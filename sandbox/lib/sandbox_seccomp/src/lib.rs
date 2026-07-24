@@ -175,7 +175,7 @@ pub unsafe extern "C" fn apply_landlock_one(lib_path: *const c_char) -> c_int {
 
 /// Install seccomp filter. Default action: SCMP_ACT_KILL_PROCESS.
 ///
-/// `openat` is only allowed when the `O_CREAT` flag is **not** set, preventing
+/// `openat`/`open` is only allowed when the `O_CREAT` flag is **not** set, preventing
 /// the sandboxed process from creating new files.  If `O_CREAT` is present the
 /// call falls through to the default `KILL_PROCESS`.
 fn install_seccomp(enable_network: bool) -> Result<(), c_int> {
@@ -192,6 +192,20 @@ fn install_seccomp(enable_network: bool) -> Result<(), c_int> {
                 // Allow openat only when O_CREAT is NOT set in flags (arg idx 2).
                 let cmp = scmp_arg_cmp {
                     arg: 2,
+                    op: scmp_compare::SCMP_CMP_MASKED_EQ,
+                    datum_a: 0,                         // O_CREAT bit must be 0
+                    datum_b: libc::O_CREAT as u64,      // mask
+                };
+                if seccomp_rule_add_array(ctx, SCMP_ACT_ALLOW, sc, 1, &cmp) != 0 {
+                    seccomp_release(ctx);
+                    return Err(-7);
+                }
+            } else if sc == libc::SYS_open as i32 {
+                // Allow open only when O_CREAT is NOT set in flags (arg idx 1).
+                // open() has one fewer argument than openat(), so the flags
+                // parameter is at argument index 1 instead of 2.
+                let cmp = scmp_arg_cmp {
+                    arg: 1,
                     op: scmp_compare::SCMP_CMP_MASKED_EQ,
                     datum_a: 0,                         // O_CREAT bit must be 0
                     datum_b: libc::O_CREAT as u64,      // mask
@@ -266,8 +280,6 @@ fn install_seccomp(enable_network: bool) -> Result<(), c_int> {
 ///   RLIMIT_AS → (Landlock applied separately by caller) → no_new_privs
 ///   → seccomp
 ///
-/// In both modes, `openat` is only allowed when `O_CREAT` is not set.
-/// Must be called once per process before executing untrusted code.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn init_seccomp(
     uid: uid_t,

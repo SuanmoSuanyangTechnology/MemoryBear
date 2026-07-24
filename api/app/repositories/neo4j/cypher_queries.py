@@ -25,7 +25,9 @@ DIALOGUE_NODE_SAVE = """
             n.dialog_embedding = dialogue.dialog_embedding,
             n.config_id = dialogue.config_id,
             n.write_mode = coalesce(dialogue.write_mode, 'normal'),
-            n.emotion = dialogue.emotion
+            // emotion 粘性保留：本次写入未带值（None）则保留原值，避免正写（不算情绪）
+            n.emotion = coalesce(dialogue.emotion, n.emotion),
+            n.emotion_score = coalesce(dialogue.emotion_score, n.emotion_score)
     )
     RETURN n.id AS uuid
 """

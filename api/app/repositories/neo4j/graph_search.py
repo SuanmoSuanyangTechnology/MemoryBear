@@ -31,6 +31,7 @@ from app.repositories.neo4j.cypher_queries import (
     USER_ID_QUERY_CYPHER_MAPPING,
 )
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+from app.utils.redis_cache import redis_cache
 
 logger = logging.getLogger(__name__)
 
@@ -370,7 +371,6 @@ def search_by_fulltext(
     cypher = FULLTEXT_QUERY_CYPHER_MAPPING[node_type]
     return connector.execute_query(
         cypher,
-        json_format=True,
         end_user_id=end_user_id,
         query=query,
         limit=limit,
@@ -378,7 +378,7 @@ def search_by_fulltext(
 
 
 def _compute_cosine_similarity(
-    batch_vectors: list, query_vec
+        batch_vectors: list, query_vec
 ) -> list[float]:
     """在独立线程中计算余弦相似度，避免阻塞事件循环。"""
     vecs = np.array(batch_vectors, dtype=np.float32)
@@ -596,17 +596,18 @@ async def search_graph(
 
     # 更新知识节点的激活值（Statement, ExtractedEntity, MemorySummary）
     # Skip activation updates if only searching summaries (optimization)
-    needs_activation_update = any(
-        key in include and key in results and results[key]
-        for key in [Neo4jNodeType.STATEMENT, Neo4jNodeType.EXTRACTEDENTITY, Neo4jNodeType.MEMORYSUMMARY]
-    )
-
-    if needs_activation_update:
-        results = await _update_search_results_activation(
-            connector=connector,
-            results=results,
-            end_user_id=end_user_id
-        )
+    # --- no-op ---
+    # needs_activation_update = any(
+    #     key in include and key in results and results[key]
+    #     for key in [Neo4jNodeType.STATEMENT, Neo4jNodeType.EXTRACTEDENTITY, Neo4jNodeType.MEMORYSUMMARY]
+    # )
+    #
+    # if needs_activation_update:
+    #     results = await _update_search_results_activation(
+    #         connector=connector,
+    #         results=results,
+    #         end_user_id=end_user_id
+    #     )
 
     return results
 
@@ -712,13 +713,15 @@ async def search_graph_by_relationship(
     return related_node
 
 
+@redis_cache(ttl=60, prefix="memory", skip_args=["connector"], id_arg="end_user_id")
 async def search_user_metadata(
         connector: Neo4jConnector,
         end_user_id: str
 ) -> dict:
     user_info = await connector.execute_query(
         SEARCH_USER_METADATA,
-        end_user_id=end_user_id
+        end_user_id=end_user_id,
+        json_format=True
     )
     return user_info[0] if user_info else {}
 
@@ -1118,8 +1121,8 @@ async def search_graph_l_valid_at(
 
 
 async def forget_count_active_nodes(
-    connector: Neo4jConnector,
-    end_user_id: str,
+        connector: Neo4jConnector,
+        end_user_id: str,
 ) -> int:
     """Count active nodes (``delete_at IS NULL``) across Chunk, Statement, Entity."""
     from app.repositories.neo4j.cypher_queries import FORGET_COUNT_ACTIVE_NODES
@@ -1130,8 +1133,8 @@ async def forget_count_active_nodes(
 
 
 async def forget_count_active_nodes_batch(
-    connector: Neo4jConnector,
-    end_user_ids: list[str],
+        connector: Neo4jConnector,
+        end_user_ids: list[str],
 ) -> dict[str, int]:
     """Batch count active nodes per end_user_id.
 
@@ -1146,10 +1149,10 @@ async def forget_count_active_nodes_batch(
 
 
 async def forget_get_mixed_candidates(
-    connector: Neo4jConnector,
-    end_user_id: str,
-    batch_size: int,
-    protection_threshold: int,
+        connector: Neo4jConnector,
+        end_user_id: str,
+        batch_size: int,
+        protection_threshold: int,
 ) -> list[dict[str, Any]]:
     """Return up to *batch_size* oldest candidates across all three types.
 
@@ -1166,10 +1169,10 @@ async def forget_get_mixed_candidates(
 
 
 async def forget_soft_delete_by_element_ids(
-    connector: Neo4jConnector,
-    end_user_id: str,
-    element_ids: list[str],
-    now: str,
+        connector: Neo4jConnector,
+        end_user_id: str,
+        element_ids: list[str],
+        now: str,
 ) -> int:
     """Mark nodes as soft-deleted (``SET delete_at = datetime($now)``).
 
@@ -1186,9 +1189,9 @@ async def forget_soft_delete_by_element_ids(
 
 
 async def forget_recover_by_element_id(
-    connector: Neo4jConnector,
-    element_id: str,
-    now: str,
+        connector: Neo4jConnector,
+        element_id: str,
+        now: str,
 ) -> dict | None:
     """Remove the soft-delete marker from a node, restoring it.
 
@@ -1205,5 +1208,3 @@ async def forget_recover_by_element_id(
         now=now,
     )
     return result[0] if result else None
-
-

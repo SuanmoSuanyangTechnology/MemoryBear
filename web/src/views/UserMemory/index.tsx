@@ -14,6 +14,7 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom'
 import { Row, Col, Form, Flex, Tooltip, App } from 'antd';
 import copy from 'copy-to-clipboard'
+import clsx from 'clsx'
 
 import type { Data } from './types'
 import { userMemoryListUrl } from '@/api/memory';
@@ -24,6 +25,9 @@ import RbStatistic from '@/components/RbStatistic';
 import MoreDropdown from '@/components/MoreDropdown'
 import PageScrollList, { type PageScrollListRef } from '@/components/PageScrollList'
 import DeleteConfirmModal, { type DeleteConfirmModalRef } from './components/DeleteConfirmModal';
+import Tag from '@/components/Tag'
+import { formatQuotaStatus, StatusProgress } from './components/StatusProgress'
+import OverflowTags from '@/components/OverflowTags'
 
 export default function UserMemory() {
   const { t } = useTranslation();
@@ -96,8 +100,9 @@ export default function UserMemory() {
         query={{ keyword }}
         column={3}
         renderItem={(item) => {
-          const { end_user, memory_num, memory_config } = item as Data;
+          const { end_user, memory_num, memory_config, tags = [] } = item as Data;
           const name = getUserName(item)
+          const quotaStatus = formatQuotaStatus(memory_num?.active_count || 0, memory_num?.memory_limit || 0)
           return (
             <RbCard
               key={item.end_user?.id}
@@ -133,15 +138,48 @@ export default function UserMemory() {
                   <span className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/copy_dark.svg')]"></span>
                 </Flex>
               </Flex>
-              <Row>
+
+              {tags.length > 0
+                ? <OverflowTags
+                  items={tags.map((tag: string) => <Tag key={tag} color="default">{tag}</Tag>)}
+                />
+                : <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-[22.5px]">{t('userMemory.noTags')}</div>
+              }
+              <Row className="rb:mt-2!">
                 <Col span={12}>
                   <RbStatistic title={t('userMemory.capacity')} value={memory_num?.total || 0} suffix={t('userMemory.memoryNum')} />
                 </Col>
                 <Col span={12}>
-                  <RbStatistic title={t('userMemory.type')} value={t(`userMemory.${item.type || 'person'}`)} />
+                  <RbStatistic title={t('userMemory.type')} value={t(`userMemory.person`)} />
                 </Col>
               </Row>
 
+              <Flex align="center" justify="space-between" className="rb:text-[#5B6167] rb:text-[12px] rb:mt-3!">
+                <span>{t('userMemory.quota_occupation')}</span>
+                <Flex align="center" gap={8}>
+                  <span
+                    className={clsx('rb:font-medium', {
+                      'rb:text-[#FF5D34]': ['overLimit', 'nearLimit'].includes(quotaStatus),
+                      'rb:text-[#FF8A4C]': quotaStatus === 'warning',
+                      'rb:text-[#212332]': quotaStatus === 'normal',
+                    })}
+                  >{memory_num?.active_count || 0}/{memory_num?.memory_limit || 0}</span>
+
+                  {quotaStatus !== 'normal' && (
+                    <Tag
+                      color={['overLimit', 'nearLimit'].includes(quotaStatus)
+                        ? 'error'
+                        : quotaStatus === 'warning'
+                        ? 'warning'
+                        : 'processing'}
+                    >{t(`userMemory.${quotaStatus}_simple`)}</Tag>
+                  )}
+                </Flex>
+              </Flex>
+              <StatusProgress
+                status={quotaStatus}
+                percent={100 * memory_num?.active_count / memory_num?.memory_limit}
+              />
               <div className="rb:relative rb:z-2 rb:mt-3 rb:bg-[#F6F6F6] rb:rounded-lg rb:py-2 rb:px-3 rb:leading-5" onClick={handleViewMemoryConfig}>
                 <Flex align="center" justify="space-between" className="rb:text-[#5B6167]">
                   {t('userMemory.memory_config_name')}

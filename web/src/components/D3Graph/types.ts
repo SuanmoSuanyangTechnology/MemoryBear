@@ -100,3 +100,9 @@ export interface InitOptions {
   onCommunityClickRef: RefObject<((node: RawCommunityNode) => void) | undefined>
   onNodeClickRef: RefObject<((node: CommunityD3Node) => void) | undefined>
 }
+
+export interface LegendItem {
+  key: string | number
+  label: string
+  color: string
+}

@@ -65,7 +65,7 @@ async def get_workspace_end_users(
     # 2. Delegate to the manager-side logic; workspace_id is forced to the API Key's workspace.
     #    background_tasks is injected by FastAPI (not part of the API contract) and passed
     #    through to preserve the same post-response Celery dispatch behavior as the manager side.
-    return memory_dashboard_controller.get_workspace_end_users(
+    return await memory_dashboard_controller.get_workspace_end_users(
         background_tasks=background_tasks,
         workspace_id=api_key_auth.workspace_id,
         keyword=keyword,
