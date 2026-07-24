@@ -198,7 +198,7 @@ export const addRunStartMessage = (prev: ChatData[], data: any): ChatData[] => {
         subContent: step_id ?[
           ...(lastMsg.subContent || []),
           {
-            node_id: `${name}`,
+            node_id: step_id,
             node_type: 'tool',
             node_name: name,
             status: 'pending',
@@ -213,11 +213,15 @@ export const addRunStartMessage = (prev: ChatData[], data: any): ChatData[] => {
 
 /** Finalises the tool-run detail on the targeted model's last assistant message. */
 export const addRunEndMessage = (prev: ChatData[], data: any): ChatData[] => {
-  const { model_config_id, conversation_id, meta, output, error } = data
+  const { model_config_id, conversation_id, meta, output, error, step_id } = data
   return mapModelLastVersion(prev, model_config_id, lastMsg => {
     if (lastMsg.role !== 'assistant') return lastMsg
     const lastSubContent = lastMsg.subContent || []
-    const lastSubContentItem = lastSubContent[lastSubContent.length - 1]
+    const targetIndex = step_id
+      ? lastSubContent.findIndex(vo => vo.node_id === step_id)
+      : lastSubContent.length - 1
+    if (targetIndex === -1) return lastMsg
+    const lastSubContentItem = lastSubContent[targetIndex]
     let sourceList: any[] = []
     if (meta?.sources?.length > 0 && (meta?.tool_type === 'knowledge_retrieval' || meta?.tool_type === 'skill')) {
       const groupedSources = meta?.sources.reduce((acc: any, source: any) => {
@@ -264,8 +268,9 @@ export const addRunEndMessage = (prev: ChatData[], data: any): ChatData[] => {
     return {
       ...lastMsg,
       subContent: [
-        ...lastSubContent.slice(0, -1),
+        ...lastSubContent.slice(0, targetIndex),
         ...sourceList,
+        ...lastSubContent.slice(targetIndex + 1),
       ],
     }
   }, conversation_id)

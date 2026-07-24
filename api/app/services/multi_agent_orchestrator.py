@@ -63,17 +63,23 @@ class MultiAgentOrchestrator:
     async def create(cls, db: Session | AsyncSession, config: MultiAgentConfig) -> "MultiAgentOrchestrator":
         orchestrator = cls(db, config)
 
-        if getattr(config, "app", None) and getattr(config.app, "workspace_id", None):
+        if config.app_id:
+            from app.models import App
             if isinstance(db, AsyncSession):
-                orchestrator.tenant_id = await ToolRepository.get_tenant_id_by_workspace_id_async(
-                    db,
-                    str(config.app.workspace_id),
-                )
+                app = await db.get(App, config.app_id)
             else:
-                orchestrator.tenant_id = ToolRepository.get_tenant_id_by_workspace_id(
-                    db,
-                    str(config.app.workspace_id),
-                )
+                app = db.get(App, config.app_id)
+            if app and app.workspace_id:
+                if isinstance(db, AsyncSession):
+                    orchestrator.tenant_id = await ToolRepository.get_tenant_id_by_workspace_id_async(
+                        db,
+                        str(app.workspace_id),
+                    )
+                else:
+                    orchestrator.tenant_id = ToolRepository.get_tenant_id_by_workspace_id(
+                        db,
+                        str(app.workspace_id),
+                    )
 
         for sub_agent_info in config.sub_agents:
             agent_id = uuid.UUID(sub_agent_info["agent_id"])

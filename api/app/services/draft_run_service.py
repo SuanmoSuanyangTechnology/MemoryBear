@@ -2659,7 +2659,11 @@ class AgentRunService:
                 .order_by(Message.created_at.asc())  # 正序排列
                 .limit(max_history)
             )
-            history_msgs = result.scalars().all()
+            # Snapshot values before leaving the session: the context manager rolls
+            # back read-only transactions, which expires ORM instances on exit.
+            history_msgs = [
+                _snapshot_message(message) for message in result.scalars().all()
+            ]
 
         # 转换为 history 格式
         filtered_history = []
