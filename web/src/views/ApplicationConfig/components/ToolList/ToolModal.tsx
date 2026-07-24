@@ -147,6 +147,7 @@ const ToolModal = forwardRef<ToolModalRef, ToolModalProps>(({
       <Form
         form={form}
         layout="vertical"
+        size="middle"
       >
         <FormItem
           name="agent_id"

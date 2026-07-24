@@ -135,30 +135,21 @@ class MemoryForgetService:
         if end_user_id:
             query += " AND n.end_user_id = $end_user_id"
 
-        query += """ \
-                 WITH n, \
-                      CASE \
-                     WHEN n: Statement THEN 'statement' \
-                     WHEN n:ExtractedEntity THEN 'entity' \
-                     WHEN n:MemorySummary THEN 'summary' \
-                 END \
-                 as node_type
+        query += """
+        WITH n,
+             CASE 
+               WHEN n:Statement THEN 'statement'
+               WHEN n:ExtractedEntity THEN 'entity'
+               WHEN n:MemorySummary THEN 'summary'
+             END as node_type
         RETURN 
             count(n) as total_nodes,
             sum(CASE WHEN node_type = 'statement' THEN 1 ELSE 0 END) as statement_count,
             sum(CASE WHEN node_type = 'entity' THEN 1 ELSE 0 END) as entity_count,
             sum(CASE WHEN node_type = 'summary' THEN 1 ELSE 0 END) as summary_count,
             avg(n.activation_value) as average_activation,
-            sum(CASE WHEN n.activation_value IS NOT NULL AND n.activation_value < \
-                 $threshold \
-                 THEN \
-                 1 \
-                 ELSE \
-                 0 \
-                 END \
-                 ) \
-                 as \
-                 low_activation_nodes
+            sum(CASE WHEN n.activation_value IS NOT NULL AND n.activation_value < $threshold THEN 1 ELSE 0 END) as low_activation_nodes
+   
         """
 
         params = {'threshold': forgetting_threshold}
@@ -556,8 +547,8 @@ class MemoryForgetService:
                 'total_nodes': result['total_nodes'] or 0,
                 'nodes_with_activation': result['nodes_with_activation'] or 0,
                 'nodes_without_activation': result['nodes_without_activation'] or 0,
-                'average_activation_value': round(result['average_activation'], 2) if result[
-                                                                                          'average_activation'] is not None else None,
+                'average_activation_value': round(result['average_activation'], 2)
+                if result['average_activation'] is not None else None,
                 'low_activation_nodes': result['low_activation_nodes'] or 0,
                 'forgetting_threshold': forgetting_threshold,
                 'timestamp': to_timestamp_ms(utcnow_naive())
@@ -582,20 +573,19 @@ class MemoryForgetService:
         if end_user_id:
             distribution_query += " AND n.end_user_id = $end_user_id"
 
-        distribution_query += """ \
-                              WITH n, \
-                                   CASE \
-                                  WHEN n: Statement THEN 'statement' \
-                                  WHEN n:ExtractedEntity THEN 'entity' \
-                                  WHEN n:MemorySummary THEN 'summary' \
-                                  WHEN n:Chunk THEN 'chunk' \
-                              END \
-                              as node_type
+        distribution_query += """
+        WITH n,
+             CASE 
+               WHEN n:Statement THEN 'statement'
+               WHEN n:ExtractedEntity THEN 'entity'
+               WHEN n:MemorySummary THEN 'summary'
+               WHEN n:Chunk THEN 'chunk'
+             END as node_type
         RETURN 
             sum(CASE WHEN node_type = 'statement' THEN 1 ELSE 0 END) as statement_count,
             sum(CASE WHEN node_type = 'entity' THEN 1 ELSE 0 END) as entity_count,
             sum(CASE WHEN node_type = 'summary' THEN 1 ELSE 0 END) as summary_count,
-            sum(CASE WHEN node_type = 'chunk' THEN 1 ELSE 0 END) as chunk_count
+            sum(CASE WHEN node_type = 'chunk' THEN 1 ELSE 0 END) as chunk_count        
         """
 
         dist_params = {}

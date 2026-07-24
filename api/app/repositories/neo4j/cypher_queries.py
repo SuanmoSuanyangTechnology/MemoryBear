@@ -25,7 +25,9 @@ DIALOGUE_NODE_SAVE = """
             n.dialog_embedding = dialogue.dialog_embedding,
             n.config_id = dialogue.config_id,
             n.write_mode = coalesce(dialogue.write_mode, 'normal'),
-            n.emotion = dialogue.emotion
+            // emotion 粘性保留：本次写入未带值（None）则保留原值，避免正写（不算情绪）
+            n.emotion = coalesce(dialogue.emotion, n.emotion),
+            n.emotion_score = coalesce(dialogue.emotion_score, n.emotion_score)
     )
     RETURN n.id AS uuid
 """
@@ -2161,13 +2163,52 @@ RETURN n.id AS entity_id,
        n.end_user_id AS end_user_id
 """
 
+# -------------------
+# Dialogue 检索（仅 write_mode='fast'：正写尚未接管的滞后窗口节点）
+# -------------------
+SEARCH_DIALOGUE_BY_FULLTEXT = """
+CALL db.index.fulltext.queryNodes("dialogueFulltext", $query) YIELD node AS d, score
+WHERE ($end_user_id IS NULL OR d.end_user_id = $end_user_id)
+  AND d.write_mode = 'fast'
+RETURN d.id AS id,
+       d.content AS content,
+       d.created_at AS created_at,
+       score
+ORDER BY score DESC
+LIMIT $limit
+"""
+
+# 向量召回的游标分页：注意别名 dialog_embedding AS embedding，
+# 对齐 search_by_embedding 读取的 "embedding" 键。
+SEARCH_DIALOGUE_BY_USER_ID = """
+MATCH (d:Dialogue)
+WHERE d.end_user_id = $end_user_id AND d.id > $last_id
+  AND d.write_mode = 'fast'
+  AND d.dialog_embedding IS NOT NULL
+RETURN d.id AS id,
+       d.dialog_embedding AS embedding
+ORDER BY d.id
+LIMIT $batch_size
+"""
+
+SEARCH_DIALOGUE_BY_IDS = """
+MATCH (d:Dialogue)
+WHERE d.id IN $ids
+  AND d.write_mode = 'fast'
+RETURN d.id AS id,
+       d.end_user_id AS end_user_id,
+       d.content AS content,
+       d.created_at AS created_at
+"""
+
 FULLTEXT_QUERY_CYPHER_MAPPING = {
     Neo4jNodeType.STATEMENT: SEARCH_STATEMENTS_BY_FULLTEXT,
     Neo4jNodeType.EXTRACTEDENTITY: SEARCH_ENTITIES_BY_FULLTEXT,
     Neo4jNodeType.CHUNK: SEARCH_CHUNKS_BY_FULLTEXT,
     Neo4jNodeType.MEMORYSUMMARY: SEARCH_MEMORY_SUMMARIES_BY_FULLTEXT,
     Neo4jNodeType.COMMUNITY: SEARCH_COMMUNITIES_BY_FULLTEXT,
-    Neo4jNodeType.PERCEPTUAL: SEARCH_PERCEPTUALS_BY_FULLTEXT
+    Neo4jNodeType.PERCEPTUAL: SEARCH_PERCEPTUALS_BY_FULLTEXT,
+    Neo4jNodeType.DIALOGUE: SEARCH_DIALOGUE_BY_FULLTEXT
 }
 USER_ID_QUERY_CYPHER_MAPPING = {
     Neo4jNodeType.STATEMENT: SEARCH_STATEMENTS_BY_USER_ID,
@@ -2175,7 +2216,8 @@ USER_ID_QUERY_CYPHER_MAPPING = {
     Neo4jNodeType.CHUNK: SEARCH_CHUNKS_BY_USER_ID,
     Neo4jNodeType.MEMORYSUMMARY: SEARCH_MEMORY_SUMMARIES_BY_USER_ID,
     Neo4jNodeType.COMMUNITY: SEARCH_COMMUNITIES_BY_USER_ID,
-    Neo4jNodeType.PERCEPTUAL: SEARCH_PERCEPTUAL_BY_USER_ID
+    Neo4jNodeType.PERCEPTUAL: SEARCH_PERCEPTUAL_BY_USER_ID,
+    Neo4jNodeType.DIALOGUE: SEARCH_DIALOGUE_BY_USER_ID
 }
 NODE_ID_QUERY_CYPHER_MAPPING = {
     Neo4jNodeType.STATEMENT: SEARCH_STATEMENTS_BY_IDS,
@@ -2183,7 +2225,8 @@ NODE_ID_QUERY_CYPHER_MAPPING = {
     Neo4jNodeType.CHUNK: SEARCH_CHUNKS_BY_IDS,
     Neo4jNodeType.MEMORYSUMMARY: SEARCH_MEMORY_SUMMARIES_BY_IDS,
     Neo4jNodeType.COMMUNITY: SEARCH_COMMUNITIES_BY_IDS,
-    Neo4jNodeType.PERCEPTUAL: SEARCH_PERCEPTUAL_BY_IDS
+    Neo4jNodeType.PERCEPTUAL: SEARCH_PERCEPTUAL_BY_IDS,
+    Neo4jNodeType.DIALOGUE: SEARCH_DIALOGUE_BY_IDS
 }
 
 # -------------------
@@ -2827,6 +2870,16 @@ ON CREATE SET r.id = edge.id,
     r.run_id = edge.run_id,
     r.created_at = edge.created_at
 RETURN elementId(r) AS uuid
+"""
+
+# ── Entity → UserSource 回溯查询 ──
+# 通过 HAS_ORIGINAL_CONTENT 边，从 ExtractedEntity 追溯到 UserSource 节点的原始文本。
+# 边方向：UserSource -[HAS_ORIGINAL_CONTENT]-> ExtractedEntity
+FETCH_USER_SOURCES_FOR_ENTITIES = """
+MATCH (us:UserSource)-[r:HAS_ORIGINAL_CONTENT]->(e:ExtractedEntity)
+WHERE e.id IN $entity_ids
+  AND us.end_user_id = $end_user_id
+RETURN e.id AS entity_id, us.original_text AS original_text
 """
 
 DELETE_NODE_BY_ELEMENT_ID = """

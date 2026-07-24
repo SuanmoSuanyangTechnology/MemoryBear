@@ -55,6 +55,7 @@ async def add_dialogue_nodes(dialogues: List[DialogueNode], connector: Neo4jConn
                 "config_id": dialogue.config_id,
                 "write_mode": getattr(dialogue, "write_mode", "normal"),
                 "emotion": getattr(dialogue, "emotion", None),
+                "emotion_score": getattr(dialogue, "emotion_score", None),
             })
 
         result = await connector.execute_query(

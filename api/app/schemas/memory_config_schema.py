@@ -15,12 +15,11 @@ Classes:
     InvalidConfigError: Raised when configuration validation fails
 """
 
-from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Dict, Literal, Optional, Union
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 # ==================== Configuration Exception Classes ====================
 
@@ -361,31 +360,32 @@ def validate_model_data(
 # ==================== Immutable Configuration Data Structure ====================
 
 
-@dataclass(frozen=True)
-class MemoryConfig:
+class MemoryConfig(BaseModel):
     """Immutable memory configuration loaded from database."""
-    
+
+    model_config = ConfigDict(frozen=True)
+
     config_id: UUID
     config_name: str
     workspace_id: UUID
     workspace_name: str
     tenant_id: UUID
-    
+
     embedding_model_id: UUID
     embedding_model_name: str
     llm_model_id: UUID
     llm_model_name: str
-    
+
     storage_type: str
-    
-    chunker_strategy: str
-    reflexion_enabled: bool
-    reflexion_iteration_period: int
-    reflexion_range: str
-    reflexion_baseline: str
-    
+
+    chunker_strategy: str = "RecursiveChunker"
+    reflexion_enabled: bool = False
+    reflexion_iteration_period: int = 3
+    reflexion_range: str = "partial"
+    reflexion_baseline: str = "TIME"
+
     loaded_at: datetime
-    
+
     rerank_model_id: Optional[UUID] = None
     rerank_model_name: Optional[str] = None
     video_model_id: Optional[UUID] = None
@@ -394,11 +394,11 @@ class MemoryConfig:
     vision_model_name: Optional[str] = None
     audio_model_id: Optional[UUID] = None
     audio_model_name: Optional[str] = None
-    
-    llm_params: Dict[str, Any] = field(default_factory=dict)
-    embedding_params: Dict[str, Any] = field(default_factory=dict)
+
+    llm_params: Dict[str, Any] = Field(default_factory=dict)
+    embedding_params: Dict[str, Any] = Field(default_factory=dict)
     config_version: str = "2.0"
-    
+
     # Pipeline config: Deduplication
     enable_llm_dedup_blockwise: bool = False
     enable_llm_disambiguation: bool = False
@@ -406,39 +406,41 @@ class MemoryConfig:
     t_type_strict: float = 0.8
     t_name_strict: float = 0.8
     t_overall: float = 0.8
-    
+
     # Pipeline config: Statement extraction
     statement_granularity: int = 2
     include_dialogue_context: bool = False
     max_dialogue_context_chars: int = 1000
-    
+
     # Pipeline config: Forgetting engine
     lambda_time: float = 0.5
     lambda_mem: float = 0.5
     offset: float = 0.0
-    
+
     # Pipeline config: Pruning
     pruning_enabled: bool = True
     pruning_scene: Optional[str] = "education"
     pruning_threshold: float = 0.5
-    
+
     # Pipeline config: Emotion extraction
     emotion_enabled: bool = False
-    
+
     # Ontology scene association
     scene_id: Optional[UUID] = None
-    ontology_class_infos: list[dict] = field(default_factory=list)
-    
-    def __post_init__(self):
-        """Validate configuration after initialization."""
+    ontology_class_infos: list[dict] = Field(default_factory=list)
+
+    @model_validator(mode='after')
+    def _validate_required_fields(self):
+        """Validate configuration after construction."""
         if not self.config_name or not self.config_name.strip():
             raise InvalidConfigError("Configuration name cannot be empty")
-        
+
         if not self.embedding_model_id:
             raise InvalidConfigError("Embedding model ID is required")
-        
+
         if not self.llm_model_id:
             raise InvalidConfigError("LLM model ID is required")
+        return self
     
     @classmethod
     def from_validated_data(

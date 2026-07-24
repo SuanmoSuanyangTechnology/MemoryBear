@@ -223,7 +223,7 @@ const Neo4j: FC = () => {
             setSelectedKey={setSelectedKey}
             setBrainMemories={setBrainMemories}
             refresh={() => {
-              // nodeStatisticsRef.current?.getData()
+              nodeStatisticsRef.current?.getData()
               reflectMemoryRef.current?.getData()
             }}
           />

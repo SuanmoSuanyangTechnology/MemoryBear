@@ -31,6 +31,7 @@ _SELF_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _SELF_DIR)
 import protocol as P  # noqa: E402
 
+
 class _ReqInfo(TypedDict):
     """Bookkeeping for one in-flight sandbox request."""
     pid: int
@@ -77,7 +78,7 @@ def _xor(data: bytes, key: bytes) -> bytes:
         seg_len = end - i
         keystream = key * (seg_len // kl) + key[: seg_len % kl]
         out[i:end] = (
-            int.from_bytes(mv[i:end], "big") ^ int.from_bytes(keystream, "big")
+                int.from_bytes(mv[i:end], "big") ^ int.from_bytes(keystream, "big")
         ).to_bytes(seg_len, "big")
         i = end
     return bytes(out)
@@ -95,7 +96,8 @@ class Zygote:
 
         # Warm load of the seccomp library. Inherited by every child via COW.
         self.lib = ctypes.CDLL(lib_so)
-        self.lib.init_seccomp.argtypes = [ctypes.c_uint32, ctypes.c_uint32, ctypes.c_bool, ctypes.c_uint64, ctypes.c_bool]
+        self.lib.init_seccomp.argtypes = [ctypes.c_uint32, ctypes.c_uint32, ctypes.c_bool, ctypes.c_uint64,
+                                          ctypes.c_bool]
         self.lib.init_seccomp.restype = ctypes.c_int
 
         self.lib.apply_landlock.argtypes = [ctypes.POINTER(ctypes.c_char_p)]
@@ -135,8 +137,8 @@ class Zygote:
         # "SyntaxError: UTF-8 decode error".
         try:
             import codecs
-            import encodings          # noqa: F401
-            import encodings.utf_8    # noqa: F401
+            import encodings  # noqa: F401
+            import encodings.utf_8  # noqa: F401
             import encodings.aliases  # noqa: F401
             for enc in ("utf-8", "ascii", "latin-1", "utf-16", "idna"):
                 try:
@@ -213,25 +215,35 @@ class Zygote:
     # -------------------------------------------------------------- request
     def _handle_run(self, req_id: int, payload: bytes) -> None:
         req = json.loads(payload)
-        out_r, out_w = os.pipe()
-        err_r, err_w = os.pipe()
+        out_r = out_w = err_r = err_w = -1
+        try:
+            out_r, out_w = os.pipe()
+            err_r, err_w = os.pipe()
 
-        # Flush our own buffers so children never inherit unflushed bytes.
-        sys.stdout.flush()
-        sys.stderr.flush()
+            # Flush our own buffers so children never inherit unflushed bytes.
+            sys.stdout.flush()
+            sys.stderr.flush()
 
-        pid = os.fork()
-        if pid == 0:
-            # ---- child ----
-            self._child_exec(req, out_w, err_w, out_r, err_r)
-            os._exit(127)  # unreachable
+            pid = os.fork()
+            if pid == 0:
+                # ---- child ----
+                self._child_exec(req, out_w, err_w, out_r, err_r)
+                os._exit(127)
 
-        # ---- parent (zygote) ----
-        os.close(out_w)
-        os.close(err_w)
-        self.reqs[req_id] = {"pid": pid, "out": out_r, "err": err_r, "open": {out_r, err_r}}
-        self.fd_map[out_r] = (req_id, P.MSG_STDOUT)
-        self.fd_map[err_r] = (req_id, P.MSG_STDERR)
+            # ---- parent (zygote) ----
+            os.close(out_w)
+            os.close(err_w)
+            self.reqs[req_id] = {"pid": pid, "out": out_r, "err": err_r, "open": {out_r, err_r}}
+            self.fd_map[out_r] = (req_id, P.MSG_STDOUT)
+            self.fd_map[err_r] = (req_id, P.MSG_STDERR)
+        except Exception:
+            for fd in (out_w, err_w, out_r, err_r):
+                if fd >= 0:
+                    try:
+                        os.close(fd)
+                    except OSError:
+                        pass
+            raise
 
     def _child_exec(self, req: dict, out_w: int, err_w: int, out_r: int, err_r: int) -> None:
         # Redirect stdout/stderr to the pipes; disconnect from everything else.
@@ -303,23 +315,9 @@ class Zygote:
             try:
                 code_obj = compile(code, "<sandbox>", "exec")
             except SyntaxError:
-                # Diagnostic: dump what compile actually received so we can tell
-                # byte corruption apart from genuinely non-UTF-8 user source.
-                import binascii
-                valid_utf8 = True
-                try:
-                    code.decode("utf-8")
-                except UnicodeDecodeError:
-                    valid_utf8 = False
-                sys.stderr.write(
-                    f"[zygote-child] compile failed: "
-                    f"code_len={len(code)} enc_len={len(req['code'])} "
-                    f"key_len={len(base64.b64decode(req['key']))} "
-                    f"valid_utf8={valid_utf8} "
-                    f"head={binascii.hexlify(code[:24]).decode()} "
-                    f"tail={binascii.hexlify(code[-24:]).decode()}\n"
-                )
-                sys.stderr.flush()
+                # Let the SyntaxError propagate to the BaseException handler
+                # below which writes a traceback to stderr — no extra hex dump
+                # here (the old diagnostic leaked plaintext code to the caller).
                 raise
             exec(code_obj, g)
 
@@ -343,6 +341,8 @@ class Zygote:
             os._exit(1)
 
     def _handle_kill(self, req_id: int) -> None:
+        """Kill the sandbox child.  The kernel will close the child's fds,
+        triggering pipe EOF -> _teardown_pipe_fd -> kill+waitpid chain."""
         req = self.reqs.get(req_id)
         if not req:
             return
@@ -364,7 +364,19 @@ class Zygote:
         self._teardown_pipe_fd(fd, req_id)
 
     def _teardown_pipe_fd(self, fd: int, req_id: int) -> None:
-        """Close one child-output fd and finish the request if both are done."""
+        """Close one child-output fd and finish the request if both are done.
+
+        After both pipes EOF we send SIGKILL before waitpid.  This handles
+        two cases with a single code path:
+
+        1. Child already exited (normal): SIGKILL is a no-op on the zombie,
+           waitpid returns immediately.
+        2. Child closed stdio but kept running (attack / misbehaviour):
+           SIGKILL kills it, waitpid returns immediately.
+
+        The seccomp sandbox prevents D-state, so SIGKILL always takes effect
+        promptly — blocking waitpid(pid, 0) will never hang here.
+        """
         try:
             os.close(fd)
         except OSError:
@@ -376,12 +388,22 @@ class Zygote:
         req["open"].discard(fd)
         if req["open"]:
             return
-        # Both streams closed -> child exited; reap and report.
-        # Pop the request BEFORE waitpid so that any concurrent MSG_KILL
-        # (same req_id) sees the entry is already gone and bails out,
-        # closing the PID-reuse window.
+
         pid = req["pid"]
+        # WNOHANG returns (0,0) for a live child, (pid,status) for a zombie.
+        # os.kill(pid,0) also succeeds on zombies -> false positives on every
+        # timeout/SIGKILL.  Only flag it when the child is genuinely still alive.
+        try:
+            alive = os.waitpid(pid, os.WNOHANG)[0] == 0
+        except ChildProcessError:
+            alive = False
+        if alive:
+            self._send(P.MSG_STDERR, req_id, b"process terminated")
         self.reqs.pop(req_id, None)
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
         try:
             _, status = os.waitpid(pid, 0)
             exit_code = os.waitstatus_to_exitcode(status)

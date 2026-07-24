@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.core.logging_config import get_api_logger
+from app.core.memory.analytics.user_card_tags import normalize_stored_user_card_tags
 from app.core.response_utils import success
 from app.core.utils.datetime_utils import to_timestamp_ms, utcnow_naive
 from app.db import get_db
@@ -218,6 +219,7 @@ async def get_workspace_end_users(
                 "id": user_id,
                 "other_name": end_user.other_name,
             },
+            "tags": normalize_stored_user_card_tags(getattr(end_user, "memory_tags", None)),
             "memory_num": {
                 "total": memory_total,
                 "active_count": active_counts.get(user_id, 0),

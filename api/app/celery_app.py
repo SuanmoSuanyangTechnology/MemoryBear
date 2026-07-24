@@ -133,6 +133,8 @@ celery_app.conf.update(
         # Memory-heavy tasks → memory_heavy_tasks queue (prefork worker, CPU-bound + beat long tasks)
         'app.tasks.scan_refresh_insight_summary_cache': {'queue': 'periodic_tasks'}, # NOTE：扫描器，仅枚举+派发，轻量
         'app.tasks.do_refresh_insight_summary_cache': {'queue': 'memory_heavy_tasks'}, # NOTE：单用户生成记忆洞察、用户摘要缓存
+        'app.tasks.scan_refresh_user_tags': {'queue': 'periodic_tasks'},
+        'app.tasks.do_refresh_user_tags': {'queue': 'memory_heavy_tasks'},
         'app.tasks.scan_forget_candidates': {'queue': 'periodic_tasks'},
         'app.tasks.do_forget_for_user': {'queue': 'memory_heavy_tasks'},
         'app.tasks.run_forgetting_cycle_task': {'queue': 'memory_heavy_tasks'},# NOTE：定时任务，跑遗忘 可以暂时关闭
@@ -174,6 +176,10 @@ memory_cache_regeneration_schedule = crontab(
     hour=settings.MEMORY_CACHE_REGENERATION_HOUR,
     minute=settings.MEMORY_CACHE_REGENERATION_MINUTE,
 )
+user_tag_refresh_schedule = crontab(
+    hour=settings.USER_TAG_REFRESH_HOUR,
+    minute=settings.USER_TAG_REFRESH_MINUTE,
+)
 workspace_reflection_schedule = timedelta(seconds=settings.WORKSPACE_REFLECTION_INTERVAL_SECONDS)
 forgetting_cycle_schedule = crontab(
     hour=settings.FORGETTING_CYCLE_HOUR,
@@ -199,6 +205,11 @@ beat_schedule_config = {
     "regenerate-memory-cache": {
         "task": "app.tasks.scan_refresh_insight_summary_cache",
         "schedule": memory_cache_regeneration_schedule,
+        "args": (),
+    },
+    "refresh-user-tags": {
+        "task": "app.tasks.scan_refresh_user_tags",
+        "schedule": user_tag_refresh_schedule,
         "args": (),
     },
     "scan-forget-candidates": {
