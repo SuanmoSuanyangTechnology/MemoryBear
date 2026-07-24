@@ -22,3 +22,8 @@ export const getOrderDetail = (order_id: string) => {
 export const upgradePackagePreview = (data: { target_plan_id: string; multiplier: number }) => {
   return request.get('/tenant/orders/upgrade-preview', data)
 }
+// Query sellable SKUs
+export const getResourcePacksUrl = '/tenant/resource-packs'
+export const getResourcePacks = (data?: { page?: number; pagesize?: number; }) => {
+  return request.get(getResourcePacksUrl, data)
+}

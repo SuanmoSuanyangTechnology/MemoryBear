@@ -1,31 +1,33 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:35:49 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 17:35:49 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-07-20 10:35:25
  */
 /**
- * Order Detail Component
+ * Order | GroupOrder Detail Component
  * Modal displaying detailed order information including payment details
  */
 
-import { forwardRef, useImperativeHandle, useState, useCallback, useMemo } from 'react';
+import { forwardRef, useImperativeHandle, useState, useMemo } from 'react';
 import { Descriptions, type DescriptionsProps } from 'antd';
 import { useTranslation } from 'react-i18next';
 import dayjs from 'dayjs';
 
-import type { Order, OrderDetailRef } from '../types'
+import type { Order, GroupOrder, OrderDetailRef } from '../types'
 import RbModal from '@/components/RbModal'
 import { STATUS } from '../constant';
 import { getOrderDetail } from '@/api/package'
-import { useI18n } from '@/store/locale'
-import type { Package } from '@/views/Package/types'
+import { formatDateTime } from '@/utils/format';
 
-const OrderDetail = forwardRef<OrderDetailRef, { getProductType: (type: string) => void; }>(({ getProductType }, ref) => {
+interface OrderDetailProps {
+  getProductName: (order: Order | GroupOrder) => string;
+}
+
+const OrderDetail = forwardRef<OrderDetailRef, OrderDetailProps>(({ getProductName }, ref) => {
   const { t } = useTranslation();
-  const { language } = useI18n()
   const [visible, setVisible] = useState(false);
-  const [data, setData] = useState<Order | null>(null)
+  const [data, setData] = useState<Order | GroupOrder | null>(null)
 
   /** Close modal */
   const handleClose = () => {
@@ -33,63 +35,80 @@ const OrderDetail = forwardRef<OrderDetailRef, { getProductType: (type: string) 
   };
 
   /** Open modal and fetch order details */
-  const handleOpen = (order: Order) => {
+  const handleOpen = (order: Order | GroupOrder) => {
     setVisible(true);
-    getOrderDetail(order.id)
+    const order_no = (order as GroupOrder).orders?.length ? (order as GroupOrder).orders[0].id : (order as Order).id
+    getOrderDetail(order_no)
       .then(res => {
-        setData(res as Order)
+        setData(res as Order | GroupOrder)
       })
   };
 
-  const getKeyWithLanguage = useCallback((key: keyof Order['package_snapshot']) => {
-    return (language === 'en' ? `${key}_en` : key) as keyof Package
-  }, [language])
   /** Format order information items */
   const formatItems = useMemo(() => {
     if (!data) return []
-    const items: DescriptionsProps['items'] = [];
-    ['order_no', 'package_snapshot', 'payable_amount', 'multiplier', 'business_type', 'status', 'reject_reason', 'pay_time', 'created_at'].forEach(key => {
-      const value = data[key as keyof Order]
-
-      if (key === 'reject_reason' && !value) {
-        if (data.status === 'rejected') {
-        items.push({
-          key,
-          label: t(`pricing.${key}`),
-          children: value || '-'
-        })
-        }
-      } else {
-        items.push({
-          key,
-          label: t(`pricing.${key}`),
-          children: (['pay_time', 'created_at'].includes(key) && value
-            ? dayjs(value as number).format('YYYY-MM-DD HH:mm:ss')
-            : key === 'multiplier' && data.package_snapshot?.billing_cycle === 'permanent_free'
-            ? t(`package.${data.package_snapshot?.billing_cycle}`)
-            : key === 'multiplier'
-            ? <>{value}{t(`package.${data.package_snapshot?.billing_cycle}`)}</>
-            : key === 'business_type' && value
-            ? t(`pricing.${value}`)
-            : key === 'status' && value
-              ? t(`pricing.${STATUS[value as keyof typeof STATUS].key}`)
-              : key === 'package_snapshot'
-                ? (data.from_view === 'platform' && data.legacy_product_type ? t(`pricing.${getProductType(data.legacy_product_type)}.type`) : (value as Package)[getKeyWithLanguage('name')])
-                : value) as string
-        })
+    const items: DescriptionsProps['items'] = [
+      {
+        key: 'order_no',
+        label: t('pricing.order_no'),
+        children: (data as GroupOrder).order_group_id || (data as Order).order_no || '-'
+      },
+      {
+        key: 'business_type',
+        label: t('pricing.business_type'),
+        children: (data as GroupOrder).orders?.length
+          ? t(`pricing.${(data as GroupOrder).orders[0].business_type}`)
+          : t(`pricing.${(data as Order).business_type}`)
+},
+      {
+        key: 'status',
+        label: t('pricing.status'),
+        children: <span className={data.status === 'rejected' ? 'rb:text-[#FF5D34]' : ''}>{data.status ? t(`pricing.${STATUS[data.status].key}`) : '-'}</span>
+      },
+      {
+        key: 'package_snapshot',
+        label: t('pricing.package_snapshot'),
+        children: getProductName(data)
+      },
+      {
+        key: 'payable_amount',
+        label: t('pricing.payable_amount'),
+        children: data.payable_amount != null
+          ? `￥${Number(data.payable_amount).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+          : '-'
+      },
+      {
+        key: 'created_at',
+        label: t('pricing.created_at'),
+        children: (data as GroupOrder).orders?.length
+          ? formatDateTime((data as GroupOrder).orders[0].created_at)
+          : formatDateTime((data as Order).created_at)
       }
-    })
-
+    ]
     return items
-  }, [data, t, getKeyWithLanguage, getProductType])
-  /** Format payment information items */
+  }, [data, t, getProductName])
+
+  /** Format payment voucher items */
   const formatPayItems = useMemo(() => {
     if (!data) return []
-    return ['pay_txn_id', 'payer'].map(key => ({
-      key,
-      label: t(`pricing.${key}`),
-      children: data[key as keyof Order]
-    }))
+    const items: DescriptionsProps['items'] = [
+      {
+        key: 'payer',
+        label: t('pricing.payer'),
+        children: data.payer || '-'
+      },
+      {
+        key: 'pay_txn_id',
+        label: t('pricing.pay_txn_id'),
+        children: data.pay_txn_id || '-'
+      },
+      {
+        key: 'pay_time',
+        label: t('pricing.transferDate'),
+        children: data.pay_time ? dayjs(data.pay_time).format('YYYY-MM-DD HH:mm:ss') : '—'
+      },
+    ]
+    return items
   }, [data, t])
 
   /** Expose methods to parent component */
@@ -104,10 +123,21 @@ const OrderDetail = forwardRef<OrderDetailRef, { getProductType: (type: string) 
       open={visible}
       footer={null}
       onCancel={handleClose}
-      width={1000}
+      width={600}
     >
-      <Descriptions title={t('pricing.orderInfo')} column={2} items={formatItems as DescriptionsProps['items']} classNames={{ label: 'rb:w-50' }} />
-      <Descriptions title={t('pricing.orderPayInfo')} column={2} items={formatPayItems as DescriptionsProps['items']} classNames={{ label: 'rb:w-50' }} className="rb:mt-6!" />
+      <Descriptions
+        title={t('pricing.orderInfo')}
+        column={1}
+        items={formatItems as DescriptionsProps['items']}
+        classNames={{ label: 'rb:w-50 rb:text-[#5B6167]!', title: 'rb:font-medium! rb:text-[#5B6167]!' }}
+      />
+      <Descriptions
+        title={t('pricing.paymentVoucher')}
+        column={1}
+        items={formatPayItems as DescriptionsProps['items']}
+        classNames={{ label: 'rb:w-50 rb:text-[#5B6167]!', title: 'rb:font-medium! rb:text-[#5B6167]!' }}
+        className="rb:mt-6!"
+      />
     </RbModal>
   );
 });

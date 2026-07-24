@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-04-14 11:34:42 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-08 17:11:58
+ * @Last Modified time: 2026-07-21 11:03:07
  */
 /**
  * Package Component
@@ -27,10 +27,11 @@ import { getPackageList } from '@/api/package';
 import PageTabs from '@/components/PageTabs'
 import { billingUnits } from './constant'
 import RbCard from '@/components/RbCard/Card'
+import ResourcePackage from './ResourcePackage'
 import BodyWrapper from '@/components/Empty/BodyWrapper'
 import { useI18n } from '@/store/locale'
 import { useUser } from '@/store/user'
-import { getTenantSubscription } from '@/api/user';
+import { useSubscription } from '@/store/subscription'
 import type { Subscription } from '@/components/SiderMenu'
 
 import SpaceSvg from '@/assets/images/package/space.svg?react'
@@ -45,8 +46,6 @@ import TechnicalSupportSvg from '@/assets/images/package/technical_support.svg?r
 import ApiOpsSvg from '@/assets/images/package/api_ops.svg?react'
 import arrowSvg from '@/assets/images/package/arrow.svg?react'
 import slaSvg from '@/assets/images/package/sla.svg?react';
-import MemoryWriteQpsSvg from '@/assets/images/package/memory_write_qps.svg?react'
-import UserMemoryLimitSvg from '@/assets/images/package/memory_limit.svg?react'
 
 const iconMap: Record<string, ComponentType<SVGProps<SVGSVGElement>>> = {
   space: SpaceSvg,
@@ -60,13 +59,12 @@ const iconMap: Record<string, ComponentType<SVGProps<SVGSVGElement>>> = {
   technical_support: TechnicalSupportSvg,
   api_ops: ApiOpsSvg,
   sla: slaSvg,
-  memory_write_qps: MemoryWriteQpsSvg,
-  user_memory_limit: UserMemoryLimitSvg,
 }
 const btnClassNames = {
   permanent_free: 'rb:h-10! rb:rounded-[8px]!',
   default: 'rb:h-10! rb:rounded-[8px]! rb:bg-[#212332]! rb:text-white! rb:border-0! rb:hover:border-0! rb:hover:opacity-[0.8]',
 }
+const isSaas = import.meta.env.VITE_PROD_ENV === 'saas'
 
 export const UnitWrapper = ({ titleKey, value, icon, unit, theme_color = '#171719' }: { titleKey: string; value?: number | string | null; icon: string; unit?: string; theme_color?: string; }) => {
   const { t } = useTranslation();
@@ -134,9 +132,13 @@ const Package: FC = () => {
   }, [data])
 
   const formatTabItems = useMemo(() => {
-    return (['saas_personal', 'commercial_deployment'] as const)
+    const items = (['saas_personal', 'commercial_deployment'] as const)
       .filter(v => categories.includes(v))
       .map(value => ({ value, label: t(`package.${value}`) }))
+    return [
+      ...items,
+      { value: 'upgrade_package', label: t('package.upgrade_package') }
+    ]
   }, [t, categories])
 
   const showTabs = categories.length > 1
@@ -151,24 +153,18 @@ const Package: FC = () => {
       setDataReady(true)
     })
   }
-  const [curPkg, setCurPkg] = useState<Subscription | null>(null)
-  const getCurrentPackage = () => {
-    getTenantSubscription()
-      .then(res => {
-        setCurPkg(res as Subscription)
-      })
-  }
+  const { subscription: curPkg, fetchSubscription } = useSubscription()
 
   useEffect(() => {
     getList()
-    getCurrentPackage()
+    fetchSubscription()
   }, [])
 
-  useEffect(() => {
-    if (categories.length > 0 && !categories.includes(activeTab as Package['category'])) {
-      setActiveTab(categories[0])
-    }
-  }, [categories, activeTab])
+  // useEffect(() => {
+  //   if (categories.length > 0 && !categories.includes(activeTab as Package['category'])) {
+  //     setActiveTab(categories[0])
+  //   }
+  // }, [categories, activeTab])
 
   const getKeyWithLanguage = (key: string) => {
     return (language === 'en' ? `${key}_en` : key) as keyof Package
@@ -217,23 +213,38 @@ const Package: FC = () => {
     navigate('/orders');
   }
 
+  const isHasTop = isSaas || showTabs
   return (
     <>
-      <Flex justify={showTabs ? "space-between" : 'end'} className="rb:mb-4!">
-        {showTabs &&
-          <PageTabs
-            value={activeTab}
-            options={formatTabItems}
-            onChange={handleChangeTab}
-          />
-        }
-        <Button className={clsx("rb:group rb:text-[#212332] rb:font-medium!", { 'rb:mr-9': showArrows })} onClick={goToHistory}>
-          <div
-            className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/order/order.svg')] rb:group-hover:bg-[url('@/assets/images/order/order_hover.svg')]"
-          ></div>
-          {t('pricing.orderHistory')}
-        </Button>
-      </Flex>
+      {isHasTop &&
+        <Flex justify={showTabs ? "space-between" : 'end'}
+          className="rb:mb-4!"
+        >
+          {showTabs &&
+            <PageTabs
+              value={activeTab}
+              options={formatTabItems}
+              onChange={handleChangeTab}
+            />
+          }
+          {isSaas &&
+            <Flex gap={12}>
+              <Button className="rb:group" onClick={goToHistory}>
+                <div
+                  className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/order/order.svg')] rb:group-hover:bg-[url('@/assets/images/order/order_hover.svg')]"
+                ></div>
+                {t('pricing.orderHistory')}
+              </Button>
+              {/* <Button
+                onClick={() => navigate('/account')}
+              >{t('package.viewOwnedResource')}</Button> */}
+            </Flex>
+          }
+        </Flex>
+      }
+      {activeTab === 'upgrade_package' ? (
+        <ResourcePackage />
+      ) : (
       <BodyWrapper empty={filteredData.length < 1}>
         <div ref={scrollRef} className="rb:relative rb:mx-9">
           {showArrows && (
@@ -315,7 +326,10 @@ const Package: FC = () => {
 
                     {/* Features */}
                     <Flex gap={12} vertical
-                      className="rb:space-y-3 rb:mb-4 rb:overflow-y-auto rb:h-[calc(100vh-401px)]!"
+                      className={clsx("rb:mb-4! rb:overflow-y-auto ", {
+                        'rb:h-[calc(100vh-346px)]!': !isHasTop,
+                        'rb:h-[calc(100vh-396px)]!': isHasTop,
+                      })}
                     >
                       {billingUnits.map(({ key, unit, icon }) => {
                         const value = pkg?.quotas?.[key as keyof Package['quotas']];
@@ -371,6 +385,7 @@ const Package: FC = () => {
           )}
         </div>
       </BodyWrapper>
+      )}
     </>
   );
 };

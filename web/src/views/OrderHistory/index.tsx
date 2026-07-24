@@ -10,24 +10,26 @@
  * Supports order detail viewing
  */
 
-import React, { useRef, useState, useCallback } from 'react';
+import React, { useRef, useState, useCallback, useEffect } from 'react';
 import { Button, Space, Select, Flex } from 'antd';
 import { useTranslation } from 'react-i18next';
 import type { ColumnsType } from 'antd/es/table';
+import { useLocation } from 'react-router-dom';
 
 import Table, { type TableRef } from '@/components/Table'
 import StatusTag from '@/components/StatusTag'
 import { formatDateTime } from '@/utils/format';
-import type { Order, OrderDetailRef, Query } from './types'
+import type { Order, GroupOrder, OrderDetailRef, Query } from './types'
 import OrderDetail from './components/OrderDetail'
 import { orderListUrl } from '@/api/package'
 import { useI18n } from '@/store/locale'
-import type { Package } from '@/views/Package/types'
+import type { Package, ResourcePack, ResourcePackTier } from '@/views/Package/types'
 import { STATUS, typeMap } from './constant'
 
 const OrderHistory: React.FC = () => {
   const { t } = useTranslation();
   const { language } = useI18n()
+  const location = useLocation();
   const orderDetailRef = useRef<OrderDetailRef>(null)
   const tableRef = useRef<TableRef>(null);
   const [query, setQuery] = useState<Query>({
@@ -40,6 +42,7 @@ const OrderHistory: React.FC = () => {
     { label: t('pricing.allType'), value: null },
     { label: t('package.saas_personal'), value: 'saas_personal' },
     { label: t('package.commercial_deployment'), value: 'commercial_deployment' },
+    { label: t('package.resource_pack'), value: 'resource_pack' },
   ]
 
   const businessTypeOptions = [
@@ -50,6 +53,10 @@ const OrderHistory: React.FC = () => {
     // { label: t('pricing.recharge'), value: 'recharge' },
     { label: t('pricing.free'), value: 'free' }
   ]
+
+  useEffect(() => {
+    setQuery(location.state || {})
+  }, [location.state])
 
   const handleView = (order: Order) => {
     orderDetailRef.current?.handleOpen(order)
@@ -93,21 +100,40 @@ const OrderHistory: React.FC = () => {
   const getKeyWithLanguage = useCallback((key: string) => {
     return (language === 'en' ? `${key}_en` : key) as keyof Package
   }, [language])
+  const getGroupKeyWithLanguage = useCallback((key: string) => {
+    return (language === 'en' ? `${key}_en` : `${key}_zh`) as keyof Package
+  }, [language])
+  const getProductName = (data: Order | GroupOrder) => {
+    if (!data) return '-'
+    if ((data as GroupOrder).order_group_id && (data as GroupOrder).orders?.length) {
+      return (data as GroupOrder).orders.map((vo) => {
+        const billing_units = [(vo.package_snapshot as ResourcePack).tier_snapshot].filter(Boolean)?.map((tier: ResourcePackTier) => {
+          return Object.keys(tier.quota_grants).map(vo => `+${t(`package.${vo}`)}: ${tier.quota_grants[vo]}`)
+        }).join(', ') || '-'
+        return `${vo.package_snapshot[getGroupKeyWithLanguage('name') as keyof Order['package_snapshot']]} (${billing_units})×${vo.multiplier ?? 1}`
+      }).join(', ')
+    }
+    if ((data as Order).legacy_product_type) {
+      return `${t(`pricing.${getProductType((data as Order).legacy_product_type as string)}.type`)}×${(data as Order).multiplier ?? 1}`
+    }
+    return `${((data as Order).package_snapshot as Package)?.[getKeyWithLanguage('name')] || '-'}×${(data as Order).multiplier ?? 1}`
+  }
   /** Table column configuration */
-  const columns: ColumnsType<Order> = [
+  const columns: ColumnsType<Order | GroupOrder> = [
     {
       title: t('pricing.order_no'),
       dataIndex: 'order_no',
       key: 'order_no',
       fixed: 'left',
+      render: (order_no, record) => {
+        return (record as GroupOrder).order_group_id || order_no
+      }
     },
     {
       title: t('pricing.package_snapshot'),
       dataIndex: 'package_snapshot',
       key: 'package_snapshot',
-      render: (package_snapshot, record) => {
-        return record.from_view === 'platform' && record.legacy_product_type ? t(`pricing.${getProductType(record.legacy_product_type)}.type`) : package_snapshot[getKeyWithLanguage('name')] || '-'
-      }
+      render: (_, record) => getProductName(record)
     },
     {
       title: t('pricing.payable_amount'),
@@ -125,13 +151,21 @@ const OrderHistory: React.FC = () => {
       title: t('pricing.business_type'),
       dataIndex: 'business_type',
       key: 'business_type',
-      render: (business_type: Order['business_type']) => t(`pricing.${business_type}`)
+      render: (business_type, record) => {
+        return (record as GroupOrder).orders?.length
+          ? t(`pricing.${(record as GroupOrder).orders[0].business_type}`)
+          : t(`pricing.${business_type}`)
+      }
     },
     {
       title: t('pricing.pay_time'),
       dataIndex: 'pay_time',
       key: 'pay_time',
-      render: (pay_time: unknown) => formatDateTime(pay_time as string, 'YYYY-MM-DD HH:mm:ss'),
+      render: (pay_time, record) => {
+        return (record as GroupOrder).orders?.length
+          ? formatDateTime((record as GroupOrder).orders[0].pay_time)
+          : formatDateTime(pay_time as string, 'YYYY-MM-DD HH:mm:ss')
+      }
     },
     {
       title: t('common.operation'),
@@ -185,7 +219,7 @@ const OrderHistory: React.FC = () => {
           onChange={handleChangeType}
         />
       </Flex>
-      <Table<Order, Query>
+      <Table<Order | GroupOrder, Query>
         ref={tableRef}
         apiUrl={orderListUrl}
         apiParams={query}
@@ -194,7 +228,9 @@ const OrderHistory: React.FC = () => {
         isScroll={true}
       />
 
-      <OrderDetail ref={orderDetailRef} getProductType={getProductType} />
+      <OrderDetail ref={orderDetailRef}
+        getProductName={getProductName}
+      />
     </div>
   );
 };

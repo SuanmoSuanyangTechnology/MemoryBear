@@ -60,3 +60,47 @@ export interface Package {
     updated_by: string | null;
     expired_at?: number | null;
 }
+
+/** 增购资源包 —— 单个扩容规格 */
+export interface ResourcePackSpec {
+    // 每份资源额度增量
+    amount: number;
+    // 单价（元）
+    price: string;
+}
+
+/** 增购资源包 —— 购物车条目 */
+export interface ResourcePackCartItem {
+    categoryKey: string;
+    icon: string;
+    unit: string;
+    amount: number;
+    price: string;
+    quantity: number;
+}
+
+
+export interface ResourcePackTier {
+  tier_id: string;
+  quota_grants: Record<string, string>;
+  unit_price: string;
+  billing_cycle: string;
+  amount?: number;
+}
+export interface ResourcePack {
+  id: string;
+  category: string;
+  version: string;
+  name_zh: string;
+  name_en: string;
+  description_zh: string;
+  description_en: string;
+  billing_units: string[];
+  tiers: ResourcePackTier[];
+  tier_snapshot: ResourcePackTier;
+  status: boolean;
+  created_at: number;
+  updated_at: number;
+  created_by: string;
+  updated_by: string;
+}

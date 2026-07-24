@@ -25,7 +25,7 @@ import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Account } from '@redbear/memory-brick'
 
-import { getTenantSubscription } from '@/api/user';
+import { useSubscription } from '@/store/subscription';
 import logo from '@/assets/images/logo.png';
 import { useI18n } from '@/store/locale';
 import { useMenu, type MenuItem } from '@/store/menu';
@@ -259,35 +259,20 @@ const Menu: FC<{
     localStorage.removeItem('user')
   }
 
-  const [subscription, setSubscription] = useState<Subscription | null>(null)
+  const { subscription, fetchSubscription } = useSubscription()
   useEffect(() => {
     if (source === 'manage') {
-      getSubscription()
-    } else {
-      setSubscription(null)
+      fetchSubscription()
     }
   }, [source])
-
-  const getSubscription = () => {
-    return new Promise((resolve, reject) => {
-      getTenantSubscription()
-        .then(res => {
-          setSubscription(res as Subscription)
-          resolve(res)
-        })
-        .catch((error) => {
-          reject(error)
-        })
-    })
-  }
 
   const getKeyWithLanguage = (key: string) => {
     return (language === 'en' ? `${key}_en` : key) as keyof Subscription['package_plan']
   }
   const handleViewDetail = () => {
-    getSubscription()
+    fetchSubscription()
       .then(res => {
-        subscriptionDetailRef.current?.handleOpen(res as Subscription)
+        subscriptionDetailRef.current?.handleOpen(res)
       })
       .catch(() => {
         subscriptionDetailRef.current?.handleOpen(subscription)

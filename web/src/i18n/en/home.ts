@@ -125,7 +125,7 @@ export const home = {
       platformManagement: 'Platform Management',
       systemSettings: 'System Settings',
       upgradePackage: 'Upgrade Package',
-      account: 'Account',
+      account: 'Account Center',
     },
     dashboard: {
       total_models: 'Available Models',
