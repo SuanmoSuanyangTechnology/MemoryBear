@@ -15,26 +15,19 @@ from typing import Optional, Dict, Any, Tuple
 from uuid import UUID
 
 from sqlalchemy.orm import Session
-from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.logging_config import get_api_logger
+from app.core.memory.storage_services.forgetting_engine.actr_calculator import ACTRCalculator
+from app.core.memory.storage_services.forgetting_engine.config_utils import (
+    load_actr_config_from_db,
+)
+from app.core.memory.storage_services.forgetting_engine.forgetting_scheduler import ForgettingScheduler
+from app.core.memory.storage_services.forgetting_engine.forgetting_strategy import ForgettingStrategy
 from app.core.utils.datetime_utils import (
     to_timestamp_ms,
     utcnow_naive,
     convert_neo4j_datetime_to_python as _convert_neo4j_datetime_to_python,
 )
-from app.core.logging_config import get_api_logger
-from app.core.memory.storage_services.forgetting_engine.actr_calculator import ACTRCalculator
-from app.core.memory.storage_services.forgetting_engine.forgetting_strategy import ForgettingStrategy
-from app.core.memory.storage_services.forgetting_engine.forgetting_scheduler import ForgettingScheduler
-from app.core.memory.storage_services.forgetting_engine.config_utils import (
-    load_actr_config_from_db,
-    load_actr_config_from_db_async,
-    calculate_forgetting_rate,
-)
-from app.models.memory_config_model import MemoryConfig
-from app.models.forgetting_cycle_history_model import ForgettingCycleHistory
-from app.repositories.neo4j.neo4j_connector import Neo4jConnector
-from app.repositories.memory_config_repository import MemoryConfigRepository
 from app.repositories.forgetting_cycle_history_repository import ForgettingCycleHistoryRepository
 from app.repositories.memory_config_repository import MemoryConfigRepository
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
@@ -57,6 +50,7 @@ class MemoryForgetService:
 
     def __init__(self):
         """初始化服务"""
+        self.config_repository = MemoryConfigRepository()
         self.history_repository = ForgettingCycleHistoryRepository()
 
     def _get_neo4j_connector(self) -> Neo4jConnector:
@@ -71,28 +65,23 @@ class MemoryForgetService:
         return Neo4jConnector()
 
     async def _get_forgetting_components(
-        self,
-        db: Session | AsyncSession,
-        config_id: Optional[UUID] = None
+            self,
+            db: Session,
+            config_id: Optional[UUID] = None
     ) -> Tuple[ACTRCalculator, ForgettingStrategy, ForgettingScheduler, Dict[str, Any]]:
         """
         获取遗忘引擎组件（计算器、策略、调度器）
-
-        Celery 任务等同步场景传入 Session，FastAPI 异步场景传入 AsyncSession。
-
+        
         Args:
-            db: 数据库会话（Session 或 AsyncSession）
+            db: 数据库会话
             config_id: 配置ID（可选）
-
+        
         Returns:
             tuple: (actr_calculator, forgetting_strategy, forgetting_scheduler, config)
         """
-        # 根据 session 类型选择同步/异步加载配置
-        if isinstance(db, AsyncSession):
-            config = await load_actr_config_from_db_async(db, config_id)
-        else:
-            config = load_actr_config_from_db(db, config_id)
-        
+        # 加载配置
+        config = load_actr_config_from_db(db, config_id)
+
         # 创建 ACT-R 计算器
         actr_calculator = ACTRCalculator(
             decay_constant=config['decay_constant'],
@@ -324,12 +313,12 @@ class MemoryForgetService:
         return result
 
     async def trigger_forgetting_cycle(
-        self,
-        db: Session | AsyncSession,
-        end_user_id: str,
-        max_merge_batch_size: Optional[int] = None,
-        min_days_since_access: Optional[int] = None,
-        config_id: Optional[UUID] = None
+            self,
+            db: Session,
+            end_user_id: str,
+            max_merge_batch_size: Optional[int] = None,
+            min_days_since_access: Optional[int] = None,
+            config_id: Optional[UUID] = None
     ) -> Dict[str, Any]:
         """
         手动触发遗忘周期
@@ -359,7 +348,6 @@ class MemoryForgetService:
         execution_time = utcnow_naive()
 
         # 运行遗忘周期（LLM 客户端将在需要时由 forgetting_strategy 内部获取）
-        # NOTE 遗忘周期定时任务，已注释暂时不使用，待后续更新
         report = await forgetting_scheduler.run_forgetting_cycle(
             end_user_id=end_user_id,
             max_merge_batch_size=max_merge_batch_size,
@@ -416,122 +404,15 @@ class MemoryForgetService:
                 duration_seconds=report['duration_seconds'],
                 trigger_type='manual'
             )
-            
-            api_logger.info(
-                f"已保存遗忘周期历史记录: end_user_id={end_user_id}, "
-                f"merged_count={report['merged_count']}"
-            )
-        
-        except Exception as e:
-            # 记录历史失败不应影响主流程
-            api_logger.error(f"保存遗忘周期历史记录失败: {str(e)}")
-        
-        return report
-    
-    async def trigger_forgetting_cycle_async(
-        self,
-        db: AsyncSession,
-        end_user_id: str,
-        max_merge_batch_size: Optional[int] = None,
-        min_days_since_access: Optional[int] = None,
-        config_id: Optional[UUID] = None
-    ) -> Dict[str, Any]:
-        """
-        手动触发遗忘周期（异步版本）
-
-        执行一次完整的遗忘周期，识别并融合低激活值节点。
-
-        Args:
-            db: 异步数据库会话
-            end_user_id: 组ID（即终端用户ID，必填）
-            max_merge_batch_size: 最大融合批次大小（可选）
-            min_days_since_access: 最小未访问天数（可选）
-            config_id: 配置ID（必填，由控制器层通过 end_user_id 获取）
-
-        Returns:
-            dict: 遗忘报告
-        """
-        # 获取遗忘引擎组件（异步）
-        _, _, forgetting_scheduler, config = await self._get_forgetting_components(db, config_id)
-
-        # 如果参数为 None，使用配置中的默认值
-        if max_merge_batch_size is None:
-            max_merge_batch_size = config.get('max_merge_batch_size', 100)
-        if min_days_since_access is None:
-            min_days_since_access = config.get('min_days_since_access', 30)
-
-        # 记录执行开始时间
-        execution_time = utcnow_naive()
-
-        # 运行遗忘周期（LLM 客户端将在需要时由 forgetting_strategy 内部获取）
-        report = await forgetting_scheduler.run_forgetting_cycle(
-            end_user_id=end_user_id,
-            max_merge_batch_size=max_merge_batch_size,
-            min_days_since_access=min_days_since_access,
-            config_id=config_id,
-            db=db
-        )
-
-        api_logger.info(
-            f"遗忘周期完成: 融合 {report['merged_count']} 对节点, "
-            f"失败 {report['failed_count']} 对, "
-            f"耗时 {report['duration_seconds']:.2f} 秒"
-        )
-
-        # 获取当前的激活值统计（用于记录历史）
-        try:
-            connector = forgetting_scheduler.connector
-            stats_query = """
-            MATCH (n)
-            WHERE (n:Statement OR n:ExtractedEntity OR n:MemorySummary OR n:Chunk)
-              AND n.end_user_id = $end_user_id
-            RETURN 
-                count(n) as total_nodes,
-                avg(n.activation_value) as average_activation,
-                sum(CASE WHEN n.activation_value IS NOT NULL AND n.activation_value < $threshold THEN 1 ELSE 0 END) as low_activation_nodes
-            """
-
-            stats_results = await connector.execute_query(
-                stats_query,
-                end_user_id=end_user_id,
-                threshold=config['forgetting_threshold']
-            )
-
-            if stats_results:
-                stats = stats_results[0]
-                total_nodes = stats['total_nodes'] or 0
-                average_activation = stats['average_activation']
-                low_activation_nodes = stats['low_activation_nodes'] or 0
-            else:
-                total_nodes = 0
-                average_activation = None
-                low_activation_nodes = 0
-
-            # 保存历史记录到数据库（异步直接插入，避免 sync Repository 与 AsyncSession 不兼容）
-            history = ForgettingCycleHistory(
-                end_user_id=end_user_id,
-                execution_time=execution_time,
-                merged_count=report['merged_count'],
-                failed_count=report['failed_count'],
-                average_activation_value=average_activation,
-                total_nodes=total_nodes,
-                low_activation_nodes=low_activation_nodes,
-                duration_seconds=report['duration_seconds'],
-                trigger_type='manual'
-            )
-            db.add(history)
-            await db.flush()
 
             api_logger.info(
                 f"已保存遗忘周期历史记录: end_user_id={end_user_id}, "
                 f"merged_count={report['merged_count']}"
             )
 
-
         except Exception as e:
             # 记录历史失败不应影响主流程
             api_logger.error(f"保存遗忘周期历史记录失败: {str(e)}")
-
 
         return report
 
@@ -541,53 +422,26 @@ class MemoryForgetService:
             config_id: UUID
     ) -> Dict[str, Any]:
         """
-        同步获取遗忘引擎配置
-
-        读取指定配置ID的遗忘引擎参数（同步版本，供 Celery 等同步场景使用）。
-
+        获取遗忘引擎配置
+        
+        读取指定配置ID的遗忘引擎参数。
+        
         Args:
-            db: 同步数据库会话 (Session)
+            db: 数据库会话
             config_id: 配置ID
-
+        
         Returns:
             dict: 配置信息字典
-
-        Raises:
-            ValueError: 配置不存在
         """
-        db_config = db.query(MemoryConfig).filter(
-            MemoryConfig.config_id == config_id
-        ).first()
+        # 加载配置
+        config = load_actr_config_from_db(db, config_id)
 
-        if db_config is None:
-            raise ValueError(f"配置不存在: config_id={config_id}")
-
-        # 计算 forgetting_rate
-        forgetting_rate = calculate_forgetting_rate(
-            db_config.lambda_time, db_config.lambda_mem
-        )
-
-        config = {
-            'config_id': config_id,
-            'decay_constant': db_config.decay_constant,
-            'lambda_time': db_config.lambda_time,
-            'lambda_mem': db_config.lambda_mem,
-            'forgetting_rate': forgetting_rate,
-            'offset': db_config.offset,
-            'max_history_length': db_config.max_history_length,
-            'forgetting_threshold': db_config.forgetting_threshold,
-            'min_days_since_access': db_config.min_days_since_access,
-            'enable_llm_summary': db_config.enable_llm_summary,
-            'max_merge_batch_size': db_config.max_merge_batch_size,
-            'forgetting_interval_hours': db_config.forgetting_interval_hours,
-            'is_default': bool(db_config.is_default),
-        }
+        # 添加 config_id 到返回结果
+        config['config_id'] = config_id
 
         api_logger.info(f"成功读取遗忘引擎配置: config_id={config_id}")
 
-
         return config
-
 
     def update_forgetting_config(
             self,
@@ -596,38 +450,35 @@ class MemoryForgetService:
             update_fields: Dict[str, Any]
     ) -> Dict[str, Any]:
         """
-        同步更新遗忘引擎配置
-
-        更新指定配置ID的遗忘引擎参数（同步版本，供 Celery 等同步场景使用）。
-
+        更新遗忘引擎配置
+        
+        更新指定配置ID的遗忘引擎参数。
+        
         Args:
-            db: 同步数据库会话 (Session)
+            db: 数据库会话
             config_id: 配置ID
             update_fields: 要更新的字段字典
-
+        
         Returns:
             dict: 更新后的配置信息
-
+        
         Raises:
             ValueError: 配置不存在
         """
-        db_config = db.query(MemoryConfig).filter(
-            MemoryConfig.config_id == config_id
-        ).first()
-
+        # 检查配置是否存在
+        db_config = self.config_repository.get_by_id(db, config_id)
         if db_config is None:
             raise ValueError(f"配置不存在: {config_id}")
 
+        # 执行更新
         if update_fields:
             for key, value in update_fields.items():
                 if hasattr(db_config, key):
                     setattr(db_config, key, value)
-
 
             db.commit()
             db.refresh(db_config)
 
-
             api_logger.info(
                 f"成功更新遗忘引擎配置: config_id={config_id}, "
                 f"更新字段: {list(update_fields.keys())}"
@@ -635,109 +486,17 @@ class MemoryForgetService:
         else:
             api_logger.info(f"没有字段需要更新: config_id={config_id}")
 
-
         # 重新加载配置并返回
-        return self.read_forgetting_config(db, config_id)
+        config = load_actr_config_from_db(db, config_id)
+        config['config_id'] = config_id
 
-    async def read_forgetting_config_async(
-        self,
-        db: AsyncSession,
-        config_id: UUID
-    ) -> Dict[str, Any]:
-        """
-        异步获取遗忘引擎配置
-        
-        读取指定配置ID的遗忘引擎参数（异步版本）。
-        
-        Args:
-            db: 异步数据库会话
-            config_id: 配置ID
-        
-        Returns:
-            dict: 配置信息字典
-        
-        Raises:
-            ValueError: 配置不存在
-        """
-        repo = MemoryConfigRepository(db)
-        db_config = await repo.get_by_id_async(config_id)
-        
-        if db_config is None:
-            raise ValueError(f"配置不存在: config_id={config_id}")
-        
-        # 计算 forgetting_rate
-        forgetting_rate = calculate_forgetting_rate(
-            db_config.lambda_time, db_config.lambda_mem
-        )
-        
-        config = {
-            'config_id': config_id,
-            'decay_constant': db_config.decay_constant,
-            'lambda_time': db_config.lambda_time,
-            'lambda_mem': db_config.lambda_mem,
-            'forgetting_rate': forgetting_rate,
-            'offset': db_config.offset,
-            'max_history_length': db_config.max_history_length,
-            'forgetting_threshold': db_config.forgetting_threshold,
-            'min_days_since_access': db_config.min_days_since_access,
-            'enable_llm_summary': db_config.enable_llm_summary,
-            'max_merge_batch_size': db_config.max_merge_batch_size,
-            'forgetting_interval_hours': db_config.forgetting_interval_hours,
-            'is_default': bool(db_config.is_default),
-        }
-        
-        api_logger.info(f"成功读取遗忘引擎配置: config_id={config_id}")
-        
         return config
-    
-    async def update_forgetting_config_async(
-        self,
-        db: AsyncSession,
-        config_id: UUID,
-        update_fields: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        """
-        异步更新遗忘引擎配置
-        
-        更新指定配置ID的遗忘引擎参数（异步版本）。
-        
-        Args:
-            db: 异步数据库会话
-            config_id: 配置ID
-            update_fields: 要更新的字段字典
-        
-        Returns:
-            dict: 更新后的配置信息
-        
-        Raises:
-            ValueError: 配置不存在
-        """
-        repo = MemoryConfigRepository(db)
-        db_config = await repo.get_by_id_async(config_id)
-        
-        if db_config is None:
-            raise ValueError(f"配置不存在: {config_id}")
-        
-        if update_fields:
-            for key, value in update_fields.items():
-                if hasattr(db_config, key):
-                    setattr(db_config, key, value)
-            
-            api_logger.info(
-                f"成功更新遗忘引擎配置: config_id={config_id}, "
-                f"更新字段: {list(update_fields.keys())}"
-            )
-        else:
-            api_logger.info(f"没有字段需要更新: config_id={config_id}")
-        
-        # 重新加载配置并返回
-        return await self.read_forgetting_config_async(db, config_id)
-    
+
     async def get_forgetting_stats(
-        self,
-        db: Session | AsyncSession,
-        end_user_id: Optional[str] = None,
-        config_id: Optional[UUID] = None
+            self,
+            db: Session,
+            end_user_id: Optional[str] = None,
+            config_id: Optional[UUID] = None
     ) -> Dict[str, Any]:
         """
         获取遗忘引擎统计信息
@@ -944,12 +703,12 @@ class MemoryForgetService:
         return stats
 
     async def get_pending_nodes(
-        self,
-        db: Session | AsyncSession,
-        end_user_id: str,
-        config_id: Optional[UUID] = None,
-        page: int = 1,
-        pagesize: int = 10
+            self,
+            db: Session,
+            end_user_id: str,
+            config_id: Optional[UUID] = None,
+            page: int = 1,
+            pagesize: int = 10
     ) -> Dict[str, Any]:
         """
         获取待遗忘节点列表（独立分页接口）
@@ -1000,11 +759,11 @@ class MemoryForgetService:
         return pending_nodes_result
 
     async def get_forgetting_curve(
-        self,
-        db: Session | AsyncSession,
-        importance_score: float,
-        days: int,
-        config_id: Optional[UUID] = None
+            self,
+            db: Session,
+            importance_score: float,
+            days: int,
+            config_id: Optional[UUID] = None
     ) -> Dict[str, Any]:
         """
         获取遗忘曲线数据

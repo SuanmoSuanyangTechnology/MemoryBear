@@ -11,7 +11,6 @@ from datetime import datetime
 from typing import Any, Callable, Dict, FrozenSet, List, Optional, Tuple
 
 from pydantic import BaseModel, Field
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from app.core.logging_config import get_logger
@@ -55,7 +54,8 @@ class TagClassification(BaseModel):
     """Represents the classification of a tag into a specific domain."""
     domain: str = Field(
         ...,
-        description="The domain the tag belongs to, chosen from: 教育, 学习, 工作, 旅行, 家庭, 运动, 社交, 娱乐, 健康, 其他",
+        description="The domain the tag belongs to, chosen from the predefined list.",
+        examples=["教育", "学习", "工作", "旅行", "家庭", "运动", "社交", "娱乐", "健康", "其他"],
     )
 
 
@@ -140,13 +140,9 @@ class MemoryInsightHelper:
                 {"role": "system", "content": "你是一个专业的标签分类助手。你必须仔细分析标签的实际含义和使用场景，优先选择9个具体领域之一。'其他'类别只用于完全无法归类的极少数情况。特别注意：历史、科学、文化等知识性对话应归类为'学习'领域；学校、课程、考试等正式教育场景应归类为'教育'领域。"},
                 {"role": "user", "content": prompt}
             ]
-            try:
-                classification = await self.llm_client.call_structured(messages, TagClassification)
-                if classification and hasattr(classification, 'domain') and classification.domain:
-                    domain_counts[classification.domain] += 1
-            except Exception as e:
-                logger.warning(f"标签 '{tag}' 分类失败，跳过: {e}")
-                continue
+            classification = await self.llm_client.call_structured(messages, TagClassification)
+            if classification and hasattr(classification, 'domain') and classification.domain:
+                domain_counts[classification.domain] += 1
         
         total_tags = sum(domain_counts.values())
         if total_tags == 0:
@@ -371,7 +367,8 @@ class UserMemoryService:
         from app.core.utils.datetime_utils import to_timestamp_ms
 
         async with get_async_db_context() as db:
-            row = await EndUserRepository(db).get_memory_insight_by_end_user_id_async(end_user_id)
+            repo = EndUserRepository(db)
+            row = await repo.get_memory_insight_by_end_user_id_async(end_user_id)
 
         if not row:
             return {
@@ -410,7 +407,8 @@ class UserMemoryService:
         from app.core.utils.datetime_utils import to_timestamp_ms
 
         async with get_async_db_context() as db:
-            row = await EndUserRepository(db).get_user_summary_by_end_user_id_async(end_user_id)
+            repo = EndUserRepository(db)
+            row = await repo.get_user_summary_by_end_user_id_async(end_user_id)
 
         if not row:
             return {
@@ -508,7 +506,7 @@ class UserMemoryService:
             
             # 如果 other_name 被更新，同步更新 end_user 表
             if other_name_updated:
-                end_user_record = EndUserRepository(db).get_by_id(user_uuid) # 加async function
+                end_user_record = EndUserRepository(db).get_by_id(user_uuid)
                 if end_user_record:
                     end_user_record.other_name = update_data['other_name']
                     end_user_record.updated_at = utcnow_naive()
@@ -564,233 +562,7 @@ class UserMemoryService:
                 "data": None,
                 "error": str(e)
             }
-
-    # ======================== 用户别名及信息（异步版本）========================
-
-    async def get_end_user_info_async(
-        self, end_user_id: str, db: Optional[AsyncSession] = None
-    ) -> Dict[str, Any]:
-        """异步版本：查询单个终端用户信息记录。
-
-        Args:
-            end_user_id: 终端用户ID (UUID 字符串)
-            db: 可选的异步 DB Session。传入时复用调用方 session（不自行管理生命周期）；
-                不传时内部自行创建 session。Controller 调用时应传入以实现单请求单 session。
-
-        Returns:
-            {"success": bool, "data": dict, "error": Optional[str]}
-        """
-        from app.db import get_async_db_context
-        from app.repositories.end_user_info_repository import EndUserInfoRepository
-        from app.core.api_key_utils import datetime_to_timestamp
-
-        try:
-            user_uuid = uuid.UUID(end_user_id)
-        except (ValueError, AttributeError):
-            logger.error(f"无效的 end_user_id 格式: {end_user_id}")
-            return {"success": False, "data": None, "error": "无效的终端用户ID格式"}
-
-        async def _query(db_session: AsyncSession):
-            nonlocal response_data
-            repo = EndUserInfoRepository(db_session)
-            end_user_info_record = await repo.get_end_user_info_async(user_uuid)
-
-            if not end_user_info_record:
-                logger.warning(f"终端用户信息记录不存在: end_user_id={end_user_id}")
-                return False
-
-            # 字段优先级筛选逻辑（与 sync 版本保持一致）
-            TOP_FIELDS = ("other_name", "aliases")
-            META_FIELDS = (
-                "relations", "goals", "core_facts", "interests",
-                "traits", "beliefs_or_stances", "anchors", "events",
-            )
-            ALWAYS_INCLUDE = {"other_name"}
-            MAX_VISIBLE = 6
-
-            raw_meta = end_user_info_record.meta_data or {}
-            candidates = (
-                [(f, getattr(end_user_info_record, f), True) for f in TOP_FIELDS]
-                + [(f, raw_meta.get(f), False) for f in META_FIELDS]
-            )
-
-            selected_top: Dict[str, Any] = {}
-            filtered_meta: Dict[str, Any] = {}
-            for field, value, is_top in candidates:
-                if len(selected_top) + len(filtered_meta) >= MAX_VISIBLE:
-                    break
-                if not value and field not in ALWAYS_INCLUDE:
-                    continue
-                (selected_top if is_top else filtered_meta)[field] = value
-
-            response_data = {
-                "end_user_info_id": str(end_user_info_record.id),
-                "end_user_id": str(end_user_info_record.end_user_id),
-                **selected_top,
-                "meta_data": filtered_meta,
-                "created_at": datetime_to_timestamp(end_user_info_record.created_at),
-                "updated_at": datetime_to_timestamp(end_user_info_record.updated_at),
-            }
-            return True
-
-        try:
-            response_data = None
-            if db is not None:
-                # Controller 传入 session，直接复用
-                ok = await _query(db)
-                if not ok:
-                    return {"success": False, "data": None, "error": "终端用户信息记录不存在"}
-            else:
-                # 独立调用，自行管理 session
-                async with get_async_db_context() as own_db:
-                    ok = await _query(own_db)
-                    if not ok:
-                        return {"success": False, "data": None, "error": "终端用户信息记录不存在"}
-
-            logger.info(f"成功查询终端用户信息记录(异步): end_user_id={end_user_id}")
-            return {"success": True, "data": response_data, "error": None}
-
-        except Exception as e:
-            logger.error(f"查询终端用户信息记录失败(异步): end_user_id={end_user_id}, error={str(e)}")
-            return {"success": False, "data": None, "error": str(e)}
-
-    async def update_end_user_info_async(
-        self,
-        end_user_id: str,
-        update_data: Dict[str, Any],
-        db: Optional[AsyncSession] = None,
-    ) -> Dict[str, Any]:
-        """异步版本：更新终端用户信息记录。
-
-        Args:
-            end_user_id: 终端用户ID (UUID 字符串)
-            update_data: 更新数据字典（allowed keys: other_name, aliases, meta_data）
-            db: 可选的异步 DB Session。传入时复用调用方 session（Controller 层负责 commit）；
-                不传时内部自行管理生命周期并 commit。Controller 调用时应传入以实现单请求单 session。
-
-        Returns:
-            {"success": bool, "data": dict, "error": Optional[str]}
-        """
-        from app.db import get_async_db_context
-        from app.repositories.end_user_info_repository import EndUserInfoRepository
-        from app.repositories.end_user_repository import EndUserRepository
-        from app.core.api_key_utils import datetime_to_timestamp
-
-        try:
-            user_uuid = uuid.UUID(end_user_id)
-        except (ValueError, AttributeError):
-            logger.error(f"无效的 end_user_id 格式: {end_user_id}")
-            return {"success": False, "data": None, "error": "无效的终端用户ID格式"}
-
-        async def _update(db_session: AsyncSession, do_commit: bool):
-            nonlocal aliases_updated
-            info_repo = EndUserInfoRepository(db_session)
-            end_user_info_record = await info_repo.get_end_user_info_async(user_uuid)
-
-            if not end_user_info_record:
-                logger.warning(f"终端用户信息记录不存在: end_user_id={end_user_id}")
-                return False
-
-            allowed_fields = {'other_name', 'aliases', 'meta_data'}
-            _user_placeholder_names = _USER_PLACEHOLDER_NAMES
-
-            # 过滤 other_name：不允许设置为占位名称
-            if (
-                'other_name' in update_data
-                and update_data['other_name']
-                and update_data['other_name'].strip() in _user_placeholder_names
-            ):
-                logger.warning(f"拒绝将占位名称 '{update_data['other_name']}' 设置为 other_name")
-                del update_data['other_name']
-
-            # 过滤 aliases：移除占位名称和非字符串值
-            if 'aliases' in update_data and update_data['aliases']:
-                update_data['aliases'] = [
-                    a for a in update_data['aliases']
-                    if isinstance(a, str) and a.strip() and a.strip() not in _user_placeholder_names
-                ]
-
-            aliases_updated = (
-                'aliases' in update_data
-                and update_data['aliases'] != end_user_info_record.aliases
-            )
-            other_name_updated = (
-                'other_name' in update_data
-                and update_data['other_name'] != end_user_info_record.other_name
-            )
-
-            # 更新字段（白名单）
-            for field, value in update_data.items():
-                if field in allowed_fields:
-                    setattr(end_user_info_record, field, value)
-
-            end_user_info_record.updated_at = utcnow_naive()
-
-            # 如果 other_name 被更新，同步更新 end_user 表
-            if other_name_updated:
-                end_user_record = await EndUserRepository(db_session).get_by_id_async(user_uuid)
-                if end_user_record:
-                    end_user_record.other_name = update_data['other_name']
-                    end_user_record.updated_at = utcnow_naive()
-                    logger.info(
-                        f"同步更新 end_user 表的 other_name: end_user_id={end_user_id}, "
-                        f"other_name={update_data['other_name']}"
-                    )
-                else:
-                    logger.warning(f"未找到对应的 end_user 记录: end_user_id={end_user_id}")
-
-            if do_commit:
-                await db_session.commit()
-            await db_session.refresh(end_user_info_record)
-
-            nonlocal response_data
-            response_data = {
-                "end_user_info_id": str(end_user_info_record.id),
-                "end_user_id": str(end_user_info_record.end_user_id),
-                "other_name": end_user_info_record.other_name,
-                "aliases": end_user_info_record.aliases,
-                "meta_data": end_user_info_record.meta_data,
-                "created_at": datetime_to_timestamp(end_user_info_record.created_at),
-                "updated_at": datetime_to_timestamp(end_user_info_record.updated_at),
-            }
-            return True
-
-        try:
-            response_data = None
-            aliases_updated = False
-            if db is not None:
-                # Controller 传入 session，不自行 commit（由 Controller 统一管理事务）
-                ok = await _update(db, do_commit=False)
-                if not ok:
-                    return {"success": False, "data": None, "error": "终端用户信息记录不存在"}
-            else:
-                # 独立调用，自行管理 session 并 commit
-                async with get_async_db_context() as own_db:
-                    ok = await _update(own_db, do_commit=True)
-                    if not ok:
-                        return {"success": False, "data": None, "error": "终端用户信息记录不存在"}
-
-            # aliases 同步到 Neo4j（在 async 上下文中直接 await，避免嵌套 asyncio.run）
-            if aliases_updated:
-                try:
-                    await self._sync_aliases_to_neo4j(end_user_id, update_data['aliases'])
-                    logger.info(
-                        f"已触发 aliases 同步到 Neo4j(异步): end_user_id={end_user_id}, "
-                        f"aliases={update_data['aliases']}"
-                    )
-                except Exception as sync_error:
-                    logger.error(f"触发同步 aliases 到 Neo4j 失败(异步): {sync_error}", exc_info=True)
-
-            logger.info(
-                f"成功更新终端用户信息记录(异步): end_user_id={end_user_id}, "
-                f"updated_fields={list(update_data.keys())}"
-            )
-            return {"success": True, "data": response_data, "error": None}
-
-        except Exception as e:
-            logger.error(f"更新终端用户信息记录失败(异步): end_user_id={end_user_id}, error={str(e)}")
-            return {"success": False, "data": None, "error": str(e)}
-
+    
     async def _sync_aliases_to_neo4j(self, end_user_id: str, aliases: List[str]) -> None:
         """
         将 aliases 同步到 Neo4j 中的用户实体
@@ -1023,11 +795,11 @@ class UserMemoryService:
             logger.error(f"获取缓存用户摘要时出错: {str(e)}")
             raise
 
-# for user
+# for user    
     async def generate_and_cache_insight(
         self, 
+        db: Session, 
         end_user_id: str,
-        db=None,
         workspace_id: Optional[uuid.UUID] = None,
         language: str = "zh"
     ) -> Dict[str, Any]:
@@ -1035,7 +807,7 @@ class UserMemoryService:
         生成并缓存记忆洞察
         
         Args:
-            db: 数据库会话（已弃用，内部使用异步会话）
+            db: 数据库会话
             end_user_id: 终端用户ID (UUID)
             workspace_id: 工作空间ID (可选)
             language: 语言类型 ("zh" 中文, "en" 英文)，默认中文
@@ -1050,30 +822,26 @@ class UserMemoryService:
                 "error": Optional[str]
             }
         """
-        from app.db import get_async_db_context
-
         try:
             logger.info(f"开始为 end_user_id {end_user_id} 生成记忆洞察, language={language}")
             
-            # 转换为UUID并查询用户（异步）
+            # 转换为UUID并查询用户
             user_uuid = uuid.UUID(end_user_id)
+            repo = EndUserRepository(db)
+            end_user = repo.get_by_id(user_uuid)
             
-            async with get_async_db_context() as async_db:
-                repo = EndUserRepository(async_db)
-                end_user = await repo.get_by_id_async(user_uuid)
-                
-                if not end_user:
-                    logger.error(f"end_user_id {end_user_id} 不存在")
-                    return {
-                        "success": False,
-                        "memory_insight": None,
-                        "behavior_pattern": None,
-                        "key_findings": None,
-                        "growth_trajectory": None,
-                        "error": "用户不存在"
-                    }
+            if not end_user:
+                logger.error(f"end_user_id {end_user_id} 不存在")
+                return {
+                    "success": False,
+                    "memory_insight": None,
+                    "behavior_pattern": None,
+                    "key_findings": None,
+                    "growth_trajectory": None,
+                    "error": "用户不存在"
+                }
             
-            # 使用 end_user_id 调用分析函数（纯异步，不需要 db session）
+            # 使用 end_user_id 调用分析函数
             try:
                 logger.info(f"使用 end_user_id={end_user_id} 生成记忆洞察")
                 result = await analytics_memory_insight_report(end_user_id, language=language)
@@ -1098,18 +866,17 @@ class UserMemoryService:
                         "error": "生成的洞察报告为空,可能Neo4j中没有该用户的数据"
                     }
                 
-                # 更新数据库缓存（异步）
-                async with get_async_db_context() as async_db:
-                    repo = EndUserRepository(async_db)
-                    update_success = await repo.update_memory_insight_async(
-                        user_uuid, 
-                        memory_insight, 
-                        behavior_pattern, 
-                        key_findings_json,
-                        growth_trajectory
-                    )
+                # 更新数据库缓存（四个维度）
+                # 注意：key_findings 存储为 JSON 字符串
+                success = repo.update_memory_insight(
+                    user_uuid, 
+                    memory_insight, 
+                    behavior_pattern, 
+                    key_findings_json,  # 存储 JSON 字符串
+                    growth_trajectory
+                )
                 
-                if update_success:
+                if success:
                     logger.info(f"成功为 end_user_id {end_user_id} 生成并缓存记忆洞察（四维度）")
                     return {
                         "success": True,
@@ -1164,6 +931,7 @@ class UserMemoryService:
     
     async def generate_and_cache_summary(
         self, 
+        db: Session, 
         end_user_id: str,
         workspace_id: Optional[uuid.UUID] = None,
         language: str = "zh"
@@ -1172,6 +940,7 @@ class UserMemoryService:
         生成并缓存用户摘要（四个部分）
         
         Args:
+            db: 数据库会话
             end_user_id: 终端用户ID (UUID)
             workspace_id: 工作空间ID (可选)
             language: 语言类型 ("zh" 中文, "en" 英文)，默认中文
@@ -1186,33 +955,30 @@ class UserMemoryService:
                 "error": Optional[str]
             }
         """
-        from app.db import get_async_db_context
-
         try:
             logger.info(f"开始为 end_user_id {end_user_id} 生成用户摘要, language={language}")
             
-            # 转换为UUID并查询用户（异步）
+            # 转换为UUID并查询用户
             user_uuid = uuid.UUID(end_user_id)
+            repo = EndUserRepository(db)
+            end_user = repo.get_by_id(user_uuid)
             
-            async with get_async_db_context() as async_db:
-                repo = EndUserRepository(async_db)
-                end_user = await repo.get_by_id_async(user_uuid)
-                
-                if not end_user:
-                    logger.error(f"end_user_id {end_user_id} 不存在")
-                    return {
-                        "success": False,
-                        "user_summary": None,
-                        "personality": None,
-                        "core_values": None,
-                        "one_sentence": None,
-                        "error": "用户不存在"
-                    }
+            if not end_user:
+                logger.error(f"end_user_id {end_user_id} 不存在")
+                return {
+                    "success": False,
+                    "user_summary": None,
+                    "personality": None,
+                    "core_values": None,
+                    "one_sentence": None,
+                    "error": "用户不存在"
+                }
             
-            # 使用 end_user_id 调用分析函数（纯异步，不需要 db session）
+            # 使用 end_user_id 调用分析函数
             try:
                 logger.info(f"使用 end_user_id={end_user_id} 生成用户摘要")
                 result = await analytics_user_summary(end_user_id, language=language)
+                
                 user_summary = result.get("user_summary", "")
                 personality = result.get("personality", "")
                 core_values = result.get("core_values", "")
@@ -1229,18 +995,16 @@ class UserMemoryService:
                         "error": "生成的用户摘要为空,可能Neo4j中没有该用户的数据"
                     }
                 
-                # 更新数据库缓存（异步）
-                async with get_async_db_context() as async_db:
-                    repo = EndUserRepository(async_db)
-                    update_success = await repo.update_user_summary_async(
-                        user_uuid, 
-                        user_summary, 
-                        personality, 
-                        core_values, 
-                        one_sentence
-                    )
+                # 更新数据库缓存
+                success = repo.update_user_summary(
+                    user_uuid, 
+                    user_summary, 
+                    personality, 
+                    core_values, 
+                    one_sentence
+                )
                 
-                if update_success:
+                if success:
                     logger.info(f"成功为 end_user_id {end_user_id} 生成并缓存用户摘要")
                     return {
                         "success": True,
@@ -1296,14 +1060,15 @@ class UserMemoryService:
 # for workspace    
     async def generate_cache_for_workspace(
         self, 
-        workspace_id: uuid.UUID = None,
+        db: Session, 
+        workspace_id: uuid.UUID,
         language: str = "zh"
     ) -> Dict[str, Any]:
         """
         为整个工作空间生成缓存
         
         Args:
-            db: 数据库会话（已弃用，内部使用异步会话）
+            db: 数据库会话
             workspace_id: 工作空间ID
             language: 语言类型 ("zh" 中文, "en" 英文)，默认中文
             
@@ -1315,8 +1080,6 @@ class UserMemoryService:
                 "errors": List[Dict]
             }
         """
-        from app.db import get_async_db_context
-
         logger.info(f"开始为工作空间 {workspace_id} 批量生成缓存, language={language}")
         
         total_users = 0
@@ -1325,10 +1088,9 @@ class UserMemoryService:
         errors = []
         
         try:
-            # 获取工作空间的所有终端用户（异步）
-            async with get_async_db_context() as async_db:
-                repo = EndUserRepository(async_db)
-                end_users = await repo.get_end_users_by_workspace_async(workspace_id)
+            # 获取工作空间的所有终端用户
+            repo = EndUserRepository(db)
+            end_users = repo.get_all_by_workspace(workspace_id)
             total_users = len(end_users)
             
             logger.info(f"工作空间 {workspace_id} 共有 {total_users} 个终端用户")
@@ -1339,10 +1101,10 @@ class UserMemoryService:
                 
                 try:
                     # 生成记忆洞察
-                    insight_result = await self.generate_and_cache_insight(end_user_id=end_user_id, language=language)
+                    insight_result = await self.generate_and_cache_insight(db, end_user_id, language=language)
                     
                     # 生成用户摘要
-                    summary_result = await self.generate_and_cache_summary(end_user_id=end_user_id, language=language)
+                    summary_result = await self.generate_and_cache_summary(db, end_user_id, language=language)
                     
                     # 检查是否都成功
                     if insight_result["success"] and summary_result["success"]:
@@ -1732,7 +1494,8 @@ async def _async_get_forgetting_threshold(end_user_id: str) -> float:
     """获取用户的遗忘阈值配置（通过 Repository 异步方法）。"""
     from app.db import get_async_db_context
     async with get_async_db_context() as db:
-        value = await EndUserRepository(db).get_forgetting_threshold_async(uuid.UUID(end_user_id))
+        repo = EndUserRepository(db)
+        value = await repo.get_forgetting_threshold_async(uuid.UUID(end_user_id))
         if value is not None:
             return float(value)
     return 0.3
@@ -1840,7 +1603,7 @@ async def analytics_memory_types_async(
     return memory_types
 
 async def analytics_graph_data(
-    end_user_id: str,
+    end_user_id: str = "",
     node_types: Optional[List[str]] = None,
     limit: int = 100,
     depth: int = 1,
@@ -1893,7 +1656,8 @@ async def analytics_graph_data(
         # 通过 Repository 异步方法校验用户存在性
         from app.db import get_async_db_context
         async with get_async_db_context() as _db:
-            end_user = await EndUserRepository(_db).get_end_user_by_id_async(user_uuid)
+            end_user_repo = EndUserRepository(_db)
+            end_user = await end_user_repo.get_end_user_by_id_async(user_uuid)
         if not end_user:
             logger.warning(f"未找到 end_user_id 为 {end_user_id} 的用户")
             return _empty_graph_response("用户不存在")
@@ -2213,7 +1977,8 @@ async def analytics_community_graph_data(
         # 通过 Repository 异步方法校验用户存在性
         from app.db import get_async_db_context
         async with get_async_db_context() as _db:
-            end_user = await EndUserRepository(_db).get_end_user_by_id_async(user_uuid)
+            end_user_repo = EndUserRepository(_db)
+            end_user = await end_user_repo.get_end_user_by_id_async(user_uuid)
         if not end_user:
             return {
                 "nodes": [], "edges": [],

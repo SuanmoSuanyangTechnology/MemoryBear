@@ -10,11 +10,9 @@ Classes:
 from typing import Dict, Any
 from uuid import UUID
 
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from app.models.memory_config_model import MemoryConfig
-from app.repositories.memory_config_repository import MemoryConfigRepository
 from app.core.logging_config import get_business_logger
 
 logger = get_business_logger()
@@ -93,8 +91,7 @@ class EmotionConfigService:
             logger.error(f"获取情绪配置失败: {str(e)}", exc_info=True)
             raise
     
-    @staticmethod
-    def validate_emotion_config(config_data: Dict[str, Any]) -> bool:
+    def validate_emotion_config(self, config_data: Dict[str, Any]) -> bool:
         """验证情绪配置参数
         
         验证配置参数的有效性，包括：
@@ -215,121 +212,4 @@ class EmotionConfigService:
         except Exception as e:
             self.db.rollback()
             logger.error(f"更新情绪配置失败: {str(e)}", exc_info=True)
-            raise
-
-    @staticmethod
-    async def get_emotion_config_async(db: AsyncSession, config_id: UUID) -> Dict[str, Any]:
-        """异步获取情绪引擎配置
-
-        查询指定配置ID的情绪相关配置字段。
-
-        Args:
-            db: 异步数据库会话
-            config_id: 配置ID
-
-        Returns:
-            Dict: 包含情绪配置的响应数据：
-                - config_id: 配置ID
-                - emotion_enabled: 是否启用情绪提取
-                - emotion_model_id: 情绪分析专用模型ID
-                - emotion_extract_keywords: 是否提取情绪关键词
-                - emotion_min_intensity: 最小情绪强度阈值
-                - emotion_enable_subject: 是否启用主体分类
-
-        Raises:
-            ValueError: 当配置不存在时
-        """
-        try:
-            logger.info(f"异步获取情绪配置: config_id={config_id}")
-
-            # 查询配置
-            repo = MemoryConfigRepository(db)
-            config = await repo.get_by_id_async(config_id)
-
-            if not config:
-                logger.error(f"配置不存在: config_id={config_id}")
-                raise ValueError(f"配置不存在: config_id={config_id}")
-
-            # 提取情绪相关字段
-            emotion_config = {
-                "config_id": config.config_id,
-                "emotion_enabled": config.emotion_enabled,
-                "emotion_model_id": config.emotion_model_id,
-                "emotion_extract_keywords": config.emotion_extract_keywords,
-                "emotion_min_intensity": config.emotion_min_intensity,
-                "emotion_enable_subject": config.emotion_enable_subject,
-                "is_default": bool(config.is_default)
-            }
-
-            logger.info(f"异步情绪配置获取成功: config_id={config_id}")
-            return emotion_config
-
-        except ValueError:
-            raise
-        except Exception as e:
-            logger.error(f"异步获取情绪配置失败: {str(e)}", exc_info=True)
-            raise
-
-    @staticmethod
-    async def update_emotion_config_async(
-        db: AsyncSession,
-        config_id: UUID,
-        config_data: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        """异步更新情绪引擎配置
-
-        更新指定配置ID的情绪相关配置字段。
-
-        Args:
-            db: 异步数据库会话
-            config_id: 配置ID
-            config_data: 要更新的配置数据，可包含以下字段：
-                - emotion_enabled: 是否启用情绪提取
-                - emotion_model_id: 情绪分析专用模型ID
-                - emotion_extract_keywords: 是否提取情绪关键词
-                - emotion_min_intensity: 最小情绪强度阈值
-                - emotion_enable_subject: 是否启用主体分类
-
-        Returns:
-            Dict: 更新后的完整情绪配置
-
-        Raises:
-            ValueError: 当配置不存在或参数无效时
-        """
-        try:
-            logger.info(f"异步更新情绪配置: config_id={config_id}, data={config_data}")
-
-            # 验证配置参数
-            EmotionConfigService.validate_emotion_config(config_data)
-
-            # 查询配置
-            repo = MemoryConfigRepository(db)
-            config = await repo.get_by_id_async(config_id)
-
-            if not config:
-                logger.error(f"配置不存在: config_id={config_id}")
-                raise ValueError(f"配置不存在: config_id={config_id}")
-
-            # 更新字段
-            if "emotion_enabled" in config_data:
-                config.emotion_enabled = config_data["emotion_enabled"]
-            if "emotion_model_id" in config_data:
-                config.emotion_model_id = config_data["emotion_model_id"]
-            if "emotion_extract_keywords" in config_data:
-                config.emotion_extract_keywords = config_data["emotion_extract_keywords"]
-            if "emotion_min_intensity" in config_data:
-                config.emotion_min_intensity = config_data["emotion_min_intensity"]
-            if "emotion_enable_subject" in config_data:
-                config.emotion_enable_subject = config_data["emotion_enable_subject"]
-
-            # 返回更新后的配置
-            updated_config = await EmotionConfigService.get_emotion_config_async(db, config_id)
-
-            logger.info(f"异步情绪配置更新成功: config_id={config_id}")
-            return updated_config
-
-        except ValueError:
-            raise
-        except Exception as e:
-            logger.error(f"异步更新情绪配置失败: {str(e)}", exc_info=True)
             raise

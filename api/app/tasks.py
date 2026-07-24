@@ -1728,7 +1728,6 @@ def sync_knowledge_for_kb(kb_id: uuid.UUID):
 @celery_app.task(name="app.core.memory.agent.write_message", bind=True, acks_late=False, max_retries=0)
 def write_message_task(
         self,
-        # HACK （end_user_id数据类型修改）改成end_user_uuid: UUID
         end_user_id: str,
         target_message: Optional[dict] = None,
         context_before: Optional[List[dict]] = None,
@@ -3064,12 +3063,13 @@ def do_refresh_insight_summary_cache(
 
         service = UserMemoryService()
         ws_uuid = uuid.UUID(workspace_id)
-        insight = await service.generate_and_cache_insight(
-            end_user_id=end_user_id, workspace_id=ws_uuid, language=language,
-        )
-        summary = await service.generate_and_cache_summary(
-            end_user_id=end_user_id, workspace_id=ws_uuid, language=language,
-        )
+        with get_db_context() as db:
+            insight = await service.generate_and_cache_insight(
+                db, end_user_id, ws_uuid, language=language,
+            )
+            summary = await service.generate_and_cache_summary(
+                db, end_user_id, ws_uuid, language=language,
+            )
         return {
             "insight_success": bool(insight.get("success")),
             "summary_success": bool(summary.get("success")),
@@ -3314,7 +3314,7 @@ def run_forgetting_cycle_task(self, config_id: Optional[uuid.UUID] = None) -> Di
                 try:
                     config_id = MemoryConfigService(db).get_workspace_active_config_id(end_user.workspace_id)
 
-                    # 执行遗忘周期（Celery sync 路径，传入 Session）
+                    # 执行遗忘周期
                     report = await forget_service.trigger_forgetting_cycle(
                         db=db, end_user_id=str(end_user.id), config_id=config_id
                     )

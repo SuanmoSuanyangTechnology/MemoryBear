@@ -4,11 +4,8 @@
 控制器中的「记忆配置」读写接口，统一收口到 /memory_config 前缀下，使对内 /api 路由与对外
 /v1（memory_config_api_controller）路径一致。
 
-异步改造范式：
-- 认证走 ``get_current_user_async``（async JWT 校验，不阻塞事件循环）
-- ``resolve_config_id`` 使用 async 版本
-- 全链路 async：service 层使用 async static 方法 + AsyncSession，端点内通过
-  ``async with get_async_db_context()`` 统一管理异步事务
+各 handler 由原域控制器整体迁入（函数体逻辑不变，仅装饰器路径调整为 /memory_config/*）。
+方法沿用对内现状（读 GET、创建/更新 POST、删除 DELETE）。
 
 路由前缀: /memory_config
 认证方式: JWT Token
@@ -18,15 +15,17 @@ from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query, status
 from fastapi.responses import JSONResponse
+from sqlalchemy.orm import Session
 
 from app.controllers.emotion_config_controller import EmotionConfigUpdate
 from app.core.error_codes import BizCode
 from app.core.language_utils import get_language_from_header
 from app.core.logging_config import get_api_logger
-from app.core.quota_manager import _check_quota_async
+from app.core.quota_stub import check_memory_engine_quota
 from app.core.response_utils import fail, success
-from app.db import get_async_db_context
-from app.dependencies import CurrentUserSnapshot, get_current_user_async
+from app.db import get_db
+from app.dependencies import get_current_user
+from app.models.user_model import User
 from app.repositories.memory_config_repository import MemoryConfigRepository
 from app.schemas.memory_reflection_schemas import Memory_Reflection
 from app.schemas.memory_storage_schema import (
@@ -41,7 +40,7 @@ from app.schemas.response_schema import ApiResponse
 from app.services.emotion_config_service import EmotionConfigService
 from app.services.memory_forget_service import MemoryForgetService
 from app.services.memory_storage_service import DataConfigService
-from app.utils.config_utils import resolve_config_id_async
+from app.utils.config_utils import resolve_config_id
 
 api_logger = get_api_logger()
 
@@ -53,28 +52,26 @@ router = APIRouter(
     tags=["Memory Config"],
 )
 
-async def _resolve_config_id(config_id: UUID | int) -> UUID:
-    """短生命周期 async session 内解析 config_id（无需 controller 显式传 db）。"""
-    async with get_async_db_context() as db:
-        return await resolve_config_id_async(config_id, db)
 
 # ==================== 读取类 ====================
 
 @router.get("/read_all_config", response_model=ApiResponse)  # 读取所有配置文件列表
-async def read_all_config(
-        current_user: CurrentUserSnapshot = Depends(get_current_user_async),
+def read_all_config(
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db),
 ) -> dict:
     workspace_id = current_user.current_workspace_id
 
+    # 检查用户是否已选择工作空间
     if workspace_id is None:
         api_logger.warning(f"用户 {current_user.username} 尝试查询配置但未选择工作空间")
         return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
 
     api_logger.info(f"用户 {current_user.username} 在工作空间 {workspace_id} 请求读取所有配置")
     try:
-        async with get_async_db_context() as db:
-            result = await DataConfigService.get_all_async(db, workspace_id=workspace_id)
-            await db.commit()
+        svc = DataConfigService(db)
+        # 传递 workspace_id 进行过滤（保持为 UUID 类型）
+        result = svc.get_all(workspace_id=workspace_id)
         return success(data=result, msg="查询成功")
     except Exception as e:
         api_logger.error(f"Read all config failed: {str(e)}")
@@ -84,10 +81,12 @@ async def read_all_config(
 @router.post('/active_config', response_model=ApiResponse)
 async def active_config(
         config_id: UUID = Body(..., embed=True),
-        current_user: CurrentUserSnapshot = Depends(get_current_user_async),
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db),
         language_type: Optional[str] = Header(None, alias="X-Language-Type"),
 ) -> dict:
     workspace_id = current_user.current_workspace_id
+
     if workspace_id is None:
         return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
 
@@ -95,10 +94,9 @@ async def active_config(
     from app.schemas.memory_config_schema import ConfigurationError
 
     locale = get_language_from_header(language_type)
+    svc = DataConfigService(db)
     try:
-        async with get_async_db_context() as db:
-            result = await DataConfigService.active_async(db, workspace_id, config_id, locale=locale)
-            await db.commit()
+        result = await svc.active(workspace_id, config_id, locale=locale)
         return success(data=result)
     except ConfigurationError as e:
         return fail(BizCode.INVALID_PARAMETER, str(e))
@@ -108,7 +106,8 @@ async def active_config(
 
 @router.get('/validate_active_config', response_model=ApiResponse)
 async def validate_active_config_models(
-        current_user: CurrentUserSnapshot = Depends(get_current_user_async),
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db),
         language_type: Optional[str] = Header(None, alias="X-Language-Type"),
 ) -> dict:
     """校验当前工作空间激活记忆配置中的模型 API 可用性"""
@@ -123,39 +122,33 @@ async def validate_active_config_models(
     locale = get_language_from_header(language_type)
 
     try:
-        async with get_async_db_context() as db:
-            try:
-                config_id = await MemoryConfigService(db).get_workspace_active_config_id_async(workspace_id)
-            except BusinessException:
-                from app.i18n.service import t
-                return success(data={
-                    "valid": False,
-                    "warnings": [{"message": t("memory_config.workspace.no_active_config", locale=locale)}],
-                })
-            result = await MemoryConfigService(db).valid_config(config_id, locale=locale)
-        return success(data=result)
-    except Exception as e:
-        api_logger.error(f"validate_active_config failed: {str(e)}")
-        return fail(BizCode.INTERNAL_ERROR, "校验激活配置失败", str(e))
+        config_id = MemoryConfigService(db).get_workspace_active_config_id(workspace_id)
+    except BusinessException:
+        from app.i18n.service import t
+        return success(data={"valid": False,
+                             "warnings": [{"message": t("memory_config.workspace.no_active_config", locale=locale)}]})
+
+    result = await MemoryConfigService(db).valid_config(config_id, locale=locale)
+    return success(data=result)
 
 
 @router.get("/read_config_extracted", response_model=ApiResponse)  # 读取某条抽取配置
-async def read_config_extracted(
+def read_config_extracted(
         config_id: UUID | int,
-        current_user: CurrentUserSnapshot = Depends(get_current_user_async),
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db),
 ) -> dict:
     workspace_id = current_user.current_workspace_id
+    config_id = resolve_config_id(config_id, db)
+    # 检查用户是否已选择工作空间
     if workspace_id is None:
         api_logger.warning(f"用户 {current_user.username} 尝试读取提取配置但未选择工作空间")
         return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
 
-    resolved = await _resolve_config_id(config_id)
-    api_logger.info(
-        f"用户 {current_user.username} 在工作空间 {workspace_id} 请求读取提取配置: {resolved}"
-    )
+    api_logger.info(f"用户 {current_user.username} 在工作空间 {workspace_id} 请求读取提取配置: {config_id}")
     try:
-        async with get_async_db_context() as db:
-            result = await DataConfigService.get_extracted_async(db, ConfigKey(config_id=resolved))
+        svc = DataConfigService(db)
+        result = svc.get_extracted(ConfigKey(config_id=config_id))
         return success(data=result, msg="查询成功")
     except Exception as e:
         api_logger.error(f"Read config extracted failed: {str(e)}")
@@ -165,10 +158,13 @@ async def read_config_extracted(
 @router.get("/read_config_forgetting", response_model=ApiResponse)
 async def read_forgetting_config(
         config_id: UUID | int,
-        current_user: CurrentUserSnapshot = Depends(get_current_user_async),
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db)
 ):
     """获取遗忘引擎配置"""
     workspace_id = current_user.current_workspace_id
+
+    # 检查用户是否已选择工作空间
     if workspace_id is None:
         api_logger.warning(f"用户 {current_user.username} 尝试读取遗忘引擎配置但未选择工作空间")
         return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
@@ -178,9 +174,8 @@ async def read_forgetting_config(
     )
 
     try:
-        resolved = await _resolve_config_id(config_id)
-        async with get_async_db_context() as db:
-            config = await forget_service.read_forgetting_config_async(db=db, config_id=resolved)
+        config_id = resolve_config_id(config_id, db)
+        config = forget_service.read_forgetting_config(db=db, config_id=config_id)
         response_data = ForgettingConfigResponse(**config)
         return success(data=response_data.model_dump(), msg="查询成功")
     except ValueError as e:
@@ -192,9 +187,10 @@ async def read_forgetting_config(
 
 
 @router.get("/read_config_emotion", response_model=ApiResponse)
-async def get_emotion_config(
+def get_emotion_config(
         config_id: UUID | int = Query(..., description="配置ID"),
-        current_user: CurrentUserSnapshot = Depends(get_current_user_async),
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_user),
 ):
     """获取情绪引擎配置"""
     try:
@@ -202,12 +198,12 @@ async def get_emotion_config(
             f"用户 {current_user.username} 请求获取情绪配置",
             extra={"config_id": config_id}
         )
-        resolved = await _resolve_config_id(config_id)
-        async with get_async_db_context() as db:
-            data = await EmotionConfigService.get_emotion_config_async(db, resolved)
+        config_id = resolve_config_id(config_id, db)
+        config_service = EmotionConfigService(db)
+        data = config_service.get_emotion_config(config_id)
         api_logger.info(
             "情绪配置获取成功",
-            extra={"config_id": resolved, "emotion_enabled": data.get("emotion_enabled", False)}
+            extra={"config_id": config_id, "emotion_enabled": data.get("emotion_enabled", False)}
         )
         return success(data=data, msg="情绪配置获取成功")
     except ValueError as e:
@@ -224,28 +220,29 @@ async def get_emotion_config(
 @router.get("/read_config_reflection", response_model=ApiResponse)
 async def start_reflection_configs(
         config_id: UUID | int,
-        current_user: CurrentUserSnapshot = Depends(get_current_user_async),
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db),
 ) -> dict:
-    """查询反思引擎配置（异步版本）"""
+    """查询反思引擎配置"""
+    config_id = resolve_config_id(config_id, db)
     try:
-        resolved = await _resolve_config_id(config_id)
-        api_logger.info(f"用户 {current_user.username} 查询反思配置，config_id: {resolved}")
+        config_id = resolve_config_id(config_id, db)
+        api_logger.info(f"用户 {current_user.username} 查询反思配置，config_id: {config_id}")
+        result = MemoryConfigRepository.query_reflection_config_by_id(db, config_id)
+        memory_config_id = resolve_config_id(result.config_id, db)
 
-        async with get_async_db_context() as db:
-            result = await MemoryConfigRepository(db).query_reflection_config_by_id_async(resolved)
-
-            reflection_config = {
-                "config_id": result.config_id,
-                "reflection_enabled": result.enable_self_reflexion,
-                "reflection_period_in_hours": result.iteration_period,
-                "reflexion_range": result.reflexion_range,
-                "baseline": result.baseline,
-                "reflection_model_id": result.reflection_model_id,
-                "memory_verify": result.memory_verify,
-                "quality_assessment": result.quality_assessment,
-                "is_default": bool(result.is_default),
-            }
-        api_logger.info(f"成功查询反思配置，config_id: {resolved}")
+        reflection_config = {
+            "config_id": memory_config_id,
+            "reflection_enabled": result.enable_self_reflexion,
+            "reflection_period_in_hours": result.iteration_period,
+            "reflexion_range": result.reflexion_range,
+            "baseline": result.baseline,
+            "reflection_model_id": result.reflection_model_id,
+            "memory_verify": result.memory_verify,
+            "quality_assessment": result.quality_assessment,
+            "is_default": bool(result.is_default)
+        }
+        api_logger.info(f"成功查询反思配置，config_id: {config_id}")
         return success(data=reflection_config, msg="反思配置查询成功")
     except HTTPException:
         raise
@@ -260,23 +257,25 @@ async def start_reflection_configs(
 # ==================== 创建 / 更新 / 删除 ====================
 
 @router.post("/create_config", response_model=ApiResponse)  # 创建配置文件，其他参数默认
-async def create_config(
+@check_memory_engine_quota
+def create_config(
         payload: ConfigParamsCreate,
-        current_user: CurrentUserSnapshot = Depends(get_current_user_async),
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db),
         x_language_type: Optional[str] = Header(None, alias="X-Language-Type"),
 ) -> dict:
     workspace_id = current_user.current_workspace_id
+    # 检查用户是否已选择工作空间
     if workspace_id is None:
         api_logger.warning(f"用户 {current_user.username} 尝试创建配置但未选择工作空间")
         return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
 
     api_logger.info(f"用户 {current_user.username} 在工作空间 {workspace_id} 请求创建配置: {payload.config_name}")
     try:
+        # 将 workspace_id 注入到 payload 中（保持为 UUID 类型）
         payload.workspace_id = workspace_id
-        async with get_async_db_context() as db:
-            await _check_quota_async(db, current_user.tenant_id, "memory_engine_quota", "memory_engine", workspace_id=workspace_id)
-            result = await DataConfigService.create_async(db, payload)
-            await db.commit()
+        svc = DataConfigService(db)
+        result = svc.create(payload)
         return success(data=result, msg="创建成功")
     except ValueError as e:
         err_str = str(e)
@@ -310,26 +309,28 @@ async def create_config(
 
 
 @router.post("/update_config", response_model=ApiResponse)  # 更新配置文件中name和desc
-async def update_config(
+def update_config(
         payload: ConfigUpdate,
-        current_user: CurrentUserSnapshot = Depends(get_current_user_async),
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db),
 ) -> dict:
     workspace_id = current_user.current_workspace_id
+    payload.config_id = resolve_config_id(payload.config_id, db)
+    # 检查用户是否已选择工作空间
     if workspace_id is None:
         api_logger.warning(f"用户 {current_user.username} 尝试更新配置但未选择工作空间")
         return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
 
+    # 校验至少有一个字段需要更新
     if payload.config_name is None and payload.config_desc is None and payload.scene_id is None:
         api_logger.warning(f"用户 {current_user.username} 尝试更新配置但未提供任何更新字段")
         return fail(BizCode.INVALID_PARAMETER, "请至少提供一个需要更新的字段",
                     "config_name, config_desc, scene_id 均为空")
 
-    payload.config_id = await _resolve_config_id(payload.config_id)
     api_logger.info(f"用户 {current_user.username} 在工作空间 {workspace_id} 请求更新配置: {payload.config_id}")
     try:
-        async with get_async_db_context() as db:
-            result = await DataConfigService.update_async(db, payload)
-            await db.commit()
+        svc = DataConfigService(db)
+        result = svc.update(payload)
         return success(data=result, msg="更新成功")
     except Exception as e:
         api_logger.error(f"Update config failed: {str(e)}")
@@ -337,21 +338,22 @@ async def update_config(
 
 
 @router.post("/update_config_extracted", response_model=ApiResponse)  # 更新抽取配置 所有业务字段均可选
-async def update_config_extracted(
+def update_config_extracted(
         payload: ConfigUpdateExtracted,
-        current_user: CurrentUserSnapshot = Depends(get_current_user_async),
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db),
 ) -> dict:
     workspace_id = current_user.current_workspace_id
+    payload.config_id = resolve_config_id(payload.config_id, db)
+    # 检查用户是否已选择工作空间
     if workspace_id is None:
         api_logger.warning(f"用户 {current_user.username} 尝试更新提取配置但未选择工作空间")
         return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
 
-    payload.config_id = await _resolve_config_id(payload.config_id)
     api_logger.info(f"用户 {current_user.username} 在工作空间 {workspace_id} 请求更新提取配置: {payload.config_id}")
     try:
-        async with get_async_db_context() as db:
-            result = await DataConfigService.update_extracted_async(db, payload)
-            await db.commit()
+        svc = DataConfigService(db)
+        result = svc.update_extracted(payload)
         return success(data=result, msg="更新成功")
     except Exception as e:
         api_logger.error(f"Update config extracted failed: {str(e)}")
@@ -361,65 +363,68 @@ async def update_config_extracted(
 @router.post("/update_config_forgetting", response_model=ApiResponse)
 async def update_forgetting_config(
         payload: ForgettingConfigUpdateRequest,
-        current_user: CurrentUserSnapshot = Depends(get_current_user_async),
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db)
 ):
     """更新遗忘引擎配置"""
     workspace_id = current_user.current_workspace_id
+    payload.config_id = resolve_config_id((payload.config_id), db)
+
+    # 检查用户是否已选择工作空间
     if workspace_id is None:
         api_logger.warning(f"用户 {current_user.username} 尝试更新遗忘引擎配置但未选择工作空间")
         return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
 
-    payload.config_id = await _resolve_config_id(payload.config_id)
     api_logger.info(
         f"用户 {current_user.username} 在工作空间 {workspace_id} 请求更新遗忘引擎配置: {payload.config_id}"
     )
 
     try:
+        # 构建更新字段字典（排除 None 值和 config_id）
         update_data = {
             key: value
             for key, value in payload.model_dump(exclude_none=True).items()
             if key != 'config_id'
         }
-        async with get_async_db_context() as db:
-            config = await forget_service.update_forgetting_config_async(
-                db=db,
-                config_id=payload.config_id,
-                update_fields=update_data,
-            )
-            await db.commit()
+        config = forget_service.update_forgetting_config(
+            db=db,
+            config_id=payload.config_id,
+            update_fields=update_data
+        )
         response_data = ForgettingConfigResponse(**config)
         return success(data=response_data.model_dump(), msg="更新成功")
     except ValueError as e:
         api_logger.warning(f"配置不存在: config_id={payload.config_id}, 错误: {str(e)}")
         return fail(BizCode.INVALID_PARAMETER, str(e), "ValueError")
     except Exception as e:
+        db.rollback()
         api_logger.error(f"更新遗忘引擎配置失败: {str(e)}")
         return fail(BizCode.INTERNAL_ERROR, "更新遗忘引擎配置失败", str(e))
 
 
 @router.post("/update_config_emotion", response_model=ApiResponse)
-async def update_emotion_config(
+def update_emotion_config(
         config: EmotionConfigUpdate,
-        current_user: CurrentUserSnapshot = Depends(get_current_user_async),
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_user),
 ):
     """更新情绪引擎配置"""
-    config.config_id = await _resolve_config_id(config.config_id)
+    config.config_id = resolve_config_id(config.config_id, db)
     try:
         api_logger.info(
             f"用户 {current_user.username} 请求更新情绪配置",
             extra={
                 "config_id": config.config_id,
                 "emotion_enabled": config.emotion_enabled,
-                "emotion_min_intensity": config.emotion_min_intensity,
+                "emotion_min_intensity": config.emotion_min_intensity
             }
         )
-        async with get_async_db_context() as db:
-            config_data = config.model_dump(exclude={'config_id'})
-            data = await EmotionConfigService.update_emotion_config_async(db, config.config_id, config_data)
-            await db.commit()
+        config_service = EmotionConfigService(db)
+        config_data = config.model_dump(exclude={'config_id'})
+        data = config_service.update_emotion_config(config.config_id, config_data)
         api_logger.info(
             "情绪配置更新成功",
-            extra={"config_id": config.config_id, "emotion_enabled": data.get("emotion_enabled", False)},
+            extra={"config_id": config.config_id, "emotion_enabled": data.get("emotion_enabled", False)}
         )
         return success(data=data, msg="情绪配置更新成功")
     except ValueError as e:
@@ -436,11 +441,13 @@ async def update_emotion_config(
 @router.post("/update_config_reflection", response_model=ApiResponse)
 async def save_reflection_config(
         request: Memory_Reflection,
-        current_user: CurrentUserSnapshot = Depends(get_current_user_async),
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db),
 ) -> dict:
     """保存反思引擎配置"""
     try:
-        config_id = await _resolve_config_id(request.config_id)
+        config_id = request.config_id
+        config_id = resolve_config_id(config_id, db)
         if not config_id:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -448,30 +455,30 @@ async def save_reflection_config(
             )
         api_logger.info(f"用户 {current_user.username} 保存反思配置，config_id: {config_id}")
 
-        async with get_async_db_context() as db:
-            memory_config = await MemoryConfigRepository(db).update_reflection_config_async(
-                config_id=config_id,
-                enable_self_reflexion=request.reflection_enabled,
-                iteration_period=request.reflection_period_in_hours,
-                reflexion_range=request.reflexion_range,
-                baseline=request.baseline,
-                reflection_model_id=request.reflection_model_id,
-                memory_verify=request.memory_verify,
-                quality_assessment=request.quality_assessment,
-            )
-            await db.commit()
-            await db.refresh(memory_config)
+        memory_config = MemoryConfigRepository.update_reflection_config(
+            db,
+            config_id=config_id,
+            enable_self_reflexion=request.reflection_enabled,
+            iteration_period=request.reflection_period_in_hours,
+            reflexion_range=request.reflexion_range,
+            baseline=request.baseline,
+            reflection_model_id=request.reflection_model_id,
+            memory_verify=request.memory_verify,
+            quality_assessment=request.quality_assessment
+        )
 
-            reflection_result = {
-                "config_id": memory_config.config_id,
-                "enable_self_reflexion": memory_config.enable_self_reflexion,
-                "iteration_period": memory_config.iteration_period,
-                "reflexion_range": memory_config.reflexion_range,
-                "baseline": memory_config.baseline,
-                "reflection_model_id": memory_config.reflection_model_id,
-                "memory_verify": memory_config.memory_verify,
-                "quality_assessment": memory_config.quality_assessment,
-            }
+        db.commit()
+        db.refresh(memory_config)
+
+        reflection_result = {
+            "config_id": memory_config.config_id,
+            "enable_self_reflexion": memory_config.enable_self_reflexion,
+            "iteration_period": memory_config.iteration_period,
+            "reflexion_range": memory_config.reflexion_range,
+            "baseline": memory_config.baseline,
+            "reflection_model_id": memory_config.reflection_model_id,
+            "memory_verify": memory_config.memory_verify,
+            "quality_assessment": memory_config.quality_assessment}
 
         return success(data=reflection_result, msg="反思配置成功")
     except ValueError as ve:
@@ -489,52 +496,61 @@ async def save_reflection_config(
 
 
 @router.delete("/delete_config", response_model=ApiResponse)  # 删除记忆配置（按配置ID）
-async def delete_config(
+def delete_config(
         config_id: UUID | int,
-        current_user: CurrentUserSnapshot = Depends(get_current_user_async),
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db),
 ) -> dict:
-    """删除记忆配置（带终端用户保护）"""
+    """删除记忆配置（带终端用户保护）
+
+    - 检查是否为默认配置，默认配置不允许删除
+    - 检查是否有终端用户连接到该配置
+    - 如果有连接，返回警告
+    """
     workspace_id = current_user.current_workspace_id
+    config_id = resolve_config_id(config_id, db)
+    # 检查用户是否已选择工作空间
     if workspace_id is None:
         api_logger.warning(f"用户 {current_user.username} 尝试删除配置但未选择工作空间")
         return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
 
-    resolved = await _resolve_config_id(config_id)
     api_logger.info(
-        f"用户 {current_user.username} 在工作空间 {workspace_id} 请求删除配置: config_id={resolved}"
+        f"用户 {current_user.username} 在工作空间 {workspace_id} 请求删除配置: "
+        f"config_id={config_id}"
     )
 
     try:
         from app.services.memory_config_service import MemoryConfigService
 
-        async with get_async_db_context() as db:
-            result = await MemoryConfigService.delete_config_async(db, config_id=resolved, workspace_id=workspace_id)
-            await db.commit()
+        config_service = MemoryConfigService(db)
+        result = config_service.delete_config(config_id=config_id, workspace_id=workspace_id)
 
         if result["status"] == "error":
             api_logger.warning(
-                f"记忆配置删除被拒绝: config_id={resolved}, reason={result['message']}"
+                f"记忆配置删除被拒绝: config_id={config_id}, reason={result['message']}"
             )
             return fail(
                 code=BizCode.FORBIDDEN,
                 msg=result["message"],
-                data={"config_id": str(resolved), "is_default": result.get("is_default", False)},
+                data={"config_id": str(config_id), "is_default": result.get("is_default", False)}
             )
 
         if result["status"] == "warning":
             api_logger.warning(
-                f"记忆配置正在使用，无法删除: config_id={resolved}"
+                f"记忆配置正在使用，无法删除: config_id={config_id}"
             )
             return fail(
                 code=BizCode.RESOURCE_IN_USE,
                 msg=result["message"],
-                data={"config_id": str(resolved), "is_default": result.get("is_default", False)},
+                data={"config_id": str(config_id), "is_default": result.get("is_default", False)}
             )
 
-        api_logger.info(f"记忆配置删除成功: config_id={resolved}")
+        api_logger.info(
+            f"记忆配置删除成功: config_id={config_id}"
+        )
         return success(
             msg=result["message"],
-            data={"config_id": str(resolved), "is_default": result.get("is_default", False)},
+            data={"config_id": str(config_id), "is_default": result.get("is_default", False)}
         )
 
     except Exception as e:

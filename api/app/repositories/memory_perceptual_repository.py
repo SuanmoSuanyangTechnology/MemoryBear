@@ -4,7 +4,6 @@ from typing import List, Tuple, Optional
 
 from sqlalchemy import and_, desc, select
 from sqlalchemy.orm import Session
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.utils.datetime_utils import utcnow_naive
 from app.core.logging_config import get_db_logger
@@ -17,7 +16,7 @@ db_logger = get_db_logger()
 class MemoryPerceptualRepository:
     """Data Access Layer for perceptual memory"""
 
-    def __init__(self, db: Session | AsyncSession):
+    def __init__(self, db: Session):
         self.db = db
 
     # ==================== Create and update ====================
@@ -154,18 +153,6 @@ class MemoryPerceptualRepository:
                 MemoryPerceptualModel.end_user_id == end_user_id
             )
             return list(self.db.execute(stmt).scalars())
-        except Exception:
-            db_logger.error(f"Failed to query perceptual memories by file_url: file_url={file_url}")
-            raise
-
-    async def get_by_url_async(
-            self,
-            file_url: str
-    ) -> list[MemoryPerceptualModel]:
-        try:
-            stmt = select(MemoryPerceptualModel).where(MemoryPerceptualModel.file_path == file_url)
-            result = await self.db.execute(stmt)
-            return list(result.scalars().all())
         except Exception:
             db_logger.error(f"Failed to query perceptual memories by file_url: file_url={file_url}")
             raise

@@ -22,7 +22,7 @@ from datetime import datetime, timezone
 from typing import Any, List, Optional
 
 from app.core.memory.enums import MemoryMessageSource
-from app.db import get_async_db_context
+from app.db import get_db_context, get_db_read
 from app.repositories.memory_message_repository import MemoryMessageRepository
 
 logger = logging.getLogger(__name__)
@@ -99,12 +99,12 @@ def unmark_conversation_pending(conversation_id: str) -> None:
         logger.debug(f"[Dispatcher] unmark_conversation_pending 失败: {e}")
 
 
-async def verify_unmark_safe(conversation_id: str) -> bool:
+def verify_unmark_safe(conversation_id: str) -> bool:
     """在 unmark 前验证对话确实没有待写入消息。"""
     try:
-        async with get_async_db_context() as db:
+        with get_db_read() as db:
             repo = MemoryMessageRepository(db)
-            return await repo.verify_cursor_complete_async(conversation_id)
+            return repo.verify_cursor_complete(conversation_id)
     except Exception as e:
         logger.warning(f"[Dispatcher] verify_unmark_safe 失败，保守返回 False: conv={conversation_id}, err={e}")
         return False
@@ -236,15 +236,23 @@ async def push_fast_write_task(
 async def check_memory_enabled(app_id: str) -> bool:
     """查询 app_releases.config -> 'memory' ->> 'enabled'。"""
     try:
-        from app.repositories.app_repository import AppRepository
+        from sqlalchemy import select as sa_select
+        from app.models.app_release_model import AppRelease
 
-        async with get_async_db_context() as db:
-            config_or_none = await AppRepository(db).get_active_release_config_async(
-                uuid.UUID(str(app_id))
-            )
-        config = config_or_none or {}
-        memory_config = config.get("memory", {}) if isinstance(config, dict) else {}
-        return bool(memory_config.get("enabled", False))
+        with get_db_context() as db:
+            result = db.execute(
+                sa_select(AppRelease.config)
+                .where(
+                    AppRelease.app_id == uuid.UUID(str(app_id)),
+                    AppRelease.is_active.is_(True),
+                )
+                .order_by(AppRelease.version.desc())
+                .limit(1)
+            ).scalar_one_or_none()
+
+            config = result or {}
+            memory_config = config.get("memory", {}) if isinstance(config, dict) else {}
+            return bool(memory_config.get("enabled", False))
     except Exception as e:
         logger.warning(f"[Dispatcher] 检查 memory.enabled 失败: app={app_id}, err={e}")
         return False
@@ -363,15 +371,15 @@ async def dispatch_api_service_async(
     Returns:
         派发的任务 ID 列表
     """
-    async with get_async_db_context() as db:
+    with get_db_context() as db:
         repo = MemoryMessageRepository(db)
-        written_mms = await repo.write_batch_async(
+        written_mms = repo.write_batch(
             conversation_id=None,
             messages=messages,
             end_user_id=end_user_id,
             source=MemoryMessageSource.SERVICE_API,
         )
-        await db.commit()
+        db.commit()
 
     if not written_mms:
         return []
@@ -471,9 +479,9 @@ async def ingest_agent_message(
         elif isinstance(_created, str):
             dialog_at = _created
 
-    async with get_async_db_context() as db: 
+    with get_db_context() as db:
         repo = MemoryMessageRepository(db)
-        written = await repo.write_batch_async(
+        written = repo.write_batch(
             conversation_id=str(conversation_id),
             messages=[{
                 "role": message.role,
@@ -489,7 +497,7 @@ async def ingest_agent_message(
         )
         if not written:
             return False
-        await db.commit()
+        db.commit()
 
     await refresh_active_key(conversation_id)
     mark_conversation_pending(conversation_id)
@@ -549,15 +557,15 @@ async def ingest_workflow_messages(
         if str(msg.get("content", "") or "").strip()
     ]
 
-    async with get_async_db_context() as db:
+    with get_db_context() as db:
         repo = MemoryMessageRepository(db)
-        await repo.write_batch_async(
+        written_mms = repo.write_batch(
             conversation_id=conversation_id,
             messages=messages,
             end_user_id=end_user_id,
             source=MemoryMessageSource.WORKFLOW,
         )
-        await db.commit()
+        db.commit()
 
     await refresh_active_key(conversation_id)
     mark_conversation_pending(conversation_id)
@@ -607,7 +615,7 @@ async def ingest_workflow_messages(
 # ──────────────────────────────────────────────
 
 
-async def _resolve_memory_config_id(conversation_id: str) -> "uuid.UUID | None":
+def _resolve_memory_config_id(conversation_id: str) -> "uuid.UUID | None":
     """从 conversation 所属 workspace 获取默认记忆配置 ID。
 
     查询链路：conversations.workspace_id → get_workspace_memory_config_id(workspace_id)
@@ -615,17 +623,20 @@ async def _resolve_memory_config_id(conversation_id: str) -> "uuid.UUID | None":
     使用同一个底层函数，确保同一会话的所有消息使用相同的记忆配置。
     """
     try:
-        from app.repositories.conversation_repository import ConversationRepository
-        from app.repositories.workspace_repository import get_workspace_memory_config_id_async
+        from sqlalchemy import select as sa_select
+        from app.models.conversation_model import Conversation
+        from app.repositories.workspace_repository import get_workspace_memory_config_id
 
-        async with get_async_db_context() as db:
-            workspace_id = await ConversationRepository(db).get_workspace_id_async(
-                uuid.UUID(conversation_id)
-            )
+        with get_db_context() as db:
+            workspace_id = db.execute(
+                sa_select(Conversation.workspace_id)
+                .where(Conversation.id == conversation_id)
+            ).scalar_one_or_none()
+
             if workspace_id is None:
                 return None
 
-            return await get_workspace_memory_config_id_async(db, workspace_id)
+            return get_workspace_memory_config_id(db, workspace_id)
     except Exception as e:
         logger.error(f"[Dispatcher] 解析 workspace memory_config 异常: conv={conversation_id}, err={e}", exc_info=True)
         return None
@@ -637,37 +648,47 @@ async def dispatch_flush_conversation(conversation_id: str) -> int:
     仅服务 agent/workflow 路径。API/MCP 消息 conversation_id=NULL 不会被扫到。
     只派发 role=user + should_memorize=TRUE 的消息，其余直接推进 cursor。
     """
-    from app.repositories.conversation_repository import ConversationRepository
-    from app.repositories.memory_message_repository import MemoryMessageRepository
+    from sqlalchemy import select as sa_select
+    from app.models.conversation_model import Conversation
+    from app.models.memory_message_model import MemoryMessage
 
     try:
         # Step 1: 查询对话信息 + 未写入消息
-        async with get_async_db_context() as db:
-            write_cursor, user_id_str, ws_id_str = await ConversationRepository(db).get_flush_info_async(
-                uuid.UUID(conversation_id)
-            )
-            if user_id_str is None:
+        with get_db_context() as db:
+            row = db.execute(
+                sa_select(
+                    Conversation.write_cursor,
+                    Conversation.user_id,
+                    Conversation.workspace_id,
+                ).where(Conversation.id == conversation_id)
+            ).one_or_none()
+
+            if row is None:
                 logger.warning(f"[Dispatcher] Flush 对话不存在: conv={conversation_id}")
                 return 0
 
-            end_user_id = str(user_id_str) if user_id_str else ""
-            workspace_id = str(ws_id_str) if ws_id_str else ""
+            write_cursor, end_user_id, workspace_id = row
+            end_user_id = str(end_user_id) if end_user_id else ""
+            workspace_id = str(workspace_id) if workspace_id else ""
 
             if not end_user_id:
                 logger.warning(f"[Dispatcher] Flush end_user_id 为空，跳过: conv={conversation_id}")
                 return 0
 
-            repo = MemoryMessageRepository(db)
-            pending_msg_objs = await repo.get_pending_messages_async(
-                conversation_id, write_cursor or 0
-            )
             pending_messages = [
                 {
                     "message_seq": msg.message_seq,
                     "role": msg.role,
                     "should_memorize": msg.should_memorize,
                 }
-                for msg in pending_msg_objs
+                for msg in db.execute(
+                    sa_select(MemoryMessage)
+                    .where(
+                        MemoryMessage.conversation_id == conversation_id,
+                        MemoryMessage.message_seq > (write_cursor or 0),
+                    )
+                    .order_by(MemoryMessage.message_seq.asc())
+                ).scalars().all()
             ]
 
             if not pending_messages:
@@ -675,7 +696,7 @@ async def dispatch_flush_conversation(conversation_id: str) -> int:
                 return 0
 
         # Step 2: 解析 memory_config_id（走 workspace 默认配置，与滑动窗口路径一致）
-        config_id_resolved = await _resolve_memory_config_id(conversation_id)
+        config_id_resolved = _resolve_memory_config_id(conversation_id)
         if not config_id_resolved:
             logger.warning(f"[Dispatcher] Flush 未能解析 memory_config_id，跳过: conv={conversation_id}")
             return 0
@@ -688,10 +709,9 @@ async def dispatch_flush_conversation(conversation_id: str) -> int:
             target_seq = msg["message_seq"]
 
             if msg["role"] != "user" or not msg["should_memorize"]:
-                async with get_async_db_context() as db:
-                    repo = MemoryMessageRepository(db)
-                    await repo.advance_write_cursor_async(conversation_id, target_seq)
-                    await db.commit()
+                with get_db_context() as db:
+                    MemoryMessageRepository(db).advance_write_cursor(conversation_id, target_seq)
+                    db.commit()
                 skipped_non_user += 1
                 continue
 
@@ -705,7 +725,7 @@ async def dispatch_flush_conversation(conversation_id: str) -> int:
                 dispatched += 1
 
         # Step 4: 清理 pending_conversations Set
-        if await verify_unmark_safe(conversation_id):
+        if verify_unmark_safe(conversation_id):
             unmark_conversation_pending(conversation_id)
 
         logger.info(
@@ -740,19 +760,19 @@ async def check_sliding_window_and_dispatch(
 
     from app.repositories.memory_message_repository import message_to_dict
 
-    async with get_async_db_context() as db:
+    with get_db_context() as db:
         repo = MemoryMessageRepository(db)
-        write_cursor = await repo.get_write_cursor_async(conversation_id) or 0
-        pending = await repo.get_pending_messages_async(conversation_id, write_cursor)
+        write_cursor = repo.get_write_cursor(conversation_id) or 0
+        pending = repo.get_pending_messages(conversation_id, write_cursor)
         pending_dicts = [message_to_dict(m) for m in pending]
 
     if not pending_dicts:
         return
 
     # 取所有 user 消息的 seq 列表（用于计算下文条数）
-    async with get_async_db_context() as db:
+    with get_db_context() as db:
         repo = MemoryMessageRepository(db)
-        all_user_seqs: List[int] = await repo.get_user_seqs_async(conversation_id)
+        all_user_seqs: List[int] = repo.get_user_seqs(conversation_id)
 
     for msg in pending_dicts:
         # 滑动窗口路径只负责派发 user 消息的写入任务，cursor 只推进到 user 消息的 seq。
@@ -774,10 +794,10 @@ async def check_sliding_window_and_dispatch(
 
         # 先推进 cursor，确保同一条消息不会被后续调用（flush 或下次 ingest）重复派发。
         # advance_write_cursor 使用 WHERE write_cursor < seq，具有原子性保护。
-        async with get_async_db_context() as db:
+        with get_db_context() as db:
             repo = MemoryMessageRepository(db)
-            acquired = await repo.advance_write_cursor_async(conversation_id, target_seq)
-            await db.commit()
+            acquired = repo.advance_write_cursor(conversation_id, target_seq)
+            db.commit()
 
         if not acquired:
             # cursor 已被推进（该消息已被其他路径处理），跳过
@@ -788,12 +808,10 @@ async def check_sliding_window_and_dispatch(
             return
 
         # 构建上下文窗口
-        async with get_async_db_context() as db:
+        with get_db_context() as db:
             repo = MemoryMessageRepository(db)
-            context_before_mms = await repo.build_context_before_async(conversation_id, target_seq)
-            context_before = [message_to_dict(m) for m in context_before_mms]
-            context_after_mms = await repo.build_context_after_async(conversation_id, target_seq)
-            context_after = [message_to_dict(m) for m in context_after_mms]
+            context_before = [message_to_dict(m) for m in repo.build_context_before(conversation_id, target_seq)]
+            context_after = [message_to_dict(m) for m in repo.build_context_after(conversation_id, target_seq)]
 
         # 派发写入任务
         await push_write_task(
@@ -823,22 +841,20 @@ async def dispatch_single_message(
     """为单条 user 消息构建上下文并派发写入任务（Flush 路径使用）。"""
     from app.repositories.memory_message_repository import message_to_dict
 
-    async with get_async_db_context() as db:
+    with get_db_context() as db:
         repo = MemoryMessageRepository(db)
-        target_orm = await repo.get_by_seq_async(conversation_id, target_seq)
+        target_orm = repo.get_by_seq(conversation_id, target_seq)
         if target_orm is None:
             return False
         msg_dict = message_to_dict(target_orm)
-        context_before_mms = await repo.build_context_before_async(conversation_id, target_seq)
-        context_before = [message_to_dict(m) for m in context_before_mms]
-        context_after_mms = await repo.build_context_after_async(conversation_id, target_seq)
-        context_after = [message_to_dict(m) for m in context_after_mms]
+        context_before = [message_to_dict(m) for m in repo.build_context_before(conversation_id, target_seq)]
+        context_after = [message_to_dict(m) for m in repo.build_context_after(conversation_id, target_seq)]
 
     # 先推进 cursor，防止并发 flush 重复派发同一条消息
-    async with get_async_db_context() as db:
+    with get_db_context() as db:
         repo = MemoryMessageRepository(db)
-        acquired = await repo.advance_write_cursor_async(conversation_id, target_seq)
-        await db.commit()
+        acquired = repo.advance_write_cursor(conversation_id, target_seq)
+        db.commit()
 
     if not acquired:
         logger.info(
@@ -891,15 +907,15 @@ async def dispatch_mcp_write(
     Returns:
         派发的任务 msg_id
     """
-    async with get_async_db_context() as db:
+    with get_db_context() as db:
         repo = MemoryMessageRepository(db)
-        written = await repo.write_batch_async(
+        written = repo.write_batch(
             conversation_id=None,
             messages=[{"role": "user", "content": message, "dialog_at": dialog_at}],
             end_user_id=end_user_id,
             source=MemoryMessageSource.MCP,
         )
-        await db.commit()
+        db.commit()
 
     if not written:
         return ""

@@ -10,6 +10,7 @@
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Header, Query
+from sqlalchemy.orm import Session
 
 from app.cache.memory.interest_memory import InterestMemoryCache
 from app.core.error_codes import BizCode
@@ -20,6 +21,7 @@ from app.core.memory.constants.graph_data_constants import (
     DEPTH_HARD_MAX,
 )
 from app.core.response_utils import fail, success
+from app.db import get_db
 from app.dependencies import CurrentUserSnapshot, get_current_user_async
 from app.schemas.memory_storage_schema import GenerateCacheRequest
 from app.schemas.response_schema import ApiResponse
@@ -86,13 +88,18 @@ async def get_user_summary_api(
 async def generate_cache_api(
         request: GenerateCacheRequest,
         language_type: str = Header(default=None, alias="X-Language-Type"),
-        current_user: CurrentUserSnapshot = Depends(get_current_user_async), 
+        current_user: CurrentUserSnapshot = Depends(get_current_user_async),
+        db: Session = Depends(get_db),
 ) -> dict:
     """
-    手动触发缓存生成（异步版本）
+    手动触发缓存生成
 
     - 如果提供 end_user_id，只为该用户生成
     - 如果不提供，为当前工作空间的所有用户生成
+
+    语言控制：
+    - 使用 X-Language-Type Header 指定语言 ("zh" 中文, "en" 英文)
+    - 如果未传 Header，默认使用中文 (zh)
     """
     language = get_language_from_header(language_type)
 
@@ -113,24 +120,29 @@ async def generate_cache_api(
         if end_user_id:
             api_logger.info(f"开始为单个用户生成缓存: end_user_id={end_user_id}")
 
-            insight_result = await user_memory_service.generate_and_cache_insight(
-                end_user_id=end_user_id, workspace_id=workspace_id, language=language,
-            )
-            summary_result = await user_memory_service.generate_and_cache_summary(
-                end_user_id=end_user_id, workspace_id=workspace_id, language=language,
-            )
+            insight_result = await user_memory_service.generate_and_cache_insight(db, end_user_id, workspace_id,
+                                                                                  language=language)
+
+            summary_result = await user_memory_service.generate_and_cache_summary(db, end_user_id, workspace_id,
+                                                                                  language=language)
 
             result = {
                 "end_user_id": end_user_id,
                 "insight_success": insight_result["success"],
                 "summary_success": summary_result["success"],
-                "errors": [],
+                "errors": []
             }
 
             if not insight_result["success"]:
-                result["errors"].append({"type": "insight", "error": insight_result.get("error")})
+                result["errors"].append({
+                    "type": "insight",
+                    "error": insight_result.get("error")
+                })
             if not summary_result["success"]:
-                result["errors"].append({"type": "summary", "error": summary_result.get("error")})
+                result["errors"].append({
+                    "type": "summary",
+                    "error": summary_result.get("error")
+                })
 
             if result["insight_success"] and result["summary_success"]:
                 api_logger.info(f"成功为用户 {end_user_id} 生成缓存")
@@ -139,15 +151,17 @@ async def generate_cache_api(
 
             return success(data=result, msg="生成完成")
 
-        api_logger.info(f"开始为工作空间 {workspace_id} 批量生成缓存")
-        result = await user_memory_service.generate_cache_for_workspace(
-            workspace_id=workspace_id, language=language,
-        )
-        api_logger.info(
-            f"工作空间 {workspace_id} 批量生成完成: "
-            f"总数={result['total_users']}, 成功={result['successful']}, 失败={result['failed']}"
-        )
-        return success(data=result, msg="批量生成完成")
+        else:
+            api_logger.info(f"开始为工作空间 {workspace_id} 批量生成缓存")
+
+            result = await user_memory_service.generate_cache_for_workspace(db, workspace_id, language=language)
+
+            api_logger.info(
+                f"工作空间 {workspace_id} 批量生成完成: "
+                f"总数={result['total_users']}, 成功={result['successful']}, 失败={result['failed']}"
+            )
+
+            return success(data=result, msg="批量生成完成")
 
     except Exception as e:
         api_logger.error(f"缓存生成失败: user={current_user.username}, error={str(e)}")

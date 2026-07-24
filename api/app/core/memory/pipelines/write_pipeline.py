@@ -975,7 +975,7 @@ class WritePipeline:
         if not messages:
             return
 
-        from app.db import get_async_db_context
+        from app.db import get_db_context
         from app.repositories.memory_perceptual_repository import MemoryPerceptualRepository
         from app.schemas.app_schema import FileInput
         from app.services.memory_perceptual_service import MemoryPerceptualService
@@ -993,9 +993,10 @@ class WritePipeline:
                     continue
 
                 try:
-                    async with get_async_db_context() as db:
+                    with get_db_context() as db:
                         # 先查找已有的 Perceptual 记录
-                        memories = await MemoryPerceptualRepository(db).get_by_url_async(url)
+                        repo = MemoryPerceptualRepository(db)
+                        memories = repo.get_by_url(self.end_user_id, url)
 
                         if memories:
                             # 已存在，复用最新的一条
@@ -1003,9 +1004,11 @@ class WritePipeline:
                                 memories,
                                 key=lambda m: m.created_time if m.created_time else datetime.min,
                             )
+                            # 在 Session 内提取所有需要的属性到一个简单对象中，
+                            # 彻底避免 DetachedInstanceError（使用模块级 _PerceptualSnapshot）
                             snap = _PerceptualSnapshot(
                                 id=memory.id,
-                                end_user_id=self.end_user_id,
+                                end_user_id=self.end_user_id,  # 使用当前 pipeline 的 end_user_id，确保 Perceptual 节点归属当前用户
                                 perceptual_type=memory.perceptual_type,
                                 file_path=memory.file_path,
                                 file_name=memory.file_name,

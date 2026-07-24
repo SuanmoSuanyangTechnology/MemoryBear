@@ -1,15 +1,14 @@
 """反思日志 Repository"""
 import uuid
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional,Tuple
 from sqlalchemy.orm import Session
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import func
 from app.models.reflection_log_model import MemoryReflectionLog
 
 
 class ReflectionLogRepository:
 
-    def __init__(self, db: Session | AsyncSession):
+    def __init__(self, db: Session):
         self.db = db
 
     def create(self, end_user_id: str, sub_problem: str, trigger_type: str,
@@ -42,7 +41,7 @@ class ReflectionLogRepository:
         self.db.commit()
         return log
 
-    def get_paginated( # NOTE(乐力齐) 没有用的同步版本需要移除吗？需要被移除
+    def get_paginated(
         self,
         end_user_id: str,
         page: int = 1,
@@ -82,55 +81,8 @@ class ReflectionLogRepository:
 
         return total, items
 
-    async def get_paginated_async(
-        self,
-        end_user_id: str,
-        page: int = 1,
-        pagesize: int = 10,
-        sub_problem: Optional[str] = None,
-        status: Optional[str] = None,
-        trigger_type: Optional[str] = None,
-    ) -> Tuple[int, list]:
-        """异步版本：分页查询反思日志。
 
-        Args:
-            end_user_id: 终端用户 ID
-            page: 页码（从1开始）
-            pagesize: 每页数量
-            sub_problem: 子问题类型筛选（可选）
-            status: 状态筛选（可选）
-            trigger_type: 触发方式筛选（可选）
-
-        Returns:
-            (total, items): 总数和当前页 ORM 对象列表
-        """
-        from sqlalchemy import select
-
-        end_user_uuid = uuid.UUID(end_user_id)
-        filters = [MemoryReflectionLog.end_user_id == end_user_uuid]
-        if sub_problem:
-            filters.append(MemoryReflectionLog.sub_problem == sub_problem)
-        if status:
-            filters.append(MemoryReflectionLog.status == status)
-        if trigger_type:
-            filters.append(MemoryReflectionLog.trigger_type == trigger_type)
-
-        total = int((await self.db.scalar(
-            select(func.count()).select_from(MemoryReflectionLog).where(*filters)
-        )) or 0)
-
-        items_result = await self.db.execute(
-            select(MemoryReflectionLog)
-            .where(*filters)
-            .order_by(MemoryReflectionLog.created_at.desc())
-            .offset((page - 1) * pagesize)
-            .limit(pagesize)
-        )
-        items = list(items_result.scalars().all())
-
-        return total, items
-
-    def get_by_id(self, log_id: str) -> Optional[MemoryReflectionLog]: # NOTE(乐力齐) 没有用的同步版本需要移除吗？需要被移除
+    def get_by_id(self, log_id: str) -> Optional[MemoryReflectionLog]:
         """按 ID 查询单条日志
 
         Args:
@@ -143,23 +95,6 @@ class ReflectionLogRepository:
             MemoryReflectionLog.id == uuid.UUID(log_id)
         ).first()
 
-    async def get_by_id_async(self, log_id: str) -> Optional[MemoryReflectionLog]:
-        """异步版本：按 ID 查询单条日志。
-
-        Args:
-            log_id: 日志 UUID 字符串
-
-        Returns:
-            MemoryReflectionLog 或 None
-        """
-        from sqlalchemy import select
-
-        result = await self.db.execute(
-            select(MemoryReflectionLog).where(
-                MemoryReflectionLog.id == uuid.UUID(log_id)
-            )
-        )
-        return result.scalars().first()
 
     def get_stats(self, end_user_id: str) -> Dict[str, Any]:
         """统计查询：按子问题和状态分组计数
