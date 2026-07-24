@@ -227,8 +227,9 @@ async def get_end_user_info(
 @require_api_key_self_db(scopes=["memory"])
 async def update_end_user_info(
     request: Request,
-    api_key_auth: ApiKeyAuth = Depends(lambda: None),
-    info_update: EndUserInfoUpdate = Body(...),
+    api_key_auth: ApiKeyAuth = None,
+    db: Session = Depends(get_db),
+    message: str = Body(None, description="Request body"),
 ):
     """
     Update end user info.
@@ -236,8 +237,11 @@ async def update_end_user_info(
     Updates the info record (other_name, aliases, meta_data) for the specified end user.
     Delegates to the manager-side controller for shared logic.
     """
+    body = await request.json()
+    payload = EndUserInfoUpdate(**body)
+
     current_user = await _resolve_current_user(api_key_auth)
     return await end_user_controller.update_end_user_info(
-        info_update=info_update,
+        info_update=payload,
         current_user=current_user,
     )
