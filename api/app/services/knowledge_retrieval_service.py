@@ -649,6 +649,38 @@ class KnowledgeRetrievalService:
         timings: RetrievalTimings | None,
         log_id: str | None,
     ) -> KnowledgeRetrievalResult:
+        result = await cls._retrieve_evidence_graph_channel(
+            request,
+            target,
+            graph_target,
+            document_ids_include,
+            store,
+            timings,
+            log_id,
+        )
+        chunks = result.chunks
+        cls._log_target_done(
+            target,
+            0,
+            0,
+            len(chunks),
+            len(chunks),
+            started_at,
+            timings=timings,
+        )
+        return result
+
+    @classmethod
+    async def _retrieve_evidence_graph_channel(
+        cls,
+        request: KnowledgeRetrievalRequest,
+        target: RetrievalTarget,
+        graph_target: GraphTargetSnapshot,
+        document_ids_include: list[str] | None,
+        store: AsyncElasticSearchRetrieval,
+        timings: RetrievalTimings | None,
+        log_id: str | None,
+    ) -> KnowledgeRetrievalResult:
         if graph_target.knowledge_id != target.knowledge_id:
             raise ValueError("graph target does not match retrieval target")
 
@@ -713,22 +745,10 @@ class KnowledgeRetrievalService:
                 type(exc).__name__,
                 cls._elapsed_ms(graph_started_at),
             )
-            graph_result = None
-            chunks = []
+            return KnowledgeRetrievalResult()
         finally:
             cls._record_timing(timings, "graph_ms", graph_started_at)
 
-        cls._log_target_done(
-            target,
-            0,
-            0,
-            len(chunks),
-            len(chunks),
-            started_at,
-            timings=timings,
-        )
-        if graph_result is None:
-            return KnowledgeRetrievalResult(chunks=chunks)
         return KnowledgeRetrievalResult(
             chunks=chunks,
             entities=graph_result.entities,
