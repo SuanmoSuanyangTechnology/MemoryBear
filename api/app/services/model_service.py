@@ -181,6 +181,7 @@ class ModelConfigService:
             model_type: 模型类型 (llm/chat/embedding/rerank)
             test_message: 测试消息
             is_omni: 是否为Omni模型
+            capability: 模型能力列表
 
         Returns:
             Dict: 验证结果

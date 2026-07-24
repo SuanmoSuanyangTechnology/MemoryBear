@@ -1,0 +1,162 @@
+import logging
+import re
+from typing import Any
+
+from app.core.workflow.engine.state_manager import WorkflowState
+from app.core.workflow.engine.variable_pool import VariablePool
+from app.core.workflow.nodes.base_node import BaseNode
+from app.core.workflow.nodes.enums import ComparisonOperator, LogicOperator, ValueInputType
+from app.core.workflow.nodes.if_else import IfElseNodeConfig
+from app.core.workflow.nodes.operators import ConditionExpressionResolver, CompareOperatorInstance, ArrayFileContainsOperator
+from app.core.workflow.variable.base_variable import VariableType
+
+logger = logging.getLogger(__name__)
+
+
+class IfElseNode(BaseNode):
+    def __init__(self, node_config: dict[str, Any], workflow_config: dict[str, Any], down_stream_nodes: list[str]):
+        super().__init__(node_config, workflow_config, down_stream_nodes)
+        self.typed_config: IfElseNodeConfig | None = None
+        self._condition_results: list = []
+
+    def _extract_extra_fields(self, business_result: Any) -> dict:
+        return {"process": {"conditions": self._condition_results}}
+
+    def _output_types(self) -> dict[str, VariableType]:
+        return {
+            "output": VariableType.STRING
+        }
+
+    def _get_typed_config(self) -> IfElseNodeConfig:
+        if self.typed_config is None:
+            self.typed_config = IfElseNodeConfig(**self.config)
+        return self.typed_config
+
+    def _extract_input(self, state: WorkflowState, variable_pool: VariablePool) -> dict[str, Any]:
+        result = []
+        for case in self._get_typed_config().cases:
+            expressions = []
+            for expression in case.expressions:
+                expressions.append({
+                    "left": self.get_variable(expression.left, variable_pool, strict=False),
+                    "right": expression.right
+                    if expression.input_type == ValueInputType.CONSTANT or expression.right is None
+                    else self.get_variable(expression.right, variable_pool, strict=False),
+                    "operator": str(expression.operator),
+                })
+            result.append({
+                "expressions": expressions,
+                "logical_operator": str(case.logical_operator),
+            })
+        return {
+            "cases": result
+        }
+
+    @staticmethod
+    def _evaluate(operator, instance: CompareOperatorInstance) -> Any:
+        match operator:
+            case ComparisonOperator.EMPTY:
+                return instance.empty()
+            case ComparisonOperator.NOT_EMPTY:
+                return instance.not_empty()
+            case ComparisonOperator.CONTAINS:
+                return instance.contains()
+            case ComparisonOperator.NOT_CONTAINS:
+                return instance.not_contains()
+            case ComparisonOperator.START_WITH:
+                return instance.startswith()
+            case ComparisonOperator.END_WITH:
+                return instance.endswith()
+            case ComparisonOperator.EQ:
+                return instance.eq()
+            case ComparisonOperator.NE:
+                return instance.ne()
+            case ComparisonOperator.LT:
+                return instance.lt()
+            case ComparisonOperator.LE:
+                return instance.le()
+            case ComparisonOperator.GT:
+                return instance.gt()
+            case ComparisonOperator.GE:
+                return instance.ge()
+            case _:
+                raise ValueError(f"Invalid condition: {operator}")
+
+    def evaluate_conditional_edge_expressions(self, variable_pool: VariablePool) -> list[bool]:
+        """
+        Build conditional edge expressions for the If-Else node.
+
+        This method does NOT evaluate any condition at runtime.
+        Instead, it converts each case branch into a Python boolean
+        expression string, which will later be attached to LangGraph
+        as conditional edges.
+
+        Each returned expression corresponds to one branch and is
+        evaluated in order. A fallback 'True' condition is appended
+        to ensure a default branch when no previous conditions match.
+
+        Returns:
+            list[str]: A list of Python boolean expression strings,
+            ordered by branch priority.
+        """
+        conditions = []
+
+        for case_branch in self._get_typed_config().cases:
+            branch_result = []
+            for expression in case_branch.expressions:
+                pattern = r"\{\{\s*(.*?)\s*\}\}"
+                left_string = re.sub(pattern, r"\1", expression.left).strip()
+                try:
+                    left_value = self.get_variable(left_string, variable_pool)
+                except KeyError:
+                    left_value = None
+
+                if expression.sub_variable_condition is not None and isinstance(left_value, list):
+                    evaluator = ArrayFileContainsOperator(left_value, expression.sub_variable_condition, variable_pool)
+                else:
+                    evaluator = ConditionExpressionResolver.resolve_by_value(left_value)(
+                        variable_pool,
+                        expression.left,
+                        expression.right,
+                        expression.input_type
+                    )
+                branch_result.append(self._evaluate(expression.operator, evaluator))
+
+            if case_branch.logical_operator == LogicOperator.AND:
+                conditions.append(all(branch_result))
+            else:
+                condition_res = any(branch_result)
+                conditions.append(condition_res)
+                if condition_res:
+                    return conditions
+
+        # Default fallback branch
+        conditions.append(True)
+
+        return conditions
+
+    async def execute(self, state: WorkflowState, variable_pool: VariablePool) -> Any:
+        """
+        Execute the conditional branching logic of the node.
+
+        Evaluates the node's configured conditional expressions (expressions) in order.
+        Once a condition is satisfied, it returns the corresponding CASE identifier.
+        If none of the conditions match, it returns the default last CASE.
+
+        Args:
+            state (WorkflowState): The current workflow state, containing variables, messages, node outputs, etc.
+            variable_pool: Variable Pool
+
+        Returns:
+            str: The matched branch identifier, e.g., 'CASE1', 'CASE2', ..., used for node transitions.
+        """
+        self.typed_config = self._get_typed_config()
+        expressions = self.evaluate_conditional_edge_expressions(variable_pool)
+        self._condition_results = [
+            {"case": f"CASE{i+1}", "result": v} for i, v in enumerate(expressions[:-1])
+        ] + [{"case": "default", "result": expressions[-1]}]
+        for i in range(len(expressions)):
+            if expressions[i]:
+                logger.info(f"Node {self.node_id}: switched to branch CASE {i + 1}")
+                return f'CASE{i + 1}'
+        return f'CASE{len(expressions)}'
