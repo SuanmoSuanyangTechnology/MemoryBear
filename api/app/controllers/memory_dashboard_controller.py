@@ -3,11 +3,12 @@ from typing import List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
 
 from app.core.logging_config import get_api_logger
 from app.core.response_utils import success
 from app.core.utils.datetime_utils import to_timestamp_ms, utcnow_naive
-from app.db import get_async_db_context
+from app.db import get_async_db_context, get_db
 from app.dependencies import CurrentUserSnapshot, get_current_user_async
 from app.schemas.response_schema import ApiResponse
 from app.services import memory_dashboard_service, workspace_service
@@ -216,19 +217,17 @@ async def get_workspace_memory_increment(
 
 
 @router.get("/api_increment", response_model=ApiResponse)
-async def get_workspace_api_increment(
+def get_workspace_api_increment(
+    db: Session = Depends(get_db),
     current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ):
-    """获取 API 调用趋势（异步版本）。"""
+    """获取工作空间的API调用增量"""
     workspace_id = current_user.current_workspace_id
     api_logger.info(f"用户 {current_user.username} 请求获取工作空间 {workspace_id} 的API调用增量")
 
-    async with get_async_db_context() as db:
-        api_increment = await memory_dashboard_service.get_workspace_api_increment_async(
-            db=db,
-            workspace_id=workspace_id,
-            current_user=current_user,
-        )
+    api_increment = memory_dashboard_service.get_workspace_api_increment(
+        db, workspace_id, current_user
+    )
 
     api_logger.info(f"成功获取 {api_increment} API调用增量")
     return success(data=api_increment, msg="API调用增量获取成功")
@@ -331,20 +330,17 @@ async def get_workspace_total_memory_count(
 # ======== RAG 数据统计 ========
 
 @router.get("/total_rag_count", response_model=ApiResponse)
-async def get_workspace_total_rag_count(
+def get_workspace_total_rag_count(
+    db: Session = Depends(get_db),
     current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ):
-    """Get RAG total documents, chunks, knowledge bases, and API calls (async)."""
-
-    async with get_async_db_context() as db:
-        total_documents = await memory_dashboard_service.get_rag_total_doc_async(db, current_user)
-        total_chunk = await memory_dashboard_service.get_rag_total_chunk_async(db, current_user)
-        total_kb = await memory_dashboard_service.get_rag_total_kb_async(db, current_user)
-        api_increment = await memory_dashboard_service.get_workspace_api_increment_async(
-            db=db,
-            workspace_id=current_user.current_workspace_id,
-            current_user=current_user,
-        )
+    """获取 rag 的总文档数、总chunk数、总知识库数量、总api调用数量"""
+    total_documents = memory_dashboard_service.get_rag_total_doc(db, current_user)
+    total_chunk = memory_dashboard_service.get_rag_total_chunk(db, current_user)
+    total_kb = memory_dashboard_service.get_rag_total_kb(db, current_user)
+    api_increment = memory_dashboard_service.get_workspace_api_increment(
+        db, current_user.current_workspace_id, current_user
+    )
 
     data = {
         "total_documents": total_documents,
@@ -356,30 +352,30 @@ async def get_workspace_total_rag_count(
 
 
 @router.get("/current_user_rag_total_num", response_model=ApiResponse)
-async def get_current_user_rag_total_num(
+def get_current_user_rag_total_num(
     end_user_id: str = Query(..., description="宿主ID"),
+    db: Session = Depends(get_db),
     current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ):
-    """获取当前宿主的 RAG 的总 chunk 数量（异步版本）。"""
-    async with get_async_db_context() as db:
-        total_chunk = await memory_dashboard_service.get_current_user_total_chunk_async(
-            end_user_id, db, current_user
-        )
+    """获取当前宿主的 RAG 的总chunk数量"""
+    total_chunk = memory_dashboard_service.get_current_user_total_chunk(
+        end_user_id, db, current_user
+    )
     return success(data=total_chunk, msg="宿主RAG知识数据获取成功")
 
 
 @router.get("/rag_content", response_model=ApiResponse)
-async def get_rag_content(
+def get_rag_content(
     end_user_id: str = Query(..., description="宿主ID"),
     page: int = Query(1, gt=0, description="页码，从1开始"),
     pagesize: int = Query(15, gt=0, le=100, description="每页返回记录数"),
+    db: Session = Depends(get_db),
     current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ):
-    """获取当前宿主知识库中的 chunk 内容（异步版本）。"""
-    async with get_async_db_context() as db:
-        data = await memory_dashboard_service.get_rag_content_async(
-            end_user_id, page, pagesize, db, current_user
-        )
+    """获取当前宿主知识库中的chunk内容（分页）"""
+    data = memory_dashboard_service.get_rag_content(
+        end_user_id, page, pagesize, db, current_user
+    )
     return success(data=data, msg="宿主RAGchunk数据获取成功")
 
 
@@ -396,7 +392,10 @@ async def get_chunk_summary_tag(
     async with get_async_db_context() as db:
         data = await memory_dashboard_service.get_chunk_summary_and_tags_async(
             end_user_id=end_user_id,
+            limit=limit,
+            max_tags=max_tags,
             db=db,
+            current_user=current_user,
         )
 
     return success(data=data, msg="获取成功")
@@ -414,7 +413,9 @@ async def get_chunk_insight(
     async with get_async_db_context() as db:
         data = await memory_dashboard_service.get_chunk_insight_async(
             end_user_id=end_user_id,
+            limit=limit,
             db=db,
+            current_user=current_user,
         )
 
     return success(data=data, msg="获取成功")
@@ -510,7 +511,9 @@ async def dashboard_data(
                     api_logger.warning(f"获取记忆总量失败: {str(e)}")
 
                 # 共享统计
-                common_stats = await memory_dashboard_service.get_dashboard_common_stats_async(db, workspace_id)
+                common_stats = await db.run_sync(
+                    lambda s: memory_dashboard_service.get_dashboard_common_stats(s, workspace_id)
+                )
                 neo4j_data.update(common_stats)
                 api_logger.info(
                     f"成功获取共享统计: app={common_stats['total_app']}, "
@@ -520,11 +523,10 @@ async def dashboard_data(
 
                 # 昨日对比
                 try:
-                    changes = await memory_dashboard_service.get_dashboard_yesterday_changes_async(
-                        db=db,
-                        workspace_id=workspace_id,
-                        storage_type=storage_type,
-                        today_data=neo4j_data,
+                    changes = await db.run_sync(
+                        lambda s: memory_dashboard_service.get_dashboard_yesterday_changes(
+                            s, workspace_id, storage_type, neo4j_data
+                        )
                     )
                     neo4j_data.update(changes)
                 except Exception as e:
@@ -549,14 +551,18 @@ async def dashboard_data(
 
                 # 记忆总量（RAG）
                 try:
-                    total_chunk = await memory_dashboard_service.get_rag_user_kb_total_chunk_async(db, current_user)
+                    total_chunk = await db.run_sync(
+                        lambda s: memory_dashboard_service.get_rag_user_kb_total_chunk(s, current_user)
+                    )
                     rag_data["total_memory"] = total_chunk
                     api_logger.info(f"成功获取RAG记忆总量: {total_chunk}")
                 except Exception as e:
                     api_logger.warning(f"获取RAG记忆总量失败: {str(e)}")
 
                 # 共享统计
-                common_stats = await memory_dashboard_service.get_dashboard_common_stats_async(db, workspace_id)
+                common_stats = await db.run_sync(
+                    lambda s: memory_dashboard_service.get_dashboard_common_stats(s, workspace_id)
+                )
                 rag_data.update(common_stats)
                 api_logger.info(
                     f"成功获取共享统计: app={common_stats['total_app']}, "
@@ -566,11 +572,10 @@ async def dashboard_data(
 
                 # 昨日对比
                 try:
-                    changes = await memory_dashboard_service.get_dashboard_yesterday_changes_async(
-                        db=db,
-                        workspace_id=workspace_id,
-                        storage_type=storage_type,
-                        today_data=rag_data,
+                    changes = await db.run_sync(
+                        lambda s: memory_dashboard_service.get_dashboard_yesterday_changes(
+                            s, workspace_id, storage_type, rag_data
+                        )
                     )
                     rag_data.update(changes)
                 except Exception as e:
