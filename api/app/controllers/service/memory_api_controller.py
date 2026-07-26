@@ -9,9 +9,8 @@
 
 import asyncio
 
-from fastapi import APIRouter, Body, Depends, Header, Request
+from fastapi import APIRouter, Body, Header, Request
 from fastapi.encoders import jsonable_encoder
-from sqlalchemy.orm import Session
 from starlette.responses import Response
 
 # 包装内部 controller
@@ -24,7 +23,8 @@ from app.core.memory.enums import Neo4jNodeType, SearchStrategy
 from app.core.memory.memory_service import MemoryService
 from app.core.quota_stub import check_end_user_quota
 from app.core.response_utils import success
-from app.db import get_db, get_async_db_context
+from app.db import get_db_context, get_async_db_context
+from app.dependencies import make_snapshot
 from app.schemas.api_key_schema import ApiKeyAuth
 from app.schemas.memory_agent_schema import Write_UserInput, InternalReadInput, ReadSyncInput
 from app.services.memory_config_service import MemoryConfigService
@@ -38,6 +38,7 @@ def _encode_result(result):
     if isinstance(result, Response):
         return result
     return jsonable_encoder(result)
+
 
 
 @router.get("")
@@ -162,7 +163,6 @@ async def read_memory_internal(
 async def write_memory_async(
         request: Request,
         api_key_auth: ApiKeyAuth = None,
-        db: Session = Depends(get_db),
         body_placeholder: str = Body(None, description="Placeholder - actual body parsed via request.json()"),
         language_type: str = Header(default=None, alias="X-Language-Type"),
 ):
@@ -174,15 +174,16 @@ async def write_memory_async(
     body = await request.json()
     payload = Write_UserInput(**body)
 
-    current_user = get_current_user_from_api_key(db, api_key_auth)
-    validate_end_user_in_workspace(db, payload.end_user_id, api_key_auth.workspace_id)
+    with get_db_context() as auth_db:
+        current_user_orm = get_current_user_from_api_key(auth_db, api_key_auth)
+        validate_end_user_in_workspace(auth_db, payload.end_user_id, api_key_auth.workspace_id)
+        current_user = make_snapshot(current_user_orm, api_key_auth.workspace_id)
 
     logger.info(f"V1 memory write (async) - end_user_id: {payload.end_user_id}, workspace: {api_key_auth.workspace_id}")
 
     result = await memory_controller.write_server_async(
         user_input=payload,
         language_type=language_type,
-        db=db,
         current_user=current_user,
     )
     return _encode_result(result)

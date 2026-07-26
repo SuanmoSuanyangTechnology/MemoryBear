@@ -11,7 +11,9 @@ import logging
 import time
 from typing import Any, Dict, List, Optional
 
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 
 from app.core.memory.models.ontology_scenario_models import (
     OntologyClass,
@@ -54,14 +56,14 @@ class OntologyService:
     
     def __init__(
         self,
-        db: Session,
+        db: Session | AsyncSession,
         llm_client=None,
     ):
         """初始化本体提取服务
         
         Args:
             llm_client: OpenAI客户端实例
-            db: SQLAlchemy数据库会话
+            db: SQLAlchemy数据库会话 (支持同步和异步)
         """
         self.extractor = OntologyExtractor(llm_client)
         self.owl_validator = OWLValidator()
@@ -126,12 +128,12 @@ class OntologyService:
         # 如果提供了scene_id,验证场景是否存在且有权限
         if scene_id and workspace_id:
             logger.info(f"Validating scene access - scene_id={scene_id}, workspace_id={workspace_id}")
-            scene = self.scene_repo.get_by_id(scene_id)
+            scene = await self.scene_repo.get_by_id_async(scene_id)
             if not scene:
                 logger.warning(f"Scene not found: {scene_id}")
                 raise ValueError("场景不存在")
             
-            if not self.scene_repo.check_ownership(scene_id, workspace_id):
+            if not await self.scene_repo.check_ownership_async(scene_id, workspace_id):
                 logger.warning(
                     f"Permission denied - scene_id={scene_id}, "
                     f"workspace_id={workspace_id}"
@@ -292,68 +294,54 @@ class OntologyService:
             raise RuntimeError(error_msg) from e
 
     
-    # ==================== 本体场景管理方法 ====================
-    
-    def create_scene(
+    # ==================== Async 版本：场景管理 ====================
+
+    async def create_scene_async(
         self,
         scene_name: str,
         scene_description: Optional[str],
         workspace_id: Any
     ):
         """创建本体场景
-        
+
         Args:
             scene_name: 场景名称
-            scene_description: 场景描述
-            workspace_id: 所属工作空间ID
-            
+            scene_description: 场景描述（可选）
+            workspace_id: 工作空间ID
+
         Returns:
-            OntologyScene: 创建的场景对象
-            
+            创建的 OntologyScene 实例
+
         Raises:
             ValueError: 场景名称为空
-            RuntimeError: 创建失败
-            
-        Examples:
-            >>> service = OntologyService(llm_client, db)
-            >>> scene = service.create_scene(
-            ...     "医疗场景",
-            ...     "用于医疗领域的本体建模",
-            ...     workspace_id
-            ... )
+            RuntimeError: 数据库操作失败
         """
-        # 验证输入
         if not scene_name or not scene_name.strip():
             logger.error("Scene name is empty")
             raise ValueError("场景名称不能为空")
-        
-        logger.info(
-            f"Creating scene - "
-            f"name={scene_name}, workspace_id={workspace_id}"
-        )
-        
+        logger.info(f"Creating scene (async) - name={scene_name}, workspace_id={workspace_id}")
         try:
             scene_data = {
                 "scene_name": scene_name.strip(),
                 "scene_description": scene_description
             }
-            
-            scene = self.scene_repo.create(scene_data, workspace_id)
-            self.db.commit()
-            
-            logger.info(f"Scene created successfully: {scene.scene_id}")
-            
+            scene = await self.scene_repo.create_async(scene_data, workspace_id)
+            await self.db.commit()
+            logger.info(f"Scene created successfully (async): {scene.scene_id}")
             return scene
-            
         except ValueError:
             raise
+        except IntegrityError as e:
+            await self.db.rollback()
+            logger.warning(f"Integrity error creating scene: {str(e)}")
+            raise
         except Exception as e:
-            self.db.rollback()
+            await self.db.rollback()
             error_msg = f"Failed to create scene: {str(e)}"
             logger.error(error_msg, exc_info=True)
             raise RuntimeError(error_msg) from e
-    
-    def update_scene(
+
+    async def update_scene_async(
         self,
         scene_id: Any,
         scene_name: Optional[str],
@@ -361,297 +349,216 @@ class OntologyService:
         workspace_id: Any
     ):
         """更新本体场景
-        
+
         Args:
             scene_id: 场景ID
-            scene_name: 场景名称（可选）
-            scene_description: 场景描述（可选）
-            workspace_id: 工作空间ID（用于权限验证）
-            
+            scene_name: 新场景名称（可选）
+            scene_description: 新场景描述（可选）
+            workspace_id: 工作空间ID
+
         Returns:
-            OntologyScene: 更新后的场景对象
-            
+            更新后的 OntologyScene 实例
+
         Raises:
-            ValueError: 场景不存在或无权限
-            RuntimeError: 更新失败
-            
-        Examples:
-            >>> service = OntologyService(llm_client, db)
-            >>> scene = service.update_scene(
-            ...     scene_id,
-            ...     "新名称",
-            ...     "新描述",
-            ...     workspace_id
-            ... )
+            ValueError: 场景不存在、无权限或名称为空
+            RuntimeError: 数据库操作失败
         """
-        logger.info(f"Updating scene: {scene_id}")
-        
+        logger.info(f"Updating scene (async): {scene_id}")
         try:
-            # 检查场景是否存在
-            scene = self.scene_repo.get_by_id(scene_id)
+            scene = await self.scene_repo.get_by_id_async(scene_id)
             if not scene:
                 logger.warning(f"Scene not found: {scene_id}")
                 raise ValueError("场景不存在")
-            
-            # 检查权限
-            if not self.scene_repo.check_ownership(scene_id, workspace_id):
-                logger.warning(
-                    f"Permission denied - scene_id={scene_id}, "
-                    f"workspace_id={workspace_id}"
-                )
+            if not await self.scene_repo.check_ownership_async(scene_id, workspace_id):
+                logger.warning(f"Permission denied - scene_id={scene_id}, workspace_id={workspace_id}")
                 raise ValueError("无权限操作该场景")
-            
-            # 准备更新数据
             update_data = {}
             if scene_name is not None:
                 if not scene_name.strip():
                     raise ValueError("场景名称不能为空")
                 update_data["scene_name"] = scene_name.strip()
-            
             if scene_description is not None:
                 update_data["scene_description"] = scene_description
-            
-            # 如果没有更新数据，直接返回
             if not update_data:
                 logger.info("No update data provided, returning existing scene")
                 return scene
-            
-            # 执行更新
-            updated_scene = self.scene_repo.update(scene_id, update_data)
-            self.db.commit()
-            
-            logger.info(f"Scene updated successfully: {scene_id}")
-            
+            updated_scene = await self.scene_repo.update_async(scene_id, update_data)
+            await self.db.commit()
+            logger.info(f"Scene updated successfully (async): {scene_id}")
             return updated_scene
-            
         except ValueError:
             raise
         except Exception as e:
-            self.db.rollback()
+            await self.db.rollback()
             error_msg = f"Failed to update scene: {str(e)}"
             logger.error(error_msg, exc_info=True)
             raise RuntimeError(error_msg) from e
-    
-    def delete_scene(
+
+    async def delete_scene_async(
         self,
         scene_id: Any,
         workspace_id: Any
     ) -> bool:
-        """删除本体场景
-        
+        """删除本体场景及其关联类型
+
         Args:
             scene_id: 场景ID
-            workspace_id: 工作空间ID（用于权限验证）
-            
+            workspace_id: 工作空间ID
+
         Returns:
-            bool: 删除成功返回True
-            
+            是否删除成功
+
         Raises:
             ValueError: 场景不存在或无权限
-            RuntimeError: 删除失败
-            
-        Examples:
-            >>> service = OntologyService(llm_client, db)
-            >>> success = service.delete_scene(scene_id, workspace_id)
+            RuntimeError: 数据库操作失败
         """
-        logger.info(f"Deleting scene: {scene_id}")
-        
+        logger.info(f"Deleting scene (async): {scene_id}")
         try:
-            # 检查场景是否存在
-            scene = self.scene_repo.get_by_id(scene_id)
+            scene = await self.scene_repo.get_by_id_async(scene_id)
             if not scene:
                 logger.warning(f"Scene not found: {scene_id}")
                 raise ValueError("场景不存在")
-            
-            # 检查权限
-            if not self.scene_repo.check_ownership(scene_id, workspace_id):
-                logger.warning(
-                    f"Permission denied - scene_id={scene_id}, "
-                    f"workspace_id={workspace_id}"
-                )
+            if not await self.scene_repo.check_ownership_async(scene_id, workspace_id):
+                logger.warning(f"Permission denied - scene_id={scene_id}, workspace_id={workspace_id}")
                 raise ValueError("无权限操作该场景")
-            
-            # 执行删除
-            success = self.scene_repo.delete(scene_id)
-            self.db.commit()
-            
-            logger.info(f"Scene deleted successfully: {scene_id}")
-            
+            success = await self.scene_repo.delete_async(scene_id)
+            await self.db.commit()
+            logger.info(f"Scene deleted successfully (async): {scene_id}")
             return success
-            
         except ValueError:
             raise
         except Exception as e:
-            self.db.rollback()
+            await self.db.rollback()
             error_msg = f"Failed to delete scene: {str(e)}"
             logger.error(error_msg, exc_info=True)
             raise RuntimeError(error_msg) from e
-    
-    def get_scene_by_id(
+
+    async def get_scene_by_id_async(
         self,
         scene_id: Any,
         workspace_id: Any
     ):
-        """获取单个场景
-        
+        """按ID获取场景
+
         Args:
             scene_id: 场景ID
-            workspace_id: 工作空间ID（用于权限验证）
-            
+            workspace_id: 工作空间ID
+
         Returns:
-            Optional[OntologyScene]: 场景对象
-            
+            OntologyScene 实例
+
         Raises:
             ValueError: 场景不存在或无权限
-            
-        Examples:
-            >>> service = OntologyService(llm_client, db)
-            >>> scene = service.get_scene_by_id(scene_id, workspace_id)
+            RuntimeError: 数据库操作失败
         """
-        logger.debug(f"Getting scene by ID: {scene_id}")
-        
+        logger.debug(f"Getting scene by ID (async): {scene_id}")
         try:
-            # 获取场景
-            scene = self.scene_repo.get_by_id(scene_id)
+            scene = await self.scene_repo.get_by_id_async(scene_id)
             if not scene:
                 logger.warning(f"Scene not found: {scene_id}")
                 raise ValueError("场景不存在")
-            
-            # 检查权限
-            if not self.scene_repo.check_ownership(scene_id, workspace_id):
-                logger.warning(
-                    f"Permission denied - scene_id={scene_id}, "
-                    f"workspace_id={workspace_id}"
-                )
+            if not await self.scene_repo.check_ownership_async(scene_id, workspace_id):
+                logger.warning(f"Permission denied - scene_id={scene_id}, workspace_id={workspace_id}")
                 raise ValueError("无权限访问该场景")
-            
             return scene
-            
         except ValueError:
             raise
         except Exception as e:
             error_msg = f"Failed to get scene: {str(e)}"
             logger.error(error_msg, exc_info=True)
             raise RuntimeError(error_msg) from e
-    
-    def get_scene_by_name(
+
+    async def get_scene_by_name_async(
         self,
         scene_name: str,
         workspace_id: Any
     ):
-        """根据场景名称获取场景（精确匹配）
-        
+        """按名称获取场景
+
         Args:
             scene_name: 场景名称
             workspace_id: 工作空间ID
-            
+
         Returns:
-            Optional[OntologyScene]: 场景对象
-            
+            OntologyScene 实例
+
         Raises:
             ValueError: 场景不存在
-            
-        Examples:
-            >>> service = OntologyService(llm_client, db)
-            >>> scene = service.get_scene_by_name("医疗场景", workspace_id)
+            RuntimeError: 数据库操作失败
         """
-        logger.debug(f"Getting scene by name: {scene_name}, workspace_id: {workspace_id}")
-        
+        logger.debug(f"Getting scene by name (async): {scene_name}, workspace_id: {workspace_id}")
         try:
-            # 获取场景
-            scene = self.scene_repo.get_by_name(scene_name, workspace_id)
+            scene = await self.scene_repo.get_by_name_async(scene_name, workspace_id)
             if not scene:
                 logger.warning(f"Scene not found: {scene_name} in workspace {workspace_id}")
                 raise ValueError("场景不存在")
-            
             return scene
-            
         except ValueError:
             raise
         except Exception as e:
             error_msg = f"Failed to get scene by name: {str(e)}"
             logger.error(error_msg, exc_info=True)
             raise RuntimeError(error_msg) from e
-    
-    def search_scenes_by_name(
+
+    async def search_scenes_by_name_async(
         self,
         keyword: str,
         workspace_id: Any
     ) -> List:
-        """根据关键词模糊搜索场景
-        
+        """模糊搜索场景
+
         Args:
             keyword: 搜索关键词
             workspace_id: 工作空间ID
-            
+
         Returns:
-            List[OntologyScene]: 匹配的场景列表
-            
+            匹配的场景列表
+
         Raises:
-            RuntimeError: 搜索失败
-            
-        Examples:
-            >>> service = OntologyService(llm_client, db)
-            >>> scenes = service.search_scenes_by_name("医疗", workspace_id)
+            RuntimeError: 数据库操作失败
         """
-        logger.debug(f"Searching scenes by keyword: {keyword}, workspace_id: {workspace_id}")
-        
+        logger.debug(f"Searching scenes by keyword (async): {keyword}, workspace_id: {workspace_id}")
         try:
-            scenes = self.scene_repo.search_by_name(keyword, workspace_id)
-            
-            logger.info(
-                f"Found {len(scenes)} scenes matching keyword '{keyword}' "
-                f"in workspace {workspace_id}"
-            )
-            
+            scenes = await self.scene_repo.search_by_name_async(keyword, workspace_id)
+            logger.info(f"Found {len(scenes)} scenes matching keyword '{keyword}' in workspace {workspace_id} (async)")
             return scenes
-            
         except Exception as e:
             error_msg = f"Failed to search scenes by keyword: {str(e)}"
             logger.error(error_msg, exc_info=True)
             raise RuntimeError(error_msg) from e
-    
-    def list_scenes(
+
+    async def list_scenes_async(
         self,
         workspace_id: Any,
         page: Optional[int] = None,
         page_size: Optional[int] = None
     ) -> tuple:
-        """获取工作空间下的所有场景（支持分页）
-        
+        """列出工作空间下的场景（支持分页）
+
         Args:
             workspace_id: 工作空间ID
-            page: 页码（可选，从1开始）
+            page: 页码（可选）
             page_size: 每页数量（可选）
-            
+
         Returns:
-            tuple: (场景列表, 总数量)
-            
+            (场景列表, 总数) 元组
+
         Raises:
-            RuntimeError: 查询失败
-            
-        Examples:
-            >>> service = OntologyService(llm_client, db)
-            >>> scenes, total = service.list_scenes(workspace_id)
-            >>> scenes, total = service.list_scenes(workspace_id, page=1, page_size=10)
+            RuntimeError: 数据库操作失败
         """
-        logger.debug(f"Listing scenes for workspace: {workspace_id}, page={page}, page_size={page_size}")
-        
+        logger.debug(f"Listing scenes (async) for workspace: {workspace_id}, page={page}, page_size={page_size}")
         try:
-            scenes, total = self.scene_repo.get_by_workspace(workspace_id, page, page_size)
-            
-            logger.info(f"Found {len(scenes)} scenes (total: {total}) in workspace {workspace_id}")
-            
+            scenes, total = await self.scene_repo.get_by_workspace_async(workspace_id, page, page_size)
+            logger.info(f"Found {len(scenes)} scenes (total: {total}) in workspace {workspace_id} (async)")
             return scenes, total
-            
         except Exception as e:
             error_msg = f"Failed to list scenes: {str(e)}"
             logger.error(error_msg, exc_info=True)
             raise RuntimeError(error_msg) from e
-    
-    # ==================== 本体类型管理方法 ====================
-    
-    def create_class(
+
+    # ==================== Async 版本：类型管理 ====================
+
+    async def create_class_async(
         self,
         scene_id: Any,
         class_name: str,
@@ -659,168 +566,109 @@ class OntologyService:
         workspace_id: Any
     ):
         """创建本体类型
-        
+
         Args:
             scene_id: 所属场景ID
             class_name: 类型名称
-            class_description: 类型描述
-            workspace_id: 工作空间ID（用于权限验证）
-            
+            class_description: 类型描述（可选）
+            workspace_id: 工作空间ID
+
         Returns:
-            OntologyClass: 创建的类型对象
-            
+            创建的 OntologyClass 实例
+
         Raises:
-            ValueError: 类型名称为空、场景不存在或无权限
-            RuntimeError: 创建失败
-            
-        Examples:
-            >>> service = OntologyService(llm_client, db)
-            >>> ontology_class = service.create_class(
-            ...     scene_id,
-            ...     "患者",
-            ...     "医院患者信息",
-            ...     workspace_id
-            ... )
+            ValueError: 名称为空、场景不存在或无权限
+            RuntimeError: 数据库操作失败
         """
-        # 验证输入
         if not class_name or not class_name.strip():
             logger.error("Class name is empty")
             raise ValueError("类型名称不能为空")
-        
-        logger.info(
-            f"Creating class - "
-            f"name={class_name}, scene_id={scene_id}"
-        )
-        
+        logger.info(f"Creating class (async) - name={class_name}, scene_id={scene_id}")
         try:
-            # 检查场景是否存在且属于当前工作空间
-            scene = self.scene_repo.get_by_id(scene_id)
+            scene = await self.scene_repo.get_by_id_async(scene_id)
             if not scene:
                 logger.warning(f"Scene not found: {scene_id}")
                 raise ValueError("所属场景不存在")
-            
-            if not self.scene_repo.check_ownership(scene_id, workspace_id):
-                logger.warning(
-                    f"Permission denied - scene_id={scene_id}, "
-                    f"workspace_id={workspace_id}"
-                )
+            if not await self.scene_repo.check_ownership_async(scene_id, workspace_id):
+                logger.warning(f"Permission denied - scene_id={scene_id}, workspace_id={workspace_id}")
                 raise ValueError("无权限在该场景下创建类型")
-            
-            # 创建类型
             class_data = {
                 "class_name": class_name.strip(),
                 "class_description": class_description
             }
-            
-            ontology_class = self.class_repo.create(class_data, scene_id)
-            self.db.commit()
-            
-            logger.info(f"Class created successfully: {ontology_class.class_id}")
-            
+            ontology_class = await self.class_repo.create_async(class_data, scene_id)
+            await self.db.commit()
+            logger.info(f"Class created successfully (async): {ontology_class.class_id}")
             return ontology_class
-            
         except ValueError:
             raise
         except Exception as e:
-            self.db.rollback()
+            await self.db.rollback()
             error_msg = f"Failed to create class: {str(e)}"
             logger.error(error_msg, exc_info=True)
             raise RuntimeError(error_msg) from e
-    
-    def create_classes_batch(
+
+    async def create_classes_batch_async(
         self,
         scene_id: Any,
         classes: List[Dict[str, Optional[str]]],
         workspace_id: Any
     ):
         """批量创建本体类型
-        
+
         Args:
             scene_id: 所属场景ID
-            classes: 类型列表，每个元素包含 class_name 和 class_description
-            workspace_id: 工作空间ID（用于权限验证）
-            
+            classes: 类型数据列表 [{"class_name": str, "class_description": Optional[str]}, ...]
+            workspace_id: 工作空间ID
+
         Returns:
-            Tuple[List, List[str]]: (成功创建的类型列表, 错误信息列表)
-            
+            (成功创建的类型列表, 错误信息列表) 元组
+
         Raises:
             ValueError: 场景不存在或无权限
-            
-        Examples:
-            >>> service = OntologyService(llm_client, db)
-            >>> classes_data = [
-            ...     {"class_name": "患者", "class_description": "医院患者信息"},
-            ...     {"class_name": "医生", "class_description": "医院医生信息"}
-            ... ]
-            >>> created_classes, errors = service.create_classes_batch(
-            ...     scene_id,
-            ...     classes_data,
-            ...     workspace_id
-            ... )
+            RuntimeError: 数据库提交失败
         """
-        logger.info(
-            f"Batch creating classes - "
-            f"count={len(classes)}, scene_id={scene_id}"
-        )
-        
-        # 检查场景是否存在且属于当前工作空间（只检查一次）
-        scene = self.scene_repo.get_by_id(scene_id)
+        logger.info(f"Batch creating classes (async) - count={len(classes)}, scene_id={scene_id}")
+        scene = await self.scene_repo.get_by_id_async(scene_id)
         if not scene:
             logger.warning(f"Scene not found: {scene_id}")
             raise ValueError("所属场景不存在")
-        
-        if not self.scene_repo.check_ownership(scene_id, workspace_id):
-            logger.warning(
-                f"Permission denied - scene_id={scene_id}, "
-                f"workspace_id={workspace_id}"
-            )
+        if not await self.scene_repo.check_ownership_async(scene_id, workspace_id):
+            logger.warning(f"Permission denied - scene_id={scene_id}, workspace_id={workspace_id}")
             raise ValueError("无权限在该场景下创建类型")
-        
         created_classes = []
         errors = []
-        
         for idx, class_data in enumerate(classes):
             class_name = class_data.get("class_name", "").strip()
             class_description = class_data.get("class_description")
-            
             if not class_name:
                 error_msg = f"第 {idx + 1} 个类型名称为空，已跳过"
                 logger.warning(error_msg)
                 errors.append(error_msg)
                 continue
-            
             try:
-                # 创建类型（不需要再次检查权限）
                 create_data = {
                     "class_name": class_name,
                     "class_description": class_description
                 }
-                
-                ontology_class = self.class_repo.create(create_data, scene_id)
+                ontology_class = await self.class_repo.create_async(create_data, scene_id)
                 created_classes.append(ontology_class)
-                logger.info(f"Class created successfully: {class_name}")
-                
+                logger.info(f"Class created successfully (async): {class_name}")
             except Exception as e:
                 error_msg = f"创建类型 '{class_name}' 失败: {str(e)}"
                 logger.error(error_msg)
                 errors.append(error_msg)
-        
-        # 统一提交所有成功的创建
         try:
-            self.db.commit()
-            logger.info(
-                f"Batch creation completed - "
-                f"success={len(created_classes)}, failed={len(errors)}"
-            )
+            await self.db.commit()
+            logger.info(f"Batch creation completed (async) - success={len(created_classes)}, failed={len(errors)}")
         except Exception as e:
-            self.db.rollback()
+            await self.db.rollback()
             error_msg = f"批量创建提交失败: {str(e)}"
             logger.error(error_msg, exc_info=True)
             raise RuntimeError(error_msg) from e
-        
         return created_classes, errors
-    
-    def update_class(
+
+    async def update_class_async(
         self,
         class_id: Any,
         class_name: Optional[str],
@@ -828,338 +676,235 @@ class OntologyService:
         workspace_id: Any
     ):
         """更新本体类型
-        
+
         Args:
             class_id: 类型ID
-            class_name: 类型名称（可选）
-            class_description: 类型描述（可选）
-            workspace_id: 工作空间ID（用于权限验证）
-            
+            class_name: 新类型名称（可选）
+            class_description: 新类型描述（可选）
+            workspace_id: 工作空间ID
+
         Returns:
-            OntologyClass: 更新后的类型对象
-            
+            更新后的 OntologyClass 实例
+
         Raises:
-            ValueError: 类型不存在或无权限
-            RuntimeError: 更新失败
-            
-        Examples:
-            >>> service = OntologyService(llm_client, db)
-            >>> ontology_class = service.update_class(
-            ...     class_id,
-            ...     "新名称",
-            ...     "新描述",
-            ...     workspace_id
-            ... )
+            ValueError: 类型不存在、无权限或名称为空
+            RuntimeError: 数据库操作失败
         """
-        logger.info(f"Updating class: {class_id}")
-        
+        logger.info(f"Updating class (async): {class_id}")
         try:
-            # 检查类型是否存在
-            ontology_class = self.class_repo.get_by_id(class_id)
+            ontology_class = await self.class_repo.get_by_id_async(class_id)
             if not ontology_class:
                 logger.warning(f"Class not found: {class_id}")
                 raise ValueError("类型不存在")
-            
-            # 检查权限（通过场景关联）
-            if not self.class_repo.check_ownership(class_id, workspace_id):
-                logger.warning(
-                    f"Permission denied - class_id={class_id}, "
-                    f"workspace_id={workspace_id}"
-                )
+            if not await self.class_repo.check_ownership_async(class_id, workspace_id):
+                logger.warning(f"Permission denied - class_id={class_id}, workspace_id={workspace_id}")
                 raise ValueError("无权限操作该类型")
-            
-            # 准备更新数据
             update_data = {}
             if class_name is not None:
                 if not class_name.strip():
                     raise ValueError("类型名称不能为空")
                 update_data["class_name"] = class_name.strip()
-            
             if class_description is not None:
                 update_data["class_description"] = class_description
-            
-            # 如果没有更新数据，直接返回
             if not update_data:
                 logger.info("No update data provided, returning existing class")
                 return ontology_class
-            
-            # 执行更新
-            updated_class = self.class_repo.update(class_id, update_data)
-            self.db.commit()
-            
-            logger.info(f"Class updated successfully: {class_id}")
-            
+            updated_class = await self.class_repo.update_async(class_id, update_data)
+            await self.db.commit()
+            logger.info(f"Class updated successfully (async): {class_id}")
             return updated_class
-            
         except ValueError:
             raise
         except Exception as e:
-            self.db.rollback()
+            await self.db.rollback()
             error_msg = f"Failed to update class: {str(e)}"
             logger.error(error_msg, exc_info=True)
             raise RuntimeError(error_msg) from e
-    
-    def delete_class(
+
+    async def delete_class_async(
         self,
         class_id: Any,
         workspace_id: Any
     ) -> bool:
         """删除本体类型
-        
+
         Args:
             class_id: 类型ID
-            workspace_id: 工作空间ID（用于权限验证）
-            
+            workspace_id: 工作空间ID
+
         Returns:
-            bool: 删除成功返回True
-            
+            是否删除成功
+
         Raises:
             ValueError: 类型不存在或无权限
-            RuntimeError: 删除失败
-            
-        Examples:
-            >>> service = OntologyService(llm_client, db)
-            >>> success = service.delete_class(class_id, workspace_id)
+            RuntimeError: 数据库操作失败
         """
-        logger.info(f"Deleting class: {class_id}")
-        
+        logger.info(f"Deleting class (async): {class_id}")
         try:
-            # 检查类型是否存在
-            ontology_class = self.class_repo.get_by_id(class_id)
+            ontology_class = await self.class_repo.get_by_id_async(class_id)
             if not ontology_class:
                 logger.warning(f"Class not found: {class_id}")
                 raise ValueError("类型不存在")
-            
-            # 检查权限（通过场景关联）
-            if not self.class_repo.check_ownership(class_id, workspace_id):
-                logger.warning(
-                    f"Permission denied - class_id={class_id}, "
-                    f"workspace_id={workspace_id}"
-                )
+            if not await self.class_repo.check_ownership_async(class_id, workspace_id):
+                logger.warning(f"Permission denied - class_id={class_id}, workspace_id={workspace_id}")
                 raise ValueError("无权限操作该类型")
-            
-            # 执行删除
-            success = self.class_repo.delete(class_id)
-            self.db.commit()
-            
-            logger.info(f"Class deleted successfully: {class_id}")
-            
+            success = await self.class_repo.delete_async(class_id)
+            await self.db.commit()
+            logger.info(f"Class deleted successfully (async): {class_id}")
             return success
-            
         except ValueError:
             raise
         except Exception as e:
-            self.db.rollback()
+            await self.db.rollback()
             error_msg = f"Failed to delete class: {str(e)}"
             logger.error(error_msg, exc_info=True)
             raise RuntimeError(error_msg) from e
-    
-    def get_class_by_id(
+
+    async def get_class_by_id_async(
         self,
         class_id: Any,
         workspace_id: Any
     ):
-        """获取单个类型
-        
+        """按ID获取本体类型
+
         Args:
             class_id: 类型ID
-            workspace_id: 工作空间ID（用于权限验证）
-            
+            workspace_id: 工作空间ID
+
         Returns:
-            Optional[OntologyClass]: 类型对象
-            
+            OntologyClass 实例
+
         Raises:
             ValueError: 类型不存在或无权限
-            
-        Examples:
-            >>> service = OntologyService(llm_client, db)
-            >>> ontology_class = service.get_class_by_id(class_id, workspace_id)
+            RuntimeError: 数据库操作失败
         """
-        logger.debug(f"Getting class by ID: {class_id}")
-        
+        logger.debug(f"Getting class by ID (async): {class_id}")
         try:
-            # 获取类型
-            ontology_class = self.class_repo.get_by_id(class_id)
+            ontology_class = await self.class_repo.get_by_id_async(class_id)
             if not ontology_class:
                 logger.warning(f"Class not found: {class_id}")
                 raise ValueError("类型不存在")
-            
-            # 检查权限（通过场景关联）
-            if not self.class_repo.check_ownership(class_id, workspace_id):
-                logger.warning(
-                    f"Permission denied - class_id={class_id}, "
-                    f"workspace_id={workspace_id}"
-                )
+            if not await self.class_repo.check_ownership_async(class_id, workspace_id):
+                logger.warning(f"Permission denied - class_id={class_id}, workspace_id={workspace_id}")
                 raise ValueError("无权限访问该类型")
-            
             return ontology_class
-            
         except ValueError:
             raise
         except Exception as e:
             error_msg = f"Failed to get class: {str(e)}"
             logger.error(error_msg, exc_info=True)
             raise RuntimeError(error_msg) from e
-    
-    def get_class_by_name(
+
+    async def get_class_by_name_async(
         self,
         class_name: str,
         scene_id: Any,
         workspace_id: Any
     ):
-        """根据类型名称获取类型（精确匹配）
-        
+        """按名称获取本体类型
+
         Args:
             class_name: 类型名称
-            scene_id: 场景ID
-            workspace_id: 工作空间ID（用于权限验证）
-            
+            scene_id: 所属场景ID
+            workspace_id: 工作空间ID
+
         Returns:
-            Optional[OntologyClass]: 类型对象
-            
+            OntologyClass 实例
+
         Raises:
-            ValueError: 类型不存在或无权限
-            
-        Examples:
-            >>> service = OntologyService(llm_client, db)
-            >>> ontology_class = service.get_class_by_name("患者", scene_id, workspace_id)
+            ValueError: 场景不存在、无权限或类型不存在
+            RuntimeError: 数据库操作失败
         """
-        logger.debug(f"Getting class by name: {class_name}, scene_id: {scene_id}")
-        
+        logger.debug(f"Getting class by name (async): {class_name}, scene_id: {scene_id}")
         try:
-            # 检查场景是否存在且属于当前工作空间
-            scene = self.scene_repo.get_by_id(scene_id)
+            scene = await self.scene_repo.get_by_id_async(scene_id)
             if not scene:
                 logger.warning(f"Scene not found: {scene_id}")
                 raise ValueError("场景不存在")
-            
-            if not self.scene_repo.check_ownership(scene_id, workspace_id):
-                logger.warning(
-                    f"Permission denied - scene_id={scene_id}, "
-                    f"workspace_id={workspace_id}"
-                )
+            if not await self.scene_repo.check_ownership_async(scene_id, workspace_id):
+                logger.warning(f"Permission denied - scene_id={scene_id}, workspace_id={workspace_id}")
                 raise ValueError("无权限访问该场景")
-            
-            # 获取类型
-            ontology_class = self.class_repo.get_by_name(class_name, scene_id)
+            ontology_class = await self.class_repo.get_by_name_async(class_name, scene_id)
             if not ontology_class:
                 logger.warning(f"Class not found: {class_name} in scene {scene_id}")
                 raise ValueError("类型不存在")
-            
             return ontology_class
-            
         except ValueError:
             raise
         except Exception as e:
             error_msg = f"Failed to get class by name: {str(e)}"
             logger.error(error_msg, exc_info=True)
             raise RuntimeError(error_msg) from e
-    
-    def search_classes_by_name(
+
+    async def search_classes_by_name_async(
         self,
         keyword: str,
         scene_id: Any,
         workspace_id: Any
     ) -> List:
-        """根据关键词模糊搜索类型
-        
+        """模糊搜索本体类型
+
         Args:
             keyword: 搜索关键词
-            scene_id: 场景ID
-            workspace_id: 工作空间ID（用于权限验证）
-            
+            scene_id: 所属场景ID
+            workspace_id: 工作空间ID
+
         Returns:
-            List[OntologyClass]: 匹配的类型列表
-            
+            匹配的类型列表
+
         Raises:
             ValueError: 场景不存在或无权限
-            RuntimeError: 搜索失败
-            
-        Examples:
-            >>> service = OntologyService(llm_client, db)
-            >>> classes = service.search_classes_by_name("患者", scene_id, workspace_id)
+            RuntimeError: 数据库操作失败
         """
-        logger.debug(
-            f"Searching classes by keyword: {keyword}, "
-            f"scene_id: {scene_id}, workspace_id: {workspace_id}"
-        )
-        
+        logger.debug(f"Searching classes by keyword (async): {keyword}, scene_id: {scene_id}, workspace_id: {workspace_id}")
         try:
-            # 检查场景是否存在且属于当前工作空间
-            scene = self.scene_repo.get_by_id(scene_id)
+            scene = await self.scene_repo.get_by_id_async(scene_id)
             if not scene:
                 logger.warning(f"Scene not found: {scene_id}")
                 raise ValueError("场景不存在")
-            
-            if not self.scene_repo.check_ownership(scene_id, workspace_id):
-                logger.warning(
-                    f"Permission denied - scene_id={scene_id}, "
-                    f"workspace_id={workspace_id}"
-                )
+            if not await self.scene_repo.check_ownership_async(scene_id, workspace_id):
+                logger.warning(f"Permission denied - scene_id={scene_id}, workspace_id={workspace_id}")
                 raise ValueError("无权限访问该场景")
-            
-            # 搜索类型
-            classes = self.class_repo.search_by_name(keyword, scene_id)
-            
-            logger.info(
-                f"Found {len(classes)} classes matching keyword '{keyword}' "
-                f"in scene {scene_id}"
-            )
-            
+            classes = await self.class_repo.search_by_name_async(keyword, scene_id)
+            logger.info(f"Found {len(classes)} classes matching keyword '{keyword}' in scene {scene_id} (async)")
             return classes
-            
         except ValueError:
             raise
         except Exception as e:
             error_msg = f"Failed to search classes by keyword: {str(e)}"
             logger.error(error_msg, exc_info=True)
             raise RuntimeError(error_msg) from e
-    
-    def list_classes_by_scene(
+
+    async def list_classes_by_scene_async(
         self,
         scene_id: Any,
         workspace_id: Any
     ) -> List:
-        """获取场景下的所有类型
-        
+        """列出场景下的所有本体类型
+
         Args:
             scene_id: 场景ID
-            workspace_id: 工作空间ID（用于权限验证）
-            
+            workspace_id: 工作空间ID
+
         Returns:
-            List[OntologyClass]: 类型列表
-            
+            类型列表
+
         Raises:
             ValueError: 场景不存在或无权限
-            RuntimeError: 查询失败
-            
-        Examples:
-            >>> service = OntologyService(llm_client, db)
-            >>> classes = service.list_classes_by_scene(scene_id, workspace_id)
+            RuntimeError: 数据库操作失败
         """
-        logger.debug(f"Listing classes for scene: {scene_id}")
-        
+        logger.debug(f"Listing classes (async) for scene: {scene_id}")
         try:
-            # 检查场景是否存在且属于当前工作空间
-            scene = self.scene_repo.get_by_id(scene_id)
+            scene = await self.scene_repo.get_by_id_async(scene_id)
             if not scene:
                 logger.warning(f"Scene not found: {scene_id}")
                 raise ValueError("场景不存在")
-            
-            if not self.scene_repo.check_ownership(scene_id, workspace_id):
-                logger.warning(
-                    f"Permission denied - scene_id={scene_id}, "
-                    f"workspace_id={workspace_id}"
-                )
+            if not await self.scene_repo.check_ownership_async(scene_id, workspace_id):
+                logger.warning(f"Permission denied - scene_id={scene_id}, workspace_id={workspace_id}")
                 raise ValueError("无权限访问该场景的类型")
-            
-            # 获取类型列表
-            classes = self.class_repo.get_classes_by_scene(scene_id)
-            
-            logger.info(f"Found {len(classes)} classes in scene {scene_id}")
-            
+            classes = await self.class_repo.get_classes_by_scene_async(scene_id)
+            logger.info(f"Found {len(classes)} classes in scene {scene_id} (async)")
             return classes
-            
         except ValueError:
             raise
         except Exception as e:

@@ -65,19 +65,24 @@ def resolve_config_id(config_id: UUID | int | str, db: Optional[Session] = None)
 def _lookup_by_old_id(old_id: int, db: Optional[Session]) -> UUID:
     """通过 config_id_old 查找 UUID，支持传入已有 session 或自动开短 session。"""
     from app.models.memory_config_model import MemoryConfig
+    from sqlalchemy.ext.asyncio import AsyncSession
 
-    def _query(session: Session) -> UUID:
-        memory_config = session.query(MemoryConfig).filter(
+    def _query(session) -> Optional[MemoryConfig]:
+        return session.query(MemoryConfig).filter(
             MemoryConfig.config_id_old == old_id
         ).first()
+
+    # AsyncSession 不支持 .query()，当传入 AsyncSession 时回退到开一个只读短 sync session
+    # 注意：必须在 session 内访问 .config_id，否则 detached object 报错
+    if db is None or isinstance(db, AsyncSession):
+        from app.db import get_db_read
+        with get_db_read() as short_db:
+            memory_config = _query(short_db)
+            if not memory_config:
+                raise ValueError(f"未找到 config_id_old={old_id} 对应的配置")
+            return memory_config.config_id
+    else:
+        memory_config = _query(db)
         if not memory_config:
             raise ValueError(f"未找到 config_id_old={old_id} 对应的配置")
         return memory_config.config_id
-
-    if db is not None:
-        return _query(db)
-
-    # 未传 db，自己开一个只读短 session
-    from app.db import get_db_read
-    with get_db_read() as short_db:
-        return _query(short_db)

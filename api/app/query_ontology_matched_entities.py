@@ -65,7 +65,7 @@ def get_ontology_types_from_scene(db, scene_id: UUID) -> Set[str]:
 
 def get_ontology_types_from_config(db, config_id: UUID) -> Optional[Set[str]]:
     """从记忆配置获取关联的本体类型"""
-    memory_config = MemoryConfigRepository.get_by_id(db, config_id)
+    memory_config = MemoryConfigRepository(db).get_by_id(config_id)
     if not memory_config or not memory_config.scene_id:
         return None
     return get_ontology_types_from_scene(db, memory_config.scene_id)
@@ -124,7 +124,7 @@ async def query_ontology_matched_entities(end_user_id: str, config_id: Optional[
                     types = get_ontology_types_from_config(db, config_uuid)
                     if types:
                         scene_ontology_types = types
-                        memory_config = MemoryConfigRepository.get_by_id(db, config_uuid)
+                        memory_config = MemoryConfigRepository(db).get_by_id(config_uuid)
                         if memory_config and memory_config.scene_id:
                             scene_repo = OntologySceneRepository(db)
                             scene = scene_repo.get_by_id(memory_config.scene_id)
