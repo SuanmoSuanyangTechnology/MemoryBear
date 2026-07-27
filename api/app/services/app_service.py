@@ -2456,7 +2456,6 @@ class AppService:
 
         if ids:
             # Soft delete: mark as inactive
-            from sqlalchemy import update as sa_update
             self.db.execute(
                 sa_update(AppShare).where(AppShare.id.in_(ids)).values(is_active=False)
             )
@@ -2585,7 +2584,6 @@ class AppService:
         count = len(ids)
 
         if ids:
-            from sqlalchemy import update as sa_update
             self.db.execute(
                 sa_update(AppShare).where(AppShare.id.in_(ids)).values(is_active=False)
             )

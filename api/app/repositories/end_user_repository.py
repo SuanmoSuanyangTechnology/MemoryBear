@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import List, NamedTuple, Optional, Set
 
 import sqlalchemy as sa
-from sqlalchemy import or_, select
+from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
@@ -1073,8 +1073,6 @@ class EndUserRepository:
     ) -> int:
         """批量更新工作空间下所有终端用户的 memory_config_id"""
         try:
-            from sqlalchemy import update
-
             stmt = (
                 update(EndUser)
                 .where(EndUser.workspace_id == workspace_id, EndUser.is_active == True)
@@ -1118,8 +1116,6 @@ class EndUserRepository:
             Exception: 数据库操作失败时抛出
         """
         try:
-            from sqlalchemy import update
-
             stmt = (
                 update(EndUser)
                 .where(EndUser.app_id == app_id, EndUser.is_active == True)
@@ -1191,8 +1187,6 @@ class EndUserRepository:
             int: 清除的行数
         """
         try:
-            from sqlalchemy import update
-
             stmt = (
                 update(EndUser)
                 .where(EndUser.memory_config_id == memory_config_id, EndUser.is_active == True)
