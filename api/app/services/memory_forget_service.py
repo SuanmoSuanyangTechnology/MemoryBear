@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 from app.core.logging_config import get_api_logger
 from app.core.memory.storage_services.forgetting_engine.actr_calculator import ACTRCalculator
 from app.core.memory.storage_services.forgetting_engine.config_utils import (
+    calculate_forgetting_rate,
     load_actr_config_from_db,
 )
 from app.core.memory.storage_services.forgetting_engine.forgetting_scheduler import ForgettingScheduler
@@ -50,7 +51,6 @@ class MemoryForgetService:
 
     def __init__(self):
         """初始化服务"""
-        self.config_repository = MemoryConfigRepository()
         self.history_repository = ForgettingCycleHistoryRepository()
 
     def _get_neo4j_connector(self) -> Neo4jConnector:
@@ -466,7 +466,7 @@ class MemoryForgetService:
             ValueError: 配置不存在
         """
         # 检查配置是否存在
-        db_config = self.config_repository.get_by_id(db, config_id)
+        db_config = MemoryConfigRepository(db).get_by_id(config_id)
         if db_config is None:
             raise ValueError(f"配置不存在: {config_id}")
 
@@ -490,6 +490,118 @@ class MemoryForgetService:
         config = load_actr_config_from_db(db, config_id)
         config['config_id'] = config_id
 
+        return config
+
+    async def read_forgetting_config_async(
+            self,
+            db: Session,
+            config_id: UUID
+    ) -> Dict[str, Any]:
+        """获取遗忘引擎配置（异步版本）
+
+        使用 MemoryConfigRepository.get_by_id_async() 替代同步的 get_by_id()，
+        内联 load_actr_config_from_db 逻辑。
+
+        Args:
+            db: 数据库会话（AsyncSession）
+            config_id: 配置ID
+
+        Returns:
+            dict: 配置信息字典
+        """
+        if config_id is None:
+            api_logger.error("未指定 config_id，无法加载配置")
+            raise ValueError("config_id 不能为空，必须指定一个有效的配置 ID")
+
+        repo = MemoryConfigRepository(db)
+        db_config = await repo.get_by_id_async(config_id)
+
+        if db_config is None:
+            api_logger.error(f"配置不存在: config_id={config_id}")
+            raise ValueError(f"配置不存在: config_id={config_id}")
+
+        # 读取配置参数
+        lambda_time = db_config.lambda_time
+        lambda_mem = db_config.lambda_mem
+        decay_constant = db_config.decay_constant
+        offset = db_config.offset
+        max_history_length = db_config.max_history_length
+        forgetting_threshold = db_config.forgetting_threshold
+        min_days_since_access = db_config.min_days_since_access
+        enable_llm_summary = db_config.enable_llm_summary
+        max_merge_batch_size = db_config.max_merge_batch_size
+        forgetting_interval_hours = db_config.forgetting_interval_hours
+        is_default = db_config.is_default
+
+        # 计算 forgetting_rate
+        forgetting_rate = calculate_forgetting_rate(lambda_time, lambda_mem)
+
+        config = {
+            'decay_constant': decay_constant,
+            'lambda_time': lambda_time,
+            'lambda_mem': lambda_mem,
+            'forgetting_rate': forgetting_rate,
+            'offset': offset,
+            'max_history_length': max_history_length,
+            'forgetting_threshold': forgetting_threshold,
+            'min_days_since_access': min_days_since_access,
+            'enable_llm_summary': enable_llm_summary,
+            'max_merge_batch_size': max_merge_batch_size,
+            'forgetting_interval_hours': forgetting_interval_hours,
+            'is_default': bool(is_default),
+            'config_id': config_id,
+        }
+
+        api_logger.info(f"成功读取遗忘引擎配置（异步）: config_id={config_id}")
+        return config
+
+    async def update_forgetting_config_async(
+            self,
+            db: Session,
+            config_id: UUID,
+            update_fields: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """更新遗忘引擎配置（异步版本）
+
+        使用 MemoryConfigRepository.get_by_id_async() 替代同步的 get_by_id()，
+        commit/refresh 前加 await。
+
+        Args:
+            db: 数据库会话（AsyncSession）
+            config_id: 配置ID
+            update_fields: 要更新的字段字典
+
+        Returns:
+            dict: 更新后的配置信息
+
+        Raises:
+            ValueError: 配置不存在
+        """
+        repo = MemoryConfigRepository(db)
+
+        # 检查配置是否存在
+        db_config = await repo.get_by_id_async(config_id)
+        if db_config is None:
+            raise ValueError(f"配置不存在: {config_id}")
+
+        # 执行更新
+        if update_fields:
+            for key, value in update_fields.items():
+                if hasattr(db_config, key):
+                    setattr(db_config, key, value)
+
+            await db.commit()
+            await db.refresh(db_config)
+
+            api_logger.info(
+                f"成功更新遗忘引擎配置（异步）: config_id={config_id}, "
+                f"更新字段: {list(update_fields.keys())}"
+            )
+        else:
+            api_logger.info(f"没有字段需要更新（异步）: config_id={config_id}")
+
+        # 重新加载配置并返回
+        config = await self.read_forgetting_config_async(db, config_id)
         return config
 
     async def get_forgetting_stats(
@@ -860,7 +972,7 @@ async def compute_forgetting_candidates(end_user_id: str) -> list[dict]:
             if end_user and end_user.workspace_id:
                 active_config_id = await get_workspace_memory_config_id_async(db, end_user.workspace_id)
                 if active_config_id:
-                    cfg = await _Repo.get_by_id_async(db, active_config_id)
+                    cfg = await _Repo(db).get_by_id_async(active_config_id)
                     if cfg and cfg.lambda_mem is not None:
                         lambda_mem = float(cfg.lambda_mem)
         except Exception:

@@ -8,9 +8,12 @@ ref within this response. Relation endpoints must reference
 entity refs emitted in the same response. Each relation should include concise
 high-level keywords explicitly supported by the source text. Omit uncertain facts. Do not answer
 the user, build communities, summarize a whole graph, or infer missing facts.
+Return a valid JSON object only. The JSON object must contain "entities" and
+"relations" arrays. Use empty arrays when no direct evidence is present. Do not
+return markdown, code fences, comments, or explanatory text.
 """.strip()
 
-EXTRACTION_PROMPT_VERSION = "2026-07-23-v2"
+EXTRACTION_PROMPT_VERSION = "2026-07-27-v1"
 
 QUERY_PLAN_PROMPT_VERSION = "2026-07-23-v2"
 

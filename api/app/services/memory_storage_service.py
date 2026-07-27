@@ -95,12 +95,12 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
             Workspace.id == workspace_id,
             Workspace.is_active.is_(True)
         )
-        workspace = self.db.scalar(stmt)
+        workspace = await self.db.scalar(stmt)
         if not workspace:
             raise BusinessException(t("workspace.not_found", locale=locale))
         validation_result = await MemoryConfigService(self.db).valid_config(config_id, locale=locale)
         workspace.memory_config = config_id
-        self.db.commit()
+        await self.db.commit()
         return {
             "config_id": config_id,
             "warnings": validation_result.get("warnings", []),
@@ -108,21 +108,18 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
         }
 
     # --- Create ---
-    def create(self, params: ConfigParamsCreate) -> Dict[str, Any]:  # 创建配置参数（仅名称与描述）
+    async def create_async(self, params: ConfigParamsCreate) -> Dict[str, Any]:  # 创建配置参数（异步版本）
         # 业务层检查同一工作空间下是否已存在同名配置
         if params.workspace_id and params.config_name:
-            from app.models.memory_config_model import MemoryConfig
-            existing = (
-                self.db.query(MemoryConfig)
-                .filter_by(workspace_id=params.workspace_id, config_name=params.config_name)
-                .first()
+            existing = await MemoryConfigRepository(self.db).get_by_workspace_and_config_name_async(
+                params.workspace_id, params.config_name
             )
             if existing:
                 raise ValueError(f"DUPLICATE_CONFIG_NAME:{params.config_name}")
 
         # 如果workspace_id存在且模型字段未全部指定，则自动获取
         if params.workspace_id and not all([params.llm_id, params.embedding_id, params.rerank_id]):
-            configs = self._get_workspace_configs(params.workspace_id)
+            configs = await self._get_workspace_configs_async(params.workspace_id)
             if configs is None:
                 raise ValueError(f"工作空间不存在: workspace_id={params.workspace_id}")
 
@@ -148,10 +145,10 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
 
         # 根据关联的本体场景推导 pruning_scene（语义剪枝场景与本体工程场景保持一致）
         if params.scene_id and not getattr(params, 'pruning_scene', None):
-            params.pruning_scene = self._resolve_pruning_scene_from_scene_id(params.scene_id)
+            params.pruning_scene = await self._resolve_pruning_scene_from_scene_id(params.scene_id)
 
-        config = MemoryConfigRepository.create(self.db, params)
-        self.db.commit()
+        config = await MemoryConfigRepository(self.db).create_async(params)
+        await self.db.commit()
         return {"affected": 1, "config_id": config.config_id}
 
     def _get_workspace_configs(self, workspace_id) -> Optional[Dict[str, Any]]:
@@ -162,7 +159,12 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
         with get_db_read() as db_session:
             return get_workspace_models_configs(db_session, workspace_id)
 
-    def _resolve_pruning_scene_from_scene_id(self, scene_id) -> Optional[str]:
+    async def _get_workspace_configs_async(self, workspace_id) -> Optional[Dict[str, Any]]:
+        """Async version of _get_workspace_configs — uses self.db (AsyncSession) directly."""
+        from app.repositories.workspace_repository import WorkspaceRepository
+        return await WorkspaceRepository(self.db).get_workspace_models_configs_async(workspace_id)
+
+    async def _resolve_pruning_scene_from_scene_id(self, scene_id) -> Optional[str]:
         """根据本体场景ID获取对应的 scene_name，作为语义剪枝场景值
 
         Args:
@@ -172,29 +174,29 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
             scene_name 字符串，查询失败时返回 None
         """
         try:
-            from app.models.ontology_scene import OntologyScene
-            scene = self.db.query(OntologyScene).filter_by(scene_id=scene_id).first()
+            from app.repositories.ontology_scene_repository import OntologySceneRepository
+            scene = await OntologySceneRepository(self.db).get_by_id_async(scene_id)
             return scene.scene_name if scene else None
         except Exception as e:
             logger.warning(f"_resolve_pruning_scene_from_scene_id failed for scene_id={scene_id}: {e}", exc_info=True)
             return None
 
     # --- Delete ---
-    def delete(self, key: ConfigParamsDelete) -> Dict[str, Any]:  # 删除配置参数（按配置ID）
-        success = MemoryConfigRepository.delete(self.db, key.config_id)
+    async def delete_async(self, key: ConfigParamsDelete) -> Dict[str, Any]:  # 删除配置参数（异步版本）
+        success = await MemoryConfigRepository(self.db).delete_async(key.config_id)
         if not success:
             raise ValueError("未找到配置")
         return {"affected": 1}
 
     # --- Update ---
-    def update(self, update: ConfigUpdate) -> Dict[str, Any]:  # 部分更新配置参数
-        config = MemoryConfigRepository.update(self.db, update)
+    async def update_async(self, update: ConfigUpdate) -> Dict[str, Any]:  # 部分更新配置参数（异步版本）
+        config = await MemoryConfigRepository(self.db).update_async(update)
         if not config:
             raise ValueError("未找到配置")
         return {"affected": 1}
 
-    def update_extracted(self, update: ConfigUpdateExtracted) -> Dict[str, Any]:  # 更新记忆萃取引擎配置参数
-        config = MemoryConfigRepository.update_extracted(self.db, update)
+    async def update_extracted_async(self, update: ConfigUpdateExtracted) -> Dict[str, Any]:  # 更新记忆萃取引擎配置参数（异步版本）
+        config = await MemoryConfigRepository(self.db).update_extracted_async(update)
         if not config:
             raise ValueError("未找到配置")
         return {"affected": 1}
@@ -204,15 +206,15 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
     # 使用新方法: MemoryForgetService.read_forgetting_config() 和 MemoryForgetService.update_forgetting_config()
 
     # --- Read ---
-    def get_extracted(self, key: ConfigKey) -> Dict[str, Any]:  # 获取萃取配置参数
-        result = MemoryConfigRepository.get_extracted_config(self.db, key.config_id)
+    async def get_extracted_async(self, key: ConfigKey) -> Dict[str, Any]:  # 获取萃取配置参数（异步版本）
+        result = await MemoryConfigRepository(self.db).get_extracted_config_async(key.config_id)
         if not result:
             raise ValueError("未找到配置")
         return result
 
     # --- Read All ---
-    def get_all(self, workspace_id) -> List[Dict[str, Any]]:  # 获取所有配置参数
-        results = MemoryConfigRepository.get_all(self.db, workspace_id)
+    async def get_all_async(self, workspace_id) -> List[Dict[str, Any]]:  # 获取所有配置参数（异步版本）
+        results = await MemoryConfigRepository(self.db).get_all_async(workspace_id)
 
         # 检查并修正 pruning_scene 与 scene_name 不一致的记录
         needs_commit = False
@@ -225,9 +227,9 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
                 config.pruning_scene = scene_name
                 needs_commit = True
         if needs_commit:
-            self.db.commit()
+            await self.db.commit()
 
-        activate_config_id = MemoryConfigService(self.db).get_workspace_active_config_id(workspace_id)
+        activate_config_id = await MemoryConfigService(self.db).get_workspace_active_config_id_async(workspace_id)
 
         # 将 ORM 对象转换为字典列表，时间字段统一转为 UTC 毫秒时间戳
         data_list = []

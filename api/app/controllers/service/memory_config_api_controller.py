@@ -3,7 +3,7 @@
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, Body, Depends, Header, Query, Request
+from fastapi import APIRouter, Body, Header, Query, Request
 from fastapi.encoders import jsonable_encoder
 from sqlalchemy.orm import Session
 
@@ -14,7 +14,7 @@ from app.core.api_key_auth import require_api_key
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
-from app.db import get_db
+from app.db import get_db_context, get_async_db_context
 from app.repositories.memory_config_repository import MemoryConfigRepository
 from app.schemas.api_key_schema import ApiKeyAuth
 from app.schemas.memory_api_schema import (
@@ -72,7 +72,7 @@ def _verify_config_ownership(config_id: str, workspace_id: uuid.UUID, db: Sessio
             message=f"Invalid config_id: {e}",
             code=BizCode.INVALID_PARAMETER,
         )
-    config = MemoryConfigRepository.get_by_id(db, resolved_id)
+    config = MemoryConfigRepository(db).get_by_id(resolved_id)
     if not config or config.workspace_id != workspace_id:
         raise BusinessException(
             message="Config not found or access denied",
@@ -108,7 +108,6 @@ def _verify_config_ownership(config_id: str, workspace_id: uuid.UUID, db: Sessio
 async def read_all_config(
         request: Request,
         api_key_auth: ApiKeyAuth = None,
-        db: Session = Depends(get_db),
 ):
     """
     List all memory configs with full details (enhanced version).
@@ -118,11 +117,11 @@ async def read_all_config(
     """
     logger.info(f"V1 get all configs (full) - workspace: {api_key_auth.workspace_id}")
 
-    current_user = _get_current_user(api_key_auth, db)
+    with get_db_context() as auth_db:
+        current_user = _get_current_user(api_key_auth, auth_db)
 
-    return memory_config_controller.read_all_config(
+    return await memory_config_controller.read_all_config(
         current_user=current_user,
-        db=db,
     )
 
 
@@ -131,7 +130,6 @@ async def read_all_config(
 async def get_ontology_scenes(
         request: Request,
         api_key_auth: ApiKeyAuth = None,
-        db: Session = Depends(get_db),
 ):
     """
     Get available ontology scenes for the workspace.
@@ -141,10 +139,10 @@ async def get_ontology_scenes(
     """
     logger.info(f"V1 get scenes - workspace: {api_key_auth.workspace_id}")
 
-    current_user = _get_current_user(api_key_auth, db)
+    with get_db_context() as auth_db:
+        current_user = _get_current_user(api_key_auth, auth_db)
 
     return await ontology_controller.get_scenes_simple(
-        db=db,
         current_user=current_user,
     )
 
@@ -155,7 +153,6 @@ async def read_config_extracted(
         request: Request,
         config_id: str = Query(..., description="config_id"),
         api_key_auth: ApiKeyAuth = None,
-        db: Session = Depends(get_db),
 ):
     """
     Get extraction engine config details for a specific config.
@@ -164,14 +161,13 @@ async def read_config_extracted(
     """
     logger.info(f"V1 read extracted config - config_id: {config_id}, workspace: {api_key_auth.workspace_id}")
 
-    _verify_config_ownership(config_id, api_key_auth.workspace_id, db)
+    with get_db_context() as auth_db:
+        _verify_config_ownership(config_id, api_key_auth.workspace_id, auth_db)
+        current_user = _get_current_user(api_key_auth, auth_db)
 
-    current_user = _get_current_user(api_key_auth, db)
-
-    return memory_config_controller.read_config_extracted(
+    return await memory_config_controller.read_config_extracted(
         config_id=config_id,
         current_user=current_user,
-        db=db,
     )
 
 
@@ -181,7 +177,6 @@ async def read_config_forgetting(
         request: Request,
         config_id: str = Query(..., description="config_id"),
         api_key_auth: ApiKeyAuth = None,
-        db: Session = Depends(get_db),
 ):
     """
     Get forgetting settings for a specific memory config.
@@ -190,14 +185,13 @@ async def read_config_forgetting(
     """
     logger.info(f"V1 read forgetting config - config_id: {config_id}, workspace: {api_key_auth.workspace_id}")
 
-    _verify_config_ownership(config_id, api_key_auth.workspace_id, db)
-
-    current_user = _get_current_user(api_key_auth, db)
+    with get_db_context() as auth_db:
+        _verify_config_ownership(config_id, api_key_auth.workspace_id, auth_db)
+        current_user = _get_current_user(api_key_auth, auth_db)
 
     result = await memory_config_controller.read_forgetting_config(
         config_id=config_id,
         current_user=current_user,
-        db=db,
     )
     return jsonable_encoder(result)
 
@@ -208,7 +202,6 @@ async def read_config_emotion(
         request: Request,
         config_id: str = Query(..., description="config_id"),
         api_key_auth: ApiKeyAuth = None,
-        db: Session = Depends(get_db),
 ):
     """
     Get emotion engine config details for a specific config.
@@ -217,13 +210,12 @@ async def read_config_emotion(
     """
     logger.info(f"V1 read emotion config - config_id: {config_id}, workspace: {api_key_auth.workspace_id}")
 
-    _verify_config_ownership(config_id, api_key_auth.workspace_id, db)
+    with get_db_context() as auth_db:
+        _verify_config_ownership(config_id, api_key_auth.workspace_id, auth_db)
+        current_user = _get_current_user(api_key_auth, auth_db)
 
-    current_user = _get_current_user(api_key_auth, db)
-
-    return jsonable_encoder(memory_config_controller.get_emotion_config(
+    return jsonable_encoder(await memory_config_controller.get_emotion_config(
         config_id=config_id,
-        db=db,
         current_user=current_user,
     ))
 
@@ -234,7 +226,6 @@ async def read_config_reflection(
         request: Request,
         config_id: str = Query(..., description="config_id"),
         api_key_auth: ApiKeyAuth = None,
-        db: Session = Depends(get_db),
 ):
     """
     Get reflection engine config details for a specific config.
@@ -243,14 +234,13 @@ async def read_config_reflection(
     """
     logger.info(f"V1 read reflection config - config_id: {config_id}, workspace: {api_key_auth.workspace_id}")
 
-    _verify_config_ownership(config_id, api_key_auth.workspace_id, db)
-
-    current_user = _get_current_user(api_key_auth, db)
+    with get_db_context() as auth_db:
+        _verify_config_ownership(config_id, api_key_auth.workspace_id, auth_db)
+        current_user = _get_current_user(api_key_auth, auth_db)
 
     return jsonable_encoder(await memory_config_controller.start_reflection_configs(
         config_id=config_id,
         current_user=current_user,
-        db=db,
     ))
 
 
@@ -259,7 +249,6 @@ async def read_config_reflection(
 async def create_memory_config(
         request: Request,
         api_key_auth: ApiKeyAuth = None,
-        db: Session = Depends(get_db),
         message: str = Body(None, description="Request body"),
         x_language_type: Optional[str] = Header(None, alias="X-Language-Type"),
 ):
@@ -274,8 +263,10 @@ async def create_memory_config(
 
     logger.info(f"V1 create config - workspace: {api_key_auth.workspace_id}, config_name: {payload.config_name}")
 
+    with get_db_context() as auth_db:
+        current_user = _get_current_user(api_key_auth, auth_db)
+
     # 构造管理端 Schema，workspace_id 从 API Key 注入
-    current_user = _get_current_user(api_key_auth, db)
     mgmt_payload = ConfigParamsCreate(
         config_name=payload.config_name,
         config_desc=payload.config_desc or "",
@@ -286,13 +277,15 @@ async def create_memory_config(
         reflection_model_id=payload.reflection_model_id,
         emotion_model_id=payload.emotion_model_id,
     )
-    # 将返回数据中UUID序列化处理
-    result = memory_config_controller.create_config(
-        payload=mgmt_payload,
-        current_user=current_user,
-        db=db,
-        x_language_type=x_language_type,
-    )
+
+    # 需要 sync Session 给 quota check 装饰器；create_config 内部会自己开 async session
+    with get_db_context() as quota_db:
+        result = await memory_config_controller.create_config(
+            payload=mgmt_payload,
+            current_user=current_user,
+            db=quota_db,
+            x_language_type=x_language_type,
+        )
     return jsonable_encoder(result)
 
 
@@ -301,7 +294,6 @@ async def create_memory_config(
 async def update_memory_config(
         request: Request,
         api_key_auth: ApiKeyAuth = None,
-        db: Session = Depends(get_db),
         message: str = Body(None, description="Request body"),
 ):
     """
@@ -315,9 +307,10 @@ async def update_memory_config(
 
     logger.info(f"V1 update config - config_id: {payload.config_id}, workspace: {api_key_auth.workspace_id}")
 
-    _verify_config_ownership(payload.config_id, api_key_auth.workspace_id, db)
+    with get_db_context() as auth_db:
+        _verify_config_ownership(payload.config_id, api_key_auth.workspace_id, auth_db)
+        current_user = _get_current_user(api_key_auth, auth_db)
 
-    current_user = _get_current_user(api_key_auth, db)
     mgmt_payload = ConfigUpdate(
         config_id=payload.config_id,
         config_name=payload.config_name,
@@ -325,10 +318,9 @@ async def update_memory_config(
         scene_id=payload.scene_id,
     )
 
-    return memory_config_controller.update_config(
+    return await memory_config_controller.update_config(
         payload=mgmt_payload,
         current_user=current_user,
-        db=db,
     )
 
 
@@ -337,7 +329,6 @@ async def update_memory_config(
 async def update_memory_config_extracted(
         request: Request,
         api_key_auth: ApiKeyAuth = None,
-        db: Session = Depends(get_db),
         message: str = Body(None, description="Request body"),
 ):
     """
@@ -351,17 +342,17 @@ async def update_memory_config_extracted(
 
     logger.info(f"V1 update extracted config - config_id: {payload.config_id}, workspace: {api_key_auth.workspace_id}")
 
-    # 校验权限
-    _verify_config_ownership(payload.config_id, api_key_auth.workspace_id, db)
+    with get_db_context() as auth_db:
+        # 校验权限
+        _verify_config_ownership(payload.config_id, api_key_auth.workspace_id, auth_db)
+        current_user = _get_current_user(api_key_auth, auth_db)
 
-    current_user = _get_current_user(api_key_auth, db)
     update_fields = payload.model_dump(exclude_unset=True)
     mgmt_payload = ConfigUpdateExtracted(**update_fields)
 
-    return memory_config_controller.update_config_extracted(
+    return await memory_config_controller.update_config_extracted(
         payload=mgmt_payload,
         current_user=current_user,
-        db=db,
     )
 
 
@@ -370,7 +361,6 @@ async def update_memory_config_extracted(
 async def update_memory_config_forgetting(
         request: Request,
         api_key_auth: ApiKeyAuth = None,
-        db: Session = Depends(get_db),
         message: str = Body(None, description="Request body"),
 ):
     """
@@ -384,10 +374,11 @@ async def update_memory_config_forgetting(
 
     logger.info(f"V1 update forgetting config - config_id: {payload.config_id}, workspace: {api_key_auth.workspace_id}")
 
-    # 校验权限
-    _verify_config_ownership(payload.config_id, api_key_auth.workspace_id, db)
+    with get_db_context() as auth_db:
+        # 校验权限
+        _verify_config_ownership(payload.config_id, api_key_auth.workspace_id, auth_db)
+        current_user = _get_current_user(api_key_auth, auth_db)
 
-    current_user = _get_current_user(api_key_auth, db)
     update_fields = payload.model_dump(exclude_unset=True)
     mgmt_payload = ForgettingConfigUpdateRequest(**update_fields)
 
@@ -395,7 +386,6 @@ async def update_memory_config_forgetting(
     result = await memory_config_controller.update_forgetting_config(
         payload=mgmt_payload,
         current_user=current_user,
-        db=db,
     )
     return jsonable_encoder(result)
 
@@ -405,7 +395,6 @@ async def update_memory_config_forgetting(
 async def update_config_emotion(
         request: Request,
         api_key_auth: ApiKeyAuth = None,
-        db: Session = Depends(get_db),
         message: str = Body(None, description="Request body"),
 ):
     """
@@ -419,14 +408,14 @@ async def update_config_emotion(
 
     logger.info(f"V1 update emotion config - config_id: {payload.config_id}, workspace: {api_key_auth.workspace_id}")
 
-    _verify_config_ownership(payload.config_id, api_key_auth.workspace_id, db)
+    with get_db_context() as auth_db:
+        _verify_config_ownership(payload.config_id, api_key_auth.workspace_id, auth_db)
+        current_user = _get_current_user(api_key_auth, auth_db)
 
-    current_user = _get_current_user(api_key_auth, db)
     update_fields = payload.model_dump(exclude_unset=True)
     mgmt_payload = EmotionConfigUpdate(**update_fields)
-    return jsonable_encoder(memory_config_controller.update_emotion_config(
+    return jsonable_encoder(await memory_config_controller.update_emotion_config(
         config=mgmt_payload,
-        db=db,
         current_user=current_user,
     ))
 
@@ -436,7 +425,6 @@ async def update_config_emotion(
 async def update_config_reflection(
         request: Request,
         api_key_auth: ApiKeyAuth = None,
-        db: Session = Depends(get_db),
         message: str = Body(None, description="Request body"),
 ):
     """
@@ -450,16 +438,16 @@ async def update_config_reflection(
 
     logger.info(f"V1 update reflection config - config_id: {payload.config_id}, workspace: {api_key_auth.workspace_id}")
 
-    _verify_config_ownership(payload.config_id, api_key_auth.workspace_id, db)
+    with get_db_context() as auth_db:
+        _verify_config_ownership(payload.config_id, api_key_auth.workspace_id, auth_db)
+        current_user = _get_current_user(api_key_auth, auth_db)
 
-    current_user = _get_current_user(api_key_auth, db)
     update_fields = payload.model_dump(exclude_unset=True)
     mgmt_payload = Memory_Reflection(**update_fields)
 
     return jsonable_encoder(await memory_config_controller.save_reflection_config(
         request=mgmt_payload,
         current_user=current_user,
-        db=db,
     ))
 
 
@@ -469,7 +457,6 @@ async def delete_memory_config(
         config_id: str,
         request: Request,
         api_key_auth: ApiKeyAuth = None,
-        db: Session = Depends(get_db),
 ):
     """
     Delete a memory config.
@@ -481,12 +468,11 @@ async def delete_memory_config(
     """
     logger.info(f"V1 delete config - config_id: {config_id}, workspace: {api_key_auth.workspace_id}")
 
-    _verify_config_ownership(config_id, api_key_auth.workspace_id, db)
+    with get_db_context() as auth_db:
+        _verify_config_ownership(config_id, api_key_auth.workspace_id, auth_db)
+        current_user = _get_current_user(api_key_auth, auth_db)
 
-    current_user = _get_current_user(api_key_auth, db)
-
-    return memory_config_controller.delete_config(
+    return await memory_config_controller.delete_config(
         config_id=config_id,
         current_user=current_user,
-        db=db,
     )

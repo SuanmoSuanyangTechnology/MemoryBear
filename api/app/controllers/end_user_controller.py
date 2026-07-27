@@ -8,14 +8,12 @@ user_memory_controllers），使对内 /api/end_user/* 与对外 /v1/end_user/* 
 认证方式: JWT Token
 """
 from fastapi import APIRouter, Depends
-from sqlalchemy.orm import Session
 
 from app.core.error_codes import BizCode
 from app.core.logging_config import get_api_logger
 from app.core.response_utils import fail, success
-from app.db import get_db
-from app.dependencies import get_current_user, get_current_user_async, CurrentUserSnapshot
-from app.models.user_model import User
+from app.db import get_async_db_context
+from app.dependencies import get_current_user_async, CurrentUserSnapshot
 from app.repositories.end_user_repository import EndUserRepository
 from app.schemas.end_user_info_schema import EndUserInfoUpdate
 from app.schemas.response_schema import ApiResponse
@@ -117,8 +115,7 @@ async def get_end_user_info(
 @router.post("/info/update", response_model=ApiResponse)
 async def update_end_user_info(
     info_update: EndUserInfoUpdate,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ) -> dict:
     """
     更新终端用户信息记录
@@ -137,21 +134,22 @@ async def update_end_user_info(
         f"workspace={workspace_id}"
     )
 
-    # 校验 end_user 是否属于当前工作空间
-    end_user_repo = EndUserRepository(db)
-    end_user = end_user_repo.get_end_user_by_id(end_user_id)
-    if end_user is None:
-        return fail(BizCode.USER_NOT_FOUND, "终端用户不存在", "end_user not found")
-    if str(end_user.workspace_id) != str(workspace_id):
-        api_logger.warning(
-            f"用户 {current_user.username} 尝试更新不属于工作空间 {workspace_id} 的终端用户 {end_user_id}"
-        )
-        return fail(BizCode.PERMISSION_DENIED, "该终端用户不属于当前工作空间", "end_user workspace mismatch")
+    async with get_async_db_context() as db:
+        # 校验 end_user 是否属于当前工作空间
+        end_user_repo = EndUserRepository(db)
+        end_user = await end_user_repo.get_end_user_by_id_async(end_user_id)
+        if end_user is None:
+            return fail(BizCode.USER_NOT_FOUND, "终端用户不存在", "end_user not found")
+        if str(end_user.workspace_id) != str(workspace_id):
+            api_logger.warning(
+                f"用户 {current_user.username} 尝试更新不属于工作空间 {workspace_id} 的终端用户 {end_user_id}"
+            )
+            return fail(BizCode.PERMISSION_DENIED, "该终端用户不属于当前工作空间", "end_user workspace mismatch")
 
-    # 获取更新数据（排除 end_user_id）
-    update_data = info_update.model_dump(exclude_unset=True, exclude={'end_user_id'})
+        # 获取更新数据（排除 end_user_id）
+        update_data = info_update.model_dump(exclude_unset=True, exclude={'end_user_id'})
 
-    result = user_memory_service.update_end_user_info(db, end_user_id, update_data)
+        result = await user_memory_service.update_end_user_info_async(db, end_user_id, update_data)
 
     if result["success"]:
         api_logger.info(f"成功更新终端用户信息: end_user_id={end_user_id}")
