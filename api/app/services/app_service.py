@@ -674,13 +674,37 @@ class AppService:
         self._validate_app_accessible(app, workspace_id)
         return app
 
+    async def _check_app_accessible_async(self, app: App, workspace_id: Optional[uuid.UUID]) -> bool:
+        from app.models import AppShare
+
+        if workspace_id is None:
+            return True
+        if app.workspace_id == workspace_id:
+            return True
+
+        stmt = select(AppShare).where(
+            AppShare.source_app_id == app.id,
+            AppShare.target_workspace_id == workspace_id,
+            AppShare.is_active.is_(True)
+        )
+        share = await self.db.scalar(stmt)
+        return share is not None
+
+    async def _validate_app_accessible_async(self, app: App, workspace_id: Optional[uuid.UUID]) -> None:
+        if not await self._check_app_accessible_async(app, workspace_id):
+            logger.warning(
+                "应用访问被拒",
+                extra={"app_id": str(app.id), "workspace_id": str(workspace_id)}
+            )
+            raise BusinessException("应用不可访问", BizCode.WORKSPACE_NO_ACCESS)
+
     async def get_app_async(
             self,
             app_id: uuid.UUID,
             workspace_id: Optional[uuid.UUID] = None
     ) -> App:
         app = await self._get_app_or_404_async(app_id)
-        self._validate_app_accessible(app, workspace_id)
+        await self._validate_app_accessible_async(app, workspace_id)
         return app
 
     def get_release_by_id(self, app_id: uuid.UUID, release_id: uuid.UUID) -> AppRelease:
