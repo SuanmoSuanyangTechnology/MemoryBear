@@ -120,9 +120,9 @@ async def read_all_config(
     with get_db_context() as auth_db:
         current_user = _get_current_user(api_key_auth, auth_db)
 
-    return await memory_config_controller.read_all_config(
-        current_user=current_user,
-    )
+        return await memory_config_controller.read_all_config(
+            current_user=current_user,
+        )
 
 
 @router.get("/scenes/simple")
@@ -142,9 +142,9 @@ async def get_ontology_scenes(
     with get_db_context() as auth_db:
         current_user = _get_current_user(api_key_auth, auth_db)
 
-    return await ontology_controller.get_scenes_simple(
-        current_user=current_user,
-    )
+        return await ontology_controller.get_scenes_simple(
+            current_user=current_user,
+        )
 
 
 @router.get("/read_config_extracted")
@@ -165,10 +165,10 @@ async def read_config_extracted(
         _verify_config_ownership(config_id, api_key_auth.workspace_id, auth_db)
         current_user = _get_current_user(api_key_auth, auth_db)
 
-    return await memory_config_controller.read_config_extracted(
-        config_id=config_id,
-        current_user=current_user,
-    )
+        return await memory_config_controller.read_config_extracted(
+            config_id=config_id,
+            current_user=current_user,
+        )
 
 
 @router.get("/read_config_forgetting")
@@ -189,11 +189,11 @@ async def read_config_forgetting(
         _verify_config_ownership(config_id, api_key_auth.workspace_id, auth_db)
         current_user = _get_current_user(api_key_auth, auth_db)
 
-    result = await memory_config_controller.read_forgetting_config(
-        config_id=config_id,
-        current_user=current_user,
-    )
-    return jsonable_encoder(result)
+        result = await memory_config_controller.read_forgetting_config(
+            config_id=config_id,
+            current_user=current_user,
+        )
+        return jsonable_encoder(result)
 
 
 @router.get("/read_config_emotion")
@@ -214,10 +214,10 @@ async def read_config_emotion(
         _verify_config_ownership(config_id, api_key_auth.workspace_id, auth_db)
         current_user = _get_current_user(api_key_auth, auth_db)
 
-    return jsonable_encoder(await memory_config_controller.get_emotion_config(
-        config_id=config_id,
-        current_user=current_user,
-    ))
+        return jsonable_encoder(await memory_config_controller.get_emotion_config(
+            config_id=config_id,
+            current_user=current_user,
+        ))
 
 
 @router.get("/read_config_reflection")
@@ -238,10 +238,10 @@ async def read_config_reflection(
         _verify_config_ownership(config_id, api_key_auth.workspace_id, auth_db)
         current_user = _get_current_user(api_key_auth, auth_db)
 
-    return jsonable_encoder(await memory_config_controller.start_reflection_configs(
-        config_id=config_id,
-        current_user=current_user,
-    ))
+        return jsonable_encoder(await memory_config_controller.start_reflection_configs(
+            config_id=config_id,
+            current_user=current_user,
+        ))
 
 
 @router.post("/create_config")
@@ -266,27 +266,24 @@ async def create_memory_config(
     with get_db_context() as auth_db:
         current_user = _get_current_user(api_key_auth, auth_db)
 
-    # 构造管理端 Schema，workspace_id 从 API Key 注入
-    mgmt_payload = ConfigParamsCreate(
-        config_name=payload.config_name,
-        config_desc=payload.config_desc or "",
-        scene_id=payload.scene_id,
-        llm_id=payload.llm_id,
-        embedding_id=payload.embedding_id,
-        rerank_id=payload.rerank_id,
-        reflection_model_id=payload.reflection_model_id,
-        emotion_model_id=payload.emotion_model_id,
-    )
-
-    # 需要 sync Session 给 quota check 装饰器；create_config 内部会自己开 async session
-    with get_db_context() as quota_db:
+        # 构造管理端 Schema，workspace_id 从 API Key 注入
+        mgmt_payload = ConfigParamsCreate(
+            config_name=payload.config_name,
+            config_desc=payload.config_desc or "",
+            scene_id=payload.scene_id,
+            llm_id=payload.llm_id,
+            embedding_id=payload.embedding_id,
+            rerank_id=payload.rerank_id,
+            reflection_model_id=payload.reflection_model_id,
+            emotion_model_id=payload.emotion_model_id,
+        )
         result = await memory_config_controller.create_config(
             payload=mgmt_payload,
             current_user=current_user,
-            db=quota_db,
+            db=auth_db,
             x_language_type=x_language_type,
         )
-    return jsonable_encoder(result)
+        return jsonable_encoder(result)
 
 
 @router.put("/update_config")
@@ -311,17 +308,17 @@ async def update_memory_config(
         _verify_config_ownership(payload.config_id, api_key_auth.workspace_id, auth_db)
         current_user = _get_current_user(api_key_auth, auth_db)
 
-    mgmt_payload = ConfigUpdate(
-        config_id=payload.config_id,
-        config_name=payload.config_name,
-        config_desc=payload.config_desc,
-        scene_id=payload.scene_id,
-    )
+        mgmt_payload = ConfigUpdate(
+            config_id=payload.config_id,
+            config_name=payload.config_name,
+            config_desc=payload.config_desc,
+            scene_id=payload.scene_id,
+        )
 
-    return await memory_config_controller.update_config(
-        payload=mgmt_payload,
-        current_user=current_user,
-    )
+        return await memory_config_controller.update_config(
+            payload=mgmt_payload,
+            current_user=current_user,
+        )
 
 
 @router.put("/update_config_extracted")
@@ -347,13 +344,13 @@ async def update_memory_config_extracted(
         _verify_config_ownership(payload.config_id, api_key_auth.workspace_id, auth_db)
         current_user = _get_current_user(api_key_auth, auth_db)
 
-    update_fields = payload.model_dump(exclude_unset=True)
-    mgmt_payload = ConfigUpdateExtracted(**update_fields)
+        update_fields = payload.model_dump(exclude_unset=True)
+        mgmt_payload = ConfigUpdateExtracted(**update_fields)
 
-    return await memory_config_controller.update_config_extracted(
-        payload=mgmt_payload,
-        current_user=current_user,
-    )
+        return await memory_config_controller.update_config_extracted(
+            payload=mgmt_payload,
+            current_user=current_user,
+        )
 
 
 @router.put("/update_config_forgetting")
@@ -379,15 +376,15 @@ async def update_memory_config_forgetting(
         _verify_config_ownership(payload.config_id, api_key_auth.workspace_id, auth_db)
         current_user = _get_current_user(api_key_auth, auth_db)
 
-    update_fields = payload.model_dump(exclude_unset=True)
-    mgmt_payload = ForgettingConfigUpdateRequest(**update_fields)
+        update_fields = payload.model_dump(exclude_unset=True)
+        mgmt_payload = ForgettingConfigUpdateRequest(**update_fields)
 
-    # 将返回数据中UUID序列化处理
-    result = await memory_config_controller.update_forgetting_config(
-        payload=mgmt_payload,
-        current_user=current_user,
-    )
-    return jsonable_encoder(result)
+        # 将返回数据中UUID序列化处理
+        result = await memory_config_controller.update_forgetting_config(
+            payload=mgmt_payload,
+            current_user=current_user,
+        )
+        return jsonable_encoder(result)
 
 
 @router.put("/update_config_emotion")
@@ -412,12 +409,12 @@ async def update_config_emotion(
         _verify_config_ownership(payload.config_id, api_key_auth.workspace_id, auth_db)
         current_user = _get_current_user(api_key_auth, auth_db)
 
-    update_fields = payload.model_dump(exclude_unset=True)
-    mgmt_payload = EmotionConfigUpdate(**update_fields)
-    return jsonable_encoder(await memory_config_controller.update_emotion_config(
-        config=mgmt_payload,
-        current_user=current_user,
-    ))
+        update_fields = payload.model_dump(exclude_unset=True)
+        mgmt_payload = EmotionConfigUpdate(**update_fields)
+        return jsonable_encoder(await memory_config_controller.update_emotion_config(
+            config=mgmt_payload,
+            current_user=current_user,
+        ))
 
 
 @router.put("/update_config_reflection")
@@ -442,13 +439,13 @@ async def update_config_reflection(
         _verify_config_ownership(payload.config_id, api_key_auth.workspace_id, auth_db)
         current_user = _get_current_user(api_key_auth, auth_db)
 
-    update_fields = payload.model_dump(exclude_unset=True)
-    mgmt_payload = Memory_Reflection(**update_fields)
+        update_fields = payload.model_dump(exclude_unset=True)
+        mgmt_payload = Memory_Reflection(**update_fields)
 
-    return jsonable_encoder(await memory_config_controller.save_reflection_config(
-        request=mgmt_payload,
-        current_user=current_user,
-    ))
+        return jsonable_encoder(await memory_config_controller.save_reflection_config(
+            request=mgmt_payload,
+            current_user=current_user,
+        ))
 
 
 @router.delete("/delete_config")
@@ -472,7 +469,7 @@ async def delete_memory_config(
         _verify_config_ownership(config_id, api_key_auth.workspace_id, auth_db)
         current_user = _get_current_user(api_key_auth, auth_db)
 
-    return await memory_config_controller.delete_config(
-        config_id=config_id,
-        current_user=current_user,
-    )
+        return await memory_config_controller.delete_config(
+            config_id=config_id,
+            current_user=current_user,
+        )
