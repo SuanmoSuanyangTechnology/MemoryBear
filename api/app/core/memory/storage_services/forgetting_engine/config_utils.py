@@ -100,8 +100,7 @@ def load_actr_config_from_db(
     
     # 从数据库加载配置
     try:
-        repository = MemoryConfigRepository()
-        db_config = repository.get_by_id(db, config_id)
+        db_config = MemoryConfigRepository(db).get_by_id(config_id)
         
         if db_config is None:
             logger.error(f"配置不存在: config_id={config_id}")

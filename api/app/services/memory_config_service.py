@@ -386,7 +386,7 @@ class MemoryConfigService:
 
         # 1. 获取模型配置
         try:
-            model_config = ModelSvc.get_model_by_id(self.db, uuid.UUID(model_id), tenant_id)
+            model_config = await ModelSvc.get_model_by_id_async(self.db, uuid.UUID(model_id), tenant_id)
         except Exception as e:
             raise ModelNotFoundError(
                 model_id=model_id,
@@ -398,7 +398,7 @@ class MemoryConfigService:
             )
 
         # 2. 获取可用 API Key
-        api_key_config = ModelApiKeyService.get_available_api_key(
+        api_key_config = await ModelApiKeyService.get_available_api_key_async(
             self.db, model_config.id, tenant_id
         )
         if not api_key_config:
@@ -458,7 +458,7 @@ class MemoryConfigService:
         """
         from app.models.memory_config_model import MemoryConfig as MemoryConfigModel
 
-        config = self.db.get(MemoryConfigModel, config_id)
+        config = await self.db.get(MemoryConfigModel, config_id)
         if not config:
             raise InvalidConfigError(
                 t("memory_config.config.not_found", locale=locale, config_id=str(config_id)),
@@ -466,7 +466,7 @@ class MemoryConfigService:
                 invalid_value=config_id,
             )
 
-        workspace = self.db.get(Workspace, config.workspace_id) if config.workspace_id else None
+        workspace = await self.db.get(Workspace, config.workspace_id) if config.workspace_id else None
         tenant_id = workspace.tenant_id if workspace else None
         workspace_id = workspace.id if workspace else None
 
@@ -578,7 +578,7 @@ class MemoryConfigService:
                     f"Configuration not found: config_id={config_id}"
                 )
 
-            result = MemoryConfigRepository.get_config_with_workspace(self.db, memory_config.config_id)
+            result = MemoryConfigRepository(self.db).get_config_with_workspace(memory_config.config_id)
 
             if not result:
                 raise ConfigurationError(
@@ -711,9 +711,7 @@ class MemoryConfigService:
 
         try:
             # Step 1: load config row + workspace in a single JOIN query
-            result = await MemoryConfigRepository.get_config_with_workspace_async(
-                self.db, config_id
-            )
+            result = await MemoryConfigRepository(self.db).get_config_with_workspace_async(config_id)
             if not result:
                 elapsed_ms = (time.perf_counter() - start_time) * 1000
                 config_logger.error(
@@ -1067,7 +1065,7 @@ class MemoryConfigService:
         Returns:
             Optional[MemoryConfigModel]: Default config or None if no configs exist
         """
-        config = MemoryConfigRepository.get_workspace_default(self.db, workspace_id)
+        config = MemoryConfigRepository(self.db).get_workspace_default(workspace_id)
 
         if not config:
             logger.warning(
@@ -1139,8 +1137,7 @@ class MemoryConfigService:
                 extra={"workspace_id": str(workspace_id)}
             )
 
-        config = MemoryConfigRepository.get_with_fallback(
-            self.db,
+        config = MemoryConfigRepository(self.db).get_with_fallback(
             memory_config_id,
             workspace_id
         )
@@ -1242,6 +1239,117 @@ class MemoryConfigService:
 
         except IntegrityError as e:
             self.db.rollback()
+
+            # Handle foreign key violation gracefully
+            error_str = str(e.orig) if e.orig else str(e)
+            if "ForeignKeyViolation" in error_str or "foreign key constraint" in error_str.lower():
+                logger.warning(
+                    "Delete failed due to foreign key constraint",
+                    extra={
+                        "config_id": str(config_id),
+                        "error": error_str
+                    }
+                )
+                return {
+                    "status": "error",
+                    "message": "无法删除记忆配置：仍有终端用户引用此配置，请使用 force=true 强制删除",
+                    "force_required": True
+                }
+
+            # Re-raise other integrity errors
+            logger.error(
+                "Delete failed due to integrity error",
+                extra={
+                    "config_id": str(config_id),
+                    "error": error_str
+                },
+                exc_info=True
+            )
+            raise
+
+    async def delete_config_async(
+            self,
+            config_id: UUID | int,
+            workspace_id: uuid.UUID,
+    ) -> dict:
+        """Async version of delete_config — uses await for AsyncSession operations.
+
+        Args:
+            workspace_id:
+            config_id: Memory config ID to delete (UUID or legacy int)
+
+        Returns:
+            Dict with status, message, and affected_users count
+
+        Raises:
+            ResourceNotFoundException: If config doesn't exist
+        """
+        from sqlalchemy.exc import IntegrityError
+
+        from app.core.exceptions import ResourceNotFoundException
+        from app.models.memory_config_model import MemoryConfig as MemoryConfigModel
+
+        # 处理旧格式 int 类型的 config_id
+        if isinstance(config_id, int):
+            logger.warning(
+                "Attempted to delete legacy int config_id",
+                extra={"config_id": config_id}
+            )
+            return {
+                "status": "error",
+                "message": "旧格式配置ID不支持删除操作，请使用新版配置",
+                "legacy_int_id": config_id
+            }
+
+        config = await self.db.get(MemoryConfigModel, config_id)
+        if not config:
+            raise ResourceNotFoundException("MemoryConfig", str(config_id))
+
+        # Check if this is the default config - default configs cannot be deleted
+        if config.is_default:
+            logger.warning(
+                "Attempted to delete default memory config",
+                extra={"config_id": str(config_id)}
+            )
+            return {
+                "status": "error",
+                "message": "默认配置不允许删除",
+                "is_default": True
+            }
+        active_config_id = await self.get_workspace_active_config_id_async(workspace_id)
+
+        if str(config.config_id) == str(active_config_id):
+            logger.warning(
+                "Attempted to delete memory config with connected end users",
+                extra={
+                    "config_id": str(config_id),
+                }
+            )
+
+            return {
+                "status": "warning",
+                "message": "无法删除记忆配置：当前空间正在使用此配置",
+                "force_required": True
+            }
+
+        try:
+            await self.db.delete(config)
+            await self.db.commit()
+
+            logger.info(
+                "Memory config deleted",
+                extra={
+                    "config_id": str(config_id),
+                }
+            )
+
+            return {
+                "status": "success",
+                "message": "记忆配置删除成功",
+            }
+
+        except IntegrityError as e:
+            await self.db.rollback()
 
             # Handle foreign key violation gracefully
             error_str = str(e.orig) if e.orig else str(e)

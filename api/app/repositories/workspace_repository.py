@@ -346,6 +346,39 @@ class WorkspaceRepository:
             db_logger.error(f"查询空间记忆配置失败 - {str(e)}")
             raise
 
+    async def get_workspace_models_configs_async(self, workspace_id: uuid.UUID) -> Optional[dict]:
+        """Async version of get_workspace_models_configs.
+
+        Args:
+            workspace_id: 工作空间ID
+
+        Returns:
+            包含 llm, embedding, rerank, vision, audio, video 的字典，如果工作空间不存在则返回 None
+        """
+        db_logger.debug(f"查询工作空间模型配置(异步): workspace_id={workspace_id}")
+        try:
+            result = await self.db.execute(
+                select(Workspace).where(Workspace.id == workspace_id)
+            )
+            workspace = result.scalars().first()
+            if workspace:
+                return {
+                    "llm": workspace.llm,
+                    "embedding": workspace.embedding,
+                    "rerank": workspace.rerank,
+                    "vision": workspace.vision,
+                    "audio": workspace.audio,
+                    "video": workspace.video,
+                    "is_default_config": workspace.is_default_config,
+                    "default_model_notice_pending": workspace.default_model_notice_pending,
+                }
+            else:
+                db_logger.debug(f"工作空间不存在(异步): workspace_id={workspace_id}")
+                return None
+        except Exception as e:
+            db_logger.error(f"查询工作空间模型配置失败(异步): workspace_id={workspace_id} - {str(e)}")
+            raise
+
 
 # 保持向后兼容的函数
 def get_workspace_by_id(db: Session, workspace_id: uuid.UUID) -> Workspace | None:

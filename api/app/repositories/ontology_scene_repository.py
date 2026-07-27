@@ -7,11 +7,12 @@ Classes:
     OntologySceneRepository: 本体场景数据访问类
 """
 
-import logging
 from typing import List, Optional
 from uuid import UUID
 
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import select, func
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.core.logging_config import get_db_logger
 from app.models.ontology_scene import OntologyScene
@@ -29,11 +30,11 @@ class OntologySceneRepository:
         db: SQLAlchemy数据库会话
     """
     
-    def __init__(self, db: Session):
+    def __init__(self, db: Session | AsyncSession):
         """初始化Repository
         
         Args:
-            db: SQLAlchemy数据库会话
+            db: SQLAlchemy数据库会话 (支持同步和异步)
         """
         self.db = db
     
@@ -162,278 +163,212 @@ class OntologySceneRepository:
             )
             raise
     
-    def search_by_name(self, keyword: str, workspace_id: UUID) -> List[OntologyScene]:
-        """根据关键词模糊搜索场景
-        
-        使用 LIKE 进行模糊匹配，支持中文和英文。
-        
-        Args:
-            keyword: 搜索关键词
-            workspace_id: 工作空间ID
-            
-        Returns:
-            List[OntologyScene]: 匹配的场景列表
-            
-        Examples:
-            >>> repo = OntologySceneRepository(db)
-            >>> scenes = repo.search_by_name("医疗", workspace_id)
-        """
+    # ==================== Async 版本 ====================
+
+    async def create_async(self, scene_data: dict, workspace_id: UUID) -> OntologyScene:
+        """Async version of create"""
         try:
-            logger.debug(
-                f"Searching ontology scenes by keyword - "
-                f"keyword={keyword}, workspace_id={workspace_id}"
-            )
-            
-            # 使用 ilike 进行不区分大小写的模糊匹配
-            scenes = self.db.query(OntologyScene).options(
-                joinedload(OntologyScene.classes)
-            ).filter(
-                OntologyScene.scene_name.ilike(f"%{keyword}%"),
-                OntologyScene.workspace_id == workspace_id
-            ).order_by(
-                OntologyScene.updated_at.desc()
-            ).all()
-            
             logger.info(
-                f"Found {len(scenes)} ontology scenes matching keyword '{keyword}' "
-                f"in workspace {workspace_id}"
+                f"Creating ontology scene (async) - "
+                f"name={scene_data.get('scene_name')}, "
+                f"workspace_id={workspace_id}"
             )
-            
-            return scenes
-            
-        except Exception as e:
-            logger.error(
-                f"Failed to search ontology scenes by keyword: {str(e)}",
-                exc_info=True
+            scene = OntologyScene(
+                scene_name=scene_data.get("scene_name"),
+                scene_description=scene_data.get("scene_description"),
+                workspace_id=workspace_id
             )
-            raise
-    
-    def get_by_workspace(self, workspace_id: UUID, page: Optional[int] = None, page_size: Optional[int] = None) -> tuple:
-        """获取工作空间下的所有场景（支持分页）
-        
-        使用joinedload预加载classes关系以统计数量。
-        
-        Args:
-            workspace_id: 工作空间ID
-            page: 页码（可选，从1开始）
-            page_size: 每页数量（可选）
-            
-        Returns:
-            tuple: (场景列表, 总数量)
-            
-        Examples:
-            >>> repo = OntologySceneRepository(db)
-            >>> scenes, total = repo.get_by_workspace(workspace_id)
-            >>> scenes, total = repo.get_by_workspace(workspace_id, page=1, page_size=10)
-        """
-        try:
-            logger.debug(f"Getting ontology scenes by workspace: {workspace_id}, page={page}, page_size={page_size}")
-            
-            # 构建基础查询
-            query = self.db.query(OntologyScene).options(
-                joinedload(OntologyScene.classes)
-            ).filter(
-                OntologyScene.workspace_id == workspace_id
-            ).order_by(
-                OntologyScene.updated_at.desc()
-            )
-            
-            # 获取总数
-            total = query.count()
-            
-            # 如果提供了分页参数，应用分页
-            if page is not None and page_size is not None:
-                offset = (page - 1) * page_size
-                query = query.offset(offset).limit(page_size)
-                logger.debug(f"Applying pagination: offset={offset}, limit={page_size}")
-            
-            scenes = query.all()
-            
-            logger.info(
-                f"Found {len(scenes)} ontology scenes (total: {total}) in workspace {workspace_id}"
-            )
-            
-            return scenes, total
-            
-        except Exception as e:
-            logger.error(
-                f"Failed to get ontology scenes by workspace: {str(e)}",
-                exc_info=True
-            )
-            raise
-    
-    def update(self, scene_id: UUID, update_data: dict) -> Optional[OntologyScene]:
-        """更新场景信息
-        
-        Args:
-            scene_id: 场景ID
-            update_data: 更新数据字典
-            
-        Returns:
-            Optional[OntologyScene]: 更新后的场景对象，不存在则返回None
-            
-        Raises:
-            Exception: 数据库操作失败
-            
-        Examples:
-            >>> repo = OntologySceneRepository(db)
-            >>> scene = repo.update(
-            ...     scene_id,
-            ...     {"scene_name": "新名称"}
-            ... )
-        """
-        try:
-            logger.info(f"Updating ontology scene: {scene_id}")
-            
-            scene = self.get_by_id(scene_id)
-            if not scene:
-                logger.warning(f"Ontology scene not found for update: {scene_id}")
-                return None
-            
-            # 更新字段
-            if "scene_name" in update_data and update_data["scene_name"] is not None:
-                scene.scene_name = update_data["scene_name"]
-            
-            if "scene_description" in update_data:
-                scene.scene_description = update_data["scene_description"]
-            
-            self.db.flush()
-            
-            logger.info(f"Ontology scene updated successfully: {scene_id}")
-            
+            self.db.add(scene)
+            await self.db.flush()
+            logger.info(f"Ontology scene created successfully (async): {scene.scene_id}")
             return scene
-            
         except Exception as e:
-            logger.error(
-                f"Failed to update ontology scene: {str(e)}",
-                exc_info=True
-            )
-            raise
-    
-    def delete(self, scene_id: UUID) -> bool:
-        """删除场景（级联删除类型）
-        
-        依赖数据库级联删除配置（ondelete="CASCADE"）。
-        
-        Args:
-            scene_id: 场景ID
-            
-        Returns:
-            bool: 删除成功返回True，场景不存在返回False
-            
-        Raises:
-            Exception: 数据库操作失败
-            
-        Examples:
-            >>> repo = OntologySceneRepository(db)
-            >>> success = repo.delete(scene_id)
-        """
-        try:
-            logger.info(f"Deleting ontology scene: {scene_id}")
-            
-            scene = self.get_by_id(scene_id)
-            if not scene:
-                logger.warning(f"Ontology scene not found for delete: {scene_id}")
-                return False
-            
-            self.db.delete(scene)
-            self.db.flush()
-            
-            logger.info(
-                f"Ontology scene deleted successfully (cascade): {scene_id}"
-            )
-            
-            return True
-            
-        except Exception as e:
-            logger.error(
-                f"Failed to delete ontology scene: {str(e)}",
-                exc_info=True
-            )
-            raise
-    
-    def check_ownership(self, scene_id: UUID, workspace_id: UUID) -> bool:
-        """检查场景是否属于指定工作空间
-        
-        Args:
-            scene_id: 场景ID
-            workspace_id: 工作空间ID
-            
-        Returns:
-            bool: 属于返回True，否则返回False
-            
-        Examples:
-            >>> repo = OntologySceneRepository(db)
-            >>> is_owner = repo.check_ownership(scene_id, workspace_id)
-        """
-        try:
-            logger.debug(
-                f"Checking scene ownership - "
-                f"scene_id={scene_id}, workspace_id={workspace_id}"
-            )
-            
-            count = self.db.query(OntologyScene).filter(
-                OntologyScene.scene_id == scene_id,
-                (OntologyScene.workspace_id == workspace_id) | (OntologyScene.is_system_default == True)
-            ).count()
-            
-            is_owner = count > 0
-            
-            logger.debug(
-                f"Scene ownership check result: {is_owner} - "
-                f"scene_id={scene_id}"
-            )
-            
-            return is_owner
-            
-        except Exception as e:
-            logger.error(
-                f"Failed to check scene ownership: {str(e)}",
-                exc_info=True
-            )
+            logger.error(f"Failed to create ontology scene (async): {str(e)}", exc_info=True)
             raise
 
-    def get_simple_list(self, workspace_id: UUID) -> List[dict]:
-        """获取场景简单列表（仅包含scene_id和scene_name，用于下拉选择）
-        
-        这是一个轻量级查询，不加载关联的classes，响应速度快。
-        
-        Args:
-            workspace_id: 工作空间ID
-            
-        Returns:
-            List[dict]: 场景简单列表，每项包含scene_id和scene_name
-            
-        Examples:
-            >>> repo = OntologySceneRepository(db)
-            >>> scenes = repo.get_simple_list(workspace_id)
-            >>> # [{"scene_id": "xxx", "scene_name": "场景1"}, ...]
-        """
+    async def get_by_id_async(self, scene_id: UUID) -> Optional[OntologyScene]:
+        """Async version of get_by_id"""
         try:
-            logger.debug(f"Getting simple scene list for workspace: {workspace_id}")
-            
-            # 只查询需要的字段，不加载关联数据
-            results = self.db.query(
-                OntologyScene.scene_id,
-                OntologyScene.scene_name
-            ).filter(
-                OntologyScene.workspace_id == workspace_id
-            ).order_by(
-                OntologyScene.updated_at.desc()
-            ).all()
-            
+            logger.debug(f"Getting ontology scene by ID (async): {scene_id}")
+            stmt = select(OntologyScene).where(OntologyScene.scene_id == scene_id)
+            result = await self.db.execute(stmt)
+            scene = result.scalar_one_or_none()
+            if scene:
+                logger.debug(f"Ontology scene found (async): {scene_id}")
+            else:
+                logger.debug(f"Ontology scene not found (async): {scene_id}")
+            return scene
+        except Exception as e:
+            logger.error(f"Failed to get ontology scene by ID (async): {str(e)}", exc_info=True)
+            raise
+
+    async def get_by_name_async(self, scene_name: str, workspace_id: UUID) -> Optional[OntologyScene]:
+        """Async version of get_by_name"""
+        try:
+            logger.debug(
+                f"Getting ontology scene by name (async) - "
+                f"scene_name={scene_name}, workspace_id={workspace_id}"
+            )
+            stmt = (
+                select(OntologyScene)
+                .options(selectinload(OntologyScene.classes))
+                .where(
+                    OntologyScene.scene_name == scene_name,
+                    OntologyScene.workspace_id == workspace_id
+                )
+            )
+            result = await self.db.execute(stmt)
+            scene = result.unique().scalar_one_or_none()
+            if scene:
+                logger.debug(f"Ontology scene found (async): {scene_name}")
+            else:
+                logger.debug(f"Ontology scene not found (async): {scene_name}")
+            return scene
+        except Exception as e:
+            logger.error(f"Failed to get ontology scene by name (async): {str(e)}", exc_info=True)
+            raise
+
+    async def search_by_name_async(self, keyword: str, workspace_id: UUID) -> List[OntologyScene]:
+        """Async version of search_by_name"""
+        try:
+            logger.debug(
+                f"Searching ontology scenes by keyword (async) - "
+                f"keyword={keyword}, workspace_id={workspace_id}"
+            )
+            stmt = (
+                select(OntologyScene)
+                .options(selectinload(OntologyScene.classes))
+                .where(
+                    OntologyScene.scene_name.ilike(f"%{keyword}%"),
+                    OntologyScene.workspace_id == workspace_id
+                )
+                .order_by(OntologyScene.updated_at.desc())
+            )
+            result = await self.db.execute(stmt)
+            scenes = result.unique().scalars().all()
+            logger.info(
+                f"Found {len(scenes)} ontology scenes matching keyword '{keyword}' "
+                f"in workspace {workspace_id} (async)"
+            )
+            return list(scenes)
+        except Exception as e:
+            logger.error(f"Failed to search ontology scenes by keyword (async): {str(e)}", exc_info=True)
+            raise
+
+    async def get_by_workspace_async(self, workspace_id: UUID, page: Optional[int] = None, page_size: Optional[int] = None) -> tuple:
+        """Async version of get_by_workspace"""
+        try:
+            logger.debug(f"Getting ontology scenes by workspace (async): {workspace_id}, page={page}, page_size={page_size}")
+
+            # 总数查询
+            count_stmt = (
+                select(func.count(OntologyScene.scene_id))
+                .where(OntologyScene.workspace_id == workspace_id)
+            )
+            count_result = await self.db.execute(count_stmt)
+            total = count_result.scalar() or 0
+
+            # 数据查询
+            stmt = (
+                select(OntologyScene)
+                .options(selectinload(OntologyScene.classes))
+                .where(OntologyScene.workspace_id == workspace_id)
+                .order_by(OntologyScene.updated_at.desc())
+            )
+            if page is not None and page_size is not None:
+                offset = (page - 1) * page_size
+                stmt = stmt.offset(offset).limit(page_size)
+                logger.debug(f"Applying pagination (async): offset={offset}, limit={page_size}")
+
+            result = await self.db.execute(stmt)
+            scenes = result.unique().scalars().all()
+            logger.info(
+                f"Found {len(scenes)} ontology scenes (total: {total}) in workspace {workspace_id} (async)"
+            )
+            return list(scenes), total
+        except Exception as e:
+            logger.error(f"Failed to get ontology scenes by workspace (async): {str(e)}", exc_info=True)
+            raise
+
+    async def update_async(self, scene_id: UUID, update_data: dict) -> Optional[OntologyScene]:
+        """Async version of update"""
+        try:
+            logger.info(f"Updating ontology scene (async): {scene_id}")
+            scene = await self.get_by_id_async(scene_id)
+            if not scene:
+                logger.warning(f"Ontology scene not found for update (async): {scene_id}")
+                return None
+            if "scene_name" in update_data and update_data["scene_name"] is not None:
+                scene.scene_name = update_data["scene_name"]
+            if "scene_description" in update_data:
+                scene.scene_description = update_data["scene_description"]
+            await self.db.flush()
+            logger.info(f"Ontology scene updated successfully (async): {scene_id}")
+            return scene
+        except Exception as e:
+            logger.error(f"Failed to update ontology scene (async): {str(e)}", exc_info=True)
+            raise
+
+    async def delete_async(self, scene_id: UUID) -> bool:
+        """Async version of delete"""
+        try:
+            logger.info(f"Deleting ontology scene (async): {scene_id}")
+            scene = await self.get_by_id_async(scene_id)
+            if not scene:
+                logger.warning(f"Ontology scene not found for delete (async): {scene_id}")
+                return False
+            await self.db.delete(scene)
+            await self.db.flush()
+            logger.info(f"Ontology scene deleted successfully (async): {scene_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to delete ontology scene (async): {str(e)}", exc_info=True)
+            raise
+
+    async def check_ownership_async(self, scene_id: UUID, workspace_id: UUID) -> bool:
+        """Async version of check_ownership"""
+        try:
+            logger.debug(
+                f"Checking scene ownership (async) - "
+                f"scene_id={scene_id}, workspace_id={workspace_id}"
+            )
+            from sqlalchemy import or_
+            stmt = (
+                select(func.count(OntologyScene.scene_id))
+                .where(
+                    OntologyScene.scene_id == scene_id,
+                    or_(
+                        OntologyScene.workspace_id == workspace_id,
+                        OntologyScene.is_system_default == True
+                    )
+                )
+            )
+            result = await self.db.execute(stmt)
+            count = result.scalar() or 0
+            is_owner = count > 0
+            logger.debug(f"Scene ownership check result (async): {is_owner} - scene_id={scene_id}")
+            return is_owner
+        except Exception as e:
+            logger.error(f"Failed to check scene ownership (async): {str(e)}", exc_info=True)
+            raise
+
+    async def get_simple_list_async(self, workspace_id: UUID) -> List[dict]:
+        """Async version of get_simple_list"""
+        try:
+            logger.debug(f"Getting simple scene list (async) for workspace: {workspace_id}")
+            stmt = (
+                select(OntologyScene.scene_id, OntologyScene.scene_name)
+                .where(OntologyScene.workspace_id == workspace_id)
+                .order_by(OntologyScene.updated_at.desc())
+            )
+            result = await self.db.execute(stmt)
+            rows = result.all()
             scenes = [
                 {"scene_id": str(r.scene_id), "scene_name": r.scene_name}
-                for r in results
+                for r in rows
             ]
-            
-            logger.info(f"Found {len(scenes)} scenes (simple list) in workspace {workspace_id}")
-            
+            logger.info(f"Found {len(scenes)} scenes (simple list) in workspace {workspace_id} (async)")
             return scenes
-            
         except Exception as e:
-            logger.error(
-                f"Failed to get simple scene list: {str(e)}",
-                exc_info=True
-            )
+            logger.error(f"Failed to get simple scene list (async): {str(e)}", exc_info=True)
             raise

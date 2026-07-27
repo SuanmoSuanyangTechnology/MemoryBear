@@ -26,7 +26,7 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, File, UploadFile, Form, Header
 from fastapi.responses import StreamingResponse, JSONResponse
-from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 
 from app.core.quota_stub import check_ontology_project_quota
 
@@ -35,9 +35,8 @@ from app.core.error_codes import BizCode
 from app.core.language_utils import get_language_from_header
 from app.core.logging_config import get_api_logger, get_business_logger
 from app.core.response_utils import fail, success
-from app.db import get_db
-from app.dependencies import get_current_user
-from app.models.user_model import User
+from app.db import get_async_db_context, get_db
+from app.dependencies import get_current_user_async, CurrentUserSnapshot
 from app.core.memory.models.ontology_scenario_models import OntologyClass
 from app.schemas.ontology_schemas import (
     ExportBySceneRequest,
@@ -71,30 +70,15 @@ router = APIRouter(
 )
 
 
-def _get_ontology_service(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+async def _get_ontology_service_async(
+    db,
+    current_user,
     llm_id: str = None
 ) -> OntologyService:
-    """获取OntologyService实例的依赖注入函数
-    
-    指定的llm_id获取LLM配置,创建OpenAIClient和OntologyService实例。
-    
-    Args:
-        db: 数据库会话
-        current_user: 当前用户
-        llm_id: 可选的LLM模型ID,如果提供则使用指定模型,否则使用工作空间默认模型
-        
-    Returns:
-        OntologyService: 本体提取服务实例
-        
-    Raises:
-        HTTPException: 如果无法获取LLM配置
-    """
+    """获取OntologyService实例的异步版本（用于 extract_ontology 端点）"""
     try:
         import uuid
         
-        # 必须提供llm_id
         if not llm_id:
             logger.error(f"llm_id is required but not provided - user: {current_user.id}")
             raise HTTPException(
@@ -104,7 +88,6 @@ def _get_ontology_service(
         
         logger.info(f"Using specified LLM model: {llm_id}")
         
-        # 验证llm_id格式
         try:
             model_id = uuid.UUID(llm_id)
         except ValueError:
@@ -114,9 +97,8 @@ def _get_ontology_service(
                 detail="无效的LLM模型ID格式"
             )
         
-        # 获取指定的模型配置
         try:
-            model_config = ModelConfigService.get_model_by_id(db=db, model_id=model_id)
+            model_config = await ModelConfigService.get_model_by_id_async(db=db, model_id=model_id)
         except Exception as e:
             logger.error(f"Model {llm_id} not found: {str(e)}")
             raise HTTPException(
@@ -124,10 +106,8 @@ def _get_ontology_service(
                 detail=f"找不到指定的LLM模型: {llm_id}"
             )
         
-        # 通过 Repository 获取可用的 API Key（负载均衡逻辑由 Repository 处理）
-        # from app.repositories.model_repository import ModelApiKeyRepository
         from app.services.model_service import ModelApiKeyService
-        api_key_config = ModelApiKeyService.get_available_api_key(
+        api_key_config = await ModelApiKeyService.get_available_api_key_async(
             db,
             model_config.id,
             tenant_id=current_user.tenant_id,
@@ -138,14 +118,6 @@ def _get_ontology_service(
                 status_code=400,
                 detail="指定的LLM模型没有可用的API密钥"
             )
-        # api_keys = ModelApiKeyRepository.get_by_model_config(db, model_config.id)
-        # if not api_keys:
-        #     logger.error(f"Model {llm_id} has no active API key")
-        #     raise HTTPException(
-        #         status_code=400,
-        #         detail="指定的LLM模型没有可用的API密钥"
-        #     )
-        # api_key_config = api_keys[0]
         
         is_composite = getattr(model_config, 'is_composite', False)
         logger.info(
@@ -154,11 +126,9 @@ def _get_ontology_service(
             f"is_composite: {is_composite}, api_key_id: {api_key_config.id}"
         )
         
-        # 创建LLM客户端（统一通过 ModelClientMixin）
         from app.core.memory.pipelines.base_pipeline import ModelClientMixin
-        llm_client = ModelClientMixin.get_llm_client(db, llm_id, current_user.tenant_id)
+        llm_client = await ModelClientMixin.get_llm_client_async(db, llm_id, current_user.tenant_id)
         
-        # 创建OntologyService
         service = OntologyService(llm_client=llm_client, db=db)
         
         logger.debug(
@@ -182,8 +152,7 @@ def _get_ontology_service(
 async def extract_ontology(
     request: ExtractionRequest,
     language_type: str = Header(default=None, alias="X-Language-Type"),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: CurrentUserSnapshot = Depends(get_current_user_async)
 ):
     """提取本体类
     
@@ -194,7 +163,6 @@ async def extract_ontology(
     Args:
         request: 提取请求,包含scenario、domain、llm_id和scene_id
         language_type: 语言类型 Header (zh/en)
-        db: 数据库会话
         current_user: 当前用户
     """
     api_logger.info(
@@ -206,52 +174,53 @@ async def extract_ontology(
     )
     
     try:
-        # 使用集中化的语言校验
-        language = get_language_from_header(language_type)
+        async with get_async_db_context() as db:
+            # 使用集中化的语言校验
+            language = get_language_from_header(language_type)
         
-        # 获取当前工作空间ID
-        workspace_id = current_user.current_workspace_id
-        if not workspace_id:
-            api_logger.warning(f"User {current_user.id} has no current workspace")
-            return fail(BizCode.BAD_REQUEST, "请求参数无效", "当前用户没有工作空间")
+            # 获取当前工作空间ID
+            workspace_id = current_user.current_workspace_id
+            if not workspace_id:
+                api_logger.warning(f"User {current_user.id} has no current workspace")
+                return fail(BizCode.BAD_REQUEST, "请求参数无效", "当前用户没有工作空间")
         
-        # 创建OntologyService实例,传入llm_id
-        service = _get_ontology_service(
-            db=db,
-            current_user=current_user,
-            llm_id=request.llm_id
-        )
+            # 创建OntologyService实例,传入llm_id
+            service = await _get_ontology_service_async(
+                db=db,
+                current_user=current_user,
+                llm_id=request.llm_id
+            )
         
-        # 调用服务层执行提取
-        result = await service.extract_ontology(
-            scenario=request.scenario,
-            domain=request.domain,
-            scene_id=request.scene_id,
-            workspace_id=workspace_id,
-            language=language
-        )
+            # 调用服务层执行提取
+            result = await service.extract_ontology(
+                scenario=request.scenario,
+                domain=request.domain,
+                scene_id=request.scene_id,
+                workspace_id=workspace_id,
+                language=language
+            )
         
-        # 根据语言类型统一 name 字段
-        # zh: name 使用 name_chinese（中文名）
-        # en: name 保持原值（英文 PascalCase）
-        if language == "zh":
-            for cls in result.classes:
-                if cls.name_chinese:
-                    cls.name = cls.name_chinese
+            # 根据语言类型统一 name 字段
+            # zh: name 使用 name_chinese（中文名）
+            # en: name 保持原值（英文 PascalCase）
+            if language == "zh":
+                for cls in result.classes:
+                    if cls.name_chinese:
+                        cls.name = cls.name_chinese
         
-        # 构建响应
-        response = ExtractionResponse(
-            classes=result.classes,
-            domain=result.domain,
-            extracted_count=len(result.classes)
-        )
+            # 构建响应
+            response = ExtractionResponse(
+                classes=result.classes,
+                domain=result.domain,
+                extracted_count=len(result.classes)
+            )
         
-        api_logger.info(
-            f"Ontology extraction completed, extracted {len(result.classes)} classes, "
-            f"scene_id={request.scene_id}, language={language}"
-        )
+            api_logger.info(
+                f"Ontology extraction completed, extracted {len(result.classes)} classes, "
+                f"scene_id={request.scene_id}, language={language}"
+            )
         
-        return success(data=response.model_dump(), msg="本体提取成功")
+            return success(data=response.model_dump(), msg="本体提取成功")
         
     except ValueError as e:
         # 验证错误 (400)
@@ -277,9 +246,9 @@ async def extract_ontology(
 @check_ontology_project_quota
 async def create_scene(
     request: SceneCreateRequest,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    x_language_type: Optional[str] = Header(None, alias="X-Language-Type")
+    current_user: CurrentUserSnapshot = Depends(get_current_user_async),
+    x_language_type: Optional[str] = Header(None, alias="X-Language-Type"),
+    db=Depends(get_db),  # quota check 装饰器需要
 ):
     """创建本体场景
     
@@ -287,7 +256,6 @@ async def create_scene(
     
     Args:
         request: 场景创建请求
-        db: 数据库会话
         current_user: 当前用户
         
     Returns:
@@ -299,48 +267,49 @@ async def create_scene(
     )
     
     try:
-        # 获取当前工作空间ID
-        workspace_id = current_user.current_workspace_id
-        if not workspace_id:
-            api_logger.warning(f"User {current_user.id} has no current workspace")
-            return fail(BizCode.BAD_REQUEST, "请求参数无效", "当前用户没有工作空间")
+        async with get_async_db_context() as db:
+            # 获取当前工作空间ID
+            workspace_id = current_user.current_workspace_id
+            if not workspace_id:
+                api_logger.warning(f"User {current_user.id} has no current workspace")
+                return fail(BizCode.BAD_REQUEST, "请求参数无效", "当前用户没有工作空间")
         
-        # 场景管理不需要LLM
-        service = OntologyService(db=db)
+            # 场景管理不需要LLM
+            service = OntologyService(db=db)
         
-        # 调用服务层创建场景
-        scene = service.create_scene(
-            scene_name=request.scene_name,
-            scene_description=request.scene_description,
-            workspace_id=workspace_id
-        )
+            # 调用服务层创建场景
+            scene = await service.create_scene_async(
+                scene_name=request.scene_name,
+                scene_description=request.scene_description,
+                workspace_id=workspace_id
+            )
         
-        # 构建响应
-        # 动态计算 type_num
-        type_num = len(scene.classes) if scene.classes else 0
+            # 构建响应
+            # NOTE: 新创建的场景还没有 classes，不能用 scene.classes（AsyncSession 不支持 lazy load）
+            type_num = 0
         
-        response = SceneResponse(
-            scene_id=scene.scene_id,
-            scene_name=scene.scene_name,
-            scene_description=scene.scene_description,
-            type_num=type_num,
-            workspace_id=scene.workspace_id,
-            created_at=scene.created_at,
-            updated_at=scene.updated_at,
-            classes_count=type_num
-        )
+            response = SceneResponse(
+                scene_id=scene.scene_id,
+                scene_name=scene.scene_name,
+                scene_description=scene.scene_description,
+                type_num=type_num,
+                workspace_id=scene.workspace_id,
+                created_at=scene.created_at,
+                updated_at=scene.updated_at,
+                classes_count=type_num
+            )
         
-        api_logger.info(f"Scene created successfully: {scene.scene_id}")
+            api_logger.info(f"Scene created successfully: {scene.scene_id}")
         
-        return success(data=response.model_dump(), msg="场景创建成功")
+            return success(data=response.model_dump(), msg="场景创建成功")
         
     except ValueError as e:
         api_logger.warning(f"Validation error in scene creation: {str(e)}")
         return fail(BizCode.BAD_REQUEST, "请求参数无效", str(e))
         
-    except RuntimeError as e:
+    except (IntegrityError, RuntimeError) as e:
         err_str = str(e)
-        if "UniqueViolation" in err_str or "uq_workspace_scene_name" in err_str:
+        if "UniqueViolation" in err_str or "uq_workspace_scene_name" in err_str or "duplicate key" in err_str:
             api_logger.warning(f"Duplicate scene name '{request.scene_name}' in workspace {current_user.current_workspace_id}")
             from app.core.language_utils import get_language_from_header
             lang = get_language_from_header(x_language_type)
@@ -349,7 +318,7 @@ async def create_scene(
             else:
                 msg = fail(BizCode.BAD_REQUEST, "场景名称已存在", f"当前工作空间下已存在名为「{request.scene_name}」的场景，请使用其他名称")
             return JSONResponse(status_code=400, content=msg)
-        api_logger.error(f"Runtime error in scene creation: {err_str}", exc_info=True)
+        api_logger.error(f"Scene creation error: {err_str}", exc_info=True)
         return fail(BizCode.INTERNAL_ERROR, "场景创建失败", err_str)
         
     except Exception as e:
@@ -361,8 +330,7 @@ async def create_scene(
 async def update_scene(
     scene_id: str,
     request: SceneUpdateRequest,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: CurrentUserSnapshot = Depends(get_current_user_async)
 ):
     """更新本体场景
     
@@ -371,7 +339,6 @@ async def update_scene(
     Args:
         scene_id: 场景ID
         request: 场景更新请求
-        db: 数据库会话
         current_user: 当前用户
         
     Returns:
@@ -383,63 +350,64 @@ async def update_scene(
     )
     
     try:
-        from uuid import UUID
+        async with get_async_db_context() as db:
+            from uuid import UUID
         
-        # 验证UUID格式
-        try:
-            scene_uuid = UUID(scene_id)
-        except ValueError:
-            api_logger.warning(f"Invalid scene_id format: {scene_id}")
-            return fail(BizCode.BAD_REQUEST, "请求参数无效", "无效的场景ID格式")
+            # 验证UUID格式
+            try:
+                scene_uuid = UUID(scene_id)
+            except ValueError:
+                api_logger.warning(f"Invalid scene_id format: {scene_id}")
+                return fail(BizCode.BAD_REQUEST, "请求参数无效", "无效的场景ID格式")
         
-        # 获取当前工作空间ID
-        workspace_id = current_user.current_workspace_id
-        if not workspace_id:
-            api_logger.warning(f"User {current_user.id} has no current workspace")
-            return fail(BizCode.BAD_REQUEST, "请求参数无效", "当前用户没有工作空间")
+            # 获取当前工作空间ID
+            workspace_id = current_user.current_workspace_id
+            if not workspace_id:
+                api_logger.warning(f"User {current_user.id} has no current workspace")
+                return fail(BizCode.BAD_REQUEST, "请求参数无效", "当前用户没有工作空间")
         
-        # 检查是否为系统默认场景
-        scene_repo = OntologySceneRepository(db)
-        scene = scene_repo.get_by_id(scene_uuid)
-        if scene and scene.is_system_default:
-            business_logger.warning(
-                f"尝试修改系统默认场景: user_id={current_user.id}, "
-                f"scene_id={scene_id}, scene_name={scene.scene_name}"
+            # 检查是否为系统默认场景
+            scene_repo = OntologySceneRepository(db)
+            scene = await scene_repo.get_by_id_async(scene_uuid)
+            if scene and scene.is_system_default:
+                business_logger.warning(
+                    f"尝试修改系统默认场景: user_id={current_user.id}, "
+                    f"scene_id={scene_id}, scene_name={scene.scene_name}"
+                )
+                return fail(
+                    BizCode.BAD_REQUEST,
+                    "系统默认场景不可修改",
+                    "该场景为系统预设场景，不允许修改"
+                )
+            # 场景管理不需要LLM
+            service = OntologyService(db=db)
+        
+            # 调用服务层更新场景
+            scene = await service.update_scene_async(
+                scene_id=scene_uuid,
+                scene_name=request.scene_name,
+                scene_description=request.scene_description,
+                workspace_id=workspace_id
             )
-            return fail(
-                BizCode.BAD_REQUEST,
-                "系统默认场景不可修改",
-                "该场景为系统预设场景，不允许修改"
+        
+            # 构建响应
+            # 动态计算 type_num
+            type_num = len(scene.classes) if scene.classes else 0
+        
+            response = SceneResponse(
+                scene_id=scene.scene_id,
+                scene_name=scene.scene_name,
+                scene_description=scene.scene_description,
+                type_num=type_num,
+                workspace_id=scene.workspace_id,
+                created_at=scene.created_at,
+                updated_at=scene.updated_at,
+                classes_count=type_num
             )
-        # 场景管理不需要LLM
-        service = OntologyService(db=db)
         
-        # 调用服务层更新场景
-        scene = service.update_scene(
-            scene_id=scene_uuid,
-            scene_name=request.scene_name,
-            scene_description=request.scene_description,
-            workspace_id=workspace_id
-        )
+            api_logger.info(f"Scene updated successfully: {scene_id}")
         
-        # 构建响应
-        # 动态计算 type_num
-        type_num = len(scene.classes) if scene.classes else 0
-        
-        response = SceneResponse(
-            scene_id=scene.scene_id,
-            scene_name=scene.scene_name,
-            scene_description=scene.scene_description,
-            type_num=type_num,
-            workspace_id=scene.workspace_id,
-            created_at=scene.created_at,
-            updated_at=scene.updated_at,
-            classes_count=type_num
-        )
-        
-        api_logger.info(f"Scene updated successfully: {scene_id}")
-        
-        return success(data=response.model_dump(), msg="场景更新成功")
+            return success(data=response.model_dump(), msg="场景更新成功")
         
     except ValueError as e:
         api_logger.warning(f"Validation error in scene update: {str(e)}")
@@ -457,8 +425,7 @@ async def update_scene(
 @router.delete("/scene/{scene_id}", response_model=ApiResponse)
 async def delete_scene(
     scene_id: str,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: CurrentUserSnapshot = Depends(get_current_user_async)
 ):
     """删除本体场景
     
@@ -466,7 +433,6 @@ async def delete_scene(
     
     Args:
         scene_id: 场景ID
-        db: 数据库会话
         current_user: 当前用户
         
     Returns:
@@ -478,46 +444,47 @@ async def delete_scene(
     )
     
     try:
-        from uuid import UUID
+        async with get_async_db_context() as db:
+            from uuid import UUID
         
-        # 验证UUID格式
-        try:
-            scene_uuid = UUID(scene_id)
-        except ValueError:
-            api_logger.warning(f"Invalid scene_id format: {scene_id}")
-            return fail(BizCode.BAD_REQUEST, "请求参数无效", "无效的场景ID格式")
+            # 验证UUID格式
+            try:
+                scene_uuid = UUID(scene_id)
+            except ValueError:
+                api_logger.warning(f"Invalid scene_id format: {scene_id}")
+                return fail(BizCode.BAD_REQUEST, "请求参数无效", "无效的场景ID格式")
         
-        # 获取当前工作空间ID
-        workspace_id = current_user.current_workspace_id
-        if not workspace_id:
-            api_logger.warning(f"User {current_user.id} has no current workspace")
-            return fail(BizCode.BAD_REQUEST, "请求参数无效", "当前用户没有工作空间")
+            # 获取当前工作空间ID
+            workspace_id = current_user.current_workspace_id
+            if not workspace_id:
+                api_logger.warning(f"User {current_user.id} has no current workspace")
+                return fail(BizCode.BAD_REQUEST, "请求参数无效", "当前用户没有工作空间")
         
-        # 检查是否为系统默认场景
-        scene_repo = OntologySceneRepository(db)
-        scene = scene_repo.get_by_id(scene_uuid)
-        if scene and scene.is_system_default:
-            business_logger.warning(
-                f"尝试删除系统默认场景: user_id={current_user.id}, "
-                f"scene_id={scene_id}, scene_name={scene.scene_name}"
+            # 检查是否为系统默认场景
+            scene_repo = OntologySceneRepository(db)
+            scene = await scene_repo.get_by_id_async(scene_uuid)
+            if scene and scene.is_system_default:
+                business_logger.warning(
+                    f"尝试删除系统默认场景: user_id={current_user.id}, "
+                    f"scene_id={scene_id}, scene_name={scene.scene_name}"
+                )
+                raise HTTPException(
+                    status_code=400,
+                    detail="SYSTEM_DEFAULT_SCENE_CANNOT_DELETE"
+                )
+        
+            # 场景管理不需要LLM
+            service = OntologyService(db=db)
+        
+            # 调用服务层删除场景
+            success_flag = await service.delete_scene_async(
+                scene_id=scene_uuid,
+                workspace_id=workspace_id
             )
-            raise HTTPException(
-                status_code=400,
-                detail="SYSTEM_DEFAULT_SCENE_CANNOT_DELETE"
-            )
         
-        # 场景管理不需要LLM
-        service = OntologyService(db=db)
+            api_logger.info(f"Scene deleted successfully: {scene_id}")
         
-        # 调用服务层删除场景
-        success_flag = service.delete_scene(
-            scene_id=scene_uuid,
-            workspace_id=workspace_id
-        )
-        
-        api_logger.info(f"Scene deleted successfully: {scene_id}")
-        
-        return success(data={"deleted": success_flag}, msg="场景删除成功")
+            return success(data={"deleted": success_flag}, msg="场景删除成功")
         
     except HTTPException:
         raise
@@ -537,8 +504,7 @@ async def delete_scene(
 
 @router.get("/scenes/simple", response_model=ApiResponse)
 async def get_scenes_simple(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: CurrentUserSnapshot = Depends(get_current_user_async)
 ):
     """获取场景简单列表（轻量级，用于下拉选择）
     
@@ -546,7 +512,6 @@ async def get_scenes_simple(
     适用于前端下拉选择场景的场景。
     
     Args:
-        db: 数据库会话
         current_user: 当前用户
         
     Returns:
@@ -559,16 +524,17 @@ async def get_scenes_simple(
     api_logger.info(f"Simple scene list requested by user {current_user.id}")
     
     try:
-        workspace_id = current_user.current_workspace_id
-        if not workspace_id:
-            api_logger.warning(f"User {current_user.id} has no current workspace")
-            return fail(BizCode.BAD_REQUEST, "请求参数无效", "当前用户没有工作空间")
+        async with get_async_db_context() as db:
+            workspace_id = current_user.current_workspace_id
+            if not workspace_id:
+                api_logger.warning(f"User {current_user.id} has no current workspace")
+                return fail(BizCode.BAD_REQUEST, "请求参数无效", "当前用户没有工作空间")
         
-        repo = OntologySceneRepository(db)
-        scenes = repo.get_simple_list(workspace_id)
+            repo = OntologySceneRepository(db)
+            scenes = await repo.get_simple_list_async(workspace_id)
         
-        api_logger.info(f"Simple scene list retrieved: {len(scenes)} scenes")
-        return success(data=scenes, msg="查询成功")
+            api_logger.info(f"Simple scene list retrieved: {len(scenes)} scenes")
+            return success(data=scenes, msg="查询成功")
         
     except Exception as e:
         api_logger.error(f"Failed to get simple scene list: {str(e)}", exc_info=True)
@@ -581,8 +547,7 @@ async def get_scenes(
     scene_name: Optional[str] = None,
     page: Optional[int] = None,
     pagesize: Optional[int] = None,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: CurrentUserSnapshot = Depends(get_current_user_async)
 ):
     """获取场景列表（支持模糊搜索和全量查询，全量查询支持分页）
     
@@ -597,7 +562,6 @@ async def get_scenes(
         scene_name: 场景名称关键词（可选，支持模糊匹配）
         page: 页码（可选，从1开始）
         pagesize: 每页数量（可选）
-        db: 数据库会话
         current_user: 当前用户
         
     Returns:
@@ -620,7 +584,7 @@ async def get_scenes(
         - 不分页时，page 字段为 null
     """
     from app.controllers.ontology_secondary_routes import scenes_handler
-    return await scenes_handler(workspace_id, scene_name, page, pagesize, db, current_user)
+    return await scenes_handler(workspace_id, scene_name, page, pagesize, None, current_user)
 
 
 # ==================== 本体类型管理接口 ====================
@@ -628,8 +592,7 @@ async def get_scenes(
 @router.post("/class", response_model=ApiResponse)
 async def create_class(
     request: ClassCreateRequest,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: CurrentUserSnapshot = Depends(get_current_user_async),
     x_language_type: Optional[str] = Header(None, alias="X-Language-Type")
 ):
     """创建本体类型
@@ -638,22 +601,20 @@ async def create_class(
     
     Args:
         request: 类型创建请求
-        db: 数据库会话
         current_user: 当前用户
         
     Returns:
         ApiResponse: 包含创建的类型信息
     """
     from app.controllers.ontology_secondary_routes import create_class_handler
-    return await create_class_handler(request, db, current_user, x_language_type)
+    return await create_class_handler(request, None, current_user, x_language_type)
 
 
 @router.put("/class/{class_id}", response_model=ApiResponse)
 async def update_class(
     class_id: str,
     request: ClassUpdateRequest,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: CurrentUserSnapshot = Depends(get_current_user_async)
 ):
     """更新本体类型
     
@@ -662,21 +623,19 @@ async def update_class(
     Args:
         class_id: 类型ID
         request: 类型更新请求
-        db: 数据库会话
         current_user: 当前用户
         
     Returns:
         ApiResponse: 包含更新后的类型信息
     """
     from app.controllers.ontology_secondary_routes import update_class_handler
-    return await update_class_handler(class_id, request, db, current_user)
+    return await update_class_handler(class_id, request, None, current_user)
 
 
 @router.delete("/class/{class_id}", response_model=ApiResponse)
 async def delete_class(
     class_id: str,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: CurrentUserSnapshot = Depends(get_current_user_async)
 ):
     """删除本体类型
     
@@ -684,22 +643,20 @@ async def delete_class(
     
     Args:
         class_id: 类型ID
-        db: 数据库会话
         current_user: 当前用户
         
     Returns:
         ApiResponse: 删除结果
     """
     from app.controllers.ontology_secondary_routes import delete_class_handler
-    return await delete_class_handler(class_id, db, current_user)
+    return await delete_class_handler(class_id, None, current_user)
 
 
 @router.get("/classes", response_model=ApiResponse)
 async def get_classes(
     scene_id: str,
     class_name: Optional[str] = None,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: CurrentUserSnapshot = Depends(get_current_user_async)
 ):
     """获取类型列表（支持模糊搜索和全量查询）
     
@@ -713,7 +670,6 @@ async def get_classes(
     Args:
         scene_id: 场景ID（必填）
         class_name: 类型名称关键词（可选，支持模糊匹配）
-        db: 数据库会话
         current_user: 当前用户
         
     Returns:
@@ -735,14 +691,13 @@ async def get_classes(
         }
     """
     from app.controllers.ontology_secondary_routes import classes_handler
-    return await classes_handler(scene_id, class_name, db, current_user)
+    return await classes_handler(scene_id, class_name, None, current_user)
 
 
 @router.get("/class/{class_id}", response_model=ApiResponse)
 async def get_class(
     class_id: str,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: CurrentUserSnapshot = Depends(get_current_user_async)
 ):
     """获取单个本体类型
     
@@ -750,7 +705,6 @@ async def get_class(
     
     Args:
         class_id: 类型ID
-        db: 数据库会话
         current_user: 当前用户
         
     Returns:
@@ -771,7 +725,7 @@ async def get_class(
         }
     """
     from app.controllers.ontology_secondary_routes import get_class_handler
-    return await get_class_handler(class_id, db, current_user)
+    return await get_class_handler(class_id, None, current_user)
 
 
 # ==================== OWL 导入接口 ====================
@@ -781,8 +735,7 @@ async def import_owl_file(
     scene_name: str = Form(..., description="场景名称"),
     scene_description: Optional[str] = Form(None, description="场景描述（可选）"),
     file: UploadFile = File(..., description="OWL/TTL文件"),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: CurrentUserSnapshot = Depends(get_current_user_async)
 ):
     """导入 OWL/TTL 文件并创建新场景
     
@@ -797,7 +750,6 @@ async def import_owl_file(
         scene_name: 场景名称（表单字段）
         scene_description: 场景描述（表单字段，可选）
         file: 上传的文件（支持 .owl, .ttl, .rdf, .xml）
-        db: 数据库会话
         current_user: 当前用户
         
     Returns:
@@ -841,18 +793,7 @@ async def import_owl_file(
         
         scene_name = scene_name.strip()
         
-        # 2. 检查场景名称是否已存在
-        scene_repo = OntologySceneRepository(db)
-        existing_scene = scene_repo.get_by_name(scene_name, workspace_id)
-        if existing_scene:
-            api_logger.warning(f"Scene name already exists: {scene_name}")
-            return fail(
-                BizCode.BAD_REQUEST,
-                "场景名称已存在",
-                f"工作空间下已存在名为 '{scene_name}' 的场景"
-            )
-        
-        # 3. 读取文件内容
+        # 2. 读取并解析文件（纯 I/O，不需要数据库）
         try:
             content = await file.read()
             owl_content = content.decode('utf-8')
@@ -863,7 +804,6 @@ async def import_owl_file(
                 "文件编码错误，请确保文件使用 UTF-8 编码"
             )
         
-        # 4. 解析 OWL 内容（先解析，成功后再创建场景）
         owl_validator = OWLValidator()
         parsed_classes = owl_validator.parse_owl_content(
             owl_content=owl_content,
@@ -878,85 +818,95 @@ async def import_owl_file(
                 "文件中没有定义任何本体类型（owl:Class）"
             )
         
-        # 5. 文件解析成功，创建场景
-        scene = scene_repo.create(
-            scene_data={
-                "scene_name": scene_name,
-                "scene_description": scene_description
-            },
-            workspace_id=workspace_id
-        )
-        scene_uuid = scene.scene_id
+        # 3. 数据库操作（使用异步会话）
+        async with get_async_db_context() as db:
+            scene_repo = OntologySceneRepository(db)
+            existing_scene = await scene_repo.get_by_name_async(scene_name, workspace_id)
+            if existing_scene:
+                api_logger.warning(f"Scene name already exists: {scene_name}")
+                return fail(
+                    BizCode.BAD_REQUEST,
+                    "场景名称已存在",
+                    f"工作空间下已存在名为 '{scene_name}' 的场景"
+                )
         
-        api_logger.info(f"Scene created for import: {scene_uuid}")
-        
-        # 6. 批量创建类型（去重同一批次内的重复类型）
-        class_repo = OntologyClassRepository(db)
-        created_items = []
-        existing_names = set()
-        skipped_count = 0
-        
-        for cls in parsed_classes:
-            class_name = cls["name"]
-            class_description = cls.get("description")
-            
-            # 检查同一批次内是否重复
-            if class_name in existing_names:
-                skipped_count += 1
-                api_logger.debug(f"Skipping duplicate class in batch: {class_name}")
-                continue
-            
-            # 创建类型
-            ontology_class = class_repo.create(
-                class_data={
-                    "class_name": class_name,
-                    "class_description": class_description
+            # 创建场景
+            scene = await scene_repo.create_async(
+                scene_data={
+                    "scene_name": scene_name,
+                    "scene_description": scene_description
                 },
-                scene_id=scene_uuid
+                workspace_id=workspace_id
             )
+            scene_uuid = scene.scene_id
+        
+            api_logger.info(f"Scene created for import: {scene_uuid}")
+        
+            # 批量创建类型（去重同一批次内的重复类型）
+            class_repo = OntologyClassRepository(db)
+            created_items = []
+            existing_names = set()
+            skipped_count = 0
+        
+            for cls in parsed_classes:
+                class_name = cls["name"]
+                class_description = cls.get("description")
             
-            # 添加到已存在集合，防止同一批次内重复
-            existing_names.add(class_name)
+                # 检查同一批次内是否重复
+                if class_name in existing_names:
+                    skipped_count += 1
+                    api_logger.debug(f"Skipping duplicate class in batch: {class_name}")
+                    continue
             
-            created_items.append(ClassResponse(
-                class_id=ontology_class.class_id,
-                class_name=ontology_class.class_name,
-                class_description=ontology_class.class_description,
-                scene_id=ontology_class.scene_id,
-                created_at=ontology_class.created_at,
-                updated_at=ontology_class.updated_at
-            ))
+                # 创建类型
+                ontology_class = await class_repo.create_async(
+                    class_data={
+                        "class_name": class_name,
+                        "class_description": class_description
+                    },
+                    scene_id=scene_uuid
+                )
+            
+                # 添加到已存在集合，防止同一批次内重复
+                existing_names.add(class_name)
+            
+                created_items.append(ClassResponse(
+                    class_id=ontology_class.class_id,
+                    class_name=ontology_class.class_name,
+                    class_description=ontology_class.class_description,
+                    scene_id=ontology_class.scene_id,
+                    created_at=ontology_class.created_at,
+                    updated_at=ontology_class.updated_at
+                ))
         
-        # 7. 提交事务
-        db.commit()
+            # 4. 提交事务
+            await db.commit()
         
-        # 8. 构建响应
-        response = ImportOwlResponse(
-            scene_id=scene_uuid,
-            scene_name=scene.scene_name,
-            imported_count=len(created_items),
-            skipped_count=skipped_count,
-            items=created_items
-        )
+            # 5. 构建响应
+            response = ImportOwlResponse(
+                scene_id=scene_uuid,
+                scene_name=scene.scene_name,
+                imported_count=len(created_items),
+                skipped_count=skipped_count,
+                items=created_items
+            )
         
-        api_logger.info(
-            f"{file_type} import completed, "
-            f"scene_id={scene_uuid}, "
-            f"scene_name={scene_name}, "
-            f"format={owl_format}, "
-            f"imported={len(created_items)}, "
-            f"skipped={skipped_count}"
-        )
+            api_logger.info(
+                f"{file_type} import completed, "
+                f"scene_id={scene_uuid}, "
+                f"scene_name={scene_name}, "
+                f"format={owl_format}, "
+                f"imported={len(created_items)}, "
+                f"skipped={skipped_count}"
+            )
         
-        return success(data=response.model_dump(), msg=f"{file_type}文件导入成功")
+            return success(data=response.model_dump(), msg=f"{file_type}文件导入成功")
         
     except ValueError as e:
-        db.rollback()
         api_logger.warning(f"Validation error in import: {str(e)}")
         return fail(BizCode.BAD_REQUEST, f"{file_type}文件导入失败", str(e))
         
     except Exception as e:
-        db.rollback()
         api_logger.error(f"Unexpected error in import: {str(e)}", exc_info=True)
         return fail(BizCode.INTERNAL_ERROR, f"{file_type}文件导入失败", str(e))
 
@@ -964,8 +914,7 @@ async def import_owl_file(
 @router.post("/export")
 async def export_owl_by_scene(
     request: ExportBySceneRequest,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: CurrentUserSnapshot = Depends(get_current_user_async)
 ):
     """按场景导出OWL/TTL文件
     
@@ -973,7 +922,6 @@ async def export_owl_by_scene(
     
     Args:
         request: 导出请求，包含 scene_id 和 format
-        db: 数据库会话
         current_user: 当前用户
         
     Returns:
@@ -1007,102 +955,103 @@ async def export_owl_by_scene(
             api_logger.warning(f"User {current_user.id} has no current workspace")
             return fail(BizCode.BAD_REQUEST, "请求参数无效", "当前用户没有工作空间")
         
-        # 1. 查询场景信息
-        scene_repo = OntologySceneRepository(db)
-        scene = scene_repo.get_by_id(request.scene_id)
+        async with get_async_db_context() as db:
+            # 1. 查询场景信息
+            scene_repo = OntologySceneRepository(db)
+            scene = await scene_repo.get_by_id_async(request.scene_id)
         
-        if not scene:
-            api_logger.warning(f"Scene not found: {request.scene_id}")
-            return fail(BizCode.NOT_FOUND, "场景不存在", f"找不到场景: {request.scene_id}")
+            if not scene:
+                api_logger.warning(f"Scene not found: {request.scene_id}")
+                return fail(BizCode.NOT_FOUND, "场景不存在", f"找不到场景: {request.scene_id}")
         
-        # 验证场景属于当前工作空间
-        if scene.workspace_id != workspace_id:
-            api_logger.warning(
-                f"Scene {request.scene_id} does not belong to workspace {workspace_id}"
-            )
-            return fail(BizCode.FORBIDDEN, "无权访问", "该场景不属于当前工作空间")
+            # 验证场景属于当前工作空间
+            if scene.workspace_id != workspace_id:
+                api_logger.warning(
+                    f"Scene {request.scene_id} does not belong to workspace {workspace_id}"
+                )
+                return fail(BizCode.FORBIDDEN, "无权访问", "该场景不属于当前工作空间")
         
-        # 2. 查询场景下的所有本体类型
-        class_repo = OntologyClassRepository(db)
-        ontology_classes_db = class_repo.get_classes_by_scene(request.scene_id)
+            # 2. 查询场景下的所有本体类型
+            class_repo = OntologyClassRepository(db)
+            ontology_classes_db = await class_repo.get_classes_by_scene_async(request.scene_id)
         
-        if not ontology_classes_db:
-            api_logger.warning(f"No classes found in scene: {request.scene_id}")
-            return fail(BizCode.BAD_REQUEST, "场景为空", "该场景下没有定义任何本体类型")
+            if not ontology_classes_db:
+                api_logger.warning(f"No classes found in scene: {request.scene_id}")
+                return fail(BizCode.BAD_REQUEST, "场景为空", "该场景下没有定义任何本体类型")
         
-        # 3. 将数据库模型转换为OWL导出所需的OntologyClass格式
-        ontology_classes: List[OntologyClass] = []
-        for db_class in ontology_classes_db:
-            owl_class = OntologyClass(
-                id=str(db_class.class_id),
-                name=db_class.class_name,
-                name_chinese=db_class.class_name if _is_chinese(db_class.class_name) else None,
-                description=db_class.class_description or "",
-                examples=[],
-                parent_class=None,
-                entity_type="Concept",
-                domain=scene.scene_name
-            )
-            ontology_classes.append(owl_class)
+            # 3. 将数据库模型转换为OWL导出所需的OntologyClass格式
+            ontology_classes: List[OntologyClass] = []
+            for db_class in ontology_classes_db:
+                owl_class = OntologyClass(
+                    id=str(db_class.class_id),
+                    name=db_class.class_name,
+                    name_chinese=db_class.class_name if _is_chinese(db_class.class_name) else None,
+                    description=db_class.class_description or "",
+                    examples=[],
+                    parent_class=None,
+                    entity_type="Concept",
+                    domain=scene.scene_name
+                )
+                ontology_classes.append(owl_class)
         
-        # 4. 确定文件名、扩展名和 MIME 类型
-        file_ext = ".ttl" if owl_format == "turtle" else ".owl"
-        filename = _sanitize_filename(scene.scene_name) + file_ext
-        media_type = "text/turtle" if owl_format == "turtle" else "application/rdf+xml"
-        file_type = "ttl" if owl_format == "turtle" else "owl"
+            # 4. 确定文件名、扩展名和 MIME 类型
+            file_ext = ".ttl" if owl_format == "turtle" else ".owl"
+            filename = _sanitize_filename(scene.scene_name) + file_ext
+            media_type = "text/turtle" if owl_format == "turtle" else "application/rdf+xml"
+            file_type = "ttl" if owl_format == "turtle" else "owl"
         
-        # 5. 导出OWL文件
-        with tempfile.NamedTemporaryFile(
-            mode='w',
-            suffix='.owl',
-            delete=False
-        ) as tmp_file:
-            output_path = tmp_file.name
+            # 5. 导出OWL文件
+            with tempfile.NamedTemporaryFile(
+                mode='w',
+                suffix='.owl',
+                delete=False
+            ) as tmp_file:
+                output_path = tmp_file.name
         
-        owl_validator = OWLValidator()
+            owl_validator = OWLValidator()
         
-        # 验证本体类
-        is_valid, errors, world = owl_validator.validate_ontology_classes(
-            classes=ontology_classes,
-        )
-        
-        if not is_valid:
-            logger.warning(
-                f"OWL validation found {len(errors)} issues during export: {errors}"
+            # 验证本体类
+            is_valid, errors, world = owl_validator.validate_ontology_classes(
+                classes=ontology_classes,
             )
         
-        if not world:
-            error_msg = "Failed to create OWL world for export"
-            logger.error(error_msg)
-            return fail(BizCode.INTERNAL_ERROR, "创建OWL世界失败", error_msg)
+            if not is_valid:
+                logger.warning(
+                    f"OWL validation found {len(errors)} issues during export: {errors}"
+                )
         
-        # 导出OWL文件（使用请求指定的格式）
-        owl_content = owl_validator.export_to_owl(
-            world=world,
-            output_path=output_path,
-            format=owl_format,
-            classes=ontology_classes
-        )
+            if not world:
+                error_msg = "Failed to create OWL world for export"
+                logger.error(error_msg)
+                return fail(BizCode.INTERNAL_ERROR, "创建OWL世界失败", error_msg)
         
-        api_logger.info(
-            f"{file_type} export by scene completed, "
-            f"scene={scene.scene_name}, "
-            f"filename={filename}, "
-            f"format={owl_format}, "
-            f"classes_count={len(ontology_classes)}"
-        )
+            # 导出OWL文件（使用请求指定的格式）
+            owl_content = owl_validator.export_to_owl(
+                world=world,
+                output_path=output_path,
+                format=owl_format,
+                classes=ontology_classes
+            )
         
-        # 6. 返回文件流响应
-        # filename 使用 ASCII 安全的默认名，filename* 使用 UTF-8 编码的实际名称
-        ascii_filename = f"ontology{file_ext}"
-        encoded_filename = quote(filename)
-        return StreamingResponse(
-            io.BytesIO(owl_content.encode('utf-8')),
-            media_type=media_type,
-            headers={
-                "Content-Disposition": f"attachment; filename=\"{ascii_filename}\"; filename*=UTF-8''{encoded_filename}"
-            }
-        )
+            api_logger.info(
+                f"{file_type} export by scene completed, "
+                f"scene={scene.scene_name}, "
+                f"filename={filename}, "
+                f"format={owl_format}, "
+                f"classes_count={len(ontology_classes)}"
+            )
+        
+            # 6. 返回文件流响应
+            # filename 使用 ASCII 安全的默认名，filename* 使用 UTF-8 编码的实际名称
+            ascii_filename = f"ontology{file_ext}"
+            encoded_filename = quote(filename)
+            return StreamingResponse(
+                io.BytesIO(owl_content.encode('utf-8')),
+                media_type=media_type,
+                headers={
+                    "Content-Disposition": f"attachment; filename=\"{ascii_filename}\"; filename*=UTF-8''{encoded_filename}"
+                }
+            )
         
     except ValueError as e:
         api_logger.warning(f"Validation error in export by scene: {str(e)}")
