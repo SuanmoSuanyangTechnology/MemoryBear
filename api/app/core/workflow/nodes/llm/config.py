@@ -448,7 +448,8 @@ _PARAM_CAPABILITY_WARNINGS: dict[str, str] = {
 }
 
 _OPENAI_COMPATIBLE_PROVIDERS = frozenset({
-    ModelProvider.OPENAI, ModelProvider.XINFERENCE, ModelProvider.GPUSTACK, ModelProvider.VOLCANO,
+    ModelProvider.OPENAI, ModelProvider.ATLASCLOUD, ModelProvider.XINFERENCE,
+    ModelProvider.GPUSTACK, ModelProvider.VOLCANO,
     ModelProvider.SPEEDBEAR,
 })
 
@@ -456,17 +457,20 @@ _PARAM_PROVIDER_SUPPORT: dict[str, frozenset[ModelProvider]] = {
     "top_k": frozenset({ModelProvider.OLLAMA, ModelProvider.DASHSCOPE, ModelProvider.BEDROCK}),
     "repetition_penalty": frozenset({ModelProvider.OLLAMA, ModelProvider.DASHSCOPE}),
     "seed": frozenset({
-        ModelProvider.OPENAI, ModelProvider.XINFERENCE, ModelProvider.GPUSTACK,
+        ModelProvider.OPENAI, ModelProvider.ATLASCLOUD, ModelProvider.XINFERENCE,
+        ModelProvider.GPUSTACK,
         ModelProvider.OLLAMA, ModelProvider.VOLCANO, ModelProvider.DASHSCOPE,
         ModelProvider.SPEEDBEAR,
         ModelProvider.BEDROCK,
     }),
     "frequency_penalty": frozenset({
-        ModelProvider.OPENAI, ModelProvider.XINFERENCE, ModelProvider.GPUSTACK,
+        ModelProvider.OPENAI, ModelProvider.ATLASCLOUD, ModelProvider.XINFERENCE,
+        ModelProvider.GPUSTACK,
         ModelProvider.VOLCANO, ModelProvider.DASHSCOPE, ModelProvider.SPEEDBEAR,
     }),
     "presence_penalty": frozenset({
-        ModelProvider.OPENAI, ModelProvider.XINFERENCE, ModelProvider.GPUSTACK,
+        ModelProvider.OPENAI, ModelProvider.ATLASCLOUD, ModelProvider.XINFERENCE,
+        ModelProvider.GPUSTACK,
         ModelProvider.VOLCANO, ModelProvider.DASHSCOPE, ModelProvider.SPEEDBEAR,
     }),
     "enable_search": frozenset({ModelProvider.DASHSCOPE}),
@@ -485,7 +489,8 @@ _PARAM_PROVIDER_WARNINGS: dict[str, str] = {
 # format: [{"type": "text", "text": "..."}], [{"type": "image_url", ...}] etc.
 # DashScope non-Omni (ChatTongyi) uses its own format and rejects OpenAI-style lists.
 _MULTIMODAL_COMPATIBLE_PROVIDERS = frozenset({
-    ModelProvider.OPENAI, ModelProvider.XINFERENCE, ModelProvider.GPUSTACK,
+    ModelProvider.OPENAI, ModelProvider.ATLASCLOUD, ModelProvider.XINFERENCE,
+    ModelProvider.GPUSTACK,
     ModelProvider.VOLCANO, ModelProvider.SPEEDBEAR,
     ModelProvider.OLLAMA,
     ModelProvider.BEDROCK,

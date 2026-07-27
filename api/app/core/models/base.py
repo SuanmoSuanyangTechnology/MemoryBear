@@ -270,6 +270,7 @@ class RedBearModelFactory:
 
         if provider in [
             ModelProvider.OPENAI,
+            ModelProvider.ATLASCLOUD,
             ModelProvider.XINFERENCE,
             ModelProvider.GPUSTACK,
             ModelProvider.OLLAMA,
@@ -508,6 +509,7 @@ def get_provider_llm_class(config: RedBearModelConfig, type: ModelType = ModelTy
         return CompatibleChatOpenAI
     if provider in [
         ModelProvider.OPENAI,
+        ModelProvider.ATLASCLOUD,
         ModelProvider.XINFERENCE,
         ModelProvider.GPUSTACK,
         ModelProvider.SPEEDBEAR,

@@ -18,6 +18,10 @@ import type { KeyConfigModalForm, ProviderModelItem, KeyConfigModalRef, KeyConfi
 import RbModal from '@/components/RbModal'
 import { updateProviderApiKeys } from '@/api/models'
 
+const PROVIDER_API_BASES: Partial<Record<string, string>> = {
+  atlascloud: 'https://api.atlascloud.ai/v1',
+}
+
 /**
  * Key configuration modal component
  */
@@ -46,6 +50,10 @@ const KeyConfigModal = forwardRef<KeyConfigModalRef, KeyConfigModalProps>(({
   const handleOpen = (vo: ProviderModelItem) => {
     setVisible(true);
     setModel(vo);
+    const apiBase = PROVIDER_API_BASES[vo.provider]
+    if (apiBase) {
+      form.setFieldValue('api_base', apiBase)
+    }
   };
   /** Save API key configuration */
   const handleSave = () => {
