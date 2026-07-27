@@ -14,7 +14,6 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom'
 import { Row, Col, Form, Flex, Tooltip, App } from 'antd';
 import copy from 'copy-to-clipboard'
-import clsx from 'clsx'
 
 import type { Data } from './types'
 import { userMemoryListUrl } from '@/api/memory';
@@ -156,25 +155,15 @@ export default function UserMemory() {
 
               <Flex align="center" justify="space-between" className="rb:text-[#5B6167] rb:text-[12px] rb:mt-3!">
                 <span>{t('userMemory.quota_occupation')}</span>
-                <Flex align="center" gap={8}>
-                  <span
-                    className={clsx('rb:font-medium', {
-                      'rb:text-[#FF5D34]': ['overLimit', 'nearLimit'].includes(quotaStatus),
-                      'rb:text-[#FF8A4C]': quotaStatus === 'warning',
-                      'rb:text-[#212332]': quotaStatus === 'normal',
-                    })}
-                  >{memory_num?.active_count || 0}/{memory_num?.memory_limit || 0}</span>
-
-                  {quotaStatus !== 'normal' && (
-                    <Tag
-                      color={['overLimit', 'nearLimit'].includes(quotaStatus)
-                        ? 'error'
-                        : quotaStatus === 'warning'
-                        ? 'warning'
-                        : 'processing'}
-                    >{t(`userMemory.${quotaStatus}_simple`)}</Tag>
-                  )}
-                </Flex>
+                {quotaStatus !== 'normal' && (
+                  <Tag
+                    color={['overLimit', 'nearLimit'].includes(quotaStatus)
+                      ? 'error'
+                      : quotaStatus === 'warning'
+                      ? 'warning'
+                      : 'processing'}
+                  >{t(`userMemory.${quotaStatus}_simple`)}</Tag>
+                )}
               </Flex>
               <StatusProgress
                 status={quotaStatus}
