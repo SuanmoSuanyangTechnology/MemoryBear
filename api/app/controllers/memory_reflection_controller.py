@@ -443,6 +443,7 @@ async def reflection_run(
             model_id=model_id,
             language_type=language_type
         )
+        model_client = await ModelClientMixin.get_llm_client_async(db, model_id, current_user.tenant_id)
 
     # Initialize Neo4j connector and reflection engine
     connector = Neo4jConnector()
