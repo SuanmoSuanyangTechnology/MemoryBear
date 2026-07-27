@@ -15,10 +15,11 @@ import clsx from 'clsx';
 import { CheckCircleFilled } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 
-import type { ResourcePack, ResourcePackTier } from './types';
+import type { ResourcePack, ResourcePackTier, ResourceUsageItem } from './types';
 import { billingUnits, getUnit } from './constant';
 import { getResourcePacks } from '@/api/package';
 import PackageIcon from './PackageIcon'
+import { getQuotaUsage } from '@/api/user'
 
 /** Generate unique key for cart item */
 const itemKey = (categoryKey: string, tierId: string) => `${categoryKey}_${tierId}`;
@@ -45,8 +46,15 @@ const ResourcePackage: FC = () => {
         setSelectedResourcePack(resourcePackList[0]);
       })
   }
+  const [quotaUsage, setQuotaUsage] = useState<Record<string, ResourceUsageItem>>({});
+  const getQuotaUsages = () => {
+    getQuotaUsage().then(res => {
+      setQuotaUsage(res as Record<string, ResourceUsageItem>);
+    })
+  }
   useEffect(() => {
     getResourcePackList();
+    getQuotaUsages();
   }, []);
 
   useEffect(() => {
@@ -244,13 +252,13 @@ const ResourcePackage: FC = () => {
                     <div className="rb:text-[12px] rb:text-[#5B6167]">{isZh ? selectedResourcePack.description_zh : selectedResourcePack.description_en}</div>
                   </div>
                 </Flex>
-                {/* <div className="rb:rounded-[10px] rb:bg-[#F7F8FA] rb:px-4 rb:py-2">
+                <div className="rb:rounded-[10px] rb:bg-[#F7F8FA] rb:px-4 rb:py-2">
                   <div className="rb:text-[12px] rb:text-[#5B6167] rb:mb-0.5">{t('package.currentTotalQuota')}</div>
                   <div className="rb:text-[16px]">
-                    <span className="rb:font-bold rb:font-[MiSans-Bold]">{currentQuota ?? '--'}</span>
-                    <span className="rb:font-medium">{t(`package.${activeCategory?.unit}`)}</span>
+                    <span className="rb:font-bold rb:font-[MiSans-Bold]">{quotaUsage[selectedResourcePack?.billing_units[0]]?.limit ?? '--'}</span>
+                    <span className="rb:font-medium">{t(`package.${getUnit(selectedResourcePack?.billing_units[0])}`)}</span>
                   </div>
-                </div> */}
+                </div>
               </Flex>
 
               {/* Select expansion tier */}
