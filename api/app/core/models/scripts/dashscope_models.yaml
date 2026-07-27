@@ -1101,7 +1101,7 @@ models:
   capability:
   - thinking
   - function_call
-  is_omni: false
+  is_omni: true
   tags:
   - 大语言模型
   - agent-thought
@@ -1118,7 +1118,7 @@ models:
   - thinking
   - json_output
   - function_call
-  is_omni: false
+  is_omni: true
   tags:
   - 大语言模型
   - 多模态
@@ -1136,7 +1136,7 @@ models:
   - thinking
   - json_output
   - function_call
-  is_omni: false
+  is_omni: true
   tags:
   - 大语言模型
   - 多模态
@@ -1154,7 +1154,7 @@ models:
   - thinking
   - json_output
   - function_call
-  is_omni: false
+  is_omni: true
   tags:
   - 大语言模型
   - 多模态
@@ -1169,7 +1169,7 @@ models:
   capability:
   - thinking
   - function_call
-  is_omni: false
+  is_omni: true
   tags:
   - 大语言模型
   - agent-thought
@@ -1183,7 +1183,7 @@ models:
   capability:
   - thinking
   - function_call
-  is_omni: false
+  is_omni: true
   tags:
   - 大语言模型
   - agent-thought
@@ -1198,7 +1198,7 @@ models:
   - thinking
   - json_output
   - function_call
-  is_omni: false
+  is_omni: true
   tags:
   - 大语言模型
   - agent-thought
@@ -1215,7 +1215,7 @@ models:
   - thinking
   - json_output
   - function_call
-  is_omni: false
+  is_omni: true
   tags:
   - 大语言模型
   - 多模态
@@ -1233,7 +1233,7 @@ models:
   - thinking
   - json_output
   - function_call
-  is_omni: false
+  is_omni: true
   tags:
   - 大语言模型
   - 多模态
@@ -1251,7 +1251,7 @@ models:
   - thinking
   - json_output
   - function_call
-  is_omni: false
+  is_omni: true
   tags:
   - 大语言模型
   - 多模态
@@ -1269,7 +1269,7 @@ models:
   - thinking
   - json_output
   - function_call
-  is_omni: false
+  is_omni: true
   tags:
   - 大语言模型
   - 多模态
@@ -1287,7 +1287,7 @@ models:
   - thinking
   - json_output
   - function_call
-  is_omni: false
+  is_omni: true
   tags:
   - 大语言模型
   - 多模态
@@ -1305,7 +1305,7 @@ models:
   - thinking
   - json_output
   - function_call
-  is_omni: false
+  is_omni: true
   tags:
   - 大语言模型
   - 多模态
