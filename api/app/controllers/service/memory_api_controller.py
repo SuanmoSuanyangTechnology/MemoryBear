@@ -11,6 +11,7 @@ import asyncio
 
 from fastapi import APIRouter, Body, Header, Request, Depends
 from fastapi.encoders import jsonable_encoder
+from sqlalchemy.orm import Session
 from starlette.responses import Response
 
 # 包装内部 controller
@@ -172,7 +173,7 @@ async def write_memory_async(
         api_key_auth: ApiKeyAuth = None,
         body_placeholder: str = Body(None, description="Placeholder - actual body parsed via request.json()"),
         language_type: str = Header(default=None, alias="X-Language-Type"),
-        db: str = Depends(get_db),
+        db: Session = Depends(get_db),
 ):
     """
     Write memory asynchronously (Celery task).
