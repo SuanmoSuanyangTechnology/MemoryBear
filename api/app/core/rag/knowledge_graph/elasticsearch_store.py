@@ -586,7 +586,12 @@ class GraphElasticsearchStore:
                                 "unmapped_type": "long",
                             }
                         },
-                        {"entity_key_kwd": {"order": "asc"}},
+                        {
+                            "entity_key_kwd": {
+                                "order": "asc",
+                                "unmapped_type": "keyword",
+                            }
+                        },
                     ],
                 ),
                 self._client.search(
@@ -603,7 +608,12 @@ class GraphElasticsearchStore:
                                 "unmapped_type": "long",
                             }
                         },
-                        {"relation_key_kwd": {"order": "asc"}},
+                        {
+                            "relation_key_kwd": {
+                                "order": "asc",
+                                "unmapped_type": "keyword",
+                            }
+                        },
                     ],
                 ),
             )
@@ -759,7 +769,14 @@ class GraphElasticsearchStore:
                 ENTITY_PROJECTION,
                 [{"terms": {"entity_key_kwd": list(keys)}}],
             ),
-            sort=[{"entity_key_kwd": {"order": "asc"}}],
+            sort=[
+                {
+                    "entity_key_kwd": {
+                        "order": "asc",
+                        "unmapped_type": "keyword",
+                    }
+                }
+            ],
         )
         raise_on_shard_failures(result, "load graph entity projections")
         projections: list[EntityProjectionHit] = []
@@ -813,7 +830,12 @@ class GraphElasticsearchStore:
                 ],
             ),
             sort=[
-                {"relation_key_kwd": {"order": "asc"}},
+                {
+                    "relation_key_kwd": {
+                        "order": "asc",
+                        "unmapped_type": "keyword",
+                    }
+                },
             ],
         )
         raise_on_shard_failures(result, "load graph neighbor relations")
