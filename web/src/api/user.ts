@@ -62,3 +62,7 @@ export const changeEmail = (data: ChangeEmailModalForm) => {
 export const getTenantSubscription = () => {
   return request.get('/tenant/subscription')
 }
+// Resource usage overview
+export const getQuotaUsage = () => {
+  return request.get('/tenants/quota/usage')
+}

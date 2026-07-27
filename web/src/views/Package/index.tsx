@@ -33,6 +33,7 @@ import { useI18n } from '@/store/locale'
 import { useUser } from '@/store/user'
 import { useSubscription } from '@/store/subscription'
 import PackageIcon from './PackageIcon'
+import { isPrivateAvailable } from '@/utils/private'
 
 import arrowSvg from '@/assets/images/package/arrow.svg?react'
 
@@ -40,7 +41,6 @@ const btnClassNames = {
   permanent_free: 'rb:h-10! rb:rounded-[8px]!',
   default: 'rb:h-10! rb:rounded-[8px]! rb:bg-[#212332]! rb:text-white! rb:border-0! rb:hover:border-0! rb:hover:opacity-[0.8]',
 }
-const isSaas = import.meta.env.VITE_PROD_ENV === 'saas'
 
 export const UnitWrapper = ({ titleKey, value, icon, unit, theme_color = '#171719' }: { titleKey: string; value?: number | string | null; icon: string; unit?: string; theme_color?: string; }) => {
   const { t } = useTranslation();
@@ -129,6 +129,7 @@ const Package: FC = () => {
   const { subscription: curPkg, fetchSubscription } = useSubscription()
 
   const checkResourcePacks = () => {
+    if (!isPrivateAvailable) return
     getResourcePacks({ page: 1, pagesize: 1 }).then(res => {
       const hasItems = (res as { items: unknown[] })?.items?.length > 0
       setHasResourcePacks(hasItems)
@@ -196,7 +197,7 @@ const Package: FC = () => {
     navigate('/orders');
   }
 
-  const isHasTop = isSaas || showTabs
+  const isHasTop = isPrivateAvailable || showTabs
   return (
     <>
       {isHasTop &&
@@ -210,7 +211,7 @@ const Package: FC = () => {
               onChange={handleChangeTab}
             />
           }
-          {isSaas &&
+          {isPrivateAvailable &&
             <Flex gap={12}>
               <Button className="rb:group" onClick={goToHistory}>
                 <div
