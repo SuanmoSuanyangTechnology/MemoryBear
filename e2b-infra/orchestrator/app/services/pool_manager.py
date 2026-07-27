@@ -129,7 +129,7 @@ class PoolManager:
 
     async def _create_container(self, host_url: str, host_id: str) -> Container:
         client = self._clients[host_id]
-        image = self._settings.TEMPLATE_ID
+        image = self._settings.template_image
         loop = asyncio.get_running_loop()
 
         import uuid

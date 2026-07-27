@@ -30,6 +30,14 @@ class Settings(BaseSettings):
 
     # Agent runner image
     TEMPLATE_ID: str = os.getenv("E2B_TEMPLATE_ID", "agent-runtime")
+    TEMPLATE_REGISTRY: str = os.getenv("E2B_TEMPLATE_REGISTRY", "")
+
+    @property
+    def template_image(self) -> str:
+        """Full qualified image name, e.g. harbor.rboa.redbearai.com/rb/agent-runtime"""
+        if self.TEMPLATE_REGISTRY:
+            return f"{self.TEMPLATE_REGISTRY}/{self.TEMPLATE_ID}"
+        return self.TEMPLATE_ID
 
     # Warm pool
     WARM_POOL_SIZE: int = int(os.getenv("E2B_WARM_POOL_SIZE", "2"))
