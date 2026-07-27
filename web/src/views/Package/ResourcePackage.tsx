@@ -1,10 +1,10 @@
 /**
  * ResourcePack Component
  *
- * 增购资源包（Add-on resource packs）:
- * - 左侧资源类别列表，可切换
- * - 右侧展示当前可用总额度、扩容规格选择、购买数量与合计
- * - 底部购物车条，汇总已选资源包并前往确认订单
+ * Add-on resource packs:
+ * - Left side: category list with switching
+ * - Right side: current available total quota, expansion tier selection, purchase quantity and total
+ * - Bottom cart bar: summarize selected resource packs and proceed to order confirmation
  *
  * @component
  */
@@ -20,7 +20,7 @@ import { billingUnits, getUnit } from './constant';
 import { getResourcePacks } from '@/api/package';
 import PackageIcon from './PackageIcon'
 
-/** 生成购物车条目的唯一键 */
+/** Generate unique key for cart item */
 const itemKey = (categoryKey: string, tierId: string) => `${categoryKey}_${tierId}`;
 
 
@@ -66,7 +66,7 @@ const ResourcePackage: FC = () => {
   const cartItems = useMemo(() => Object.values(cart), [cart]);
   const cartCount = cartItems.reduce((sum, item) => sum + (item.tiers?.[0]?.amount ?? 0), 0);
   const cartTotal = cartItems.reduce((sum, item) => sum + Number(item.tiers[0].unit_price) * (item.tiers?.[0].amount || 0), 0);
-  // 更新购物车
+  // Update cart
   const handleAddToCart = () => {
     if (!selectedResourcePack || !activeSpecTier) return;
     const key = itemKey(selectedResourcePack.id, activeSpecTier?.tier_id);
@@ -84,23 +84,23 @@ const ResourcePackage: FC = () => {
     });
     message.success(t('package.confirmAddCart'));
   };
-  /** 清空购物车 */
+  /** Clear cart */
   const handleClearCart = () => {
     setCart({});
     setCartExpanded(false);
     message.success(t('package.cartCleared'));
   };
-  /** 从购物车移除某条目 */
+  /** Remove item from cart */
   const handleRemoveCartItem = (key: string) => {
     setCart(prev => {
       const next = { ...prev };
       delete next[key];
       return next;
     });
-    // 移除后若购物车已空，收起明细
+    // Collapse cart detail if empty after removal
     if (Object.keys(cart).length <= 1) setCartExpanded(false);
   };
-  /** 修改购物车中某条目的数量 */
+  /** Update quantity of cart item */
   const handleUpdateCartQty = (key: string, qty: number | null) => {
     const current = cart[key];
     if (current) {
@@ -122,7 +122,7 @@ const ResourcePackage: FC = () => {
       };
     });
   };
-  // 去下单
+  // Go to checkout
   const handleCheckout = () => {
     if (cartCount < 1) return;
     navigate('/order-pay', {
@@ -132,11 +132,11 @@ const ResourcePackage: FC = () => {
       },
     });
   };
-  
+
   const [cartExpanded, setCartExpanded] = useState(false);
-  /** 购物车明细弹层是否展开且有内容 */
+  /** Whether cart detail panel is expanded and has content */
   const cartPanelOpen = cartExpanded && cartItems.length > 0;
-  /** 实测购物车明细弹层高度，用于动态计算两栏可用高度 */
+  /** Measured cart panel height for dynamic two-column height calculation */
   const cartPanelRef = useRef<HTMLDivElement>(null);
   const [cartPanelHeight, setCartPanelHeight] = useState(0);
   useEffect(() => {
@@ -162,7 +162,7 @@ const ResourcePackage: FC = () => {
   }, [cartItems, selectedResourcePack])
   return (
     <Flex vertical gap={16} className="rb:relative rb:h-[calc(100vh-104px)]">
-      {/* 顶部说明 */}
+      {/* Top description */}
       <Flex justify="space-between" align="start">
         <div>
           <h2 className="rb:text-[18px] rb:font-bold rb:mb-1">{t('package.resourcePackTitle')}</h2>
@@ -175,7 +175,7 @@ const ResourcePackage: FC = () => {
         className="rb:min-h-0"
         style={{ height: `calc(100% - 144px - ${cartPanelHeight}px)` }}
       >
-        {/* 左侧类别列表 */}
+        {/* Left category list */}
         <Flex vertical gap={8} className="rb:w-[300px] rb:shrink-0 rb:min-h-0 rb:overflow-y-auto rb:pr-1">
           {resourcePacks.map(resource => {
             const active = resource.id === selectedResourcePack?.id;
@@ -229,11 +229,11 @@ const ResourcePackage: FC = () => {
           })}
         </Flex>
 
-        {/* 右侧配置区 */}
+        {/* Right configuration area */}
         {selectedResourcePack &&
           <Flex vertical gap={12} justify="space-between" className="rb:flex-1 rb:min-w-0 rb:min-h-0 rb:overflow-y-auto rb:bg-white rb:rounded-[12px] rb:border rb:border-[#EBEBEB]">
             <Flex vertical gap={12}>
-              {/* 类别标题 + 当前可用总额度 */}
+              {/* Category title + current available total quota */}
               <Flex justify="space-between" align="center" className="rb:border-b rb:border-[#EBEBEB] rb:py-3! rb:mx-4!">
                 <Flex gap={12} align="center">
                   <Flex align="center" justify="center" className="rb:size-9 rb:rounded-lg rb:bg-[#F4F5F7]">
@@ -253,7 +253,7 @@ const ResourcePackage: FC = () => {
                 </div> */}
               </Flex>
 
-              {/* 选择扩容规格 */}
+              {/* Select expansion tier */}
               <Flex align="baseline" gap={8} className="rb:px-3!">
                 <span className="rb:text-[14px] rb:font-medium">{t('package.chooseCategory')}</span>
                 <span className="rb:text-[12px] rb:text-[#5B6167]">{t('package.chooseCategoryDesc')}</span>
@@ -287,7 +287,7 @@ const ResourcePackage: FC = () => {
               </div>
             </Flex>
 
-            {/* 数量 + 合计 + 加入购物车 */}
+            {/* Quantity + total + add to cart */}
             <Flex justify="space-between" align="center" className="rb:border-t rb:border-[#EBEBEB] rb:py-3! rb:mx-4!">
               <Flex align="center" gap={12}>
                 <span className="rb:text-[13px] rb:text-[#5B6167]">{t('package.buyQuantity')}</span>
@@ -325,7 +325,7 @@ const ResourcePackage: FC = () => {
         }
       </Flex>
 
-      {/* 底部购物车条 */}
+      {/* Bottom cart bar */}
       <Flex
         align="center"
         justify="space-between"
@@ -363,7 +363,7 @@ const ResourcePackage: FC = () => {
         </Flex>
       </Flex>
 
-      {/* 购物车明细弹出 */}
+      {/* Cart detail popup */}
       {cartPanelOpen && (
         <div ref={cartPanelRef} className="rb:absolute rb:bottom-16 rb:-left-3 rb:-right-3 rb:bg-white rb:border-b rb:border-[#EBEBEB] rb:p-4">
           <Flex justify="space-between" align="center" className="rb:pb-3!">

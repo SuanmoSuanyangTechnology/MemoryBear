@@ -55,7 +55,9 @@ const OrderHistory: React.FC = () => {
   ]
 
   useEffect(() => {
-    setQuery(location.state || {})
+    if (location.state) {
+      setQuery(location.state || {})
+    }
   }, [location.state])
 
   const handleView = (order: Order) => {
@@ -184,13 +186,13 @@ const OrderHistory: React.FC = () => {
     },
   ];
   
-
+  console.log('query', query, location.state)
   return (
     <div className="rb:h-full rb:overflow-hidden rb:bg-white rb:rounded-lg rb:pt-3 rb:px-3">
       <Flex className="rb:mb-3!" gap={10}>
         {/* 订单状态 pending/approved/rejected */}
         <Select
-          defaultValue={query.status}
+          value={query.status}
           placeholder={t('common.select')}
           options={[
             { label: t('pricing.allStatus'), value: null },
@@ -204,7 +206,7 @@ const OrderHistory: React.FC = () => {
         />
         {/* 业务类型 purchase/renewal/recharge/free */}
         <Select
-          defaultValue={query.business_type}
+          value={query.business_type}
           placeholder={t('common.select')}
           options={businessTypeOptions}
           className="rb:w-40"
@@ -212,7 +214,7 @@ const OrderHistory: React.FC = () => {
         />
         {/* 产品类型 saas_personal/commercial_deployment */}
         <Select
-          defaultValue={query.product_type}
+          value={query.product_type}
           placeholder={t('common.select')}
           options={productTypeOptions}
           className="rb:w-40"
@@ -224,7 +226,7 @@ const OrderHistory: React.FC = () => {
         apiUrl={orderListUrl}
         apiParams={query}
         columns={columns}
-        rowKey="id"
+        rowKey={(record) => (record as GroupOrder).order_group_id || (record as Order).id || 'id'}
         isScroll={true}
       />
 
