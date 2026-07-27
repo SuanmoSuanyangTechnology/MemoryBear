@@ -21,8 +21,8 @@ import { getResourcePacks } from '@/api/package';
 import PackageIcon from './PackageIcon'
 import { getQuotaUsage } from '@/api/user'
 
-/** Generate unique key for cart item */
-const itemKey = (categoryKey: string, tierId: string) => `${categoryKey}_${tierId}`;
+/** Generate unique key for cart item by resource pack ID */
+const itemKey = (resourcePackId: string) => resourcePackId;
 
 
 const getPackage = (key: string) => {
@@ -64,7 +64,7 @@ const ResourcePackage: FC = () => {
   }, [selectedResourcePack]);
 
   const handleChangeTier = (tier: ResourcePackTier) => {
-    const key = itemKey(selectedResourcePack?.id || '', tier.tier_id || '');
+    const key = selectedResourcePack?.id || '';
     const current = cart[key];
     setActiveSpecTier(tier);
     setQuantity(current?.tiers?.[0]?.amount || 1);
@@ -77,7 +77,7 @@ const ResourcePackage: FC = () => {
   // Update cart
   const handleAddToCart = () => {
     if (!selectedResourcePack || !activeSpecTier) return;
-    const key = itemKey(selectedResourcePack.id, activeSpecTier?.tier_id);
+    const key = itemKey(selectedResourcePack.id);
     setCart(prev => {
       return {
         ...prev,
@@ -403,7 +403,7 @@ const ResourcePackage: FC = () => {
 
           <Flex vertical gap={12} className="rb:max-h-[280px] rb:overflow-y-auto">
             {cartItems.map((item, index) => {
-              const key = itemKey(item.id, item.tiers[0].tier_id);
+              const key = itemKey(item.id);
               const tier = item.tiers[0];
               return (
                 <Flex key={key} justify="space-between" align="center" gap={12}
