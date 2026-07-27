@@ -21,6 +21,7 @@ from uuid import UUID
 
 from app.core.language_utils import get_language_from_header
 from app.core.logging_config import get_api_logger
+from app.core.memory.pipelines.base_pipeline import ModelClientMixin
 from app.core.memory.storage_services.reflection_engine.self_reflexion import (
     ReflectionConfig,
     ReflectionEngine, ReflectionRange, ReflectionBaseline,
@@ -425,14 +426,14 @@ async def reflection_run(
         model_id=model_id,
         language_type=language_type
     )
-
+    model_client = ModelClientMixin.get_llm_client(db, model_id, current_user.tenant_id)
     # Initialize Neo4j connector and reflection engine
     connector = Neo4jConnector()
     engine = ReflectionEngine(
         config=config,
         neo4j_connector=connector,
-        llm_client=model_id,  # Pass validated model_id
-        tenant_id=current_user.tenant_id
+        llm_client=model_client,
+        tenant_id=current_user.tenant_id,
     )
 
     result = await (engine.reflection_run())
