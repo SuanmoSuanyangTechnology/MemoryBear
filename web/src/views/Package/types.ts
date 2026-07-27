@@ -104,3 +104,16 @@ export interface ResourcePack {
   created_by: string;
   updated_by: string;
 }
+export interface ResourceUsageItem {
+  used: number;
+  limit: number;
+  percentage: number;
+  unit: string;
+  per_workspace: {
+    workspace_id: string;
+    workspace_name: string;
+    used: number;
+    limit: number;
+    percentage: number;
+  }[];
+}

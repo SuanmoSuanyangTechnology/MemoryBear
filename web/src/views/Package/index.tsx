@@ -15,7 +15,7 @@
  * @component
  */
 
-import { useRef, useMemo, useState, useEffect, type FC, type ComponentType, type SVGProps } from 'react';
+import { useRef, useMemo, useState, useEffect, type FC } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Flex, Tooltip, Divider, Button, type SegmentedProps } from 'antd';
 import clsx from 'clsx';
@@ -23,7 +23,7 @@ import Icon from '@ant-design/icons'
 import { useNavigate, useLocation } from 'react-router-dom';
 
 import type { Package } from './types'
-import { getPackageList } from '@/api/package';
+import { getPackageList, getResourcePacks } from '@/api/package';
 import PageTabs from '@/components/PageTabs'
 import { billingUnits } from './constant'
 import RbCard from '@/components/RbCard/Card'
@@ -32,48 +32,19 @@ import BodyWrapper from '@/components/Empty/BodyWrapper'
 import { useI18n } from '@/store/locale'
 import { useUser } from '@/store/user'
 import { useSubscription } from '@/store/subscription'
-import type { Subscription } from '@/components/SiderMenu'
+import PackageIcon from './PackageIcon'
+import { isPrivateAvailable } from '@/utils/private'
 
-import SpaceSvg from '@/assets/images/package/space.svg?react'
-import SkillSvg from '@/assets/images/package/skill.svg?react'
-import AppSvg from '@/assets/images/package/app.svg?react'
-import KnowledgeSvg from '@/assets/images/package/knowledge.svg?react'
-import MemoryConfigSvg from '@/assets/images/package/memory_config.svg?react'
-import EndUserSvg from '@/assets/images/package/end_user.svg?react'
-import OntologySvg from '@/assets/images/package/ontology.svg?react'
-import ModelSvg from '@/assets/images/package/model.svg?react'
-import TechnicalSupportSvg from '@/assets/images/package/technical_support.svg?react'
-import ApiOpsSvg from '@/assets/images/package/api_ops.svg?react'
 import arrowSvg from '@/assets/images/package/arrow.svg?react'
-import slaSvg from '@/assets/images/package/sla.svg?react';
 
-const iconMap: Record<string, ComponentType<SVGProps<SVGSVGElement>>> = {
-  space: SpaceSvg,
-  skill: SkillSvg,
-  app: AppSvg,
-  knowledge: KnowledgeSvg,
-  memory_config: MemoryConfigSvg,
-  end_user: EndUserSvg,
-  ontology: OntologySvg,
-  model: ModelSvg,
-  technical_support: TechnicalSupportSvg,
-  api_ops: ApiOpsSvg,
-  sla: slaSvg,
-}
 const btnClassNames = {
   permanent_free: 'rb:h-10! rb:rounded-[8px]!',
   default: 'rb:h-10! rb:rounded-[8px]! rb:bg-[#212332]! rb:text-white! rb:border-0! rb:hover:border-0! rb:hover:opacity-[0.8]',
 }
-const isSaas = import.meta.env.VITE_PROD_ENV === 'saas'
 
 export const UnitWrapper = ({ titleKey, value, icon, unit, theme_color = '#171719' }: { titleKey: string; value?: number | string | null; icon: string; unit?: string; theme_color?: string; }) => {
   const { t } = useTranslation();
 
-  const renderFeatureIcon = (iconKey: string, color: string) => {
-    const SvgComponent = iconMap[iconKey]
-    if (!SvgComponent) return null
-    return <Icon component={SvgComponent} style={{ color, fontSize: 16 }} />
-  }
   return (
     <Flex key={titleKey} align="start" gap={16}>
       <Flex
@@ -81,7 +52,9 @@ export const UnitWrapper = ({ titleKey, value, icon, unit, theme_color = '#17171
         justify="center"
         className="rb:mt-1! rb:shrink-0 rb:rounded-lg rb:size-7"
         style={{ backgroundColor: `${theme_color}14` }}
-      >{renderFeatureIcon(icon, theme_color)}</Flex>
+      >
+        <PackageIcon iconKey={icon} color={theme_color} />
+      </Flex>
       <div className="rb:text-[13px] rb:leading-4.5">
         <div className="rb:text-[#5F6266]">{t(`package.${titleKey}`)}</div>
         {value ? <div>{value} {unit ? t(`package.${unit}`) : ''}</div> : <div>{t('package.noLimit')}</div>}
@@ -125,6 +98,7 @@ const Package: FC = () => {
   }, [dataReady])
 
   const [activeTab, setActiveTab] = useState('saas_personal');
+  const [hasResourcePacks, setHasResourcePacks] = useState(false);
 
   const categories = useMemo(() => {
     const cats = [...new Set(data.map(p => p.category))]
@@ -135,11 +109,10 @@ const Package: FC = () => {
     const items = (['saas_personal', 'commercial_deployment'] as const)
       .filter(v => categories.includes(v))
       .map(value => ({ value, label: t(`package.${value}`) }))
-    return [
-      ...items,
-      { value: 'upgrade_package', label: t('package.upgrade_package') }
-    ]
-  }, [t, categories])
+    return hasResourcePacks
+      ? [...items, { value: 'upgrade_package', label: t('package.upgrade_package') }]
+      : items
+  }, [t, categories, hasResourcePacks])
 
   const showTabs = categories.length > 1
 
@@ -155,16 +128,27 @@ const Package: FC = () => {
   }
   const { subscription: curPkg, fetchSubscription } = useSubscription()
 
+  const checkResourcePacks = () => {
+    if (!isPrivateAvailable) return
+    getResourcePacks({ page: 1, pagesize: 1 }).then(res => {
+      const hasItems = (res as { items: unknown[] })?.items?.length > 0
+      setHasResourcePacks(hasItems)
+    }).catch(() => {
+      setHasResourcePacks(false)
+    })
+  }
+
   useEffect(() => {
     getList()
     fetchSubscription()
+    checkResourcePacks()
   }, [])
 
-  // useEffect(() => {
-  //   if (categories.length > 0 && !categories.includes(activeTab as Package['category'])) {
-  //     setActiveTab(categories[0])
-  //   }
-  // }, [categories, activeTab])
+  useEffect(() => {
+    if (categories.length > 0 && activeTab !== 'upgrade_package' && !categories.includes(activeTab as Package['category'])) {
+      setActiveTab(categories[0])
+    }
+  }, [categories, activeTab])
 
   const getKeyWithLanguage = (key: string) => {
     return (language === 'en' ? `${key}_en` : key) as keyof Package
@@ -213,7 +197,7 @@ const Package: FC = () => {
     navigate('/orders');
   }
 
-  const isHasTop = isSaas || showTabs
+  const isHasTop = isPrivateAvailable || showTabs
   return (
     <>
       {isHasTop &&
@@ -227,7 +211,7 @@ const Package: FC = () => {
               onChange={handleChangeTab}
             />
           }
-          {isSaas &&
+          {isPrivateAvailable &&
             <Flex gap={12}>
               <Button className="rb:group" onClick={goToHistory}>
                 <div
@@ -235,9 +219,9 @@ const Package: FC = () => {
                 ></div>
                 {t('pricing.orderHistory')}
               </Button>
-              {/* <Button
+              <Button
                 onClick={() => navigate('/account')}
-              >{t('package.viewOwnedResource')}</Button> */}
+              >{t('package.viewOwnedResource')}</Button>
             </Flex>
           }
         </Flex>

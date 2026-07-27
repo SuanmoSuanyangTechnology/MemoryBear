@@ -3196,7 +3196,11 @@ def scan_reflection_retry(self) -> Dict[str, Any]:
 #     return data
 
 
-@celery_app.task(name="app.controllers.memory_storage_controller.search_all")
+@celery_app.task(
+    name="app.controllers.memory_storage_controller.search_all",
+    time_limit=3600,
+    soft_time_limit=3300,
+)
 def write_total_memory_task(workspace_id: str) -> Dict[str, Any]:
     """定时任务：查询工作空间下所有宿主的记忆总量并写入数据库
 
@@ -3211,7 +3215,7 @@ def write_total_memory_task(workspace_id: str) -> Dict[str, Any]:
     async def _run() -> Dict[str, Any]:
         from app.models.app_model import App
         from app.repositories.end_user_repository import EndUserRepository
-        from app.repositories.memory_increment_repository import write_memory_increment
+        from app.repositories.memory_increment_repository import MemoryIncrementRepository
         from app.services.memory_storage_service import search_all_batch
 
         with get_db_context() as db:
@@ -3226,8 +3230,7 @@ def write_total_memory_task(workspace_id: str) -> Dict[str, Any]:
 
                 if not apps:
                     # 如果没有app，总量为0
-                    memory_increment = write_memory_increment(
-                        db=db,
+                    memory_increment = MemoryIncrementRepository(db).write_memory_increment(
                         workspace_id=workspace_uuid,
                         total_num=0
                     )
@@ -3255,8 +3258,7 @@ def write_total_memory_task(workspace_id: str) -> Dict[str, Any]:
                 ]
 
                 # 4. 写入数据库
-                memory_increment = write_memory_increment(
-                    db=db,
+                memory_increment = MemoryIncrementRepository(db).write_memory_increment(
                     workspace_id=workspace_uuid,
                     total_num=total_num
                 )
@@ -3314,7 +3316,7 @@ def write_all_workspaces_memory_task(self) -> Dict[str, Any]:
         from app.models.app_model import App
         from app.models.workspace_model import Workspace
         from app.repositories.end_user_repository import EndUserRepository
-        from app.repositories.memory_increment_repository import write_memory_increment
+        from app.repositories.memory_increment_repository import MemoryIncrementRepository
         from app.services.memory_storage_service import search_all_batch
 
         with get_db_context() as db:
@@ -3350,8 +3352,7 @@ def write_all_workspaces_memory_task(self) -> Dict[str, Any]:
 
                         if not apps:
                             # 如果没有app，总量为0
-                            memory_increment = write_memory_increment(
-                                db=db,
+                            memory_increment = MemoryIncrementRepository(db).write_memory_increment(
                                 workspace_id=workspace_id,
                                 total_num=0
                             )
@@ -3381,8 +3382,7 @@ def write_all_workspaces_memory_task(self) -> Dict[str, Any]:
                         ]
 
                         # 4. 写入数据库
-                        memory_increment = write_memory_increment(
-                            db=db,
+                        memory_increment = MemoryIncrementRepository(db).write_memory_increment(
                             workspace_id=workspace_id,
                             total_num=total_num
                         )

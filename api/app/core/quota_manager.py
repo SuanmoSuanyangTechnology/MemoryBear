@@ -104,6 +104,17 @@ async def _get_tenant_id_from_kwargs_async(db: AsyncSession, kwargs: dict):
     return await db.run_sync(lambda sync_db: _get_tenant_id_from_kwargs(sync_db, kwargs))
 
 
+# 按工作空间计量的配额：套餐额度是「每个工作空间」的上限，
+# 资源包额度是「整个租户」的一次性增量，聚合时不能跟着工作空间数量翻倍。
+PER_WORKSPACE_QUOTA_KEYS = frozenset({
+    "app_quota",
+    "knowledge_capacity_quota",
+    "memory_engine_quota",
+    "end_user_quota",
+    "ontology_project_quota",
+})
+
+
 def _merge_quota_overlay(base: Optional[Dict[str, Any]], overlay: Dict[str, Any]) -> Dict[str, Any]:
     """Return a new quota mapping with every numeric resource-pack grant added."""
     merged: Dict[str, Any] = dict(base or {})
@@ -122,8 +133,10 @@ def _free_quota_config() -> Optional[Dict[str, Any]]:
         return None
 
 
-def _get_quota_config(db: Session, tenant_id: UUID) -> Optional[Dict[str, Any]]:
-    """Get final quota = effective package (or free fallback) + active packs."""
+def _get_quota_breakdown(
+        db: Session, tenant_id: UUID,
+) -> tuple[Optional[Dict[str, Any]], Dict[str, Any]]:
+    """Return (套餐额度, 资源包额度) so callers can aggregate them separately."""
     try:
         from premium.platform_admin.package_plan_service import TenantSubscriptionService
         from premium.platform_admin.resource_pack_service import ResourcePackService
@@ -132,15 +145,16 @@ def _get_quota_config(db: Session, tenant_id: UUID) -> Optional[Dict[str, Any]]:
         if not base:
             logger.debug(f"租户 {tenant_id} 无 premium 订阅，降级到免费套餐")
             base = _free_quota_config()
-        overlay = ResourcePackService(db).get_overlay(tenant_id)
-        return _merge_quota_overlay(base, overlay)
+        return base, ResourcePackService(db).get_overlay(tenant_id)
     except (ModuleNotFoundError, ImportError):
         logger.debug("premium 模块不存在，使用社区版免费套餐配额")
-        return _free_quota_config()
+        return _free_quota_config(), {}
 
 
-async def _get_quota_config_async(db: AsyncSession, tenant_id: UUID) -> Optional[Dict[str, Any]]:
-    """Async equivalent of :func:`_get_quota_config`."""
+async def _get_quota_breakdown_async(
+        db: AsyncSession, tenant_id: UUID,
+) -> tuple[Optional[Dict[str, Any]], Dict[str, Any]]:
+    """Async equivalent of :func:`_get_quota_breakdown`."""
     try:
         from premium.platform_admin.package_plan_service import TenantSubscriptionService
         from premium.platform_admin.resource_pack_service import ResourcePackService
@@ -149,11 +163,26 @@ async def _get_quota_config_async(db: AsyncSession, tenant_id: UUID) -> Optional
         if not base:
             logger.debug(f"租户 {tenant_id} 无 premium 订阅，降级到免费套餐")
             base = _free_quota_config()
-        overlay = await ResourcePackService.get_overlay_async(db, tenant_id)
-        return _merge_quota_overlay(base, overlay)
+        return base, await ResourcePackService.get_overlay_async(db, tenant_id)
     except (ModuleNotFoundError, ImportError):
         logger.debug("premium 模块不存在，使用社区版免费套餐配额")
-        return _free_quota_config()
+        return _free_quota_config(), {}
+
+
+def _get_quota_config(db: Session, tenant_id: UUID) -> Optional[Dict[str, Any]]:
+    """Get final quota = effective package (or free fallback) + active packs."""
+    base, overlay = _get_quota_breakdown(db, tenant_id)
+    if not overlay:
+        return dict(base) if base else base
+    return _merge_quota_overlay(base, overlay)
+
+
+async def _get_quota_config_async(db: AsyncSession, tenant_id: UUID) -> Optional[Dict[str, Any]]:
+    """Async equivalent of :func:`_get_quota_config`."""
+    base, overlay = await _get_quota_breakdown_async(db, tenant_id)
+    if not overlay:
+        return dict(base) if base else base
+    return _merge_quota_overlay(base, overlay)
 
 
 def get_api_ops_rate_limit(db: Session, tenant_id: UUID) -> Optional[int]:
@@ -867,8 +896,14 @@ async def get_quota_usage(db: Session, tenant_id: UUID) -> dict:
 
     workspace 级配额汇总所有活跃空间，并提供逐空间明细；每用户级配额
     使用租户内单个用户的最大值，便于直接判断最接近限额的资源。
+
+    额度口径：租户总额度 = 套餐额度（workspace 级配额按活跃空间数折算）
+    + 资源包额度（租户级增量，只累加一次）。``limit_source`` 给出两者的
+    构成明细；``per_workspace[].limit`` 是单空间的实际校验上限
+    （套餐每空间额度 + 资源包额度），与 :func:`_check_quota` 保持一致。
     """
-    quota_config = _get_quota_config(db, tenant_id)
+    plan_quota, pack_quota = _get_quota_breakdown(db, tenant_id)
+    quota_config = _merge_quota_overlay(plan_quota, pack_quota) if pack_quota else dict(plan_quota or {})
     if not quota_config:
         return {}
 
@@ -918,16 +953,37 @@ async def get_quota_usage(db: Session, tenant_id: UUID) -> dict:
     end_user_memory_limit = quota_config.get("end_user_memory_limit")
     memory_write_qps_limit = quota_config.get("pre_user_memory_write_qps_limit")
 
-    def effective_workspace_limit(per_workspace_limit):
-        if per_workspace_limit is not None and workspace_count > 0:
-            return per_workspace_limit * workspace_count
-        return per_workspace_limit
+    def effective_workspace_limit(quota_type: str):
+        """租户总额度 = 套餐每空间额度 × 活跃空间数 + 资源包租户级增量。
 
-    app_effective_limit = effective_workspace_limit(app_quota_per_workspace)
-    knowledge_effective_limit = effective_workspace_limit(knowledge_quota_per_workspace)
-    memory_effective_limit = effective_workspace_limit(memory_quota_per_workspace)
-    end_user_effective_limit = effective_workspace_limit(end_user_quota_per_workspace)
-    ontology_effective_limit = effective_workspace_limit(ontology_quota_per_workspace)
+        资源包额度是整个租户购买的一次性增量，因此只能累加一次；
+        直接把它并入每空间额度再乘以空间数会把资源包额度放大 N 倍。
+        """
+        plan_per_workspace = (plan_quota or {}).get(quota_type)
+        pack_grant = (pack_quota or {}).get(quota_type) or 0
+        if plan_per_workspace is None and not pack_grant:
+            return None
+        plan_total = plan_per_workspace or 0
+        if plan_per_workspace is not None and workspace_count > 0:
+            plan_total = plan_per_workspace * workspace_count
+        total = plan_total + pack_grant
+        return round(total, 4) if isinstance(total, float) else total
+
+    app_effective_limit = effective_workspace_limit("app_quota")
+    knowledge_effective_limit = effective_workspace_limit("knowledge_capacity_quota")
+    memory_effective_limit = effective_workspace_limit("memory_engine_quota")
+    end_user_effective_limit = effective_workspace_limit("end_user_quota")
+    ontology_effective_limit = effective_workspace_limit("ontology_project_quota")
+
+    def limit_source(quota_type: str) -> dict:
+        """返回额度构成，便于前端区分套餐与资源包贡献。"""
+        plan_value = (plan_quota or {}).get(quota_type)
+        pack_value = (pack_quota or {}).get(quota_type) or 0
+        source = {"plan": plan_value, "resource_pack": pack_value}
+        if quota_type in PER_WORKSPACE_QUOTA_KEYS:
+            source["plan_per_workspace"] = plan_value
+            source["workspace_count"] = workspace_count
+        return source
 
     api_ops_current = 0
     try:
@@ -974,16 +1030,19 @@ async def get_quota_usage(db: Session, tenant_id: UUID) -> dict:
             "used": workspace_count,
             "limit": quota_config.get("workspace_quota"),
             "percentage": pct(workspace_count, quota_config.get("workspace_quota")),
+            "limit_source": limit_source("workspace_quota"),
         },
         "skill_quota": {
             "used": skill_count,
             "limit": quota_config.get("skill_quota"),
             "percentage": pct(skill_count, quota_config.get("skill_quota")),
+            "limit_source": limit_source("skill_quota"),
         },
         "app_quota": {
             "used": app_count,
             "limit": app_effective_limit,
             "percentage": pct(app_count, app_effective_limit),
+            "limit_source": limit_source("app_quota"),
             "per_workspace": _build_per_workspace_detail(
                 repo.count_apps, app_quota_per_workspace
             ),
@@ -993,6 +1052,7 @@ async def get_quota_usage(db: Session, tenant_id: UUID) -> dict:
             "limit": knowledge_effective_limit,
             "percentage": pct(knowledge_gb, knowledge_effective_limit),
             "unit": "GB",
+            "limit_source": limit_source("knowledge_capacity_quota"),
             "per_workspace": _build_per_workspace_detail(
                 repo.sum_knowledge_capacity_gb, knowledge_quota_per_workspace
             ),
@@ -1001,6 +1061,7 @@ async def get_quota_usage(db: Session, tenant_id: UUID) -> dict:
             "used": memory_count,
             "limit": memory_effective_limit,
             "percentage": pct(memory_count, memory_effective_limit),
+            "limit_source": limit_source("memory_engine_quota"),
             "per_workspace": _build_per_workspace_detail(
                 repo.count_memory_engines, memory_quota_per_workspace
             ),
@@ -1009,6 +1070,7 @@ async def get_quota_usage(db: Session, tenant_id: UUID) -> dict:
             "used": end_user_count,
             "limit": end_user_effective_limit,
             "percentage": pct(end_user_count, end_user_effective_limit),
+            "limit_source": limit_source("end_user_quota"),
             "per_workspace": _build_per_workspace_detail(
                 repo.count_end_users, end_user_quota_per_workspace
             ),
@@ -1017,6 +1079,7 @@ async def get_quota_usage(db: Session, tenant_id: UUID) -> dict:
             "used": ontology_count,
             "limit": ontology_effective_limit,
             "percentage": pct(ontology_count, ontology_effective_limit),
+            "limit_source": limit_source("ontology_project_quota"),
             "per_workspace": _build_per_workspace_detail(
                 repo.count_ontology_projects, ontology_quota_per_workspace
             ),
@@ -1025,12 +1088,14 @@ async def get_quota_usage(db: Session, tenant_id: UUID) -> dict:
             "used": model_count,
             "limit": quota_config.get("model_quota"),
             "percentage": pct(model_count, quota_config.get("model_quota")),
+            "limit_source": limit_source("model_quota"),
         },
         "api_ops_rate_limit": {
             "current": api_ops_current,
             "limit": api_ops_limit,
             "percentage": pct(api_ops_current, api_ops_limit),
             "unit": "次/秒/API Key",
+            "limit_source": limit_source("api_ops_rate_limit"),
         },
         "end_user_memory_limit": {
             "used": end_user_memory_count,
@@ -1038,6 +1103,7 @@ async def get_quota_usage(db: Session, tenant_id: UUID) -> dict:
             "percentage": pct(end_user_memory_count, end_user_memory_limit),
             "unit": "记忆节点/用户",
             "aggregation": "max_per_end_user",
+            "limit_source": limit_source("end_user_memory_limit"),
             "per_workspace": _build_per_workspace_detail(
                 repo.max_end_user_memory_count, end_user_memory_limit
             ),
@@ -1048,5 +1114,6 @@ async def get_quota_usage(db: Session, tenant_id: UUID) -> dict:
             "percentage": pct(memory_write_qps_current, memory_write_qps_limit),
             "unit": "次/秒/用户",
             "aggregation": "max_per_end_user",
+            "limit_source": limit_source("pre_user_memory_write_qps_limit"),
         },
     }

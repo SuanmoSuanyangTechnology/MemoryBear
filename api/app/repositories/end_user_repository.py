@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import List, NamedTuple, Optional, Set
 
 import sqlalchemy as sa
-from sqlalchemy import or_, select
+from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
@@ -80,6 +80,30 @@ class EndUserRepository:
             return end_users
         except Exception as e:
             self.db.rollback()
+            db_logger.error(f"查询工作空间 {workspace_id} 下终端用户时出错: {str(e)}")
+            raise
+
+    async def get_end_users_by_workspace_async(
+        self, workspace_id: uuid.UUID
+    ) -> List[EndUser]:
+        """获取指定 workspace 下的所有活跃 end_user（异步版本）
+        返回结果按 created_at 从新到旧排序（NULL 值排在最后）
+        """
+        from sqlalchemy import desc, nullslast
+        try:
+            result = await self.db.execute(
+                select(EndUser)
+                .filter(EndUser.workspace_id == workspace_id, EndUser.is_active == True)
+                .order_by(
+                    nullslast(desc(EndUser.created_at)),
+                    desc(EndUser.id),
+                )
+            )
+            end_users = list(result.scalars().all())
+            db_logger.info(f"成功查询工作空间 {workspace_id} 下的 {len(end_users)} 个终端用户")
+            return end_users
+        except Exception as e:
+            await self.db.rollback()
             db_logger.error(f"查询工作空间 {workspace_id} 下终端用户时出错: {str(e)}")
             raise
 
@@ -1049,8 +1073,6 @@ class EndUserRepository:
     ) -> int:
         """批量更新工作空间下所有终端用户的 memory_config_id"""
         try:
-            from sqlalchemy import update
-
             stmt = (
                 update(EndUser)
                 .where(EndUser.workspace_id == workspace_id, EndUser.is_active == True)
@@ -1094,8 +1116,6 @@ class EndUserRepository:
             Exception: 数据库操作失败时抛出
         """
         try:
-            from sqlalchemy import update
-
             stmt = (
                 update(EndUser)
                 .where(EndUser.app_id == app_id, EndUser.is_active == True)
@@ -1167,8 +1187,6 @@ class EndUserRepository:
             int: 清除的行数
         """
         try:
-            from sqlalchemy import update
-
             stmt = (
                 update(EndUser)
                 .where(EndUser.memory_config_id == memory_config_id, EndUser.is_active == True)
@@ -1228,6 +1246,25 @@ class EndUserRepository:
         except Exception as e:
             self.db.rollback()
             db_logger.error(f"软删除终端用户失败: end_user_id={end_user_id}, error={str(e)}")
+            raise
+
+    async def soft_delete_by_end_user_id_async(self, end_user_id: uuid.UUID) -> bool:
+        """软删除指定 EndUser（异步版本）"""
+        try:
+            result = await self.db.execute(
+                update(EndUser)
+                .where(EndUser.id == end_user_id, EndUser.is_active == True)
+                .values(is_active=False)
+            )
+            await self.db.commit()
+            if result.rowcount:
+                db_logger.info(f"软删除终端用户(异步): end_user_id={end_user_id}")
+            else:
+                db_logger.warning(f"未找到活跃终端用户(异步)，无法软删除: end_user_id={end_user_id}")
+            return result.rowcount > 0
+        except Exception as e:
+            await self.db.rollback()
+            db_logger.error(f"软删除终端用户失败(异步): end_user_id={end_user_id}, error={str(e)}")
             raise
 
     def soft_delete_by_user_id(self, user_id: uuid.UUID) -> int:
@@ -1496,6 +1533,21 @@ class EndUserRepository:
         except Exception as e:
             self.db.rollback()
             db_logger.error(f"更新记忆计数失败: end_user_id={end_user_id}, error={str(e)}")
+            raise
+
+    async def update_memory_count_async(self, end_user_id: uuid.UUID, node_count: int) -> bool:
+        """更新终端用户的记忆节点计数（异步版本）"""
+        try:
+            result = await self.db.execute(
+                update(EndUser)
+                .where(EndUser.id == end_user_id, EndUser.is_active == True)
+                .values(memory_count=node_count)
+            )
+            await self.db.commit()
+            return result.rowcount > 0
+        except Exception as e:
+            await self.db.rollback()
+            db_logger.error(f"更新记忆计数失败(异步): end_user_id={end_user_id}, error={str(e)}")
             raise
 
 

@@ -110,7 +110,7 @@ class ConversationRepository:
         logger.info(f"Conversation fetched successfully: {conversation_id}")
         return conversation
 
-    def get_conversation_by_user_id(
+    async def get_conversation_by_user_id_async(
             self,
             user_id: uuid.UUID,
             workspace_id: uuid.UUID = None,
@@ -118,30 +118,12 @@ class ConversationRepository:
             page: int = 1,
             page_size: int = 20
     ) -> tuple[list[Conversation], int]:
-        """
-        Retrieve recent conversations for a specific user with pagination.
-
-        This method queries conversations associated with the given user ID,
-        optionally scoped to a specific workspace. Results are ordered by the
-        most recently updated conversations.
-
-        Args:
-            user_id (uuid.UUID): Unique identifier of the user.
-            workspace_id (uuid.UUID, optional): Workspace scope for the query.
-                If provided, only conversations under this workspace will be returned.
-            is_activate (bool): Conversation State limit.
-            page (int): Page number (1-based). Defaults to 1.
-            page_size (int): Number of items per page. Defaults to 20.
-
-        Returns:
-            tuple[list[Conversation], int]: A list of conversation entities and total count.
-        """
-        logger.info(f"Fetching conversation by user_id: {user_id}")
+        """Async version of get_conversation_by_user_id."""
+        logger.info(f"Fetching conversation by user_id (async): {user_id}")
 
         stmt = select(Conversation).where(
             Conversation.user_id == str(user_id),
             Conversation.is_active.is_(is_activate),
-            # FIXME: Hacky workaround to filter out Memory API write requests.
             Conversation.app_id != "00000000-0000-0000-0000-000000000001"
         )
 
@@ -149,17 +131,19 @@ class ConversationRepository:
             stmt = stmt.where(Conversation.workspace_id == workspace_id)
 
         # Calculate total count
-        total = int(self.db.execute(
+        count_result = await self.db.execute(
             select(func.count()).select_from(stmt.subquery())
-        ).scalar_one())
+        )
+        total = int(count_result.scalar_one())
 
         # Apply ordering and pagination
         stmt = stmt.order_by(desc(Conversation.updated_at))
         stmt = stmt.offset((page - 1) * page_size).limit(page_size)
 
-        conversations = list(self.db.scalars(stmt).all())
+        result = await self.db.execute(stmt)
+        conversations = list(result.scalars().all())
         logger.info(
-            "Conversation fetched successfully",
+            "Conversation fetched successfully (async)",
             extra={
                 "user_id": str(user_id),
                 "workspace_id": str(workspace_id),

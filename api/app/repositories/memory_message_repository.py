@@ -18,6 +18,7 @@ from typing import List, Optional
 import sqlalchemy as sa
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.memory.enums import MemoryMessageSource
 from app.core.utils.datetime_utils import ensure_dialog_at, to_iso_z, utcnow_naive
@@ -34,7 +35,7 @@ class MemoryMessageRepository:
     Workflow、Flush、MCP）复用。
     """
 
-    def __init__(self, db: Session):
+    def __init__(self, db: Session | AsyncSession):
         self.db = db
 
     # ──────────────────────────────────────────────
@@ -262,6 +263,27 @@ class MemoryMessageRepository:
             for r in rows
         ]
 
+    async def get_working_memory_sources_async(self, end_user_id: str) -> List[dict]:
+        """返回该用户 API/MCP 各来源的记忆摘要（每 source 一行）（异步版本）。"""
+        result = await self.db.execute(
+            select(
+                MemoryMessage.source,
+                func.count().label("message_count"),
+                func.max(MemoryMessage.created_at).label("latest_at"),
+            )
+            .where(
+                MemoryMessage.end_user_id == end_user_id,
+                MemoryMessage.conversation_id.is_(None),
+                MemoryMessage.source.in_(self._API_MCP_SOURCES),
+            )
+            .group_by(MemoryMessage.source)
+        )
+        rows = result.all()
+        return [
+            {"source": r.source, "message_count": int(r.message_count), "latest_at": r.latest_at}
+            for r in rows
+        ]
+
     async def get_working_memory_source_count_async(self, end_user_id: str) -> int:
         """统计该用户 API/MCP 来源的 distinct source 数量（异步版本）。
 
@@ -331,6 +353,47 @@ class MemoryMessageRepository:
             .where(MemoryMessage.id.in_(recent_ids))
             .order_by(MemoryMessage.created_at.asc())
         ).scalars().all())
+
+        return rows, total
+
+    async def list_recent_messages_by_source_async(
+        self,
+        end_user_id: str,
+        source: str,
+        limit: int = 20,
+    ) -> tuple[list[MemoryMessage], int]:
+        """按来源取最近 N 条消息（从旧到新排列）+ 该来源总条数（异步版本）。"""
+        base_filter = [
+            MemoryMessage.end_user_id == end_user_id,
+            MemoryMessage.conversation_id.is_(None),
+            MemoryMessage.source == source,
+        ]
+
+        total_result = await self.db.execute(
+            select(func.count(MemoryMessage.id)).where(*base_filter)
+        )
+        total = int(total_result.scalar_one())
+
+        if total == 0:
+            return [], 0
+
+        recent_ids_result = await self.db.execute(
+            select(MemoryMessage.id)
+            .where(*base_filter)
+            .order_by(MemoryMessage.created_at.desc())
+            .limit(limit)
+        )
+        recent_ids = list(recent_ids_result.scalars().all())
+
+        if not recent_ids:
+            return [], total
+
+        rows_result = await self.db.execute(
+            select(MemoryMessage)
+            .where(MemoryMessage.id.in_(recent_ids))
+            .order_by(MemoryMessage.created_at.asc())
+        )
+        rows = list(rows_result.scalars().all())
 
         return rows, total
 

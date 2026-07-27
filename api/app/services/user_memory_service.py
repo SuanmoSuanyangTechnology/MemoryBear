@@ -12,6 +12,7 @@ from typing import Any, Callable, Dict, FrozenSet, List, Optional, Tuple
 
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging_config import get_logger
 from app.core.memory.analytics.user_card_tags import normalize_stored_user_card_tags
@@ -556,6 +557,109 @@ class UserMemoryService:
             }
         except Exception as e:
             db.rollback()
+            logger.error(f"更新终端用户信息记录失败: end_user_id={end_user_id}, error={str(e)}")
+            return {
+                "success": False,
+                "data": None,
+                "error": str(e)
+            }
+    
+    async def update_end_user_info_async(
+        self,
+        db: AsyncSession,
+        end_user_id: str,
+        update_data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """更新终端用户信息记录（异步版本）"""
+        try:
+            from app.repositories.end_user_info_repository import EndUserInfoRepository
+            from app.repositories.end_user_repository import EndUserRepository
+            from app.core.api_key_utils import datetime_to_timestamp
+            
+            user_uuid = uuid.UUID(end_user_id)
+            end_user_info_record = await EndUserInfoRepository(db).get_by_end_user_id_async(user_uuid)
+            
+            if not end_user_info_record:
+                logger.warning(f"终端用户信息记录不存在: end_user_id={end_user_id}")
+                return {
+                    "success": False,
+                    "data": None,
+                    "error": "终端用户信息记录不存在"
+                }
+            
+            allowed_fields = {'other_name', 'aliases', 'meta_data'}
+            _user_placeholder_names = _USER_PLACEHOLDER_NAMES
+            
+            if 'other_name' in update_data and update_data['other_name'] and update_data['other_name'].strip() in _user_placeholder_names:
+                logger.warning(f"拒绝将占位名称 '{update_data['other_name']}' 设置为 other_name")
+                del update_data['other_name']
+            
+            if 'aliases' in update_data and update_data['aliases']:
+                update_data['aliases'] = [
+                    a for a in update_data['aliases']
+                    if isinstance(a, str) and a.strip() and a.strip() not in _user_placeholder_names
+                ]
+            
+            aliases_updated = 'aliases' in update_data and update_data['aliases'] != end_user_info_record.aliases
+            other_name_updated = 'other_name' in update_data and update_data['other_name'] != end_user_info_record.other_name
+            
+            for field, value in update_data.items():
+                if field in allowed_fields:
+                    setattr(end_user_info_record, field, value)
+            
+            end_user_info_record.updated_at = utcnow_naive()
+            
+            if other_name_updated:
+                end_user_record = await EndUserRepository(db).get_end_user_by_id_async(user_uuid)
+                if end_user_record:
+                    end_user_record.other_name = update_data['other_name']
+                    end_user_record.updated_at = utcnow_naive()
+                    logger.info(f"同步更新 end_user 表的 other_name: end_user_id={end_user_id}, other_name={update_data['other_name']}")
+                else:
+                    logger.warning(f"未找到对应的 end_user 记录: end_user_id={end_user_id}")
+            
+            await db.commit()
+            await db.refresh(end_user_info_record)
+            
+            if aliases_updated:
+                neo4j_sync_status = "success"
+                try:
+                    await self._sync_aliases_to_neo4j(end_user_id, update_data['aliases'])
+                    logger.info(f"已触发 aliases 同步到 Neo4j: end_user_id={end_user_id}, aliases={update_data['aliases']}")
+                except Exception as sync_error:
+                    neo4j_sync_status = "failed"
+                    logger.error(f"触发同步 aliases 到 Neo4j 失败: {sync_error}", exc_info=True)
+            else:
+                neo4j_sync_status = "skipped"
+            
+            response_data = {
+                "end_user_info_id": str(end_user_info_record.id),
+                "end_user_id": str(end_user_info_record.end_user_id),
+                "other_name": end_user_info_record.other_name,
+                "aliases": end_user_info_record.aliases,
+                "meta_data": end_user_info_record.meta_data,
+                "created_at": datetime_to_timestamp(end_user_info_record.created_at),
+                "updated_at": datetime_to_timestamp(end_user_info_record.updated_at)
+            }
+            
+            logger.info(f"成功更新终端用户信息记录: end_user_id={end_user_id}, updated_fields={list(update_data.keys())}")
+            
+            return {
+                "success": True,
+                "data": response_data,
+                "neo4j_sync_status": neo4j_sync_status,
+                "error": None
+            }
+            
+        except ValueError:
+            logger.error(f"无效的 end_user_id 格式: {end_user_id}")
+            return {
+                "success": False,
+                "data": None,
+                "error": "无效的终端用户ID格式"
+            }
+        except Exception as e:
+            await db.rollback()
             logger.error(f"更新终端用户信息记录失败: end_user_id={end_user_id}, error={str(e)}")
             return {
                 "success": False,
