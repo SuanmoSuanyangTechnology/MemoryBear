@@ -388,5 +388,8 @@ export const knowledgeBase = {
       imagePreviewFailedDesc: '文件实际是图片类型，但被标记为文本文件',
       imageLoadFailed: '图片加载失败',
       pdfLoadFailed: '加载 PDF 文件失败',
+      hybridIsHasGraph: '是否启用图谱',
+      yes: '是',
+      no: '否',
     },
 }

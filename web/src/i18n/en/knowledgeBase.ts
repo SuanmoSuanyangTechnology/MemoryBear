@@ -389,5 +389,8 @@ export const knowledgeBase = {
       imagePreviewFailedDesc: 'File content is image but extension is text file',
       imageLoadFailed: 'Image load failed',
       pdfLoadFailed: 'Failed to load PDF file',
+      hybridIsHasGraph: 'Enable graph retrieval',
+      yes: 'Yes',
+      no: 'No',
     },
 }
