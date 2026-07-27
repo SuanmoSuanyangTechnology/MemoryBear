@@ -10,11 +10,11 @@ from sqlalchemy.orm import Session
 from app.controllers import memory_config_controller
 from app.controllers import ontology_controller
 from app.controllers.emotion_config_controller import EmotionConfigUpdate
-from app.core.api_key_auth import require_api_key
+from app.core.api_key_auth import require_api_key_self_db
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
-from app.db import get_db_context, get_async_db_context
+from app.db import get_db_context
 from app.repositories.memory_config_repository import MemoryConfigRepository
 from app.schemas.api_key_schema import ApiKeyAuth
 from app.schemas.memory_api_schema import (
@@ -104,7 +104,7 @@ def _verify_config_ownership(config_id: str, workspace_id: uuid.UUID, db: Sessio
 #     return success(data=ListConfigsResponse(**result).model_dump(), msg="Configs listed successfully")
 
 @router.get("/read_all_config")
-@require_api_key(scopes=["memory"])
+@require_api_key_self_db(scopes=["memory"])
 async def read_all_config(
         request: Request,
         api_key_auth: ApiKeyAuth = None,
@@ -126,7 +126,7 @@ async def read_all_config(
 
 
 @router.get("/scenes/simple")
-@require_api_key(scopes=["memory"])
+@require_api_key_self_db(scopes=["memory"])
 async def get_ontology_scenes(
         request: Request,
         api_key_auth: ApiKeyAuth = None,
@@ -148,7 +148,7 @@ async def get_ontology_scenes(
 
 
 @router.get("/read_config_extracted")
-@require_api_key(scopes=["memory"])
+@require_api_key_self_db(scopes=["memory"])
 async def read_config_extracted(
         request: Request,
         config_id: str = Query(..., description="config_id"),
@@ -172,7 +172,7 @@ async def read_config_extracted(
 
 
 @router.get("/read_config_forgetting")
-@require_api_key(scopes=["memory"])
+@require_api_key_self_db(scopes=["memory"])
 async def read_config_forgetting(
         request: Request,
         config_id: str = Query(..., description="config_id"),
@@ -197,7 +197,7 @@ async def read_config_forgetting(
 
 
 @router.get("/read_config_emotion")
-@require_api_key(scopes=["memory"])
+@require_api_key_self_db(scopes=["memory"])
 async def read_config_emotion(
         request: Request,
         config_id: str = Query(..., description="config_id"),
@@ -221,7 +221,7 @@ async def read_config_emotion(
 
 
 @router.get("/read_config_reflection")
-@require_api_key(scopes=["memory"])
+@require_api_key_self_db(scopes=["memory"])
 async def read_config_reflection(
         request: Request,
         config_id: str = Query(..., description="config_id"),
@@ -245,7 +245,7 @@ async def read_config_reflection(
 
 
 @router.post("/create_config")
-@require_api_key(scopes=["memory"])
+@require_api_key_self_db(scopes=["memory"])
 async def create_memory_config(
         request: Request,
         api_key_auth: ApiKeyAuth = None,
@@ -290,7 +290,7 @@ async def create_memory_config(
 
 
 @router.put("/update_config")
-@require_api_key(scopes=["memory"])
+@require_api_key_self_db(scopes=["memory"])
 async def update_memory_config(
         request: Request,
         api_key_auth: ApiKeyAuth = None,
@@ -325,7 +325,7 @@ async def update_memory_config(
 
 
 @router.put("/update_config_extracted")
-@require_api_key(scopes=["memory"])
+@require_api_key_self_db(scopes=["memory"])
 async def update_memory_config_extracted(
         request: Request,
         api_key_auth: ApiKeyAuth = None,
@@ -357,7 +357,7 @@ async def update_memory_config_extracted(
 
 
 @router.put("/update_config_forgetting")
-@require_api_key(scopes=["memory"])
+@require_api_key_self_db(scopes=["memory"])
 async def update_memory_config_forgetting(
         request: Request,
         api_key_auth: ApiKeyAuth = None,
@@ -391,7 +391,7 @@ async def update_memory_config_forgetting(
 
 
 @router.put("/update_config_emotion")
-@require_api_key(scopes=["memory"])
+@require_api_key_self_db(scopes=["memory"])
 async def update_config_emotion(
         request: Request,
         api_key_auth: ApiKeyAuth = None,
@@ -421,7 +421,7 @@ async def update_config_emotion(
 
 
 @router.put("/update_config_reflection")
-@require_api_key(scopes=["memory"])
+@require_api_key_self_db(scopes=["memory"])
 async def update_config_reflection(
         request: Request,
         api_key_auth: ApiKeyAuth = None,
@@ -452,7 +452,7 @@ async def update_config_reflection(
 
 
 @router.delete("/delete_config")
-@require_api_key(scopes=["memory"])
+@require_api_key_self_db(scopes=["memory"])
 async def delete_memory_config(
         config_id: str,
         request: Request,

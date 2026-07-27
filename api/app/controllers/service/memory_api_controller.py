@@ -9,7 +9,7 @@
 
 import asyncio
 
-from fastapi import APIRouter, Body, Header, Request
+from fastapi import APIRouter, Body, Header, Request, Depends
 from fastapi.encoders import jsonable_encoder
 from starlette.responses import Response
 
@@ -23,7 +23,7 @@ from app.core.memory.enums import Neo4jNodeType, SearchStrategy
 from app.core.memory.memory_service import MemoryService
 from app.core.quota_stub import check_end_user_quota
 from app.core.response_utils import success
-from app.db import get_db_context, get_async_db_context
+from app.db import get_db_context, get_async_db_context, get_db
 from app.dependencies import make_snapshot
 from app.schemas.api_key_schema import ApiKeyAuth
 from app.schemas.memory_agent_schema import Write_UserInput, InternalReadInput, ReadSyncInput
@@ -38,7 +38,6 @@ def _encode_result(result):
     if isinstance(result, Response):
         return result
     return jsonable_encoder(result)
-
 
 
 @router.get("")
@@ -71,7 +70,7 @@ async def read_memory_sync(
 
     if payload.end_user_ids:
         # ── Multi-user mode: concurrent reads ──
-        end_user_ids = payload.end_user_ids
+        end_user_ids = set(payload.end_user_ids)
 
         async with get_async_db_context() as db:
             for euid in end_user_ids:
@@ -94,9 +93,16 @@ async def read_memory_sync(
             }
 
         results = await asyncio.gather(
-            *[_read_for_user(euid) for euid in end_user_ids]
+            *[_read_for_user(euid) for euid in end_user_ids],
+            return_exceptions=True
         )
-        return success(data={euid: data for euid, data in results})
+        res = {}
+        for data in results:
+            if isinstance(data, Exception):
+                pass
+            res[data[0]] = data[1]
+
+        return success(data={euid: data for data in results})
 
     # ── Single-user mode (backward-compatible) ──
     async with get_async_db_context() as db:
@@ -133,7 +139,8 @@ async def read_memory_internal(
     async with get_async_db_context() as db:
         await validate_end_user_in_workspace_async(db, payload.end_user_id, api_key_auth.workspace_id)
         config_id = await MemoryConfigService(db).get_config_id_by_end_user_async(payload.end_user_id)
-    logger.info(f"V1 memory read (internal) - end_user_id: {payload.end_user_id}, workspace: {api_key_auth.workspace_id}")
+    logger.info(
+        f"V1 memory read (internal) - end_user_id: {payload.end_user_id}, workspace: {api_key_auth.workspace_id}")
 
     # Resolve include strings to Neo4jNodeType enum values
     includes = None
@@ -165,6 +172,7 @@ async def write_memory_async(
         api_key_auth: ApiKeyAuth = None,
         body_placeholder: str = Body(None, description="Placeholder - actual body parsed via request.json()"),
         language_type: str = Header(default=None, alias="X-Language-Type"),
+        db: str = Depends(get_db),
 ):
     """
     Write memory asynchronously (Celery task).
