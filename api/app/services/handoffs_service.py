@@ -481,22 +481,28 @@ def route_after_agent(state: HandoffState) -> str:
 
 # ==================== 配置转换 ====================
 
-def _resolve_release_tenant_id(db: Session, release: Any) -> uuid.UUID | None:
+async def _resolve_release_tenant_id(db, release: Any) -> uuid.UUID | None:
     from app.models import App
     from app.repositories.tool_repository import ToolRepository
+    from sqlalchemy.ext.asyncio import AsyncSession
 
     app_id = getattr(release, "app_id", None)
     if not app_id:
         return None
-    app = db.get(App, app_id)
+    if isinstance(db, AsyncSession):
+        app = await db.get(App, app_id)
+    else:
+        app = db.get(App, app_id)
     if not app:
         return None
+    if isinstance(db, AsyncSession):
+        return await ToolRepository.get_tenant_id_by_workspace_id_async(db, str(app.workspace_id))
     return ToolRepository.get_tenant_id_by_workspace_id(db, str(app.workspace_id))
 
 
-def convert_multi_agent_config_to_handoffs(
+async def convert_multi_agent_config_to_handoffs(
     multi_agent_config: Dict,
-    db: Session
+    db
 ) -> Dict[str, Dict]:
     """将 multi_agent_config 转换为 handoffs 配置格式
     
@@ -529,17 +535,19 @@ def convert_multi_agent_config_to_handoffs(
         
         if agent_id:
             try:
+                from sqlalchemy.ext.asyncio import AsyncSession
                 agent_id_uuid = uuid.UUID(agent_id) if isinstance(agent_id, str) else agent_id
-                
+                is_async = isinstance(db, AsyncSession)
+
                 # 先尝试作为 release_id 查询
-                release = db.get(AppRelease, agent_id_uuid)
-                
+                release = await db.get(AppRelease, agent_id_uuid) if is_async else db.get(AppRelease, agent_id_uuid)
+
                 # 如果找不到，尝试作为 app_id 查询，获取 current_release
                 if not release:
-                    app = db.get(App, agent_id_uuid)
+                    app = await db.get(App, agent_id_uuid) if is_async else db.get(App, agent_id_uuid)
                     if app and app.current_release_id:
-                        release = db.get(AppRelease, app.current_release_id)
-                
+                        release = await db.get(AppRelease, app.current_release_id) if is_async else db.get(AppRelease, app.current_release_id)
+
                 if release:
                     # 从 release.config 获取 system_prompt
                     if release.config:
@@ -547,10 +555,10 @@ def convert_multi_agent_config_to_handoffs(
                         release_system_prompt = config_data.get("system_prompt")
                         if release_system_prompt:
                             system_prompt = release_system_prompt
-                    
+
                     # 获取该 Agent 的模型配置
                     if release.default_model_config_id:
-                        tenant_id = _resolve_release_tenant_id(db, release)
+                        tenant_id = await _resolve_release_tenant_id(db, release)
                         model_api_key = ModelApiKeyService.get_available_api_key(
                             db,
                             release.default_model_config_id,
