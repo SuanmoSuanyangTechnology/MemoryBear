@@ -51,7 +51,7 @@ const OrderDetail = forwardRef<OrderDetailRef, OrderDetailProps>(({ getProductNa
       {
         key: 'order_no',
         label: t('pricing.order_no'),
-        children: (data as GroupOrder).order_group_id || (data as Order).order_no || '-'
+        children: (data as Order).order_no || '-'
       },
       {
         key: 'business_type',
