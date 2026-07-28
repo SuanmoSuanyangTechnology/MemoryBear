@@ -61,7 +61,8 @@ class StatementBuiler(BaseBuilder):
             "id": self.record.get("id"),
             "content": self.record.get("statement"),
             "kw_score": self.record.get("kw_score", 0.0),
-            "emb_score": self.record.get("embedding_score", 0.0)
+            "emb_score": self.record.get("embedding_score", 0.0),
+            "chunk_id": self.record.get("chunk_id", ""),
         }
 
     @property
@@ -118,7 +119,8 @@ class SummaryBuilder(BaseBuilder):
             "id": self.record.get("id"),
             "content": self.record.get("content"),
             "kw_score": self.record.get("kw_score", 0.0),
-            "emb_score": self.record.get("embedding_score", 0.0)
+            "emb_score": self.record.get("embedding_score", 0.0),
+            "chunk_ids": self.record.get("chunk_ids", []),
         }
 
     @property

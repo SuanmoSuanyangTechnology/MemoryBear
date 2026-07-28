@@ -12,6 +12,7 @@ from app.core.memory.read_services.search_engine.content_search import (
     HistorySearchService,
     MetaSearchService
 )
+from app.core.models import RedBearLLM
 from app.db import get_async_db_context
 from app.repositories.memory_short_repository import ShortTermMemoryRepository
 
@@ -41,6 +42,7 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
         self._llm_client = None
         self._vision_llm_client = None
         self._audio_llm_client = None
+        self._rerank_client = None
 
     async def run(
             self,
@@ -49,16 +51,22 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
             history: list,
             limit: int = 10,
             includes=None,
-            skip_summary=False
+            skip_summary=False,
+            enable_rerank: bool = False,
     ) -> MemorySearchResult:
         query = QueryPreprocessor.process(query)
         match search_switch:
             case SearchStrategy.DEEP:
-                res = await self._deep_read(query, history, limit, includes=includes, skip_summary=skip_summary)
+                res = await self._deep_read(query, history, limit,
+                                            includes=includes, skip_summary=skip_summary,
+                                            enable_rerank=enable_rerank)
             case SearchStrategy.NORMAL:
-                res = await self._normal_read(query, history, limit, includes=includes, skip_summary=skip_summary)
+                res = await self._normal_read(query, history, limit,
+                                              includes=includes, skip_summary=skip_summary,
+                                              enable_rerank=enable_rerank)
             case SearchStrategy.QUICK:
-                return await self._quick_read(query, limit, includes)
+                return await self._quick_read(query, limit, includes,
+                                              enable_rerank=enable_rerank)
             case SearchStrategy.EXPRESS:
                 return await self._express_read(query, limit, includes)
             case SearchStrategy.RECENT:
@@ -73,7 +81,13 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
 
         return res
 
-    async def _get_search_service(self, includes=None, need_embedder=True, need_llm=True):
+    async def _get_search_service(
+            self,
+            includes=None,
+            need_embedder=True,
+            need_llm=True,
+            enable_rerank: bool = False
+    ):
         if self.ctx.storage_type == StorageType.NEO4J:
             if need_embedder and need_llm:
                 embedder, llm = await asyncio.gather(
@@ -83,10 +97,21 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
             else:
                 embedder = (await self._get_embedding_client()) if need_embedder else None
                 llm = (await self._get_llm_client()) if need_llm else None
+
+            reranker = None
+            if enable_rerank:
+                reranker = await self._get_rerank_client()
+                if reranker is None:
+                    logger.warning(
+                        "[ReadPipeLine] enable_rerank=True but rerank_model_id not configured, "
+                        "falling back to score fusion"
+                    )
+
             return Neo4jSearchService(
                 self.ctx,
                 embedder=embedder,
                 llm=llm,
+                reranker=reranker,
                 includes=includes,
             )
         else:
@@ -139,15 +164,34 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
         else:
             return None
 
+    async def _get_rerank_client(self):
+        """懒加载 rerank client，仅在 rerank_model_id 已配置时可用。
+
+        Returns:
+            RedBearRerank | None: 如果 rerank_model_id 未配置则返回 None
+        """
+        cfg = self.ctx.memory_config
+        if cfg.rerank_model_id is None:
+            return None
+        if self._rerank_client is None:
+            async with get_async_db_context() as db:
+                self._rerank_client = await self.get_rerank_client_async(
+                    db,
+                    cfg.rerank_model_id,
+                    tenant_id=cfg.tenant_id
+                )
+        return self._rerank_client
+
     async def _deep_read(
             self,
             query: str,
             history: list,
             limit: int,
-            includes=None,
-            skip_summary=False
+            includes: list,
+            skip_summary=False,
+            enable_rerank: bool = False,
     ) -> MemorySearchResult:
-        search_service = await self._get_search_service(includes)
+        search_service = await self._get_search_service(includes, enable_rerank=enable_rerank)
         memory_l0 = await self._user_meta()
         questions = await QueryPreprocessor.split(
             query,
@@ -174,7 +218,7 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
         ]
         if perceptual_memories:
             parse_tasks = []
-            type_llm_cache: dict[int, object] = {}
+            type_llm_cache: dict[int, RedBearLLM] = {}
 
             async def _get_llm_for_type(pt: int):
                 if pt not in type_llm_cache:
@@ -236,9 +280,10 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
             history: list,
             limit: int,
             includes=None,
-            skip_summary=False
+            skip_summary=False,
+            enable_rerank: bool = False,
     ) -> MemorySearchResult:
-        search_service = await self._get_search_service(includes)
+        search_service = await self._get_search_service(includes, enable_rerank=enable_rerank)
 
         memory_l0 = await self._user_meta()
         questions = await QueryPreprocessor.split(
@@ -269,9 +314,19 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
         memory_l0 = await meta_task
         return memory_l0 + express_res
 
-    async def _quick_read(self, query: str, limit: int, includes=None) -> MemorySearchResult:
+    async def _quick_read(
+            self,
+            query: str,
+            limit: int,
+            includes=None,
+            enable_rerank: bool = False
+    ) -> MemorySearchResult:
         meta_task = asyncio.ensure_future(self._user_meta())
-        search_service = await self._get_search_service(includes, need_llm=False)
+        search_service = await self._get_search_service(
+            includes,
+            need_llm=False,
+            enable_rerank=enable_rerank
+        )
         quick_res = await search_service.hybrid_search(query, limit)
         memory_l0 = await meta_task
         return memory_l0 + quick_res

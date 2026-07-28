@@ -85,7 +85,8 @@ async def read_memory_sync(
                 config_id = await MemoryConfigService(db).get_config_id_by_end_user_async(euid)
             service = await MemoryService.create(config_id, end_user_id=euid)
             memory = await service.read(
-                payload.message, search_switch=SearchStrategy(payload.search_switch)
+                payload.message, search_switch=SearchStrategy(payload.search_switch),
+                enable_rerank=payload.enable_rerank,
             )
             return euid, {
                 "answer": memory.content,
@@ -106,7 +107,9 @@ async def read_memory_sync(
         config_id,
         end_user_id=payload.end_user_id,
     )
-    memory = await service.read(payload.message, search_switch=SearchStrategy(payload.search_switch))
+    memory = await service.read(
+        payload.message, search_switch=SearchStrategy(payload.search_switch),
+        enable_rerank=payload.enable_rerank)
     return success(data={
         "answer": memory.content,
         "intermediate_outputs": [_.model_dump() for _ in memory.memories]
@@ -132,7 +135,8 @@ async def read_memory_internal(
     async with get_async_db_context() as db:
         await validate_end_user_in_workspace_async(db, payload.end_user_id, api_key_auth.workspace_id)
         config_id = await MemoryConfigService(db).get_config_id_by_end_user_async(payload.end_user_id)
-    logger.info(f"V1 memory read (internal) - end_user_id: {payload.end_user_id}, workspace: {api_key_auth.workspace_id}")
+    logger.info(
+        f"V1 memory read (internal) - end_user_id: {payload.end_user_id}, workspace: {api_key_auth.workspace_id}")
 
     # Resolve include strings to Neo4jNodeType enum values
     includes = None
@@ -148,7 +152,8 @@ async def read_memory_internal(
         search_switch=SearchStrategy(payload.search_switch),
         limit=payload.limit,
         includes=includes,
-        skip_summary=payload.skip_summary
+        skip_summary=payload.skip_summary,
+        enable_rerank=payload.enable_rerank,
     )
     return success(data={
         "answer": memory.content,
