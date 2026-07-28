@@ -4,7 +4,7 @@
  */
 
 import { forwardRef, useImperativeHandle, useState } from 'react';
-import { Form, Select, InputNumber, Flex } from 'antd';
+import { Form, Select, InputNumber, Flex, Switch } from 'antd';
 import { useTranslation } from 'react-i18next';
 
 import type { KnowledgeConfigModalRef, KnowledgeBase, KnowledgeConfigForm, RetrieveType } from './types'
@@ -103,6 +103,16 @@ const KnowledgeConfigModal = forwardRef<KnowledgeConfigModalRef, KnowledgeConfig
             }))}
           />
         </FormItem>
+        {(values?.retrieve_type === 'hybrid') &&
+          <Form.Item
+            name="enable_graph_retrieval"
+            valuePropName="checked"
+            label={t('knowledgeBase.hybridIsHasGraph')}
+            layout="horizontal"
+          >
+            <Switch checkedChildren={t('knowledgeBase.yes')} unCheckedChildren={t('knowledgeBase.no')} />
+          </Form.Item>
+        }
         <FormItem
           name="top_k"
           label={t('application.top_k')}

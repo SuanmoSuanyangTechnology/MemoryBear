@@ -40,7 +40,7 @@ interface TableComponentProps<T = Record<string, unknown>, Q = Record<string, un
   /** Pagination configuration or boolean to enable/disable */
   pagination?: boolean | TablePaginationConfig;
   /** Key to use for row identification */
-  rowKey: string;
+  rowKey: string | ((record: T) => string);
   /** Row selection configuration */
   rowSelection?: TableProps<T>['rowSelection'];
   /** Initial data to display (used when no API) */
