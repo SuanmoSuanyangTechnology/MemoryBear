@@ -67,7 +67,8 @@ def _dispatch_dashboard_async_jobs(workspace_id: uuid.UUID, end_user_ids: List[s
 router = APIRouter(
     prefix="/dashboard",
     tags=["Dashboard"],
-    dependencies=[Depends(get_current_user)],  # 兜底鉴权：每路由仍需显式声明 get_current_user_async
+    # 移除 router 级同步 get_current_user 依赖，避免阻塞事件循环。
+    # 每个路由已通过 Depends(get_current_user_async) 或 Depends(get_current_user) 自行声明鉴权。
 )
 
 

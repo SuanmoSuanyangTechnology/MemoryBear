@@ -15,12 +15,14 @@ from typing import Optional, Dict, Any, Tuple
 from uuid import UUID
 
 from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging_config import get_api_logger
 from app.core.memory.storage_services.forgetting_engine.actr_calculator import ACTRCalculator
 from app.core.memory.storage_services.forgetting_engine.config_utils import (
     calculate_forgetting_rate,
     load_actr_config_from_db,
+    load_actr_config_from_db_async,
 )
 from app.core.memory.storage_services.forgetting_engine.forgetting_scheduler import ForgettingScheduler
 from app.core.memory.storage_services.forgetting_engine.forgetting_strategy import ForgettingStrategy
@@ -66,21 +68,21 @@ class MemoryForgetService:
 
     async def _get_forgetting_components(
             self,
-            db: Session,
+            db: AsyncSession,
             config_id: Optional[UUID] = None
     ) -> Tuple[ACTRCalculator, ForgettingStrategy, ForgettingScheduler, Dict[str, Any]]:
         """
         获取遗忘引擎组件（计算器、策略、调度器）
-        
+
         Args:
-            db: 数据库会话
+            db: 异步数据库会话（AsyncSession）
             config_id: 配置ID（可选）
-        
+
         Returns:
             tuple: (actr_calculator, forgetting_strategy, forgetting_scheduler, config)
         """
-        # 加载配置
-        config = load_actr_config_from_db(db, config_id)
+        # 加载配置（异步）
+        config = await load_actr_config_from_db_async(db, config_id)
 
         # 创建 ACT-R 计算器
         actr_calculator = ACTRCalculator(
@@ -314,7 +316,7 @@ class MemoryForgetService:
 
     async def trigger_forgetting_cycle(
             self,
-            db: Session,
+            db: AsyncSession,
             end_user_id: str,
             max_merge_batch_size: Optional[int] = None,
             min_days_since_access: Optional[int] = None,
@@ -391,8 +393,8 @@ class MemoryForgetService:
                 average_activation = None
                 low_activation_nodes = 0
 
-            # 保存历史记录到数据库
-            self.history_repository.create(
+            # 保存历史记录到数据库（异步）
+            await self.history_repository.create_async(
                 db=db,
                 end_user_id=end_user_id,
                 execution_time=execution_time,
@@ -416,7 +418,7 @@ class MemoryForgetService:
 
         return report
 
-    def read_forgetting_config(
+    def read_forgetting_config( # 没有地方调用
             self,
             db: Session,
             config_id: UUID
@@ -606,7 +608,7 @@ class MemoryForgetService:
 
     async def get_forgetting_stats(
             self,
-            db: Session,
+            db: AsyncSession,
             end_user_id: Optional[str] = None,
             config_id: Optional[UUID] = None
     ) -> Dict[str, Any]:
@@ -726,8 +728,8 @@ class MemoryForgetService:
         recent_trends = []
         try:
             if end_user_id:
-                # 查询所有历史记录
-                history_records = self.history_repository.get_recent_by_end_user(
+                # 查询所有历史记录（异步）
+                history_records = await self.history_repository.get_recent_by_end_user_async(
                     db=db,
                     end_user_id=end_user_id
                 )
@@ -816,7 +818,7 @@ class MemoryForgetService:
 
     async def get_pending_nodes(
             self,
-            db: Session,
+            db: AsyncSession,
             end_user_id: str,
             config_id: Optional[UUID] = None,
             page: int = 1,
@@ -872,7 +874,7 @@ class MemoryForgetService:
 
     async def get_forgetting_curve(
             self,
-            db: Session,
+            db: AsyncSession,
             importance_score: float,
             days: int,
             config_id: Optional[UUID] = None
@@ -883,7 +885,7 @@ class MemoryForgetService:
         生成遗忘曲线数据用于可视化，模拟记忆激活值随时间的衰减。
         
         Args:
-            db: 数据库会话
+            db: 异步数据库会话（AsyncSession）
             importance_score: 重要性分数（0-1）
             days: 模拟天数
             config_id: 配置ID（可选）

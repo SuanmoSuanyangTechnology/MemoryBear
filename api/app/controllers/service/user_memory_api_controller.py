@@ -18,22 +18,23 @@
 认证方式: API Key (@require_api_key)
 """
 
+import json
 from typing import Optional
 
 from fastapi import APIRouter, Header, Query, Request, Body
 
 from app.core.api_key_auth import require_api_key_self_db
-from app.core.api_key_utils import get_current_user_from_api_key, validate_end_user_in_workspace
+from app.core.api_key_utils import get_current_user_snapshot_from_api_key_async, validate_end_user_in_workspace_async
+from app.core.error_codes import BizCode
+from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
-from app.db import get_db_context, get_async_db_context
+from app.db import get_async_db_context
 from app.schemas.api_key_schema import ApiKeyAuth
 from app.schemas.memory_storage_schema import GenerateCacheRequest
 
 # 包装内部服务 controller
 from app.controllers import memory_analytics_controller
 from app.controllers import end_user_controller
-
-from app.dependencies import make_snapshot
 
 router = APIRouter(prefix="/memory", tags=["V1 - User Memory API"])
 logger = get_business_logger()
@@ -54,10 +55,10 @@ async def get_graph_data(
     api_key_auth: ApiKeyAuth = None,
 ):
     """Get knowledge graph data (nodes + edges) for an end user."""
-    with get_db_context() as auth_db:
-        current_user_orm = get_current_user_from_api_key(auth_db, api_key_auth)
-        validate_end_user_in_workspace(auth_db, end_user_id, api_key_auth.workspace_id)
-        current_user = make_snapshot(current_user_orm, api_key_auth.workspace_id)
+    async with get_async_db_context() as auth_db:
+        current_user = await get_current_user_snapshot_from_api_key_async(auth_db, api_key_auth)
+        await validate_end_user_in_workspace_async(auth_db, end_user_id, api_key_auth.workspace_id)
+
 
     return await memory_analytics_controller.get_graph_data_api(
         end_user_id=end_user_id,
@@ -77,10 +78,10 @@ async def get_community_graph(
     api_key_auth: ApiKeyAuth = None,
 ):
     """Get community clustering graph for an end user."""
-    with get_db_context() as auth_db:
-        current_user_orm = get_current_user_from_api_key(auth_db, api_key_auth)
-        validate_end_user_in_workspace(auth_db, end_user_id, api_key_auth.workspace_id)
-        current_user = make_snapshot(current_user_orm, api_key_auth.workspace_id)
+    async with get_async_db_context() as auth_db:
+        current_user = await get_current_user_snapshot_from_api_key_async(auth_db, api_key_auth)
+        await validate_end_user_in_workspace_async(auth_db, end_user_id, api_key_auth.workspace_id)
+
 
     return await memory_analytics_controller.get_community_graph_data_api(
         end_user_id=end_user_id,
@@ -99,10 +100,10 @@ async def get_node_statistics(
     api_key_auth: ApiKeyAuth = None,
 ):
     """Get memory node type statistics for an end user."""
-    with get_db_context() as auth_db:
-        current_user_orm = get_current_user_from_api_key(auth_db, api_key_auth)
-        validate_end_user_in_workspace(auth_db, end_user_id, api_key_auth.workspace_id)
-        current_user = make_snapshot(current_user_orm, api_key_auth.workspace_id)
+    async with get_async_db_context() as auth_db:
+        current_user = await get_current_user_snapshot_from_api_key_async(auth_db, api_key_auth)
+        await validate_end_user_in_workspace_async(auth_db, end_user_id, api_key_auth.workspace_id)
+
 
     return await memory_analytics_controller.get_node_statistics_api(
         end_user_id=end_user_id,
@@ -122,10 +123,10 @@ async def get_user_summary(
     api_key_auth: ApiKeyAuth = None,
 ):
     """Get cached user summary for an end user."""
-    with get_db_context() as auth_db:
-        current_user_orm = get_current_user_from_api_key(auth_db, api_key_auth)
-        validate_end_user_in_workspace(auth_db, end_user_id, api_key_auth.workspace_id)
-        current_user = make_snapshot(current_user_orm, api_key_auth.workspace_id)
+    async with get_async_db_context() as auth_db:
+        current_user = await get_current_user_snapshot_from_api_key_async(auth_db, api_key_auth)
+        await validate_end_user_in_workspace_async(auth_db, end_user_id, api_key_auth.workspace_id)
+
 
     return await memory_analytics_controller.get_user_summary_api(
         end_user_id=end_user_id,
@@ -142,10 +143,10 @@ async def get_memory_insight(
     api_key_auth: ApiKeyAuth = None,
 ):
     """Get cached memory insight report for an end user."""
-    with get_db_context() as auth_db:
-        current_user_orm = get_current_user_from_api_key(auth_db, api_key_auth)
-        validate_end_user_in_workspace(auth_db, end_user_id, api_key_auth.workspace_id)
-        current_user = make_snapshot(current_user_orm, api_key_auth.workspace_id)
+    async with get_async_db_context() as auth_db:
+        current_user = await get_current_user_snapshot_from_api_key_async(auth_db, api_key_auth)
+        await validate_end_user_in_workspace_async(auth_db, end_user_id, api_key_auth.workspace_id)
+
 
     return await memory_analytics_controller.get_memory_insight_report_api(
         end_user_id=end_user_id,
@@ -166,10 +167,10 @@ async def get_interest_distribution(
     api_key_auth: ApiKeyAuth = None,
 ):
     """Get interest distribution tags for an end user."""
-    with get_db_context() as auth_db:
-        current_user_orm = get_current_user_from_api_key(auth_db, api_key_auth)
-        validate_end_user_in_workspace(auth_db, end_user_id, api_key_auth.workspace_id)
-        current_user = make_snapshot(current_user_orm, api_key_auth.workspace_id)
+    async with get_async_db_context() as auth_db:
+        current_user = await get_current_user_snapshot_from_api_key_async(auth_db, api_key_auth)
+        await validate_end_user_in_workspace_async(auth_db, end_user_id, api_key_auth.workspace_id)
+
 
     return await memory_analytics_controller.get_interest_distribution_by_user_api(
         end_user_id=end_user_id,
@@ -190,10 +191,10 @@ async def get_end_user_info(
     api_key_auth: ApiKeyAuth = None,
 ):
     """Get end user basic information (name, aliases, metadata)."""
-    with get_db_context() as auth_db:
-        current_user_orm = get_current_user_from_api_key(auth_db, api_key_auth)
-        validate_end_user_in_workspace(auth_db, end_user_id, api_key_auth.workspace_id)
-        current_user = make_snapshot(current_user_orm, api_key_auth.workspace_id)
+    async with get_async_db_context() as auth_db:
+        current_user = await get_current_user_snapshot_from_api_key_async(auth_db, api_key_auth)
+        await validate_end_user_in_workspace_async(auth_db, end_user_id, api_key_auth.workspace_id)
+
 
     return await end_user_controller.get_end_user_info(
         end_user_id=end_user_id,
@@ -213,14 +214,23 @@ async def generate_cache(
     language_type: str = Header(default=None, alias="X-Language-Type"),
 ):
     """Trigger cache generation (user summary + memory insight) for an end user or all workspace users."""
-    body = await request.json()
+    # 空 body 视为「为整个工作空间批量生成」，与 GenerateCacheRequest.end_user_id 为 Optional 的语义一致。
+    raw_body = await request.body()
+    try:
+        body = json.loads(raw_body) if raw_body else {}
+    except json.JSONDecodeError as exc:
+        logger.warning(f"generate_cache 收到非法 JSON body: {exc}")
+        raise BusinessException(
+            "请求体不是合法 JSON",
+            BizCode.INVALID_PARAMETER,
+        )
     cache_request = GenerateCacheRequest(**body)
 
-    with get_db_context() as auth_db:
-        current_user_orm = get_current_user_from_api_key(auth_db, api_key_auth)
+    async with get_async_db_context() as auth_db:
+        current_user = await get_current_user_snapshot_from_api_key_async(auth_db, api_key_auth)
         if cache_request.end_user_id:
-            validate_end_user_in_workspace(auth_db, cache_request.end_user_id, api_key_auth.workspace_id)
-        current_user = make_snapshot(current_user_orm, api_key_auth.workspace_id)
+            await validate_end_user_in_workspace_async(auth_db, cache_request.end_user_id, api_key_auth.workspace_id)
+
 
     return await memory_analytics_controller.generate_cache_api(
         request=cache_request,

@@ -1025,11 +1025,55 @@ class MemoryConfigRepository:
             db_logger.debug("config_id 为空，使用工作空间默认配置")
             return self.get_workspace_default(workspace_id)
 
-        config = self.db.get(MemoryConfig, config_id)
+    async def get_workspace_default_async(self, workspace_id: uuid.UUID) -> Optional[MemoryConfig]:
+        """异步版：获取工作空间的默认记忆配置。"""
+        try:
+            stmt = (
+                select(MemoryConfig)
+                .where(
+                    MemoryConfig.workspace_id == workspace_id,
+                    MemoryConfig.is_default.is_(True),
+                    MemoryConfig.state.is_(True),
+                )
+                .limit(1)
+            )
+            result = await self.db.execute(stmt)
+            config = result.scalars().first()
+            if config:
+                return config
 
+            stmt = (
+                select(MemoryConfig)
+                .where(
+                    MemoryConfig.workspace_id == workspace_id,
+                    MemoryConfig.state.is_(True),
+                )
+                .order_by(MemoryConfig.created_at.asc())
+                .limit(1)
+            )
+            result = await self.db.execute(stmt)
+            return result.scalars().first()
+        except Exception as e:
+            db_logger.error(f"查询工作空间默认配置失败(async): workspace_id={workspace_id} - {str(e)}")
+            raise
+
+    async def get_with_fallback_async(
+            self,
+            config_id: Optional[uuid.UUID],
+            workspace_id: uuid.UUID
+    ) -> Optional[MemoryConfig]:
+        """异步版：获取记忆配置，支持回退到工作空间默认配置。"""
+        if not config_id:
+            return await self.get_workspace_default_async(workspace_id)
+
+        config = await self.get_by_id_async(config_id)
         if config:
             return config
 
+        db_logger.warning(
+            f"配置不存在(async)，回退: missing_config_id={config_id}, workspace_id={workspace_id}"
+        )
+        return await self.get_workspace_default_async(workspace_id)
         db_logger.warning(
             f"配置不存在，回退到工作空间默认配置: missing_config_id={config_id}, workspace_id={workspace_id}"
         )

@@ -17,15 +17,14 @@ from starlette.responses import Response
 # 包装内部 controller
 from app.controllers import memory_controller
 from app.core.api_key_auth import require_api_key, require_api_key_self_db
-from app.core.api_key_utils import get_current_user_from_api_key, validate_end_user_in_workspace, \
+from app.core.api_key_utils import get_current_user_snapshot_from_api_key_async, \
     validate_end_user_in_workspace_async
 from app.core.logging_config import get_business_logger
 from app.core.memory.enums import Neo4jNodeType, SearchStrategy
 from app.core.memory.memory_service import MemoryService
 from app.core.quota_stub import check_end_user_quota
 from app.core.response_utils import success
-from app.db import get_db_context, get_async_db_context, get_db
-from app.dependencies import make_snapshot
+from app.db import get_async_db_context, get_db
 from app.schemas.api_key_schema import ApiKeyAuth
 from app.schemas.memory_agent_schema import Write_UserInput, InternalReadInput, ReadSyncInput
 from app.services.memory_config_service import MemoryConfigService
@@ -183,10 +182,9 @@ async def write_memory_async(
     body = await request.json()
     payload = Write_UserInput(**body)
 
-    with get_db_context() as auth_db:
-        current_user_orm = get_current_user_from_api_key(auth_db, api_key_auth)
-        validate_end_user_in_workspace(auth_db, payload.end_user_id, api_key_auth.workspace_id)
-        current_user = make_snapshot(current_user_orm, api_key_auth.workspace_id)
+    async with get_async_db_context() as auth_db:
+        current_user = await get_current_user_snapshot_from_api_key_async(auth_db, api_key_auth)
+        await validate_end_user_in_workspace_async(auth_db, payload.end_user_id, api_key_auth.workspace_id)
 
     logger.info(f"V1 memory write (async) - end_user_id: {payload.end_user_id}, workspace: {api_key_auth.workspace_id}")
 

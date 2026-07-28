@@ -192,8 +192,123 @@ class WorkspaceAppService:
                 "app_id": str(end_user.app_id)
             }
             app_info["end_users"].append(end_user_info)
-        # print(100*'-')
-        # print(app_info)
+
+    # ==================== 异步版本 ====================
+
+    async def get_workspace_apps_detailed_async(self, workspace_id) -> Dict[str, Any]:
+        """异步版：获取 workspace 下所有应用的详情。"""
+        from sqlalchemy import select as sa_select
+
+        stmt = sa_select(App).where(
+            App.workspace_id == workspace_id,
+            App.is_active.is_(True),
+        )
+        result = await self.db.execute(stmt)
+        apps = list(result.scalars().all())
+
+        apps_detailed_info = []
+        for app in apps:
+            app_info = self._build_app_info(app)
+            await self._process_app_releases_async(app, app_info)
+            await self._process_end_users_async(app, app_info)
+            apps_detailed_info.append(app_info)
+
+        return {
+            "status": "成功",
+            "message": f"成功查询到 {len(apps)} 个应用及其详细信息",
+            "workspace_id": str(workspace_id),
+            "apps_count": len(apps),
+            "app_ids": [str(a.id) for a in apps],
+            "apps_detailed_info": apps_detailed_info,
+        }
+
+    async def _process_app_releases_async(self, app: App, app_info: Dict[str, Any]) -> None:
+        """异步版：处理应用的发布版本和配置信息。"""
+        from sqlalchemy import select as sa_select
+
+        stmt = sa_select(AppRelease).where(AppRelease.app_id == app.id)
+        result = await self.db.execute(stmt)
+        app_releases = list(result.scalars().all())
+
+        if not app_releases:
+            return
+
+        processed_configs: Set[str] = set()
+
+        for release in app_releases:
+            memory_content = self._extract_memory_content(release.config, app.type)
+            if memory_content and memory_content in processed_configs:
+                continue
+
+            release_info = {
+                "app_id": str(release.app_id),
+                "config": memory_content,
+            }
+
+            if memory_content:
+                processed_configs.add(memory_content)
+                memory_config_info = await self._get_memory_config_async(memory_content)
+                if memory_config_info:
+                    if not any(dc["config_id"] == memory_config_info["config_id"] for dc in app_info["memory_configs"]):
+                        app_info["memory_configs"].append(memory_config_info)
+
+            app_info["releases"].append(release_info)
+
+    async def _get_memory_config_async(self, memory_content: str) -> Optional[Dict[str, Any]]:
+        """异步版：根据 memory_content 获取 memory_config 信息。"""
+        from sqlalchemy import select as sa_select
+        from app.utils.config_utils import resolve_config_id_async
+
+        try:
+            resolved_id = await resolve_config_id_async(memory_content, self.db)
+            memory_config_result = await MemoryConfigRepository(self.db).query_reflection_config_by_id_async(resolved_id)
+
+            if not memory_config_result:
+                return None
+
+            # 查询 workspace 获取 tenant_id
+            tenant_id = None
+            if memory_config_result.workspace_id:
+                ws_result = await self.db.execute(
+                    sa_select(Workspace).where(Workspace.id == memory_config_result.workspace_id)
+                )
+                workspace = ws_result.scalars().first()
+                tenant_id = str(workspace.tenant_id) if workspace and workspace.tenant_id else None
+
+            return {
+                "config_id": resolved_id,
+                "workspace_id": memory_config_result.workspace_id,
+                "tenant_id": tenant_id,
+                "enable_self_reflexion": memory_config_result.enable_self_reflexion,
+                "iteration_period": memory_config_result.iteration_period,
+                "reflexion_range": memory_config_result.reflexion_range,
+                "baseline": memory_config_result.baseline,
+                "reflection_model_id": memory_config_result.reflection_model_id,
+                "memory_verify": memory_config_result.memory_verify,
+                "quality_assessment": memory_config_result.quality_assessment,
+                "user_id": memory_config_result.user_id,
+            }
+        except Exception as e:
+            api_logger.warning(f"异步查询memory_config失败，memory_content: {memory_content}, 错误: {str(e)}")
+            return None
+
+    async def _process_end_users_async(self, app: App, app_info: Dict[str, Any]) -> None:
+        """异步版：查询应用关联的终端用户。"""
+        from sqlalchemy import select as sa_select
+        from app.models.end_user_model import EndUser
+
+        stmt = sa_select(EndUser).where(
+            EndUser.app_id == app.id,
+            EndUser.is_active.is_(True),
+        )
+        result = await self.db.execute(stmt)
+        end_users = list(result.scalars().all())
+
+        for end_user in end_users:
+            app_info["end_users"].append({
+                "id": str(end_user.id),
+                "app_id": str(end_user.app_id),
+            })
 
     def get_end_user_reflection_time(self, end_user_id: str) -> Optional[Any]:
         """
@@ -309,6 +424,139 @@ class MemoryReflectionService:
         tid = getattr(reflection_config, 'tenant_id', None)
         tenant_id = uuid.UUID(tid) if tid else None
         return ModelClientMixin.get_llm_client(db, reflection_config.model_id, tenant_id)
+
+    @staticmethod
+    async def resolve_reflection_config_async(db, config_data: Dict[str, Any]) -> Optional[ReflectionConfig]:
+        """异步提取反思配置。
+
+        Args:
+            db: AsyncSession
+            config_data: 包含 config_id、enable_self_reflexion 等字段的字典
+
+        Returns:
+            ReflectionConfig or None
+        """
+        if not config_data.get("enable_self_reflexion", False):
+            return None
+        config_data_id = config_data.get('config_id')
+        if not config_data_id:
+            return None
+
+        # 异步获取 memory_config 详情
+        from app.utils.config_utils import resolve_config_id_async
+        from app.repositories.memory_config_repository import MemoryConfigRepository
+        from app.models.workspace_model import Workspace
+        from sqlalchemy import select
+
+        try:
+            resolved_id = await resolve_config_id_async(str(config_data_id), db)
+            memory_config_result = await MemoryConfigRepository(db).get_by_id_async(resolved_id)
+            if not memory_config_result or not memory_config_result.enable_self_reflexion:
+                return None
+
+            # 获取 tenant_id
+            tenant_id = None
+            if memory_config_result.workspace_id:
+                ws_result = await db.execute(
+                    select(Workspace).where(Workspace.id == memory_config_result.workspace_id)
+                )
+                workspace = ws_result.scalars().first()
+                tenant_id = str(workspace.tenant_id) if workspace and workspace.tenant_id else None
+
+            reflection_config_dict = {
+                "config_id": resolved_id,
+                "workspace_id": memory_config_result.workspace_id,
+                "tenant_id": tenant_id,
+                "enable_self_reflexion": memory_config_result.enable_self_reflexion,
+                "iteration_period": memory_config_result.iteration_period,
+                "reflexion_range": memory_config_result.reflexion_range,
+                "baseline": memory_config_result.baseline,
+                "reflection_model_id": memory_config_result.reflection_model_id,
+                "memory_verify": memory_config_result.memory_verify,
+                "quality_assessment": memory_config_result.quality_assessment,
+                "user_id": memory_config_result.user_id,
+            }
+        except Exception as e:
+            api_logger.warning(f"异步获取反思配置失败: config_id={config_data_id}, 错误: {e}")
+            return None
+
+        return MemoryReflectionService._create_reflection_config_from_data_pure(reflection_config_dict, db)
+
+    @staticmethod
+    async def get_llm_client_async(db, reflection_config: 'ReflectionConfig'):
+        """异步获取 LLM 客户端。
+
+        ModelClientMixin.get_llm_client 内部主要是同步 DB 查询 model_config 表。
+        这里用 asyncio.to_thread 包装以避免阻塞事件循环。
+        """
+        import asyncio
+        from app.core.memory.pipelines.base_pipeline import ModelClientMixin
+        from app.db import get_db_context
+
+        tid = getattr(reflection_config, 'tenant_id', None)
+        tenant_id = uuid.UUID(tid) if tid else None
+
+        def _get_client():
+            with get_db_context() as sync_db:
+                return ModelClientMixin.get_llm_client(sync_db, reflection_config.model_id, tenant_id)
+
+        return await asyncio.to_thread(_get_client)
+
+    @staticmethod
+    def _create_reflection_config_from_data_pure(config_data: Dict[str, Any], db=None) -> ReflectionConfig:
+        """从配置字典创建 ReflectionConfig（不需要 DB 查询的纯构造版本）。
+
+        当 reflection_model_id 为空且有 workspace_id 时，尝试用 db 获取默认模型。
+        db 可以是 sync Session 或 None（此时跳过回退查询）。
+        """
+        from app.repositories.workspace_repository import get_workspace_models_configs
+
+        reflexion_range_value = config_data.get("reflexion_range")
+        if reflexion_range_value is None or reflexion_range_value == "":
+            reflexion_range_value = "partial"
+        reflexion_range_mapping = {"retrieval": "partial", "partial": "partial", "all": "all"}
+        reflexion_range_value = reflexion_range_mapping.get(reflexion_range_value, "partial")
+        reflexion_range = ReflectionRange(reflexion_range_value)
+
+        baseline_value = config_data.get("baseline")
+        if baseline_value is None or baseline_value == "":
+            baseline_value = "TIME"
+        baseline = ReflectionBaseline(baseline_value)
+
+        iteration_period = config_data.get("iteration_period", 24)
+        if isinstance(iteration_period, str):
+            try:
+                iteration_period = int(iteration_period)
+            except (ValueError, TypeError):
+                iteration_period = 24
+
+        reflection_model_id = config_data.get("reflection_model_id", "")
+        if reflection_model_id:
+            reflection_model_id = str(reflection_model_id)
+
+        # 如果模型 ID 为空，且传了同步 db，尝试查工作空间默认
+        if not reflection_model_id and db is not None:
+            workspace_id = config_data.get("workspace_id")
+            if workspace_id:
+                try:
+                    from app.db import get_db_context
+                    with get_db_context() as sync_db:
+                        workspace_models = get_workspace_models_configs(sync_db, workspace_id)
+                        if workspace_models and workspace_models.get("llm"):
+                            reflection_model_id = workspace_models["llm"]
+                except Exception:
+                    pass
+
+        return ReflectionConfig(
+            enabled=config_data.get("enable_self_reflexion", False),
+            iteration_period=str(iteration_period),
+            reflexion_range=reflexion_range,
+            baseline=baseline,
+            memory_verify=config_data.get("memory_verify", False),
+            quality_assessment=config_data.get("quality_assessment", False),
+            model_id=reflection_model_id,
+            tenant_id=config_data.get("tenant_id"),
+        )
 
     async def start_reflection_from_data(self, config_data: Dict[str, Any], end_user_id: str) -> Dict[str, Any]:
         """从配置数据启动反思（兼容旧接口，内部持有 self.db）。"""

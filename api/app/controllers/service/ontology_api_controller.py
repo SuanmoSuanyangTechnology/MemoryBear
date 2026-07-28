@@ -15,9 +15,9 @@ from fastapi.responses import JSONResponse
 from starlette.responses import Response
 
 from app.core.api_key_auth import require_api_key_self_db
-from app.core.api_key_utils import get_current_user_from_api_key
+from app.core.api_key_utils import get_current_user_snapshot_from_api_key_async
 from app.core.logging_config import get_business_logger
-from app.db import get_db_context, get_async_db_context
+from app.db import get_async_db_context, get_db_context
 from app.schemas.api_key_schema import ApiKeyAuth
 
 # 包装内部 controller
@@ -31,22 +31,14 @@ from app.schemas.ontology_schemas import (
     ClassUpdateRequest,
 )
 
-from app.dependencies import make_snapshot
-
 router = APIRouter(prefix="/memory/ontology", tags=["V1 - Ontology API"])
 logger = get_business_logger()
-
-
 def _encode_result(result):
     """Encode result for JSON serialization, preserving Response objects as-is."""
     if isinstance(result, Response):
         return result
     return jsonable_encoder(result)
-
-
 # ==================== 本体提取 ====================
-
-
 @router.post("/extract")
 @require_api_key_self_db(scopes=["memory"])
 async def extract_ontology(
@@ -64,21 +56,15 @@ async def extract_ontology(
 
     logger.info(f"V1 ontology extract - workspace: {api_key_auth.workspace_id}")
 
-    with get_db_context() as auth_db:
-        current_user_orm = get_current_user_from_api_key(auth_db, api_key_auth)
-        current_user = make_snapshot(current_user_orm, api_key_auth.workspace_id)
-
+    async with get_async_db_context() as auth_db:
+        current_user = await get_current_user_snapshot_from_api_key_async(auth_db, api_key_auth)
     result = await ontology_controller.extract_ontology(
         request=payload,
         language_type=language_type,
         current_user=current_user,
     )
     return _encode_result(result)
-
-
 # ==================== 场景管理 ====================
-
-
 @router.post("/scene")
 @require_api_key_self_db(scopes=["memory"])
 async def create_scene(
@@ -96,15 +82,16 @@ async def create_scene(
 
     logger.info(f"V1 create scene - workspace: {api_key_auth.workspace_id}, name: {payload.scene_name}")
 
-    with get_db_context() as auth_db:
-        current_user_orm = get_current_user_from_api_key(auth_db, api_key_auth)
-        current_user = make_snapshot(current_user_orm, api_key_auth.workspace_id)
+    async with get_async_db_context() as auth_db:
+        current_user = await get_current_user_snapshot_from_api_key_async(auth_db, api_key_auth)
 
-    result = await ontology_controller.create_scene(
-        request=payload,
-        current_user=current_user,
-        x_language_type=x_language_type,
-    )
+    with get_db_context() as sync_db:
+        result = await ontology_controller.create_scene(
+            request=payload,
+            current_user=current_user,
+            x_language_type=x_language_type,
+            db=sync_db,
+        )
     return _encode_result(result)
 
 
@@ -125,18 +112,14 @@ async def update_scene(
 
     logger.info(f"V1 update scene - scene_id: {scene_id}, workspace: {api_key_auth.workspace_id}")
 
-    with get_db_context() as auth_db:
-        current_user_orm = get_current_user_from_api_key(auth_db, api_key_auth)
-        current_user = make_snapshot(current_user_orm, api_key_auth.workspace_id)
-
+    async with get_async_db_context() as auth_db:
+        current_user = await get_current_user_snapshot_from_api_key_async(auth_db, api_key_auth)
     result = await ontology_controller.update_scene(
         scene_id=scene_id,
         request=payload,
         current_user=current_user,
     )
     return _encode_result(result)
-
-
 @router.delete("/scene/{scene_id}")
 @require_api_key_self_db(scopes=["memory"])
 async def delete_scene(
@@ -150,17 +133,13 @@ async def delete_scene(
     """
     logger.info(f"V1 delete scene - scene_id: {scene_id}, workspace: {api_key_auth.workspace_id}")
 
-    with get_db_context() as auth_db:
-        current_user_orm = get_current_user_from_api_key(auth_db, api_key_auth)
-        current_user = make_snapshot(current_user_orm, api_key_auth.workspace_id)
-
+    async with get_async_db_context() as auth_db:
+        current_user = await get_current_user_snapshot_from_api_key_async(auth_db, api_key_auth)
     result = await ontology_controller.delete_scene(
         scene_id=scene_id,
         current_user=current_user,
     )
     return _encode_result(result)
-
-
 @router.get("/scenes/simple")
 @require_api_key_self_db(scopes=["memory"])
 async def get_scenes_simple(
@@ -173,16 +152,12 @@ async def get_scenes_simple(
     """
     logger.info(f"V1 get scenes simple - workspace: {api_key_auth.workspace_id}")
 
-    with get_db_context() as auth_db:
-        current_user_orm = get_current_user_from_api_key(auth_db, api_key_auth)
-        current_user = make_snapshot(current_user_orm, api_key_auth.workspace_id)
-
+    async with get_async_db_context() as auth_db:
+        current_user = await get_current_user_snapshot_from_api_key_async(auth_db, api_key_auth)
     result = await ontology_controller.get_scenes_simple(
         current_user=current_user,
     )
     return _encode_result(result)
-
-
 @router.get("/scenes")
 @require_api_key_self_db(scopes=["memory"])
 async def get_scenes(
@@ -198,10 +173,8 @@ async def get_scenes(
     """
     logger.info(f"V1 get scenes - workspace: {api_key_auth.workspace_id}, keyword: {scene_name}")
 
-    with get_db_context() as auth_db:
-        current_user_orm = get_current_user_from_api_key(auth_db, api_key_auth)
-        current_user = make_snapshot(current_user_orm, api_key_auth.workspace_id)
-
+    async with get_async_db_context() as auth_db:
+        current_user = await get_current_user_snapshot_from_api_key_async(auth_db, api_key_auth)
     result = await ontology_controller.get_scenes(
         workspace_id=None,
         scene_name=scene_name,
@@ -210,11 +183,7 @@ async def get_scenes(
         current_user=current_user,
     )
     return _encode_result(result)
-
-
 # ==================== 类型管理 ====================
-
-
 @router.post("/class")
 @require_api_key_self_db(scopes=["memory"])
 async def create_class(
@@ -232,18 +201,14 @@ async def create_class(
 
     logger.info(f"V1 create class - workspace: {api_key_auth.workspace_id}, scene_id: {payload.scene_id}")
 
-    with get_db_context() as auth_db:
-        current_user_orm = get_current_user_from_api_key(auth_db, api_key_auth)
-        current_user = make_snapshot(current_user_orm, api_key_auth.workspace_id)
-
+    async with get_async_db_context() as auth_db:
+        current_user = await get_current_user_snapshot_from_api_key_async(auth_db, api_key_auth)
     result = await ontology_controller.create_class(
         request=payload,
         current_user=current_user,
         x_language_type=x_language_type,
     )
     return _encode_result(result)
-
-
 @router.put("/class/{class_id}")
 @require_api_key_self_db(scopes=["memory"])
 async def update_class(
@@ -261,18 +226,14 @@ async def update_class(
 
     logger.info(f"V1 update class - class_id: {class_id}, workspace: {api_key_auth.workspace_id}")
 
-    with get_db_context() as auth_db:
-        current_user_orm = get_current_user_from_api_key(auth_db, api_key_auth)
-        current_user = make_snapshot(current_user_orm, api_key_auth.workspace_id)
-
+    async with get_async_db_context() as auth_db:
+        current_user = await get_current_user_snapshot_from_api_key_async(auth_db, api_key_auth)
     result = await ontology_controller.update_class(
         class_id=class_id,
         request=payload,
         current_user=current_user,
     )
     return _encode_result(result)
-
-
 @router.delete("/class/{class_id}")
 @require_api_key_self_db(scopes=["memory"])
 async def delete_class(
@@ -286,17 +247,13 @@ async def delete_class(
     """
     logger.info(f"V1 delete class - class_id: {class_id}, workspace: {api_key_auth.workspace_id}")
 
-    with get_db_context() as auth_db:
-        current_user_orm = get_current_user_from_api_key(auth_db, api_key_auth)
-        current_user = make_snapshot(current_user_orm, api_key_auth.workspace_id)
-
+    async with get_async_db_context() as auth_db:
+        current_user = await get_current_user_snapshot_from_api_key_async(auth_db, api_key_auth)
     result = await ontology_controller.delete_class(
         class_id=class_id,
         current_user=current_user,
     )
     return _encode_result(result)
-
-
 @router.get("/class/{class_id}")
 @require_api_key_self_db(scopes=["memory"])
 async def get_class(
@@ -310,17 +267,13 @@ async def get_class(
     """
     logger.info(f"V1 get class - class_id: {class_id}, workspace: {api_key_auth.workspace_id}")
 
-    with get_db_context() as auth_db:
-        current_user_orm = get_current_user_from_api_key(auth_db, api_key_auth)
-        current_user = make_snapshot(current_user_orm, api_key_auth.workspace_id)
-
+    async with get_async_db_context() as auth_db:
+        current_user = await get_current_user_snapshot_from_api_key_async(auth_db, api_key_auth)
     result = await ontology_controller.get_class(
         class_id=class_id,
         current_user=current_user,
     )
     return _encode_result(result)
-
-
 @router.get("/classes")
 @require_api_key_self_db(scopes=["memory"])
 async def get_classes(
@@ -335,21 +288,15 @@ async def get_classes(
     """
     logger.info(f"V1 get classes - scene_id: {scene_id}, workspace: {api_key_auth.workspace_id}")
 
-    with get_db_context() as auth_db:
-        current_user_orm = get_current_user_from_api_key(auth_db, api_key_auth)
-        current_user = make_snapshot(current_user_orm, api_key_auth.workspace_id)
-
+    async with get_async_db_context() as auth_db:
+        current_user = await get_current_user_snapshot_from_api_key_async(auth_db, api_key_auth)
     result = await ontology_controller.get_classes(
         scene_id=scene_id,
         class_name=class_name,
         current_user=current_user,
     )
     return _encode_result(result)
-
-
 # ==================== OWL 导入/导出 ====================
-
-
 @router.post("/import")
 @require_api_key_self_db(scopes=["memory"])
 async def import_owl_file(
@@ -365,10 +312,8 @@ async def import_owl_file(
     """
     logger.info(f"V1 import OWL - workspace: {api_key_auth.workspace_id}, scene_name: {scene_name}")
 
-    with get_db_context() as auth_db:
-        current_user_orm = get_current_user_from_api_key(auth_db, api_key_auth)
-        current_user = make_snapshot(current_user_orm, api_key_auth.workspace_id)
-
+    async with get_async_db_context() as auth_db:
+        current_user = await get_current_user_snapshot_from_api_key_async(auth_db, api_key_auth)
     result = await ontology_controller.import_owl_file(
         scene_name=scene_name,
         scene_description=scene_description,
@@ -376,8 +321,6 @@ async def import_owl_file(
         current_user=current_user,
     )
     return _encode_result(result)
-
-
 @router.post("/export")
 @require_api_key_self_db(scopes=["memory"])
 async def export_owl_by_scene(
@@ -394,10 +337,8 @@ async def export_owl_by_scene(
 
     logger.info(f"V1 export OWL - workspace: {api_key_auth.workspace_id}, scene_id: {payload.scene_id}")
 
-    with get_db_context() as auth_db:
-        current_user_orm = get_current_user_from_api_key(auth_db, api_key_auth)
-        current_user = make_snapshot(current_user_orm, api_key_auth.workspace_id)
-
+    async with get_async_db_context() as auth_db:
+        current_user = await get_current_user_snapshot_from_api_key_async(auth_db, api_key_auth)
     return await ontology_controller.export_owl_by_scene(
         request=payload,
         current_user=current_user,

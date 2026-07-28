@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.controllers import end_user_controller
 from app.core.api_key_auth import require_api_key_self_db
+from app.core.api_key_utils import get_current_user_snapshot_from_api_key_async
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
@@ -17,35 +18,10 @@ from app.repositories.end_user_repository import EndUserRepository
 from app.schemas.api_key_schema import ApiKeyAuth
 from app.schemas.end_user_info_schema import EndUserInfoUpdate
 from app.schemas.memory_api_schema import CreateEndUserRequest, CreateEndUserResponse
-from app.services import api_key_service
 from app.services.memory_config_service import MemoryConfigService
 
 router = APIRouter(prefix="/end_user", tags=["V1 - End User API"])
 logger = get_business_logger()
-
-
-def _get_current_user(api_key_auth: ApiKeyAuth, db: Session):
-    """Build a current_user snapshot from API key auth (detach-safe).
-
-    Args:
-        api_key_auth: Validated API key auth info
-        db: Database session
-
-    Returns:
-        CurrentUserSnapshot with all needed fields extracted
-    """
-    from app.dependencies import CurrentUserSnapshot
-    api_key = api_key_service.ApiKeyService.get_api_key(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
-    user_orm = api_key.creator
-    return CurrentUserSnapshot(
-        id=user_orm.id,
-        username=user_orm.username,
-        email=user_orm.email,
-        is_active=user_orm.is_active,
-        is_superuser=user_orm.is_superuser,
-        current_workspace_id=api_key_auth.workspace_id,
-        tenant_id=user_orm.tenant_id,
-    )
 
 
 @router.post("/create")
@@ -74,10 +50,10 @@ async def create_end_user(
 
     logger.info("Create end user request - other_id: %s, workspace_id: %s", payload.other_id, workspace_id)
 
-    with get_db_context() as db:
+    async with get_async_db_context() as async_db:
         # Resolve memory_config_id: explicit > workspace default
         memory_config_id = None
-        config_service = MemoryConfigService(db)
+        config_service = MemoryConfigService(async_db)
 
         if payload.memory_config_id:
             try:
@@ -87,7 +63,7 @@ async def create_end_user(
                     f"Invalid memory_config_id format: {payload.memory_config_id}",
                     BizCode.INVALID_PARAMETER
                 )
-            config = config_service.get_config_with_fallback(memory_config_id, workspace_id)
+            config = await config_service.get_config_with_fallback_async(memory_config_id, workspace_id)
             if not config:
                 raise BusinessException(
                     f"Memory config not found: {payload.memory_config_id}",
@@ -95,7 +71,7 @@ async def create_end_user(
                 )
             memory_config_id = config.config_id
         else:
-            default_config = config_service.get_workspace_default_config(workspace_id)
+            default_config = await config_service.get_workspace_default_config_async(workspace_id)
             if default_config:
                 memory_config_id = default_config.config_id
                 logger.info(f"Using workspace default memory config: {memory_config_id}")
@@ -113,8 +89,8 @@ async def create_end_user(
                     BizCode.INVALID_PARAMETER
                 )
 
-        end_user_repo = EndUserRepository(db)
-        end_user = end_user_repo.get_or_create_end_user_with_config(
+        end_user_repo = EndUserRepository(async_db)
+        end_user = await end_user_repo.get_or_create_end_user_with_config_async(
             app_id=app_id,
             workspace_id=workspace_id,
             other_id=payload.other_id,
@@ -122,7 +98,7 @@ async def create_end_user(
             other_name=payload.other_name,
         )
         end_user.other_name = payload.other_name
-        db.commit()  # 确保 other_name 修改持久化（get_or_create_end_user_with_config 内部已 commit）
+        await async_db.commit()
         logger.info(f"End user ready: {end_user.id}")
 
         result = {
@@ -226,8 +202,8 @@ async def get_end_user_info(
     Retrieves the info record (aliases, meta_data, etc.) for the specified end user.
     Delegates to the manager-side controller for shared logic.
     """
-    with get_db_context() as auth_db:
-        current_user = _get_current_user(api_key_auth, auth_db)
+    async with get_async_db_context() as auth_db:
+        current_user = await get_current_user_snapshot_from_api_key_async(auth_db, api_key_auth)
     return await end_user_controller.get_end_user_info(
         end_user_id=end_user_id,
         current_user=current_user,
@@ -250,8 +226,8 @@ async def update_end_user_info(
     body = await request.json()
     payload = EndUserInfoUpdate(**body)
 
-    with get_db_context() as auth_db:
-        current_user = _get_current_user(api_key_auth, auth_db)
+    async with get_async_db_context() as auth_db:
+        current_user = await get_current_user_snapshot_from_api_key_async(auth_db, api_key_auth)
 
     return await end_user_controller.update_end_user_info(
         info_update=payload,
