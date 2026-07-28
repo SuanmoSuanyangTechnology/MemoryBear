@@ -11,13 +11,11 @@ from fastapi import APIRouter, BackgroundTasks, Query, Request
 
 from app.controllers import memory_dashboard_controller
 from app.core.api_key_auth import require_api_key_self_db
+from app.core.api_key_utils import get_current_user_snapshot_from_api_key_async
 from app.core.logging_config import get_business_logger
-from app.db import get_db_context, get_async_db_context
+from app.db import get_async_db_context
 from app.schemas.api_key_schema import ApiKeyAuth
 from app.schemas.response_schema import ApiResponse
-from app.services import api_key_service
-
-from app.dependencies import make_snapshot
 
 router = APIRouter(prefix="/dashboard", tags=["V1 - Dashboard API"])
 api_logger = get_business_logger()
@@ -50,21 +48,20 @@ async def get_workspace_end_users(
     Returns:
         ApiResponse: end user list with pagination metadata
     """
-    with get_db_context() as auth_db:
-        # 1. Build current_user snapshot from the API Key (extract before session closes)
-        api_key = api_key_service.ApiKeyService.get_api_key(
-            auth_db, api_key_auth.api_key_id, api_key_auth.workspace_id
-        )
-        current_user = make_snapshot(api_key.creator, api_key_auth.workspace_id)
+    # 1. 异步提取用户快照
+    async with get_async_db_context() as auth_db:
+        current_user = await get_current_user_snapshot_from_api_key_async(auth_db, api_key_auth)
 
-        # 2. Delegate to the manager-side logic with the same sync session;
-        #    workspace_id is forced to the API Key's workspace.
+    # 2. Delegate to the manager-side logic with a fresh sync session
+    #    (dashboard 内部查询暂未全量异步化，保留同步 session 给业务逻辑)
+    from app.db import get_db_context
+    with get_db_context() as db:
         return await memory_dashboard_controller.get_workspace_end_users(
             background_tasks=background_tasks,
             workspace_id=api_key_auth.workspace_id,
             keyword=keyword,
             page=page,
             pagesize=pagesize,
-            db=auth_db,
+            db=db,
             current_user=current_user,
         )

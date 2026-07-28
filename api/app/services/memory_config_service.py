@@ -1153,6 +1153,25 @@ class MemoryConfigService:
 
         return config
 
+    async def get_workspace_default_config_async(
+            self,
+            workspace_id: UUID
+    ) -> Optional["MemoryConfigModel"]:
+        """异步版：获取工作空间默认记忆配置。"""
+        config = await MemoryConfigRepository(self.db).get_workspace_default_async(workspace_id)
+        if not config:
+            logger.warning("No active memory config found (async)", extra={"workspace_id": str(workspace_id)})
+        return config
+
+    async def get_config_with_fallback_async(
+            self,
+            memory_config_id: Optional[UUID],
+            workspace_id: UUID
+    ) -> Optional["MemoryConfigModel"]:
+        """异步版：获取记忆配置，支持回退到工作空间默认配置。"""
+        config = await MemoryConfigRepository(self.db).get_with_fallback_async(memory_config_id, workspace_id)
+        return config
+
     def delete_config(
             self,
             config_id: UUID | int,

@@ -468,10 +468,7 @@ async def delete_scene(
                     f"尝试删除系统默认场景: user_id={current_user.id}, "
                     f"scene_id={scene_id}, scene_name={scene.scene_name}"
                 )
-                raise HTTPException(
-                    status_code=400,
-                    detail="SYSTEM_DEFAULT_SCENE_CANNOT_DELETE"
-                )
+                return fail(BizCode.BAD_REQUEST, "系统默认场景不可删除", "SYSTEM_DEFAULT_SCENE_CANNOT_DELETE")
         
             # 场景管理不需要LLM
             service = OntologyService(db=db)

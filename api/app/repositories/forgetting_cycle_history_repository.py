@@ -4,10 +4,12 @@
 提供遗忘周期历史记录的数据访问操作。
 """
 
+from datetime import datetime
 from typing import List, Optional
-from datetime import datetime, timedelta
+
+from sqlalchemy import desc, select
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
-from sqlalchemy import desc, and_
 
 from app.models.forgetting_cycle_history_model import ForgettingCycleHistory
 
@@ -63,7 +65,37 @@ class ForgettingCycleHistoryRepository:
         db.refresh(history)
         
         return history
-    
+
+    async def create_async(
+        self,
+        db: AsyncSession,
+        end_user_id: str,
+        execution_time: datetime,
+        merged_count: int,
+        failed_count: int,
+        average_activation_value: Optional[float],
+        total_nodes: int,
+        low_activation_nodes: int,
+        duration_seconds: float,
+        trigger_type: str = "manual",
+    ) -> ForgettingCycleHistory:
+        """创建历史记录（异步版本，供 AsyncSession 调用方使用）。"""
+        history = ForgettingCycleHistory(
+            end_user_id=end_user_id,
+            execution_time=execution_time,
+            merged_count=merged_count,
+            failed_count=failed_count,
+            average_activation_value=average_activation_value,
+            total_nodes=total_nodes,
+            low_activation_nodes=low_activation_nodes,
+            duration_seconds=duration_seconds,
+            trigger_type=trigger_type,
+        )
+        db.add(history)
+        await db.commit()
+        await db.refresh(history)
+        return history
+
     def get_recent_by_end_user(
         self,
         db: Session,
@@ -84,7 +116,21 @@ class ForgettingCycleHistoryRepository:
         return db.query(ForgettingCycleHistory).filter(
             ForgettingCycleHistory.end_user_id == end_user_id
         ).order_by(ForgettingCycleHistory.execution_time.desc()).all()
-    
+
+    async def get_recent_by_end_user_async(
+        self,
+        db: AsyncSession,
+        end_user_id: str,
+    ) -> List[ForgettingCycleHistory]:
+        """获取指定终端用户的所有历史记录（异步版本，按时间降序）。"""
+        stmt = (
+            select(ForgettingCycleHistory)
+            .where(ForgettingCycleHistory.end_user_id == end_user_id)
+            .order_by(ForgettingCycleHistory.execution_time.desc())
+        )
+        result = await db.execute(stmt)
+        return list(result.scalars().all())
+
     def get_latest_by_end_user(
         self,
         db: Session,

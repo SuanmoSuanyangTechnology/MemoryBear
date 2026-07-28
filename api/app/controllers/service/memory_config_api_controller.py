@@ -5,16 +5,16 @@ from typing import Optional
 
 from fastapi import APIRouter, Body, Header, Query, Request
 from fastapi.encoders import jsonable_encoder
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.controllers import memory_config_controller
 from app.controllers import ontology_controller
 from app.controllers.emotion_config_controller import EmotionConfigUpdate
 from app.core.api_key_auth import require_api_key_self_db
+from app.core.api_key_utils import get_current_user_snapshot_from_api_key_async
 from app.core.error_codes import BizCode
-from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
-from app.db import get_db_context
+from app.db import get_async_db_context, get_db_context
 from app.repositories.memory_config_repository import MemoryConfigRepository
 from app.schemas.api_key_schema import ApiKeyAuth
 from app.schemas.memory_api_schema import (
@@ -32,52 +32,32 @@ from app.schemas.memory_storage_schema import (
     ConfigParamsCreate,
 )
 from app.schemas.memory_storage_schema import ForgettingConfigUpdateRequest
-from app.services import api_key_service
-from app.utils.config_utils import resolve_config_id
+from app.utils.config_utils import resolve_config_id_async
 
 router = APIRouter(prefix="/memory_config", tags=["V1 - Memory Config API"])
 logger = get_business_logger()
 
 
-def _get_current_user(api_key_auth: ApiKeyAuth, db: Session):
-    """Build a current_user object from API key auth
-
-    Args:
-        api_key_auth: Validated API key auth info
-        db: Database session
+async def _verify_config_ownership_async(config_id: str, workspace_id: uuid.UUID, db: AsyncSession):
+    """异步版本：验证 config 归属 workspace。
 
     Returns:
-        User object with current_workspace_id set
+        None: 校验通过
+        dict: fail() 响应（校验失败时直接 return 给客户端）
     """
-    api_key = api_key_service.ApiKeyService.get_api_key(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
-    current_user = api_key.creator
-    current_user.current_workspace_id = api_key_auth.workspace_id
-    return current_user
+    from app.core.response_utils import fail
 
-
-def _verify_config_ownership(config_id: str, workspace_id: uuid.UUID, db: Session):
-    """Verify that the config belongs to the workspace.
-    
-      Args: 
-          config_id: The ID of the config to verify
-          workspace_id: The workspace ID tocheck against
-          db: Database session for querying
-        Raises:
-            BusinessException: If the config does not exist or does not belong to the workspace
-    """
     try:
-        resolved_id = resolve_config_id(config_id, db)
+        resolved_id = await resolve_config_id_async(config_id, db)
     except ValueError as e:
-        raise BusinessException(
-            message=f"Invalid config_id: {e}",
-            code=BizCode.INVALID_PARAMETER,
-        )
-    config = MemoryConfigRepository(db).get_by_id(resolved_id)
-    if not config or config.workspace_id != workspace_id:
-        raise BusinessException(
-            message="Config not found or access denied",
-            code=BizCode.MEMORY_CONFIG_NOT_FOUND,
-        )
+        return fail(BizCode.INVALID_PARAMETER, f"无效的配置ID: {e}")
+
+    config = await MemoryConfigRepository(db).get_by_id_async(resolved_id)
+    if not config:
+        return fail(BizCode.MEMORY_CONFIG_NOT_FOUND, "配置不存在")
+    if str(config.workspace_id) != str(workspace_id):
+        return fail(BizCode.MEMORY_CONFIG_NOT_FOUND, "无权访问该配置")
+    return None
 
 
 # @router.get("/configs")
@@ -117,8 +97,8 @@ async def read_all_config(
     """
     logger.info(f"V1 get all configs (full) - workspace: {api_key_auth.workspace_id}")
 
-    with get_db_context() as auth_db:
-        current_user = _get_current_user(api_key_auth, auth_db)
+    async with get_async_db_context() as auth_db:
+        current_user = await get_current_user_snapshot_from_api_key_async(auth_db, api_key_auth)
 
         return await memory_config_controller.read_all_config(
             current_user=current_user,
@@ -139,8 +119,8 @@ async def get_ontology_scenes(
     """
     logger.info(f"V1 get scenes - workspace: {api_key_auth.workspace_id}")
 
-    with get_db_context() as auth_db:
-        current_user = _get_current_user(api_key_auth, auth_db)
+    async with get_async_db_context() as auth_db:
+        current_user = await get_current_user_snapshot_from_api_key_async(auth_db, api_key_auth)
 
         return await ontology_controller.get_scenes_simple(
             current_user=current_user,
@@ -161,9 +141,11 @@ async def read_config_extracted(
     """
     logger.info(f"V1 read extracted config - config_id: {config_id}, workspace: {api_key_auth.workspace_id}")
 
-    with get_db_context() as auth_db:
-        _verify_config_ownership(config_id, api_key_auth.workspace_id, auth_db)
-        current_user = _get_current_user(api_key_auth, auth_db)
+    async with get_async_db_context() as auth_db:
+        _ownership_error = await _verify_config_ownership_async(config_id, api_key_auth.workspace_id, auth_db)
+        if _ownership_error:
+            return _ownership_error
+        current_user = await get_current_user_snapshot_from_api_key_async(auth_db, api_key_auth)
 
         return await memory_config_controller.read_config_extracted(
             config_id=config_id,
@@ -185,9 +167,11 @@ async def read_config_forgetting(
     """
     logger.info(f"V1 read forgetting config - config_id: {config_id}, workspace: {api_key_auth.workspace_id}")
 
-    with get_db_context() as auth_db:
-        _verify_config_ownership(config_id, api_key_auth.workspace_id, auth_db)
-        current_user = _get_current_user(api_key_auth, auth_db)
+    async with get_async_db_context() as auth_db:
+        _ownership_error = await _verify_config_ownership_async(config_id, api_key_auth.workspace_id, auth_db)
+        if _ownership_error:
+            return _ownership_error
+        current_user = await get_current_user_snapshot_from_api_key_async(auth_db, api_key_auth)
 
         result = await memory_config_controller.read_forgetting_config(
             config_id=config_id,
@@ -210,9 +194,11 @@ async def read_config_emotion(
     """
     logger.info(f"V1 read emotion config - config_id: {config_id}, workspace: {api_key_auth.workspace_id}")
 
-    with get_db_context() as auth_db:
-        _verify_config_ownership(config_id, api_key_auth.workspace_id, auth_db)
-        current_user = _get_current_user(api_key_auth, auth_db)
+    async with get_async_db_context() as auth_db:
+        _ownership_error = await _verify_config_ownership_async(config_id, api_key_auth.workspace_id, auth_db)
+        if _ownership_error:
+            return _ownership_error
+        current_user = await get_current_user_snapshot_from_api_key_async(auth_db, api_key_auth)
 
         return jsonable_encoder(await memory_config_controller.get_emotion_config(
             config_id=config_id,
@@ -234,9 +220,11 @@ async def read_config_reflection(
     """
     logger.info(f"V1 read reflection config - config_id: {config_id}, workspace: {api_key_auth.workspace_id}")
 
-    with get_db_context() as auth_db:
-        _verify_config_ownership(config_id, api_key_auth.workspace_id, auth_db)
-        current_user = _get_current_user(api_key_auth, auth_db)
+    async with get_async_db_context() as auth_db:
+        _ownership_error = await _verify_config_ownership_async(config_id, api_key_auth.workspace_id, auth_db)
+        if _ownership_error:
+            return _ownership_error
+        current_user = await get_current_user_snapshot_from_api_key_async(auth_db, api_key_auth)
 
         return jsonable_encoder(await memory_config_controller.start_reflection_configs(
             config_id=config_id,
@@ -263,27 +251,29 @@ async def create_memory_config(
 
     logger.info(f"V1 create config - workspace: {api_key_auth.workspace_id}, config_name: {payload.config_name}")
 
-    with get_db_context() as auth_db:
-        current_user = _get_current_user(api_key_auth, auth_db)
+    async with get_async_db_context() as auth_db:
+        current_user = await get_current_user_snapshot_from_api_key_async(auth_db, api_key_auth)
 
-        # 构造管理端 Schema，workspace_id 从 API Key 注入
-        mgmt_payload = ConfigParamsCreate(
-            config_name=payload.config_name,
-            config_desc=payload.config_desc or "",
-            scene_id=payload.scene_id,
-            llm_id=payload.llm_id,
-            embedding_id=payload.embedding_id,
-            rerank_id=payload.rerank_id,
-            reflection_model_id=payload.reflection_model_id,
-            emotion_model_id=payload.emotion_model_id,
-        )
+    # 构造管理端 Schema，workspace_id 从 API Key 注入
+    mgmt_payload = ConfigParamsCreate(
+        config_name=payload.config_name,
+        config_desc=payload.config_desc or "",
+        scene_id=payload.scene_id,
+        llm_id=payload.llm_id,
+        embedding_id=payload.embedding_id,
+        rerank_id=payload.rerank_id,
+        reflection_model_id=payload.reflection_model_id,
+        emotion_model_id=payload.emotion_model_id,
+    )
+    # create_config 有 @check_memory_engine_quota 装饰器，需要同步 db
+    with get_db_context() as sync_db:
         result = await memory_config_controller.create_config(
             payload=mgmt_payload,
             current_user=current_user,
-            db=auth_db,
+            db=sync_db,
             x_language_type=x_language_type,
         )
-        return jsonable_encoder(result)
+    return jsonable_encoder(result)
 
 
 @router.put("/update_config")
@@ -304,9 +294,11 @@ async def update_memory_config(
 
     logger.info(f"V1 update config - config_id: {payload.config_id}, workspace: {api_key_auth.workspace_id}")
 
-    with get_db_context() as auth_db:
-        _verify_config_ownership(payload.config_id, api_key_auth.workspace_id, auth_db)
-        current_user = _get_current_user(api_key_auth, auth_db)
+    async with get_async_db_context() as auth_db:
+        _ownership_error = await _verify_config_ownership_async(payload.config_id, api_key_auth.workspace_id, auth_db)
+        if _ownership_error:
+            return _ownership_error
+        current_user = await get_current_user_snapshot_from_api_key_async(auth_db, api_key_auth)
 
         mgmt_payload = ConfigUpdate(
             config_id=payload.config_id,
@@ -339,10 +331,12 @@ async def update_memory_config_extracted(
 
     logger.info(f"V1 update extracted config - config_id: {payload.config_id}, workspace: {api_key_auth.workspace_id}")
 
-    with get_db_context() as auth_db:
+    async with get_async_db_context() as auth_db:
         # 校验权限
-        _verify_config_ownership(payload.config_id, api_key_auth.workspace_id, auth_db)
-        current_user = _get_current_user(api_key_auth, auth_db)
+        _ownership_error = await _verify_config_ownership_async(payload.config_id, api_key_auth.workspace_id, auth_db)
+        if _ownership_error:
+            return _ownership_error
+        current_user = await get_current_user_snapshot_from_api_key_async(auth_db, api_key_auth)
 
         update_fields = payload.model_dump(exclude_unset=True)
         mgmt_payload = ConfigUpdateExtracted(**update_fields)
@@ -371,10 +365,12 @@ async def update_memory_config_forgetting(
 
     logger.info(f"V1 update forgetting config - config_id: {payload.config_id}, workspace: {api_key_auth.workspace_id}")
 
-    with get_db_context() as auth_db:
+    async with get_async_db_context() as auth_db:
         # 校验权限
-        _verify_config_ownership(payload.config_id, api_key_auth.workspace_id, auth_db)
-        current_user = _get_current_user(api_key_auth, auth_db)
+        _ownership_error = await _verify_config_ownership_async(payload.config_id, api_key_auth.workspace_id, auth_db)
+        if _ownership_error:
+            return _ownership_error
+        current_user = await get_current_user_snapshot_from_api_key_async(auth_db, api_key_auth)
 
         update_fields = payload.model_dump(exclude_unset=True)
         mgmt_payload = ForgettingConfigUpdateRequest(**update_fields)
@@ -405,9 +401,11 @@ async def update_config_emotion(
 
     logger.info(f"V1 update emotion config - config_id: {payload.config_id}, workspace: {api_key_auth.workspace_id}")
 
-    with get_db_context() as auth_db:
-        _verify_config_ownership(payload.config_id, api_key_auth.workspace_id, auth_db)
-        current_user = _get_current_user(api_key_auth, auth_db)
+    async with get_async_db_context() as auth_db:
+        _ownership_error = await _verify_config_ownership_async(payload.config_id, api_key_auth.workspace_id, auth_db)
+        if _ownership_error:
+            return _ownership_error
+        current_user = await get_current_user_snapshot_from_api_key_async(auth_db, api_key_auth)
 
         update_fields = payload.model_dump(exclude_unset=True)
         mgmt_payload = EmotionConfigUpdate(**update_fields)
@@ -435,9 +433,11 @@ async def update_config_reflection(
 
     logger.info(f"V1 update reflection config - config_id: {payload.config_id}, workspace: {api_key_auth.workspace_id}")
 
-    with get_db_context() as auth_db:
-        _verify_config_ownership(payload.config_id, api_key_auth.workspace_id, auth_db)
-        current_user = _get_current_user(api_key_auth, auth_db)
+    async with get_async_db_context() as auth_db:
+        _ownership_error = await _verify_config_ownership_async(payload.config_id, api_key_auth.workspace_id, auth_db)
+        if _ownership_error:
+            return _ownership_error
+        current_user = await get_current_user_snapshot_from_api_key_async(auth_db, api_key_auth)
 
         update_fields = payload.model_dump(exclude_unset=True)
         mgmt_payload = Memory_Reflection(**update_fields)
@@ -465,9 +465,11 @@ async def delete_memory_config(
     """
     logger.info(f"V1 delete config - config_id: {config_id}, workspace: {api_key_auth.workspace_id}")
 
-    with get_db_context() as auth_db:
-        _verify_config_ownership(config_id, api_key_auth.workspace_id, auth_db)
-        current_user = _get_current_user(api_key_auth, auth_db)
+    async with get_async_db_context() as auth_db:
+        _ownership_error = await _verify_config_ownership_async(config_id, api_key_auth.workspace_id, auth_db)
+        if _ownership_error:
+            return _ownership_error
+        current_user = await get_current_user_snapshot_from_api_key_async(auth_db, api_key_auth)
 
         return await memory_config_controller.delete_config(
             config_id=config_id,

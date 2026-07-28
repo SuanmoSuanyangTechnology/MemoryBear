@@ -249,11 +249,10 @@ async def start_workspace_reflection(
     try:
         api_logger.info(f"用户 {current_user.username} 启动workspace反思，workspace_id: {workspace_id}")
 
-        # Use independent database session to get workspace app details, avoiding transaction failures
-        from app.db import get_db_context
-        with get_db_context() as query_db:
+        # 异步查询 workspace 下所有应用详情
+        async with get_async_db_context() as query_db:
             service = WorkspaceAppService(query_db)
-            result = service.get_workspace_apps_detailed(workspace_id)
+            result = await service.get_workspace_apps_detailed_async(workspace_id)
 
         reflection_results = []
 
@@ -279,20 +278,20 @@ async def start_workspace_reflection(
                     api_logger.debug(f"配置 {config_id_str} 没有匹配的release")
                     continue
 
-                # Execute reflection for each user - using independent database sessions
+                # Execute reflection for each user - using async database sessions
                 for user in end_users:
                     api_logger.info(f"为用户 {user['id']} 启动反思，config_id: {config_id_str}")
 
-                    # Phase 1: Quick sync DB work — extract config + LLM client, close session
+                    # Phase 1: Async DB work — extract config + LLM client
                     reflection_config = None
                     llm_client = None
-                    with get_db_context() as user_db:
+                    async with get_async_db_context() as user_db:
                         try:
-                            reflection_config = MemoryReflectionService.resolve_reflection_config_sync(
+                            reflection_config = await MemoryReflectionService.resolve_reflection_config_async(
                                 user_db, config
                             )
                             if reflection_config:
-                                llm_client = MemoryReflectionService.get_llm_client_sync(
+                                llm_client = await MemoryReflectionService.get_llm_client_async(
                                     user_db, reflection_config
                                 )
                         except Exception as e:

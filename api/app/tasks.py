@@ -3623,11 +3623,12 @@ def do_refresh_insight_summary_cache(
     inflight_key = CACHE_INFLIGHT_KEY_FMT.format(end_user_id=end_user_id)
 
     async def _run() -> Dict[str, Any]:
+        from app.db import get_async_db_context
         from app.services.user_memory_service import UserMemoryService
 
         service = UserMemoryService()
         ws_uuid = uuid.UUID(workspace_id)
-        with get_db_context() as db:
+        async with get_async_db_context() as db:
             insight = await service.generate_and_cache_insight(
                 db, end_user_id, ws_uuid, language=language,
             )
@@ -3860,9 +3861,12 @@ def run_forgetting_cycle_task(self, config_id: Optional[uuid.UUID] = None) -> Di
     start_time = time.time()
 
     async def _process_users() -> Dict[str, Any]:
+        from app.db import get_async_db_context
         from app.repositories.end_user_repository import EndUserRepository
-        with get_db_context() as db:
-            end_users = EndUserRepository(db).get_all_active()
+
+        # forget_service.trigger_forgetting_cycle 已迁移到 AsyncSession，
+        async with get_async_db_context() as db:
+            end_users = await EndUserRepository(db).get_all_active_async()
             if not end_users:
                 logger.info("没有终端用户，跳过遗忘周期")
                 return {"status": "SUCCESS", "message": "没有终端用户",
@@ -3876,7 +3880,7 @@ def run_forgetting_cycle_task(self, config_id: Optional[uuid.UUID] = None) -> Di
 
             for end_user in end_users:
                 try:
-                    config_id = MemoryConfigService(db).get_workspace_active_config_id(end_user.workspace_id)
+                    config_id = await MemoryConfigService(db).get_workspace_active_config_id_async(end_user.workspace_id)
 
                     # 执行遗忘周期
                     report = await forget_service.trigger_forgetting_cycle(

@@ -145,10 +145,22 @@ async def generate_cache_api(
 
                 if result["insight_success"] and result["summary_success"]:
                     api_logger.info(f"成功为用户 {end_user_id} 生成缓存")
-                else:
-                    api_logger.warning(f"用户 {end_user_id} 的缓存生成部分失败: {result['errors']}")
+                    return success(data=result, msg="生成完成")
 
-                return success(data=result, msg="生成完成")
+                # 至少一个失败：真实反映给调用方，data 里仍带上明细
+                api_logger.warning(f"用户 {end_user_id} 的缓存生成部分失败: {result['errors']}")
+                if not result["insight_success"] and not result["summary_success"]:
+                    error_msg = "; ".join(
+                        f"{item.get('type')}: {item.get('error')}"
+                        for item in result["errors"]
+                    ) or "unknown error"
+                    return fail(
+                        BizCode.INTERNAL_ERROR,
+                        "缓存生成失败",
+                        error_msg,
+                        data=result,
+                    )
+                return success(data=result, msg="部分生成成功")
 
             else:
                 api_logger.info(f"开始为工作空间 {workspace_id} 批量生成缓存")
