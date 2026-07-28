@@ -1,7 +1,7 @@
 import logging
 from pathlib import Path
 
-from app.core.rag.chunk.context import ParsedBlockType, ParseResult
+from app.core.rag.chunk.context import ParsedBlockType, ParseResult, is_image_vision_enabled
 from app.core.rag.chunk.parser.base import DocumentParser
 from app.core.rag.chunk.parser.image_vision import enhance_image_blocks_with_vision
 from app.core.rag.chunk.parser.image_storage import store_mineru_v3_image
@@ -36,8 +36,10 @@ class MinerUV3Parser(DocumentParser):
         attached_count, attached_images = self._attach_images(blocks, mineru_result.images)
         LOGGER.info("[MinerUV3] markdown images attached: count=%s", attached_count)
         self._store_image_assets(attached_images, ctx)
-        if ctx.vision_model:
+        if ctx.vision_model and is_image_vision_enabled(ctx.parser_config):
             self._enhance_image_blocks(blocks, ctx)
+        elif ctx.vision_model:
+            LOGGER.info("[MinerUV3] image vision enhancement disabled by parser config")
         return ParseResult(blocks=blocks, merge_strategy="blocks")
 
     def _attach_images(self, blocks, images):

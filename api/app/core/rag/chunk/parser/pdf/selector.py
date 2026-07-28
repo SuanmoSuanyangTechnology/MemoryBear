@@ -1,11 +1,18 @@
 import os
 
+from app.core.rag.chunk.context import is_image_vision_enabled
 from app.core.rag.deepdoc.parser.figure_parser import vision_figure_parser_pdf_wrapper
 from app.core.rag.deepdoc.parser.mineru_parser import MinerUParser
 from app.core.rag.deepdoc.parser.pdf_parser import PlainParser, VisionParser
 
 from .deepdoc import DeepDocPdfParser
 from .textln import TextLnParser
+
+
+def _image_vision_model(vision_model, parser_config):
+    if is_image_vision_enabled(parser_config):
+        return vision_model
+    return None
 
 
 def by_deepdoc(filename, binary=None, from_page=0, to_page=100000, lang="Chinese", callback=None, vision_model=None, pdf_cls=None, **kwargs):
@@ -20,7 +27,7 @@ def by_deepdoc(filename, binary=None, from_page=0, to_page=100000, lang="Chinese
     tables = vision_figure_parser_pdf_wrapper(
         tbls=tables,
         callback=callback,
-        vision_model=vision_model,
+        vision_model=_image_vision_model(vision_model, kwargs.get("parser_config")),
         **kwargs,
     )
     return sections, tables, pdf_parser
@@ -64,7 +71,7 @@ def by_textln(filename, binary=None, from_page=0, to_page=100000, lang="Chinese"
 
 
 def by_plaintext(filename, binary=None, from_page=0, to_page=100000, callback=None, vision_model=None, **kwargs):
-    if kwargs.get("layout_recognizer", "") == "Plain Text":
+    if kwargs.get("layout_recognizer", "") == "Plain Text" or not is_image_vision_enabled(kwargs.get("parser_config")):
         pdf_parser = PlainParser()
     else:
         pdf_parser = VisionParser(vision_model=vision_model, **kwargs)
