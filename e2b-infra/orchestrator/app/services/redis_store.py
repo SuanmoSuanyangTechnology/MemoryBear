@@ -92,6 +92,9 @@ class RedisStore:
     async def pool_decr_total(self, host_id: str) -> int:
         return await self.client.decr(self._pool_total_key(host_id))
 
+    async def pool_incr_total(self, host_id: str) -> int:
+        return await self.client.incr(self._pool_total_key(host_id))
+
     async def pool_acquire_create_lock(self, host_id: str) -> bool:
         return await self.client.set(
             self._pool_lock_key(host_id), self._instance_id, ex=10, nx=True

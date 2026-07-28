@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 
 import docker
 from docker.models.containers import Container
@@ -109,6 +110,7 @@ class PoolManager:
         host = self._select_least_loaded_host()
         host_id = _host_id(host)
         container = await self._create_container(host, host_id)
+        await self._redis.pool_incr_total(host_id)
         return container, host_id, False
 
     async def release(self, host_id: str) -> None:
@@ -161,6 +163,24 @@ class PoolManager:
             None,
             lambda: container.exec_run(["mkdir", "-p", "/input"]),
         )
+
+        # Pre-import Python modules to warm .pyc cache and OS page cache.
+        # This moves the 300-800ms import cost out of the request path.
+        logger.info("Warming imports in container %s", name)
+        t0 = time.perf_counter()
+        try:
+            await loop.run_in_executor(
+                None,
+                lambda: container.exec_run(
+                    ["python", "/app/runtime/pre_import.py"],
+                    stderr=True,
+                ),
+            )
+        except Exception as exc:
+            logger.warning("Pre-import failed for %s: %s", name, exc)
+        elapsed = (time.perf_counter() - t0) * 1000
+        logger.info("Import warmup done container=%s elapsed_ms=%.0f", name, elapsed)
+
         return container
 
     async def _refill_loop(self, host_url: str) -> None:
