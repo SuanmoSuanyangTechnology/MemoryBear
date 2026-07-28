@@ -48,6 +48,11 @@ const Logs: FC<{ application: Application; }> = ({ application }) => {
       className: 'rb:text-[#212332]'
     },
     {
+      title: 'User ID',
+      dataIndex: 'user_id',
+      key: 'user_id',
+    },
+    {
       title: t('application.created_at'),
       dataIndex: 'created_at',
       key: 'created_at',
