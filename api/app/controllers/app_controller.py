@@ -1697,6 +1697,7 @@ async def update_workflow_config(
         db: Annotated[Session, Depends(get_db)],
         current_user: Annotated[User, Depends(get_current_user)]
 ):
+    from app.utils.redis_cache import delete_json_async, workflow_config_key
     workspace_id = current_user.current_workspace_id
     if payload.variables:
         from app.services.workflow_service import WorkflowService
@@ -1707,6 +1708,9 @@ async def update_workflow_config(
         for var_def, resolved_def in zip(payload.variables, resolved):
             var_def.default = resolved_def.get("default", var_def.default)
     cfg = app_service.update_workflow_config(db, app_id=app_id, data=payload, workspace_id=workspace_id)
+    cache_key = workflow_config_key(app_id)
+    deleted = await delete_json_async(cache_key)
+    logger.info(f"[cache] invalidate workflow config: key={cache_key}, deleted={deleted}")
     return success(data=WorkflowConfigSchema.model_validate(cfg))
 
 
