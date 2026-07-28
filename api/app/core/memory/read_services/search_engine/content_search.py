@@ -214,10 +214,14 @@ class Neo4jSearchService:
                 )
                 for i, mem in enumerate(memories)
             ]
-
-            reranked = self.reranker.compress_documents(
-                documents, query, top_n=min(limit, len(documents))
-            )
+            reranked = []
+            if documents:
+                reranked = await asyncio.to_thread(
+                    self.reranker.compress_documents,
+                    documents,
+                    query,
+                    top_n=min(limit, len(documents))
+                )
             index_to_score = {
                 doc.metadata["index"]: doc.metadata.get("relevance_score", 0.0)
                 for doc in reranked
