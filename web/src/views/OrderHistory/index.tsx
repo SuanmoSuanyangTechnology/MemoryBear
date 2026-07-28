@@ -19,7 +19,7 @@ import { useLocation } from 'react-router-dom';
 import Table, { type TableRef } from '@/components/Table'
 import StatusTag from '@/components/StatusTag'
 import { formatDateTime } from '@/utils/format';
-import type { Order, GroupOrder, OrderDetailRef, Query } from './types'
+import type { Order, GroupOrder, OrderDetailRef, Query, OrderItem } from './types'
 import OrderDetail from './components/OrderDetail'
 import { orderListUrl } from '@/api/package'
 import { useI18n } from '@/store/locale'
@@ -107,13 +107,19 @@ const OrderHistory: React.FC = () => {
   }, [language])
   const getProductName = (data: Order | GroupOrder) => {
     if (!data) return '-'
-    if ((data as GroupOrder).order_group_id && (data as GroupOrder).orders?.length) {
+    if ((data as GroupOrder).orders?.length) {
       return (data as GroupOrder).orders.map((vo) => {
         const billing_units = [(vo.package_snapshot as ResourcePack).tier_snapshot].filter(Boolean)?.map((tier: ResourcePackTier) => {
           return Object.keys(tier.quota_grants).map(vo => `+${t(`package.${vo}`)}: ${tier.quota_grants[vo]}`)
         }).join(', ') || '-'
         return `${vo.package_snapshot[getGroupKeyWithLanguage('name') as keyof Order['package_snapshot']]} (${billing_units})×${vo.multiplier ?? 1}`
       }).join(', ')
+    }
+    if (((data as Order).package_snapshot as ResourcePack)?.billing_units?.length > 0) {
+        const billing_units = [((data as Order).package_snapshot as ResourcePack).tier_snapshot].filter(Boolean)?.map((tier: ResourcePackTier) => {
+          return Object.keys(tier.quota_grants).map(key => `+${t(`package.${key}`)}: ${tier.quota_grants[key]}`)
+        }).join(', ') || '-'
+        return `${((data as Order).package_snapshot as ResourcePack)[getGroupKeyWithLanguage('name') as keyof OrderItem['package_snapshot']]} (${billing_units})×${(data as Order).multiplier ?? 1}`
     }
     if ((data as Order).legacy_product_type) {
       return `${t(`pricing.${getProductType((data as Order).legacy_product_type as string)}.type`)}×${(data as Order).multiplier ?? 1}`
@@ -127,9 +133,6 @@ const OrderHistory: React.FC = () => {
       dataIndex: 'order_no',
       key: 'order_no',
       fixed: 'left',
-      render: (order_no, record) => {
-        return (record as GroupOrder).order_group_id || order_no
-      }
     },
     {
       title: t('pricing.package_snapshot'),
@@ -226,7 +229,7 @@ const OrderHistory: React.FC = () => {
         apiUrl={orderListUrl}
         apiParams={query}
         columns={columns}
-        rowKey={(record) => (record as GroupOrder).order_group_id || (record as Order).id || 'id'}
+        rowKey="order_no"
         isScroll={true}
       />
 
