@@ -30,10 +30,14 @@ CHINESE_NUMERAL_MARKERS = "零〇一二三四五六七八九十百千万壹贰�
 
 UNORDERED_LIST_PATTERN = re.compile(r"^\s{0,3}([-+*])\s+(.+\S)\s*$")
 ORDERED_LIST_PATTERN = re.compile(r"^\s{0,3}(\d+)([.)）、|｜])\s*(.+\S)\s*$")
+PAREN_ORDERED_LIST_PATTERN = re.compile(
+    rf"^\s{{0,3}}([（(]\s*(?:\d+|[{CHINESE_NUMERAL_MARKERS}]+)\s*[）)])\s*(.+\S)\s*$"
+)
 KEYCAP_LIST_PATTERN = re.compile(r"^\s{0,3}([0-9]\ufe0f?\u20e3)\s*(.+\S)\s*$")
 CIRCLED_LIST_PATTERN = re.compile(rf"^\s{{0,3}}([{CIRCLED_MARKERS}])\s*(.+\S)\s*$")
 CHINESE_LIST_PATTERN = re.compile(rf"^\s{{0,3}}([{CHINESE_NUMERAL_MARKERS}]+)({LIST_BOUNDARY})\s*(.+\S)\s*$")
 ALPHA_LIST_PATTERN = re.compile(r"^\s{0,3}([A-Za-z])([.)）、|｜])\s*(.+\S)\s*$")
+DEFINITION_LIST_PATTERN = re.compile(r"^\s{0,3}([A-Z][A-Z0-9]{1,11})([：:])\s*(.+\S)\s*$")
 QA_LIST_PATTERN = re.compile(r"^\s{0,3}(问|答|拓展|补充)([?？:：|｜]|\s+)\s*(.+\S)\s*$")
 ORDINAL_LIST_PATTERN = re.compile(
     rf"^\s{{0,3}}(首次|其次|再次|最后|第[{CHINESE_NUMERAL_MARKERS}0-9]+)({LIST_BOUNDARY})\s*(.+\S)\s*$"
@@ -41,6 +45,8 @@ ORDINAL_LIST_PATTERN = re.compile(
 STEP_LIST_PATTERN = re.compile(
     rf"^\s{{0,3}}(.{{0,12}}?第[{CHINESE_NUMERAL_MARKERS}0-9]+步)({LIST_BOUNDARY})\s*(.+\S)\s*$"
 )
+LIST_CONTINUATION_PATTERN = re.compile(r"^\s{0,3}.{1,24}简介[：:].+\S\s*$")
+IMAGE_LINE_PATTERN = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
 
 
 @dataclass
@@ -69,6 +75,7 @@ class MarkdownPreprocessor:
     ) -> MarkdownPreprocessResult:
         line_infos: list[MarkdownLineInfo] = []
         in_code = False
+        in_list_context = False
         for line_number, raw_line in enumerate(text.split("\n"), start=1):
             stripped = raw_line.strip()
             is_code_fence = stripped.startswith("```")
@@ -91,6 +98,7 @@ class MarkdownPreprocessor:
             if normalize_escaped_structure:
                 line = self._normalize_escaped_structural_line(line)
             line = EMPTY_HTML_ANCHOR_PATTERN.sub("", line)
+            stripped = line.strip()
 
             block_hint = None
             metadata: dict[str, Any] = {}
@@ -102,11 +110,23 @@ class MarkdownPreprocessor:
                         "heading_level": len(heading_match.group(1)),
                         "heading_title": _strip_wrapping_emphasis(heading_match.group(2)),
                     }
+                    in_list_context = False
                 else:
                     list_metadata = self._list_metadata(line)
                     if list_metadata:
                         block_hint = "list"
                         metadata = list_metadata
+                        in_list_context = True
+                    elif in_list_context and self._is_list_continuation(line):
+                        block_hint = "list_continuation"
+                        metadata = {
+                            "list_continuation": True,
+                            "list_level": _indent_level(line),
+                        }
+                    elif stripped and not IMAGE_LINE_PATTERN.search(line):
+                        in_list_context = False
+                    elif IMAGE_LINE_PATTERN.search(line):
+                        in_list_context = False
 
             line_infos.append(
                 MarkdownLineInfo(
@@ -120,6 +140,7 @@ class MarkdownPreprocessor:
             )
             if is_code_fence:
                 in_code = True
+                in_list_context = False
 
         return MarkdownPreprocessResult(
             lines=[line_info.text for line_info in line_infos],
@@ -138,12 +159,14 @@ class MarkdownPreprocessor:
         patterns = (
             ("unordered", UNORDERED_LIST_PATTERN),
             ("ordered", ORDERED_LIST_PATTERN),
+            ("ordered_parenthesis", PAREN_ORDERED_LIST_PATTERN),
             ("keycap", KEYCAP_LIST_PATTERN),
             ("circled", CIRCLED_LIST_PATTERN),
             ("step", STEP_LIST_PATTERN),
             ("ordinal", ORDINAL_LIST_PATTERN),
             ("chinese", CHINESE_LIST_PATTERN),
             ("alpha", ALPHA_LIST_PATTERN),
+            ("definition", DEFINITION_LIST_PATTERN),
             ("qa", QA_LIST_PATTERN),
         )
         for marker_kind, pattern in patterns:
@@ -158,6 +181,14 @@ class MarkdownPreprocessor:
                 "contains_qa_marker": marker_kind == "qa",
             }
         return None
+
+    def _is_list_continuation(self, line: str) -> bool:
+        stripped = line.strip()
+        if not stripped:
+            return False
+        if IMAGE_LINE_PATTERN.search(line) or ATX_HEADING_PATTERN.match(line):
+            return False
+        return bool(LIST_CONTINUATION_PATTERN.match(line))
 
 
 def _indent_level(line: str) -> int:

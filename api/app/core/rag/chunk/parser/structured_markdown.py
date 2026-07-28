@@ -26,6 +26,7 @@ class StructMarkdownParser(DocumentParser):
         self._seq = 0
         self.blocks: list[ParsedBlock] = []
         self._heading_stack: dict[int, str] = {}
+        self._compact_block_spacing = normalize_escaped_structure
         preprocess_result = MarkdownPreprocessor().preprocess(
             text,
             normalize_escaped_structure=normalize_escaped_structure,
@@ -142,6 +143,9 @@ class StructMarkdownParser(DocumentParser):
 
     def _is_list_line(self, index: int) -> bool:
         return self._line_info(index).block_hint == "list"
+
+    def _is_list_body_line(self, index: int) -> bool:
+        return self._line_info(index).block_hint in {"list", "list_continuation"}
 
     def _current_heading_path(self) -> list[str]:
         return [
@@ -278,11 +282,11 @@ class StructMarkdownParser(DocumentParser):
         index += 1
         while index < len(self.lines):
             line = self.lines[index]
-            if self._is_list_line(index) or line.startswith((" ", "\t")) or not line.strip():
+            if self._is_list_body_line(index) or line.startswith((" ", "\t")) or not line.strip():
                 index += 1
                 continue
             break
-        content = "\n".join(self.lines[start:index]).rstrip()
+        content = self._block_content(start, index, compact_blank_lines=self._compact_block_spacing)
         self._append_block(
             ParsedBlockType.LIST,
             content,
@@ -324,7 +328,7 @@ class StructMarkdownParser(DocumentParser):
             if self._is_block_start(index) or IMAGE_PATTERN.search(line):
                 break
             index += 1
-        content = "\n".join(self.lines[start:index])
+        content = self._block_content(start, index, compact_blank_lines=self._compact_block_spacing)
         self._append_block(
             ParsedBlockType.TEXT,
             content,
@@ -360,6 +364,12 @@ class StructMarkdownParser(DocumentParser):
         if len(cells) < 2:
             return False
         return all(re.match(r"^:?-{3,}:?$", cell.replace(" ", "")) for cell in cells if cell)
+
+    def _block_content(self, start: int, end: int, *, compact_blank_lines: bool = False) -> str:
+        lines = self.lines[start:end]
+        if compact_blank_lines:
+            lines = [line for line in lines if line.strip()]
+        return "\n".join(lines).rstrip()
 
     def _normalize_html_table(self, raw: str) -> str:
         tags = ["table", "td", "tr", "th", "tbody", "thead", "div"]
