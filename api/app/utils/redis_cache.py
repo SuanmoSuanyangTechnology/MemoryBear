@@ -450,7 +450,11 @@ def set_json(key: str, value: Any, ttl: int) -> None:
 
 def delete_json(key: str) -> None:
     try:
-        get_thread_safe_sync_redis().delete(key)
+        r = get_thread_safe_sync_redis()
+        result = r.delete(key)
+        cp = r.connection_pool.connection_kwargs
+        logger.info("[cache:delete_json] key=%s deleted=%s host=%s port=%s db=%s",
+                    key, result, cp.get("host"), cp.get("port"), cp.get("db"))
     except Exception:
         logger.warning("Redis cache invalidation failed: key=%s", key, exc_info=True)
 
@@ -468,15 +472,23 @@ async def get_json_async(key: str) -> Any:
 
 async def set_json_async(key: str, value: Any, ttl: int) -> None:
     try:
+        r = get_thread_safe_redis()
         payload = json.dumps(value, ensure_ascii=False, default=str, separators=(",", ":"))
-        await get_thread_safe_redis().set(key, payload, ex=ttl_with_jitter(ttl))
+        await r.set(key, payload, ex=ttl_with_jitter(ttl))
+        cp = r.connection_pool.connection_kwargs
+        logger.info("[cache:set_json_async] key=%s host=%s port=%s db=%s",
+                    key, cp.get("host"), cp.get("port"), cp.get("db"))
     except Exception:
         logger.warning("Redis async cache write failed: key=%s", key, exc_info=True)
 
 
 async def delete_json_async(key: str) -> None:
     try:
-        await get_thread_safe_redis().delete(key)
+        r = get_thread_safe_redis()
+        result = await r.delete(key)
+        cp = r.connection_pool.connection_kwargs
+        logger.info("[cache:delete_json_async] key=%s deleted=%s host=%s port=%s db=%s",
+                    key, result, cp.get("host"), cp.get("port"), cp.get("db"))
     except Exception:
         logger.warning("Redis async cache invalidation failed: key=%s", key, exc_info=True)
 
