@@ -183,17 +183,22 @@ const KnowledgeGraph: FC<KnowledgeGraphProps> = ({ data, loading = false, title 
       connectionCount[edge.tgt_id] = (connectionCount[edge.tgt_id] || 0) + 1
     })
 
-    // Process node data
-    rawNodes.forEach(node => {
+    // Process node data. Use a unique chart ID/name for every row so
+    // entities with the same entity_name are rendered independently.
+    const chartNodeIdMap = new Map<string, string>()
+    rawNodes.forEach((node, index) => {
       const connections = connectionCount[node.id] || 0
       const categoryIndex = categoryMap[node.entity_type] || 0
+      const chartNodeId = `knowledge-node-${index}`
+      chartNodeIdMap.set(node.id, chartNodeId)
       
       // Calculate node size based on pagerank and connection count
-      let symbolSize = Math.max(10, Math.min(50, node.pagerank * 200 + connections * 2))
+      const symbolSize = Math.max(10, Math.min(50, node.pagerank * 200 + connections * 2))
       
       processedNodes.push({
         ...node,
-        name: node.entity_name,
+        id: chartNodeId,
+        name: chartNodeId,
         category: categoryIndex,
         symbolSize,
         itemStyle: {
@@ -202,14 +207,12 @@ const KnowledgeGraph: FC<KnowledgeGraphProps> = ({ data, loading = false, title 
       })
     })
 
-    // Process edge data
+    // Process edge data and point it to each node's unique chart ID.
     rawEdges.forEach(edge => {
-      // Note: Based on data structure, source and target fields may be opposite to src_id and tgt_id
-      // We use src_id and tgt_id as the correct connection relationship
       processedEdges.push({
-        ...edge, // Keep all original fields
-        source: edge.src_id, // Use src_id as source node
-        target: edge.tgt_id, // Use tgt_id as target node
+        ...edge,
+        source: chartNodeIdMap.get(edge.src_id) || edge.src_id,
+        target: chartNodeIdMap.get(edge.tgt_id) || edge.tgt_id,
         value: edge.weight || 1
       })
     })
@@ -266,8 +269,6 @@ const KnowledgeGraph: FC<KnowledgeGraphProps> = ({ data, loading = false, title 
     }
   }, [nodes])
 
-  console.log('selectedNode', selectedNode)
-
   return (
     <Col span={24}>
       <RbCard 
@@ -287,14 +288,14 @@ const KnowledgeGraph: FC<KnowledgeGraphProps> = ({ data, loading = false, title 
               <ReactEcharts
                 ref={chartRef}
                 option={{
-                  colors: Object.values(entityTypeColors),
+                  color: Object.values(entityTypeColors),
                   tooltip: {
                     show: true,
                     formatter: (params: any) => {
                       if (params.dataType === 'node') {
                         const node = params.data as KnowledgeNode
                         return `
-                          <div class="rb:max-w-[560px]">
+                          <div class="rb:max-w-140">
                             <div><strong>${node.entity_name}</strong></div>
                             <div>类型: ${node.entity_type}</div>
                             <div>重要度: ${(node.pagerank * 100).toFixed(2)}%</div>
@@ -303,10 +304,10 @@ const KnowledgeGraph: FC<KnowledgeGraphProps> = ({ data, loading = false, title 
                       } else if (params.dataType === 'edge') {
                         const edge = params.data as KnowledgeEdge
                         return `
-                          <div class="rb:max-w-[560px]">
+                          <div class="rb:max-w-140">
                             <div><strong>关系</strong></div>
                             <div>权重: ${edge.weight}</div>
-                            <div class="rb:break-words rb:whitespace-pre-wrap">${edge.description}</div>
+                            <div class="rb:wrap-break-word rb:whitespace-pre-wrap">${edge.description}</div>
                           </div>
                         `
                       }
@@ -330,7 +331,7 @@ const KnowledgeGraph: FC<KnowledgeGraphProps> = ({ data, loading = false, title 
                       label: {
                         show: true,
                         position: 'right',
-                        formatter: '{b}',
+                        formatter: (params: { data: KnowledgeNode }) => params.data.entity_name,
                         fontSize: 12
                       },
                       lineStyle: {
@@ -382,7 +383,7 @@ const KnowledgeGraph: FC<KnowledgeGraphProps> = ({ data, loading = false, title 
               {selectedNode && (
                 <div
                   ref={modalRef}
-                  className="rb:absolute rb:bg-white rb:border rb:border-[#EBEBEB] rb:rounded-[12px] rb:shadow-lg rb:p-4 rb:w-80 rb:z-10"
+                  className="rb:absolute rb:bg-white rb:border rb:border-[#EBEBEB] rb:rounded-xl rb:shadow-lg rb:p-4 rb:w-80 rb:z-10"
                   style={{
                     left: modalPosition.x,
                     top: modalPosition.y,
