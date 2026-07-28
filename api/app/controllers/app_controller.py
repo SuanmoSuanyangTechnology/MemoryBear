@@ -37,6 +37,7 @@ from app.services.workflow_import_service import WorkflowImportService
 from app.services.workflow_service import WorkflowService, get_workflow_service
 from app.services.app_dsl_service import AppDslService
 from app.core.quota_stub import check_app_quota
+from app.utils.redis_cache import delete_json_async, workflow_config_key
 
 router = APIRouter(prefix="/apps", tags=["Apps"])
 logger = get_business_logger()
@@ -1697,7 +1698,6 @@ async def update_workflow_config(
         db: Annotated[Session, Depends(get_db)],
         current_user: Annotated[User, Depends(get_current_user)]
 ):
-    from app.utils.redis_cache import delete_json_async, workflow_config_key
     workspace_id = current_user.current_workspace_id
     if payload.variables:
         from app.services.workflow_service import WorkflowService
