@@ -22,7 +22,6 @@ from .text import TextMerger
 TEXT_LIKE_TYPES = {
     ParsedBlockType.HEADING,
     ParsedBlockType.TEXT,
-    ParsedBlockType.LIST,
     ParsedBlockType.BLOCKQUOTE,
 }
 
@@ -71,7 +70,12 @@ class BlockMerger(ChunkMerger):
                 return
             metadata = self._metadata_for_range(text_group, "text")
             content = "\n\n".join(str(block.content) for block in text_group if str(block.content).strip())
-            for chunk in self.text_merger.merge(content, token_num, delimiter):
+            chunks = (
+                [content]
+                if delimiter is None and num_tokens_from_string(content) <= token_num
+                else self.text_merger.merge(content, token_num, delimiter)
+            )
+            for chunk in chunks:
                 logical_chunks.append(
                     LogicalChunk(
                         type=LogicalChunkType.TEXT,
@@ -87,6 +91,10 @@ class BlockMerger(ChunkMerger):
                 continue
 
             flush_text_group()
+
+            if block.type is ParsedBlockType.LIST:
+                logical_chunks.extend(self._list_logical_chunks(block, token_num, delimiter))
+                continue
 
             if block.type is ParsedBlockType.CODE:
                 logical_chunks.extend(self._code_logical_chunks(block, token_num))
@@ -135,6 +143,19 @@ class BlockMerger(ChunkMerger):
             return [deepcopy(parent)]
 
         block_type = parent.metadata.get("block_type")
+        if block_type == ParsedBlockType.LIST.value:
+            return [
+                LogicalChunk(
+                    type=LogicalChunkType.TEXT,
+                    content=chunk,
+                    image=parent.image,
+                    positions=deepcopy(parent.positions),
+                    metadata=deepcopy(parent.metadata),
+                )
+                for chunk in self._split_list_content(str(parent.content), token_num, delimiter)
+                if chunk.strip()
+            ]
+
         if block_type == ParsedBlockType.CODE.value:
             return [
                 LogicalChunk(
@@ -144,7 +165,11 @@ class BlockMerger(ChunkMerger):
                     positions=deepcopy(parent.positions),
                     metadata=deepcopy(parent.metadata),
                 )
-                for chunk in self._split_code_content(str(parent.content), token_num, parent.metadata.get("language", ""))
+                for chunk in self._split_code_content(
+                    str(parent.content),
+                    token_num,
+                    parent.metadata.get("language", ""),
+                )
                 if chunk.strip()
             ]
 
@@ -159,6 +184,63 @@ class BlockMerger(ChunkMerger):
             for chunk in self.text_merger.merge(str(parent.content), token_num, delimiter)
             if chunk.strip()
         ]
+
+    def _list_logical_chunks(self, block: ParsedBlock, token_num: int, delimiter: str | None) -> list[LogicalChunk]:
+        metadata = self._metadata_for_block(block)
+        return [
+            LogicalChunk(
+                type=LogicalChunkType.TEXT,
+                content=content,
+                positions=deepcopy(block.positions),
+                metadata=deepcopy(metadata),
+            )
+            for content in self._split_list_content(str(block.content), token_num, delimiter)
+            if content.strip()
+        ]
+
+    def _split_list_content(self, content: str, token_num: int, delimiter: str | None = None) -> list[str]:
+        if num_tokens_from_string(content) <= token_num:
+            return [content]
+
+        items = self._split_list_items(content)
+        if len(items) <= 1:
+            return self.text_merger.merge(content, token_num, delimiter)
+
+        chunks: list[str] = []
+        current_items: list[str] = []
+        for item in items:
+            if num_tokens_from_string(item) > token_num:
+                if current_items:
+                    chunks.append("\n".join(current_items))
+                    current_items = []
+                chunks.extend(self.text_merger.merge(item, token_num, delimiter))
+                continue
+
+            candidate_items = [*current_items, item]
+            candidate = "\n".join(candidate_items)
+            if current_items and num_tokens_from_string(candidate) > token_num:
+                chunks.append("\n".join(current_items))
+                current_items = [item]
+            else:
+                current_items = candidate_items
+
+        if current_items:
+            chunks.append("\n".join(current_items))
+        return chunks or [content]
+
+    def _split_list_items(self, content: str) -> list[str]:
+        items: list[str] = []
+        current_lines: list[str] = []
+        for line in content.split("\n"):
+            starts_new_item = bool(line.strip()) and not line.startswith((" ", "\t"))
+            if starts_new_item and current_lines:
+                items.append("\n".join(current_lines).rstrip())
+                current_lines = [line]
+            else:
+                current_lines.append(line)
+        if current_lines:
+            items.append("\n".join(current_lines).rstrip())
+        return [item for item in items if item.strip()]
 
     def _code_logical_chunks(self, block: ParsedBlock, token_num: int) -> list[LogicalChunk]:
         metadata = self._metadata_for_block(block)
@@ -389,7 +471,7 @@ class BlockMerger(ChunkMerger):
     def _metadata_for_range(self, blocks: list[ParsedBlock], block_type: str) -> dict:
         first = blocks[0]
         last = blocks[-1]
-        return {
+        metadata = {
             "block_type": block_type,
             "block_types": [block.type.value for block in blocks],
             "block_seq_start": first.seq,
@@ -397,6 +479,38 @@ class BlockMerger(ChunkMerger):
             "start_line": first.start_line,
             "end_line": last.end_line,
         }
+        self._add_range_context_metadata(metadata, blocks)
+        return metadata
+
+    def _add_range_context_metadata(self, metadata: dict, blocks: list[ParsedBlock]) -> None:
+        heading_paths = _unique_paths(
+            block.metadata.get("heading_path", [])
+            for block in blocks
+            if isinstance(block.metadata, dict)
+        )
+        if len(heading_paths) == 1:
+            metadata["heading_path"] = heading_paths[0]
+        elif len(heading_paths) > 1:
+            metadata["heading_paths"] = heading_paths
+
+        if len(blocks) == 1 and blocks[0].type is ParsedBlockType.LIST:
+            for key in ("list_item_count", "list_markers", "list_marker_kinds", "contains_qa_marker"):
+                if key in blocks[0].metadata:
+                    metadata[key] = deepcopy(blocks[0].metadata[key])
 
     def _serialize_chunk_contents(self, chunks: list[LogicalChunk]) -> list[str]:
         return [str(chunk.content) for chunk in chunks if str(chunk.content or "").strip()]
+
+
+def _unique_paths(paths) -> list[list[str]]:
+    result: list[list[str]] = []
+    seen = set()
+    for path in paths:
+        if not isinstance(path, list):
+            continue
+        key = tuple(str(item) for item in path)
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(list(key))
+    return result

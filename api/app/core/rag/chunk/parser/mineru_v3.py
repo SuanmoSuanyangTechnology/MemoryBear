@@ -29,7 +29,10 @@ class MinerUV3Parser(DocumentParser):
             end_page_id=ctx.to_page,
             callback=ctx.callback,
         )
-        blocks = StructMarkdownParser().parse_text(mineru_result.markdown)
+        blocks = StructMarkdownParser().parse_text(
+            mineru_result.markdown,
+            normalize_escaped_structure=True,
+        )
         attached_count, attached_images = self._attach_images(blocks, mineru_result.images)
         LOGGER.info("[MinerUV3] markdown images attached: count=%s", attached_count)
         self._store_image_assets(attached_images, ctx)
