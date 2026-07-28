@@ -22,21 +22,27 @@ class MinerUV3Parser(DocumentParser):
             with open(ctx.filename, "rb") as file:
                 binary = file.read()
 
+        image_vision_enabled = is_image_vision_enabled(ctx.parser_config)
         mineru_result = self.client.parse(
             file_name=ctx.filename,
             binary=binary,
             start_page_id=ctx.from_page,
             end_page_id=ctx.to_page,
             callback=ctx.callback,
+            return_images=image_vision_enabled,
         )
         blocks = StructMarkdownParser().parse_text(
             mineru_result.markdown,
             normalize_escaped_structure=True,
         )
-        attached_count, attached_images = self._attach_images(blocks, mineru_result.images)
-        LOGGER.info("[MinerUV3] markdown images attached: count=%s", attached_count)
-        self._store_image_assets(attached_images, ctx)
-        if ctx.vision_model and is_image_vision_enabled(ctx.parser_config):
+        if image_vision_enabled:
+            attached_count, attached_images = self._attach_images(blocks, mineru_result.images)
+            LOGGER.info("[MinerUV3] markdown images attached: count=%s", attached_count)
+            self._store_image_assets(attached_images, ctx)
+        else:
+            LOGGER.info("[MinerUV3] image block processing disabled by parser config")
+
+        if ctx.vision_model and image_vision_enabled:
             self._enhance_image_blocks(blocks, ctx)
         elif ctx.vision_model:
             LOGGER.info("[MinerUV3] image vision enhancement disabled by parser config")

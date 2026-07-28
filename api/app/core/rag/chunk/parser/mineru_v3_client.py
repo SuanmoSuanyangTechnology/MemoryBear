@@ -92,6 +92,7 @@ class MinerUV3Client:
         start_page_id: int,
         end_page_id: int,
         callback: Callable | None = None,
+        return_images: bool = True,
     ) -> MinerUV3Result:
         if not self.api_server:
             raise RuntimeError("[MinerUV3] service unavailable: MINERU_V3_APISERVER is not configured")
@@ -99,12 +100,12 @@ class MinerUV3Client:
             raise RuntimeError("[MinerUV3] empty input binary")
 
         LOGGER.info("[MinerUV3] request start: file_name=%s, parse_method=auto", file_name)
-        task_id = self._submit_task(file_name, binary, start_page_id, end_page_id, callback)
+        task_id = self._submit_task(file_name, binary, start_page_id, end_page_id, callback, return_images)
         self._poll_task(task_id, callback)
         result_payload = self._fetch_result(task_id)
         file_result = self._extract_file_result(result_payload, file_name)
         markdown = self._extract_markdown(file_result, file_name)
-        images = self._extract_images(file_result)
+        images = self._extract_images(file_result) if return_images else {}
         LOGGER.info("[MinerUV3] markdown extracted: chars=%s", len(markdown))
         if callback:
             callback(0.70, "MinerU V3 markdown extracted.")
@@ -117,9 +118,10 @@ class MinerUV3Client:
         start_page_id: int,
         end_page_id: int,
         callback: Callable | None,
+        return_images: bool,
     ) -> str:
         url = f"{self.api_server}/tasks"
-        data = self._build_form_data(start_page_id, end_page_id)
+        data = self._build_form_data(start_page_id, end_page_id, return_images)
         files = {
             "files": (
                 Path(file_name).name,
@@ -184,7 +186,7 @@ class MinerUV3Client:
             raise RuntimeError(f"[MinerUV3] service unavailable: GET /tasks/{task_id}/result failed: {exc}") from exc
         return payload
 
-    def _build_form_data(self, start_page_id: int, end_page_id: int) -> dict[str, str]:
+    def _build_form_data(self, start_page_id: int, end_page_id: int, return_images: bool = True) -> dict[str, str]:
         return {
             "lang_list": "ch",
             "backend": "hybrid-engine",
@@ -198,7 +200,7 @@ class MinerUV3Client:
             "return_middle_json": "false",
             "return_model_output": "false",
             "return_content_list": "false",
-            "return_images": "true",
+            "return_images": "true" if return_images else "false",
             "response_format_zip": "false",
             "return_original_file": "false",
             "client_side_output_generation": "false",
