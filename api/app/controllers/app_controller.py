@@ -37,6 +37,7 @@ from app.services.workflow_import_service import WorkflowImportService
 from app.services.workflow_service import WorkflowService, get_workflow_service
 from app.services.app_dsl_service import AppDslService
 from app.core.quota_stub import check_app_quota
+from app.utils.redis_cache import delete_json_async, workflow_config_key
 
 router = APIRouter(prefix="/apps", tags=["Apps"])
 logger = get_business_logger()
@@ -1707,6 +1708,9 @@ async def update_workflow_config(
         for var_def, resolved_def in zip(payload.variables, resolved):
             var_def.default = resolved_def.get("default", var_def.default)
     cfg = app_service.update_workflow_config(db, app_id=app_id, data=payload, workspace_id=workspace_id)
+    cache_key = workflow_config_key(app_id)
+    await delete_json_async(cache_key)
+    logger.info(f"[cache] invalidate workflow config: key={cache_key}")
     return success(data=WorkflowConfigSchema.model_validate(cfg))
 
 

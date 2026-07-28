@@ -1793,7 +1793,6 @@ class AppService:
 
         self.db.commit()
         self.db.refresh(workflow_cfg)
-        delete_json(workflow_config_key(app_id))
 
         logger.info("Workflow 配置更新成功", extra={"app_id": str(app_id)})
         return workflow_cfg
