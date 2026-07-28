@@ -3628,7 +3628,6 @@ def do_refresh_insight_summary_cache(
 
         service = UserMemoryService()
         ws_uuid = uuid.UUID(workspace_id)
-        # generate_and_cache_insight/summary 需要 AsyncSession（fea5cd27 之后已迁移）。
         async with get_async_db_context() as db:
             insight = await service.generate_and_cache_insight(
                 db, end_user_id, ws_uuid, language=language,
@@ -3866,7 +3865,6 @@ def run_forgetting_cycle_task(self, config_id: Optional[uuid.UUID] = None) -> Di
         from app.repositories.end_user_repository import EndUserRepository
 
         # forget_service.trigger_forgetting_cycle 已迁移到 AsyncSession，
-        # 这里必须用 async session 才能触通全链路（get_by_id_async / commit_async 等）。
         async with get_async_db_context() as db:
             end_users = await EndUserRepository(db).get_all_active_async()
             if not end_users:

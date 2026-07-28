@@ -224,13 +224,11 @@ async def start_reflection_configs(
     async with get_async_db_context() as db:
         config_id = await resolve_config_id_async(config_id, db)
         try:
-            config_id = await resolve_config_id_async(config_id, db)
             api_logger.info(f"用户 {current_user.username} 查询反思配置，config_id: {config_id}")
             result = await MemoryConfigRepository(db).query_reflection_config_by_id_async(config_id)
-            memory_config_id = await resolve_config_id_async(result.config_id, db)
 
             reflection_config = {
-                "config_id": memory_config_id,
+                "config_id": config_id,
                 "reflection_enabled": result.enable_self_reflexion,
                 "reflection_period_in_hours": result.iteration_period,
                 "reflexion_range": result.reflexion_range,
