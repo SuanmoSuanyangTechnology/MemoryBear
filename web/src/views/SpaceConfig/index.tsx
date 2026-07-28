@@ -10,14 +10,15 @@
  */
 
 import { type FC, useEffect, useState } from 'react';
-import { Form, App, Button, Skeleton, Select, Flex } from 'antd';
+import { Form, App, Button, Skeleton, Flex } from 'antd';
 import { useTranslation } from 'react-i18next';
 
 import type { SpaceConfigData } from './types'
 import { getWorkspaceModels, updateWorkspaceModels, getDefaultWorkspaceModel, getCustomWorkspaceModels } from '@/api/workspaces'
 import RadioGroupCard from '@/components/RadioGroupCard'
-import type { Capability, ModelListItem } from '@/views/ModelManagement/types'
+import type { Capability, Model } from '@/views/ModelManagement/types'
 import { isPrivateAvailable } from '@/utils/private'
+import ModelSelect from '@/components/ModelSelect'
 
 /** Required base model selectors */
 const baseModelFields: { name: string; label: string; required?: boolean }[] = [
@@ -42,20 +43,20 @@ const SpaceConfig: FC = () => {
 
   const values = Form.useWatch([], form);
 
-  const [defaultModels, setDefaultModels] = useState<Record<string, ModelListItem>>({})
+  const [defaultModels, setDefaultModels] = useState<Record<string, Model>>({})
   const handleGetDefaultModels = () => {
     if (!isPrivateAvailable) {
       return
     }
     getDefaultWorkspaceModel().then(res => {
-      setDefaultModels((res || {}) as Record<string, ModelListItem>)
+      setDefaultModels((res || {}) as Record<string, Model>)
     })
   }
-  const [customModels, setCustomModels] = useState<Record<string, ModelListItem[]>>({})
+  const [customModels, setCustomModels] = useState<Record<string, Model[]>>({})
   const [lastConfig, setLastConfig] = useState<SpaceConfigData>({})
   const handleGetCustomModels = () => {
     getCustomWorkspaceModels().then(res => {
-      setCustomModels((res || {}) as Record<string, ModelListItem[]>)
+      setCustomModels((res || {}) as Record<string, Model[]>)
     })
   }
 
@@ -163,13 +164,11 @@ const SpaceConfig: FC = () => {
                   name={field.name}
                   rules={[{ required: true, message: t('common.pleaseSelect') }]}
                 >
-                  <Select
-                    allowClear
-                    showSearch
-                    optionFilterProp="label"
+                  <ModelSelect
                     fieldNames={{ label: 'name', value: 'id' }}
                     placeholder={t('common.pleaseSelect')}
-                    options={customModels[field.name]}
+                    isAutoFetch={false}
+                    initialData={customModels[field.name]}
                     className="rb:w-137.5!"
                   />
                 </Form.Item>
@@ -186,13 +185,11 @@ const SpaceConfig: FC = () => {
                   className="rb:font-medium rb:text-[#212332] rb:mb-6!"
                   name={field.name}
                 >
-                  <Select
-                    allowClear
-                    showSearch
-                    optionFilterProp="label"
+                  <ModelSelect
                     fieldNames={{ label: 'name', value: 'id' }}
                     placeholder={t('common.pleaseSelect')}
-                    options={customModels[field.name]}
+                    isAutoFetch={false}
+                    initialData={customModels[field.name]}
                     className="rb:w-137.5!"
                   />
                 </Form.Item>
