@@ -221,7 +221,7 @@ async def add_memory_summary_nodes(
                 "name": s.name,
                 "end_user_id": s.end_user_id,
                 "run_id": s.run_id,
-                "created_at": to_iso_z(s.created_at),
+                "created_at": s.created_at,
                 "dialog_id": s.dialog_id,
                 "chunk_ids": s.chunk_ids,
                 "content": s.content,
