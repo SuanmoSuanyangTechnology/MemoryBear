@@ -369,6 +369,8 @@ export const applicationPart1 = {
       text_to_speech: '文字转语音',
       text_to_speech_desc: '文本可以转换成语音',
       suggested_questions_after_answer: '回答后建议问题',
+      emotion_reply: '情绪感知回复',
+      emotion_reply_desc: '识别用户当前消息的情绪，调整回复的语气、结构和信息优先级',
       opening_statement: '对话开场白',
       opening_statement_desc: '设置对话开场白内容',
       editOpeningStatement: '编辑开场白',
