@@ -305,3 +305,20 @@ class OntologyClassRepository:
         except Exception as e:
             logger.error(f"Failed to get scene ID by class (async): {str(e)}", exc_info=True)
             raise
+
+    async def count_by_scene_async(self, scene_id: UUID) -> int:
+        """获取场景下的类型数量
+
+        Args:
+            scene_id: 场景ID
+
+        Returns:
+            int: 类型数量
+        """
+        try:
+            stmt = select(func.count()).where(OntologyClass.scene_id == scene_id)
+            result = await self.db.execute(stmt)
+            return result.scalar() or 0
+        except Exception as e:
+            logger.error(f"Failed to count classes by scene (async): {str(e)}", exc_info=True)
+            raise

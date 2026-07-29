@@ -391,8 +391,10 @@ async def update_scene(
             )
         
             # 构建响应
-            # 动态计算 type_num
-            type_num = len(scene.classes) if scene.classes else 0
+            # 动态计算 type_num（避免 AsyncSession 下懒加载触发 MissingGreenlet）
+            from app.repositories.ontology_class_repository import OntologyClassRepository
+            class_repo = OntologyClassRepository(db)
+            type_num = await class_repo.count_by_scene_async(scene_uuid)
         
             response = SceneResponse(
                 scene_id=scene.scene_id,
