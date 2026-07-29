@@ -197,10 +197,13 @@ class AppChatService:
         return await ModelApiKeyService.record_api_key_usage_bridge_async(self.db, api_key_id)
 
     async def _release_db_connection(self) -> None:
-        if self._uses_async_session():
-            await self.db.close()
-        else:
-            self.db.close()
+        try:
+            if self._uses_async_session():
+                await self.db.close()
+            else:
+                self.db.close()
+        except Exception as e:
+            logger.warning(f"Failed to release DB connection: {e}")
 
     @staticmethod
     def _append_history_message(
@@ -598,8 +601,8 @@ class AppChatService:
         if hasattr(features_config, 'model_dump'):
             features_config = features_config.model_dump()
         web_search_feature = features_config.get("web_search", {})
-        if not (isinstance(web_search_feature, dict) and web_search_feature.get("enabled")):
-            web_search = False
+        if isinstance(web_search_feature, dict) and web_search_feature.get("enabled"):
+            web_search = True
 
         # 校验文件上传
         self.agent_service._validate_file_upload(features_config, files)
@@ -1131,8 +1134,8 @@ class AppChatService:
             if hasattr(features_config, 'model_dump'):
                 features_config = features_config.model_dump()
             web_search_feature = features_config.get("web_search", {})
-            if not (isinstance(web_search_feature, dict) and web_search_feature.get("enabled")):
-                web_search = False
+            if isinstance(web_search_feature, dict) and web_search_feature.get("enabled"):
+                web_search = True
 
             # 校验文件上传
             self.agent_service._validate_file_upload(features_config, files)
@@ -1636,6 +1639,535 @@ class AppChatService:
             # 发送错误事件
             yield f"event: end\ndata: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
 
+    # ------------------------------------------------------------------
+    # Phase 2 _from_context variants (zero DB, read from ChatLoadContext)
+    # ------------------------------------------------------------------
+
+    async def agent_chat_stream_from_context(
+            self,
+            ctx: Any,  # ChatLoadContext
+            result: Any,  # StreamResult
+            message: str,
+            config: AgentConfig,
+            files: list[FileInput],
+            user_id: Optional[str] = None,
+            variables: Optional[Dict[str, Any]] = None,
+            web_search: bool = False,
+            memory: bool = True,
+            workspace_id: Optional[str] = None,
+            source: str = "",
+            execution_mode: Literal["in_process", "sandbox"] = "in_process",
+    ) -> AsyncGenerator[str, None]:
+        """Phase 2 zero-DB agent chat streaming (from pre-loaded context).
+
+        Reads all configuration from *ctx* (no self.db access).
+        Accumulates streaming output into *result* (mutable).
+        Does NOT persist anything — the caller enqueues Phase 3 tasks.
+        """
+        try:
+            start_time = time.time()
+            result.message_id = uuid.uuid4()
+            result.user_message_id = uuid.uuid4()
+            message_id = result.message_id
+            user_message_id = result.user_message_id
+
+            # -- annotation fast path (from ctx) ---------------------------------
+            annotation_match = ctx.annotation_match
+            if annotation_match:
+                result.full_content = annotation_match["answer"]
+                yield f"event: start\ndata: {json.dumps({'conversation_id': str(ctx.conversation_id), 'message_id': str(message_id), 'user_message_id': str(user_message_id)}, ensure_ascii=False)}\n\n"
+                yield f"event: message\ndata: {json.dumps({'content': annotation_match['answer'], 'conversation_id': str(ctx.conversation_id)}, ensure_ascii=False)}\n\n"
+                yield f"event: end\ndata: {json.dumps({'elapsed_time': time.time() - start_time, 'message_length': len(annotation_match['answer']), 'usage': {'prompt_tokens': 0, 'completion_tokens': 0, 'total_tokens': 0}}, ensure_ascii=False)}\n\n"
+                return
+
+            # -- features --------------------------------------------------------
+            features_config = ctx.features_config
+            if isinstance(features_config, dict):
+                web_search_feature = features_config.get("web_search", {})
+                if isinstance(web_search_feature, dict) and web_search_feature.get("enabled"):
+                    web_search = True
+
+            # -- validate files --------------------------------------------------
+            self.agent_service._validate_file_upload(features_config, files)
+
+            # Build files_meta for persistence (user message)
+            if files:
+                for f in files:
+                    result.files_meta.append({
+                        "type": getattr(f, 'type', None),
+                        "url": getattr(f, 'url', None),
+                        "name": getattr(f, 'name', None),
+                        "size": getattr(f, 'size', None),
+                        "file_type": getattr(f, 'file_type', None),
+                    })
+
+            yield f"event: start\ndata: {json.dumps({'conversation_id': str(ctx.conversation_id), 'message_id': str(message_id), 'user_message_id': str(user_message_id)}, ensure_ascii=False)}\n\n"
+
+            variables = self.agent_service.prepare_variables(variables, config.variables)
+
+            # -- model info (from ctx, zero DB) ----------------------------------
+            api_key = ctx.api_key
+            model_info = ModelInfo(
+                model_name=api_key.model_name,
+                provider=api_key.provider,
+                api_key=api_key.api_key,
+                api_base=api_key.api_base,
+                capability=api_key.capability,
+                is_omni=api_key.is_omni,
+                model_type=ModelType.LLM,
+            )
+
+            # -- system prompt (from ctx) ----------------------------------------
+            system_prompt = ctx.system_prompt
+            if variables:
+                system_prompt_rendered = render_prompt_message(
+                    system_prompt,
+                    PromptMessageRole.USER,
+                    variables,
+                )
+                system_prompt = system_prompt_rendered.get_text_content() or system_prompt
+
+            system_prompt = append_external_context_rule(system_prompt)
+
+            # -- model parameters (from ctx) -------------------------------------
+            model_parameters = ctx.model_parameters
+
+            # -- tools (from ctx if pre-loaded, else empty) ----------------------
+            tools = list(ctx.tools) if ctx.tools else []
+            skill_prompts = ctx.skill_prompts
+            if skill_prompts:
+                system_prompt = f"{system_prompt}\n\n{skill_prompts}"
+
+            # -- history (from ctx) ----------------------------------------------
+            history = ctx.history
+
+            # -- opening statement (from ctx) ------------------------------------
+            is_new_conversation = ctx.is_new_conversation
+            opening_statement = None
+            opening_suggested_questions: list[str] = []
+            if is_new_conversation and isinstance(features_config, dict):
+                opening_stmt_cfg = features_config.get("opening_statement")
+                if isinstance(opening_stmt_cfg, dict):
+                    opening_statement = opening_stmt_cfg.get("text") or ""
+                    opening_suggested_questions = opening_stmt_cfg.get("suggested_questions") or []
+                if opening_statement:
+                    history = self._append_history_message(
+                        history or [],
+                        role="assistant",
+                        content=opening_statement,
+                    )
+
+            # -- processed files (from ctx) --------------------------------------
+            processed_files = ctx.processed_files
+            if processed_files:
+                result.history_files = {
+                    "content": processed_files,
+                    "provider": api_key.provider,
+                    "is_omni": api_key.is_omni,
+                }
+
+            # -- capability check ------------------------------------------------
+            capability = api_key.capability
+            _api_key_config = {
+                "model_name": api_key.model_name,
+                "api_key": api_key.api_key,
+                "provider": api_key.provider,
+                "api_base": api_key.api_base,
+                "is_omni": api_key.is_omni,
+                "capability": capability,
+            }
+            use_agent_mode = ModelCapability.FUNCTION_CALL in capability
+            if not use_agent_mode and tools:
+                system_prompt, orchestrator_node_executions = await ToolOrchestrator.create_and_run(
+                    tools=tools,
+                    system_prompt=system_prompt,
+                    message=message,
+                    history=history,
+                    api_key_config=_api_key_config,
+                    model_config=model_info,
+                    effective_params=model_parameters,
+                    processed_files=processed_files,
+                    context_evidence_loader=None,
+                )
+                for step in orchestrator_node_executions:
+                    event_type = "tool_error" if step.get("status") == "failed" else "tool_end"
+                    yield f"event: tool_start\ndata: {json.dumps({'step_id': step.get('step_id'), 'name': step.get('node_name'), 'input': step.get('input'), 'meta': step.get('meta')}, cls=CustomJsonEncoder, ensure_ascii=False)}\n\n"
+                    yield f"event: {event_type}\ndata: {json.dumps({'step_id': step.get('step_id'), 'name': step.get('node_name'), 'output': step.get('output'), 'error': step.get('error'), 'meta': step.get('meta')}, cls=CustomJsonEncoder, ensure_ascii=False)}\n\n"
+                tools = []
+
+            # -- create agent & stream -------------------------------------------
+            agent = LangChainAgent(
+                model_name=api_key.model_name,
+                api_key=api_key.api_key,
+                provider=api_key.provider,
+                api_base=api_key.api_base,
+                is_omni=api_key.is_omni,
+                temperature=model_parameters.get("temperature", 0.7),
+                max_tokens=model_parameters.get("max_tokens", 2000),
+                system_prompt=system_prompt,
+                tools=tools,
+                streaming=True,
+                deep_thinking=model_parameters.get("deep_thinking", False),
+                thinking_budget_tokens=model_parameters.get("thinking_budget_tokens"),
+                json_output=model_parameters.get("json_output", False),
+                capability=capability,
+                context_query=message,
+                context_base_text=system_prompt + "\n" + str(history) + "\n" + message,
+                context_evidence_loader=None,
+            )
+
+            for t in tools:
+                if hasattr(t, 'tool_instance') and hasattr(t.tool_instance, 'set_runtime_context'):
+                    t.tool_instance.set_runtime_context(
+                        user_id=user_id or "anonymous",
+                        conversation_id=str(ctx.conversation_id),
+                        uploaded_files=processed_files or [],
+                    )
+
+            _chunk_stream = agent.chat_stream(
+                message=message,
+                history=history,
+                context=None,
+                files=processed_files,
+            )
+
+            # -- TTS setup (no DB) -----------------------------------------------
+            text_queue: asyncio.Queue = asyncio.Queue()
+            api_key_config = {
+                "model_name": api_key.model_name,
+                "api_key": api_key.api_key,
+                "api_base": api_key.api_base,
+                "provider": api_key.provider,
+            }
+            stream_audio_url = None
+            tts_task = None
+            try:
+                stream_audio_url, tts_task = await self.agent_service._generate_tts_streaming(
+                    features_config, api_key_config,
+                    text_queue=text_queue,
+                    tenant_id=str(ctx.tenant_id) if ctx.tenant_id else None,
+                    workspace_id=str(workspace_id) if workspace_id else None,
+                )
+            except Exception:
+                logger.warning("TTS setup failed, continuing without audio", exc_info=True)
+
+            # -- streaming loop --------------------------------------------------
+            full_content = ""
+            full_reasoning = ""
+            total_tokens = 0
+            node_executions: list[dict[str, Any]] = []
+            citations_collector = ctx.citations_collector if ctx.citations_collector else []
+
+            async for chunk in _chunk_stream:
+                if isinstance(chunk, int):
+                    total_tokens = chunk
+                elif isinstance(chunk, dict) and chunk.get("type") == "reasoning":
+                    full_reasoning += chunk['content']
+                    yield f"event: reasoning\ndata: {json.dumps({'content': chunk['content']}, ensure_ascii=False)}\n\n"
+                elif isinstance(chunk, dict) and chunk.get("type") == "node_executions":
+                    node_executions = chunk.get("data", [])
+                elif isinstance(chunk, dict) and chunk.get("type") == "tool_start":
+                    yield f"event: tool_start\ndata: {json.dumps({'step_id': chunk.get('step_id'), 'name': chunk['name'], 'input': chunk.get('input'), 'meta': chunk.get('meta')}, cls=CustomJsonEncoder, ensure_ascii=False)}\n\n"
+                elif isinstance(chunk, dict) and chunk.get("type") == "tool_end":
+                    yield f"event: tool_end\ndata: {json.dumps({'step_id': chunk.get('step_id'), 'name': chunk['name'], 'output': chunk.get('output'), 'meta': chunk.get('meta')}, cls=CustomJsonEncoder, ensure_ascii=False)}\n\n"
+                elif isinstance(chunk, dict) and chunk.get("type") == "tool_error":
+                    yield f"event: tool_error\ndata: {json.dumps({'step_id': chunk.get('step_id'), 'name': chunk['name'], 'error': chunk.get('error')}, cls=CustomJsonEncoder, ensure_ascii=False)}\n\n"
+                elif isinstance(chunk, dict) and chunk.get("type") == "agent_log":
+                    yield f"event: agent_log\ndata: {json.dumps(chunk, cls=CustomJsonEncoder, ensure_ascii=False)}\n\n"
+                elif isinstance(chunk, str):
+                    full_content += chunk
+                    yield f"event: message\ndata: {json.dumps({'content': chunk}, ensure_ascii=False)}\n\n"
+                    if tts_task is not None:
+                        await text_queue.put(chunk)
+                elif isinstance(chunk, dict):
+                    event_type = str(chunk.get("type") or "unknown")
+                    yield f"event: {event_type}\ndata: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+
+            if tts_task is not None:
+                await text_queue.put(None)
+
+            # -- accumulate result ------------------------------------------------
+            result.full_content = full_content
+            result.full_reasoning = full_reasoning
+            result.total_tokens = total_tokens
+            result.node_executions = node_executions
+
+            # -- end event -------------------------------------------------------
+            elapsed_time = time.time() - start_time
+            end_data: dict = {
+                "elapsed_time": elapsed_time,
+                "message_length": len(full_content),
+                "error": None,
+            }
+            sq_config = features_config.get("suggested_questions_after_answer", {}) if isinstance(features_config, dict) else {}
+            if isinstance(sq_config, dict) and sq_config.get("enabled"):
+                try:
+                    suggested_questions = await self.agent_service._generate_suggested_questions(
+                        features_config, full_content,
+                        _api_key_config, {},
+                    )
+                    end_data["suggested_questions"] = suggested_questions
+                except Exception:
+                    suggested_questions = []
+                    end_data["suggested_questions"] = []
+            else:
+                suggested_questions = []
+                end_data["suggested_questions"] = []
+            result.suggested_questions = suggested_questions
+
+            end_data["audio_url"] = stream_audio_url
+            audio_status = "pending"
+            if tts_task is not None and tts_task.done():
+                try:
+                    tts_task.result()
+                    audio_status = "completed"
+                except Exception:
+                    audio_status = "failed"
+            end_data["audio_status"] = audio_status if stream_audio_url else None
+            result.audio_url = stream_audio_url
+            result.audio_status = audio_status if stream_audio_url else None
+
+            try:
+                filtered_citations = self.agent_service._filter_citations(features_config, citations_collector)
+            except Exception:
+                filtered_citations = []
+            end_data["citations"] = filtered_citations
+            result.citations = filtered_citations
+
+            yield f"event: end\ndata: {json.dumps(end_data, ensure_ascii=False)}\n\n"
+
+            logger.info(
+                "流式聊天完成 (from_context)",
+                extra={
+                    "conversation_id": str(ctx.conversation_id),
+                    "elapsed_time": elapsed_time,
+                    "message_length": len(full_content),
+                },
+            )
+
+        except (GeneratorExit, asyncio.CancelledError):
+            logger.debug("流式聊天被中断 (from_context)")
+            raise
+        except Exception as e:
+            logger.error(f"流式聊天失败 (from_context): {str(e)}", exc_info=True)
+            result.full_content = ""
+            yield f"event: end\ndata: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
+
+    async def multi_agent_chat_stream_from_context(
+            self,
+            ctx: Any,  # ChatLoadContext
+            result: Any,  # StreamResult
+            message: str,
+            orchestrator: Any,  # MultiAgentOrchestrator (pre-created in Phase 1)
+            user_id: Optional[str] = None,
+            variables: Optional[Dict[str, Any]] = None,
+            web_search: bool = False,
+            memory: bool = True,
+            storage_type: Optional[str] = None,
+            user_rag_memory_id: Optional[str] = None,
+    ) -> AsyncGenerator[str, None]:
+        """Phase 2 zero-DB multi-agent chat streaming (from pre-loaded context).
+
+        *orchestrator* must be pre-created during Phase 1 while a DB session is
+        available, so Phase 2 never touches the database.
+        """
+        try:
+            start_time = time.time()
+            result.message_id = uuid.uuid4()
+            result.user_message_id = uuid.uuid4()
+            message_id = result.message_id
+            user_message_id = result.user_message_id
+
+            yield f"event: start\ndata: {json.dumps({'conversation_id': str(ctx.conversation_id), 'message_id': str(message_id), 'user_message_id': str(user_message_id)}, ensure_ascii=False)}\n\n"
+
+            # -- features --------------------------------------------------------
+            features_config = ctx.features_config
+            if isinstance(features_config, dict):
+                web_search_feature = features_config.get("web_search", {})
+                if isinstance(web_search_feature, dict) and web_search_feature.get("enabled"):
+                    web_search = True
+
+            # -- execute stream --------------------------------------------------
+            full_content = ""
+            total_tokens = 0
+            node_executions: list[dict[str, Any]] = []
+
+            async for chunk in orchestrator.execute_stream(
+                message=message,
+                conversation_id=ctx.conversation_id,
+                user_id=user_id or ctx.user_id,
+                variables=variables,
+                web_search=web_search,
+                memory=memory,
+                storage_type=storage_type or ctx.storage_type or "",
+                user_rag_memory_id=user_rag_memory_id or ctx.user_rag_memory_id or "",
+            ):
+                if isinstance(chunk, int):
+                    total_tokens = chunk
+                elif isinstance(chunk, dict) and chunk.get("type") == "node_executions":
+                    node_executions = chunk.get("data", [])
+                elif isinstance(chunk, str):
+                    # Orchestrator yields SSE-formatted strings; pass through directly.
+                    # Filter sub_usage events and accumulate tokens (matching original behavior).
+                    if "event: sub_usage" in chunk:
+                        if "data:" in chunk:
+                            try:
+                                data_line = chunk.split("data: ", 1)[1].strip()
+                                data = json.loads(data_line)
+                                total_tokens += data.get("total_tokens", 0)
+                            except Exception:
+                                pass
+                    elif "event: message" in chunk:
+                        if "data:" in chunk:
+                            try:
+                                data_line = chunk.split("data: ", 1)[1].strip()
+                                data = json.loads(data_line)
+                                full_content += data.get("content", "")
+                            except Exception:
+                                pass
+                        yield chunk
+                    else:
+                        yield chunk
+                elif isinstance(chunk, dict):
+                    yield self._format_sse_chunk(chunk)
+
+            # -- accumulate result ------------------------------------------------
+            result.full_content = full_content
+            result.total_tokens = total_tokens
+            result.node_executions = node_executions
+            result.assistant_meta = {
+                "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": total_tokens},
+            }
+
+            # Note: orchestrator already yielded its own "end" event, so we do NOT
+            # emit a duplicate. The caller's event_generator yields the final event.
+
+            logger.info(
+                "多智能体流式聊天完成 (from_context)",
+                extra={
+                    "conversation_id": str(ctx.conversation_id),
+                    "elapsed_time": time.time() - start_time,
+                },
+            )
+
+        except (GeneratorExit, asyncio.CancelledError):
+            logger.debug("多智能体流式聊天被中断 (from_context)")
+            raise
+        except Exception as e:
+            logger.error(f"多智能体流式聊天失败 (from_context): {str(e)}", exc_info=True)
+            result.full_content = ""
+            yield f"event: end\ndata: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
+
+    async def workflow_chat_stream_from_context(
+            self,
+            ctx: Any,  # ChatLoadContext
+            result: Any,  # StreamResult
+            message: str,
+            config: Any,  # WorkflowConfig
+            user_id: Optional[str] = None,
+            variables: Optional[Dict[str, Any]] = None,
+            files: Optional[list[FileInput]] = None,
+            memory: bool = True,
+            web_search: bool = False,
+            workspace_id: Optional[str] = None,
+            release_id: Optional[str] = None,
+    ) -> AsyncGenerator[str, None]:
+        """Phase 2 zero-DB workflow chat streaming (from pre-loaded context).
+
+        WorkflowService already uses independent get_async_db_context() sessions
+        internally. This wrapper provides a consistent _from_context interface.
+        """
+        try:
+            start_time = time.time()
+            result.message_id = uuid.uuid4()
+            result.user_message_id = uuid.uuid4()
+
+            wf_service = WorkflowService(None)
+
+            full_content = ""
+            total_tokens = 0
+            execution_id = None
+
+            _ws_id = uuid.UUID(workspace_id) if workspace_id else ctx.workspace_id
+            _rel_id = uuid.UUID(release_id) if release_id else None
+
+            from app.schemas.app_schema import DraftRunRequest
+            payload = DraftRunRequest(
+                message=message,
+                variables=variables,
+                conversation_id=str(ctx.conversation_id),
+                stream=True,
+                user_id=user_id or ctx.user_id,
+                files=files or [],
+            )
+
+            async for chunk in wf_service.run_stream(
+                app_id=ctx.app_id,
+                payload=payload,
+                config=config,
+                workspace_id=_ws_id,
+                release_id=_rel_id,
+                public=True,
+                source=ctx.source,
+                prepared_memory_storage_type=ctx.storage_type,
+                prepared_user_rag_memory_id=ctx.user_rag_memory_id,
+                skip_save=True,
+            ):
+                if isinstance(chunk, str):
+                    full_content += chunk
+                    yield f"event: message\ndata: {json.dumps({'content': chunk}, ensure_ascii=False)}\n\n"
+                elif isinstance(chunk, dict):
+                    event_type = chunk.get("event", "message")
+                    event_data = chunk.get("data", {})
+                    if event_type == "message" and isinstance(event_data, dict):
+                        full_content += str(event_data.get("content", ""))
+                    elif event_type in ("workflow_start", "start") and isinstance(event_data, dict):
+                        execution_id = event_data.get("execution_id") or execution_id
+                    elif event_type in ("workflow_end", "end") and isinstance(event_data, dict):
+                        execution_id = event_data.get("execution_id") or execution_id
+                        total_tokens = event_data.get("total_tokens", total_tokens) or total_tokens
+                    elif event_type == "node_executions":
+                        result.node_executions = event_data if isinstance(event_data, list) else []
+                    yield f"event: {event_type}\ndata: {json.dumps(event_data, ensure_ascii=False)}\n\n"
+
+            result.full_content = full_content
+            result.total_tokens = total_tokens
+            result.execution_id = execution_id
+            result.assistant_meta = {
+                "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": total_tokens},
+                "execution_id": execution_id,
+            }
+
+            elapsed_time = time.time() - start_time
+            end_data = {
+                "elapsed_time": elapsed_time,
+                "message_length": len(full_content),
+                "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": total_tokens},
+            }
+            yield f"event: end\ndata: {json.dumps(end_data, ensure_ascii=False)}\n\n"
+
+            logger.info(
+                "工作流流式聊天完成 (from_context)",
+                extra={
+                    "conversation_id": str(ctx.conversation_id),
+                    "elapsed_time": elapsed_time,
+                },
+            )
+
+        except (GeneratorExit, asyncio.CancelledError):
+            logger.debug("工作流流式聊天被中断 (from_context)")
+            raise
+        except Exception as e:
+            logger.error(f"工作流流式聊天失败 (from_context): {str(e)}", exc_info=True)
+            result.full_content = ""
+            yield f"event: end\ndata: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
+
+    @staticmethod
+    def _format_sse_chunk(chunk: dict) -> str:
+        """Format a dict chunk as an SSE event string."""
+        event_type = str(chunk.get("type") or "unknown")
+        return f"event: {event_type}\ndata: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+
     async def multi_agent_chat(
             self,
             message: str,
@@ -1776,28 +2308,29 @@ class AppChatService:
 
             elapsed_time = time.time() - start_time
 
-            # 保存消息
-            await self.conversation_service.add_message_async(
-                message_id=user_message_id,
-                conversation_id=conversation_id,
-                role="user",
-                content=message
-            )
-
-            await self.conversation_service.add_message_async(
-                message_id=message_id,
-                conversation_id=conversation_id,
-                role="assistant",
-                content=full_content,
-                meta_data={
-                    "elapsed_time": elapsed_time,
-                    "usage": {
-                        "prompt_tokens": 0,
-                        "completion_tokens": 0,
-                        "total_tokens": total_tokens
-                    }
-                }
-            )
+            # 保存消息（使用独立短会话，不依赖已释放的长连接）
+            async with get_async_db_context() as db:
+                svc = ConversationService(db)
+                await svc.add_message_async(
+                    message_id=user_message_id,
+                    conversation_id=conversation_id,
+                    role="user",
+                    content=message,
+                )
+                await svc.add_message_async(
+                    message_id=message_id,
+                    conversation_id=conversation_id,
+                    role="assistant",
+                    content=full_content,
+                    meta_data={
+                        "elapsed_time": elapsed_time,
+                        "usage": {
+                            "prompt_tokens": 0,
+                            "completion_tokens": 0,
+                            "total_tokens": total_tokens,
+                        },
+                    },
+                )
 
             logger.info(
                 "多 Agent 流式聊天完成",
@@ -1814,6 +2347,25 @@ class AppChatService:
             raise
         except Exception as e:
             logger.error(f"多 Agent 流式聊天失败: {str(e)}", exc_info=True)
+            # 保存失败的消息
+            try:
+                async with get_async_db_context() as db:
+                    svc = ConversationService(db)
+                    await svc.add_message_async(
+                        message_id=user_message_id,
+                        conversation_id=conversation_id,
+                        role="user",
+                        content=message,
+                    )
+                    await svc.add_message_async(
+                        message_id=message_id,
+                        conversation_id=conversation_id,
+                        role="assistant",
+                        content="",
+                        meta_data={"error": str(e), "status": "failed"},
+                    )
+            except Exception:
+                pass
             # 发送错误事件
             yield f"event: error\ndata: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
 

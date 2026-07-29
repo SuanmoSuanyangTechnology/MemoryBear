@@ -64,6 +64,13 @@ class Settings:
     DB_POOL_TIMEOUT: int = int(os.getenv("DB_POOL_TIMEOUT", "30"))
     DB_POOL_PRE_PING: bool = os.getenv("DB_POOL_PRE_PING", "true").lower() == "true"
 
+    # Three-phase chat streaming optimization
+    THREE_PHASE_CHAT_ENABLED: bool = os.getenv("THREE_PHASE_CHAT_ENABLED", "false").lower() == "true"
+    BATCH_PERSIST_QUEUE_SIZE: int = int(os.getenv("BATCH_PERSIST_QUEUE_SIZE", "10000"))
+    BATCH_PERSIST_MAX_BATCH: int = int(os.getenv("BATCH_PERSIST_MAX_BATCH", "50"))
+    BATCH_PERSIST_MAX_WAIT_MS: int = int(os.getenv("BATCH_PERSIST_MAX_WAIT_MS", "500"))
+    BATCH_PERSIST_PUT_TIMEOUT_MS: int = int(os.getenv("BATCH_PERSIST_PUT_TIMEOUT_MS", "100"))
+
     DB_AUTO_UPGRADE = os.getenv("DB_AUTO_UPGRADE", "false").lower() == "true"
 
     # Redis configuration

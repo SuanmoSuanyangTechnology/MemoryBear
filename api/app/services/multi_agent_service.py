@@ -1,14 +1,14 @@
 """多 Agent 配置管理服务"""
 import uuid
 import json
-from typing import Optional, List, Tuple, Any, Annotated
+from typing import AsyncGenerator, Optional, List, Tuple, Any, Annotated
 
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 from sqlalchemy import select, desc
 
-from app.db import get_db
+from app.db import get_db, get_async_db_context
 from app.models import MultiAgentConfig, App, AgentConfig
 from app.schemas.multi_agent_schema import (
     MultiAgentConfigCreate,
@@ -49,6 +49,19 @@ class MultiAgentService:
 
     def __init__(self, db: Session | AsyncSession):
         self.db = db
+
+    def _uses_async_session(self) -> bool:
+        return isinstance(self.db, AsyncSession)
+
+    async def _release_db_connection(self) -> None:
+        """Release the underlying DB connection back to the pool before LLM streaming."""
+        try:
+            if self._uses_async_session():
+                await self.db.close()
+            else:
+                self.db.close()
+        except Exception as e:
+            logger.warning(f"Failed to release DB connection: {e}")
 
     def create_config(
         self,
@@ -569,28 +582,29 @@ class MultiAgentService:
             from app.models import Conversation, Message
 
             if isinstance(self.db, AsyncSession):
-                conversation = await self.db.get(Conversation, conversation_id)
-                if not conversation:
-                    raise ResourceNotFoundException("会话", str(conversation_id))
+                async with get_async_db_context() as db:
+                    conversation = await db.get(Conversation, conversation_id)
+                    if not conversation:
+                        raise ResourceNotFoundException("会话", str(conversation_id))
 
-                for role, content, message_meta in (
-                    ("user", user_message, None),
-                    ("assistant", assistant_message, meta_data),
-                ):
-                    message = Message(
-                        id=uuid.uuid4(),
-                        conversation_id=conversation_id,
-                        role=role,
-                        content=content,
-                        meta_data=message_meta,
-                        status="completed",
-                    )
-                    self.db.add(message)
-                    conversation.message_count = (conversation.message_count or 0) + 1
-                    if conversation.message_count <= 2 and role == "user":
-                        conversation.title = content[:50] + ("..." if len(content) > 50 else "")
+                    for role, content, message_meta in (
+                        ("user", user_message, None),
+                        ("assistant", assistant_message, meta_data),
+                    ):
+                        message = Message(
+                            id=uuid.uuid4(),
+                            conversation_id=conversation_id,
+                            role=role,
+                            content=content,
+                            meta_data=message_meta,
+                            status="completed",
+                        )
+                        db.add(message)
+                        conversation.message_count = (conversation.message_count or 0) + 1
+                        if conversation.message_count <= 2 and role == "user":
+                            conversation.title = content[:50] + ("..." if len(content) > 50 else "")
 
-                await self.db.commit()
+                    await db.commit()
             else:
                 conversation_service = ConversationService(self.db)
                 conversation_service.add_message(
@@ -616,6 +630,80 @@ class MultiAgentService:
 
         except Exception as e:
             logger.warning("保存会话消息失败", extra={"error": str(e)})
+
+    async def run_stream_from_context(
+        self,
+        ctx: Any,  # ChatLoadContext
+        result: Any,  # StreamResult
+        app_id: uuid.UUID,
+        request: Any,  # MultiAgentRunRequest
+        storage_type: str = "",
+        user_rag_memory_id: str = "",
+    ) -> AsyncGenerator[str, None]:
+        """Phase 2 zero-DB multi-agent streaming (from pre-loaded context).
+
+        Uses a pre-created orchestrator (loaded in Phase 1) and skips all
+        DB access during streaming. Accumulates output into *result*.
+        """
+        try:
+            config = await self.get_config_async(app_id)
+        except Exception:
+            config = None
+        if config is None:
+            from app.core.exceptions import ResourceNotFoundException
+            raise ResourceNotFoundException("多 Agent 配置", str(app_id))
+
+        if not config.is_active:
+            from app.core.exceptions import BusinessException
+            raise BusinessException("多 Agent 配置已禁用", BizCode.NOT_FOUND)
+
+        try:
+            orchestrator = await MultiAgentOrchestrator.create(self.db, config)
+        except Exception:
+            # If self.db is None, orchestrator must be pre-created
+            orchestrator = getattr(request, '_orchestrator', None)
+            if orchestrator is None:
+                raise RuntimeError("MultiAgentOrchestrator not pre-created and no DB session available")
+
+        full_content = ""
+        total_tokens = 0
+
+        async for event in orchestrator.execute_stream(
+            message=request.message,
+            conversation_id=request.conversation_id,
+            user_id=request.user_id,
+            variables=request.variables,
+            use_llm_routing=getattr(request, 'use_llm_routing', True),
+            web_search=getattr(request, 'web_search', False),
+            memory=getattr(request, 'memory', True),
+            storage_type=storage_type or ctx.storage_type or "",
+            user_rag_memory_id=user_rag_memory_id or ctx.user_rag_memory_id or "",
+        ):
+            if isinstance(event, dict):
+                if "sub_usage" in event:
+                    pass
+                else:
+                    yield f"event: {event.get('type', 'unknown')}\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
+            elif isinstance(event, str):
+                if "data:" in event:
+                    try:
+                        data_line = event.split("data: ", 1)[1].strip()
+                        data = json.loads(data_line)
+                        if "content" in data:
+                            full_content += data["content"]
+                        if "total_tokens" in data:
+                            total_tokens += data["total_tokens"]
+                    except Exception:
+                        pass
+                yield event
+
+        result.full_content = full_content
+        result.total_tokens = total_tokens
+
+        logger.info(
+            "多 Agent 流式聊天完成 (from_context)",
+            extra={"conversation_id": request.conversation_id},
+        )
 
     # def add_sub_agent(
     #     self,

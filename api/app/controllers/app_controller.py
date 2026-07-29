@@ -1046,6 +1046,75 @@ async def draft_run(
 
             source = HitLogSource.EXTERNAL if is_shared else HitLogSource.CONSOLE
 
+            if settings.THREE_PHASE_CHAT_ENABLED:
+                from app.services.chat_context_loader import load_chat_context_for_draft_run
+                from app.services.chat_context import StreamResult
+                from app.services.batch_persist_queue import BatchPersistQueue, PersistTask
+
+                async with get_async_db_context() as db:
+                    ctx = await load_chat_context_for_draft_run(
+                        db, app, payload, None,
+                        workspace_id=workspace_id,
+                        end_user=None,
+                        storage_type=storage_type,
+                        user_rag_memory_id=user_rag_memory_id,
+                        tenant_id=current_user.tenant_id,
+                    )
+
+                async def event_generator():
+                    import json
+                    from app.services.workflow_service import WorkflowService as _WorkflowService
+
+                    result = StreamResult()
+                    _wf_service = _WorkflowService()
+                    try:
+                        async for event in _wf_service.run_stream_from_context(
+                                ctx=ctx,
+                                result=result,
+                                payload=payload,
+                                config=config,
+                                workspace_id=workspace_id,
+                                source=source,
+                                trigger_payload=payload.trigger_payload,
+                        ):
+                            yield event
+                        await BatchPersistQueue.enqueue(PersistTask(
+                            task_type="save_messages",
+                            args={
+                                "ctx": ctx,
+                                "result": result,
+                                "user_message_content": payload.message,
+                                "files_meta": [],
+                            },
+                        ))
+                    except Exception as e:
+                        logger.error(f"workflow run_stream_from_context failed: {e}", exc_info=True)
+                        try:
+                            await BatchPersistQueue.enqueue(PersistTask(
+                                task_type="save_failed_message",
+                                args={
+                                    "ctx": ctx,
+                                    "user_message_id": str(result.user_message_id),
+                                    "message_id": str(result.message_id),
+                                    "user_message_content": payload.message,
+                                    "files_meta": [],
+                                    "error_message": "An error occurred during generation.",
+                                    "error_detail": str(e)[:2000],
+                                },
+                            ))
+                        except Exception:
+                            pass
+
+                return StreamingResponse(
+                    event_generator(),
+                    media_type="text/event-stream",
+                    headers={
+                        "Cache-Control": "no-cache",
+                        "Connection": "keep-alive",
+                        "X-Accel-Buffering": "no",
+                    },
+                )
+
             async def event_generator():
                 import json
                 from app.services.workflow_service import WorkflowService as _WorkflowService
@@ -1134,11 +1203,97 @@ async def draft_run(
         if payload.stream:
             source = HitLogSource.EXTERNAL if is_shared else HitLogSource.CONSOLE
 
+            from app.db import AsyncSessionLocal
+            from app.services.draft_run_service import AgentRunService as _AgentRunService
+
+            execution_mode = "sandbox" if settings.E2B_ENABLED else "in_process"
+
+            if settings.THREE_PHASE_CHAT_ENABLED:
+                from app.services.chat_context_loader import load_chat_context_for_draft_run
+                from app.services.chat_context import StreamResult
+                from app.services.batch_persist_queue import BatchPersistQueue, PersistTask
+
+                async with get_async_db_context() as db:
+                    ctx = await load_chat_context_for_draft_run(
+                        db, app, payload, None,
+                        workspace_id=workspace_id,
+                        end_user=None,  # end_user was already created above
+                        storage_type=storage_type,
+                        user_rag_memory_id=user_rag_memory_id,
+                        tenant_id=current_user.tenant_id,
+                    )
+
+                stream_db = AsyncSessionLocal()
+
+                async def event_generator():
+                    result = StreamResult()
+                    service = _AgentRunService(stream_db)
+                    try:
+                        async for event in service.run_stream_from_context(
+                                ctx=ctx,
+                                result=result,
+                                agent_config=agent_cfg,
+                                model_config=model_config,
+                                message=payload.message,
+                                workspace_id=workspace_id,
+                                conversation_id=payload.conversation_id,
+                                user_id=payload.user_id or current_user_id,
+                                variables=payload.variables,
+                                storage_type=storage_type,
+                                user_rag_memory_id=user_rag_memory_id,
+                                files=payload.files,
+                                source=source,
+                                execution_mode=execution_mode,
+                        ):
+                            yield event
+                        await BatchPersistQueue.enqueue(PersistTask(
+                            task_type="save_messages",
+                            args={
+                                "ctx": ctx,
+                                "result": result,
+                                "user_message_content": payload.message,
+                                "files_meta": [],
+                            },
+                        ))
+                    except Exception as e:
+                        logger.error(f"run_stream_from_context failed: {e}", exc_info=True)
+                        try:
+                            await BatchPersistQueue.enqueue(PersistTask(
+                                task_type="save_failed_message",
+                                args={
+                                    "ctx": ctx,
+                                    "user_message_id": str(result.user_message_id),
+                                    "message_id": str(result.message_id),
+                                    "user_message_content": payload.message,
+                                    "files_meta": [],
+                                    "error_message": "An error occurred during generation.",
+                                    "error_detail": str(e)[:2000],
+                                },
+                            ))
+                        except Exception:
+                            pass
+                    finally:
+                        await stream_db.close()
+
+                return StreamingResponse(
+                    event_generator(),
+                    media_type="text/event-stream",
+                    headers={
+                        "Cache-Control": "no-cache",
+                        "Connection": "keep-alive",
+                        "X-Accel-Buffering": "no",
+                    },
+                )
+
+            stream_db = AsyncSessionLocal()
+            try:
+                _draft_service = _AgentRunService(stream_db)
+            except Exception:
+                await stream_db.close()
+                raise
+
             async def event_generator():
-                async with get_async_db_context() as stream_db:
-                    from app.services.draft_run_service import AgentRunService as _AgentRunService
-                    _draft_service = _AgentRunService(stream_db)
-                    execution_mode = "sandbox" if settings.E2B_ENABLED else "in_process"
+                try:
                     async for event in _draft_service.run_stream(
                             agent_config=agent_cfg,
                             model_config=model_config,
@@ -1154,6 +1309,8 @@ async def draft_run(
                             execution_mode=execution_mode,
                     ):
                         yield event
+                finally:
+                    await stream_db.close()
 
             return StreamingResponse(
                 event_generator(),
@@ -1161,8 +1318,8 @@ async def draft_run(
                 headers={
                     "Cache-Control": "no-cache",
                     "Connection": "keep-alive",
-                    "X-Accel-Buffering": "no"
-                }
+                    "X-Accel-Buffering": "no",
+                },
             )
 
         logger.debug(
@@ -1256,10 +1413,90 @@ async def draft_run(
                 }
             )
 
-            async def event_generator():
-                async with get_async_db_context() as stream_db:
+            if settings.THREE_PHASE_CHAT_ENABLED:
+                from app.services.chat_context_loader import load_chat_context_for_draft_run
+                from app.services.chat_context import StreamResult
+                from app.services.batch_persist_queue import BatchPersistQueue, PersistTask
+                from app.db import AsyncSessionLocal
+
+                async with get_async_db_context() as db:
+                    ctx = await load_chat_context_for_draft_run(
+                        db, app, payload, None,
+                        workspace_id=workspace_id,
+                        end_user=None,
+                        storage_type=storage_type,
+                        user_rag_memory_id=user_rag_memory_id,
+                        tenant_id=current_user.tenant_id,
+                    )
+
+                stream_db = AsyncSessionLocal()
+
+                async def event_generator():
                     from app.services.multi_agent_service import MultiAgentService as _MultiAgentService
-                    multiservice = _MultiAgentService(stream_db)
+
+                    result = StreamResult()
+                    service = _MultiAgentService(stream_db)
+                    try:
+                        async for event in service.run_stream_from_context(
+                                ctx=ctx,
+                                result=result,
+                                app_id=app_id,
+                                request=multi_agent_request,
+                                storage_type=storage_type,
+                                user_rag_memory_id=user_rag_memory_id,
+                        ):
+                            yield event
+                        await BatchPersistQueue.enqueue(PersistTask(
+                            task_type="save_messages",
+                            args={
+                                "ctx": ctx,
+                                "result": result,
+                                "user_message_content": payload.message,
+                                "files_meta": [],
+                            },
+                        ))
+                    except Exception as e:
+                        logger.error(f"run_stream_from_context failed: {e}", exc_info=True)
+                        try:
+                            await BatchPersistQueue.enqueue(PersistTask(
+                                task_type="save_failed_message",
+                                args={
+                                    "ctx": ctx,
+                                    "user_message_id": str(result.user_message_id),
+                                    "message_id": str(result.message_id),
+                                    "user_message_content": payload.message,
+                                    "files_meta": [],
+                                    "error_message": "An error occurred during generation.",
+                                    "error_detail": str(e)[:2000],
+                                },
+                            ))
+                        except Exception:
+                            pass
+                    finally:
+                        await stream_db.close()
+
+                return StreamingResponse(
+                    event_generator(),
+                    media_type="text/event-stream",
+                    headers={
+                        "Cache-Control": "no-cache",
+                        "Connection": "keep-alive",
+                        "X-Accel-Buffering": "no",
+                    },
+                )
+
+            from app.db import AsyncSessionLocal
+            from app.services.multi_agent_service import MultiAgentService as _MultiAgentService
+
+            stream_db = AsyncSessionLocal()
+            try:
+                multiservice = _MultiAgentService(stream_db)
+            except Exception:
+                await stream_db.close()
+                raise
+
+            async def event_generator():
+                try:
                     async for event in multiservice.run_stream(
                             app_id=app_id,
                             request=multi_agent_request,
@@ -1267,6 +1504,8 @@ async def draft_run(
                             user_rag_memory_id=user_rag_memory_id
                     ):
                         yield event
+                finally:
+                    await stream_db.close()
 
             return StreamingResponse(
                 event_generator(),
@@ -1274,8 +1513,8 @@ async def draft_run(
                 headers={
                     "Cache-Control": "no-cache",
                     "Connection": "keep-alive",
-                    "X-Accel-Buffering": "no"
-                }
+                    "X-Accel-Buffering": "no",
+                },
             )
 
         logger.debug(
@@ -1416,6 +1655,82 @@ async def draft_run_compare(
     if payload.stream:
         source = HitLogSource.CONSOLE
         execution_mode = "sandbox" if settings.E2B_ENABLED else "in_process"
+
+        if settings.THREE_PHASE_CHAT_ENABLED:
+            from app.db import AsyncSessionLocal as _AsyncSessionLocal
+            from app.services.chat_context_loader import load_chat_context_for_draft_compare
+            from app.services.chat_context import StreamResult
+            from app.services.batch_persist_queue import BatchPersistQueue, PersistTask
+
+            async with get_async_db_context() as db:
+                ctx = await load_chat_context_for_draft_compare(
+                    db, app, payload,
+                    workspace_id=workspace_id,
+                    end_user=None,
+                    storage_type=storage_type,
+                    user_rag_memory_id=user_rag_memory_id,
+                    model_config_snapshots=model_configs,
+                    tenant_id=current_user.tenant_id,
+                )
+
+            compare_db = _AsyncSessionLocal()
+
+            async def event_generator():
+                from app.services.draft_run_service import AgentRunService
+
+                result = StreamResult()
+                draft_service = AgentRunService(compare_db)
+                try:
+                    async for event in draft_service.run_compare_stream(
+                            agent_config=agent_cfg,
+                            models=model_configs,
+                            message=payload.message,
+                            workspace_id=workspace_id,
+                            conversation_id=payload.conversation_id,
+                            user_id=payload.user_id,
+                            variables=payload.variables,
+                            storage_type=storage_type,
+                            user_rag_memory_id=user_rag_memory_id,
+                            web_search=web_search,
+                            memory=True,
+                            parallel=payload.parallel,
+                            timeout=payload.timeout or 60,
+                            files=payload.files,
+                            source=source,
+                            execution_mode=execution_mode,
+                            skip_save=True,
+                    ):
+                        yield event
+                except Exception as e:
+                    logger.error(f"run_compare_stream failed: {e}", exc_info=True)
+                    try:
+                        await BatchPersistQueue.enqueue(PersistTask(
+                            task_type="save_failed_message",
+                            args={
+                                "ctx": ctx,
+                                "user_message_id": str(result.user_message_id),
+                                "message_id": str(result.message_id),
+                                "user_message_content": payload.message,
+                                "files_meta": [],
+                                "error_message": "An error occurred during generation.",
+                                "error_detail": str(e)[:2000],
+                            },
+                        ))
+                    except Exception:
+                        pass
+                finally:
+                    await compare_db.close()
+
+            return StreamingResponse(
+                event_generator(),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "X-Accel-Buffering": "no",
+                },
+            )
+
         async def event_generator():
             from app.services.draft_run_service import AgentRunService
             async with get_async_db_context() as db:

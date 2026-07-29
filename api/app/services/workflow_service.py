@@ -7,7 +7,7 @@ import time
 import logging
 import uuid
 from dataclasses import dataclass
-from typing import Any, Annotated, Optional
+from typing import Any, Annotated, AsyncGenerator, Optional
 
 import yaml
 from fastapi import Depends
@@ -4676,6 +4676,8 @@ class WorkflowService:
                     "message_length": len(payload.get("output", "")),
                     "error": payload.get("error", ""),
                     "output": payload.get("output", ""),
+                    "execution_id": payload.get("execution_id"),
+                    "total_tokens": (payload.get("token_usage") or {}).get("total_tokens", 0) or 0,
                 }
                 if payload.get("error_node_id"):
                     data["error_node_id"] = payload["error_node_id"]
@@ -6128,6 +6130,7 @@ class WorkflowService:
             regenerate_history: Optional[tuple] = None,
             prepared_memory_storage_type: str | None = None,
             prepared_user_rag_memory_id: str | None = None,
+            skip_save: bool = False,
     ):
         """运行工作流
 
@@ -6214,7 +6217,7 @@ class WorkflowService:
             history = await self._get_history_info_async(conversation_id_uuid) if conversation_id_uuid else None
             if history:
                 _, prev_messages = history
-            if conversation_id_uuid:
+            if conversation_id_uuid and not skip_save:
                 await self._add_message_async(
                     message_id=user_message_id,
                     conversation_id=conversation_id_uuid,
@@ -6296,7 +6299,7 @@ class WorkflowService:
             if stop:
                 message_id = uuid.uuid4()
                 user_message_id = uuid.uuid4()
-                if conversation_id_uuid:
+                if conversation_id_uuid and not skip_save:
                     await self._add_message_async(
                         message_id=user_message_id,
                         conversation_id=conversation_id_uuid,
@@ -6417,12 +6420,13 @@ class WorkflowService:
                     if payload.variables:
                         for var_name, var_value in payload.variables.items():
                             statement = statement.replace(f"{{{{{var_name}}}}}", str(var_value))
-                    await self._add_message_async(
-                        conversation_id=conversation_id_uuid,
-                        role="assistant",
-                        content=statement,
-                        meta_data={"suggested_questions": suggested_questions},
-                    )
+                    if not skip_save:
+                        await self._add_message_async(
+                            conversation_id=conversation_id_uuid,
+                            role="assistant",
+                            content=statement,
+                            meta_data={"suggested_questions": suggested_questions},
+                        )
                     # 注入到 conv_messages，让 LLM 感知开场白
                     input_data["conv_messages"] = [{"role": "assistant", "content": statement}]
                     init_message_length = 1
@@ -6645,6 +6649,7 @@ class WorkflowService:
             preserved_execution: "WorkflowExecution | None" = None,
             prepared_memory_storage_type: str | None = None,
             prepared_user_rag_memory_id: str | None = None,
+            skip_save: bool = False,
     ):
         """当 `preserved_execution` 不为 None 时，跳过本方法内部三处
         `create_execution` 调用，复用调用方已创建的 WorkflowExecution 行。
@@ -6790,7 +6795,7 @@ class WorkflowService:
             history = await self._get_history_info_async(conversation_id_uuid) if conversation_id_uuid else None
             if history:
                 _, prev_messages = history
-            if conversation_id_uuid:
+            if conversation_id_uuid and not skip_save:
                 await self._add_message_async(
                     message_id=user_message_id,
                     conversation_id=conversation_id_uuid,
@@ -6904,7 +6909,7 @@ class WorkflowService:
             if stop:
                 message_id = uuid.uuid4()
                 user_message_id = uuid.uuid4()
-                if conversation_id_uuid:
+                if conversation_id_uuid and not skip_save:
                     await self._add_message_async(
                         message_id=user_message_id,
                         conversation_id=conversation_id_uuid,
@@ -7057,12 +7062,13 @@ class WorkflowService:
                     if payload.variables:
                         for var_name, var_value in payload.variables.items():
                             statement = statement.replace(f"{{{{{var_name}}}}}", str(var_value))
-                    await self._add_message_async(
-                        conversation_id=conversation_id_uuid,
-                        role="assistant",
-                        content=statement,
-                        meta_data={"suggested_questions": suggested_questions},
-                    )
+                    if not skip_save:
+                        await self._add_message_async(
+                            conversation_id=conversation_id_uuid,
+                            role="assistant",
+                            content=statement,
+                            meta_data={"suggested_questions": suggested_questions},
+                        )
                     # 注入到 conv_messages，让 LLM 感知开场白
                     input_data["conv_messages"] = [{"role": "assistant", "content": statement}]
                     init_message_length = 1
@@ -7188,7 +7194,7 @@ class WorkflowService:
                                 else:
                                     node_outputs[cycle_node_id] = {"cycle_items": items}
                             workflow_output_data.update(new_output_data)
-                        if conversation_id_uuid:
+                        if conversation_id_uuid and not skip_save:
                             await self._add_message_async(
                                 message_id=user_message_id,
                                 conversation_id=conversation_id_uuid,
@@ -7347,6 +7353,27 @@ class WorkflowService:
                                 payload.from_message_id,
                                 conversation_id_uuid,
                             )
+                            if not skip_save:
+                                execution = await self._finalize_completed_execution_async(
+                                    execution_id=execution.execution_id,
+                                    conversation_id=conversation_id_uuid,
+                                    human_message=human_message,
+                                    human_meta=human_meta,
+                                    user_message_id=user_message_id,
+                                    from_message_id=_from_msg_id,
+                                    assistant_message_id=message_id,
+                                    assistant_message=assistant_message,
+                                    assistant_meta=assistant_meta,
+                                    workflow_output_data=workflow_output_data,
+                                    token_usage=_token_usage_total,
+                                )
+                            else:
+                                execution = await self._patch_execution_async(
+                                    execution.execution_id,
+                                    status="completed",
+                                    output_data=workflow_output_data,
+                                    token_usage=_token_usage_total,
+                                )
                             finalize_context_ready_at = time.perf_counter()
                             logger.info(
                                 "[TIMING] workflow.finalize_outer stage=context_ready execution_id=%s "
@@ -7354,19 +7381,6 @@ class WorkflowService:
                                 execution.execution_id,
                                 (finalize_context_ready_at - finalize_started_at) * 1000,
                                 (finalize_context_ready_at - finalize_payload_ready_at) * 1000,
-                            )
-                            execution = await self._finalize_completed_execution_async(
-                                execution_id=execution.execution_id,
-                                conversation_id=conversation_id_uuid,
-                                human_message=human_message,
-                                human_meta=human_meta,
-                                user_message_id=user_message_id,
-                                from_message_id=_from_msg_id,
-                                assistant_message_id=message_id,
-                                assistant_message=assistant_message,
-                                assistant_meta=assistant_meta,
-                                workflow_output_data=workflow_output_data,
-                                token_usage=_token_usage_total,
                             )
                         else:
                             execution = await self._patch_execution_async(
@@ -7400,9 +7414,10 @@ class WorkflowService:
                         _failed_output = event.get("data")
                         _error_node_id = (_failed_output or {}).get("error_node")
 
-                        await self._save_failed_conversation_async(
-                            conversation_id_uuid, message_id, human_message, human_meta, error_msg
-                        )
+                        if not skip_save:
+                            await self._save_failed_conversation_async(
+                                conversation_id_uuid, message_id, human_message, human_meta, error_msg
+                            )
                         execution = await self._patch_execution_async(
                             execution.execution_id,
                             status="failed",
@@ -7539,7 +7554,7 @@ class WorkflowService:
                             conversation_id_uuid,
                         )
                         _hitl_user_msg = None
-                        if conversation_id_uuid:
+                        if conversation_id_uuid and not skip_save:
                             _hitl_user_msg = await self._add_message_async(
                                 conversation_id=conversation_id_uuid,
                                 role="user",
@@ -8060,12 +8075,13 @@ class WorkflowService:
             from app.core.workflow.nodes.human_intervention.node import InterventionRegistry
             InterventionRegistry.cleanup(execution.execution_id)
             human_message, human_meta = self._extract_human_message_and_meta([], payload.message or "", files)
-            await self._save_failed_conversation_async(
-                conversation_id_uuid, None, human_message, human_meta, str(e)
-            )
+            if not skip_save:
+                await self._save_failed_conversation_async(
+                    conversation_id_uuid, None, human_message, human_meta, str(e)
+                )
             # On failure, update the waiting_human message in-place:
             # clear the flag and set content to the error message.
-            if conversation_id_uuid and message_id:
+            if conversation_id_uuid and message_id and not skip_save:
                 await self._update_message_async(
                     message_id=message_id,
                     content=str(e),
@@ -8076,6 +8092,84 @@ class WorkflowService:
                     },
                 )
             yield {"event": "error", "data": {"execution_id": execution.execution_id, "error": str(e)}}
+
+    async def run_stream_from_context(
+        self,
+        ctx: Any,  # ChatLoadContext
+        result: Any,  # StreamResult
+        payload: Any,  # DraftRunRequest
+        config: Any,  # WorkflowConfig
+        workspace_id: uuid.UUID,
+        release_id: Optional[uuid.UUID] = None,
+        public: bool = False,
+        source: str = "",
+        trigger_type: str = "manual",
+        trigger_id: str | None = None,
+        trigger_meta: dict[str, Any] | None = None,
+        trigger_payload: dict[str, Any] | None = None,
+    ) -> AsyncGenerator[dict[str, Any] | str, None]:
+        """Phase 2 zero-DB workflow streaming (from pre-loaded context).
+
+        Delegates to ``run_stream`` for the core execution. WorkflowService
+        already uses independent ``get_async_db_context()`` sessions, so the
+        main benefit of this wrapper is the consistent ``_from_context``
+        interface and accumulation into *result*.
+        """
+        import json
+
+        full_content = ""
+        total_tokens = 0
+        execution_id = None
+        node_executions: list[dict[str, Any]] = []
+
+        async for event in self.run_stream(
+            app_id=ctx.app_id,
+            payload=payload,
+            config=config,
+            workspace_id=workspace_id,
+            release_id=release_id,
+            public=public,
+            source=source or ctx.source,
+            trigger_type=trigger_type,
+            trigger_id=trigger_id,
+            trigger_meta=trigger_meta,
+            trigger_payload=trigger_payload,
+            prepared_memory_storage_type=ctx.storage_type,
+            prepared_user_rag_memory_id=ctx.user_rag_memory_id,
+            skip_save=True,
+        ):
+            # Accumulate content for result
+            if isinstance(event, dict):
+                if event.get("event") == "message":
+                    data = event.get("data", {})
+                    if isinstance(data, dict):
+                        full_content += str(data.get("content", ""))
+                elif event.get("event") == "node_executions":
+                    node_executions = event.get("data", [])
+                elif event.get("event") in ("workflow_end", "end"):
+                    data = event.get("data", {})
+                    if isinstance(data, dict):
+                        execution_id = data.get("execution_id") or execution_id
+                        # public end event has total_tokens directly; internal workflow_end has token_usage
+                        _tokens = data.get("total_tokens", 0) or 0
+                        if not _tokens:
+                            _tokens = (data.get("token_usage") or {}).get("total_tokens", 0) or 0
+                        if _tokens:
+                            total_tokens = _tokens
+                event_type = event.get("event", "message")
+                event_data = event.get("data", {})
+                yield f"event: {event_type}\ndata: {json.dumps(event_data, ensure_ascii=False)}\n\n"
+            else:
+                yield event
+
+        result.full_content = full_content
+        result.total_tokens = total_tokens
+        result.execution_id = execution_id
+        result.node_executions = node_executions
+        result.assistant_meta = {
+            "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": total_tokens},
+            "execution_id": execution_id,
+        }
 
     async def resume_intervention_stream(
             self,

@@ -17,6 +17,7 @@ from app.core.exceptions import (
 from app.core.logging_config import get_api_logger
 from app.core.utils.datetime_utils import utcnow_naive
 from app.db import get_async_db_context
+from app.models.workspace_model import Workspace
 from app.repositories.api_key_repository import ApiKeyLogRepository, ApiKeyRepository
 from app.schemas.api_key_schema import ApiKeyAuth
 from app.services.api_key_service import ApiKeyAuthService, RateLimiterService
@@ -168,9 +169,14 @@ def require_api_key(
                         context={"required_scopes": scopes, "missing_scopes": missing_scopes}
                     )
 
+            # Resolve tenant_id from workspace
+            _ws = db.query(Workspace).filter(Workspace.id == api_key_obj.workspace_id).first()
+            _tenant_id = _ws.tenant_id if _ws else None
+
             kwargs["api_key_auth"] = ApiKeyAuth(
                 api_key_id=api_key_obj.id,
                 workspace_id=api_key_obj.workspace_id,
+                tenant_id=_tenant_id,
                 type=api_key_obj.type,
                 scopes=api_key_obj.scopes,
                 resource_id=api_key_obj.resource_id,
@@ -360,10 +366,18 @@ def require_api_key_self_db(
 
                 await db.commit()
 
+                # Resolve tenant_id from workspace (needed by downstream loaders)
+                from sqlalchemy import select as sa_select
+                _ws_result = await db.execute(
+                    sa_select(Workspace.tenant_id).where(Workspace.id == api_key_obj.workspace_id)
+                )
+                _tenant_id = _ws_result.scalar_one_or_none()
+
                 _api_key_id = api_key_obj.id
                 _api_key_auth = ApiKeyAuth(
                     api_key_id=api_key_obj.id,
                     workspace_id=api_key_obj.workspace_id,
+                    tenant_id=_tenant_id,
                     type=api_key_obj.type,
                     scopes=api_key_obj.scopes,
                     resource_id=api_key_obj.resource_id,

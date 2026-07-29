@@ -57,13 +57,15 @@ class MultiAgentOrchestrator:
         return value
 
     async def _db_get(self, model, identity):
+        if self.db is None:
+            return None
         return await self._maybe_await(self.db.get(model, identity))
 
     @classmethod
-    async def create(cls, db: Session | AsyncSession, config: MultiAgentConfig) -> "MultiAgentOrchestrator":
+    async def create(cls, db: Session | AsyncSession | None, config: MultiAgentConfig) -> "MultiAgentOrchestrator":
         orchestrator = cls(db, config)
 
-        if config.app_id:
+        if config.app_id and db is not None:
             from app.models import App
             if isinstance(db, AsyncSession):
                 app = await db.get(App, config.app_id)

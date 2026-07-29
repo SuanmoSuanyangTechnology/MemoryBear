@@ -6,6 +6,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import StreamingResponse
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
@@ -640,6 +641,11 @@ async def chat(
             app = await app_service.get_app_async(share.app_id)
             workspace_id = app.workspace_id
 
+            _ws_result = await db.execute(
+                select(Workspace.tenant_id).where(Workspace.id == workspace_id)
+            )
+            _tenant_id = _ws_result.scalar_one_or_none()
+
             new_end_user = await _get_or_create_public_end_user_async(
                 db,
                 app_id=share.app_id,
@@ -718,9 +724,92 @@ async def chat(
         if payload.stream:
             source = HitLogSource.EXTERNAL
             execution_mode = "sandbox" if settings.E2B_ENABLED else "in_process"
+
+            if settings.THREE_PHASE_CHAT_ENABLED:
+                from app.services.chat_context_loader import load_chat_context_for_public_share
+                from app.services.chat_context import StreamResult
+                from app.services.batch_persist_queue import BatchPersistQueue, PersistTask
+
+                payload.conversation_id = str(conversation_id)
+                async with get_async_db_context() as db:
+                    ctx = await load_chat_context_for_public_share(
+                        db, share, release, app, payload,
+                        workspace_id=workspace_id,
+                        end_user=new_end_user,
+                        storage_type=storage_type,
+                        user_rag_memory_id=user_rag_memory_id,
+                        tenant_id=_tenant_id,
+                        web_search=payload.web_search,
+                        memory=payload.memory,
+                    )
+
+                async def event_generator():
+                    result = StreamResult()
+                    service = AppChatService(None)
+                    try:
+                        async for event in service.agent_chat_stream_from_context(
+                                ctx=ctx,
+                                result=result,
+                                message=payload.message,
+                                config=agent_config,
+                                files=payload.files,
+                                user_id=end_user_id,
+                                variables=payload.variables,
+                                web_search=payload.web_search,
+                                memory=payload.memory,
+                                workspace_id=str(workspace_id),
+                                source=source,
+                                execution_mode=execution_mode,
+                        ):
+                            yield event
+                        await BatchPersistQueue.enqueue(PersistTask(
+                            task_type="save_messages",
+                            args={
+                                "ctx": ctx,
+                                "result": result,
+                                "user_message_content": payload.message,
+                                "files_meta": [],
+                            },
+                        ))
+                    except Exception as e:
+                        logger.error(f"agent_chat_stream_from_context failed: {e}", exc_info=True)
+                        try:
+                            await BatchPersistQueue.enqueue(PersistTask(
+                                task_type="save_failed_message",
+                                args={
+                                    "ctx": ctx,
+                                    "user_message_id": str(result.user_message_id),
+                                    "message_id": str(result.message_id),
+                                    "user_message_content": payload.message,
+                                    "files_meta": [],
+                                    "error_message": "An error occurred during generation.",
+                                    "error_detail": str(e)[:2000],
+                                },
+                            ))
+                        except Exception:
+                            pass
+
+                return StreamingResponse(
+                    event_generator(),
+                    media_type="text/event-stream",
+                    headers={
+                        "Cache-Control": "no-cache",
+                        "Connection": "keep-alive",
+                        "X-Accel-Buffering": "no",
+                    },
+                )
+
+            from app.db import AsyncSessionLocal
+
+            stream_db = AsyncSessionLocal()
+            try:
+                app_chat_service = AppChatService(stream_db)
+            except Exception:
+                await stream_db.close()
+                raise
+
             async def event_generator():
-                async with get_async_db_context() as stream_db:
-                    app_chat_service = AppChatService(stream_db)
+                try:
                     async for event in app_chat_service.agent_chat_stream(
                             message=payload.message,
                             conversation_id=conversation_id,
@@ -737,6 +826,8 @@ async def chat(
                             execution_mode=execution_mode,
                     ):
                         yield event
+                finally:
+                    await stream_db.close()
 
             return StreamingResponse(
                 event_generator(),
@@ -744,8 +835,8 @@ async def chat(
                 headers={
                     "Cache-Control": "no-cache",
                     "Connection": "keep-alive",
-                    "X-Accel-Buffering": "no"
-                }
+                    "X-Accel-Buffering": "no",
+                },
             )
         source = HitLogSource.EXTERNAL
         execution_mode = "sandbox" if settings.E2B_ENABLED else "in_process"
@@ -770,9 +861,105 @@ async def chat(
     elif app_type == AppType.MULTI_AGENT:
         config = runtime_config
         if payload.stream:
+            if settings.THREE_PHASE_CHAT_ENABLED:
+                from app.services.chat_context_loader import load_chat_context_for_public_share
+                from app.services.chat_context import StreamResult
+                from app.services.batch_persist_queue import BatchPersistQueue, PersistTask
+                from app.services.multi_agent_orchestrator import MultiAgentOrchestrator
+                from app.db import AsyncSessionLocal
+
+                payload.conversation_id = str(conversation_id)
+                async with get_async_db_context() as load_db:
+                    ctx = await load_chat_context_for_public_share(
+                        load_db, share, release, app, payload,
+                        workspace_id=workspace_id,
+                        end_user=new_end_user,
+                        storage_type=storage_type,
+                        user_rag_memory_id=user_rag_memory_id,
+                        tenant_id=_tenant_id,
+                        web_search=getattr(payload, 'web_search', True),
+                        memory=getattr(payload, 'memory', True),
+                    )
+
+                # Orchestrator needs a streaming session that stays alive
+                # during Phase 2 (AgentRunService & dependencies need DB).
+                stream_db = AsyncSessionLocal()
+                try:
+                    orchestrator = await MultiAgentOrchestrator.create(stream_db, config)
+                except Exception:
+                    await stream_db.close()
+                    raise
+
+                async def event_generator():
+                    result = StreamResult()
+                    service = AppChatService(None)
+                    try:
+                        async for event in service.multi_agent_chat_stream_from_context(
+                                ctx=ctx,
+                                result=result,
+                                message=payload.message,
+                                orchestrator=orchestrator,
+                                user_id=end_user_id,
+                                variables=payload.variables,
+                                web_search=payload.web_search,
+                                memory=payload.memory,
+                                storage_type=storage_type,
+                                user_rag_memory_id=user_rag_memory_id,
+                        ):
+                            yield event
+                        await BatchPersistQueue.enqueue(PersistTask(
+                            task_type="save_messages",
+                            args={
+                                "ctx": ctx,
+                                "result": result,
+                                "user_message_content": payload.message,
+                                "files_meta": [],
+                            },
+                        ))
+                    except Exception as e:
+                        logger.error(f"multi_agent_chat_stream_from_context failed: {e}", exc_info=True)
+                        try:
+                            await BatchPersistQueue.enqueue(PersistTask(
+                                task_type="save_failed_message",
+                                args={
+                                    "ctx": ctx,
+                                    "user_message_id": str(result.user_message_id),
+                                    "message_id": str(result.message_id),
+                                    "user_message_content": payload.message,
+                                    "files_meta": [],
+                                    "error_message": "An error occurred during generation.",
+                                    "error_detail": str(e)[:2000],
+                                },
+                            ))
+                        except Exception:
+                            pass
+                    finally:
+                        try:
+                            await stream_db.close()
+                        except Exception:
+                            pass
+
+                return StreamingResponse(
+                    event_generator(),
+                    media_type="text/event-stream",
+                    headers={
+                        "Cache-Control": "no-cache",
+                        "Connection": "keep-alive",
+                        "X-Accel-Buffering": "no",
+                    },
+                )
+
+            from app.db import AsyncSessionLocal
+
+            stream_db = AsyncSessionLocal()
+            try:
+                app_chat_service = AppChatService(stream_db)
+            except Exception:
+                await stream_db.close()
+                raise
+
             async def event_generator():
-                async with get_async_db_context() as stream_db:
-                    app_chat_service = AppChatService(stream_db)
+                try:
                     async for event in app_chat_service.multi_agent_chat_stream(
                             message=payload.message,
                             conversation_id=conversation_id,
@@ -785,6 +972,8 @@ async def chat(
                             user_rag_memory_id=user_rag_memory_id
                     ):
                         yield event
+                finally:
+                    await stream_db.close()
 
             return StreamingResponse(
                 event_generator(),
@@ -792,8 +981,8 @@ async def chat(
                 headers={
                     "Cache-Control": "no-cache",
                     "Connection": "keep-alive",
-                    "X-Accel-Buffering": "no"
-                }
+                    "X-Accel-Buffering": "no",
+                },
             )
 
         # 多 Agent 非流式返回
@@ -816,9 +1005,91 @@ async def chat(
         config = runtime_config
         if payload.stream:
             source = HitLogSource.EXTERNAL
+
+            if settings.THREE_PHASE_CHAT_ENABLED:
+                from app.services.chat_context_loader import load_chat_context_for_public_share
+                from app.services.chat_context import StreamResult
+                from app.services.batch_persist_queue import BatchPersistQueue, PersistTask
+
+                payload.conversation_id = str(conversation_id)
+                async with get_async_db_context() as db:
+                    ctx = await load_chat_context_for_public_share(
+                        db, share, release, app, payload,
+                        workspace_id=workspace_id,
+                        end_user=new_end_user,
+                        storage_type=storage_type,
+                        user_rag_memory_id=user_rag_memory_id,
+                        tenant_id=_tenant_id,
+                        web_search=getattr(payload, 'web_search', True),
+                        memory=getattr(payload, 'memory', True),
+                    )
+
+                async def event_generator():
+                    result = StreamResult()
+                    service = AppChatService(None)
+                    try:
+                        async for event in service.workflow_chat_stream_from_context(
+                                ctx=ctx,
+                                result=result,
+                                message=payload.message,
+                                config=config,
+                                user_id=end_user_id,
+                                variables=payload.variables,
+                                files=payload.files,
+                                memory=payload.memory,
+                                web_search=payload.web_search,
+                                workspace_id=str(workspace_id),
+                                release_id=str(release_id),
+                        ):
+                            yield event
+                        await BatchPersistQueue.enqueue(PersistTask(
+                            task_type="save_messages",
+                            args={
+                                "ctx": ctx,
+                                "result": result,
+                                "user_message_content": payload.message,
+                                "files_meta": [],
+                            },
+                        ))
+                    except Exception as e:
+                        logger.error(f"workflow_chat_stream_from_context failed: {e}", exc_info=True)
+                        try:
+                            await BatchPersistQueue.enqueue(PersistTask(
+                                task_type="save_failed_message",
+                                args={
+                                    "ctx": ctx,
+                                    "user_message_id": str(result.user_message_id),
+                                    "message_id": str(result.message_id),
+                                    "user_message_content": payload.message,
+                                    "files_meta": [],
+                                    "error_message": "An error occurred during generation.",
+                                    "error_detail": str(e)[:2000],
+                                },
+                            ))
+                        except Exception:
+                            pass
+
+                return StreamingResponse(
+                    event_generator(),
+                    media_type="text/event-stream",
+                    headers={
+                        "Cache-Control": "no-cache",
+                        "Connection": "keep-alive",
+                        "X-Accel-Buffering": "no",
+                    },
+                )
+
+            from app.db import AsyncSessionLocal
+
+            stream_db = AsyncSessionLocal()
+            try:
+                app_chat_service = AppChatService(stream_db)
+            except Exception:
+                await stream_db.close()
+                raise
+
             async def event_generator():
-                async with get_async_db_context() as stream_db:
-                    app_chat_service = AppChatService(stream_db)
+                try:
                     async for event in app_chat_service.workflow_chat_stream(
                             message=payload.message,
                             conversation_id=conversation_id,
@@ -840,6 +1111,8 @@ async def chat(
                         event_data = event.get("data", {})
                         sse_message = f"event: {event_type}\ndata: {json.dumps(event_data, default=str, ensure_ascii=False)}\n\n"
                         yield sse_message
+                finally:
+                    await stream_db.close()
 
             return StreamingResponse(
                 event_generator(),
@@ -847,8 +1120,8 @@ async def chat(
                 headers={
                     "Cache-Control": "no-cache",
                     "Connection": "keep-alive",
-                    "X-Accel-Buffering": "no"
-                }
+                    "X-Accel-Buffering": "no",
+                },
             )
 
         # 多 Agent 非流式返回
