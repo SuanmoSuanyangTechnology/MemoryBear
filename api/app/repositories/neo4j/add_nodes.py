@@ -49,7 +49,7 @@ async def add_dialogue_nodes(dialogues: List[DialogueNode], connector: Neo4jConn
                 "run_id": dialogue.run_id,
                 "ref_id": dialogue.ref_id,
                 "name": dialogue.name,
-                "created_at": to_iso_z(dialogue.created_at),
+                "created_at": dialogue.created_at,
                 "content": dialogue.content,
                 "dialog_embedding": dialogue.dialog_embedding,
                 "config_id": dialogue.config_id,
