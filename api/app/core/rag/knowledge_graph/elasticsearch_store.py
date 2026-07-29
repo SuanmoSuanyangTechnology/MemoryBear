@@ -25,6 +25,10 @@ from app.core.rag.knowledge_graph.normalizer import (
 )
 from app.core.rag.models.chunk import DocumentChunk
 from app.core.rag.retrieval.elasticsearch_queries import raise_on_shard_failures
+from app.core.rag.vdb.elasticsearch.response_validation import (
+    raise_on_delete_by_query_failure,
+    raise_on_search_response_failure,
+)
 from app.core.rag.vdb.field import Field
 from app.core.utils.datetime_utils import utcnow_naive
 
@@ -47,63 +51,6 @@ EVIDENCE_GRAPH_TYPES = (
 )
 GRAPH_FULL_SCAN_BATCH_SIZE = 1000
 GRAPH_PIT_KEEP_ALIVE = "2m"
-
-
-def _safe_int(value: Any) -> int:
-    try:
-        return int(value or 0)
-    except (TypeError, ValueError):
-        return 0
-
-
-def _failure_summary(failures: Any) -> str:
-    if not isinstance(failures, list) or not failures:
-        return ""
-    summaries: list[str] = []
-    for failure in failures[:3]:
-        if isinstance(failure, Mapping):
-            reason = failure.get("reason") or failure.get("type") or failure.get("cause")
-            if isinstance(reason, Mapping):
-                reason = reason.get("reason") or reason.get("type")
-            summaries.append(str(reason or "unknown"))
-        else:
-            summaries.append(str(failure))
-    return "; ".join(summaries)
-
-
-def _raise_on_search_response_failure(
-    response: Mapping[str, Any],
-    context: str,
-) -> None:
-    if response.get("timed_out"):
-        raise RuntimeError(f"Elasticsearch search timed out during {context}")
-    failures = response.get("failures") or []
-    if failures:
-        details = _failure_summary(failures)
-        message = f"Elasticsearch search failed during {context}: failures={len(failures)}"
-        if details:
-            message = f"{message}: {details}"
-        raise RuntimeError(message)
-    raise_on_shard_failures(response, context)
-
-
-def _raise_on_delete_by_query_failure(
-    response: Mapping[str, Any],
-    context: str,
-) -> None:
-    if response.get("timed_out"):
-        raise RuntimeError(f"Elasticsearch delete_by_query timed out during {context}")
-    version_conflicts = _safe_int(response.get("version_conflicts"))
-    failures = response.get("failures") or []
-    if version_conflicts or failures:
-        details = _failure_summary(failures)
-        message = (
-            f"Elasticsearch delete_by_query failed during {context}: "
-            f"version_conflicts={version_conflicts} failures={len(failures)}"
-        )
-        if details:
-            message = f"{message}: {details}"
-        raise RuntimeError(message)
 
 
 @lru_cache(maxsize=1)
@@ -251,7 +198,7 @@ class GraphElasticsearchStore:
                 latest_pit_id = response.get("pit_id")
                 if latest_pit_id:
                     pit_id = latest_pit_id
-                _raise_on_search_response_failure(response, context)
+                raise_on_search_response_failure(response, context)
 
                 hits = list(response.get("hits", {}).get("hits", []))
                 if not hits:
@@ -463,7 +410,7 @@ class GraphElasticsearchStore:
                 [{"term": {"document_id": document_id}}],
             ),
         )
-        _raise_on_delete_by_query_failure(
+        raise_on_delete_by_query_failure(
             result,
             "replace graph document evidence",
         )
@@ -714,7 +661,7 @@ class GraphElasticsearchStore:
             wait_for_completion=True,
             query=self._graph_query(knowledge_id, EVIDENCE_GRAPH_TYPES),
         )
-        _raise_on_delete_by_query_failure(
+        raise_on_delete_by_query_failure(
             result,
             "clear evidence graph",
         )
@@ -742,7 +689,7 @@ class GraphElasticsearchStore:
                 }
             },
         )
-        _raise_on_delete_by_query_failure(
+        raise_on_delete_by_query_failure(
             result,
             "clear all graph documents",
         )

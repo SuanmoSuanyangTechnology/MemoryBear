@@ -7,6 +7,10 @@ from typing import Any
 
 from elasticsearch import Elasticsearch
 
+from app.core.rag.vdb.elasticsearch.response_validation import (
+    raise_on_search_response_failure,
+)
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_PIT_KEEP_ALIVE = "2m"
@@ -25,48 +29,6 @@ def _total_value(response: Mapping[str, Any]) -> int:
     if isinstance(total, Mapping):
         return int(total.get("value", 0))
     return int(total or 0)
-
-
-def _int_value(value: Any) -> int:
-    try:
-        return int(value or 0)
-    except (TypeError, ValueError):
-        return 0
-
-
-def _failure_summary(failures: Any) -> str:
-    if not isinstance(failures, list) or not failures:
-        return ""
-    summaries: list[str] = []
-    for failure in failures[:3]:
-        if isinstance(failure, Mapping):
-            reason = failure.get("reason") or failure.get("type") or failure.get("cause")
-            if isinstance(reason, Mapping):
-                reason = reason.get("reason") or reason.get("type")
-            summaries.append(str(reason or "unknown"))
-        else:
-            summaries.append(str(failure))
-    return "; ".join(summaries)
-
-
-def _raise_on_search_failure(response: Mapping[str, Any]) -> None:
-    if response.get("timed_out"):
-        raise RuntimeError("Elasticsearch PIT search timed out")
-
-    shards = response.get("_shards") or {}
-    failed = _int_value(shards.get("failed") if isinstance(shards, Mapping) else 0)
-    failures = []
-    if isinstance(shards, Mapping):
-        failures = shards.get("failures") or []
-    if not failures:
-        failures = response.get("failures") or []
-
-    if failed or failures:
-        details = _failure_summary(failures)
-        message = f"Elasticsearch PIT search failed on {failed} shard(s)"
-        if details:
-            message = f"{message}: {details}"
-        raise RuntimeError(message)
 
 
 def _with_shard_tiebreaker(
@@ -128,7 +90,7 @@ def iter_pit_search_pages(
             latest_pit_id = response.get("pit_id")
             if latest_pit_id:
                 pit_id = latest_pit_id
-            _raise_on_search_failure(response)
+            raise_on_search_response_failure(response, "PIT search")
 
             hits = list(response.get("hits", {}).get("hits", []))
             total = _total_value(response) if first_page and track_total_hits else None

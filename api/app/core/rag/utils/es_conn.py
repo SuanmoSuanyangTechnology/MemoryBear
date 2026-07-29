@@ -20,6 +20,9 @@ from app.core.rag.nlp import is_english, rag_tokenizer
 from app.core.rag.common.float_utils import get_float
 from app.core.rag.common.constants import PAGERANK_FLD, TAG_FLD
 from app.core.rag.vdb.elasticsearch.pit_search import iter_pit_search_hits
+from app.core.rag.vdb.elasticsearch.response_validation import (
+    raise_on_delete_by_query_failure,
+)
 
 ATTEMPT_TIME = 2
 
@@ -479,7 +482,14 @@ class ESConnection(DocStoreConnection):
                 res = self.es.delete_by_query(
                     index=indexName,
                     body=Search().query(qry).to_dict(),
-                    refresh=True)
+                    refresh=True,
+                    conflicts="abort",
+                    wait_for_completion=True,
+                )
+                raise_on_delete_by_query_failure(
+                    res,
+                    "legacy graph document delete",
+                )
                 return res["deleted"]
             except ConnectionTimeout:
                 logger.exception("ES request timeout")
@@ -490,7 +500,8 @@ class ESConnection(DocStoreConnection):
                 logger.warning("ESConnection.delete got exception: " + str(e))
                 if re.search(r"(not_found)", str(e), re.IGNORECASE):
                     return 0
-        return 0
+                raise
+        raise RuntimeError("ESConnection.delete failed after Elasticsearch connection timeouts")
 
     """
     Helper functions for search result
