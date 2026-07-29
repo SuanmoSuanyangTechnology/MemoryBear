@@ -9,6 +9,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.background import BackgroundTask
 
 from app.core.utils.datetime_utils import utcnow_naive
 from app.celery_app import celery_app
@@ -55,10 +56,12 @@ from app.services import file_service
 from app.services.file_storage_service import FileStorageService, get_file_storage_service
 from app.services.model_service import ModelApiKeyService, ModelConfigService
 from app.services.qa_export_service import (
-    iter_qa_csv_chunks,
+    cleanup_qa_csv_export_file,
+    iter_qa_csv_file_chunks,
     iter_qa_pairs_by_document,
     make_qa_export_filename,
     render_qa_pairs_export,
+    write_qa_csv_export_file,
 )
 from app.core.quota_stub import check_knowledge_capacity_quota
 
@@ -515,12 +518,15 @@ async def export_knowledge_qa_csv(
 
     from urllib.parse import quote
 
+    export_path = await asyncio.to_thread(write_qa_csv_export_file, kb_id)
+
     return StreamingResponse(
-        iter_qa_csv_chunks(kb_id),
+        iter_qa_csv_file_chunks(export_path),
         media_type="text/csv; charset=utf-8",
         headers={
             "Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}",
         },
+        background=BackgroundTask(cleanup_qa_csv_export_file, export_path),
     )
 
 

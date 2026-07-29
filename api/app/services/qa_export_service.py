@@ -1,5 +1,7 @@
 import csv
 import io
+import os
+import tempfile
 import uuid
 from collections.abc import Iterator, Mapping
 from typing import Any
@@ -14,6 +16,7 @@ from app.core.rag.vdb.field import Field
 
 QA_EXPORT_COLUMNS = ("question", "answer")
 QA_EXPORT_BATCH_SIZE = 1000
+QA_CSV_FILE_CHUNK_SIZE = 1024 * 1024
 QA_CSV_MEDIA_TYPE = "text/csv"
 QA_XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
@@ -77,13 +80,34 @@ def iter_qa_pairs_by_document(
         yield _qa_pair_from_source(source)
 
 
-def iter_qa_csv_chunks(
+def write_qa_csv_export_file(
     kb_id: uuid.UUID | str,
     batch_size: int = QA_EXPORT_BATCH_SIZE,
+) -> str:
+    fd, path = tempfile.mkstemp(prefix="memorybear-qa-export-", suffix=".csv")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8-sig", newline="") as output:
+            writer = csv.writer(output)
+            writer.writerow(QA_EXPORT_COLUMNS)
+            for pair in iter_qa_pairs_by_knowledge(kb_id=kb_id, batch_size=batch_size):
+                writer.writerow([pair["question"], pair["answer"]])
+    except Exception:
+        _remove_file_if_exists(path)
+        raise
+    return path
+
+
+def iter_qa_csv_file_chunks(
+    path: str,
+    chunk_size: int = QA_CSV_FILE_CHUNK_SIZE,
 ) -> Iterator[bytes]:
-    yield _write_csv_rows([QA_EXPORT_COLUMNS]).encode("utf-8-sig")
-    for pair in iter_qa_pairs_by_knowledge(kb_id=kb_id, batch_size=batch_size):
-        yield _write_csv_rows([(pair["question"], pair["answer"])]).encode("utf-8")
+    with open(path, "rb") as file:
+        while chunk := file.read(chunk_size):
+            yield chunk
+
+
+def cleanup_qa_csv_export_file(path: str) -> None:
+    _remove_file_if_exists(path)
 
 
 def render_qa_pairs_export(
@@ -211,6 +235,13 @@ def _write_xlsx_qa_pairs(qa_pairs: list[Mapping[str, Any]]) -> bytes:
         return output.getvalue()
     finally:
         wb.close()
+
+
+def _remove_file_if_exists(path: str) -> None:
+    try:
+        os.remove(path)
+    except FileNotFoundError:
+        pass
 
 
 def _normalize_csv_value(value: Any) -> str:
