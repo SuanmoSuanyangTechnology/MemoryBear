@@ -113,7 +113,6 @@ def _load_parent_fallback_page(
     if parent_doc_ids:
         for item in vector_service.iter_by_segment(
             document_id=document_id,
-            query=keywords,
             asc=True,
         ):
             metadata = item.metadata or {}

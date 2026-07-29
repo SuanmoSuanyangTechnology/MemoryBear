@@ -1,6 +1,7 @@
 import asyncio
 import json
-from collections.abc import Callable, Mapping, Sequence
+import logging
+from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -28,6 +29,8 @@ from app.core.rag.vdb.field import Field
 from app.core.utils.datetime_utils import utcnow_naive
 
 
+logger = logging.getLogger(__name__)
+
 ENTITY_EVIDENCE = "entity_evidence"
 RELATION_EVIDENCE = "relation_evidence"
 ENTITY_PROJECTION = "entity_projection"
@@ -42,6 +45,65 @@ EVIDENCE_GRAPH_TYPES = (
     RELATION_PROJECTION,
     DOCUMENT_PROJECTION_MAP,
 )
+GRAPH_FULL_SCAN_BATCH_SIZE = 1000
+GRAPH_PIT_KEEP_ALIVE = "2m"
+
+
+def _safe_int(value: Any) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _failure_summary(failures: Any) -> str:
+    if not isinstance(failures, list) or not failures:
+        return ""
+    summaries: list[str] = []
+    for failure in failures[:3]:
+        if isinstance(failure, Mapping):
+            reason = failure.get("reason") or failure.get("type") or failure.get("cause")
+            if isinstance(reason, Mapping):
+                reason = reason.get("reason") or reason.get("type")
+            summaries.append(str(reason or "unknown"))
+        else:
+            summaries.append(str(failure))
+    return "; ".join(summaries)
+
+
+def _raise_on_search_response_failure(
+    response: Mapping[str, Any],
+    context: str,
+) -> None:
+    if response.get("timed_out"):
+        raise RuntimeError(f"Elasticsearch search timed out during {context}")
+    failures = response.get("failures") or []
+    if failures:
+        details = _failure_summary(failures)
+        message = f"Elasticsearch search failed during {context}: failures={len(failures)}"
+        if details:
+            message = f"{message}: {details}"
+        raise RuntimeError(message)
+    raise_on_shard_failures(response, context)
+
+
+def _raise_on_delete_by_query_failure(
+    response: Mapping[str, Any],
+    context: str,
+) -> None:
+    if response.get("timed_out"):
+        raise RuntimeError(f"Elasticsearch delete_by_query timed out during {context}")
+    version_conflicts = _safe_int(response.get("version_conflicts"))
+    failures = response.get("failures") or []
+    if version_conflicts or failures:
+        details = _failure_summary(failures)
+        message = (
+            f"Elasticsearch delete_by_query failed during {context}: "
+            f"version_conflicts={version_conflicts} failures={len(failures)}"
+        )
+        if details:
+            message = f"{message}: {details}"
+        raise RuntimeError(message)
 
 
 @lru_cache(maxsize=1)
@@ -129,6 +191,116 @@ class GraphElasticsearchStore:
             ignore_unavailable=True,
         )
 
+    @staticmethod
+    def _with_shard_doc_sort(
+        sort: Sequence[str | Mapping[str, Any]],
+    ) -> list[str | Mapping[str, Any]]:
+        result = list(sort)
+        has_shard_doc = any(
+            value == "_shard_doc"
+            or (isinstance(value, Mapping) and "_shard_doc" in value)
+            for value in result
+        )
+        if not has_shard_doc:
+            result.append({"_shard_doc": "asc"})
+        return result
+
+    async def _iter_search_after_hits(
+        self,
+        *,
+        index_name: str,
+        query: Mapping[str, Any],
+        sort: Sequence[str | Mapping[str, Any]],
+        context: str,
+        source_includes: Sequence[str] | None = None,
+        source: bool | Mapping[str, Any] | None = None,
+        batch_size: int = GRAPH_FULL_SCAN_BATCH_SIZE,
+    ) -> AsyncIterator[dict[str, Any]]:
+        if not 1 <= batch_size <= 10000:
+            raise ValueError("batch_size must be between 1 and 10000")
+
+        pit_id: str | None = None
+        cursor: list[Any] | None = None
+        try:
+            opened = await self._client.open_point_in_time(
+                index=index_name,
+                keep_alive=GRAPH_PIT_KEEP_ALIVE,
+                allow_partial_search_results=False,
+            )
+            pit_id = opened.get("id")
+            if not pit_id:
+                raise RuntimeError(f"Elasticsearch did not return a PIT id during {context}")
+
+            effective_sort = self._with_shard_doc_sort(sort)
+            while True:
+                search_kwargs: dict[str, Any] = {
+                    "pit": {"id": pit_id, "keep_alive": GRAPH_PIT_KEEP_ALIVE},
+                    "query": dict(query),
+                    "sort": effective_sort,
+                    "size": batch_size,
+                    "allow_partial_search_results": False,
+                }
+                if source is not None:
+                    search_kwargs["source"] = source
+                if source_includes is not None:
+                    search_kwargs["source_includes"] = list(source_includes)
+                if cursor is not None:
+                    search_kwargs["search_after"] = cursor
+
+                response = await self._client.search(**search_kwargs)
+                latest_pit_id = response.get("pit_id")
+                if latest_pit_id:
+                    pit_id = latest_pit_id
+                _raise_on_search_response_failure(response, context)
+
+                hits = list(response.get("hits", {}).get("hits", []))
+                if not hits:
+                    return
+
+                for hit in hits:
+                    yield hit
+
+                next_cursor = hits[-1].get("sort")
+                if not next_cursor or list(next_cursor) == cursor:
+                    raise RuntimeError(
+                        f"Elasticsearch search_after cursor did not advance during {context}"
+                    )
+                cursor = list(next_cursor)
+        finally:
+            if pit_id:
+                try:
+                    await self._client.close_point_in_time(id=pit_id)
+                except Exception:
+                    logger.warning(
+                        "Failed to close Elasticsearch PIT during %s",
+                        context,
+                        exc_info=True,
+                    )
+
+    async def _collect_search_after_hits(
+        self,
+        *,
+        index_name: str,
+        query: Mapping[str, Any],
+        sort: Sequence[str | Mapping[str, Any]],
+        context: str,
+        source_includes: Sequence[str] | None = None,
+        source: bool | Mapping[str, Any] | None = None,
+        batch_size: int = GRAPH_FULL_SCAN_BATCH_SIZE,
+    ) -> list[dict[str, Any]]:
+        return [
+            hit
+            async for hit in self._iter_search_after_hits(
+                index_name=index_name,
+                query=query,
+                sort=sort,
+                context=context,
+                source_includes=source_includes,
+                source=source,
+                batch_size=batch_size,
+            )
+        ]
+
     async def load_document_chunks(
         self,
         chunk_index_name: str,
@@ -140,9 +312,8 @@ class GraphElasticsearchStore:
             {"term": {"metadata.document_id": document_id}},
             {"term": {"metadata.status": 1}},
         ]
-        result = await self._client.search(
-            index=chunk_index_name,
-            size=10000,
+        hits = await self._collect_search_after_hits(
+            index_name=chunk_index_name,
             query={"bool": {"filter": filters}},
             source_includes=[
                 "page_content",
@@ -158,11 +329,11 @@ class GraphElasticsearchStore:
                 {"metadata.sort_id": {"order": "asc", "unmapped_type": "long"}},
                 {"metadata.doc_id": {"order": "asc"}},
             ],
+            context="load graph source document",
         )
-        raise_on_shard_failures(result, "load graph source document")
 
         scoped_hits: list[dict[str, Any]] = []
-        for hit in self._hits(result):
+        for hit in hits:
             source = hit.get("_source") or {}
             metadata = source.get("metadata") or {}
             if not isinstance(metadata, Mapping):
@@ -204,24 +375,29 @@ class GraphElasticsearchStore:
         knowledge_id: str,
         document_id: str,
     ) -> AffectedProjectionKeys:
-        result = await self._client.search(
-            index=index_name,
-            size=10000,
+        hits = await self._collect_search_after_hits(
+            index_name=index_name,
             query=self._graph_query(
                 knowledge_id,
                 EVIDENCE_TYPES,
                 [{"term": {"document_id": document_id}}],
             ),
-            source=[
+            source_includes=[
                 "knowledge_graph_kwd",
                 "entity_key_kwd",
                 "relation_key_kwd",
             ],
+            sort=[
+                {"knowledge_graph_kwd": {"order": "asc"}},
+                {"entity_key_kwd": {"order": "asc", "missing": "_last"}},
+                {"relation_key_kwd": {"order": "asc", "missing": "_last"}},
+                {"source_chunk_id_kwd": {"order": "asc", "missing": "_last"}},
+            ],
+            context="load graph document evidence keys",
         )
-        raise_on_shard_failures(result, "load graph document evidence keys")
         entity_keys: set[str] = set()
         relation_keys: set[str] = set()
-        for hit in self._hits(result):
+        for hit in hits:
             source = hit.get("_source") or {}
             if source.get("knowledge_graph_kwd") == ENTITY_EVIDENCE:
                 if source.get("entity_key_kwd"):
@@ -276,15 +452,20 @@ class GraphElasticsearchStore:
             )
 
         self._ensure_valid(ensure_valid)
-        await self._client.delete_by_query(
+        result = await self._client.delete_by_query(
             index=index_name,
-            conflicts="proceed",
+            conflicts="abort",
             refresh=False,
+            wait_for_completion=True,
             query=self._graph_query(
                 knowledge_id,
                 EVIDENCE_TYPES,
                 [{"term": {"document_id": document_id}}],
             ),
+        )
+        _raise_on_delete_by_query_failure(
+            result,
+            "replace graph document evidence",
         )
 
         operations: list[dict[str, Any]] = []
@@ -324,18 +505,21 @@ class GraphElasticsearchStore:
     ) -> list[EntityEvidence]:
         if not entity_keys:
             return []
-        result = await self._client.search(
-            index=index_name,
-            size=10000,
+        hits = await self._collect_search_after_hits(
+            index_name=index_name,
             query=self._graph_query(
                 knowledge_id,
                 ENTITY_EVIDENCE,
                 [{"terms": {"entity_key_kwd": list(entity_keys)}}],
             ),
+            sort=[
+                {"entity_key_kwd": {"order": "asc"}},
+                {"source_chunk_id_kwd": {"order": "asc", "missing": "_last"}},
+            ],
+            context="load entity evidence",
         )
-        raise_on_shard_failures(result, "load entity evidence")
         evidence: list[EntityEvidence] = []
-        for hit in self._hits(result):
+        for hit in hits:
             source = hit.get("_source") or {}
             evidence.append(
                 EntityEvidence(
@@ -502,16 +686,15 @@ class GraphElasticsearchStore:
         index_name: str,
         knowledge_id: str,
     ) -> list[dict[str, Any]]:
-        result = await self._client.search(
-            index=index_name,
-            size=10000,
+        hits = await self._collect_search_after_hits(
+            index_name=index_name,
             query=self._graph_query(knowledge_id, DOCUMENT_PROJECTION_MAP),
             sort=[{"document_id": {"order": "asc"}}],
+            context="list graph document maps",
         )
-        raise_on_shard_failures(result, "list graph document maps")
         return [
             dict(source)
-            for hit in self._hits(result)
+            for hit in hits
             if isinstance((source := hit.get("_source")), Mapping)
         ]
 
@@ -523,12 +706,17 @@ class GraphElasticsearchStore:
         ensure_valid: Callable[[], None] | None = None,
     ) -> None:
         self._ensure_valid(ensure_valid)
-        await self._client.delete_by_query(
+        result = await self._client.delete_by_query(
             index=index_name,
-            conflicts="proceed",
+            conflicts="abort",
             ignore_unavailable=True,
             refresh=True,
+            wait_for_completion=True,
             query=self._graph_query(knowledge_id, EVIDENCE_GRAPH_TYPES),
+        )
+        _raise_on_delete_by_query_failure(
+            result,
+            "clear evidence graph",
         )
 
     async def clear_all_graph_documents(
@@ -539,11 +727,12 @@ class GraphElasticsearchStore:
         ensure_valid: Callable[[], None] | None = None,
     ) -> None:
         self._ensure_valid(ensure_valid)
-        await self._client.delete_by_query(
+        result = await self._client.delete_by_query(
             index=index_name,
-            conflicts="proceed",
+            conflicts="abort",
             ignore_unavailable=True,
             refresh=True,
+            wait_for_completion=True,
             query={
                 "bool": {
                     "filter": [
@@ -552,6 +741,10 @@ class GraphElasticsearchStore:
                     ]
                 }
             },
+        )
+        _raise_on_delete_by_query_failure(
+            result,
+            "clear all graph documents",
         )
 
     async def load_projection_graph(
@@ -1219,18 +1412,21 @@ class GraphElasticsearchStore:
         extra_filters: Sequence[Mapping[str, Any]],
         context: str,
     ) -> list[RelationEvidence]:
-        result = await self._client.search(
-            index=index_name,
-            size=10000,
+        hits = await self._collect_search_after_hits(
+            index_name=index_name,
             query=self._graph_query(
                 knowledge_id,
                 RELATION_EVIDENCE,
                 extra_filters,
             ),
+            sort=[
+                {"relation_key_kwd": {"order": "asc"}},
+                {"source_chunk_id_kwd": {"order": "asc", "missing": "_last"}},
+            ],
+            context=context,
         )
-        raise_on_shard_failures(result, context)
         evidence: list[RelationEvidence] = []
-        for hit in self._hits(result):
+        for hit in hits:
             source = hit.get("_source") or {}
             evidence.append(
                 RelationEvidence(

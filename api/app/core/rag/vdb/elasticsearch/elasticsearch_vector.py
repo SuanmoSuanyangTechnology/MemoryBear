@@ -54,6 +54,49 @@ ES_DEFAULT_MAX_RESULT_WINDOW = 10000
 ES_FULL_SCAN_BATCH_SIZE = 1000
 
 
+def _safe_int(value: Any) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _delete_failure_summary(failures: Any) -> str:
+    if not isinstance(failures, list) or not failures:
+        return ""
+    summaries: list[str] = []
+    for failure in failures[:3]:
+        if isinstance(failure, Mapping):
+            reason = failure.get("reason") or failure.get("type") or failure.get("cause")
+            if isinstance(reason, Mapping):
+                reason = reason.get("reason") or reason.get("type")
+            summaries.append(str(reason or "unknown"))
+        else:
+            summaries.append(str(failure))
+    return "; ".join(summaries)
+
+
+def _raise_on_delete_by_query_failure(
+    response: Mapping[str, Any],
+    *,
+    operation: str,
+) -> None:
+    if response.get("timed_out"):
+        raise RuntimeError(f"Elasticsearch {operation} timed out")
+
+    version_conflicts = _safe_int(response.get("version_conflicts"))
+    failures = response.get("failures") or []
+    if version_conflicts or failures:
+        details = _delete_failure_summary(failures)
+        message = (
+            f"Elasticsearch {operation} failed: "
+            f"version_conflicts={version_conflicts} failures={len(failures)}"
+        )
+        if details:
+            message = f"{message}: {details}"
+        raise RuntimeError(message)
+
+
 @dataclass(frozen=True)
 class ModelApiKeyRuntimeConfig:
     model_name: str
@@ -211,6 +254,10 @@ class ElasticSearchVector(BaseVector):
                 conflicts="abort",
                 wait_for_completion=True,
             )
+            _raise_on_delete_by_query_failure(
+                result,
+                operation="delete by metadata IDs",
+            )
             deleted += int(result.get("deleted", 0))
 
         if refresh:
@@ -244,6 +291,10 @@ class ElasticSearchVector(BaseVector):
             refresh=refresh,
             conflicts="abort",
             wait_for_completion=True,
+        )
+        _raise_on_delete_by_query_failure(
+            result,
+            operation="delete by metadata field",
         )
         logger.info(
             "Deleted Elasticsearch documents by metadata field: index=%s field=%s deleted=%s",
@@ -1010,6 +1061,10 @@ class ElasticSearchVectorIndexOps:
             refresh=refresh,
             conflicts="abort",
             wait_for_completion=True,
+        )
+        _raise_on_delete_by_query_failure(
+            result,
+            operation="delete by metadata field",
         )
         logger.info(
             "Deleted Elasticsearch documents by metadata field: index=%s field=%s deleted=%s",
