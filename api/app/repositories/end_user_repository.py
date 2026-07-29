@@ -1771,7 +1771,7 @@ async def get_end_user_by_id_async(db: AsyncSession, end_user_id: uuid.UUID) -> 
     return end_user
 
 
-@redis_cache(ttl=600, prefix='tenant', skip_args=["db"])
+# @redis_cache(ttl=600, prefix='tenant', skip_args=["db"])
 def get_tenant_id_by_end_user_id(db: Session, end_user_id: uuid.UUID) -> Optional[uuid.UUID]:
     stmt = (
         select(Workspace.tenant_id)
@@ -1782,7 +1782,7 @@ def get_tenant_id_by_end_user_id(db: Session, end_user_id: uuid.UUID) -> Optiona
     return result.scalar()
 
 
-@redis_cache(ttl=600, prefix='tenant', skip_args=["db"])
+# @redis_cache(ttl=600, prefix='tenant', skip_args=["db"])
 async def get_tenant_id_by_end_user_id_async(db: AsyncSession, end_user_id: uuid.UUID) -> Optional[uuid.UUID]:
     stmt = (
         select(Workspace.tenant_id)
