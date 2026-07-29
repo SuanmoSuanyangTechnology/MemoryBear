@@ -28,28 +28,22 @@ def iter_qa_pairs_by_knowledge(
     batch_size: int = QA_EXPORT_BATCH_SIZE,
 ) -> Iterator[dict[str, str]]:
     kb_id_str = str(kb_id)
-    batch_size = max(1, batch_size)
     index_name = ElasticSearchVectorIndexOps.collection_name_for_knowledge(kb_id_str)
     client = ElasticSearchVectorClientProvider.get_shared_client()
 
     if not client.indices.exists(index=index_name):
         return
 
-    search_after: list[Any] | None = None
-    while True:
-        body = _build_qa_export_search_body(kb_id_str, batch_size, search_after)
-        result = client.search(index=index_name, body=body)
-        hits = result.get("hits", {}).get("hits", [])
-        if not hits:
-            return
-
-        for hit in hits:
-            source = hit.get("_source") or {}
-            yield _qa_pair_from_source(source)
-
-        search_after = hits[-1].get("sort")
-        if not search_after:
-            return
+    for hit in iter_pit_search_hits(
+        client,
+        index=index_name,
+        query=_qa_export_query(kb_id_str, active_only=True),
+        source_includes=_qa_source_includes(),
+        sort=_qa_export_sort(),
+        batch_size=max(1, min(batch_size, 10000)),
+    ):
+        source = hit.get("_source") or {}
+        yield _qa_pair_from_source(source)
 
 
 def iter_qa_pairs_by_document(
@@ -137,6 +131,16 @@ def _qa_source_includes() -> list[str]:
     ]
 
 
+def _qa_export_query(kb_id: str, *, active_only: bool) -> dict[str, Any]:
+    filters: list[dict[str, Any]] = [
+        _qa_chunk_type_filter(),
+        {"term": {Field.KNOWLEDGE_ID.value: kb_id}},
+    ]
+    if active_only:
+        filters.append({"term": {"metadata.status": 1}})
+    return {"bool": {"filter": filters}}
+
+
 def _qa_pair_from_source(source: Mapping[str, Any]) -> dict[str, str]:
     metadata = source.get(Field.METADATA_KEY.value) or {}
     if not isinstance(metadata, Mapping):
@@ -159,15 +163,7 @@ def _build_qa_export_search_body(
     search_after: list[Any] | None,
 ) -> dict[str, Any]:
     body: dict[str, Any] = {
-        "query": {
-            "bool": {
-                "filter": [
-                    _qa_chunk_type_filter(),
-                    {"term": {Field.KNOWLEDGE_ID.value: kb_id}},
-                    {"term": {"metadata.status": 1}},
-                ]
-            }
-        },
+        "query": _qa_export_query(kb_id, active_only=True),
         "_source": _qa_source_includes(),
         "size": batch_size,
         "sort": _qa_export_sort(),
