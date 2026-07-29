@@ -367,30 +367,16 @@ async def iter_async_search_after_hits(
         cursor = _next_cursor(hits, cursor, context)
 
 
-def search_after_slice(
-    client: Elasticsearch,
+def _collect_page_slice(
+    pages: Iterator[PitSearchPage | SearchAfterPage],
     *,
-    index: str | Sequence[str],
-    query: Mapping[str, Any],
-    sort: Sequence[str | Mapping[str, Any]],
     offset: int,
     size: int,
-    batch_size: int = DEFAULT_SEARCH_AFTER_BATCH_SIZE,
 ) -> tuple[int, list[dict[str, Any]]]:
-    if offset < 0 or size < 0:
-        raise ValueError("offset and size must be non-negative")
-
     total = 0
     selected: list[dict[str, Any]] = []
     seen = 0
-    for page in iter_search_after_pages(
-        client,
-        index=index,
-        query=query,
-        sort=sort,
-        batch_size=batch_size,
-        track_total_hits=True,
-    ):
+    for page in pages:
         if page.total is not None:
             total = page.total
             if size == 0 or offset >= total:
@@ -409,6 +395,33 @@ def search_after_slice(
     return total, selected
 
 
+def search_after_slice(
+    client: Elasticsearch,
+    *,
+    index: str | Sequence[str],
+    query: Mapping[str, Any],
+    sort: Sequence[str | Mapping[str, Any]],
+    offset: int,
+    size: int,
+    batch_size: int = DEFAULT_SEARCH_AFTER_BATCH_SIZE,
+) -> tuple[int, list[dict[str, Any]]]:
+    if offset < 0 or size < 0:
+        raise ValueError("offset and size must be non-negative")
+
+    return _collect_page_slice(
+        iter_search_after_pages(
+            client,
+            index=index,
+            query=query,
+            sort=sort,
+            batch_size=batch_size,
+            track_total_hits=True,
+        ),
+        offset=offset,
+        size=size,
+    )
+
+
 def pit_search_slice(
     client: Elasticsearch,
     *,
@@ -422,9 +435,6 @@ def pit_search_slice(
     if offset < 0 or size < 0:
         raise ValueError("offset and size must be non-negative")
 
-    total = 0
-    selected: list[dict[str, Any]] = []
-    seen = 0
     pages = iter_pit_search_pages(
         client,
         index=index,
@@ -434,22 +444,7 @@ def pit_search_slice(
         track_total_hits=True,
     )
     try:
-        for page in pages:
-            if page.total is not None:
-                total = page.total
-                if size == 0 or offset >= total:
-                    break
-            if not page.hits or size == 0:
-                break
-
-            page_end = seen + len(page.hits)
-            take_start = max(offset - seen, 0)
-            take_end = min(offset + size - seen, len(page.hits))
-            if take_start < take_end:
-                selected.extend(page.hits[take_start:take_end])
-            seen = page_end
-            if len(selected) >= size or seen >= total:
-                break
+        total, selected = _collect_page_slice(pages, offset=offset, size=size)
     finally:
         pages.close()
     return total, selected
