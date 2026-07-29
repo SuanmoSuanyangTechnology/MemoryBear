@@ -98,7 +98,7 @@ VIDEO_IMAGE_PATTERN = re.compile(
 )
 DEFAULT_PARSE_LANGUAGE = "Chinese"
 DEFAULT_PARSE_TO_PAGE = 100_000
-EMBEDDING_BATCH_SIZE = int(os.getenv("EMBEDDING_BATCH_SIZE", "20"))
+EMBEDDING_BATCH_SIZE = settings.EMBEDDING_BATCH_SIZE
 # Embedding 并发写入的最大线程数，需根据模型 API rate limit 调整
 EMBEDDING_MAX_WORKERS = int(os.getenv("EMBEDDING_MAX_WORKERS", "3"))
 # auto_questions LLM 并发调用的最大线程数

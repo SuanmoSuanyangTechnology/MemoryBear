@@ -3,6 +3,7 @@ from typing import Any, Dict, List, Union
 
 from langchain_core.embeddings import Embeddings
 
+from app.core.config import settings
 from app.core.models.base import RedBearModelConfig, get_provider_embedding_class, RedBearModelFactory
 from app.models.models_model import ModelProvider
 
@@ -44,6 +45,7 @@ class RedBearEmbeddings(Embeddings):
                 "api_key": config.api_key,
                 "timeout": timeout,
                 "max_retries": config.max_retries,
+                "chunk_size": settings.EMBEDDING_BATCH_SIZE,
             }
             if provider == ModelProvider.SPEEDBEAR:
                 params["check_embedding_ctx_length"] = False
