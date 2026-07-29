@@ -602,6 +602,7 @@ def _rebuild_graph_sync(workspace_id, kb_id, exclude_rebuild=None):
         index_name=search.index_name(workspace_id),
         query=query,
         fields=flds,
+        sort=[{"source_id": {"order": "asc", "missing": "_last"}}],
         batch_size=256,
     ):
         assert d["knowledge_graph_kwd"] == "subgraph"

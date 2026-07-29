@@ -41,7 +41,7 @@ from app.core.rag.retrieval.elasticsearch_queries import (
 )
 from app.core.rag.vdb.field import Field
 from app.core.rag.vdb.elasticsearch.pit_search import (
-    iter_pit_search_hits,
+    iter_search_after_hits,
     pit_search_slice,
 )
 from app.core.rag.vdb.elasticsearch.response_validation import (
@@ -261,10 +261,11 @@ class ElasticSearchVector(BaseVector):
     def get_ids_by_metadata_field(self, key: str, value: str) -> list[str] | None:
         ids = [
             hit["_id"]
-            for hit in iter_pit_search_hits(
+            for hit in iter_search_after_hits(
                 self._client,
                 index=self._collection_name,
                 query={"term": {f"{Field.METADATA_KEY.value}.{key}": value}},
+                sort=self._segment_sort(True),
                 batch_size=ES_FULL_SCAN_BATCH_SIZE,
                 source=False,
             )
@@ -372,7 +373,7 @@ class ElasticSearchVector(BaseVector):
             chunk_types,
             parent_ids,
         )
-        for hit in iter_pit_search_hits(
+        for hit in iter_search_after_hits(
             self._client,
             index=indices,
             query=segment_query,

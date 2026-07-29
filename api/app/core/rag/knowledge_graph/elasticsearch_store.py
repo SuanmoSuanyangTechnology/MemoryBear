@@ -1,6 +1,5 @@
 import asyncio
 import json
-import logging
 from collections.abc import Callable, Mapping, Sequence
 from functools import lru_cache
 from pathlib import Path
@@ -25,15 +24,12 @@ from app.core.rag.knowledge_graph.normalizer import (
 )
 from app.core.rag.models.chunk import DocumentChunk
 from app.core.rag.retrieval.elasticsearch_queries import raise_on_shard_failures
-from app.core.rag.vdb.elasticsearch.pit_search import iter_async_pit_search_hits
+from app.core.rag.vdb.elasticsearch.pit_search import iter_async_search_after_hits
 from app.core.rag.vdb.elasticsearch.response_validation import (
     raise_on_delete_by_query_failure,
 )
 from app.core.rag.vdb.field import Field
 from app.core.utils.datetime_utils import utcnow_naive
-
-
-logger = logging.getLogger(__name__)
 
 ENTITY_EVIDENCE = "entity_evidence"
 RELATION_EVIDENCE = "relation_evidence"
@@ -50,7 +46,6 @@ EVIDENCE_GRAPH_TYPES = (
     DOCUMENT_PROJECTION_MAP,
 )
 GRAPH_FULL_SCAN_BATCH_SIZE = 1000
-GRAPH_PIT_KEEP_ALIVE = "2m"
 
 
 @lru_cache(maxsize=1)
@@ -151,7 +146,7 @@ class GraphElasticsearchStore:
     ) -> list[dict[str, Any]]:
         return [
             hit
-            async for hit in iter_async_pit_search_hits(
+            async for hit in iter_async_search_after_hits(
                 self._client,
                 index=index_name,
                 query=query,
@@ -160,7 +155,6 @@ class GraphElasticsearchStore:
                 source_includes=source_includes,
                 source=source,
                 batch_size=batch_size,
-                keep_alive=GRAPH_PIT_KEEP_ALIVE,
             )
         ]
 
@@ -255,6 +249,7 @@ class GraphElasticsearchStore:
                 {"entity_key_kwd": {"order": "asc", "missing": "_last"}},
                 {"relation_key_kwd": {"order": "asc", "missing": "_last"}},
                 {"source_chunk_id_kwd": {"order": "asc", "missing": "_last"}},
+                {"document_id": {"order": "asc", "missing": "_last"}},
             ],
             context="load graph document evidence keys",
         )
@@ -378,6 +373,7 @@ class GraphElasticsearchStore:
             sort=[
                 {"entity_key_kwd": {"order": "asc"}},
                 {"source_chunk_id_kwd": {"order": "asc", "missing": "_last"}},
+                {"document_id": {"order": "asc", "missing": "_last"}},
             ],
             context="load entity evidence",
         )
@@ -1285,6 +1281,7 @@ class GraphElasticsearchStore:
             sort=[
                 {"relation_key_kwd": {"order": "asc"}},
                 {"source_chunk_id_kwd": {"order": "asc", "missing": "_last"}},
+                {"document_id": {"order": "asc", "missing": "_last"}},
             ],
             context=context,
         )

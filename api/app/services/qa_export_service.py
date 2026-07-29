@@ -10,7 +10,7 @@ from app.core.rag.vdb.elasticsearch.elasticsearch_vector import (
     ElasticSearchVectorClientProvider,
     ElasticSearchVectorIndexOps,
 )
-from app.core.rag.vdb.elasticsearch.pit_search import iter_pit_search_hits
+from app.core.rag.vdb.elasticsearch.pit_search import iter_search_after_hits
 from app.core.rag.vdb.field import Field
 
 
@@ -39,7 +39,7 @@ def iter_qa_pairs_by_knowledge(
     if not client.indices.exists(index=index_name):
         return
 
-    for hit in iter_pit_search_hits(
+    for hit in iter_search_after_hits(
         client,
         index=index_name,
         query=_qa_export_query(kb_id_str, active_only=True),
@@ -68,7 +68,7 @@ def iter_qa_pairs_by_document(
         {"term": {Field.KNOWLEDGE_ID.value: kb_id_str}},
         {"term": {Field.DOCUMENT_ID.value: str(document_id)}},
     ]
-    for hit in iter_pit_search_hits(
+    for hit in iter_search_after_hits(
         client,
         index=index_name,
         query={"bool": {"filter": filters}},
