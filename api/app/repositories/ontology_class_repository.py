@@ -316,7 +316,7 @@ class OntologyClassRepository:
             int: 类型数量
         """
         try:
-            stmt = select(func.count()).where(OntologyClass.scene_id == scene_id)
+            stmt = select(func.count(OntologyClass.class_id)).where(OntologyClass.scene_id == scene_id)
             result = await self.db.execute(stmt)
             return result.scalar() or 0
         except Exception as e:
