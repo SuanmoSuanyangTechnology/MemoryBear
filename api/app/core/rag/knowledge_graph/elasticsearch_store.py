@@ -1,7 +1,7 @@
 import asyncio
 import json
 import logging
-from collections.abc import AsyncIterator, Callable, Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -25,9 +25,9 @@ from app.core.rag.knowledge_graph.normalizer import (
 )
 from app.core.rag.models.chunk import DocumentChunk
 from app.core.rag.retrieval.elasticsearch_queries import raise_on_shard_failures
+from app.core.rag.vdb.elasticsearch.pit_search import iter_async_pit_search_hits
 from app.core.rag.vdb.elasticsearch.response_validation import (
     raise_on_delete_by_query_failure,
-    raise_on_search_response_failure,
 )
 from app.core.rag.vdb.field import Field
 from app.core.utils.datetime_utils import utcnow_naive
@@ -138,92 +138,6 @@ class GraphElasticsearchStore:
             ignore_unavailable=True,
         )
 
-    @staticmethod
-    def _with_shard_doc_sort(
-        sort: Sequence[str | Mapping[str, Any]],
-    ) -> list[str | Mapping[str, Any]]:
-        result = list(sort)
-        has_shard_doc = any(
-            value == "_shard_doc"
-            or (isinstance(value, Mapping) and "_shard_doc" in value)
-            for value in result
-        )
-        if not has_shard_doc:
-            result.append({"_shard_doc": "asc"})
-        return result
-
-    async def _iter_search_after_hits(
-        self,
-        *,
-        index_name: str,
-        query: Mapping[str, Any],
-        sort: Sequence[str | Mapping[str, Any]],
-        context: str,
-        source_includes: Sequence[str] | None = None,
-        source: bool | Mapping[str, Any] | None = None,
-        batch_size: int = GRAPH_FULL_SCAN_BATCH_SIZE,
-    ) -> AsyncIterator[dict[str, Any]]:
-        if not 1 <= batch_size <= 10000:
-            raise ValueError("batch_size must be between 1 and 10000")
-
-        pit_id: str | None = None
-        cursor: list[Any] | None = None
-        try:
-            opened = await self._client.open_point_in_time(
-                index=index_name,
-                keep_alive=GRAPH_PIT_KEEP_ALIVE,
-                allow_partial_search_results=False,
-            )
-            pit_id = opened.get("id")
-            if not pit_id:
-                raise RuntimeError(f"Elasticsearch did not return a PIT id during {context}")
-
-            effective_sort = self._with_shard_doc_sort(sort)
-            while True:
-                search_kwargs: dict[str, Any] = {
-                    "pit": {"id": pit_id, "keep_alive": GRAPH_PIT_KEEP_ALIVE},
-                    "query": dict(query),
-                    "sort": effective_sort,
-                    "size": batch_size,
-                    "allow_partial_search_results": False,
-                }
-                if source is not None:
-                    search_kwargs["source"] = source
-                if source_includes is not None:
-                    search_kwargs["source_includes"] = list(source_includes)
-                if cursor is not None:
-                    search_kwargs["search_after"] = cursor
-
-                response = await self._client.search(**search_kwargs)
-                latest_pit_id = response.get("pit_id")
-                if latest_pit_id:
-                    pit_id = latest_pit_id
-                raise_on_search_response_failure(response, context)
-
-                hits = list(response.get("hits", {}).get("hits", []))
-                if not hits:
-                    return
-
-                for hit in hits:
-                    yield hit
-
-                next_cursor = hits[-1].get("sort")
-                if not next_cursor or list(next_cursor) == cursor:
-                    raise RuntimeError(
-                        f"Elasticsearch search_after cursor did not advance during {context}"
-                    )
-                cursor = list(next_cursor)
-        finally:
-            if pit_id:
-                try:
-                    await self._client.close_point_in_time(id=pit_id)
-                except Exception:
-                    logger.warning(
-                        "Failed to close Elasticsearch PIT during %s",
-                        context,
-                        exc_info=True,
-                    )
-
     async def _collect_search_after_hits(
         self,
         *,
@@ -237,14 +151,16 @@ class GraphElasticsearchStore:
     ) -> list[dict[str, Any]]:
         return [
             hit
-            async for hit in self._iter_search_after_hits(
-                index_name=index_name,
+            async for hit in iter_async_pit_search_hits(
+                self._client,
+                index=index_name,
                 query=query,
                 sort=sort,
                 context=context,
                 source_includes=source_includes,
                 source=source,
                 batch_size=batch_size,
+                keep_alive=GRAPH_PIT_KEEP_ALIVE,
             )
         ]
 

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import AsyncIterator, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -64,7 +64,11 @@ def iter_pit_search_pages(
     cursor: list[Any] | None = None
     first_page = True
     try:
-        opened = client.open_point_in_time(index=index, keep_alive=keep_alive)
+        opened = client.open_point_in_time(
+            index=index,
+            keep_alive=keep_alive,
+            allow_partial_search_results=False,
+        )
         pit_id = opened.get("id")
         if not pit_id:
             raise RuntimeError("Elasticsearch did not return a PIT id")
@@ -126,6 +130,80 @@ def iter_pit_search_hits(
             yield from page.hits
     finally:
         pages.close()
+
+
+async def iter_async_pit_search_hits(
+    client: Any,
+    *,
+    index: str | Sequence[str],
+    query: Mapping[str, Any],
+    sort: Sequence[str | Mapping[str, Any]] = (),
+    batch_size: int = DEFAULT_SEARCH_AFTER_BATCH_SIZE,
+    source: bool | Mapping[str, Any] | None = None,
+    source_includes: Sequence[str] | None = None,
+    keep_alive: str = DEFAULT_PIT_KEEP_ALIVE,
+    context: str = "async PIT search",
+) -> AsyncIterator[dict[str, Any]]:
+    if not 1 <= batch_size <= MAX_SEARCH_AFTER_BATCH_SIZE:
+        raise ValueError("batch_size must be between 1 and 10000")
+
+    pit_id: str | None = None
+    cursor: list[Any] | None = None
+    try:
+        opened = await client.open_point_in_time(
+            index=index,
+            keep_alive=keep_alive,
+            allow_partial_search_results=False,
+        )
+        pit_id = opened.get("id")
+        if not pit_id:
+            raise RuntimeError(f"Elasticsearch did not return a PIT id during {context}")
+
+        effective_sort = _with_shard_tiebreaker(sort)
+        while True:
+            search_kwargs: dict[str, Any] = {
+                "pit": {"id": pit_id, "keep_alive": keep_alive},
+                "query": dict(query),
+                "sort": effective_sort,
+                "size": batch_size,
+                "allow_partial_search_results": False,
+            }
+            if source is not None:
+                search_kwargs["source"] = source
+            if source_includes is not None:
+                search_kwargs["source_includes"] = list(source_includes)
+            if cursor is not None:
+                search_kwargs["search_after"] = cursor
+
+            response = await client.search(**search_kwargs)
+            latest_pit_id = response.get("pit_id")
+            if latest_pit_id:
+                pit_id = latest_pit_id
+            raise_on_search_response_failure(response, context)
+
+            hits = list(response.get("hits", {}).get("hits", []))
+            if not hits:
+                return
+
+            for hit in hits:
+                yield hit
+
+            next_cursor = hits[-1].get("sort")
+            if not next_cursor or list(next_cursor) == cursor:
+                raise RuntimeError(
+                    f"Elasticsearch search_after cursor did not advance during {context}"
+                )
+            cursor = list(next_cursor)
+    finally:
+        if pit_id:
+            try:
+                await client.close_point_in_time(id=pit_id)
+            except Exception:
+                logger.warning(
+                    "Failed to close Elasticsearch PIT during %s",
+                    context,
+                    exc_info=True,
+                )
 
 
 def pit_search_slice(

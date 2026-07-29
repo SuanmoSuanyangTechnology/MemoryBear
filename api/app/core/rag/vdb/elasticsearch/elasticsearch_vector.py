@@ -46,6 +46,7 @@ from app.core.rag.vdb.elasticsearch.pit_search import (
 )
 from app.core.rag.vdb.elasticsearch.response_validation import (
     raise_on_delete_by_query_failure,
+    raise_on_search_response_failure,
 )
 from app.core.rag.vdb.vector_base import BaseVector
 from app.core.rag.models.chunk import DocumentChunk, chunk_retrieval_content
@@ -401,9 +402,11 @@ class ElasticSearchVector(BaseVector):
                     query=segment_query,
                     sort=sort,
                     track_total_hits=True,
+                    allow_partial_search_results=False,
                 )
             except NotFoundError:
                 return 0, []
+            raise_on_search_response_failure(result, "segment search")
             if "errors" in result:
                 raise ValueError(f"Error during query: {result['errors']}")
             total = int(result["hits"]["total"]["value"])
