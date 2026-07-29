@@ -58,9 +58,7 @@ from app.services.model_service import ModelApiKeyService, ModelConfigService
 from app.services.qa_export_service import (
     cleanup_qa_csv_export_file,
     iter_qa_csv_file_chunks,
-    iter_qa_pairs_by_document,
     make_qa_export_filename,
-    render_qa_pairs_export,
     write_qa_csv_export_file,
 )
 from app.core.quota_stub import check_knowledge_capacity_quota
@@ -84,22 +82,6 @@ router = APIRouter(
     tags=["knowledges"],
     dependencies=[Depends(get_current_user_async)]  # Apply auth to all routes in this controller
 )
-
-
-def _build_qa_export_content(
-    kb_id: uuid.UUID | str,
-    document_id: uuid.UUID | str,
-    file_ext: str | None,
-) -> bytes | None:
-    rendered = render_qa_pairs_export(
-        list(iter_qa_pairs_by_document(kb_id, document_id)),
-        file_ext,
-    )
-    if rendered is None:
-        return None
-
-    content, _ = rendered
-    return content
 
 
 async def _dispatch_reparse_tasks_for_knowledge_async(
@@ -559,32 +541,30 @@ async def kb_batch_download(
         if not files:
             raise BusinessException("该知识库下没有可下载的文件", BizCode.NOT_FOUND)
 
-        qa_export_specs = []
+        qa_export_specs: dict[str, file_service.QAExportSpec] = {}
         for f in files:
             doc_result = await db.execute(select(Document).where(Document.file_id == f.id))
             doc = doc_result.scalars().first()
             if doc and (doc.parser_config or {}).get("doc_type") == "qa":
-                qa_export_specs.append((f.file_key, f.file_ext, doc.id, kb_id))
+                qa_export_specs[f.file_key] = file_service.QAExportSpec(
+                    kb_id=kb_id,
+                    document_id=doc.id,
+                    file_ext=f.file_ext,
+                    file_name=f.file_name,
+                )
 
         entries = file_service.build_zip_arcnames(files)
         zip_name = file_service.make_zip_filename(files, request_body.zip_filename, base_name=db_knowledge.name)
         total_files = len(files)
 
-    # Prefetch QA document content before streaming so the generator does not hold a DB session.
-    pre_fetched: dict[str, bytes] = {}
-    for file_key, file_ext, document_id, knowledge_id in qa_export_specs:
-        content = await asyncio.to_thread(
-            _build_qa_export_content,
-            knowledge_id,
-            document_id,
-            file_ext,
-        )
-        if content:
-            pre_fetched[file_key] = content
-
     from urllib.parse import quote
     return StreamingResponse(
-        file_service.stream_zip_files(entries, storage_service, api_logger, pre_fetched),
+        file_service.stream_zip_files(
+            entries,
+            storage_service,
+            api_logger,
+            qa_export_specs=qa_export_specs,
+        ),
         media_type="application/zip",
         headers={
             "Content-Disposition": f"attachment; filename*=UTF-8''{quote(zip_name)}",

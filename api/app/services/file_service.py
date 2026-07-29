@@ -2,6 +2,8 @@ import asyncio
 import struct
 import uuid
 import zlib
+from collections.abc import AsyncIterator, Mapping
+from dataclasses import dataclass
 from typing import Any, AsyncGenerator
 from logging import Logger
 
@@ -12,12 +14,29 @@ from app.schemas.file_schema import FileCreate, FileUpdate
 from app.repositories import file_repository
 from app.core.logging_config import get_business_logger
 from app.services.qa_export_service import (
-    iter_qa_pairs_by_document,
-    render_qa_pairs_export,
+    cleanup_qa_export_file,
+    write_qa_document_export_file,
 )
 
 # Obtain a dedicated logger for business logic
 business_logger = get_business_logger()
+
+ZIP_STREAM_CHUNK_SIZE = 1024 * 1024
+
+
+@dataclass(frozen=True)
+class QAExportSpec:
+    kb_id: uuid.UUID | str
+    document_id: uuid.UUID | str
+    file_ext: str | None
+    file_name: str
+
+
+@dataclass(frozen=True)
+class QAExportFile:
+    path: str
+    filename: str
+    media_type: str
 
 
 def get_files_paginated(
@@ -106,10 +125,7 @@ def _is_qa_doc(db: Session, file_id: uuid.UUID) -> bool:
     return doc.parser_config.get("doc_type") == "qa"
 
 
-def _build_qa_export(db: Session, file_id: uuid.UUID, kb_id: uuid.UUID) -> tuple[bytes, str, str] | None:
-    """从 ES 导出 QA 问答对，保留原始文件格式（CSV 或 XLSX）。
-    返回 (content_bytes, filename, media_type)，文档非 QA 类型或无数据时返回 None。
-    """
+def get_qa_export_spec(db: Session, file_id: uuid.UUID, kb_id: uuid.UUID) -> QAExportSpec | None:
     from app.models.document_model import Document
     from app.models.knowledge_model import Knowledge
 
@@ -122,13 +138,32 @@ def _build_qa_export(db: Session, file_id: uuid.UUID, kb_id: uuid.UUID) -> tuple
     if not db_knowledge:
         return None
 
-    qa_pairs = list(iter_qa_pairs_by_document(kb_id, doc.id))
-    rendered = render_qa_pairs_export(qa_pairs, db_file.file_ext)
-    if rendered is None:
+    if (doc.parser_config or {}).get("doc_type") != "qa":
         return None
 
-    content, media_type = rendered
-    return content, db_file.file_name, media_type
+    return QAExportSpec(
+        kb_id=kb_id,
+        document_id=doc.id,
+        file_ext=db_file.file_ext,
+        file_name=db_file.file_name,
+    )
+
+
+def build_qa_export_file(spec: QAExportSpec) -> QAExportFile | None:
+    result = write_qa_document_export_file(
+        kb_id=spec.kb_id,
+        document_id=spec.document_id,
+        file_ext=spec.file_ext,
+    )
+    if result is None:
+        return None
+
+    path, media_type = result
+    return QAExportFile(
+        path=path,
+        filename=spec.file_name,
+        media_type=media_type,
+    )
 
 
 def build_zip_arcnames(files: list[Any]) -> list[tuple[str, str, str]]:
@@ -174,6 +209,7 @@ async def stream_zip_files(
     storage_service: Any,
     logger: Logger,
     pre_fetched: dict[str, bytes] | None = None,
+    qa_export_specs: Mapping[str, QAExportSpec] | None = None,
 ) -> AsyncGenerator[bytes, None]:
     """逐文件下载 → 实时 deflate 压缩 → yield ZIP 数据块，全程不落盘。
     单个文件下载失败时跳过并记录，最终 ZIP 内含 _skipped_files.txt 清单。
@@ -184,84 +220,127 @@ async def stream_zip_files(
     central_entries: list[tuple[bytes, int, int, int, int]] = []
     skipped_files: list[str] = []
     offset = 0
+    cleanup_paths: set[str] = set()
 
-    for file_name, file_key, arc_name in entries:
-        try:
-            if pre_fetched and file_key in pre_fetched:
-                content = pre_fetched[file_key]
-            else:
-                async with asyncio.timeout(120):
-                    content = await storage_service.download_file(file_key)
+    try:
+        for file_name, file_key, arc_name in entries:
+            try:
+                export_file: QAExportFile | None = None
+                if qa_export_specs and file_key in qa_export_specs:
+                    export_file = await asyncio.to_thread(
+                        build_qa_export_file,
+                        qa_export_specs[file_key],
+                    )
+                    if export_file is not None:
+                        cleanup_paths.add(export_file.path)
 
-            arc_name_bytes = arc_name.encode("utf-8")
+                if export_file is not None:
+                    chunk_source = _iter_qa_export_chunks(export_file.path)
+                elif pre_fetched and file_key in pre_fetched:
+                    chunk_source = _iter_bytes_content(pre_fetched[file_key])
+                else:
+                    async with asyncio.timeout(120):
+                        content = await storage_service.download_file(file_key)
+                    chunk_source = _iter_bytes_content(content)
+
+                arc_name_bytes = arc_name.encode("utf-8")
+                local_header = struct.pack(
+                    "<4sHHHHHIIIHH",
+                    b"PK\x03\x04", 20, 0x0808, 8, 0, 0, 0, 0, 0, len(arc_name_bytes), 0,
+                ) + arc_name_bytes
+
+                yield local_header
+
+                crc = 0
+                uncompressed_size = 0
+                compressed_size = 0
+                compressor = zlib.compressobj(zlib.Z_DEFAULT_COMPRESSION, zlib.DEFLATED, -15)
+                async for chunk in chunk_source:
+                    crc = zlib.crc32(chunk, crc) & 0xFFFFFFFF
+                    uncompressed_size += len(chunk)
+                    compressed_chunk = compressor.compress(chunk)
+                    if compressed_chunk:
+                        compressed_size += len(compressed_chunk)
+                        yield compressed_chunk
+
+                compressed_tail = compressor.flush()
+                if compressed_tail:
+                    compressed_size += len(compressed_tail)
+                    yield compressed_tail
+
+                descriptor = struct.pack("<III", crc, compressed_size, uncompressed_size)
+                yield descriptor
+
+                header_data_len = len(local_header) + compressed_size
+                central_entries.append((arc_name_bytes, crc, compressed_size, uncompressed_size, offset))
+                offset += header_data_len + 12
+                if export_file is not None:
+                    cleanup_qa_export_file(export_file.path)
+                    cleanup_paths.discard(export_file.path)
+            except Exception as e:
+                logger.warning(f"跳过文件 {file_name}: {e}")
+                skipped_files.append(file_name)
+                continue
+
+        # --- skipped_files manifest ---
+        if skipped_files:
+            lines = "\n".join(f"- {name}" for name in skipped_files)
+            content = f"以下文件下载失败，未包含在此ZIP包中：\n\n{lines}\n".encode("utf-8")
             crc = zlib.crc32(content) & 0xFFFFFFFF
             uncompressed_size = len(content)
             compressor = zlib.compressobj(zlib.Z_DEFAULT_COMPRESSION, zlib.DEFLATED, -15)
             compressed_data = compressor.compress(content) + compressor.flush()
             compressed_size = len(compressed_data)
+            name_bytes = "_skipped_files.txt".encode("utf-8")
 
             local_header = struct.pack(
                 "<4sHHHHHIIIHH",
-                b"PK\x03\x04", 20, 0x0808, 8, 0, 0, 0, 0, 0, len(arc_name_bytes), 0,
-            ) + arc_name_bytes
+                b"PK\x03\x04", 20, 0x0808, 8, 0, 0, 0, 0, 0, len(name_bytes), 0,
+            ) + name_bytes
+            descriptor = struct.pack("<III", crc, compressed_size, uncompressed_size)
 
             yield local_header
             yield compressed_data
-
-            descriptor = struct.pack("<III", crc, compressed_size, uncompressed_size)
             yield descriptor
 
             header_data_len = len(local_header) + compressed_size
-            central_entries.append((arc_name_bytes, crc, compressed_size, uncompressed_size, offset))
+            central_entries.append((name_bytes, crc, compressed_size, uncompressed_size, offset))
             offset += header_data_len + 12
-        except Exception as e:
-            logger.warning(f"跳过文件 {file_name}: {e}")
-            skipped_files.append(file_name)
-            continue
 
-    # --- skipped_files manifest ---
-    if skipped_files:
-        lines = "\n".join(f"- {name}" for name in skipped_files)
-        content = f"以下文件下载失败，未包含在此ZIP包中：\n\n{lines}\n".encode("utf-8")
-        crc = zlib.crc32(content) & 0xFFFFFFFF
-        uncompressed_size = len(content)
-        compressor = zlib.compressobj(zlib.Z_DEFAULT_COMPRESSION, zlib.DEFLATED, -15)
-        compressed_data = compressor.compress(content) + compressor.flush()
-        compressed_size = len(compressed_data)
-        name_bytes = "_skipped_files.txt".encode("utf-8")
+        # --- Central Directory ---
+        central_offset = offset
+        for arc_name_bytes, crc, compressed_size, uncompressed_size, local_offset in central_entries:
+            entry = struct.pack(
+                "<4sHHHHHHIIIHHHHHII",
+                b"PK\x01\x02", 20, 20, 0x0808, 8, 0, 0,
+                crc, compressed_size, uncompressed_size,
+                len(arc_name_bytes), 0, 0, 0, 0, 0, local_offset,
+            ) + arc_name_bytes
+            yield entry
+            offset += len(entry)
 
-        local_header = struct.pack(
-            "<4sHHHHHIIIHH",
-            b"PK\x03\x04", 20, 0x0808, 8, 0, 0, 0, 0, 0, len(name_bytes), 0,
-        ) + name_bytes
-        descriptor = struct.pack("<III", crc, compressed_size, uncompressed_size)
+        central_size = offset - central_offset
 
-        yield local_header
-        yield compressed_data
-        yield descriptor
+        eocd = struct.pack(
+            "<4sHHHHIIH",
+            b"PK\x05\x06", 0, 0,
+            len(central_entries), len(central_entries),
+            central_size, central_offset, 0,
+        )
+        yield eocd
+    finally:
+        for path in cleanup_paths:
+            cleanup_qa_export_file(path)
 
-        header_data_len = len(local_header) + compressed_size
-        central_entries.append((name_bytes, crc, compressed_size, uncompressed_size, offset))
-        offset += header_data_len + 12
 
-    # --- Central Directory ---
-    central_offset = offset
-    for arc_name_bytes, crc, compressed_size, uncompressed_size, local_offset in central_entries:
-        entry = struct.pack(
-            "<4sHHHHHHIIIHHHHHII",
-            b"PK\x01\x02", 20, 20, 0x0808, 8, 0, 0,
-            crc, compressed_size, uncompressed_size,
-            len(arc_name_bytes), 0, 0, 0, 0, 0, local_offset,
-        ) + arc_name_bytes
-        yield entry
-        offset += len(entry)
+async def _iter_bytes_content(content: bytes) -> AsyncIterator[bytes]:
+    yield content
 
-    central_size = offset - central_offset
 
-    eocd = struct.pack(
-        "<4sHHHHIIH",
-        b"PK\x05\x06", 0, 0,
-        len(central_entries), len(central_entries),
-        central_size, central_offset, 0,
-    )
-    yield eocd
+async def _iter_qa_export_chunks(path: str) -> AsyncIterator[bytes]:
+    with open(path, "rb") as file:
+        while True:
+            chunk = await asyncio.to_thread(file.read, ZIP_STREAM_CHUNK_SIZE)
+            if not chunk:
+                break
+            yield chunk

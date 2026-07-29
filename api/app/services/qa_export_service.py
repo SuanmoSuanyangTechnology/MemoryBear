@@ -97,13 +97,68 @@ def write_qa_csv_export_file(
     return path
 
 
-def iter_qa_csv_file_chunks(
+def write_qa_document_export_file(
+    kb_id: uuid.UUID | str,
+    document_id: uuid.UUID | str,
+    file_ext: str | None,
+    batch_size: int = QA_EXPORT_BATCH_SIZE,
+) -> tuple[str, str] | None:
+    suffix = ".xlsx" if _is_xlsx_file(file_ext) else ".csv"
+    fd, path = tempfile.mkstemp(prefix="memorybear-qa-document-export-", suffix=suffix)
+    try:
+        if _is_xlsx_file(file_ext):
+            os.close(fd)
+            has_rows = _write_xlsx_qa_pairs_file(
+                iter_qa_pairs_by_document(
+                    kb_id=kb_id,
+                    document_id=document_id,
+                    batch_size=batch_size,
+                ),
+                path,
+            )
+            if not has_rows:
+                _remove_file_if_exists(path)
+                return None
+            return path, QA_XLSX_MEDIA_TYPE
+
+        has_rows = False
+        with os.fdopen(fd, "w", encoding="utf-8-sig", newline="") as output:
+            writer = csv.writer(output)
+            writer.writerow(QA_EXPORT_COLUMNS)
+            for pair in iter_qa_pairs_by_document(
+                kb_id=kb_id,
+                document_id=document_id,
+                batch_size=batch_size,
+            ):
+                has_rows = True
+                writer.writerow([pair["question"], pair["answer"]])
+        if not has_rows:
+            _remove_file_if_exists(path)
+            return None
+        return path, QA_CSV_MEDIA_TYPE
+    except Exception:
+        _remove_file_if_exists(path)
+        raise
+
+
+def iter_qa_export_file_chunks(
     path: str,
     chunk_size: int = QA_CSV_FILE_CHUNK_SIZE,
 ) -> Iterator[bytes]:
     with open(path, "rb") as file:
         while chunk := file.read(chunk_size):
             yield chunk
+
+
+def iter_qa_csv_file_chunks(
+    path: str,
+    chunk_size: int = QA_CSV_FILE_CHUNK_SIZE,
+) -> Iterator[bytes]:
+    yield from iter_qa_export_file_chunks(path, chunk_size)
+
+
+def cleanup_qa_export_file(path: str) -> None:
+    _remove_file_if_exists(path)
 
 
 def cleanup_qa_csv_export_file(path: str) -> None:
@@ -233,6 +288,32 @@ def _write_xlsx_qa_pairs(qa_pairs: list[Mapping[str, Any]]) -> bytes:
         output = io.BytesIO()
         wb.save(output)
         return output.getvalue()
+    finally:
+        wb.close()
+
+
+def _write_xlsx_qa_pairs_file(
+    qa_pairs: Iterator[dict[str, str]],
+    path: str,
+) -> bool:
+    import openpyxl
+
+    wb = openpyxl.Workbook(write_only=True)
+    try:
+        ws = wb.create_sheet()
+        ws.append(QA_EXPORT_COLUMNS)
+        has_rows = False
+        for pair in qa_pairs:
+            has_rows = True
+            ws.append(
+                [
+                    _normalize_csv_value(pair.get("question")),
+                    _normalize_csv_value(pair.get("answer")),
+                ]
+            )
+        if has_rows:
+            wb.save(path)
+        return has_rows
     finally:
         wb.close()
 
