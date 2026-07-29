@@ -454,10 +454,10 @@ class ESConnection(DocStoreConnection):
             chunk_ids = condition["id"]
             if not isinstance(chunk_ids, list):
                 chunk_ids = [chunk_ids]
-            if not chunk_ids:  # when chunk_ids is empty, delete all
-                qry = Q("match_all")
-            else:
-                qry = Q("ids", values=chunk_ids)
+            qry = Q("bool")
+            qry.filter.append(Q("term", kb_id=knowledgebaseId))
+            if chunk_ids:
+                qry.filter.append(Q("ids", values=chunk_ids))
         else:
             qry = Q("bool")
             for k, v in condition.items():
