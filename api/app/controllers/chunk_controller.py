@@ -67,64 +67,6 @@ def _list_all_segments(vector_service: Any, **kwargs: Any) -> list[DocumentChunk
     return list(vector_service.iter_by_segment(**kwargs))
 
 
-def _load_parent_fallback_page(
-    vector_service: Any,
-    *,
-    document_id: str,
-    keywords: str | None,
-    page: int,
-    pagesize: int,
-) -> tuple[
-    int,
-    list[DocumentChunk],
-    int,
-    list[DocumentChunk],
-    list[DocumentChunk],
-]:
-    offset = (page - 1) * pagesize
-    end = offset + pagesize
-    total_all = 0
-    total_parents = 0
-    flat_page: list[DocumentChunk] = []
-    parent_page: list[DocumentChunk] = []
-
-    for item in vector_service.iter_by_segment(
-        document_id=document_id,
-        query=keywords,
-        asc=True,
-    ):
-        if offset <= total_all < end:
-            flat_page.append(item)
-        if (item.metadata or {}).get("chunk_type") == "parent":
-            if offset <= total_parents < end:
-                parent_page.append(item)
-            total_parents += 1
-        total_all += 1
-
-    if total_parents == 0 or not parent_page:
-        return total_all, flat_page, total_parents, parent_page, []
-
-    parent_doc_ids = {
-        item.metadata.get("doc_id")
-        for item in parent_page
-        if item.metadata and item.metadata.get("doc_id")
-    }
-    selected_children: list[DocumentChunk] = []
-    if parent_doc_ids:
-        for item in vector_service.iter_by_segment(
-            document_id=document_id,
-            asc=True,
-        ):
-            metadata = item.metadata or {}
-            if (
-                metadata.get("chunk_type") == "child"
-                and metadata.get("parent_id") in parent_doc_ids
-            ):
-                selected_children.append(item)
-
-    return total_all, flat_page, total_parents, parent_page, selected_children
-
-
 def _build_image2text_vision_model(db: Session, image2text_id: uuid.UUID, tenant_id: uuid.UUID):
     if not image2text_id:
         raise HTTPException(
@@ -617,10 +559,9 @@ async def get_chunks(
                     parent_items,
                     child_items_fallback,
                 ) = await asyncio.to_thread(
-                    _load_parent_fallback_page,
-                    vector_service,
+                    vector_service.load_parent_child_fallback_page,
                     document_id=str(document_id),
-                    keywords=keywords,
+                    query=keywords,
                     page=page,
                     pagesize=pagesize,
                 )

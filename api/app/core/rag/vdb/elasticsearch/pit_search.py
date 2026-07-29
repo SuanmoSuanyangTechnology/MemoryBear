@@ -45,6 +45,56 @@ def _with_shard_tiebreaker(
     return result
 
 
+def _pit_search_kwargs(
+    *,
+    pit_id: str,
+    keep_alive: str,
+    query: Mapping[str, Any],
+    sort: Sequence[str | Mapping[str, Any]],
+    batch_size: int,
+    source: bool | Mapping[str, Any] | None,
+    source_includes: Sequence[str] | None,
+    cursor: list[Any] | None,
+    track_total_hits: bool | None = None,
+) -> dict[str, Any]:
+    search_kwargs: dict[str, Any] = {
+        "pit": {"id": pit_id, "keep_alive": keep_alive},
+        "query": dict(query),
+        "sort": list(sort),
+        "size": batch_size,
+        "allow_partial_search_results": False,
+    }
+    if track_total_hits is not None:
+        search_kwargs["track_total_hits"] = track_total_hits
+    if source is not None:
+        search_kwargs["source"] = source
+    if source_includes is not None:
+        search_kwargs["source_includes"] = list(source_includes)
+    if cursor is not None:
+        search_kwargs["search_after"] = cursor
+    return search_kwargs
+
+
+def _latest_pit_id(response: Mapping[str, Any], current_pit_id: str) -> str:
+    latest = response.get("pit_id")
+    if latest:
+        return str(latest)
+    return current_pit_id
+
+
+def _next_cursor(
+    hits: list[dict[str, Any]],
+    cursor: list[Any] | None,
+    context: str,
+) -> list[Any]:
+    next_cursor = hits[-1].get("sort")
+    if not next_cursor or list(next_cursor) == cursor:
+        raise RuntimeError(
+            f"Elasticsearch search_after cursor did not advance during {context}"
+        )
+    return list(next_cursor)
+
+
 def iter_pit_search_pages(
     client: Elasticsearch,
     *,
@@ -75,26 +125,22 @@ def iter_pit_search_pages(
 
         effective_sort = _with_shard_tiebreaker(sort)
         while True:
-            search_kwargs: dict[str, Any] = {
-                "pit": {"id": pit_id, "keep_alive": keep_alive},
-                "query": dict(query),
-                "sort": effective_sort,
-                "size": batch_size,
-                "track_total_hits": track_total_hits if first_page else False,
-                "allow_partial_search_results": False,
-            }
-            if source is not None:
-                search_kwargs["source"] = source
-            if source_includes is not None:
-                search_kwargs["source_includes"] = list(source_includes)
-            if cursor is not None:
-                search_kwargs["search_after"] = cursor
-
-            response = client.search(**search_kwargs)
-            latest_pit_id = response.get("pit_id")
-            if latest_pit_id:
-                pit_id = latest_pit_id
-            raise_on_search_response_failure(response, "PIT search")
+            response = client.search(
+                **_pit_search_kwargs(
+                    pit_id=pit_id,
+                    keep_alive=keep_alive,
+                    query=query,
+                    sort=effective_sort,
+                    batch_size=batch_size,
+                    source=source,
+                    source_includes=source_includes,
+                    cursor=cursor,
+                    track_total_hits=track_total_hits if first_page else False,
+                )
+            )
+            pit_id = _latest_pit_id(response, pit_id)
+            context = "PIT search"
+            raise_on_search_response_failure(response, context)
 
             hits = list(response.get("hits", {}).get("hits", []))
             total = _total_value(response) if first_page and track_total_hits else None
@@ -105,12 +151,7 @@ def iter_pit_search_pages(
 
             yield PitSearchPage(total=total, hits=hits)
 
-            next_cursor = hits[-1].get("sort")
-            if not next_cursor or list(next_cursor) == cursor:
-                raise RuntimeError(
-                    "Elasticsearch search_after sort cursor is missing or did not advance"
-                )
-            cursor = list(next_cursor)
+            cursor = _next_cursor(hits, cursor, context)
             first_page = False
     finally:
         if pit_id:
@@ -161,24 +202,19 @@ async def iter_async_pit_search_hits(
 
         effective_sort = _with_shard_tiebreaker(sort)
         while True:
-            search_kwargs: dict[str, Any] = {
-                "pit": {"id": pit_id, "keep_alive": keep_alive},
-                "query": dict(query),
-                "sort": effective_sort,
-                "size": batch_size,
-                "allow_partial_search_results": False,
-            }
-            if source is not None:
-                search_kwargs["source"] = source
-            if source_includes is not None:
-                search_kwargs["source_includes"] = list(source_includes)
-            if cursor is not None:
-                search_kwargs["search_after"] = cursor
-
-            response = await client.search(**search_kwargs)
-            latest_pit_id = response.get("pit_id")
-            if latest_pit_id:
-                pit_id = latest_pit_id
+            response = await client.search(
+                **_pit_search_kwargs(
+                    pit_id=pit_id,
+                    keep_alive=keep_alive,
+                    query=query,
+                    sort=effective_sort,
+                    batch_size=batch_size,
+                    source=source,
+                    source_includes=source_includes,
+                    cursor=cursor,
+                )
+            )
+            pit_id = _latest_pit_id(response, pit_id)
             raise_on_search_response_failure(response, context)
 
             hits = list(response.get("hits", {}).get("hits", []))
@@ -188,12 +224,7 @@ async def iter_async_pit_search_hits(
             for hit in hits:
                 yield hit
 
-            next_cursor = hits[-1].get("sort")
-            if not next_cursor or list(next_cursor) == cursor:
-                raise RuntimeError(
-                    f"Elasticsearch search_after cursor did not advance during {context}"
-                )
-            cursor = list(next_cursor)
+            cursor = _next_cursor(hits, cursor, context)
     finally:
         if pit_id:
             try:

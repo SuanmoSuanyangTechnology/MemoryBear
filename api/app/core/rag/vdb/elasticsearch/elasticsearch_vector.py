@@ -381,6 +381,64 @@ class ElasticSearchVector(BaseVector):
         ):
             yield self._segment_hit_to_chunk(hit)
 
+    def load_parent_child_fallback_page(
+        self,
+        *,
+        document_id: str,
+        query: str | None,
+        page: int,
+        pagesize: int,
+    ) -> tuple[
+        int,
+        list[DocumentChunk],
+        int,
+        list[DocumentChunk],
+        list[DocumentChunk],
+    ]:
+        offset = (page - 1) * pagesize
+        end = offset + pagesize
+        total_all = 0
+        total_parents = 0
+        flat_page: list[DocumentChunk] = []
+        parent_page: list[DocumentChunk] = []
+
+        for item in self.iter_by_segment(
+            document_id=document_id,
+            query=query,
+            asc=True,
+        ):
+            metadata = item.metadata or {}
+            if offset <= total_all < end:
+                flat_page.append(item)
+            if metadata.get("chunk_type") == "parent":
+                if offset <= total_parents < end:
+                    parent_page.append(item)
+                total_parents += 1
+            total_all += 1
+
+        if total_parents == 0 or not parent_page:
+            return total_all, flat_page, total_parents, parent_page, []
+
+        parent_doc_ids = {
+            item.metadata.get("doc_id")
+            for item in parent_page
+            if item.metadata and item.metadata.get("doc_id")
+        }
+        selected_children: list[DocumentChunk] = []
+        if parent_doc_ids:
+            for item in self.iter_by_segment(
+                document_id=document_id,
+                asc=True,
+            ):
+                metadata = item.metadata or {}
+                if (
+                    metadata.get("chunk_type") == "child"
+                    and metadata.get("parent_id") in parent_doc_ids
+                ):
+                    selected_children.append(item)
+
+        return total_all, flat_page, total_parents, parent_page, selected_children
+
     def search_by_segment(self, document_id: str | None = None, query: str | None = None, pagesize: int = 10, page: int = 1, asc: bool = True, chunk_types: list[str] | str | None = None, parent_ids: list[str] | str | None = None, **kwargs) -> tuple[int, list[DocumentChunk]]:  # 返回 (total, results):
         """
         Search documents by segment (pagination) with optional keyword query.
