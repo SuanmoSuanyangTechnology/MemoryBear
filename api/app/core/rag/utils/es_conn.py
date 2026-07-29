@@ -19,7 +19,10 @@ from app.core.rag.utils.doc_store_conn import DocStoreConnection, MatchExpr, Ord
 from app.core.rag.nlp import is_english, rag_tokenizer
 from app.core.rag.common.float_utils import get_float
 from app.core.rag.common.constants import PAGERANK_FLD, TAG_FLD
-from app.core.rag.vdb.elasticsearch.pit_search import iter_pit_search_hits
+from app.core.rag.vdb.elasticsearch.pit_search import (
+    DEFAULT_PIT_KEEP_ALIVE,
+    iter_pit_search_hits,
+)
 from app.core.rag.vdb.elasticsearch.response_validation import (
     raise_on_delete_by_query_failure,
 )
@@ -286,16 +289,26 @@ class ESConnection(DocStoreConnection):
             query: Mapping[str, Any],
             fields: Sequence[str],
             batch_size: int = 1000,
+            keep_alive: str = DEFAULT_PIT_KEEP_ALIVE,
     ) -> Iterator[dict[str, Any]]:
+        """
+        Iterate over search hits using an Elasticsearch point-in-time scan.
+
+        Returned dicts are copied from each hit's source. When the ES document
+        id is available, it is exposed as ``_es_id`` to avoid colliding with
+        source-defined ``_id`` fields.
+        """
         for hit in iter_pit_search_hits(
             self.es,
             index=index_name,
             query=query,
             source_includes=fields,
             batch_size=batch_size,
+            keep_alive=keep_alive,
         ):
             source = dict(hit.get("_source") or {})
-            source["_id"] = hit.get("_id")
+            if hit.get("_id") is not None:
+                source.setdefault("_es_id", hit.get("_id"))
             yield source
 
     def get(self, chunkId: str, indexName: str, knowledgebaseIds: list[str]) -> dict | None:

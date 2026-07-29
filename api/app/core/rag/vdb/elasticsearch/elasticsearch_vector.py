@@ -429,6 +429,7 @@ class ElasticSearchVector(BaseVector):
             for item in self.iter_by_segment(
                 document_id=document_id,
                 asc=True,
+                parent_ids=list(parent_doc_ids),
             ):
                 metadata = item.metadata or {}
                 if (
