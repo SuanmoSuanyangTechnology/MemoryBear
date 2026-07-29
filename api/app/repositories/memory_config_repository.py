@@ -44,6 +44,9 @@ class MemoryConfigRepository:
     - Neo4j Cypher查询常量
     """
 
+    def __init__(self, db: Session | AsyncSession):
+        self.db = db
+
     # ==================== Neo4j Cypher 查询常量 ====================
 
     # Dialogue count by group
@@ -121,9 +124,8 @@ class MemoryConfigRepository:
       r.statement AS statement
     """
 
-    @staticmethod
-    def update_reflection_config(
-            db: Session,
+    async def update_reflection_config_async(
+            self,
             config_id: uuid.UUID,
             enable_self_reflexion: bool,
             iteration_period: str,
@@ -133,28 +135,11 @@ class MemoryConfigRepository:
             memory_verify: bool,
             quality_assessment: bool
     ) -> MemoryConfig:
-        """构建反思配置更新语句（SQLAlchemy text() 命名参数）
-
-        Args:
-            quality_assessment:
-            memory_verify:
-            reflection_model_id:
-            baseline:
-            reflexion_range:
-            iteration_period:
-            enable_self_reflexion:
-            db: database object
-            config_id: 配置ID
-
-        Returns:
-            MemoryConfig
-
-        Raises:
-            ValueError: 没有字段需要更新时抛出
-        """
-        db_logger.debug(f"构建反思配置更新语句: config_id={config_id}")
+        """异步版本：构建反思配置更新语句"""
+        db_logger.debug(f"构建反思配置更新语句(异步): config_id={config_id}")
         stmt = select(MemoryConfig).where(MemoryConfig.config_id == config_id)
-        memory_config_obj = db.scalars(stmt).first()
+        result = await self.db.execute(stmt)
+        memory_config_obj = result.scalars().first()
         if not memory_config_obj:
             raise BusinessException
         memory_config_obj.enable_self_reflexion = enable_self_reflexion
@@ -164,11 +149,9 @@ class MemoryConfigRepository:
         memory_config_obj.reflection_model_id = reflection_model_id
         memory_config_obj.memory_verify = memory_verify
         memory_config_obj.quality_assessment = quality_assessment
-
         return memory_config_obj
 
-    @staticmethod
-    def query_reflection_config_by_id(db: Session, config_id: uuid.UUID | int | str) -> MemoryConfig:
+    def query_reflection_config_by_id(self, config_id: uuid.UUID | int | str) -> MemoryConfig:
         """构建反思配置查询语句，通过config_id查询反思配置（SQLAlchemy text() 命名参数）
 
         Args:
@@ -180,13 +163,22 @@ class MemoryConfigRepository:
         """
         db_logger.debug(f"构建反思配置查询语句: config_id={config_id}")
         stmt = select(MemoryConfig).where(MemoryConfig.config_id == config_id)
-        memory_config = db.scalars(stmt).first()
+        memory_config = self.db.scalars(stmt).first()
         if not memory_config:
             raise RuntimeError("reflection config not found")
         return memory_config
 
-    @staticmethod
-    def query_reflection_config_by_workspace_id(db: Session, workspace_id: uuid.UUID) -> MemoryConfig:
+    async def query_reflection_config_by_id_async(self, config_id: uuid.UUID | int | str) -> MemoryConfig:
+        """异步版本：通过config_id查询反思配置"""
+        db_logger.debug(f"构建反思配置查询语句(异步): config_id={config_id}")
+        stmt = select(MemoryConfig).where(MemoryConfig.config_id == config_id)
+        result = await self.db.execute(stmt)
+        memory_config = result.scalars().first()
+        if not memory_config:
+            raise RuntimeError("reflection config not found")
+        return memory_config
+
+    def query_reflection_config_by_workspace_id(self, workspace_id: uuid.UUID) -> MemoryConfig:
         """构建查询所有配置的语句（SQLAlchemy text() 命名参数）
 
         Args:
@@ -199,7 +191,7 @@ class MemoryConfigRepository:
         db_logger.debug(f"构建查询所有配置语句: workspace_id={workspace_id}")
 
         stmt = select(MemoryConfig).where(MemoryConfig.workspace_id == workspace_id)
-        memory_config = db.scalars(stmt).first()
+        memory_config = self.db.scalars(stmt).first()
         if not memory_config:
             raise RuntimeError("reflection config not found")
         return memory_config
@@ -224,12 +216,10 @@ class MemoryConfigRepository:
         params = {"workspace_id": workspace_id}
         return query, params
 
-    @staticmethod
-    def create(db: Session, params: ConfigParamsCreate) -> MemoryConfig:
+    def create(self, params: ConfigParamsCreate) -> MemoryConfig:
         """创建记忆配置
 
         Args:
-            db: 数据库会话
             params: 配置参数创建模型
 
         Returns:
@@ -254,23 +244,49 @@ class MemoryConfigRepository:
                 audio_id=params.audio_id,
                 vision_id=params.vision_id,
             )
-            db.add(db_config)
-            db.flush()  # 获取自增ID但不提交事务
+            self.db.add(db_config)
+            self.db.flush()  # 获取自增ID但不提交事务
 
             db_logger.info(f"记忆配置已添加到会话: {db_config.config_name} (ID: {db_config.config_id})")
             return db_config
 
         except Exception as e:
-            db.rollback()
+            self.db.rollback()
             db_logger.error(f"创建记忆配置失败: {params.config_name} - {str(e)}")
             raise
 
-    @staticmethod
-    def update(db: Session, update: ConfigUpdate) -> Optional[MemoryConfig]:
+    async def create_async(self, params: ConfigParamsCreate) -> MemoryConfig:
+        db_logger.debug(f"创建记忆配置(异步): config_name={params.config_name}, workspace_id={params.workspace_id}")
+        try:
+            db_config = MemoryConfig(
+                config_id=uuid.uuid4(),
+                config_name=params.config_name,
+                config_desc=params.config_desc,
+                workspace_id=params.workspace_id,
+                scene_id=params.scene_id,
+                pruning_scene=params.pruning_scene,
+                llm_id=params.llm_id,
+                embedding_id=params.embedding_id,
+                rerank_id=params.rerank_id,
+                reflection_model_id=params.reflection_model_id,
+                emotion_model_id=params.emotion_model_id,
+                video_id=params.video_id,
+                audio_id=params.audio_id,
+                vision_id=params.vision_id,
+            )
+            self.db.add(db_config)
+            await self.db.flush()
+            db_logger.info(f"记忆配置已添加到会话(异步): {db_config.config_name} (ID: {db_config.config_id})")
+            return db_config
+        except Exception as e:
+            await self.db.rollback()
+            db_logger.error(f"创建记忆配置失败(异步): {params.config_name} - {str(e)}")
+            raise
+
+    def update(self, update: ConfigUpdate) -> Optional[MemoryConfig]:
         """更新基础配置
 
         Args:
-            db: 数据库会话
             update: 配置更新模型
 
         Returns:
@@ -282,7 +298,7 @@ class MemoryConfigRepository:
         db_logger.debug(f"更新记忆配置: config_id={update.config_id}")
 
         try:
-            db_config = db.query(MemoryConfig).filter(MemoryConfig.config_id == update.config_id).first()
+            db_config = self.db.query(MemoryConfig).filter(MemoryConfig.config_id == update.config_id).first()
             if not db_config:
                 db_logger.warning(f"记忆配置不存在: config_id={update.config_id}")
                 return None
@@ -302,23 +318,51 @@ class MemoryConfigRepository:
             if not has_update:
                 raise ValueError("No fields to update")
 
-            db.commit()
-            db.refresh(db_config)
+            self.db.commit()
+            self.db.refresh(db_config)
 
             db_logger.info(f"记忆配置更新成功: {db_config.config_name} (ID: {update.config_id})")
             return db_config
 
         except Exception as e:
-            db.rollback()
+            self.db.rollback()
             db_logger.error(f"更新记忆配置失败: config_id={update.config_id} - {str(e)}")
             raise
 
-    @staticmethod
-    def update_extracted(db: Session, update: ConfigUpdateExtracted) -> Optional[MemoryConfig]:
+    async def update_async(self, update: ConfigUpdate) -> Optional[MemoryConfig]:
+        db_logger.debug(f"更新记忆配置(异步): config_id={update.config_id}")
+        try:
+            stmt = select(MemoryConfig).where(MemoryConfig.config_id == update.config_id)
+            result = await self.db.execute(stmt)
+            db_config = result.scalar_one_or_none()
+            if not db_config:
+                db_logger.warning(f"记忆配置不存在: config_id={update.config_id}")
+                return None
+            has_update = False
+            if update.config_name is not None:
+                db_config.config_name = update.config_name
+                has_update = True
+            if update.config_desc is not None:
+                db_config.config_desc = update.config_desc
+                has_update = True
+            if update.scene_id is not None:
+                db_config.scene_id = update.scene_id
+                has_update = True
+            if not has_update:
+                raise ValueError("No fields to update")
+            await self.db.commit()
+            await self.db.refresh(db_config)
+            db_logger.info(f"记忆配置更新成功(异步): {db_config.config_name} (ID: {update.config_id})")
+            return db_config
+        except Exception as e:
+            await self.db.rollback()
+            db_logger.error(f"更新记忆配置失败(异步): config_id={update.config_id} - {str(e)}")
+            raise
+
+    def update_extracted(self, update: ConfigUpdateExtracted) -> Optional[MemoryConfig]:
         """更新记忆萃取引擎配置
 
         Args:
-            db: 数据库会话
             update: 萃取配置更新模型
 
         Returns:
@@ -328,7 +372,7 @@ class MemoryConfigRepository:
 
         try:
             stmt = select(MemoryConfig).where(MemoryConfig.config_id == update.config_id)
-            db_config = db.execute(stmt).scalar_one_or_none()
+            db_config = self.db.execute(stmt).scalar_one_or_none()
             if not db_config:
                 db_logger.warning(f"记忆配置不存在: config_id={update.config_id}")
                 return None
@@ -339,23 +383,43 @@ class MemoryConfigRepository:
             for field, value in update_data.items():
                 setattr(db_config, field, value)
 
-            db.commit()
-            db.refresh(db_config)
+            self.db.commit()
+            self.db.refresh(db_config)
 
             db_logger.info(f"萃取配置更新成功: config_id={update.config_id}")
             return db_config
 
         except Exception as e:
-            db.rollback()
+            self.db.rollback()
             db_logger.error(f"更新萃取配置失败: config_id={update.config_id} - {str(e)}")
             raise
 
-    @staticmethod
-    def update_forget(db: Session, update: ConfigUpdateForget) -> Optional[MemoryConfig]:
+    async def update_extracted_async(self, update: ConfigUpdateExtracted) -> Optional[MemoryConfig]:
+        db_logger.debug(f"更新萃取配置(异步): config_id={update.config_id}")
+        try:
+            stmt = select(MemoryConfig).where(MemoryConfig.config_id == update.config_id)
+            result = await self.db.execute(stmt)
+            db_config = result.scalar_one_or_none()
+            if not db_config:
+                db_logger.warning(f"记忆配置不存在: config_id={update.config_id}")
+                return None
+            update_data = update.model_dump(exclude_unset=True)
+            update_data.pop("config_id", None)
+            for field, value in update_data.items():
+                setattr(db_config, field, value)
+            await self.db.commit()
+            await self.db.refresh(db_config)
+            db_logger.info(f"萃取配置更新成功(异步): config_id={update.config_id}")
+            return db_config
+        except Exception as e:
+            await self.db.rollback()
+            db_logger.error(f"更新萃取配置失败(异步): config_id={update.config_id} - {str(e)}")
+            raise
+
+    def update_forget(self, update: ConfigUpdateForget) -> Optional[MemoryConfig]:
         """更新遗忘引擎配置
 
         Args:
-            db: 数据库会话
             update: 遗忘配置更新模型
 
         Returns:
@@ -367,7 +431,7 @@ class MemoryConfigRepository:
         db_logger.debug(f"更新遗忘配置: config_id={update.config_id}")
 
         try:
-            db_config = db.query(MemoryConfig).filter(MemoryConfig.config_id == update.config_id).first()
+            db_config = self.db.query(MemoryConfig).filter(MemoryConfig.config_id == update.config_id).first()
             if not db_config:
                 db_logger.warning(f"记忆配置不存在: config_id={update.config_id}")
                 return None
@@ -387,32 +451,30 @@ class MemoryConfigRepository:
             if not has_update:
                 raise ValueError("No fields to update")
 
-            db.commit()
-            db.refresh(db_config)
+            self.db.commit()
+            self.db.refresh(db_config)
 
             db_logger.info(f"遗忘配置更新成功: config_id={update.config_id}")
             return db_config
 
         except Exception as e:
-            db.rollback()
+            self.db.rollback()
             db_logger.error(f"更新遗忘配置失败: config_id={update.config_id} - {str(e)}")
             raise
 
-    @staticmethod
-    def get_extracted_config(db: Session, config_id: UUID | int) -> Optional[Dict]:
+    def get_extracted_config(self, config_id: UUID | int) -> Optional[Dict]:
         """获取萃取配置，通过主键查询某条配置
 
         Args:
-            db: 数据库会话
             config_id: 配置ID
 
         Returns:
             Optional[Dict]: 萃取配置字典，不存在则返回None
         """
-        config_id = resolve_config_id(config_id, db)
+        config_id = resolve_config_id(config_id, self.db)
         db_logger.debug(f"查询萃取配置: config_id={config_id}")
         try:
-            db_config = db.query(MemoryConfig).filter(MemoryConfig.config_id == config_id).first()
+            db_config = self.db.query(MemoryConfig).filter(MemoryConfig.config_id == config_id).first()
             if not db_config:
                 db_logger.debug(f"萃取配置不存在: config_id={config_id}")
                 return None
@@ -451,12 +513,49 @@ class MemoryConfigRepository:
             db_logger.error(f"查询萃取配置失败: config_id={config_id} - {str(e)}")
             raise
 
-    @staticmethod
-    def get_forget_config(db: Session, config_id: UUID) -> Optional[Dict]:
+    async def get_extracted_config_async(self, config_id: UUID | int) -> Optional[Dict]:
+        config_id = resolve_config_id(config_id, self.db)
+        db_logger.debug(f"查询萃取配置(异步): config_id={config_id}")
+        try:
+            stmt = select(MemoryConfig).where(MemoryConfig.config_id == config_id)
+            result = await self.db.execute(stmt)
+            db_config = result.scalar_one_or_none()
+            if not db_config:
+                db_logger.debug(f"萃取配置不存在: config_id={config_id}")
+                return None
+            result_dict = {
+                "llm_id": db_config.llm_id, "embedding_id": db_config.embedding_id,
+                "rerank_id": db_config.rerank_id, "vision_id": db_config.vision_id,
+                "audio_id": db_config.audio_id, "video_id": db_config.video_id,
+                "enable_llm_dedup_blockwise": db_config.enable_llm_dedup_blockwise,
+                "enable_llm_disambiguation": db_config.enable_llm_disambiguation,
+                "deep_retrieval": db_config.deep_retrieval,
+                "t_type_strict": db_config.t_type_strict,
+                "t_name_strict": db_config.t_name_strict,
+                "t_overall": db_config.t_overall,
+                "chunker_strategy": db_config.chunker_strategy,
+                "statement_granularity": db_config.statement_granularity,
+                "include_dialogue_context": db_config.include_dialogue_context,
+                "max_context": db_config.max_context,
+                "pruning_enabled": db_config.pruning_enabled,
+                "pruning_scene": db_config.pruning_scene,
+                "pruning_threshold": db_config.pruning_threshold,
+                "enable_self_reflexion": db_config.enable_self_reflexion,
+                "iteration_period": db_config.iteration_period,
+                "reflexion_range": db_config.reflexion_range,
+                "baseline": db_config.baseline,
+                "is_default": bool(db_config.is_default),
+            }
+            db_logger.debug(f"萃取配置查询成功(异步): config_id={config_id}")
+            return result_dict
+        except Exception as e:
+            db_logger.error(f"查询萃取配置失败(异步): config_id={config_id} - {str(e)}")
+            raise
+
+    def get_forget_config(self, config_id: UUID) -> Optional[Dict]:
         """获取遗忘配置，通过主键查询某条配置
 
         Args:
-            db: 数据库会话
             config_id: 配置ID
 
         Returns:
@@ -465,7 +564,7 @@ class MemoryConfigRepository:
         db_logger.debug(f"查询遗忘配置: config_id={config_id}")
 
         try:
-            db_config = db.query(MemoryConfig).filter(MemoryConfig.config_id == config_id).first()
+            db_config = self.db.query(MemoryConfig).filter(MemoryConfig.config_id == config_id).first()
             if not db_config:
                 db_logger.debug(f"遗忘配置不存在: config_id={config_id}")
                 return None
@@ -483,12 +582,10 @@ class MemoryConfigRepository:
             db_logger.error(f"查询遗忘配置失败: config_id={config_id} - {str(e)}")
             raise
 
-    @staticmethod
-    def get_by_id(db: Session, config_id: uuid.UUID) -> Optional[MemoryConfig]:
+    def get_by_id(self, config_id: uuid.UUID) -> Optional[MemoryConfig]:
         """根据ID获取记忆配置
 
         Args:
-            db: 数据库会话
             config_id: 配置ID
 
         Returns:
@@ -497,7 +594,7 @@ class MemoryConfigRepository:
         db_logger.debug(f"根据ID查询记忆配置: config_id={config_id}")
 
         try:
-            config = db.query(MemoryConfig).filter(MemoryConfig.config_id == config_id).first()
+            config = self.db.query(MemoryConfig).filter(MemoryConfig.config_id == config_id).first()
 
             if config:
                 db_logger.debug(f"记忆配置查询成功: {config.config_name} (ID: {config_id})")
@@ -508,15 +605,48 @@ class MemoryConfigRepository:
             db_logger.error(f"根据ID查询记忆配置失败: config_id={config_id} - {str(e)}")
             raise
 
-    @staticmethod
+    async def get_by_id_async(self, config_id: uuid.UUID) -> Optional[MemoryConfig]:
+        """根据ID获取记忆配置（异步版本）"""
+        db_logger.debug(f"根据ID查询记忆配置(异步): config_id={config_id}")
+        try:
+            stmt = select(MemoryConfig).where(MemoryConfig.config_id == config_id)
+            result = await self.db.execute(stmt)
+            config = result.scalars().first()
+            if config:
+                db_logger.debug(f"记忆配置查询成功: {config.config_name} (ID: {config_id})")
+            else:
+                db_logger.debug(f"记忆配置不存在: config_id={config_id}")
+            return config
+        except Exception as e:
+            db_logger.error(f"根据ID查询记忆配置失败(异步): config_id={config_id} - {str(e)}")
+            raise
+
+    async def get_by_workspace_and_config_name_async(
+            self, workspace_id: uuid.UUID, config_name: str
+    ) -> Optional[MemoryConfig]:
+        """根据工作空间ID和配置名称查询记忆配置（异步版本）"""
+        db_logger.debug(f"根据工作空间和名称查询记忆配置(异步): workspace_id={workspace_id}, config_name={config_name}")
+        try:
+            stmt = select(MemoryConfig).where(
+                MemoryConfig.workspace_id == workspace_id,
+                MemoryConfig.config_name == config_name,
+            )
+            result = await self.db.execute(stmt)
+            config = result.scalars().first()
+            if config:
+                db_logger.debug(f"记忆配置已存在: {config_name} (ID: {config.config_id})")
+            return config
+        except Exception as e:
+            db_logger.error(f"根据工作空间和名称查询记忆配置失败(异步): {str(e)}")
+            raise
+
     def get_config_with_workspace(
-            db: Session,
+            self,
             config_id: uuid.UUID | int | str
     ) -> Optional[tuple[MemoryConfig, Workspace]]:
         """Get memory config and its associated workspace information
 
         Args:
-            db: Database session
             config_id: Configuration ID
 
         Returns:
@@ -528,7 +658,7 @@ class MemoryConfigRepository:
         import time
 
         start_time = time.time()
-        config_id = resolve_config_id(config_id, db)
+        config_id = resolve_config_id(config_id, self.db)
 
         # Log configuration loading start
         config_logger.info(
@@ -543,7 +673,7 @@ class MemoryConfigRepository:
 
         try:
             # Use join query to get both config and workspace
-            result = db.query(MemoryConfig, Workspace).join(
+            result = self.db.query(MemoryConfig, Workspace).join(
                 Workspace, MemoryConfig.workspace_id == Workspace.id
             ).filter(MemoryConfig.config_id == config_id).first()
 
@@ -551,7 +681,7 @@ class MemoryConfigRepository:
 
             if not result:
                 # Check if config exists but workspace is missing
-                config_only = db.query(MemoryConfig).filter(MemoryConfig.config_id == config_id).first()
+                config_only = self.db.query(MemoryConfig).filter(MemoryConfig.config_id == config_id).first()
                 if config_only:
                     if config_only.workspace_id is None:
                         config_logger.error(
@@ -637,9 +767,8 @@ class MemoryConfigRepository:
             db_logger.error(f"Failed to query memory config and workspace: config_id={config_id} - {str(e)}")
             raise
 
-    @staticmethod
     async def get_config_with_workspace_async(
-            db: AsyncSession,
+            self,
             config_id: uuid.UUID,
     ):
         start_time = time.perf_counter()
@@ -654,13 +783,13 @@ class MemoryConfigRepository:
                 .where(MemoryConfig.config_id == config_id)
             )
 
-            result = await db.execute(stmt)
+            result = await self.db.execute(stmt)
             row = result.first()
             elapsed_ms = (time.perf_counter() - start_time) * 1000
             if not row:
                 # Check if config exists but workspace is missing
                 stmt = select(MemoryConfig).where(MemoryConfig.config_id == config_id)
-                config_only = await db.scalar(stmt)
+                config_only = await self.db.scalar(stmt)
                 if config_only:
                     if config_only.workspace_id is None:
                         config_logger.error(
@@ -725,12 +854,10 @@ class MemoryConfigRepository:
             db_logger.error(f"Failed to query memory config and workspace: config_id={config_id} - {str(e)}")
             raise
 
-    @staticmethod
-    def get_all(db: Session, workspace_id: Optional[uuid.UUID] = None) -> List[Tuple[MemoryConfig, Optional[str]]]:
+    def get_all(self, workspace_id: Optional[uuid.UUID] = None) -> List[Tuple[MemoryConfig, Optional[str]]]:
         """获取所有配置参数，包含关联的场景名称
 
         Args:
-            db: 数据库会话
             workspace_id: 工作空间ID，用于过滤查询结果
 
         Returns:
@@ -741,7 +868,7 @@ class MemoryConfigRepository:
         db_logger.debug(f"查询所有配置: workspace_id={workspace_id}")
 
         try:
-            query = db.query(MemoryConfig, OntologyScene.scene_name).outerjoin(
+            query = self.db.query(MemoryConfig, OntologyScene.scene_name).outerjoin(
                 OntologyScene, MemoryConfig.scene_id == OntologyScene.scene_id
             )
 
@@ -757,12 +884,28 @@ class MemoryConfigRepository:
             db_logger.error(f"查询所有配置失败: workspace_id={workspace_id} - {str(e)}")
             raise
 
-    @staticmethod
-    def delete(db: Session, config_id: uuid.UUID) -> bool:
+    async def get_all_async(self, workspace_id: Optional[uuid.UUID] = None) -> List[Tuple[MemoryConfig, Optional[str]]]:
+        from app.models.ontology_scene import OntologyScene
+        db_logger.debug(f"查询所有配置(异步): workspace_id={workspace_id}")
+        try:
+            stmt = select(MemoryConfig, OntologyScene.scene_name).outerjoin(
+                OntologyScene, MemoryConfig.scene_id == OntologyScene.scene_id
+            )
+            if workspace_id:
+                stmt = stmt.where(MemoryConfig.workspace_id == workspace_id)
+            stmt = stmt.order_by(desc(MemoryConfig.updated_at))
+            result = await self.db.execute(stmt)
+            results = result.all()
+            db_logger.debug(f"配置列表查询成功(异步): 数量={len(results)}")
+            return results
+        except Exception as e:
+            db_logger.error(f"查询所有配置失败(异步): workspace_id={workspace_id} - {str(e)}")
+            raise
+
+    def delete(self, config_id: uuid.UUID) -> bool:
         """删除记忆配置
 
         Args:
-            db: 数据库会话
             config_id: 配置ID
 
         Returns:
@@ -771,30 +914,46 @@ class MemoryConfigRepository:
         db_logger.debug(f"删除记忆配置: config_id={config_id}")
 
         try:
-            db_config = db.query(MemoryConfig).filter(MemoryConfig.config_id == config_id).first()
+            db_config = self.db.query(MemoryConfig).filter(MemoryConfig.config_id == config_id).first()
             if not db_config:
                 db_logger.warning(f"记忆配置不存在: config_id={config_id}")
                 return False
 
-            db.delete(db_config)
-            db.commit()
+            self.db.delete(db_config)
+            self.db.commit()
 
             db_logger.info(f"记忆配置删除成功: config_id={config_id}")
             return True
 
         except Exception as e:
-            db.rollback()
+            self.db.rollback()
             db_logger.error(f"删除记忆配置失败: config_id={config_id} - {str(e)}")
             raise
 
-    @staticmethod
-    def get_workspace_default(db: Session, workspace_id: uuid.UUID) -> Optional[MemoryConfig]:
+    async def delete_async(self, config_id: uuid.UUID) -> bool:
+        db_logger.debug(f"删除记忆配置(异步): config_id={config_id}")
+        try:
+            stmt = select(MemoryConfig).where(MemoryConfig.config_id == config_id)
+            result = await self.db.execute(stmt)
+            db_config = result.scalar_one_or_none()
+            if not db_config:
+                db_logger.warning(f"记忆配置不存在: config_id={config_id}")
+                return False
+            await self.db.delete(db_config)
+            await self.db.commit()
+            db_logger.info(f"记忆配置删除成功(异步): config_id={config_id}")
+            return True
+        except Exception as e:
+            await self.db.rollback()
+            db_logger.error(f"删除记忆配置失败(异步): config_id={config_id} - {str(e)}")
+            raise
+
+    def get_workspace_default(self, workspace_id: uuid.UUID) -> Optional[MemoryConfig]:
         """获取工作空间的默认记忆配置
         
         优先返回标记为默认的配置，如果没有则返回最早创建的活跃配置。
         
         Args:
-            db: 数据库会话
             workspace_id: 工作空间ID
             
         Returns:
@@ -814,7 +973,7 @@ class MemoryConfigRepository:
                 .limit(1)
             )
 
-            config = db.scalars(stmt).first()
+            config = self.db.scalars(stmt).first()
 
             if config:
                 db_logger.debug(f"找到默认配置: config_id={config.config_id}")
@@ -831,7 +990,7 @@ class MemoryConfigRepository:
                 .limit(1)
             )
 
-            config = db.scalars(stmt).first()
+            config = self.db.scalars(stmt).first()
 
             if config:
                 db_logger.debug(f"使用最早创建的配置作为默认: config_id={config.config_id}")
@@ -844,9 +1003,8 @@ class MemoryConfigRepository:
             db_logger.error(f"查询工作空间默认配置失败: workspace_id={workspace_id} - {str(e)}")
             raise
 
-    @staticmethod
     def get_with_fallback(
-            db: Session,
+            self,
             config_id: Optional[uuid.UUID],
             workspace_id: uuid.UUID
     ) -> Optional[MemoryConfig]:
@@ -855,7 +1013,6 @@ class MemoryConfigRepository:
         如果 config_id 为 None 或配置不存在，则回退到工作空间默认配置。
         
         Args:
-            db: 数据库会话
             config_id: 配置ID（可为None）
             workspace_id: 工作空间ID，用于回退查询
             
@@ -866,15 +1023,59 @@ class MemoryConfigRepository:
 
         if not config_id:
             db_logger.debug("config_id 为空，使用工作空间默认配置")
-            return MemoryConfigRepository.get_workspace_default(db, workspace_id)
+            return self.get_workspace_default(workspace_id)
 
-        config = db.get(MemoryConfig, config_id)
+    async def get_workspace_default_async(self, workspace_id: uuid.UUID) -> Optional[MemoryConfig]:
+        """异步版：获取工作空间的默认记忆配置。"""
+        try:
+            stmt = (
+                select(MemoryConfig)
+                .where(
+                    MemoryConfig.workspace_id == workspace_id,
+                    MemoryConfig.is_default.is_(True),
+                    MemoryConfig.state.is_(True),
+                )
+                .limit(1)
+            )
+            result = await self.db.execute(stmt)
+            config = result.scalars().first()
+            if config:
+                return config
 
+            stmt = (
+                select(MemoryConfig)
+                .where(
+                    MemoryConfig.workspace_id == workspace_id,
+                    MemoryConfig.state.is_(True),
+                )
+                .order_by(MemoryConfig.created_at.asc())
+                .limit(1)
+            )
+            result = await self.db.execute(stmt)
+            return result.scalars().first()
+        except Exception as e:
+            db_logger.error(f"查询工作空间默认配置失败(async): workspace_id={workspace_id} - {str(e)}")
+            raise
+
+    async def get_with_fallback_async(
+            self,
+            config_id: Optional[uuid.UUID],
+            workspace_id: uuid.UUID
+    ) -> Optional[MemoryConfig]:
+        """异步版：获取记忆配置，支持回退到工作空间默认配置。"""
+        if not config_id:
+            return await self.get_workspace_default_async(workspace_id)
+
+        config = await self.get_by_id_async(config_id)
         if config:
             return config
 
         db_logger.warning(
+            f"配置不存在(async)，回退: missing_config_id={config_id}, workspace_id={workspace_id}"
+        )
+        return await self.get_workspace_default_async(workspace_id)
+        db_logger.warning(
             f"配置不存在，回退到工作空间默认配置: missing_config_id={config_id}, workspace_id={workspace_id}"
         )
 
-        return MemoryConfigRepository.get_workspace_default(db, workspace_id)
+        return self.get_workspace_default(workspace_id)

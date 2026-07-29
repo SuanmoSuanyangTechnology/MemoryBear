@@ -121,11 +121,11 @@ class FastWritePipeline:
                     )
 
                 # 时间来源降级：dialog_at → dispatch_at → 当前时间（ensure_dialog_at 兜底）
-                created_at = as_utc_aware(
-                    parse_iso_to_utc_naive(
-                        ensure_dialog_at(target_message.get("dialog_at") or dispatch_at)
-                    )
+                # LocalDateTime，而不是带时区的 DateTime。
+                created_at = parse_iso_to_utc_naive(
+                    ensure_dialog_at(target_message.get("dialog_at") or dispatch_at)
                 )
+
 
                 # Step 3/3 — 构造并写入 DialogueNode
                 async with bear.step(3, 3, "存储", "写入 Dialogue") as s:

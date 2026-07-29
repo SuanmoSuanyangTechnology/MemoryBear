@@ -325,44 +325,47 @@ async def _validate_workspace_model_runtime(
     locale: str,
     slots_to_validate: tuple[str, ...],
 ) -> list[dict]:
-    service = MemoryConfigService(db)
-    warnings: list[dict] = []
-    validate_as_llm = {"vision", "video", "audio"}
+    from app.db import get_async_db_context
 
-    async def _validate_one(model_type: str, model_id: str) -> dict | None:
-        validate_type = "llm" if model_type in validate_as_llm else model_type
-        try:
-            await service._validate_model_connectivity(
-                model_id,
-                validate_type,
-                tenant_id,
-                None,
-                workspace_id,
-                locale=locale,
-            )
-            return None
-        except ConfigurationError as exc:
-            return {
-                "model_type": model_type,
-                "model_id": str(model_id),
-                "message": exc.err_message,
-            }
+    async with get_async_db_context() as async_db:
+        service = MemoryConfigService(async_db)
+        warnings: list[dict] = []
+        validate_as_llm = {"vision", "video", "audio"}
 
-    for slot in slots_to_validate:
-        if not values.get(slot):
-            warnings.append({
-                "model_type": slot,
-                "model_id": None,
-                "message": t("memory_config.model.not_configured", locale=locale, model_type=slot),
-            })
+        async def _validate_one(model_type: str, model_id: str) -> dict | None:
+            validate_type = "llm" if model_type in validate_as_llm else model_type
+            try:
+                await service._validate_model_connectivity(
+                    model_id,
+                    validate_type,
+                    tenant_id,
+                    None,
+                    workspace_id,
+                    locale=locale,
+                )
+                return None
+            except ConfigurationError as exc:
+                return {
+                    "model_type": model_type,
+                    "model_id": str(model_id),
+                    "message": exc.err_message,
+                }
 
-    for slot in slots_to_validate:
-        model_id = values.get(slot)
-        if not model_id:
-            continue
-        result = await _validate_one(slot, model_id)
-        if result is not None:
-            warnings.append(result)
+        for slot in slots_to_validate:
+            if not values.get(slot):
+                warnings.append({
+                    "model_type": slot,
+                    "model_id": None,
+                    "message": t("memory_config.model.not_configured", locale=locale, model_type=slot),
+                })
+
+        for slot in slots_to_validate:
+            model_id = values.get(slot)
+            if not model_id:
+                continue
+            result = await _validate_one(slot, model_id)
+            if result is not None:
+                warnings.append(result)
 
     return warnings
 

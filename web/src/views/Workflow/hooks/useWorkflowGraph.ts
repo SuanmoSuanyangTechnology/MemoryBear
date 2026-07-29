@@ -272,7 +272,7 @@ export const useWorkflowGraph = ({
             } else if (type === 'memory-write' && key === 'message' && nodeLibraryConfig.config) {
               nodeLibraryConfig.config['messages'].defaultValue = [{ role: 'USER', content: config[key] }]
               delete nodeLibraryConfig.config[key]
-            } else if (key === 'memory' && nodeLibraryConfig.config && nodeLibraryConfig.config[key]) {
+            } else if (key === 'memory' && nodeLibraryConfig.config && nodeLibraryConfig.config[key] && type === 'llm') {
               const { memory, messages } = config as any;
               if (memory?.enable && messages && messages.length > 0) {
                 const lastMessage = messages[messages.length - 1]

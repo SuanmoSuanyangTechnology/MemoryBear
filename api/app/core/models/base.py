@@ -204,9 +204,6 @@ class RedBearModelFactory:
         logger = get_business_logger()
         logger.debug(f"获取模型参数 - Provider: {provider}, Model: {config.model_name}, is_omni: {config.is_omni}, deep_thinking: {config.deep_thinking}")
 
-        # DashScope URL 自动路由在 get_provider_llm_class 内部处理（必须在 llm_class
-        # 选择前升级 is_omni，否则仍会被路由到原生 ChatTongyi）。
-
         filtered_extra_params, provider_specific = cls._extract_provider_specific_params(config.extra_params)
         default_headers = config.extra_params.get("default_headers")
         if default_headers:
@@ -483,23 +480,6 @@ class RedBearModelFactory:
 def get_provider_llm_class(config: RedBearModelConfig, type: ModelType = ModelType.LLM) -> type[BaseLLM]:
     """根据模型提供商获取对应的模型类"""
     provider = config.provider.lower()
-
-    # DashScope URL 自动路由：当前端传入 Maas compatible-mode URL（典型如
-    # https://{workspace}.cn-beijing.maas.aliyuncs.com/compatible-mode/v1）时，
-    # 强制走 OpenAI 兼容模式，避免原生 ChatTongyi SDK 因 endpoint 表滞后导致
-    # "url error, please check url"。必须在 is_omni 判断之前升级。
-    if (
-        provider == ModelProvider.DASHSCOPE.value
-        and not config.is_omni
-        and config.base_url
-        and ("compatible-mode" in config.base_url or "maas.aliyuncs.com" in config.base_url)
-    ):
-        from app.core.logging_config import get_business_logger
-        get_business_logger().info(
-            f"[DashScope路由] 检测到 Maas compatible-mode base_url，自动升级 is_omni=True: "
-            f"model={config.model_name}, base_url={config.base_url}"
-        )
-        config.is_omni = True
 
     # dashscope的omni模型 和 volcano模型使用
     if provider == ModelProvider.DASHSCOPE and config.is_omni:

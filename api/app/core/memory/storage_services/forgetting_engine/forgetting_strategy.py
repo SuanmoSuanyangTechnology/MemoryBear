@@ -532,11 +532,11 @@ class ForgettingStrategy:
     async def _get_llm_client(self, db, config_id: UUID):
         """
         从数据库获取 LLM 客户端
-        
+
         Args:
-            db: 数据库会话
+            db: 数据库会话（AsyncSession，从 MemoryForgetService 一路透传下来）
             config_id: 配置ID
-        
+
         Returns:
             LLM 客户端实例，如果无法获取则返回 None
         """
@@ -544,16 +544,16 @@ class ForgettingStrategy:
             from app.core.memory.pipelines.base_pipeline import ModelClientMixin
             from app.services.memory_config_service import MemoryConfigService
 
-            memory_config = MemoryConfigService(db).load_memory_config(config_id=config_id)
-            llm_client = ModelClientMixin.get_llm_client(
+            memory_config = await MemoryConfigService(db).load_memory_config_async(config_id=config_id)
+            llm_client = await ModelClientMixin.get_llm_client_async(
                 db,
                 memory_config.llm_model_id,
                 tenant_id=memory_config.tenant_id,
             )
-            
+
             logger.info(f"成功获取 LLM 客户端: config_id={config_id}, llm_id={memory_config.llm_model_id}")
             return llm_client
-            
+
         except Exception as e:
             logger.error(f"获取 LLM 客户端失败: {str(e)}")
             return None

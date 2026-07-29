@@ -58,7 +58,7 @@ from app.repositories import knowledge_repository, knowledgeshare_repository
 from app.services import knowledge_service, document_service
 from app.services import file_service
 from app.services.file_storage_service import FileStorageService, get_file_storage_service
-from app.services.model_service import ModelConfigService
+from app.services.model_service import ModelApiKeyService, ModelConfigService
 from app.services.qa_export_service import iter_qa_csv_chunks, make_qa_export_filename
 from app.core.quota_stub import check_knowledge_capacity_quota
 
@@ -271,11 +271,32 @@ async def get_knowledge_graph_entity_types(
         # 1. Check whether the model exists
         api_logger.debug(f"Check whether the model exists: {llm_id}")
         config = await ModelConfigService.get_model_by_id_async(db=db, model_id=llm_id)
+        if not config:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Model config does not exist",
+            )
+        api_key = await ModelApiKeyService.get_available_api_key_async(
+            db,
+            llm_id,
+            tenant_id=current_user.tenant_id,
+        )
+        if api_key is None or not api_key.api_key:
+            api_logger.warning(
+                "No available API key for graph entity type generation"
+                " llm_id=%s username=%s",
+                str(llm_id),
+                current_user.username,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No available API key for the selected model",
+            )
         # 2. Prepare to configure chat_mdl information
         chat_model = Base(
-            key=config.api_keys[0].api_key,
-            model_name=config.api_keys[0].model_name,
-            base_url=config.api_keys[0].api_base
+            key=api_key.api_key,
+            model_name=api_key.model_name,
+            base_url=api_key.api_base
         )
         # response = graph_entity_types(chat_model, scenario)
         response = await asyncio.to_thread(graph_entity_types, chat_model, scenario)

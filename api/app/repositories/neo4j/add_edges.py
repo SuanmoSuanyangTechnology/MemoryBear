@@ -86,7 +86,7 @@ async def add_memory_summary_statement_edges(summaries: List[MemorySummaryNode],
                     "chunk_id": chunk_id,
                     "end_user_id": s.end_user_id,
                     "run_id": s.run_id,
-                    "created_at": to_iso_z(s.created_at),
+                    "created_at": s.created_at,
                 })
 
         if not edges:

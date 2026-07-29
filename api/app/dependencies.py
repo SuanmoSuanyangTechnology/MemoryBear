@@ -89,6 +89,31 @@ class CurrentUserSnapshot:
     preferred_language: str | None = None
     roles: tuple[str, ...] = ()
 
+
+def make_snapshot(user_orm, workspace_id):
+    """Create a CurrentUserSnapshot from ORM user object before session closes.
+
+    Extracts all needed fields from the ORM object so the snapshot remains
+    usable after the database session is closed (detach-safe).
+
+    Args:
+        user_orm: SQLAlchemy User ORM object with id, username, email,
+                  is_active, is_superuser, tenant_id attributes.
+        workspace_id: UUID of the target workspace.
+
+    Returns:
+        CurrentUserSnapshot with all fields extracted from user_orm.
+    """
+    return CurrentUserSnapshot(
+        id=user_orm.id,
+        username=user_orm.username,
+        email=user_orm.email,
+        is_active=user_orm.is_active,
+        is_superuser=user_orm.is_superuser,
+        current_workspace_id=workspace_id,
+        tenant_id=user_orm.tenant_id,
+    )
+
 async def get_current_user(
         token: str = Depends(oauth2_scheme),
         db: Session = Depends(get_db)

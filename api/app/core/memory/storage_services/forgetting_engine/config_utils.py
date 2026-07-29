@@ -13,6 +13,7 @@ import logging
 from typing import Optional, Dict, Any
 from uuid import UUID
 from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.repositories.memory_config_repository import MemoryConfigRepository
 from app.core.memory.storage_services.forgetting_engine.actr_calculator import ACTRCalculator
@@ -100,8 +101,7 @@ def load_actr_config_from_db(
     
     # 从数据库加载配置
     try:
-        repository = MemoryConfigRepository()
-        db_config = repository.get_by_id(db, config_id)
+        db_config = MemoryConfigRepository(db).get_by_id(config_id)
         
         if db_config is None:
             logger.error(f"配置不存在: config_id={config_id}")
@@ -191,3 +191,66 @@ def create_actr_calculator_from_config(
     )
     
     return calculator
+
+
+async def load_actr_config_from_db_async(
+    db: AsyncSession,
+    config_id: Optional[UUID] = None,
+) -> Dict[str, Any]:
+    """
+    从数据库加载 ACT-R 配置参数（异步版本）
+
+    与 load_actr_config_from_db 行为一致，但使用 AsyncSession + repo 的异步接口，
+    可在 async 上下文中调用而不阻塞事件循环。
+
+    Args:
+        db: 异步数据库会话
+        config_id: 配置 ID（必填）
+
+    Returns:
+        Dict[str, Any]: 与同步版本结构完全一致的配置字典
+
+    Raises:
+        ValueError: 如果 config_id 为空或对应配置不存在
+    """
+    if config_id is None:
+        logger.error("未指定 config_id，无法加载配置")
+        raise ValueError("config_id 不能为空，必须指定一个有效的配置 ID")
+
+    try:
+        db_config = await MemoryConfigRepository(db).get_by_id_async(config_id)
+
+        if db_config is None:
+            logger.error(f"配置不存在: config_id={config_id}")
+            raise ValueError(f"配置不存在: config_id={config_id}")
+
+        lambda_time = db_config.lambda_time
+        lambda_mem = db_config.lambda_mem
+        forgetting_rate = calculate_forgetting_rate(lambda_time, lambda_mem)
+
+        config = {
+            'decay_constant': db_config.decay_constant,
+            'lambda_time': lambda_time,
+            'lambda_mem': lambda_mem,
+            'forgetting_rate': forgetting_rate,
+            'offset': db_config.offset,
+            'max_history_length': db_config.max_history_length,
+            'forgetting_threshold': db_config.forgetting_threshold,
+            'min_days_since_access': db_config.min_days_since_access,
+            'enable_llm_summary': db_config.enable_llm_summary,
+            'max_merge_batch_size': db_config.max_merge_batch_size,
+            'forgetting_interval_hours': db_config.forgetting_interval_hours,
+            'is_default': bool(db_config.is_default),
+            # 注意：llm_id 不包含在配置响应中，仅在内部使用
+        }
+
+        logger.info(
+            f"成功加载 ACT-R 配置(异步): config_id={config_id}, "
+            f"forgetting_rate={forgetting_rate:.4f}"
+        )
+
+        return config
+
+    except Exception as e:
+        logger.error(f"加载 ACT-R 配置失败(异步): config_id={config_id}, 错误: {str(e)}")
+        raise

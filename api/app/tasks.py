@@ -98,7 +98,7 @@ VIDEO_IMAGE_PATTERN = re.compile(
 )
 DEFAULT_PARSE_LANGUAGE = "Chinese"
 DEFAULT_PARSE_TO_PAGE = 100_000
-EMBEDDING_BATCH_SIZE = int(os.getenv("EMBEDDING_BATCH_SIZE", "20"))
+EMBEDDING_BATCH_SIZE = settings.EMBEDDING_BATCH_SIZE
 # Embedding 并发写入的最大线程数，需根据模型 API rate limit 调整
 EMBEDDING_MAX_WORKERS = int(os.getenv("EMBEDDING_MAX_WORKERS", "3"))
 # auto_questions LLM 并发调用的最大线程数
@@ -3196,7 +3196,11 @@ def scan_reflection_retry(self) -> Dict[str, Any]:
 #     return data
 
 
-@celery_app.task(name="app.controllers.memory_storage_controller.search_all")
+@celery_app.task(
+    name="app.controllers.memory_storage_controller.search_all",
+    time_limit=3600,
+    soft_time_limit=3300,
+)
 def write_total_memory_task(workspace_id: str) -> Dict[str, Any]:
     """定时任务：查询工作空间下所有宿主的记忆总量并写入数据库
 
@@ -3211,7 +3215,7 @@ def write_total_memory_task(workspace_id: str) -> Dict[str, Any]:
     async def _run() -> Dict[str, Any]:
         from app.models.app_model import App
         from app.repositories.end_user_repository import EndUserRepository
-        from app.repositories.memory_increment_repository import write_memory_increment
+        from app.repositories.memory_increment_repository import MemoryIncrementRepository
         from app.services.memory_storage_service import search_all_batch
 
         with get_db_context() as db:
@@ -3226,8 +3230,7 @@ def write_total_memory_task(workspace_id: str) -> Dict[str, Any]:
 
                 if not apps:
                     # 如果没有app，总量为0
-                    memory_increment = write_memory_increment(
-                        db=db,
+                    memory_increment = MemoryIncrementRepository(db).write_memory_increment(
                         workspace_id=workspace_uuid,
                         total_num=0
                     )
@@ -3255,8 +3258,7 @@ def write_total_memory_task(workspace_id: str) -> Dict[str, Any]:
                 ]
 
                 # 4. 写入数据库
-                memory_increment = write_memory_increment(
-                    db=db,
+                memory_increment = MemoryIncrementRepository(db).write_memory_increment(
                     workspace_id=workspace_uuid,
                     total_num=total_num
                 )
@@ -3314,7 +3316,7 @@ def write_all_workspaces_memory_task(self) -> Dict[str, Any]:
         from app.models.app_model import App
         from app.models.workspace_model import Workspace
         from app.repositories.end_user_repository import EndUserRepository
-        from app.repositories.memory_increment_repository import write_memory_increment
+        from app.repositories.memory_increment_repository import MemoryIncrementRepository
         from app.services.memory_storage_service import search_all_batch
 
         with get_db_context() as db:
@@ -3350,8 +3352,7 @@ def write_all_workspaces_memory_task(self) -> Dict[str, Any]:
 
                         if not apps:
                             # 如果没有app，总量为0
-                            memory_increment = write_memory_increment(
-                                db=db,
+                            memory_increment = MemoryIncrementRepository(db).write_memory_increment(
                                 workspace_id=workspace_id,
                                 total_num=0
                             )
@@ -3381,8 +3382,7 @@ def write_all_workspaces_memory_task(self) -> Dict[str, Any]:
                         ]
 
                         # 4. 写入数据库
-                        memory_increment = write_memory_increment(
-                            db=db,
+                        memory_increment = MemoryIncrementRepository(db).write_memory_increment(
                             workspace_id=workspace_id,
                             total_num=total_num
                         )
@@ -3623,11 +3623,12 @@ def do_refresh_insight_summary_cache(
     inflight_key = CACHE_INFLIGHT_KEY_FMT.format(end_user_id=end_user_id)
 
     async def _run() -> Dict[str, Any]:
+        from app.db import get_async_db_context
         from app.services.user_memory_service import UserMemoryService
 
         service = UserMemoryService()
         ws_uuid = uuid.UUID(workspace_id)
-        with get_db_context() as db:
+        async with get_async_db_context() as db:
             insight = await service.generate_and_cache_insight(
                 db, end_user_id, ws_uuid, language=language,
             )
@@ -3860,9 +3861,12 @@ def run_forgetting_cycle_task(self, config_id: Optional[uuid.UUID] = None) -> Di
     start_time = time.time()
 
     async def _process_users() -> Dict[str, Any]:
+        from app.db import get_async_db_context
         from app.repositories.end_user_repository import EndUserRepository
-        with get_db_context() as db:
-            end_users = EndUserRepository(db).get_all_active()
+
+        # forget_service.trigger_forgetting_cycle 已迁移到 AsyncSession，
+        async with get_async_db_context() as db:
+            end_users = await EndUserRepository(db).get_all_active_async()
             if not end_users:
                 logger.info("没有终端用户，跳过遗忘周期")
                 return {"status": "SUCCESS", "message": "没有终端用户",
@@ -3876,7 +3880,7 @@ def run_forgetting_cycle_task(self, config_id: Optional[uuid.UUID] = None) -> Di
 
             for end_user in end_users:
                 try:
-                    config_id = MemoryConfigService(db).get_workspace_active_config_id(end_user.workspace_id)
+                    config_id = await MemoryConfigService(db).get_workspace_active_config_id_async(end_user.workspace_id)
 
                     # 执行遗忘周期
                     report = await forget_service.trigger_forgetting_cycle(

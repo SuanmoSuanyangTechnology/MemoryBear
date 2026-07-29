@@ -9,7 +9,7 @@
 
 import asyncio
 
-from fastapi import APIRouter, Body, Depends, Header, Request
+from fastapi import APIRouter, Body, Header, Request, Depends
 from fastapi.encoders import jsonable_encoder
 from sqlalchemy.orm import Session
 from starlette.responses import Response
@@ -17,14 +17,14 @@ from starlette.responses import Response
 # 包装内部 controller
 from app.controllers import memory_controller
 from app.core.api_key_auth import require_api_key, require_api_key_self_db
-from app.core.api_key_utils import get_current_user_from_api_key, validate_end_user_in_workspace, \
+from app.core.api_key_utils import get_current_user_snapshot_from_api_key_async, \
     validate_end_user_in_workspace_async
 from app.core.logging_config import get_business_logger
 from app.core.memory.enums import Neo4jNodeType, SearchStrategy
 from app.core.memory.memory_service import MemoryService
 from app.core.quota_stub import check_end_user_quota
 from app.core.response_utils import success
-from app.db import get_db, get_async_db_context
+from app.db import get_async_db_context, get_db
 from app.schemas.api_key_schema import ApiKeyAuth
 from app.schemas.memory_agent_schema import Write_UserInput, InternalReadInput, ReadSyncInput
 from app.services.memory_config_service import MemoryConfigService
@@ -70,7 +70,7 @@ async def read_memory_sync(
 
     if payload.end_user_ids:
         # ── Multi-user mode: concurrent reads ──
-        end_user_ids = payload.end_user_ids
+        end_user_ids = set(payload.end_user_ids)
 
         async with get_async_db_context() as db:
             for euid in end_user_ids:
@@ -94,9 +94,16 @@ async def read_memory_sync(
             }
 
         results = await asyncio.gather(
-            *[_read_for_user(euid) for euid in end_user_ids]
+            *[_read_for_user(euid) for euid in end_user_ids],
+            return_exceptions=True
         )
-        return success(data={euid: data for euid, data in results})
+        res = {}
+        for data in results:
+            if isinstance(data, Exception):
+                pass
+            res[data[0]] = data[1]
+
+        return success(data={euid: data for data in results})
 
     # ── Single-user mode (backward-compatible) ──
     async with get_async_db_context() as db:
@@ -167,9 +174,9 @@ async def read_memory_internal(
 async def write_memory_async(
         request: Request,
         api_key_auth: ApiKeyAuth = None,
-        db: Session = Depends(get_db),
         body_placeholder: str = Body(None, description="Placeholder - actual body parsed via request.json()"),
         language_type: str = Header(default=None, alias="X-Language-Type"),
+        db: Session = Depends(get_db),
 ):
     """
     Write memory asynchronously (Celery task).
@@ -179,15 +186,15 @@ async def write_memory_async(
     body = await request.json()
     payload = Write_UserInput(**body)
 
-    current_user = get_current_user_from_api_key(db, api_key_auth)
-    validate_end_user_in_workspace(db, payload.end_user_id, api_key_auth.workspace_id)
+    async with get_async_db_context() as auth_db:
+        current_user = await get_current_user_snapshot_from_api_key_async(auth_db, api_key_auth)
+        await validate_end_user_in_workspace_async(auth_db, payload.end_user_id, api_key_auth.workspace_id)
 
     logger.info(f"V1 memory write (async) - end_user_id: {payload.end_user_id}, workspace: {api_key_auth.workspace_id}")
 
     result = await memory_controller.write_server_async(
         user_input=payload,
         language_type=language_type,
-        db=db,
         current_user=current_user,
     )
     return _encode_result(result)

@@ -181,24 +181,14 @@ class ConversationService:
             workspace_id=workspace_id,
         )
 
-    def get_user_conversations(
+    async def get_user_conversations_async(
             self,
             user_id: uuid.UUID,
             page: int = 1,
             page_size: int = 20
     ) -> tuple[list[Conversation], int]:
-        """
-        Retrieve recent conversations for a specific user with pagination.
-
-        Args:
-            user_id (uuid.UUID): Unique identifier of the user.
-            page (int): Page number (1-based). Defaults to 1.
-            page_size (int): Number of items per page. Defaults to 20.
-
-        Returns:
-            tuple[list[Conversation], int]: A list of recent conversation entities and total count.
-        """
-        conversations, total = self.conversation_repo.get_conversation_by_user_id(
+        """异步版本：分页查询用户的会话列表。"""
+        conversations, total = await self.conversation_repo.get_conversation_by_user_id_async(
             user_id,
             page=page,
             page_size=page_size

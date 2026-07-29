@@ -60,13 +60,11 @@ export interface OrderDetailRef {
 
 export interface OrderItem extends Order {
   resource_pack_instance_id: string | null;
-  order_group_id: string;
   source_type: 'resource_pack' | 'package_plan';
   source_channel: 'direct';
   source_id: string | null;
 }
 export interface GroupOrder {
-  order_group_id: string;
   status: 'pending' | 'approved' | 'rejected';
   order_count: number;
   payable_amount: string;

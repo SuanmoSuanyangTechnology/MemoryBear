@@ -11,7 +11,6 @@ from app.models.end_user_model import EndUser, EndUser as EndUserModel
 from app.models.memory_increment_model import MemoryIncrement
 from app.models.user_model import User
 from app.repositories import (
-    app_repository,
     memory_increment_repository,
     knowledge_repository
 )
@@ -47,37 +46,20 @@ def get_current_workspace_type(
         raise
 
 
-def get_workspace_end_users(
-    db: Session,
+async def get_workspace_end_users_async(
+    db,
     workspace_id: uuid.UUID,
-    current_user: User
+    current_user
 ) -> List[EndUser]:
-    """获取工作空间的所有宿主（优化版本：减少数据库查询次数）
-    返回结果按 created_at 从新到旧排序（NULL 值排在最后）
-    """
-    business_logger.info(f"获取工作空间宿主列表: workspace_id={workspace_id}, 操作者: {current_user.username}")
+    """获取工作空间的所有宿主（异步版本，使用 repository）"""
+    business_logger.info(f"获取工作空间宿主列表(异步): workspace_id={workspace_id}, 操作者: {current_user.username}")
 
     try:
-        # 查询应用（ORM）
-        apps_orm = app_repository.get_apps_by_workspace_id(db, workspace_id)
+        from app.repositories.end_user_repository import EndUserRepository
 
-        if not apps_orm:
-            business_logger.info("工作空间下没有应用")
-            return []
+        repo = EndUserRepository(db)
+        end_users_orm = await repo.get_end_users_by_workspace_async(workspace_id)
 
-        # 提取所有 app_id
-        # app_ids = [app.id for app in apps_orm]
-        # 批量查询所有活跃 end_users（一次查询而非循环查询）
-        # 按 created_at 降序排序，NULL 值排在最后；id 作为次级排序键保证确定性
-        end_users_orm = db.query(EndUserModel).filter(
-            EndUserModel.workspace_id == workspace_id,
-            EndUserModel.is_active == True,
-        ).order_by(
-            nullslast(desc(EndUserModel.created_at)),
-            desc(EndUserModel.id)
-        ).all()
-
-        # 转换为 Pydantic 模型（只在需要时转换）
         end_users = [EndUserSchema.model_validate(eu) for eu in end_users_orm]
 
         business_logger.info(f"成功获取 {len(end_users)} 个宿主记录")
@@ -86,7 +68,7 @@ def get_workspace_end_users(
     except HTTPException:
         raise
     except Exception as e:
-        business_logger.error(f"获取工作空间宿主列表失败: workspace_id={workspace_id} - {str(e)}")
+        business_logger.error(f"获取工作空间宿主列表失败(异步): workspace_id={workspace_id} - {str(e)}")
         raise
 
 
@@ -179,36 +161,11 @@ def get_workspace_end_users_paginated_rag(
         )
         raise
 
-def get_workspace_memory_increment(
-    db: Session, 
+async def get_workspace_api_increment_async(
     workspace_id: uuid.UUID, 
-    limit: int,
-    current_user: User
-) -> List[MemoryIncrementSchema]:
-    """获取工作空间的记忆增量"""
-    business_logger.info(f"获取工作空间记忆增量: workspace_id={workspace_id}, 操作者: {current_user.username}")
-    
-    try:        
-        # 查询记忆增量
-        memory_increment_orm_list = memory_increment_repository.get_memory_increments_by_workspace_id(db, workspace_id, limit)
-        memory_increment = [MemoryIncrementSchema.model_validate(m) for m in memory_increment_orm_list]
-        
-        business_logger.info(f"成功获取 {len(memory_increment)} 条记忆增量记录")
-        return memory_increment
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        business_logger.error(f"获取工作空间记忆增量失败: workspace_id={workspace_id} - {str(e)}")
-        raise
-
-
-def get_workspace_api_increment(
-    db: Session, 
-    workspace_id: uuid.UUID, 
-    current_user: User
+    current_user,
 ) -> int:
-    """获取工作空间的API调用增量"""
+    """获取工作空间的API调用增量（异步版本）"""
     business_logger.info(f"获取工作空间API调用增量: workspace_id={workspace_id}, 操作者: {current_user.username}")
     
     try:        
@@ -225,62 +182,55 @@ def get_workspace_api_increment(
         raise
 
 
-def write_workspace_total_memory(
-    db: Session, 
+async def get_workspace_memory_increment_async(
+    db,
+    workspace_id: uuid.UUID,
+    limit: int,
+    current_user
+) -> List[MemoryIncrementSchema]:
+    """获取工作空间的记忆增量（异步版本）"""
+    business_logger.info(f"获取记忆增量(异步): workspace_id={workspace_id}, limit={limit}, 操作者: {current_user.username}")
+    from sqlalchemy import select as sa_select
+    from app.models.memory_increment_model import MemoryIncrement as MemoryIncrementORM
+
+    stmt = (
+        sa_select(MemoryIncrementORM)
+        .where(MemoryIncrementORM.workspace_id == workspace_id)
+        .order_by(MemoryIncrementORM.created_at.desc())
+        .limit(limit)
+    )
+    result = await db.execute(stmt)
+    records = result.scalars().all()
+
+    increments = [MemoryIncrementSchema.model_validate(r) for r in records]
+    business_logger.info(f"成功获取 {len(increments)} 条记忆增量记录")
+    return increments
+
+
+async def get_workspace_memory_list_async(
+    db, 
     workspace_id: uuid.UUID, 
-    current_user: User
-) -> int:
-    """写入工作空间的记忆总量"""
-    business_logger.info(f"写入工作空间记忆总量: workspace_id={workspace_id}, 操作者: {current_user.username}")
-    
-    try:
-        # 模拟记忆总量
-        total_num = 1024
-
-        # 写入记忆总量
-        memory_increment_repository.write_memory_increment(db, workspace_id, total_num)
-        
-        business_logger.info(f"成功写入记忆总量 {total_num}")
-        return total_num
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        business_logger.error(f"写入工作空间记忆总量失败: workspace_id={workspace_id} - {str(e)}")
-        raise
-
-
-def get_workspace_memory_list(
-    db: Session, 
-    workspace_id: uuid.UUID, 
-    current_user: User,
+    current_user,
     limit: int = 7
 ) -> dict:
-    """
-    获取工作空间的记忆列表（整合接口）
-    
-    整合以下三个接口的数据：
-    1. total_memory - 工作空间记忆总量
-    2. memory_increment - 工作空间记忆增量
-    3. hosts - 工作空间宿主列表
-    """
-    business_logger.info(f"获取工作空间记忆列表: workspace_id={workspace_id}, 操作者: {current_user.username}")
+    """获取工作空间的记忆列表（异步版本）"""
+    business_logger.info(f"获取工作空间记忆列表(异步): workspace_id={workspace_id}, 操作者: {current_user.username}")
     
     result = {}
     
     try:
         # 1. 获取记忆总量
         try:
-            total_memory = write_workspace_total_memory(db, workspace_id, current_user)
-            result["total_memory"] = total_memory
-            business_logger.info(f"成功获取记忆总量: {total_memory}")
+            total_memory_record = await memory_increment_repository.write_memory_increment(db, workspace_id, 0)
+            result["total_memory"] = total_memory_record.total_num
+            business_logger.info(f"成功获取记忆总量: {total_memory_record.total_num}")
         except Exception as e:
             business_logger.warning(f"获取记忆总量失败: {str(e)}")
             result["total_memory"] = 0.0
         
         # 2. 获取记忆增量
         try:
-            memory_increment = get_workspace_memory_increment(db, workspace_id, limit, current_user)
+            memory_increment = await get_workspace_memory_increment_async(db, workspace_id, limit, current_user)
             result["memory_increment"] = memory_increment
             business_logger.info(f"成功获取 {len(memory_increment)} 条记忆增量记录")
         except Exception as e:
@@ -289,7 +239,7 @@ def get_workspace_memory_list(
         
         # 3. 获取宿主列表
         try:
-            hosts = get_workspace_end_users(db, workspace_id, current_user)
+            hosts = await get_workspace_end_users_async(db, workspace_id, current_user)
             result["hosts"] = hosts
             business_logger.info(f"成功获取 {len(hosts)} 个宿主记录")
         except Exception as e:
@@ -302,23 +252,20 @@ def get_workspace_memory_list(
     except HTTPException:
         raise
     except Exception as e:
-        business_logger.error(f"获取工作空间记忆列表失败: workspace_id={workspace_id} - {str(e)}")
+        business_logger.error(f"获取工作空间记忆列表失败(异步): workspace_id={workspace_id} - {str(e)}")
         raise
 
 
-def get_workspace_total_end_users(
-    db: Session, 
+async def get_workspace_total_end_users_async(
+    db, 
     workspace_id: uuid.UUID, 
-    current_user: User
+    current_user
 ) -> dict:
-    """
-    获取用户列表的总用户数
-    """
-    business_logger.info(f"获取用户列表的总用户数: workspace_id={workspace_id}, 操作者: {current_user.username}")
+    """获取用户列表的总用户数（异步版本）"""
+    business_logger.info(f"获取用户列表的总用户数(异步): workspace_id={workspace_id}, 操作者: {current_user.username}")
     
     try:
-        # 复用原有的 get_workspace_end_users 逻辑
-        end_users = get_workspace_end_users(db, workspace_id, current_user)
+        end_users = await get_workspace_end_users_async(db, workspace_id, current_user)
         
         business_logger.info(f"成功获取 {len(end_users)} 个宿主记录")
         return {
@@ -329,14 +276,14 @@ def get_workspace_total_end_users(
     except HTTPException:
         raise
     except Exception as e:
-        business_logger.error(f"获取用户列表失败: workspace_id={workspace_id} - {str(e)}")
+        business_logger.error(f"获取用户列表失败(异步): workspace_id={workspace_id} - {str(e)}")
         raise
 
 
 async def get_workspace_total_memory_count(
-    db: Session, 
-    workspace_id: uuid.UUID, 
-    current_user: User,
+    db,
+    workspace_id: uuid.UUID,
+    current_user,
     end_user_id: str = None
 ) -> dict:
     """
@@ -350,8 +297,8 @@ async def get_workspace_total_memory_count(
     business_logger.info(f"获取工作空间记忆总量: workspace_id={workspace_id}, 操作者: {current_user.username}")
     
     try:
-        # 1. 获取所有 hosts
-        hosts = get_workspace_end_users(db, workspace_id, current_user)
+        # 1. 获取所有 hosts（异步版本）
+        hosts = await get_workspace_end_users_async(db, workspace_id, current_user)
         business_logger.info(f"获取到 {len(hosts)} 个宿主")
         
         if not hosts:
@@ -370,9 +317,8 @@ async def get_workspace_total_memory_count(
             batch_result = await memory_storage_service.search_all_batch([end_user_id])
             count = batch_result.get(end_user_id, 0)
             # 查询用户名称
-            from app.repositories.end_user_repository import EndUserRepository
-            repo = EndUserRepository(db)
-            end_user = repo.get_by_id(uuid.UUID(end_user_id))
+            from app.repositories.end_user_repository import get_end_user_by_id_async
+            end_user = await get_end_user_by_id_async(db, uuid.UUID(end_user_id))
             user_name = end_user.other_name if end_user else None
             
             return {
@@ -415,6 +361,78 @@ async def get_workspace_total_memory_count(
         raise
     except Exception as e:
         business_logger.error(f"获取工作空间记忆总量失败: workspace_id={workspace_id} - {str(e)}")
+        raise
+
+
+async def get_workspace_total_memory_count_async(
+    db, 
+    workspace_id: uuid.UUID, 
+    current_user,
+    end_user_id: str = None
+) -> dict:
+    """获取工作空间的记忆总量（异步版本，使用 AsyncSession）"""
+    business_logger.info(f"获取工作空间记忆总量(异步): workspace_id={workspace_id}, 操作者: {current_user.username}")
+    
+    try:
+        hosts = await get_workspace_end_users_async(db, workspace_id, current_user)
+        business_logger.info(f"获取到 {len(hosts)} 个宿主")
+        
+        if not hosts:
+            business_logger.warning("未找到任何宿主，返回0")
+            return {
+                "total_memory_count": 0,
+                "host_count": 0,
+                "details": []
+            }
+        
+        from app.services import memory_storage_service
+        
+        if end_user_id:
+            batch_result = await memory_storage_service.search_all_batch([end_user_id])
+            count = batch_result.get(end_user_id, 0)
+            from app.repositories.end_user_repository import EndUserRepository
+            repo = EndUserRepository(db)
+            end_user = await repo.get_end_user_by_id_async(uuid.UUID(end_user_id))
+            user_name = end_user.other_name if end_user else None
+            
+            return {
+                "total_memory_count": count,
+                "host_count": 1,
+                "details": [{
+                    "end_user_id": end_user_id, 
+                    "count": count,
+                    "name": user_name
+                }]
+            }
+        
+        end_user_ids = [str(host.id) for host in hosts]
+        batch_result = await memory_storage_service.search_all_batch(end_user_ids)
+        
+        host_name_map = {str(host.id): host.other_name for host in hosts}
+        
+        total_count = sum(batch_result.values())
+        details = [
+            {
+                "end_user_id": uid,
+                "count": batch_result.get(uid, 0),
+                "name": host_name_map.get(uid)
+            }
+            for uid in end_user_ids
+        ]
+        
+        result = {
+            "total_memory_count": total_count,
+            "host_count": len(hosts),
+            "details": details
+        }
+        
+        business_logger.info(f"成功获取工作空间记忆总量: {total_count} (来自 {len(hosts)} 个宿主)")
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        business_logger.error(f"获取工作空间记忆总量失败(异步): workspace_id={workspace_id} - {str(e)}")
         raise
 
 

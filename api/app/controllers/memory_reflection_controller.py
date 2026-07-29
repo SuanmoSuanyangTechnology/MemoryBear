@@ -21,14 +21,14 @@ from uuid import UUID
 
 from app.core.language_utils import get_language_from_header
 from app.core.logging_config import get_api_logger
+from app.core.memory.pipelines.base_pipeline import ModelClientMixin
 from app.core.memory.storage_services.reflection_engine.self_reflexion import (
     ReflectionConfig,
     ReflectionEngine, ReflectionRange, ReflectionBaseline,
 )
 from app.core.response_utils import success
-from app.db import get_db
-from app.dependencies import get_current_user, get_current_user_async, CurrentUserSnapshot
-from app.models.user_model import User
+from app.db import get_async_db_context
+from app.dependencies import get_current_user_async, CurrentUserSnapshot
 from app.repositories.memory_config_repository import MemoryConfigRepository
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.services.memory_reflection_service import (
@@ -39,7 +39,6 @@ from app.services.model_service import ModelConfigService
 from dotenv import load_dotenv
 from fastapi import APIRouter, Depends, HTTPException, status, Header
 from sqlalchemy import text
-from sqlalchemy.orm import Session
 
 from app.utils.config_utils import resolve_config_id
 from typing import Optional
@@ -103,10 +102,9 @@ async def get_reflection_log_stats(
 
 
 @router.get("/reflection/logs/{log_id}")
-def get_reflection_log_detail(
+async def get_reflection_log_detail(
         log_id: str = Path(..., description="日志ID"),
-        current_user: User = Depends(get_current_user),
-        db: Session = Depends(get_db),
+        current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ):
     """获取反思日志详情
 
@@ -120,28 +118,28 @@ def get_reflection_log_detail(
 
     api_logger.info(f"用户 {current_user.username} 查询反思日志详情: log_id={log_id}")
 
-    try:
-        repo = ReflectionLogRepository(db)
-        log = repo.get_by_id(log_id)
-        if not log:
-            return fail(BizCode.NOT_FOUND, "日志不存在")
-        detail = ReflectionLogDetail.model_validate(log)
-        return success(data=detail.model_dump(mode="json"), msg="反思日志详情获取成功")
-    except Exception as e:
-        api_logger.error(f"查询反思日志详情失败: log_id={log_id}, error={e}")
-        return fail(BizCode.INTERNAL_ERROR, "查询详情失败", str(e))
+    async with get_async_db_context() as db:
+        try:
+            repo = ReflectionLogRepository(db)
+            log = await repo.get_by_id_async(log_id)
+            if not log:
+                return fail(BizCode.NOT_FOUND, "日志不存在")
+            detail = ReflectionLogDetail.model_validate(log)
+            return success(data=detail.model_dump(mode="json"), msg="反思日志详情获取成功")
+        except Exception as e:
+            api_logger.error(f"查询反思日志详情失败: log_id={log_id}, error={e}")
+            return fail(BizCode.INTERNAL_ERROR, "查询详情失败", str(e))
 
 
 @router.get("/reflection/logs")
-def get_reflection_logs(
+async def get_reflection_logs(
         end_user_id: str = Query(..., description="终端用户ID"),
         sub_problem: Optional[SubProblemEnum] = Query(None, description="子问题类型筛选"),
         status: Optional[LogStatusEnum] = Query(None, description="状态筛选"),
         trigger_type: Optional[TriggerTypeEnum] = Query(None, description="触发方式筛选"),
         page: int = Query(1, ge=1, description="页码，从1开始"),
         pagesize: int = Query(10, ge=1, le=100, description="每页数量"),
-        current_user: User = Depends(get_current_user),
-        db: Session = Depends(get_db),
+        current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ):
     """获取反思日志列表（分页）
 
@@ -159,49 +157,49 @@ def get_reflection_logs(
         f"status={status}, page={page}, pagesize={pagesize}"
     )
 
-    try:
-        # 校验终端用户是否存在
-        from app.repositories.end_user_repository import EndUserRepository
-        end_user_repo = EndUserRepository(db)
-        end_user = end_user_repo.get_end_user_by_id(end_user_uuid)
-        if end_user is None:
-            return fail(BizCode.USER_NOT_FOUND, f"终端用户不存在: {end_user_id}", "end_user not found")
+    async with get_async_db_context() as db:
+        try:
+            # 校验终端用户是否存在
+            from app.repositories.end_user_repository import EndUserRepository
+            end_user_repo = EndUserRepository(db)
+            end_user = await end_user_repo.get_end_user_by_id_async(end_user_uuid)
+            if end_user is None:
+                return fail(BizCode.USER_NOT_FOUND, f"终端用户不存在: {end_user_id}", "end_user not found")
 
-        repo = ReflectionLogRepository(db)
-        total, items = repo.get_paginated(
-            end_user_id=end_user_id,
-            page=page,
-            pagesize=pagesize,
-            sub_problem=sub_problem.value if sub_problem else None,
-            status=status.value if status else None,
-            trigger_type=trigger_type.value if trigger_type else None,
-        )
+            repo = ReflectionLogRepository(db)
+            total, items = await repo.get_paginated_async(
+                end_user_id=end_user_id,
+                page=page,
+                pagesize=pagesize,
+                sub_problem=sub_problem.value if sub_problem else None,
+                status=status.value if status else None,
+                trigger_type=trigger_type.value if trigger_type else None,
+            )
 
-        data_items = [
-            ReflectionLogListItem.model_validate(log).model_dump(mode="json")
-            for log in items
-        ]
+            data_items = [
+                ReflectionLogListItem.model_validate(log).model_dump(mode="json")
+                for log in items
+            ]
 
-        return success(data={
-            "items": data_items,
-            "page": {
-                "page": page,
-                "pagesize": pagesize,
-                "total": total,
-                "hasnext": (page * pagesize) < total,
-            },
-        }, msg="反思日志列表获取成功")
-    except Exception as e:
-        api_logger.error(f"查询反思日志列表失败: end_user_id={end_user_id}, error={e}")
-        return fail(BizCode.INTERNAL_ERROR, "查询日志列表失败", str(e))
+            return success(data={
+                "items": data_items,
+                "page": {
+                    "page": page,
+                    "pagesize": pagesize,
+                    "total": total,
+                    "hasnext": (page * pagesize) < total,
+                },
+            }, msg="反思日志列表获取成功")
+        except Exception as e:
+            api_logger.error(f"查询反思日志列表失败: end_user_id={end_user_id}, error={e}")
+            return fail(BizCode.INTERNAL_ERROR, "查询日志列表失败", str(e))
 
 # save_reflection_config 已迁移至 memory_config_controller（/memory_config/update_config_reflection）
 
 
 @router.get("/reflection")
 async def start_workspace_reflection(
-        current_user: User = Depends(get_current_user),
-        db: Session = Depends(get_db),
+        current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ) -> dict:
     """
     Start reflection functionality for all matching applications in workspace
@@ -251,11 +249,10 @@ async def start_workspace_reflection(
     try:
         api_logger.info(f"用户 {current_user.username} 启动workspace反思，workspace_id: {workspace_id}")
 
-        # Use independent database session to get workspace app details, avoiding transaction failures
-        from app.db import get_db_context
-        with get_db_context() as query_db:
+        # 异步查询 workspace 下所有应用详情
+        async with get_async_db_context() as query_db:
             service = WorkspaceAppService(query_db)
-            result = service.get_workspace_apps_detailed(workspace_id)
+            result = await service.get_workspace_apps_detailed_async(workspace_id)
 
         reflection_results = []
 
@@ -281,36 +278,56 @@ async def start_workspace_reflection(
                     api_logger.debug(f"配置 {config_id_str} 没有匹配的release")
                     continue
 
-                # Execute reflection for each user - using independent database sessions
+                # Execute reflection for each user - using async database sessions
                 for user in end_users:
                     api_logger.info(f"为用户 {user['id']} 启动反思，config_id: {config_id_str}")
 
-                    # Create independent database session for each user to avoid transaction failure impact
-                    with get_db_context() as user_db:
+                    # Phase 1: Async DB work — extract config + LLM client
+                    reflection_config = None
+                    llm_client = None
+                    async with get_async_db_context() as user_db:
                         try:
-                            reflection_service = MemoryReflectionService(user_db)
-                            reflection_result = await reflection_service.start_text_reflection(
-                                config_data=config,
-                                end_user_id=user['id']
+                            reflection_config = await MemoryReflectionService.resolve_reflection_config_async(
+                                user_db, config
                             )
-
-                            reflection_results.append({
-                                "app_id": data['id'],
-                                "config_id": config_id_str,
-                                "end_user_id": user['id'],
-                                "reflection_result": reflection_result
-                            })
+                            if reflection_config:
+                                llm_client = await MemoryReflectionService.get_llm_client_async(
+                                    user_db, reflection_config
+                                )
                         except Exception as e:
-                            api_logger.error(f"用户 {user['id']} 反思失败: {str(e)}")
-                            reflection_results.append({
-                                "app_id": data['id'],
+                            api_logger.warning(f"解析反思配置失败: {str(e)}")
+
+                    # Phase 2: Async reflection (no DB session held during LLM call)
+                    try:
+                        if reflection_config and llm_client:
+                            reflection_result = await MemoryReflectionService.execute_reflection_with_client(
+                                reflection_config, str(user['id']), llm_client
+                            )
+                        else:
+                            reflection_result = {
+                                "status": "跳过",
+                                "message": "反思引擎未启用",
                                 "config_id": config_id_str,
-                                "end_user_id": user['id'],
-                                "reflection_result": {
-                                    "status": "错误",
-                                    "message": f"反思失败: {str(e)}"
-                                }
-                            })
+                                "end_user_id": str(user['id']),
+                                "config_data": config
+                            }
+                        reflection_results.append({
+                            "app_id": data['id'],
+                            "config_id": config_id_str,
+                            "end_user_id": user['id'],
+                            "reflection_result": reflection_result
+                        })
+                    except Exception as e:
+                        api_logger.error(f"用户 {user['id']} 反思失败: {str(e)}")
+                        reflection_results.append({
+                            "app_id": data['id'],
+                            "config_id": config_id_str,
+                            "end_user_id": user['id'],
+                            "reflection_result": {
+                                "status": "错误",
+                                "message": f"反思失败: {str(e)}"
+                            }
+                        })
 
         return success(data=reflection_results, msg="反思配置成功")
 
@@ -329,8 +346,7 @@ async def start_workspace_reflection(
 async def reflection_run(
         config_id: UUID | int,
         language_type: str = Header(default=None, alias="X-Language-Type"),
-        current_user: User = Depends(get_current_user),
-        db: Session = Depends(get_db),
+        current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ) -> dict:
     """
     Execute reflection engine with specified configuration
@@ -347,7 +363,6 @@ async def reflection_run(
         config_id: Configuration identifier (UUID or integer) for reflection settings
         language_type: Language preference header for output localization (optional)
         current_user: Authenticated user executing the reflection
-        db: Database session for configuration queries
     
     Returns:
         dict: Success response with reflection execution results including:
@@ -389,50 +404,53 @@ async def reflection_run(
     language = get_language_from_header(language_type)
 
     api_logger.info(f"用户 {current_user.username} 查询反思配置，config_id: {config_id}")
-    config_id = resolve_config_id(config_id, db)
 
-    # Query reflection configuration using MemoryConfigRepository
-    result = MemoryConfigRepository.query_reflection_config_by_id(db, config_id)
-    if not result:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"未找到config_id为 {config_id} 的配置"
+    async with get_async_db_context() as db:
+        config_id = resolve_config_id(config_id, db)
+
+        # Query reflection configuration using MemoryConfigRepository
+        result = await MemoryConfigRepository(db).query_reflection_config_by_id_async(config_id)
+        if not result:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"未找到config_id为 {config_id} 的配置"
+            )
+
+        api_logger.info(f"成功查询反思配置，config_id: {config_id}")
+
+        # Validate model ID existence
+        model_id = result.reflection_model_id
+        if model_id:
+            try:
+                await ModelConfigService.get_model_by_id_async(db=db, model_id=uuid.UUID(model_id), tenant_id=current_user.tenant_id)
+                api_logger.info(f"模型ID验证成功: {model_id}")
+            except Exception as e:
+                api_logger.warning(f"模型ID '{model_id}' 不存在，将使用默认模型: {str(e)}")
+                # 可以设置为None，让反思引擎使用默认模型
+                model_id = None
+
+        # Construct config inside block to avoid DetachedInstanceError
+        config = ReflectionConfig(
+            enabled=result.enable_self_reflexion,
+            iteration_period=result.iteration_period,
+            reflexion_range=ReflectionRange(result.reflexion_range),
+            baseline=ReflectionBaseline(result.baseline),
+            output_example='',
+            memory_verify=result.memory_verify,
+            quality_assessment=result.quality_assessment,
+            violation_handling_strategy="block",
+            model_id=model_id,
+            language_type=language_type
         )
-
-    api_logger.info(f"成功查询反思配置，config_id: {config_id}")
-
-    # Validate model ID existence
-    model_id = result.reflection_model_id
-    if model_id:
-        try:
-            ModelConfigService.get_model_by_id(db=db, model_id=uuid.UUID(model_id), tenant_id=current_user.tenant_id)
-            api_logger.info(f"模型ID验证成功: {model_id}")
-        except Exception as e:
-            api_logger.warning(f"模型ID '{model_id}' 不存在，将使用默认模型: {str(e)}")
-            # 可以设置为None，让反思引擎使用默认模型
-            model_id = None
-
-    # Create reflection configuration with database parameters
-    config = ReflectionConfig(
-        enabled=result.enable_self_reflexion,
-        iteration_period=result.iteration_period,
-        reflexion_range=ReflectionRange(result.reflexion_range),
-        baseline=ReflectionBaseline(result.baseline),
-        output_example='',
-        memory_verify=result.memory_verify,
-        quality_assessment=result.quality_assessment,
-        violation_handling_strategy="block",
-        model_id=model_id,
-        language_type=language_type
-    )
+        model_client = await ModelClientMixin.get_llm_client_async(db, model_id, current_user.tenant_id)
 
     # Initialize Neo4j connector and reflection engine
     connector = Neo4jConnector()
     engine = ReflectionEngine(
         config=config,
         neo4j_connector=connector,
-        llm_client=model_id,  # Pass validated model_id
-        tenant_id=current_user.tenant_id
+        llm_client=model_client,
+        tenant_id=current_user.tenant_id,
     )
 
     result = await (engine.reflection_run())

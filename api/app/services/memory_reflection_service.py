@@ -7,7 +7,6 @@ from datetime import datetime
 from typing import Dict, Any, Optional, Set
 
 from sqlalchemy.orm import Session
-from sqlalchemy import text
 
 from app.core.utils.datetime_utils import to_iso_z, utcnow_naive
 from app.core.logging_config import get_api_logger
@@ -156,7 +155,7 @@ class WorkspaceAppService:
         """
         try:
             memory_content = resolve_config_id(memory_content, self.db)
-            memory_config_result = MemoryConfigRepository.query_reflection_config_by_id(self.db, memory_content)
+            memory_config_result = MemoryConfigRepository(self.db).query_reflection_config_by_id(memory_content)
 
             if memory_config_result:
                 # 查询 workspace 获取 tenant_id，用于 SpeedBear 模型 API key 解析
@@ -193,8 +192,123 @@ class WorkspaceAppService:
                 "app_id": str(end_user.app_id)
             }
             app_info["end_users"].append(end_user_info)
-        # print(100*'-')
-        # print(app_info)
+
+    # ==================== 异步版本 ====================
+
+    async def get_workspace_apps_detailed_async(self, workspace_id) -> Dict[str, Any]:
+        """异步版：获取 workspace 下所有应用的详情。"""
+        from sqlalchemy import select as sa_select
+
+        stmt = sa_select(App).where(
+            App.workspace_id == workspace_id,
+            App.is_active.is_(True),
+        )
+        result = await self.db.execute(stmt)
+        apps = list(result.scalars().all())
+
+        apps_detailed_info = []
+        for app in apps:
+            app_info = self._build_app_info(app)
+            await self._process_app_releases_async(app, app_info)
+            await self._process_end_users_async(app, app_info)
+            apps_detailed_info.append(app_info)
+
+        return {
+            "status": "成功",
+            "message": f"成功查询到 {len(apps)} 个应用及其详细信息",
+            "workspace_id": str(workspace_id),
+            "apps_count": len(apps),
+            "app_ids": [str(a.id) for a in apps],
+            "apps_detailed_info": apps_detailed_info,
+        }
+
+    async def _process_app_releases_async(self, app: App, app_info: Dict[str, Any]) -> None:
+        """异步版：处理应用的发布版本和配置信息。"""
+        from sqlalchemy import select as sa_select
+
+        stmt = sa_select(AppRelease).where(AppRelease.app_id == app.id)
+        result = await self.db.execute(stmt)
+        app_releases = list(result.scalars().all())
+
+        if not app_releases:
+            return
+
+        processed_configs: Set[str] = set()
+
+        for release in app_releases:
+            memory_content = self._extract_memory_content(release.config, app.type)
+            if memory_content and memory_content in processed_configs:
+                continue
+
+            release_info = {
+                "app_id": str(release.app_id),
+                "config": memory_content,
+            }
+
+            if memory_content:
+                processed_configs.add(memory_content)
+                memory_config_info = await self._get_memory_config_async(memory_content)
+                if memory_config_info:
+                    if not any(dc["config_id"] == memory_config_info["config_id"] for dc in app_info["memory_configs"]):
+                        app_info["memory_configs"].append(memory_config_info)
+
+            app_info["releases"].append(release_info)
+
+    async def _get_memory_config_async(self, memory_content: str) -> Optional[Dict[str, Any]]:
+        """异步版：根据 memory_content 获取 memory_config 信息。"""
+        from sqlalchemy import select as sa_select
+        from app.utils.config_utils import resolve_config_id_async
+
+        try:
+            resolved_id = await resolve_config_id_async(memory_content, self.db)
+            memory_config_result = await MemoryConfigRepository(self.db).query_reflection_config_by_id_async(resolved_id)
+
+            if not memory_config_result:
+                return None
+
+            # 查询 workspace 获取 tenant_id
+            tenant_id = None
+            if memory_config_result.workspace_id:
+                ws_result = await self.db.execute(
+                    sa_select(Workspace).where(Workspace.id == memory_config_result.workspace_id)
+                )
+                workspace = ws_result.scalars().first()
+                tenant_id = str(workspace.tenant_id) if workspace and workspace.tenant_id else None
+
+            return {
+                "config_id": resolved_id,
+                "workspace_id": memory_config_result.workspace_id,
+                "tenant_id": tenant_id,
+                "enable_self_reflexion": memory_config_result.enable_self_reflexion,
+                "iteration_period": memory_config_result.iteration_period,
+                "reflexion_range": memory_config_result.reflexion_range,
+                "baseline": memory_config_result.baseline,
+                "reflection_model_id": memory_config_result.reflection_model_id,
+                "memory_verify": memory_config_result.memory_verify,
+                "quality_assessment": memory_config_result.quality_assessment,
+                "user_id": memory_config_result.user_id,
+            }
+        except Exception as e:
+            api_logger.warning(f"异步查询memory_config失败，memory_content: {memory_content}, 错误: {str(e)}")
+            return None
+
+    async def _process_end_users_async(self, app: App, app_info: Dict[str, Any]) -> None:
+        """异步版：查询应用关联的终端用户。"""
+        from sqlalchemy import select as sa_select
+        from app.models.end_user_model import EndUser
+
+        stmt = sa_select(EndUser).where(
+            EndUser.app_id == app.id,
+            EndUser.is_active.is_(True),
+        )
+        result = await self.db.execute(stmt)
+        end_users = list(result.scalars().all())
+
+        for end_user in end_users:
+            app_info["end_users"].append({
+                "id": str(end_user.id),
+                "app_id": str(end_user.app_id),
+            })
 
     def get_end_user_reflection_time(self, end_user_id: str) -> Optional[Any]:
         """
@@ -231,7 +345,6 @@ class WorkspaceAppService:
             Is the update successful
         """
         try:
-            from datetime import datetime
 
             end_user = EndUserRepository(self.db).get_end_user_by_id(uuid.UUID(end_user_id))
             if end_user:
@@ -287,103 +400,198 @@ class MemoryReflectionService:
     def __init__(self, db: Session):
         self.db = db
 
-    async def start_text_reflection(self, config_data: Dict[str, Any], end_user_id: str) -> Dict[str, Any]:
+    @staticmethod
+    def resolve_reflection_config_sync(db: Session, config_data: Dict[str, Any]) -> Optional[ReflectionConfig]:
+        """同步提取反思配置（在短生命周期 Session 内完成，不跨 await 持有）。
+        
+        Returns:
+            ReflectionConfig or None if config not found / disabled
+        """
+        if not config_data.get("enable_self_reflexion", False):
+            return None
+        config_data_id = config_data.get('config_id')
+        if not config_data_id:
+            return None
+        reflection_config_dict = WorkspaceAppService(db)._get_memory_config(config_data_id)
+        if reflection_config_dict is None or not reflection_config_dict.get('enable_self_reflexion'):
+            return None
+        return MemoryReflectionService._create_reflection_config_from_data(db, reflection_config_dict)
+
+    @staticmethod
+    def get_llm_client_sync(db: Session, reflection_config: 'ReflectionConfig'):
+        """同步获取 LLM 客户端（短生命周期 Session）。"""
+        from app.core.memory.pipelines.base_pipeline import ModelClientMixin
+        tid = getattr(reflection_config, 'tenant_id', None)
+        tenant_id = uuid.UUID(tid) if tid else None
+        return ModelClientMixin.get_llm_client(db, reflection_config.model_id, tenant_id)
+
+    @staticmethod
+    async def resolve_reflection_config_async(db, config_data: Dict[str, Any]) -> Optional[ReflectionConfig]:
+        """异步提取反思配置。
+
+        Args:
+            db: AsyncSession
+            config_data: 包含 config_id、enable_self_reflexion 等字段的字典
+
+        Returns:
+            ReflectionConfig or None
+        """
+        if not config_data.get("enable_self_reflexion", False):
+            return None
+        config_data_id = config_data.get('config_id')
+        if not config_data_id:
+            return None
+
+        # 异步获取 memory_config 详情
+        from app.utils.config_utils import resolve_config_id_async
+        from app.repositories.memory_config_repository import MemoryConfigRepository
+        from app.models.workspace_model import Workspace
+        from sqlalchemy import select
+
+        try:
+            resolved_id = await resolve_config_id_async(str(config_data_id), db)
+            memory_config_result = await MemoryConfigRepository(db).get_by_id_async(resolved_id)
+            if not memory_config_result or not memory_config_result.enable_self_reflexion:
+                return None
+
+            # 获取 tenant_id
+            tenant_id = None
+            if memory_config_result.workspace_id:
+                ws_result = await db.execute(
+                    select(Workspace).where(Workspace.id == memory_config_result.workspace_id)
+                )
+                workspace = ws_result.scalars().first()
+                tenant_id = str(workspace.tenant_id) if workspace and workspace.tenant_id else None
+
+            reflection_config_dict = {
+                "config_id": resolved_id,
+                "workspace_id": memory_config_result.workspace_id,
+                "tenant_id": tenant_id,
+                "enable_self_reflexion": memory_config_result.enable_self_reflexion,
+                "iteration_period": memory_config_result.iteration_period,
+                "reflexion_range": memory_config_result.reflexion_range,
+                "baseline": memory_config_result.baseline,
+                "reflection_model_id": memory_config_result.reflection_model_id,
+                "memory_verify": memory_config_result.memory_verify,
+                "quality_assessment": memory_config_result.quality_assessment,
+                "user_id": memory_config_result.user_id,
+            }
+        except Exception as e:
+            api_logger.warning(f"异步获取反思配置失败: config_id={config_data_id}, 错误: {e}")
+            return None
+
+        return MemoryReflectionService._create_reflection_config_from_data_pure(reflection_config_dict, db)
+
+    @staticmethod
+    async def get_llm_client_async(db, reflection_config: 'ReflectionConfig'):
+        """异步获取 LLM 客户端。
+
+        ModelClientMixin.get_llm_client 内部主要是同步 DB 查询 model_config 表。
+        这里用 asyncio.to_thread 包装以避免阻塞事件循环。
+        """
+        import asyncio
+        from app.core.memory.pipelines.base_pipeline import ModelClientMixin
+        from app.db import get_db_context
+
+        tid = getattr(reflection_config, 'tenant_id', None)
+        tenant_id = uuid.UUID(tid) if tid else None
+
+        def _get_client():
+            with get_db_context() as sync_db:
+                return ModelClientMixin.get_llm_client(sync_db, reflection_config.model_id, tenant_id)
+
+        return await asyncio.to_thread(_get_client)
+
+    @staticmethod
+    def _create_reflection_config_from_data_pure(config_data: Dict[str, Any], db=None) -> ReflectionConfig:
+        """从配置字典创建 ReflectionConfig（不需要 DB 查询的纯构造版本）。
+
+        当 reflection_model_id 为空且有 workspace_id 时，尝试用 db 获取默认模型。
+        db 可以是 sync Session 或 None（此时跳过回退查询）。
+        """
+        from app.repositories.workspace_repository import get_workspace_models_configs
+
+        reflexion_range_value = config_data.get("reflexion_range")
+        if reflexion_range_value is None or reflexion_range_value == "":
+            reflexion_range_value = "partial"
+        reflexion_range_mapping = {"retrieval": "partial", "partial": "partial", "all": "all"}
+        reflexion_range_value = reflexion_range_mapping.get(reflexion_range_value, "partial")
+        reflexion_range = ReflectionRange(reflexion_range_value)
+
+        baseline_value = config_data.get("baseline")
+        if baseline_value is None or baseline_value == "":
+            baseline_value = "TIME"
+        baseline = ReflectionBaseline(baseline_value)
+
+        iteration_period = config_data.get("iteration_period", 24)
+        if isinstance(iteration_period, str):
+            try:
+                iteration_period = int(iteration_period)
+            except (ValueError, TypeError):
+                iteration_period = 24
+
+        reflection_model_id = config_data.get("reflection_model_id", "")
+        if reflection_model_id:
+            reflection_model_id = str(reflection_model_id)
+
+        # 如果模型 ID 为空，且传了同步 db，尝试查工作空间默认
+        if not reflection_model_id and db is not None:
+            workspace_id = config_data.get("workspace_id")
+            if workspace_id:
+                try:
+                    from app.db import get_db_context
+                    with get_db_context() as sync_db:
+                        workspace_models = get_workspace_models_configs(sync_db, workspace_id)
+                        if workspace_models and workspace_models.get("llm"):
+                            reflection_model_id = workspace_models["llm"]
+                except Exception:
+                    pass
+
+        return ReflectionConfig(
+            enabled=config_data.get("enable_self_reflexion", False),
+            iteration_period=str(iteration_period),
+            reflexion_range=reflexion_range,
+            baseline=baseline,
+            memory_verify=config_data.get("memory_verify", False),
+            quality_assessment=config_data.get("quality_assessment", False),
+            model_id=reflection_model_id,
+            tenant_id=config_data.get("tenant_id"),
+        )
+
+    async def start_reflection_from_data(self, config_data: Dict[str, Any], end_user_id: str) -> Dict[str, Any]:
+        """从配置数据启动反思（兼容旧接口，内部持有 self.db）。"""
         try:
             config_id = config_data.get("config_id")
             api_logger.info(f"从配置数据启动反思，config_id: {config_id}, end_user_id: {end_user_id}")
 
             if not config_data.get("enable_self_reflexion", False):
                 return {
-                    "status": "跳过",
-                    "message": "反思引擎未启用",
-                    "config_id": config_id,
-                    "end_user_id": end_user_id,
-                    "config_data": config_data
+                    "status": "跳过", "message": "反思引擎未启用",
+                    "config_id": config_id, "end_user_id": end_user_id, "config_data": config_data
                 }
 
             config_data_id = config_data['config_id']
-            reflection_config = WorkspaceAppService(self.db)._get_memory_config(config_data_id)
-            if reflection_config is not None and reflection_config['enable_self_reflexion']:
-                reflection_config = self._create_reflection_config_from_data(reflection_config)
-                # 3. 执行反思引擎
-                reflection_results = await self._execute_reflection_engine(
-                    reflection_config, end_user_id
-                )
-                return {
-                    "status": "完成",
-                    "message": "反思引擎执行完成",
-                    "config_id": config_id,
-                    "end_user_id": end_user_id,
-                    "config_data": config_data,
-                    "reflection_results": reflection_results
-                }
-
-        except Exception as e:
-            config_id = config_data.get("config_id", "unknown")
-            api_logger.error(f"启动反思失败，config_id: {config_id}, end_user_id: {end_user_id}, 错误: {str(e)}")
-            return {
-                "status": "错误",
-                "message": f"启动反思失败: {str(e)}",
-                "config_id": config_id,
-                "end_user_id": end_user_id,
-                "config_data": config_data
-            }
-
-    async def start_reflection_from_data(self, config_data: Dict[str, Any], end_user_id: str) -> Dict[str, Any]:
-        """
-        Starting Reflection from Configuration Data
-
-        Args:
-            config_data: Configure data dictionary, including reflective configuration information
-            end_user_id: end_user_id
-
-        Returns:
-            Reflect on the execution results
-        """
-        try:
-            config_id = config_data.get("config_id")
-            api_logger.info(f"从配置数据启动反思，config_id: {config_id}, end_user_id: {end_user_id}")
-
-
-            if not config_data.get("enable_self_reflexion", False):
-                return {
-                    "status": "跳过",
-                    "message": "反思引擎未启用",
-                    "config_id": config_id,
-                    "end_user_id": end_user_id,
-                    "config_data": config_data
-                }
-
-
-            config_data_id=config_data['config_id']
-            reflection_config=WorkspaceAppService(self.db)._get_memory_config(config_data_id)
-            if reflection_config is not None and reflection_config['enable_self_reflexion']:
-                reflection_config=  self._create_reflection_config_from_data(reflection_config)
+            reflection_config_dict = WorkspaceAppService(self.db)._get_memory_config(config_data_id)
+            if reflection_config_dict is not None and reflection_config_dict.get('enable_self_reflexion'):
+                reflection_config = MemoryReflectionService._create_reflection_config_from_data(self.db, reflection_config_dict)
                 iteration_period = int(reflection_config.iteration_period)
                 workspace_service = WorkspaceAppService(self.db)
                 current_reflection_time = workspace_service.get_end_user_reflection_time(end_user_id)
 
-                # 检查是否需要执行反思
                 should_execute = False
                 hours_diff = 0
-
                 if current_reflection_time is None:
-                    # 首次执行反思
                     should_execute = True
                     api_logger.info(f"首次执行反思，end_user_id: {end_user_id}")
                 else:
-                    # 计算时间差
                     try:
                         if isinstance(current_reflection_time, str):
                             reflection_time = datetime.fromisoformat(current_reflection_time)
                         else:
                             reflection_time = current_reflection_time
-
                         current_time = utcnow_naive()
                         time_diff = current_time - reflection_time
                         hours_diff = int(time_diff.total_seconds() / 3600)
-
-                        # 检查是否达到反思周期
                         if hours_diff >= iteration_period:
                             should_execute = True
                             api_logger.info(f"与上次的反思时间间隔为: {hours_diff} 小时，达到周期 {iteration_period} 小时")
@@ -395,141 +603,55 @@ class MemoryReflectionService:
 
                 if should_execute:
                     api_logger.info(f"与上次的反思时间间隔为: {hours_diff} 小时")
-                    # 3. 执行反思引擎
-                    reflection_results = await self._execute_reflection_engine(
-                        reflection_config, end_user_id
-                    )
-                    # 更新反思时间为当前时间
+                    reflection_results = await self._execute_reflection_engine(reflection_config, end_user_id)
                     update_success = workspace_service.update_end_user_reflection_time(end_user_id)
                     if update_success:
                         api_logger.info(f"成功更新用户 {end_user_id} 的反思时间")
                     else:
                         api_logger.error(f"更新用户 {end_user_id} 的反思时间失败")
-
                     return {
-                        "status": "完成",
-                        "message": "反思引擎执行完成",
-                        "config_id": config_id,
-                        "end_user_id": end_user_id,
-                        "config_data": config_data,
-                        "reflection_results": reflection_results
+                        "status": "完成", "message": "反思引擎执行完成",
+                        "config_id": config_id, "end_user_id": end_user_id,
+                        "config_data": config_data, "reflection_results": reflection_results
                     }
                 else:
                     return {
                         "status": "等待中",
                         "message": f"反思引擎未开始执行，距离下次执行还需 {iteration_period - hours_diff} 小时",
-                        "config_id": config_id,
-                        "end_user_id": end_user_id,
-                        "config_data": config_data,
-                        "hours_since_last_reflection": hours_diff,
+                        "config_id": config_id, "end_user_id": end_user_id,
+                        "config_data": config_data, "hours_since_last_reflection": hours_diff,
                         "next_reflection_in_hours": iteration_period - hours_diff
                     }
-
 
         except Exception as e:
             config_id = config_data.get("config_id", "unknown")
             api_logger.error(f"启动反思失败，config_id: {config_id}, end_user_id: {end_user_id}, 错误: {str(e)}")
             return {
-                "status": "错误",
-                "message": f"启动反思失败: {str(e)}",
-                "config_id": config_id,
-                "end_user_id": end_user_id,
-                "config_data": config_data
+                "status": "错误", "message": f"启动反思失败: {str(e)}",
+                "config_id": config_id, "end_user_id": end_user_id, "config_data": config_data
             }
 
-    def _create_reflection_config_from_data(self, config_data: Dict[str, Any]) -> ReflectionConfig:
-        """Create reflective configuration objects from configuration data
-        
-        If reflection_model_id is not set, falls back to workspace default LLM.
+    @staticmethod
+    async def execute_reflection_with_client(
+        reflection_config: 'ReflectionConfig',
+        end_user_id: str,
+        llm_client,
+    ) -> Dict[str, Any]:
+        """执行反思引擎（纯异步，无 DB Session 依赖）。
         
         Args:
-            config_data: Dict containing reflection config including workspace_id
-            
-        Returns:
-            ReflectionConfig object with model_id resolved
+            reflection_config: 已解析的反思配置
+            end_user_id: 终端用户 ID
+            llm_client: 已初始化的 LLM 客户端
         """
-        from app.repositories.workspace_repository import get_workspace_models_configs
-
-        reflexion_range_value = config_data.get("reflexion_range")
-        if reflexion_range_value is None or reflexion_range_value == "":
-            reflexion_range_value = "partial"
-        
-        # Map legacy/invalid values to valid enum values
-        reflexion_range_mapping = {
-            "retrieval": "partial",  # Map old 'retrieval' to 'partial'
-            "partial": "partial",
-            "all": "all"
-        }
-        reflexion_range_value = reflexion_range_mapping.get(reflexion_range_value, "partial")
-        reflexion_range = ReflectionRange(reflexion_range_value)
-
-        baseline_value = config_data.get("baseline")
-        if baseline_value is None or baseline_value == "":
-            baseline_value = "TIME"
-        baseline = ReflectionBaseline(baseline_value)
-
-        # iteration_period
-        iteration_period = config_data.get("iteration_period", 24)
-        if isinstance(iteration_period, str):
-            try:
-                iteration_period = int(iteration_period)
-            except (ValueError, TypeError):
-                iteration_period = 24  # 默认24小时
-        
-        # 获取 model_id 并转换为字符串（如果是 UUID 对象）
-        reflection_model_id = config_data.get("reflection_model_id", "")
-        if reflection_model_id:
-            reflection_model_id = str(reflection_model_id)
-        
-        # 如果 reflection_model_id 为空，回退到工作空间默认 LLM
-        if not reflection_model_id:
-            workspace_id = config_data.get("workspace_id")
-            if workspace_id:
-                workspace_models = get_workspace_models_configs(self.db, workspace_id)
-                if workspace_models and workspace_models.get("llm"):
-                    reflection_model_id = workspace_models["llm"]
-                    api_logger.info(
-                        f"reflection_model_id 为空，使用工作空间默认 LLM: {reflection_model_id}"
-                    )
-        
-        return ReflectionConfig(
-            enabled=config_data.get("enable_self_reflexion", False),
-            iteration_period=str(iteration_period),  # ReflectionConfig期望字符串
-            reflexion_range=reflexion_range,
-            baseline=baseline,
-            memory_verify=config_data.get("memory_verify", False),
-            quality_assessment=config_data.get("quality_assessment", False),
-            model_id=reflection_model_id,
-            tenant_id=config_data.get("tenant_id")
-        )
-    
-    async def _execute_reflection_engine(
-        self, 
-        reflection_config: ReflectionConfig, 
-        user_id: str
-    ) -> Dict[str, Any]:
-        """Execute Reflection Engine"""
         try:
-            from app.core.memory.pipelines.base_pipeline import ModelClientMixin
-
-            # 创建Neo4j连接器
             connector = Neo4jConnector()
-            
-            # 提前构建 LLM 客户端（不再让 ReflectionEngine 内部 lazy init）
-            llm_client = ModelClientMixin.get_llm_client(
-                self.db, reflection_config.model_id, self._get_tenant_id(reflection_config)
-            )
-            
-            # 创建反思引擎
             engine = ReflectionEngine(
                 config=reflection_config,
                 neo4j_connector=connector,
                 llm_client=llm_client
             )
-            
-            # 执行反思
-            reflection_result = await engine.execute_reflection(user_id)
-            
+            reflection_result = await engine.execute_reflection(end_user_id)
             return {
                 "success": reflection_result.success,
                 "message": reflection_result.message,
@@ -539,20 +661,88 @@ class MemoryReflectionService:
                 "execution_time": reflection_result.execution_time,
                 "details": reflection_result.details
             }
-            
         except Exception as e:
             api_logger.error(f"反思引擎执行失败: {str(e)}")
             return {
-                "success": False,
-                "message": f"反思引擎执行失败: {str(e)}",
-                "conflicts_found": 0,
-                "conflicts_resolved": 0,
-                "memories_updated": 0,
-                "execution_time": 0.0
+                "success": False, "message": f"反思引擎执行失败: {str(e)}",
+                "conflicts_found": 0, "conflicts_resolved": 0,
+                "memories_updated": 0, "execution_time": 0.0
+            }
+
+    @staticmethod
+    def _create_reflection_config_from_data(db: Session, config_data: Dict[str, Any]) -> ReflectionConfig:
+        """从配置数据创建反思配置对象（接收 db 参数，不依赖 self.db）。"""
+        from app.repositories.workspace_repository import get_workspace_models_configs
+
+        reflexion_range_value = config_data.get("reflexion_range")
+        if reflexion_range_value is None or reflexion_range_value == "":
+            reflexion_range_value = "partial"
+        reflexion_range_mapping = {"retrieval": "partial", "partial": "partial", "all": "all"}
+        reflexion_range_value = reflexion_range_mapping.get(reflexion_range_value, "partial")
+        reflexion_range = ReflectionRange(reflexion_range_value)
+
+        baseline_value = config_data.get("baseline")
+        if baseline_value is None or baseline_value == "":
+            baseline_value = "TIME"
+        baseline = ReflectionBaseline(baseline_value)
+
+        iteration_period = config_data.get("iteration_period", 24)
+        if isinstance(iteration_period, str):
+            try:
+                iteration_period = int(iteration_period)
+            except (ValueError, TypeError):
+                iteration_period = 24
+
+        reflection_model_id = config_data.get("reflection_model_id", "")
+        if reflection_model_id:
+            reflection_model_id = str(reflection_model_id)
+
+        if not reflection_model_id:
+            workspace_id = config_data.get("workspace_id")
+            if workspace_id:
+                workspace_models = get_workspace_models_configs(db, workspace_id)
+                if workspace_models and workspace_models.get("llm"):
+                    reflection_model_id = workspace_models["llm"]
+                    api_logger.info(f"reflection_model_id 为空，使用工作空间默认 LLM: {reflection_model_id}")
+
+        return ReflectionConfig(
+            enabled=config_data.get("enable_self_reflexion", False),
+            iteration_period=str(iteration_period),
+            reflexion_range=reflexion_range,
+            baseline=baseline,
+            memory_verify=config_data.get("memory_verify", False),
+            quality_assessment=config_data.get("quality_assessment", False),
+            model_id=reflection_model_id,
+            tenant_id=config_data.get("tenant_id")
+        )
+
+    async def _execute_reflection_engine(self, reflection_config: ReflectionConfig, user_id: str) -> Dict[str, Any]:
+        """执行反思引擎（兼容旧调用，从 self.db 获取 LLM client）。"""
+        from app.core.memory.pipelines.base_pipeline import ModelClientMixin
+        try:
+            connector = Neo4jConnector()
+            llm_client = ModelClientMixin.get_llm_client(
+                self.db, reflection_config.model_id, self._get_tenant_id(reflection_config)
+            )
+            engine = ReflectionEngine(config=reflection_config, neo4j_connector=connector, llm_client=llm_client)
+            reflection_result = await engine.execute_reflection(user_id)
+            return {
+                "success": reflection_result.success, "message": reflection_result.message,
+                "conflicts_found": reflection_result.conflicts_found,
+                "conflicts_resolved": reflection_result.conflicts_resolved,
+                "memories_updated": reflection_result.memories_updated,
+                "execution_time": reflection_result.execution_time,
+                "details": reflection_result.details
+            }
+        except Exception as e:
+            api_logger.error(f"反思引擎执行失败: {str(e)}")
+            return {
+                "success": False, "message": f"反思引擎执行失败: {str(e)}",
+                "conflicts_found": 0, "conflicts_resolved": 0,
+                "memories_updated": 0, "execution_time": 0.0
             }
 
     def _get_tenant_id(self, reflection_config: ReflectionConfig):
-        """从 ReflectionConfig 中获取 tenant_id，用于 SpeedBear 模型 API key 解析"""
         tid = getattr(reflection_config, 'tenant_id', None)
         return uuid.UUID(tid) if tid else None
 
