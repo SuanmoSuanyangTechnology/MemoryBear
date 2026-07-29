@@ -1,7 +1,7 @@
 import csv
 import io
 import uuid
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from typing import Any
 
 from app.core.rag.vdb.elasticsearch.elasticsearch_vector import (
@@ -45,10 +45,7 @@ def iter_qa_pairs_by_knowledge(
 
         for hit in hits:
             source = hit.get("_source") or {}
-            yield {
-                "question": _normalize_csv_value(source.get(Field.QUESTION.value)),
-                "answer": _normalize_csv_value(source.get(Field.ANSWER.value)),
-            }
+            yield _qa_pair_from_source(source)
 
         search_after = hits[-1].get("sort")
         if not search_after:
@@ -68,7 +65,7 @@ def iter_qa_pairs_by_document(
         return
 
     filters: list[dict[str, Any]] = [
-        {"term": {Field.CHUNK_TYPE.value: "qa"}},
+        _qa_chunk_type_filter(),
         {"term": {Field.KNOWLEDGE_ID.value: kb_id_str}},
         {"term": {Field.DOCUMENT_ID.value: str(document_id)}},
     ]
@@ -76,15 +73,12 @@ def iter_qa_pairs_by_document(
         client,
         index=index_name,
         query={"bool": {"filter": filters}},
-        source_includes=[Field.QUESTION.value, Field.ANSWER.value],
+        source_includes=_qa_source_includes(),
         sort=_qa_export_sort(),
         batch_size=max(1, min(batch_size, 10000)),
     ):
         source = hit.get("_source") or {}
-        yield {
-            "question": _normalize_csv_value(source.get(Field.QUESTION.value)),
-            "answer": _normalize_csv_value(source.get(Field.ANSWER.value)),
-        }
+        yield _qa_pair_from_source(source)
 
 
 def iter_qa_csv_chunks(
@@ -122,6 +116,43 @@ def _qa_export_sort() -> list[dict[str, Any]]:
     ]
 
 
+def _qa_chunk_type_filter() -> dict[str, Any]:
+    return {
+        "bool": {
+            "should": [
+                {"term": {Field.CHUNK_TYPE.value: "qa"}},
+                {"term": {f"{Field.METADATA_KEY.value}.{Field.CHUNK_TYPE.value}": "qa"}},
+            ],
+            "minimum_should_match": 1,
+        }
+    }
+
+
+def _qa_source_includes() -> list[str]:
+    return [
+        Field.QUESTION.value,
+        Field.ANSWER.value,
+        f"{Field.METADATA_KEY.value}.{Field.QUESTION.value}",
+        f"{Field.METADATA_KEY.value}.{Field.ANSWER.value}",
+    ]
+
+
+def _qa_pair_from_source(source: Mapping[str, Any]) -> dict[str, str]:
+    metadata = source.get(Field.METADATA_KEY.value) or {}
+    if not isinstance(metadata, Mapping):
+        metadata = {}
+    question = source.get(Field.QUESTION.value)
+    answer = source.get(Field.ANSWER.value)
+    if question is None:
+        question = metadata.get(Field.QUESTION.value)
+    if answer is None:
+        answer = metadata.get(Field.ANSWER.value)
+    return {
+        "question": _normalize_csv_value(question),
+        "answer": _normalize_csv_value(answer),
+    }
+
+
 def _build_qa_export_search_body(
     kb_id: str,
     batch_size: int,
@@ -131,13 +162,13 @@ def _build_qa_export_search_body(
         "query": {
             "bool": {
                 "filter": [
-                    {"term": {Field.CHUNK_TYPE.value: "qa"}},
+                    _qa_chunk_type_filter(),
                     {"term": {Field.KNOWLEDGE_ID.value: kb_id}},
                     {"term": {"metadata.status": 1}},
                 ]
             }
         },
-        "_source": [Field.QUESTION.value, Field.ANSWER.value],
+        "_source": _qa_source_includes(),
         "size": batch_size,
         "sort": _qa_export_sort(),
     }

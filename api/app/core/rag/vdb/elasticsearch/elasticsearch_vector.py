@@ -58,6 +58,34 @@ ES_DEFAULT_MAX_RESULT_WINDOW = 10000
 ES_FULL_SCAN_BATCH_SIZE = 1000
 
 
+def _delete_by_metadata_field(
+    client: Elasticsearch,
+    index_name: str,
+    key: str,
+    value: str,
+    *,
+    refresh: bool,
+) -> bool:
+    result = client.delete_by_query(
+        index=index_name,
+        query={"term": {f"{Field.METADATA_KEY.value}.{key}": value}},
+        refresh=refresh,
+        conflicts="abort",
+        wait_for_completion=True,
+    )
+    raise_on_delete_by_query_failure(
+        result,
+        "delete by metadata field",
+    )
+    logger.info(
+        "Deleted Elasticsearch documents by metadata field: index=%s field=%s deleted=%s",
+        index_name,
+        key,
+        result.get("deleted", 0),
+    )
+    return True
+
+
 @dataclass(frozen=True)
 class ModelApiKeyRuntimeConfig:
     model_name: str
@@ -246,24 +274,13 @@ class ElasticSearchVector(BaseVector):
     def delete_by_metadata_field(self, key: str, value: str, *, refresh: bool = False):
         if not self._client.indices.exists(index=self._collection_name):
             return False
-        result = self._client.delete_by_query(
-            index=self._collection_name,
-            query={"term": {f"{Field.METADATA_KEY.value}.{key}": value}},
-            refresh=refresh,
-            conflicts="abort",
-            wait_for_completion=True,
-        )
-        raise_on_delete_by_query_failure(
-            result,
-            "delete by metadata field",
-        )
-        logger.info(
-            "Deleted Elasticsearch documents by metadata field: index=%s field=%s deleted=%s",
+        return _delete_by_metadata_field(
+            self._client,
             self._collection_name,
             key,
-            result.get("deleted", 0),
+            value,
+            refresh=refresh,
         )
-        return True
 
     def delete(self):
         if self._client.indices.exists(index=self._collection_name):
@@ -1018,24 +1035,13 @@ class ElasticSearchVectorIndexOps:
         if not self._client.indices.exists(index=self._collection_name):
             return False
 
-        result = self._client.delete_by_query(
-            index=self._collection_name,
-            query={"term": {f"{Field.METADATA_KEY.value}.{key}": value}},
-            refresh=refresh,
-            conflicts="abort",
-            wait_for_completion=True,
-        )
-        raise_on_delete_by_query_failure(
-            result,
-            "delete by metadata field",
-        )
-        logger.info(
-            "Deleted Elasticsearch documents by metadata field: index=%s field=%s deleted=%s",
+        return _delete_by_metadata_field(
+            self._client,
             self._collection_name,
             key,
-            result.get("deleted", 0),
+            value,
+            refresh=refresh,
         )
-        return True
 
     def change_document_status(self, document_id: str, status: int) -> int:
         body = {
