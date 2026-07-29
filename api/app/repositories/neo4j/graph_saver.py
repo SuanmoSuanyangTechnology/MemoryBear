@@ -55,7 +55,7 @@ async def save_entities_and_relationships(
             'statement': edge.statement,
             'valid_at': to_iso_z(edge.valid_at),
             'invalid_at': to_iso_z(edge.invalid_at),
-            'created_at': to_iso_z(edge.created_at),
+            'created_at': edge.created_at,
             'run_id': edge.run_id,
             'end_user_id': edge.end_user_id,
         }
@@ -114,7 +114,7 @@ async def save_statement_chunk_edges(
             "target": edge.target,
             "end_user_id": edge.end_user_id,
             "run_id": edge.run_id,
-            "created_at": to_iso_z(edge.created_at),
+            "created_at": edge.created_at,
         })
 
     try:
@@ -143,7 +143,7 @@ async def save_statement_entity_edges(
             "end_user_id": edge.end_user_id,
             "run_id": edge.run_id,
             "connect_strength": edge.connect_strength,
-            "created_at": to_iso_z(edge.created_at),
+            "created_at": edge.created_at,
         }
         all_se_edges.append(edge_data)
 
@@ -310,7 +310,7 @@ async def save_dialog_and_statements_to_neo4j(
                     'statement': edge.statement,
                     'valid_at': to_iso_z(edge.valid_at),
                     'invalid_at': to_iso_z(edge.invalid_at),
-                    'created_at': to_iso_z(edge.created_at),
+                    'created_at': edge.created_at,
                     'run_id': edge.run_id,
                     'end_user_id': edge.end_user_id,
                 })
@@ -328,7 +328,7 @@ async def save_dialog_and_statements_to_neo4j(
                     "id": edge.id,
                     "source": edge.source,
                     "target": edge.target,
-                    "created_at": to_iso_z(edge.created_at),
+                    "created_at": edge.created_at,
                     "run_id": edge.run_id,
                     "end_user_id": edge.end_user_id,
                 })
@@ -345,7 +345,7 @@ async def save_dialog_and_statements_to_neo4j(
                 se_edge_data.append({
                     "source": edge.source,
                     "target": edge.target,
-                    "created_at": to_iso_z(edge.created_at),
+                    "created_at": edge.created_at,
                     "run_id": edge.run_id,
                     "end_user_id": edge.end_user_id,
                     "connect_strength": getattr(edge, "connect_strength", "strong"),
@@ -373,7 +373,7 @@ async def save_dialog_and_statements_to_neo4j(
                     "perceptual_id": edge.target,
                     "end_user_id": edge.end_user_id,
                     "run_id": edge.run_id,
-                    "created_at": to_iso_z(edge.created_at),
+                    "created_at": edge.created_at,
                     "perceptual_type": edge.perceptual_type,
                     "perceptual_type_id": edge.perceptual_type_id,
                 }
@@ -429,7 +429,7 @@ async def save_dialog_and_statements_to_neo4j(
                 "pair_id": edge.pair_id,
                 "end_user_id": edge.end_user_id,
                 "run_id": edge.run_id,
-                "created_at": to_iso_z(edge.created_at),
+                "created_at": edge.created_at,
             } for edge in assistant_pruned_edges]
             result = await tx.run(ASSISTANT_PRUNED_EDGE_SAVE, edges=edge_data)
             pruned_edge_uuids = [record["uuid"] async for record in result]
@@ -445,7 +445,7 @@ async def save_dialog_and_statements_to_neo4j(
                 "end_user_id": node.end_user_id,
                 "conversation_id": node.conversation_id,
                 "run_id": node.run_id,
-                "created_at": to_iso_z(node.created_at),
+                "created_at": node.created_at,
             } for node in conversation_nodes]
             result = await tx.run(CONVERSATION_NODE_SAVE, conversations=conv_data)
             conv_uuids = [record["uuid"] async for record in result]
@@ -460,7 +460,7 @@ async def save_dialog_and_statements_to_neo4j(
                 "target": edge.target,
                 "end_user_id": edge.end_user_id,
                 "run_id": edge.run_id,
-                "created_at": to_iso_z(edge.created_at),
+                "created_at": edge.created_at,
             } for edge in assistant_conversation_edges]
             result = await tx.run(ASSISTANT_CONVERSATION_EDGE_SAVE, edges=edge_data)
             conv_edge_uuids = [record["uuid"] async for record in result]
@@ -485,7 +485,7 @@ async def save_dialog_and_statements_to_neo4j(
                 "target": edge.target,
                 "end_user_id": edge.end_user_id,
                 "run_id": edge.run_id,
-                "created_at": to_iso_z(edge.created_at),
+                "created_at": edge.created_at,
             } for edge in user_source_edges]
             result = await tx.run(USER_SOURCE_ENTITY_EDGE_SAVE, edges=edge_data)
             us_edge_uuids = [record["uuid"] async for record in result]
