@@ -265,6 +265,8 @@ def pit_search_slice(
         for page in pages:
             if page.total is not None:
                 total = page.total
+                if size == 0 or offset >= total:
+                    break
             if not page.hits or size == 0:
                 break
 
