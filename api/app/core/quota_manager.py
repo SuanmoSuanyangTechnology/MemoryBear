@@ -104,8 +104,8 @@ async def _get_tenant_id_from_kwargs_async(db: AsyncSession, kwargs: dict):
     return await db.run_sync(lambda sync_db: _get_tenant_id_from_kwargs(sync_db, kwargs))
 
 
-# 按工作空间计量的配额：套餐额度是「每个工作空间」的上限，
-# 资源包额度是「整个租户」的一次性增量，聚合时不能跟着工作空间数量翻倍。
+# 按工作空间计量的配额：套餐额度与资源包额度都是「每个工作空间」的上限
+# （与 :func:`_check_quota` 的口径一致），租户总额度需要乘以活跃空间数。
 PER_WORKSPACE_QUOTA_KEYS = frozenset({
     "app_quota",
     "knowledge_capacity_quota",
@@ -315,38 +315,6 @@ class QuotaUsageRepository:
         if trial_user_ids:
             query = query.filter(~EndUser.other_id.in_(trial_user_ids))
         return query.count()
-
-    def max_end_user_memory_count(
-        self,
-        tenant_id: UUID,
-        workspace_id: Optional[UUID] = None,
-    ) -> int:
-        """返回单个活跃终端用户的最大已同步记忆节点数。"""
-        from app.models.end_user_model import EndUser
-        from app.models.workspace_model import Workspace
-
-        query = self.db.query(func.coalesce(func.max(EndUser.memory_count), 0)).join(
-            Workspace, EndUser.workspace_id == Workspace.id
-        ).filter(
-            Workspace.tenant_id == tenant_id,
-            EndUser.is_active == True,
-        )
-        if workspace_id:
-            query = query.filter(EndUser.workspace_id == workspace_id)
-        return int(query.scalar() or 0)
-
-    def list_active_end_user_ids(self, tenant_id: UUID) -> list[UUID]:
-        """返回租户下活跃终端用户 ID，用于读取每用户实时限流窗口。"""
-        from app.models.end_user_model import EndUser
-        from app.models.workspace_model import Workspace
-
-        rows = self.db.query(EndUser.id).join(
-            Workspace, EndUser.workspace_id == Workspace.id
-        ).filter(
-            Workspace.tenant_id == tenant_id,
-            EndUser.is_active == True,
-        ).all()
-        return [end_user_id for (end_user_id,) in rows]
 
     async def count_end_users_async(self, tenant_id: UUID, workspace_id: Optional[UUID] = None) -> int:
         from app.models.end_user_model import EndUser
@@ -894,13 +862,11 @@ def check_quota(quota_type: str, resource_name: str, usage_func: Optional[Callab
 async def get_quota_usage(db: Session, tenant_id: UUID) -> dict:
     """获取租户全部配额的使用情况。
 
-    workspace 级配额汇总所有活跃空间，并提供逐空间明细；每用户级配额
-    使用租户内单个用户的最大值，便于直接判断最接近限额的资源。
+    workspace 级配额只返回租户维度的汇总值，不再逐空间展开明细。
 
-    额度口径：租户总额度 = 套餐额度（workspace 级配额按活跃空间数折算）
-    + 资源包额度（租户级增量，只累加一次）。``limit_source`` 给出两者的
-    构成明细；``per_workspace[].limit`` 是单空间的实际校验上限
-    （套餐每空间额度 + 资源包额度），与 :func:`_check_quota` 保持一致。
+    额度口径：workspace 级配额的租户总额度 = （套餐每空间额度 + 资源包每空间额度）
+    × 活跃空间数，与 :func:`_check_quota` 的单空间校验上限保持一致；
+    ``limit_source`` 给出套餐与资源包的构成明细。
     """
     plan_quota, pack_quota = _get_quota_breakdown(db, tenant_id)
     quota_config = _merge_quota_overlay(plan_quota, pack_quota) if pack_quota else dict(plan_quota or {})
@@ -918,55 +884,21 @@ async def get_quota_usage(db: Session, tenant_id: UUID) -> dict:
     knowledge_gb = repo.sum_knowledge_capacity_gb(tenant_id)
     memory_count = repo.count_memory_engines(tenant_id)
     end_user_count = repo.count_end_users(tenant_id)
-    end_user_memory_count = repo.max_end_user_memory_count(tenant_id)
     model_count = repo.count_models(tenant_id)
     ontology_count = repo.count_ontology_projects(tenant_id)
 
-    from app.models.workspace_model import Workspace
-
-    active_workspaces = db.query(Workspace).filter(
-        Workspace.tenant_id == tenant_id,
-        Workspace.is_active.is_(True),
-    ).all()
-
-    def _build_per_workspace_detail(usage_func, per_unit_limit):
-        """为 workspace 级或按 workspace 展示的配额构建明细。"""
-        if per_unit_limit is None or not active_workspaces:
-            return []
-        details = []
-        for workspace in active_workspaces:
-            workspace_used = usage_func(tenant_id, workspace.id)
-            details.append({
-                "workspace_id": str(workspace.id),
-                "workspace_name": workspace.name,
-                "used": workspace_used,
-                "limit": per_unit_limit,
-                "percentage": pct(workspace_used, per_unit_limit),
-            })
-        return details
-
-    app_quota_per_workspace = quota_config.get("app_quota")
-    knowledge_quota_per_workspace = quota_config.get("knowledge_capacity_quota")
-    memory_quota_per_workspace = quota_config.get("memory_engine_quota")
-    end_user_quota_per_workspace = quota_config.get("end_user_quota")
-    ontology_quota_per_workspace = quota_config.get("ontology_project_quota")
-    end_user_memory_limit = quota_config.get("end_user_memory_limit")
-    memory_write_qps_limit = quota_config.get("pre_user_memory_write_qps_limit")
-
     def effective_workspace_limit(quota_type: str):
-        """租户总额度 = 套餐每空间额度 × 活跃空间数 + 资源包租户级增量。
+        """租户总额度 =（套餐每空间额度 + 资源包每空间额度）× 活跃空间数。
 
-        资源包额度是整个租户购买的一次性增量，因此只能累加一次；
-        直接把它并入每空间额度再乘以空间数会把资源包额度放大 N 倍。
+        套餐和资源包额度都作用在单个工作空间上（见 :func:`_check_quota`），
+        因此先合并成单空间上限，再按活跃空间数折算成租户总额度。
         """
         plan_per_workspace = (plan_quota or {}).get(quota_type)
-        pack_grant = (pack_quota or {}).get(quota_type) or 0
-        if plan_per_workspace is None and not pack_grant:
+        pack_per_workspace = (pack_quota or {}).get(quota_type) or 0
+        if plan_per_workspace is None and not pack_per_workspace:
             return None
-        plan_total = plan_per_workspace or 0
-        if plan_per_workspace is not None and workspace_count > 0:
-            plan_total = plan_per_workspace * workspace_count
-        total = plan_total + pack_grant
+        per_workspace_limit = (plan_per_workspace or 0) + pack_per_workspace
+        total = per_workspace_limit * workspace_count if workspace_count > 0 else per_workspace_limit
         return round(total, 4) if isinstance(total, float) else total
 
     app_effective_limit = effective_workspace_limit("app_quota")
@@ -982,49 +914,10 @@ async def get_quota_usage(db: Session, tenant_id: UUID) -> dict:
         source = {"plan": plan_value, "resource_pack": pack_value}
         if quota_type in PER_WORKSPACE_QUOTA_KEYS:
             source["plan_per_workspace"] = plan_value
+            source["resource_pack_per_workspace"] = pack_value
             source["workspace_count"] = workspace_count
         return source
 
-    api_ops_current = 0
-    try:
-        from app.aioRedis import aio_redis as _aio_redis
-        from app.models.api_key_model import ApiKey
-
-        api_key_ids = db.query(ApiKey.id).join(
-            Workspace, ApiKey.workspace_id == Workspace.id
-        ).filter(
-            Workspace.tenant_id == tenant_id,
-            ApiKey.is_active.is_(True),
-        ).all()
-        for (key_id,) in api_key_ids:
-            redis_key = API_KEY_QPS_REDIS_KEY.format(api_key_id=key_id)
-            value = await _aio_redis.get(redis_key)
-            api_ops_current = max(api_ops_current, int(value) if value else 0)
-    except Exception as e:
-        logger.warning(f"获取 api_ops_current 失败，返回 0: {type(e).__name__}: {e}")
-
-    memory_write_qps_current = 0
-    try:
-        import time
-
-        from app.aioRedis import aio_redis as _aio_redis
-        from app.celery_task_scheduler.rate_policy import RATE_LIMIT_PREFIX, RATE_WINDOW_MS
-
-        now_ms = int(time.time() * 1000)
-        task_name = "app.core.memory.agent.write_message"
-        for end_user_id in repo.list_active_end_user_ids(tenant_id):
-            unit_key = f"{task_name}:{end_user_id}"
-            redis_key = f"{RATE_LIMIT_PREFIX}{unit_key}"
-            await _aio_redis.zremrangebyscore(redis_key, 0, now_ms - RATE_WINDOW_MS)
-            current = int(await _aio_redis.zcard(redis_key) or 0)
-            memory_write_qps_current = max(memory_write_qps_current, current)
-    except Exception as e:
-        logger.warning(
-            "获取 memory_write_qps_current 失败，返回 0: "
-            f"{type(e).__name__}: {e}"
-        )
-
-    api_ops_limit = quota_config.get("api_ops_rate_limit")
     return {
         "workspace_quota": {
             "used": workspace_count,
@@ -1043,9 +936,6 @@ async def get_quota_usage(db: Session, tenant_id: UUID) -> dict:
             "limit": app_effective_limit,
             "percentage": pct(app_count, app_effective_limit),
             "limit_source": limit_source("app_quota"),
-            "per_workspace": _build_per_workspace_detail(
-                repo.count_apps, app_quota_per_workspace
-            ),
         },
         "knowledge_capacity_quota": {
             "used": round(knowledge_gb, 2),
@@ -1053,67 +943,29 @@ async def get_quota_usage(db: Session, tenant_id: UUID) -> dict:
             "percentage": pct(knowledge_gb, knowledge_effective_limit),
             "unit": "GB",
             "limit_source": limit_source("knowledge_capacity_quota"),
-            "per_workspace": _build_per_workspace_detail(
-                repo.sum_knowledge_capacity_gb, knowledge_quota_per_workspace
-            ),
         },
         "memory_engine_quota": {
             "used": memory_count,
             "limit": memory_effective_limit,
             "percentage": pct(memory_count, memory_effective_limit),
             "limit_source": limit_source("memory_engine_quota"),
-            "per_workspace": _build_per_workspace_detail(
-                repo.count_memory_engines, memory_quota_per_workspace
-            ),
         },
         "end_user_quota": {
             "used": end_user_count,
             "limit": end_user_effective_limit,
             "percentage": pct(end_user_count, end_user_effective_limit),
             "limit_source": limit_source("end_user_quota"),
-            "per_workspace": _build_per_workspace_detail(
-                repo.count_end_users, end_user_quota_per_workspace
-            ),
         },
         "ontology_project_quota": {
             "used": ontology_count,
             "limit": ontology_effective_limit,
             "percentage": pct(ontology_count, ontology_effective_limit),
             "limit_source": limit_source("ontology_project_quota"),
-            "per_workspace": _build_per_workspace_detail(
-                repo.count_ontology_projects, ontology_quota_per_workspace
-            ),
         },
         "model_quota": {
             "used": model_count,
             "limit": quota_config.get("model_quota"),
             "percentage": pct(model_count, quota_config.get("model_quota")),
             "limit_source": limit_source("model_quota"),
-        },
-        "api_ops_rate_limit": {
-            "current": api_ops_current,
-            "limit": api_ops_limit,
-            "percentage": pct(api_ops_current, api_ops_limit),
-            "unit": "次/秒/API Key",
-            "limit_source": limit_source("api_ops_rate_limit"),
-        },
-        "end_user_memory_limit": {
-            "used": end_user_memory_count,
-            "limit": end_user_memory_limit,
-            "percentage": pct(end_user_memory_count, end_user_memory_limit),
-            "unit": "记忆节点/用户",
-            "aggregation": "max_per_end_user",
-            "limit_source": limit_source("end_user_memory_limit"),
-            "per_workspace": _build_per_workspace_detail(
-                repo.max_end_user_memory_count, end_user_memory_limit
-            ),
-        },
-        "pre_user_memory_write_qps_limit": {
-            "current": memory_write_qps_current,
-            "limit": memory_write_qps_limit,
-            "percentage": pct(memory_write_qps_current, memory_write_qps_limit),
-            "unit": "次/秒/用户",
-            "aggregation": "max_per_end_user",
-            "limit_source": limit_source("pre_user_memory_write_qps_limit"),
         },
     }
