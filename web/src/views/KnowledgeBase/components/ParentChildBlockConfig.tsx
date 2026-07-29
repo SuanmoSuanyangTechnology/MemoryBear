@@ -1,5 +1,5 @@
 import { type FC, useState, useEffect } from 'react';
-import { Form, Input, InputNumber, Radio, Row, Col } from 'antd';
+import { Form, Flex, InputNumber, Radio, Row, Col } from 'antd';
 import { useTranslation } from 'react-i18next';
 import clsx from 'clsx';
 
@@ -78,9 +78,11 @@ const ParentChildBlockConfig: FC<ParentChildBlockConfigProps> = ({ initialValue,
         <div className="rb:mb-6">
           <div className="rb:font-medium rb:text-[#171719] rb:mb-3">{t('knowledgeBase.parentBlockAsContext')}</div>
           
-          <div className="rb:space-y-3">
-            <div
-              className={clsx("rb:flex rb:items-center rb:cursor-pointer rb:gap-4 rb:p-4 rb:border rb:rounded-xl cursor-pointer transition-all", {
+          <Flex vertical gap={12}>
+            <Flex
+              align="center"
+              gap={16}
+              className={clsx("rb:cursor-pointer rb:p-4! rb:border rb:rounded-xl rb:cursor-pointer rb:transition-all", {
                 'rb:border-[#171719] rb:bg-[#FAFAFA]': parent_chunk_mode === 'paragraph',
                 'rb:border-[#E5E5E5]': parent_chunk_mode !== 'paragraph',
               })}
@@ -120,10 +122,12 @@ const ParentChildBlockConfig: FC<ParentChildBlockConfigProps> = ({ initialValue,
                   </Col>
                 </Row>
               </div>
-            </div>
+            </Flex>
 
-            <div
-              className={clsx("rb:flex rb:items-center rb:cursor-pointer rb:gap-4 rb:p-4 rb:border rb:rounded-xl cursor-pointer transition-all", {
+            <Flex
+              align="center"
+              gap={16}
+              className={clsx("rb:cursor-pointer rb:p-4! rb:border rb:rounded-xl rb:cursor-pointer rb:transition-all", {
                 'rb:border-[#171719] rb:bg-[#FAFAFA]': parent_chunk_mode === 'full-doc',
                 'rb:border-[#E5E5E5]': parent_chunk_mode !== 'full-doc',
               })}
@@ -137,12 +141,12 @@ const ParentChildBlockConfig: FC<ParentChildBlockConfigProps> = ({ initialValue,
                 <div className="rb:font-medium rb:mb-1">{t('knowledgeBase.full-doc')}</div>
                 <p className="rb:text-[12px] rb:text-[#5B6167]">{t('knowledgeBase.fullTextDescription')}</p>
               </div>
-            </div>
-          </div>
+            </Flex>
+          </Flex>
           <Form.Item name="parent_chunk_mode" hidden />
         </div>
 
-        <div className="rb:mb-6">
+        <div>
           <div className="rb:font-medium rb:text-[#171719] rb:mb-3">{t('knowledgeBase.childBlockForRetrieval')}</div>
           <Row gutter={16}>
             <Col span={12}>

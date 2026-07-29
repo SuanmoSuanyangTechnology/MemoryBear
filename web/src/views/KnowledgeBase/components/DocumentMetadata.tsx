@@ -6,7 +6,7 @@
  */
 import { useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Button, Input, Space, App, Form, InputNumber, DatePicker } from 'antd';
+import { Button, Input, Space, App, Form, InputNumber, DatePicker, Tooltip, Flex } from 'antd';
 
 import Empty from '@/components/Empty';
 import type { MetadataField } from '../types';
@@ -169,17 +169,13 @@ const DocumentMetadata: React.FC<DocumentMetadataProps> = ({ documentId, knowled
 
   return (
     <div className="rb:mb-4">
-      <div className="rb:flex rb:items-center rb:justify-between rb:mb-3">
-        <div className="rb:flex rb:items-center rb:gap-2">
+      <Flex align="center" justify="space-between" className="rb:mb-3!">
+        <Flex align="center" gap={8}>
           <span className="rb:font-medium rb:text-lg">{t('knowledgeBase.metadata.label')}</span>
-          <div
-            className="rb:inline-block rb:w-3.5 rb:h-3.5 rb:bg-cover rb:cursor-pointer"
-            style={{
-              backgroundImage: `url('@/assets/images/common/info.svg')`,
-            }}
-            title={t('knowledgeBase.metadata.description')}
-          />
-        </div>
+          <Tooltip title={t('knowledgeBase.metadata.description')}>
+            <div className="rb:size-4.5 rb:bg-cover rb:bg-[url('@/assets/images/common/question.svg')] rb:shrink-0"></div>
+          </Tooltip>
+        </Flex>
         {isEditing ? (
           <Space>
             <Button onClick={handleCancelEdit} disabled={isSaving}>
@@ -197,7 +193,7 @@ const DocumentMetadata: React.FC<DocumentMetadataProps> = ({ documentId, knowled
             {t('common.edit')}
           </Button>
         )}
-      </div>
+      </Flex>
 
       {loading ? (
         <div className="rb:py-4 rb:text-center rb:text-gray-500">{t('common.loading')}</div>
@@ -227,7 +223,7 @@ const DocumentMetadata: React.FC<DocumentMetadataProps> = ({ documentId, knowled
             {documentMetadataFields.length > 0 && (
               <div className="rb:space-y-3">
                 {documentMetadataFields.map(field => (
-                  <div key={field.id} className="rb:flex rb:items-center rb:gap-3">
+                  <Flex key={field.id} align="center" gap={12}>
                     <span className="rb:text-sm rb:text-gray-700 rb:w-17.5">{field.name}</span>
                     <div className="rb:flex-1">
                       {renderFieldValue(field)}
@@ -238,7 +234,7 @@ const DocumentMetadata: React.FC<DocumentMetadataProps> = ({ documentId, knowled
                         onClick={() => handleDeleteMetadata(field.name)}
                       ></div>
                     )}
-                  </div>
+                  </Flex>
                 ))}
               </div>
             )}

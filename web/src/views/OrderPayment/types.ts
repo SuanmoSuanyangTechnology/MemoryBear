@@ -39,13 +39,19 @@ export interface VoucherForm {
 }
 
 export interface OrderForm {
-  package_plan_id: string;
+  package_plan_id?: string;
   multiplier: number;
   business_type: string; // 业务类型筛选（可选）：购买purchase/续费renewal/升级upgrade/降级downgrade/recharge/free
   pay_txn_id: string;
   payer: string;
   pay_time: number;
-  remarks: string;                                               // 备注说明
+  remarks: string;   // 备注说明
+  source_type?: 'resource_pack';
+  items?: Array<{
+    resource_pack_id: string;
+    tier_id: string;
+    quantity: number;
+  }>
 }
 
 interface QueuedSub {

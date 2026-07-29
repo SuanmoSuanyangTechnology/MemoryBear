@@ -223,12 +223,24 @@ class DialogueNode(Node):
         content: Full dialogue content as text
         dialog_embedding: Optional embedding vector for the entire dialogue
         config_id: Configuration ID used to process this dialogue
+        write_mode: Write pipeline marker ('fast' | 'normal')
+        emotion: BERT top_emotion label written by Fast Write; None when the emotion service fails/times out or is unconfigured
+        emotion_score: BERT top_score (sigmoid probability, 0.0-1.0) paired with `emotion`; None under the same degraded conditions
     """
     ref_id: str = Field(..., description="Reference identifier of the dialog")
     content: str = Field(..., description="Dialogue content")
     dialog_embedding: Optional[List[float]] = Field(None, description="Dialog embedding vector")
     config_id: Optional[int | str] = Field(None,
                                            description="Configuration ID used to process this dialogue (integer or string)")
+    
+    write_mode: str = Field(default="normal",description="写入管线标识：'fast' | 'normal'")
+    emotion: Optional[str] = Field(default=None,description="BERT top_emotion；服务失败时为 None")
+    emotion_score: Optional[float] = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="BERT top_score（sigmoid 概率）；服务失败时为 None",
+    )
 
 
 class StatementNode(Node):

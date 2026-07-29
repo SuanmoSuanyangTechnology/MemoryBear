@@ -1,4 +1,5 @@
 import asyncio
+import copy
 import datetime
 import os
 from typing import Optional
@@ -14,6 +15,10 @@ from app.core.utils.datetime_utils import utcnow_naive
 from app.celery_app import celery_app
 from app.core.config import settings
 from app.core.logging_config import get_api_logger
+from app.core.rag.knowledge_graph.dispatch import (
+    dispatch_document_graph_sync,
+    enqueue_document_graph_sync,
+)
 from app.core.rag.utils.redis_conn import REDIS_CONN
 from app.core.rag.vdb.elasticsearch.elasticsearch_vector import (
     ElasticSearchVectorFactory,
@@ -59,7 +64,11 @@ async def _delete_file_record_async(
 ) -> None:
     db_file = await db.get(file_model.File, file_id)
     if not db_file:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+        api_logger.info(
+            "File record already absent during document cleanup: file_id=%s",
+            str(file_id),
+        )
+        return
 
     if db_file.file_ext == "folder":
         result = await db.execute(
@@ -269,9 +278,11 @@ async def update_document(
         # kb_mode=1 且 new=False，或 kb_mode=2 且 new=True：通过，不改知识库
 
     # 3.1 If updating the status, synchronize the document status switch to whether it can be retrieved from the vector database
+    status_changed = False
     if "status" in update_dict:
         new_status = update_dict["status"]
         if new_status != db_document.status:
+            status_changed = True
             await asyncio.to_thread(
                 ElasticSearchVectorIndexOps.for_knowledge(db_knowledge.id).change_document_status,
                 document_id=str(document_id),
@@ -293,6 +304,8 @@ async def update_document(
         api_logger.debug(f"updated fields: {', '.join(updated_fields)}")
 
     db_document.updated_at = utcnow_naive()
+    graph_parser_config = copy.deepcopy(db_knowledge.parser_config or {})
+    graph_knowledge_id = str(db_knowledge.id)
 
     # 4. Save to database
     try:
@@ -305,6 +318,14 @@ async def update_document(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Document update failed: {str(e)}"
+        )
+
+    if status_changed:
+        dispatch_document_graph_sync(
+            graph_knowledge_id,
+            str(document_id),
+            graph_parser_config,
+            dispatch_legacy=False,
         )
 
     # 5. Return the updated document
@@ -337,6 +358,15 @@ async def delete_document(
         file_id = db_document.file_id
         kb_id = db_document.kb_id
 
+        db_knowledge = await knowledge_service.get_knowledge_by_id_async(
+            db,
+            knowledge_id=kb_id,
+            current_user=current_user,
+        )
+        graph_parser_config = copy.deepcopy(db_knowledge.parser_config or {})
+        graph_knowledge_id = str(db_knowledge.id)
+        document_file_name = db_document.file_name
+
         # 2. Cancel any running parse task via Redis
         task_id = REDIS_CONN.get(_PARSE_TASK_KEY.format(doc_id=document_id))
         if task_id:
@@ -345,7 +375,7 @@ async def delete_document(
                 celery_app.control.revoke(task_id)
                 api_logger.warning(f"[DELETE] Revoke signal sent for task_id={task_id}")
             except NotImplementedError:
-                # ThreadPool does not support force termination; rely on Redis cancel marker
+                # ThreadPool does not support terminate; rely on Redis cancel marker
                 api_logger.info(f"[DELETE] ThreadPool does not support terminate, relying on Redis cancel marker for task_id={task_id}")
             except Exception as revoke_err:
                 api_logger.error(f"[DELETE] Failed to revoke task {task_id}: {revoke_err}")
@@ -353,30 +383,43 @@ async def delete_document(
         REDIS_CONN.set(_PARSE_CANCEL_KEY.format(doc_id=document_id), "1", exp=_PARSE_CANCEL_TTL)
         REDIS_CONN.delete(_PARSE_TASK_KEY.format(doc_id=document_id))
 
-        # 3. Delete vector index (non-404 failures raise, caught by except below)
-        db_knowledge = await knowledge_service.get_knowledge_by_id_async(db, knowledge_id=kb_id, current_user=current_user)
+        # 3. Persist graph cleanup before deleting any document resources.
+        await enqueue_document_graph_sync(
+            graph_knowledge_id,
+            str(document_id),
+            graph_parser_config,
+            dispatch_legacy=False,
+            document_deleted=True,
+        )
+
+        # 4. Delete vector index (non-404 failures raise, caught by except below)
         await asyncio.to_thread(
             ElasticSearchVectorIndexOps.for_knowledge(db_knowledge.id).delete_by_metadata_field,
             key="document_id",
             value=str(document_id),
         )
 
-        # 4. Delete file (storage errors are swallowed internally)
+        # 5. Delete file (storage errors are swallowed internally)
         await _delete_file_record_async(db=db, file_id=file_id, storage_service=storage_service)
 
-        # 5. Delete metadata bindings (app-level cleanup, FK no longer has CASCADE)
+        # 6. Delete metadata bindings (app-level cleanup, FK no longer has CASCADE)
         api_logger.debug(f"Delete metadata bindings for document: {document_id}")
         await KnowledgeMetadataService.delete_document_metadata_async(db, document_id)
 
-        # 6. Delete document from DB (last — if DB fails, external resources are already cleaned)
+        # 7. Delete document from DB only after graph cleanup is recoverable.
         api_logger.debug(f"Perform document delete: {db_document.file_name} (ID: {document_id})")
         await db.delete(db_document)
         await db.commit()
 
-        api_logger.info(f"The document has been successfully deleted: {db_document.file_name} (ID: {document_id})")
+        api_logger.info(f"The document has been successfully deleted: {document_file_name} (ID: {document_id})")
         return success(msg="The document has been successfully deleted")
     except Exception as e:
-        api_logger.error(f"Failed to delete from the document: document_id={document_id} - {str(e)}")
+        api_logger.error(
+            "Failed to delete document"
+            " document_id=%s error_type=%s",
+            str(document_id),
+            type(e).__name__,
+        )
         raise
 
 

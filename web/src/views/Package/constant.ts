@@ -61,3 +61,7 @@ export const billingUnits = [
     icon: 'api_ops',
   },
 ]
+
+export const getUnit = (key: string) => {
+  return billingUnits.find((item) => item.key === key)?.unit || key;
+}

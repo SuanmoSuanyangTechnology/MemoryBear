@@ -89,15 +89,17 @@ const Group = forwardRef <BaseRef,{ query: any; handleEdit: (data: ModelListItem
               >
                 <Flex vertical gap={8}>
                   {formatData(item)?.map((description: DescriptionItem) => (
-                    <div
+                    <Flex
                       key={description.key}
-                      className="rb:flex rb:justify-between rb:text-[14px] rb:leading-5"
+                      justify="space-between"
+                      gap={12}
+                      className="rb:text-[14px] rb:leading-5"
                     >
                       <span className="rb:whitespace-nowrap rb:text-[#5B6167]">{(description.label as string)}</span>
                       <span className={clsx({
                         "rb:font-medium": description.key === 'type',
                       })}>{(description.children as string)}</span>
-                    </div>
+                    </Flex>
                   ))}
                 </Flex>
               </RbCard>

@@ -7,17 +7,30 @@
 """
 from typing import Any, Dict, Optional
 
-from volcenginesdkarkruntime import Ark
-from volcenginesdkarkruntime.types.images.images import (
-    SequentialImageGenerationOptions,
-    ContentGenerationTool,
-    OptimizePromptOptions
-)
-
 from app.core.models.base import RedBearModelConfig
 from app.core.exceptions import BusinessException
 from app.core.error_codes import BizCode
 from app.models.models_model import ModelProvider
+
+
+def _get_ark_client(api_key: str, base_url: Optional[str] = None):
+    from volcenginesdkarkruntime import Ark
+    return Ark(api_key=api_key, base_url=base_url)
+
+
+def _get_sequential_image_options(**kwargs):
+    from volcenginesdkarkruntime.types.images.images import SequentialImageGenerationOptions
+    return SequentialImageGenerationOptions(**kwargs)
+
+
+def _get_content_generation_tool(**kwargs):
+    from volcenginesdkarkruntime.types.images.images import ContentGenerationTool
+    return ContentGenerationTool(**kwargs)
+
+
+def _get_optimize_prompt_options(**kwargs):
+    from volcenginesdkarkruntime.types.images.images import OptimizePromptOptions
+    return OptimizePromptOptions(**kwargs)
 
 
 class RedBearImageGenerator:
@@ -32,7 +45,7 @@ class RedBearImageGenerator:
         provider = config.provider.lower()
         
         if provider == ModelProvider.VOLCANO:
-            return Ark(api_key=config.api_key, base_url=config.base_url)
+            return _get_ark_client(api_key=config.api_key, base_url=config.base_url)
         # elif provider == ModelProvider.OPENAI:
         #     from openai import OpenAI
         #     return OpenAI(api_key=config.api_key, base_url=config.base_url)
@@ -95,15 +108,15 @@ class RedBearImageGenerator:
             if sequential_image_generation:
                 params["sequential_image_generation"] = sequential_image_generation
                 if sequential_image_generation_options:
-                    params["sequential_image_generation_options"] = SequentialImageGenerationOptions(
+                    params["sequential_image_generation_options"] = _get_sequential_image_options(
                         **sequential_image_generation_options
                     )
             
             if tools:
-                params["tools"] = [ContentGenerationTool(**tool) if isinstance(tool, dict) else tool for tool in tools]
+                params["tools"] = [_get_content_generation_tool(**tool) if isinstance(tool, dict) else tool for tool in tools]
             
             if optimize_prompt_options:
-                params["optimize_prompt_options"] = OptimizePromptOptions(**optimize_prompt_options)
+                params["optimize_prompt_options"] = _get_optimize_prompt_options(**optimize_prompt_options)
             
             if stream:
                 params["stream"] = True
@@ -153,7 +166,7 @@ class RedBearVideoGenerator:
         provider = config.provider.lower()
         
         if provider == ModelProvider.VOLCANO:
-            return Ark(api_key=config.api_key, base_url=config.base_url)
+            return _get_ark_client(api_key=config.api_key, base_url=config.base_url)
         else:
             raise BusinessException(
                 f"不支持的视频生成提供商: {provider}",

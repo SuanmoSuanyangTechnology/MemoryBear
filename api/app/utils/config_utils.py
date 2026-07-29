@@ -65,19 +65,90 @@ def resolve_config_id(config_id: UUID | int | str, db: Optional[Session] = None)
 def _lookup_by_old_id(old_id: int, db: Optional[Session]) -> UUID:
     """通过 config_id_old 查找 UUID，支持传入已有 session 或自动开短 session。"""
     from app.models.memory_config_model import MemoryConfig
+    from sqlalchemy.ext.asyncio import AsyncSession
 
-    def _query(session: Session) -> UUID:
-        memory_config = session.query(MemoryConfig).filter(
+    def _query(session) -> Optional[MemoryConfig]:
+        return session.query(MemoryConfig).filter(
             MemoryConfig.config_id_old == old_id
         ).first()
+
+    # AsyncSession 不支持 .query()，当传入 AsyncSession 时回退到开一个只读短 sync session
+    # 注意：必须在 session 内访问 .config_id，否则 detached object 报错
+    if db is None or isinstance(db, AsyncSession):
+        from app.db import get_db_read
+        with get_db_read() as short_db:
+            memory_config = _query(short_db)
+            if not memory_config:
+                raise ValueError(f"未找到 config_id_old={old_id} 对应的配置")
+            return memory_config.config_id
+    else:
+        memory_config = _query(db)
         if not memory_config:
             raise ValueError(f"未找到 config_id_old={old_id} 对应的配置")
         return memory_config.config_id
 
-    if db is not None:
-        return _query(db)
 
-    # 未传 db，自己开一个只读短 session
-    from app.db import get_db_read
-    with get_db_read() as short_db:
-        return _query(short_db)
+async def resolve_config_id_async(config_id: UUID | int | str, db=None) -> UUID:
+    """
+    异步版本：解析 config_id，支持 UUID、UUID字符串、整数等多种格式。
+
+    在 async 上下文中使用，避免在 AsyncSession 环境下回退到同步 Session。
+
+    Args:
+        config_id: 配置ID（UUID、UUID字符串 或 整数）
+        db: AsyncSession（当 config_id 为整数时需要）
+
+    Returns:
+        UUID: 解析后的配置ID
+
+    Raises:
+        ValueError: 当找不到对应的配置时或格式无效时
+    """
+    # 1. 如果已经是 UUID 类型，直接返回
+    if isinstance(config_id, UUID):
+        return config_id
+
+    # 2. 如果是字符串
+    if isinstance(config_id, str):
+        config_id_stripped = config_id.strip()
+
+        # 2.1 先尝试解析为整数（用于查询 config_id_old）
+        try:
+            old_id = int(config_id_stripped)
+            if old_id > 0:
+                return await _lookup_by_old_id_async(old_id, db)
+        except ValueError:
+            pass
+
+        # 2.2 尝试解析为 UUID
+        try:
+            return uuid_module.UUID(config_id_stripped)
+        except ValueError:
+            pass
+
+        raise ValueError(f"无效的 config_id 格式: '{config_id}'（必须是 UUID 或正整数）")
+
+    # 3. 如果是整数类型
+    if isinstance(config_id, int):
+        if config_id <= 0:
+            raise ValueError(f"config_id 必须是正整数: {config_id}")
+        return await _lookup_by_old_id_async(config_id, db)
+
+    # 4. 不支持的类型
+    raise ValueError(f"不支持的 config_id 类型: {type(config_id).__name__}")
+
+
+async def _lookup_by_old_id_async(old_id: int, db) -> UUID:
+    """通过 config_id_old 异步查找 UUID。"""
+    from app.models.memory_config_model import MemoryConfig
+    from sqlalchemy import select
+
+    if db is None:
+        raise ValueError(f"查询 config_id_old={old_id} 需要传入 AsyncSession")
+
+    stmt = select(MemoryConfig.config_id).where(MemoryConfig.config_id_old == old_id)
+    result = await db.execute(stmt)
+    config_id = result.scalar_one_or_none()
+    if not config_id:
+        raise ValueError(f"未找到 config_id_old={old_id} 对应的配置")
+    return config_id

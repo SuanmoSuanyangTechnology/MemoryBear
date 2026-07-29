@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:48:03 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-07-07 10:18:37
+ * @Last Modified time: 2026-07-21 18:15:35
  */
 /**
  * Space Configuration Page
@@ -10,13 +10,14 @@
  */
 
 import { type FC, useEffect, useState } from 'react';
-import { Form, App, Button, Skeleton, Select } from 'antd';
+import { Form, App, Button, Skeleton, Select, Flex } from 'antd';
 import { useTranslation } from 'react-i18next';
 
 import type { SpaceConfigData } from './types'
 import { getWorkspaceModels, updateWorkspaceModels, getDefaultWorkspaceModel, getCustomWorkspaceModels } from '@/api/workspaces'
 import RadioGroupCard from '@/components/RadioGroupCard'
 import type { Capability, ModelListItem } from '@/views/ModelManagement/types'
+import { isPrivateAvailable } from '@/utils/private'
 
 /** Required base model selectors */
 const baseModelFields: { name: string; label: string; required?: boolean }[] = [
@@ -31,7 +32,6 @@ const multimodalModelFields: { name: string; label: string; capability: Capabili
   { name: 'audio', label: 'audioModel', capability: 'audio' },
   { name: 'video', label: 'videoModel', capability: 'video' },
 ]
-const isSaas = import.meta.env.VITE_PROD_ENV === 'saas'
 
 const SpaceConfig: FC = () => {
   const { t } = useTranslation();
@@ -44,7 +44,7 @@ const SpaceConfig: FC = () => {
 
   const [defaultModels, setDefaultModels] = useState<Record<string, ModelListItem>>({})
   const handleGetDefaultModels = () => {
-    if (!isSaas) {
+    if (!isPrivateAvailable) {
       return
     }
     getDefaultWorkspaceModel().then(res => {
@@ -81,7 +81,7 @@ const SpaceConfig: FC = () => {
     setPageLoading(true)
     getWorkspaceModels().then((res) => {
       const { is_default_config } = res as SpaceConfigData
-      form.setFieldValue('is_default_config', is_default_config && isSaas ? '1' : '0')
+      form.setFieldValue('is_default_config', is_default_config && isPrivateAvailable ? '1' : '0')
       setLastConfig(res as SpaceConfigData)
     })
     .finally(() => {
@@ -96,7 +96,7 @@ const SpaceConfig: FC = () => {
     form
       .validateFields()
       .then(({ is_default_config, ...rest }: SpaceConfigData) => {
-        const isDefaultConfig = is_default_config === '1' && isSaas && Object.keys(defaultModels).length > 0
+        const isDefaultConfig = is_default_config === '1' && isPrivateAvailable && Object.keys(defaultModels).length > 0
         if (isDefaultConfig) {
           [...baseModelFields, ...multimodalModelFields].map(field => {
             (rest as Record<string, any>)[field.name] = undefined
@@ -126,9 +126,9 @@ const SpaceConfig: FC = () => {
         : <Form
           form={form}
           layout="vertical"
-          initialValues={{ is_default_config: isSaas ? '1' : '0' }}
+          initialValues={{ is_default_config: isPrivateAvailable ? '1' : '0' }}
         >
-          {isSaas && Object.keys(defaultModels).length > 0 &&
+          {isPrivateAvailable && Object.keys(defaultModels).length > 0 &&
             <Form.Item name="is_default_config" className="rb:mb-6! rb:max-w-137.5">
               <RadioGroupCard
                 allowClear={false}
@@ -149,12 +149,12 @@ const SpaceConfig: FC = () => {
             </Form.Item>
           }
 
-          {!isSaas || Object.keys(defaultModels).length === 0 || values?.is_default_config === '0' ? (
+          {!isPrivateAvailable || Object.keys(defaultModels).length === 0 || values?.is_default_config === '0' ? (
             <>
-              <div className="rb:flex rb:items-baseline rb:gap-2 rb:pb-3 rb:mb-6 rb:border-b rb:border-[#EBEBEB] rb:max-w-137.5">
+              <Flex align="baseline" gap={8} className="rb:pb-3! rb:mb-6! rb:border-b rb:border-[#EBEBEB] rb:max-w-137.5">
                 <span className="rb:font-medium rb:text-[#212332]">{t('space.baseModel')}</span>
                 <span className="rb:text-[12px] rb:text-[#5B6167]">{t('space.baseModelDesc')}</span>
-              </div>
+              </Flex>
               {baseModelFields.map(field => (
                 <Form.Item
                   key={field.name}
@@ -175,10 +175,10 @@ const SpaceConfig: FC = () => {
                 </Form.Item>
               ))}
 
-              <div className="rb:flex rb:items-baseline rb:gap-2 rb:pb-3 rb:mb-6 rb:border-b rb:border-[#EBEBEB] rb:max-w-137.5">
+              <Flex align="baseline" gap={8} className="rb:pb-3! rb:mb-6! rb:border-b rb:border-[#EBEBEB] rb:max-w-137.5">
                 <span className="rb:font-medium rb:text-[#212332]">{t('space.multimodalModel')}</span>
                 <span className="rb:text-[12px] rb:text-[#5B6167]">{t('space.multimodalModelDesc')}</span>
-              </div>
+              </Flex>
               {multimodalModelFields.map(field => (
                 <Form.Item
                   key={field.name}
@@ -201,13 +201,15 @@ const SpaceConfig: FC = () => {
           ) : (
             <div className="rb:rounded-lg rb:bg-[#F6F6F6] rb:px-4 rb:mb-6 rb:max-w-137.5">
               {[...baseModelFields, ...multimodalModelFields].map(field => (
-                <div
+                <Flex
                   key={field.name}
-                  className="rb:flex rb:items-center rb:justify-between rb:py-3.5 rb:border-b rb:border-[#EBEBEB] rb:last:border-b-0"
+                  align="center"
+                  justify="space-between"
+                  className="rb:py-3.5! rb:border-b rb:border-[#EBEBEB] rb:last:border-b-0"
                 >
                   <span className="rb:text-[#5B6167]">{t(`space.${field.label}`)}</span>
                   <span className="rb:font-medium rb:text-[#212332]">{defaultModels[field.name]?.name || '-'}</span>
-                </div>
+                </Flex>
               ))}
             </div>
           )}

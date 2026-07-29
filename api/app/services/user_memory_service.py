@@ -12,8 +12,10 @@ from typing import Any, Callable, Dict, FrozenSet, List, Optional, Tuple
 
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging_config import get_logger
+from app.core.memory.analytics.user_card_tags import normalize_stored_user_card_tags
 from app.core.memory.constants.graph_data_constants import (
     NODE_PROPERTY_WHITELIST,
     _DEFAULT_FIELDS,
@@ -365,6 +367,16 @@ class UserMemoryService:
         from app.db import get_async_db_context
         from app.core.utils.datetime_utils import to_timestamp_ms
 
+        try:
+            uuid.UUID(end_user_id)
+        except (ValueError, TypeError):
+            logger.warning(f"无效的 end_user_id 格式: {end_user_id}")
+            return {
+                "memory_insight": None, "behavior_pattern": None,
+                "key_findings": None, "growth_trajectory": None,
+                "updated_at": None, "is_cached": False, "message": "无效的用户ID格式"
+            }
+
         async with get_async_db_context() as db:
             repo = EndUserRepository(db)
             row = await repo.get_memory_insight_by_end_user_id_async(end_user_id)
@@ -405,6 +417,17 @@ class UserMemoryService:
         from app.db import get_async_db_context
         from app.core.utils.datetime_utils import to_timestamp_ms
 
+        try:
+            uuid.UUID(end_user_id)
+        except (ValueError, TypeError):
+            logger.warning(f"无效的 end_user_id 格式: {end_user_id}")
+            return {
+                "user_summary": None, "personality": None,
+                "core_values": None, "one_sentence": None,
+                "tags": [], "updated_at": None,
+                "is_cached": False, "message": "无效的用户ID格式"
+            }
+
         async with get_async_db_context() as db:
             repo = EndUserRepository(db)
             row = await repo.get_user_summary_by_end_user_id_async(end_user_id)
@@ -413,7 +436,8 @@ class UserMemoryService:
             return {
                 "user_summary": None, "personality": None,
                 "core_values": None, "one_sentence": None,
-                "updated_at": None, "is_cached": False, "message": "用户不存在"
+                "tags": [], "updated_at": None,
+                "is_cached": False, "message": "用户不存在"
             }
 
         has_cache = any([
@@ -426,105 +450,12 @@ class UserMemoryService:
             "personality": row["personality_traits"],
             "core_values": row["core_values"],
             "one_sentence": row["one_sentence_summary"],
+            "tags": normalize_stored_user_card_tags(row["memory_tags"]),
             "updated_at": to_timestamp_ms(row["user_summary_updated_at"]) if row["user_summary_updated_at"] else None,
             "is_cached": has_cache,
         }
 
     # ======================== 用户别名及信息 ========================    
-    def get_end_user_info( #TODO(乐力齐):[910]清除旧有无用代码(v0.3.14)
-        self,
-        db: Session,
-        end_user_id: str
-    ) -> Dict[str, Any]:
-        """
-        查询单个终端用户信息记录
-        
-        Args:
-            db: 数据库会话
-            end_user_id: 终端用户ID (UUID)
-            
-        Returns:
-            {
-                "success": bool,
-                "data": dict,
-                "error": Optional[str]
-            }
-        """
-        try:
-            from app.repositories.end_user_info_repository import EndUserInfoRepository
-            from app.core.api_key_utils import datetime_to_timestamp
-            
-            # 转换为UUID并查询
-            user_uuid = uuid.UUID(end_user_id)
-            end_user_info_record = EndUserInfoRepository(db).get_by_end_user_id(user_uuid)
-            
-            if not end_user_info_record:
-                logger.warning(f"终端用户信息记录不存在: end_user_id={end_user_id}")
-                return {
-                    "success": False,
-                    "data": None,
-                    "error": "终端用户信息记录不存在"
-                }
-            
-            # 构建响应数据（转换时间为毫秒时间戳）
-            # 字段优先级：other_name > aliases > relations > goals > core_facts
-            # > interests > traits > beliefs_or_stances > anchors > events
-            # 默认最多展示 6 个非空字段；other_name 即使为空也必显示并占 1 个名额。
-            TOP_FIELDS = ("other_name", "aliases")
-            META_FIELDS = (
-                "relations", "goals", "core_facts", "interests",
-                "traits", "beliefs_or_stances", "anchors", "events",
-            )
-            ALWAYS_INCLUDE = {"other_name"}
-            MAX_VISIBLE = 6
-
-            raw_meta = end_user_info_record.meta_data or {}
-            candidates = (
-                [(f, getattr(end_user_info_record, f), True) for f in TOP_FIELDS]
-                + [(f, raw_meta.get(f), False) for f in META_FIELDS]
-            )
-
-            selected_top: Dict[str, Any] = {}
-            filtered_meta: Dict[str, Any] = {}
-            for field, value, is_top in candidates:
-                if len(selected_top) + len(filtered_meta) >= MAX_VISIBLE:
-                    break
-                if not value and field not in ALWAYS_INCLUDE:
-                    continue
-                (selected_top if is_top else filtered_meta)[field] = value
-
-            response_data = {
-                "end_user_info_id": str(end_user_info_record.id),
-                "end_user_id": str(end_user_info_record.end_user_id),
-                **selected_top,
-                "meta_data": filtered_meta,
-                "created_at": datetime_to_timestamp(end_user_info_record.created_at),
-                "updated_at": datetime_to_timestamp(end_user_info_record.updated_at),
-            }
-            
-            logger.info(f"成功查询终端用户信息记录: end_user_id={end_user_id}")
-            
-            return {
-                "success": True,
-                "data": response_data,
-                "error": None
-            }
-            
-        except ValueError:
-            logger.error(f"无效的 end_user_id 格式: {end_user_id}")
-            return {
-                "success": False,
-                "data": None,
-                "error": "无效的终端用户ID格式"
-            }
-        except Exception as e:
-            logger.error(f"查询终端用户信息记录失败: end_user_id={end_user_id}, error={str(e)}")
-            return {
-                "success": False,
-                "data": None,
-                "error": str(e)
-            }
-    
     def update_end_user_info(
         self,
         db: Session,
@@ -654,6 +585,109 @@ class UserMemoryService:
                 "error": str(e)
             }
     
+    async def update_end_user_info_async(
+        self,
+        db: AsyncSession,
+        end_user_id: str,
+        update_data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """更新终端用户信息记录（异步版本）"""
+        try:
+            from app.repositories.end_user_info_repository import EndUserInfoRepository
+            from app.repositories.end_user_repository import EndUserRepository
+            from app.core.api_key_utils import datetime_to_timestamp
+            
+            user_uuid = uuid.UUID(end_user_id)
+            end_user_info_record = await EndUserInfoRepository(db).get_end_user_info_async(user_uuid)
+            
+            if not end_user_info_record:
+                logger.warning(f"终端用户信息记录不存在: end_user_id={end_user_id}")
+                return {
+                    "success": False,
+                    "data": None,
+                    "error": "终端用户信息记录不存在"
+                }
+            
+            allowed_fields = {'other_name', 'aliases', 'meta_data'}
+            _user_placeholder_names = _USER_PLACEHOLDER_NAMES
+            
+            if 'other_name' in update_data and update_data['other_name'] and update_data['other_name'].strip() in _user_placeholder_names:
+                logger.warning(f"拒绝将占位名称 '{update_data['other_name']}' 设置为 other_name")
+                del update_data['other_name']
+            
+            if 'aliases' in update_data and update_data['aliases']:
+                update_data['aliases'] = [
+                    a for a in update_data['aliases']
+                    if isinstance(a, str) and a.strip() and a.strip() not in _user_placeholder_names
+                ]
+            
+            aliases_updated = 'aliases' in update_data and update_data['aliases'] != end_user_info_record.aliases
+            other_name_updated = 'other_name' in update_data and update_data['other_name'] != end_user_info_record.other_name
+            
+            for field, value in update_data.items():
+                if field in allowed_fields:
+                    setattr(end_user_info_record, field, value)
+            
+            end_user_info_record.updated_at = utcnow_naive()
+            
+            if other_name_updated:
+                end_user_record = await EndUserRepository(db).get_end_user_by_id_async(user_uuid)
+                if end_user_record:
+                    end_user_record.other_name = update_data['other_name']
+                    end_user_record.updated_at = utcnow_naive()
+                    logger.info(f"同步更新 end_user 表的 other_name: end_user_id={end_user_id}, other_name={update_data['other_name']}")
+                else:
+                    logger.warning(f"未找到对应的 end_user 记录: end_user_id={end_user_id}")
+            
+            await db.commit()
+            await db.refresh(end_user_info_record)
+            
+            if aliases_updated:
+                neo4j_sync_status = "success"
+                try:
+                    await self._sync_aliases_to_neo4j(end_user_id, update_data['aliases'])
+                    logger.info(f"已触发 aliases 同步到 Neo4j: end_user_id={end_user_id}, aliases={update_data['aliases']}")
+                except Exception as sync_error:
+                    neo4j_sync_status = "failed"
+                    logger.error(f"触发同步 aliases 到 Neo4j 失败: {sync_error}", exc_info=True)
+            else:
+                neo4j_sync_status = "skipped"
+            
+            response_data = {
+                "end_user_info_id": str(end_user_info_record.id),
+                "end_user_id": str(end_user_info_record.end_user_id),
+                "other_name": end_user_info_record.other_name,
+                "aliases": end_user_info_record.aliases,
+                "meta_data": end_user_info_record.meta_data,
+                "created_at": datetime_to_timestamp(end_user_info_record.created_at),
+                "updated_at": datetime_to_timestamp(end_user_info_record.updated_at)
+            }
+            
+            logger.info(f"成功更新终端用户信息记录: end_user_id={end_user_id}, updated_fields={list(update_data.keys())}")
+            
+            return {
+                "success": True,
+                "data": response_data,
+                "neo4j_sync_status": neo4j_sync_status,
+                "error": None
+            }
+            
+        except ValueError:
+            logger.error(f"无效的 end_user_id 格式: {end_user_id}")
+            return {
+                "success": False,
+                "data": None,
+                "error": "无效的终端用户ID格式"
+            }
+        except Exception as e:
+            await db.rollback()
+            logger.error(f"更新终端用户信息记录失败: end_user_id={end_user_id}, error={str(e)}")
+            return {
+                "success": False,
+                "data": None,
+                "error": str(e)
+            }
+    
     async def _sync_aliases_to_neo4j(self, end_user_id: str, aliases: List[str]) -> None:
         """
         将 aliases 同步到 Neo4j 中的用户实体
@@ -689,207 +723,10 @@ class UserMemoryService:
         except Exception as e:
             logger.error(f"同步 aliases 到 Neo4j 失败: {e}", exc_info=True)
             raise
-    
-    async def get_cached_memory_insight(
-        self, 
-        db: Session, 
-        end_user_id: str
-    ) -> Dict[str, Any]:
-        """
-        从数据库获取缓存的记忆洞察（四个维度）
-        
-        Args:
-            db: 数据库会话
-            end_user_id: 终端用户ID (UUID)
-        
-        Returns:
-            {
-                "memory_insight": str,           # 总体概述
-                "behavior_pattern": str,         # 行为模式
-                "key_findings": List[str],       # 关键发现（数组）
-                "growth_trajectory": str,        # 成长轨迹
-                "updated_at": int,               # 时间戳（毫秒）
-                "is_cached": bool
-            }
-        """
-        try:
-            # 转换为UUID并查询用户
-            user_uuid = uuid.UUID(end_user_id)
-            repo = EndUserRepository(db)
-            end_user = repo.get_by_id(user_uuid)
-            
-            if not end_user:
-                logger.warning(f"未找到 end_user_id 为 {end_user_id} 的用户")
-                return {
-                    "memory_insight": None,
-                    "behavior_pattern": None,
-                    "key_findings": None,
-                    "growth_trajectory": None,
-                    "updated_at": None,
-                    "is_cached": False,
-                    "message": "用户不存在"
-                }
-            
-            # 检查是否有缓存数据（至少有一个字段不为空）
-            has_cache = any([
-                end_user.memory_insight,
-                end_user.behavior_pattern,
-                end_user.key_findings,
-                end_user.growth_trajectory
-            ])
-            
-            if has_cache:
-                # 反序列化 key_findings（从 JSON 字符串转为数组）
-                key_findings_value = end_user.key_findings
-                if key_findings_value:
-                    try:
-                        import json
-                        key_findings_array = json.loads(key_findings_value)
-                    except (json.JSONDecodeError, TypeError):
-                        # 如果解析失败，尝试按 • 分割（兼容旧数据）
-                        key_findings_array = [item.strip() for item in key_findings_value.split('•') if item.strip()]
-                else:
-                    key_findings_array = []
-                
-                logger.info(f"成功获取 end_user_id {end_user_id} 的缓存记忆洞察（四维度）")
-                memory_insight=end_user.memory_insight
-                behavior_pattern=end_user.behavior_pattern
-                growth_trajectory=end_user.growth_trajectory
-                return {
-                    "memory_insight":memory_insight,  # 总体概述存储在 memory_insight
-                    "behavior_pattern":behavior_pattern,
-                    "key_findings": key_findings_array,  # 返回数组
-                    "growth_trajectory": growth_trajectory,
-                    "updated_at": self._datetime_to_timestamp(end_user.memory_insight_updated_at),
-                    "is_cached": True
-                }
-            else:
-                logger.info(f"end_user_id {end_user_id} 的记忆洞察缓存为空")
-                return {
-                    "memory_insight": None,
-                    "behavior_pattern": None,
-                    "key_findings": None,
-                    "growth_trajectory": None,
-                    "updated_at": None,
-                    "is_cached": False,
-                    "message": "数据尚未生成，请稍后重试或联系管理员"
-                }
-                
-        except ValueError:
-            logger.error(f"无效的 end_user_id 格式: {end_user_id}")
-            return {
-                "memory_insight": None,
-                "behavior_pattern": None,
-                "key_findings": None,
-                "growth_trajectory": None,
-                "updated_at": None,
-                "is_cached": False,
-                "message": "无效的用户ID格式"
-            }
-        except Exception as e:
-            logger.error(f"获取缓存记忆洞察时出错: {str(e)}")
-            raise
-    
-    async def get_cached_user_summary(
-        self, 
-        db: Session, 
-        end_user_id: str,
-        model_id:str,
-        language_type:str="zh"
-    ) -> Dict[str, Any]:
-        """
-        从数据库获取缓存的用户摘要（四个部分）
-        
-        Args:
-            db: 数据库会话
-            end_user_id: 终端用户ID (UUID)
-            model_id: 模型ID（用于翻译）
-            language_type: 语言类型 ("zh" 中文, "en" 英文)
-            
-        Returns:
-            {
-                "user_summary": str,
-                "personality": str,
-                "core_values": str,
-                "one_sentence": str,
-                "updated_at": datetime,
-                "is_cached": bool
-            }
-        """
-        try:
-            # 转换为UUID并查询用户
-            user_uuid = uuid.UUID(end_user_id)
-            repo = EndUserRepository(db)
-            end_user = repo.get_by_id(user_uuid)
-            if not end_user:
-                logger.warning(f"未找到 end_user_id 为 {end_user_id} 的用户")
-                return {
-                    "user_summary": None,
-                    "personality": None,
-                    "core_values": None,
-                    "one_sentence": None,
-                    "updated_at": None,
-                    "is_cached": False,
-                    "message": "用户不存在"
-                }
-            
-            # 检查是否有缓存数据（至少有一个字段不为空）
-            user_summary=end_user.user_summary
-            personality_traits=end_user.personality_traits
-            core_values=end_user.core_values
-            one_sentence_summary=end_user.one_sentence_summary
-            
-            # 直接返回数据库中的数据，不进行二次翻译
-            # 语言由生成时的 X-Language-Type 决定
-            
-            has_cache = any([
-                user_summary,
-                personality_traits,
-                core_values,
-                one_sentence_summary
-            ])
-            
-            if has_cache:
-                logger.info(f"成功获取 end_user_id {end_user_id} 的缓存用户摘要")
-                return {
-                    "user_summary": user_summary,
-                    "personality": personality_traits,
-                    "core_values":core_values,
-                    "one_sentence": one_sentence_summary,
-                    "updated_at": self._datetime_to_timestamp(end_user.user_summary_updated_at),
-                    "is_cached": True
-                }
-            else:
-                logger.info(f"end_user_id {end_user_id} 的用户摘要缓存为空")
-                return {
-                    "user_summary": None,
-                    "personality": None,
-                    "core_values": None,
-                    "one_sentence": None,
-                    "updated_at": None,
-                    "is_cached": False,
-                    "message": "数据尚未生成，请稍后重试或联系管理员"
-                }
-                
-        except ValueError:
-            logger.error(f"无效的 end_user_id 格式: {end_user_id}")
-            return {
-                "user_summary": None,
-                "personality": None,
-                "core_values": None,
-                "one_sentence": None,
-                "updated_at": None,
-                "is_cached": False,
-                "message": "无效的用户ID格式"
-            }
-        except Exception as e:
-            logger.error(f"获取缓存用户摘要时出错: {str(e)}")
-            raise
 
-# for user    
     async def generate_and_cache_insight(
         self, 
-        db: Session, 
+        db: AsyncSession, 
         end_user_id: str,
         workspace_id: Optional[uuid.UUID] = None,
         language: str = "zh"
@@ -919,7 +756,7 @@ class UserMemoryService:
             # 转换为UUID并查询用户
             user_uuid = uuid.UUID(end_user_id)
             repo = EndUserRepository(db)
-            end_user = repo.get_by_id(user_uuid)
+            end_user = await repo.get_by_id_async(user_uuid)
             
             if not end_user:
                 logger.error(f"end_user_id {end_user_id} 不存在")
@@ -959,7 +796,7 @@ class UserMemoryService:
                 
                 # 更新数据库缓存（四个维度）
                 # 注意：key_findings 存储为 JSON 字符串
-                success = repo.update_memory_insight(
+                success = await repo.update_memory_insight_async(
                     user_uuid, 
                     memory_insight, 
                     behavior_pattern, 
@@ -1022,7 +859,7 @@ class UserMemoryService:
     
     async def generate_and_cache_summary(
         self, 
-        db: Session, 
+        db: AsyncSession, 
         end_user_id: str,
         workspace_id: Optional[uuid.UUID] = None,
         language: str = "zh"
@@ -1052,7 +889,7 @@ class UserMemoryService:
             # 转换为UUID并查询用户
             user_uuid = uuid.UUID(end_user_id)
             repo = EndUserRepository(db)
-            end_user = repo.get_by_id(user_uuid)
+            end_user = await repo.get_by_id_async(user_uuid)
             
             if not end_user:
                 logger.error(f"end_user_id {end_user_id} 不存在")
@@ -1087,7 +924,7 @@ class UserMemoryService:
                     }
                 
                 # 更新数据库缓存
-                success = repo.update_user_summary(
+                success = await repo.update_user_summary_async(
                     user_uuid, 
                     user_summary, 
                     personality, 
@@ -1151,7 +988,7 @@ class UserMemoryService:
 # for workspace    
     async def generate_cache_for_workspace(
         self, 
-        db: Session, 
+        db: AsyncSession, 
         workspace_id: uuid.UUID,
         language: str = "zh"
     ) -> Dict[str, Any]:
@@ -1181,7 +1018,7 @@ class UserMemoryService:
         try:
             # 获取工作空间的所有终端用户
             repo = EndUserRepository(db)
-            end_users = repo.get_all_by_workspace(workspace_id)
+            end_users = await repo.get_all_by_workspace_async(workspace_id)
             total_users = len(end_users)
             
             logger.info(f"工作空间 {workspace_id} 共有 {total_users} 个终端用户")

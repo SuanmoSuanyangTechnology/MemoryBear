@@ -1,0 +1,94 @@
+# Agent + Workflow Runtime Dependencies
+# 完整 api 依赖的子集，排除重量级 ML/文档处理库（torch/onnx/opencv/tika/libreoffice 等）
+# 目标：让 app.schemas / app.models / app.core.workflow 的导入链能完整加载
+
+# --- Web / API framework (schemas 依赖) ---
+fastapi==0.119.0
+starlette==0.48.0
+uvicorn==0.37.0
+python-multipart>=0.0.20
+email-validator>=2.3.0
+
+# --- Pydantic ---
+pydantic[email]==2.12.2
+pydantic-core==2.41.4
+pydantic-settings>=2.7.0
+
+# --- Database ---
+sqlalchemy==2.0.44
+psycopg2-binary==2.9.11
+asyncpg==0.31.0
+alembic==1.17.0
+
+# --- Auth / crypto ---
+passlib==1.7.4
+python-jose==3.5.0
+bcrypt==5.0.0
+cryptography==46.0.3
+ecdsa==0.19.1
+rsa==4.9.1
+
+# --- Redis / Celery ---
+redis==6.4.0
+celery==5.5.3
+valkey==6.0.2
+
+# --- LLM / Agent Framework ---
+langchain>=1.0.3
+langchain-core>=0.3.0
+langchain-openai>=1.0.2
+langchain-community>=0.3.31
+langchain-ollama
+langgraph>=0.4.0
+langchain-mcp-adapters>=0.1.13
+langchain-aws>=1.0.0a1
+dashscope>=1.25.0
+
+# --- Search / Graph stores ---
+elasticsearch==8.17.0
+elasticsearch-dsl==8.17.0
+elastic-transport==8.17.0
+neo4j>=6.0.3
+
+# --- MCP ---
+mcp>=1.21.1
+fastmcp>=2.13.1
+
+# --- HTTP / Async ---
+httpx>=0.28.0
+aiohttp>=3.9.0
+aiofiles>=23.0.0
+requests==2.32.5
+websockets==15.0.1
+
+# --- Templating / parsing ---
+jinja2==3.1.6
+json-repair>=0.53.0
+demjson3==3.0.6
+markdown==3.8
+markdownify==1.2.0
+beautifulsoup4==4.14.2
+markupsafe==3.0.3
+
+# --- Workflow support ---
+simpleeval>=1.0.3
+networkx>=3.4.2
+tiktoken==0.12.0
+
+# --- Object storage ---
+oss2>=2.19.1
+
+# --- Utilities ---
+pyyaml==6.0.3
+python-dateutil==2.9.0.post0
+python-dotenv==1.1.1
+cachetools==6.2.1
+strenum==0.4.15
+deprecated>=1.3.1
+xxhash==3.6.0
+concurrent-log-handler>=0.9.28
+tenacity>=8.0.0
+beartype==0.22.5
+langfuse>=3.10.0
+langid>=1.1.6
+xpinyin==0.7.7

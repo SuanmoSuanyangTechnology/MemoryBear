@@ -18,15 +18,17 @@
 认证方式: API Key (@require_api_key)
 """
 
+import json
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Header, Query, Request, Body
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, Header, Query, Request, Body
 
-from app.core.api_key_auth import require_api_key
-from app.core.api_key_utils import get_current_user_from_api_key, validate_end_user_in_workspace
+from app.core.api_key_auth import require_api_key_self_db
+from app.core.api_key_utils import get_current_user_snapshot_from_api_key_async, validate_end_user_in_workspace_async
+from app.core.error_codes import BizCode
+from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
-from app.db import get_db
+from app.db import get_async_db_context
 from app.schemas.api_key_schema import ApiKeyAuth
 from app.schemas.memory_storage_schema import GenerateCacheRequest
 
@@ -42,7 +44,7 @@ logger = get_business_logger()
 
 
 @router.get("/analytics/graph_data")
-@require_api_key(scopes=["memory"])
+@require_api_key_self_db(scopes=["memory"])
 async def get_graph_data(
     request: Request,
     end_user_id: str = Query(..., description="End user ID"),
@@ -51,11 +53,12 @@ async def get_graph_data(
     depth: int = Query(1, description="Graph traversal depth (auto-capped at 3 in service layer)"),
     center_node_id: Optional[str] = Query(None, description="Center node for subgraph"),
     api_key_auth: ApiKeyAuth = None,
-    db: Session = Depends(get_db),
 ):
     """Get knowledge graph data (nodes + edges) for an end user."""
-    current_user = get_current_user_from_api_key(db, api_key_auth)
-    validate_end_user_in_workspace(db, end_user_id, api_key_auth.workspace_id)
+    async with get_async_db_context() as auth_db:
+        current_user = await get_current_user_snapshot_from_api_key_async(auth_db, api_key_auth)
+        await validate_end_user_in_workspace_async(auth_db, end_user_id, api_key_auth.workspace_id)
+
 
     return await memory_analytics_controller.get_graph_data_api(
         end_user_id=end_user_id,
@@ -64,26 +67,25 @@ async def get_graph_data(
         depth=depth,
         center_node_id=center_node_id,
         current_user=current_user,
-        db=db,
     )
 
 
 @router.get("/analytics/community_graph")
-@require_api_key(scopes=["memory"])
+@require_api_key_self_db(scopes=["memory"])
 async def get_community_graph(
     request: Request,
     end_user_id: str = Query(..., description="End user ID"),
     api_key_auth: ApiKeyAuth = None,
-    db: Session = Depends(get_db),
 ):
     """Get community clustering graph for an end user."""
-    current_user = get_current_user_from_api_key(db, api_key_auth)
-    validate_end_user_in_workspace(db, end_user_id, api_key_auth.workspace_id)
+    async with get_async_db_context() as auth_db:
+        current_user = await get_current_user_snapshot_from_api_key_async(auth_db, api_key_auth)
+        await validate_end_user_in_workspace_async(auth_db, end_user_id, api_key_auth.workspace_id)
+
 
     return await memory_analytics_controller.get_community_graph_data_api(
         end_user_id=end_user_id,
         current_user=current_user,
-        db=db,
     )
 
 
@@ -91,21 +93,21 @@ async def get_community_graph(
 
 
 @router.get("/analytics/node_statistics")
-@require_api_key(scopes=["memory"])
+@require_api_key_self_db(scopes=["memory"])
 async def get_node_statistics(
     request: Request,
     end_user_id: str = Query(..., description="End user ID"),
     api_key_auth: ApiKeyAuth = None,
-    db: Session = Depends(get_db),
 ):
     """Get memory node type statistics for an end user."""
-    current_user = get_current_user_from_api_key(db, api_key_auth)
-    validate_end_user_in_workspace(db, end_user_id, api_key_auth.workspace_id)
+    async with get_async_db_context() as auth_db:
+        current_user = await get_current_user_snapshot_from_api_key_async(auth_db, api_key_auth)
+        await validate_end_user_in_workspace_async(auth_db, end_user_id, api_key_auth.workspace_id)
+
 
     return await memory_analytics_controller.get_node_statistics_api(
         end_user_id=end_user_id,
         current_user=current_user,
-        db=db,
     )
 
 
@@ -113,42 +115,42 @@ async def get_node_statistics(
 
 
 @router.get("/analytics/user_summary")
-@require_api_key(scopes=["memory"])
+@require_api_key_self_db(scopes=["memory"])
 async def get_user_summary(
     request: Request,
     end_user_id: str = Query(..., description="End user ID"),
     language_type: str = Header(default=None, alias="X-Language-Type"),
     api_key_auth: ApiKeyAuth = None,
-    db: Session = Depends(get_db),
 ):
     """Get cached user summary for an end user."""
-    current_user = get_current_user_from_api_key(db, api_key_auth)
-    validate_end_user_in_workspace(db, end_user_id, api_key_auth.workspace_id)
+    async with get_async_db_context() as auth_db:
+        current_user = await get_current_user_snapshot_from_api_key_async(auth_db, api_key_auth)
+        await validate_end_user_in_workspace_async(auth_db, end_user_id, api_key_auth.workspace_id)
+
 
     return await memory_analytics_controller.get_user_summary_api(
         end_user_id=end_user_id,
         language_type=language_type,
         current_user=current_user,
-        db=db,
     )
 
 
 @router.get("/analytics/memory_insight")
-@require_api_key(scopes=["memory"])
+@require_api_key_self_db(scopes=["memory"])
 async def get_memory_insight(
     request: Request,
     end_user_id: str = Query(..., description="End user ID"),
     api_key_auth: ApiKeyAuth = None,
-    db: Session = Depends(get_db),
 ):
     """Get cached memory insight report for an end user."""
-    current_user = get_current_user_from_api_key(db, api_key_auth)
-    validate_end_user_in_workspace(db, end_user_id, api_key_auth.workspace_id)
+    async with get_async_db_context() as auth_db:
+        current_user = await get_current_user_snapshot_from_api_key_async(auth_db, api_key_auth)
+        await validate_end_user_in_workspace_async(auth_db, end_user_id, api_key_auth.workspace_id)
+
 
     return await memory_analytics_controller.get_memory_insight_report_api(
         end_user_id=end_user_id,
         current_user=current_user,
-        db=db,
     )
 
 
@@ -156,25 +158,25 @@ async def get_memory_insight(
 
 
 @router.get("/analytics/interest_distribution")
-@require_api_key(scopes=["memory"])
+@require_api_key_self_db(scopes=["memory"])
 async def get_interest_distribution(
     request: Request,
     end_user_id: str = Query(..., description="End user ID"),
     limit: int = Query(5, le=5, description="Max interest tags to return"),
     language_type: str = Header(default=None, alias="X-Language-Type"),
     api_key_auth: ApiKeyAuth = None,
-    db: Session = Depends(get_db),
 ):
     """Get interest distribution tags for an end user."""
-    current_user = get_current_user_from_api_key(db, api_key_auth)
-    validate_end_user_in_workspace(db, end_user_id, api_key_auth.workspace_id)
+    async with get_async_db_context() as auth_db:
+        current_user = await get_current_user_snapshot_from_api_key_async(auth_db, api_key_auth)
+        await validate_end_user_in_workspace_async(auth_db, end_user_id, api_key_auth.workspace_id)
+
 
     return await memory_analytics_controller.get_interest_distribution_by_user_api(
         end_user_id=end_user_id,
         limit=limit,
         language_type=language_type,
         current_user=current_user,
-        db=db,
     )
 
 
@@ -182,21 +184,21 @@ async def get_interest_distribution(
 
 
 @router.get("/analytics/end_user_info")
-@require_api_key(scopes=["memory"])
+@require_api_key_self_db(scopes=["memory"])
 async def get_end_user_info(
     request: Request,
     end_user_id: str = Query(..., description="End user ID"),
     api_key_auth: ApiKeyAuth = None,
-    db: Session = Depends(get_db),
 ):
     """Get end user basic information (name, aliases, metadata)."""
-    current_user = get_current_user_from_api_key(db, api_key_auth)
-    validate_end_user_in_workspace(db, end_user_id, api_key_auth.workspace_id)
+    async with get_async_db_context() as auth_db:
+        current_user = await get_current_user_snapshot_from_api_key_async(auth_db, api_key_auth)
+        await validate_end_user_in_workspace_async(auth_db, end_user_id, api_key_auth.workspace_id)
+
 
     return await end_user_controller.get_end_user_info(
         end_user_id=end_user_id,
         current_user=current_user,
-        db=db,
     )
 
 
@@ -204,28 +206,35 @@ async def get_end_user_info(
 
 
 @router.post("/analytics/generate_cache")
-@require_api_key(scopes=["memory"])
+@require_api_key_self_db(scopes=["memory"])
 async def generate_cache(
     request: Request,
     api_key_auth: ApiKeyAuth = None,
-    db: Session = Depends(get_db),
     message: str = Body(None, description="Request body"),
     language_type: str = Header(default=None, alias="X-Language-Type"),
 ):
     """Trigger cache generation (user summary + memory insight) for an end user or all workspace users."""
-    body = await request.json()
+    # 空 body 视为「为整个工作空间批量生成」，与 GenerateCacheRequest.end_user_id 为 Optional 的语义一致。
+    raw_body = await request.body()
+    try:
+        body = json.loads(raw_body) if raw_body else {}
+    except json.JSONDecodeError as exc:
+        logger.warning(f"generate_cache 收到非法 JSON body: {exc}")
+        raise BusinessException(
+            "请求体不是合法 JSON",
+            BizCode.INVALID_PARAMETER,
+        )
     cache_request = GenerateCacheRequest(**body)
 
-    current_user = get_current_user_from_api_key(db, api_key_auth)
+    async with get_async_db_context() as auth_db:
+        current_user = await get_current_user_snapshot_from_api_key_async(auth_db, api_key_auth)
+        if cache_request.end_user_id:
+            await validate_end_user_in_workspace_async(auth_db, cache_request.end_user_id, api_key_auth.workspace_id)
 
-    if cache_request.end_user_id:
-        validate_end_user_in_workspace(db, cache_request.end_user_id, api_key_auth.workspace_id)
 
     return await memory_analytics_controller.generate_cache_api(
         request=cache_request,
         language_type=language_type,
         current_user=current_user,
-        db=db,
     )
-
 

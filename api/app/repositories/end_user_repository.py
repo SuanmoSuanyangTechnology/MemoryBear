@@ -1,9 +1,10 @@
 import uuid
 from contextlib import contextmanager
-from typing import List, Optional, Set
+from datetime import datetime
+from typing import List, NamedTuple, Optional, Set
 
 import sqlalchemy as sa
-from sqlalchemy import select, or_
+from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
@@ -13,9 +14,18 @@ from app.models import User
 from app.models.end_user_info_model import EndUserInfo
 from app.models.end_user_model import EndUser
 from app.models.workspace_model import Workspace
+from app.utils.redis_cache import redis_cache
 
 # 获取数据库专用日志器
 db_logger = get_db_logger()
+
+
+class UserTagRefreshCandidate(NamedTuple):
+    """扫描阶段使用的轻量候选记录，避免批量加载完整 metadata。"""
+
+    end_user_id: uuid.UUID
+    workspace_id: uuid.UUID
+    metadata_updated_at: datetime | None
 
 
 def is_uuid(value: str) -> bool:
@@ -70,6 +80,30 @@ class EndUserRepository:
             return end_users
         except Exception as e:
             self.db.rollback()
+            db_logger.error(f"查询工作空间 {workspace_id} 下终端用户时出错: {str(e)}")
+            raise
+
+    async def get_end_users_by_workspace_async(
+        self, workspace_id: uuid.UUID
+    ) -> List[EndUser]:
+        """获取指定 workspace 下的所有活跃 end_user（异步版本）
+        返回结果按 created_at 从新到旧排序（NULL 值排在最后）
+        """
+        from sqlalchemy import desc, nullslast
+        try:
+            result = await self.db.execute(
+                select(EndUser)
+                .filter(EndUser.workspace_id == workspace_id, EndUser.is_active == True)
+                .order_by(
+                    nullslast(desc(EndUser.created_at)),
+                    desc(EndUser.id),
+                )
+            )
+            end_users = list(result.scalars().all())
+            db_logger.info(f"成功查询工作空间 {workspace_id} 下的 {len(end_users)} 个终端用户")
+            return end_users
+        except Exception as e:
+            await self.db.rollback()
             db_logger.error(f"查询工作空间 {workspace_id} 下终端用户时出错: {str(e)}")
             raise
 
@@ -393,6 +427,73 @@ class EndUserRepository:
             db_logger.error(f"获取或创建终端用户(含配置)时出错: {str(e)}")
             raise
 
+    async def get_or_create_end_user_with_config_async(
+            self,
+            app_id: Optional[uuid.UUID],
+            workspace_id: uuid.UUID,
+            other_id: str,
+            memory_config_id: Optional[uuid.UUID] = None,
+            other_name: Optional[str] = None
+    ) -> EndUser:
+        """异步版：获取或创建终端用户，并关联记忆配置。"""
+        from sqlalchemy import select
+
+        try:
+            stmt = (
+                select(EndUser)
+                .where(
+                    EndUser.workspace_id == workspace_id,
+                    EndUser.other_id == other_id,
+                    EndUser.is_active == True,
+                )
+                .order_by(EndUser.created_at.asc())
+                .limit(1)
+            )
+            result = await self.db.execute(stmt)
+            end_user = result.scalars().first()
+
+            if end_user:
+                db_logger.debug(f"找到现有终端用户(async): workspace_id={workspace_id}, other_id={other_id}")
+                if app_id is not None:
+                    end_user.app_id = app_id
+                if memory_config_id and not end_user.memory_config_id:
+                    end_user.memory_config_id = memory_config_id
+                await self.db.commit()
+                await self.db.refresh(end_user)
+                return end_user
+
+            # 创建新用户
+            end_user = EndUser(
+                app_id=app_id,
+                workspace_id=workspace_id,
+                other_id=other_id,
+                memory_config_id=memory_config_id,
+            )
+            self.db.add(end_user)
+            await self.db.flush()
+
+            end_user_info = EndUserInfo(
+                end_user_id=end_user.id,
+                other_name=other_name or "",
+                aliases=[],
+                meta_data={}
+            )
+            self.db.add(end_user_info)
+
+            await self.db.commit()
+            await self.db.refresh(end_user)
+
+            db_logger.info(
+                f"创建新终端用户及其信息(async): (other_id: {other_id}) for workspace {workspace_id}, "
+                f"memory_config_id={memory_config_id}"
+            )
+            return end_user
+
+        except Exception as e:
+            await self.db.rollback()
+            db_logger.error(f"获取或创建终端用户(含配置/async)时出错: {str(e)}")
+            raise
+
     def get_by_id(self, end_user_id: uuid.UUID) -> Optional[EndUser]:
         """根据ID获取终端用户（用于缓存操作）
         
@@ -416,6 +517,26 @@ class EndUserRepository:
         except Exception as e:
             self.db.rollback()
             db_logger.error(f"查询终端用户 {end_user_id} 时出错: {str(e)}")
+            raise
+
+    async def get_by_id_async(self, end_user_id: uuid.UUID) -> Optional[EndUser]:
+        """根据ID获取终端用户（异步版本，供 AsyncSession 调用方使用）。"""
+        try:
+            result = await self.db.execute(
+                select(EndUser).where(
+                    EndUser.id == end_user_id,
+                    EndUser.is_active == True,
+                )
+            )
+            end_user = result.scalars().first()
+            if end_user:
+                db_logger.debug(f"成功查询到终端用户 {end_user_id}(异步)")
+            else:
+                db_logger.debug(f"未找到终端用户 {end_user_id}(异步)")
+            return end_user
+        except Exception as e:
+            await self.db.rollback()
+            db_logger.error(f"查询终端用户 {end_user_id} 时出错(异步): {str(e)}")
             raise
 
     def filter_existing_ids(self, end_user_ids: List[uuid.UUID]) -> Set[str]:
@@ -465,9 +586,138 @@ class EndUserRepository:
                 EndUser.core_values,
                 EndUser.one_sentence_summary,
                 EndUser.user_summary_updated_at,
+                EndUser.memory_tags,
             ).where(EndUser.id == end_user_id).limit(1)
         )
         return result.mappings().one_or_none()
+
+    def get_user_tag_refresh_candidates(
+            self,
+            after_id: uuid.UUID | None,
+            limit: int,
+    ) -> List[UserTagRefreshCandidate]:
+        """按主键游标分页获取需要刷新名片 Tag 的有效用户。
+
+        Tag 缓存字段不完整，或 metadata 的更新时间晚于 Tag 更新时间时，用户会进入候选集。
+        查询只返回派发任务所需的轻量字段，避免扫描阶段占用过多数据库连接和内存。
+        """
+        query = (
+            self.db.query(
+                EndUser.id,
+                EndUser.workspace_id,
+                EndUserInfo.updated_at,
+            )
+            .join(EndUserInfo, EndUserInfo.end_user_id == EndUser.id)
+            .join(Workspace, Workspace.id == EndUser.workspace_id)
+            .filter(
+                EndUser.is_active.is_(True),
+                Workspace.is_active.is_(True),
+                or_(
+                    EndUser.memory_tags.is_(None),
+                    EndUser.memory_tags_source_fingerprint.is_(None),
+                    EndUser.memory_tags_updated_at.is_(None),
+                    EndUserInfo.updated_at > EndUser.memory_tags_updated_at,
+                ),
+            )
+        )
+        if after_id is not None:
+            # 使用主键游标继续下一页，避免数据量增大时 OFFSET 扫描逐页变慢。
+            query = query.filter(EndUser.id > after_id)
+
+        rows = query.order_by(EndUser.id.asc()).limit(limit).all()
+        return [
+            UserTagRefreshCandidate(
+                end_user_id=row[0],
+                workspace_id=row[1],
+                metadata_updated_at=row[2],
+            )
+            for row in rows
+        ]
+
+    def get_scoped_user_tag_source(
+            self,
+            workspace_id: uuid.UUID,
+            end_user_id: uuid.UUID,
+    ) -> Optional[dict]:
+        """读取有效 Workspace 下单个有效用户的 Tag 源数据和当前缓存状态。"""
+        result = self.db.execute(
+            select(
+                EndUserInfo.meta_data.label("meta_data"),
+                EndUserInfo.updated_at.label("metadata_updated_at"),
+                EndUser.memory_tags.label("memory_tags"),
+                EndUser.memory_tags_source_fingerprint.label("memory_tags_source_fingerprint"),
+            )
+            .select_from(EndUser)
+            .join(EndUserInfo, EndUserInfo.end_user_id == EndUser.id)
+            .join(Workspace, Workspace.id == EndUser.workspace_id)
+            .where(
+                EndUser.id == end_user_id,
+                EndUser.workspace_id == workspace_id,
+                EndUser.is_active.is_(True),
+                Workspace.is_active.is_(True),
+            )
+            .limit(1)
+        )
+        row = result.mappings().one_or_none()
+        if row is None:
+            return None
+        return {
+            "meta_data": row["meta_data"],
+            "metadata_updated_at": row["metadata_updated_at"],
+            "memory_tags": row["memory_tags"],
+            "memory_tags_source_fingerprint": row["memory_tags_source_fingerprint"],
+        }
+
+    def update_user_tags_if_source_unchanged(
+            self,
+            workspace_id: uuid.UUID,
+            end_user_id: uuid.UUID,
+            expected_metadata_updated_at: datetime | None,
+            tags: List[str],
+            source_fingerprint: str,
+            refreshed_at: datetime,
+    ) -> bool:
+        """仅在 metadata 仍是读取时的版本时更新 Tag 缓存及源指纹。
+
+        LLM 生成期间 metadata 可能被其他任务修改。把版本条件放进 UPDATE，可避免较旧的
+        LLM 结果覆盖新数据；返回 False 表示版本已变化或用户、Workspace 已失效。
+        """
+        timestamp_matches = (
+            EndUserInfo.updated_at.is_(None)
+            if expected_metadata_updated_at is None
+            else EndUserInfo.updated_at == expected_metadata_updated_at
+        )
+        source_unchanged = sa.exists().where(
+            EndUserInfo.end_user_id == end_user_id,
+            timestamp_matches,
+        )
+        workspace_active = sa.exists().where(
+            Workspace.id == workspace_id,
+            Workspace.is_active.is_(True),
+        )
+
+        try:
+            result = self.db.execute(
+                sa.update(EndUser)
+                .where(
+                    EndUser.id == end_user_id,
+                    EndUser.workspace_id == workspace_id,
+                    EndUser.is_active.is_(True),
+                    source_unchanged,
+                    workspace_active,
+                )
+                .values(
+                    memory_tags=list(tags),
+                    memory_tags_updated_at=refreshed_at,
+                    memory_tags_source_fingerprint=source_fingerprint,
+                )
+                .execution_options(synchronize_session=False)
+            )
+            self.db.commit()
+            return bool(result.rowcount)
+        except Exception:
+            self.db.rollback()
+            raise
 
     async def get_forgetting_threshold_async(self, end_user_id: uuid.UUID) -> Optional[float]:
         """获取用户的遗忘阈值配置。
@@ -491,7 +741,7 @@ class EndUserRepository:
         )
         result = await self.db.execute(stmt)
         return result.scalar_one_or_none()
-        
+
     def update_memory_insight(
             self,
             end_user_id: uuid.UUID,
@@ -542,6 +792,40 @@ class EndUserRepository:
             db_logger.error(f"更新终端用户 {end_user_id} 的记忆洞察缓存时出错: {str(e)}")
             raise
 
+    async def update_memory_insight_async(
+            self,
+            end_user_id: uuid.UUID,
+            memory_insight: str,
+            behavior_pattern: str,
+            key_findings: str,
+            growth_trajectory: str,
+    ) -> bool:
+        """更新记忆洞察缓存（四个维度，异步版本）。"""
+        try:
+            result = await self.db.execute(
+                update(EndUser)
+                .where(EndUser.id == end_user_id, EndUser.is_active == True)
+                .values(
+                    memory_insight=memory_insight,
+                    behavior_pattern=behavior_pattern,
+                    key_findings=key_findings,
+                    growth_trajectory=growth_trajectory,
+                    memory_insight_updated_at=utcnow_naive(),
+                )
+                .execution_options(synchronize_session=False)
+            )
+            await self.db.commit()
+
+            if result.rowcount > 0:
+                db_logger.info(f"成功更新终端用户 {end_user_id} 的记忆洞察缓存(异步)")
+                return True
+            db_logger.warning(f"未找到终端用户 {end_user_id}，无法更新记忆洞察缓存(异步)")
+            return False
+        except Exception as e:
+            await self.db.rollback()
+            db_logger.error(f"更新终端用户 {end_user_id} 的记忆洞察缓存时出错(异步): {str(e)}")
+            raise
+
     def update_user_summary(
             self,
             end_user_id: uuid.UUID,
@@ -590,6 +874,40 @@ class EndUserRepository:
         except Exception as e:
             self.db.rollback()
             db_logger.error(f"更新终端用户 {end_user_id} 的用户摘要缓存时出错: {str(e)}")
+            raise
+
+    async def update_user_summary_async(
+            self,
+            end_user_id: uuid.UUID,
+            user_summary: str,
+            personality: str,
+            core_values: str,
+            one_sentence: str,
+    ) -> bool:
+        """更新用户摘要缓存（四个部分，异步版本）。"""
+        try:
+            result = await self.db.execute(
+                update(EndUser)
+                .where(EndUser.id == end_user_id, EndUser.is_active == True)
+                .values(
+                    user_summary=user_summary,
+                    personality_traits=personality,
+                    core_values=core_values,
+                    one_sentence_summary=one_sentence,
+                    user_summary_updated_at=utcnow_naive(),
+                )
+                .execution_options(synchronize_session=False)
+            )
+            await self.db.commit()
+
+            if result.rowcount > 0:
+                db_logger.info(f"成功更新终端用户 {end_user_id} 的用户摘要缓存(异步)")
+                return True
+            db_logger.warning(f"未找到终端用户 {end_user_id}，无法更新用户摘要缓存(异步)")
+            return False
+        except Exception as e:
+            await self.db.rollback()
+            db_logger.error(f"更新终端用户 {end_user_id} 的用户摘要缓存时出错(异步): {str(e)}")
             raise
 
     def update_rag_summary_tags(
@@ -694,6 +1012,25 @@ class EndUserRepository:
         except Exception as e:
             self.db.rollback()
             db_logger.error(f"查询工作空间 {workspace_id} 下的终端用户时出错: {str(e)}")
+            raise
+
+    async def get_all_by_workspace_async(self, workspace_id: uuid.UUID) -> List[EndUser]:
+        """获取工作空间下的所有终端用户（异步版本）。"""
+        try:
+            result = await self.db.execute(
+                select(EndUser).where(
+                    EndUser.workspace_id == workspace_id,
+                    EndUser.is_active == True,
+                )
+            )
+            end_users = result.scalars().all()
+            db_logger.debug(
+                f"成功查询工作空间 {workspace_id} 下的 {len(end_users)} 个终端用户(异步)"
+            )
+            return list(end_users)
+        except Exception as e:
+            await self.db.rollback()
+            db_logger.error(f"查询工作空间 {workspace_id} 下终端用户时出错(异步): {str(e)}")
             raise
 
     def get_cache_refresh_fields_by_workspace(
@@ -910,8 +1247,6 @@ class EndUserRepository:
     ) -> int:
         """批量更新工作空间下所有终端用户的 memory_config_id"""
         try:
-            from sqlalchemy import update
-
             stmt = (
                 update(EndUser)
                 .where(EndUser.workspace_id == workspace_id, EndUser.is_active == True)
@@ -955,8 +1290,6 @@ class EndUserRepository:
             Exception: 数据库操作失败时抛出
         """
         try:
-            from sqlalchemy import update
-
             stmt = (
                 update(EndUser)
                 .where(EndUser.app_id == app_id, EndUser.is_active == True)
@@ -1028,8 +1361,6 @@ class EndUserRepository:
             int: 清除的行数
         """
         try:
-            from sqlalchemy import update
-
             stmt = (
                 update(EndUser)
                 .where(EndUser.memory_config_id == memory_config_id, EndUser.is_active == True)
@@ -1091,6 +1422,25 @@ class EndUserRepository:
             db_logger.error(f"软删除终端用户失败: end_user_id={end_user_id}, error={str(e)}")
             raise
 
+    async def soft_delete_by_end_user_id_async(self, end_user_id: uuid.UUID) -> bool:
+        """软删除指定 EndUser（异步版本）"""
+        try:
+            result = await self.db.execute(
+                update(EndUser)
+                .where(EndUser.id == end_user_id, EndUser.is_active == True)
+                .values(is_active=False)
+            )
+            await self.db.commit()
+            if result.rowcount:
+                db_logger.info(f"软删除终端用户(异步): end_user_id={end_user_id}")
+            else:
+                db_logger.warning(f"未找到活跃终端用户(异步)，无法软删除: end_user_id={end_user_id}")
+            return result.rowcount > 0
+        except Exception as e:
+            await self.db.rollback()
+            db_logger.error(f"软删除终端用户失败(异步): end_user_id={end_user_id}, error={str(e)}")
+            raise
+
     def soft_delete_by_user_id(self, user_id: uuid.UUID) -> int:
         """软删除指定 User（通过 other_id 关联）的所有 EndUser。
 
@@ -1136,6 +1486,20 @@ class EndUserRepository:
         except Exception as e:
             self.db.rollback()
             db_logger.error(f"查询所有活跃终端用户时出错: {str(e)}")
+            raise
+
+    async def get_all_active_async(self) -> List[EndUser]:
+        """获取所有活跃的 EndUser 记录（异步版本）。"""
+        try:
+            result = await self.db.execute(
+                select(EndUser).where(EndUser.is_active == True)
+            )
+            end_users = list(result.scalars().all())
+            db_logger.info(f"查询所有活跃终端用户(异步): {len(end_users)} 个")
+            return end_users
+        except Exception as e:
+            await self.db.rollback()
+            db_logger.error(f"查询所有活跃终端用户时出错(异步): {str(e)}")
             raise
 
     def get_ids_by_app_workspace(self, workspace_id: uuid.UUID) -> List[str]:
@@ -1205,6 +1569,7 @@ class EndUserRepository:
         columns = load_only(
             EndUser.id,
             EndUser.other_name,
+            EndUser.memory_tags,
             EndUser.memory_count,
             EndUser.app_id,
             EndUser.memory_config_id,
@@ -1288,6 +1653,7 @@ class EndUserRepository:
         columns = load_only(
             EndUser.id,
             EndUser.other_name,
+            EndUser.memory_tags,
             EndUser.memory_count,
             EndUser.app_id,
             EndUser.memory_config_id,
@@ -1357,6 +1723,21 @@ class EndUserRepository:
             db_logger.error(f"更新记忆计数失败: end_user_id={end_user_id}, error={str(e)}")
             raise
 
+    async def update_memory_count_async(self, end_user_id: uuid.UUID, node_count: int) -> bool:
+        """更新终端用户的记忆节点计数（异步版本）"""
+        try:
+            result = await self.db.execute(
+                update(EndUser)
+                .where(EndUser.id == end_user_id, EndUser.is_active == True)
+                .values(memory_count=node_count)
+            )
+            await self.db.commit()
+            return result.rowcount > 0
+        except Exception as e:
+            await self.db.rollback()
+            db_logger.error(f"更新记忆计数失败(异步): end_user_id={end_user_id}, error={str(e)}")
+            raise
+
 
 # def get_end_users_by_app_id(db: Session, app_id: uuid.UUID) -> List[EndUser]:
 #     """根据应用ID查询宿主（返回 EndUser ORM 列表）"""
@@ -1390,6 +1771,7 @@ async def get_end_user_by_id_async(db: AsyncSession, end_user_id: uuid.UUID) -> 
     return end_user
 
 
+# @redis_cache(ttl=600, prefix='tenant', skip_args=["db"])
 def get_tenant_id_by_end_user_id(db: Session, end_user_id: uuid.UUID) -> Optional[uuid.UUID]:
     stmt = (
         select(Workspace.tenant_id)
@@ -1400,6 +1782,7 @@ def get_tenant_id_by_end_user_id(db: Session, end_user_id: uuid.UUID) -> Optiona
     return result.scalar()
 
 
+# @redis_cache(ttl=600, prefix='tenant', skip_args=["db"])
 async def get_tenant_id_by_end_user_id_async(db: AsyncSession, end_user_id: uuid.UUID) -> Optional[uuid.UUID]:
     stmt = (
         select(Workspace.tenant_id)

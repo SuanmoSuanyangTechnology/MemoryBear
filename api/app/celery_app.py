@@ -101,6 +101,9 @@ celery_app.conf.update(
         # Memory tasks → memory_tasks queue (threads worker)
         'app.core.memory.agent.write_message': {'queue': 'memory_tasks'},
 
+        # Fast Write tasks → memory_fast_tasks queue (threads worker，独立队列，避免与普通写入互相阻塞)
+        'app.core.memory.fast_write_message': {'queue': 'memory_fast_tasks'},
+
         # Document tasks → document_tasks queue (prefork worker)
         'app.core.rag.tasks.parse_document': {'queue': 'document_tasks'},
         'app.core.rag.tasks.sync_knowledge_for_kb': {'queue': 'document_tasks'},
@@ -108,6 +111,10 @@ celery_app.conf.update(
         # GraphRAG tasks → graphrag_tasks queue (独立队列，避免阻塞文档解析)
         'app.core.rag.tasks.build_graphrag_for_kb': {'queue': 'graphrag_tasks'},
         'app.core.rag.tasks.build_graphrag_for_document': {'queue': 'graphrag_tasks'},
+        'app.core.rag.tasks.sync_evidence_graph_document': {'queue': 'graphrag_tasks'},
+        'app.core.rag.tasks.rebuild_evidence_graph_knowledge': {'queue': 'graphrag_tasks'},
+        'app.core.rag.tasks.migrate_evidence_graph_knowledge': {'queue': 'graphrag_tasks'},
+        'app.core.rag.tasks.clear_all_knowledge_graph_data': {'queue': 'graphrag_tasks'},
 
         # Beat/periodic tasks → periodic_tasks queue (dedicated periodic worker)
         'app.tasks.workspace_reflection_task': {'queue': 'periodic_tasks'},
@@ -130,6 +137,8 @@ celery_app.conf.update(
         # Memory-heavy tasks → memory_heavy_tasks queue (prefork worker, CPU-bound + beat long tasks)
         'app.tasks.scan_refresh_insight_summary_cache': {'queue': 'periodic_tasks'}, # NOTE：扫描器，仅枚举+派发，轻量
         'app.tasks.do_refresh_insight_summary_cache': {'queue': 'memory_heavy_tasks'}, # NOTE：单用户生成记忆洞察、用户摘要缓存
+        'app.tasks.scan_refresh_user_tags': {'queue': 'periodic_tasks'},
+        'app.tasks.do_refresh_user_tags': {'queue': 'memory_heavy_tasks'},
         'app.tasks.scan_forget_candidates': {'queue': 'periodic_tasks'},
         'app.tasks.do_forget_for_user': {'queue': 'memory_heavy_tasks'},
         'app.tasks.run_forgetting_cycle_task': {'queue': 'memory_heavy_tasks'},# NOTE：定时任务，跑遗忘 可以暂时关闭
@@ -171,6 +180,10 @@ memory_cache_regeneration_schedule = crontab(
     hour=settings.MEMORY_CACHE_REGENERATION_HOUR,
     minute=settings.MEMORY_CACHE_REGENERATION_MINUTE,
 )
+user_tag_refresh_schedule = crontab(
+    hour=settings.USER_TAG_REFRESH_HOUR,
+    minute=settings.USER_TAG_REFRESH_MINUTE,
+)
 workspace_reflection_schedule = timedelta(seconds=settings.WORKSPACE_REFLECTION_INTERVAL_SECONDS)
 forgetting_cycle_schedule = crontab(
     hour=settings.FORGETTING_CYCLE_HOUR,
@@ -196,6 +209,11 @@ beat_schedule_config = {
     "regenerate-memory-cache": {
         "task": "app.tasks.scan_refresh_insight_summary_cache",
         "schedule": memory_cache_regeneration_schedule,
+        "args": (),
+    },
+    "refresh-user-tags": {
+        "task": "app.tasks.scan_refresh_user_tags",
+        "schedule": user_tag_refresh_schedule,
         "args": (),
     },
     "scan-forget-candidates": {

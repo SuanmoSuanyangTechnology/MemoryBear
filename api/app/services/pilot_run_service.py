@@ -41,6 +41,7 @@ from app.schemas.app_schema import FileInput, TransferMethod
 from app.schemas.memory_agent_schema import WriteMessageItem
 from app.schemas.memory_config_schema import MemoryConfig
 from app.services.memory_perceptual_service import _PerceptualSnapshot
+from app.services.multimodal_service import MultimodalService
 
 logger = get_memory_logger(__name__)
 
@@ -136,7 +137,7 @@ def _build_perceptual_summary(snapshots: list[PerceptualEntry]) -> dict:
 
 async def _resolve_file_url(
     file: FileInput,
-    mm_service: "Optional['MultimodalService']" = None,
+    mm_service: Optional[MultimodalService] = None,
 ) -> Optional[str]:
     """解析 FileInput 为可访问 URL。
 
@@ -153,7 +154,6 @@ async def _resolve_file_url(
 
         # 兼容：无共享 service 时临时开一次 session
         from app.db import get_db_read
-        from app.services.multimodal_service import MultimodalService
 
         with get_db_read() as db:
             return await MultimodalService(db, api_config=None).get_file_url(file)
@@ -182,7 +182,6 @@ async def _generate_perceptual_snapshots(
     """
     from app.db import get_db_read
     from app.services.memory_perceptual_service import MemoryPerceptualService
-    from app.services.multimodal_service import MultimodalService
 
     # ── Phase 1: 批量解析 URL（一次 session 内完成，remote_url 无需 DB）──
     # 注意：仅遍历 user 消息，assistant 消息的 files 直接忽略。

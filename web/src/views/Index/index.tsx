@@ -49,11 +49,11 @@ const Index = () => {
       key: 'icon',
       render:(value: string, record: any) => {
         return value ? (
-          <img src={value} alt="icon" className='rb:size-6' />
+          <img src={value} alt="icon" className='rb:size-6 rb:rounded' />
         ) : (
-          <div className='rb:size-6 rb:bg-[#155EEF] rb:text-white rb:rounded rb:flex rb:items-center rb:justify-center rb:text-xs rb:font-medium'>
+          <Flex align="center" justify="center" className='rb:size-6 rb:bg-[#155EEF] rb:text-white rb:rounded rb:text-xs rb:font-medium'>
             {record.name?.charAt(0)?.toUpperCase() || '?'}
-          </div>
+          </Flex>
         )
       }
     },
@@ -100,34 +100,32 @@ const Index = () => {
 
   return (
     <Flex gap={12} wrap="nowrap" className="rb:w-full! rb:h-full! rb:overflow-y-auto">
-      <div className="rb:flex-1 rb:min-w-0 rb:min-h-0 rb:space-y-3 rb:flex rb:flex-col">
-        {/* <Flex vertical> */}
-          <div className='rb:w-full rb:h-26 rb:p-4 rb:bg-cover rb:bg-[url("@/assets/images/index/index_bg.png")] rb:rounded-xl rb:overflow-hidden'>
-            <div className="rb:font-[MiSans-Bold] rb:font-bold rb:text-white rb:text-[18px] rb:leading-7">
-              {t('index.spaceTitle')}
-            </div>
-            <div className='rb:mt-2 rb:text-[12px] rb:leading-4.5 rb:text-white rb:max-w-139.75'>
-              {t('index.spaceSubTitle')}
-            </div>
+      <Flex vertical gap={12} className="rb:flex-1 rb:min-w-0 rb:min-h-0">
+        <div className='rb:w-full rb:h-26 rb:p-4 rb:bg-cover rb:bg-[url("@/assets/images/index/index_bg.png")] rb:rounded-xl rb:overflow-hidden'>
+          <div className="rb:font-[MiSans-Bold] rb:font-bold rb:text-white rb:text-[18px] rb:leading-7">
+            {t('index.spaceTitle')}
           </div>
-          <div className='rb:shrink-0'>
-            {/* 统计卡片 */}
-            <TopCardList data={dashboardData} />
+          <div className='rb:mt-2 rb:text-[12px] rb:leading-4.5 rb:text-white rb:max-w-139.75'>
+            {t('index.spaceSubTitle')}
           </div>
-          <div className="rb:flex-1 rb:min-h-0 rb:rounded-xl rb:bg-white rb:pt-3 rb:px-3 rb:overflow-hidden">
-            <Table
-              ref={tableRef}
-              apiUrl={tableApi}
-              columns={columns}
-              rowKey="id"
-              bordered={false}
-              fillHeight
-              pagination={{pagesize: 10}}
-            />
-          </div>
-        {/* </Flex> */}
-      </div>
-      <div className="rb:w-82! rb:flex rb:flex-col rb:min-h-0 rb:space-y-3">
+        </div>
+        <div className='rb:shrink-0'>
+          {/* 统计卡片 */}
+          <TopCardList data={dashboardData} />
+        </div>
+        <div className="rb:flex-1 rb:min-h-0 rb:rounded-xl rb:bg-white rb:pt-3 rb:px-3 rb:overflow-hidden">
+          <Table
+            ref={tableRef}
+            apiUrl={tableApi}
+            columns={columns}
+            rowKey="id"
+            bordered={false}
+            fillHeight
+            pagination={{pagesize: 20}}
+          />
+        </div>
+      </Flex>
+      <Flex vertical gap={12} className="rb:w-82! rb:min-h-0">
         {/* 引导 */}
         <div className='rb:shrink-0'>
           <GuideCard />
@@ -138,7 +136,7 @@ const Index = () => {
         <div className='rb:shrink-0'>
           <QuickActions onNavigate={navigate} />
         </div>
-      </div>
+      </Flex>
     </Flex>
   );
 }

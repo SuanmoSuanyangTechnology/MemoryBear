@@ -5,7 +5,7 @@
  * @Last Modified time: 2026-05-08 17:35:57
  */
 
-import type { Package } from '@/views/Package/types';
+import type { Package, ResourcePack } from '@/views/Package/types';
 
 /**
  * Order query parameters
@@ -32,7 +32,7 @@ export interface Order {
   package_version: string;
   product_type: string;
   legacy_product_type?: string;
-  package_snapshot: Package;
+  package_snapshot: Package | ResourcePack;
   business_type: 'purchase' | 'renewal' | 'upgrade' | 'recharge' | 'downgrade' | 'free';
   multiplier: number;
   payable_amount: string;
@@ -56,4 +56,22 @@ export interface Order {
  */
 export interface OrderDetailRef {
   handleOpen: (order: Order) => void;
+}
+
+export interface OrderItem extends Order {
+  resource_pack_instance_id: string | null;
+  source_type: 'resource_pack' | 'package_plan';
+  source_channel: 'direct';
+  source_id: string | null;
+}
+export interface GroupOrder {
+  status: 'pending' | 'approved' | 'rejected';
+  order_count: number;
+  payable_amount: string;
+  payment_method: 'bank_transfer' | 'paypal';
+  pay_txn_id: string;
+  payer: string;
+  pay_time: number;
+  remarks: string | null;
+  orders: OrderItem[];
 }

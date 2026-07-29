@@ -5,7 +5,7 @@
  * @Last Modified time: 2026-05-20 14:27:10 
  */
 import { forwardRef, useImperativeHandle, useState } from 'react';
-import { Form } from 'antd';
+import { Form, Flex } from 'antd';
 import { useTranslation } from 'react-i18next';
 import { useParams } from 'react-router-dom';
 
@@ -84,12 +84,11 @@ const AnnotationsSettingsModal = forwardRef<AnnotationSettingModalRef, { refresh
           name="similarity_threshold"
           label={t('application.similarityThreshold')}
           rules={[{ required: true, message: t('common.pleaseEnter') }]}
-          // TODO: ui
           tooltip={
-            <div className="rb:flex rb:justify-between rb:text-[12px]">
+            <Flex justify="space-between" gap={12} className="rb:text-[12px]">
               <span className="rb:text-[#10B981]">0.8 · {t('application.easyMatch')}</span>
               <span className="rb:text-[#155EEF]">1.0 · {t('application.preciseMatch')}</span>
-            </div>
+            </Flex>
           }
         >
           <RbSlider

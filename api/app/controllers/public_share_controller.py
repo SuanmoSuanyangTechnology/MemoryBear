@@ -9,6 +9,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
@@ -716,6 +717,7 @@ async def chat(
 
         if payload.stream:
             source = HitLogSource.EXTERNAL
+            execution_mode = "sandbox" if settings.E2B_ENABLED else "in_process"
             async def event_generator():
                 async with get_async_db_context() as stream_db:
                     app_chat_service = AppChatService(stream_db)
@@ -731,7 +733,8 @@ async def chat(
                             user_rag_memory_id=user_rag_memory_id,
                             workspace_id=workspace_id,
                             files=payload.files,
-                            source=source
+                            source=source,
+                            execution_mode=execution_mode,
                     ):
                         yield event
 
@@ -745,6 +748,7 @@ async def chat(
                 }
             )
         source = HitLogSource.EXTERNAL
+        execution_mode = "sandbox" if settings.E2B_ENABLED else "in_process"
         async with get_async_db_context() as db:
             app_chat_service = AppChatService(db)
             result = await app_chat_service.agent_chat(
@@ -759,7 +763,8 @@ async def chat(
                 user_rag_memory_id=user_rag_memory_id,
                 workspace_id=workspace_id,
                 files=payload.files,
-                source=source
+                source=source,
+                execution_mode=execution_mode,
             )
         return success(data=conversation_schema.ChatResponse(**result).model_dump(mode="json"))
     elif app_type == AppType.MULTI_AGENT:

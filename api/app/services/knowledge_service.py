@@ -15,8 +15,21 @@ from app.core.logging_config import get_business_logger
 from app.core.exceptions import BusinessException
 from app.core.error_codes import BizCode
 from app.models.models_model import ModelType
+from app.core.rag.parser_config import normalize_new_knowledge_parser_config
 
 business_logger = get_business_logger()
+
+
+def _normalize_parser_config_for_create(
+        knowledge: KnowledgeCreate,
+        *,
+        preserve_source_parser_config: bool,
+) -> None:
+    if preserve_source_parser_config:
+        return
+    knowledge.parser_config = normalize_new_knowledge_parser_config(
+        knowledge.parser_config
+    )
 
 
 def _build_knowledge_items_with_folder_trees(
@@ -317,11 +330,19 @@ async def get_chunked_knowledgeids_async(
 
 
 def create_knowledge(
-        db: Session, knowledge: KnowledgeCreate, current_user: User
+        db: Session,
+        knowledge: KnowledgeCreate,
+        current_user: User,
+        *,
+        preserve_source_parser_config: bool = False,
 ) -> Knowledge:
     business_logger.info(f"Create a knowledge base: {knowledge.name}, creator: {current_user.username}")
 
     try:
+        _normalize_parser_config_for_create(
+            knowledge,
+            preserve_source_parser_config=preserve_source_parser_config,
+        )
         knowledge.created_by = current_user.id
         if knowledge.workspace_id is None:
             knowledge.workspace_id = current_user.current_workspace_id
@@ -378,7 +399,9 @@ def create_knowledge(
 
         business_logger.debug(f"Start creating the knowledge base: {knowledge.name}")
         db_knowledge = knowledge_repository.create_knowledge(
-            db=db, knowledge=knowledge
+            db=db,
+            knowledge=knowledge,
+            preserve_source_parser_config=preserve_source_parser_config,
         )
         business_logger.info(f"The knowledge base has been successfully created: {knowledge.name} (ID: {db_knowledge.id}), creator: {current_user.username}")
         return db_knowledge
@@ -388,11 +411,19 @@ def create_knowledge(
 
 
 async def create_knowledge_async(
-        db: AsyncSession, knowledge: KnowledgeCreate, current_user: User
+        db: AsyncSession,
+        knowledge: KnowledgeCreate,
+        current_user: User,
+        *,
+        preserve_source_parser_config: bool = False,
 ) -> Knowledge:
     business_logger.info(f"Create a knowledge base (async): {knowledge.name}, creator: {current_user.username}")
 
     try:
+        _normalize_parser_config_for_create(
+            knowledge,
+            preserve_source_parser_config=preserve_source_parser_config,
+        )
         knowledge.created_by = current_user.id
         if knowledge.workspace_id is None:
             knowledge.workspace_id = current_user.current_workspace_id
@@ -455,7 +486,9 @@ async def create_knowledge_async(
             business_logger.debug(f"Auto-bind image2text model: {model.id}")
 
         db_knowledge = await knowledge_repository.create_knowledge_async(
-            db=db, knowledge=knowledge
+            db=db,
+            knowledge=knowledge,
+            preserve_source_parser_config=preserve_source_parser_config,
         )
         business_logger.info(
             f"The knowledge base has been successfully created (async): "

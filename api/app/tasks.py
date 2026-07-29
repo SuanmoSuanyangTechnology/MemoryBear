@@ -7,11 +7,13 @@ import tempfile
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import redis
+from elasticsearch import AsyncElasticsearch
 from fastapi.encoders import jsonable_encoder
 from redis.exceptions import RedisError
 from sqlalchemy import select, cast, String
@@ -20,11 +22,31 @@ from app.aioRedis import get_thread_safe_redis
 from app.celery_app import celery_app
 from app.core.config import settings
 from app.core.logging_config import get_logger
+from app.core.models import RedBearEmbeddings, RedBearLLM
 from app.core.memory.storage_services.reflection_engine import retry_registry as rr
 from app.core.rag.chunk.metadata import merge_parser_metadata
 from app.core.rag.crawler.web_crawler import WebCrawler
 from app.core.rag.graphrag.general.index import init_graphrag, run_graphrag_for_kb
 from app.core.rag.graphrag.utils import get_llm_cache, set_llm_cache
+from app.core.rag.knowledge_graph.config import (
+    GraphPipeline,
+    GraphPipelineConfigError,
+    is_graph_enabled,
+    resolve_graph_pipeline,
+)
+from app.core.rag.knowledge_graph.dispatch import dispatch_document_graph_sync
+from app.core.rag.knowledge_graph.elasticsearch_store import GraphElasticsearchStore
+from app.core.rag.knowledge_graph.extractor import LLMEntityRelationExtractor
+from app.core.rag.knowledge_graph.index_pipeline import KnowledgeGraphIndexPipeline
+from app.core.rag.knowledge_graph.lock import create_knowledge_graph_lock
+from app.core.rag.knowledge_graph.runtime import (
+    build_model_config,
+    snapshot_graph_runtime,
+)
+from app.core.rag.parser_config import set_graph_pipeline_for_migration
+from app.core.rag.retrieval.async_elasticsearch import (
+    build_async_elasticsearch_client_config,
+)
 from app.core.rag.integrations.feishu.client import FeishuAPIClient
 from app.core.rag.integrations.feishu.models import FileInfo
 from app.core.rag.integrations.yuque.client import YuqueAPIClient
@@ -55,6 +77,7 @@ from app.core.utils.datetime_utils import (
 from app.db import get_db_context, get_db_read
 from app.models import App, AppRelease, Document, File, Knowledge, User, Workspace
 from app.models.end_user_model import EndUser
+from app.models.models_model import ModelType
 from app.repositories.end_user_repository import get_end_users_by_workspace
 from app.schemas import document_schema, file_schema
 from app.services.memory_config_service import MemoryConfigService
@@ -75,13 +98,450 @@ VIDEO_IMAGE_PATTERN = re.compile(
 )
 DEFAULT_PARSE_LANGUAGE = "Chinese"
 DEFAULT_PARSE_TO_PAGE = 100_000
-EMBEDDING_BATCH_SIZE = int(os.getenv("EMBEDDING_BATCH_SIZE", "20"))
+EMBEDDING_BATCH_SIZE = settings.EMBEDDING_BATCH_SIZE
 # Embedding 并发写入的最大线程数，需根据模型 API rate limit 调整
 EMBEDDING_MAX_WORKERS = int(os.getenv("EMBEDDING_MAX_WORKERS", "3"))
 # auto_questions LLM 并发调用的最大线程数
 AUTO_QUESTIONS_MAX_WORKERS = int(os.getenv("AUTO_QUESTIONS_MAX_WORKERS", "5"))
 # 文档解析页数上限
 MAX_DOCUMENT_PAGES = int(os.getenv("MAX_DOCUMENT_PAGES", "200"))
+
+
+@dataclass(frozen=True)
+class _GraphTaskState:
+    knowledge_id: str
+    workspace_id: str
+    pipeline: GraphPipeline
+    graph_enabled: bool
+    document_active: bool | None
+    active_document_ids: tuple[str, ...]
+    fingerprint: str
+
+
+class _GraphDocumentDeletionPending(RuntimeError):
+    """The graph cleanup must wait until the document deletion is committed."""
+
+
+def _document_active_state(document: Document | None) -> bool | None:
+    if document is None:
+        return None
+    return document.status == 1
+
+
+def _canonical_graph_uuid(value: object, field_name: str) -> str:
+    try:
+        return str(uuid.UUID(str(value)))
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise GraphPipelineConfigError(
+            f"invalid {field_name}: {value}"
+        ) from exc
+
+
+def _graph_task_fingerprint(knowledge: Knowledge) -> str:
+    import hashlib
+
+    graph_config = (knowledge.parser_config or {}).get("graphrag")
+    payload = {
+        "llm_id": str(knowledge.llm_id) if knowledge.llm_id else None,
+        "embedding_id": (
+            str(knowledge.embedding_id) if knowledge.embedding_id else None
+        ),
+        "graphrag": graph_config,
+    }
+    encoded = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _load_graph_task_state(
+        knowledge_id: str,
+        document_id: str | None = None,
+        *,
+        include_active_documents: bool = False,
+) -> _GraphTaskState:
+    knowledge_uuid = uuid.UUID(
+        _canonical_graph_uuid(knowledge_id, "knowledge id")
+    )
+    document_uuid = (
+        uuid.UUID(_canonical_graph_uuid(document_id, "document id"))
+        if document_id
+        else None
+    )
+
+    with get_db_context() as db:
+        knowledge = db.query(Knowledge).filter(
+            Knowledge.id == knowledge_uuid
+        ).first()
+        if knowledge is None:
+            raise GraphPipelineConfigError(
+                f"knowledge does not exist: {knowledge_id}"
+            )
+        workspace = db.query(Workspace).filter(
+            Workspace.id == knowledge.workspace_id
+        ).first()
+        if workspace is None:
+            raise GraphPipelineConfigError(
+                f"workspace does not exist: {knowledge.workspace_id}"
+            )
+
+        document_active: bool | None = None
+        if document_uuid is not None:
+            document = db.query(Document).filter(
+                Document.id == document_uuid,
+                Document.kb_id == knowledge_uuid,
+            ).first()
+            document_active = _document_active_state(document)
+
+        active_document_ids: tuple[str, ...] = ()
+        if include_active_documents:
+            documents = db.query(Document).filter(
+                Document.kb_id == knowledge_uuid,
+                Document.status == 1,
+                Document.chunk_num > 0,
+            ).order_by(Document.id).all()
+            active_document_ids = tuple(str(document.id) for document in documents)
+
+        return _GraphTaskState(
+            knowledge_id=str(knowledge.id),
+            workspace_id=str(workspace.id),
+            pipeline=resolve_graph_pipeline(knowledge.parser_config),
+            graph_enabled=is_graph_enabled(knowledge.parser_config),
+            document_active=document_active,
+            active_document_ids=active_document_ids,
+            fingerprint=_graph_task_fingerprint(knowledge),
+        )
+
+
+def _build_evidence_index_pipeline(runtime, client, lock_guard):
+    llm_type = (
+        ModelType.CHAT
+        if runtime.llm.model_type == ModelType.CHAT.value
+        else ModelType.LLM
+    )
+    llm = RedBearLLM(build_model_config(runtime.llm), type=llm_type)
+    embedding = RedBearEmbeddings(build_model_config(runtime.embedding))
+    extractor = LLMEntityRelationExtractor(
+        llm,
+        runtime.entity_types,
+        runtime.scene_name,
+    )
+    return KnowledgeGraphIndexPipeline(
+        store=GraphElasticsearchStore(client),
+        extractor=extractor,
+        embedding=embedding,
+        lock_guard=lock_guard,
+    )
+
+
+async def _run_evidence_document_async(
+        runtime,
+        document_id: str,
+        document_active: bool,
+        lock_guard,
+) -> None:
+    client = AsyncElasticsearch(**build_async_elasticsearch_client_config())
+    try:
+        pipeline = _build_evidence_index_pipeline(runtime, client, lock_guard)
+        await pipeline.sync_document(runtime, document_id, document_active)
+    finally:
+        await client.close()
+
+
+async def _run_evidence_rebuild_async(runtime, active_document_ids, lock_guard) -> None:
+    client = AsyncElasticsearch(**build_async_elasticsearch_client_config())
+    try:
+        pipeline = _build_evidence_index_pipeline(runtime, client, lock_guard)
+        await pipeline.rebuild_knowledge(runtime, active_document_ids)
+    finally:
+        await client.close()
+
+
+async def _run_evidence_clear_async(
+        graph_index_name: str,
+        knowledge_id: str,
+        lock_guard,
+        *,
+        clear_all: bool,
+) -> None:
+    client = AsyncElasticsearch(**build_async_elasticsearch_client_config())
+    try:
+        store = GraphElasticsearchStore(client)
+        if clear_all:
+            await store.clear_all_graph_documents(
+                graph_index_name,
+                knowledge_id,
+                ensure_valid=lock_guard.ensure_valid,
+            )
+        else:
+            await store.clear_evidence_graph(
+                graph_index_name,
+                knowledge_id,
+                ensure_valid=lock_guard.ensure_valid,
+            )
+    finally:
+        await client.close()
+
+
+def _execute_evidence_document(
+        state: _GraphTaskState,
+        document_id: str,
+        lock_guard,
+        *,
+        document_active: bool,
+) -> None:
+    runtime = snapshot_graph_runtime(state.knowledge_id)
+    asyncio.run(
+        _run_evidence_document_async(
+            runtime,
+            str(document_id),
+            document_active,
+            lock_guard,
+        )
+    )
+
+
+def _execute_evidence_rebuild(state: _GraphTaskState, lock_guard) -> None:
+    runtime = snapshot_graph_runtime(state.knowledge_id)
+    asyncio.run(
+        _run_evidence_rebuild_async(
+            runtime,
+            state.active_document_ids,
+            lock_guard,
+        )
+    )
+
+
+def _execute_evidence_clear(
+        state: _GraphTaskState,
+        lock_guard,
+        *,
+        clear_all: bool,
+) -> None:
+    asyncio.run(
+        _run_evidence_clear_async(
+            f"graphrag_{state.workspace_id}",
+            state.knowledge_id,
+            lock_guard,
+            clear_all=clear_all,
+        )
+    )
+
+
+def _commit_evidence_pipeline(
+        knowledge_id: str,
+        expected_fingerprint: str,
+) -> None:
+    knowledge_uuid = uuid.UUID(
+        _canonical_graph_uuid(knowledge_id, "knowledge id")
+    )
+    with get_db_context() as db:
+        knowledge = db.query(Knowledge).filter(
+            Knowledge.id == knowledge_uuid
+        ).with_for_update().first()
+        if knowledge is None:
+            raise GraphPipelineConfigError(
+                f"knowledge does not exist: {knowledge_id}"
+            )
+        if resolve_graph_pipeline(knowledge.parser_config) is GraphPipeline.EVIDENCE:
+            return
+        if _graph_task_fingerprint(knowledge) != expected_fingerprint:
+            raise RuntimeError(
+                "graph migration inputs changed while rebuilding"
+            )
+        knowledge.parser_config = set_graph_pipeline_for_migration(
+            knowledge.parser_config,
+            GraphPipeline.EVIDENCE,
+        )
+        db.commit()
+
+
+def _run_evidence_graph_document(
+        knowledge_id: str,
+        document_id: str,
+        *,
+        document_deleted: bool = False,
+) -> dict[str, Any]:
+    knowledge_id = _canonical_graph_uuid(knowledge_id, "knowledge id")
+    document_id = _canonical_graph_uuid(document_id, "document id")
+    with create_knowledge_graph_lock(knowledge_id) as lock_guard:
+        lock_guard.ensure_valid()
+        state = _load_graph_task_state(knowledge_id, document_id)
+        if state.pipeline is not GraphPipeline.EVIDENCE:
+            return {"status": "skipped", "reason": "pipeline_changed"}
+        if not state.graph_enabled:
+            return {"status": "skipped", "reason": "graph_disabled"}
+        if document_deleted and state.document_active is not None:
+            raise _GraphDocumentDeletionPending(
+                "document deletion has not been committed"
+            )
+        _execute_evidence_document(
+            state,
+            document_id,
+            lock_guard,
+            document_active=(
+                False if document_deleted else bool(state.document_active)
+            ),
+        )
+        lock_guard.ensure_valid()
+        return {
+            "status": "completed",
+            "knowledge_id": knowledge_id,
+            "document_id": document_id,
+        }
+
+
+def _run_evidence_graph_rebuild(knowledge_id: str) -> dict[str, Any]:
+    knowledge_id = _canonical_graph_uuid(knowledge_id, "knowledge id")
+    with create_knowledge_graph_lock(knowledge_id) as lock_guard:
+        lock_guard.ensure_valid()
+        state = _load_graph_task_state(
+            knowledge_id,
+            include_active_documents=True,
+        )
+        if state.pipeline is not GraphPipeline.EVIDENCE:
+            return {"status": "skipped", "reason": "pipeline_changed"}
+        if not state.graph_enabled:
+            return {"status": "skipped", "reason": "graph_disabled"}
+        _execute_evidence_rebuild(state, lock_guard)
+        lock_guard.ensure_valid()
+        return {"status": "completed", "knowledge_id": knowledge_id}
+
+
+def _run_evidence_graph_migration(knowledge_id: str) -> dict[str, Any]:
+    knowledge_id = _canonical_graph_uuid(knowledge_id, "knowledge id")
+    with create_knowledge_graph_lock(knowledge_id) as lock_guard:
+        lock_guard.ensure_valid()
+        state = _load_graph_task_state(
+            knowledge_id,
+            include_active_documents=True,
+        )
+        if state.pipeline is GraphPipeline.EVIDENCE:
+            return {"status": "already_evidence", "knowledge_id": knowledge_id}
+
+        if state.graph_enabled and state.active_document_ids:
+            _execute_evidence_rebuild(state, lock_guard)
+        else:
+            _execute_evidence_clear(state, lock_guard, clear_all=False)
+        lock_guard.ensure_valid()
+        _commit_evidence_pipeline(knowledge_id, state.fingerprint)
+        lock_guard.ensure_valid()
+        return {"status": "migrated", "knowledge_id": knowledge_id}
+
+
+def _run_clear_all_knowledge_graph_data(
+        knowledge_id: str,
+        *,
+        force: bool = False,
+) -> dict[str, Any]:
+    knowledge_id = _canonical_graph_uuid(knowledge_id, "knowledge id")
+    with create_knowledge_graph_lock(knowledge_id) as lock_guard:
+        lock_guard.ensure_valid()
+        state = _load_graph_task_state(knowledge_id)
+        if state.graph_enabled and not force:
+            return {"status": "skipped", "reason": "graph_reenabled"}
+        _execute_evidence_clear(state, lock_guard, clear_all=True)
+        lock_guard.ensure_valid()
+        return {"status": "cleared", "knowledge_id": knowledge_id}
+
+
+def _graph_task_retry_countdown(task) -> int:
+    return min(300, 2 ** int(task.request.retries or 0))
+
+
+def _redacted_graph_exc_info(exc: Exception):
+    redacted = RuntimeError(f"{type(exc).__name__}: message redacted")
+    return type(redacted), redacted, exc.__traceback__
+
+
+def _run_observed_graph_task(
+        task,
+        *,
+        task_name: str,
+        knowledge_id: str,
+        operation: Callable[[], dict[str, Any]],
+        document_id: str | None = None,
+) -> dict[str, Any]:
+    started_at = time.perf_counter()
+    task_id = str(getattr(task.request, "id", None) or "unknown")
+    retry = int(getattr(task.request, "retries", 0) or 0)
+    document_field = (
+        f" document_id={document_id}" if document_id is not None else ""
+    )
+    logger.info(
+        "[EvidenceGraph] task_start"
+        " task=%s task_id=%s kb_id=%s%s retry=%d",
+        task_name,
+        task_id,
+        str(knowledge_id),
+        document_field,
+        retry,
+    )
+    try:
+        result = operation()
+    except GraphPipelineConfigError as exc:
+        logger.error(
+            "[EvidenceGraph] task_failed"
+            " task=%s task_id=%s kb_id=%s%s"
+            " status=failure error_type=%s retry=%d elapsed_ms=%d",
+            task_name,
+            task_id,
+            str(knowledge_id),
+            document_field,
+            type(exc).__name__,
+            retry,
+            int((time.perf_counter() - started_at) * 1000),
+        )
+        raise
+    except Exception as exc:
+        countdown = _graph_task_retry_countdown(task)
+        retry_options = {}
+        if isinstance(exc, _GraphDocumentDeletionPending):
+            retry_options["max_retries"] = 8
+        logger.warning(
+            "[EvidenceGraph] task_retry"
+            " task=%s task_id=%s kb_id=%s%s"
+            " error_type=%s retry=%d countdown=%d elapsed_ms=%d",
+            task_name,
+            task_id,
+            str(knowledge_id),
+            document_field,
+            type(exc).__name__,
+            retry,
+            countdown,
+            int((time.perf_counter() - started_at) * 1000),
+            exc_info=_redacted_graph_exc_info(exc),
+        )
+        raise task.retry(
+            exc=exc,
+            countdown=countdown,
+            **retry_options,
+        )
+
+    status_value = str(result.get("status") or "completed")
+    is_skip = status_value in {"skipped", "already_evidence"}
+    reason = str(
+        result.get("reason")
+        or ("idempotent" if status_value == "already_evidence" else "none")
+    )
+    logger.info(
+        "[EvidenceGraph] %s"
+        " task=%s task_id=%s kb_id=%s%s"
+        " status=%s reason=%s elapsed_ms=%d",
+        "task_skip" if is_skip else "task_done",
+        task_name,
+        task_id,
+        str(knowledge_id),
+        document_field,
+        status_value,
+        reason,
+        int((time.perf_counter() - started_at) * 1000),
+    )
+    return result
 
 
 def _resolve_model_api_key(db, model_config_id, tenant_id, role: str):
@@ -453,7 +913,6 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
             document_label = file_name or str(document_id)
 
             parser_config = db_document.parser_config or {}
-            knowledge_parser_config = db_knowledge.parser_config or {}
             auto_questions_topn = parser_config.get("auto_questions", 0)
             document_info = {
                 "id": str(db_document.id),
@@ -470,9 +929,6 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
             if auto_questions_topn:
                 llm_config = _build_llm_config(db, db_knowledge.llm_id, tenant_id)
             knowledge_id = str(db_knowledge.id)
-            use_graphrag = bool(
-                knowledge_parser_config.get("graphrag", {}).get("use_graphrag", False)
-            )
             vision_model = _build_vision_model(file_name, db, db_knowledge.image2text_id, tenant_id)
             vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
 
@@ -858,18 +1314,34 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
 
         _update_document(document_id, _mark_done)
 
-        if use_graphrag:
+        with get_db_context() as graph_db:
+            current_knowledge = graph_db.query(Knowledge).filter(
+                Knowledge.id == uuid.UUID(knowledge_id)
+            ).first()
+            current_graph_config = (
+                dict(current_knowledge.parser_config or {})
+                if current_knowledge is not None
+                else None
+            )
+
+        if current_graph_config is not None and is_graph_enabled(current_graph_config):
             if _should_abort(document_id):
                 _clear_redis_state(document_id)
                 logger.info(f"[ParseDoc] document={document_id} cancelled via Redis -- stopped")
                 return f"parse document '{document_label}' aborted (deleted or cancelled)."
-            progress_lines.append(f"{_progress_ts()} GraphRAG enabled, dispatching async task.")
+            progress_lines.append(
+                f"{_progress_ts()} Knowledge graph enabled, dispatching async task."
+            )
 
             def _mark_graphrag_dispatched(doc):
                 doc.progress_msg = _progress_msg()
 
             _update_document(document_id, _mark_graphrag_dispatched)
-            build_graphrag_for_document.delay(str(document_id), knowledge_id)
+            dispatch_document_graph_sync(
+                knowledge_id,
+                str(document_id),
+                current_graph_config,
+            )
 
         _clear_redis_state(document_id)
         result = f"parse document '{document_info['file_name']}' processed successfully."
@@ -926,6 +1398,8 @@ def build_graphrag_for_kb(kb_id: uuid.UUID):
             graphrag_conf = parser_config.get("graphrag", {})
             if not graphrag_conf.get("use_graphrag", False):
                 return f"build knowledge graph '{kb_name}' skipped: graphrag not enabled"
+            if resolve_graph_pipeline(parser_config) is not GraphPipeline.LEGACY:
+                return f"build knowledge graph '{kb_name}' skipped: pipeline changed"
 
             db_documents = db.query(Document).filter(Document.kb_id == kb_id).all()
             document_ids = [str(doc.id) for doc in db_documents]
@@ -1004,6 +1478,16 @@ def build_graphrag_for_document(document_id: str, knowledge_id: str):
             tenant_id = db_workspace.tenant_id
             parser_config = db_knowledge.parser_config or {}
             graphrag_conf = parser_config.get("graphrag", {})
+            if not graphrag_conf.get("use_graphrag", False):
+                return (
+                    f"build_graphrag_for_document '{document_id}' skipped: "
+                    "graphrag not enabled"
+                )
+            if resolve_graph_pipeline(parser_config) is not GraphPipeline.LEGACY:
+                return (
+                    f"build_graphrag_for_document '{document_id}' skipped: "
+                    "pipeline changed"
+                )
             with_resolution = graphrag_conf.get("resolution", False)
             with_community = graphrag_conf.get("community", False)
 
@@ -1062,6 +1546,86 @@ def build_graphrag_for_document(document_id: str, knowledge_id: str):
     except Exception as e:
         logger.error(f"[GraphRAG] doc={document_id} failed: {e}", exc_info=True)
         return f"build_graphrag_for_document '{document_id}' failed: {e}"
+
+
+@celery_app.task(
+    bind=True,
+    name="app.core.rag.tasks.sync_evidence_graph_document",
+    max_retries=5,
+)
+def sync_evidence_graph_document(
+        self,
+        knowledge_id: str,
+        document_id: str,
+        document_deleted: bool = False,
+):
+    return _run_observed_graph_task(
+        self,
+        task_name="sync_document",
+        knowledge_id=str(knowledge_id),
+        document_id=str(document_id),
+        operation=lambda: (
+            _run_evidence_graph_document(
+                knowledge_id,
+                document_id,
+                document_deleted=True,
+            )
+            if document_deleted
+            else _run_evidence_graph_document(
+                knowledge_id,
+                document_id,
+            )
+        ),
+    )
+
+
+@celery_app.task(
+    bind=True,
+    name="app.core.rag.tasks.rebuild_evidence_graph_knowledge",
+    max_retries=5,
+)
+def rebuild_evidence_graph_knowledge(self, knowledge_id: str):
+    return _run_observed_graph_task(
+        self,
+        task_name="rebuild_knowledge",
+        knowledge_id=str(knowledge_id),
+        operation=lambda: _run_evidence_graph_rebuild(knowledge_id),
+    )
+
+
+@celery_app.task(
+    bind=True,
+    name="app.core.rag.tasks.migrate_evidence_graph_knowledge",
+    max_retries=5,
+)
+def migrate_evidence_graph_knowledge(self, knowledge_id: str):
+    return _run_observed_graph_task(
+        self,
+        task_name="migrate_knowledge",
+        knowledge_id=str(knowledge_id),
+        operation=lambda: _run_evidence_graph_migration(knowledge_id),
+    )
+
+
+@celery_app.task(
+    bind=True,
+    name="app.core.rag.tasks.clear_all_knowledge_graph_data",
+    max_retries=5,
+)
+def clear_all_knowledge_graph_data(
+        self,
+        knowledge_id: str,
+        force: bool = False,
+):
+    return _run_observed_graph_task(
+        self,
+        task_name="clear_knowledge",
+        knowledge_id=str(knowledge_id),
+        operation=lambda: _run_clear_all_knowledge_graph_data(
+            knowledge_id,
+            force=force,
+        ),
+    )
 
 
 @celery_app.task(name="app.core.rag.tasks.import_qa_chunks", queue="qa_import")
@@ -1919,6 +2483,103 @@ def write_message_task(
             _shutdown_loop_gracefully(loop)
 
 
+@celery_app.task(
+    name="app.core.memory.fast_write_message",
+    bind=True,
+    acks_late=False,
+    max_retries=0
+)
+def fast_write_message_task(
+        self,
+        end_user_id: str,
+        target_message: Optional[dict] = None,
+        config_id: str = "",
+        workspace_id: str = "",
+        conversation_id: str = "",
+        message_seq: int = 0,
+        language: str = "zh",
+        dispatch_at: str = "",
+        source: str = "",
+) -> Dict[str, Any]:
+    """快速写入任务 — 构造 MemoryService 并驱动 fast_write。
+
+    职责：提供事件循环 + 计时 + backend 状态映射，不夹带业务加载逻辑。
+
+    backend 状态与业务结果分层：
+    - ``success`` / ``dropped`` 是 Pipeline 业务结果，放在返回值的 ``result`` 中；
+      任务正常返回时 backend 为 ``SUCCESS``。
+    - 持久化 / 配置 / 代码异常必须抛出任务函数，backend 才会标记 ``FAILURE``，
+      scheduler tracker 与失败率监控才能拿到真实状态。
+    - ``max_retries=0``：不做 Celery 层重试；Neo4j deadlock 的有界重试在 Pipeline 内完成。
+
+    Args:
+        end_user_id: 终端用户 ID（分片键）
+        target_message: 目标消息 {"role": "user", "content": "...", "dialog_at": "..."}
+        config_id: 记忆配置 ID
+        workspace_id: 工作空间 ID
+        conversation_id: 对话 ID（会话类入口非空，用于确定性 ID 生成）
+        message_seq: 消息序号
+        language: 语言
+        dispatch_at: 任务派发时刻的 UTC ISO 8601 时间戳
+        source: 写入来源（agent/service_api/mcp/workflow）
+
+    Returns:
+        Dict containing status, result, task_id
+    """
+    logger.info(
+        f"[CELERY FAST WRITE] Starting - end_user_id={end_user_id}, "
+        f"config_id={config_id}, conv={conversation_id or '-'}, "
+        f"seq={message_seq}, language={language}, source={source or '-'}"
+    )
+    start_time = time.time()
+
+    async def _run() -> dict:
+        from app.core.memory.memory_service import MemoryService
+
+        service = MemoryService(
+            config_id=uuid.UUID(config_id),
+            end_user_id=end_user_id,
+            workspace_id=workspace_id,
+            language=language,
+        )
+
+        return await service.fast_write(
+            target_message=target_message or {"role": "user", "content": ""},
+            conversation_id=conversation_id,
+            message_seq=message_seq,
+            source=source,
+            dispatch_at=dispatch_at,
+        )
+
+    loop = None
+    try:
+        loop = set_asyncio_event_loop()
+
+        result = loop.run_until_complete(_run())
+        elapsed_time = time.time() - start_time
+
+        logger.info(f"[CELERY FAST WRITE] Task completed - elapsed_time={elapsed_time:.2f}s")
+
+        try:
+            safe_result = jsonable_encoder(result)
+        except Exception:
+            safe_result = str(result)
+
+        return {
+            "status": "SUCCESS",
+            "result": safe_result,
+            "task_id": self.request.id,
+        }
+    except BaseException:
+        elapsed_time = time.time() - start_time
+        logger.exception(f"[CELERY FAST WRITE] Failed - elapsed_time={elapsed_time:.2f}s")
+        # 异常必须逃出任务函数，Celery backend 才会标记 FAILURE
+        raise
+    finally:
+        if loop:
+            _shutdown_loop_gracefully(loop)
+
+
 def _is_active_recently(db, end_user_id: str, inactive_hours: int | None = None) -> bool:
     """用户是否活跃：end_user.write_time 距今 < inactive_hours 小时（NULL 或读取失败视为不活跃）。
 
@@ -2022,7 +2683,7 @@ def scan_layer2_reflection(self) -> Dict[str, Any]:
                             continue
                     do_layer2_reflection.apply_async(
                         kwargs={
-                            "user_id": uid,
+                            "end_user_id": uid,
                             "config_id": str(config_id),
                             "workspace_id": ws_id,
                             "iteration_period": iteration_period,
@@ -2063,8 +2724,9 @@ def scan_layer2_reflection(self) -> Dict[str, Any]:
     time_limit=600,
     soft_time_limit=540,
 )
-def do_layer2_reflection(self, user_id: str, config_id: str, workspace_id: str,
-                         iteration_period: int = 24, from_retry: bool = False) -> Dict[str, Any]:
+def do_layer2_reflection(self, end_user_id: str | None = None, config_id: str = "",
+                         workspace_id: str = "", iteration_period: int = 24,
+                         from_retry: bool = False, user_id: str | None = None) -> Dict[str, Any]:
     """对【单个用户】执行一次 Layer2 反思（实体去重 / 描述合并 / 未识别实体处理等）。
 
     由 scan_layer2_reflection 派发，每个用户一个独立任务、独立 db session，跑完即释放内存。
@@ -2074,8 +2736,13 @@ def do_layer2_reflection(self, user_id: str, config_id: str, workspace_id: str,
         lock_timeout       抢用户写锁超时，本次放弃（下一轮 scan 会重派）
         failed             执行报错
     """
+    # HACK: 兼容旧参数 user_id，v0.3.15 后移除
+    end_user_id = end_user_id or user_id
+    if not end_user_id:
+        raise ValueError("end_user_id is required")
+
     start_time = time.time()
-    inflight_key = f"reflection:inflight:{user_id}"
+    inflight_key = f"reflection:inflight:{end_user_id}"
 
     async def _run() -> Dict[str, Any]:
         from app.services.memory_reflection_service import WorkspaceAppService
@@ -2088,8 +2755,8 @@ def do_layer2_reflection(self, user_id: str, config_id: str, workspace_id: str,
         if not from_retry:
             with get_db_read() as db:
                 ws_svc = WorkspaceAppService(db)
-                rt = ws_svc.get_end_user_reflection_time(user_id)
-                if not _should_reflect_now(db, user_id, rt, iteration_period):
+                rt = ws_svc.get_end_user_reflection_time(end_user_id)
+                if not _should_reflect_now(db, end_user_id, rt, iteration_period):
                     return {"status": "skipped_idempotent"}
 
         # 步骤2 抢该用户的写锁：与该用户的记忆写入 pipeline、去重任务互斥，
@@ -2098,12 +2765,12 @@ def do_layer2_reflection(self, user_id: str, config_id: str, workspace_id: str,
         redis_client = get_sync_redis_client()
         if redis_client is not None:
             write_lock = RedisFairLock(
-                key=f"memory_write:{user_id}",
+                key=f"memory_write:{end_user_id}",
                 redis_client=redis_client,
                 expire=600, timeout=30, auto_renewal=True,
             )
             if not await asyncio.to_thread(write_lock.acquire):
-                logger.warning(f"反思高频do 获取写锁超时，跳过 user={user_id}")
+                logger.warning(f"反思高频do 获取写锁超时，跳过 user={end_user_id}")
                 return {"status": "lock_timeout"}
         try:
             # 步骤2.5 double-check：拿到写锁后再复查一次是否仍需反思。
@@ -2113,14 +2780,14 @@ def do_layer2_reflection(self, user_id: str, config_id: str, workspace_id: str,
             if not from_retry:
                 with get_db_read() as db:
                     ws_svc = WorkspaceAppService(db)
-                    rt_recheck = ws_svc.get_end_user_reflection_time(user_id)
-                    if not _should_reflect_now(db, user_id, rt_recheck, iteration_period):
-                        logger.info(f"反思高频do 拿锁后复查已无需反思，跳过 user={user_id}")
+                    rt_recheck = ws_svc.get_end_user_reflection_time(end_user_id)
+                    if not _should_reflect_now(db, end_user_id, rt_recheck, iteration_period):
+                        logger.info(f"反思高频do 拿锁后复查已无需反思，跳过 user={end_user_id}")
                         return {"status": "skipped_idempotent"}
 
             # 步骤2.8 开工租约：通过幂等门 + 抢到写锁后、run() 前登记，进程被硬杀也能被租约兜底重派。
             _rc = get_sync_redis_client()
-            rr.lease(_rc, "high_freq", user_id,
+            rr.lease(_rc, "high_freq", end_user_id,
                      {"config_id": config_id, "workspace_id": workspace_id,
                       "iteration_period": iteration_period},
                      from_retry=from_retry)
@@ -2128,7 +2795,8 @@ def do_layer2_reflection(self, user_id: str, config_id: str, workspace_id: str,
             # 步骤3 执行反思（读图谱 → LLM → 写回，全程持锁）
             memory_service = MemoryService(
                 config_id=uuid.UUID(config_id),
-                end_user_id=user_id, workspace_id=workspace_id,
+                end_user_id=end_user_id,
+                workspace_id=workspace_id,
             )
             r = await memory_service.run_reflection_layer2()
 
@@ -2144,10 +2812,10 @@ def do_layer2_reflection(self, user_id: str, config_id: str, workspace_id: str,
             if completion == "full":
                 # 步骤4 完整跑完：刷新"上次反思时间"，注销重试登记
                 with get_db_context() as db:
-                    WorkspaceAppService(db).update_end_user_reflection_time(user_id)
-                rr.resolve(_rc, "high_freq", user_id)
+                    WorkspaceAppService(db).update_end_user_reflection_time(end_user_id)
+                rr.resolve(_rc, "high_freq", end_user_id)
                 logger.info(
-                    f"反思高频do 完成 user={user_id} status=success "
+                    f"反思高频do 完成 user={end_user_id} status=success "
                     f"未识别解析={unresolved_info.get('resolved', 0)}/{unresolved_info.get('total', 0)} "
                     f"别名归并={alias_info.get('alias_merged', 0)} "
                     f"实体去重={dedup_info.get('merged_count', 0)}(候选{dedup_info.get('candidate_count', 0)}) "
@@ -2169,12 +2837,12 @@ def do_layer2_reflection(self, user_id: str, config_id: str, workspace_id: str,
             # failed 不会到这里（真异常冒到外层 except 处理）。
             if completion == "partial":
                 with get_db_context() as db:
-                    WorkspaceAppService(db).update_end_user_reflection_time(user_id)
+                    WorkspaceAppService(db).update_end_user_reflection_time(end_user_id)
             skipped_steps = rr.skipped_steps_of_layer2(r)
-            rr.record(_rc, "high_freq", user_id, completion, progressed,
+            rr.record(_rc, "high_freq", end_user_id, completion, progressed,
                       skipped_steps=skipped_steps)
             logger.warning(
-                f"反思高频do 未完整完成 user={user_id} completion={completion} "
+                f"反思高频do 未完整完成 user={end_user_id} completion={completion} "
                 f"progressed={progressed} skipped={skipped_steps} "
                 f"耗时={time.time() - start_time:.1f}s"
             )
@@ -2196,10 +2864,10 @@ def do_layer2_reflection(self, user_id: str, config_id: str, workspace_id: str,
         result = loop.run_until_complete(_run())
     except Exception as e:
         # 真异常：run() 抛出未达 completion 逻辑，补登记 failed（无推进），再 re-raise（FAILURE + traceback，需排查）
-        logger.error(f"反思高频do 失败 user={user_id}: {e}", exc_info=True)
+        logger.error(f"反思高频do 失败 user={end_user_id}: {e}", exc_info=True)
         try:
             _rc = get_sync_redis_client()
-            rr.record(_rc, "high_freq", user_id, "failed", progressed=False, last_error=str(e))
+            rr.record(_rc, "high_freq", end_user_id, "failed", progressed=False, last_error=str(e))
         except Exception:
             pass
         raise
@@ -2270,7 +2938,7 @@ def scan_layer2_dedup_full_scan(self) -> Dict[str, Any]:
                             continue
                     do_layer2_dedup_full_scan.apply_async(
                         kwargs={
-                            "user_id": uid,
+                            "end_user_id": uid,
                             "config_id": str(config_id),
                             "workspace_id": ws_id,
                         },
@@ -2304,16 +2972,22 @@ def scan_layer2_dedup_full_scan(self) -> Dict[str, Any]:
     time_limit=600,
     soft_time_limit=540,
 )
-def do_layer2_dedup_full_scan(self, user_id: str, config_id: str,
-                              workspace_id: str, from_retry: bool = False) -> Dict[str, Any]:
+def do_layer2_dedup_full_scan(self, end_user_id: str | None = None, config_id: str = "",
+                              workspace_id: str = "", from_retry: bool = False,
+                              user_id: str | None = None) -> Dict[str, Any]:
     """对【单个用户】执行一次低频全量去重扫描。
 
     由 scan_layer2_dedup_full_scan 派发。精确的增量判断在 run_dedup_full_scan 内部
     （check_new_entities 按实体类型查 Neo4j 新增数），do 这层不重复做。
     返回 status：success / lock_timeout / failed。
     """
+    # HACK: 兼容旧参数 user_id，v0.3.15 后移除
+    end_user_id = end_user_id or user_id
+    if not end_user_id:
+        raise ValueError("end_user_id is required")
+
     start_time = time.time()
-    inflight_key = f"dedup:inflight:{user_id}"
+    inflight_key = f"dedup:inflight:{end_user_id}"
 
     async def _run() -> Dict[str, Any]:
         from app.core.memory.memory_service import MemoryService
@@ -2324,22 +2998,23 @@ def do_layer2_dedup_full_scan(self, user_id: str, config_id: str,
         redis_client = get_sync_redis_client()
         if redis_client is not None:
             write_lock = RedisFairLock(
-                key=f"memory_write:{user_id}",
+                key=f"memory_write:{end_user_id}",
                 redis_client=redis_client,
                 expire=600, timeout=120, auto_renewal=True,
             )
             if not await asyncio.to_thread(write_lock.acquire):
-                logger.warning(f"反思低频去重do 获取写锁超时，跳过 user={user_id}")
+                logger.warning(f"反思低频去重do 获取写锁超时，跳过 user={end_user_id}")
                 return {"status": "lock_timeout"}
         try:
             _rc = get_sync_redis_client()
-            rr.lease(_rc, "dedup", user_id,
+            rr.lease(_rc, "dedup", end_user_id,
                      {"config_id": config_id, "workspace_id": workspace_id},
                      from_retry=from_retry)
 
             memory_service = MemoryService(
                 config_id=uuid.UUID(config_id),
-                end_user_id=user_id, workspace_id=workspace_id,
+                end_user_id=end_user_id, 
+                workspace_id=workspace_id,
             )
             r = await memory_service.run_dedup_full_scan()
             completion = rr.completion_of_dedup(r)
@@ -2347,18 +3022,18 @@ def do_layer2_dedup_full_scan(self, user_id: str, config_id: str,
             merged = r.get("merged_count", 0)
 
             if completion == "full":
-                rr.resolve(_rc, "dedup", user_id)
+                rr.resolve(_rc, "dedup", end_user_id)
                 logger.info(
-                    f"反思低频去重do 完成 user={user_id} status=success "
+                    f"反思低频去重do 完成 user={end_user_id} status=success "
                     f"扫描类型={r.get('scanned_types', 0)} 合并={merged} "
                     f"耗时={time.time() - start_time:.1f}s"
                 )
                 return {"status": "success", "merged_count": merged}
 
             # partial：truncated / had_type_error。低频不刷 reflection_time（靠 update_scan_time 续扫）。
-            rr.record(_rc, "dedup", user_id, completion, progressed)
+            rr.record(_rc, "dedup", end_user_id, completion, progressed)
             logger.warning(
-                f"反思低频去重do 未完整完成 user={user_id} completion={completion} "
+                f"反思低频去重do 未完整完成 user={end_user_id} completion={completion} "
                 f"progressed={progressed} truncated={r.get('truncated')} "
                 f"had_type_error={r.get('had_type_error')} 合并={merged} "
                 f"耗时={time.time() - start_time:.1f}s"
@@ -2380,10 +3055,10 @@ def do_layer2_dedup_full_scan(self, user_id: str, config_id: str,
     try:
         result = loop.run_until_complete(_run())
     except Exception as e:
-        logger.error(f"反思低频去重do 失败 user={user_id}: {e}", exc_info=True)
+        logger.error(f"反思低频去重do 失败 user={end_user_id}: {e}", exc_info=True)
         try:
             _rc = get_sync_redis_client()
-            rr.record(_rc, "dedup", user_id, "failed", progressed=False, last_error=str(e))
+            rr.record(_rc, "dedup", end_user_id, "failed", progressed=False, last_error=str(e))
         except Exception:
             pass
         raise
@@ -2425,6 +3100,8 @@ def scan_reflection_retry(self) -> Dict[str, Any]:
     batch = rr.RETRY_BATCH
     dispatched = 0
     cleaned = 0
+    dispatched_uids: Dict[str, List[str]] = {"high_freq": [], "dedup": []}
+
     for task_type, do_task, inflight_prefix in (
         ("high_freq", do_layer2_reflection, "reflection:inflight"),
         ("dedup", do_layer2_dedup_full_scan, "dedup:inflight"),
@@ -2452,18 +3129,24 @@ def scan_reflection_retry(self) -> Dict[str, Any]:
                 # 仍走 inflight 锁，避免与正常 scan 派的同一用户撞车
                 if not rc.set(f"{inflight_prefix}:{uid}", "1", nx=True, ex=1500):
                     continue
-                kwargs = {"user_id": uid, "config_id": meta["config_id"],
+                kwargs = {"end_user_id": uid, "config_id": meta["config_id"],
                           "workspace_id": meta["workspace_id"], "from_retry": True}
                 if task_type == "high_freq":
                     kwargs["iteration_period"] = meta.get("iteration_period", 24)
                 do_task.apply_async(kwargs=kwargs, queue="reflection_tasks")
                 dispatched += 1
+                dispatched_uids[task_type].append(uid)
             except Exception as e:
                 logger.error(f"scan_reflection_retry 处理用户失败 task_type={task_type} uid={uid}: {e}")
 
     logger.info(f"scan_reflection_retry 完成: 派发 {dispatched}, 清理孤儿 {cleaned}, "
                 f"耗时 {time.time() - start_time:.1f}s")
-    return {"status": "SUCCESS", "dispatched": dispatched, "cleaned": cleaned}
+    return {
+        "status": "SUCCESS",
+        "dispatched": dispatched,
+        "cleaned": cleaned,
+        "dispatched_uids": dispatched_uids,
+    }
 
 
 # unused task
@@ -2513,7 +3196,11 @@ def scan_reflection_retry(self) -> Dict[str, Any]:
 #     return data
 
 
-@celery_app.task(name="app.controllers.memory_storage_controller.search_all")
+@celery_app.task(
+    name="app.controllers.memory_storage_controller.search_all",
+    time_limit=3600,
+    soft_time_limit=3300,
+)
 def write_total_memory_task(workspace_id: str) -> Dict[str, Any]:
     """定时任务：查询工作空间下所有宿主的记忆总量并写入数据库
 
@@ -2528,7 +3215,7 @@ def write_total_memory_task(workspace_id: str) -> Dict[str, Any]:
     async def _run() -> Dict[str, Any]:
         from app.models.app_model import App
         from app.repositories.end_user_repository import EndUserRepository
-        from app.repositories.memory_increment_repository import write_memory_increment
+        from app.repositories.memory_increment_repository import MemoryIncrementRepository
         from app.services.memory_storage_service import search_all_batch
 
         with get_db_context() as db:
@@ -2543,8 +3230,7 @@ def write_total_memory_task(workspace_id: str) -> Dict[str, Any]:
 
                 if not apps:
                     # 如果没有app，总量为0
-                    memory_increment = write_memory_increment(
-                        db=db,
+                    memory_increment = MemoryIncrementRepository(db).write_memory_increment(
                         workspace_id=workspace_uuid,
                         total_num=0
                     )
@@ -2572,8 +3258,7 @@ def write_total_memory_task(workspace_id: str) -> Dict[str, Any]:
                 ]
 
                 # 4. 写入数据库
-                memory_increment = write_memory_increment(
-                    db=db,
+                memory_increment = MemoryIncrementRepository(db).write_memory_increment(
                     workspace_id=workspace_uuid,
                     total_num=total_num
                 )
@@ -2631,7 +3316,7 @@ def write_all_workspaces_memory_task(self) -> Dict[str, Any]:
         from app.models.app_model import App
         from app.models.workspace_model import Workspace
         from app.repositories.end_user_repository import EndUserRepository
-        from app.repositories.memory_increment_repository import write_memory_increment
+        from app.repositories.memory_increment_repository import MemoryIncrementRepository
         from app.services.memory_storage_service import search_all_batch
 
         with get_db_context() as db:
@@ -2667,8 +3352,7 @@ def write_all_workspaces_memory_task(self) -> Dict[str, Any]:
 
                         if not apps:
                             # 如果没有app，总量为0
-                            memory_increment = write_memory_increment(
-                                db=db,
+                            memory_increment = MemoryIncrementRepository(db).write_memory_increment(
                                 workspace_id=workspace_id,
                                 total_num=0
                             )
@@ -2698,8 +3382,7 @@ def write_all_workspaces_memory_task(self) -> Dict[str, Any]:
                         ]
 
                         # 4. 写入数据库
-                        memory_increment = write_memory_increment(
-                            db=db,
+                        memory_increment = MemoryIncrementRepository(db).write_memory_increment(
                             workspace_id=workspace_id,
                             total_num=total_num
                         )
@@ -2940,11 +3623,12 @@ def do_refresh_insight_summary_cache(
     inflight_key = CACHE_INFLIGHT_KEY_FMT.format(end_user_id=end_user_id)
 
     async def _run() -> Dict[str, Any]:
+        from app.db import get_async_db_context
         from app.services.user_memory_service import UserMemoryService
 
         service = UserMemoryService()
         ws_uuid = uuid.UUID(workspace_id)
-        with get_db_context() as db:
+        async with get_async_db_context() as db:
             insight = await service.generate_and_cache_insight(
                 db, end_user_id, ws_uuid, language=language,
             )
@@ -2992,6 +3676,174 @@ def do_refresh_insight_summary_cache(
     result["end_user_id"] = end_user_id
     return result
 
+
+# 用户名片 Tag 定时刷新任务
+
+USER_TAG_INFLIGHT_KEY_FMT = "user_tags:inflight:{end_user_id}"
+USER_TAG_INFLIGHT_TTL_SEC = 600
+USER_TAG_SCAN_PAGE_SIZE = 500
+
+
+@celery_app.task(
+    name="app.tasks.scan_refresh_user_tags",
+    bind=True,
+    ignore_result=False,
+    max_retries=0,
+    acks_late=False,
+    time_limit=600,
+    soft_time_limit=540,
+)
+def scan_refresh_user_tags(self) -> Dict[str, Any]:
+    """分页扫描待刷新用户，并为每个用户派发独立的 Tag 刷新任务。
+
+    扫描任务只负责筛选和派发，不读取完整 metadata，也不调用 LLM，避免一个长任务持续
+    占用数据库连接。实际生成由 ``do_refresh_user_tags`` 在 heavy worker 中完成。
+    """
+    from app.repositories.end_user_repository import EndUserRepository
+
+    start_time = time.time()
+    redis_client = get_sync_redis_client()
+    if redis_client is None:
+        logger.error("用户名片Tag scan终止：Redis客户端不可用，拒绝无锁派发")
+        raise RuntimeError("Redis unavailable: user tag scan requires inflight locks")
+
+    after_id: uuid.UUID | None = None
+    candidates_count = 0
+    dispatched = 0
+    skip_inflight = 0
+    failed = 0
+
+    while True:
+        with get_db_read() as db:
+            candidates = EndUserRepository(db).get_user_tag_refresh_candidates(
+                after_id=after_id,
+                limit=USER_TAG_SCAN_PAGE_SIZE,
+            )
+        if not candidates:
+            break
+
+        candidates_count += len(candidates)
+        for candidate in candidates:
+            end_user_id = str(candidate.end_user_id)
+            inflight_key = USER_TAG_INFLIGHT_KEY_FMT.format(end_user_id=end_user_id)
+            try:
+                # Redis 在途标记防止相邻两轮扫描为同一用户重复派发任务。
+                lock_acquired = bool(
+                    redis_client.set(
+                        inflight_key,
+                        "1",
+                        nx=True,
+                        ex=USER_TAG_INFLIGHT_TTL_SEC,
+                    )
+                )
+            except Exception as exc:
+                logger.error(
+                    "用户名片Tag scan终止：Redis在途锁不可用 user=%s error=%s",
+                    end_user_id,
+                    str(exc),
+                    exc_info=True,
+                )
+                raise RuntimeError("Redis unavailable: failed to acquire user tag inflight lock") from exc
+
+            if not lock_acquired:
+                skip_inflight += 1
+                continue
+
+            try:
+                # 每 60 个任务分散到 5 分钟内启动，削平 LLM 和数据库的瞬时压力。
+                countdown = (dispatched % 60) * 5
+                do_refresh_user_tags.apply_async(
+                    kwargs={
+                        "end_user_id": end_user_id,
+                        "workspace_id": str(candidate.workspace_id),
+                    },
+                    countdown=countdown,
+                    queue="memory_heavy_tasks",
+                )
+                dispatched += 1
+            except Exception as exc:
+                failed += 1
+                logger.error(
+                    "用户名片Tag scan派发失败 user=%s error=%s",
+                    end_user_id,
+                    str(exc),
+                    exc_info=True,
+                )
+                try:
+                    redis_client.delete(inflight_key)
+                except Exception:
+                    logger.warning("用户名片Tag scan回滚在途锁失败 user=%s", end_user_id, exc_info=True)
+
+        after_id = candidates[-1].end_user_id
+        if len(candidates) < USER_TAG_SCAN_PAGE_SIZE:
+            break
+
+    result = {
+        "status": "SUCCESS",
+        "candidates": candidates_count,
+        "dispatched": dispatched,
+        "skip_inflight": skip_inflight,
+        "failed": failed,
+        "elapsed_time": time.time() - start_time,
+        "task_id": self.request.id,
+    }
+    logger.info(
+        "scan_refresh_user_tags完成 candidates=%s dispatched=%s skip_inflight=%s failed=%s",
+        candidates_count,
+        dispatched,
+        skip_inflight,
+        failed,
+    )
+    return result
+
+
+@celery_app.task(
+    name="app.tasks.do_refresh_user_tags",
+    bind=True,
+    ignore_result=False,
+    max_retries=0,
+    acks_late=False,
+    time_limit=120,
+    soft_time_limit=90,
+)
+def do_refresh_user_tags(
+    self,
+    end_user_id: str,
+    workspace_id: str,
+) -> Dict[str, Any]:
+    """在 heavy worker 中调用记忆领域入口，刷新单个用户的名片 Tag。
+
+    Celery 任务本身是同步函数，新事件循环只用于驱动异步 LLM 调用；领域层中的 PostgreSQL
+    操作仍使用同步短会话，并且不会在等待 LLM 时持有数据库连接。
+    """
+    inflight_key = USER_TAG_INFLIGHT_KEY_FMT.format(end_user_id=end_user_id)
+    start_time = time.time()
+
+    async def _run() -> Dict[str, Any]:
+        from app.core.memory.memory_service import MemoryService
+
+        return await MemoryService.refresh_user_card_tags(end_user_id, workspace_id)
+
+    loop = set_asyncio_event_loop()
+    try:
+        result = loop.run_until_complete(_run())
+    finally:
+        _shutdown_loop_gracefully(loop)
+        # 无论任务成功还是异常都释放在途标记，让后续扫描可以再次处理该用户。
+        try:
+            redis_client = get_sync_redis_client()
+            if redis_client is not None:
+                redis_client.delete(inflight_key)
+        except Exception:
+            logger.warning("用户名片Tag do释放在途锁失败 user=%s", end_user_id, exc_info=True)
+
+    result["elapsed_time"] = time.time() - start_time
+    result["task_id"] = self.request.id
+    result["end_user_id"] = end_user_id
+    logger.info("do_refresh_user_tags完成 user=%s status=%s", end_user_id, result["status"])
+    return result
+
+
 @celery_app.task(
     name="app.tasks.run_forgetting_cycle_task",
     bind=True,
@@ -3009,9 +3861,12 @@ def run_forgetting_cycle_task(self, config_id: Optional[uuid.UUID] = None) -> Di
     start_time = time.time()
 
     async def _process_users() -> Dict[str, Any]:
+        from app.db import get_async_db_context
         from app.repositories.end_user_repository import EndUserRepository
-        with get_db_context() as db:
-            end_users = EndUserRepository(db).get_all_active()
+
+        # forget_service.trigger_forgetting_cycle 已迁移到 AsyncSession，
+        async with get_async_db_context() as db:
+            end_users = await EndUserRepository(db).get_all_active_async()
             if not end_users:
                 logger.info("没有终端用户，跳过遗忘周期")
                 return {"status": "SUCCESS", "message": "没有终端用户",
@@ -3025,7 +3880,7 @@ def run_forgetting_cycle_task(self, config_id: Optional[uuid.UUID] = None) -> Di
 
             for end_user in end_users:
                 try:
-                    config_id = MemoryConfigService(db).get_workspace_active_config_id(end_user.workspace_id)
+                    config_id = await MemoryConfigService(db).get_workspace_active_config_id_async(end_user.workspace_id)
 
                     # 执行遗忘周期
                     report = await forget_service.trigger_forgetting_cycle(

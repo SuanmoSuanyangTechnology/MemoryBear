@@ -1526,7 +1526,7 @@ class MultiAgentOrchestrator:
             }
 
             # 2. 转换配置（每个 Agent 包含自己的 model_config）
-            agent_configs = convert_multi_agent_config_to_handoffs(
+            agent_configs = await convert_multi_agent_config_to_handoffs(
                 multi_agent_config,
                 self.db
             )
@@ -1592,7 +1592,7 @@ class MultiAgentOrchestrator:
             }
 
             # 2. 转换配置（每个 Agent 包含自己的 model_config）
-            agent_configs = convert_multi_agent_config_to_handoffs(
+            agent_configs = await convert_multi_agent_config_to_handoffs(
                 multi_agent_config,
                 self.db
             )

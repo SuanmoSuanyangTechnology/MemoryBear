@@ -144,10 +144,14 @@ class MemoryPerceptualRepository:
 
     def get_by_url(
             self,
+            end_user_id: str,
             file_url: str
     ) -> list[MemoryPerceptualModel]:
         try:
-            stmt = select(MemoryPerceptualModel).where(MemoryPerceptualModel.file_path == file_url)
+            stmt = select(MemoryPerceptualModel).where(
+                MemoryPerceptualModel.file_path == file_url,
+                MemoryPerceptualModel.end_user_id == end_user_id
+            )
             return list(self.db.execute(stmt).scalars())
         except Exception:
             db_logger.error(f"Failed to query perceptual memories by file_url: file_url={file_url}")

@@ -73,6 +73,7 @@ const OverflowTags = ({ items = [], gap = 8, numTagColor = 'default', numTag, po
             {items.map((item, i) => <span key={i}>{item}</span>)}
           </div>
         }
+        placement="topLeft"
         {...(popoverProps || {})}
         open={popoverProps === false ? false : undefined}
       >

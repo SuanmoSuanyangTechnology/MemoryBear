@@ -7,7 +7,7 @@
  * @LastEditTime: 2026-03-25 18:30:28
  */
 import { forwardRef, useImperativeHandle, useState, useRef } from 'react';
-import { Switch, App } from 'antd';
+import { Switch, App, Flex } from 'antd';
 import { useTranslation } from 'react-i18next';
 import type { ShareModalRef, ShareModalRefProps, KnowledgeBase, SpaceItem} from '@/views/KnowledgeBase/types';
 import RbModal from '@/components/RbModal'
@@ -108,32 +108,35 @@ const ShareModal = forwardRef<ShareModalRef,ShareModalRefProps>(({ handleShare: 
       onOk={handleShare}
       confirmLoading={loading}
     >
-        <div className='rb:flex rb:flex-col rb:text-left'>
+        <Flex vertical className='rb:text-left'>
             <h4 className='rb:text-sm rb:font-medium rb:text-gray-800'>{t('knowledgeBase.shareSpaceTitle')}</h4>
             <span className='rb:text-xs rb:text-gray-500'>{t('knowledgeBase.shareSpaceNote')}</span>
-            <div className='rb:flex rb:flex-col rb:text-left rb:gap-4 rb:mt-4 '>
+            <Flex vertical gap={16} className='rb:text-left rb:mt-4!'>
               {spaceList.length === 0 && (
                 <NoData />
               )}
               {spaceList.map((item,index) => (
-                  <div key={index} 
-                      className={`rb:flex rb:items-center rb:justify-between rb:border-gray-200 rb:gap-2 rb:rounded-lg rb:p-4 rb:border`}
-                     
+                  <Flex
+                    key={index}
+                    align="center"
+                    justify="space-between"
+                    gap={8}
+                    className={`rb:border-gray-200 rb:rounded-lg rb:p-4! rb:border`}
                   >
-                    <div className='rb:flex rb:items-center rb:gap-2'>
+                    <Flex align="center" gap={8}>
                         <img src={item.icon || kbIcon} className='rb:size-[20px]' />
-                        <div className='rb:flex rb:flex-col rb:text-left rb:gap-1'>
+                        <Flex vertical gap={4} className='rb:text-left'>
                             <span className='rb:text-base rb:font-medium rb:text-gray-800'>{item.target_workspace?.name}</span>
                             <span className='rb:text-xs rb:text-gray-500'>{t('knowledgeBase.authorizedPerson')}:{item.shared_user?.username} {formatDateTime((item.target_workspace?.created_at || 0))}</span>
-                        </div>
-                    </div>
+                        </Flex>
+                    </Flex>
                     <div>
                       <Switch checkedChildren={t('common.enable')} unCheckedChildren={t('common.disable')} defaultChecked={item.target_kb?.status === 1} onChange={(checked) => handleChange(checked, item)} />
                     </div>
-                  </div>
+                  </Flex>
               ))}
-            </div>
-        </div>
+            </Flex>
+        </Flex>
     </RbModal>
     <ShareSpaceModal 
       ref={shareSpaceModalRef} 

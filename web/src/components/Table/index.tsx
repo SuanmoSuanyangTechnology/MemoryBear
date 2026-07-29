@@ -40,7 +40,7 @@ interface TableComponentProps<T = Record<string, unknown>, Q = Record<string, un
   /** Pagination configuration or boolean to enable/disable */
   pagination?: boolean | TablePaginationConfig;
   /** Key to use for row identification */
-  rowKey: string;
+  rowKey: string | ((record: T) => string);
   /** Row selection configuration */
   rowSelection?: TableProps<T>['rowSelection'];
   /** Initial data to display (used when no API) */
@@ -122,7 +122,7 @@ const RbTable = forwardRef(<T = Record<string, unknown>, Q = Record<string, unkn
     const thead = wrapper.querySelector('.ant-table-thead') as HTMLElement | null
     const pagination = wrapper.querySelector('.ant-pagination') as HTMLElement | null
     const theadH = thead?.offsetHeight ?? 0
-    const paginationH = pagination ? (pagination.offsetHeight + 16) : 0 // 16 = margin
+    const paginationH = pagination ? pagination.offsetHeight : 0
     setComputedScrollY(wrapperHeight - theadH - paginationH - 2)
   }, [fillHeight])
 
@@ -130,8 +130,11 @@ const RbTable = forwardRef(<T = Record<string, unknown>, Q = Record<string, unkn
     if (!fillHeight || !wrapperRef.current) return
     const ro = new ResizeObserver(measureHeight)
     ro.observe(wrapperRef.current)
-    measureHeight()
-    return () => ro.disconnect()
+    const timer = setTimeout(measureHeight, 100)
+    return () => {
+      ro.disconnect()
+      clearTimeout(timer)
+    }
   }, [fillHeight, measureHeight])
 
   /** Sync initial data when provided without API */
@@ -186,6 +189,7 @@ const RbTable = forwardRef(<T = Record<string, unknown>, Q = Record<string, unkn
         setTotal(totalCount)
         setData(Array.isArray(res.items) ? res.items : Array.isArray(res.hosts) ? res.hosts : Array.isArray(res.list) ? res.list : res || [])
         setLoading(false)
+        setTimeout(measureHeight, 50)
       })
       .catch(err => {
         if (err.name !== 'AbortError') {

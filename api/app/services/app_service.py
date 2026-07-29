@@ -45,6 +45,7 @@ from app.services.agent_config_converter import AgentConfigConverter
 from app.services.model_service import ModelApiKeyService
 from app.services.workflow_service import WorkflowService
 from app.utils.app_config_utils import model_parameters_to_dict
+from app.utils.redis_cache import delete_json, workflow_config_key
 
 # 获取业务日志器
 logger = get_business_logger()
@@ -673,13 +674,37 @@ class AppService:
         self._validate_app_accessible(app, workspace_id)
         return app
 
+    async def _check_app_accessible_async(self, app: App, workspace_id: Optional[uuid.UUID]) -> bool:
+        from app.models import AppShare
+
+        if workspace_id is None:
+            return True
+        if app.workspace_id == workspace_id:
+            return True
+
+        stmt = select(AppShare).where(
+            AppShare.source_app_id == app.id,
+            AppShare.target_workspace_id == workspace_id,
+            AppShare.is_active.is_(True)
+        )
+        share = await self.db.scalar(stmt)
+        return share is not None
+
+    async def _validate_app_accessible_async(self, app: App, workspace_id: Optional[uuid.UUID]) -> None:
+        if not await self._check_app_accessible_async(app, workspace_id):
+            logger.warning(
+                "应用访问被拒",
+                extra={"app_id": str(app.id), "workspace_id": str(workspace_id)}
+            )
+            raise BusinessException("应用不可访问", BizCode.WORKSPACE_NO_ACCESS)
+
     async def get_app_async(
             self,
             app_id: uuid.UUID,
             workspace_id: Optional[uuid.UUID] = None
     ) -> App:
         app = await self._get_app_or_404_async(app_id)
-        self._validate_app_accessible(app, workspace_id)
+        await self._validate_app_accessible_async(app, workspace_id)
         return app
 
     def get_release_by_id(self, app_id: uuid.UUID, release_id: uuid.UUID) -> AppRelease:
@@ -1768,6 +1793,7 @@ class AppService:
 
         self.db.commit()
         self.db.refresh(workflow_cfg)
+        delete_json(workflow_config_key(app_id))
 
         logger.info("Workflow 配置更新成功", extra={"app_id": str(app_id)})
         return workflow_cfg
@@ -2430,7 +2456,6 @@ class AppService:
 
         if ids:
             # Soft delete: mark as inactive
-            from sqlalchemy import update as sa_update
             self.db.execute(
                 sa_update(AppShare).where(AppShare.id.in_(ids)).values(is_active=False)
             )
@@ -2559,7 +2584,6 @@ class AppService:
         count = len(ids)
 
         if ids:
-            from sqlalchemy import update as sa_update
             self.db.execute(
                 sa_update(AppShare).where(AppShare.id.in_(ids)).values(is_active=False)
             )

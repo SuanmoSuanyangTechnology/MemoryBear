@@ -21,11 +21,12 @@ import corporateImg from '@/assets/images/order/corporate.svg'
 import type { OrderForm, UpgradePreview } from './types'
 import { useI18n } from '@/store/locale'
 import type { Package } from '@/views/Package/types'
-import { billingUnits } from '@/views/Package/constant'
+import type { ResourcePack } from '@/views/Package/types'
+import { billingUnits, getUnit } from '@/views/Package/constant'
 import { UnitWrapper } from '@/views/Package'
 import { submitOrder, getPackageList, upgradePackagePreview } from '@/api/package'
 import Tag from '@/components/Tag'
-import { getTenantSubscription } from '@/api/user'
+import { useSubscription } from '@/store/subscription'
 
 const { TextArea } = Input;
 
@@ -41,12 +42,18 @@ const OrderPayment: React.FC = () => {
   const navigate = useNavigate();
   const { t } = useTranslation();
   const { language } = useI18n()
+  const isZh = language === 'zh';
   const [form] = Form.useForm<OrderForm>()
   
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [pkg, setPkg] = useState<Package | null>(null)
   const [jumpFrom, setJumpFrom] = useState<string | null>(null)
+  /** 增购资源包购物车条目（来自资源包页面） */
+  const [resourcePacks, setResourcePacks] = useState<ResourcePack[]>([])
+  const isResourcePackOrder = resourcePacks.length > 0
   const multiplierValue = Form.useWatch('multiplier', form)
+
+  const { fetchSubscription } = useSubscription()
 
   /** Copy text to clipboard */
   const copyText = (text: string) => {
@@ -56,9 +63,12 @@ const OrderPayment: React.FC = () => {
 
   /** Submit payment voucher */
   const submitPayment = (values: OrderForm) => {
-    if (isSubmitting || !pkg?.id) return;
+    console.log('submitPayment')
+    if (isSubmitting) return;
 
-    if (!values.multiplier) {
+    if (!pkg?.id && !isResourcePackOrder) return;
+
+    if (!values.multiplier && !isResourcePackOrder) {
       message.warning(t('common.inputPlaceholder', { title: t('pricing.orderCycle') }))
       return
     }
@@ -66,12 +76,23 @@ const OrderPayment: React.FC = () => {
     setIsSubmitting(true);
     
     const { pay_time, ...rest } = values
-    const submitData: OrderForm = {
+    let submitData: OrderForm = {
       ...rest,
       business_type: jumpFrom === 'renewal' ? 'renewal' : jumpFrom === '/upgrade' ? 'upgrade' : 'purchase',
       pay_time: pay_time?.valueOf(),
       package_plan_id: pkg?.id,
     };
+    if (isResourcePackOrder) {
+      submitData = {
+        ...submitData,
+        source_type: "resource_pack",
+        items: resourcePacks.map(item => ({
+          "resource_pack_id": item.id,
+          "tier_id": item.tiers[0].tier_id,
+          "quantity": item.tiers[0].amount || 0
+        }))
+      }
+    }
     submitOrder(submitData)
       .then(() => {
         form.resetFields()
@@ -94,17 +115,23 @@ const OrderPayment: React.FC = () => {
   useEffect(() => {
     setUpgradePreview(null)
     setPkg(null)
+    setResourcePacks([])
     if (location.state?.jumpFrom) {
       setJumpFrom(location.state?.jumpFrom)
 
       if (location.state?.jumpFrom === 'renewal') {
-        getTenantSubscription()
-          .then(subscription => {
-            getPackageList({ search: (subscription as any).package_plan_id }).then(res => {
-              setPkg((res as Package[])[0] ? { ...(res as Package[])[0], expired_at: (subscription as any).expired_at, created_at: dayjs().valueOf() } : null)
-            })
+        fetchSubscription().then(subscription => {
+          if (!subscription) return
+          getPackageList({ search: subscription.package_plan_id }).then(res => {
+            setPkg((res as Package[])[0] ? { ...(res as Package[])[0], expired_at: subscription.expired_at, created_at: dayjs().valueOf() } : null)
           })
+        })
       }
+    }
+    // 增购资源包订单：从资源包页面携带的购物车条目
+    if (Array.isArray(location.state?.resourcePacks) && location.state.resourcePacks.length > 0) {
+      setResourcePacks(location.state.resourcePacks as ResourcePack[])
+      return
     }
     if (!location.state?.id) return
     setPkg({
@@ -118,6 +145,13 @@ const OrderPayment: React.FC = () => {
 
   const getKeyWithLanguage = (key: string) => {
     return (language === 'en' ? `${key}_en` : key) as keyof Package
+  }
+
+  /** 资源包订单创建时间（进入页面时固定） */
+  const [orderCreatedAt] = useState(() => dayjs().valueOf())
+  /** 修改某个资源包的购买数量 */
+  const handleResourcePackQty = (index: number, qty: number | null) => {
+    setResourcePacks(prev => prev.map((item, i) => i === index ? { ...item, tiers: item.tiers.map(tier => ({ ...tier, amount: qty && qty > 0 ? qty : 1 })) } : item))
   }
   const [upgradePreview, setUpgradePreview] = useState<UpgradePreview | null>(null)
   const getUpgradePreview = () => {
@@ -203,7 +237,7 @@ const OrderPayment: React.FC = () => {
           <div className="rb:flex rb:flex-col rb:items-start rb:gap-8 rb:mb-6 rb:text-[12px] ">
             <div className="rb:flex rb:items-center rb:gap-2">
               <span className="rb:text-[#5B6167]">{t('pricing.creationTime')}:</span>
-              <span className="">{dayjs(pkg?.created_at).format('YYYY-MM-DD HH:mm:ss')}</span>
+              <span className="">{dayjs(isResourcePackOrder ? orderCreatedAt : pkg?.created_at).format('YYYY-MM-DD HH:mm:ss')}</span>
             </div>
           </div>
 
@@ -219,6 +253,49 @@ const OrderPayment: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
+                {isResourcePackOrder ? (
+                  resourcePacks.map((item, index) => {
+                    const tier = item.tiers[0]
+                    const key = item.billing_units[0]
+                    return (
+                      <tr key={`${item.id}_${tier.tier_id}`} className="rb:border-t rb:border-[#DFE4ED]">
+                        <td className="rb:px-4 rb:py-4 rb:w-50 rb:align-top">
+                          <div className="rb:text-[18px] rb:font-bold rb:mb-1">{isZh ? item.name_zh : item.name_en}</div>
+                          <div className="rb:text-[12px] rb:text-[#5B6167]">{isZh ? item.description_zh : item.description_en}</div>
+                        </td>
+                        <td className="rb:px-4 rb:py-4 rb:align-top">
+                          <div className="rb:grid rb:md:grid-cols-2 rb:gap-y-3 rb:gap-x-8 rb:text-[12px] rb:text-[#5B6167]">
+                            <div>
+                              <div className="rb:mb-1">{t('package.perShareAmount')}</div>
+                              <div className="rb:text-[#171719]">
+                                {tier.quota_grants[key]} {t(`package.${getUnit(key)}`)}
+                              </div>
+                            </div>
+                            <div>
+                              <div className="rb:mb-1">{t('package.validity')}</div>
+                              <div className="rb:text-[#171719]">{tier.amount}{t(`package.${tier.billing_cycle}`)}</div>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="rb:px-4 rb:py-4 rb:w-32 rb:align-top">
+                          <InputNumber
+                            min={1}
+                            max={99}
+                            precision={0}
+                            value={tier.amount}
+                            suffix={t('package.share')}
+                            onChange={(value) => handleResourcePackQty(index, value as number | null)}
+                          />
+                        </td>
+                        <td className="rb:px-4 rb:py-4 rb:align-top">
+                          <div className="rb:w-32 rb:text-right rb:font-bold rb:text-[20px]">
+                            ¥ {(Number(tier.unit_price) * (tier.amount || 0)).toFixed(2)}
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })
+                ) : (
                 <tr>
                   <td className="rb:px-4 rb:py-2 rb:w-50">
                     <div className="rb:text-[18px] rb:text-xl rb:font-bold rb:mb-1">{String(pkg?.[getKeyWithLanguage('name')] ?? '')}</div>
@@ -279,6 +356,7 @@ const OrderPayment: React.FC = () => {
                     </div>
                   </td>
                 </tr>
+                )}
               </tbody>
             </table>
           </div>

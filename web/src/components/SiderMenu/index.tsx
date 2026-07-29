@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:25:31 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-26 11:32:26
+ * @Last Modified time: 2026-07-21 17:55:31
  */
 /**
  * SiderMenu Component
@@ -23,9 +23,8 @@ import clsx from 'clsx';
 import { useEffect, useRef, useState, type FC } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Account } from '@redbear/memory-brick'
 
-import { getTenantSubscription } from '@/api/user';
+import { useSubscription } from '@/store/subscription';
 import logo from '@/assets/images/logo.png';
 import { useI18n } from '@/store/locale';
 import { useMenu, type MenuItem } from '@/store/menu';
@@ -34,6 +33,7 @@ import styles from './index.module.css';
 import SubscriptionDetailModal, { type SubscriptionDetailModalRef } from './SubscriptionDetailModal';
 import SwitchSpaceModal, { type SwitchSpaceModalRef } from './SwitchSpaceModal';
 import { formatDateTime } from '@/utils/format'
+import { isPrivateAvailable } from '@/utils/private'
 
 export interface PackagePlan {
   id: string
@@ -83,7 +83,6 @@ export interface Subscription {
 
 const { Sider } = Layout;
 
-const isSaas = import.meta.env.VITE_PROD_ENV === 'saas'
 /** Sidebar menu component with collapsible navigation */
 const Menu: FC<{
   /** Menu display mode */
@@ -113,14 +112,14 @@ const Menu: FC<{
       menuList = allMenus[source] || []
     }
 
-    // account permission depends on pricing and isSaas: if has pricing and isSaas, then has account
+    // account permission depends on pricing and private package: if has pricing and private package available, then has account
     const hasPricing = user.permissions?.includes('pricing') || user.permissions?.includes('all')
     const noAuthList = ['user'].filter(vo =>
       (Array.isArray(user.permissions) && !user.permissions?.includes(vo) && !user.permissions?.includes('all')) || !Array.isArray(user.permissions)
     )
     if (!hasPricing) {
       noAuthList.push('pricing', 'account')
-    } else if ((!isSaas || !Account) && !noAuthList.includes('account')) {
+    } else if (!isPrivateAvailable && !noAuthList.includes('account')) {
       noAuthList.push('account')
     }
 
@@ -259,35 +258,20 @@ const Menu: FC<{
     localStorage.removeItem('user')
   }
 
-  const [subscription, setSubscription] = useState<Subscription | null>(null)
+  const { subscription, fetchSubscription } = useSubscription()
   useEffect(() => {
     if (source === 'manage') {
-      getSubscription()
-    } else {
-      setSubscription(null)
+      fetchSubscription()
     }
   }, [source])
-
-  const getSubscription = () => {
-    return new Promise((resolve, reject) => {
-      getTenantSubscription()
-        .then(res => {
-          setSubscription(res as Subscription)
-          resolve(res)
-        })
-        .catch((error) => {
-          reject(error)
-        })
-    })
-  }
 
   const getKeyWithLanguage = (key: string) => {
     return (language === 'en' ? `${key}_en` : key) as keyof Subscription['package_plan']
   }
   const handleViewDetail = () => {
-    getSubscription()
+    fetchSubscription()
       .then(res => {
-        subscriptionDetailRef.current?.handleOpen(res as Subscription)
+        subscriptionDetailRef.current?.handleOpen(res)
       })
       .catch(() => {
         subscriptionDetailRef.current?.handleOpen(subscription)

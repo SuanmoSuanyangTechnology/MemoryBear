@@ -71,6 +71,7 @@ class Settings:
     REDIS_PORT: int = int(os.getenv("REDIS_PORT", "6379"))
     REDIS_DB: int = int(os.getenv("REDIS_DB", "1"))
     REDIS_PASSWORD: str = os.getenv("REDIS_PASSWORD", "")
+    REDIS_POOL_SIZE: int = int(os.getenv("REDIS_POOL_SIZE", "100"))
 
     # ElasticSearch configuration
     ELASTICSEARCH_HOST: str = os.getenv("ELASTICSEARCH_HOST", "https://127.0.0.1")
@@ -86,6 +87,14 @@ class Settings:
     KNOWLEDGE_RETRIEVAL_GRAPH_MAX_CONCURRENCY: int = int(
         os.getenv("KNOWLEDGE_RETRIEVAL_GRAPH_MAX_CONCURRENCY", "2")
     )
+    KNOWLEDGE_GRAPH_EXTRACT_MAX_CONCURRENCY: int = max(
+        1,
+        min(16, int(os.getenv("KNOWLEDGE_GRAPH_EXTRACT_MAX_CONCURRENCY", "4"))),
+    )
+    KNOWLEDGE_GRAPH_RETRIEVAL_TIMEOUT_MS: int = max(
+        100,
+        min(30000, int(os.getenv("KNOWLEDGE_GRAPH_RETRIEVAL_TIMEOUT_MS", "15000"))),
+    )
 
     # Xinference configuration
     XINFERENCE_URL: str = os.getenv("XINFERENCE_URL", "http://127.0.0.1")
@@ -99,6 +108,12 @@ class Settings:
     # LLM Request Configuration
     LLM_TIMEOUT: float = float(os.getenv("LLM_TIMEOUT", "120.0"))
     LLM_MAX_RETRIES: int = int(os.getenv("LLM_MAX_RETRIES", "2"))
+    EMBEDDING_BATCH_SIZE: int = int(os.getenv("EMBEDDING_BATCH_SIZE", "10"))
+
+    # Fast Write BERT 
+    FAST_WRITE_EMOTION_URL: str = os.getenv("FAST_WRITE_EMOTION_URL", "")
+    FAST_WRITE_EMOTION_MODEL: str = os.getenv("FAST_WRITE_EMOTION_MODEL", "")
+    FAST_WRITE_EMOTION_API_KEY: str = os.getenv("FAST_WRITE_EMOTION_API_KEY", "")
 
     # JWT Token Configuration
     SECRET_KEY: str = os.getenv("SECRET_KEY", "a_default_secret_key_that_is_long_and_random")
@@ -274,6 +289,23 @@ class Settings:
     SMTP_PASSWORD: str = os.getenv("SMTP_PASSWORD", "")
     
     SANDBOX_URL: str = os.getenv("SANDBOX_URL", "")
+    SANDBOX_API_KEY: str = os.getenv("SANDBOX_API_KEY", "redbear-sandbox")
+
+    # ─── E2B Sandbox Configuration (自建 E2B 基础设施) ───
+    E2B_ENABLED: bool = os.getenv("E2B_ENABLED", "false").lower() == "true"
+    # Orchestrator connection
+    E2B_ORCHESTRATOR_URL: str = os.getenv("E2B_ORCHESTRATOR_URL", "http://e2b-orchestrator:3001")
+    E2B_ORCHESTRATOR_SECRET: str = os.getenv("E2B_ORCHESTRATOR_SECRET", "changeme")
+    # Docker / template settings
+    E2B_TEMPLATE_ID: str = os.getenv("E2B_TEMPLATE_ID", "agent-runtime")
+    E2B_SANDBOX_TIMEOUT: int = int(os.getenv("E2B_SANDBOX_TIMEOUT", "600"))
+    E2B_SANDBOX_CPU: int = int(os.getenv("E2B_SANDBOX_CPU", "2"))
+    E2B_SANDBOX_MEMORY_MB: int = int(os.getenv("E2B_SANDBOX_MEMORY_MB", "512"))
+    # Callback (sandbox → API)
+    E2B_CALLBACK_URL: str = os.getenv("E2B_CALLBACK_URL", "http://host.docker.internal:8000")
+    E2B_CALLBACK_SECRET: str = os.getenv("E2B_CALLBACK_SECRET", "sandbox-callback-secret")
+    # Warm pool
+    E2B_WARM_POOL_SIZE: int = int(os.getenv("E2B_WARM_POOL_SIZE", "2"))
 
     REFLECTION_INTERVAL_SECONDS: float = float(os.getenv("REFLECTION_INTERVAL_SECONDS", "300"))
     HEALTH_CHECK_SECONDS: float = float(os.getenv("HEALTH_CHECK_SECONDS", "600"))
@@ -297,6 +329,13 @@ class Settings:
     MEMORY_CACHE_REGENERATION_MINUTE: int = TypeAdapter(
         Annotated[int, Field(ge=0, le=59, description="memory cache regeneration cron minute [0, 59]")]
     ).validate_python(int(os.getenv("MEMORY_CACHE_REGENERATION_MINUTE", "0")))
+    # 用户名片 Tag 定时刷新时间（UTC，默认 18:30，北京时间次日 02:30）
+    USER_TAG_REFRESH_HOUR: int = TypeAdapter(
+        Annotated[int, Field(ge=0, le=23, description="user tag refresh cron hour [0, 23]")]
+    ).validate_python(int(os.getenv("USER_TAG_REFRESH_HOUR", "18")))
+    USER_TAG_REFRESH_MINUTE: int = TypeAdapter(
+        Annotated[int, Field(ge=0, le=59, description="user tag refresh cron minute [0, 59]")]
+    ).validate_python(int(os.getenv("USER_TAG_REFRESH_MINUTE", "30")))
     # 洞察/摘要缓存刷新新鲜度窗口（小时）：缓存上次刷新距今 < 该值则本轮跳过（限频，避免频繁重算），默认 72
     MEMORY_CACHE_FRESH_HOURS: int = TypeAdapter(
         Annotated[int, Field(ge=1, description="insight/summary cache freshness window in hours, must be >= 1")]

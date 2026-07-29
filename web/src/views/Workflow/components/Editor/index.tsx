@@ -102,7 +102,6 @@ const Editor: FC<LexicalEditorProps> =({
     onError: (error: Error) => {
       console.error(error);
     },
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }), []);
 
   // Calculate minimum height based on type and size

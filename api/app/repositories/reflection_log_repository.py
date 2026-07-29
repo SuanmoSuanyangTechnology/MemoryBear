@@ -1,8 +1,8 @@
 """反思日志 Repository"""
 import uuid
 from typing import Any, Dict, List, Optional,Tuple
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
-from sqlalchemy import func
 from app.models.reflection_log_model import MemoryReflectionLog
 
 
@@ -41,7 +41,14 @@ class ReflectionLogRepository:
         self.db.commit()
         return log
 
-    def get_paginated(
+    async def get_by_id_async(self, log_id: str) -> Optional[MemoryReflectionLog]:
+        """Async: 按 ID 查询单条日志"""
+        result = await self.db.execute(
+            select(MemoryReflectionLog).where(MemoryReflectionLog.id == uuid.UUID(log_id))
+        )
+        return result.scalars().first()
+
+    async def get_paginated_async(
         self,
         end_user_id: str,
         page: int = 1,
@@ -50,105 +57,29 @@ class ReflectionLogRepository:
         status: Optional[str] = None,
         trigger_type: Optional[str] = None,
     ) -> Tuple[int, list]:
-        """分页查询反思日志
-
-        Args:
-            end_user_id: 终端用户 ID
-            page: 页码（从1开始）
-            pagesize: 每页数量
-            sub_problem: 子问题类型筛选（可选）
-            status: 状态筛选（可选）
-            trigger_type: 触发方式筛选（可选）
-
-        Returns:
-            (total, items): 总数和当前页 ORM 对象列表
-        """
-        query = self.db.query(MemoryReflectionLog).filter(
+        """Async: 分页查询反思日志"""
+        stmt = select(MemoryReflectionLog).where(
             MemoryReflectionLog.end_user_id == uuid.UUID(end_user_id)
         )
-
         if sub_problem:
-            query = query.filter(MemoryReflectionLog.sub_problem == sub_problem)
+            stmt = stmt.where(MemoryReflectionLog.sub_problem == sub_problem)
         if status:
-            query = query.filter(MemoryReflectionLog.status == status)
+            stmt = stmt.where(MemoryReflectionLog.status == status)
         if trigger_type:
-            query = query.filter(MemoryReflectionLog.trigger_type == trigger_type)
+            stmt = stmt.where(MemoryReflectionLog.trigger_type == trigger_type)
 
-        total = query.count()
-        items = query.order_by(
-            MemoryReflectionLog.created_at.desc()
-        ).offset((page - 1) * pagesize).limit(pagesize).all()
+        # count
+        count_stmt = select(func.count()).select_from(stmt.subquery())
+        count_result = await self.db.execute(count_stmt)
+        total = count_result.scalar()
+
+        # items
+        stmt = stmt.order_by(MemoryReflectionLog.created_at.desc()).offset((page - 1) * pagesize).limit(pagesize)
+        result = await self.db.execute(stmt)
+        items = result.scalars().all()
 
         return total, items
 
-
-    def get_by_id(self, log_id: str) -> Optional[MemoryReflectionLog]:
-        """按 ID 查询单条日志
-
-        Args:
-            log_id: 日志 UUID 字符串
-
-        Returns:
-            MemoryReflectionLog 或 None
-        """
-        return self.db.query(MemoryReflectionLog).filter(
-            MemoryReflectionLog.id == uuid.UUID(log_id)
-        ).first()
-
-
-    def get_stats(self, end_user_id: str) -> Dict[str, Any]:
-        """统计查询：按子问题和状态分组计数
-
-        Args:
-            end_user_id: 终端用户 ID
-
-        Returns:
-            {
-                "total": int,
-                "sub_problem": {"entity_dedup": 28, ...},
-                "status": {"resolved": 42, "recorded": 5},
-                "resolve_rate": 0.89
-            }
-        """
-        base = self.db.query(MemoryReflectionLog).filter(
-            MemoryReflectionLog.end_user_id == uuid.UUID(end_user_id)
-        )
-
-        total = base.count()
-
-        # 按 sub_problem 分组计数
-        sub_counts = dict(
-            base.with_entities(
-                MemoryReflectionLog.sub_problem,
-                func.count()
-            ).group_by(MemoryReflectionLog.sub_problem).all()
-        )
-
-        # 按 status 分组计数
-        status_counts = dict(
-            base.with_entities(
-                MemoryReflectionLog.status,
-                func.count()
-            ).group_by(MemoryReflectionLog.status).all()
-        )
-
-        # 补全所有枚举值（确保前端拿到完整结构）
-        from app.schemas.memory_reflection_schemas import SubProblemEnum
-        all_sub_problems = [e.value for e in SubProblemEnum]
-        sub_problem = {sp: sub_counts.get(sp, 0) for sp in all_sub_problems}
-        status = {
-            "resolved": status_counts.get("resolved", 0),
-            "recorded": status_counts.get("recorded", 0),
-        }
-
-        resolve_rate = round(status["resolved"] / total, 2) if total > 0 else 0.0
-
-        return {
-            "total": total,
-            "sub_problem": sub_problem,
-            "status": status,
-            "resolve_rate": resolve_rate,
-        }
 
     async def get_stats_async(self, end_user_id: str) -> Dict[str, Any]:
         """统计查询（异步版本）：按子问题和状态分组计数

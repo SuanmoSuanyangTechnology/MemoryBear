@@ -12,7 +12,7 @@
 
 import { useState, useImperativeHandle, forwardRef, useRef, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Button, Switch, Row, Col, Tooltip } from 'antd'
+import { Button, Switch, Row, Col, Tooltip, Flex } from 'antd'
 import clsx from 'clsx';
 
 import type { ProviderModelItem, ModelListItem, ModelListDetailRef, MultiKeyConfigModalRef } from '../types';
@@ -151,9 +151,9 @@ const ModelListDetail = forwardRef<ModelListDetailRef, ModelListDetailProps>(({ 
                 />}
               avatarUrl={getLogoUrl(item.logo)}
               avatar={
-                <div className="rb:w-12 rb:h-12 rb:rounded-lg rb:mr-3.25 rb:bg-[#155eef] rb:flex rb:items-center rb:justify-center rb:text-[28px] rb:text-[#ffffff]">
+                <Flex align="center" justify="center" className="rb:size-12 rb:rounded-lg rb:bg-[#155eef] rb:text-[28px] rb:text-[#ffffff]">
                   {item.name[0]}
-                </div>
+                </Flex>
               }
               extra={item.provider !== 'speedbear' && <Switch checked={item.is_active} disabled={loading} onChange={() => handleChange(item)} />}
               bodyClassName={clsx("rb:relative rb:h-[calc(100%-64px)]!", {

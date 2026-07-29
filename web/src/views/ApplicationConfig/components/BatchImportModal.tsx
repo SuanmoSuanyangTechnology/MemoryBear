@@ -6,7 +6,7 @@
  */
 import { forwardRef, useImperativeHandle, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { UploadFile } from 'antd';
+import { type UploadFile, Flex } from 'antd';
 import { useParams } from 'react-router-dom';
 
 import RbModal from '@/components/RbModal';
@@ -83,18 +83,18 @@ const BatchImportModal = forwardRef<{ handleOpen: () => void; handleClose: () =>
         
         {/* Table structure example */}
         <div className="rb-border rb:rounded-lg rb:overflow-hidden">
-          <div className="rb:flex rb:bg-[#F5F7FA] rb:text-[#646A73] rb:text-sm">
-            <div className="rb:flex-1 rb:px-4 rb:py-2 rb-border-r">问题</div>
-            <div className="rb:flex-1 rb:px-4 rb:py-2">回答</div>
-          </div>
-          <div className="rb:flex rb:text-[#212332] rb:text-sm">
-            <div className="rb:flex-1 rb:px-4 rb:py-2 rb-border-r rb-border-t">问题 1</div>
-            <div className="rb:flex-1 rb:px-4 rb:py-2 rb-border-t">回答 1</div>
-          </div>
-          <div className="rb:flex rb:text-[#212332] rb:text-sm">
-            <div className="rb:flex-1 rb:px-4 rb:py-2 rb-border-r">问题 2</div>
-            <div className="rb:flex-1 rb:px-4 rb:py-2">回答 2</div>
-          </div>
+          <Flex className="rb:bg-[#F5F7FA] rb:text-[#646A73] rb:text-sm">
+            <div className="rb:flex-1 rb:px-4 rb:py-2 rb-border-r">{t('shortTermDetail.query')}</div>
+            <div className="rb:flex-1 rb:px-4 rb:py-2">{t('shortTermDetail.answer')}</div>
+          </Flex>
+          <Flex className="rb:text-[#212332] rb:text-sm">
+            <div className="rb:flex-1 rb:px-4 rb:py-2 rb-border-r rb-border-t">{t('shortTermDetail.query')} 1</div>
+            <div className="rb:flex-1 rb:px-4 rb:py-2 rb-border-t">{t('shortTermDetail.answer')} 1</div>
+          </Flex>
+          <Flex className="rb:text-[#212332] rb:text-sm">
+            <div className="rb:flex-1 rb:px-4 rb:py-2 rb-border-r">{t('shortTermDetail.query')} 2</div>
+            <div className="rb:flex-1 rb:px-4 rb:py-2">{t('shortTermDetail.answer')} 2</div>
+          </Flex>
         </div>
       </div>
 

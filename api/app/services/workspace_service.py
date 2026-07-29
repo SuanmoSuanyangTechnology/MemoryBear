@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from app.config.default_ontology_initializer import DefaultOntologyInitializer
+from app.core.config import settings
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException, PermissionDeniedException
 from app.core.logging_config import get_business_logger
@@ -37,6 +38,13 @@ from app.schemas.memory_config_schema import ConfigurationError
 from app.i18n import t
 from app.services.memory_config_service import MemoryConfigService
 from app.services.session_service import SessionService
+from app.utils.redis_cache import (
+    CACHE_MISS,
+    get_json,
+    get_workspace_model_public_version,
+    set_json,
+    workspace_model_options_key,
+)
 
 # 获取业务逻辑专用日志器
 business_logger = get_business_logger()
@@ -48,11 +56,11 @@ _REQUIRED_WORKSPACE_MODEL_SLOTS = ("llm", "embedding", "rerank")
 
 def _serialize_model_option(model: ModelConfig) -> dict:
     return {
-        "id": model.id,
+        "id": str(model.id),
         "name": model.name,
-        "provider": model.provider,
-        "type": model.type,
-        "capability": list(model.capability or []),
+        "provider": getattr(model.provider, "value", model.provider),
+        "type": getattr(model.type, "value", model.type),
+        "capability": [getattr(item, "value", item) for item in (model.capability or [])],
         "logo": model.logo,
         "is_public": bool(model.is_public),
     }
@@ -317,44 +325,47 @@ async def _validate_workspace_model_runtime(
     locale: str,
     slots_to_validate: tuple[str, ...],
 ) -> list[dict]:
-    service = MemoryConfigService(db)
-    warnings: list[dict] = []
-    validate_as_llm = {"vision", "video", "audio"}
+    from app.db import get_async_db_context
 
-    async def _validate_one(model_type: str, model_id: str) -> dict | None:
-        validate_type = "llm" if model_type in validate_as_llm else model_type
-        try:
-            await service._validate_model_connectivity(
-                model_id,
-                validate_type,
-                tenant_id,
-                None,
-                workspace_id,
-                locale=locale,
-            )
-            return None
-        except ConfigurationError as exc:
-            return {
-                "model_type": model_type,
-                "model_id": str(model_id),
-                "message": exc.err_message,
-            }
+    async with get_async_db_context() as async_db:
+        service = MemoryConfigService(async_db)
+        warnings: list[dict] = []
+        validate_as_llm = {"vision", "video", "audio"}
 
-    for slot in slots_to_validate:
-        if not values.get(slot):
-            warnings.append({
-                "model_type": slot,
-                "model_id": None,
-                "message": t("memory_config.model.not_configured", locale=locale, model_type=slot),
-            })
+        async def _validate_one(model_type: str, model_id: str) -> dict | None:
+            validate_type = "llm" if model_type in validate_as_llm else model_type
+            try:
+                await service._validate_model_connectivity(
+                    model_id,
+                    validate_type,
+                    tenant_id,
+                    None,
+                    workspace_id,
+                    locale=locale,
+                )
+                return None
+            except ConfigurationError as exc:
+                return {
+                    "model_type": model_type,
+                    "model_id": str(model_id),
+                    "message": exc.err_message,
+                }
 
-    for slot in slots_to_validate:
-        model_id = values.get(slot)
-        if not model_id:
-            continue
-        result = await _validate_one(slot, model_id)
-        if result is not None:
-            warnings.append(result)
+        for slot in slots_to_validate:
+            if not values.get(slot):
+                warnings.append({
+                    "model_type": slot,
+                    "model_id": None,
+                    "message": t("memory_config.model.not_configured", locale=locale, model_type=slot),
+                })
+
+        for slot in slots_to_validate:
+            model_id = values.get(slot)
+            if not model_id:
+                continue
+            result = await _validate_one(slot, model_id)
+            if result is not None:
+                warnings.append(result)
 
     return warnings
 
@@ -423,7 +434,15 @@ def update_default_workspace_models(db: Session, data) -> dict:
 
 
 def get_workspace_model_options(db: Session, tenant_id: uuid.UUID) -> dict:
-    return _group_workspace_model_options(_get_accessible_workspace_models(db, tenant_id))
+    public_version = get_workspace_model_public_version()
+    cache_key = workspace_model_options_key(tenant_id, public_version)
+    cached = get_json(cache_key)
+    if cached is not CACHE_MISS and isinstance(cached, dict):
+        return cached
+
+    result = _group_workspace_model_options(_get_accessible_workspace_models(db, tenant_id))
+    set_json(cache_key, result, 300)
+    return result
 
 
 def get_system_workspace_model_options(db: Session) -> dict:

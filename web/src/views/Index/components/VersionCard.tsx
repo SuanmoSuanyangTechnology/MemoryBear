@@ -40,18 +40,18 @@ const VersionCard: React.FC = () => {
   }, []);
     
   return (
-    <div className='rb:w-full rb:h-full rb:p-3 rb:bg-white rb:rounded-xl rb:flex rb:flex-col'>
-      <Flex gap={4} className="rb:mb-3">
+    <Flex vertical className='rb:w-full rb:h-full rb:p-3! rb:bg-white rb:rounded-xl'>
+      <Flex gap={4} align="center" className="rb:mb-1!">
         <span className="rb:font-[MiSans-Bold] rb:font-bold rb:leading-5">{t('index.latestUpdate')}</span>
         {versionInfo?.version && 
-          <span className='rb:text-[12px] rb:text-white rb:leading-4.25 rb:pt-px rb:pl-2 rb:pr-1.75 rb:bg-[#171719] rb:rounded-lg rb:rounded-bl-none '>
+          <span className='rb:text-[12px] rb:text-white rb:font-medium rb:leading-4.5 rb:pl-2 rb:pr-1.75 rb:bg-[#171719] rb:rounded-lg rb:rounded-bl-none! '>
             {versionInfo?.version}
           </span>
         }
       </Flex>
       {introduction
         ? (<>  
-          <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4.5 rb:mt-1 rb:mb-2">
+          <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4.5 rb:mb-2">
             {t('version.releaseDate')}: {formatDateTime(introduction.releaseDate, 'YYYY-MM-DD')} | {t('version.name')}: {introduction.codeName}
           </div>
           <div className="rb:flex-1 rb:min-h-0 rb:overflow-y-auto">
@@ -70,7 +70,7 @@ const VersionCard: React.FC = () => {
         </>)
         : <Empty size={88} />
       }
-    </div>
+    </Flex>
   );
 };
 
