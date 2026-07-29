@@ -1,7 +1,5 @@
-import csv as csv_module
 import asyncio
 import datetime
-import io
 import json
 from typing import Optional
 import uuid
@@ -60,6 +58,7 @@ from app.services.qa_export_service import (
     iter_qa_csv_chunks,
     iter_qa_pairs_by_document,
     make_qa_export_filename,
+    render_qa_pairs_export,
 )
 from app.core.quota_stub import check_knowledge_capacity_quota
 
@@ -89,31 +88,15 @@ def _build_qa_export_content(
     document_id: uuid.UUID | str,
     file_ext: str | None,
 ) -> bytes | None:
-    qa_pairs = list(iter_qa_pairs_by_document(kb_id, document_id))
-
-    if not qa_pairs:
+    rendered = render_qa_pairs_export(
+        list(iter_qa_pairs_by_document(kb_id, document_id)),
+        file_ext,
+    )
+    if rendered is None:
         return None
 
-    file_ext_lower = file_ext.lower() if file_ext else ".csv"
-    if file_ext_lower in (".xlsx", ".xls"):
-        import openpyxl
-
-        wb = openpyxl.Workbook()
-        ws = wb.active
-        ws.append(["question", "answer"])
-        for pair in qa_pairs:
-            ws.append([pair["question"], pair["answer"]])
-        output = io.BytesIO()
-        wb.save(output)
-        wb.close()
-        return output.getvalue()
-
-    text_output = io.StringIO()
-    writer = csv_module.writer(text_output)
-    writer.writerow(["question", "answer"])
-    for pair in qa_pairs:
-        writer.writerow([pair["question"], pair["answer"]])
-    return text_output.getvalue().encode("utf-8-sig")
+    content, _ = rendered
+    return content
 
 
 async def _dispatch_reparse_tasks_for_knowledge_async(

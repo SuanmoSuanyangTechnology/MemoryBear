@@ -14,6 +14,8 @@ from app.core.rag.vdb.field import Field
 
 QA_EXPORT_COLUMNS = ("question", "answer")
 QA_EXPORT_BATCH_SIZE = 1000
+QA_CSV_MEDIA_TYPE = "text/csv"
+QA_XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 
 def make_qa_export_filename(knowledge_name: str | None) -> str:
@@ -82,6 +84,27 @@ def iter_qa_csv_chunks(
     yield _write_csv_rows([QA_EXPORT_COLUMNS]).encode("utf-8-sig")
     for pair in iter_qa_pairs_by_knowledge(kb_id=kb_id, batch_size=batch_size):
         yield _write_csv_rows([(pair["question"], pair["answer"])]).encode("utf-8")
+
+
+def render_qa_pairs_export(
+    qa_pairs: list[Mapping[str, Any]],
+    file_ext: str | None,
+) -> tuple[bytes, str] | None:
+    if not qa_pairs:
+        return None
+
+    if _is_xlsx_file(file_ext):
+        return _write_xlsx_qa_pairs(qa_pairs), QA_XLSX_MEDIA_TYPE
+
+    rows: list[tuple[str, ...]] = [QA_EXPORT_COLUMNS]
+    rows.extend(
+        (
+            _normalize_csv_value(pair.get("question")),
+            _normalize_csv_value(pair.get("answer")),
+        )
+        for pair in qa_pairs
+    )
+    return _write_csv_rows(rows).encode("utf-8-sig"), QA_CSV_MEDIA_TYPE
 
 
 def _qa_export_sort() -> list[dict[str, Any]]:
@@ -162,6 +185,32 @@ def _write_csv_rows(rows: list[tuple[str, ...]]) -> str:
     writer = csv.writer(output)
     writer.writerows(rows)
     return output.getvalue()
+
+
+def _is_xlsx_file(file_ext: str | None) -> bool:
+    file_ext_lower = file_ext.lower() if file_ext else ".csv"
+    return file_ext_lower in (".xlsx", ".xls")
+
+
+def _write_xlsx_qa_pairs(qa_pairs: list[Mapping[str, Any]]) -> bytes:
+    import openpyxl
+
+    wb = openpyxl.Workbook()
+    try:
+        ws = wb.active
+        ws.append(QA_EXPORT_COLUMNS)
+        for pair in qa_pairs:
+            ws.append(
+                [
+                    _normalize_csv_value(pair.get("question")),
+                    _normalize_csv_value(pair.get("answer")),
+                ]
+            )
+        output = io.BytesIO()
+        wb.save(output)
+        return output.getvalue()
+    finally:
+        wb.close()
 
 
 def _normalize_csv_value(value: Any) -> str:

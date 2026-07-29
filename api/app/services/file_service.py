@@ -1,6 +1,4 @@
 import asyncio
-import csv as csv_module
-import io
 import struct
 import uuid
 import zlib
@@ -13,7 +11,10 @@ from app.models.file_model import File
 from app.schemas.file_schema import FileCreate, FileUpdate
 from app.repositories import file_repository
 from app.core.logging_config import get_business_logger
-from app.services.qa_export_service import iter_qa_pairs_by_document
+from app.services.qa_export_service import (
+    iter_qa_pairs_by_document,
+    render_qa_pairs_export,
+)
 
 # Obtain a dedicated logger for business logic
 business_logger = get_business_logger()
@@ -122,34 +123,11 @@ def _build_qa_export(db: Session, file_id: uuid.UUID, kb_id: uuid.UUID) -> tuple
         return None
 
     qa_pairs = list(iter_qa_pairs_by_document(kb_id, doc.id))
-
-    if not qa_pairs:
+    rendered = render_qa_pairs_export(qa_pairs, db_file.file_ext)
+    if rendered is None:
         return None
 
-    file_ext_lower = db_file.file_ext.lower() if db_file.file_ext else ".csv"
-    is_xlsx = file_ext_lower in (".xlsx", ".xls")
-
-    if is_xlsx:
-        import openpyxl
-        wb = openpyxl.Workbook()
-        ws = wb.active
-        ws.append(["question", "answer"])
-        for pair in qa_pairs:
-            ws.append([pair["question"], pair["answer"]])
-        output = io.BytesIO()
-        wb.save(output)
-        content = output.getvalue()
-        wb.close()
-        media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    else:
-        text_output = io.StringIO()
-        writer = csv_module.writer(text_output)
-        writer.writerow(["question", "answer"])
-        for pair in qa_pairs:
-            writer.writerow([pair["question"], pair["answer"]])
-        content = text_output.getvalue().encode("utf-8-sig")
-        media_type = "text/csv"
-
+    content, media_type = rendered
     return content, db_file.file_name, media_type
 
 
