@@ -157,22 +157,6 @@ def _qa_pair_from_source(source: Mapping[str, Any]) -> dict[str, str]:
     }
 
 
-def _build_qa_export_search_body(
-    kb_id: str,
-    batch_size: int,
-    search_after: list[Any] | None,
-) -> dict[str, Any]:
-    body: dict[str, Any] = {
-        "query": _qa_export_query(kb_id, active_only=True),
-        "_source": _qa_source_includes(),
-        "size": batch_size,
-        "sort": _qa_export_sort(),
-    }
-    if search_after:
-        body["search_after"] = search_after
-    return body
-
-
 def _write_csv_rows(rows: list[tuple[str, ...]]) -> str:
     output = io.StringIO()
     writer = csv.writer(output)
