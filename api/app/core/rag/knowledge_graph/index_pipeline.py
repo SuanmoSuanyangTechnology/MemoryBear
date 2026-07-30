@@ -342,9 +342,6 @@ class KnowledgeGraphIndexPipeline:
                 stage = "rebuild_graph_pageranks"
                 self._lock_guard.ensure_valid()
                 await self._rebuild_graph_pageranks(runtime)
-                stage = "refresh_graph_pageranks"
-                self._lock_guard.ensure_valid()
-                await self._store.refresh_graph(runtime.graph_index_name)
             logger.info(
                 "[EvidenceGraph] index_done"
                 " kb_id=%s document_id=%s"
@@ -419,8 +416,6 @@ class KnowledgeGraphIndexPipeline:
         await self._store.refresh_graph(runtime.graph_index_name)
         self._lock_guard.ensure_valid()
         await self._rebuild_graph_pageranks(runtime)
-        self._lock_guard.ensure_valid()
-        await self._store.refresh_graph(runtime.graph_index_name)
         logger.info(
             "[EvidenceGraph] rebuild_done"
             " kb_id=%s active_documents=%d stale_documents=%d elapsed_ms=%d",
