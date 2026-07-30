@@ -717,8 +717,8 @@ class MultimodalService:
     def _extract_pdf_images(file_content: bytes) -> list[dict]:
         """从 PDF 提取内嵌图片，附带页码和序号"""
         images = []
+        import fitz  # PyMuPDF
         try:
-            import fitz  # PyMuPDF
             doc = fitz.open(stream=file_content, filetype="pdf")
             for page_num, page in enumerate(doc, start=1):
                 for idx, img in enumerate(page.get_images(full=True)):

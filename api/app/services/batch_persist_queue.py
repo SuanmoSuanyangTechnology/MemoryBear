@@ -24,8 +24,6 @@ from sqlalchemy import (
     insert as sa_insert,
     update as sa_update,
     case as sa_case,
-    func as sa_func,
-    text as sa_text,
 )
 
 from app.core.config import settings
@@ -217,11 +215,10 @@ class BatchPersistQueue:
         msg_tasks = [t for t in batch if t.task_type in ("save_messages", "save_failed_message")]
         other_tasks = [t for t in batch if t not in msg_tasks]
 
-        memory_conv_ids: list[str] = []
         try:
             async with get_async_db_context() as db:
                 if msg_tasks:
-                    memory_conv_ids = await _bulk_persist_messages(db, msg_tasks)
+                    await _bulk_persist_messages(db, msg_tasks)
                 for task in other_tasks:
                     try:
                         await self._execute_task(db, task)
@@ -235,34 +232,17 @@ class BatchPersistQueue:
         except Exception:
             logger.exception("Batch persist failed for %d tasks (%d msg)", len(batch), len(msg_tasks))
 
-        for conv_id in memory_conv_ids:
-            try:
-                asyncio.ensure_future(_mark_memory_pending(conv_id))
-            except Exception:
-                logger.warning(
-                    "Failed to schedule mark_pending for conv %s", conv_id, exc_info=True,
-                )
-
     async def _sync_write(self, task: PersistTask) -> None:
         """Synchronous (immediate) write fallback for a single task."""
-        memory_conv_ids: list[str] = []
         try:
             async with get_async_db_context() as db:
                 if task.task_type in ("save_messages", "save_failed_message"):
-                    memory_conv_ids = await _bulk_persist_messages(db, [task])
+                    await _bulk_persist_messages(db, [task])
                 else:
                     await self._execute_task(db, task)
                 await db.commit()
         except Exception:
             logger.exception("Sync persist failed for task %s", task.task_type)
-
-        for conv_id in memory_conv_ids:
-            try:
-                asyncio.ensure_future(_mark_memory_pending(conv_id))
-            except Exception:
-                logger.warning(
-                    "Failed to schedule mark_pending for conv %s", conv_id, exc_info=True,
-                )
 
     # -- task handlers ----------------------------------------------------------
 
@@ -304,24 +284,14 @@ def _row(
 async def _bulk_persist_messages(
     db: Any,
     msg_tasks: list[PersistTask],
-) -> list[str]:
+) -> None:
     """Persist all messages from *msg_tasks* via a single multi-row INSERT
-    followed by atomic ``message_count`` UPDATEs per conversation.
-
-    When a task carries ``with_memory=True``, also inserts into
-    ``memory_messages`` within the same transaction.
-
-    Returns a list of conversation_ids that need ``mark_conversation_pending``
-    after commit (may be empty).
-    """
+    followed by atomic ``message_count`` UPDATEs per conversation."""
     from app.models.conversation_model import Message, Conversation
     from app.services.chat_context import StreamResult
 
     rows: list[dict[str, Any]] = []
     conv_deltas: dict[uuid_module.UUID, tuple[int, str | None]] = defaultdict(lambda: (0, None))
-    memory_conv_ids: list[str] = []
-    # Defer memory writes until after messages are INSERTed so FK references resolve.
-    _memory_params: list[dict[str, Any]] = []
 
     for task in msg_tasks:
         args = task.args
@@ -365,8 +335,8 @@ async def _bulk_persist_messages(
         if result and getattr(result, 'history_files', None):
             user_meta["history_files"] = result.history_files
 
-        user_content = args.get("user_message_content", "") or ""
-        rows.append(_row(user_msg_id, conv_id, "user", user_content, user_meta))
+        rows.append(_row(user_msg_id, conv_id, "user",
+                         args.get("user_message_content", ""), user_meta))
 
         # assistant message meta
         if args.get("meta_override"):
@@ -395,6 +365,7 @@ async def _bulk_persist_messages(
             result.full_content if result else "")
         rows.append(_row(msg_id, conv_id, "assistant", assistant_content, assistant_meta))
 
+        user_content = args.get("user_message_content", "") or ""
         title_candidate = user_content[:50] + ("..." if len(user_content) > 50 else "") if user_content else None
         delta, _ = conv_deltas[conv_id]
         conv_deltas[conv_id] = (delta + 2, title_candidate)
@@ -407,27 +378,9 @@ async def _bulk_persist_messages(
                 d, t = conv_deltas[conv_id]
                 conv_deltas[conv_id] = (d + 1, t)
 
-        # Collect memory params — must write AFTER messages INSERT so FK references resolve.
-        if args.get("with_memory") and ctx:
-            _memory_params.append({
-                "conv_id": conv_id,
-                "ctx": ctx,
-                "user_msg_id": user_msg_id,
-                "msg_id": msg_id,
-                "user_content": user_content,
-                "assistant_content": assistant_content,
-            })
-
     # --- single multi-row INSERT for all messages ---
     if rows:
         await db.execute(sa_insert(Message).values(rows))
-
-    # --- memory_messages (now that FK targets exist) ---
-    for mp in _memory_params:
-        await _write_memory_messages_inline(
-            db, mp["conv_id"], mp["ctx"], mp["user_msg_id"], mp["msg_id"],
-            mp["user_content"], mp["assistant_content"], memory_conv_ids,
-        )
 
     # --- atomic UPDATE per conversation ---
     for conv_id, (delta, title_candidate) in conv_deltas.items():
@@ -444,88 +397,6 @@ async def _bulk_persist_messages(
         await db.execute(
             sa_update(Conversation).where(Conversation.id == conv_id).values(**values)
         )
-
-    return memory_conv_ids
-
-
-async def _write_memory_messages_inline(
-    db: Any,
-    conv_id: uuid_module.UUID,
-    ctx: Any,
-    user_msg_id: uuid_module.UUID,
-    assistant_msg_id: uuid_module.UUID,
-    user_content: str,
-    assistant_content: str,
-    memory_conv_ids: list[str],
-) -> None:
-    """Insert user + assistant rows into ``memory_messages`` with per-conversation
-    seq allocation, and append conversation_id to *memory_conv_ids*."""
-    from app.models.memory_message_model import MemoryMessage
-    from app.core.memory.enums import MemoryMessageSource
-
-    end_user_id = str(ctx.user_id) if ctx.user_id else ""
-    source = MemoryMessageSource.AGENT
-    should_memorize = bool(ctx.memory_enabled) if hasattr(ctx, 'memory_enabled') else True
-
-    # Per-conversation advisory lock for seq allocation
-    lock_key = f"mm_seq:conv:{conv_id}"
-    await db.execute(sa_text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"), {"key": lock_key})
-
-    # Current max seq
-    stmt = sa_select(sa_func.coalesce(sa_func.max(MemoryMessage.message_seq), 0))
-    stmt = stmt.where(MemoryMessage.conversation_id == conv_id)
-    seq_result = await db.execute(stmt)
-    next_seq: int = seq_result.scalar() or 0
-
-    now = utcnow_naive()
-    dialog_at = now.isoformat()
-
-    # User
-    next_seq += 1
-    db.add(MemoryMessage(
-        id=uuid_module.uuid4(),
-        conversation_id=conv_id,
-        original_message_id=user_msg_id,
-        end_user_id=end_user_id,
-        source=source.value,
-        role="user",
-        content=user_content,
-        message_seq=next_seq,
-        should_memorize=should_memorize,
-        created_at=now,
-        dialog_at=dialog_at,
-    ))
-
-    # Assistant
-    assistant_seq: int | None = None
-    if assistant_content.strip():
-        next_seq += 1
-        assistant_seq = next_seq
-        db.add(MemoryMessage(
-            id=uuid_module.uuid4(),
-            conversation_id=conv_id,
-            original_message_id=assistant_msg_id,
-            end_user_id=end_user_id,
-            source=source.value,
-            role="assistant",
-            content=assistant_content,
-            message_seq=assistant_seq,
-            should_memorize=True,
-            created_at=now,
-            dialog_at=dialog_at,
-        ))
-
-    memory_conv_ids.append(str(conv_id))
-
-
-async def _mark_memory_pending(conv_id: str) -> None:
-    """Best-effort: mark conversation as pending so the periodic Celery task
-    picks it up for memory extraction."""
-    try:
-        from app.core.memory.pipelines.dispatcher import mark_conversation_pending
-        mark_conversation_pending(conv_id)
-    except Exception:
-        logger.warning("mark_conversation_pending failed for conv %s", conv_id, exc_info=True)
 
 
 async def _handle_save_execution(
