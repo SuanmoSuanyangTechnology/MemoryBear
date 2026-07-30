@@ -10,10 +10,15 @@
 
 import logging
 import uuid
-from datetime import datetime, timezone
 from typing import List
 
-from app.core.utils.datetime_utils import utcnow
+from sqlalchemy.orm import Session
+
+from app.core.utils.datetime_utils import to_timestamp_ms, utcnow
+from app.repositories.end_user_repository import EndUserRepository
+from app.repositories.memory_display_record_repository import (
+    MemoryDisplayRecordRepository,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +28,47 @@ _MAX_RETRIES = 2
 
 class MemoryDisplayRecordService:
     """记忆展示记录业务逻辑层"""
+
+    @staticmethod
+    def query_written(
+        db: Session,
+        end_user_id: str,
+        workspace_id: uuid.UUID,
+        page: int,
+        pagesize: int,
+    ) -> tuple[List[dict], int] | None:
+        """查询写入展示记录并组装前端 DTO。
+
+        返回 None 表示终端用户不属于当前工作空间。
+        """
+        end_user_uuid = uuid.UUID(end_user_id)
+        end_user_repo = EndUserRepository(db)
+        if end_user_repo.get_active_end_user_in_workspace(
+            end_user_uuid,
+            workspace_id,
+        ) is None:
+            return None
+
+        repo = MemoryDisplayRecordRepository(db)
+        records, total = repo.query_written_paginated(
+            end_user_id=end_user_id,
+            workspace_id=workspace_id,
+            page=page,
+            pagesize=pagesize,
+        )
+
+        items = [
+            {
+                "id": str(record.id),
+                "memory_id": record.memory_id,
+                "memory_type": record.memory_type,
+                "name": record.name,
+                "content": record.content,
+                "occurred_at": to_timestamp_ms(record.occurred_at),
+            }
+            for record in records
+        ]
+        return items, total
 
     @staticmethod
     async def save_written(
@@ -43,9 +89,6 @@ class MemoryDisplayRecordService:
 
         from app.db import get_db_context
         from app.models.memory_display_record_model import MemoryDisplayRecord
-        from app.repositories.memory_display_record_repository import (
-            MemoryDisplayRecordRepository,
-        )
 
         # 过滤 memory_type 为空的 summary
         valid_summaries = [
@@ -75,9 +118,6 @@ class MemoryDisplayRecordService:
         # 组装 PG 记录
         records = []
         for s in deduped:
-            # 解析 created_at
-            created_at = _parse_created_at(s.created_at)
-
             # 标题兜底
             name = s.name if s.name and str(s.name).strip() else f"记忆_{s.id[:8]}"
 
@@ -90,7 +130,6 @@ class MemoryDisplayRecordService:
                 memory_type=str(s.memory_type).strip(),
                 name=str(name).strip(),
                 content=s.content or "",
-                created_at=created_at,
                 score=None,
                 rank=None,
                 search_mode=None,
@@ -124,45 +163,3 @@ class MemoryDisplayRecordService:
             f"end_user_id={end_user_id}, operation_id={operation_id}, "
             f"error={last_error}"
         )
-
-
-def _parse_created_at(value) -> datetime:
-    """解析 MemorySummaryNode.created_at 为 UTC datetime。
-
-    处理以下情况：
-    - Python datetime（aware 或 naive）
-    - ISO 8601 UTC 字符串（如 "2026-07-29T06:00:00Z"）
-    - Neo4j DateTime 对象（有 to_native() 方法）
-    """
-    if value is None:
-        return utcnow()
-
-    # 已经是 datetime
-    if isinstance(value, datetime):
-        if value.tzinfo is None:
-            return value.replace(tzinfo=timezone.utc)
-        return value.astimezone(timezone.utc)
-
-    # Neo4j DateTime 对象
-    if hasattr(value, "to_native"):
-        native = value.to_native()
-        if native.tzinfo is None:
-            return native.replace(tzinfo=timezone.utc)
-        return native.astimezone(timezone.utc)
-
-    # ISO 8601 字符串
-    if isinstance(value, str):
-        # 处理 Z 后缀
-        s = value.replace("Z", "+00:00")
-        try:
-            dt = datetime.fromisoformat(s)
-            if dt.tzinfo is None:
-                return dt.replace(tzinfo=timezone.utc)
-            return dt.astimezone(timezone.utc)
-        except ValueError:
-            logger.warning(f"[MemoryDisplayRecord] 无法解析 created_at: {value}")
-            return utcnow()
-
-    # 兜底
-    logger.warning(f"[MemoryDisplayRecord] 未知 created_at 类型: {type(value)}")
-    return utcnow()

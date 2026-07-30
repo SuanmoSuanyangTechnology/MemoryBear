@@ -116,6 +116,30 @@ class EndUserRepository:
             db_logger.error(f"查询宿主 {end_user_id} 时出错: {str(e)}")
             raise
 
+    def get_active_end_user_in_workspace(
+        self,
+        end_user_id: uuid.UUID,
+        workspace_id: uuid.UUID,
+    ) -> Optional[EndUser]:
+        """查询当前工作空间内的有效终端用户。"""
+        try:
+            return (
+                self.db.query(EndUser)
+                .filter(
+                    EndUser.id == end_user_id,
+                    EndUser.workspace_id == workspace_id,
+                    EndUser.is_active.is_(True),
+                )
+                .first()
+            )
+        except Exception as e:
+            self.db.rollback()
+            db_logger.error(
+                f"查询工作空间 {workspace_id} 下的终端用户 "
+                f"{end_user_id} 时出错: {str(e)}"
+            )
+            raise
+
     async def get_end_user_by_id_async(self, end_user_id: uuid.UUID) -> Optional[EndUser]:
         try:
             result = await self.db.execute(

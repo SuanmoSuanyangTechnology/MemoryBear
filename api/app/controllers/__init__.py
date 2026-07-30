@@ -121,7 +121,7 @@ manager_router.include_router(tenant_quota_controller.router)
 manager_router.include_router(tenant_subscription_controller.router)
 manager_router.include_router(tenant_subscription_controller.public_router)
 manager_router.include_router(message_interaction_controller.router)  # 消息交互功能
-manager_router.include_router(memory_display_controller.router)  # 记忆写入展示
+manager_router.include_router(memory_display_controller.router)  # 记忆和引擎展示
 manager_router.include_router(workflow_trigger_controller.router)
 manager_router.include_router(human_intervention_controller.router)  # 人工介入功能
 manager_router.include_router(internal_sandbox_controller.router)

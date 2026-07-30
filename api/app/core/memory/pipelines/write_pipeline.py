@@ -514,7 +514,23 @@ class WritePipeline:
                     await self._build_user_source_subgraph(extraction_result)
 
                 async with bear.step(4, 6, "存储", "写入 Neo4j"):
-                    await self._store(extraction_result)
+                    stored = await self._store(extraction_result)
+
+                # Neo4j 事务成功后，触发引擎展示 PG 写入
+                if stored:
+                    try:
+                        from app.services.memory_engine_display_service import (
+                            MemoryEngineDisplayService,
+                        )
+                        await MemoryEngineDisplayService.save_events(
+                            end_user_id=self.end_user_id,
+                            extraction_result=extraction_result,
+                        )
+                    except Exception as e:
+                        logger.warning(
+                            f"[EngineDisplay] 引擎展示 PG 写入异常（不影响主流程）: {e}",
+                            exc_info=True,
+                        )
 
                 # Step 6: 摘要 - 生成情景记忆摘要
                 async with bear.step(6, 6, "摘要", "生成情景记忆"):
@@ -697,12 +713,17 @@ class WritePipeline:
     # Step 3: 存储
     # ──────────────────────────────────────────────
 
-    async def _store(self, result: ExtractionResult) -> None:
+    async def _store(self, result: ExtractionResult) -> bool:
         """
         存储：别名清洗 → Neo4j 写入（含死锁重试）。
 
         错误策略：
         - 别名清洗失败 → 警告日志，继续写入
+
+        Returns:
+            True: Neo4j 事务整体成功
+            False: 重试后仍部分失败
+            异常: 死锁重试耗尽或非死锁异常向上抛出
         """
         from app.repositories.neo4j.graph_saver import (
             save_dialog_and_statements_to_neo4j,
@@ -736,7 +757,7 @@ class WritePipeline:
                 )
                 if success:
                     logger.debug("Successfully saved all data to Neo4j")
-                    return
+                    return True
                 # 写入返回 False（部分失败）
                 if attempt < max_retries - 1:
                     logger.warning(
@@ -745,12 +766,14 @@ class WritePipeline:
                     await asyncio.sleep(1 * (attempt + 1))
                 else:
                     logger.error(f"Neo4j 写入在 {max_retries} 次尝试后仍部分失败")
+                    return False
             except Exception as e:
                 if self._is_deadlock(e) and attempt < max_retries - 1:
                     logger.warning(f"Neo4j 死锁，重试 ({attempt + 2}/{max_retries})")
                     await asyncio.sleep(1 * (attempt + 1))
                 else:
                     raise
+        return False
 
     # ──────────────────────────────────────────────
     # Step 3.5: 构建 UserSource 子图

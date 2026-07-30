@@ -30,7 +30,6 @@ class MemoryDisplayRecord(Base):
     memory_type = Column(String(32), nullable=False)
     name = Column(String(255), nullable=False)
     content = Column(Text, nullable=False)
-    created_at = Column(DateTime(timezone=True), nullable=False)
     score = Column(Float, nullable=True)
     rank = Column(Integer, nullable=True)
     search_mode = Column(String(16), nullable=True)

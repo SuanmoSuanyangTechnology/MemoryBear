@@ -4,12 +4,14 @@
 """
 
 import logging
+import uuid
 from typing import List, Tuple
 
-from sqlalchemy import func
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
+from app.models.end_user_model import EndUser
 from app.models.memory_display_record_model import MemoryDisplayRecord
 
 logger = logging.getLogger(__name__)
@@ -50,7 +52,6 @@ class MemoryDisplayRecordRepository:
                 "memory_type": r.memory_type,
                 "name": r.name,
                 "content": r.content,
-                "created_at": r.created_at,
                 "score": r.score,
                 "rank": r.rank,
                 "search_mode": r.search_mode,
@@ -75,22 +76,45 @@ class MemoryDisplayRecordRepository:
     def query_written_paginated(
         self,
         end_user_id: str,
+        workspace_id: uuid.UUID,
         page: int,
         pagesize: int,
     ) -> Tuple[List[MemoryDisplayRecord], int]:
-        """按 created_at DESC, id DESC 分页查询写入展示记录。
+        """按 occurred_at DESC, id DESC 分页查询写入展示记录。
+
+        查询附加 end_users 归属条件并限定 workspace_id，
+        防止跨工作空间越权读取。
 
         Args:
-            end_user_id: 终端用户 ID
+            end_user_id: 终端用户 ID（UUID 字符串）
+            workspace_id: 当前工作空间 ID，用于数据隔离
             page: 页码（从 1 开始）
             pagesize: 每页数量
 
         Returns:
             (记录列表, 总条数)
         """
+        # memory_display_records.end_user_id 是 varchar，end_users.id 是 uuid，
+        # 直接 JOIN 会有类型不匹配，改用归属 EXISTS 子查询（可命中 end_users 主键）
+        try:
+            end_user_uuid = uuid.UUID(end_user_id)
+        except (ValueError, AttributeError, TypeError):
+            return [], 0
+
+        owned_by_workspace = (
+            select(EndUser.id)
+            .where(
+                EndUser.id == end_user_uuid,
+                EndUser.workspace_id == workspace_id,
+                EndUser.is_active.is_(True),
+            )
+            .exists()
+        )
+
         base_filter = (
             (MemoryDisplayRecord.end_user_id == end_user_id)
             & (MemoryDisplayRecord.operation == "WRITE")
+            & owned_by_workspace
         )
 
         total = (
@@ -104,7 +128,7 @@ class MemoryDisplayRecordRepository:
             self.db.query(MemoryDisplayRecord)
             .filter(base_filter)
             .order_by(
-                MemoryDisplayRecord.created_at.desc(),
+                MemoryDisplayRecord.occurred_at.desc(),
                 MemoryDisplayRecord.id.desc(),
             )
             .offset(offset)
