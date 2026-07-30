@@ -179,7 +179,14 @@ const RecallTest = forwardRef<RecallTestDrawerRef>(({},ref) => {
               )}  
 
               {(retrieveType === 'hybrid') &&
-                <Form.Item name="enable_graph_retrieval" valuePropName="checked" initialValue={true} label={t('knowledgeBase.hybridIsHasGraph')}>
+                <Form.Item
+                    name="enable_graph_retrieval"
+                    getValueProps={(value: 0 | 1 | undefined) => ({ checked: value === 1 })}
+                    getValueFromEvent={(checked: boolean) => checked ? 1 : 0}
+                    initialValue={0}
+                    valuePropName="checked"
+                    label={t('knowledgeBase.hybridIsHasGraph')}
+                >
                     <Switch checkedChildren={t('knowledgeBase.yes')} unCheckedChildren={t('knowledgeBase.no')} />
                 </Form.Item>
               }
