@@ -61,7 +61,12 @@ export const userMemory = {
       EMOTIONAL_MEMORY: '情绪记忆',
       EPISODIC_MEMORY: '情景记忆',
       FORGET_MEMORY: '遗忘记忆',
-      
+
+      memoryType: '记忆类型',
+      allTermMemory: '全部',
+      shortTermMemory: '短时记忆',
+      longTermMemory: '长时记忆',
+
       endUserProfile: '永久记忆',
       editEndUserProfile: '编辑',
       other_name: '名称',

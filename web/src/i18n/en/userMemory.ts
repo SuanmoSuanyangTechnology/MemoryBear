@@ -61,6 +61,11 @@ export const userMemory = {
       EPISODIC_MEMORY: 'Episodic Memory',
       FORGET_MEMORY: 'Forget Memory',
 
+      memoryType: 'Memory Type',
+      allTermMemory: 'All Memory',
+      shortTermMemory: 'Short-Term Memory',
+      longTermMemory: 'Long-Term Memory',
+
       endUserProfile: 'Permanent Memory',
       editEndUserProfile: 'Edit',
       other_name: 'Name',
