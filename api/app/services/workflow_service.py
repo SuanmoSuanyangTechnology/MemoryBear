@@ -1006,6 +1006,7 @@ class WorkflowService:
 
 
             async with get_async_db_context() as db:
+                # Read annotation settings
                 result = await db.execute(
                     select(
                         AppAnnotationSetting.similarity_threshold,
@@ -1022,7 +1023,7 @@ class WorkflowService:
                 if not enabled or not model_config_id:
                     return None
 
-            async with get_async_db_context() as db:
+                # Read annotations + model config in same session
                 result = await db.execute(
                     select(
                         AppAnnotation.id,
@@ -3734,86 +3735,30 @@ class WorkflowService:
             workflow_output_data: Any,
             token_usage: Any,
     ) -> WorkflowExecutionRef:
-        async with get_async_db_context() as db:
-            started_at = time.perf_counter()
-            conversation = await db.get(Conversation, conversation_id)
-            if not conversation:
-                raise BusinessException(
-                    f"会话不存在: conversation_id={conversation_id}",
-                    code=BizCode.NOT_FOUND,
-                )
+        # Enqueue message persistence to BatchPersistQueue (async, non-blocking)
+        if conversation_id:
+            from app.services.batch_persist_queue import BatchPersistQueue, PersistTask
+            await BatchPersistQueue.enqueue(PersistTask(
+                task_type="save_messages",
+                args={
+                    "conversation_id": str(conversation_id),
+                    "user_message_id_override": user_message_id or uuid.uuid4(),
+                    "message_id_override": assistant_message_id or uuid.uuid4(),
+                    "user_message_content": human_message,
+                    "user_meta_override": human_meta or {"files": []},
+                    "content_override": assistant_message,
+                    "meta_override": assistant_meta or {},
+                    "user_parent_message_id": from_message_id,
+                    "sync_memory": False,  # workflow has its own memory ingestion via memory node
+                },
+            ))
 
-            result = await db.execute(
-                select(WorkflowExecution).where(WorkflowExecution.execution_id == execution_id)
-            )
-            execution = result.scalar_one_or_none()
-            if not execution:
-                runtime_execution = await self._get_runtime_execution_snapshot_async(execution_id)
-                if not runtime_execution:
-                    raise BusinessException(
-                        code=BizCode.NOT_FOUND,
-                        message=f"执行记录不存在: execution_id={execution_id}",
-                    )
-                execution = self._build_execution_record_from_ref(runtime_execution)
-                db.add(execution)
-
-            user_msg = Message(
-                id=user_message_id if user_message_id else uuid.uuid4(),
-                conversation_id=conversation_id,
-                role="user",
-                content=human_message,
-                meta_data=human_meta,
-                status="completed",
-                parent_message_id=from_message_id,
-            )
-            assistant_msg = Message(
-                id=assistant_message_id if assistant_message_id else uuid.uuid4(),
-                conversation_id=conversation_id,
-                role="assistant",
-                content=assistant_message,
-                meta_data=assistant_meta,
-                status="completed",
-                parent_message_id=user_msg.id,
-            )
-            db.add(user_msg)
-            db.add(assistant_msg)
-
-            message_count = int(conversation.message_count or 0)
-            if message_count + 1 <= 2:
-                conversation.title = human_message[:50] + ("..." if len(human_message) > 50 else "")
-            conversation.message_count = message_count + 2
-
-            execution.status = "completed"
-            execution.output_data = (
-                convert_uuids_to_str(workflow_output_data)
-                if workflow_output_data is not None
-                else workflow_output_data
-            )
-            execution.token_usage = token_usage
-            if not execution.completed_at:
-                execution.completed_at = utcnow_naive()
-                execution.elapsed_time = (
-                    (execution.completed_at - execution.started_at).total_seconds()
-                    if execution.started_at else 0.0
-                )
-
-            before_commit_at = time.perf_counter()
-            await db.commit()
-            after_commit_at = time.perf_counter()
-            pool_status = get_async_pool_status()
-            logger.info(
-                "[TIMING] workflow.finalize_execution stage=after_commit execution_id=%s "
-                "total_ms=%.2f commit_ms=%.2f pool_checked_out=%s pool_overflow=%s "
-                "pool_usage_percent=%s",
-                execution_id,
-                (after_commit_at - started_at) * 1000,
-                (after_commit_at - before_commit_at) * 1000,
-                pool_status["checked_out"],
-                pool_status["overflow"],
-                pool_status["usage_percent"],
-            )
-            await self._delete_runtime_execution_snapshot_async(execution_id)
-            return self._build_execution_ref(execution)
+        return await self._patch_execution_async(
+            execution_id,
+            status="completed",
+            output_data=workflow_output_data,
+            token_usage=token_usage,
+        )
 
     async def _update_message_async(
             self,
@@ -3857,19 +3802,20 @@ class WorkflowService:
     ) -> None:
         if not conversation_id:
             return
-        await self._add_message_async(
-            conversation_id=conversation_id,
-            role="user",
-            content=human_message,
-            meta_data=human_meta,
-        )
-        await self._add_message_async(
-            conversation_id=conversation_id,
-            role="assistant",
-            content="",
-            meta_data={"error": error},
-            message_id=message_id,
-        )
+        from app.services.batch_persist_queue import BatchPersistQueue, PersistTask
+        await BatchPersistQueue.enqueue(PersistTask(
+            task_type="save_failed_message",
+            args={
+                "conversation_id": str(conversation_id),
+                "message_id": message_id or uuid.uuid4(),
+                "user_message_id": uuid.uuid4(),
+                "user_message_content": human_message,
+                "files_meta": (human_meta or {}).get("files", []),
+                "error_message": "",
+                "error_detail": error,
+                "sync_memory": False,
+            },
+        ))
 
     async def _archive_resolved_intervention_async(
             self,
@@ -4742,6 +4688,17 @@ class WorkflowService:
         return storage_type, user_rag_memory_id
 
     async def _get_memory_store_info_async(self, workspace_id: uuid.UUID) -> tuple[str, str]:
+        """Return (storage_type, user_rag_memory_id) with Redis caching.
+
+        Workspace storage type and RAG memory knowledge id change infrequently,
+        so this lookup is cached for 5 minutes to avoid a DB round-trip on
+        every workflow request.
+        """
+        cache_key = f"wf_mem_store:{workspace_id}"
+        cached = await get_json_async(cache_key)
+        if cached is not CACHE_MISS and isinstance(cached, dict):
+            return cached.get("storage_type", "neo4j"), cached.get("user_rag_memory_id", "")
+
         from app.models.workspace_model import Workspace
         from app.models.knowledge_model import Knowledge
 
@@ -4776,7 +4733,11 @@ class WorkflowService:
                     )
                     storage_type = "neo4j"
 
-            return storage_type, user_rag_memory_id
+        await set_json_async(cache_key, {
+            "storage_type": storage_type,
+            "user_rag_memory_id": user_rag_memory_id,
+        }, ttl=300)
+        return storage_type, user_rag_memory_id
 
     @staticmethod
     def _extract_human_message_and_meta(
@@ -6383,16 +6344,12 @@ class WorkflowService:
                 storage_type, user_rag_memory_id = await self._get_memory_store_info_async(workspace_id)
             input_data["files"] = files
             message_id = uuid.uuid4()
-            # 预生成 user_message_id：重新生成模式不创建新 user 消息，置 None
-            # （add_message 收到 None 时内部生成 id，行为同原先；仅非重新生成场景
-            # 需要把 id 经由 response 返回给前端，供"未刷新即删除 user 消息"使用）
             user_message_id = None if regenerate_mode else uuid.uuid4()
 
             if regenerate_mode and regenerate_history:
                 history = regenerate_history
             elif payload.from_message_id:
                 history = await self._get_history_from_message_async(payload.from_message_id)
-                # from_message_id 找不到对应 execution 时回退到最近 completed
                 if history is None and conversation_id_uuid:
                     history = await self._get_history_info_async(conversation_id_uuid)
             elif not has_existing_conversation:
@@ -6407,7 +6364,6 @@ class WorkflowService:
 
             # 新会话时写入开场白
             is_new_conversation = init_message_length == 0
-            # 重新生成场景不重复写开场白（会话历史中已存在）
             if is_new_conversation and not regenerate_mode:
                 opening_cfg = feature_configs.get("opening_statement", {})
                 if (
@@ -6428,7 +6384,6 @@ class WorkflowService:
                             content=statement,
                             meta_data={"suggested_questions": suggested_questions},
                         )
-                    # 注入到 conv_messages，让 LLM 感知开场白
                     input_data["conv_messages"] = [{"role": "assistant", "content": statement}]
                     init_message_length = 1
 
@@ -7019,7 +6974,6 @@ class WorkflowService:
             elif payload.from_message_id:
                 history = await self._get_history_from_message_async(payload.from_message_id)
                 history_source = "from_message"
-                # from_message_id 找不到对应 execution 时回退到最近 completed
                 if history is None and conversation_id_uuid:
                     history = await self._get_history_info_async(conversation_id_uuid)
                     history_source = "conversation_fallback"
@@ -7039,17 +6993,14 @@ class WorkflowService:
                 history_message_count=init_message_length,
                 history_source=history_source,
             )
+
             message_id = regenerate_message_id or uuid.uuid4()
-            # 预生成 user_message_id（重新生成模式不创建新 user 消息，置 None）。
-            # 主流程 user 消息在 workflow_end 后才落库(:5550)，而 workflow_start 事件
-            # (:5822) 在其之前发射，故先预生成 id 经事件返回前端，落库时用同一 id。
             user_message_id = None if regenerate_mode else uuid.uuid4()
             _cycle_items: dict[str, list] = {}
             intervention_list = []
 
             # 新会话时写入开场白
             is_new_conversation = init_message_length == 0
-            # 重新生成场景不重复写开场白（会话历史中已存在）
             if is_new_conversation and not regenerate_mode:
                 opening_cfg = feature_configs.get("opening_statement", {})
                 if (
@@ -7070,7 +7021,6 @@ class WorkflowService:
                             content=statement,
                             meta_data={"suggested_questions": suggested_questions},
                         )
-                    # 注入到 conv_messages，让 LLM 感知开场白
                     input_data["conv_messages"] = [{"role": "assistant", "content": statement}]
                     init_message_length = 1
             _log_before_execute_step(
@@ -8093,84 +8043,6 @@ class WorkflowService:
                     },
                 )
             yield {"event": "error", "data": {"execution_id": execution.execution_id, "error": str(e)}}
-
-    async def run_stream_from_context(
-        self,
-        ctx: Any,  # ChatLoadContext
-        result: Any,  # StreamResult
-        payload: Any,  # DraftRunRequest
-        config: Any,  # WorkflowConfig
-        workspace_id: uuid.UUID,
-        release_id: Optional[uuid.UUID] = None,
-        public: bool = False,
-        source: str = "",
-        trigger_type: str = "manual",
-        trigger_id: str | None = None,
-        trigger_meta: dict[str, Any] | None = None,
-        trigger_payload: dict[str, Any] | None = None,
-    ) -> AsyncGenerator[dict[str, Any] | str, None]:
-        """Phase 2 zero-DB workflow streaming (from pre-loaded context).
-
-        Delegates to ``run_stream`` for the core execution. WorkflowService
-        already uses independent ``get_async_db_context()`` sessions, so the
-        main benefit of this wrapper is the consistent ``_from_context``
-        interface and accumulation into *result*.
-        """
-        import json
-
-        full_content = ""
-        total_tokens = 0
-        execution_id = None
-        node_executions: list[dict[str, Any]] = []
-
-        async for event in self.run_stream(
-            app_id=ctx.app_id,
-            payload=payload,
-            config=config,
-            workspace_id=workspace_id,
-            release_id=release_id,
-            public=public,
-            source=source or ctx.source,
-            trigger_type=trigger_type,
-            trigger_id=trigger_id,
-            trigger_meta=trigger_meta,
-            trigger_payload=trigger_payload,
-            prepared_memory_storage_type=ctx.storage_type,
-            prepared_user_rag_memory_id=ctx.user_rag_memory_id,
-            skip_save=True,
-        ):
-            # Accumulate content for result
-            if isinstance(event, dict):
-                if event.get("event") == "message":
-                    data = event.get("data", {})
-                    if isinstance(data, dict):
-                        full_content += str(data.get("content", ""))
-                elif event.get("event") == "node_executions":
-                    node_executions = event.get("data", [])
-                elif event.get("event") in ("workflow_end", "end"):
-                    data = event.get("data", {})
-                    if isinstance(data, dict):
-                        execution_id = data.get("execution_id") or execution_id
-                        # public end event has total_tokens directly; internal workflow_end has token_usage
-                        _tokens = data.get("total_tokens", 0) or 0
-                        if not _tokens:
-                            _tokens = (data.get("token_usage") or {}).get("total_tokens", 0) or 0
-                        if _tokens:
-                            total_tokens = _tokens
-                event_type = event.get("event", "message")
-                event_data = event.get("data", {})
-                yield f"event: {event_type}\ndata: {json.dumps(event_data, ensure_ascii=False)}\n\n"
-            else:
-                yield event
-
-        result.full_content = full_content
-        result.total_tokens = total_tokens
-        result.execution_id = execution_id
-        result.node_executions = node_executions
-        result.assistant_meta = {
-            "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": total_tokens},
-            "execution_id": execution_id,
-        }
 
     async def resume_intervention_stream(
             self,

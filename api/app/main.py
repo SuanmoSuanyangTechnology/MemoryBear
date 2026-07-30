@@ -104,9 +104,8 @@ async def lifespan(app: FastAPI):
     from app.core.api_key_auth import start_log_consumer
     await start_log_consumer()
 
-    if settings.THREE_PHASE_CHAT_ENABLED:
-        from app.services.batch_persist_queue import BatchPersistQueue
-        await BatchPersistQueue.start()
+    from app.services.batch_persist_queue import BatchPersistQueue
+    await BatchPersistQueue.start()
 
     logger.info("应用程序启动完成")
 
@@ -120,10 +119,9 @@ async def lifespan(app: FastAPI):
     stop_timeout_scanner()
     from app.core.workflow.nodes.http_client import close_http_client
     await close_http_client()
-    if settings.THREE_PHASE_CHAT_ENABLED:
-        from app.services.batch_persist_queue import BatchPersistQueue
-        await BatchPersistQueue.flush()
-        await BatchPersistQueue.stop()
+    from app.services.batch_persist_queue import BatchPersistQueue
+    await BatchPersistQueue.flush()
+    await BatchPersistQueue.stop()
 
     from app.repositories.neo4j.neo4j_connector import Neo4jConnector
     await Neo4jConnector.shutdown()

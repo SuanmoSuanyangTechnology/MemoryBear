@@ -64,8 +64,7 @@ class Settings:
     DB_POOL_TIMEOUT: int = int(os.getenv("DB_POOL_TIMEOUT", "30"))
     DB_POOL_PRE_PING: bool = os.getenv("DB_POOL_PRE_PING", "true").lower() == "true"
 
-    # Three-phase chat streaming optimization
-    THREE_PHASE_CHAT_ENABLED: bool = os.getenv("THREE_PHASE_CHAT_ENABLED", "false").lower() == "true"
+    # Batch persist queue for async message persistence
     BATCH_PERSIST_QUEUE_SIZE: int = int(os.getenv("BATCH_PERSIST_QUEUE_SIZE", "10000"))
     BATCH_PERSIST_MAX_BATCH: int = int(os.getenv("BATCH_PERSIST_MAX_BATCH", "50"))
     BATCH_PERSIST_MAX_WAIT_MS: int = int(os.getenv("BATCH_PERSIST_MAX_WAIT_MS", "500"))

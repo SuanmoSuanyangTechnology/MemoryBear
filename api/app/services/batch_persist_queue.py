@@ -24,6 +24,8 @@ from sqlalchemy import (
     insert as sa_insert,
     update as sa_update,
     case as sa_case,
+    func as sa_func,
+    text as sa_text,
 )
 
 from app.core.config import settings
@@ -215,10 +217,11 @@ class BatchPersistQueue:
         msg_tasks = [t for t in batch if t.task_type in ("save_messages", "save_failed_message")]
         other_tasks = [t for t in batch if t not in msg_tasks]
 
+        memory_conv_ids: list[str] = []
         try:
             async with get_async_db_context() as db:
                 if msg_tasks:
-                    await _bulk_persist_messages(db, msg_tasks)
+                    memory_conv_ids = await _bulk_persist_messages(db, msg_tasks) or []
                 for task in other_tasks:
                     try:
                         await self._execute_task(db, task)
@@ -229,18 +232,33 @@ class BatchPersistQueue:
                             list(task.args.keys()),
                         )
                 await db.commit()
+            for conv_id in memory_conv_ids:
+                try:
+                    asyncio.ensure_future(_mark_memory_pending(conv_id))
+                except Exception:
+                    logger.warning(
+                        "Failed to schedule mark_pending for conv %s", conv_id, exc_info=True,
+                    )
         except Exception:
             logger.exception("Batch persist failed for %d tasks (%d msg)", len(batch), len(msg_tasks))
 
     async def _sync_write(self, task: PersistTask) -> None:
         """Synchronous (immediate) write fallback for a single task."""
+        memory_conv_ids: list[str] = []
         try:
             async with get_async_db_context() as db:
                 if task.task_type in ("save_messages", "save_failed_message"):
-                    await _bulk_persist_messages(db, [task])
+                    memory_conv_ids = await _bulk_persist_messages(db, [task]) or []
                 else:
                     await self._execute_task(db, task)
                 await db.commit()
+            for conv_id in memory_conv_ids:
+                try:
+                    asyncio.ensure_future(_mark_memory_pending(conv_id))
+                except Exception:
+                    logger.warning(
+                        "Failed to schedule mark_pending for conv %s", conv_id, exc_info=True,
+                    )
         except Exception:
             logger.exception("Sync persist failed for task %s", task.task_type)
 
@@ -284,23 +302,31 @@ def _row(
 async def _bulk_persist_messages(
     db: Any,
     msg_tasks: list[PersistTask],
-) -> None:
+) -> list[str]:
     """Persist all messages from *msg_tasks* via a single multi-row INSERT
-    followed by atomic ``message_count`` UPDATEs per conversation."""
+    followed by atomic ``message_count`` UPDATEs per conversation.
+
+    When a task carries ``sync_memory=True``, also inserts into
+    ``memory_messages`` within the same transaction.
+
+    Returns a list of conversation_ids that need ``mark_conversation_pending``
+    after commit (may be empty).
+    """
     from app.models.conversation_model import Message, Conversation
     from app.services.chat_context import StreamResult
 
     rows: list[dict[str, Any]] = []
     conv_deltas: dict[uuid_module.UUID, tuple[int, str | None]] = defaultdict(lambda: (0, None))
+    memory_conv_ids: list[str] = []
+    _memory_params: list[dict[str, Any]] = []
 
     for task in msg_tasks:
         args = task.args
-        ctx = args.get("ctx")
         result: StreamResult | None = args.get("result")
+        sync_memory = args.get("sync_memory", True)
+        should_memorize = args.get("should_memorize", True)
 
-        conv_id = args.get("conversation_id_override") or (
-            ctx.conversation_id if ctx else None
-        )
+        conv_id = args.get("conversation_id_override") or args.get("conversation_id")
         if conv_id is None:
             continue
         if isinstance(conv_id, str):
@@ -310,8 +336,9 @@ async def _bulk_persist_messages(
         if task.task_type == "save_failed_message":
             user_msg_id = args.get("user_message_id", uuid_module.uuid4())
             msg_id = args.get("message_id", uuid_module.uuid4())
+            user_content = args.get("user_message_content", "")
             rows.append(_row(user_msg_id, conv_id, "user",
-                             args.get("user_message_content", ""),
+                             user_content,
                              {"files": args.get("files_meta", [])}))
             rows.append(_row(msg_id, conv_id, "assistant",
                              args.get("error_message", "An error occurred during generation."),
@@ -319,6 +346,14 @@ async def _bulk_persist_messages(
                              status="failed"))
             delta, _ = conv_deltas[conv_id]
             conv_deltas[conv_id] = (delta + 2, None)
+            if sync_memory:
+                _memory_params.append({
+                    "conv_id": conv_id,
+                    "msg_id": user_msg_id,
+                    "content": user_content,
+                    "role": "user",
+                    "should_memorize": should_memorize,
+                })
             continue
 
         # --- save_messages ---
@@ -328,15 +363,22 @@ async def _bulk_persist_messages(
             result.message_id if result else uuid_module.uuid4())
 
         # user message
-        files_meta = args.get("files_meta", [])
-        if result and getattr(result, 'files_meta', None):
-            files_meta = result.files_meta
-        user_meta: dict[str, Any] = {"files": files_meta}
-        if result and getattr(result, 'history_files', None):
-            user_meta["history_files"] = result.history_files
+        if args.get("user_meta_override"):
+            user_meta = dict(args["user_meta_override"])
+        else:
+            files_meta = args.get("files_meta", [])
+            if result and getattr(result, 'files_meta', None):
+                files_meta = result.files_meta
+            user_meta = {"files": files_meta}
+            if result and getattr(result, 'history_files', None):
+                user_meta["history_files"] = result.history_files
+
+        user_parent_id = args.get("user_parent_message_id")
+        user_content = args.get("user_message_content", "") or ""
 
         rows.append(_row(user_msg_id, conv_id, "user",
-                         args.get("user_message_content", ""), user_meta))
+                         user_content, user_meta,
+                         parent_message_id=user_parent_id))
 
         # assistant message meta
         if args.get("meta_override"):
@@ -358,29 +400,50 @@ async def _bulk_persist_messages(
                 val = getattr(result, src, None)
                 if val:
                     assistant_meta.setdefault(dst, val)
-            if ctx and hasattr(ctx, 'api_key') and ctx.api_key and getattr(ctx.api_key, 'model_name', None):
-                assistant_meta.setdefault("model", ctx.api_key.model_name)
+            api_key_model_name = args.get("api_key_model_name")
+            if api_key_model_name:
+                assistant_meta.setdefault("model", api_key_model_name)
 
         assistant_content = args.get("content_override") or (
             result.full_content if result else "")
-        rows.append(_row(msg_id, conv_id, "assistant", assistant_content, assistant_meta))
+        rows.append(_row(msg_id, conv_id, "assistant", assistant_content, assistant_meta,
+                         parent_message_id=user_msg_id))
 
-        user_content = args.get("user_message_content", "") or ""
         title_candidate = user_content[:50] + ("..." if len(user_content) > 50 else "") if user_content else None
         delta, _ = conv_deltas[conv_id]
         conv_deltas[conv_id] = (delta + 2, title_candidate)
 
+        if sync_memory:
+            _memory_params.append({
+                "conv_id": conv_id,
+                "msg_id": user_msg_id,
+                "content": user_content,
+                "role": "user",
+                "should_memorize": should_memorize,
+            })
+            _memory_params.append({
+                "conv_id": conv_id,
+                "msg_id": msg_id,
+                "content": assistant_content,
+                "role": "assistant",
+                "should_memorize": True,
+            })
+
         # opening statement
-        if ctx and ctx.is_new_conversation and ctx.opening_statement:
+        if args.get("is_new_conversation") and args.get("opening_statement"):
             opening_id = args.get("opening_message_id")
             if opening_id:
-                rows.append(_row(opening_id, conv_id, "assistant", ctx.opening_statement))
+                rows.append(_row(opening_id, conv_id, "assistant", args["opening_statement"]))
                 d, t = conv_deltas[conv_id]
                 conv_deltas[conv_id] = (d + 1, t)
 
     # --- single multi-row INSERT for all messages ---
     if rows:
         await db.execute(sa_insert(Message).values(rows))
+
+    # --- memory_messages (now that FK targets exist) ---
+    if _memory_params:
+        await _write_memory_messages_batch(db, _memory_params, memory_conv_ids)
 
     # --- atomic UPDATE per conversation ---
     for conv_id, (delta, title_candidate) in conv_deltas.items():
@@ -398,10 +461,90 @@ async def _bulk_persist_messages(
             sa_update(Conversation).where(Conversation.id == conv_id).values(**values)
         )
 
+    return memory_conv_ids
+
+
+async def _write_memory_messages_batch(
+    db: Any,
+    entries: list[dict[str, Any]],
+    memory_conv_ids: list[str],
+) -> None:
+    """Insert rows into ``memory_messages`` with per-conversation seq allocation.
+
+    Acquires an advisory lock per conversation, computes the next
+    ``message_seq``, then inserts all entries for that conversation.
+    """
+    from app.models.memory_message_model import MemoryMessage
+    from app.core.memory.enums import MemoryMessageSource
+
+    by_conv: dict[uuid_module.UUID, list[dict[str, Any]]] = defaultdict(list)
+    for entry in entries:
+        by_conv[entry["conv_id"]].append(entry)
+
+    source = MemoryMessageSource.AGENT.value
+    now = utcnow_naive()
+    dialog_at = now.isoformat()
+
+    # Resolve end_user_id per conversation from the conversation table
+    conv_ids = list(by_conv.keys())
+    conv_meta: dict[uuid_module.UUID, str] = {}
+    if conv_ids:
+        from app.models.conversation_model import Conversation
+        result = await db.execute(
+            sa_select(Conversation.id, Conversation.user_id).where(
+                Conversation.id.in_(conv_ids)
+            )
+        )
+        for row in result:
+            conv_meta[row[0]] = str(row[1]) if row[1] else ""
+
+    for conv_id, conv_entries in by_conv.items():
+        lock_key = f"mm_seq:conv:{conv_id}"
+        await db.execute(
+            sa_text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+            {"key": lock_key},
+        )
+
+        stmt = sa_select(sa_func.coalesce(sa_func.max(MemoryMessage.message_seq), 0))
+        stmt = stmt.where(MemoryMessage.conversation_id == conv_id)
+        seq_result = await db.execute(stmt)
+        next_seq: int = seq_result.scalar() or 0
+
+        end_user_id = conv_meta.get(conv_id, "")
+
+        for entry in conv_entries:
+            next_seq += 1
+            db.add(MemoryMessage(
+                id=uuid_module.uuid4(),
+                conversation_id=conv_id,
+                original_message_id=entry["msg_id"],
+                end_user_id=end_user_id,
+                source=source,
+                role=entry["role"],
+                content=entry.get("content", ""),
+                message_seq=next_seq,
+                should_memorize=entry.get("should_memorize", True),
+                created_at=now,
+                dialog_at=dialog_at,
+            ))
+
+        memory_conv_ids.append(str(conv_id))
+
+
+async def _mark_memory_pending(conv_id: str) -> None:
+    """Best-effort: mark conversation as pending so the periodic Celery task
+    picks it up for memory extraction."""
+    try:
+        from app.core.memory.pipelines.dispatcher import mark_conversation_pending
+        mark_conversation_pending(conv_id)
+    except Exception:
+        logger.warning(
+            "mark_conversation_pending failed for conv %s", conv_id, exc_info=True,
+        )
+
 
 async def _handle_save_execution(
     db: Any,
-    ctx: Any,  # ChatLoadContext
     result: Any,  # StreamResult
     **kwargs: Any,
 ) -> None:
@@ -410,16 +553,16 @@ async def _handle_save_execution(
 
     execution = AgentExecution(
         id=kwargs.get("execution_id"),
-        app_id=ctx.app_id,
-        conversation_id=ctx.conversation_id,
+        app_id=kwargs.get("app_id"),
+        conversation_id=kwargs.get("conversation_id"),
         message_id=result.message_id,
-        user_id=ctx.user_id,
+        user_id=kwargs.get("user_id"),
         status=kwargs.get("status", "completed"),
         node_executions=result.node_executions,
         total_tokens=result.total_tokens,
         elapsed_time=result.elapsed_time,
-        model_name=ctx.api_key_model_name,
-        provider=ctx.api_key_provider,
+        model_name=kwargs.get("api_key_model_name"),
+        provider=kwargs.get("api_key_provider"),
     )
     db.add(execution)
 
@@ -445,7 +588,6 @@ async def _handle_record_usage(
 
 async def _handle_after_turn(
     db: Any,
-    ctx: Any,  # ChatLoadContext
     **kwargs: Any,
 ) -> None:
     """Run context engine after-turn processing."""
@@ -454,14 +596,14 @@ async def _handle_after_turn(
 
         manager = ContextEngineManager(db)
         await manager.after_app_turn(
-            features=ctx.features_config,
-            conversation_id=ctx.conversation_id,
-            current_provider=ctx.api_key_provider,
-            current_is_omni=ctx.api_key_is_omni,
+            features=kwargs.get("features_config", {}),
+            conversation_id=kwargs.get("conversation_id"),
+            current_provider=kwargs.get("api_key_provider"),
+            current_is_omni=kwargs.get("api_key_is_omni", False),
             model_config_id=kwargs.get("model_config_id"),
         )
     except Exception:
-        logger.exception("after_turn failed for conversation %s", ctx.conversation_id)
+        logger.exception("after_turn failed for conversation %s", kwargs.get("conversation_id"))
 
 
 _TASK_HANDLERS: dict[str, Any] = {

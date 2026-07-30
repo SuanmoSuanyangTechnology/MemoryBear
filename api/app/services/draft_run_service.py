@@ -3326,78 +3326,6 @@ class AgentRunService:
 
         return result
 
-    async def run_stream_from_context(
-            self,
-            ctx: Any,  # ChatLoadContext
-            result: Any,  # StreamResult
-            *,
-            agent_config: Any,
-            model_config: Any,
-            message: str,
-            workspace_id: uuid.UUID,
-            conversation_id: Optional[str] = None,
-            user_id: Optional[str] = None,
-            variables: Optional[Dict[str, Any]] = None,
-            storage_type: Optional[str] = None,
-            user_rag_memory_id: Optional[str] = None,
-            web_search: bool = True,
-            memory: bool = True,
-            files: Optional[List[FileInput]] = None,
-            source: str = "",
-            history: Optional[List[Dict[str, str]]] = None,
-            execution_mode: Literal["in_process", "sandbox"] = "in_process",
-    ) -> AsyncGenerator[str, None]:
-        """Phase 2 zero-DB draft run streaming (from pre-loaded context).
-
-        Uses ctx for pre-loaded data, delegates to run_stream for the core
-        streaming loop, but skips post-inference DB writes.
-        Accumulates output into *result*.
-        """
-        # Build a compatible history from ctx if not explicitly provided
-        if history is None and ctx.history:
-            history = [
-                {"role": h.get("role", "user"), "content": h.get("content", "")}
-                for h in ctx.history
-            ]
-
-        # Delegate to existing run_stream with skip_save to avoid post-inference writes
-        full_content = ""
-        total_tokens = 0
-
-        async for event in self.run_stream(
-            agent_config=agent_config,
-            model_config=model_config,
-            message=message,
-            workspace_id=workspace_id,
-            conversation_id=conversation_id or str(ctx.conversation_id),
-            user_id=user_id or ctx.user_id,
-            variables=variables,
-            storage_type=storage_type or ctx.storage_type,
-            user_rag_memory_id=user_rag_memory_id or ctx.user_rag_memory_id,
-            web_search=web_search,
-            memory=memory,
-            files=files,
-            source=source or ctx.source,
-            history=history,
-            skip_save=True,  # Phase 3 handles persistence via batch queue
-            execution_mode=execution_mode,
-        ):
-            yield event
-            # Extract content for result accumulation
-            if isinstance(event, str) and "data:" in event:
-                try:
-                    data_line = event.split("data: ", 1)[1].strip()
-                    data = json.loads(data_line)
-                    if "content" in data:
-                        full_content += str(data["content"])
-                    if "total_tokens" in data:
-                        total_tokens = int(data["total_tokens"])
-                except Exception:
-                    pass
-
-        result.full_content = full_content
-        result.total_tokens = total_tokens
-
     # ==================== 多模型对比试运行 ====================
 
     async def run_compare(
@@ -4138,6 +4066,7 @@ class AgentRunService:
                         await BatchPersistQueue.enqueue(PersistTask(
                             task_type="save_messages",
                             args={
+                                "sync_memory": False,
                                 "ctx": None,  # unused when overrides provided
                                 "result": None,  # unused when overrides provided
                                 "conversation_id_override": uuid.UUID(_conv_id) if isinstance(_conv_id, str) else _conv_id,
