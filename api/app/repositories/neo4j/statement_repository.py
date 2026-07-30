@@ -7,7 +7,7 @@ Classes:
     StatementRepository: 陈述句仓储，管理StatementNode的CRUD操作
 """
 
-from typing import List, Dict
+from typing import Dict, List, Sequence
 from datetime import datetime
 
 from app.repositories.neo4j.base_neo4j_repository import BaseNeo4jRepository
@@ -94,3 +94,31 @@ class StatementRepository(BaseNeo4jRepository[StatementNode]):
             List[StatementNode]: 陈述句列表
         """
         return await self.find({"chunk_id": chunk_id})
+
+    async def find_recent_valid_user_statements(
+        self,
+        end_user_id: str,
+        statement_types: Sequence[str],
+        limit: int,
+    ) -> List[str]:
+        """查询用户最近的有效 Statement 正文。"""
+        query = """
+        MATCH (s:Statement)
+        WHERE s.end_user_id = $end_user_id
+          AND s.delete_at IS NULL
+          AND s.speaker = "user"
+          AND coalesce(s.has_unsolved_reference, false) = false
+          AND s.stmt_type IN $statement_types
+          AND s.statement IS NOT NULL
+          AND trim(s.statement) <> ""
+        RETURN s.statement AS statement
+        ORDER BY s.dialog_at DESC, s.id ASC
+        LIMIT $limit
+        """
+        results = await self.connector.execute_query(
+            query,
+            end_user_id=end_user_id,
+            statement_types=list(statement_types),
+            limit=limit,
+        )
+        return [record["statement"] for record in results]
