@@ -546,6 +546,21 @@ class WritePipeline:
                             await add_memory_summary_nodes(summaries, self._neo4j_connector)
                             await add_memory_summary_statement_edges(summaries, self._neo4j_connector)
                             s.metadata(summary_count=len(summaries))
+                            # 摘要成功写入 Neo4j 后，同步保存为 PG 展示记录
+                            if summaries:
+                                try:
+                                    from app.services.memory_display_record_service import (
+                                        MemoryDisplayRecordService,
+                                    )
+                                    await MemoryDisplayRecordService.save_written(
+                                        summaries=summaries,
+                                        end_user_id=self.end_user_id,
+                                    )
+                                except Exception as e:
+                                    logger.warning(
+                                        f"[MemoryDisplayRecord] PG 展示记录写入异常（不影响主流程）: {e}",
+                                        exc_info=True,
+                                    )
                         except Exception as e:
                             logger.error(f"Memory summary step failed: {e}", exc_info=True)
 
@@ -560,13 +575,13 @@ class WritePipeline:
                         elapsed_seconds=0.0,
                     )
 
-                finally:
-                    if summary_gen_task is not None and not summary_gen_task.done():
-                        summary_gen_task.cancel()
-                        try:
-                            await summary_gen_task
-                        except (asyncio.CancelledError, Exception):
-                            pass
+            finally:
+                if summary_gen_task is not None and not summary_gen_task.done():
+                    summary_gen_task.cancel()
+                    try:
+                        await summary_gen_task
+                    except (asyncio.CancelledError, Exception):
+                        pass
 
         except Exception:
             raise

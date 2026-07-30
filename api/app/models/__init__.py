@@ -46,6 +46,7 @@ from .message_feedback_model import MessageFeedback
 from .message_report_model import MessageReport
 from .conversation_share_model import ConversationShare
 from .memory_message_model import MemoryMessage
+from .memory_display_record_model import MemoryDisplayRecord
 
 __all__ = [
     "Tenants",
@@ -115,5 +116,6 @@ __all__ = [
     "AppAnnotationSetting",
     "ModelCapability",
     "MemoryMessage",
-    "MemoryReflectionLog"
+    "MemoryReflectionLog",
+    "MemoryDisplayRecord",
 ]
