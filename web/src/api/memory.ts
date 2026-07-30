@@ -25,6 +25,7 @@ import type { TestParams } from '@/views/MemoryConversation'
 import type { EndUser } from '@/views/UserMemoryDetail/types'
 import { handleSSE, type SSEMessage } from '@/utils/stream'
 import type { ChatItem } from '@/components/Chat/types'
+import type { Query } from '@/views/UserMemory/types';
 
 // Memory conversation
 export const readService = (query: TestParams) => {
@@ -64,7 +65,7 @@ export const getDashboardData = () => {
 
 /****************** User Memory APIs *******************************/
 export const userMemoryListUrl = '/dashboard/end_users'
-export const getUserMemoryList = (query?: { keyword?: string }) => {
+export const getUserMemoryList = (query?: Query) => {
   return request.get(userMemoryListUrl, query)
 }
 // User Memory - Delete end user
