@@ -106,7 +106,9 @@ const KnowledgeConfigModal = forwardRef<KnowledgeConfigModalRef, KnowledgeConfig
         {(values?.retrieve_type === 'hybrid') &&
           <Form.Item
             name="enable_graph_retrieval"
-            valuePropName="checked"
+            getValueProps={(value: 0 | 1 | undefined) => ({ checked: value === 1 })}
+            getValueFromEvent={(checked: boolean) => checked ? 1 : 0}
+            initialValue={0}
             label={t('knowledgeBase.hybridIsHasGraph')}
             layout="horizontal"
           >
