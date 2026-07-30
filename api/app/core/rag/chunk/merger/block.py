@@ -33,13 +33,19 @@ class BlockMerger(ChunkMerger):
     def merge(self, ctx: ChunkContext, parse_result: ParseResult) -> MergeResult:
         blocks = parse_result.blocks or []
         token_num = int(ctx.parser_config.get("chunk_token_num", 128))
-        delimiter = ctx.parser_config.get("delimiter", "\n\n")
+        delimiter = ctx.parser_config.get("delimiter")
+        chunk_overlap = _safe_int(ctx.parser_config.get("chunk_overlap", 0))
 
         if ctx.chunk_output_mode is ChunkOutputMode.PARENT_CHILD:
             parent_token_num = int(ctx.parser_config.get("parent_chunk_token_num", 1024))
-            parent_chunk_delimiter = ctx.parser_config.get("parent_chunk_delimiter", "\n\n")
-            parent_chunks = self._blocks_to_logical_chunks(blocks, parent_token_num, parent_chunk_delimiter)
-            child_chunks, parent_id_map = self._build_children_from_parents(parent_chunks, token_num, delimiter)
+            parent_chunk_delimiter = ctx.parser_config.get("parent_chunk_delimiter")
+            parent_chunks = self._blocks_to_logical_chunks(blocks, parent_token_num, parent_chunk_delimiter, 0)
+            child_chunks, parent_id_map = self._build_children_from_parents(
+                parent_chunks,
+                token_num,
+                delimiter,
+                chunk_overlap,
+            )
             return MergeResult(
                 chunks=self._serialize_chunk_contents(child_chunks),
                 logical_chunks=child_chunks,
@@ -49,7 +55,7 @@ class BlockMerger(ChunkMerger):
                 pdf_parser=parse_result.pdf_parser,
             )
 
-        logical_chunks = self._blocks_to_logical_chunks(blocks, token_num, delimiter)
+        logical_chunks = self._blocks_to_logical_chunks(blocks, token_num, delimiter, chunk_overlap)
         return MergeResult(
             chunks=self._serialize_chunk_contents(logical_chunks),
             logical_chunks=logical_chunks,
@@ -60,7 +66,8 @@ class BlockMerger(ChunkMerger):
         self,
         blocks: list[ParsedBlock],
         token_num: int,
-        delimiter: str,
+        delimiter: str | None,
+        overlap: int,
     ) -> list[LogicalChunk]:
         logical_chunks: list[LogicalChunk] = []
         text_group: list[ParsedBlock] = []
@@ -73,7 +80,7 @@ class BlockMerger(ChunkMerger):
             chunks = (
                 [content]
                 if delimiter is None and num_tokens_from_string(content) <= token_num
-                else self.text_merger.merge(content, token_num, delimiter)
+                else self.text_merger.merge(content, token_num, delimiter, overlap)
             )
             for chunk in chunks:
                 logical_chunks.append(
@@ -93,7 +100,7 @@ class BlockMerger(ChunkMerger):
             flush_text_group()
 
             if block.type is ParsedBlockType.LIST:
-                logical_chunks.extend(self._list_logical_chunks(block, token_num, delimiter))
+                logical_chunks.extend(self._list_logical_chunks(block, token_num, delimiter, overlap))
                 continue
 
             if block.type is ParsedBlockType.CODE:
@@ -122,20 +129,27 @@ class BlockMerger(ChunkMerger):
         self,
         parent_chunks: list[LogicalChunk],
         child_token_num: int,
-        delimiter: str,
+        delimiter: str | None,
+        overlap: int,
     ) -> tuple[list[LogicalChunk], dict[int, int]]:
         child_chunks: list[LogicalChunk] = []
         parent_id_map: dict[int, int] = {}
 
         for parent_index, parent in enumerate(parent_chunks):
-            children = self._split_parent_chunk(parent, child_token_num, delimiter)
+            children = self._split_parent_chunk(parent, child_token_num, delimiter, overlap)
             for child in children:
                 parent_id_map[len(child_chunks)] = parent_index
                 child_chunks.append(child)
 
         return child_chunks, parent_id_map
 
-    def _split_parent_chunk(self, parent: LogicalChunk, token_num: int, delimiter: str) -> list[LogicalChunk]:
+    def _split_parent_chunk(
+        self,
+        parent: LogicalChunk,
+        token_num: int,
+        delimiter: str | None,
+        overlap: int,
+    ) -> list[LogicalChunk]:
         if parent.type is LogicalChunkType.TABLE:
             return self._split_logical_table_chunk(parent, token_num)
 
@@ -152,7 +166,7 @@ class BlockMerger(ChunkMerger):
                     positions=deepcopy(parent.positions),
                     metadata=deepcopy(parent.metadata),
                 )
-                for chunk in self._split_list_content(str(parent.content), token_num, delimiter)
+                for chunk in self._split_list_content(str(parent.content), token_num, delimiter, overlap)
                 if chunk.strip()
             ]
 
@@ -181,11 +195,17 @@ class BlockMerger(ChunkMerger):
                 positions=deepcopy(parent.positions),
                 metadata=deepcopy(parent.metadata),
             )
-            for chunk in self.text_merger.merge(str(parent.content), token_num, delimiter)
+            for chunk in self.text_merger.merge(str(parent.content), token_num, delimiter, overlap)
             if chunk.strip()
         ]
 
-    def _list_logical_chunks(self, block: ParsedBlock, token_num: int, delimiter: str | None) -> list[LogicalChunk]:
+    def _list_logical_chunks(
+        self,
+        block: ParsedBlock,
+        token_num: int,
+        delimiter: str | None,
+        overlap: int,
+    ) -> list[LogicalChunk]:
         metadata = self._metadata_for_block(block)
         return [
             LogicalChunk(
@@ -194,17 +214,23 @@ class BlockMerger(ChunkMerger):
                 positions=deepcopy(block.positions),
                 metadata=deepcopy(metadata),
             )
-            for content in self._split_list_content(str(block.content), token_num, delimiter)
+            for content in self._split_list_content(str(block.content), token_num, delimiter, overlap)
             if content.strip()
         ]
 
-    def _split_list_content(self, content: str, token_num: int, delimiter: str | None = None) -> list[str]:
+    def _split_list_content(
+        self,
+        content: str,
+        token_num: int,
+        delimiter: str | None = None,
+        overlap: int = 0,
+    ) -> list[str]:
         if num_tokens_from_string(content) <= token_num:
             return [content]
 
         items = self._split_list_items(content)
         if len(items) <= 1:
-            return self.text_merger.merge(content, token_num, delimiter)
+            return self.text_merger.merge(content, token_num, delimiter, overlap)
 
         chunks: list[str] = []
         current_items: list[str] = []
@@ -213,7 +239,7 @@ class BlockMerger(ChunkMerger):
                 if current_items:
                     chunks.append("\n".join(current_items))
                     current_items = []
-                chunks.extend(self.text_merger.merge(item, token_num, delimiter))
+                chunks.extend(self.text_merger.merge(item, token_num, delimiter, overlap))
                 continue
 
             candidate_items = [*current_items, item]
@@ -514,3 +540,10 @@ def _unique_paths(paths) -> list[list[str]]:
         seen.add(key)
         result.append(list(key))
     return result
+
+
+def _safe_int(value, default: int = 0) -> int:
+    try:
+        return max(int(value), 0)
+    except (TypeError, ValueError):
+        return default
