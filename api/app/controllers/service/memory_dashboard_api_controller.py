@@ -28,6 +28,7 @@ async def get_workspace_end_users(
     background_tasks: BackgroundTasks,
     api_key_auth: ApiKeyAuth = None,
     keyword: Optional[str] = Query(None, description="Search keyword (fuzzy match on other_name and id)"),
+    label: Optional[str] = Query(None, description="Label filter (long=has name, short=no name)"),
     page: int = Query(1, ge=1, description="Page number, starting from 1"),
     pagesize: int = Query(10, ge=1, description="Page size"),
 ):
@@ -60,6 +61,7 @@ async def get_workspace_end_users(
             background_tasks=background_tasks,
             workspace_id=api_key_auth.workspace_id,
             keyword=keyword,
+            label=label,
             page=page,
             pagesize=pagesize,
             db=db,
