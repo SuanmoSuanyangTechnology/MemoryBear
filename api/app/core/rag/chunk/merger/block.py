@@ -452,28 +452,44 @@ class BlockMerger(ChunkMerger):
 
     def _hard_split_wrapped(self, text: str, token_num: int, wrap) -> list[str]:
         tokens = encoder.encode(text)
+        limit = max(int(token_num), 1)
         chunks: list[str] = []
         index = 0
         while index < len(tokens):
-            low = 1
-            high = len(tokens) - index
-            best = 0
-            while low <= high:
-                mid = (low + high) // 2
-                piece = encoder.decode(tokens[index:index + mid])
-                wrapped = wrap(piece)
-                if num_tokens_from_string(wrapped) <= token_num:
-                    best = mid
-                    low = mid + 1
-                else:
-                    high = mid - 1
+            boundary = self._find_wrapped_token_boundary(tokens, index, limit, wrap)
+            if boundary is None:
+                raise RuntimeError(f"Unable to find a valid UTF-8 boundary from token index {index}.")
 
-            if best <= 0:
-                best = 1
-            piece = encoder.decode(tokens[index:index + best])
+            end, piece = boundary
             chunks.append(wrap(piece))
-            index += best
+            index = end
         return chunks
+
+    def _find_wrapped_token_boundary(
+        self,
+        tokens: list[int],
+        start: int,
+        limit: int,
+        wrap,
+    ) -> tuple[int, str] | None:
+        search_end = min(len(tokens), start + limit)
+        for end in range(search_end, start, -1):
+            piece = self._decode_token_slice(tokens, start, end)
+            if piece is not None and num_tokens_from_string(wrap(piece)) <= limit:
+                return end, piece
+
+        for end in range(start + 1, len(tokens) + 1):
+            piece = self._decode_token_slice(tokens, start, end)
+            if piece is not None:
+                return end, piece
+        return None
+
+    @staticmethod
+    def _decode_token_slice(tokens: list[int], start: int, end: int) -> str | None:
+        try:
+            return encoder.decode(tokens[start:end], errors="strict")
+        except UnicodeDecodeError:
+            return None
 
     def _wrap_code_lines(self, lines: list[str], fence_start: str, fence_end: str) -> str:
         if not fence_start:
