@@ -44,7 +44,7 @@ class BlockMerger(ChunkMerger):
                 parent_chunks,
                 token_num,
                 delimiter,
-                chunk_overlap,
+                0,
             )
             return MergeResult(
                 chunks=self._serialize_chunk_contents(child_chunks),
