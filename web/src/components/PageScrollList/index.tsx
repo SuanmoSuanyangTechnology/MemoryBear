@@ -49,6 +49,8 @@ interface PageScrollListProps<T, Q = Record<string, unknown>> {
   url: string;
   /** Function to render each list item */
   renderItem: (item: T, index: number) => React.ReactNode;
+  /** Optional renderer that receives all currently loaded items */
+  renderItems?: (items: T[]) => React.ReactNode;
   /** Query parameters for API request */
   query?: Q;
   /** Number of columns in grid layout */
@@ -59,6 +61,7 @@ interface PageScrollListProps<T, Q = Record<string, unknown>> {
   heightClass?: string;
   gutter?: [number, number] | number;
   onTotalChange?: (total: number) => void;
+  empty?: React.ReactNode;
 }
 
 const defaultHeightClass = 'rb:h-[calc(100vh-118px)]!';
@@ -66,6 +69,7 @@ const defaultHeightClass = 'rb:h-[calc(100vh-118px)]!';
 /** Infinite scroll list component with pagination support */
 const PageScrollList = forwardRef(<T, Q = Record<string, unknown>>({
   renderItem,
+  renderItems,
   query,
   url,
   column = 4,
@@ -74,6 +78,7 @@ const PageScrollList = forwardRef(<T, Q = Record<string, unknown>>({
   heightClass,
   gutter = [12, 12],
   onTotalChange,
+  empty,
 }: PageScrollListProps<T, Q>, ref: React.Ref<PageScrollListRef>) => {
   /** Expose refresh method to parent component */
   useImperativeHandle(ref, () => ({
@@ -162,16 +167,18 @@ const PageScrollList = forwardRef(<T, Q = Record<string, unknown>>({
         >
           {/* Render grid list or empty state */}
           {data.length > 0 ? (
-            <Row
-              gutter={gutter}
-            >
-              {data.map((item, index) => (
-                <Col key={(item as any).id || index} span={24/column}>
-                  {renderItem(item, index)}
-                </Col>
-              ))}
-            </Row>
-          ) : !loading ? <PageEmpty className={heightClass || defaultHeightClass} /> : null}
+            renderItems
+            ? renderItems(data)
+            : (
+              <Row gutter={gutter}>
+                {data.map((item, index) => (
+                  <Col key={(item as any).id || index} span={24/column}>
+                    {renderItem(item, index)}
+                  </Col>
+                ))}
+              </Row>
+            )
+          ) : !loading ? empty || <PageEmpty className={heightClass || defaultHeightClass} /> : null}
         </InfiniteScroll>
       </div>
     </>

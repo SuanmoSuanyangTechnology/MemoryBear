@@ -276,5 +276,18 @@ export const userMemory = {
       normal: 'Normal',
       userTag: 'User Tag',
       noTags: 'No tags',
+
+      memoryActivity: 'Memory Activity',
+      memoryActivitySubtitle: 'Memory read, write, and engine processing records',
+      activityDateToday: 'Today',
+      activityDateYesterday: 'Yesterday',
+      activityDateEarlier: 'Earlier',
+      activityFilterAll: 'All',
+      activityFilterEngine: 'Engine',
+      activityFilterRead: 'Read',
+      activityFilterWrite: 'Write',
+      EXTRACTION: 'Memory Extraction Engine',
+      CROSS_MODAL: 'Cross-modal Memory Association Engine',
+      EMOTION: 'Emotion Engine',
     },
 }

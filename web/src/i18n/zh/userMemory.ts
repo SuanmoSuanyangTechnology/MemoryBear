@@ -277,5 +277,18 @@ export const userMemory = {
       normal: '常规',
       userTag: '用户标签',
       noTags: '暂无标签',
+
+      memoryActivity: '记忆活动',
+      memoryActivitySubtitle: '记忆读写与引擎处理记录',
+      activityDateToday: '今天',
+      activityDateYesterday: '昨天',
+      activityDateEarlier: '更早',
+      activityFilterAll: '全部',
+      activityFilterEngine: '引擎',
+      activityFilterRead: '读取',
+      activityFilterWrite: '写入',
+      EXTRACTION: "记忆萃取引擎",
+      CROSS_MODAL: "跨模态记忆关联联想引擎",
+      EMOTION: "情感引擎",
     },
 }

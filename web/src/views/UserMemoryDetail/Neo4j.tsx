@@ -30,6 +30,7 @@ import { useI18n } from '@/store/locale'
 import PrivateWrap from '@/components/PrivateWrap'
 import { BrainView, ReflectMemory, type ReflectMemoryRef } from '@redbear/memory-brick'
 import { request } from '@/utils/request'
+import MemoryActivity from './components/MemoryActivity'
 
 const Neo4j: FC = () => {
   const { id } = useParams()
@@ -214,7 +215,7 @@ const Neo4j: FC = () => {
           </Flex>
         </Flex>
 
-        <Flex vertical className="rb:flex-1">
+        <Flex vertical className="rb:flex-1 rb:min-w-0">
           <NodeStatistics ref={nodeStatisticsRef} highlightKeys={brainMemories} />
           <RelationshipNetwork
             regionId={regionId}
@@ -228,6 +229,7 @@ const Neo4j: FC = () => {
             }}
           />
         </Flex>
+        <MemoryActivity className="rb:w-70 rb:shrink-0" />
       </Flex>
       <div onClick={(e) => e.stopPropagation()}>
         <EndUserProfile ref={ref} onDataLoaded={handleNameUpdate} className={selectedKey === 'userProfile' ? 'rb:block!' : 'rb:hidden!'} />
