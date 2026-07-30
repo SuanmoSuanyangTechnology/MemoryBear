@@ -539,6 +539,21 @@ class WritePipeline:
                             self._update_stats_cache(extraction_result),
                         )
 
+                    # Neo4j 事务成功后，触发引擎展示 PG 写入
+                    try:
+                        from app.services.memory_engine_display_service import (
+                            MemoryEngineDisplayService,
+                        )
+                        await MemoryEngineDisplayService.save_events(
+                            end_user_id=self.end_user_id,
+                            extraction_result=extraction_result,
+                        )
+                    except Exception as e:
+                        logger.warning(
+                            f"[EngineDisplay] 引擎展示 PG 写入异常（不影响主流程）: {e}",
+                            exc_info=True,
+                        )
+
                     # Step 5: 摘要写入（依赖 Step 4 写入的 CONTAINS 边）
                     async with bear.step(5, 6, "摘要", "写入情景记忆") as s:
                         try:
@@ -730,12 +745,17 @@ class WritePipeline:
     # Step 3: 存储
     # ──────────────────────────────────────────────
 
-    async def _store(self, result: ExtractionResult) -> None:
+    async def _store(self, result: ExtractionResult) -> bool:
         """
         存储：别名清洗 → Neo4j 写入（含死锁重试）。
 
         错误策略：
         - 别名清洗失败 → 警告日志，继续写入
+
+        Returns:
+            True: Neo4j 事务整体成功
+            False: 重试后仍部分失败
+            异常: 死锁重试耗尽或非死锁异常向上抛出
         """
         from app.repositories.neo4j.graph_saver import (
             save_dialog_and_statements_to_neo4j,
@@ -769,7 +789,7 @@ class WritePipeline:
                 )
                 if success:
                     logger.debug("Successfully saved all data to Neo4j")
-                    return
+                    return True
                 # 写入返回 False（部分失败）
                 if attempt < max_retries - 1:
                     logger.warning(
@@ -787,6 +807,7 @@ class WritePipeline:
                     await asyncio.sleep(1 * (attempt + 1))
                 else:
                     raise
+        return False
 
     # ──────────────────────────────────────────────
     # Step 3.5: 构建 UserSource 子图

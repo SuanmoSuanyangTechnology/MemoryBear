@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 UTC = timezone.utc
 _BARE_CLOCK_LINE_RE = re.compile(
@@ -26,6 +27,32 @@ def utcnow() -> datetime:
 def utcnow_naive() -> datetime:
     """Return a naive UTC datetime for DB storage."""
     return utcnow().replace(tzinfo=None)
+
+
+def resolve_iana_timezone(timezone_name: str | None) -> tuple[ZoneInfo, str]:
+    """严格解析 IANA 时区名。
+
+    用于时区由调用方显式传入的场景（如查询接口参数），
+    空值或非法值直接抛错，避免静默按错误的时区聚合数据。
+
+    Args:
+        timezone_name: IANA 时区名称，如 "Asia/Shanghai"。
+
+    Returns:
+        (ZoneInfo 实例, 去除首尾空白后的时区名)
+
+    Raises:
+        ValueError: 时区名为空或不是合法的 IANA 时区。
+    """
+    normalized_name = (timezone_name or "").strip()
+    if not normalized_name:
+        raise ValueError("timezone is required")
+    try:
+        return ZoneInfo(normalized_name), normalized_name
+    except (ZoneInfoNotFoundError, KeyError, ValueError) as exc:
+        raise ValueError(
+            f"'{normalized_name}' is not a valid IANA timezone"
+        ) from exc
 
 
 def as_utc_aware(dt: datetime | None) -> datetime | None:
