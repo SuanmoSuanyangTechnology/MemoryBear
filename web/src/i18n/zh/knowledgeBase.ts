@@ -227,6 +227,8 @@ export const knowledgeBase = {
       delimiter: '文本段落分隔符',
       customDelimiterPlaceholder: '请输入分隔符',
       suggestedBlockSize: '建议文本块大小',
+      chunkOverlap: '分块重叠大小',
+      chunkOverlapRange: '分块重叠大小必须大于 0 且小于文本块大小',
       insertContent: '插入内容',
       editContent: '编辑内容',
       insertContentPlaceholder: '请输入内容',

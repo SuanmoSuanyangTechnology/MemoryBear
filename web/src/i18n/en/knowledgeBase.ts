@@ -228,6 +228,8 @@ export const knowledgeBase = {
       delimiter:'Text paragraph delimiter',
       customDelimiterPlaceholder: 'Please enter the delimiter',
       suggestedBlockSize:'Suggested text block size',
+      chunkOverlap: 'Chunk overlap size',
+      chunkOverlapRange: 'Chunk overlap size must be greater than 0 and less than the text block size',
       insertContent: 'Insert Content',
       editContent:'Edit Content',
       insertContentPlaceholder: 'Please enter the content',
