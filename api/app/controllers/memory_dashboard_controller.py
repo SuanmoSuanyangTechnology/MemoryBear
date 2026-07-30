@@ -96,6 +96,7 @@ async def get_workspace_end_users(
     background_tasks: BackgroundTasks,
     workspace_id: Optional[uuid.UUID] = Query(None, description="工作空间ID（可选，默认当前用户工作空间）"),
     keyword: Optional[str] = Query(None, description="搜索关键词（同时模糊匹配 other_name 和 id）"),
+    label: Optional[str] = Query(None, description="标签过滤（long=有名称, short=无名称）"),
     page: int = Query(1, ge=1, description="页码，从1开始"),
     pagesize: int = Query(10, ge=1, description="每页数量"),
     db: Session = Depends(get_db),
@@ -144,6 +145,7 @@ async def get_workspace_end_users(
             page=page,
             pagesize=pagesize,
             keyword=keyword,
+            label=label,
         )
         raw_items = end_users_result.get("items", [])
         end_users = [item["end_user"] for item in raw_items]
@@ -155,6 +157,7 @@ async def get_workspace_end_users(
             page=page,
             pagesize=pagesize,
             keyword=keyword,
+            label=label,
         )
         raw_items = end_users_result.get("items", [])
         end_users = raw_items
@@ -219,6 +222,7 @@ async def get_workspace_end_users(
             "end_user": {
                 "id": user_id,
                 "other_name": end_user.other_name,
+                "label": "long" if end_user.other_name else "short",
             },
             "tags": normalize_stored_user_card_tags(getattr(end_user, "memory_tags", None)),
             "memory_num": {

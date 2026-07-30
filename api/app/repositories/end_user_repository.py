@@ -1547,6 +1547,7 @@ class EndUserRepository:
             page: int,
             pagesize: int,
             keyword: Optional[str] = None,
+            label: Optional[str] = None,
     ) -> tuple[List[EndUser], int]:
         """Dashboard 专用：分页查询有记忆的宿主（memory_count > 0）
 
@@ -1558,6 +1559,7 @@ class EndUserRepository:
             page: 页码（从1开始）
             pagesize: 每页数量
             keyword: 搜索关键词（可选，同时模糊匹配 other_name 和 id）
+            label: 标签过滤（可选，"long" 表示有 other_name，"short" 表示无 other_name）
 
         Returns:
             tuple[List[EndUser], int]: (当前页宿主列表, 符合条件的总数)
@@ -1581,6 +1583,19 @@ class EndUserRepository:
             EndUser.memory_count > 0,
             EndUser.is_active == True,
         )
+
+        if label == "long":
+            query = query.filter(
+                EndUser.other_name.isnot(None),
+                EndUser.other_name != "",
+            )
+        elif label == "short":
+            query = query.filter(
+                or_(
+                    EndUser.other_name.is_(None),
+                    EndUser.other_name == "",
+                )
+            )
 
         if keyword:
             keyword = keyword.strip()
@@ -1611,6 +1626,7 @@ class EndUserRepository:
             page: int,
             pagesize: int,
             keyword: Optional[str] = None,
+            label: Optional[str] = None,
     ) -> tuple[list, int]:
         """Dashboard RAG 模式：分页查询有记忆的宿主
 
@@ -1624,6 +1640,7 @@ class EndUserRepository:
             page: 页码（从1开始）
             pagesize: 每页数量
             keyword: 搜索关键词（可选，同时模糊匹配 other_name 和 id）
+            label: 标签过滤（可选，"long" 表示有 other_name，"short" 表示无 other_name）
 
         Returns:
             tuple[list, int]: (items列表[{"end_user": ORM, "memory_count": int}], 总数)
@@ -1677,6 +1694,19 @@ class EndUserRepository:
                 EndUser.is_active == True,
             )
         )
+
+        if label == "long":
+            base_query = base_query.filter(
+                EndUser.other_name.isnot(None),
+                EndUser.other_name != "",
+            )
+        elif label == "short":
+            base_query = base_query.filter(
+                or_(
+                    EndUser.other_name.is_(None),
+                    EndUser.other_name == "",
+                )
+            )
 
         if keyword:
             keyword = keyword.strip()
