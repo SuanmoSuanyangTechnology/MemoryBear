@@ -184,16 +184,32 @@ async def _retrieve_chunks_via_standard(query: str, kb_config: Dict[str, Any]) -
         vector_similarity_weight = None
     else:
         vector_similarity_weight = _as_float(first_kb.get("vector_similarity_weight"), 0.5)
-    
+
+    # 混合检索下，按第一个 KB 的开关设置请求级图谱检索兜底
+    # （每个 KB 显式配置的 enable_graph_retrieval 仍会在检索层按 KB 覆盖生效）
+    enable_graph_retrieval = (
+        1
+        if (
+            retrieve_type == RetrieveType.HYBRID
+            and _as_int(first_kb.get("enable_graph_retrieval"), 0) == 1
+        )
+        else 0
+    )
+
+    # 仅透传带有 kb_id 的 KB 配置，避免缺字段导致请求校验失败
+    request_kbs = [kb for kb in knowledge_bases if kb.get("kb_id")]
+
     request = KnowledgeRetrievalRequest(
         query=query,
         caller=KnowledgeRetrievalCaller.AGENT,
         kb_ids=[uuid.UUID(kid) for kid in kb_ids],
+        knowledge_bases=request_kbs,
         top_k=_as_int(first_kb.get("top_k"), 3),
         similarity_threshold=_as_float(first_kb.get("similarity_threshold"), 0.7),
         vector_similarity_weight=vector_similarity_weight,
         retrieve_type=retrieve_type,
         rerank_id=rerank_id,
+        enable_graph_retrieval=enable_graph_retrieval,
     )
 
     result = await KnowledgeRetrievalService.retrieve_async(request=request, principal=None)
