@@ -10,7 +10,8 @@ from app.core.logging_config import get_memory_logger
 from app.core.memory.models.base_response import RobustLLMResponse
 from app.core.memory.models.graph_models import MemorySummaryNode
 from app.core.memory.models.message_models import DialogData
-from app.core.memory.utils.prompt.prompt_utils import render_memory_summary_prompt
+from app.core.memory.utils.prompt.prompt_utils import render_memory_summary_prompt # 相关内容也需要删除
+from app.core.memory.utils.prompt.prompt_utils import render_neo4j_memory_summary_prompt
 from app.core.language_utils import validate_language  # 使用集中化的语言校验
 from pydantic import Field
 
@@ -31,7 +32,31 @@ class MemorySummaryResponse(RobustLLMResponse):
     )
 
 
-async def generate_title_and_type_for_summary(
+class EpisodicCombinedResponse(RobustLLMResponse):
+    """Combined response: title + type + summary in one LLM call.
+
+    Used by neo4j_memory_summary.jinja2 prompt to reduce per-chunk LLM calls from 2 to 1.
+    """
+
+    title: str = Field(
+        ...,
+        description="Concise title capturing the core subject or event.",
+        min_length=1,
+        max_length=200,
+    )
+    type: str = Field(
+        ...,
+        description="Episodic memory type classification (conversation/project_work/learning/decision/important_event).",
+    )
+    summary: str = Field(
+        ...,
+        description="Faithful summary of the input chunk.",
+        min_length=1,
+        max_length=5000,
+    )
+
+
+async def generate_title_and_type_for_summary( # 只作用于遗忘，已经有新的任务替代遗忘的作用，确定后准备清理
     content: str,
     llm_client,
     language: str = "zh"
@@ -154,82 +179,21 @@ async def generate_title_and_type_for_summary(
         logger.error(f"生成标题和类型时出错 (language={language}): {str(e)}", exc_info=True)
         return (ERROR_TITLE, DEFAULT_TYPE)
 
-async def _process_chunk_summary(
-    dialog: DialogData,
-    chunk,
-    llm_client,
-    embedder: Any,
-    language: str = "zh",
-) -> Optional[MemorySummaryNode]:
-    """Process a single chunk to generate a memory summary node."""
-    # Skip empty chunks
-    if not chunk.content or not chunk.content.strip():
-        return None
 
-    try:
-        # 验证语言参数
-        language = validate_language(language)
-        
-        # Render prompt via Jinja2 for a single chunk
-        prompt_content = await render_memory_summary_prompt(
-            chunk_texts=chunk.content,
-            json_schema=MemorySummaryResponse.model_json_schema(),
-            max_words=200,
-            language=language,
-        )
+_SUMMARY_MAX_RETRIES = 2
 
-        messages = [
-            {"role": "system", "content": "You are an expert memory summarizer."},
-            {"role": "user", "content": prompt_content},
-        ]
+_VALID_EPISODIC_TYPES = {"conversation", "project_work", "learning", "decision", "important_event"}
 
-        # Generate structured summary with the existing LLM client
-        structured = await llm_client.call_structured(
-            messages,
-            MemorySummaryResponse,
-        )
-        summary_text = structured.summary.strip()
-        # Generate title and type for the summary
-        title = None
-        episodic_type = None
-        try:
-            title, episodic_type = await generate_title_and_type_for_summary(
-                content=summary_text,
-                llm_client=llm_client,
-                language=language
-            )
-            logger.debug(f"Generated title and type for MemorySummary (language={language}): title={title}, type={episodic_type}")
-        except Exception as e:
-            logger.warning(f"Failed to generate title and type for chunk {chunk.id}: {e}")
-            # Continue without title and type
-
-        # Embed the summary
-        embedding = (await embedder.aembed_documents([summary_text]))[0]
-
-        # Build node per chunk
-        # Note: title is stored in the 'name' field, type is stored in 'memory_type' field
-        node = MemorySummaryNode(
-            id=uuid4().hex,
-            name=title if title else f"MemorySummaryChunk_{chunk.id}",
-            end_user_id=dialog.end_user_id,
-            user_id=dialog.end_user_id,
-            apply_id=dialog.end_user_id,
-            run_id=dialog.run_id,  # 使用 dialog 的 run_id
-            created_at=utcnow_naive(),
-            dialog_id=dialog.id,
-            chunk_ids=[chunk.id],
-            content=summary_text,
-            memory_type=episodic_type,
-            summary_embedding=embedding,
-            metadata={"ref_id": dialog.ref_id},
-            config_id=dialog.config_id,  # 添加 config_id
-        )
-        return node
-
-    except Exception as e:
-        # Log the error but continue processing other chunks
-        logger.warning(f"Failed to generate summary for chunk {chunk.id} in dialog {dialog.id}: {e}", exc_info=True)
-        return None
+_EPISODIC_TYPE_MAPPING = {
+    "对话": "conversation",
+    "项目": "project_work",
+    "工作": "project_work",
+    "项目/工作": "project_work",
+    "学习": "learning",
+    "决策": "decision",
+    "重要事件": "important_event",
+    "事件": "important_event",
+}
 
 
 async def memory_summary_generation(
@@ -238,24 +202,89 @@ async def memory_summary_generation(
     embedder_client: Any,
     language: str = "zh",
 ) -> List[MemorySummaryNode]:
-    """Generate memory summaries per chunk, embed them, and return nodes.
-    
+    """Generate memory summaries per chunk with retry, embed them, and return nodes.
+
+    每个 chunk 通过单次 LLM 调用 (neo4j_memory_summary.jinja2) 同时产出
+    title、type、summary，失败时指数退避重试。
+
     Args:
         chunked_dialogs: 分块后的对话数据
-        llm_client: LLM客户端
+        llm_client: LLM 客户端
         embedder_client: 嵌入客户端
         language: 语言类型 ("zh" 中文, "en" 英文)，默认中文
     """
-    # Collect all tasks for parallel processing
-    tasks = []
-    for dialog in chunked_dialogs:
-        for chunk in dialog.chunks:
-            tasks.append(_process_chunk_summary(dialog, chunk, llm_client, embedder_client, language=language))
+    language = validate_language(language)
 
-    # Process all chunks in parallel
-    results = await asyncio.gather(*tasks, return_exceptions=False)
+    async def _process_chunk(dialog: DialogData, chunk) -> Optional[MemorySummaryNode]:
+        """处理单个 chunk：渲染 prompt → LLM → embed → 构建节点，带重试。"""
+        if not chunk.content or not chunk.content.strip():
+            return None
 
-    # Filter out None values (failed or empty chunks)
-    nodes = [node for node in results if node is not None]
+        for attempt in range(1, _SUMMARY_MAX_RETRIES + 1):
+            try:
+                # 渲染合并提示词
+                prompt_content = await render_neo4j_memory_summary_prompt(
+                    chunk_texts=chunk.content,
+                    max_words=200,
+                    language=language,
+                )
 
-    return nodes
+                # 单次 LLM 调用产出 title / type / summary
+                structured: EpisodicCombinedResponse = await llm_client.call_structured(
+                    [
+                        {"role": "system", "content": "You are an expert memory summarizer."},
+                        {"role": "user", "content": prompt_content},
+                    ],
+                    EpisodicCombinedResponse,
+                )
+
+                summary_text = structured.summary.strip()
+                if not summary_text:
+                    return None
+
+                # 归一化 type
+                episodic_type = structured.type.lower().strip()
+                if episodic_type not in _VALID_EPISODIC_TYPES:
+                    episodic_type = _EPISODIC_TYPE_MAPPING.get(episodic_type, "conversation")
+
+                # 生成 embedding
+                embedding = (await embedder_client.aembed_documents([summary_text]))[0]
+
+                return MemorySummaryNode(
+                    id=uuid4().hex,
+                    name=structured.title or f"MemorySummaryChunk_{chunk.id}",
+                    end_user_id=dialog.end_user_id,
+                    user_id=dialog.end_user_id,
+                    apply_id=dialog.end_user_id,
+                    run_id=dialog.run_id,
+                    created_at=utcnow_naive(),
+                    dialog_id=dialog.id,
+                    chunk_ids=[chunk.id],
+                    content=summary_text,
+                    memory_type=episodic_type,
+                    summary_embedding=embedding,
+                    metadata={"ref_id": dialog.ref_id},
+                    config_id=dialog.config_id,
+                )
+
+            except Exception as e:
+                if attempt == _SUMMARY_MAX_RETRIES:
+                    logger.warning(
+                        "Chunk %s in dialog %s summary failed after %d attempts: %s",
+                        chunk.id, dialog.id, _SUMMARY_MAX_RETRIES, e,
+                        exc_info=True,
+                    )
+                    return None
+                await asyncio.sleep(0.5 * attempt)
+
+    # 并发处理所有 chunk
+    results = await asyncio.gather(
+        *[
+            _process_chunk(dialog, chunk)
+            for dialog in chunked_dialogs
+            for chunk in dialog.chunks
+        ],
+        return_exceptions=False,
+    )
+
+    return [node for node in results if node is not None]
