@@ -1003,7 +1003,7 @@ class WorkflowService:
             )
             from app.services.model_service import ModelApiKeyService
             from app.models.workspace_model import Workspace
-            from premium.platform_admin.speedbear_model import TenantSpeedBearBinding
+
 
             async with get_async_db_context() as db:
                 result = await db.execute(
@@ -1051,6 +1051,7 @@ class WorkflowService:
 
                 api_key_obj: ModelApiKey | None = None
                 if ModelApiKeyService._is_public_speedbear_model(model_cfg):
+                    from premium.platform_admin.speedbear_model import TenantSpeedBearBinding
                     result = await db.execute(
                         select(Workspace.tenant_id)
                         .join(App, App.workspace_id == Workspace.id)

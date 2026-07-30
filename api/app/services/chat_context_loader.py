@@ -446,17 +446,24 @@ async def load_chat_context_for_app_api(
 
     # -- tools / skills / knowledge / memory ------------------------------------
     user_id_str = str(end_user.id) if end_user else "default_user"
-    tools, skill_prompts, citations_collector, memory_enabled = await _load_agent_tools(
-        release_config=release_config,
-        user_id=user_id_str,
-        workspace_id=workspace_id,
-        tenant_id=tenant_id,
-        storage_type=storage_type,
-        user_rag_memory_id=user_rag_memory_id,
-        message=message,
-        web_search=web_search,
-        memory=memory,
-    )
+    is_workflow = app_type in ("workflow", "pure_workflow")
+    if is_workflow:
+        tools = []
+        skill_prompts = ""
+        citations_collector = None
+        memory_enabled = bool(memory)
+    else:
+        tools, skill_prompts, citations_collector, memory_enabled = await _load_agent_tools(
+            release_config=release_config,
+            user_id=user_id_str,
+            workspace_id=workspace_id,
+            tenant_id=tenant_id,
+            storage_type=storage_type,
+            user_rag_memory_id=user_rag_memory_id,
+            message=message,
+            web_search=web_search,
+            memory=memory,
+        )
 
     return ChatLoadContext(
         conversation_id=conversation_id,
@@ -655,17 +662,24 @@ async def load_chat_context_for_public_share(
     # -- tools / skills / knowledge / memory ------------------------------------
     user_id_str = str(end_user.id) if end_user else "default_user"
     message = getattr(payload, "message", "") or ""
-    tools, skill_prompts, citations_collector, memory_enabled = await _load_agent_tools(
-        release_config=release_config,
-        user_id=user_id_str,
-        workspace_id=workspace_id,
-        tenant_id=tenant_id,
-        storage_type=storage_type,
-        user_rag_memory_id=user_rag_memory_id,
-        message=message,
-        web_search=web_search,
-        memory=memory,
-    )
+    is_workflow = app.type in ("workflow", "pure_workflow")
+    if is_workflow:
+        tools = []
+        skill_prompts = ""
+        citations_collector = None
+        memory_enabled = bool(memory)
+    else:
+        tools, skill_prompts, citations_collector, memory_enabled = await _load_agent_tools(
+            release_config=release_config,
+            user_id=user_id_str,
+            workspace_id=workspace_id,
+            tenant_id=tenant_id,
+            storage_type=storage_type,
+            user_rag_memory_id=user_rag_memory_id,
+            message=message,
+            web_search=web_search,
+            memory=memory,
+        )
 
     return ChatLoadContext(
         conversation_id=conversation_id,

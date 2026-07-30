@@ -431,6 +431,7 @@ async def chat(
                                 "result": result,
                                 "user_message_content": payload.message,
                                 "files_meta": [],
+                                "with_memory": ctx.memory_enabled,
                             },
                         ))
                     except Exception as e:
@@ -581,6 +582,7 @@ async def chat(
                                 "result": result,
                                 "user_message_content": payload.message,
                                 "files_meta": [],
+                                "with_memory": ctx.memory_enabled,
                             },
                         ))
                     except Exception as e:

@@ -4,6 +4,8 @@ Design doc: docs/方案设计_高并发性能优化.md Section 8
 
 Single asyncio.Queue consumer that collects ``PersistTask`` entries after
 Phase 2 streaming completes and flushes them to the database in batches.
+Message-persistence tasks within a batch are merged into a single multi-row
+INSERT plus atomic conversation counter UPDATEs.
 """
 
 from __future__ import annotations
@@ -12,10 +14,19 @@ import asyncio
 import logging
 import time
 import uuid as uuid_module
+from collections import defaultdict
 from dataclasses import dataclass, field
+from app.core.utils.datetime_utils import utcnow_naive
 from typing import Any, ClassVar
 
-from sqlalchemy import select as sa_select
+from sqlalchemy import (
+    select as sa_select,
+    insert as sa_insert,
+    update as sa_update,
+    case as sa_case,
+    func as sa_func,
+    text as sa_text,
+)
 
 from app.core.config import settings
 from app.db import get_async_db_context
@@ -197,10 +208,21 @@ class BatchPersistQueue:
     # -- batch write ------------------------------------------------------------
 
     async def _batch_write(self, batch: list[PersistTask]) -> None:
-        """Write a batch of tasks in a single DB session."""
+        """Write a batch of tasks in a single DB session.
+
+        Message-persistence tasks (save_messages / save_failed_message) are
+        extracted and committed together via one multi-row INSERT plus atomic
+        conversation counter UPDATEs — the DB is opened only once per batch.
+        """
+        msg_tasks = [t for t in batch if t.task_type in ("save_messages", "save_failed_message")]
+        other_tasks = [t for t in batch if t not in msg_tasks]
+
+        memory_conv_ids: list[str] = []
         try:
             async with get_async_db_context() as db:
-                for task in batch:
+                if msg_tasks:
+                    memory_conv_ids = await _bulk_persist_messages(db, msg_tasks)
+                for task in other_tasks:
                     try:
                         await self._execute_task(db, task)
                     except Exception:
@@ -211,16 +233,36 @@ class BatchPersistQueue:
                         )
                 await db.commit()
         except Exception:
-            logger.exception("Batch persist failed for %d tasks", len(batch))
+            logger.exception("Batch persist failed for %d tasks (%d msg)", len(batch), len(msg_tasks))
+
+        for conv_id in memory_conv_ids:
+            try:
+                asyncio.ensure_future(_mark_memory_pending(conv_id))
+            except Exception:
+                logger.warning(
+                    "Failed to schedule mark_pending for conv %s", conv_id, exc_info=True,
+                )
 
     async def _sync_write(self, task: PersistTask) -> None:
         """Synchronous (immediate) write fallback for a single task."""
+        memory_conv_ids: list[str] = []
         try:
             async with get_async_db_context() as db:
-                await self._execute_task(db, task)
+                if task.task_type in ("save_messages", "save_failed_message"):
+                    memory_conv_ids = await _bulk_persist_messages(db, [task])
+                else:
+                    await self._execute_task(db, task)
                 await db.commit()
         except Exception:
             logger.exception("Sync persist failed for task %s", task.task_type)
+
+        for conv_id in memory_conv_ids:
+            try:
+                asyncio.ensure_future(_mark_memory_pending(conv_id))
+            except Exception:
+                logger.warning(
+                    "Failed to schedule mark_pending for conv %s", conv_id, exc_info=True,
+                )
 
     # -- task handlers ----------------------------------------------------------
 
@@ -234,118 +276,256 @@ class BatchPersistQueue:
 
 
 # ---------------------------------------------------------------------------
-# Task handlers
+# Bulk message persistence
 # ---------------------------------------------------------------------------
 
 
-async def _handle_save_messages(
+def _row(
+    msg_id: uuid_module.UUID,
+    conversation_id: uuid_module.UUID,
+    role: str,
+    content: str,
+    meta_data: dict[str, Any] | None = None,
+    status: str = "completed",
+    parent_message_id: uuid_module.UUID | None = None,
+) -> dict[str, Any]:
+    return {
+        "id": msg_id,
+        "conversation_id": conversation_id,
+        "role": role,
+        "content": content,
+        "meta_data": meta_data or {},
+        "status": status,
+        "parent_message_id": parent_message_id,
+        "created_at": utcnow_naive(),
+    }
+
+
+async def _bulk_persist_messages(
     db: Any,
-    ctx: Any,  # ChatLoadContext
-    result: Any,  # StreamResult
-    **kwargs: Any,
-) -> None:
-    """Persist user + assistant messages from streaming result."""
-    from app.models.conversation_model import Conversation, Message
+    msg_tasks: list[PersistTask],
+) -> list[str]:
+    """Persist all messages from *msg_tasks* via a single multi-row INSERT
+    followed by atomic ``message_count`` UPDATEs per conversation.
 
-    conversation_id = kwargs.get("conversation_id_override") or (
-        ctx.conversation_id if ctx else None
-    )
-    user_message_id = kwargs.get("user_message_id_override") or (
-        result.user_message_id if result else uuid_module.uuid4()
-    )
-    message_id = kwargs.get("message_id_override") or (
-        result.message_id if result else uuid_module.uuid4()
-    )
+    When a task carries ``with_memory=True``, also inserts into
+    ``memory_messages`` within the same transaction.
 
-    # -- user message meta_data --------------------------------------------------
-    files_meta = kwargs.get("files_meta", [])
-    if result and hasattr(result, 'files_meta') and result.files_meta:
-        files_meta = result.files_meta
-    user_meta: dict[str, Any] = {"files": files_meta}
-    history_files = None
-    if result and hasattr(result, 'history_files') and result.history_files:
-        history_files = result.history_files
-    if history_files:
-        user_meta["history_files"] = history_files
+    Returns a list of conversation_ids that need ``mark_conversation_pending``
+    after commit (may be empty).
+    """
+    from app.models.conversation_model import Message, Conversation
+    from app.services.chat_context import StreamResult
 
-    user_msg = Message(
-        id=user_message_id,
-        conversation_id=conversation_id,
-        role="user",
-        content=kwargs.get("user_message_content", ""),
-        meta_data=user_meta,
-        status="completed",
-    )
-    db.add(user_msg)
+    rows: list[dict[str, Any]] = []
+    conv_deltas: dict[uuid_module.UUID, tuple[int, str | None]] = defaultdict(lambda: (0, None))
+    memory_conv_ids: list[str] = []
+    # Defer memory writes until after messages are INSERTed so FK references resolve.
+    _memory_params: list[dict[str, Any]] = []
 
-    # -- assistant message meta_data ---------------------------------------------
-    if kwargs.get("meta_override"):
-        assistant_meta = kwargs["meta_override"]
-    elif result and result.assistant_meta:
-        assistant_meta = dict(result.assistant_meta)
-    else:
-        assistant_meta = {
-            "usage": {
-                "prompt_tokens": 0,
-                "completion_tokens": 0,
-                "total_tokens": result.total_tokens if result else 0,
-            },
-        }
+    for task in msg_tasks:
+        args = task.args
+        ctx = args.get("ctx")
+        result: StreamResult | None = args.get("result")
 
-    # Merge persist-time fields from result into assistant_meta
-    if result:
-        if hasattr(result, 'suggested_questions') and result.suggested_questions:
-            assistant_meta.setdefault("suggested_questions", result.suggested_questions)
-        if hasattr(result, 'citations') and result.citations:
-            assistant_meta.setdefault("citations", result.citations)
-        if hasattr(result, 'audio_url') and result.audio_url:
-            assistant_meta.setdefault("audio_url", result.audio_url)
-        if hasattr(result, 'audio_status') and result.audio_status:
-            assistant_meta.setdefault("audio_status", result.audio_status)
-        if hasattr(result, 'full_reasoning') and result.full_reasoning:
-            assistant_meta.setdefault("reasoning_content", result.full_reasoning)
-        elif hasattr(result, 'full_reasoning'):
-            assistant_meta.setdefault("reasoning", result.full_reasoning)
-        if ctx and hasattr(ctx, 'api_key') and ctx.api_key and hasattr(ctx.api_key, 'model_name'):
-            assistant_meta.setdefault("model", ctx.api_key.model_name)
-
-    assistant_content = kwargs.get("content_override") or (
-        result.full_content if result else ""
-    )
-    assistant_msg = Message(
-        id=message_id,
-        conversation_id=conversation_id,
-        role="assistant",
-        content=assistant_content,
-        meta_data=assistant_meta,
-        status="completed",
-    )
-    db.add(assistant_msg)
-
-    # Optional opening statement
-    if ctx is not None and ctx.is_new_conversation and ctx.opening_statement:
-        opening_msg = Message(
-            id=kwargs.get("opening_message_id"),
-            conversation_id=conversation_id,
-            role="assistant",
-            content=ctx.opening_statement,
-            status="completed",
+        conv_id = args.get("conversation_id_override") or (
+            ctx.conversation_id if ctx else None
         )
-        if opening_msg.id:
-            db.add(opening_msg)
+        if conv_id is None:
+            continue
+        if isinstance(conv_id, str):
+            conv_id = uuid_module.UUID(conv_id)
 
-    # Update conversation message count
-    conv_result = await db.execute(
-        sa_select(Conversation).where(Conversation.id == conversation_id)
-    )
-    conversation = conv_result.scalars().first()
-    if conversation:
-        current_count = conversation.message_count or 0
-        if current_count <= 1:
-            user_message_content = kwargs.get("user_message_content", "")
-            conversation.title = user_message_content[:50] + ("..." if len(user_message_content) > 50 else "")
-        conversation.message_count = current_count + 2
-        db.add(conversation)
+        # --- save_failed_message ---
+        if task.task_type == "save_failed_message":
+            user_msg_id = args.get("user_message_id", uuid_module.uuid4())
+            msg_id = args.get("message_id", uuid_module.uuid4())
+            rows.append(_row(user_msg_id, conv_id, "user",
+                             args.get("user_message_content", ""),
+                             {"files": args.get("files_meta", [])}))
+            rows.append(_row(msg_id, conv_id, "assistant",
+                             args.get("error_message", "An error occurred during generation."),
+                             {"error": args.get("error_detail", "")},
+                             status="failed"))
+            delta, _ = conv_deltas[conv_id]
+            conv_deltas[conv_id] = (delta + 2, None)
+            continue
+
+        # --- save_messages ---
+        user_msg_id = args.get("user_message_id_override") or (
+            result.user_message_id if result else uuid_module.uuid4())
+        msg_id = args.get("message_id_override") or (
+            result.message_id if result else uuid_module.uuid4())
+
+        # user message
+        files_meta = args.get("files_meta", [])
+        if result and getattr(result, 'files_meta', None):
+            files_meta = result.files_meta
+        user_meta: dict[str, Any] = {"files": files_meta}
+        if result and getattr(result, 'history_files', None):
+            user_meta["history_files"] = result.history_files
+
+        user_content = args.get("user_message_content", "") or ""
+        rows.append(_row(user_msg_id, conv_id, "user", user_content, user_meta))
+
+        # assistant message meta
+        if args.get("meta_override"):
+            assistant_meta = dict(args["meta_override"])
+        elif result and result.assistant_meta:
+            assistant_meta = dict(result.assistant_meta)
+        else:
+            assistant_meta = {
+                "usage": {"prompt_tokens": 0, "completion_tokens": 0,
+                          "total_tokens": result.total_tokens if result else 0},
+            }
+
+        if result:
+            for src, dst in (("suggested_questions", "suggested_questions"),
+                             ("citations", "citations"),
+                             ("audio_url", "audio_url"),
+                             ("audio_status", "audio_status"),
+                             ("full_reasoning", "reasoning_content")):
+                val = getattr(result, src, None)
+                if val:
+                    assistant_meta.setdefault(dst, val)
+            if ctx and hasattr(ctx, 'api_key') and ctx.api_key and getattr(ctx.api_key, 'model_name', None):
+                assistant_meta.setdefault("model", ctx.api_key.model_name)
+
+        assistant_content = args.get("content_override") or (
+            result.full_content if result else "")
+        rows.append(_row(msg_id, conv_id, "assistant", assistant_content, assistant_meta))
+
+        title_candidate = user_content[:50] + ("..." if len(user_content) > 50 else "") if user_content else None
+        delta, _ = conv_deltas[conv_id]
+        conv_deltas[conv_id] = (delta + 2, title_candidate)
+
+        # opening statement
+        if ctx and ctx.is_new_conversation and ctx.opening_statement:
+            opening_id = args.get("opening_message_id")
+            if opening_id:
+                rows.append(_row(opening_id, conv_id, "assistant", ctx.opening_statement))
+                d, t = conv_deltas[conv_id]
+                conv_deltas[conv_id] = (d + 1, t)
+
+        # Collect memory params — must write AFTER messages INSERT so FK references resolve.
+        if args.get("with_memory") and ctx:
+            _memory_params.append({
+                "conv_id": conv_id,
+                "ctx": ctx,
+                "user_msg_id": user_msg_id,
+                "msg_id": msg_id,
+                "user_content": user_content,
+                "assistant_content": assistant_content,
+            })
+
+    # --- single multi-row INSERT for all messages ---
+    if rows:
+        await db.execute(sa_insert(Message).values(rows))
+
+    # --- memory_messages (now that FK targets exist) ---
+    for mp in _memory_params:
+        await _write_memory_messages_inline(
+            db, mp["conv_id"], mp["ctx"], mp["user_msg_id"], mp["msg_id"],
+            mp["user_content"], mp["assistant_content"], memory_conv_ids,
+        )
+
+    # --- atomic UPDATE per conversation ---
+    for conv_id, (delta, title_candidate) in conv_deltas.items():
+        if delta <= 0:
+            continue
+        values: dict[str, Any] = {
+            "message_count": Conversation.message_count + delta,
+        }
+        if title_candidate:
+            values["title"] = sa_case(
+                (Conversation.message_count <= 1, title_candidate),
+                else_=Conversation.title,
+            )
+        await db.execute(
+            sa_update(Conversation).where(Conversation.id == conv_id).values(**values)
+        )
+
+    return memory_conv_ids
+
+
+async def _write_memory_messages_inline(
+    db: Any,
+    conv_id: uuid_module.UUID,
+    ctx: Any,
+    user_msg_id: uuid_module.UUID,
+    assistant_msg_id: uuid_module.UUID,
+    user_content: str,
+    assistant_content: str,
+    memory_conv_ids: list[str],
+) -> None:
+    """Insert user + assistant rows into ``memory_messages`` with per-conversation
+    seq allocation, and append conversation_id to *memory_conv_ids*."""
+    from app.models.memory_message_model import MemoryMessage
+    from app.core.memory.enums import MemoryMessageSource
+
+    end_user_id = str(ctx.user_id) if ctx.user_id else ""
+    source = MemoryMessageSource.AGENT
+    should_memorize = bool(ctx.memory_enabled) if hasattr(ctx, 'memory_enabled') else True
+
+    # Per-conversation advisory lock for seq allocation
+    lock_key = f"mm_seq:conv:{conv_id}"
+    await db.execute(sa_text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"), {"key": lock_key})
+
+    # Current max seq
+    stmt = sa_select(sa_func.coalesce(sa_func.max(MemoryMessage.message_seq), 0))
+    stmt = stmt.where(MemoryMessage.conversation_id == conv_id)
+    seq_result = await db.execute(stmt)
+    next_seq: int = seq_result.scalar() or 0
+
+    now = utcnow_naive()
+    dialog_at = now.isoformat()
+
+    # User
+    next_seq += 1
+    db.add(MemoryMessage(
+        id=uuid_module.uuid4(),
+        conversation_id=conv_id,
+        original_message_id=user_msg_id,
+        end_user_id=end_user_id,
+        source=source.value,
+        role="user",
+        content=user_content,
+        message_seq=next_seq,
+        should_memorize=should_memorize,
+        created_at=now,
+        dialog_at=dialog_at,
+    ))
+
+    # Assistant
+    assistant_seq: int | None = None
+    if assistant_content.strip():
+        next_seq += 1
+        assistant_seq = next_seq
+        db.add(MemoryMessage(
+            id=uuid_module.uuid4(),
+            conversation_id=conv_id,
+            original_message_id=assistant_msg_id,
+            end_user_id=end_user_id,
+            source=source.value,
+            role="assistant",
+            content=assistant_content,
+            message_seq=assistant_seq,
+            should_memorize=True,
+            created_at=now,
+            dialog_at=dialog_at,
+        ))
+
+    memory_conv_ids.append(str(conv_id))
+
+
+async def _mark_memory_pending(conv_id: str) -> None:
+    """Best-effort: mark conversation as pending so the periodic Celery task
+    picks it up for memory extraction."""
+    try:
+        from app.core.memory.pipelines.dispatcher import mark_conversation_pending
+        mark_conversation_pending(conv_id)
+    except Exception:
+        logger.warning("mark_conversation_pending failed for conv %s", conv_id, exc_info=True)
 
 
 async def _handle_save_execution(
@@ -403,53 +583,18 @@ async def _handle_after_turn(
 
         manager = ContextEngineManager(db)
         await manager.after_app_turn(
-            conversation_id=ctx.conversation_id,
             features=ctx.features_config,
-            system_prompt=ctx.system_prompt,
-            provider=ctx.api_key_provider,
-            is_omni=ctx.api_key_is_omni,
+            conversation_id=ctx.conversation_id,
+            current_provider=ctx.api_key_provider,
+            current_is_omni=ctx.api_key_is_omni,
             model_config_id=kwargs.get("model_config_id"),
         )
     except Exception:
         logger.exception("after_turn failed for conversation %s", ctx.conversation_id)
 
 
-async def _handle_save_failed_message(
-    db: Any,
-    ctx: Any,  # ChatLoadContext
-    **kwargs: Any,
-) -> None:
-    """Persist failed message when LLM call fails."""
-    from app.models.conversation_model import Message
-
-    user_message_id = kwargs.get("user_message_id", uuid_module.uuid4())
-    message_id = kwargs.get("message_id", uuid_module.uuid4())
-
-    user_msg = Message(
-        id=user_message_id,
-        conversation_id=ctx.conversation_id,
-        role="user",
-        content=kwargs.get("user_message_content", ""),
-        meta_data={"files": kwargs.get("files_meta", [])},
-        status="completed",
-    )
-    db.add(user_msg)
-
-    assistant_msg = Message(
-        id=message_id,
-        conversation_id=ctx.conversation_id,
-        role="assistant",
-        content=kwargs.get("error_message", "An error occurred during generation."),
-        meta_data={"error": kwargs.get("error_detail", "")},
-        status="failed",
-    )
-    db.add(assistant_msg)
-
-
 _TASK_HANDLERS: dict[str, Any] = {
-    "save_messages": _handle_save_messages,
     "save_execution": _handle_save_execution,
     "record_usage": _handle_record_usage,
     "after_turn": _handle_after_turn,
-    "save_failed_message": _handle_save_failed_message,
 }
