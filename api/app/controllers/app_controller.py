@@ -2023,9 +2023,6 @@ async def update_workflow_config(
         for var_def, resolved_def in zip(payload.variables, resolved):
             var_def.default = resolved_def.get("default", var_def.default)
     cfg = app_service.update_workflow_config(db, app_id=app_id, data=payload, workspace_id=workspace_id)
-    # cache_key = workflow_config_key(app_id)
-    # await delete_json_async(cache_key)
-    # logger.info(f"[cache] invalidate workflow config: key={cache_key}")
     return success(data=WorkflowConfigSchema.model_validate(cfg))
 
 
