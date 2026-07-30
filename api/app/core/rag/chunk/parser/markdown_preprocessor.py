@@ -9,6 +9,7 @@ EMPTY_HTML_ANCHOR_PATTERN = re.compile(
 )
 
 ATX_HEADING_PATTERN = re.compile(r"^\s{0,3}(#{1,6})\s+(.+?)\s*$")
+MINERU_FIELD_HEADING_BODY_PATTERN = re.compile(r"[：:；;。。，,]")
 ESCAPED_HEADING_PATTERN = re.compile(r"^(\s*)\\(#{1,6})(\s+)")
 ESCAPED_UNORDERED_LIST_PATTERN = re.compile(r"^(\s*)\\([-+*])(\s+)")
 ESCAPED_THEMATIC_BREAK_PATTERN = re.compile(r"^(\s*)\\((?:-{3,}|\*{3,}|_{3,}))(\s*)$")
@@ -93,9 +94,12 @@ class MarkdownPreprocessor:
         in_code = False
         in_list_context = False
         in_qa_list_context = False
+        pending_empty_html_anchor = False
         for line_number, raw_line in enumerate(text.split("\n"), start=1):
-            stripped = raw_line.strip()
-            is_code_fence = stripped.startswith("```")
+            raw_stripped = raw_line.strip()
+            is_code_fence = raw_stripped.startswith("```")
+            line_is_empty_html_anchor = bool(EMPTY_HTML_ANCHOR_PATTERN.fullmatch(raw_stripped))
+            preceded_by_empty_html_anchor = pending_empty_html_anchor
 
             if in_code:
                 line_infos.append(
@@ -109,6 +113,7 @@ class MarkdownPreprocessor:
                 )
                 if is_code_fence:
                     in_code = False
+                pending_empty_html_anchor = False
                 continue
 
             line = raw_line
@@ -121,6 +126,14 @@ class MarkdownPreprocessor:
             metadata: dict[str, Any] = {}
             if not is_code_fence:
                 heading_match = ATX_HEADING_PATTERN.match(line)
+                if heading_match and self._should_demote_mineru_field_heading(
+                    heading_match,
+                    normalize_escaped_structure=normalize_escaped_structure,
+                    preceded_by_empty_html_anchor=preceded_by_empty_html_anchor,
+                ):
+                    line = heading_match.group(2).strip()
+                    stripped = line.strip()
+                    heading_match = None
                 if heading_match:
                     block_hint = "heading"
                     metadata = {
@@ -167,6 +180,11 @@ class MarkdownPreprocessor:
                 in_code = True
                 in_list_context = False
                 in_qa_list_context = False
+                pending_empty_html_anchor = False
+            elif line_is_empty_html_anchor:
+                pending_empty_html_anchor = True
+            elif stripped:
+                pending_empty_html_anchor = False
 
         return MarkdownPreprocessResult(
             lines=[line_info.text for line_info in line_infos],
@@ -180,6 +198,20 @@ class MarkdownPreprocessor:
         if heading_count or list_count or rule_count or STRUCTURAL_LINE_PATTERN.match(normalized):
             normalized = ESCAPED_EMPHASIS_PATTERN.sub(r"\1", normalized)
         return normalized
+
+    def _should_demote_mineru_field_heading(
+        self,
+        heading_match: re.Match,
+        *,
+        normalize_escaped_structure: bool,
+        preceded_by_empty_html_anchor: bool,
+    ) -> bool:
+        if not normalize_escaped_structure or preceded_by_empty_html_anchor:
+            return False
+        body = heading_match.group(2).strip()
+        if _is_wrapped_emphasis(body):
+            return False
+        return bool(MINERU_FIELD_HEADING_BODY_PATTERN.search(body))
 
     def _list_metadata(self, line: str) -> dict[str, Any] | None:
         patterns = (
@@ -243,6 +275,15 @@ def _indent_level(line: str) -> int:
 def _strip_wrapping_emphasis(text: str) -> str:
     value = text.strip()
     for marker in ("**", "__"):
-        if value.startswith(marker) and value.endswith(marker) and len(value) > len(marker) * 2:
+        if _is_wrapped_emphasis(value, marker):
             return value[len(marker):-len(marker)].strip()
     return value
+
+
+def _is_wrapped_emphasis(text: str, marker: str | None = None) -> bool:
+    value = text.strip()
+    markers = (marker,) if marker else ("**", "__")
+    return any(
+        value.startswith(item) and value.endswith(item) and len(value) > len(item) * 2
+        for item in markers
+    )
