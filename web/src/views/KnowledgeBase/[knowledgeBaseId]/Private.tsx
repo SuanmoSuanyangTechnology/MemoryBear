@@ -9,24 +9,25 @@ import Table, { type TableRef } from '@/components/Table'
 import type { ColumnsType } from 'antd/es/table';
 import type { AnyObject } from 'antd/es/_util/type';
 import { MoreOutlined } from '@ant-design/icons';
+import copy from 'copy-to-clipboard'
+
 import folderIcon from '@/assets/images/knowledgeBase/folder.png';
 import textIcon from '@/assets/images/knowledgeBase/text.png';
+import NoData from '@/assets/images/knowledgeBase/noData.png'
 
-// import blankIcon from '@/assets/images/knowledgeBase/blankDocument.png';
-// import imageIcon from '@/assets/images/knowledgeBase/image.png'
 import { getKnowledgeBaseDetail, deleteDocument, downloadFile, updateKnowledgeBase, createSync, batchDownloadFilesByKb, exportQaByKb } from '@/api/knowledgeBase';
-import { 
-  type CreateModalRef, 
-  type KnowledgeBaseListItem, 
-  type RecallTestDrawerRef, 
-  type CreateFolderModalRef, 
-  type CreateSetModalRef,
-  type ShareModalRef,
-  type CreateDatasetModalRef,
-  type FolderFormData, 
-  type KnowledgeBaseDocumentData,
-  type KnowledgeBaseFormData,
-  type MetadataDrawerRef,
+import type { 
+  CreateModalRef, 
+  KnowledgeBaseListItem, 
+  RecallTestDrawerRef, 
+  CreateFolderModalRef, 
+  CreateSetModalRef,
+  ShareModalRef,
+  CreateDatasetModalRef,
+  FolderFormData, 
+  KnowledgeBaseDocumentData,
+  KnowledgeBaseFormData,
+  MetadataDrawerRef,
 } from '@/views/KnowledgeBase/types';
 import RecallTestDrawer from '../components/RecallTestDrawer';
 import CreateFolderModal from '../components/CreateFolderModal';
@@ -42,9 +43,7 @@ import { formatDateTime } from '@/utils/format';
 import KnowledgeGraphCard from '../components/KnowledgeGraphCard';
 import { useBreadcrumbManager, type BreadcrumbItem } from '@/hooks/useBreadcrumbManager';
 import './Private.css'
-import copy from 'copy-to-clipboard'
 import Empty from '@/components/Empty'
-import NoData from '@/assets/images/knowledgeBase/noData.png'
 // Tree node data type
 
 const Private: FC = () => {
