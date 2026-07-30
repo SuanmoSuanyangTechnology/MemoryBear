@@ -16,6 +16,9 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING, List, NamedTuple, Optional, Tuple
 
+from app.core.memory.storage_services.extraction_engine.data_preprocessing import SemanticPruner
+from app.core.memory.models.config_models import PruningConfig
+
 if TYPE_CHECKING:
     from app.schemas.memory_config_schema import MemoryConfig
 
@@ -40,6 +43,7 @@ async def prune_messages(
     source: str = "",
     language: str = "zh",
     persist: bool = True,
+    llm_client=None,
 ) -> Tuple[List[dict], list]:
     """对滑动窗口覆盖的所有消息执行剪枝/规整。
 
@@ -52,6 +56,7 @@ async def prune_messages(
         language: 语言
         persist: 是否将剪枝结果持久化到 DB。试运行(pilot)模式应传 False，
                  避免污染 PG 中的 pruned_content 字段。
+        llm_client: 外部传入的 LLM 客户端（由 Pipeline 复用），为 None 时自行创建。
 
     Returns:
         (pruned_messages, pruning_records) 元组：
@@ -75,8 +80,24 @@ async def prune_messages(
     prune_tasks: list = []
     db_updates: list = []
 
-    # 初始化 LLM 客户端（懒加载，整个调用共享）
-    llm_client = _get_llm_client(memory_config)
+    # 初始化 LLM 客户端：外部传入时复用，否则自行创建（兼容独立调用场景）
+    if llm_client is None:
+        llm_client = _get_llm_client(memory_config)
+
+    # 提前创建共享 PruningConfig + SemanticPruner（K 条消息复用同一实例）
+    # SemanticPruner.extract_assistant_hint() 内部仅读取 self 属性，无可变状态写入，协程并发安全
+    shared_pruning_config = PruningConfig(
+        pruning_switch=memory_config.pruning_enabled,
+        pruning_scene=memory_config.pruning_scene or "education",
+        pruning_threshold=memory_config.pruning_threshold,
+        scene_id=str(memory_config.scene_id) if memory_config.scene_id else None,
+        ontology_class_infos=memory_config.ontology_class_infos,
+    )
+    shared_pruner = SemanticPruner(
+        config=shared_pruning_config,
+        llm_client=llm_client,
+        language=language,
+    )
 
     for i, msg in enumerate(messages):
         role = msg.get("role", "")
@@ -102,19 +123,15 @@ async def prune_messages(
         if role == "user":
             pair = _next_assistant_content(messages, i)
             prune_tasks.append((i, "user", _call_llm_prune(
-                llm_client=llm_client,
-                memory_config=memory_config,
+                pruner=shared_pruner,
                 content=pair,
                 user_content=content,
-                language=language,
             )))
         elif role == "assistant":
             prune_tasks.append((i, "assistant", _call_llm_prune(
-                llm_client=llm_client,
-                memory_config=memory_config,
+                pruner=shared_pruner,
                 content=content,
                 user_content="",
-                language=language,
             )))
         else:
             result[i] = msg
@@ -248,41 +265,21 @@ def _get_llm_client(memory_config: "MemoryConfig"):
 
 
 async def _call_llm_prune(
-    llm_client,
-    memory_config: "MemoryConfig",
+    pruner,
     content: str,
     user_content: str,
-    language: str,
 ) -> PruneResult:
     """调用 SemanticPruner 执行单条消息剪枝。
 
     Args:
-        llm_client: LLM 客户端实例
-        memory_config: 记忆配置
+        pruner: 共享的 SemanticPruner 实例（协程安全，无可变状态）
         content: assistant 消息内容（user 角色调用时传入紧邻的 assistant 配对内容）
         user_content: user 消息内容（assistant 角色调用时传空字符串）
-        language: 语言
 
     Returns:
         PruneResult 命名元组
     """
-    from app.core.memory.storage_services.extraction_engine.data_preprocessing import SemanticPruner
-    from app.core.memory.models.config_models import PruningConfig
     from app.core.memory.models.message_models import ConversationMessage
-
-    pruning_config = PruningConfig(
-        pruning_switch=memory_config.pruning_enabled,
-        pruning_scene=memory_config.pruning_scene or "education",
-        pruning_threshold=memory_config.pruning_threshold,
-        scene_id=str(memory_config.scene_id) if memory_config.scene_id else None,
-        ontology_class_infos=memory_config.ontology_class_infos,
-    )
-
-    pruner = SemanticPruner(
-        config=pruning_config,
-        llm_client=llm_client,
-        language=language,
-    )
 
     user_msg = ConversationMessage(role="user", msg=user_content if user_content else "[context]")
     asst_msg = ConversationMessage(role="assistant", msg=content)
