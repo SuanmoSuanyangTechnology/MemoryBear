@@ -30,13 +30,14 @@ CHINESE_NUMERAL_MARKERS = "零〇一二三四五六七八九十百千万壹贰�
 
 UNORDERED_LIST_PATTERN = re.compile(r"^\s{0,3}([-+*])\s+(.+\S)\s*$")
 ORDERED_LIST_PATTERN = re.compile(r"^\s{0,3}(\d+)([.)）、|｜])\s*(.+\S)\s*$")
+EMPTY_ORDERED_LIST_PATTERN = re.compile(r"^\s{0,3}(\d{1,3})([.)）、|｜])\s*$")
 PAREN_ORDERED_LIST_PATTERN = re.compile(
     rf"^\s{{0,3}}([（(]\s*(?:\d+|[{CHINESE_NUMERAL_MARKERS}]+)\s*[）)])\s*(.+\S)\s*$"
 )
 KEYCAP_LIST_PATTERN = re.compile(r"^\s{0,3}([0-9]\ufe0f?\u20e3)\s*(.+\S)\s*$")
 CIRCLED_LIST_PATTERN = re.compile(rf"^\s{{0,3}}([{CIRCLED_MARKERS}])\s*(.+\S)\s*$")
 CHINESE_LIST_PATTERN = re.compile(rf"^\s{{0,3}}([{CHINESE_NUMERAL_MARKERS}]+)({LIST_BOUNDARY})\s*(.+\S)\s*$")
-ALPHA_LIST_PATTERN = re.compile(r"^\s{0,3}([A-Za-z])([.)）、|｜])\s*(.+\S)\s*$")
+ALPHA_LIST_PATTERN = re.compile(r"^\s{0,3}([A-Za-z])([.)）|｜]|、(?!\s*[A-Za-z]))\s*(.+\S)\s*$")
 DEFINITION_LIST_PATTERN = re.compile(r"^\s{0,3}([A-Z][A-Z0-9]{1,11})([：:])\s*(.+\S)\s*$")
 QA_LIST_PATTERN = re.compile(r"^\s{0,3}(问|答|拓展|补充)([?？:：|｜]|\s+)\s*(.+\S)\s*$")
 ORDINAL_LIST_PATTERN = re.compile(
@@ -45,7 +46,20 @@ ORDINAL_LIST_PATTERN = re.compile(
 STEP_LIST_PATTERN = re.compile(
     rf"^\s{{0,3}}(.{{0,12}}?第[{CHINESE_NUMERAL_MARKERS}0-9]+步)({LIST_BOUNDARY})\s*(.+\S)\s*$"
 )
-LIST_CONTINUATION_PATTERN = re.compile(r"^\s{0,3}.{1,24}简介[：:].+\S\s*$")
+PREFIXED_LIST_PATTERN = re.compile(
+    rf"^\s{{0,3}}(?P<prefix>[^:：|｜\n]{{1,24}}[：:|｜])\s*"
+    rf"(?P<marker>"
+    rf"\d+[.)）、|｜]"
+    rf"|[（(]\s*(?:\d+|[{CHINESE_NUMERAL_MARKERS}]+)\s*[）)]"
+    rf"|[0-9]\ufe0f?\u20e3"
+    rf"|[{CIRCLED_MARKERS}]"
+    rf"|[{CHINESE_NUMERAL_MARKERS}]+(?:{LIST_BOUNDARY})"
+    rf"|[A-Za-z](?:[.)）|｜]|、(?!\s*[A-Za-z]))"
+    rf"|(?:首次|其次|再次|最后|第[{CHINESE_NUMERAL_MARKERS}0-9]+)(?:{LIST_BOUNDARY})"
+    rf"|.{{0,12}}?第[{CHINESE_NUMERAL_MARKERS}0-9]+步(?:{LIST_BOUNDARY})"
+    rf")\s*(?P<body>.*\S)?\s*$"
+)
+LIST_CONTINUATION_PATTERN = re.compile(r"^\s{0,3}.{1,24}(?:简介|介绍|说明|定义)[：:].+\S\s*$")
 IMAGE_LINE_PATTERN = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
 HTML_TABLE_LINE_PATTERN = re.compile(r"^\s*<table\b", re.IGNORECASE)
 MARKDOWN_TABLE_LINE_PATTERN = re.compile(r"^\s*\|.+\|\s*$")
@@ -171,6 +185,7 @@ class MarkdownPreprocessor:
         patterns = (
             ("unordered", UNORDERED_LIST_PATTERN),
             ("ordered", ORDERED_LIST_PATTERN),
+            ("ordered", EMPTY_ORDERED_LIST_PATTERN),
             ("ordered_parenthesis", PAREN_ORDERED_LIST_PATTERN),
             ("keycap", KEYCAP_LIST_PATTERN),
             ("circled", CIRCLED_LIST_PATTERN),
@@ -191,6 +206,15 @@ class MarkdownPreprocessor:
                 "list_marker_kind": marker_kind,
                 "list_level": _indent_level(line),
                 "contains_qa_marker": marker_kind == "qa",
+            }
+        prefixed_match = PREFIXED_LIST_PATTERN.match(line)
+        if prefixed_match:
+            return {
+                "list_marker": prefixed_match.group("marker").strip(),
+                "list_marker_kind": "prefixed",
+                "list_prefix": prefixed_match.group("prefix").strip(),
+                "list_level": _indent_level(line),
+                "contains_qa_marker": False,
             }
         return None
 
