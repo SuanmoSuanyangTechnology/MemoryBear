@@ -67,9 +67,9 @@ const MemoryActivity: FC<MemoryActivityProps> = ({ className }) => {
 
         <Flex vertical gap={4} className="rb:min-w-0 rb:flex-1 rb:shrink-0">
           <Tooltip title={record.name || '-'} placement="topLeft">
-            <Flex align="center" justify="space-between" gap={10} className="rb:min-w-0 rb:truncate rb:text-[12px] rb:leading-4.5 rb:font-medium">
+            <div className="rb:min-w-0 rb:truncate rb:text-[12px] rb:leading-4.5 rb:font-medium">
               {record.name || '-'}
-            </Flex>
+            </div>
           </Tooltip>
 
           <Tooltip title={record.content || '-'} placement="topLeft">
