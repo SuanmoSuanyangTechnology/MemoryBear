@@ -518,7 +518,23 @@ class WritePipeline:
 
                 # Step 6: 摘要 - 生成情景记忆摘要
                 async with bear.step(6, 6, "摘要", "生成情景记忆"):
-                    await self._summarize(chunked_dialogs)
+                    successful_summaries = await self._summarize(chunked_dialogs)
+
+                # 摘要成功写入 Neo4j 后，同步保存为 PG 展示记录
+                if successful_summaries:
+                    try:
+                        from app.services.memory_display_record_service import (
+                            MemoryDisplayRecordService,
+                        )
+                        await MemoryDisplayRecordService.save_written(
+                            summaries=successful_summaries,
+                            end_user_id=self.end_user_id,
+                        )
+                    except Exception as e:
+                        logger.warning(
+                            f"[MemoryDisplayRecord] PG 展示记录写入异常（不影响主流程）: {e}",
+                            exc_info=True,
+                        )
 
                 # Step 5: 聚类 - 增量更新社区（Celery 异步任务，无需持锁）
                 async with bear.step(5, 6, "聚类", "增量更新社区") as s:
@@ -928,12 +944,15 @@ class WritePipeline:
     # （+ entity_description）+ meta_data部分在此提取
     # ──────────────────────────────────────────────
     # TODO 乐力齐 需要做成异步celery任务
-    async def _summarize(self, chunked_dialogs: List[DialogData]) -> None:
+    async def _summarize(self, chunked_dialogs: List[DialogData]) -> List[Any]:
         """
-        摘要：生成情景记忆摘要 → 写入 Neo4j。
+        摘要：生成情景记忆摘要 → 写入 Neo4j → 返回成功写入的 MemorySummaryNode 列表。
 
-        摘要生成失败不影响主流程（try/except 吞掉异常）。
-        直接复用 self._neo4j_connector，避免每次写入额外创建一个 driver。
+        返回值语义：
+        - 非空列表：本轮成功写入 Neo4j 的 MemorySummaryNode
+        - 空列表：没有候选 Summary / Neo4j 未返回成功 ID / 步骤异常
+
+        调用方在返回非空时触发 PG 展示记录写入。
         """
         from app.core.memory.storage_services.extraction_engine.knowledge_extraction.memory_summary import (
             memory_summary_generation,
@@ -950,10 +969,23 @@ class WritePipeline:
                 embedder_client=self._embedder_client,
                 language=self.language,
             )
-            await add_memory_summary_nodes(summaries, self._neo4j_connector)
+
+            if not summaries:
+                return []
+
+            created_ids = await add_memory_summary_nodes(summaries, self._neo4j_connector)
+
+            if not created_ids:
+                return []
+
             await add_memory_summary_statement_edges(summaries, self._neo4j_connector)
+
+            created_id_set = set(created_ids)
+            return [s for s in summaries if s.id in created_id_set]
+
         except Exception as e:
             logger.error(f"Memory summary step failed: {e}", exc_info=True)
+            return []
 
     # ──────────────────────────────────────────────
     # 文件预处理（与旧路径 memory_agent_service._preprocess_files 一脉相承）
