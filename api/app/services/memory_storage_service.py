@@ -566,11 +566,13 @@ async def search_edges(end_user_id: Optional[str] = None) -> List[Dict[str, Any]
     return result
 
 
-async def search_all_batch(end_user_ids: List[str]) -> Dict[str, int]:
+async def search_all_batch(end_user_ids: List[str], connector: Neo4jConnector = None) -> Dict[str, int]:
     """批量查询多个用户的记忆数量（简化版本，只返回total）
 
     Args:
         end_user_ids: 用户ID列表
+        connector: 可选的 Neo4j 连接器。为 None 时使用模块级共享 connector（适用于 FastAPI）；
+                   Celery 任务中应传入独立 connector 以避免跨 event loop 问题。
 
     Returns:
         Dict[str, int]: 以user_id为key的记忆数量字典
@@ -579,7 +581,8 @@ async def search_all_batch(end_user_ids: List[str]) -> Dict[str, int]:
     if not end_user_ids:
         return {}
 
-    result = await _neo4j_connector.execute_query(
+    neo4j = connector or _neo4j_connector
+    result = await neo4j.execute_query(
         MemoryConfigRepository.SEARCH_FOR_ALL_BATCH,
         end_user_ids=end_user_ids,
     )

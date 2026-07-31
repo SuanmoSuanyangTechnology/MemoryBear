@@ -65,11 +65,15 @@ class ImplicitMemoryLLMClient:
         self.db = db
         self.default_model_id = default_model_id
         self._tenant_id = tenant_id
+        self._cached_client = None
         
         logger.debug("ImplicitMemoryLLMClient initialized")
 
     def _get_llm_client(self, model_id: Optional[str] = None):
         """Get LLM client instance.
+        
+        Uses cached client when requesting the default model to avoid
+        redundant DB queries. Non-default model_id bypasses cache.
         
         Args:
             model_id: LLM model ID to use, defaults to default_model_id
@@ -84,9 +88,16 @@ class ImplicitMemoryLLMClient:
         if not effective_model_id:
             raise ValueError("No LLM model ID provided and no default model ID set")
         
+        # 缓存命中：仅当使用默认 model_id 时复用
+        if self._cached_client is not None and effective_model_id == self.default_model_id:
+            return self._cached_client
+        
         try:
             client = ModelClientMixin.get_llm_client(self.db, effective_model_id, self._tenant_id)
             logger.debug(f"Created LLM client for model: {effective_model_id}")
+            # 缓存默认 model 的 client
+            if effective_model_id == self.default_model_id:
+                self._cached_client = client
             return client
         except Exception as e:
             logger.error(f"Failed to create LLM client for model {effective_model_id}: {e}")

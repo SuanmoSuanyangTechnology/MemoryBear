@@ -527,7 +527,7 @@ class EmotionAnalyticsService:
     async def generate_emotion_suggestions(
             self,
             end_user_id: str,
-            db: Session,
+            db: Session = None,
             language: str = "zh",
     ) -> Dict[str, Any]:
         """生成个性化情绪建议
@@ -536,7 +536,8 @@ class EmotionAnalyticsService:
 
         Args:
             end_user_id: 宿主ID（用户组ID）
-            db: 数据库会话
+            db: 数据库会话（可选）。为 None 时内部自行开短 session 查 config + 构造 LLM 客户端后关闭，
+                避免在 Neo4j/LLM I/O 期间长时间持有 PG 连接。
             language: 输出语言 ("zh" 中文, "en" 英文)
 
         Returns:
@@ -547,25 +548,20 @@ class EmotionAnalyticsService:
         try:
             logger.info(f"生成个性化情绪建议: user={end_user_id}")
 
-            # 1. 从 end_user_id 获取关联的 memory_config_id
+            # 1. 从 end_user_id 获取关联的 memory_config_id + 构造 LLM 客户端
             llm_client = None
+            config_error = None
             try:
-                config_service = MemoryConfigService(db)
-                config_id = config_service.get_config_id_by_end_user(end_user_id)
-                if config_id is not None:
-                    memory_config = config_service.load_memory_config(
-                        config_id=config_id
-                    )
-                    from app.core.memory.pipelines.base_pipeline import ModelClientMixin
-                    # 统一经 ModelClientMixin 获取客户端，并携带 tenant_id，
-                    # 避免 SpeedBear 公共模型运行时缺失租户上下文。
-                    llm_client = ModelClientMixin.get_llm_client(
-                        db,
-                        memory_config.llm_model_id,
-                        tenant_id=memory_config.tenant_id,
-                    )
+                if db is not None:
+                    llm_client = self._get_llm_client_for_user(db, end_user_id)
+                else:
+                    # db=None：用短 session 查 config + 构造 LLM 客户端后立即关闭
+                    from app.db import get_db_context
+                    with get_db_context() as _db:
+                        llm_client = self._get_llm_client_for_user(_db, end_user_id)
             except Exception as e:
-                logger.warning(f"无法获取 end_user {end_user_id} 的配置，将使用默认配置: {e}")
+                logger.warning(f"无法获取 end_user {end_user_id} 的LLM配置: {e}")
+                config_error = str(e)
 
             # 2. 获取情绪健康数据
             health_data = await self.calculate_emotion_health_index(end_user_id, time_range="30d")
@@ -608,8 +604,9 @@ class EmotionAnalyticsService:
 
             # 7. 调用LLM生成建议（使用配置中的LLM）
             if llm_client is None:
-                # 无法获取配置时，抛出错误而不是使用默认配置
-                raise ValueError("无法获取LLM配置，请确保end_user关联了有效的memory_config")
+                # 将上游具体错误传递出去
+                detail = config_error or "未知原因"
+                raise ValueError(f"无法获取LLM配置: {detail}")
 
             # 将 prompt 转换为 messages 格式
             messages = [
@@ -661,6 +658,30 @@ class EmotionAnalyticsService:
             logger.error(f"生成个性化建议失败: {str(e)}", exc_info=True)
             raise
 
+    @staticmethod # 做一个静态方法？
+    def _get_llm_client_for_user(db: Session, end_user_id: str):
+        """从 end_user_id 获取关联 memory_config 并构造 LLM 客户端。
+
+        Args:
+            db: 数据库会话
+            end_user_id: 终端用户 ID
+
+        Returns:
+            LLM 客户端实例，若无法获取配置则返回 None
+        """
+        from app.core.memory.pipelines.base_pipeline import ModelClientMixin
+
+        config_service = MemoryConfigService(db)
+        config_id = config_service.get_config_id_by_end_user(end_user_id)
+        if config_id is None:
+            return None
+        memory_config = config_service.load_memory_config(config_id=config_id)
+        return ModelClientMixin.get_llm_client(
+            db,
+            memory_config.llm_model_id,
+            tenant_id=memory_config.tenant_id,
+        )
+
     async def _get_simple_user_profile(self, end_user_id: str) -> Dict[str, Any]:
         """获取简化的用户画像数据
 
@@ -670,9 +691,8 @@ class EmotionAnalyticsService:
         Returns:
             Dict: 用户画像数据
         """
+        connector = Neo4jConnector()
         try:
-            connector = Neo4jConnector()
-
             # 查询用户的实体和标签
             query = """
             MATCH (e:ExtractedEntity)
@@ -686,7 +706,6 @@ class EmotionAnalyticsService:
 
             # 提取兴趣标签
             interests = [e["name"] for e in entities if e.get("type") in ["INTEREST", "HOBBY"]][:5]
-            # 后期会引入用户的习惯。。
             return {
                 "interests": interests if interests else ["未知"]
             }
@@ -694,6 +713,8 @@ class EmotionAnalyticsService:
         except Exception as e:
             logger.error(f"获取用户画像失败: {str(e)}")
             return {"interests": ["未知"]}
+        finally:
+            await connector.close()
 
     async def _build_suggestion_prompt(
             self,
