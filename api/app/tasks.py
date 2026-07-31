@@ -3786,29 +3786,39 @@ def do_refresh_insight_summary_cache(
 ) -> Dict[str, Any]:
     """按 scan 的独立判定刷新单个用户的记忆洞察或用户摘要缓存。
 
-    由 scan_refresh_insight_summary_cache 派发，每个用户一个独立任务、独立 db session，
-    跑完即释放内存。刷新标记默认开启，兼容发布前已入队的旧消息。
+    由 scan_refresh_insight_summary_cache 派发，每个用户一个独立任务；PostgreSQL
+    读写使用独立同步短 Session，Neo4j/LLM 保持异步。刷新标记默认开启，
+    兼容发布前已入队的旧消息。
     """
     start_time = time.time()
     inflight_key = CACHE_INFLIGHT_KEY_FMT.format(end_user_id=end_user_id)
 
     async def _run() -> Dict[str, Any]:
-        from app.db import get_async_db_context
         from app.services.user_memory_service import UserMemoryService
 
         service = UserMemoryService()
         ws_uuid = uuid.UUID(workspace_id)
         insight = None
         summary = None
-        async with get_async_db_context() as db:
-            if refresh_insight:
-                insight = await service.generate_and_cache_insight(
-                    db, end_user_id, ws_uuid, language=language,
-                )
-            if refresh_summary:
-                summary = await service.generate_and_cache_summary(
-                    db, end_user_id, ws_uuid, language=language,
-                )
+
+        # 旧 Celery 异步 PG 编排保留如下：
+        # async with get_async_db_context() as db:
+        #     insight = await service.generate_and_cache_insight(db, ...)
+        #     summary = await service.generate_and_cache_summary(db, ...)
+        # 模块级 asyncpg pool 会跨 Task/event loop 复用连接，存在
+        # "Future attached to a different loop" 和连接协议状态损坏风险。
+        if refresh_insight:
+            insight = await service.generate_and_cache_insight_for_worker(
+                end_user_id,
+                ws_uuid,
+                language=language,
+            )
+        if refresh_summary:
+            summary = await service.generate_and_cache_summary_for_worker(
+                end_user_id,
+                ws_uuid,
+                language=language,
+            )
 
         insight_success = bool(insight and insight.get("success"))
         summary_success = bool(summary and summary.get("success"))
