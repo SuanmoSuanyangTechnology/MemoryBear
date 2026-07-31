@@ -541,8 +541,8 @@ class AppChatService:
         if hasattr(features_config, 'model_dump'):
             features_config = features_config.model_dump()
         web_search_feature = features_config.get("web_search", {})
-        if isinstance(web_search_feature, dict) and web_search_feature.get("enabled"):
-            web_search = True
+        if not (isinstance(web_search_feature, dict) and web_search_feature.get("enabled")):
+            web_search = False
 
         # 校验文件上传
         self.agent_service._validate_file_upload(features_config, files)
@@ -1086,8 +1086,8 @@ class AppChatService:
             if hasattr(features_config, 'model_dump'):
                 features_config = features_config.model_dump()
             web_search_feature = features_config.get("web_search", {})
-            if isinstance(web_search_feature, dict) and web_search_feature.get("enabled"):
-                web_search = True
+            if not (isinstance(web_search_feature, dict) and web_search_feature.get("enabled")):
+                web_search = False
 
             # 校验文件上传
             self.agent_service._validate_file_upload(features_config, files)
@@ -1542,6 +1542,8 @@ class AppChatService:
                     ))
             else:
                 async with get_async_db_context() as db:
+                    _app_obj = await db.get(App, config.app_id)
+                    _release_id = _app_obj.current_release_id if _app_obj else None
                     new_msg = Message(
                         id=message_id,
                         conversation_id=conversation_id,
@@ -1557,6 +1559,7 @@ class AppChatService:
                     if conv:
                         conv.message_count += 1
                     await db.commit()
+                from app.services.batch_persist_queue import BatchPersistQueue, PersistTask
                 await BatchPersistQueue.enqueue(PersistTask(
                     task_type="save_agent_execution",
                     args={
