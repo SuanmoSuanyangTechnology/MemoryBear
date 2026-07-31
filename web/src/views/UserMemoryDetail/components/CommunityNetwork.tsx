@@ -24,7 +24,7 @@ const NodeTooltip: FC<{ node: CommunityD3Node }> = ({ node }) => {
       )}
       <div className="rb:leading-5.5 rb:text-[#5B6167]">
         {t('userMemory.type')}：
-        <span className="rb:text-[#1a1a1a]">{t(`userMemory.${node.properties?.entity_type}`)}</span>
+        <span className="rb:text-[#1a1a1a]">{node.properties?.entity_type}</span>
       </div>
       <div className="rb:leading-5.5 rb:text-[#5B6167]">
         {t('userMemory.community')}：
