@@ -1,4 +1,5 @@
 import logging
+import uuid
 from collections.abc import Mapping
 from typing import Any
 
@@ -7,6 +8,10 @@ from app.core.rag.knowledge_graph.config import (
     GraphPipeline,
     is_graph_enabled,
     resolve_graph_pipeline,
+)
+from app.core.rag.knowledge_graph.rebuild_task_guard import (
+    claim_or_get_rebuild_job,
+    release_rebuild_job,
 )
 
 logger = logging.getLogger(__name__)
@@ -129,12 +134,35 @@ def dispatch_knowledge_graph_rebuild(
         return None
 
     pipeline = resolve_graph_pipeline(parser_config)
-    task_name = (
-        "app.core.rag.tasks.build_graphrag_for_kb"
-        if pipeline is GraphPipeline.LEGACY
-        else "app.core.rag.tasks.rebuild_evidence_graph_knowledge"
-    )
-    task = celery_app.send_task(task_name, args=[str(knowledge_id)])
+    if pipeline is GraphPipeline.LEGACY:
+        task_name = "app.core.rag.tasks.build_graphrag_for_kb"
+        task = celery_app.send_task(task_name, args=[str(knowledge_id)])
+    else:
+        task_name = "app.core.rag.tasks.rebuild_evidence_graph_knowledge"
+        proposed_task_id = str(uuid.uuid4())
+        claim = claim_or_get_rebuild_job(
+            str(knowledge_id),
+            proposed_task_id,
+        )
+        if not claim.claimed:
+            logger.info(
+                "[GraphPipeline] task_coalesced"
+                " scope=knowledge pipeline=%s task=%s kb_id=%s task_id=%s",
+                pipeline.value,
+                task_name,
+                str(knowledge_id),
+                claim.task_id,
+            )
+            return celery_app.AsyncResult(claim.task_id)
+        try:
+            task = celery_app.send_task(
+                task_name,
+                args=[str(knowledge_id)],
+                task_id=claim.task_id,
+            )
+        except Exception:
+            release_rebuild_job(str(knowledge_id), claim.task_id)
+            raise
     _log_dispatched_task(
         task,
         scope="knowledge",
