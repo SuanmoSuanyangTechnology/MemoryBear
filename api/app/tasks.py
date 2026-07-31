@@ -3464,46 +3464,6 @@ CACHE_INFLIGHT_KEY_FMT = "insight_summary_cache:inflight:{end_user_id}"
 CACHE_INFLIGHT_TTL_SEC = 1800
 
 
-def _classify_cache_refresh(insight_at, summary_at, write_at) -> str:
-    """判定单个用户本轮是否需要刷新洞察/摘要缓存。
-
-    入参为三个时间戳标量（非 ORM 对象），便于在 DB 会话外安全调用：
-        insight_at —— memory_insight_updated_at（洞察缓存最后生成时间）
-        summary_at —— user_summary_updated_at（摘要缓存最后生成时间）
-        write_at   —— write_time（最后一次记忆写入时间，覆盖 API / MCP 全部写入路径）
-
-    两层过滤：
-        1. 数据未变跳过：缓存比最后写入更新（或从未写入）→ 重算结果相同
-        2. 新鲜度窗口：数据虽有变，但缓存在 MEMORY_CACHE_FRESH_HOURS 内刚刷过 → 限频跳过
-
-    返回值：
-        "dispatch"        需要派发刷新
-        "skip_no_change"  缓存已是最新（write_time 为 null 或 updated_at > write_time）
-        "skip_fresh"      数据有变但缓存刚刷新过（未到最短刷新间隔）
-    """
-    # 1) 缓存从未生成 → 必须刷新
-    if insight_at is None or summary_at is None:
-        return "dispatch"
-
-    # 2) write_time 为 null（从未写入，或者之前没有write_time的终端用户）或 数据未变（两份缓存都比最后写入更新）→ 跳过
-    if write_at is None:
-        return "skip_no_change"
-    write_at_naive = as_utc_aware(write_at).replace(tzinfo=None)
-    insight_at_naive = as_utc_aware(insight_at).replace(tzinfo=None)
-    summary_at_naive = as_utc_aware(summary_at).replace(tzinfo=None)
-    if insight_at_naive > write_at_naive and summary_at_naive > write_at_naive:
-        return "skip_no_change"
-
-    # 3) 数据有变，但缓存在新鲜度窗口内刚刷过 → 限频跳过（取更早的一份刷新时间，两份都够新才算新鲜）
-    fresh_hours = settings.MEMORY_CACHE_FRESH_HOURS
-    last_refresh = min(insight_at_naive, summary_at_naive)
-    if (utcnow_naive() - last_refresh).total_seconds() / 3600 < fresh_hours:
-        return "skip_fresh"
-
-    # 4) 数据有变且已过新鲜度窗口 → 派发
-    return "dispatch"
-
-
 @celery_app.task(
     name="app.tasks.scan_refresh_insight_summary_cache",
     bind=True,
@@ -3514,14 +3474,9 @@ def _classify_cache_refresh(insight_at, summary_at, write_at) -> str:
     soft_time_limit=540,
 )
 def scan_refresh_insight_summary_cache(self) -> Dict[str, Any]:
-    """扫描器：遍历所有用户，筛选出需要刷新洞察/摘要缓存的，派发 do_refresh_insight_summary_cache。
-
-    轻量、无事件循环、不调 LLM、无超时风险。两层过滤：
-      1. 数据未变跳过：上次缓存生成之后没有新记忆写入（updated_at > write_time）
-      2. 新鲜度窗口：数据虽有变，但缓存在 MEMORY_CACHE_FRESH_HOURS 内刚刷过 → 限频跳过
-    在途锁（Redis SETNX）防止同一用户被并发派发多次。
-    """
+    """扫描原始刷新字段，并派发需要更新洞察或摘要的用户。"""
     start_time = time.time()
+    from app.core.memory.analytics.memory_insight import classify_memory_cache_refresh
     from app.repositories.end_user_repository import EndUserRepository
 
     redis_client = get_sync_redis_client()
@@ -3539,17 +3494,24 @@ def scan_refresh_insight_summary_cache(self) -> Dict[str, Any]:
     for ws_id in workspace_ids:
         # 列裁剪查询：返回普通元组，不受 session 关闭后 detach 影响，且内存更省
         with get_db_read() as db:
-            rows = EndUserRepository(db).get_cache_refresh_fields_by_workspace(ws_id)
+            rows = EndUserRepository(db).get_neo4j_memory_cache_refresh_fields(ws_id)
 
-        for eu_id_raw, write_at, insight_at, summary_at in rows:
-            eu_id = str(eu_id_raw)
+        for row in rows:
+            eu_id = str(row.end_user_id)
             try:
-                decision = _classify_cache_refresh(insight_at, summary_at, write_at)
-                if decision == "skip_no_change":
-                    skip_no_change += 1
-                    continue
-                if decision == "skip_fresh":
-                    skip_fresh += 1
+                decisions = classify_memory_cache_refresh(
+                    insight_at=row.memory_insight_updated_at,
+                    summary_at=row.user_summary_updated_at,
+                    write_at=row.write_time,
+                    metadata_updated_at=row.metadata_updated_at,
+                )
+                refresh_insight = decisions.insight == "dispatch"
+                refresh_summary = decisions.summary == "dispatch"
+                if not refresh_insight and not refresh_summary:
+                    if "skip_fresh" in (decisions.insight, decisions.summary):
+                        skip_fresh += 1
+                    else:
+                        skip_no_change += 1
                     continue
 
                 # 在途锁：抢不到说明该用户已有刷新任务在途，跳过
@@ -3567,8 +3529,10 @@ def scan_refresh_insight_summary_cache(self) -> Dict[str, Any]:
                 do_refresh_insight_summary_cache.apply_async(
                     kwargs={
                         "end_user_id": eu_id,
-                        "workspace_id": str(ws_id),
+                        "workspace_id": str(row.workspace_id),
                         "language": "zh",  # 与旧任务行为对齐
+                        "refresh_insight": refresh_insight,
+                        "refresh_summary": refresh_summary,
                     },
                     countdown=countdown,
                 )
@@ -3613,11 +3577,13 @@ def do_refresh_insight_summary_cache(
     end_user_id: str,
     workspace_id: str,
     language: str = "zh",
+    refresh_insight: bool = True,
+    refresh_summary: bool = True,
 ) -> Dict[str, Any]:
-    """对【单个用户】刷新一次记忆洞察 + 用户摘要缓存。
+    """按 scan 的独立判定刷新单个用户的记忆洞察或用户摘要缓存。
 
     由 scan_refresh_insight_summary_cache 派发，每个用户一个独立任务、独立 db session，
-    跑完即释放内存。返回 status：success / partial / failed。
+    跑完即释放内存。刷新标记默认开启，兼容发布前已入队的旧消息。
     """
     start_time = time.time()
     inflight_key = CACHE_INFLIGHT_KEY_FMT.format(end_user_id=end_user_id)
@@ -3628,36 +3594,56 @@ def do_refresh_insight_summary_cache(
 
         service = UserMemoryService()
         ws_uuid = uuid.UUID(workspace_id)
+        insight = None
+        summary = None
         async with get_async_db_context() as db:
-            insight = await service.generate_and_cache_insight(
-                db, end_user_id, ws_uuid, language=language,
-            )
-            summary = await service.generate_and_cache_summary(
-                db, end_user_id, ws_uuid, language=language,
-            )
+            if refresh_insight:
+                insight = await service.generate_and_cache_insight(
+                    db, end_user_id, ws_uuid, language=language,
+                )
+            if refresh_summary:
+                summary = await service.generate_and_cache_summary(
+                    db, end_user_id, ws_uuid, language=language,
+                )
+
+        insight_success = bool(insight and insight.get("success"))
+        summary_success = bool(summary and summary.get("success"))
         return {
-            "insight_success": bool(insight.get("success")),
-            "summary_success": bool(summary.get("success")),
-            "insight_error": insight.get("error"),
-            "summary_error": summary.get("error"),
+            "insight_success": insight_success if refresh_insight else None,
+            "summary_success": summary_success if refresh_summary else None,
+            "insight_status": (
+                "success" if insight_success else "failed"
+            ) if refresh_insight else "skipped",
+            "summary_status": (
+                "success" if summary_success else "failed"
+            ) if refresh_summary else "skipped",
+            "insight_error": insight.get("error") if insight else None,
+            "summary_error": summary.get("error") if summary else None,
         }
 
     loop = set_asyncio_event_loop()
     try:
         result = loop.run_until_complete(_run())
-        # 双失败 = 完全失败：raise 让 Celery 标记 FAILURE（便于 Flower 一眼发现）
-        if not result["insight_success"] and not result["summary_success"]:
+        requested_successes = []
+        if refresh_insight:
+            requested_successes.append(result["insight_success"])
+        if refresh_summary:
+            requested_successes.append(result["summary_success"])
+        if requested_successes and not any(requested_successes):
             raise RuntimeError(
-                f"insight and summary both failed: "
+                f"all requested cache refreshes failed: "
                 f"insight_error={result.get('insight_error')}, "
                 f"summary_error={result.get('summary_error')}"
             )
-        result["status"] = (
-            "success" if (result["insight_success"] and result["summary_success"]) else "partial"
-        )
+        if not requested_successes:
+            result["status"] = "skipped"
+        elif all(requested_successes):
+            result["status"] = "success"
+        else:
+            result["status"] = "partial"
         logger.info(
             f"do_refresh_insight_summary_cache 完成 user={end_user_id} status={result['status']} "
-            f"insight={result['insight_success']} summary={result['summary_success']} "
+            f"insight={result['insight_status']} summary={result['summary_status']} "
             f"耗时={time.time() - start_time:.1f}s"
         )
     # 异常不再 catch，直接冒出 → Celery FAILURE

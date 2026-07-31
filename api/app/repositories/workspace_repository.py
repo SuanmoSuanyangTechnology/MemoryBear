@@ -65,6 +65,26 @@ class WorkspaceRepository:
             db_logger.error(f"根据ID查询工作空间失败: workspace_id={workspace_id} - {str(e)}")
             raise
 
+    async def get_workspace_by_id_async(
+            self,
+            workspace_id: uuid.UUID,
+    ) -> Optional[Workspace]:
+        """根据 ID 异步获取工作空间。"""
+        db_logger.debug(f"异步查询工作空间: workspace_id={workspace_id}")
+        try:
+            result = await self.db.execute(
+                select(Workspace).where(Workspace.id == workspace_id).limit(1)
+            )
+            workspace = result.scalars().first()
+            if workspace:
+                db_logger.debug(f"异步查询工作空间成功: workspace_id={workspace_id}")
+            else:
+                db_logger.debug(f"异步查询工作空间不存在: workspace_id={workspace_id}")
+            return workspace
+        except Exception as e:
+            db_logger.error(f"异步查询工作空间失败: workspace_id={workspace_id} - {str(e)}")
+            raise
+
     def get_workspace_models_configs(self, workspace_id: uuid.UUID) -> Optional[dict]:
         """根据workspace_id获取模型配置（llm, embedding, rerank）
         

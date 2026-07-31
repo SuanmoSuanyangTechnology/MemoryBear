@@ -81,7 +81,9 @@ service.interceptors.request.use(
       }
     }
     const language = localStorage.getItem('language')
+    const timeZone = localStorage.getItem('timeZone')
     config.headers['X-Language-Type'] = language || 'en';
+    config.headers['X-Timezone'] = timeZone || 'Asia/Shanghai'
     config.headers.Cookie = undefined
     return config;
   },

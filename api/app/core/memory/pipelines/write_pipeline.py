@@ -41,7 +41,12 @@ from app.core.memory.models.graph_models import (
     StatementEntityEdge,
     StatementNode,
 )
+from app.core.memory.storage_services.extraction_engine.knowledge_extraction.memory_summary import (
+    memory_summary_generation,
+)
 from app.core.memory.utils.name_similarity_utils import cosine_similarity
+from app.repositories.neo4j.add_nodes import add_memory_summary_nodes
+from app.repositories.neo4j.add_edges import add_memory_summary_statement_edges
 
 logger = logging.getLogger(__name__)
 bear = BearLogger("memory.pipeline")
@@ -367,10 +372,13 @@ class WritePipeline:
                     target_idx = len(context_before)
                     all_messages = context_before + [target_message] + context_after
 
-                    # 文件预处理：先对 target 注入 file-summary（剪枝判断依赖此标签）
-                    await self._preprocess_files([all_messages[target_idx]])
-                    await self._preprocess_files(context_before)
-                    await self._preprocess_files(context_after)
+                    # 文件预处理：注入 file-summary（剪枝判断依赖此标签）
+                    # 三次预处理操作不同 msg dict 对象，各自独立开启 DB session，并行安全
+                    await asyncio.gather(
+                        self._preprocess_files([all_messages[target_idx]]),
+                        self._preprocess_files(context_before),
+                        self._preprocess_files(context_after),
+                    )
 
                     # 统一剪枝
                     from app.core.memory.storage_services.extraction_engine.data_preprocessing.pruning_service import prune_messages
@@ -382,6 +390,7 @@ class WritePipeline:
                         source=source,
                         language=self.language,
                         persist=not is_pilot_run,
+                        llm_client=self._llm_client,  # 复用 Pipeline 已创建的客户端
                     )
 
                     # 拆回三部分
@@ -491,48 +500,73 @@ class WritePipeline:
 
                     s.metadata(chunks=sum(len(d.chunks) for d in chunked_dialogs))
 
-                # Step 3: 萃取 - 知识提取
-                async with bear.step(3, 6, "萃取", "知识提取") as s:
-                    extraction_result = await self._extract(chunked_dialogs, is_pilot_run)
-                    stats = extraction_result.stats
-                    s.metadata(
-                        entities=stats["entity_count"],
-                        statements=stats["statement_count"],
-                        relations=stats["relation_count"],
-                    )
+                # Step 3: 萃取 + 摘要 LLM 生成并行启动
+                summary_gen_task = None
+                if not is_pilot_run:
+                    summary_gen_task = asyncio.create_task(memory_summary_generation(
+                        chunked_dialogs,
+                        llm_client=self._llm_client,
+                        embedder_client=self._embedder_client,
+                        language=self.language,
+                    ))
 
-                # 试运行模式到此结束
-                if is_pilot_run:
+                try:
+                    async with bear.step(3, 6, "萃取", "知识提取") as s:
+                        extraction_result = await self._extract(chunked_dialogs, is_pilot_run)
+                        stats = extraction_result.stats
+                        s.metadata(
+                            entities=stats["entity_count"],
+                            statements=stats["statement_count"],
+                            relations=stats["relation_count"],
+                        )
+
+                    # 试运行到此结束
+                    if is_pilot_run:
+                        return WriteResult(
+                            status="pilot_complete",
+                            extraction=extraction_result.stats,
+                            elapsed_seconds=0.0,
+                        )
+
+                    # Step 3.5: 构建 UserSource 子图
+                    if self._user_pruning_info:
+                        await self._build_user_source_subgraph(extraction_result)
+
+                    # Step 4: Store + Stats 并行（Neo4j + Redis 互不依赖）
+                    async with bear.step(4, 6, "存储", "写入 Neo4j + 统计缓存"):
+                        await asyncio.gather(
+                            self._store(extraction_result),
+                            self._update_stats_cache(extraction_result),
+                        )
+
+                    # Step 5: 摘要写入（依赖 Step 4 写入的 CONTAINS 边）
+                    async with bear.step(5, 6, "摘要", "写入情景记忆") as s:
+                        try:
+                            summaries = await summary_gen_task
+                            await add_memory_summary_nodes(summaries, self._neo4j_connector)
+                            await add_memory_summary_statement_edges(summaries, self._neo4j_connector)
+                            s.metadata(summary_count=len(summaries))
+                        except Exception as e:
+                            logger.error(f"Memory summary step failed: {e}", exc_info=True)
+
+                    # Step 6: 聚类（Celery 异步，不阻塞）
+                    async with bear.step(6, 6, "聚类", "增量更新社区") as s:
+                        await self._cluster(extraction_result)
+                        s.metadata(mode="async")
+
                     return WriteResult(
-                        status="pilot_complete",
+                        status="success",
                         extraction=extraction_result.stats,
                         elapsed_seconds=0.0,
                     )
 
-                # Step 3.5: 构建 UserSource 子图（剪枝原文 → 实体连边）
-                if self._user_pruning_info:
-                    await self._build_user_source_subgraph(extraction_result)
-
-                async with bear.step(4, 6, "存储", "写入 Neo4j"):
-                    await self._store(extraction_result)
-
-                # Step 6: 摘要 - 生成情景记忆摘要
-                async with bear.step(6, 6, "摘要", "生成情景记忆"):
-                    await self._summarize(chunked_dialogs)
-
-                # Step 5: 聚类 - 增量更新社区（Celery 异步任务，无需持锁）
-                async with bear.step(5, 6, "聚类", "增量更新社区") as s:
-                    await self._cluster(extraction_result)
-                    s.metadata(mode="async")
-
-                # 更新活动统计缓存
-                await self._update_stats_cache(extraction_result)
-
-                return WriteResult(
-                    status="success",
-                    extraction=extraction_result.stats,
-                    elapsed_seconds=0.0,
-                )
+                finally:
+                    if summary_gen_task is not None and not summary_gen_task.done():
+                        summary_gen_task.cancel()
+                        try:
+                            await summary_gen_task
+                        except (asyncio.CancelledError, Exception):
+                            pass
 
         except Exception:
             raise
@@ -729,6 +763,9 @@ class WritePipeline:
                     await asyncio.sleep(1 * (attempt + 1))
                 else:
                     logger.error(f"Neo4j 写入在 {max_retries} 次尝试后仍部分失败")
+                    raise RuntimeError(
+                        f"Neo4j 写入在 {max_retries} 次重试后仍部分失败"
+                    )
             except Exception as e:
                 if self._is_deadlock(e) and attempt < max_retries - 1:
                     logger.warning(f"Neo4j 死锁，重试 ({attempt + 2}/{max_retries})")
@@ -924,36 +961,8 @@ class WritePipeline:
             )
 
     # ──────────────────────────────────────────────
-    # Step 5: 摘要
-    # （+ entity_description）+ meta_data部分在此提取
+    # (已内联到 run() 中：摘要 LLM 生成与萃取并行，Neo4j 写入在 _store 之后)
     # ──────────────────────────────────────────────
-    # TODO 乐力齐 需要做成异步celery任务
-    async def _summarize(self, chunked_dialogs: List[DialogData]) -> None:
-        """
-        摘要：生成情景记忆摘要 → 写入 Neo4j。
-
-        摘要生成失败不影响主流程（try/except 吞掉异常）。
-        直接复用 self._neo4j_connector，避免每次写入额外创建一个 driver。
-        """
-        from app.core.memory.storage_services.extraction_engine.knowledge_extraction.memory_summary import (
-            memory_summary_generation,
-        )
-        from app.repositories.neo4j.add_edges import (
-            add_memory_summary_statement_edges,
-        )
-        from app.repositories.neo4j.add_nodes import add_memory_summary_nodes
-
-        try:
-            summaries = await memory_summary_generation(
-                chunked_dialogs,
-                llm_client=self._llm_client,
-                embedder_client=self._embedder_client,
-                language=self.language,
-            )
-            await add_memory_summary_nodes(summaries, self._neo4j_connector)
-            await add_memory_summary_statement_edges(summaries, self._neo4j_connector)
-        except Exception as e:
-            logger.error(f"Memory summary step failed: {e}", exc_info=True)
 
     # ──────────────────────────────────────────────
     # 文件预处理（与旧路径 memory_agent_service._preprocess_files 一脉相承）
