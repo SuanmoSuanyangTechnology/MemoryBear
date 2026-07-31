@@ -129,25 +129,6 @@ def _convert_pruning_records(raw_records: list, end_user_id: str = "", source: s
     return result
 
 
-@dataclass
-class _PerceptualSnapshot:
-    """MemoryPerceptualModel 的 Session 无关快照。
-
-    在 _preprocess_files 内部（DB Session 活跃期）从 ORM 实例拷贝生成，
-    切断与 SQLAlchemy Session 的绑定；供下游异步步骤（如 graph_build_step）
-    安全访问属性。
-    """
-
-    id: Any
-    end_user_id: str
-    perceptual_type: str
-    file_path: str
-    file_name: str
-    file_ext: str
-    summary: str
-    meta_data: Any
-    created_time: Any
-
 
 class ExtractionResult(BaseModel):
     """萃取 + 图构建 + 去重消歧后的结构化输出。
@@ -534,10 +515,27 @@ class WritePipeline:
 
                     # Step 4: Store + Stats 并行（Neo4j + Redis 互不依赖）
                     async with bear.step(4, 6, "存储", "写入 Neo4j + 统计缓存"):
-                        await asyncio.gather(
+                        results = await asyncio.gather(
                             self._store(extraction_result),
                             self._update_stats_cache(extraction_result),
                         )
+                        stored = results[0]
+
+                    # Neo4j 事务成功后，触发引擎展示 PG 写入
+                    if stored:
+                        try:
+                            from app.services.memory_engine_display_service import (
+                                MemoryEngineDisplayService,
+                            )
+                            await MemoryEngineDisplayService.save_events(
+                                end_user_id=self.end_user_id,
+                                extraction_result=extraction_result,
+                            )
+                        except Exception as e:
+                            logger.warning(
+                                f"[EngineDisplay] 引擎展示 PG 写入异常（不影响主流程）: {e}",
+                                exc_info=True,
+                            )
 
                     # Step 5: 摘要写入（依赖 Step 4 写入的 CONTAINS 边）
                     async with bear.step(5, 6, "摘要", "写入情景记忆") as s:
@@ -546,6 +544,21 @@ class WritePipeline:
                             await add_memory_summary_nodes(summaries, self._neo4j_connector)
                             await add_memory_summary_statement_edges(summaries, self._neo4j_connector)
                             s.metadata(summary_count=len(summaries))
+                            # 摘要成功写入 Neo4j 后，同步保存为 PG 展示记录
+                            if summaries:
+                                try:
+                                    from app.services.memory_display_record_service import (
+                                        MemoryDisplayRecordService,
+                                    )
+                                    await MemoryDisplayRecordService.save_written(
+                                        summaries=summaries,
+                                        end_user_id=self.end_user_id,
+                                    )
+                                except Exception as e:
+                                    logger.warning(
+                                        f"[MemoryDisplayRecord] PG 展示记录写入异常（不影响主流程）: {e}",
+                                        exc_info=True,
+                                    )
                         except Exception as e:
                             logger.error(f"Memory summary step failed: {e}", exc_info=True)
 
@@ -715,12 +728,18 @@ class WritePipeline:
     # Step 3: 存储
     # ──────────────────────────────────────────────
 
-    async def _store(self, result: ExtractionResult) -> None:
+    async def _store(self, result: ExtractionResult) -> bool:
         """
         存储：别名清洗 → Neo4j 写入（含死锁重试）。
 
         错误策略：
         - 别名清洗失败 → 警告日志，继续写入
+        - Neo4j 写入部分失败 → 重试，耗尽后返回 False
+        - 非死锁异常 → 向上抛出
+
+        Returns:
+            True: Neo4j 事务整体成功
+            False: 重试后仍部分失败
         """
         from app.repositories.neo4j.graph_saver import (
             save_dialog_and_statements_to_neo4j,
@@ -754,7 +773,7 @@ class WritePipeline:
                 )
                 if success:
                     logger.debug("Successfully saved all data to Neo4j")
-                    return
+                    return True
                 # 写入返回 False（部分失败）
                 if attempt < max_retries - 1:
                     logger.warning(
@@ -763,15 +782,14 @@ class WritePipeline:
                     await asyncio.sleep(1 * (attempt + 1))
                 else:
                     logger.error(f"Neo4j 写入在 {max_retries} 次尝试后仍部分失败")
-                    raise RuntimeError(
-                        f"Neo4j 写入在 {max_retries} 次重试后仍部分失败"
-                    )
+                    return False
             except Exception as e:
                 if self._is_deadlock(e) and attempt < max_retries - 1:
                     logger.warning(f"Neo4j 死锁，重试 ({attempt + 2}/{max_retries})")
                     await asyncio.sleep(1 * (attempt + 1))
                 else:
                     raise
+        return False
 
     # ──────────────────────────────────────────────
     # Step 3.5: 构建 UserSource 子图
@@ -987,7 +1005,7 @@ class WritePipeline:
         from app.db import get_db_context
         from app.repositories.memory_perceptual_repository import MemoryPerceptualRepository
         from app.schemas.app_schema import FileInput
-        from app.services.memory_perceptual_service import MemoryPerceptualService
+        from app.services.memory_perceptual_service import MemoryPerceptualService, _PerceptualSnapshot
 
         for msg in messages:
             files = msg.get("files") or []
@@ -1035,12 +1053,27 @@ class WritePipeline:
                             if "transfer_method" not in file_data:
                                 file_data["transfer_method"] = "remote_url" if file_data.get("url") else "local_file"
                             file_input = FileInput(**file_data)
-                            file_object = await perceptual_service.generate_perceptual_memory(
+                            memory = await perceptual_service.generate_perceptual_memory(
                                 end_user_id=self.end_user_id,
                                 memory_config=self.memory_config,
                                 file=file_input,
                                 content=msg.get("content") or None,
                             )
+                            # 在 Session 内提取属性到快照，避免 DetachedInstanceError
+                            if memory is not None:
+                                file_object = _PerceptualSnapshot(
+                                    id=memory.id,
+                                    end_user_id=self.end_user_id,
+                                    perceptual_type=memory.perceptual_type,
+                                    file_path=memory.file_path,
+                                    file_name=memory.file_name,
+                                    file_ext=memory.file_ext,
+                                    summary=memory.summary,
+                                    meta_data=memory.meta_data,
+                                    created_time=memory.created_time,
+                                )
+                            else:
+                                file_object = None
 
                         if file_object is None:
                             continue
