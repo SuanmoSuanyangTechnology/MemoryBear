@@ -15,6 +15,12 @@ from sqlalchemy.orm import Session
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging_config import get_logger
+from app.core.memory.analytics.memory_insight import (
+    MemoryInsightWorkspaceValidation,
+    parse_stored_memory_insight_findings,
+    refresh_memory_insight,
+    validate_neo4j_memory_insight_workspace,
+)
 from app.core.memory.analytics.user_card_tags import normalize_stored_user_card_tags
 from app.core.memory.constants.graph_data_constants import (
     NODE_PROPERTY_WHITELIST,
@@ -361,30 +367,46 @@ class UserMemoryService:
 
     # ======================== 异步缓存查询（纯异步，不阻塞事件循环）========================
 
-    async def get_cached_memory_insight_async(self, end_user_id: str) -> Dict[str, Any]:
+    async def get_cached_memory_insight_async(
+        self,
+        end_user_id: str,
+        workspace_id: uuid.UUID | str,
+    ) -> Dict[str, Any]:
         """获取缓存的记忆洞察（纯异步版本，通过 Repository 层查询）。"""
-        import json
         from app.db import get_async_db_context
         from app.core.utils.datetime_utils import to_timestamp_ms
 
         try:
-            uuid.UUID(end_user_id)
-        except (ValueError, TypeError):
-            logger.warning(f"无效的 end_user_id 格式: {end_user_id}")
+            end_user_uuid = uuid.UUID(end_user_id)
+            workspace_uuid = (
+                workspace_id
+                if isinstance(workspace_id, uuid.UUID)
+                else uuid.UUID(workspace_id)
+            )
+        except (TypeError, ValueError, AttributeError):
             return {
-                "memory_insight": None, "behavior_pattern": None,
-                "key_findings": None, "growth_trajectory": None,
-                "updated_at": None, "is_cached": False, "message": "无效的用户ID格式"
+                "memory_insight": None,
+                "behavior_pattern": None,
+                "key_findings": None,
+                "actionable_findings": [],
+                "growth_trajectory": None,
+                "updated_at": None,
+                "is_cached": False,
+                "message": "无效的用户或工作空间ID格式",
             }
 
         async with get_async_db_context() as db:
             repo = EndUserRepository(db)
-            row = await repo.get_memory_insight_by_end_user_id_async(end_user_id)
+            row = await repo.get_memory_insight_by_end_user_id_async(
+                end_user_uuid,
+                workspace_uuid,
+            )
 
         if not row:
             return {
                 "memory_insight": None, "behavior_pattern": None,
                 "key_findings": None, "growth_trajectory": None,
+                "actionable_findings": [],
                 "updated_at": None, "is_cached": False, "message": "用户不存在"
             }
 
@@ -393,22 +415,21 @@ class UserMemoryService:
             row["key_findings"], row["growth_trajectory"],
         ])
 
-        # key_findings: JSON 字符串 → 数组
-        key_findings_raw = row["key_findings"]
-        if key_findings_raw:
-            try:
-                key_findings_array = json.loads(key_findings_raw)
-            except (json.JSONDecodeError, TypeError):
-                key_findings_array = [item.strip() for item in key_findings_raw.split('•') if item.strip()]
-        else:
-            key_findings_array = []
+        key_findings_array, actionable_findings = parse_stored_memory_insight_findings(
+            row["key_findings"]
+        )
 
         return {
             "memory_insight": row["memory_insight"],
             "behavior_pattern": row["behavior_pattern"],
             "key_findings": key_findings_array,
+            "actionable_findings": actionable_findings,
             "growth_trajectory": row["growth_trajectory"],
-            "updated_at": to_timestamp_ms(row["memory_insight_updated_at"]) if row["memory_insight_updated_at"] else None,
+            "updated_at": (
+                to_timestamp_ms(row["memory_insight_updated_at"])
+                if row["memory_insight_updated_at"]
+                else None
+            ),
             "is_cached": has_cache,
         }
 
@@ -724,6 +745,13 @@ class UserMemoryService:
             logger.error(f"同步 aliases 到 Neo4j 失败: {e}", exc_info=True)
             raise
 
+    async def validate_neo4j_cache_workspace(
+        self,
+        workspace_id: uuid.UUID | str,
+    ) -> MemoryInsightWorkspaceValidation:
+        """为 Controller 提供不暴露 Repository 的 Workspace 校验入口。"""
+        return await validate_neo4j_memory_insight_workspace(workspace_id)
+
     async def generate_and_cache_insight(
         self, 
         db: AsyncSession, 
@@ -735,126 +763,57 @@ class UserMemoryService:
         生成并缓存记忆洞察
         
         Args:
-            db: 数据库会话
+            db: 为兼容现有调用协议保留；新洞察生成不使用该 Session
             end_user_id: 终端用户ID (UUID)
-            workspace_id: 工作空间ID (可选)
+            workspace_id: 工作空间ID（必填）
             language: 语言类型 ("zh" 中文, "en" 英文)，默认中文
             
         Returns:
             {
                 "success": bool,
+                "status": str,
                 "memory_insight": str,
                 "behavior_pattern": str,
                 "key_findings": List[str],  # 数组格式
+                "actionable_findings": List[Dict[str, str]],
                 "growth_trajectory": str,
                 "error": Optional[str]
             }
         """
-        try:
-            logger.info(f"开始为 end_user_id {end_user_id} 生成记忆洞察, language={language}")
-            
-            # 转换为UUID并查询用户
-            user_uuid = uuid.UUID(end_user_id)
-            repo = EndUserRepository(db)
-            end_user = await repo.get_by_id_async(user_uuid)
-            
-            if not end_user:
-                logger.error(f"end_user_id {end_user_id} 不存在")
-                return {
-                    "success": False,
-                    "memory_insight": None,
-                    "behavior_pattern": None,
-                    "key_findings": None,
-                    "growth_trajectory": None,
-                    "error": "用户不存在"
-                }
-            
-            # 使用 end_user_id 调用分析函数
-            try:
-                logger.info(f"使用 end_user_id={end_user_id} 生成记忆洞察")
-                result = await analytics_memory_insight_report(end_user_id, language=language)
-                
-                memory_insight = result.get("memory_insight", "")
-                behavior_pattern = result.get("behavior_pattern", "")
-                key_findings_array = result.get("key_findings", [])  # 现在是数组
-                growth_trajectory = result.get("growth_trajectory", "")
-                
-                # 将 key_findings 数组序列化为 JSON 字符串以存储到数据库
-                import json
-                key_findings_json = json.dumps(key_findings_array, ensure_ascii=False) if key_findings_array else ""
-                
-                if not any([memory_insight, behavior_pattern, key_findings_array, growth_trajectory]):
-                    logger.warning(f"end_user_id {end_user_id} 的记忆洞察生成结果为空")
-                    return {
-                        "success": False,
-                        "memory_insight": None,
-                        "behavior_pattern": None,
-                        "key_findings": None,
-                        "growth_trajectory": None,
-                        "error": "生成的洞察报告为空,可能Neo4j中没有该用户的数据"
-                    }
-                
-                # 更新数据库缓存（四个维度）
-                # 注意：key_findings 存储为 JSON 字符串
-                success = await repo.update_memory_insight_async(
-                    user_uuid, 
-                    memory_insight, 
-                    behavior_pattern, 
-                    key_findings_json,  # 存储 JSON 字符串
-                    growth_trajectory
-                )
-                
-                if success:
-                    logger.info(f"成功为 end_user_id {end_user_id} 生成并缓存记忆洞察（四维度）")
-                    return {
-                        "success": True,
-                        "memory_insight": memory_insight,
-                        "behavior_pattern": behavior_pattern,
-                        "key_findings": key_findings_array,  # 返回数组
-                        "growth_trajectory": growth_trajectory,
-                        "error": None
-                    }
-                else:
-                    logger.error(f"更新 end_user_id {end_user_id} 的记忆洞察缓存失败")
-                    return {
-                        "success": False,
-                        "memory_insight": memory_insight,
-                        "behavior_pattern": behavior_pattern,
-                        "key_findings": key_findings_array,  # 返回数组
-                        "growth_trajectory": growth_trajectory,
-                        "error": "数据库更新失败"
-                    }
-                    
-            except Exception as e:
-                logger.error(f"调用分析函数生成记忆洞察时出错: {str(e)}")
-                return {
-                    "success": False,
-                    "memory_insight": None,
-                    "behavior_pattern": None,
-                    "key_findings": None,
-                    "growth_trajectory": None,
-                    "error": f"Neo4j或LLM服务不可用: {str(e)}"
-                }
-                
-        except ValueError:
-            logger.error(f"无效的 end_user_id 格式: {end_user_id}")
+        if workspace_id is None:
             return {
                 "success": False,
+                "status": "invalid_parameter",
                 "memory_insight": None,
                 "behavior_pattern": None,
                 "key_findings": None,
+                "actionable_findings": [],
                 "growth_trajectory": None,
-                "error": "无效的用户ID格式"
+                "error": "workspace_id 不能为空",
             }
+        try:
+            return await refresh_memory_insight(
+                end_user_id=end_user_id,
+                workspace_id=workspace_id,
+                language=language,
+            )
         except Exception as e:
-            logger.error(f"生成并缓存记忆洞察时出错: {str(e)}")
+            logger.error(
+                "生成并缓存记忆洞察失败: end_user_id=%s workspace_id=%s error=%s",
+                end_user_id,
+                workspace_id,
+                e,
+                exc_info=True,
+            )
             return {
                 "success": False,
+                "status": "generation_failed",
                 "memory_insight": None,
                 "behavior_pattern": None,
                 "key_findings": None,
+                "actionable_findings": [],
                 "growth_trajectory": None,
-                "error": str(e)
+                "error": f"Neo4j或LLM服务不可用: {e}",
             }
     
     async def generate_and_cache_summary(
@@ -1029,7 +988,12 @@ class UserMemoryService:
                 
                 try:
                     # 生成记忆洞察
-                    insight_result = await self.generate_and_cache_insight(db, end_user_id, language=language)
+                    insight_result = await self.generate_and_cache_insight(
+                        db,
+                        end_user_id,
+                        workspace_id,
+                        language=language,
+                    )
                     
                     # 生成用户摘要
                     summary_result = await self.generate_and_cache_summary(db, end_user_id, language=language)
