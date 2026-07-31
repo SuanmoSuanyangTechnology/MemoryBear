@@ -114,7 +114,9 @@ class MemoryMessageRepository:
             source: 写入来源枚举，决定 seq 分组键与 memory_messages.source 字段值
 
         Returns:
-            成功写入的消息摘要列表 [{"role": "user", "message_seq": 1, "content": "..."}, ...]
+            成功写入的消息摘要列表
+            [{"role": "user", "message_seq": 1, "content": "...", "dialog_at": ..., "files": ...,
+              "original_message_id": "uuid-str" | None}, ...]
             （跳过 content 为空的消息）
         """
         # 所有路径统一持锁分配 seq，防止同一分组的并发请求抢到重复 seq
@@ -167,6 +169,11 @@ class MemoryMessageRepository:
                 "content": content,
                 "dialog_at": memory_message.dialog_at,
                 "files": memory_message.files,
+                # 快写侧用它作为情绪缓存 key（= 回复链路的 user_message_id）；
+                "original_message_id": (
+                    str(memory_message.original_message_id)
+                    if memory_message.original_message_id else None
+                ),
             })
             logger.debug(
                 "[MemoryMessageRepository] 写入 memory_messages: "

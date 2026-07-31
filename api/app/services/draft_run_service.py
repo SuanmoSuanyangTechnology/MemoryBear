@@ -52,6 +52,11 @@ from app.services.context_assembler import (
     append_external_context_rule,
 )
 from app.services.tool_service import ToolService
+from app.core.memory.emotion.emotion_resolver import (
+    apply_detection as apply_emotion_detection,
+    cancel_detection as cancel_emotion_detection,
+    start_detection as start_emotion_detection,
+)
 
 logger = get_business_logger()
 
@@ -1158,6 +1163,8 @@ class AgentRunService:
 
         # file_upload 校验
         self._validate_file_upload(features_config, files)
+        # 情绪感知回复：与提示词/上下文引擎/多模态准备并发，结果在 ToolOrchestrator 之前注入。
+        emotion_detection = start_emotion_detection(features_config, message)
         tenant_id = await self._get_tenant_id_by_workspace_id_async(workspace_id)
 
         try:
@@ -1231,6 +1238,8 @@ class AgentRunService:
                                                                       source=source)
                 if annotation_match:
                     elapsed_time = time.time() - start_time
+                    # 标注命中直接返回
+                    cancel_emotion_detection(emotion_detection)
                     # skip_save=True 时由调用方自行保存版本化消息，跳过 run 内部重复保存
                     if not skip_save:
                         conv_uuid = uuid.UUID(conversation_id)
@@ -1340,6 +1349,10 @@ class AgentRunService:
             async def load_annotation_context():
                 return await self._load_annotation_context_evidence(agent_config.app_id, message)
             system_prompt = append_external_context_rule(system_prompt)
+            # 情绪感知回复：必须在 ToolOrchestrator / LangChainAgent 之前完成。
+            system_prompt = await apply_emotion_detection(
+                system_prompt, emotion_detection, user_message_id, write_cache=False
+            )
             use_agent_mode = ModelCapability.FUNCTION_CALL in capability
             orchestrator_node_executions = []
             if not use_agent_mode and tools:
@@ -1584,6 +1597,8 @@ class AgentRunService:
 
         # file_upload 校验
         self._validate_file_upload(features_config, files)
+        # 情绪感知回复：提前启动，与提示词/上下文引擎/多模态准备并发，结果在 ToolOrchestrator 之前注入。
+        emotion_detection = start_emotion_detection(features_config, message)
         tenant_id = await self._get_tenant_id_by_workspace_id_async(workspace_id)
 
         start_time = time.time()
@@ -1657,6 +1672,8 @@ class AgentRunService:
                                                                       source=source)
                 if annotation_match:
                     elapsed_time = time.time() - start_time
+                    # 标注命中直接返回
+                    cancel_emotion_detection(emotion_detection)
                     # skip_save=True 时由调用方自行保存版本化消息，跳过 run_stream 内部重复保存
                     if not skip_save:
                         conv_uuid = uuid.UUID(conversation_id)
@@ -1772,6 +1789,10 @@ class AgentRunService:
             async def load_annotation_context():
                 return await self._load_annotation_context_evidence(agent_config.app_id, message)
             system_prompt = append_external_context_rule(system_prompt)
+            # 情绪感知回复：必须在 ToolOrchestrator / LangChainAgent 之前完成。
+            system_prompt = await apply_emotion_detection(
+                system_prompt, emotion_detection, user_message_id, write_cache=False
+            )
             use_agent_mode = ModelCapability.FUNCTION_CALL in capability
             orchestrator_node_executions = []
             if not use_agent_mode and tools:
