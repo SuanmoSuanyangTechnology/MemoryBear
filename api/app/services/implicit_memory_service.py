@@ -103,6 +103,37 @@ class ImplicitMemoryService:
         except Exception as e:
             logger.error(f"Failed to get memory config for end_user {self.end_user_id}: {e}")
             raise ValueError(f"Unable to get memory configuration for end_user {self.end_user_id}: {e}")
+
+    @classmethod
+    def create_without_session(cls, end_user_id: str) -> "ImplicitMemoryService":
+        """工厂方法：短 session 内完成初始化并预热 LLM client 缓存，session 关闭后实例可独立工作。
+
+        利用 ImplicitMemoryLLMClient 的 _cached_client 机制：在 session 存活期间
+        触发一次 _get_llm_client()，client 被缓存后后续调用不再需要 db。
+
+        Args:
+            end_user_id: 终端用户 ID
+
+        Returns:
+            ImplicitMemoryService 实例（不持有 db）
+
+        Raises:
+            ValueError: 若找不到用户对应的 memory_config 或 LLM client 构造失败
+        """
+        from app.db import get_db_context
+
+        with get_db_context() as db:
+            instance = cls(db=db, end_user_id=end_user_id)
+            # 预热所有 Analyzer 的 LLM client 缓存（session 存活期间完成 DB 查询）
+            instance.preference_analyzer._llm_client._get_llm_client()
+            instance.dimension_analyzer._llm_client._get_llm_client()
+            instance.interest_analyzer._llm_client._get_llm_client()
+            instance.habit_detector.habit_analyzer._llm_client._get_llm_client()
+
+        # session 已关闭，断开 db 引用
+        instance.db = None
+        logger.info(f"ImplicitMemoryService created without session for end_user: {end_user_id}")
+        return instance
     
     async def extract_user_summaries(
         self,

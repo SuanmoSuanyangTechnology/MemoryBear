@@ -297,7 +297,7 @@ def write_workspace_total_memory(
     # 触发 Celery 异步任务
     from app.celery_app import celery_app
     task = celery_app.send_task(
-        "app.controllers.memory_storage_controller.search_all",
+        "app.tasks.write_total_memory_task",
         kwargs={"workspace_id": str(workspace_id)}
     )
     

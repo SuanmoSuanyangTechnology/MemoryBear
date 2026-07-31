@@ -1101,6 +1101,8 @@ class MemoryConfigService:
             end_user_id = uuid.UUID(end_user_id)
 
         end_user = get_end_user_by_id(self.db, end_user_id)
+        if end_user is None:
+            raise BusinessException(f"end_user {end_user_id} 不存在")
         config_id = self.get_workspace_active_config_id(end_user.workspace_id)
         return config_id
 
