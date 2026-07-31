@@ -241,70 +241,6 @@ class AppChatService:
 
 
 
-    async def _persist_final_agent_execution(
-            self,
-            *,
-            app_id: uuid.UUID,
-            conversation_id: uuid.UUID,
-            agent_config_id: uuid.UUID | None,
-            started_at_ts: float,
-            status: str,
-            steps: list,
-            meta_data: dict,
-            elapsed_time: Optional[float] = None,
-            token_usage: Optional[dict] = None,
-            error_message: Optional[str] = None,
-            message_id: Optional[uuid.UUID] = None,
-    ) -> uuid.UUID:
-        if self._uses_async_session():
-            async with get_async_db_context() as db:
-                app_obj = await db.get(App, app_id)
-                execution = AgentExecution(
-                    app_id=app_id,
-                    conversation_id=conversation_id,
-                    message_id=message_id,
-                    agent_config_id=agent_config_id,
-                    release_id=app_obj.current_release_id if app_obj else None,
-                    triggered_by=None,
-                    steps=steps,
-                    status=status,
-                    started_at=parse_timestamp_to_utc_naive(started_at_ts),
-                    completed_at=utcnow_naive(),
-                    elapsed_time=elapsed_time,
-                    token_usage=token_usage,
-                    error_message=error_message,
-                    meta_data=meta_data,
-                )
-                db.add(execution)
-                await db.commit()
-                await db.refresh(execution)
-                return execution.id
-
-        app_obj = await self._db_get(App, app_id)
-        execution = AgentExecution(
-            app_id=app_id,
-            conversation_id=conversation_id,
-            message_id=message_id,
-            agent_config_id=agent_config_id,
-            release_id=app_obj.current_release_id if app_obj else None,
-            triggered_by=None,
-            steps=steps,
-            status=status,
-            started_at=parse_timestamp_to_utc_naive(started_at_ts),
-            completed_at=utcnow_naive(),
-            elapsed_time=elapsed_time,
-            token_usage=token_usage,
-            error_message=error_message,
-            meta_data=meta_data,
-        )
-        self.db.add(execution)
-        self.db.commit()
-        return execution.id
-
-
-
-
-
     async def _check_annotation_match_async(
             self,
             app_id: uuid.UUID,
@@ -1594,18 +1530,22 @@ class AppChatService:
                     if conv:
                         conv.message_count += 1
                     await db.commit()
-                await self._persist_final_agent_execution(
-                    app_id=config.app_id,
-                    conversation_id=conversation_id,
-                    agent_config_id=config.id,
-                    started_at_ts=start_time,
-                    status="completed",
-                    steps=all_node_executions,
-                    meta_data={"model": _api_key_model_name, "provider": _api_key_provider},
-                    elapsed_time=elapsed_time,
-                    token_usage={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": total_tokens},
-                    message_id=message_id,
-                )
+                await BatchPersistQueue.enqueue(PersistTask(
+                    task_type="save_agent_execution",
+                    args={
+                        "app_id": str(config.app_id),
+                        "conversation_id": str(conversation_id),
+                        "message_id": str(message_id),
+                        "agent_config_id": str(config.id) if config.id else None,
+                        "release_id": str(_release_id) if _release_id else None,
+                        "steps": all_node_executions,
+                        "status": "completed",
+                        "started_at_ts": start_time,
+                        "elapsed_time": elapsed_time,
+                        "token_usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": total_tokens},
+                        "meta_data": {"model": _api_key_model_name, "provider": _api_key_provider},
+                    },
+                ))
 
             yield f"event: end\ndata: {json.dumps(end_data, ensure_ascii=False)}\n\n"
 
@@ -1643,21 +1583,26 @@ class AppChatService:
                 pass
             # 失败场景也改成尾部一次写，避免依赖首包前 execution。
             try:
-                elapsed_time = time.time() - start_time
-                await self._persist_final_agent_execution(
-                    app_id=config.app_id,
-                    conversation_id=conversation_id,
-                    agent_config_id=config.id,
-                    started_at_ts=start_time,
-                    status="failed",
-                    steps=node_executions if 'node_executions' in dir() else [],
-                    meta_data={
-                        "model": _api_key_model_name if '_api_key_model_name' in locals() else None,
-                        "provider": _api_key_provider if '_api_key_provider' in locals() else None,
+                from app.services.batch_persist_queue import BatchPersistQueue, PersistTask
+                await BatchPersistQueue.enqueue(PersistTask(
+                    task_type="save_agent_execution",
+                    args={
+                        "app_id": str(config.app_id),
+                        "conversation_id": str(conversation_id),
+                        "message_id": None,
+                        "agent_config_id": str(config.id) if config.id else None,
+                        "release_id": None,
+                        "steps": node_executions if 'node_executions' in locals() else [],
+                        "status": "failed",
+                        "started_at_ts": start_time,
+                        "elapsed_time": time.time() - start_time,
+                        "error_message": str(e)[:2000],
+                        "meta_data": {
+                            "model": _api_key_model_name if '_api_key_model_name' in locals() else None,
+                            "provider": _api_key_provider if '_api_key_provider' in locals() else None,
+                        },
                     },
-                    elapsed_time=elapsed_time,
-                    error_message=str(e)[:2000],
-                )
+                ))
             except Exception:
                 pass  # 保存失败不影响错误事件发送
             # 发送错误事件
