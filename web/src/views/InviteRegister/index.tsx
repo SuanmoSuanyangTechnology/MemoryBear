@@ -185,9 +185,9 @@ const InviteRegister: React.FC = () => {
                 <div className="rb:mb-3">
                   <Progress 
                     percent={passwordStrength === 'weak' ? 33 : passwordStrength === 'medium' ? 66 : passwordStrength === 'strong' ? 100 : 0} 
-                    steps={3} 
-                    showInfo={false} 
-                    style={{width: '100%'}}
+                    steps={3}
+                    showInfo={false}
+                    className="rb:w-full!"
                   />
                   <div className="rb:font-medium rb:mt-2">
                     {t('login.passwordStrength')}:

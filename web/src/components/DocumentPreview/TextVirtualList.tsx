@@ -47,11 +47,8 @@ const TextVirtualList: FC<{ content: string }> = ({ content }) => {
           ...style,
           width: contentWidth,
           lineHeight: `${TEXT_LINE_HEIGHT}px`,
-          paddingLeft: 16,
-          paddingRight: 16,
-          whiteSpace: 'pre',
         }}
-        className="rb:text-sm rb:text-gray-800 rb:font-mono"
+        className="rb:text-sm rb:text-gray-800 rb:font-mono rb:px-4 rb:whitespace-pre"
       >
         {/* Use a non-breaking space for empty lines to preserve row height */}
         {lines[index] === '' ? '\u00A0' : lines[index]}

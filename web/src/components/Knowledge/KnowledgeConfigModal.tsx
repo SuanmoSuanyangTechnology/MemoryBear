@@ -122,7 +122,8 @@ const KnowledgeConfigModal = forwardRef<KnowledgeConfigModalRef, KnowledgeConfig
           extra={t('application.top_k_desc')}
         >
           <InputNumber
-            style={{ width: '100%' }}
+            className="rb:w-full!"
+            placeholder={t('common.pleaseEnter')}
             min={1}
             max={20}
             onChange={(value) => form.setFieldValue('top_k', value)}

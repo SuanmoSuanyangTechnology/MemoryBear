@@ -110,7 +110,8 @@ const KnowledgeGlobalConfigModal = forwardRef<KnowledgeGlobalConfigModalRef, Kno
             extra={t('application.reranker_top_k_desc')}
           >
             <InputNumber
-              style={{ width: '100%' }}
+              className="rb:w-full!"
+              placeholder={t('common.pleaseEnter')}
               min={1}
               max={20}
               onChange={(value) => form.setFieldValue('reranker_top_k', value)}

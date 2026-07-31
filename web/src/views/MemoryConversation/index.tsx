@@ -180,10 +180,9 @@ const MemoryConversation: FC = () => {
               value: item.end_user?.id,
             }))}
             placeholder={t('memoryConversation.searchPlaceholder')}
-            style={{ width: '100%', marginBottom: '16px' }}
             onChange={handleChangeUser}
             variant="borderless"
-            className="rb:bg-white rb:rounded-lg"
+            className="rb:bg-white rb:rounded-lg rb:w-full! rb:mb-4!"
             showSearch
           />
         </Col>

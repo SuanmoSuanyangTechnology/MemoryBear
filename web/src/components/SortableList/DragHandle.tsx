@@ -27,7 +27,7 @@ const DragHandle: React.FC = () => {
       type="text"
       size="small"
       icon={<HolderOutlined />}
-      style={{ cursor: 'move' }}
+      className="rb:cursor-move!"
       ref={setActivatorNodeRef}
       {...attributes}
       {...listeners}

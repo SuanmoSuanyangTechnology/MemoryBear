@@ -59,7 +59,7 @@ const OpenStatementSettingModal = forwardRef<OpenStatementSettingModalRef, OpenS
         if (invalid.length > 0) {
           modal.confirm({
             title: t('application.invalidVariablesTitle'),
-            content: invalid.map((vo, index) => <Tag key={index}>{'{{'}{vo}{'}}'}</Tag>),
+            content: invalid.map((vo, index) => <Tag key={index} className="rb:break-all">{'{{'}{vo}{'}}'}</Tag>),
             okText: t('common.confirm'),
             cancelText: t('common.cancel'),
             onOk: () => {

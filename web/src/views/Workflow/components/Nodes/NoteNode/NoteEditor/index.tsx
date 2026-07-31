@@ -127,7 +127,7 @@ const NoteEditor: FC<NoteEditorProps> = ({ nodeId, value, fontSize = 12, onChang
     <>
       <style>{NOTE_STYLES}</style>
       <LexicalComposer initialConfig={{ namespace: `note-${nodeId}`, theme, nodes: NOTE_NODES, onError: console.error }}>
-        <div style={{ position: 'relative' }} data-note-id={nodeId}>
+        <div className="rb:relative" data-note-id={nodeId}>
           <RichTextPlugin
             contentEditable={
               <ContentEditable
@@ -135,7 +135,9 @@ const NoteEditor: FC<NoteEditorProps> = ({ nodeId, value, fontSize = 12, onChang
               />
             }
             placeholder={
-              <div style={{ position: 'absolute', top: 0, left: 0, color: '#9CA3AF', lineHeight: '18px', pointerEvents: 'none' }}>
+              <div
+                className="rb:absolute rb:top-0 rb:left-0 rb:text-[#9CA3AF] rb:text-[12px] rb:leading-4.5 rb:pointer-none:"
+              >
                 {t('workflow.config.notes.placeholder')}
               </div>
             }

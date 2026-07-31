@@ -61,12 +61,12 @@ export const VariableComponent: React.FC<{ nodeKey: NodeKey; data: Suggestion }>
         <>
           {!data.value.includes('conv') && !data.value.includes('env') && !data.value.includes('sys') && <>
             <span className="rb:wrap-break-word rb:line-clamp-1">{data.nodeData?.name}</span>
-            <span style={{ color: '#DFE4ED', margin: '0 2px' }}>/</span>
+            <span className="rb:text-[#DFE4ED] rb:my-0 rb:mx-0.5">/</span>
           </>}
           {data.parentLabel && (
             <>
               <span className="rb:wrap-break-word rb:line-clamp-1">{data.parentLabel}</span>
-              <span style={{ color: '#DFE4ED', margin: '0 2px' }}>/</span>
+              <span className="rb:text-[#DFE4ED] rb:my-0 rb:mx-0.5">/</span>
             </>
           )}
         </>

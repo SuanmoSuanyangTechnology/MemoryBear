@@ -178,7 +178,7 @@ const Api: FC<{ application: Application | null }> = ({ application }) => {
             <span className="rb:text-[#5B6167] rb:text-[12px]">({t('application.apiKeySubTitle')})</span>
           </Flex>)}
           extra={
-            <Button style={{padding: '0 8px', height: '24px'}} onClick={handleAdd}>+ {t('application.addApiKey')}</Button>
+            <Button className="rb:py-0! rb:px-2! rb:h-6!" onClick={handleAdd}>+ {t('application.addApiKey')}</Button>
           }
           headerType="borderless"
           headerClassName="rb:min-h-13.5!"

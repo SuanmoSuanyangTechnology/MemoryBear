@@ -311,7 +311,7 @@ const VariableEditModal = forwardRef<VariableEditModalRef, VariableEditModalProp
           >
             <InputNumber
               placeholder={t('common.enter')}
-              style={{ width: '100%' }}
+              className="rb:w-full!"
               onChange={(value) => form.setFieldValue('max_length', value)}
             />
           </FormItem>
@@ -374,7 +374,7 @@ const VariableEditModal = forwardRef<VariableEditModalRef, VariableEditModalProp
               : ['number'].includes(values.ui_type)
               ? <InputNumber
                   placeholder={t('common.enter')}
-                  style={{ width: '100%' }}
+                  className="rb:w-full!"
                   onChange={(value) => form.setFieldValue('default', value)}
                 />
               : ['checkbox'].includes(values.ui_type)

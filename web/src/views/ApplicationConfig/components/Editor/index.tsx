@@ -137,7 +137,7 @@ const EditorContent = forwardRef<EditorRef, LexicalEditorProps>(({
   }), [editor]);
 
   return (
-    <div style={{ position: 'relative' }}>
+    <div className="rb:relative">
       <RichTextPlugin
         contentEditable={
           <ContentEditable

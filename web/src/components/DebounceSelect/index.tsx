@@ -1,5 +1,5 @@
 import { useRef, useState, useCallback, useEffect, type FC } from 'react';
-import { Select, Spin, Avatar } from 'antd';
+import { Select, Spin, Avatar, Flex } from 'antd';
 import type { SelectProps, DefaultOptionType } from 'antd/es/select';
 
 import { request } from '@/utils/request';
@@ -124,15 +124,15 @@ const DebounceSelect: FC<DebounceSelectProps> = ({
         <>
           {menu}
           {fetching && options.length > 0 && (
-            <div style={{ textAlign: 'center', padding: '4px 0' }}><Spin size="small" /></div>
+            <div className="rb:text-center rb:pt-1"><Spin size="small" /></div>
           )}
         </>
       )}
       optionRender={(option) => (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <Flex align="center" gap={8}>
           {option.data.avatar && <Avatar src={option.data.avatar} size="small" />}
           {option.label}
-        </div>
+        </Flex>
       )}
     />
   );
