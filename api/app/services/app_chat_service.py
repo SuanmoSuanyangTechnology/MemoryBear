@@ -1531,6 +1531,7 @@ class AppChatService:
                     "is_omni": _api_key_is_omni
                 }
 
+            all_node_executions = orchestrator_node_executions + node_executions
             if not skip_save:
                 from app.services.batch_persist_queue import BatchPersistQueue, PersistTask
 
@@ -1570,6 +1571,28 @@ class AppChatService:
                     args=persist_args,
                 ))
 
+                # Enqueue agent execution after messages so the FK is satisfied
+                # within the same batch (messages commit first, then execution).
+                async with get_async_db_context() as _exec_db:
+                    _app_obj = await _exec_db.get(App, config.app_id)
+                    _release_id = _app_obj.current_release_id if _app_obj else None
+                await BatchPersistQueue.enqueue(PersistTask(
+                    task_type="save_agent_execution",
+                    args={
+                        "app_id": str(config.app_id),
+                        "conversation_id": str(conversation_id),
+                        "message_id": str(message_id),
+                        "agent_config_id": str(config.id) if config.id else None,
+                        "release_id": str(_release_id) if _release_id else None,
+                        "steps": all_node_executions,
+                        "status": "completed",
+                        "started_at_ts": start_time,
+                        "elapsed_time": elapsed_time,
+                        "token_usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": total_tokens},
+                        "meta_data": {"model": _api_key_model_name, "provider": _api_key_provider},
+                    },
+                ))
+
                 if used_context_engine:
                     await BatchPersistQueue.enqueue(PersistTask(
                         task_type="after_turn",
@@ -1598,23 +1621,18 @@ class AppChatService:
                     if conv:
                         conv.message_count += 1
                     await db.commit()
-            # 首包后再一次性落 Agent execution，避免首包前 create + 尾部 update 双写。
-            all_node_executions = orchestrator_node_executions + node_executions
-            await self._persist_final_agent_execution(
-                app_id=config.app_id,
-                conversation_id=conversation_id,
-                agent_config_id=config.id,
-                started_at_ts=start_time,
-                status="completed",
-                steps=all_node_executions,
-                meta_data={
-                    "model": _api_key_model_name,
-                    "provider": _api_key_provider,
-                },
-                elapsed_time=elapsed_time,
-                token_usage={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": total_tokens},
-                message_id=message_id,
-            )
+                await self._persist_final_agent_execution(
+                    app_id=config.app_id,
+                    conversation_id=conversation_id,
+                    agent_config_id=config.id,
+                    started_at_ts=start_time,
+                    status="completed",
+                    steps=all_node_executions,
+                    meta_data={"model": _api_key_model_name, "provider": _api_key_provider},
+                    elapsed_time=elapsed_time,
+                    token_usage={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": total_tokens},
+                    message_id=message_id,
+                )
 
             yield f"event: end\ndata: {json.dumps(end_data, ensure_ascii=False)}\n\n"
 
