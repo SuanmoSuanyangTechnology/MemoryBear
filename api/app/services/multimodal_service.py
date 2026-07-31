@@ -303,6 +303,7 @@ PROVIDER_STRATEGIES = {
     "openai": OpenAIFormatStrategy,
     "volcano": OpenAIFormatStrategy,
     "speedbear": OpenAIFormatStrategy,
+    "gpustack": OpenAIFormatStrategy,
 }
 
 
