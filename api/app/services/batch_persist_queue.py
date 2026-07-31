@@ -43,7 +43,7 @@ class PersistTask:
     """Immutable description of a single persistence operation."""
 
     task_type: str
-    """One of: save_messages, save_execution, record_usage, after_turn, save_failed_message."""
+    """One of: save_messages, save_agent_execution, record_usage, after_turn, save_failed_message."""
 
     args: dict[str, Any]
     """Keyword arguments for the handler that executes this task."""
@@ -577,30 +577,6 @@ async def _handle_save_agent_execution(
     db.add(execution)
 
 
-async def _handle_save_execution(
-    db: Any,
-    result: Any,  # StreamResult
-    **kwargs: Any,
-) -> None:
-    """Persist agent execution record."""
-    from app.models.agent_execution_model import AgentExecution
-
-    execution = AgentExecution(
-        id=kwargs.get("execution_id"),
-        app_id=kwargs.get("app_id"),
-        conversation_id=kwargs.get("conversation_id"),
-        message_id=result.message_id,
-        user_id=kwargs.get("user_id"),
-        status=kwargs.get("status", "completed"),
-        node_executions=result.node_executions,
-        total_tokens=result.total_tokens,
-        elapsed_time=result.elapsed_time,
-        model_name=kwargs.get("api_key_model_name"),
-        provider=kwargs.get("api_key_provider"),
-    )
-    db.add(execution)
-
-
 async def _handle_record_usage(
     db: Any,
     **kwargs: Any,
@@ -659,7 +635,6 @@ async def _handle_save_node_executions(
 
 
 _TASK_HANDLERS: dict[str, Any] = {
-    "save_execution": _handle_save_execution,
     "save_agent_execution": _handle_save_agent_execution,
     "save_node_executions": _handle_save_node_executions,
     "record_usage": _handle_record_usage,
