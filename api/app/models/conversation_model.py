@@ -107,7 +107,7 @@ class Message(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
 
     # 关联信息
-    conversation_id = Column(UUID(as_uuid=True), ForeignKey("conversations.id"), nullable=False, comment="会话ID")
+    conversation_id = Column(UUID(as_uuid=True), ForeignKey("conversations.id"), nullable=False, index=True, comment="会话ID")
 
     # 消息内容
     role = Column(String(20), nullable=False, comment="角色: user/assistant/system")
