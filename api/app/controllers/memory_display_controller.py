@@ -60,7 +60,7 @@ async def get_written_memories(
 
     normalized_end_user_id = end_user_id.strip()
     try:
-        uuid.UUID(normalized_end_user_id)
+        end_user_uuid = uuid.UUID(normalized_end_user_id)
     except (ValueError, AttributeError):
         return fail(
             BizCode.INVALID_PARAMETER,
@@ -71,7 +71,7 @@ async def get_written_memories(
     try:
         query_result = MemoryDisplayRecordService.query_written(
             db=db,
-            end_user_id=normalized_end_user_id,
+            end_user_id=end_user_uuid,
             workspace_id=workspace_id,
             page=page,
             pagesize=pagesize,
@@ -146,7 +146,7 @@ async def get_engine_display_cards(
 
     normalized_end_user_id = end_user_id.strip()
     try:
-        uuid.UUID(normalized_end_user_id)
+        end_user_uuid = uuid.UUID(normalized_end_user_id)
     except (ValueError, AttributeError):
         return fail(
             BizCode.INVALID_PARAMETER,
@@ -175,7 +175,7 @@ async def get_engine_display_cards(
         language = get_language_from_header(language_type)
         query_result = MemoryEngineDisplayService.query_cards(
             db=db,
-            end_user_id=normalized_end_user_id,
+            end_user_id=end_user_uuid,
             workspace_id=workspace_id,
             timezone=tz_name,
             language=language,

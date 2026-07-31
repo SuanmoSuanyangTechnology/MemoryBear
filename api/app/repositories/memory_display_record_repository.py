@@ -75,7 +75,7 @@ class MemoryDisplayRecordRepository:
 
     def query_written_paginated(
         self,
-        end_user_id: str,
+        end_user_id: uuid.UUID,
         workspace_id: uuid.UUID,
         page: int,
         pagesize: int,
@@ -86,7 +86,7 @@ class MemoryDisplayRecordRepository:
         防止跨工作空间越权读取。
 
         Args:
-            end_user_id: 终端用户 ID（UUID 字符串）
+            end_user_id: 终端用户 ID
             workspace_id: 当前工作空间 ID，用于数据隔离
             page: 页码（从 1 开始）
             pagesize: 每页数量
@@ -94,17 +94,10 @@ class MemoryDisplayRecordRepository:
         Returns:
             (记录列表, 总条数)
         """
-        # memory_display_records.end_user_id 是 varchar，end_users.id 是 uuid，
-        # 直接 JOIN 会有类型不匹配，改用归属 EXISTS 子查询（可命中 end_users 主键）
-        try:
-            end_user_uuid = uuid.UUID(end_user_id)
-        except (ValueError, AttributeError, TypeError):
-            return [], 0
-
         owned_by_workspace = (
             select(EndUser.id)
             .where(
-                EndUser.id == end_user_uuid,
+                EndUser.id == end_user_id,
                 EndUser.workspace_id == workspace_id,
                 EndUser.is_active.is_(True),
             )

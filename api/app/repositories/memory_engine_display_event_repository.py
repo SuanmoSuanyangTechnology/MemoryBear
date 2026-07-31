@@ -4,6 +4,7 @@
 """
 
 import logging
+import uuid
 from typing import Any, Dict, List, Tuple
 
 from sqlalchemy import text
@@ -66,8 +67,8 @@ class MemoryEngineDisplayEventRepository:
 
     def query_aggregated_paginated(
         self,
-        end_user_id: str,
-        workspace_id: str,
+        end_user_id: uuid.UUID,
+        workspace_id: uuid.UUID,
         timezone: str,
         page: int,
         pagesize: int,
@@ -81,8 +82,8 @@ class MemoryEngineDisplayEventRepository:
         防止跨工作空间越权读取。
 
         Args:
-            end_user_id: 终端用户 ID（UUID 字符串）
-            workspace_id: 当前工作空间 ID（UUID 字符串），用于数据隔离
+            end_user_id: 终端用户 ID
+            workspace_id: 当前工作空间 ID，用于数据隔离
             timezone: IANA 时区名称（已验证合法）
             page: 页码（从 1 开始）
             pagesize: 每页数量

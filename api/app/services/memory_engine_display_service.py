@@ -54,7 +54,7 @@ class MemoryEngineDisplayService:
     @staticmethod
     def query_cards(
         db: Session,
-        end_user_id: str,
+        end_user_id: uuid.UUID,
         workspace_id: uuid.UUID,
         timezone: str,
         language: str,
@@ -65,10 +65,9 @@ class MemoryEngineDisplayService:
 
         返回 None 表示终端用户不属于当前工作空间。
         """
-        end_user_uuid = uuid.UUID(end_user_id)
         end_user_repo = EndUserRepository(db)
         if end_user_repo.get_active_end_user_in_workspace(
-            end_user_uuid,
+            end_user_id,
             workspace_id,
         ) is None:
             return None
@@ -76,14 +75,14 @@ class MemoryEngineDisplayService:
         repo = MemoryEngineDisplayEventRepository(db)
         groups, total = repo.query_aggregated_paginated(
             end_user_id=end_user_id,
-            workspace_id=str(workspace_id),
+            workspace_id=workspace_id,
             timezone=timezone,
             page=page,
             pagesize=pagesize,
         )
         cards = MemoryEngineDisplayService.build_cards_from_groups(
             groups=groups,
-            end_user_id=end_user_id,
+            end_user_id=str(end_user_id),
             timezone=timezone,
             language=language,
         )

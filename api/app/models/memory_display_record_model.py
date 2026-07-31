@@ -6,7 +6,16 @@ PG 仅保存前端展示快照，不参与记忆检索，Neo4j 仍是记忆事�
 
 import uuid
 
-from sqlalchemy import Column, DateTime, Float, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    Column,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
 
@@ -23,7 +32,11 @@ class MemoryDisplayRecord(Base):
     __tablename__ = "memory_display_records"
 
     id = Column(UUID(as_uuid=True), default=uuid.uuid4, primary_key=True)
-    end_user_id = Column(String(255), nullable=False)
+    end_user_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("end_users.id"),
+        nullable=False,
+    )
     operation_id = Column(UUID(as_uuid=True), nullable=False)
     operation = Column(String(16), nullable=False)  # "WRITE" or "RETRIEVE"
     memory_id = Column(String(64), nullable=False)

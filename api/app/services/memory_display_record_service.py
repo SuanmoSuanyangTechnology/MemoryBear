@@ -32,7 +32,7 @@ class MemoryDisplayRecordService:
     @staticmethod
     def query_written(
         db: Session,
-        end_user_id: str,
+        end_user_id: uuid.UUID,
         workspace_id: uuid.UUID,
         page: int,
         pagesize: int,
@@ -41,10 +41,9 @@ class MemoryDisplayRecordService:
 
         返回 None 表示终端用户不属于当前工作空间。
         """
-        end_user_uuid = uuid.UUID(end_user_id)
         end_user_repo = EndUserRepository(db)
         if end_user_repo.get_active_end_user_in_workspace(
-            end_user_uuid,
+            end_user_id,
             workspace_id,
         ) is None:
             return None
@@ -87,6 +86,14 @@ class MemoryDisplayRecordService:
         if not summaries:
             return
 
+        try:
+            end_user_uuid = uuid.UUID(end_user_id)
+        except (ValueError, AttributeError, TypeError):
+            logger.warning(
+                f"[MemoryDisplayRecord] 无法将 end_user_id 转为 UUID: {end_user_id}"
+            )
+            return
+
         from app.db import get_db_context
         from app.models.memory_display_record_model import MemoryDisplayRecord
 
@@ -123,7 +130,7 @@ class MemoryDisplayRecordService:
 
             record = MemoryDisplayRecord(
                 id=uuid.uuid4(),
-                end_user_id=end_user_id,
+                end_user_id=end_user_uuid,
                 operation_id=operation_id,
                 operation="WRITE",
                 memory_id=s.id,
