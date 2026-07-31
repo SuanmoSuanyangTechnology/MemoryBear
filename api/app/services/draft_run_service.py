@@ -4043,7 +4043,7 @@ class AgentRunService:
             })
 
         # Phase 3: enqueue per-model message saves via batch persist queue
-        if skip_save:
+        if not skip_save:
             from app.services.batch_persist_queue import BatchPersistQueue, PersistTask
 
             # Build files_meta from FileInput list
