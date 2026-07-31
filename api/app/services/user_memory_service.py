@@ -1053,7 +1053,7 @@ class UserMemoryService:
 # for workspace    
     async def generate_cache_for_workspace(
         self, 
-        db: AsyncSession, 
+        db: Session, 
         workspace_id: uuid.UUID,
         language: str = "zh"
     ) -> Dict[str, Any]:
@@ -1083,7 +1083,7 @@ class UserMemoryService:
         try:
             # 获取工作空间的所有终端用户
             repo = EndUserRepository(db)
-            end_users = await repo.get_all_by_workspace_async(workspace_id)
+            end_users = repo.get_all_by_workspace(workspace_id)
             total_users = len(end_users)
             
             logger.info(f"工作空间 {workspace_id} 共有 {total_users} 个终端用户")
