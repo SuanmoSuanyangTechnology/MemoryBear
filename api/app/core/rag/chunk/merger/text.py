@@ -87,6 +87,12 @@ class TextMerger:
         separator: str,
     ) -> list[_SplitUnit]:
         raw_parts = text.split(separator)
+        if separator in {"。", "；"}:
+            return [
+                _SplitUnit(text=part + (separator if index < len(raw_parts) - 1 else ""))
+                for index, part in enumerate(raw_parts)
+                if part
+            ]
         return [
             _SplitUnit(text=part, prefix="" if index == 0 else separator)
             for index, part in enumerate(raw_parts)

@@ -29,7 +29,7 @@ CIRCLED_MARKERS = (
 CHINESE_NUMERAL_MARKERS = "零〇一二三四五六七八九十百千万壹贰貳貮叁參肆伍陆陸柒捌玖拾"
 
 UNORDERED_LIST_PATTERN = re.compile(r"^\s{0,3}([-+*])\s+(.+\S)\s*$")
-ORDERED_LIST_PATTERN = re.compile(r"^\s{0,3}(\d+)([.)）、|｜])\s*(.+\S)\s*$")
+ORDERED_LIST_PATTERN = re.compile(r"^\s{0,3}(\d+)(?:[)）、|｜]|[.．](?!\d))\s*(.+\S)\s*$")
 EMPTY_ORDERED_LIST_PATTERN = re.compile(r"^\s{0,3}(\d{1,3})([.)）、|｜])\s*$")
 PAREN_ORDERED_LIST_PATTERN = re.compile(
     rf"^\s{{0,3}}([（(]\s*(?:\d+|[{CHINESE_NUMERAL_MARKERS}]+)\s*[）)])\s*(.+\S)\s*$"
@@ -49,7 +49,7 @@ STEP_LIST_PATTERN = re.compile(
 PREFIXED_LIST_PATTERN = re.compile(
     rf"^\s{{0,3}}(?P<prefix>[^:：|｜\n]{{1,24}}[：:|｜])\s*"
     rf"(?P<marker>"
-    rf"\d+[.)）、|｜]"
+    rf"\d+(?:[)）、|｜]|[.．](?!\d))"
     rf"|[（(]\s*(?:\d+|[{CHINESE_NUMERAL_MARKERS}]+)\s*[）)]"
     rf"|[0-9]\ufe0f?\u20e3"
     rf"|[{CIRCLED_MARKERS}]"
@@ -60,6 +60,13 @@ PREFIXED_LIST_PATTERN = re.compile(
     rf")\s*(?P<body>.*\S)?\s*$"
 )
 LIST_CONTINUATION_PATTERN = re.compile(r"^\s{0,3}.{1,24}(?:简介|介绍|说明|定义)[：:].+\S\s*$")
+QA_CONTINUATION_AFTER_BLANK_PATTERN = re.compile(
+    r"^(?:"
+    r"(?=.{12,})(?=.*[。！？；，,.;:：]).+"
+    r"|(?:当|若|如果|因此|所以|同时|另外|此外|其中|相关|产品|试验|测试|验证|优先|严酷|注意|GB/T|IEC).+"
+    r")"
+)
+MAX_QA_CONTINUATION_PARAGRAPHS = 3
 IMAGE_LINE_PATTERN = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
 HTML_TABLE_LINE_PATTERN = re.compile(r"^\s*<table\b", re.IGNORECASE)
 MARKDOWN_TABLE_LINE_PATTERN = re.compile(r"^\s*\|.+\|\s*$")
@@ -93,6 +100,8 @@ class MarkdownPreprocessor:
         in_code = False
         in_list_context = False
         in_qa_list_context = False
+        qa_blank_lines = 0
+        qa_continuation_paragraphs = 0
         for line_number, raw_line in enumerate(text.split("\n"), start=1):
             stripped = raw_line.strip()
             is_code_fence = stripped.startswith("```")
@@ -120,6 +129,13 @@ class MarkdownPreprocessor:
             block_hint = None
             metadata: dict[str, Any] = {}
             if not is_code_fence:
+                after_qa_blank = False
+                if not stripped:
+                    if in_qa_list_context:
+                        qa_blank_lines += 1
+                else:
+                    after_qa_blank = qa_blank_lines > 0
+                    qa_blank_lines = 0
                 heading_match = ATX_HEADING_PATTERN.match(line)
                 if heading_match:
                     block_hint = "heading"
@@ -129,6 +145,7 @@ class MarkdownPreprocessor:
                     }
                     in_list_context = False
                     in_qa_list_context = False
+                    qa_continuation_paragraphs = 0
                 else:
                     list_metadata = self._list_metadata(line)
                     if list_metadata:
@@ -136,9 +153,13 @@ class MarkdownPreprocessor:
                         metadata = list_metadata
                         in_list_context = True
                         in_qa_list_context = in_qa_list_context or bool(list_metadata.get("contains_qa_marker"))
+                        if list_metadata.get("contains_qa_marker"):
+                            qa_continuation_paragraphs = 0
                     elif in_list_context and self._is_list_continuation(
                         line,
                         in_qa_context=normalize_escaped_structure and in_qa_list_context,
+                        after_blank=normalize_escaped_structure and in_qa_list_context and after_qa_blank,
+                        qa_continuation_paragraphs=qa_continuation_paragraphs,
                     ):
                         block_hint = "list_continuation"
                         metadata = {
@@ -146,12 +167,16 @@ class MarkdownPreprocessor:
                             "qa_continuation": in_qa_list_context,
                             "list_level": _indent_level(line),
                         }
+                        if in_qa_list_context and after_qa_blank:
+                            qa_continuation_paragraphs += 1
                     elif stripped and not IMAGE_LINE_PATTERN.search(line):
                         in_list_context = False
                         in_qa_list_context = False
+                        qa_continuation_paragraphs = 0
                     elif IMAGE_LINE_PATTERN.search(line):
                         in_list_context = False
                         in_qa_list_context = False
+                        qa_continuation_paragraphs = 0
 
             line_infos.append(
                 MarkdownLineInfo(
@@ -167,6 +192,8 @@ class MarkdownPreprocessor:
                 in_code = True
                 in_list_context = False
                 in_qa_list_context = False
+                qa_blank_lines = 0
+                qa_continuation_paragraphs = 0
 
         return MarkdownPreprocessResult(
             lines=[line_info.text for line_info in line_infos],
@@ -218,7 +245,14 @@ class MarkdownPreprocessor:
             }
         return None
 
-    def _is_list_continuation(self, line: str, *, in_qa_context: bool = False) -> bool:
+    def _is_list_continuation(
+        self,
+        line: str,
+        *,
+        in_qa_context: bool = False,
+        after_blank: bool = False,
+        qa_continuation_paragraphs: int = 0,
+    ) -> bool:
         stripped = line.strip()
         if not stripped:
             return False
@@ -231,6 +265,11 @@ class MarkdownPreprocessor:
         ):
             return False
         if in_qa_context:
+            if after_blank:
+                return (
+                    qa_continuation_paragraphs < MAX_QA_CONTINUATION_PARAGRAPHS
+                    and bool(QA_CONTINUATION_AFTER_BLANK_PATTERN.match(stripped))
+                )
             return True
         return bool(LIST_CONTINUATION_PATTERN.match(line))
 

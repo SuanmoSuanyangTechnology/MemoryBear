@@ -11,12 +11,12 @@ DEFAULT_PARSER_CONFIG = {
     "chunk_token_num": 512,
     "delimiter": "\n!?。；！？",
     "analyze_hyperlink": True,
-    "image_vision_enabled": False,
+    "image_vision_enabled": True,
 }
 
 
 def is_image_vision_enabled(parser_config: dict | None) -> bool:
-    raw_value = (parser_config or {}).get("image_vision_enabled", False)
+    raw_value = (parser_config or {}).get("image_vision_enabled", True)
     if isinstance(raw_value, bool):
         return raw_value
     if isinstance(raw_value, str):

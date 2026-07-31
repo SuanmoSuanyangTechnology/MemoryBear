@@ -4,6 +4,21 @@ from html import escape
 from bs4 import BeautifulSoup
 
 from app.core.rag.common.token_utils import encoder, num_tokens_from_string
+from app.core.rag.chunk.parser.markdown_preprocessor import (
+    ALPHA_LIST_PATTERN,
+    CHINESE_LIST_PATTERN,
+    CIRCLED_LIST_PATTERN,
+    DEFINITION_LIST_PATTERN,
+    EMPTY_ORDERED_LIST_PATTERN,
+    KEYCAP_LIST_PATTERN,
+    ORDERED_LIST_PATTERN,
+    ORDINAL_LIST_PATTERN,
+    PAREN_ORDERED_LIST_PATTERN,
+    PREFIXED_LIST_PATTERN,
+    QA_LIST_PATTERN,
+    STEP_LIST_PATTERN,
+    UNORDERED_LIST_PATTERN,
+)
 from app.core.rag.chunk.context import (
     ChunkContext,
     ChunkOutputMode,
@@ -24,6 +39,22 @@ TEXT_LIKE_TYPES = {
     ParsedBlockType.TEXT,
     ParsedBlockType.BLOCKQUOTE,
 }
+
+LIST_ITEM_START_PATTERNS = (
+    UNORDERED_LIST_PATTERN,
+    ORDERED_LIST_PATTERN,
+    EMPTY_ORDERED_LIST_PATTERN,
+    PAREN_ORDERED_LIST_PATTERN,
+    KEYCAP_LIST_PATTERN,
+    CIRCLED_LIST_PATTERN,
+    STEP_LIST_PATTERN,
+    ORDINAL_LIST_PATTERN,
+    CHINESE_LIST_PATTERN,
+    ALPHA_LIST_PATTERN,
+    DEFINITION_LIST_PATTERN,
+    QA_LIST_PATTERN,
+    PREFIXED_LIST_PATTERN,
+)
 
 
 class BlockMerger(ChunkMerger):
@@ -225,40 +256,47 @@ class BlockMerger(ChunkMerger):
         delimiter: str | None = None,
         overlap: int = 0,
     ) -> list[str]:
-        if num_tokens_from_string(content) <= token_num:
+        limit = max(int(token_num), 1)
+        overlap_tokens = TextMerger._normalize_overlap(overlap, limit)
+        if num_tokens_from_string(content) <= limit:
             return [content]
 
         items = self._split_list_items(content)
         if len(items) <= 1:
-            return self.text_merger.merge(content, token_num, delimiter, overlap)
+            return self.text_merger.merge(content, limit, delimiter, overlap)
 
         chunks: list[str] = []
         current_items: list[str] = []
         for item in items:
-            if num_tokens_from_string(item) > token_num:
+            if num_tokens_from_string(item) > limit:
                 if current_items:
-                    chunks.append("\n".join(current_items))
+                    chunks.append(self._join_list_items(current_items))
                     current_items = []
-                chunks.extend(self.text_merger.merge(item, token_num, delimiter, overlap))
+                chunks.extend(self.text_merger.merge(item, limit, delimiter, overlap))
                 continue
 
             candidate_items = [*current_items, item]
-            candidate = "\n".join(candidate_items)
-            if current_items and num_tokens_from_string(candidate) > token_num:
-                chunks.append("\n".join(current_items))
-                current_items = [item]
-            else:
-                current_items = candidate_items
+            candidate = self._join_list_items(candidate_items)
+            if current_items and num_tokens_from_string(candidate) > limit:
+                chunks.append(self._join_list_items(current_items))
+                current_items = self._retain_list_overlap_items(
+                    current_items,
+                    item,
+                    limit,
+                    overlap_tokens,
+                )
+
+            current_items.append(item)
 
         if current_items:
-            chunks.append("\n".join(current_items))
+            chunks.append(self._join_list_items(current_items))
         return chunks or [content]
 
     def _split_list_items(self, content: str) -> list[str]:
         items: list[str] = []
         current_lines: list[str] = []
         for line in content.split("\n"):
-            starts_new_item = bool(line.strip()) and not line.startswith((" ", "\t"))
+            starts_new_item = self._is_list_item_start(line)
             if starts_new_item and current_lines:
                 items.append("\n".join(current_lines).rstrip())
                 current_lines = [line]
@@ -267,6 +305,30 @@ class BlockMerger(ChunkMerger):
         if current_lines:
             items.append("\n".join(current_lines).rstrip())
         return [item for item in items if item.strip()]
+
+    def _is_list_item_start(self, line: str) -> bool:
+        if not line.strip() or line.startswith((" ", "\t")):
+            return False
+        return any(pattern.match(line) for pattern in LIST_ITEM_START_PATTERNS)
+
+    def _retain_list_overlap_items(
+        self,
+        current_items: list[str],
+        next_item: str,
+        limit: int,
+        overlap: int,
+    ) -> list[str]:
+        retained = current_items[:]
+        while retained and (
+            num_tokens_from_string(self._join_list_items(retained)) > overlap
+            or num_tokens_from_string(self._join_list_items([*retained, next_item])) > limit
+        ):
+            retained = retained[1:]
+        return retained
+
+    @staticmethod
+    def _join_list_items(items: list[str]) -> str:
+        return "\n".join(items)
 
     def _code_logical_chunks(self, block: ParsedBlock, token_num: int) -> list[LogicalChunk]:
         metadata = self._metadata_for_block(block)
