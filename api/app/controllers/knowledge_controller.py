@@ -29,6 +29,7 @@ from app.core.rag.knowledge_graph.config import (
 )
 from app.core.rag.knowledge_graph.dispatch import (
     dispatch_graph_enabled_transition,
+    dispatch_knowledge_graph_rebuild,
 )
 from app.core.rag.knowledge_graph.elasticsearch_store import (
     GraphElasticsearchStore,
@@ -972,10 +973,12 @@ async def rebuild_knowledge_graph(
             if pipeline is GraphPipeline.LEGACY
             else "app.core.rag.tasks.rebuild_evidence_graph_knowledge"
         )
-        task = celery_app.send_task(
-            task_name,
-            args=[str(knowledge_id)],
+        task = dispatch_knowledge_graph_rebuild(
+            str(knowledge_id),
+            db_knowledge.parser_config,
         )
+        if task is None:
+            raise GraphPipelineConfigError("knowledge graph is not enabled")
         api_logger.info(
             "Knowledge graph rebuild task accepted"
             " kb_id=%s pipeline=%s task=%s task_id=%s",
