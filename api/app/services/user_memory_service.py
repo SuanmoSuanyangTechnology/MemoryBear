@@ -984,7 +984,6 @@ class UserMemoryService:
         language: str = "zh",
     ) -> Dict[str, Any]:
         """Celery 专用入口：同步 PG 读写，异步 Neo4j/LLM。"""
-        del workspace_id  # 保留与现有生成入口一致的调用形状。
         try:
             logger.info(f"开始为 end_user_id {end_user_id} 生成用户摘要, language={language}")
             user_uuid = uuid.UUID(end_user_id)

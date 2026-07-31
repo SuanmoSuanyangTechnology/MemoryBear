@@ -436,6 +436,8 @@ def _memory_insight_result(
     }
 
 
+# 默认 False 保留 API 的异步 PostgreSQL 路径；
+# Celery 必须通过 refresh_memory_insight_for_worker() 显式传入 True，使用同步短 Session。
 async def refresh_memory_insight(
     end_user_id: str,
     workspace_id: uuid.UUID | str,
