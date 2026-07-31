@@ -543,6 +543,39 @@ async def _mark_memory_pending(conv_id: str) -> None:
         )
 
 
+async def _handle_save_agent_execution(
+    db: Any,
+    **kwargs: Any,
+) -> None:
+    """Persist agent execution record after messages are committed."""
+    from app.models.agent_execution_model import AgentExecution
+    from app.core.utils.datetime_utils import parse_timestamp_to_utc_naive, utcnow_naive
+
+    app_id = uuid_module.UUID(kwargs["app_id"]) if isinstance(kwargs.get("app_id"), str) else kwargs.get("app_id")
+    conversation_id = uuid_module.UUID(kwargs["conversation_id"]) if isinstance(kwargs.get("conversation_id"), str) else kwargs.get("conversation_id")
+    message_id = uuid_module.UUID(kwargs["message_id"]) if isinstance(kwargs.get("message_id"), str) else kwargs.get("message_id")
+    agent_config_id = uuid_module.UUID(kwargs["agent_config_id"]) if kwargs.get("agent_config_id") else None
+    release_id = uuid_module.UUID(kwargs["release_id"]) if kwargs.get("release_id") else None
+
+    execution = AgentExecution(
+        app_id=app_id,
+        conversation_id=conversation_id,
+        message_id=message_id,
+        agent_config_id=agent_config_id,
+        release_id=release_id,
+        triggered_by=None,
+        steps=kwargs.get("steps", []),
+        status=kwargs.get("status", "completed"),
+        started_at=parse_timestamp_to_utc_naive(kwargs["started_at_ts"]),
+        completed_at=utcnow_naive(),
+        elapsed_time=kwargs.get("elapsed_time"),
+        token_usage=kwargs.get("token_usage"),
+        error_message=kwargs.get("error_message"),
+        meta_data=kwargs.get("meta_data", {}),
+    )
+    db.add(execution)
+
+
 async def _handle_save_execution(
     db: Any,
     result: Any,  # StreamResult
@@ -626,6 +659,7 @@ async def _handle_save_node_executions(
 
 _TASK_HANDLERS: dict[str, Any] = {
     "save_execution": _handle_save_execution,
+    "save_agent_execution": _handle_save_agent_execution,
     "save_node_executions": _handle_save_node_executions,
     "record_usage": _handle_record_usage,
     "after_turn": _handle_after_turn,
