@@ -543,6 +543,13 @@ async def _mark_memory_pending(conv_id: str) -> None:
         )
 
 
+def _to_uuid(value: Any) -> uuid_module.UUID | None:
+    """Coerce a str or UUID to UUID, returning None if falsy."""
+    if not value:
+        return None
+    return uuid_module.UUID(value) if isinstance(value, str) else value
+
+
 async def _handle_save_agent_execution(
     db: Any,
     **kwargs: Any,
@@ -551,18 +558,12 @@ async def _handle_save_agent_execution(
     from app.models.agent_execution_model import AgentExecution
     from app.core.utils.datetime_utils import parse_timestamp_to_utc_naive, utcnow_naive
 
-    app_id = uuid_module.UUID(kwargs["app_id"]) if isinstance(kwargs.get("app_id"), str) else kwargs.get("app_id")
-    conversation_id = uuid_module.UUID(kwargs["conversation_id"]) if isinstance(kwargs.get("conversation_id"), str) else kwargs.get("conversation_id")
-    message_id = uuid_module.UUID(kwargs["message_id"]) if isinstance(kwargs.get("message_id"), str) else kwargs.get("message_id")
-    agent_config_id = uuid_module.UUID(kwargs["agent_config_id"]) if kwargs.get("agent_config_id") else None
-    release_id = uuid_module.UUID(kwargs["release_id"]) if kwargs.get("release_id") else None
-
     execution = AgentExecution(
-        app_id=app_id,
-        conversation_id=conversation_id,
-        message_id=message_id,
-        agent_config_id=agent_config_id,
-        release_id=release_id,
+        app_id=_to_uuid(kwargs["app_id"]),
+        conversation_id=_to_uuid(kwargs["conversation_id"]),
+        message_id=_to_uuid(kwargs.get("message_id")),
+        agent_config_id=_to_uuid(kwargs.get("agent_config_id")),
+        release_id=_to_uuid(kwargs.get("release_id")),
         triggered_by=None,
         steps=kwargs.get("steps", []),
         status=kwargs.get("status", "completed"),
