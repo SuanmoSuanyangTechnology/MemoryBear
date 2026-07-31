@@ -369,10 +369,17 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
       modal.confirm({
         title: t('knowledgeBase.rebuildConfirmTitle'),
         content: t('knowledgeBase.rebuildConfirmContent'),
-        onOk: async() => {
-          handleDeleteGraph()
+        onOk: async () => {
+          deleteKnowledgeGraph(datasets?.id || '')
+            .then(() => {
+              console.log(t('knowledgeBase.deleteGraphSuccess'));
+              rebuildKnowledgeGraph(datasets?.id || '');
+            })
+            .catch(() => {
+              messageApi.error(t('knowledgeBase.deleteGraphFailed'));
+            })
+
           performSave();
-          await rebuildKnowledgeGraph(datasets?.id || '')
         },
         onCancel: () => {
           // User cancelled, no action taken
@@ -382,14 +389,6 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
       // Non-rebuild mode or knowledge graph not enabled, save directly
       performSave();
     }
-  };
-  const handleDeleteGraph = () => {
-     try{
-        deleteKnowledgeGraph(datasets?.id || '')
-        console.log(t('knowledgeBase.deleteGraphSuccess'))
-     }catch(e){
-        messageApi.error(t('knowledgeBase.deleteGraphFailed'))
-     }
   };
   // Actual save logic
   const performSave = async () => {
