@@ -3,8 +3,10 @@ import logging
 import time
 import unicodedata
 from collections import Counter, defaultdict
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any
+
+import networkx as nx
 
 from app.core.config import settings
 from app.core.rag.knowledge_graph.batching import (
@@ -29,6 +31,42 @@ from app.core.rag.knowledge_graph.normalizer import (
 
 
 logger = logging.getLogger(__name__)
+
+
+def calculate_evidence_pageranks(
+    entity_keys: Sequence[str],
+    relations: Sequence[Mapping[str, Any]],
+) -> dict[str, float]:
+    graph = nx.MultiDiGraph()
+    graph.add_nodes_from(str(key) for key in entity_keys if str(key))
+    entity_key_set = set(graph.nodes)
+    for relation in relations:
+        from_key = str(relation.get("from_entity_key_kwd") or "")
+        to_key = str(relation.get("to_entity_key_kwd") or "")
+        relation_key = str(relation.get("relation_key_kwd") or "")
+        if (
+            not relation_key
+            or not from_key
+            or not to_key
+            or from_key == to_key
+            or from_key not in entity_key_set
+            or to_key not in entity_key_set
+        ):
+            continue
+        try:
+            weight = max(float(relation.get("evidence_count_int") or 1), 1.0)
+        except (TypeError, ValueError):
+            weight = 1.0
+        graph.add_edge(from_key, to_key, key=relation_key, weight=weight)
+        directed = relation.get("directed_int")
+        if directed is not None and not bool(directed):
+            graph.add_edge(to_key, from_key, key=relation_key, weight=weight)
+    if not graph:
+        return {}
+    return {
+        str(entity_key): float(pagerank)
+        for entity_key, pagerank in nx.pagerank(graph, weight="weight").items()
+    }
 
 
 def _clean_display(value: str) -> str:
@@ -218,6 +256,8 @@ class KnowledgeGraphIndexPipeline:
         runtime: GraphIndexRuntime,
         document_id: str,
         document_active: bool,
+        *,
+        refresh_pageranks: bool = True,
     ) -> None:
         started_at = time.perf_counter()
         stage = "ensure_graph_index"
@@ -298,6 +338,10 @@ class KnowledgeGraphIndexPipeline:
             stage = "refresh_graph"
             self._lock_guard.ensure_valid()
             await self._store.refresh_graph(runtime.graph_index_name)
+            if refresh_pageranks:
+                stage = "rebuild_graph_pageranks"
+                self._lock_guard.ensure_valid()
+                await self._rebuild_graph_pageranks(runtime)
             logger.info(
                 "[EvidenceGraph] index_done"
                 " kb_id=%s document_id=%s"
@@ -339,7 +383,12 @@ class KnowledgeGraphIndexPipeline:
             len(active_ids),
         )
         for document_id in active_ids:
-            await self.sync_document(runtime, document_id, True)
+            await self.sync_document(
+                runtime,
+                document_id,
+                True,
+                refresh_pageranks=False,
+            )
 
         self._lock_guard.ensure_valid()
         maps = await self._store.list_document_maps(
@@ -356,10 +405,17 @@ class KnowledgeGraphIndexPipeline:
             }
         )
         for document_id in stale_ids:
-            await self.sync_document(runtime, document_id, False)
+            await self.sync_document(
+                runtime,
+                document_id,
+                False,
+                refresh_pageranks=False,
+            )
 
         self._lock_guard.ensure_valid()
         await self._store.refresh_graph(runtime.graph_index_name)
+        self._lock_guard.ensure_valid()
+        await self._rebuild_graph_pageranks(runtime)
         logger.info(
             "[EvidenceGraph] rebuild_done"
             " kb_id=%s active_documents=%d stale_documents=%d elapsed_ms=%d",
@@ -487,6 +543,7 @@ class KnowledgeGraphIndexPipeline:
                 "description": description,
                 "evidence_count_int": len(items),
                 "document_count_int": len({item.document_id for item in items}),
+                "source_id": sorted({item.document_id for item in items}),
             }
             projections.append(projection)
             texts.append(
@@ -565,6 +622,7 @@ class KnowledgeGraphIndexPipeline:
                 "evidence_count_int": len(items),
                 "document_count_int": len({item.document_id for item in items}),
                 "degree_int": degrees.get(key, 0),
+                "source_id": sorted({item.document_id for item in items}),
             }
             projections.append(projection)
             texts.append(f"{name}\n{entity_type}\n{description}".strip())
@@ -576,6 +634,23 @@ class KnowledgeGraphIndexPipeline:
             runtime.knowledge_id,
             projections,
             tuple(delete_keys),
+            ensure_valid=self._lock_guard.ensure_valid,
+        )
+
+    async def _rebuild_graph_pageranks(
+        self,
+        runtime: GraphIndexRuntime,
+    ) -> None:
+        entity_keys, relations = await self._store.load_graph_metric_inputs(
+            runtime.graph_index_name,
+            runtime.knowledge_id,
+        )
+        pageranks = calculate_evidence_pageranks(entity_keys, relations)
+        self._lock_guard.ensure_valid()
+        await self._store.update_entity_pageranks(
+            runtime.graph_index_name,
+            runtime.knowledge_id,
+            pageranks,
             ensure_valid=self._lock_guard.ensure_valid,
         )
 

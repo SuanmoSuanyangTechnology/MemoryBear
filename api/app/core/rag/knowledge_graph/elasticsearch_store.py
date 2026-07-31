@@ -46,6 +46,8 @@ EVIDENCE_GRAPH_TYPES = (
     DOCUMENT_PROJECTION_MAP,
 )
 GRAPH_FULL_SCAN_BATCH_SIZE = 1000
+GRAPH_METRIC_SCAN_BATCH_SIZE = 1000
+GRAPH_PAGERANK_BULK_SIZE = 1000
 
 
 @lru_cache(maxsize=1)
@@ -550,6 +552,118 @@ class GraphElasticsearchStore:
             query=self._graph_query(knowledge_id, DOCUMENT_PROJECTION_MAP),
             sort=[{"document_id": {"order": "asc"}}],
             context="list graph document maps",
+            batch_size=GRAPH_METRIC_SCAN_BATCH_SIZE,
+        )
+        return [
+            dict(source)
+            for hit in hits
+            if isinstance((source := hit.get("_source")), Mapping)
+        ]
+
+    async def load_graph_metric_inputs(
+        self,
+        index_name: str,
+        knowledge_id: str,
+    ) -> tuple[tuple[str, ...], tuple[dict[str, Any], ...]]:
+        entity_sources, relation_sources = await asyncio.gather(
+            self._scan_projection_sources(
+                index_name,
+                knowledge_id,
+                document_type=ENTITY_PROJECTION,
+                sort_field="entity_key_kwd",
+                source_includes=["entity_key_kwd"],
+            ),
+            self._scan_projection_sources(
+                index_name,
+                knowledge_id,
+                document_type=RELATION_PROJECTION,
+                sort_field="relation_key_kwd",
+                source_includes=[
+                    "relation_key_kwd",
+                    "from_entity_key_kwd",
+                    "to_entity_key_kwd",
+                    "directed_int",
+                    "evidence_count_int",
+                ],
+            ),
+        )
+        entity_keys = tuple(
+            sorted(
+                {
+                    str(source["entity_key_kwd"])
+                    for source in entity_sources
+                    if source.get("entity_key_kwd")
+                }
+            )
+        )
+        relations = tuple(
+            sorted(
+                (
+                    dict(source)
+                    for source in relation_sources
+                    if source.get("relation_key_kwd")
+                    and source.get("from_entity_key_kwd")
+                    and source.get("to_entity_key_kwd")
+                ),
+                key=lambda source: str(source["relation_key_kwd"]),
+            )
+        )
+        return entity_keys, relations
+
+    async def update_entity_pageranks(
+        self,
+        index_name: str,
+        knowledge_id: str,
+        pageranks: Mapping[str, float],
+        *,
+        ensure_valid: Callable[[], None] | None = None,
+    ) -> None:
+        items = sorted(pageranks.items())
+        for offset in range(0, len(items), GRAPH_PAGERANK_BULK_SIZE):
+            operations: list[dict[str, Any]] = []
+            for entity_key, pagerank in items[
+                offset : offset + GRAPH_PAGERANK_BULK_SIZE
+            ]:
+                operations.extend(
+                    [
+                        {
+                            "update": {
+                                "_index": index_name,
+                                "_id": projection_id(
+                                    knowledge_id,
+                                    "entity",
+                                    str(entity_key),
+                                ),
+                            }
+                        },
+                        {"doc": {"pagerank_flt": float(pagerank)}},
+                    ]
+                )
+            await self._bulk(operations, ensure_valid=ensure_valid)
+
+    async def _scan_projection_sources(
+        self,
+        index_name: str,
+        knowledge_id: str,
+        *,
+        document_type: str,
+        sort_field: str,
+        source_includes: Sequence[str],
+    ) -> list[dict[str, Any]]:
+        hits = await self._collect_search_after_hits(
+            index_name=index_name,
+            query=self._graph_query(knowledge_id, document_type),
+            source_includes=source_includes,
+            sort=[
+                {
+                    sort_field: {
+                        "order": "asc",
+                        "unmapped_type": "keyword",
+                    }
+                }
+            ],
+            context=f"scan {document_type}",
+            batch_size=GRAPH_METRIC_SCAN_BATCH_SIZE,
         )
         return [
             dict(source)
@@ -616,13 +730,13 @@ class GraphElasticsearchStore:
     ) -> dict[str, Any]:
         empty_graph = {
             "directed": True,
-            "multigraph": False,
+            "multigraph": True,
             "graph": {"source_id": []},
             "nodes": [],
             "edges": [],
         }
         try:
-            node_result, edge_result = await asyncio.gather(
+            node_result, edge_result, document_maps = await asyncio.gather(
                 self._client.search(
                     index=index_name,
                     size=max(1, node_limit),
@@ -631,6 +745,13 @@ class GraphElasticsearchStore:
                         ENTITY_PROJECTION,
                     ),
                     sort=[
+                        {
+                            "pagerank_flt": {
+                                "order": "desc",
+                                "unmapped_type": "float",
+                                "missing": "_last",
+                            }
+                        },
                         {"degree_int": {"order": "desc", "unmapped_type": "long"}},
                         {
                             "evidence_count_int": {
@@ -668,6 +789,7 @@ class GraphElasticsearchStore:
                         },
                     ],
                 ),
+                self.list_document_maps(index_name, knowledge_id),
             )
         except NotFoundError:
             return empty_graph
@@ -687,8 +809,14 @@ class GraphElasticsearchStore:
                     "entity_name": str(source.get("entity_name_kwd") or ""),
                     "entity_type": str(source.get("entity_type_kwd") or ""),
                     "description": str(source.get("description") or ""),
-                    "pagerank": 0.0,
-                    "source_id": [],
+                    "pagerank": float(source.get("pagerank_flt") or 0.0),
+                    "source_id": sorted(
+                        {
+                            str(value)
+                            for value in (source.get("source_id") or ())
+                            if str(value).strip()
+                        }
+                    ),
                     "aliases": list(source.get("aliases_kwd") or ()),
                     "evidence_count": int(source.get("evidence_count_int") or 0),
                     "document_count": int(source.get("document_count_int") or 0),
@@ -730,7 +858,13 @@ class GraphElasticsearchStore:
                     "description": str(source.get("description") or ""),
                     "keywords": keywords or ([predicate] if predicate else []),
                     "weight": int(source.get("evidence_count_int") or 1),
-                    "source_id": [],
+                    "source_id": sorted(
+                        {
+                            str(value)
+                            for value in (source.get("source_id") or ())
+                            if str(value).strip()
+                        }
+                    ),
                     "directed": bool(source.get("directed_int")),
                     "document_count": int(source.get("document_count_int") or 0),
                 }
@@ -738,7 +872,19 @@ class GraphElasticsearchStore:
             if len(edges) >= edge_limit:
                 break
 
-        return {**empty_graph, "nodes": nodes, "edges": edges}
+        graph_source_ids = sorted(
+            {
+                str(item["document_id"])
+                for item in document_maps
+                if item.get("document_id")
+            }
+        )
+        return {
+            **empty_graph,
+            "graph": {"source_id": graph_source_ids},
+            "nodes": nodes,
+            "edges": edges,
+        }
 
     async def search_entity_projections(
         self,

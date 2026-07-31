@@ -13,6 +13,8 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 import redis
+from celery import states
+from celery.exceptions import Ignore, Retry
 from elasticsearch import AsyncElasticsearch
 from fastapi.encoders import jsonable_encoder
 from redis.exceptions import RedisError
@@ -39,6 +41,14 @@ from app.core.rag.knowledge_graph.elasticsearch_store import GraphElasticsearchS
 from app.core.rag.knowledge_graph.extractor import LLMEntityRelationExtractor
 from app.core.rag.knowledge_graph.index_pipeline import KnowledgeGraphIndexPipeline
 from app.core.rag.knowledge_graph.lock import create_knowledge_graph_lock
+from app.core.rag.knowledge_graph.rebuild_task_guard import (
+    acquire_rebuild_execution,
+    has_rebuild_terminal,
+    mark_rebuild_terminal,
+    refresh_rebuild_job,
+    release_rebuild_execution,
+    release_rebuild_job,
+)
 from app.core.rag.knowledge_graph.runtime import (
     build_model_config,
     snapshot_graph_runtime,
@@ -541,6 +551,199 @@ def _run_observed_graph_task(
         reason,
         int((time.perf_counter() - started_at) * 1000),
     )
+    return result
+
+
+def _log_coalesced_rebuild_task(
+        *,
+        task_id: str,
+        knowledge_id: str,
+        retry: int,
+        reason: str,
+) -> None:
+    logger.info(
+        "[EvidenceGraph] task_coalesced"
+        " task=rebuild_knowledge task_id=%s kb_id=%s retry=%d reason=%s",
+        task_id,
+        knowledge_id,
+        retry,
+        reason,
+    )
+
+
+def _retry_rebuild_guard_failure(
+        task,
+        *,
+        task_id: str,
+        knowledge_id: str,
+        retry: int,
+        exc: Exception,
+):
+    countdown = _graph_task_retry_countdown(task)
+    logger.warning(
+        "[EvidenceGraph] task_guard_retry"
+        " task=rebuild_knowledge task_id=%s kb_id=%s"
+        " error_type=%s retry=%d countdown=%d",
+        task_id,
+        knowledge_id,
+        type(exc).__name__,
+        retry,
+        countdown,
+        exc_info=_redacted_graph_exc_info(exc),
+    )
+    raise task.retry(exc=exc, countdown=countdown)
+
+
+def _release_rebuild_attempt(
+        knowledge_id: str,
+        owner_token: str,
+) -> None:
+    try:
+        released = release_rebuild_execution(knowledge_id, owner_token)
+        if not released:
+            logger.warning(
+                "[EvidenceGraph] task_guard_release_skipped"
+                " task=rebuild_knowledge kb_id=%s guard=execution",
+                knowledge_id,
+            )
+    except Exception as exc:  # noqa: BLE001
+        logger.error(
+            "[EvidenceGraph] task_guard_release_failed"
+            " task=rebuild_knowledge kb_id=%s guard=execution"
+            " error_type=%s",
+            knowledge_id,
+            type(exc).__name__,
+        )
+
+
+def _finish_rebuild_task_guard(
+        *,
+        task_id: str,
+        knowledge_id: str,
+        owner_token: str,
+        terminal: str,
+) -> None:
+    try:
+        mark_rebuild_terminal(task_id, terminal)
+    finally:
+        _release_rebuild_attempt(knowledge_id, owner_token)
+    try:
+        released = release_rebuild_job(knowledge_id, task_id)
+        if not released:
+            logger.warning(
+                "[EvidenceGraph] task_guard_release_skipped"
+                " task=rebuild_knowledge task_id=%s kb_id=%s guard=job",
+                task_id,
+                knowledge_id,
+            )
+    except Exception as exc:  # noqa: BLE001
+        logger.error(
+            "[EvidenceGraph] task_guard_release_failed"
+            " task=rebuild_knowledge task_id=%s kb_id=%s guard=job"
+            " error_type=%s",
+            task_id,
+            knowledge_id,
+            type(exc).__name__,
+        )
+
+
+def _run_guarded_evidence_graph_rebuild(
+        task,
+        knowledge_id: str,
+) -> dict[str, Any]:
+    knowledge_id = _canonical_graph_uuid(knowledge_id, "knowledge id")
+    task_id = str(getattr(task.request, "id", None) or "unknown")
+    retry = int(getattr(task.request, "retries", 0) or 0)
+    owner_token = f"{task_id}:{uuid.uuid4()}"
+
+    try:
+        if has_rebuild_terminal(task_id):
+            _log_coalesced_rebuild_task(
+                task_id=task_id,
+                knowledge_id=knowledge_id,
+                retry=retry,
+                reason="terminal",
+            )
+            raise Ignore()
+        if not refresh_rebuild_job(knowledge_id, task_id):
+            _log_coalesced_rebuild_task(
+                task_id=task_id,
+                knowledge_id=knowledge_id,
+                retry=retry,
+                reason="foreign_job",
+            )
+            raise Ignore()
+        if not acquire_rebuild_execution(knowledge_id, owner_token):
+            _log_coalesced_rebuild_task(
+                task_id=task_id,
+                knowledge_id=knowledge_id,
+                retry=retry,
+                reason="active_attempt",
+            )
+            raise Ignore()
+    except Ignore:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        _retry_rebuild_guard_failure(
+            task,
+            task_id=task_id,
+            knowledge_id=knowledge_id,
+            retry=retry,
+            exc=exc,
+        )
+
+    try:
+        task.update_state(
+            state=states.STARTED,
+            meta={
+                "knowledge_id": knowledge_id,
+                "retry": retry,
+            },
+        )
+    except Exception as exc:  # noqa: BLE001
+        _release_rebuild_attempt(knowledge_id, owner_token)
+        _retry_rebuild_guard_failure(
+            task,
+            task_id=task_id,
+            knowledge_id=knowledge_id,
+            retry=retry,
+            exc=exc,
+        )
+
+    try:
+        result = _run_observed_graph_task(
+            task,
+            task_name="rebuild_knowledge",
+            knowledge_id=knowledge_id,
+            operation=lambda: _run_evidence_graph_rebuild(knowledge_id),
+        )
+    except Retry:
+        _release_rebuild_attempt(knowledge_id, owner_token)
+        raise
+    except Exception:
+        _finish_rebuild_task_guard(
+            task_id=task_id,
+            knowledge_id=knowledge_id,
+            owner_token=owner_token,
+            terminal="failure",
+        )
+        raise
+
+    try:
+        _finish_rebuild_task_guard(
+            task_id=task_id,
+            knowledge_id=knowledge_id,
+            owner_token=owner_token,
+            terminal="success",
+        )
+    except Exception as exc:  # noqa: BLE001
+        _retry_rebuild_guard_failure(
+            task,
+            task_id=task_id,
+            knowledge_id=knowledge_id,
+            retry=retry,
+            exc=exc,
+        )
     return result
 
 
@@ -1583,13 +1786,14 @@ def sync_evidence_graph_document(
     bind=True,
     name="app.core.rag.tasks.rebuild_evidence_graph_knowledge",
     max_retries=5,
+    acks_late=False,
+    reject_on_worker_lost=False,
+    track_started=False,
 )
 def rebuild_evidence_graph_knowledge(self, knowledge_id: str):
-    return _run_observed_graph_task(
+    return _run_guarded_evidence_graph_rebuild(
         self,
-        task_name="rebuild_knowledge",
-        knowledge_id=str(knowledge_id),
-        operation=lambda: _run_evidence_graph_rebuild(knowledge_id),
+        str(knowledge_id),
     )
 
 
