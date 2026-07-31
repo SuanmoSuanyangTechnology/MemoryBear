@@ -29,3 +29,4 @@ package-lock.json
 yalc.lock
 
 .npmrc
+public/brain-model/*

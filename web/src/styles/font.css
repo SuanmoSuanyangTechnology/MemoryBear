@@ -1,63 +1,44 @@
 @import "tailwindcss" prefix(rb);
 @plugin "@tailwindcss/typography";
 
+/* ============================================
+ * MiSans Font Definitions
+ * Optimized: Only includes used font weights
+ * Added font-display: swap to prevent FOIT
+ * ============================================ */
+
+/* Primary: Used for titles and important text (99 references) */
 @font-face {
   font-family: 'MiSans-Bold';
   src: url('@/assets/font/MiSans/MiSans-Bold.woff2') format('woff2');
   font-weight: 700;
   font-style: normal;
+  font-display: swap;
 }
+
+/* Used in ECharts charts */
 @font-face {
   font-family: 'MiSans-Demibold';
   src: url('@/assets/font/MiSans/MiSans-Demibold.woff2') format('woff2');
-  font-weight: 700;
+  font-weight: 600;
   font-style: normal;
+  font-display: swap;
 }
-@font-face {
-  font-family: 'MiSans-ExtraLight';
-  src: url('@/assets/font/MiSans/MiSans-ExtraLight.woff2') format('woff2');
-  font-weight: 200;
-  font-style: normal;
-}
-@font-face {
-  font-family: 'MiSans-Heavy';
-  src: url('@/assets/font/MiSans/MiSans-Heavy.woff2') format('woff2');
-  font-weight: 900;
-  font-style: normal;
-}
-@font-face {
-  font-family: 'MiSans-Light';
-  src: url('@/assets/font/MiSans/MiSans-Light.woff2') format('woff2');
-  font-weight: 300;
-  font-style: normal;
-}
-@font-face {
-  font-family: 'MiSans-Medium';
-  src: url('@/assets/font/MiSans/MiSans-Medium.woff2') format('woff2');
-  font-weight: 500;
-  font-style: normal;
-}
-@font-face {
-  font-family: 'MiSans-Normal';
-  src: url('@/assets/font/MiSans/MiSans-Normal.woff2') format('woff2');
-  font-weight: 500;
-  font-style: normal;
-}
-@font-face {
-  font-family: 'MiSans-Regular';
-  src: url('@/assets/font/MiSans/MiSans-Regular.woff2') format('woff2');
-  font-weight: 400;
-  font-style: normal;
-}
+
+/* Used in sider menu */
 @font-face {
   font-family: 'MiSans-Semibold';
   src: url('@/assets/font/MiSans/MiSans-Semibold.woff2') format('woff2');
   font-weight: 600;
   font-style: normal;
+  font-display: swap;
 }
+
+/* Used for statistics numbers */
 @font-face {
-  font-family: 'MiSans-Thin';
-  src: url('@/assets/font/MiSans/MiSans-Thin.woff2') format('woff2');
-  font-weight: 100;
+  font-family: 'MiSans-Heavy';
+  src: url('@/assets/font/MiSans/MiSans-Heavy.woff2') format('woff2');
+  font-weight: 900;
   font-style: normal;
+  font-display: swap;
 }
