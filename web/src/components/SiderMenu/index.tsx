@@ -317,7 +317,6 @@ const Menu: FC<{
       </div>
       {/* Main navigation menu */}
       <AntMenu
-        style={{ borderRight: 0 }}
         mode={mode}
         selectedKeys={selectedKeys}
         // openKeys={openKeys}
@@ -325,7 +324,7 @@ const Menu: FC<{
         items={menuItems}
         inlineCollapsed={collapsed}
         inlineIndent={10}
-        className="rb:overflow-y-auto rb:flex-1!"
+        className="rb:overflow-y-auto rb:flex-1! rb:border-r-0!"
       />
       {/* Return to space button for superusers */}
       {source === 'space' &&

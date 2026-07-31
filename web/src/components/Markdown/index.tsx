@@ -86,7 +86,7 @@ const buildComponents = (isNeedCopy = true) => ({
   span: ({ children, style, ...restProps }: any) => {
     // Apply special styling for HTML comment spans
     if (style?.color === '#999') {
-      return <span style={{ color: '#999', fontSize: '0.9em' }}>{children}</span>
+      return <span className="rb:text-[#999] rb:text-[0.9em]">{children}</span>
     }
     return <span style={style} {...restProps}>{children}</span>
   },
@@ -221,9 +221,8 @@ const RbMarkdown: FC<RbMarkdownProps> = ({
           value={editContent}
           onChange={handleTextareaChange}
           rows={10}
-          className="rb:font-mono rb:text-sm"
+          className="rb:font-mono rb:text-sm rb:resize-y"
           placeholder="Enter Markdown content..."
-          style={{ resize: 'vertical' }}
         />
       </div>
     )

@@ -75,7 +75,7 @@ export const applicationPart1 = {
       knowledgeEmpty: '目前没有知识库关联',
       memoryConfiguration: '记忆配置',
       memoryConfigurationDesc: '应用将自动绑定当前空间线上生效的记忆配置。',
-      systemDefaultDesc: '当前使用的是系统<b>默认配置</b>（尚未创建自定义配置）。如需自定义记忆策略，请前往 <a href="#/memory">记忆管理 › </a> 创建并设为生效。',
+      systemDefaultDesc: '当前使用的是系统<bold>默认配置</bold>（尚未创建自定义配置）。如需自定义记忆策略，请前往 <memoryLink>记忆管理 › </memoryLink> 创建并设为生效。',
       dialogueHistoricalMemory: '对话历史记忆',
       dialogueHistoricalMemoryDesc: '激活后，可以选择记忆管理中的记忆内容',
       toolConfiguration: '工具配置',

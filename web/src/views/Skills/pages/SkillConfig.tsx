@@ -193,7 +193,7 @@ const SkillConfig: FC = () => {
             {/* Prompt Configuration Section: AI instructions */}
             <Card title={t('skills.promptConfiguration')}
               extra={
-                <Button style={{ padding: '0 8px', height: '24px' }} onClick={handlePrompt}>
+                <Button className="rb:px-2! rb:py-0! rb:h-6!" onClick={handlePrompt}>
                   <div className="rb:size-5 rb:bg-cover rb:bg-[url('@/assets/images/application/aiPrompt.png')] rb:mr-1!" />
                   {t('skills.aiPrompt')}
                 </Button>

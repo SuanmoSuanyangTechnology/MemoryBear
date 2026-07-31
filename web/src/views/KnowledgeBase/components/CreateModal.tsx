@@ -727,7 +727,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
   // Knowledge graph configuration form content
   const renderKnowledgeGraphConfig = () => (
     <>
-      <Flex align="center" className={`rb:w-full rb:p-4! rb:border-1 rb:rounded-lg rb:mb-4! ${
+      <Flex align="center" className={`rb:w-full rb:p-4! rb:border rb:rounded-lg rb:mb-4! ${
         enableKnowledgeGraph 
           ? 'rb:border-[#155EEF] rb:bg-[rgba(21,94,239,0.06)]' 
           : 'rb:border-[#EBEBEB]'
@@ -760,7 +760,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
             <Form.Item
               name={['parser_config', 'graphrag', 'scene_name']}
               label={t('knowledgeBase.sceneName')}
-              className='rb:w-full rb:min-w-[240px]'
+              className='rb:w-full rb:min-w-60'
               rules={[{ required: true, message: t('common.pleaseEnter') + t('knowledgeBase.sceneName') }]}
             >
               <Input  placeholder={t('knowledgeBase.sceneNamePlaceholder')} />
@@ -791,7 +791,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
           </Form.Item>
 
           {/* Entity normalization */}
-          <Flex gap={8} align="center" className={`rb:w-full rb:p-4! rb:border-1 rb:rounded-lg rb:mb-4! ${
+          <Flex gap={8} align="center" className={`rb:w-full rb:p-4! rb:border rb:rounded-lg rb:mb-4! ${
             entityNormalization 
               ? 'rb:border-[#155EEF] rb:bg-[rgba(21,94,239,0.06)]' 
               : 'rb:border-[#EBEBEB]'
@@ -827,7 +827,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
           </Form.Item>
 
           {/* Community report generation */}
-          <Flex gap={8} align="center" className={`rb:w-full rb:p-4! rb:border-1 rb:rounded-lg rb:mb-4! ${
+          <Flex gap={8} align="center" className={`rb:w-full rb:p-4! rb:border rb:rounded-lg rb:mb-4! ${
             communityReportGeneration 
               ? 'rb:border-[#155EEF] rb:bg-[rgba(21,94,239,0.06)]' 
               : 'rb:border-[#EBEBEB]'

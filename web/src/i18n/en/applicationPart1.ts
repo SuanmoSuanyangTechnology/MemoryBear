@@ -76,7 +76,7 @@ export const applicationPart1 = {
       knowledgeEmpty: 'No knowledge base associated.',
       memoryConfiguration: 'Memory Configuration',
       memoryConfigurationDesc: 'The application will automatically bind the memory configuration of the current space.',
-      systemDefaultDesc: 'Using <b>System Default</b> memory configuration. Please go to <a href="#/memory">Memory Management › </a> to create a custom configuration.',
+      systemDefaultDesc: 'Using <bold>System Default</bold> memory configuration. Please go to <memoryLink>Memory Management › </memoryLink> to create a custom configuration.',
       dialogueHistoricalMemory: 'Conversation History Memory',
       dialogueHistoricalMemoryDesc: 'Enable this to select memory content from memory management.',
       toolConfiguration: 'Tool Configuration',

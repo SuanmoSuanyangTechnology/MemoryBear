@@ -66,7 +66,7 @@ interface FolderTreeProps {
 
 const renderIcon = (icon?: string) => {
   if (!icon) return undefined;
-  return <img src={icon} alt="icon" style={{ width: 16, height: 16 }} />;
+  return <img src={icon} alt="icon" className="rb:size-4" />;
 };
 
 const transformTreeData = (nodes: TreeNodeData[]): DataNode[] =>

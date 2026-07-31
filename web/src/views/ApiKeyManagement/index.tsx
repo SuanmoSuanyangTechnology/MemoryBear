@@ -154,6 +154,9 @@ const ApiKeyManagement: React.FC = () => {
                     }
                   </span>
                 }))}
+                classNames={{
+                  label: 'rb:w-20!'
+                }}
               />
 
               <Flex align="center" justify="space-between" className="rb:h-8! rb:mt-4! rb:py-1! rb:pl-2.5! rb:pr-1! rb:bg-[#F6F6F6] rb:rounded-md rb:leading-5">

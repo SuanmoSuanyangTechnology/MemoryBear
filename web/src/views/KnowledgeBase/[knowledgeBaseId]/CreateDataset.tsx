@@ -296,12 +296,7 @@ const CreateDataset = () => {
         if ( record.run === 0 && typeof value === 'number' && value < 0) {
           return <StatusTag status="error" text={t('knowledgeBase.failed')}></StatusTag>
         } else if (value >= 1) {
-          return (
-            <span className="rb:text-xs rb:border rb:border-[#DFE4ED] rb:bg-[#FBFDFF] rb:rounded rb:items-center rb:text-[#212332] rb:py-1 rb:px-2">
-              <span className="rb:inline-block rb:w-[5px] rb:h-[5px] rb:mr-2 rb:rounded-full" style={{ backgroundColor: '#369F21' }}></span>
-              <span>{t('knowledgeBase.completed')}</span>
-            </span>
-          );
+          return <StatusTag status="success" text={t('knowledgeBase.completed')}></StatusTag>
         } else if (value >= 0 && value < 1) {
           // Processing, show progress bar
           return (
@@ -313,17 +308,12 @@ const CreateDataset = () => {
                 '0%': '#108ee9',
                 '100%': '#87d068',
               }}
-              style={{ width: '120px' }}
+              className="rb:w-30!"
             />
           );
         } else {
           // value = 0 or other cases, show pending
-          return (
-            <span className="rb:text-xs rb:border rb:border-[#DFE4ED] rb:bg-[#FBFDFF] rb:rounded rb:items-center rb:text-[#212332] rb:py-1 rb:px-2">
-              <span className="rb:inline-block rb:w-[5px] rb:h-[5px] rb:mr-2 rb:rounded-full" style={{ backgroundColor: '#FF8A4C' }}></span>
-              <span>{t('knowledgeBase.pending')}</span>
-            </span>
-          );
+          return <StatusTag status="warning" text={t('knowledgeBase.pending')}></StatusTag>
         }
       }
     },
@@ -769,7 +759,7 @@ const CreateDataset = () => {
         {current === 1 && (
           <Flex vertical  className='rb:mt-10! rb:px-40!'>
               {rechunkFileIds.length > 0 && (
-                <Flex align="center" wrap gap={8} className='rb:bg-[#F0F3F8] rb:border rb:border-[#DFE4ED] rb:rounded-[8px] rb:px-3! rb:py-2! rb:mb-4! rb:text-xs rb:text-gray-600'>
+                <Flex align="center" wrap gap={8} className='rb:bg-[#F0F3F8] rb:border rb:border-[#DFE4ED] rb:rounded-lg rb:px-3! rb:py-2! rb:mb-4! rb:text-xs rb:text-gray-600'>
                     <span className='rb:text-gray-700 rb:font-medium'>{t('knowledgeBase.rechunking')}:</span>
                     {rechunkFileIds.map((id) => (
                       <span key={id} className='rb:px-2 rb:py-0.5 rb:bg-white rb:border rb:border-[#DFE4ED] rb:rounded'>{id}</span>
@@ -792,7 +782,7 @@ const CreateDataset = () => {
                   onChange={(e) => setPdfEnhancementEnabled(e.target.checked)}
                   className='rb:mr-3'
                 >
-                  <span className='rb:text-base rb:font-medium rb:text-gray-800 rb:pl-[22px]'>
+                  <span className='rb:text-base rb:font-medium rb:text-gray-800 rb:pl-5.5'>
                     {t('knowledgeBase.pdfEnhancementAnalysis')}
                   </span>
                 </Checkbox>
@@ -801,7 +791,7 @@ const CreateDataset = () => {
                     <Select
                       value={pdfEnhancementMethod}
                       onChange={(value) => setPdfEnhancementMethod(value)}
-                      className='rb:w-[300px]'
+                      className='rb:w-75!'
                       options={[
                         { value: 'deepdoc', label: 'DeepDoc' },
                         { value: 'mineru', label: 'MinerU' },

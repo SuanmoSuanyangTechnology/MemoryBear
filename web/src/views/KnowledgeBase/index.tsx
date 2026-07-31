@@ -162,7 +162,7 @@ const KnowledgeBaseManagement: FC = () => {
   const createItems: MenuProps['items'] = useMemo(() => {
     return knowledgeBaseTypes.map((type, index) => ({
       key: String(index + 1),
-      icon: <img src={getTypeIcon(type)} alt={type} style={{ width: 16, height: 16 }} />,
+      icon: <img src={getTypeIcon(type)} alt={type} className="rb:size-4" />,
       label: t(getTypeLabelKey(type.toLocaleLowerCase())),
       onClick: () => {
         handleCreate(type);
@@ -539,14 +539,14 @@ const KnowledgeBaseManagement: FC = () => {
         <SearchInput
           placeholder={t('knowledgeBase.searchPlaceholder')}
           onSearch={handleSearch}
-          style={{ width: '32.666%' }}
+          className="rb:w-[32.666%]!"
         />
         
         <Dropdown menu={{ items: createItems }} trigger={['click']}>
           <Button type="primary">+ {t('knowledgeBase.createKnowledgeBase')}</Button>
         </Dropdown>
       </Flex>
-      <div id="scrollableDiv" style={{ height: 'calc(100vh - 120px)', overflowY: 'auto', overflowX: 'hidden' }}>
+      <div id="scrollableDiv" className="rb:h-[calc(100vh-120px)] rb:overflow-y-auto rb:overflow-x-hidden">
       <InfiniteScroll
         dataLength={data.length}
         next={loadMore}

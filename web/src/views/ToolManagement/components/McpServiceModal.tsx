@@ -351,7 +351,7 @@ const McpServiceModal = forwardRef<McpServiceModalRef, McpServiceModalProps>(({
               <div className="rb:font-medium rb:leading-5 rb:mb-1">{t('tool.requestHeader')}</div>
               <div className="rb:text-[12px] rb:text-[#5B6167] rb:leading-4">{t('tool.requestHeaderDesc')}</div>
             </div>
-            <Button style={{padding: '0 8px', height: '24px'}} onClick={() => handleEditRequestHeader()}>+{t('tool.addRequestHeader')}</Button>
+            <Button className="rb:py-0! rb:px-2! rb:h-6!" onClick={() => handleEditRequestHeader()}>+{t('tool.addRequestHeader')}</Button>
           </Flex>
 
           {requestHeaderList.length === 0

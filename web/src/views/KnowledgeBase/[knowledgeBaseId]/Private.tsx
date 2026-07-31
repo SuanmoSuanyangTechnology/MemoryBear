@@ -4,16 +4,14 @@ import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Switch, Button, Dropdown, Space, Radio, Tooltip, App, Flex, Divider, Spin } from 'antd';
 import type { MenuProps } from 'antd';
+import clsx from 'clsx';
+
 import SearchInput from '@/components/SearchInput'
 import Table, { type TableRef } from '@/components/Table'
 import type { ColumnsType } from 'antd/es/table';
 import type { AnyObject } from 'antd/es/_util/type';
 import { MoreOutlined } from '@ant-design/icons';
-import folderIcon from '@/assets/images/knowledgeBase/folder.png';
-import textIcon from '@/assets/images/knowledgeBase/text.png';
-
-// import blankIcon from '@/assets/images/knowledgeBase/blankDocument.png';
-// import imageIcon from '@/assets/images/knowledgeBase/image.png'
+import StatusTag, { type StatusTagProps } from '@/components/StatusTag';
 import { getKnowledgeBaseDetail, deleteDocument, downloadFile, updateKnowledgeBase, createSync, batchDownloadFilesByKb, exportQaByKb } from '@/api/knowledgeBase';
 import { 
   type CreateModalRef, 
@@ -326,7 +324,7 @@ const Private: FC = () => {
   const createItems: MenuProps['items'] = [
     {
       key: '1',
-      icon: <img src={folderIcon} alt="dataset" style={{ width: 16, height: 16 }} />,
+      icon: <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/knowledgeBase/folder.png')]" />,
       label: t('knowledgeBase.folder'),
       onClick: () => {
         let f: FolderFormData | null = null;
@@ -341,7 +339,7 @@ const Private: FC = () => {
     },
     {
       key: '2',
-      icon: <img src={textIcon} alt="text" style={{ width: 16, height: 16 }} />,
+      icon: <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/knowledgeBase/text.png')]" />,
       label: (<span>{t('knowledgeBase.createA')} {t('knowledgeBase.dataset')}</span>),
       onClick: () => {
         datasetModalRef?.current?.handleOpen(knowledgeBase?.id,folder?.parent_id ?? knowledgeBase?.id ?? '');
@@ -349,7 +347,7 @@ const Private: FC = () => {
     },
     // {
     //   key: '8',
-    //   icon: <img src={blankIcon} alt="Custome Text" style={{ width: 16, height: 16 }} />,
+    //   icon: <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/knowledgeBase/blankDocument.png')]" />,
     //   label: t('knowledgeBase.mediaDataSet'),
     //   onClick: () => {
     //     createContentModalRef?.current?.handleOpen(knowledgeBase?.id ?? '', folder?.parent_id ?? knowledgeBase?.id ?? '');
@@ -357,7 +355,7 @@ const Private: FC = () => {
     // },
     // {
     //   key: '3',
-    //   icon: <img src={imageIcon} alt="image" style={{ width: 16, height: 16 }} />,
+    //   icon: <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/knowledgeBase/image.png')]" />,
     //   label: t('knowledgeBase.imageDataSet'),
     //   onClick: () => {
     //     createImageDataset?.current?.handleOpen(knowledgeBaseId || '', parentId || '')
@@ -366,7 +364,7 @@ const Private: FC = () => {
         // Not implemented yet
     // {
     //   key: '4',
-    //   icon: <img src={blankIcon} alt="blank" style={{ width: 16, height: 16 }} />,
+    //   icon: <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/knowledgeBase/blankDocument.png')]" />,
     //   label: t('knowledgeBase.blankDataset'),
     //   onClick: () => {
     //     handleCreate('folder'); // Pass type: 'folder'
@@ -378,7 +376,7 @@ const Private: FC = () => {
     // },
     // {
     //   key: '6',
-    //   icon: <img src={templateIcon} alt="import" style={{ width: 16, height: 16 }} />,
+    //   icon: <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/knowledgeBase/template.png')]" />,
     //   label: t('knowledgeBase.importTemplate'),
     //   onClick: () => {
     //     handleCreate('folder'); // Pass type: 'folder'
@@ -386,7 +384,7 @@ const Private: FC = () => {
     // },
     // {
     //   key: '7',
-    //   icon: <img src={backupIcon} alt="import" style={{ width: 16, height: 16 }} />,
+    //   icon: <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/knowledgeBase/backup.png')]" />,
     //   label: t('knowledgeBase.importBackup'),
     //   onClick: () => {
     //     handleCreate('folder'); // Pass type: 'folder'
@@ -587,22 +585,25 @@ const Private: FC = () => {
       width: 160,
       render: (value: string | number, record: KnowledgeBaseDocumentData) => {
         return (
-          <span className="rb:text-xs rb:border rb:border-[#DFE4ED] rb:bg-[#FBFDFF] rb:rounded rb:items-center rb:text-[#212332] rb:py-1 rb:px-2">
-            <span
-              className="rb:inline-block rb:w-1.25 rb:h-1.25 rb:mr-2 rb:rounded-full"
-              style={{ backgroundColor: value === 1 ? '#369F21' : value === 0 ? '#FF0000' : '#FF8A4C' }}
-            ></span>
-            <span>
-              {record.run === 0 && typeof value === 'number' && value < 0
-                ? t('knowledgeBase.failed')
-                :value === 1
-                ? t('knowledgeBase.completed')
-                : value === 0
-                ? t('knowledgeBase.pending')
-                : t('knowledgeBase.processing')
-              }</span>
-          </span>
-        );
+          <StatusTag
+            status={record.run === 0 && typeof value === 'number' && value < 0
+              ? 'error'
+              :value === 1
+              ? 'success'
+              : value === 0
+              ? 'warning'
+              : 'default'
+            }
+            text={record.run === 0 && typeof value === 'number' && value < 0
+              ? t('knowledgeBase.failed')
+              :value === 1
+              ? t('knowledgeBase.completed')
+              : value === 0
+              ? t('knowledgeBase.pending')
+              : t('knowledgeBase.processing')
+            }
+          />
+        )
       }
     },{
       title: t('knowledgeBase.processMsg'),
@@ -616,20 +617,8 @@ const Private: FC = () => {
         const formattedText = value.replace(/\\n/g, '\n');
         
         return (
-          <Tooltip title={<pre style={{ margin: 0, whiteSpace: 'pre-wrap', maxHeight: '200px', overflowY: 'auto' }}>{formattedText}</pre>} placement="topLeft">
-            <div 
-              style={{
-                maxWidth: '320px',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                display: '-webkit-box',
-                WebkitLineClamp: 2,
-                WebkitBoxOrient: 'vertical',
-                lineHeight: '1.5',
-                whiteSpace: 'pre-wrap',
-                wordBreak: 'break-word'
-              }}
-            >
+          <Tooltip title={<pre className="rb:m-0 rb:whitespace-pre-wrap rb:max-h-50 rb:overflow-y-auto">{formattedText}</pre>} placement="topLeft">
+            <div className="rb:max-w-80 rb:line-clamp-2 rb:leading-normal rb:whitespace-pre-wrap rb:wrap-break-word">
               {formattedText}
             </div>
           </Tooltip>

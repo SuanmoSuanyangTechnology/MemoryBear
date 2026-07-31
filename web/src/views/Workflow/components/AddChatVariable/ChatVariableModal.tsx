@@ -358,7 +358,7 @@ const ChatVariableModal = forwardRef<ChatVariableModalRef, ChatVariableModalProp
             }
           >
             {type === 'number'
-              ? <InputNumber placeholder={t('common.enter')} style={{ width: '100%' }} />
+              ? <InputNumber placeholder={t('common.enter')} className="rb:w-full!" />
               : type === 'boolean'
               ? <RadioGroupBtn size="large" options={[{ value: true, label: 'True' }, { value: false, label: 'False' }]} />
               : type === 'object' || type === 'array[object]'

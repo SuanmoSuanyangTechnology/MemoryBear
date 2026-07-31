@@ -100,14 +100,10 @@ const Code: FC<ICodeProps> = (props) => {
         {isNeedCopy &&
           <CopyBtn
             value={children}
-            style={{
-              position: 'absolute',
-              top: 20,
-              right: 20,
-            }}
+            className="rb:absolute! rb:top-5 rb:right-5"
           />
         }
-    </div>
+      </div>
     )
   }
   // Render inline code

@@ -73,7 +73,7 @@ const ErrorHandle: FC<{ selectedNode?: any; graphRef?: any; }> = ({
             name={['error_handle', 'output']}
             label={<>
                 <span className="rb:text-[#5B6167] rb:font-medium">output</span>
-                <span className="rb:text-[#5B6167] rb:ml-1" style={{fontWeight: 400}}>string</span>
+                <span className="rb:text-[#5B6167] rb:ml-1 rb:font-normal">string</span>
             </>}
             className="rb:my-2!"
         >

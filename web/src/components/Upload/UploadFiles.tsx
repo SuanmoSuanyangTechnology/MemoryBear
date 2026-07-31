@@ -6,7 +6,7 @@ import type { UploadProps, UploadFile } from 'antd';
 // import { request } from '@/utils/request';
 import type { UploadProps as RcUploadProps } from 'antd/es/upload/interface';
 // import CloudUploadOutlined from '@/assets/images/CloudUploadOutlined.png'
-import { useTranslation } from 'react-i18next';
+import { Trans, useTranslation } from 'react-i18next';
 import { cookieUtils } from '@/utils/request'
 // import { fileUpload } from '@/api/fileStorage'
 
@@ -267,23 +267,38 @@ const UploadFiles = forwardRef<UploadFilesRef, UploadFilesProps>(({
       {...uploadProps}
     >
       <div>
-      <Button
-        type="default"
-        icon={<UploadOutlined />}
-        className="rb:w-full"
-        disabled={fileList.length >= maxCount}
-      >
-        上传文件
-      </Button>
-      {(fileSize || fileType || maxCount > 1) && (
-        <div>
-          请上传
-          {fileSize && <>大小不超过 <b style={{color: '#f56c6c'}}>{ fileSize }MB</b></>}
-          {fileType && <>格式为 <b style={{color: '#f56c6c'}}>{ fileType.join('、') }</b></>}
-          的文件
-          {multiple && maxCount > 1 && <>，最多上传 <b style={{color: '#f56c6c'}}>{ maxCount } 个</b> 文件</>}
-        </div>
-      )}
+        <Button
+          type="default"
+          icon={<UploadOutlined />}
+          className="rb:w-full"
+          disabled={fileList.length >= maxCount}
+        >
+          {t('common.uploadFile')}
+        </Button>
+        {(fileSize || fileType || maxCount > 1) && (
+          <div>
+            <Trans
+              i18nKey={fileSize
+                ? (fileType ? 'common.uploadFileRequirementSizeAndType' : 'common.uploadFileRequirementSize')
+                : (fileType ? 'common.uploadFileRequirementType' : 'common.uploadFileRequirement')}
+              values={{
+                fileSize,
+                fileTypes: fileType?.join(t('common.listSeparator')),
+              }}
+              components={{
+                size: <b style={{ color: '#f56c6c' }} />,
+                types: <b style={{ color: '#f56c6c' }} />,
+              }}
+            />
+            {multiple && maxCount > 1 && (
+              <Trans
+                i18nKey="common.uploadFileMaxCount"
+                values={{ maxCount }}
+                components={{ count: <b style={{ color: '#f56c6c' }} /> }}
+              />
+            )}
+          </div>
+        )}
       </div>
     </Upload>
   );

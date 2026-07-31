@@ -133,7 +133,7 @@ const EmotionTags: FC = () => {
     >
       {data?.keywords && data?.keywords.length > 0
         ? <div>
-          <div ref={chartRef} className="rb:mt-4 rb:px-3" style={{ height: '212px', width: '100%' }} />
+          <div ref={chartRef} className="rb:mt-4 rb:px-3 rb:h-53 rb:w-full" />
           
           <div className="rb:px-4 rb:pb-2.5">
             <Divider className="rb:my-2.5!" />
