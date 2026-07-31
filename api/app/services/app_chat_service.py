@@ -1514,10 +1514,9 @@ class AppChatService:
                         },
                     ))
             else:
-                async with get_async_db_context() as _exec_db:
-                    _app_obj = await _exec_db.get(App, config.app_id)
-                    _release_id = _app_obj.current_release_id if _app_obj else None
                 async with get_async_db_context() as db:
+                    _app_obj = await db.get(App, config.app_id)
+                    _release_id = _app_obj.current_release_id if _app_obj else None
                     new_msg = Message(
                         id=message_id,
                         conversation_id=conversation_id,
