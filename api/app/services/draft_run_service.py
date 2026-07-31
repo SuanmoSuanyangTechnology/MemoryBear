@@ -153,11 +153,13 @@ async def _retrieve_chunks_via_standard(query: str, kb_config: Dict[str, Any]) -
     用第一个 KB 的参数作为全局默认；缺失值回落到 schema 默认值。
     """
     knowledge_bases = (kb_config or {}).get("knowledge_bases", []) or []
-    kb_ids = [kb.get("kb_id") for kb in knowledge_bases if kb.get("kb_id")]
+    # 单一过滤源:有 kb_id 的 KB 才会进入请求,request_kbs 与 kb_ids 强一致
+    valid_kbs = [kb for kb in knowledge_bases if kb.get("kb_id")]
+    kb_ids = [kb["kb_id"] for kb in valid_kbs]
     if not kb_ids:
         return []
 
-    first_kb = knowledge_bases[0] or {}
+    first_kb = valid_kbs[0] or {}
 
     def _as_float(value: Any, default: float) -> float:
         try:
@@ -189,16 +191,30 @@ async def _retrieve_chunks_via_standard(query: str, kb_config: Dict[str, Any]) -
         vector_similarity_weight = None
     else:
         vector_similarity_weight = _as_float(first_kb.get("vector_similarity_weight"), 0.5)
-    
+
+    # 混合检索下，按第一个 KB 的开关设置请求级图谱检索兜底
+    # （每个 KB 显式配置的 enable_graph_retrieval 仍会在检索层按 KB 覆盖生效）
+    enable_graph_retrieval = (
+        1
+        if (
+            retrieve_type == RetrieveType.HYBRID
+            and _as_int(first_kb.get("enable_graph_retrieval"), 0) == 1
+        )
+        else 0
+    )
+
+    # 透传与 kb_ids 同源的 KB 配置,避免重复过滤导致漂移
     request = KnowledgeRetrievalRequest(
         query=query,
         caller=KnowledgeRetrievalCaller.AGENT,
         kb_ids=[uuid.UUID(kid) for kid in kb_ids],
+        knowledge_bases=valid_kbs,
         top_k=_as_int(first_kb.get("top_k"), 3),
         similarity_threshold=_as_float(first_kb.get("similarity_threshold"), 0.7),
         vector_similarity_weight=vector_similarity_weight,
         retrieve_type=retrieve_type,
         rerank_id=rerank_id,
+        enable_graph_retrieval=enable_graph_retrieval,
     )
 
     result = await KnowledgeRetrievalService.retrieve_async(request=request, principal=None)
