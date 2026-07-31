@@ -24,6 +24,7 @@ import RbStatistic from '@/components/RbStatistic';
 import MoreDropdown from '@/components/MoreDropdown'
 import PageScrollList, { type PageScrollListRef } from '@/components/PageScrollList'
 import DeleteConfirmModal, { type DeleteConfirmModalRef } from './components/DeleteConfirmModal';
+import MemorySubjectDetailModal, { type MemorySubjectDetailModalRef } from './components/MemorySubjectDetailModal';
 import Tag from '@/components/Tag'
 import { formatQuotaStatus, StatusProgress } from './components/StatusProgress'
 import OverflowTags from '@/components/OverflowTags'
@@ -40,6 +41,7 @@ export default function UserMemory() {
 
   const scrollListRef = useRef<PageScrollListRef>(null)
   const deleteConfirmModalRef = useRef<DeleteConfirmModalRef>(null)
+  const memorySubjectDetailModalRef = useRef<MemorySubjectDetailModalRef>(null)
 
   /** Navigate to user memory detail */
   const handleViewDetail = (id: string | number) => {
@@ -133,6 +135,15 @@ export default function UserMemory() {
               extra={<MoreDropdown
                 items={[
                   {
+                    key: 'detail',
+                    icon: <div className="rb:size-4 rb:bg-cover rb:cursor-pointer rb:bg-[url('@/assets/images/common/eye.svg')]" />,
+                    label: t('userMemory.memorySubject'),
+                    onClick: (info) => {
+                      info.domEvent?.stopPropagation();
+                      memorySubjectDetailModalRef.current?.handleOpen(item);
+                    },
+                  },
+                  {
                     key: 'delete',
                     danger: true,
                     icon: <div className="rb:size-4 rb:bg-cover rb:cursor-pointer rb:bg-[url('@/assets/images/common/delete_red_big.svg')]" />,
@@ -202,6 +213,8 @@ export default function UserMemory() {
           )
         }}
       />
+
+      <MemorySubjectDetailModal ref={memorySubjectDetailModalRef} />
 
       {/* 删除确认弹窗 */}
       <DeleteConfirmModal

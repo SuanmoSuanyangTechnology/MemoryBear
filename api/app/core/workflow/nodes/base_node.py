@@ -314,7 +314,7 @@ class BaseNode(ABC):
             return None
         cache_input = self._build_cache_input_snapshot(state, variable_pool)
         cache_key = manager.build_cache_key(cache_input)
-        cache_entry = await manager.get_active_cache_async(cache_key)
+        cache_entry = await manager.get_active_cache(cache_key)
         if not cache_entry:
             return None
         await self._store_runtime_variables((cache_entry.get("result_data") or {}).get("output"), variable_pool)
@@ -348,7 +348,7 @@ class BaseNode(ABC):
         cache_payload.pop("cache_status", None)
         cache_payload.pop("cache_hit_count", None)
         cache_payload.pop("cache_origin_elapsed_time", None)
-        await manager.save_cache_async(
+        await manager.save_cache(
             cache_key=cache_key,
             input_data=cache_input,
             result_data=cache_payload,

@@ -15,6 +15,7 @@ export interface Data {
     id: string;
     other_name: string;
     label: MemoryType;
+    other_id: string;
   },
   memory_num: {
     total: number;

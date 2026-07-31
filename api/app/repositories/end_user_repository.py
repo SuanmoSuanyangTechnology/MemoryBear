@@ -787,6 +787,43 @@ class EndUserRepository:
             "memory_insight_updated_at": row["memory_insight_updated_at"],
         }
 
+    def get_scoped_memory_insight_source(
+            self,
+            workspace_id: uuid.UUID,
+            end_user_id: uuid.UUID,
+    ) -> MemoryInsightSourceRow | None:
+        """同步读取 Neo4j Workspace 下的洞察源数据和并发版本。"""
+        result = self.db.execute(
+            select(
+                EndUserInfo.id.label("metadata_id"),
+                EndUserInfo.meta_data.label("meta_data"),
+                EndUserInfo.updated_at.label("metadata_updated_at"),
+                EndUser.write_time.label("write_time"),
+                EndUser.memory_insight_updated_at.label("memory_insight_updated_at"),
+            )
+            .select_from(EndUser)
+            .join(Workspace, Workspace.id == EndUser.workspace_id)
+            .outerjoin(EndUserInfo, EndUserInfo.end_user_id == EndUser.id)
+            .where(
+                EndUser.id == end_user_id,
+                EndUser.workspace_id == workspace_id,
+                EndUser.is_active.is_(True),
+                Workspace.is_active.is_(True),
+                Workspace.storage_type == "neo4j",
+            )
+            .limit(1)
+        )
+        row = result.mappings().one_or_none()
+        if row is None:
+            return None
+        return {
+            "meta_data": row["meta_data"],
+            "metadata_row_exists": row["metadata_id"] is not None,
+            "metadata_updated_at": row["metadata_updated_at"],
+            "write_time": row["write_time"],
+            "memory_insight_updated_at": row["memory_insight_updated_at"],
+        }
+
     def update_grounded_memory_insight_if_source_unchanged(
             self,
             workspace_id: uuid.UUID,

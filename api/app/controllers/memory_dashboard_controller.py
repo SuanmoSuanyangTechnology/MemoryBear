@@ -221,6 +221,7 @@ async def get_workspace_end_users(
             "end_user_id": user_id,
             "end_user": {
                 "id": user_id,
+                "other_id": end_user.other_id,
                 "other_name": end_user.other_name,
                 "label": "long" if end_user.other_name else "short",
             },

@@ -113,7 +113,12 @@ class FastWritePipeline:
                 async with bear.step(2, 3, "并行处理", "Embedding + 情绪") as s:
                     embedding, emotion_result = await asyncio.gather(
                         self._embed(cleaned),
-                        self._extract_emotion(cleaned),
+                        self._extract_emotion(
+                            cleaned,
+                            message_id=str(
+                                (target_message or {}).get("original_message_id") or ""
+                            ),
+                        ),
                     )
                     s.metadata(
                         has_embedding=embedding is not None,
@@ -233,16 +238,32 @@ class FastWritePipeline:
             )
             return None
 
-    async def _extract_emotion(self, text: str):
-        """Step 2 并行分支 — 调用已部署 BERT /v1/rerank 获取 top 情绪。
+    async def _extract_emotion(self, text: str, message_id: str = ""):
+        """Step 2 并行分支 — 复用回复链路缓存，未命中才调 BERT /v1/rerank。
 
+        - 先按 message_id（= memory_messages.original_message_id = 回复链路的
+          user_message_id）读情绪缓存，**读后即删**（GETDEL）：快写是唯一消费者，
+          命中即复用 emotion + score 并跳过 BERT。
         - text 为空、或未配置（URL/API_KEY/MODEL 任一缺失）→ 直接返回 None，不发请求、不空等超时。
         - 已配置时才调用；硬超时 EMOTION_TIMEOUT_SEC，超时/异常一律降级为 None，不重试。
+        - 未命中时自己算出的结果**不回写缓存**（唯一消费者，回写无意义）。
         - 关键约束：服务故障绝不伪造 neutral；真实中性(emotion='neutral')
           与服务失败(emotion=None)必须可区分。
         """
         if not text:
             return None
+        # 先读回复链路写入的缓存（读后即删）：命中则跳过 BERT
+        if message_id:
+            from app.core.memory.emotion.emotion_cache import take_cached_emotion
+
+            cached = await take_cached_emotion(message_id)
+            if cached is not None:
+                logger.info(
+                    "[FastWrite] emotion cache hit, skip BERT: mid=%s, end_user_id=%s",
+                    message_id,
+                    self.end_user_id,
+                )
+                return cached
         # 未配置（URL / API_KEY / MODEL 任一缺失）直接跳过，不发请求、不空等超时
         from app.core.config import settings
         if (

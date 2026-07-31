@@ -1,15 +1,6 @@
 """Fast Write BERT 情绪 HTTP client。
 
 调用已部署的 BERT 情绪服务（`/v1/rerank`），返回 top 情绪及分数。
-
-并发模型说明：
-- 快写 Worker 为 ``--pool=threads --concurrency=32``，每个线程持有自己独立的
-  event loop（``set_asyncio_event_loop`` 复用、``_shutdown_loop_gracefully`` 不关）。
-- ``httpx.AsyncClient`` 的连接池绑定在创建它的那个 loop 上，因此**不能**用全进程单例
-  （单例只属于一个 loop，被其它线程的 loop 使用会跨 loop 出错）。
-- 这里用 ``threading.local()`` 做「每线程一个 client」的线程级单例：同线程后续所有
-  快写复用它（keep-alive 省握手），loop 万一被换掉则重建。
-
 失败语义：任何异常（网络/超时/HTTP 4xx-5xx/JSON 结构/枚举/值域）都向上抛出，由调用方
 ``FastWritePipeline._extract_emotion`` 统一降级为 None——服务故障绝不伪造 neutral。
 """

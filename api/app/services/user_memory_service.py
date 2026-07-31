@@ -19,6 +19,7 @@ from app.core.memory.analytics.memory_insight import (
     MemoryInsightWorkspaceValidation,
     parse_stored_memory_insight_findings,
     refresh_memory_insight,
+    refresh_memory_insight_for_worker,
     validate_neo4j_memory_insight_workspace,
 )
 from app.core.memory.analytics.user_card_tags import normalize_stored_user_card_tags
@@ -903,6 +904,38 @@ class UserMemoryService:
                 "growth_trajectory": None,
                 "error": str(e)
             }
+
+    async def generate_and_cache_insight_for_worker(
+        self,
+        end_user_id: str,
+        workspace_id: uuid.UUID,
+        language: str = "zh",
+    ) -> Dict[str, Any]:
+        """Celery 专用入口：PostgreSQL 仅使用同步短 Session。"""
+        try:
+            return await refresh_memory_insight_for_worker(
+                end_user_id=end_user_id,
+                workspace_id=workspace_id,
+                language=language,
+            )
+        except Exception as e:
+            logger.error(
+                "Celery 生成并缓存记忆洞察失败: end_user_id=%s workspace_id=%s error=%s",
+                end_user_id,
+                workspace_id,
+                e,
+                exc_info=True,
+            )
+            return {
+                "success": False,
+                "status": "generation_failed",
+                "memory_insight": None,
+                "behavior_pattern": None,
+                "key_findings": None,
+                "actionable_findings": [],
+                "growth_trajectory": None,
+                "error": f"Neo4j或LLM服务不可用: {e}",
+            }
     
     async def generate_and_cache_summary(
         self, 
@@ -1048,6 +1081,105 @@ class UserMemoryService:
                 "core_values": None,
                 "one_sentence": None,
                 "error": str(e)
+            }
+
+    async def generate_and_cache_summary_for_worker(
+        self,
+        end_user_id: str,
+        workspace_id: Optional[uuid.UUID] = None,
+        language: str = "zh",
+    ) -> Dict[str, Any]:
+        """Celery 专用入口：同步 PG 读写，异步 Neo4j/LLM。"""
+        try:
+            logger.info(f"开始为 end_user_id {end_user_id} 生成用户摘要, language={language}")
+            user_uuid = uuid.UUID(end_user_id)
+
+            # Celery 旧异步查询保留如下：
+            # repo = EndUserRepository(db)
+            # end_user = await repo.get_by_id_async(user_uuid)
+            # 全局 asyncpg pool 可能复用其他 event loop 的连接，因此改用同步短 Session。
+            with get_db_context() as db:
+                end_user_exists = EndUserRepository(db).get_by_id(user_uuid) is not None
+
+            if not end_user_exists:
+                logger.error(f"end_user_id {end_user_id} 不存在")
+                return {
+                    "success": False,
+                    "user_summary": None,
+                    "personality": None,
+                    "core_values": None,
+                    "one_sentence": None,
+                    "error": "用户不存在",
+                }
+
+            logger.info(f"使用 end_user_id={end_user_id} 生成用户摘要")
+            result = await analytics_user_summary(end_user_id, language=language)
+            user_summary = result.get("user_summary", "")
+            personality = result.get("personality", "")
+            core_values = result.get("core_values", "")
+            one_sentence = result.get("one_sentence", "")
+
+            if not any([user_summary, personality, core_values, one_sentence]):
+                logger.warning(f"end_user_id {end_user_id} 的用户摘要生成结果为空")
+                return {
+                    "success": False,
+                    "user_summary": None,
+                    "personality": None,
+                    "core_values": None,
+                    "one_sentence": None,
+                    "error": "生成的用户摘要为空,可能Neo4j中没有该用户的数据",
+                }
+
+            # Celery 旧异步写回保留如下：
+            # success = await repo.update_user_summary_async(...)
+            # 异步写回也可能取到绑定其他 loop 的 asyncpg 连接。
+            with get_db_context() as db:
+                success = EndUserRepository(db).update_user_summary(
+                    user_uuid,
+                    user_summary,
+                    personality,
+                    core_values,
+                    one_sentence,
+                )
+
+            if success:
+                logger.info(f"成功为 end_user_id {end_user_id} 生成并缓存用户摘要")
+                return {
+                    "success": True,
+                    "user_summary": user_summary,
+                    "personality": personality,
+                    "core_values": core_values,
+                    "one_sentence": one_sentence,
+                    "error": None,
+                }
+            logger.error(f"更新 end_user_id {end_user_id} 的用户摘要缓存失败")
+            return {
+                "success": False,
+                "user_summary": user_summary,
+                "personality": personality,
+                "core_values": core_values,
+                "one_sentence": one_sentence,
+                "error": "数据库更新失败",
+            }
+        except ValueError:
+            logger.error(f"无效的 end_user_id 格式: {end_user_id}")
+            return {
+                "success": False,
+                "user_summary": None,
+                "personality": None,
+                "core_values": None,
+                "one_sentence": None,
+                "error": "无效的用户ID格式",
+            }
+        except Exception as e:
+            logger.error(f"Celery 生成并缓存用户摘要时出错: {str(e)}", exc_info=True)
+            return {
+                "success": False,
+                "user_summary": None,
+                "personality": None,
+                "core_values": None,
+                "one_sentence": None,
+                "error": str(e),
             }
 
 # for workspace    

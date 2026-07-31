@@ -43,6 +43,10 @@ from app.services.context_assembler import (
     ContextEvidence,
     append_external_context_rule,
 )
+from app.core.memory.emotion.emotion_resolver import (
+    apply_detection as apply_emotion_detection,
+    start_detection as start_emotion_detection,
+)
 
 logger = get_business_logger()
 
@@ -197,10 +201,13 @@ class AppChatService:
         return await ModelApiKeyService.record_api_key_usage_bridge_async(self.db, api_key_id)
 
     async def _release_db_connection(self) -> None:
-        if self._uses_async_session():
-            await self.db.close()
-        else:
-            self.db.close()
+        try:
+            if self._uses_async_session():
+                await self.db.close()
+            else:
+                self.db.close()
+        except Exception as e:
+            logger.warning(f"Failed to release DB connection: {e}")
 
     @staticmethod
     def _append_history_message(
@@ -598,11 +605,16 @@ class AppChatService:
         if hasattr(features_config, 'model_dump'):
             features_config = features_config.model_dump()
         web_search_feature = features_config.get("web_search", {})
-        if not (isinstance(web_search_feature, dict) and web_search_feature.get("enabled")):
-            web_search = False
+        if isinstance(web_search_feature, dict) and web_search_feature.get("enabled"):
+            web_search = True
 
         # 校验文件上传
         self.agent_service._validate_file_upload(features_config, files)
+
+        # 情绪感知回复（App 开关；关闭时返回 None，全程不做任何情绪处理）。
+        # 提前启动，与下面的工具/提示词/上下文引擎/多模态准备并发执行，避免串行增加首字延迟；
+        # 结果在创建 ToolOrchestrator / LangChainAgent 之前统一 await 并注入。
+        emotion_detection = start_emotion_detection(features_config, message)
 
         variables = self.agent_service.prepare_variables(variables, config.variables)
 
@@ -729,6 +741,13 @@ class AppChatService:
                     "重要：图片 URL 中包含 UUID（如 /storage/permanent/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx），"
                     "必须将 src 属性的值原封不动复制到 Markdown 的括号中，不得增删任何字符。"
                 )
+
+        # 情绪感知回复：等待识别结果 → 成功则写缓存并注入「固定原则+本轮策略」；失败/未命中则提示词原样不动。
+        # 必须在 ToolOrchestrator / LangChainAgent 之前完成，保证它们拿到的是最终提示词。
+        # write_cache=memory：记忆关闭时 dispatcher 不派发快写，缓存无消费方，不写避免孤儿 key。
+        system_prompt = await apply_emotion_detection(
+            system_prompt, emotion_detection, user_message_id, write_cache=memory
+        )
 
         # 弱模型：用 ReAct prompt 驱动多轮工具调用，将轨迹注入 system_prompt
         capability = api_key_obj.capability or []
@@ -1131,11 +1150,15 @@ class AppChatService:
             if hasattr(features_config, 'model_dump'):
                 features_config = features_config.model_dump()
             web_search_feature = features_config.get("web_search", {})
-            if not (isinstance(web_search_feature, dict) and web_search_feature.get("enabled")):
-                web_search = False
+            if isinstance(web_search_feature, dict) and web_search_feature.get("enabled"):
+                web_search = True
 
             # 校验文件上传
             self.agent_service._validate_file_upload(features_config, files)
+
+            # 情绪感知回复（App 开关；关闭时返回 None，全程不做任何情绪处理）。
+            # 提前启动，与提示词/上下文引擎/多模态准备并发，避免串行增加首字延迟。
+            emotion_detection = start_emotion_detection(features_config, message)
 
             yield f"event: start\ndata: {json.dumps({'conversation_id': str(conversation_id), 'message_id': str(message_id), 'user_message_id': str(user_message_id)}, ensure_ascii=False)}\n\n"
 
@@ -1258,6 +1281,13 @@ class AppChatService:
                         "重要：图片 URL 中包含 UUID（如 /storage/permanent/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx），"
                         "必须将 src 属性的值原封不动复制到 Markdown 的括号中，不得增删任何字符。"
                     )
+
+            # 情绪感知回复：等待识别结果 → 成功则写缓存并注入「固定原则+本轮策略」；失败/未命中则提示词原样不动。
+            # 必须在 ToolOrchestrator / LangChainAgent 之前完成。
+            # write_cache=memory：记忆关闭时 dispatcher 不派发快写，缓存无消费方，不写避免孤儿 key。
+            system_prompt = await apply_emotion_detection(
+                system_prompt, emotion_detection, user_message_id, write_cache=memory
+            )
 
             # 弱模型：用 ReAct prompt 驱动多轮工具调用，将轨迹注入 system_prompt
             capability = api_key_obj.capability or []
@@ -1502,44 +1532,55 @@ class AppChatService:
                 }
 
             if not skip_save:
-                async with get_async_db_context() as db:
-                    svc = ConversationService(db)
-                    if opening_statement:
-                        await svc.add_message_async(
-                            conversation_id=conversation_id,
-                            role="assistant",
-                            content=opening_statement,
-                            meta_data={"suggested_questions": opening_suggested_questions},
-                        )
-                    await svc.add_message_async(
-                        message_id=user_message_id,
-                        conversation_id=conversation_id,
-                        role="user",
-                        content=message,
-                        meta_data=human_meta,
-                        should_memorize=memory,
-                    )
-                    await svc.add_message_async(
-                        message_id=message_id,
-                        conversation_id=conversation_id,
-                        role="assistant",
-                        content=full_content,
-                        meta_data=assistant_meta,
-                        should_memorize=memory,
-                    )
+                from app.services.batch_persist_queue import BatchPersistQueue, PersistTask
+
+                persist_args = {
+                    "conversation_id": str(conversation_id),
+                    "user_message_id_override": user_message_id,
+                    "user_message_content": message,
+                    "files_meta": human_meta.get("files", []),
+                    "api_key_model_name": _api_key_model_name,
+                    "should_memorize": memory,
+                }
+                if opening_statement:
+                    opening_id = uuid.uuid4()
+                    persist_args["is_new_conversation"] = True
+                    persist_args["opening_statement"] = opening_statement
+                    persist_args["opening_message_id"] = opening_id
+                    persist_args["opening_suggested_questions"] = opening_suggested_questions
+
+                # Build StreamResult-alike accumulator for the persist task
+                from app.services.chat_context import StreamResult as _StreamResult
+                _result = _StreamResult()
+                _result.message_id = message_id
+                _result.user_message_id = user_message_id
+                _result.full_content = full_content
+                _result.total_tokens = total_tokens
+                _result.full_reasoning = full_reasoning
+                _result.suggested_questions = suggested_questions
+                _result.citations = filtered_citations
+                _result.audio_url = stream_audio_url
+                _result.audio_status = audio_status if stream_audio_url else None
+                _result.history_files = human_meta.get("history_files")
+                _result.assistant_meta = assistant_meta
+                persist_args["result"] = _result
+
+                await BatchPersistQueue.enqueue(PersistTask(
+                    task_type="save_messages",
+                    args=persist_args,
+                ))
+
                 if used_context_engine:
-                    _ctx_kwargs = dict(
-                        features=features_config,
-                        conversation_id=conversation_id,
-                        current_provider=_api_key_provider,
-                        current_is_omni=_api_key_is_omni,
-                        legacy_max_history=settings.AGENT_MAX_HISTORY,
-                        model_config_id=config.default_model_config_id,
-                    )
-                    async def _run_after_turn(kwargs=_ctx_kwargs):
-                        async with get_async_db_context() as db2:
-                            await ContextEngineManager(db2).after_app_turn(**kwargs)
-                    asyncio.create_task(_run_after_turn())
+                    await BatchPersistQueue.enqueue(PersistTask(
+                        task_type="after_turn",
+                        args={
+                            "conversation_id": str(conversation_id),
+                            "features_config": features_config,
+                            "api_key_provider": _api_key_provider,
+                            "api_key_is_omni": _api_key_is_omni,
+                            "model_config_id": str(config.default_model_config_id) if config.default_model_config_id else None,
+                        },
+                    ))
             else:
                 async with get_async_db_context() as db:
                     new_msg = Message(
@@ -1594,24 +1635,19 @@ class AppChatService:
             logger.error(f"流式聊天失败: {str(e)}", exc_info=True)
             # 保存失败的消息，使前端可以展示失败状态
             try:
-                _human_meta = human_meta if 'human_meta' in locals() else {"files": [], "history_files": {}}
-                async with get_async_db_context() as db:
-                    svc = ConversationService(db)
-                    await svc.add_message_async(
-                        message_id=user_message_id,
-                        conversation_id=conversation_id,
-                        role="user",
-                        content=message,
-                        meta_data=_human_meta,
-                    )
-                    await svc.add_message_async(
-                        message_id=message_id,
-                        conversation_id=conversation_id,
-                        role="assistant",
-                        content="",
-                        meta_data={"error": str(e)[:2000]},
-                        status="failed",
-                    )
+                from app.services.batch_persist_queue import BatchPersistQueue, PersistTask
+                await BatchPersistQueue.enqueue(PersistTask(
+                    task_type="save_failed_message",
+                    args={
+                        "conversation_id": str(conversation_id) if 'conversation_id' in locals() else "",
+                        "user_message_id": str(user_message_id) if 'user_message_id' in locals() else str(uuid.uuid4()),
+                        "message_id": str(message_id) if 'message_id' in locals() else str(uuid.uuid4()),
+                        "user_message_content": message if 'message' in locals() else "",
+                        "files_meta": [],
+                        "error_message": "An error occurred during generation.",
+                        "error_detail": str(e)[:2000],
+                    },
+                ))
             except Exception:
                 pass
             # 失败场景也改成尾部一次写，避免依赖首包前 execution。
@@ -1635,6 +1671,12 @@ class AppChatService:
                 pass  # 保存失败不影响错误事件发送
             # 发送错误事件
             yield f"event: end\ndata: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
+
+    @staticmethod
+    def _format_sse_chunk(chunk: dict) -> str:
+        """Format a dict chunk as an SSE event string."""
+        event_type = str(chunk.get("type") or "unknown")
+        return f"event: {event_type}\ndata: {json.dumps(chunk, ensure_ascii=False)}\n\n"
 
     async def multi_agent_chat(
             self,
@@ -1776,28 +1818,28 @@ class AppChatService:
 
             elapsed_time = time.time() - start_time
 
-            # 保存消息
-            await self.conversation_service.add_message_async(
-                message_id=user_message_id,
-                conversation_id=conversation_id,
-                role="user",
-                content=message
-            )
-
-            await self.conversation_service.add_message_async(
-                message_id=message_id,
-                conversation_id=conversation_id,
-                role="assistant",
-                content=full_content,
-                meta_data={
-                    "elapsed_time": elapsed_time,
-                    "usage": {
-                        "prompt_tokens": 0,
-                        "completion_tokens": 0,
-                        "total_tokens": total_tokens
-                    }
-                }
-            )
+            # Enqueue async batch persist
+            from app.services.batch_persist_queue import BatchPersistQueue, PersistTask
+            from app.services.chat_context import StreamResult as _StreamResult
+            _result = _StreamResult()
+            _result.message_id = message_id
+            _result.user_message_id = user_message_id
+            _result.full_content = full_content
+            _result.total_tokens = total_tokens
+            _result.assistant_meta = {
+                "elapsed_time": elapsed_time,
+                "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": total_tokens},
+            }
+            await BatchPersistQueue.enqueue(PersistTask(
+                task_type="save_messages",
+                args={
+                    "conversation_id": str(conversation_id),
+                    "result": _result,
+                    "user_message_id_override": user_message_id,
+                    "user_message_content": message,
+                    "should_memorize": memory,
+                },
+            ))
 
             logger.info(
                 "多 Agent 流式聊天完成",
@@ -1814,6 +1856,23 @@ class AppChatService:
             raise
         except Exception as e:
             logger.error(f"多 Agent 流式聊天失败: {str(e)}", exc_info=True)
+            # 保存失败的消息
+            try:
+                from app.services.batch_persist_queue import BatchPersistQueue, PersistTask
+                await BatchPersistQueue.enqueue(PersistTask(
+                    task_type="save_failed_message",
+                    args={
+                        "conversation_id": str(conversation_id) if 'conversation_id' in locals() else "",
+                        "user_message_id": str(user_message_id) if 'user_message_id' in locals() else str(uuid.uuid4()),
+                        "message_id": str(message_id) if 'message_id' in locals() else str(uuid.uuid4()),
+                        "user_message_content": message if 'message' in locals() else "",
+                        "files_meta": [],
+                        "error_message": "An error occurred during generation.",
+                        "error_detail": str(e)[:2000],
+                    },
+                ))
+            except Exception:
+                pass
             # 发送错误事件
             yield f"event: error\ndata: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
 
