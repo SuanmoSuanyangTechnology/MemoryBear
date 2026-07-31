@@ -1,25 +1,41 @@
+from dataclasses import dataclass
+
 from app.core.rag.common.token_utils import encoder, num_tokens_from_string
 
 
 DEFAULT_TEXT_SEPARATORS = ["\n\n", "\n", "。", "；", " ", ""]
 
 
+@dataclass(frozen=True)
+class _SplitUnit:
+    text: str
+    prefix: str = ""
+
+
 class TextMerger:
     def __init__(self, separators: list[str] | None = None):
         self.separators = separators or DEFAULT_TEXT_SEPARATORS
 
-    def merge(self, value: str | list, chunk_num: int, delimiter: str | None = None) -> list[str]:
+    def merge(
+        self,
+        value: str | list,
+        chunk_num: int,
+        delimiter: str | None = None,
+        overlap: int | None = 0,
+    ) -> list[str]:
         limit = max(int(chunk_num), 1)
-        separators = self._build_separators(delimiter)
+        overlap_tokens = self._normalize_overlap(overlap, limit)
         chunks: list[str] = []
         for text in self._extract_strings(value):
-            chunks.extend(self._split_recursive(text, limit, separators, 0))
+            for segment in self._split_by_custom_delimiter(text, delimiter):
+                if not segment or not segment.strip():
+                    continue
+                if self._within_limit(segment, limit):
+                    chunks.append(segment)
+                    continue
+                split_units = self._split_recursive(segment, limit, 0)
+                chunks.extend(self._merge_split_units(split_units, limit, overlap_tokens))
         return chunks
-
-    def _build_separators(self, delimiter: str | None) -> list[str]:
-        if delimiter is None:
-            return list(self.separators)
-        return [delimiter] + [separator for separator in self.separators if separator != delimiter]
 
     def _extract_strings(self, value: str | list) -> list[str]:
         if isinstance(value, str):
@@ -28,40 +44,102 @@ class TextMerger:
             return [item for item in value if isinstance(item, str)]
         return []
 
-    def _split_recursive(self, text: str, limit: int, separators: list[str], separator_index: int) -> list[str]:
-        if not text or not text.strip():
-            return []
-
-        separator = separators[separator_index] if separator_index < len(separators) else ""
-        if self._within_limit(text, limit) and (separator_index > 0 or not separator or separator not in text):
+    def _split_by_custom_delimiter(self, text: str, delimiter: str | None) -> list[str]:
+        if not delimiter:
             return [text]
-
-        if separator == "":
-            return self._hard_split(text, limit)
-
-        parts = self._split_with_separator(text, separator)
-        if len(parts) <= 1:
-            return self._split_recursive(text, limit, separators, separator_index + 1)
-
-        result: list[str] = []
-        for part in parts:
-            if not part or not part.strip():
-                continue
-            if self._within_limit(part, limit):
-                result.append(part)
-            else:
-                result.extend(self._split_recursive(part, limit, separators, separator_index + 1))
-        return result
-
-    def _split_with_separator(self, text: str, separator: str) -> list[str]:
-        raw_parts = text.split(separator)
-        if separator in {"。", "；"}:
+        raw_parts = text.split(delimiter)
+        if delimiter in {"。", "；"}:
             return [
-                part + (separator if index < len(raw_parts) - 1 else "")
+                part + (delimiter if index < len(raw_parts) - 1 else "")
                 for index, part in enumerate(raw_parts)
                 if part
             ]
         return [part for part in raw_parts if part]
+
+    def _split_recursive(self, text: str, limit: int, separator_index: int, prefix: str = "") -> list[_SplitUnit]:
+        if not text or not text.strip():
+            return []
+        if self._within_limit(text, limit):
+            return [_SplitUnit(text=text, prefix=prefix)]
+
+        separator = self.separators[separator_index] if separator_index < len(self.separators) else ""
+        if separator == "":
+            return [
+                _SplitUnit(text=chunk, prefix=prefix if index == 0 else "")
+                for index, chunk in enumerate(self._hard_split(text, limit))
+            ]
+
+        parts = self._split_with_separator(text, separator)
+        if len(parts) <= 1:
+            return self._split_recursive(text, limit, separator_index + 1, prefix)
+
+        result: list[_SplitUnit] = []
+        for index, part in enumerate(parts):
+            if not part or not part.text.strip():
+                continue
+            unit_prefix = prefix if index == 0 else part.prefix
+            result.extend(self._split_recursive(part.text, limit, separator_index + 1, unit_prefix))
+        return result
+
+    def _split_with_separator(
+        self,
+        text: str,
+        separator: str,
+    ) -> list[_SplitUnit]:
+        raw_parts = text.split(separator)
+        if separator in {"。", "；"}:
+            return [
+                _SplitUnit(text=part + (separator if index < len(raw_parts) - 1 else ""))
+                for index, part in enumerate(raw_parts)
+                if part
+            ]
+        return [
+            _SplitUnit(text=part, prefix="" if index == 0 else separator)
+            for index, part in enumerate(raw_parts)
+            if part
+        ]
+
+    def _merge_split_units(self, split_units: list[_SplitUnit], limit: int, overlap: int) -> list[str]:
+        docs: list[str] = []
+        current_doc: list[_SplitUnit] = []
+        total = 0
+
+        for split_unit in split_units:
+            if current_doc and not self._within_limit(self._join_units([*current_doc, split_unit]), limit):
+                docs.append(self._join_units(current_doc))
+
+                while current_doc and (
+                    total > overlap
+                    or not self._within_limit(self._join_units([*current_doc, split_unit]), limit)
+                ):
+                    total -= num_tokens_from_string(current_doc[0].text)
+                    current_doc = current_doc[1:]
+
+            current_doc.append(split_unit)
+            total += num_tokens_from_string(split_unit.text)
+
+        if current_doc:
+            docs.append(self._join_units(current_doc))
+        return docs
+
+    @staticmethod
+    def _join_units(split_units: list[_SplitUnit]) -> str:
+        if not split_units:
+            return ""
+        return "".join(
+            split_unit.text if index == 0 else f"{split_unit.prefix}{split_unit.text}"
+            for index, split_unit in enumerate(split_units)
+        )
+
+    @staticmethod
+    def _normalize_overlap(overlap: int | None, limit: int) -> int:
+        try:
+            value = int(overlap or 0)
+        except (TypeError, ValueError):
+            value = 0
+        if value <= 0:
+            return 0
+        return min(value, max(limit - 1, 0))
 
     def _hard_split(self, text: str, limit: int) -> list[str]:
         tokens = encoder.encode(text)

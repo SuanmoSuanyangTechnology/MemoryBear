@@ -9,16 +9,12 @@ from PIL import Image
 
 from app.core.rag.chunk.context import ParsedBlock, ParsedBlockType
 from app.core.rag.chunk.parser.base import DocumentParser
+from app.core.rag.chunk.parser.markdown_preprocessor import MarkdownLineInfo, MarkdownPreprocessor
 from app.core.rag.nlp import find_codec
 
 
 IMAGE_PATTERN = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
-HEADING_PATTERN = re.compile(r"^(#{1,6})\s+.*$")
-LIST_PATTERN = re.compile(r"^\s*(?:[-*+]\s+|\d+\.\s+).*$")
-EMPTY_HTML_ANCHOR_PATTERN = re.compile(
-    r"<a\b(?=[^>]*(?:\bid\s*=\s*['\"][^'\"]+['\"]|\bname\s*=\s*['\"][^'\"]+['\"]))(?![^>]*\bhref\s*=)[^>]*>\s*</a>",
-    re.IGNORECASE,
-)
+HEADING_PATTERN = re.compile(r"^\s{0,3}(#{1,6})\s+(.+?)\s*$")
 
 
 class StructMarkdownParser(DocumentParser):
@@ -26,10 +22,17 @@ class StructMarkdownParser(DocumentParser):
         text = self._read_text(ctx.filename, ctx.binary)
         return self.parse_text(text)
 
-    def parse_text(self, text: str) -> list[ParsedBlock]:
+    def parse_text(self, text: str, *, normalize_escaped_structure: bool = False) -> list[ParsedBlock]:
         self._seq = 0
         self.blocks: list[ParsedBlock] = []
-        self.lines = self._strip_empty_html_anchors_outside_code(text.split("\n"))
+        self._heading_stack: dict[int, str] = {}
+        self._compact_block_spacing = normalize_escaped_structure
+        preprocess_result = MarkdownPreprocessor().preprocess(
+            text,
+            normalize_escaped_structure=normalize_escaped_structure,
+        )
+        self.lines = preprocess_result.lines
+        self.line_infos = preprocess_result.line_infos
 
         index = 0
         while index < len(self.lines):
@@ -39,7 +42,7 @@ class StructMarkdownParser(DocumentParser):
                 index += 1
                 continue
 
-            if self._is_heading(line):
+            if self._is_heading(index):
                 index = self._append_heading(index)
                 continue
             if stripped.startswith("```"):
@@ -54,7 +57,7 @@ class StructMarkdownParser(DocumentParser):
             if IMAGE_PATTERN.search(line):
                 index = self._append_image_line(index)
                 continue
-            if LIST_PATTERN.match(line):
+            if self._is_list_line(index):
                 index = self._append_list(index)
                 continue
             if stripped.startswith(">"):
@@ -64,24 +67,6 @@ class StructMarkdownParser(DocumentParser):
             index = self._append_text(index)
 
         return self.blocks
-
-    def _strip_empty_html_anchors_outside_code(self, lines: list[str]) -> list[str]:
-        cleaned_lines = []
-        in_code = False
-        for line in lines:
-            stripped = line.strip()
-            if stripped.startswith("```"):
-                cleaned_lines.append(line)
-                in_code = not in_code
-                continue
-            if in_code:
-                cleaned_lines.append(line)
-                continue
-            cleaned_lines.append(self._strip_empty_html_anchors(line))
-        return cleaned_lines
-
-    def _strip_empty_html_anchors(self, line: str) -> str:
-        return EMPTY_HTML_ANCHOR_PATTERN.sub("", line)
 
     def md_to_html(self, text: str):
         if not text:
@@ -134,6 +119,8 @@ class StructMarkdownParser(DocumentParser):
     ) -> None:
         if isinstance(content, str) and not content.strip() and block_type is not ParsedBlockType.IMAGE:
             return
+        block_metadata = dict(metadata or {})
+        block_metadata.setdefault("heading_path", self._current_heading_path())
         self.blocks.append(
             ParsedBlock(
                 type=block_type,
@@ -143,24 +130,53 @@ class StructMarkdownParser(DocumentParser):
                 start_line=start_line,
                 end_line=end_line,
                 image=image,
-                metadata=metadata or {},
+                metadata=block_metadata,
             )
         )
         self._seq += 1
 
-    def _is_heading(self, line: str) -> bool:
-        return bool(HEADING_PATTERN.match(line))
+    def _line_info(self, index: int) -> MarkdownLineInfo:
+        return self.line_infos[index]
+
+    def _is_heading(self, index: int) -> bool:
+        return self._line_info(index).block_hint == "heading"
+
+    def _is_list_line(self, index: int) -> bool:
+        return self._line_info(index).block_hint == "list"
+
+    def _is_list_body_line(self, index: int) -> bool:
+        return self._line_info(index).block_hint in {"list", "list_continuation"}
+
+    def _current_heading_path(self) -> list[str]:
+        return [
+            self._heading_stack[level]
+            for level in sorted(self._heading_stack)
+        ]
 
     def _append_heading(self, index: int) -> int:
         line = self.lines[index]
+        line_info = self._line_info(index)
         match = HEADING_PATTERN.match(line)
-        level = len(match.group(1)) if match else 1
+        level = int(line_info.metadata.get("heading_level") or (len(match.group(1)) if match else 1))
+        title = str(line_info.metadata.get("heading_title") or (match.group(2).strip() if match else line.strip()))
+        self._heading_stack = {
+            existing_level: existing_title
+            for existing_level, existing_title in self._heading_stack.items()
+            if existing_level < level
+        }
+        self._heading_stack[level] = title
         self._append_block(
             ParsedBlockType.HEADING,
             line,
             start_line=index + 1,
             end_line=index + 1,
-            metadata={"level": level},
+            metadata={
+                "level": level,
+                "heading_level": level,
+                "heading_title": title,
+                "heading_raw": line,
+                "heading_path": self._current_heading_path(),
+            },
         )
         return index + 1
 
@@ -266,16 +282,17 @@ class StructMarkdownParser(DocumentParser):
         index += 1
         while index < len(self.lines):
             line = self.lines[index]
-            if LIST_PATTERN.match(line) or line.startswith((" ", "\t")) or not line.strip():
+            if self._is_list_body_line(index) or line.startswith((" ", "\t")) or not line.strip():
                 index += 1
                 continue
             break
-        content = "\n".join(self.lines[start:index])
+        content = self._block_content(start, index, compact_blank_lines=self._compact_block_spacing)
         self._append_block(
             ParsedBlockType.LIST,
             content,
             start_line=start + 1,
             end_line=index,
+            metadata=self._list_metadata(start, index),
         )
         return index
 
@@ -311,7 +328,7 @@ class StructMarkdownParser(DocumentParser):
             if self._is_block_start(index) or IMAGE_PATTERN.search(line):
                 break
             index += 1
-        content = "\n".join(self.lines[start:index])
+        content = self._block_content(start, index, compact_blank_lines=self._compact_block_spacing)
         self._append_block(
             ParsedBlockType.TEXT,
             content,
@@ -332,11 +349,11 @@ class StructMarkdownParser(DocumentParser):
         line = self.lines[index]
         stripped = line.strip()
         return (
-            self._is_heading(line)
+            self._is_heading(index)
             or stripped.startswith("```")
             or self._is_html_table_start(line)
             or self._is_markdown_table_start(index)
-            or LIST_PATTERN.match(line)
+            or self._is_list_line(index)
             or stripped.startswith(">")
         )
 
@@ -348,6 +365,12 @@ class StructMarkdownParser(DocumentParser):
             return False
         return all(re.match(r"^:?-{3,}:?$", cell.replace(" ", "")) for cell in cells if cell)
 
+    def _block_content(self, start: int, end: int, *, compact_blank_lines: bool = False) -> str:
+        lines = self.lines[start:end]
+        if compact_blank_lines:
+            lines = [line for line in lines if line.strip()]
+        return "\n".join(lines).rstrip()
+
     def _normalize_html_table(self, raw: str) -> str:
         tags = ["table", "td", "tr", "th", "tbody", "thead", "div"]
         pattern = re.compile(rf"<(?:{'|'.join(tags)})[^>]*>", re.IGNORECASE)
@@ -357,3 +380,34 @@ class StructMarkdownParser(DocumentParser):
             return f"<{tag_name}>"
 
         return re.sub(pattern, replace_tag, raw)
+
+    def _list_metadata(self, start: int, end: int) -> dict:
+        markers = []
+        marker_kinds = []
+        contains_qa_marker = False
+        for index in range(start, end):
+            line_info = self._line_info(index)
+            if line_info.block_hint != "list":
+                continue
+            marker = line_info.metadata.get("list_marker")
+            marker_kind = line_info.metadata.get("list_marker_kind")
+            if marker:
+                markers.append(marker)
+            if marker_kind:
+                marker_kinds.append(marker_kind)
+            contains_qa_marker = contains_qa_marker or bool(line_info.metadata.get("contains_qa_marker"))
+
+        return {
+            "list_item_count": len(markers),
+            "list_markers": markers,
+            "list_marker_kinds": _unique_preserving_order(marker_kinds),
+            "contains_qa_marker": contains_qa_marker,
+        }
+
+
+def _unique_preserving_order(values: list[str]) -> list[str]:
+    result = []
+    for value in values:
+        if value not in result:
+            result.append(value)
+    return result
