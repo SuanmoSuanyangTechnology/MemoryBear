@@ -323,6 +323,22 @@
   box-shadow: 0px 2px 4px 0px rgba(33, 35, 50, 0.16);
 }
 
+.pageTabs.small.ant-segmented {
+  padding: 4px;
+  margin-left: 4px;
+}
+
+.pageTabs.small.ant-segmented .ant-segmented-item-label {
+  line-height: 24px;
+  min-height: 24px;
+  padding: 0 12px;
+  font-size: 12px;
+}
+
+.pageTabs.small.ant-segmented .ant-segmented-item-selected {
+  box-shadow: 0px 2px 4px 0px rgba(33, 35, 50, 0.16);
+}
+
 .ant-app {
   height: 100%;
 }

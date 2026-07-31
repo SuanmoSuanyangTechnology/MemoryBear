@@ -237,4 +237,3 @@ async def generate_cache(
         language_type=language_type,
         current_user=current_user,
     )
-

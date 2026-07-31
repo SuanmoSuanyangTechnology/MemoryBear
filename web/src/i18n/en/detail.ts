@@ -61,7 +61,8 @@ export const detail = {
     episodicDetail: {
       title: 'Record every important scene you have truly experienced',
       total_all: 'Total Episodic Memories',
-      all: "All",
+      all: 'All Time',
+      allType: 'All Types',
       today: 'Today',
       this_week: 'This Week',
       this_month: 'This Month',

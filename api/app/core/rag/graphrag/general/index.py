@@ -122,6 +122,32 @@ async def run_graphrag(
     return
 
 
+def _load_graphrag_document_chunks(
+    vector_service: ElasticSearchVector,
+    document_id: str,
+) -> list[str]:
+    from app.core.rag.common.token_utils import num_tokens_from_string
+
+    chunks: list[str] = []
+    current_chunk = ""
+    for document in vector_service.iter_by_segment(
+        document_id=str(document_id),
+        asc=True,
+    ):
+        if (document.metadata or {}).get("chunk_type") == "qa":
+            continue
+        content = document.page_content or ""
+        if num_tokens_from_string(current_chunk + content) < 1024:
+            current_chunk += content
+        else:
+            if current_chunk:
+                chunks.append(current_chunk)
+            current_chunk = content
+    if current_chunk:
+        chunks.append(current_chunk)
+    return chunks
+
+
 async def run_graphrag_for_kb(
     row: dict,
     document_ids: list[str],
@@ -145,34 +171,14 @@ async def run_graphrag_for_kb(
         callback(msg=f"[GraphRAG] kb:{kb_id} has no processable document_id.")
         return {"ok_documents": [], "failed_documents": [], "total_documents": 0, "total_chunks": 0, "seconds": 0.0}
 
-    def load_doc_chunks(document_id: str) -> list[str]:
-        from app.core.rag.common.token_utils import num_tokens_from_string
-
-        chunks = []
-        current_chunk = ""
-
-        total, items = vector_service.search_by_segment(document_id=str(document_id), query=None, pagesize=9999, page=1, asc=True)
-        for doc in items:
-            # 跳过 QA chunks，只用原文 chunks 构建图谱
-            if (doc.metadata or {}).get("chunk_type") == "qa":
-                continue
-            content = doc.page_content
-            if num_tokens_from_string(current_chunk + content) < 1024:
-                current_chunk += content
-            else:
-                if current_chunk:
-                    chunks.append(current_chunk)
-                current_chunk = content
-
-        if current_chunk:
-            chunks.append(current_chunk)
-
-        return chunks
-
     all_document_chunks: dict[str, list[str]] = {}
     total_chunks = 0
     for document_id in document_ids:
-        chunks = load_doc_chunks(document_id)
+        chunks = await trio.to_thread.run_sync(
+            _load_graphrag_document_chunks,
+            vector_service,
+            document_id,
+        )
         all_document_chunks[document_id] = chunks
         total_chunks += len(chunks)
 
