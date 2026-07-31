@@ -606,8 +606,27 @@ async def _handle_after_turn(
         logger.exception("after_turn failed for conversation %s", kwargs.get("conversation_id"))
 
 
+async def _handle_save_node_executions(
+    db: Any,
+    execution_id: str,
+    items: list[dict[str, Any]],
+    **kwargs: Any,
+) -> None:
+    """Batch persist workflow node execution records."""
+    from app.models.workflow_model import WorkflowNodeExecution
+
+    if not items:
+        return
+    await db.execute(
+        sa_text("DELETE FROM workflow_node_executions WHERE execution_id = :eid"),
+        {"eid": execution_id},
+    )
+    await db.execute(sa_insert(WorkflowNodeExecution).values(items))
+
+
 _TASK_HANDLERS: dict[str, Any] = {
     "save_execution": _handle_save_execution,
+    "save_node_executions": _handle_save_node_executions,
     "record_usage": _handle_record_usage,
     "after_turn": _handle_after_turn,
 }

@@ -11,7 +11,7 @@ from typing import Any, Annotated, AsyncGenerator, Optional
 
 import yaml
 from fastapi import Depends
-from sqlalchemy import delete, desc, select, update
+from sqlalchemy import delete, desc, insert, select, update
 from sqlalchemy.orm import Session, selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -2151,7 +2151,7 @@ class WorkflowService:
             app_id=app_id,
             workflow_config=workflow_config,
         )
-        state_cache = manager.get_latest_cache(include_inactive=False)
+        state_cache = manager.get_latest_cache_sync(include_inactive=False)
         result_data = state_cache.get("result_data") if state_cache else {}
         snapshot = (result_data or {}).get("snapshot") if isinstance(result_data, dict) else None
         if not isinstance(snapshot, dict):
@@ -2227,7 +2227,7 @@ class WorkflowService:
             app_id=app_id,
             workflow_config=workflow_config,
         )
-        saved_cache = manager.save_cache(
+        saved_cache = manager.save_cache_sync(
             cache_key=manager.build_cache_key({"kind": self.DEBUG_STATE_SOURCE}),
             input_data={"kind": self.DEBUG_STATE_SOURCE},
             result_data=persist_payload["result_data"],
@@ -3149,7 +3149,7 @@ class WorkflowService:
             node_type=node_type,
             node_name=node_name,
         )
-        cache = manager.get_latest_cache(include_inactive=False)
+        cache = manager.get_latest_cache_sync(include_inactive=False)
         secret_values = self._extract_secret_values_from_environment_variables(
             config.environment_variables if config else []
         )
@@ -3230,7 +3230,7 @@ class WorkflowService:
             node_type=node.get("type"),
             node_name=node.get("name"),
         )
-        latest_cache = manager.get_latest_cache(include_inactive=False)
+        latest_cache = manager.get_latest_cache_sync(include_inactive=False)
         next_result_data = self._sanitize_cache_result_data(result_data or {})
         if patches:
             if latest_cache:
@@ -3244,7 +3244,7 @@ class WorkflowService:
             next_result_data = self._apply_cache_result_patches(patch_base, patches)
         if not latest_cache:
             cache_key = manager.build_cache_key(next_result_data)
-            updated = manager.save_cache(
+            updated = manager.save_cache_sync(
                 cache_key=cache_key,
                 input_data={},
                 result_data=next_result_data,
@@ -3252,7 +3252,7 @@ class WorkflowService:
                 ttl_seconds=None,
             )
         else:
-            updated = manager.update_latest_cache(
+            updated = manager.update_latest_cache_sync(
                 result_data=next_result_data,
             )
         if not updated:
@@ -3293,7 +3293,7 @@ class WorkflowService:
             node_type=node.get("type") if node else None,
             node_name=node.get("name") if node else None,
         )
-        affected = manager.invalidate_latest_cache()
+        affected = manager.invalidate_latest_cache_sync()
         if affected > 0:
             self._sync_workflow_debug_state_node(
                 app_id=app_id,
@@ -3905,15 +3905,15 @@ class WorkflowService:
             workflow_config=resolved_workflow_config,
         )
 
-    async def _persist_workflow_node_executions_async(
+    def _prepare_node_execution_items(
             self,
             execution: WorkflowExecution | WorkflowExecutionRef,
             workflow_config: WorkflowConfig,
             result: dict[str, Any],
-    ) -> None:
+    ) -> tuple[uuid.UUID, uuid.UUID, list[dict[str, Any]]]:
         node_outputs = result.get("node_outputs") or {}
         if not isinstance(node_outputs, dict) or not node_outputs:
-            return
+            return execution.id, execution.app_id, []
 
         items: list[dict[str, Any]] = []
         ordered_node_outputs = sorted(node_outputs.items(), key=self._node_output_sort_key)
@@ -3930,13 +3930,23 @@ class WorkflowService:
                     fallback_node_name=self._get_node_name_from_config(workflow_config, node_id),
                 )
             )
-        async with get_async_db_context() as db:
-            await db.execute(
-                delete(WorkflowNodeExecution).where(WorkflowNodeExecution.execution_id == execution.id)
-            )
-            if items:
-                db.add_all([WorkflowNodeExecution(**item) for item in items])
-            await db.commit()
+        return execution.id, execution.app_id, items
+
+    async def _persist_workflow_node_executions_async(
+            self,
+            execution: WorkflowExecution | WorkflowExecutionRef,
+            workflow_config: WorkflowConfig,
+            result: dict[str, Any],
+    ) -> None:
+        from app.services.batch_persist_queue import BatchPersistQueue, PersistTask
+
+        execution_id, _app_id, items = self._prepare_node_execution_items(execution, workflow_config, result)
+        if not items:
+            return
+        await BatchPersistQueue.enqueue(PersistTask(
+            task_type="save_node_executions",
+            args={"execution_id": str(execution_id), "items": items},
+        ))
 
     async def _write_workflow_debug_state_async(
             self,
