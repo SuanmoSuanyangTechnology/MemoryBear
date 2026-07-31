@@ -43,7 +43,7 @@ class PersistTask:
     """Immutable description of a single persistence operation."""
 
     task_type: str
-    """One of: save_messages, save_execution, record_usage, after_turn, save_failed_message."""
+    """One of: save_messages, save_agent_execution, record_usage, after_turn, save_failed_message."""
 
     args: dict[str, Any]
     """Keyword arguments for the handler that executes this task."""
@@ -543,26 +543,36 @@ async def _mark_memory_pending(conv_id: str) -> None:
         )
 
 
-async def _handle_save_execution(
+def _to_uuid(value: Any) -> uuid_module.UUID | None:
+    """Coerce a str or UUID to UUID, returning None if falsy."""
+    if not value:
+        return None
+    return uuid_module.UUID(value) if isinstance(value, str) else value
+
+
+async def _handle_save_agent_execution(
     db: Any,
-    result: Any,  # StreamResult
     **kwargs: Any,
 ) -> None:
-    """Persist agent execution record."""
+    """Persist agent execution record after messages are committed."""
     from app.models.agent_execution_model import AgentExecution
+    from app.core.utils.datetime_utils import parse_timestamp_to_utc_naive, utcnow_naive
 
     execution = AgentExecution(
-        id=kwargs.get("execution_id"),
-        app_id=kwargs.get("app_id"),
-        conversation_id=kwargs.get("conversation_id"),
-        message_id=result.message_id,
-        user_id=kwargs.get("user_id"),
+        app_id=_to_uuid(kwargs["app_id"]),
+        conversation_id=_to_uuid(kwargs["conversation_id"]),
+        message_id=_to_uuid(kwargs.get("message_id")),
+        agent_config_id=_to_uuid(kwargs.get("agent_config_id")),
+        release_id=_to_uuid(kwargs.get("release_id")),
+        triggered_by=None,
+        steps=kwargs.get("steps", []),
         status=kwargs.get("status", "completed"),
-        node_executions=result.node_executions,
-        total_tokens=result.total_tokens,
-        elapsed_time=result.elapsed_time,
-        model_name=kwargs.get("api_key_model_name"),
-        provider=kwargs.get("api_key_provider"),
+        started_at=parse_timestamp_to_utc_naive(kwargs["started_at_ts"]),
+        completed_at=utcnow_naive(),
+        elapsed_time=kwargs.get("elapsed_time"),
+        token_usage=kwargs.get("token_usage"),
+        error_message=kwargs.get("error_message"),
+        meta_data=kwargs.get("meta_data", {}),
     )
     db.add(execution)
 
@@ -606,8 +616,27 @@ async def _handle_after_turn(
         logger.exception("after_turn failed for conversation %s", kwargs.get("conversation_id"))
 
 
+async def _handle_save_node_executions(
+    db: Any,
+    execution_id: str,
+    items: list[dict[str, Any]],
+    **kwargs: Any,
+) -> None:
+    """Batch persist workflow node execution records."""
+    from app.models.workflow_model import WorkflowNodeExecution
+
+    if not items:
+        return
+    await db.execute(
+        sa_text("DELETE FROM workflow_node_executions WHERE execution_id = :eid"),
+        {"eid": execution_id},
+    )
+    await db.execute(sa_insert(WorkflowNodeExecution).values(items))
+
+
 _TASK_HANDLERS: dict[str, Any] = {
-    "save_execution": _handle_save_execution,
+    "save_agent_execution": _handle_save_agent_execution,
+    "save_node_executions": _handle_save_node_executions,
     "record_usage": _handle_record_usage,
     "after_turn": _handle_after_turn,
 }
