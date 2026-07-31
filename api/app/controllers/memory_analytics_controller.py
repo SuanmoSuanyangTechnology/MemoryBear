@@ -141,10 +141,10 @@ async def generate_cache_api(
                 api_logger.info(f"开始为单个用户生成缓存: end_user_id={end_user_id}")
 
                 insight_result = await user_memory_service.generate_and_cache_insight(
-                    db, end_user_id, workspace_id, language=language,
+                    end_user_id, workspace_id, language=language, db=db,
                 )
                 summary_result = await user_memory_service.generate_and_cache_summary(
-                    db, end_user_id, workspace_id, language=language,
+                    end_user_id, workspace_id, language=language, db=db,
                 )
 
                 result = {

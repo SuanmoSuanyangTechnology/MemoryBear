@@ -658,7 +658,7 @@ class EmotionAnalyticsService:
             logger.error(f"生成个性化建议失败: {str(e)}", exc_info=True)
             raise
 
-    @staticmethod # 做一个静态方法？
+    @staticmethod
     def _get_llm_client_for_user(db: Session, end_user_id: str):
         """从 end_user_id 获取关联 memory_config 并构造 LLM 客户端。
 

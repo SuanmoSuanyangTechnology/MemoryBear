@@ -4503,8 +4503,8 @@ def update_implicit_emotions_storage(self) -> Dict[str, Any]:
     ignore_result=True,
     max_retries=0,
     acks_late=False,
-    time_limit=2400,
-    soft_time_limit=2200,
+    time_limit=3600,
+    soft_time_limit=3300,
     # 触发型任务标识，区别于 periodic_tasks 队列中的定时任务
     triggered=True,
 )
