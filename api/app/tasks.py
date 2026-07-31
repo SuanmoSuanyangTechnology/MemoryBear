@@ -623,8 +623,10 @@ def _finish_rebuild_task_guard(
         owner_token: str,
         terminal: str,
 ) -> None:
-    mark_rebuild_terminal(task_id, terminal)
-    _release_rebuild_attempt(knowledge_id, owner_token)
+    try:
+        mark_rebuild_terminal(task_id, terminal)
+    finally:
+        _release_rebuild_attempt(knowledge_id, owner_token)
     try:
         released = release_rebuild_job(knowledge_id, task_id)
         if not released:
