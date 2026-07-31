@@ -311,13 +311,26 @@ def create_knowledge_retrieval_tool(kb_config, kb_ids, user_id, citations_collec
 class AgentRunService:
     """Agent运行服务类"""
 
-    def __init__(self, db: Session | AsyncSession):
+    def __init__(self, db: Session | AsyncSession | None):
         """Agent运行服务
 
         Args:
             db: 数据库会话
         """
         self.db = db
+
+    def _uses_async_session(self) -> bool:
+        return isinstance(self.db, AsyncSession)
+
+    async def _release_db_connection(self) -> None:
+        """Release the underlying DB connection back to the pool before LLM streaming."""
+        try:
+            if self._uses_async_session():
+                await self.db.close()
+            else:
+                self.db.close()
+        except Exception as e:
+            logger.warning(f"Failed to release DB connection: {e}")
 
     async def _resolve_app_tenant_id_async(self, app_id: uuid.UUID) -> Optional[uuid.UUID]:
         async with get_async_db_context() as db:
@@ -1564,10 +1577,10 @@ class AgentRunService:
         memory_config: dict | None = agent_config.memory
         features_config: dict = agent_config.features or {}
 
-        # 从 features 中读取功能开关
+        # 从 features 中读取功能开关（features 配置为权威来源）
         web_search_feature = features_config.get("web_search", {})
-        if not (isinstance(web_search_feature, dict) and web_search_feature.get("enabled")):
-            web_search = False
+        if isinstance(web_search_feature, dict) and web_search_feature.get("enabled"):
+            web_search = True
 
         # file_upload 校验
         self._validate_file_upload(features_config, files)
@@ -1880,8 +1893,7 @@ class AgentRunService:
 
             # LLM 推理期间不需要 db，提前归还连接给连接池
             # 所有工具（knowledge/memory/web_search）均使用独立连接，不依赖 self.db
-            # SQLAlchemy Session.close() 只归还底层连接，session 对象仍可复用（懒重连）
-            # self.db.close()
+            await self._release_db_connection()
 
             # 9. 流式调用 Agent（支持多模态），同时并行启动 TTS
             full_content = ""
@@ -3565,6 +3577,7 @@ class AgentRunService:
             files: list[FileInput] | None = None,
             source: str = "",
             execution_mode: Literal["in_process", "sandbox"] = "in_process",
+            skip_save: bool = False,
     ) -> AsyncGenerator[str, None]:
         """多模型对比试运行（流式返回）
 
@@ -3642,6 +3655,7 @@ class AgentRunService:
                 start_time = time.time()
                 full_content = ""
                 full_reasoning = ""
+                total_tokens = 0
                 returned_conversation_id = model_conversation_id
                 audio_url = None
                 audio_status = None
@@ -3672,6 +3686,7 @@ class AgentRunService:
                             source=source,
                             user_message_id=model_user_message_id,
                             execution_mode=execution_mode,
+                            skip_save=skip_save,
                     ):
                         # 解析原始事件
                         try:
@@ -3753,6 +3768,7 @@ class AgentRunService:
                                 citations = event_data.get("citations", [])
                                 suggested_questions = event_data.get("suggested_questions", [])
                                 message_id = event_data.get("message_id")
+                                total_tokens = event_data.get("total_tokens", 0) or 0
 
                             if event_type == "error" and event_data:
                                 stream_error = event_data.get("error") or {"message": "未知错误"}
@@ -3807,7 +3823,8 @@ class AgentRunService:
                         "audio_status": audio_status,
                         "citations": citations,
                         "suggested_questions": suggested_questions,
-                        "error": stream_error
+                        "error": stream_error,
+                        "user_message_id": str(model_user_message_id),
                     }
 
                 # 构建结果（参考 run_compare）
@@ -3824,7 +3841,9 @@ class AgentRunService:
                     "audio_status": audio_status,
                     "citations": citations,
                     "suggested_questions": suggested_questions,
-                    "error": None
+                    "error": None,
+                    "total_tokens": total_tokens,
+                    "user_message_id": str(model_user_message_id),
                 }
 
                 # 发送模型完成事件
@@ -3861,7 +3880,8 @@ class AgentRunService:
                     "conversation_id": model_conversation_id,
                     "parameters_used": model_info["parameters"],
                     "elapsed_time": timeout,
-                    "error": compact_error
+                    "error": compact_error,
+                    "user_message_id": str(model_user_message_id),
                 }
 
                 await event_queue.put(self._format_sse_event(
@@ -3903,7 +3923,8 @@ class AgentRunService:
                     "conversation_id": model_conversation_id,
                     "parameters_used": model_info["parameters"],
                     "elapsed_time": 0,
-                    "error": compact_error
+                    "error": compact_error,
+                    "user_message_id": str(model_user_message_id),
                 }
 
                 await event_queue.put(self._format_sse_event(
@@ -4020,6 +4041,56 @@ class AgentRunService:
                 "suggested_questions": r.get("suggested_questions", []),
                 "error": r.get("error")
             })
+
+        # Phase 3: enqueue per-model message saves via batch persist queue
+        if not skip_save:
+            from app.services.batch_persist_queue import BatchPersistQueue, PersistTask
+
+            # Build files_meta from FileInput list
+            _files_meta: list[dict[str, Any]] = []
+            if files:
+                for f in files:
+                    _files_meta.append({
+                        "type": getattr(f, 'type', None),
+                        "url": getattr(f, 'url', None),
+                        "name": getattr(f, 'name', None),
+                        "size": getattr(f, 'size', None),
+                        "file_type": getattr(f, 'file_type', None),
+                    })
+
+            for r in successful:
+                _conv_id = r.get("conversation_id")
+                _user_msg_id = r.get("user_message_id")
+                if _conv_id and _user_msg_id:
+                    try:
+                        await BatchPersistQueue.enqueue(PersistTask(
+                            task_type="save_messages",
+                            args={
+                                "sync_memory": False,
+                                "ctx": None,  # unused when overrides provided
+                                "result": None,  # unused when overrides provided
+                                "conversation_id_override": uuid.UUID(_conv_id) if isinstance(_conv_id, str) else _conv_id,
+                                "user_message_id_override": uuid.UUID(_user_msg_id) if isinstance(_user_msg_id, str) else _user_msg_id,
+                                "message_id_override": uuid.uuid4(),
+                                "user_message_content": message,
+                                "files_meta": _files_meta,
+                                "content_override": r.get("message", ""),
+                                "meta_override": {
+                                    "usage": {
+                                        "prompt_tokens": 0,
+                                        "completion_tokens": 0,
+                                        "total_tokens": r.get("total_tokens", 0) or 0,
+                                    },
+                                    "reasoning": r.get("reasoning_content") or "",
+                                    "audio_url": r.get("audio_url"),
+                                    "citations": r.get("citations", []),
+                                    "suggested_questions": r.get("suggested_questions", []),
+                                    "audio_status": r.get("audio_status"),
+                                },
+                            },
+                        ))
+                    except Exception:
+                        logger.exception("Failed to enqueue compare model save for %s", r.get("label"))
 
         # 发送对比完成事件（参考 run_compare 的返回格式）
         yield self._format_sse_event("compare_end", {

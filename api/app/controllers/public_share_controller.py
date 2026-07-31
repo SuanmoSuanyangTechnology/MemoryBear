@@ -6,6 +6,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import StreamingResponse
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
@@ -640,6 +641,11 @@ async def chat(
             app = await app_service.get_app_async(share.app_id)
             workspace_id = app.workspace_id
 
+            _ws_result = await db.execute(
+                select(Workspace.tenant_id).where(Workspace.id == workspace_id)
+            )
+            _tenant_id = _ws_result.scalar_one_or_none()
+
             new_end_user = await _get_or_create_public_end_user_async(
                 db,
                 app_id=share.app_id,
@@ -718,9 +724,18 @@ async def chat(
         if payload.stream:
             source = HitLogSource.EXTERNAL
             execution_mode = "sandbox" if settings.E2B_ENABLED else "in_process"
+
+            from app.db import AsyncSessionLocal
+
+            stream_db = AsyncSessionLocal()
+            try:
+                app_chat_service = AppChatService(stream_db)
+            except Exception:
+                await stream_db.close()
+                raise
+
             async def event_generator():
-                async with get_async_db_context() as stream_db:
-                    app_chat_service = AppChatService(stream_db)
+                try:
                     async for event in app_chat_service.agent_chat_stream(
                             message=payload.message,
                             conversation_id=conversation_id,
@@ -737,6 +752,8 @@ async def chat(
                             execution_mode=execution_mode,
                     ):
                         yield event
+                finally:
+                    await stream_db.close()
 
             return StreamingResponse(
                 event_generator(),
@@ -744,8 +761,8 @@ async def chat(
                 headers={
                     "Cache-Control": "no-cache",
                     "Connection": "keep-alive",
-                    "X-Accel-Buffering": "no"
-                }
+                    "X-Accel-Buffering": "no",
+                },
             )
         source = HitLogSource.EXTERNAL
         execution_mode = "sandbox" if settings.E2B_ENABLED else "in_process"
@@ -770,9 +787,17 @@ async def chat(
     elif app_type == AppType.MULTI_AGENT:
         config = runtime_config
         if payload.stream:
+            from app.db import AsyncSessionLocal
+
+            stream_db = AsyncSessionLocal()
+            try:
+                app_chat_service = AppChatService(stream_db)
+            except Exception:
+                await stream_db.close()
+                raise
+
             async def event_generator():
-                async with get_async_db_context() as stream_db:
-                    app_chat_service = AppChatService(stream_db)
+                try:
                     async for event in app_chat_service.multi_agent_chat_stream(
                             message=payload.message,
                             conversation_id=conversation_id,
@@ -785,6 +810,8 @@ async def chat(
                             user_rag_memory_id=user_rag_memory_id
                     ):
                         yield event
+                finally:
+                    await stream_db.close()
 
             return StreamingResponse(
                 event_generator(),
@@ -792,8 +819,8 @@ async def chat(
                 headers={
                     "Cache-Control": "no-cache",
                     "Connection": "keep-alive",
-                    "X-Accel-Buffering": "no"
-                }
+                    "X-Accel-Buffering": "no",
+                },
             )
 
         # 多 Agent 非流式返回
@@ -816,9 +843,18 @@ async def chat(
         config = runtime_config
         if payload.stream:
             source = HitLogSource.EXTERNAL
+
+            from app.db import AsyncSessionLocal
+
+            stream_db = AsyncSessionLocal()
+            try:
+                app_chat_service = AppChatService(stream_db)
+            except Exception:
+                await stream_db.close()
+                raise
+
             async def event_generator():
-                async with get_async_db_context() as stream_db:
-                    app_chat_service = AppChatService(stream_db)
+                try:
                     async for event in app_chat_service.workflow_chat_stream(
                             message=payload.message,
                             conversation_id=conversation_id,
@@ -840,6 +876,8 @@ async def chat(
                         event_data = event.get("data", {})
                         sse_message = f"event: {event_type}\ndata: {json.dumps(event_data, default=str, ensure_ascii=False)}\n\n"
                         yield sse_message
+                finally:
+                    await stream_db.close()
 
             return StreamingResponse(
                 event_generator(),
@@ -847,8 +885,8 @@ async def chat(
                 headers={
                     "Cache-Control": "no-cache",
                     "Connection": "keep-alive",
-                    "X-Accel-Buffering": "no"
-                }
+                    "X-Accel-Buffering": "no",
+                },
             )
 
         # 多 Agent 非流式返回

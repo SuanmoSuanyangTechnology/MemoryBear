@@ -21,7 +21,7 @@ from app.schemas.response_schema import PageData, PageMeta
 from app.core.exceptions import BusinessException
 from app.core.error_codes import BizCode
 from app.core.utils.datetime_utils import utcnow_naive
-from app.utils.redis_cache import invalidate_workspace_model_options
+from app.utils.redis_cache import invalidate_workspace_model_options, get_json_async, set_json_async, CACHE_MISS
 
 logger = get_business_logger()
 
@@ -97,7 +97,12 @@ class ModelConfigService:
         model_id: uuid.UUID,
         tenant_id: uuid.UUID | None = None,
     ) -> ModelInfo:
-        """统一获取运行时模型信息（异步）"""
+        """统一获取运行时模型信息（异步），带 Redis 缓存"""
+        cache_key = f"runtime_model_info:{model_id}:{tenant_id or '_'}"
+        cached = await get_json_async(cache_key)
+        if cached is not CACHE_MISS and isinstance(cached, dict):
+            return ModelInfo(**cached)
+
         model = await ModelConfigService.get_model_by_id_async(
             db,
             model_id,
@@ -111,7 +116,7 @@ class ModelConfigService:
         if not api_key:
             raise BusinessException("模型配置缺少 API Key", BizCode.INVALID_PARAMETER)
 
-        return ModelInfo(
+        result = ModelInfo(
             model_name=api_key.model_name,
             model_type=ModelType(model.type),
             api_key=api_key.api_key,
@@ -120,6 +125,8 @@ class ModelConfigService:
             is_omni=api_key.is_omni,
             capability=api_key.capability,
         )
+        await set_json_async(cache_key, result.model_dump(mode="json"), ttl=300)
+        return result
 
     @staticmethod
     def get_model_list(db: Session, query: ModelConfigQuery, tenant_id: uuid.UUID | None = None) -> PageData:

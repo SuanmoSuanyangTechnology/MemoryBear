@@ -749,6 +749,16 @@ def update_workspace(
         db.add(db_workspace)
         db.commit()
         db.refresh(db_workspace)
+
+        # storage_type 变更时，使 _prepare_v1_chat_memory_context_async 缓存失效
+        if "storage_type" in update_data:
+            import asyncio
+            from app.utils.redis_cache import invalidate_cache
+            try:
+                asyncio.run(invalidate_cache(prefix=f"storage_type:{workspace_id}"))
+            except Exception:
+                pass
+
         business_logger.info(f"工作空间更新成功: {db_workspace.name} (ID: {workspace_id})")
         return db_workspace
     except Exception as e:
