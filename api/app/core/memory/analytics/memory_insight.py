@@ -16,7 +16,7 @@ from app.core.logging_config import get_logger
 from app.core.memory.pipelines.base_pipeline import ModelClientMixin
 from app.core.memory.utils.prompt.template_render import prompt_env
 from app.core.utils.datetime_utils import as_utc_aware, utcnow_naive
-from app.db import get_async_db_context
+from app.db import get_async_db_context, get_db_context
 from app.repositories.end_user_repository import (
     EndUserRepository,
     MemoryInsightSourceRow,
@@ -329,6 +329,8 @@ def classify_memory_cache_refresh(
 
 async def validate_neo4j_memory_insight_workspace(
     workspace_id: uuid.UUID | str,
+    *,
+    use_sync_db: bool = False,
 ) -> MemoryInsightWorkspaceValidation:
     try:
         workspace_uuid = (
@@ -339,12 +341,24 @@ async def validate_neo4j_memory_insight_workspace(
     except (TypeError, ValueError, AttributeError):
         return MemoryInsightWorkspaceValidation(False, "invalid_workspace_id")
 
-    async with get_async_db_context() as db:
-        workspace = await WorkspaceRepository(db).get_workspace_by_id_async(workspace_uuid)
-        if workspace is None:
-            return MemoryInsightWorkspaceValidation(False, "workspace_not_found")
-        is_active = cast(bool, cast(object, workspace.is_active))
-        raw_storage_type = cast(str | None, cast(object, workspace.storage_type))
+    if use_sync_db:
+        # Celery 旧实现保留如下：
+        # async with get_async_db_context() as db:
+        #     workspace = await WorkspaceRepository(db).get_workspace_by_id_async(workspace_uuid)
+        # 模块级 asyncpg pool 可能把其他 event loop 使用过的连接交给当前 Task。
+        with get_db_context() as db:
+            workspace = WorkspaceRepository(db).get_workspace_by_id(workspace_uuid)
+            if workspace is None:
+                return MemoryInsightWorkspaceValidation(False, "workspace_not_found")
+            is_active = cast(bool, cast(object, workspace.is_active))
+            raw_storage_type = cast(str | None, cast(object, workspace.storage_type))
+    else:
+        async with get_async_db_context() as db:
+            workspace = await WorkspaceRepository(db).get_workspace_by_id_async(workspace_uuid)
+            if workspace is None:
+                return MemoryInsightWorkspaceValidation(False, "workspace_not_found")
+            is_active = cast(bool, cast(object, workspace.is_active))
+            raw_storage_type = cast(str | None, cast(object, workspace.storage_type))
 
     if not is_active:
         return MemoryInsightWorkspaceValidation(
@@ -365,16 +379,34 @@ async def validate_neo4j_memory_insight_workspace(
 
 async def _create_memory_insight_llm_client(
     end_user_id: uuid.UUID,
+    *,
+    use_sync_db: bool = False,
 ) -> StructuredLLMClient:
-    async with get_async_db_context() as db:
-        config_service = MemoryConfigService(db)
-        config_id = await config_service.get_config_id_by_end_user_async(end_user_id)
-        memory_config = await config_service.load_memory_config_async(config_id)
-        llm_client = await ModelClientMixin.get_llm_client_async(
-            db,
-            memory_config.llm_model_id,
-            memory_config.tenant_id,
-        )
+    if use_sync_db:
+        # Celery 旧实现保留如下：
+        # config_id = await config_service.get_config_id_by_end_user_async(end_user_id)
+        # memory_config = await config_service.load_memory_config_async(config_id)
+        # llm_client = await ModelClientMixin.get_llm_client_async(...)
+        # 这些查询复用全局 asyncpg pool 时存在 Future attached to a different loop 风险。
+        with get_db_context() as db:
+            config_service = MemoryConfigService(db)
+            config_id = config_service.get_config_id_by_end_user(end_user_id)
+            memory_config = config_service.load_memory_config(config_id)
+            llm_client = ModelClientMixin.get_llm_client(
+                db,
+                memory_config.llm_model_id,
+                memory_config.tenant_id,
+            )
+    else:
+        async with get_async_db_context() as db:
+            config_service = MemoryConfigService(db)
+            config_id = await config_service.get_config_id_by_end_user_async(end_user_id)
+            memory_config = await config_service.load_memory_config_async(config_id)
+            llm_client = await ModelClientMixin.get_llm_client_async(
+                db,
+                memory_config.llm_model_id,
+                memory_config.tenant_id,
+            )
     return cast(
         StructuredLLMClient,
         cast(
@@ -408,6 +440,8 @@ async def refresh_memory_insight(
     end_user_id: str,
     workspace_id: uuid.UUID | str,
     language: str = "zh",
+    *,
+    use_sync_db: bool = False,
 ) -> dict[str, object]:
     """使用短 PG 会话生成并条件写回单个用户的 Memory Insight。"""
     started_at = time.monotonic()
@@ -425,7 +459,15 @@ async def refresh_memory_insight(
             error="无效的用户或工作空间ID格式",
         )
 
-    workspace_validation = await validate_neo4j_memory_insight_workspace(workspace_uuid)
+    if use_sync_db:
+        workspace_validation = await validate_neo4j_memory_insight_workspace(
+            workspace_uuid,
+            use_sync_db=True,
+        )
+    else:
+        workspace_validation = await validate_neo4j_memory_insight_workspace(
+            workspace_uuid
+        )
     if not workspace_validation.valid:
         return _memory_insight_result(
             success=False,
@@ -433,13 +475,25 @@ async def refresh_memory_insight(
             error=f"工作空间不可用于 Neo4j Memory Insight: {workspace_validation.reason}",
         )
 
-    async with get_async_db_context() as db:
-        source: MemoryInsightSourceRow | None = await EndUserRepository(
-            db
-        ).get_scoped_memory_insight_source_async(
-            workspace_id=workspace_uuid,
-            end_user_id=end_user_uuid,
-        )
+    source: MemoryInsightSourceRow | None
+    if use_sync_db:
+        # Celery 旧实现保留如下：
+        # async with get_async_db_context() as db:
+        #     source = await EndUserRepository(db).get_scoped_memory_insight_source_async(...)
+        # asyncpg 连接可能绑定其他 event loop，因此 worker 改用同步短 Session。
+        with get_db_context() as db:
+            source = EndUserRepository(db).get_scoped_memory_insight_source(
+                workspace_id=workspace_uuid,
+                end_user_id=end_user_uuid,
+            )
+    else:
+        async with get_async_db_context() as db:
+            source = await EndUserRepository(
+                db
+            ).get_scoped_memory_insight_source_async(
+                workspace_id=workspace_uuid,
+                end_user_id=end_user_uuid,
+            )
     if source is None:
         return _memory_insight_result(
             success=False,
@@ -474,7 +528,13 @@ async def refresh_memory_insight(
             key_findings=[],
         )
     else:
-        llm_client = await _create_memory_insight_llm_client(end_user_uuid)
+        if use_sync_db:
+            llm_client = await _create_memory_insight_llm_client(
+                end_user_uuid,
+                use_sync_db=True,
+            )
+        else:
+            llm_client = await _create_memory_insight_llm_client(end_user_uuid)
         output = await generate_memory_insight_output(
             llm_client,
             metadata_input,
@@ -484,19 +544,29 @@ async def refresh_memory_insight(
 
     actionable = [item.model_dump() for item in output.key_findings]
     refreshed_at = utcnow_naive()
-    async with get_async_db_context() as db:
-        updated = await EndUserRepository(
-            db
-        ).update_grounded_memory_insight_if_source_unchanged_async(
-            workspace_id=workspace_uuid,
-            end_user_id=end_user_uuid,
-            expected_write_time=source["write_time"],
-            expected_metadata_row_exists=source["metadata_row_exists"],
-            expected_metadata_updated_at=source["metadata_updated_at"],
-            memory_insight=output.overview,
-            key_findings=json.dumps(actionable, ensure_ascii=False),
-            refreshed_at=refreshed_at,
-        )
+    update_kwargs = {
+        "workspace_id": workspace_uuid,
+        "end_user_id": end_user_uuid,
+        "expected_write_time": source["write_time"],
+        "expected_metadata_row_exists": source["metadata_row_exists"],
+        "expected_metadata_updated_at": source["metadata_updated_at"],
+        "memory_insight": output.overview,
+        "key_findings": json.dumps(actionable, ensure_ascii=False),
+        "refreshed_at": refreshed_at,
+    }
+    if use_sync_db:
+        # Celery 旧实现保留如下：
+        # updated = await EndUserRepository(db).update_grounded_memory_insight_if_source_unchanged_async(...)
+        # 异步写回同样可能从全局 asyncpg pool 取得绑定其他 loop 的连接。
+        with get_db_context() as db:
+            updated = EndUserRepository(
+                db
+            ).update_grounded_memory_insight_if_source_unchanged(**update_kwargs)
+    else:
+        async with get_async_db_context() as db:
+            updated = await EndUserRepository(
+                db
+            ).update_grounded_memory_insight_if_source_unchanged_async(**update_kwargs)
 
     status = "refreshed" if updated else "superseded"
     logger.info(
@@ -515,3 +585,17 @@ async def refresh_memory_insight(
             error="源数据已更新，本轮洞察未写入",
         )
     return _memory_insight_result(success=True, output=output, status=status)
+
+
+async def refresh_memory_insight_for_worker(
+    end_user_id: str,
+    workspace_id: uuid.UUID | str,
+    language: str = "zh",
+) -> dict[str, object]:
+    """使用同步 PG 短 Session 刷新 Celery worker 中的 Memory Insight。"""
+    return await refresh_memory_insight(
+        end_user_id=end_user_id,
+        workspace_id=workspace_id,
+        language=language,
+        use_sync_db=True,
+    )
