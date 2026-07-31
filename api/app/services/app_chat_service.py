@@ -43,6 +43,10 @@ from app.services.context_assembler import (
     ContextEvidence,
     append_external_context_rule,
 )
+from app.core.memory.emotion.emotion_resolver import (
+    apply_detection as apply_emotion_detection,
+    start_detection as start_emotion_detection,
+)
 
 logger = get_business_logger()
 
@@ -607,6 +611,11 @@ class AppChatService:
         # 校验文件上传
         self.agent_service._validate_file_upload(features_config, files)
 
+        # 情绪感知回复（App 开关；关闭时返回 None，全程不做任何情绪处理）。
+        # 提前启动，与下面的工具/提示词/上下文引擎/多模态准备并发执行，避免串行增加首字延迟；
+        # 结果在创建 ToolOrchestrator / LangChainAgent 之前统一 await 并注入。
+        emotion_detection = start_emotion_detection(features_config, message)
+
         variables = self.agent_service.prepare_variables(variables, config.variables)
 
         # 获取模型配置ID
@@ -732,6 +741,13 @@ class AppChatService:
                     "重要：图片 URL 中包含 UUID（如 /storage/permanent/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx），"
                     "必须将 src 属性的值原封不动复制到 Markdown 的括号中，不得增删任何字符。"
                 )
+
+        # 情绪感知回复：等待识别结果 → 成功则写缓存并注入「固定原则+本轮策略」；失败/未命中则提示词原样不动。
+        # 必须在 ToolOrchestrator / LangChainAgent 之前完成，保证它们拿到的是最终提示词。
+        # write_cache=memory：记忆关闭时 dispatcher 不派发快写，缓存无消费方，不写避免孤儿 key。
+        system_prompt = await apply_emotion_detection(
+            system_prompt, emotion_detection, user_message_id, write_cache=memory
+        )
 
         # 弱模型：用 ReAct prompt 驱动多轮工具调用，将轨迹注入 system_prompt
         capability = api_key_obj.capability or []
@@ -1140,6 +1156,10 @@ class AppChatService:
             # 校验文件上传
             self.agent_service._validate_file_upload(features_config, files)
 
+            # 情绪感知回复（App 开关；关闭时返回 None，全程不做任何情绪处理）。
+            # 提前启动，与提示词/上下文引擎/多模态准备并发，避免串行增加首字延迟。
+            emotion_detection = start_emotion_detection(features_config, message)
+
             yield f"event: start\ndata: {json.dumps({'conversation_id': str(conversation_id), 'message_id': str(message_id), 'user_message_id': str(user_message_id)}, ensure_ascii=False)}\n\n"
 
             variables = self.agent_service.prepare_variables(variables, config.variables)
@@ -1261,6 +1281,13 @@ class AppChatService:
                         "重要：图片 URL 中包含 UUID（如 /storage/permanent/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx），"
                         "必须将 src 属性的值原封不动复制到 Markdown 的括号中，不得增删任何字符。"
                     )
+
+            # 情绪感知回复：等待识别结果 → 成功则写缓存并注入「固定原则+本轮策略」；失败/未命中则提示词原样不动。
+            # 必须在 ToolOrchestrator / LangChainAgent 之前完成。
+            # write_cache=memory：记忆关闭时 dispatcher 不派发快写，缓存无消费方，不写避免孤儿 key。
+            system_prompt = await apply_emotion_detection(
+                system_prompt, emotion_detection, user_message_id, write_cache=memory
+            )
 
             # 弱模型：用 ReAct prompt 驱动多轮工具调用，将轨迹注入 system_prompt
             capability = api_key_obj.capability or []
