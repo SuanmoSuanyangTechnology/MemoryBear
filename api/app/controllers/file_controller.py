@@ -1,3 +1,4 @@
+import asyncio
 import os
 from typing import Any, Optional
 import uuid
@@ -6,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, File, UploadFile,
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import Response, StreamingResponse
 from sqlalchemy.orm import Session
+from starlette.background import BackgroundTask
 
 from app.core.config import settings
 from app.core.logging_config import get_api_logger
@@ -23,7 +25,11 @@ from app.services.file_storage_service import (
     generate_kb_file_key,
     get_file_storage_service,
 )
-from app.services.file_service import _is_qa_doc, _build_qa_export
+from app.services.file_service import _is_qa_doc
+from app.services.qa_export_service import (
+    cleanup_qa_export_file,
+    iter_qa_export_file_chunks,
+)
 from app.core.quota_stub import check_knowledge_capacity_quota
 
 api_logger = get_api_logger()
@@ -222,15 +228,20 @@ async def get_file(
 
     # QA 文档：默认从 ES 导出修改后的内容
     if not original and _is_qa_doc(db, file_id):
-        result = _build_qa_export(db, file_id, db_file.kb_id)
-        if result:
-            content, filename, media_type = result
-            from urllib.parse import quote
-            return Response(
-                content=content,
-                media_type=media_type,
-                headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}"}
+        qa_export_spec = file_service.get_qa_export_spec(db, file_id, db_file.kb_id)
+        if qa_export_spec:
+            export_file = await asyncio.to_thread(
+                file_service.build_qa_export_file,
+                qa_export_spec,
             )
+            if export_file:
+                from urllib.parse import quote
+                return StreamingResponse(
+                    iter_qa_export_file_chunks(export_file.path),
+                    media_type=export_file.media_type,
+                    headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(export_file.filename)}"},
+                    background=BackgroundTask(cleanup_qa_export_file, export_file.path),
+                )
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="QA document has no exportable content")
 
     if not db_file.file_key:
@@ -281,21 +292,23 @@ async def batch_download_files(
             detail="所选文件均无有效存储Key",
         )
 
-    # 预取 QA 文档内容，非 QA 文档走原下载逻辑
-    pre_fetched: dict[str, bytes] = {}
+    qa_export_specs: dict[str, file_service.QAExportSpec] = {}
     for f in valid_files:
-        if _is_qa_doc(db, f.id):
-            result = _build_qa_export(db, f.id, f.kb_id)
-            if result:
-                content, _, _ = result
-                pre_fetched[f.file_key] = content
+        qa_export_spec = file_service.get_qa_export_spec(db, f.id, f.kb_id)
+        if qa_export_spec:
+            qa_export_specs[f.file_key] = qa_export_spec
 
     entries = file_service.build_zip_arcnames(valid_files)
     zip_name = file_service.make_zip_filename(valid_files, request_body.zip_filename)
 
     from urllib.parse import quote
     return StreamingResponse(
-        file_service.stream_zip_files(entries, storage_service, api_logger, pre_fetched),
+        file_service.stream_zip_files(
+            entries,
+            storage_service,
+            api_logger,
+            qa_export_specs=qa_export_specs,
+        ),
         media_type="application/zip",
         headers={
             "Content-Disposition": f"attachment; filename*=UTF-8''{quote(zip_name)}",

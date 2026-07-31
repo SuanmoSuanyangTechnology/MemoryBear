@@ -233,7 +233,7 @@ async def render_triplet_extraction_prompt(
 
     return rendered_prompt
 
-async def render_memory_summary_prompt(
+async def render_memory_summary_prompt( # 只提供给RAG存储使用
     chunk_texts: str,
     json_schema: dict,
     max_words: int = 200,
@@ -540,4 +540,37 @@ def render_interest_filter_prompt(tag_list: str, language: str = "zh") -> str:
     template = prompt_env.get_template("interest_filter.jinja2")
     rendered_prompt = template.render(tag_list=tag_list, language=language)
     log_prompt_rendering('interest filter', rendered_prompt)
+    return rendered_prompt
+
+
+async def render_neo4j_memory_summary_prompt(
+    chunk_texts: str,
+    max_words: int = 200,
+    language: str = "zh",
+) -> str:
+    """Render the combined neo4j memory title + type + summary prompt.
+
+    Uses neo4j_memory_summary.jinja2 to generate title, type,
+    and summary in a single LLM call, reducing per-chunk calls from 2 to 1.
+
+    Args:
+        chunk_texts: The content of the chunk to summarize
+        max_words: Maximum words for the summary
+        language: Language for output ("zh" for Chinese, "en" for English)
+
+    Returns:
+        Rendered prompt content as string
+    """
+    template = prompt_env.get_template("neo4j_memory_summary.jinja2")
+    rendered_prompt = template.render(
+        chunk_texts=chunk_texts,
+        max_words=max_words,
+        language=language,
+    )
+    log_prompt_rendering('neo4j memory summary (title+type+summary)', rendered_prompt)
+    log_template_rendering('neo4j_memory_summary.jinja2', {
+        'chunk_texts_len': len(chunk_texts or ""),
+        'max_words': max_words,
+        'language': language,
+    })
     return rendered_prompt

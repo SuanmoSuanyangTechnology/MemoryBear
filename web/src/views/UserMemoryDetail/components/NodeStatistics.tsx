@@ -83,16 +83,14 @@ const NodeStatistics = forwardRef<NodeStatisticsRef, { highlightKeys?: string[] 
         justify="space-between"
         className={clsx(
           "rb:h-full rb:group rb:cursor-pointer rb:bg-[#FFFFFF]",{
-            'rb:rounded-xl rb:shaodow-[0px_2px_6px_0px_rgba(33,35,50,0.08)] rb:p-3!': !isChild,
+            'rb:rounded-xl rb:shadow-[0px_2px_6px_0px_rgba(33,35,50,0.08)] rb:p-3!': !isChild,
             'rb:px-3! rb:pt-2! rb:pb-2.5! rb:w-full': isChild
           }
         )}
         onClick={() => handleViewDetail(key)}
       >
-        <div>
-          <div className={clsx("rb:leading-5 rb:font-regular", isHighlighted ? 'rb:text-[#155EEF]' : 'rb:text-[#5B6167]')}>
-            {t(`userMemory.${key}`)}
-          </div>
+        <div className={clsx("rb:leading-5 rb:font-regular", isHighlighted ? 'rb:text-[#155EEF]' : 'rb:text-[#5B6167]')}>
+          {t(`userMemory.${key}`)}
         </div>
         <Flex justify="space-between" align="center">
           <div className={clsx("rb:text-[24px] rb:leading-8 rb:font-extrabold rb:font-[MiSans-Heavy]", isHighlighted && 'rb:text-[#155EEF]')}>{item?.count ?? 0}</div>
@@ -106,7 +104,7 @@ const NodeStatistics = forwardRef<NodeStatisticsRef, { highlightKeys?: string[] 
   }))
 
   return (
-    <div className="rb:h-22">
+    <div>
       {loading
         ? <Skeleton active />
         : <div className="rb:w-full rb:grid rb:grid-cols-8 rb:gap-3 rb:h-full">
@@ -115,8 +113,8 @@ const NodeStatistics = forwardRef<NodeStatisticsRef, { highlightKeys?: string[] 
               return <div key={vo.key} className="rb:h-full">{renderCard(vo.key)}</div>
             }
             return (
-              <div key={vo.key} className={clsx("rb:col-span-3 rb:shaodow-[0px_2px_6px_0px_rgba(33,35,50,0.08)] rb:rounded-xl rb:bg-[#FFFFFF] rb:overflow-hidden")}>
-                <div className="rb:w-[136px] rb:h-5 rb:text-xs rb:text-[#171719] rb:py-[2px] rb:font-medium rb:text-center rb:rounded-tl-xl  rb:rounded-br-xl"
+              <div key={vo.key} className={clsx("rb:col-span-3 rb:shadow-[0px_2px_6px_0px_rgba(33,35,50,0.08)] rb:rounded-xl rb:bg-[#FFFFFF] rb:overflow-hidden")}>
+                <div className="rb:w-34 rb:h-5 rb:text-xs rb:text-[#171719] rb:py-0.5 rb:font-medium rb:text-center rb:rounded-tl-xl  rb:rounded-br-xl"
                   style={{ background: 'linear-gradient( 90deg, #F0E3FE 0%, #D1E7FF 100%)' }}
                 >{t(`userMemory.${vo.key}`)}</div>
                 <div className="rb:grid rb:grid-cols-3">

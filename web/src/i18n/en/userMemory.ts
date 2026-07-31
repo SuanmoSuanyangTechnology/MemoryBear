@@ -61,6 +61,11 @@ export const userMemory = {
       EPISODIC_MEMORY: 'Episodic Memory',
       FORGET_MEMORY: 'Forget Memory',
 
+      memoryType: 'Memory Type',
+      allTermMemory: 'All Memory',
+      shortTermMemory: 'Short-Term Memory',
+      longTermMemory: 'Long-Term Memory',
+
       endUserProfile: 'Permanent Memory',
       editEndUserProfile: 'Edit',
       other_name: 'Name',
@@ -276,5 +281,18 @@ export const userMemory = {
       normal: 'Normal',
       userTag: 'User Tag',
       noTags: 'No tags',
+
+      memoryActivity: 'Memory Activity',
+      memoryActivitySubtitle: 'Memory read, write, and engine processing records',
+      activityDateToday: 'Today',
+      activityDateYesterday: 'Yesterday',
+      activityDateEarlier: 'Earlier',
+      activityFilterAll: 'All',
+      activityFilterEngine: 'Engine',
+      activityFilterRead: 'Read',
+      activityFilterWrite: 'Write',
+      EXTRACTION: 'Memory Extraction Engine',
+      CROSS_MODAL: 'Cross-modal Memory Association Engine',
+      EMOTION: 'Emotion Engine',
     },
 }

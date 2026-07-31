@@ -25,6 +25,7 @@ import type { TestParams } from '@/views/MemoryConversation'
 import type { EndUser } from '@/views/UserMemoryDetail/types'
 import { handleSSE, type SSEMessage } from '@/utils/stream'
 import type { ChatItem } from '@/components/Chat/types'
+import type { Query } from '@/views/UserMemory/types';
 
 // Memory conversation
 export const readService = (query: TestParams) => {
@@ -64,7 +65,7 @@ export const getDashboardData = () => {
 
 /****************** User Memory APIs *******************************/
 export const userMemoryListUrl = '/dashboard/end_users'
-export const getUserMemoryList = (query?: { keyword?: string }) => {
+export const getUserMemoryList = (query?: Query) => {
   return request.get(userMemoryListUrl, query)
 }
 // User Memory - Delete end user
@@ -159,19 +160,19 @@ export const generateSuggestions = (end_user_id: string) => {
 export const analyticsRefresh = (end_user_id: string) => {
   return request.post('/memory/analytics/generate_cache', { end_user_id })
 }
-// 遗忘记忆配额表
+// Forgetting memory quota table
 export const getForgetMemoryQuota = (end_user_id: string | string) => {
   return request.get(`/memory/forget-memory/${end_user_id}/memory_quota`)
 }
-// 仅7日遗忘趋势
+// Seven-day forgetting trend
 export const getForgetMemoryTrend = (end_user_id: string) => {
   return request.get(`/memory/forget-memory/${end_user_id}/forgetting_trend`)
 }
-// 遗忘候选
+// Forgetting candidates
 export const getForgetMemoryCandidatesUrl = (end_user_id: string) => `/memory/forget-memory/${end_user_id}/forgetting_candidates`
-// 遗忘记录
+// Forgotten records
 export const getForgetMemoryLogsUrl = (end_user_id: string) => `/memory/forget-memory/${end_user_id}/forgotten_logs`
-// 刷新（清除遗忘缓存）
+// Refresh and clear the forgetting cache
 export const refreshForgetMemoryCache = (end_user_id: string) => {
   return request.post(`/memory/forget-memory/${end_user_id}/refresh_cache`)
 }
@@ -379,10 +380,23 @@ export const getMemoryReflectionLogs = (end_user_id: string) => {
 }
 
 /*************** end Memory Management APIs ******************************/
-
-
-/****************** API Parameters APIs *******************************/
-export const getMemoryApi = () => {
-  return request.get('/memory/docs/api')
+// Get written memory activity records
+export const getMemoryActivityWrittenUrl = '/memory-display/written';
+export const getMemoryActivityWritten = (data: { end_user_id: string; page?: number; pagesize?: number; }) => {
+  return request.get(getMemoryActivityWrittenUrl, data)
 }
-/*************** end API Parameters APIs ******************************/
+// Get read memory activity records
+export const getMemoryActivityReadUrl = '/memory-activity/read';
+export const getMemoryActivityRead = (data: { end_user_id: string; page?: number; pagesize?: number; }) => {
+  return request.get(getMemoryActivityReadUrl, data)
+}
+// Get engine memory activity records
+export const getMemoryActivityEngineUrl = '/memory-display/engines';
+export const getMemoryActivityEngine = (data: { end_user_id: string; page?: number; pagesize?: number; }) => {
+  return request.get(getMemoryActivityEngineUrl, data)
+}
+// Get all memory activity records
+export const getMemoryActivityUrl = '/memory-activity/all';
+export const getMemoryActivity = (data: { end_user_id: string; page?: number; pagesize?: number; }) => {
+  return request.get(getMemoryActivityUrl, data)
+}

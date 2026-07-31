@@ -51,8 +51,15 @@ async def get_memory_insight_report_api(
 ) -> dict:
     """获取缓存的记忆洞察报告"""
     api_logger.info(f"记忆洞察报告查询请求: end_user_id={end_user_id}, user={current_user.username}")
+    workspace_id = current_user.current_workspace_id
+    if workspace_id is None:
+        return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
+
     try:
-        result = await user_memory_service.get_cached_memory_insight_async(end_user_id)
+        result = await user_memory_service.get_cached_memory_insight_async(
+            end_user_id,
+            workspace_id,
+        )
 
         if result.get("is_cached"):
             return success(data=result, msg="查询成功")
@@ -115,6 +122,20 @@ async def generate_cache_api(
     )
 
     try:
+        workspace_validation = await user_memory_service.validate_neo4j_cache_workspace(workspace_id)
+        if not workspace_validation.valid:
+            if workspace_validation.reason == "unsupported_storage_type":
+                return fail(
+                    BizCode.INVALID_PARAMETER,
+                    "当前接口仅支持 Neo4j 工作空间；RAG 工作空间请使用 RAG 专用画像生成入口",
+                    f"unsupported storage_type: {workspace_validation.storage_type or 'unknown'}",
+                )
+            return fail(
+                BizCode.INVALID_PARAMETER,
+                "当前工作空间不可用",
+                workspace_validation.reason,
+            )
+
         async with get_async_db_context() as db:
             if end_user_id:
                 api_logger.info(f"开始为单个用户生成缓存: end_user_id={end_user_id}")
