@@ -7,7 +7,7 @@ import logging
 import uuid
 from typing import Any, Dict, List, Tuple
 
-from sqlalchemy import text
+from sqlalchemy import and_, or_, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
@@ -121,19 +121,30 @@ class MemoryEngineDisplayEventRepository:
         if total == 0:
             return [], 0
 
-        # Step 2: 获取当前页的聚合键（local_date + engine_type），按 max_occurred_at DESC
+        # Step 2: 获取当前页的聚合键及其 UTC 边界，按 max_occurred_at DESC
         offset = (page - 1) * pagesize
         keys_sql = text("""
+            WITH grouped AS (
+                SELECT
+                    (r.occurred_at AT TIME ZONE 'UTC' AT TIME ZONE :tz)::date AS local_date,
+                    r.engine_type AS engine_type,
+                    MAX(r.occurred_at) AS max_occurred_at
+                FROM memory_engine_display_records r
+                JOIN end_users u ON u.id = r.end_user_id
+                WHERE r.end_user_id = CAST(:user_id AS uuid)
+                  AND u.workspace_id = CAST(:workspace_id AS uuid)
+                  AND u.is_active = true
+                GROUP BY local_date, engine_type
+            )
             SELECT
-                (r.occurred_at AT TIME ZONE 'UTC' AT TIME ZONE :tz)::date AS local_date,
-                r.engine_type AS engine_type,
-                MAX(r.occurred_at) AS max_occurred_at
-            FROM memory_engine_display_records r
-            JOIN end_users u ON u.id = r.end_user_id
-            WHERE r.end_user_id = CAST(:user_id AS uuid)
-              AND u.workspace_id = CAST(:workspace_id AS uuid)
-              AND u.is_active = true
-            GROUP BY local_date, engine_type
+                local_date,
+                engine_type,
+                max_occurred_at,
+                CAST(local_date AS timestamp)
+                    AT TIME ZONE :tz AT TIME ZONE 'UTC' AS start_utc,
+                (CAST(local_date AS timestamp) + interval '1 day')
+                    AT TIME ZONE :tz AT TIME ZONE 'UTC' AS end_utc
+            FROM grouped
             ORDER BY max_occurred_at DESC, engine_type ASC
             LIMIT :limit OFFSET :offset
         """)
@@ -151,44 +162,61 @@ class MemoryEngineDisplayEventRepository:
         if not keys_result:
             return [], total
 
-        # Step 3: 对当前页的每个聚合组，查回完整事件
-        groups = []
+        # Step 3: 一次查回当前页所有聚合组的完整事件，避免逐组查询。
+        group_specs = []
+        event_filters = []
         for row in keys_result:
             local_date = row[0]  # date
             engine_type = row[1]  # str
             max_occurred_at = row[2]  # datetime naive UTC
+            start_utc = row[3]  # datetime naive UTC
+            end_utc = row[4]  # datetime naive UTC
 
-            # 将本地日期边界转为 naive UTC 范围
-            range_sql = text("""
-                SELECT
-                    CAST(:local_date AS timestamp)
-                        AT TIME ZONE :tz AT TIME ZONE 'UTC' AS start_utc,
-                    (CAST(:local_date AS timestamp) + interval '1 day')
-                        AT TIME ZONE :tz AT TIME ZONE 'UTC' AS end_utc
-            """)
-            range_row = self.db.execute(
-                range_sql, {"local_date": str(local_date), "tz": timezone}
-            ).fetchone()
-            start_utc = range_row[0]
-            end_utc = range_row[1]
-
-            events = (
-                self.db.query(MemoryEngineDisplayEvent)
-                .filter(
-                    MemoryEngineDisplayEvent.end_user_id == end_user_id,
+            group_specs.append({
+                "engine_type": engine_type,
+                "local_date": local_date,
+                "max_occurred_at": max_occurred_at,
+                "start_utc": start_utc,
+                "end_utc": end_utc,
+                "events": [],
+            })
+            event_filters.append(
+                and_(
                     MemoryEngineDisplayEvent.engine_type == engine_type,
                     MemoryEngineDisplayEvent.occurred_at >= start_utc,
                     MemoryEngineDisplayEvent.occurred_at < end_utc,
                 )
-                .order_by(MemoryEngineDisplayEvent.occurred_at.desc())
-                .all()
             )
 
-            groups.append({
-                "engine_type": engine_type,
-                "local_date": local_date,
-                "max_occurred_at": max_occurred_at,
-                "events": events,
-            })
+        events = (
+            self.db.query(MemoryEngineDisplayEvent)
+            .filter(
+                MemoryEngineDisplayEvent.end_user_id == end_user_id,
+                or_(*event_filters),
+            )
+            .order_by(MemoryEngineDisplayEvent.occurred_at.desc())
+            .all()
+        )
+
+        specs_by_engine = {}
+        for spec in group_specs:
+            specs_by_engine.setdefault(spec["engine_type"], []).append(spec)
+
+        # events 已按 occurred_at 倒序，依次追加可保持每组内部顺序。
+        for event in events:
+            for spec in specs_by_engine.get(event.engine_type, []):
+                if spec["start_utc"] <= event.occurred_at < spec["end_utc"]:
+                    spec["events"].append(event)
+                    break
+
+        groups = [
+            {
+                "engine_type": spec["engine_type"],
+                "local_date": spec["local_date"],
+                "max_occurred_at": spec["max_occurred_at"],
+                "events": spec["events"],
+            }
+            for spec in group_specs
+        ]
 
         return groups, total
