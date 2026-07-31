@@ -209,7 +209,7 @@ class ApiKeyAuth(BaseModel):
     """API Key 认证信息"""
     api_key_id: uuid.UUID
     workspace_id: uuid.UUID
-    tenant_id: Optional[uuid.UUID]
+    tenant_id: Optional[uuid.UUID] = None
     type: str
     scopes: List[str]
     resource_id: Optional[uuid.UUID]
