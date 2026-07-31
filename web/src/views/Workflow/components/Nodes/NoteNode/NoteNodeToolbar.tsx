@@ -28,15 +28,23 @@ const NoteNodeToolbar: FC<NoteNodeToolbarProps> = ({ node, onFormat, toolConfig,
       <div
         className="rb:w-5 rb:h-5 rb:rounded-full rb:cursor-pointer rb:border rb:border-gray-200"
         style={{ background: theme.bg }}
-        onClick={() => onFormat('color', key)}
       />
     ),
   }));
 
   const fontSizeItems: MenuProps['items'] = FONT_SIZES.map(({ label, value }) => ({
     key: value,
-    label: <span onClick={() => onFormat('fontSize', value)}>{label}</span>,
+    label: <span>{label}</span>,
+    className: toolConfig.fontSize === value ? 'rb:bg-[#171719] rb:text-white!' : ''
   }));
+
+  const handleColorClick: MenuProps['onClick'] = ({ key }) => {
+    onFormat('color', key);
+  };
+
+  const handleFontSizeClick: MenuProps['onClick'] = ({ key }) => {
+    onFormat('fontSize', Number(key));
+  };
 
   const currentFontSize = FONT_SIZES.find(f => f.value === toolConfig.fontSize)?.label ?? '小';
 
@@ -71,20 +79,25 @@ const NoteNodeToolbar: FC<NoteNodeToolbarProps> = ({ node, onFormat, toolConfig,
       align="center"
       gap={8}
       className="rb:absolute rb:-top-11 rb:left-1/2 rb:-translate-x-1/2 rb:bg-white rb:z-10 rb:whitespace-nowrap rb:rounded-lg rb:py-1! rb:px-3!"
+      onPointerDown={e => e.stopPropagation()}
+      onMouseDown={e => {
+        e.preventDefault();
+        e.stopPropagation();
+      }}
       onClick={e => e.stopPropagation()}
     >
       {/* Color picker */}
-      <Dropdown menu={{ items: colorItems }} trigger={['click']}>
+      <Dropdown menu={{ items: colorItems, onClick: handleColorClick }} trigger={['click']}>
         <div
           className="rb:w-5 rb:h-5 rb:rounded-full rb:cursor-pointer rb:border rb:border-gray-200"
-          style={{ background: THEME_MAP[data.bgColor]?.bg || THEME_MAP.blue.bg }}
+          style={{ background: THEME_MAP[data.config?.theme?.defaultValue]?.bg || THEME_MAP.blue.bg }}
         />
       </Dropdown>
 
       <Divider type="vertical" />
 
       {/* Font size */}
-      <Dropdown menu={{ items: fontSizeItems }} trigger={['click']}>
+      <Dropdown menu={{ items: fontSizeItems, onClick: handleFontSizeClick }} trigger={['click']}>
         <Flex align="center" gap={4} className="rb:cursor-pointer rb:text-xs rb:text-gray-600 rb:select-none">
           <span className="rb:text-xs">Aa</span>
           <span className="rb:text-xs">{currentFontSize}</span>

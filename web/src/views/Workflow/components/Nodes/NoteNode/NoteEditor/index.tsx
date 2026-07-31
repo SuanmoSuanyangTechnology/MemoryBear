@@ -28,6 +28,7 @@ const theme = {
 };
 
 const NOTE_NODES = [ListNode, ListItemNode, LinkNode];
+const NOTE_EDIT_LINK_OPEN_EVENT = 'note:edit-link-opened';
 
 const NOTE_STYLES = `
   .editor-text-bold { font-weight: bold; }
@@ -69,7 +70,26 @@ const NoteEditor: FC<NoteEditorProps> = ({ nodeId, value, fontSize = 12, onChang
   const { t } = useTranslation();
   const [linkState, setLinkState] = useState<{ url: string; rect: DOMRect } | null>(null);
   const [editLinkRect, setEditLinkRect] = useState<{ url: string; rect: DOMRect } | null>(null);
+  const editLinkOwner = useRef(Symbol('note-edit-link-popover'));
   const removingLink = useRef(false);
+
+  const openEditLink = useCallback((nextState: { url: string; rect: DOMRect }) => {
+    window.dispatchEvent(new CustomEvent(NOTE_EDIT_LINK_OPEN_EVENT, {
+      detail: { owner: editLinkOwner.current },
+    }));
+    setEditLinkRect(nextState);
+  }, []);
+
+  useEffect(() => {
+    const closeOtherEditLink = (event: Event) => {
+      const { owner } = (event as CustomEvent<{ owner: symbol }>).detail;
+      if (owner !== editLinkOwner.current) {
+        setEditLinkRect(null);
+      }
+    };
+    window.addEventListener(NOTE_EDIT_LINK_OPEN_EVENT, closeOtherEditLink);
+    return () => window.removeEventListener(NOTE_EDIT_LINK_OPEN_EVENT, closeOtherEditLink);
+  }, []);
 
   useEffect(() => {
     if (!linkState) return;
@@ -83,21 +103,21 @@ const NoteEditor: FC<NoteEditorProps> = ({ nodeId, value, fontSize = 12, onChang
       const { id, url, rect: passedRect } = (e as CustomEvent).detail;
       if (id !== nodeId) return;
       if (passedRect) {
-        setEditLinkRect({ url: url || '', rect: passedRect });
+        openEditLink({ url: url || '', rect: passedRect });
         return;
       }
       const sel = window.getSelection();
       if (sel && sel.rangeCount > 0) {
         const r = sel.getRangeAt(0).getBoundingClientRect();
-        if (r.width > 0 || r.height > 0) { setEditLinkRect({ url: url || '', rect: r }); return; }
+        if (r.width > 0 || r.height > 0) { openEditLink({ url: url || '', rect: r }); return; }
       }
       const linkEl = document.querySelector(`[data-note-id="${nodeId}"] a.note-link`) as HTMLElement;
       const rect = linkEl?.getBoundingClientRect() ?? new DOMRect(window.innerWidth / 2, 200, 0, 0);
-      setEditLinkRect({ url: url || '', rect });
+      openEditLink({ url: url || '', rect });
     };
     window.addEventListener('note:edit-link', handler);
     return () => window.removeEventListener('note:edit-link', handler);
-  }, [nodeId]);
+  }, [nodeId, openEditLink]);
 
   const handleFormatChange = useCallback((state: FormatState) => {
     onFormatChange?.(state);
@@ -154,8 +174,8 @@ const NoteEditor: FC<NoteEditorProps> = ({ nodeId, value, fontSize = 12, onChang
               onConfirm={(url) => {
                 removingLink.current = true;
                 window.dispatchEvent(new CustomEvent('note:format', { detail: { id: nodeId, format: 'link', value: url || null } }));
-                setEditLinkRect(null);
               }}
+              onClose={() => setEditLinkRect(null)}
             />
           )}
           {linkState && (
@@ -166,7 +186,7 @@ const NoteEditor: FC<NoteEditorProps> = ({ nodeId, value, fontSize = 12, onChang
                 removingLink.current = true;
                 const { rect, url } = linkState;
                 setLinkState(null);
-                setEditLinkRect({ url, rect });
+                openEditLink({ url, rect });
               }}
               onRemove={() => {
                 removingLink.current = true;
