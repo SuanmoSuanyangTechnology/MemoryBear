@@ -724,9 +724,9 @@ class UserMemoryService:
             logger.error(f"同步 aliases 到 Neo4j 失败: {e}", exc_info=True)
             raise
 
-    async def generate_and_cache_insight(
+    async def generate_and_cache_insight( # api celery
         self, 
-        db: AsyncSession, 
+        db: Session, 
         end_user_id: str,
         workspace_id: Optional[uuid.UUID] = None,
         language: str = "zh"
@@ -756,7 +756,7 @@ class UserMemoryService:
             # 转换为UUID并查询用户
             user_uuid = uuid.UUID(end_user_id)
             repo = EndUserRepository(db)
-            end_user = await repo.get_by_id_async(user_uuid)
+            end_user = repo.get_by_id(user_uuid)
             
             if not end_user:
                 logger.error(f"end_user_id {end_user_id} 不存在")
@@ -796,7 +796,7 @@ class UserMemoryService:
                 
                 # 更新数据库缓存（四个维度）
                 # 注意：key_findings 存储为 JSON 字符串
-                success = await repo.update_memory_insight_async(
+                success = repo.update_memory_insight(
                     user_uuid, 
                     memory_insight, 
                     behavior_pattern, 
@@ -857,9 +857,9 @@ class UserMemoryService:
                 "error": str(e)
             }
     
-    async def generate_and_cache_summary(
+    async def generate_and_cache_summary( # api celery
         self, 
-        db: AsyncSession, 
+        db: Session, 
         end_user_id: str,
         workspace_id: Optional[uuid.UUID] = None,
         language: str = "zh"
@@ -889,7 +889,7 @@ class UserMemoryService:
             # 转换为UUID并查询用户
             user_uuid = uuid.UUID(end_user_id)
             repo = EndUserRepository(db)
-            end_user = await repo.get_by_id_async(user_uuid)
+            end_user = repo.get_by_id(user_uuid)
             
             if not end_user:
                 logger.error(f"end_user_id {end_user_id} 不存在")
@@ -924,7 +924,7 @@ class UserMemoryService:
                     }
                 
                 # 更新数据库缓存
-                success = await repo.update_user_summary_async(
+                success = repo.update_user_summary(
                     user_uuid, 
                     user_summary, 
                     personality, 
@@ -986,9 +986,9 @@ class UserMemoryService:
             }
 
 # for workspace    
-    async def generate_cache_for_workspace(
+    async def generate_cache_for_workspace( # api celery
         self, 
-        db: AsyncSession, 
+        db: Session, 
         workspace_id: uuid.UUID,
         language: str = "zh"
     ) -> Dict[str, Any]:
@@ -1018,7 +1018,7 @@ class UserMemoryService:
         try:
             # 获取工作空间的所有终端用户
             repo = EndUserRepository(db)
-            end_users = await repo.get_all_by_workspace_async(workspace_id)
+            end_users = repo.get_all_by_workspace(workspace_id)
             total_users = len(end_users)
             
             logger.info(f"工作空间 {workspace_id} 共有 {total_users} 个终端用户")

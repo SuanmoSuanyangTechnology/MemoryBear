@@ -3628,7 +3628,7 @@ def do_refresh_insight_summary_cache(
 
         service = UserMemoryService()
         ws_uuid = uuid.UUID(workspace_id)
-        async with get_async_db_context() as db:
+        with get_db_context() as db:
             insight = await service.generate_and_cache_insight(
                 db, end_user_id, ws_uuid, language=language,
             )

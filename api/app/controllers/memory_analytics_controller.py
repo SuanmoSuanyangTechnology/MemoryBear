@@ -20,7 +20,7 @@ from app.core.memory.constants.graph_data_constants import (
     DEPTH_HARD_MAX,
 )
 from app.core.response_utils import fail, success
-from app.db import get_async_db_context
+from app.db import get_async_db_context, get_db_context
 from app.dependencies import CurrentUserSnapshot, get_current_user_async
 from app.schemas.memory_storage_schema import GenerateCacheRequest
 from app.schemas.response_schema import ApiResponse
@@ -115,7 +115,7 @@ async def generate_cache_api(
     )
 
     try:
-        async with get_async_db_context() as db:
+        with get_db_context() as db:
             if end_user_id:
                 api_logger.info(f"开始为单个用户生成缓存: end_user_id={end_user_id}")
 
