@@ -2,7 +2,7 @@ import uuid
 from typing import Optional
 from sqlalchemy.orm import Session
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, update
 from app.core.utils.datetime_utils import utcnow_naive
 from app.models import ReleaseShare
 
@@ -58,21 +58,29 @@ class ReleaseShareRepository:
         return self.db.scalars(stmt).first() is not None
     
     def increment_view_count(self, share_id: uuid.UUID) -> None:
-        """增加访问次数（异步更新，不阻塞）"""
-        stmt = select(ReleaseShare).where(ReleaseShare.id == share_id)
-        share = self.db.scalars(stmt).first()
-        if share:
-            share.view_count += 1
-            share.last_accessed_at = utcnow_naive()
-            self.db.commit()
+        """原子增加访问次数，避免 SELECT+UPDATE 竞态导致行锁等待超时"""
+        stmt = (
+            update(ReleaseShare)
+            .where(ReleaseShare.id == share_id)
+            .values(
+                view_count=ReleaseShare.view_count + 1,
+                last_accessed_at=utcnow_naive(),
+                updated_at=utcnow_naive(),
+            )
+        )
+        self.db.execute(stmt)
+        self.db.commit()
 
     async def increment_view_count_async(self, share_id: uuid.UUID) -> None:
-        """异步增加访问次数"""
-        result = await self.db.execute(
-            select(ReleaseShare).where(ReleaseShare.id == share_id)
+        """异步原子增加访问次数，避免 SELECT+UPDATE 竞态导致行锁等待超时"""
+        stmt = (
+            update(ReleaseShare)
+            .where(ReleaseShare.id == share_id)
+            .values(
+                view_count=ReleaseShare.view_count + 1,
+                last_accessed_at=utcnow_naive(),
+                updated_at=utcnow_naive(),
+            )
         )
-        share = result.scalars().first()
-        if share:
-            share.view_count += 1
-            share.last_accessed_at = utcnow_naive()
-            await self.db.commit()
+        await self.db.execute(stmt)
+        await self.db.commit()
