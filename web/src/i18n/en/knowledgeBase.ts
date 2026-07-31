@@ -228,6 +228,8 @@ export const knowledgeBase = {
       delimiter:'Text paragraph delimiter',
       customDelimiterPlaceholder: 'Please enter the delimiter',
       suggestedBlockSize:'Suggested text block size',
+      chunkOverlap: 'Chunk overlap size',
+      chunkOverlapRange: 'Chunk overlap size must be greater than 0 and less than the text block size',
       insertContent: 'Insert Content',
       editContent:'Edit Content',
       insertContentPlaceholder: 'Please enter the content',
@@ -389,5 +391,8 @@ export const knowledgeBase = {
       imagePreviewFailedDesc: 'File content is image but extension is text file',
       imageLoadFailed: 'Image load failed',
       pdfLoadFailed: 'Failed to load PDF file',
+      hybridIsHasGraph: 'Enable graph retrieval',
+      yes: 'Yes',
+      no: 'No',
     },
 }

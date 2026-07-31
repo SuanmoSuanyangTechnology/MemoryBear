@@ -72,7 +72,8 @@ export interface RecallTestParams {
   top_k?: number;
   hybrid?: boolean; // 是否混合检索
   hybrid_weight?: string;
-  retrieve_type?: string; //
+  retrieve_type?: string; // 检索类型
+  enable_graph_retrieval?: number; // 是否启用图谱检索
 }
 // 文件夹 
 export interface FolderFormData {

@@ -4,6 +4,7 @@ import logging
 import math
 import uuid
 
+from langchain_core.documents import Document
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.runnables.config import RunnableConfig, var_child_runnable_config
 from sqlalchemy import select
@@ -21,9 +22,10 @@ from app.core.memory.models.service_models import MemoryContext
 from app.core.memory.prompt import prompt_manager
 from app.core.memory.read_services.search_engine.result_builder import MetadataBuilder
 from app.core.memory.read_services.search_engine.result_builder import data_builder_factory
-from app.core.memory.read_services.search_engine.tools import make_entity_search_tool, make_relation_search_tool, make_user_source_lookup_tool
+from app.core.memory.read_services.search_engine.tools import make_entity_search_tool, make_relation_search_tool, \
+    make_user_source_lookup_tool
+from app.core.models import RedBearEmbeddings, RedBearLLM, RedBearRerank
 from app.core.models.llm import StructResponse
-from app.core.models import RedBearEmbeddings, RedBearLLM
 from app.core.rag.nlp.search import knowledge_retrieval
 from app.db import get_async_db_context
 from app.models import Conversation, MemoryMessage
@@ -42,6 +44,8 @@ DEFAULT_FULLTEXT_SCORE_THRESHOLD = 1.5
 DEFAULT_COSINE_SCORE_THRESHOLD = 0.5
 DEFAULT_CONTENT_SCORE_THRESHOLD = 0.5
 
+MAX_RERANK_CHARS_PER_DOC = 2000
+
 RELATIONSHIP_LOOP_LIMIT = 6
 
 
@@ -51,6 +55,7 @@ class Neo4jSearchService:
             ctx: MemoryContext,
             embedder: RedBearEmbeddings | None = None,
             llm: RedBearLLM | None = None,
+            reranker: RedBearRerank | None = None,
             includes: list[Neo4jNodeType] | None = None,
             alpha: float = DEFAULT_ALPHA,
             fulltext_score_threshold: float = DEFAULT_FULLTEXT_SCORE_THRESHOLD,
@@ -65,6 +70,7 @@ class Neo4jSearchService:
 
         self.embedder: RedBearEmbeddings | None = embedder
         self.llm: RedBearLLM | None = llm
+        self.reranker: RedBearRerank | None = reranker
         self.connector: Neo4jConnector | None = None
 
         self.includes = includes
@@ -161,6 +167,85 @@ class Neo4jSearchService:
         )
         return results
 
+    async def _hybrid_search_with_model_rerank(
+            self,
+            kw_results: dict,
+            emb_results: dict,
+            query: str,
+            limit: int,
+    ) -> list[Memory]:
+        seen: dict[str, dict] = {}
+        for node_type in self.includes:
+            for record in kw_results.get(node_type, []):
+                rid = record.get("id", "")
+                if rid and rid not in seen:
+                    record["_node_type"] = node_type
+                    record["_source"] = "keyword"
+                    seen[rid] = record
+            for record in emb_results.get(node_type, []):
+                rid = record.get("id", "")
+                if rid and rid not in seen:
+                    record["_node_type"] = node_type
+                    record["_source"] = "embedding"
+                    seen[rid] = record
+
+        if not seen:
+            return []
+
+        memories: list[Memory] = []
+        for record in seen.values():
+            node_type = record.pop("_node_type")
+            memory = data_builder_factory(node_type, record)
+            memories.append(Memory(
+                score=memory.score,
+                content=memory.content,
+                data=memory.data,
+                source=node_type,
+                query=query,
+                id=memory.id,
+            ))
+
+        try:
+
+            documents = [
+                Document(
+                    page_content=mem.content[:MAX_RERANK_CHARS_PER_DOC],
+                    metadata={"index": i},
+                )
+                for i, mem in enumerate(memories)
+            ]
+            reranked = []
+            if documents:
+                reranked = await asyncio.to_thread(
+                    self.reranker.compress_documents,
+                    documents,
+                    query,
+                    top_n=min(limit, len(documents))
+                )
+            index_to_score = {
+                doc.metadata["index"]: doc.metadata.get("relevance_score", 0.0)
+                for doc in reranked
+            }
+            for i, mem in enumerate(memories):
+                if i in index_to_score:
+                    mem.score = index_to_score[i]
+
+            memories.sort(key=lambda x: x.score, reverse=True)
+            memories = memories[:limit]
+
+            logger.info(
+                f"[Neo4jSearch] Model rerank applied: {len(documents)} → {len(memories)} memories"
+            )
+        except Exception as e:
+            logger.warning(
+                f"[Neo4jSearch] Model rerank failed, falling back to content_score: {e}",
+                exc_info=True,
+            )
+            memories.sort(key=lambda x: x.score, reverse=True)
+            memories = memories[:limit]
+
+        return memories
+
     def _normalize_kw_scores(self, items: list[dict]) -> list[dict]:
         if not items:
             return items
@@ -229,25 +314,32 @@ class Neo4jSearchService:
             logger.warning(f"[MemorySearch] embedding search error: {emb_results}")
             emb_results = {}
 
-        memories = []
-        for node_type in self.includes:
-            reranked = self._rerank(
-                kw_results.get(node_type, []),
-                emb_results.get(node_type, []),
-                limit
+        if self.reranker is not None:
+            memories = await self._hybrid_search_with_model_rerank(
+                kw_results, emb_results, query, limit
             )
-            for record in reranked:
-                memory = data_builder_factory(node_type, record)
-                memories.append(Memory(
-                    score=memory.score,
-                    content=memory.content,
-                    data=memory.data,
-                    source=node_type,
-                    query=query,
-                    id=memory.id
-                ))
-        memories.sort(key=lambda x: x.score, reverse=True)
-        return MemorySearchResult(memories=memories[:limit])
+        else:
+            memories = []
+            for node_type in self.includes:
+                reranked = self._rerank(
+                    kw_results.get(node_type, []),
+                    emb_results.get(node_type, []),
+                    limit
+                )
+                for record in reranked:
+                    memory = data_builder_factory(node_type, record)
+                    memories.append(Memory(
+                        score=memory.score,
+                        content=memory.content,
+                        data=memory.data,
+                        source=node_type,
+                        query=query,
+                        id=memory.id
+                    ))
+            memories.sort(key=lambda x: x.score, reverse=True)
+            memories = memories[:limit]
+
+        return MemorySearchResult(memories=memories)
 
     async def _run_relation_agent(self, query: str) -> RelationSearchResult:
         system_prompt = prompt_manager.render(

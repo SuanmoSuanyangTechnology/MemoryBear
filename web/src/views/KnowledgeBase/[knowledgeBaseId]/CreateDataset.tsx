@@ -95,6 +95,7 @@ const CreateDataset = () => {
   const pollingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [delimiter, setDelimiter] = useState<string | undefined>(undefined);
   const [blockSize, setBlockSize] = useState<number>(512);
+  const [chunkOverlap, setChunkOverlap] = useState<number>(52);
   const [qaPrompt, setQaPrompt] = useState<string | undefined>()
   console.log('qaPrompt', qaPrompt)
   const [processingMethod, setProcessingMethod] = useState<ProcessingMethod>('directBlock');
@@ -158,14 +159,23 @@ const CreateDataset = () => {
     
     // 从参数设置进入确认上传时的处理
     if(current === 1 && nextStep === 2) {
+      if (
+        processingMethod === 'directBlock' &&
+        (!Number.isInteger(chunkOverlap) || chunkOverlap <= 0 || chunkOverlap >= blockSize)
+      ) {
+        messageApi.warning(t('knowledgeBase.chunkOverlapRange'));
+        return;
+      }
+
       // debugger
         // handlePreview(data[0],0) 
-        if(parameterSettings === 'customSettings' || processingMethod === 'qaExtract' || pdfEnhancementEnabled){
+        if(parameterSettings === 'customSettings' || processingMethod === 'qaExtract' || processingMethod === 'directBlock' || pdfEnhancementEnabled){
             rechunkFileIds.map((id) => {
               let parser_config = {
                 layout_recognize: pdfEnhancementMethod || 'DeepDOC',
                 delimiter: delimiter,
                 chunk_token_num: blockSize,
+                chunk_overlap: processingMethod === 'directBlock' ? chunkOverlap : undefined,
                 auto_questions: processingMethod === 'parentChildBlock' || processingMethod === 'directBlock' ? 0 : 1,
                 qa_prompt: qaPrompt,
               }
@@ -540,7 +550,15 @@ const CreateDataset = () => {
   const handleChange = (value: number | null) =>{
       if (value !== null) {
         setBlockSize(value);
+        if (processingMethod === 'directBlock' && chunkOverlap >= value) {
+          setChunkOverlap(Math.max(1, value - 1));
+        }
       }
+  }
+  const handleChunkOverlapChange = (value: number | null) => {
+    if (value !== null) {
+      setChunkOverlap(value);
+    }
   }
   // 删除已上传的文件
   const handleDeleteFile = async (fileId: string) => {
@@ -612,6 +630,7 @@ const CreateDataset = () => {
   const handleChangeProcessingMethod = (method: ProcessingMethod) => {
     if (method === 'directBlock') {
       setBlockSize(512)
+      setChunkOverlap(52)
     }
     setProcessingMethod(method)
   }
@@ -851,14 +870,34 @@ const CreateDataset = () => {
                   </Radio>
               </Radio.Group>
               {parameterSettings === 'customSettings' && processingMethod !== 'parentChildBlock' && (<>
-                <div className='rb:grid rb:grid-cols-2 rb:mt-5 rb-border rb:rounded-xl rb:px-6 rb:py-4 rb:gap-10'> 
+                <div className='rb:grid rb:grid-cols-3 rb:mt-5 rb-border rb:rounded-xl rb:px-6 rb:py-4 rb:gap-10'> 
                   <div>
                     <div className='rb:w-full rb:text-[#5B6167] rb:leading-5 rb:mb-2'>
                       {t('knowledgeBase.delimiter')}
                     </div>
                     <DelimiterSelector value={delimiter} onChange={setDelimiter} />
                   </div>
-                  <SliderInput label={t('knowledgeBase.suggestedBlockSize')} max={1024} min={1} step={1} value={blockSize} onChange={handleChange} />
+                  <SliderInput
+                    label={t('knowledgeBase.suggestedBlockSize')}
+                    max={1024}
+                    min={processingMethod === 'directBlock' ? 2 : 1}
+                    step={1}
+                    value={blockSize}
+                    onChange={handleChange}
+                  />
+                  {processingMethod === 'directBlock' && (
+                    <SliderInput
+                      label={<span>
+                        <span className="rb:text-[#ff5d34] rb:mr-1">*</span>
+                        {t('knowledgeBase.chunkOverlap')}
+                      </span>}
+                      max={blockSize - 1}
+                      min={1}
+                      step={1}
+                      value={chunkOverlap}
+                      onChange={handleChunkOverlapChange}
+                    />
+                  )}
                 </div>
                 {processingMethod === 'qaExtract' && (
                 <div>

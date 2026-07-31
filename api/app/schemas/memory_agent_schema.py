@@ -55,6 +55,7 @@ class ReadSyncInput(BaseModel):
     end_user_ids: Optional[List[str]] = None
     session_id: uuid.UUID = Field(default_factory=uuid.uuid4)
     config_id: Optional[str] = None
+    enable_rerank: bool = Field(default=False)
 
     @model_validator(mode='after')
     def check_at_least_one_id(self):
@@ -78,6 +79,7 @@ class InternalReadInput(BaseModel):
     )
     limit: int = Field(default=10, description="返回的记忆数量上限", ge=1, le=100)
     skip_summary: bool = Field(default=False, description="跳过摘要")
+    enable_rerank: bool = Field(default=False)
 
 
 class WriteMessageItem(BaseModel):

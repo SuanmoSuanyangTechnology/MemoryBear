@@ -23,13 +23,17 @@ import { Segmented, type SegmentedProps } from 'antd';
 const PageTabs: FC<SegmentedProps> = ({
   value,
   options,
-  onChange
+  onChange,
+  size = "middle",
+  className = '',
+  ...props
 }) => {
   return <Segmented
     value={value}
     options={options}
     onChange={onChange}
-    className="pageTabs"
+    className={`pageTabs ${size} ${className}`}
+    {...props}
   />;
 };
 

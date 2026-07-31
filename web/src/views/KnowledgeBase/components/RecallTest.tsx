@@ -1,6 +1,6 @@
 
 import { forwardRef, useImperativeHandle, useState, useEffect } from 'react';
-import { Form, Input,  Select, Button, InputNumber, Flex } from 'antd';
+import { Form, Input,  Select, Button, InputNumber, Flex, Switch } from 'antd';
 import { useTranslation } from 'react-i18next';
 import type { RecallTestDrawerRef, RecallTestData, RecallTestParams } from '@/views/KnowledgeBase/types';
 // import refreshIcon from '@/assets/images/knowledgeBase/refresh-blue.png';
@@ -67,7 +67,6 @@ const RecallTest = forwardRef<RecallTestDrawerRef>(({},ref) => {
     const fetchData = (params: RecallTestParams) => {
         if (loading) return;
         setLoading(true);
-        console.log('params', params);
         reChunks(params)
           .then((res) => {
             const response = res as  RecallTestData[] ;
@@ -87,6 +86,7 @@ const RecallTest = forwardRef<RecallTestDrawerRef>(({},ref) => {
                 top_k: values.top_k || 100,
                 // hybrid: values.retrieve_type !== hybrid ? true : false,
                 retrieve_type: retrieveType,
+                enable_graph_retrieval: retrieveType === 'hybrid' ? values.enable_graph_retrieval || false: undefined,
             };
             console.log('RecallTest - params:', params);
             fetchData(params);
@@ -112,7 +112,7 @@ const RecallTest = forwardRef<RecallTestDrawerRef>(({},ref) => {
           <Form.Item name="query">
               <TextArea rows={4} placeholder={t('knowledgeBase.testQuestionPlaceholder')}/>
           </Form.Item>
-          <div className='rb:grid rb:grid-cols-5 rb:gap-x-4'>
+          <div className='rb:grid rb:grid-cols-6 rb:gap-x-4'>
               <Form.Item 
                   name="retrieve_type" 
                   label={t('knowledgeBase.retrieveMode')}
@@ -136,6 +136,7 @@ const RecallTest = forwardRef<RecallTestDrawerRef>(({},ref) => {
 
               {/* Show when retrieve_type = semantic or hybrid */}
               {(retrieveType === 'hybrid') && (
+                <>
                   <Form.Item name="similarity_threshold" label={t('knowledgeBase.similarityThreshold')}>
                       <Select
                           options={[
@@ -153,6 +154,7 @@ const RecallTest = forwardRef<RecallTestDrawerRef>(({},ref) => {
                           placeholder={t('knowledgeBase.similarityThreshold')}
                       />
                   </Form.Item>
+                </>
               )}
 
               {/* Show when retrieve_type = participle or hybrid */}
@@ -175,17 +177,23 @@ const RecallTest = forwardRef<RecallTestDrawerRef>(({},ref) => {
                       />
                   </Form.Item>
               )}  
-                
-              {/* <Form.Item name="hybrid" valuePropName="checked" initialValue={true} label={t('knowledgeBase.hybrid') || 'Hybrid'}>
-                  <Switch checkedChildren={t('common.yes') || 'Yes'} unCheckedChildren={t('common.no') || 'No'} />
-              </Form.Item>  */}
+
+              {(retrieveType === 'hybrid') &&
+                <Form.Item
+                    name="enable_graph_retrieval"
+                    getValueProps={(value: 0 | 1 | undefined) => ({ checked: value === 1 })}
+                    getValueFromEvent={(checked: boolean) => checked ? 1 : 0}
+                    initialValue={0}
+                    valuePropName="checked"
+                    label={t('knowledgeBase.hybridIsHasGraph')}
+                >
+                    <Switch checkedChildren={t('knowledgeBase.yes')} unCheckedChildren={t('knowledgeBase.no')} />
+                </Form.Item>
+              }
               <Form.Item className="rb:flex rb:items-end rb:justify-end">
                   <Button type="primary" onClick={handleStartTest} loading={loading}>{ t('knowledgeBase.startTesting')}</Button>
               </Form.Item> 
           </div>
-          {/* <Flex align="center" justify="end">
-              
-          </Flex> */}
         </Form>
       </div>
       <div className='rb:flex-1 rb:overflow-y-auto rb:min-h-0'>

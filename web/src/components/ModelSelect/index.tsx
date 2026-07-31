@@ -4,7 +4,7 @@
  * @Last Modified by: ZhaoYing
  * @Last Modified time: 2026-05-18 12:10:55
  */
-import { type FC, useEffect, useState } from 'react';
+import { type FC, useEffect, useState, useMemo } from 'react';
 import { Select, Flex } from 'antd';
 import type { SelectProps } from 'antd/es/select';
 import { useTranslation } from 'react-i18next';
@@ -43,7 +43,7 @@ const ModelSelect: FC<ModelSelectProps> = ({ params, placeholder, fontClassName,
 
   // Render the selected value inside the trigger with logo + truncated name
   const labelRender: SelectProps['labelRender'] = ({ value }) => {
-    const item = options.find((o) => o.id === value);
+    const item = allOptions.find((o) => o.id === value);
     if (!item) return undefined;
     const logo = getListLogoUrl(item.provider, item.logo as string);
     return (
@@ -55,14 +55,16 @@ const ModelSelect: FC<ModelSelectProps> = ({ params, placeholder, fontClassName,
     );
   };
 
+  const allOptions = useMemo(() => [...options, ...initialData], [JSON.stringify(options), JSON.stringify(initialData)]);
   useEffect(() => {
-    if (updateOptions) updateOptions([...options, ...initialData]);
-  }, [JSON.stringify(options), JSON.stringify(initialData)])
+    if (updateOptions) updateOptions(allOptions);
+  }, [JSON.stringify(allOptions), updateOptions])
+
 
   return (
     <Select
       placeholder={placeholder ?? t('common.pleaseSelect')}
-      options={[...options, ...initialData].map(item => ({ ...item, disabled: item.is_deprecated }))}
+      options={allOptions.map(item => ({ ...item, disabled: item.is_deprecated }))}
       fieldNames={{ label: 'name', value: 'id' }}
       allowClear
       // popupMatchSelectWidth={false}

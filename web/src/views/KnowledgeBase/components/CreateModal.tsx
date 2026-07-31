@@ -16,7 +16,10 @@ import {
 import RbModal from '@/components/RbModal'
 import SliderInput from '@/components/SliderInput'
 import { stringRegExp } from '@/utils/validator'
-import Tag from '@/components/Tag'
+import ModelSelect from '@/components/ModelSelect'
+import type { Model } from '@/views/ModelManagement/types'
+import { getCustomWorkspaceModels } from '@/api/workspaces'
+
 const { TextArea } = Input;
 
 // Global model data constant
@@ -29,7 +32,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
   const { modal, message: messageApi } = App.useApp()
   const [visible, setVisible] = useState(false);
   const [modelTypeList, setModelTypeList] = useState<string[]>([]);
-  const [modelOptionsByType, setModelOptionsByType] = useState<Record<string, { label: string; value: string }[]>>({});
+  const [modelOptionsByType, setModelOptionsByType] = useState<Record<string, Model[]>>({});
   const [datasets, setDatasets] = useState<KnowledgeBaseListItem | null>(null);
   const [currentType, setCurrentType] = useState<'General' | 'Web' | 'Third-party' | 'Folder'>('General');
   const [thirdPartyPlatform, setThirdPartyPlatform] = useState<'yuque' | 'feishu'>('yuque');
@@ -157,6 +160,23 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
         return `${type.toLowerCase()}_id`;
     }
   };
+  const typeToModelType = (type: string): string => {
+    switch ((type || '').toLowerCase()) {
+      case 'embedding':
+        return 'embedding';
+      case 'llm':
+        return 'llm';
+      case 'image2text':
+        return 'vision';
+      case 'rerank':
+      case 'reranker':
+        return 'rerank';
+      case 'chat':
+        return 'chat';
+      default: 
+        return type;
+    }
+  };
 
   const fetchModelLists = async (types: string[]) => {
     // If model data hasn't been fetched yet, fetch it once
@@ -171,17 +191,13 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
 
     // Filter out the required types from all model data
     const typesToFetch = types.includes('llm') ? [...types, 'chat'] : types;
-    const next: Record<string, { label: string; value: string }[]> = {};
+    const next: Record<string, Model[]> = {};
     
     typesToFetch.forEach((tp) => {
       const targetType = tp === 'image2text' ? 'chat' : tp;
       const filteredModels = (models?.items || []).filter((m: any) => m.type === targetType);
       next[tp] = filteredModels.map((m: any) => ({
-        label: <Flex gap={4} align="center">
-          <span className="rb:wrap-break-word rb:line-clamp-1">{m.name}</span>
-          {m.is_deprecated && <Tag color="default">{t('modelNew.deprecated')}</Tag>}
-        </Flex>,
-        value: m.id,
+        ...m,
         disabled: m.is_deprecated
       }));
     });
@@ -199,7 +215,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
         
         // If there are options and current field has no value, set first option as default
         if (options.length > 0 && !form.getFieldValue(fieldKey as any)) {
-          defaultValues[fieldKey] = options[0].value;
+          defaultValues[fieldKey] = options[0].id;
         }
       });
       
@@ -310,6 +326,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
     setBaseFields(record || null, actualType);
     getTypeList(record || null);
     setVisible(true);
+    handleGetCustomModels();
   };
 
   const getTypeList = async (record: KnowledgeBaseListItem | null) => {
@@ -333,6 +350,13 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
       setDynamicModelFields(datasets, modelTypeList);
     }
   }, [visible, modelTypeList]);
+
+  const [customModels, setCustomModels] = useState<Record<string, Model[]>>({})
+  const handleGetCustomModels = () => {
+    getCustomWorkspaceModels().then(res => {
+      setCustomModels((res || {}) as Record<string, Model[]>)
+    })
+  }
 
   // Encapsulate save method, add submit logic
   const handleSave = () => {
@@ -679,17 +703,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
       {currentType !== 'Folder' && dynamicTypeList.map((tp) => {
         const fieldKey = typeToFieldKey(tp);
         // When tp is 'llm', merge llm and chat options
-        let options = tp.toLowerCase() === 'llm' || tp.toLowerCase() === 'image2text'
-          ? [...(modelOptionsByType['llm'] || []), ...(modelOptionsByType['chat'] || [])]
-          : modelOptionsByType[tp] || [];
-        
-        // When tp is 'image2text', filter to only include models with 'vision' capability
-        if (tp.toLowerCase() === 'image2text') {
-          options = options.filter((opt: any) => {
-            const model = models?.items?.find((m: any) => m.id === opt.value);
-            return model?.capability?.includes('vision');
-          });
-        }
+        let options = customModels[typeToModelType(tp)] || [];
         return (
           <Form.Item
             key={tp}
@@ -697,12 +711,12 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
             label={t(`knowledgeBase.createForm.${fieldKey}`) + ' ' + 'model'}
             rules={[{ required: true, message: t('knowledgeBase.createForm.modelRequired') }]}
           >
-            <Select
-              options={options}
+            <ModelSelect
+              fieldNames={{ label: 'name', value: 'id' }}
               placeholder={t(`knowledgeBase.createForm.${fieldKey}`)}
+              isAutoFetch={false}
+              initialData={options}
               allowClear={false}
-              showSearch
-              optionFilterProp="label"
               onChange={(value) => handleChange(value, tp)}
             />
           </Form.Item>
