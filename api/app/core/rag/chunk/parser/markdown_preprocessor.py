@@ -38,7 +38,7 @@ KEYCAP_LIST_PATTERN = re.compile(r"^\s{0,3}([0-9]\ufe0f?\u20e3)\s*(.+\S)\s*$")
 CIRCLED_LIST_PATTERN = re.compile(rf"^\s{{0,3}}([{CIRCLED_MARKERS}])\s*(.+\S)\s*$")
 CHINESE_LIST_PATTERN = re.compile(rf"^\s{{0,3}}([{CHINESE_NUMERAL_MARKERS}]+)({LIST_BOUNDARY})\s*(.+\S)\s*$")
 ALPHA_LIST_PATTERN = re.compile(r"^\s{0,3}([A-Za-z])([.)）|｜]|、(?!\s*[A-Za-z]))\s*(.+\S)\s*$")
-DEFINITION_LIST_PATTERN = re.compile(r"^\s{0,3}([A-Z][A-Z0-9]{1,11})([：:])\s*(.+\S)\s*$")
+DEFINITION_LIST_PATTERN = re.compile(r"^\s{0,3}(?!问|答|拓展|补充)([^:：\n]{1,32})([：:])\s*(\S(?:.*\S)?)\s*$")
 QA_LIST_PATTERN = re.compile(r"^\s{0,3}(问|答|拓展|补充)([?？:：|｜]|\s+)\s*(\S(?:.*\S)?)\s*$")
 ORDINAL_LIST_PATTERN = re.compile(
     rf"^\s{{0,3}}(首次|其次|再次|最后|第[{CHINESE_NUMERAL_MARKERS}0-9]+)({LIST_BOUNDARY})\s*(.+\S)\s*$"
@@ -220,7 +220,6 @@ class MarkdownPreprocessor:
             ("ordinal", ORDINAL_LIST_PATTERN),
             ("chinese", CHINESE_LIST_PATTERN),
             ("alpha", ALPHA_LIST_PATTERN),
-            ("definition", DEFINITION_LIST_PATTERN),
             ("qa", QA_LIST_PATTERN),
         )
         for marker_kind, pattern in patterns:
@@ -240,6 +239,14 @@ class MarkdownPreprocessor:
                 "list_marker": prefixed_match.group("marker").strip(),
                 "list_marker_kind": "prefixed",
                 "list_prefix": prefixed_match.group("prefix").strip(),
+                "list_level": _indent_level(line),
+                "contains_qa_marker": False,
+            }
+        definition_match = DEFINITION_LIST_PATTERN.match(line)
+        if definition_match:
+            return {
+                "list_marker": definition_match.group(1).strip(),
+                "list_marker_kind": "definition",
                 "list_level": _indent_level(line),
                 "contains_qa_marker": False,
             }
