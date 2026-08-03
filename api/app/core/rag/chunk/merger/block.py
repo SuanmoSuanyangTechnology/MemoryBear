@@ -56,6 +56,8 @@ LIST_ITEM_START_PATTERNS = (
     PREFIXED_LIST_PATTERN,
 )
 
+FULL_DOC_MAX_CHARS = 10000
+
 
 class BlockMerger(ChunkMerger):
     def __init__(self):
@@ -68,6 +70,34 @@ class BlockMerger(ChunkMerger):
         chunk_overlap = _safe_int(ctx.parser_config.get("chunk_overlap", 0))
 
         if ctx.chunk_output_mode is ChunkOutputMode.PARENT_CHILD:
+            if ctx.parser_config.get("parent_chunk_mode") == "full-doc":
+                child_chunks = self._blocks_to_logical_chunks(
+                    blocks,
+                    token_num,
+                    delimiter,
+                    0,
+                )
+                full_text = "\n\n".join(
+                    str(chunk.content)
+                    for chunk in child_chunks
+                    if str(chunk.content or "").strip()
+                )
+                parent_chunks = [
+                    LogicalChunk(
+                        type=LogicalChunkType.TEXT,
+                        content=full_text[:FULL_DOC_MAX_CHARS],
+                    )
+                ]
+                parent_id_map = {index: 0 for index in range(len(child_chunks))}
+                return MergeResult(
+                    chunks=self._serialize_chunk_contents(child_chunks),
+                    logical_chunks=child_chunks,
+                    parent_chunks=parent_chunks,
+                    child_chunks=child_chunks,
+                    parent_id_map=parent_id_map,
+                    pdf_parser=parse_result.pdf_parser,
+                )
+
             parent_token_num = int(ctx.parser_config.get("parent_chunk_token_num", 1024))
             parent_chunk_delimiter = ctx.parser_config.get("parent_chunk_delimiter")
             parent_chunks = self._blocks_to_logical_chunks(
