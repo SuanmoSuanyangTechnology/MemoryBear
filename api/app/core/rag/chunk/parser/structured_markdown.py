@@ -9,7 +9,11 @@ from PIL import Image
 
 from app.core.rag.chunk.context import ParsedBlock, ParsedBlockType
 from app.core.rag.chunk.parser.base import DocumentParser
-from app.core.rag.chunk.parser.markdown_preprocessor import MarkdownLineInfo, MarkdownPreprocessor
+from app.core.rag.chunk.parser.markdown_preprocessor import (
+    MarkdownLineInfo,
+    MarkdownPreprocessor,
+    QA_QUESTION_MARKERS,
+)
 from app.core.rag.nlp import find_codec
 
 
@@ -154,7 +158,7 @@ class StructMarkdownParser(DocumentParser):
         )
 
     def _is_qa_question_line(self, index: int) -> bool:
-        return self._is_qa_list_line(index) and self._qa_marker(index) == "问"
+        return self._is_qa_list_line(index) and self._qa_marker(index) in QA_QUESTION_MARKERS
 
     def _qa_marker(self, index: int) -> str:
         return str(self._line_info(index).metadata.get("list_marker") or "")
@@ -331,8 +335,7 @@ class StructMarkdownParser(DocumentParser):
                 continue
 
             if self._is_qa_list_line(index):
-                marker = self._qa_marker(index)
-                if marker == "问":
+                if self._is_qa_question_line(index):
                     break
                 index += 1
                 continue

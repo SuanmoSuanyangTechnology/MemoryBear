@@ -38,8 +38,9 @@ KEYCAP_LIST_PATTERN = re.compile(r"^\s{0,3}([0-9]\ufe0f?\u20e3)\s*(.+\S)\s*$")
 CIRCLED_LIST_PATTERN = re.compile(rf"^\s{{0,3}}([{CIRCLED_MARKERS}])\s*(.+\S)\s*$")
 CHINESE_LIST_PATTERN = re.compile(rf"^\s{{0,3}}([{CHINESE_NUMERAL_MARKERS}]+)({LIST_BOUNDARY})\s*(.+\S)\s*$")
 ALPHA_LIST_PATTERN = re.compile(r"^\s{0,3}([A-Za-z])([.)）|｜]|、(?!\s*[A-Za-z]))\s*(.+\S)\s*$")
+QA_QUESTION_MARKERS = {"问", "问题", "提问", "追问"}
+QA_LIST_PATTERN = re.compile(r"^\s{0,3}(问题|答案|提问|回答|答复|回复|追问|问|答|拓展|补充)([?？:：|｜]|\s+)\s*(\S(?:.*\S)?)\s*$")
 DEFINITION_LIST_PATTERN = re.compile(r"^\s{0,3}(?!问|答|拓展|补充)([^:：\n]{1,32})([：:])\s*(\S(?:.*\S)?)\s*$")
-QA_LIST_PATTERN = re.compile(r"^\s{0,3}(问|答|拓展|补充)([?？:：|｜]|\s+)\s*(\S(?:.*\S)?)\s*$")
 ORDINAL_LIST_PATTERN = re.compile(
     rf"^\s{{0,3}}(首次|其次|再次|最后|第[{CHINESE_NUMERAL_MARKERS}0-9]+)({LIST_BOUNDARY})\s*(.+\S)\s*$"
 )
