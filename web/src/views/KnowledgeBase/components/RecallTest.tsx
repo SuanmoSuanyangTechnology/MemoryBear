@@ -86,7 +86,7 @@ const RecallTest = forwardRef<RecallTestDrawerRef>(({},ref) => {
                 top_k: values.top_k || 100,
                 // hybrid: values.retrieve_type !== hybrid ? true : false,
                 retrieve_type: retrieveType,
-                enable_graph_retrieval: retrieveType === 'hybrid' ? values.enable_graph_retrieval || false: undefined,
+                enable_graph_retrieval: retrieveType === 'hybrid' ? values.enable_graph_retrieval: undefined,
             };
             console.log('RecallTest - params:', params);
             fetchData(params);
