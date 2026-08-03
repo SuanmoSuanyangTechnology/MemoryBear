@@ -41,7 +41,7 @@ from app.core.workflow.executor import execute_workflow, execute_workflow_stream
 from app.core.workflow.nodes.enums import NodeType
 from app.core.workflow.variable.base_variable import VariableType, DEFAULT_VALUE
 from app.core.workflow.validator import validate_workflow_config
-from app.aioRedis import aio_redis_delete, aio_redis_get, aio_redis_set, get_thread_safe_redis
+from app.aioRedis import aio_redis, aio_redis_delete, aio_redis_get, aio_redis_set, get_thread_safe_redis
 from app.db import get_async_db_context, get_async_pool_status, get_db
 from app.models import App, AppRelease, Conversation, Message
 from app.models.workflow_model import WorkflowConfig, WorkflowExecution, WorkflowNodeCache, WorkflowNodeExecution
@@ -5924,19 +5924,26 @@ class WorkflowService:
     def _get_history_info(self, conversation_id: uuid.UUID) -> tuple[dict, list] | None:
         """加载会话历史（兜底：from_message_id 为空时用）。
 
-        conv_vars 从最近 completed execution 取（会话级变量累积）；
+        conv_vars 从最近 terminal 状态的 execution 取（completed / cancelled）；
         conv_messages 沿最近消息的 parent 链回溯得到当前分支上下文。
         """
-        # conv_vars 从最近 execution 取
+        # conv_vars 从最近 terminal execution 取
         conv_vars: dict[str, Any] = {}
-        executions = self.execution_repo.get_by_conversation_id(
-            conversation_id=conversation_id,
-            status="completed",
-            limit_count=1,
+        result = self.db.execute(
+            select(WorkflowExecution)
+            .where(
+                WorkflowExecution.conversation_id == conversation_id,
+                WorkflowExecution.status.in_(["completed", "cancelled"]),
+            )
+            .order_by(desc(WorkflowExecution.started_at))
+            .limit(10)
         )
-        if executions and isinstance(executions[0].output_data, dict):
-            variables = executions[0].output_data.get("variables", {}) or {}
-            conv_vars = variables.get("conv", {}) if isinstance(variables, dict) else {}
+        for latest_execution in result.scalars():
+            if isinstance(latest_execution.output_data, dict):
+                variables = latest_execution.output_data.get("variables", {}) or {}
+                conv_vars = variables.get("conv", {}) if isinstance(variables, dict) else {}
+                if conv_vars:
+                    break
 
         # conv_messages 沿最近消息的 parent 链回溯
         from app.models import Message as MessageModel
@@ -5989,15 +5996,17 @@ class WorkflowService:
                 select(WorkflowExecution)
                 .where(
                     WorkflowExecution.conversation_id == conversation_id,
-                    WorkflowExecution.status == "completed",
+                    WorkflowExecution.status.in_(["completed", "cancelled"]),
                 )
                 .order_by(desc(WorkflowExecution.started_at))
-                .limit(1)
+                .limit(10)
             )
-            latest_execution = result.scalar_one_or_none()
-            if latest_execution and isinstance(latest_execution.output_data, dict):
-                variables = latest_execution.output_data.get("variables", {}) or {}
-                conv_vars = variables.get("conv", {}) if isinstance(variables, dict) else {}
+            for latest_execution in result.scalars():
+                if isinstance(latest_execution.output_data, dict):
+                    variables = latest_execution.output_data.get("variables", {}) or {}
+                    conv_vars = variables.get("conv", {}) if isinstance(variables, dict) else {}
+                    if conv_vars:
+                        break
 
             result = await db.execute(
                 select(MessageModel)
@@ -6963,6 +6972,11 @@ class WorkflowService:
         )
         _log_before_execute_step("before_execute_runtime_config_ready")
 
+        _lock_key: str | None = None
+        _lock_value: str | None = None
+        _lock_degraded = False
+        _last_event_data: dict | None = None
+
         try:
             files = await self._handle_file_input(payload.files)
             if prepared_memory_storage_type is not None:
@@ -7089,6 +7103,62 @@ class WorkflowService:
                 status="running",
             )
 
+            # ── 会话执行锁 ──
+            if conversation_id_uuid:
+                _lock_key = f"workflow:exec_lock:{conversation_id_uuid}"
+                _lock_value = f"{execution.execution_id}:{time.time()}"
+                acquired = False
+                try:
+                    acquired = (await asyncio.wait_for(
+                        aio_redis.set(_lock_key, _lock_value, nx=True, ex=120),
+                        timeout=2.0,
+                    )) or False
+                except Exception as redis_exc:
+                    logger.warning(
+                        "Redis lock acquisition failed, degrading to no-lock mode: %s",
+                        redis_exc,
+                    )
+                    acquired = True
+                    _lock_degraded = True
+                    _lock_key = None
+
+                if not acquired:
+                    logger.info(
+                        "Lock held by another execution, waiting: conversation_id=%s new_execution=%s",
+                        conversation_id_uuid, execution.execution_id,
+                    )
+                    for _ in range(10):
+                        await asyncio.sleep(0.2)
+                        try:
+                            acquired = (await asyncio.wait_for(
+                                aio_redis.set(_lock_key, _lock_value, nx=True, ex=120),
+                                timeout=1.0,
+                            )) or False
+                        except Exception:
+                            acquired = True
+                            _lock_degraded = True
+                            _lock_key = None
+                            break
+                        if acquired:
+                            break
+
+                    if not acquired:
+                        logger.warning(
+                            "Lock wait timeout, using fallback vars: conversation_id=%s execution_id=%s",
+                            conversation_id_uuid, execution.execution_id,
+                        )
+                        _lock_key = None
+                    elif not _lock_degraded:
+                        # 锁获取成功，重新读变量（上一轮可能刚释放）
+                        try:
+                            refetched = await self._get_history_info_async(conversation_id_uuid)
+                            if refetched:
+                                refetched_vars, _ = refetched
+                                if refetched_vars:
+                                    input_data["conv"] = refetched_vars
+                        except Exception:
+                            pass
+
             accumulated_content = ""
             # One workflow execution owns one assistant message.  Individual
             # Answer/End outputs are kept as logical responses inside that
@@ -7113,6 +7183,7 @@ class WorkflowService:
                     memory_storage_type=storage_type,
                     user_rag_memory_id=user_rag_memory_id
             ):
+                _last_event_data = event.get("data") or {}
                 event_type = event.get("event")
                 event_data = event.get("data", {})
 
@@ -8053,6 +8124,53 @@ class WorkflowService:
                     },
                 )
             yield {"event": "error", "data": {"execution_id": execution.execution_id, "error": str(e)}}
+
+        finally:
+            # ── 中断/取消时持久化变量 + 释放锁 + 清理资源 ──
+            if execution and execution.status == "running":
+                try:
+                    await self._patch_execution_async(
+                        execution.execution_id,
+                        status="cancelled",
+                        output_data=_last_event_data,
+                    )
+                    if not isinstance(_last_event_data, dict) or "variables" not in (_last_event_data or {}):
+                        logger.warning(
+                            "cancelled without full variable snapshot: "
+                            "execution_id=%s conversation_id=%s",
+                            execution.execution_id, conversation_id_uuid,
+                        )
+                except Exception as persist_err:
+                    logger.warning(
+                        "Failed to persist variables on cancel: execution_id=%s error=%s",
+                        execution.execution_id, persist_err,
+                    )
+
+            # 释放会话执行锁
+            if _lock_key and _lock_value and not _lock_degraded:
+                try:
+                    _release_script = """
+                    if redis.call("get", KEYS[1]) == ARGV[1] then
+                        return redis.call("del", KEYS[1])
+                    end
+                    return 0
+                    """
+                    await aio_redis.eval(_release_script, 1, _lock_key, _lock_value)
+                except Exception as lock_release_err:
+                    logger.warning(
+                        "Failed to release execution lock: key=%s error=%s",
+                        _lock_key, lock_release_err,
+                    )
+
+            # 清理干预注册表
+            try:
+                from app.core.workflow.nodes.human_intervention.node import InterventionRegistry
+                InterventionRegistry.cleanup(execution.execution_id)
+            except Exception as cleanup_err:
+                logger.warning(
+                    "Failed to cleanup intervention registry: execution_id=%s error=%s",
+                    execution.execution_id, cleanup_err,
+                )
 
     async def resume_intervention_stream(
             self,
