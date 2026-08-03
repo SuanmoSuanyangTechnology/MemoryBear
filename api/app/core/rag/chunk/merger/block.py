@@ -561,9 +561,12 @@ class BlockMerger(ChunkMerger):
 
     def _metadata_for_block(self, block: ParsedBlock) -> dict:
         metadata = deepcopy(block.metadata)
+        block_type = block.type.value
+        if block.type is ParsedBlockType.LIST and block.metadata.get("contains_qa_marker"):
+            block_type = "qa"
         metadata.update(
             {
-                "block_type": block.type.value,
+                "block_type": block_type,
                 "block_seq_start": block.seq,
                 "block_seq_end": block.seq,
                 "start_line": block.start_line,
