@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:50:00 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-07-01 10:18:39
+ * @Last Modified time: 2026-08-03 16:58:45
  */
 /**
  * Group Model View
@@ -70,7 +70,7 @@ const Group = forwardRef <BaseRef,{ query: any; handleEdit: (data: ModelListItem
       {list.length === 0
         ? <PageEmpty />
         :(
-          <div className="rb:grid rb:grid-cols-4 rb:gap-3">
+          <div className="rb:grid rb:grid-cols-4 rb:gap-4">
             {list.map(item => (
               <RbCard
                 key={item.id}

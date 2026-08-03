@@ -546,7 +546,7 @@ const KnowledgeBaseManagement: FC = () => {
           <Button type="primary">+ {t('knowledgeBase.createKnowledgeBase')}</Button>
         </Dropdown>
       </Flex>
-      <div id="scrollableDiv" className="rb:h-[calc(100vh-120px)] rb:overflow-y-auto rb:overflow-x-hidden">
+      <div id="scrollableDiv" className="rb:h-[calc(100vh-116px)] rb:overflow-y-auto rb:overflow-x-hidden">
       <InfiniteScroll
         dataLength={data.length}
         next={loadMore}
