@@ -180,26 +180,43 @@ async def get_sources(
 async def get_source_messages(
         end_user_id: uuid.UUID,
         source: str = Query(..., description="来源：service_api 或 mcp"),
-        limit: int = Query(default=20, ge=1, le=100, description="返回条数上限"),
+        page: int = Query(default=1, ge=1, description="页码，从 1 开始"),
+        pagesize: int = Query(default=20, ge=1, le=100, description="每页数量，最大 100"),
         current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ):
-    """按来源获取最近 N 条消息，从旧到新排列，形成连贯对话流。
+    """按来源分页获取工作记忆消息，按 message_seq 从旧到新排列，形成连贯对话流。
+
+    分页语义（service_api / mcp 两种来源完全一致）：
+    - page 从 1 开始；pagesize 默认 20、最大 100
+    - 返回 page 元数据 {page, pagesize, total, hasnext}
+    - 按 message_seq ASC 排序：message_seq 从小到大表示消息从旧到新，
+      该来源分组内单调递增，翻页无重复无遗漏
 
     Args:
         end_user_id: 终端用户 UUID
         source: service_api 或 mcp
-        limit: 返回条数上限（默认 20，最大 100）
+        page: 页码（默认 1，最小 1）
+        pagesize: 每页数量（默认 20，最小 1，最大 100）
     """
     allowed_sources = {MemoryMessageSource.SERVICE_API.value, MemoryMessageSource.MCP.value}
     if source not in allowed_sources:
-        return success(data={"items": [], "total": 0, "source": source}, msg="unsupported source")
+        return success(
+            data={
+                "items": [],
+                "total": 0,
+                "source": source,
+                "page": {"page": page, "pagesize": pagesize, "total": 0, "hasnext": False},
+            },
+            msg="unsupported source",
+        )
 
     async with get_async_db_context() as db:
         memory_message_repo = MemoryMessageRepository(db)
         rows, total = await memory_message_repo.list_recent_messages_by_source_async(
             end_user_id=str(end_user_id),
             source=source,
-            limit=limit,
+            page=page,
+            pagesize=pagesize,
         )
         items = [
             {
@@ -211,4 +228,17 @@ async def get_source_messages(
             }
             for m in rows
         ]
-    return success(data={"items": items, "total": total, "source": source}, msg="查询成功")
+    return success(
+        data={
+            "items": items,
+            "total": total,
+            "source": source,
+            "page": {
+                "page": page,
+                "pagesize": pagesize,
+                "total": total,
+                "hasnext": (page * pagesize) < total,
+            },
+        },
+        msg="查询成功",
+    )
