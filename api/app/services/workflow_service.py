@@ -5786,7 +5786,7 @@ class WorkflowService:
         conv_id = chain[0].conversation_id
         fallback_executions = self.db.query(WorkflowExecution).filter(
             WorkflowExecution.conversation_id == conv_id,
-            WorkflowExecution.status.in_(["completed", "failed", "waiting_human", "timeout"]),
+            WorkflowExecution.status.in_(["completed", "failed", "waiting_human", "timeout", "cancelled"]),
         ).all() if conv_id else []
 
         def _find_execution_by_time(target_msg: MessageModel):
@@ -7147,6 +7147,25 @@ class WorkflowService:
                             "Lock wait timeout, using fallback vars: conversation_id=%s execution_id=%s",
                             conversation_id_uuid, execution.execution_id,
                         )
+                        # 尝试取消上一轮执行（A），从 Redis lock value 读取 A 的 execution_id
+                        try:
+                            holder_value = await aio_redis.get(_lock_key)
+                            if holder_value:
+                                holder_exec_id = (holder_value or "").split(":")[0]
+                                if holder_exec_id and holder_exec_id != execution.execution_id:
+                                    await self._patch_execution_async(
+                                        holder_exec_id, status="cancelled",
+                                    )
+                                    logger.info(
+                                        "Cancelled previous execution after lock timeout: "
+                                        "previous_execution=%s new_execution=%s",
+                                        holder_exec_id, execution.execution_id,
+                                    )
+                        except Exception as cancel_err:
+                            logger.warning(
+                                "Failed to cancel previous execution after lock timeout: %s",
+                                cancel_err,
+                            )
                         _lock_key = None
                     elif not _lock_degraded:
                         # 锁获取成功，重新读变量（上一轮可能刚释放）
@@ -8129,14 +8148,21 @@ class WorkflowService:
             # ── 中断/取消时持久化变量 + 释放锁 + 清理资源 ──
             if execution and execution.status == "running":
                 try:
+                    # 仅当快照包含完整变量时才持久化 output_data；
+                    # 不完整快照（如 LLM 流式 chunk）不保存，避免覆盖上一个已知完整终态。
+                    snapshot = (
+                        _last_event_data
+                        if self._is_snapshot_complete(_last_event_data)
+                        else None
+                    )
                     await self._patch_execution_async(
                         execution.execution_id,
                         status="cancelled",
-                        output_data=_last_event_data,
+                        output_data=snapshot,
                     )
-                    if not isinstance(_last_event_data, dict) or "variables" not in (_last_event_data or {}):
+                    if snapshot is None:
                         logger.warning(
-                            "cancelled without full variable snapshot: "
+                            "cancelled without complete variable snapshot: "
                             "execution_id=%s conversation_id=%s",
                             execution.execution_id, conversation_id_uuid,
                         )
@@ -8171,6 +8197,20 @@ class WorkflowService:
                     "Failed to cleanup intervention registry: execution_id=%s error=%s",
                     execution.execution_id, cleanup_err,
                 )
+
+    @staticmethod
+    def _is_snapshot_complete(data: dict | None) -> bool:
+        """SSE 事件 data 是否包含完整变量快照（含 variables.conv）。
+
+        只有 workflow_end 事件才会携带完整 variables 字段；
+        message/node_end 等中间事件不含，不应作为 cancelled 的变量恢复源。
+        """
+        if not isinstance(data, dict):
+            return False
+        if "variables" not in data:
+            return False
+        variables = data.get("variables") or {}
+        return isinstance(variables, dict) and "conv" in variables
 
     async def resume_intervention_stream(
             self,
