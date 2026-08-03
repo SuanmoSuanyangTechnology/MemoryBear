@@ -34,6 +34,24 @@ from app.db import get_async_db_context
 logger = logging.getLogger(__name__)
 
 
+def _get_async_pool_status_safe() -> dict | None:
+    try:
+        from app.db import get_async_pool_status
+        return get_async_pool_status()
+    except Exception:
+        return None
+
+
+def _fmt_pool(status: dict | None) -> str:
+    if not status:
+        return "N/A"
+    return (
+        f"checkout={status.get('checked_out')}/{status.get('pool_size')}"
+        f" overflow={status.get('overflow')}"
+        f" usage={status.get('usage_percent')}%"
+    )
+
+
 # ---------------------------------------------------------------------------
 # PersistTask
 # ---------------------------------------------------------------------------
@@ -214,8 +232,14 @@ class BatchPersistQueue:
         extracted and committed together via one multi-row INSERT plus atomic
         conversation counter UPDATEs — the DB is opened only once per batch.
         """
+        if not batch:
+            return
+
+        t0 = time.time()
         msg_tasks = [t for t in batch if t.task_type in ("save_messages", "save_failed_message")]
         other_tasks = [t for t in batch if t not in msg_tasks]
+
+        pool_status_before = _get_async_pool_status_safe()
 
         memory_conv_ids: list[str] = []
         try:
@@ -239,8 +263,22 @@ class BatchPersistQueue:
                     logger.warning(
                         "Failed to schedule mark_pending for conv %s", conv_id, exc_info=True,
                     )
+
+            elapsed_ms = (time.time() - t0) * 1000
+            pool_status_after = _get_async_pool_status_safe()
+            logger.info(
+                "[TIMING] batch_persist flush: batch=%d msg=%d other=%d elapsed=%.1fms "
+                "pool_before=%s pool_after=%s queue_depth=%d",
+                len(batch), len(msg_tasks), len(other_tasks), elapsed_ms,
+                _fmt_pool(pool_status_before), _fmt_pool(pool_status_after),
+                self._queue.qsize(),
+            )
         except Exception:
-            logger.exception("Batch persist failed for %d tasks (%d msg)", len(batch), len(msg_tasks))
+            elapsed_ms = (time.time() - t0) * 1000
+            logger.exception(
+                "[TIMING] batch_persist FAILED: batch=%d msg=%d elapsed=%.1fms queue_depth=%d",
+                len(batch), len(msg_tasks), elapsed_ms, self._queue.qsize(),
+            )
 
     async def _sync_write(self, task: PersistTask) -> None:
         """Synchronous (immediate) write fallback for a single task."""

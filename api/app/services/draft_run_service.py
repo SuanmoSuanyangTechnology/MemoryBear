@@ -1216,23 +1216,47 @@ class AgentRunService:
             # 3. 处理系统提示词（支持变量替换）
             system_prompt = system_prompt.get_text_content() or "你是一个专业的AI助手"
 
-            # 4. 准备工具列表
+            # 4. 并行加载工具/技能/知识库/记忆配置（各自独立 DB 会话，无相互依赖）
             tools = []
+            parallel_results = await asyncio.gather(
+                self.load_tools_config(tools_config, web_search, tenant_id, user_id, workspace_id),
+                self.load_skill_config(skills_config, message, tenant_id, user_id, workspace_id),
+                self.load_knowledge_retrieval_config(knowledge_retrieval_config, user_id),
+                self.load_memory_config(memory_config, user_id, workspace_id, storage_type, user_rag_memory_id)
+                if memory else None,
+                return_exceptions=True,
+            )
 
-            # 从配置中获取启用的工具
-            tools.extend(await self.load_tools_config(tools_config, web_search, tenant_id, user_id, workspace_id))
-            skill_tools, skill_prompts = await self.load_skill_config(skills_config, message, tenant_id, user_id, workspace_id)
-            tools.extend(skill_tools)
-            if skill_prompts:
-                system_prompt = f"{system_prompt}\n\n{skill_prompts}"
-            kb_tools, citations_collector = await self.load_knowledge_retrieval_config(knowledge_retrieval_config, user_id)
-            tools.extend(kb_tools)
-            # 添加长期记忆工具
-            if memory:
-                memory_tools, _ = await self.load_memory_config(
-                    memory_config, user_id, workspace_id, storage_type, user_rag_memory_id
-                )
+            base_tools = parallel_results[0]
+            skill_result = parallel_results[1]
+            kb_result = parallel_results[2]
+            memory_result = parallel_results[3]
+
+            if not isinstance(base_tools, Exception):
+                tools.extend(base_tools)
+            else:
+                logger.warning("load_tools_config failed: %s", base_tools)
+
+            if not isinstance(skill_result, Exception) and skill_result is not None:
+                skill_tools, skill_prompts = skill_result
+                tools.extend(skill_tools)
+                if skill_prompts:
+                    system_prompt = f"{system_prompt}\n\n{skill_prompts}"
+            elif isinstance(skill_result, Exception):
+                logger.warning("load_skill_config failed: %s", skill_result)
+
+            if not isinstance(kb_result, Exception) and kb_result is not None:
+                kb_tools, citations_collector = kb_result
+                tools.extend(kb_tools)
+            elif isinstance(kb_result, Exception):
+                logger.warning("load_knowledge_retrieval_config failed: %s", kb_result)
+                citations_collector = []
+
+            if memory_result is not None and not isinstance(memory_result, Exception):
+                memory_tools, _ = memory_result
                 tools.extend(memory_tools)
+            elif isinstance(memory_result, Exception):
+                logger.warning("load_memory_config failed: %s", memory_result)
 
             # 5. 处理会话ID（创建或验证），新会话时写入开场白
             is_new_conversation = not conversation_id
@@ -1648,24 +1672,47 @@ class AgentRunService:
             # 3. 处理系统提示词（支持变量替换）
             system_prompt = system_prompt.get_text_content() or "你是一个专业的AI助手"
 
-            # 4. 准备工具列表
+            # 4. 并行加载工具/技能/知识库/记忆配置（各自独立 DB 会话，无相互依赖）
             tools = []
+            parallel_results = await asyncio.gather(
+                self.load_tools_config(tools_config, web_search, tenant_id, user_id, workspace_id),
+                self.load_skill_config(skills_config, message, tenant_id, user_id, workspace_id),
+                self.load_knowledge_retrieval_config(knowledge_retrieval_config, user_id),
+                self.load_memory_config(memory_config, user_id, workspace_id, storage_type, user_rag_memory_id)
+                if memory else None,
+                return_exceptions=True,
+            )
 
-            # 从配置中获取启用的工具
-            tools.extend(await self.load_tools_config(tools_config, web_search, tenant_id, user_id, workspace_id))
-            skill_tools, skill_prompts = await self.load_skill_config(skills_config, message, tenant_id, user_id, workspace_id)
-            tools.extend(skill_tools)
-            if skill_prompts:
-                system_prompt = f"{system_prompt}\n\n{skill_prompts}"
-            kb_tools, citations_collector = await self.load_knowledge_retrieval_config(knowledge_retrieval_config, user_id)
-            tools.extend(kb_tools)
+            base_tools = parallel_results[0]
+            skill_result = parallel_results[1]
+            kb_result = parallel_results[2]
+            memory_result = parallel_results[3]
 
-            # 添加长期记忆工具
-            if memory:
-                memory_tools, _ = await self.load_memory_config(
-                    memory_config, user_id, workspace_id, storage_type, user_rag_memory_id
-                )
+            if not isinstance(base_tools, Exception):
+                tools.extend(base_tools)
+            else:
+                logger.warning("load_tools_config failed: %s", base_tools)
+
+            if not isinstance(skill_result, Exception) and skill_result is not None:
+                skill_tools, skill_prompts = skill_result
+                tools.extend(skill_tools)
+                if skill_prompts:
+                    system_prompt = f"{system_prompt}\n\n{skill_prompts}"
+            elif isinstance(skill_result, Exception):
+                logger.warning("load_skill_config failed: %s", skill_result)
+
+            if not isinstance(kb_result, Exception) and kb_result is not None:
+                kb_tools, citations_collector = kb_result
+                tools.extend(kb_tools)
+            elif isinstance(kb_result, Exception):
+                logger.warning("load_knowledge_retrieval_config failed: %s", kb_result)
+                citations_collector = []
+
+            if memory_result is not None and not isinstance(memory_result, Exception):
+                memory_tools, _ = memory_result
                 tools.extend(memory_tools)
+            elif isinstance(memory_result, Exception):
+                logger.warning("load_memory_config failed: %s", memory_result)
 
             # 5. 处理会话ID（创建或验证），新会话时写入开场白
             is_new_conversation = not conversation_id
