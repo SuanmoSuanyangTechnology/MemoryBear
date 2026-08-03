@@ -385,7 +385,7 @@ class StructMarkdownParser(DocumentParser):
             if self._is_block_start(index) or IMAGE_PATTERN.search(line):
                 break
             index += 1
-        content = self._block_content(start, index, compact_blank_lines=self._compact_block_spacing)
+        content = self._block_content(start, index)
         self._append_block(
             ParsedBlockType.TEXT,
             content,
