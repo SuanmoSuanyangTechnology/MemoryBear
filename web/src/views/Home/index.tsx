@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:12:43 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-10 11:57:58
+ * @Last Modified time: 2026-08-03 17:15:29
  */
 /**
  * Home Dashboard Page
@@ -120,7 +120,7 @@ const Home = () => {
   }
 
   return (
-    <Row gutter={[12, 12]}>
+    <Row gutter={[12, 12]} className="rb:h-full! rb:overflow-y-auto!">
       <Col span={8}>
         <TopCardList data={dashboardData} />
       </Col>
