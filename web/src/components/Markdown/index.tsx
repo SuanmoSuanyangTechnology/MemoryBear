@@ -269,7 +269,7 @@ const RbMarkdown: FC<RbMarkdownProps> = ({
           //   }
           // },
         ]}
-        remarkPlugins={[RemarkGfm, RemarkMath, RemarkBreaks]}
+        remarkPlugins={[[RemarkGfm, { singleTilde: false }], RemarkMath, RemarkBreaks]}
         remarkRehypeOptions={{
           allowDangerousHtml: true,
         }}
