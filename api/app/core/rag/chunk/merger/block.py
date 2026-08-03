@@ -37,6 +37,7 @@ from .text import TextMerger
 TEXT_LIKE_TYPES = {
     ParsedBlockType.HEADING,
     ParsedBlockType.TEXT,
+    ParsedBlockType.LIST,
     ParsedBlockType.BLOCKQUOTE,
 }
 
@@ -580,7 +581,8 @@ class BlockMerger(ChunkMerger):
         last = blocks[-1]
         metadata = {
             "block_type": block_type,
-            "block_types": [block.type.value for block in blocks],
+            "block_types": _unique_preserving_order(block.type.value for block in blocks),
+            "block_count": len(blocks),
             "block_seq_start": first.seq,
             "block_seq_end": last.seq,
             "start_line": first.start_line,
@@ -620,6 +622,16 @@ def _unique_paths(paths) -> list[list[str]]:
             continue
         seen.add(key)
         result.append(list(key))
+    return result
+
+
+def _unique_preserving_order(values) -> list[str]:
+    result: list[str] = []
+    for value in values:
+        item = str(value)
+        if item in result:
+            continue
+        result.append(item)
     return result
 
 
