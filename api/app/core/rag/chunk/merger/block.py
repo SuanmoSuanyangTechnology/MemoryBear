@@ -117,8 +117,15 @@ class BlockMerger(ChunkMerger):
         logical_chunks: list[LogicalChunk] = []
         text_group: list[ParsedBlock] = []
         text_like_types = set(TEXT_LIKE_TYPES)
-        if merge_lists_with_text:
-            text_like_types.add(ParsedBlockType.LIST)
+
+        def is_text_like_block(block: ParsedBlock) -> bool:
+            if block.type in text_like_types:
+                return True
+            return (
+                merge_lists_with_text
+                and block.type is ParsedBlockType.LIST
+                and not block.metadata.get("contains_qa_marker")
+            )
 
         def flush_text_group():
             if not text_group:
@@ -141,7 +148,7 @@ class BlockMerger(ChunkMerger):
             text_group.clear()
 
         for block in blocks:
-            if block.type in text_like_types:
+            if is_text_like_block(block):
                 text_group.append(block)
                 continue
 
