@@ -1225,6 +1225,8 @@ class WritePipeline:
         清理本次写入产生的统计快照，避免缓存领先于实际图数据。
         失败不中断异常传播。
         """
+        from redis.exceptions import RedisError
+
         try:
             from app.cache.memory.activity_stats_cache import ActivityStatsCache
 
@@ -1235,7 +1237,9 @@ class WritePipeline:
                 f"[Stats] Neo4j 写入失败，已回滚 Redis 统计缓存: "
                 f"workspace_id={self.memory_config.workspace_id}"
             )
-        except Exception as e:
+        except (RedisError, OSError) as e:
+            # RedisError: Redis 连接/命令层面失败
+            # OSError: 网络层面不可达（ConnectionRefusedError 等是 OSError 子类）
             logger.warning(f"[Stats] 回滚统计缓存失败（不影响异常传播）: {e}")
 
     async def _update_stats_cache(self, result: ExtractionResult) -> None:
