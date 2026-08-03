@@ -39,7 +39,7 @@ CIRCLED_LIST_PATTERN = re.compile(rf"^\s{{0,3}}([{CIRCLED_MARKERS}])\s*(.+\S)\s*
 CHINESE_LIST_PATTERN = re.compile(rf"^\s{{0,3}}([{CHINESE_NUMERAL_MARKERS}]+)({LIST_BOUNDARY})\s*(.+\S)\s*$")
 ALPHA_LIST_PATTERN = re.compile(r"^\s{0,3}([A-Za-z])([.)）|｜]|、(?!\s*[A-Za-z]))\s*(.+\S)\s*$")
 DEFINITION_LIST_PATTERN = re.compile(r"^\s{0,3}([A-Z][A-Z0-9]{1,11})([：:])\s*(.+\S)\s*$")
-QA_LIST_PATTERN = re.compile(r"^\s{0,3}(问|答|拓展|补充)([?？:：|｜]|\s+)\s*(.+\S)\s*$")
+QA_LIST_PATTERN = re.compile(r"^\s{0,3}(问|答|拓展|补充)([?？:：|｜]|\s+)\s*(\S(?:.*\S)?)\s*$")
 ORDINAL_LIST_PATTERN = re.compile(
     rf"^\s{{0,3}}(首次|其次|再次|最后|第[{CHINESE_NUMERAL_MARKERS}0-9]+)({LIST_BOUNDARY})\s*(.+\S)\s*$"
 )
