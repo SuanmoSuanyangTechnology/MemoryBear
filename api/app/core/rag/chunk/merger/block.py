@@ -37,7 +37,6 @@ from .text import TextMerger
 TEXT_LIKE_TYPES = {
     ParsedBlockType.HEADING,
     ParsedBlockType.TEXT,
-    ParsedBlockType.LIST,
     ParsedBlockType.BLOCKQUOTE,
 }
 
@@ -71,7 +70,13 @@ class BlockMerger(ChunkMerger):
         if ctx.chunk_output_mode is ChunkOutputMode.PARENT_CHILD:
             parent_token_num = int(ctx.parser_config.get("parent_chunk_token_num", 1024))
             parent_chunk_delimiter = ctx.parser_config.get("parent_chunk_delimiter")
-            parent_chunks = self._blocks_to_logical_chunks(blocks, parent_token_num, parent_chunk_delimiter, 0)
+            parent_chunks = self._blocks_to_logical_chunks(
+                blocks,
+                parent_token_num,
+                parent_chunk_delimiter,
+                0,
+                merge_lists_with_text=parse_result.markdown_preprocess_profile == "mineru",
+            )
             child_chunks, parent_id_map = self._build_children_from_parents(
                 parent_chunks,
                 token_num,
@@ -87,7 +92,13 @@ class BlockMerger(ChunkMerger):
                 pdf_parser=parse_result.pdf_parser,
             )
 
-        logical_chunks = self._blocks_to_logical_chunks(blocks, token_num, delimiter, chunk_overlap)
+        logical_chunks = self._blocks_to_logical_chunks(
+            blocks,
+            token_num,
+            delimiter,
+            chunk_overlap,
+            merge_lists_with_text=parse_result.markdown_preprocess_profile == "mineru",
+        )
         return MergeResult(
             chunks=self._serialize_chunk_contents(logical_chunks),
             logical_chunks=logical_chunks,
@@ -100,9 +111,14 @@ class BlockMerger(ChunkMerger):
         token_num: int,
         delimiter: str | None,
         overlap: int,
+        *,
+        merge_lists_with_text: bool = False,
     ) -> list[LogicalChunk]:
         logical_chunks: list[LogicalChunk] = []
         text_group: list[ParsedBlock] = []
+        text_like_types = set(TEXT_LIKE_TYPES)
+        if merge_lists_with_text:
+            text_like_types.add(ParsedBlockType.LIST)
 
         def flush_text_group():
             if not text_group:
@@ -125,7 +141,7 @@ class BlockMerger(ChunkMerger):
             text_group.clear()
 
         for block in blocks:
-            if block.type in TEXT_LIKE_TYPES:
+            if block.type in text_like_types:
                 text_group.append(block)
                 continue
 
@@ -562,12 +578,9 @@ class BlockMerger(ChunkMerger):
 
     def _metadata_for_block(self, block: ParsedBlock) -> dict:
         metadata = deepcopy(block.metadata)
-        block_type = block.type.value
-        if block.type is ParsedBlockType.LIST and block.metadata.get("contains_qa_marker"):
-            block_type = "qa"
         metadata.update(
             {
-                "block_type": block_type,
+                "block_type": block.type.value,
                 "block_seq_start": block.seq,
                 "block_seq_end": block.seq,
                 "start_line": block.start_line,
@@ -581,7 +594,6 @@ class BlockMerger(ChunkMerger):
         last = blocks[-1]
         metadata = {
             "block_type": block_type,
-            "block_types": _unique_preserving_order(block.type.value for block in blocks),
             "block_count": len(blocks),
             "block_seq_start": first.seq,
             "block_seq_end": last.seq,
@@ -622,16 +634,6 @@ def _unique_paths(paths) -> list[list[str]]:
             continue
         seen.add(key)
         result.append(list(key))
-    return result
-
-
-def _unique_preserving_order(values) -> list[str]:
-    result: list[str] = []
-    for value in values:
-        item = str(value)
-        if item in result:
-            continue
-        result.append(item)
     return result
 
 
