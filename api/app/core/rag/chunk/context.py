@@ -97,6 +97,7 @@ class ParseResult:
     url_res: list | None = None
     append_embed: bool = True
     blocks: list[ParsedBlock] | None = None
+    markdown_preprocess_profile: str | None = None
 
 
 @dataclass

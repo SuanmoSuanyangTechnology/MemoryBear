@@ -347,7 +347,7 @@ const Market: React.FC<{ getStatusTag?: (status: string) => ReactNode }> = () =>
         </Flex>
 
         <div className="rb:mt-4">
-          <div id="mcpScrollableDiv" className="rb:overflow-y-auto rb:h-[calc(100vh-188px)]">
+          <div id="mcpScrollableDiv" className="rb:overflow-y-auto rb:h-[calc(100vh-180px)]">
             {!loading && mcpList.length === 0 ? (
               <Empty
                 url={pageEmptyIcon}

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-01-12 14:42:02 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-07-03 11:07:08
+ * @Last Modified time: 2026-08-03 16:45:38
  */
 import { type FC, useEffect, useState, useMemo, useRef, Fragment } from 'react'
 import clsx from 'clsx'
@@ -405,7 +405,7 @@ const WorkingDetail: FC = () => {
                         ? <Skeleton active />
                         : (!hasInsight && !hasSummary)
                           ? <Empty />
-                          : <Flex vertical gap={16}>
+                          : <Flex vertical gap={16} className="rb:pt-4!">
                             {/* Memory insight */}
                             {INSIGHT_KEYS.filter(key => (Array.isArray(insight[key]) && insight[key].length > 0) || (!Array.isArray(insight[key]) && insight[key])).map((key, index) => {
                               const value = insight[key]

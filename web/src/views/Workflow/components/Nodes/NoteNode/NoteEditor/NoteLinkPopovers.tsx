@@ -1,4 +1,4 @@
-import { type FC, useState } from 'react';
+import { type FC, useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { Flex, Button, Input } from 'antd';
@@ -52,6 +52,17 @@ interface EditLinkPopoverProps {
 export const EditLinkPopover: FC<EditLinkPopoverProps> = ({ rect, initialUrl, onConfirm, onClose }) => {
   const { t } = useTranslation();
   const [url, setUrl] = useState(initialUrl);
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
+  }, [onClose]);
   const confirm = () => {
     onClose();
     onConfirm(url);

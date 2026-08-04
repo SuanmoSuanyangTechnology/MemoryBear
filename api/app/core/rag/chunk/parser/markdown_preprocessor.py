@@ -38,8 +38,9 @@ KEYCAP_LIST_PATTERN = re.compile(r"^\s{0,3}([0-9]\ufe0f?\u20e3)\s*(.+\S)\s*$")
 CIRCLED_LIST_PATTERN = re.compile(rf"^\s{{0,3}}([{CIRCLED_MARKERS}])\s*(.+\S)\s*$")
 CHINESE_LIST_PATTERN = re.compile(rf"^\s{{0,3}}([{CHINESE_NUMERAL_MARKERS}]+)({LIST_BOUNDARY})\s*(.+\S)\s*$")
 ALPHA_LIST_PATTERN = re.compile(r"^\s{0,3}([A-Za-z])([.)）|｜]|、(?!\s*[A-Za-z]))\s*(.+\S)\s*$")
-DEFINITION_LIST_PATTERN = re.compile(r"^\s{0,3}([A-Z][A-Z0-9]{1,11})([：:])\s*(.+\S)\s*$")
-QA_LIST_PATTERN = re.compile(r"^\s{0,3}(问|答|拓展|补充)([?？:：|｜]|\s+)\s*(.+\S)\s*$")
+QA_QUESTION_MARKERS = {"问", "问题", "提问", "追问"}
+QA_LIST_PATTERN = re.compile(r"^\s{0,3}(问题|答案|提问|回答|答复|回复|追问|问|答|拓展|补充)([?？:：|｜]|\s+)\s*(\S(?:.*\S)?)\s*$")
+DEFINITION_LIST_PATTERN = re.compile(r"^\s{0,3}(?!问|答|拓展|补充)([^:：\n]{1,32})([：:])\s*(\S(?:.*\S)?)\s*$")
 ORDINAL_LIST_PATTERN = re.compile(
     rf"^\s{{0,3}}(首次|其次|再次|最后|第[{CHINESE_NUMERAL_MARKERS}0-9]+)({LIST_BOUNDARY})\s*(.+\S)\s*$"
 )
@@ -123,7 +124,7 @@ class MarkdownPreprocessor:
             line = raw_line
             if normalize_escaped_structure:
                 line = self._normalize_escaped_structural_line(line)
-            line = EMPTY_HTML_ANCHOR_PATTERN.sub("", line)
+                line = EMPTY_HTML_ANCHOR_PATTERN.sub("", line)
             stripped = line.strip()
 
             block_hint = None
@@ -147,7 +148,7 @@ class MarkdownPreprocessor:
                     in_qa_list_context = False
                     qa_continuation_paragraphs = 0
                 else:
-                    list_metadata = self._list_metadata(line)
+                    list_metadata = self._list_metadata(line, enhanced=normalize_escaped_structure)
                     if list_metadata:
                         block_hint = "list"
                         metadata = list_metadata
@@ -155,10 +156,10 @@ class MarkdownPreprocessor:
                         in_qa_list_context = in_qa_list_context or bool(list_metadata.get("contains_qa_marker"))
                         if list_metadata.get("contains_qa_marker"):
                             qa_continuation_paragraphs = 0
-                    elif in_list_context and self._is_list_continuation(
+                    elif normalize_escaped_structure and in_list_context and self._is_list_continuation(
                         line,
-                        in_qa_context=normalize_escaped_structure and in_qa_list_context,
-                        after_blank=normalize_escaped_structure and in_qa_list_context and after_qa_blank,
+                        in_qa_context=in_qa_list_context,
+                        after_blank=in_qa_list_context and after_qa_blank,
                         qa_continuation_paragraphs=qa_continuation_paragraphs,
                     ):
                         block_hint = "list_continuation"
@@ -208,21 +209,24 @@ class MarkdownPreprocessor:
             normalized = ESCAPED_EMPHASIS_PATTERN.sub(r"\1", normalized)
         return normalized
 
-    def _list_metadata(self, line: str) -> dict[str, Any] | None:
+    def _list_metadata(self, line: str, *, enhanced: bool = False) -> dict[str, Any] | None:
         patterns = (
             ("unordered", UNORDERED_LIST_PATTERN),
             ("ordered", ORDERED_LIST_PATTERN),
-            ("ordered", EMPTY_ORDERED_LIST_PATTERN),
-            ("ordered_parenthesis", PAREN_ORDERED_LIST_PATTERN),
-            ("keycap", KEYCAP_LIST_PATTERN),
-            ("circled", CIRCLED_LIST_PATTERN),
-            ("step", STEP_LIST_PATTERN),
-            ("ordinal", ORDINAL_LIST_PATTERN),
-            ("chinese", CHINESE_LIST_PATTERN),
-            ("alpha", ALPHA_LIST_PATTERN),
-            ("definition", DEFINITION_LIST_PATTERN),
-            ("qa", QA_LIST_PATTERN),
         )
+        if enhanced:
+            patterns = (
+                *patterns,
+                ("ordered", EMPTY_ORDERED_LIST_PATTERN),
+                ("ordered_parenthesis", PAREN_ORDERED_LIST_PATTERN),
+                ("keycap", KEYCAP_LIST_PATTERN),
+                ("circled", CIRCLED_LIST_PATTERN),
+                ("step", STEP_LIST_PATTERN),
+                ("ordinal", ORDINAL_LIST_PATTERN),
+                ("chinese", CHINESE_LIST_PATTERN),
+                ("alpha", ALPHA_LIST_PATTERN),
+                ("qa", QA_LIST_PATTERN),
+            )
         for marker_kind, pattern in patterns:
             match = pattern.match(line)
             if not match:
@@ -234,12 +238,22 @@ class MarkdownPreprocessor:
                 "list_level": _indent_level(line),
                 "contains_qa_marker": marker_kind == "qa",
             }
+        if not enhanced:
+            return None
         prefixed_match = PREFIXED_LIST_PATTERN.match(line)
         if prefixed_match:
             return {
                 "list_marker": prefixed_match.group("marker").strip(),
                 "list_marker_kind": "prefixed",
                 "list_prefix": prefixed_match.group("prefix").strip(),
+                "list_level": _indent_level(line),
+                "contains_qa_marker": False,
+            }
+        definition_match = DEFINITION_LIST_PATTERN.match(line)
+        if definition_match:
+            return {
+                "list_marker": definition_match.group(1).strip(),
+                "list_marker_kind": "definition",
                 "list_level": _indent_level(line),
                 "contains_qa_marker": False,
             }

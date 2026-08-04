@@ -31,14 +31,16 @@ const NoteFormatPlugin = ({ nodeId, onFormatChange, fontSize = 12 }: { nodeId: s
         const style = 'getStyle' in anchorNode ? (anchorNode as { getStyle(): string }).getStyle() : '';
         const match = style.match(/font-size:\s*([\d.]+)px/);
         const nodeFontSize = match ? Number(match[1]) : fontSize;
-        const linkNode = $getNearestNodeOfType(anchorNode, LinkNode);
+        const anchorLink = $getNearestNodeOfType(anchorNode, LinkNode);
+        const focusLink = $getNearestNodeOfType(selection.focus.getNode(), LinkNode);
+        const linkUrl = anchorLink && anchorLink === focusLink ? anchorLink.getURL() : null;
         onFormatChange?.({
           bold: selection.hasFormat('bold'),
           italic: selection.hasFormat('italic'),
           strikethrough: selection.hasFormat('strikethrough'),
           list: !!$getNearestNodeOfType(anchorNode, ListNode),
           ...(nodeFontSize ? { fontSize: nodeFontSize } : {}),
-          linkUrl: linkNode ? linkNode.getURL() : null,
+          linkUrl,
         });
       });
     });

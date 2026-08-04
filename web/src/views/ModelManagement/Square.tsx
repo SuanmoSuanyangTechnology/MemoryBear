@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:50:14 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-07-01 10:13:27
+ * @Last Modified time: 2026-08-03 17:00:07
  */
 /**
  * Model Square View
@@ -78,7 +78,7 @@ const ModelSquare = forwardRef <BaseRef, { query: any; }>(({ query }, ref) => {
             ))}
           </Space>
           {list.filter(vo => vo.provider === activeProvider).map(vo => (
-            <div key={vo.provider} className="rb:max-h-[calc(100%-50px)] rb:overflow-y-auto">
+            <div key={vo.provider} className="rb:max-h-[calc(100%-44px)] rb:overflow-y-auto">
               <div className="rb:grid rb:grid-cols-3 rb:gap-4">
                 {vo.models.map(item => (
                   <RbCard
