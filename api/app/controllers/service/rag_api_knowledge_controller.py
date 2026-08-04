@@ -16,10 +16,12 @@ from app.schemas import knowledge_schema
 from app.schemas.api_key_schema import ApiKeyAuth
 from app.schemas.response_schema import ApiResponse
 from app.services import api_key_service
+from app.services.rag_access_service import unwrap_current_workspace_guard
 
 
 router = APIRouter(prefix="/knowledges", tags=["V1 - RAG API"])
 api_logger = get_business_logger()
+knowledge_controller = unwrap_current_workspace_guard(knowledge_controller)
 
 
 @router.get("/knowledgetype", response_model=ApiResponse)

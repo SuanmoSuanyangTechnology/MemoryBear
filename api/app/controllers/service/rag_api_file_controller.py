@@ -14,11 +14,13 @@ from app.schemas import file_schema
 from app.schemas.api_key_schema import ApiKeyAuth
 from app.schemas.response_schema import ApiResponse
 from app.services import api_key_service
+from app.services.rag_access_service import unwrap_current_workspace_guard
 from app.services.file_storage_service import FileStorageService, get_file_storage_service
 
 
 router = APIRouter(prefix="/files", tags=["V1 - RAG API"])
 api_logger = get_business_logger()
+file_controller = unwrap_current_workspace_guard(file_controller)
 
 
 @router.get("/{kb_id}/{parent_id}/files", response_model=ApiResponse)
@@ -141,8 +143,11 @@ async def custom_text(
 
 
 @router.get("/{file_id}", response_model=Any)
+@require_api_key(scopes=["rag"])
 async def get_file(
     file_id: uuid.UUID,
+    request: Request,
+    api_key_auth: ApiKeyAuth = None,
     db: Session = Depends(get_db),
     storage_service: FileStorageService = Depends(get_file_storage_service),
 ) -> Any:
@@ -152,9 +157,20 @@ async def get_file(
     - Construct the file path and check if it exists
     - Return a FileResponse to download the file
     """
-    return await file_controller.get_file(file_id=file_id,
-                                          db=db,
-                                          storage_service=storage_service)
+    api_key = api_key_service.ApiKeyService.get_api_key(
+        db,
+        api_key_auth.api_key_id,
+        api_key_auth.workspace_id,
+    )
+    current_user = api_key.creator
+    current_user.current_workspace_id = api_key_auth.workspace_id
+
+    return await file_controller.get_file(
+        file_id=file_id,
+        db=db,
+        current_user=current_user,
+        storage_service=storage_service,
+    )
 
 
 @router.put("/{file_id}", response_model=ApiResponse)
@@ -204,4 +220,3 @@ async def delete_file(
                                              db=db,
                                              current_user=current_user,
                                              storage_service=storage_service)
-

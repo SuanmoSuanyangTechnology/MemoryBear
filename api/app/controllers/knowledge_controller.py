@@ -43,7 +43,7 @@ from app.core.rag.utils.redis_conn import REDIS_CONN
 from app.core.rag.vdb.elasticsearch.elasticsearch_vector import ElasticSearchVectorIndexOps
 from app.core.response_utils import success, fail
 from app.db import get_async_db, get_async_db_context
-from app.dependencies import get_current_user_async
+from app.dependencies import cur_workspace_access_guard_async, get_current_user_async
 from app.models import knowledge_model
 from app.models import file_model
 from app.models.document_model import Document
@@ -275,6 +275,7 @@ async def get_knowledge_graph_entity_types(
 
 
 @router.get("/knowledges", response_model=ApiResponse)
+@cur_workspace_access_guard_async()
 async def get_knowledges(
         parent_id: Optional[uuid.UUID] = Query(None, description="parent folder id"),
         page: int = Query(1, gt=0),  # Default: 1, which must be greater than 0
@@ -361,6 +362,7 @@ async def get_knowledges(
 
 
 @router.post("/knowledge", response_model=ApiResponse)
+@cur_workspace_access_guard_async()
 @check_knowledge_capacity_quota
 async def create_knowledge(
         create_data: knowledge_schema.KnowledgeCreate,
@@ -373,6 +375,18 @@ async def create_knowledge(
     api_logger.info(f"Request to create a knowledge base: name={create_data.name}, workspace_id={current_user.current_workspace_id}, username: {current_user.username}")
 
     try:
+        create_data.workspace_id = current_user.current_workspace_id
+        if create_data.parent_id and create_data.parent_id != current_user.current_workspace_id:
+            parent = await knowledge_service.get_knowledge_by_id_async(
+                db=db,
+                knowledge_id=create_data.parent_id,
+                current_user=current_user,
+            )
+            if not parent:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="The parent knowledge base does not exist or access is denied",
+                )
         api_logger.debug(f"Start creating the knowledge base: {create_data.name}")
         # 1. Check if the knowledge base name already exists
         db_knowledge_exist = await knowledge_service.get_knowledge_by_name_async(db, name=create_data.name, current_user=current_user)
@@ -404,6 +418,7 @@ async def create_knowledge(
 
 
 @router.get("/{knowledge_id}", response_model=ApiResponse)
+@cur_workspace_access_guard_async()
 async def get_knowledge(
         knowledge_id: uuid.UUID,
         db: AsyncSession = Depends(get_async_db),
@@ -435,6 +450,7 @@ async def get_knowledge(
 
 
 @router.get("/{knowledge_id}/chunk-policy", response_model=ApiResponse)
+@cur_workspace_access_guard_async()
 async def get_knowledge_chunk_policy(
         knowledge_id: uuid.UUID,
         db: AsyncSession = Depends(get_async_db),
@@ -470,6 +486,7 @@ async def get_knowledge_chunk_policy(
 
 
 @router.put("/{knowledge_id}", response_model=ApiResponse)
+@cur_workspace_access_guard_async()
 async def update_knowledge(
         knowledge_id: uuid.UUID,
         update_data: knowledge_schema.KnowledgeUpdate,
@@ -482,6 +499,7 @@ async def update_knowledge(
 
 
 @router.get("/{kb_id}/qa/export")
+@cur_workspace_access_guard_async()
 async def export_knowledge_qa_csv(
         kb_id: uuid.UUID,
         current_user: User = Depends(get_current_user_async),
@@ -515,6 +533,7 @@ async def export_knowledge_qa_csv(
 
 
 @router.post("/{kb_id}/batch-download")
+@cur_workspace_access_guard_async()
 async def kb_batch_download(
         kb_id: uuid.UUID,
         current_user: User = Depends(get_current_user_async),
@@ -599,6 +618,19 @@ async def _update_knowledge(
 
         # 2. If updating the embedding_id, delete the knowledge base vector index, reset all document parsing progress to 0, and set chunk_num to 0
         update_dict = update_data.model_dump(exclude_unset=True)
+        if "parent_id" in update_dict:
+            parent_id = update_dict["parent_id"]
+            if parent_id is not None and parent_id != current_user.current_workspace_id:
+                parent = await knowledge_service.get_knowledge_by_id_async(
+                    db=db,
+                    knowledge_id=parent_id,
+                    current_user=current_user,
+                )
+                if not parent:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail="The parent knowledge base does not exist or access is denied",
+                    )
         graph_enabled_before: bool | None = None
         if "parser_config" in update_dict:
             try:
@@ -736,6 +768,7 @@ async def _update_knowledge(
 
 
 @router.delete("/{knowledge_id}", response_model=ApiResponse)
+@cur_workspace_access_guard_async()
 async def delete_knowledge(
         knowledge_id: uuid.UUID,
         db: AsyncSession = Depends(get_async_db),
@@ -778,6 +811,7 @@ async def delete_knowledge(
 
 
 @router.get("/{knowledge_id}/knowledge_graph", response_model=ApiResponse)
+@cur_workspace_access_guard_async()
 async def get_knowledge_graph(
         knowledge_id: uuid.UUID,
         db: AsyncSession = Depends(get_async_db),
@@ -867,6 +901,7 @@ async def get_knowledge_graph(
 
 
 @router.delete("/{knowledge_id}/knowledge_graph", response_model=ApiResponse)
+@cur_workspace_access_guard_async()
 async def delete_knowledge_graph(
         knowledge_id: uuid.UUID,
         db: AsyncSession = Depends(get_async_db),
@@ -910,6 +945,7 @@ async def delete_knowledge_graph(
 
 
 @router.post("/{knowledge_id}/knowledge_graph", response_model=ApiResponse)
+@cur_workspace_access_guard_async()
 async def rebuild_knowledge_graph(
         knowledge_id: uuid.UUID,
         db: AsyncSession = Depends(get_async_db),
@@ -1042,6 +1078,7 @@ async def check_feishu_auth(
 
 
 @router.post("/{knowledge_id}/sync", response_model=ApiResponse)
+@cur_workspace_access_guard_async()
 async def sync_knowledge(
         knowledge_id: uuid.UUID,
         db: AsyncSession = Depends(get_async_db),

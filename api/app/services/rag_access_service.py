@@ -1,4 +1,6 @@
 import uuid
+from types import ModuleType
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,6 +15,20 @@ from app.models.workspace_model import Workspace, WorkspaceMember
 from app.repositories import workspace_repository
 from app.schemas.api_key_schema import ApiKeyAuth
 from app.services.knowledge_retrieval_service import KnowledgeRetrievalAccessDenied
+
+
+class _CurrentWorkspaceGuardBypass:
+    def __init__(self, controller: ModuleType):
+        self._controller = controller
+
+    def __getattr__(self, name: str) -> Any:
+        handler = getattr(self._controller, name)
+        return getattr(handler, "__wrapped__", handler)
+
+
+def unwrap_current_workspace_guard(controller: ModuleType) -> _CurrentWorkspaceGuardBypass:
+    """Expose controller handlers for API Key calls after API Key scope has been verified."""
+    return _CurrentWorkspaceGuardBypass(controller)
 
 
 async def get_api_key_retrieval_principal_async(

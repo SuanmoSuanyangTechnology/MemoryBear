@@ -196,6 +196,34 @@ def get_knowledgeshare_by_id(db: Session, knowledgeshare_id: uuid.UUID) -> Knowl
         raise
 
 
+def get_knowledgeshare_by_id_in_source_workspace(
+        db: Session,
+        knowledgeshare_id: uuid.UUID,
+        source_workspace_id: uuid.UUID,
+) -> KnowledgeShare | None:
+    """Return a share only to its source workspace."""
+    try:
+        return (
+            db.query(KnowledgeShare)
+            .filter(
+                or_(
+                    KnowledgeShare.id == knowledgeshare_id,
+                    KnowledgeShare.target_kb_id == knowledgeshare_id,
+                ),
+                KnowledgeShare.source_workspace_id == source_workspace_id,
+            )
+            .first()
+        )
+    except Exception as e:
+        db_logger.error(
+            "Failed to query knowledge share in source workspace: share_id=%s workspace_id=%s error=%s",
+            knowledgeshare_id,
+            source_workspace_id,
+            str(e),
+        )
+        raise
+
+
 async def get_knowledgeshare_by_id_async(db: AsyncSession, knowledgeshare_id: uuid.UUID) -> KnowledgeShare | None:
     """Async version of get_knowledgeshare_by_id."""
     try:
@@ -209,6 +237,32 @@ async def get_knowledgeshare_by_id_async(db: AsyncSession, knowledgeshare_id: uu
         return result.scalars().first()
     except Exception as e:
         db_logger.error(f"Failed to query knowledge share by ID (async): knowledgeshare_id={knowledgeshare_id} - {str(e)}")
+        raise
+
+
+async def get_knowledgeshare_by_id_in_source_workspace_async(
+        db: AsyncSession,
+        knowledgeshare_id: uuid.UUID,
+        source_workspace_id: uuid.UUID,
+) -> KnowledgeShare | None:
+    """Async source-workspace-scoped knowledge share lookup."""
+    try:
+        stmt = select(KnowledgeShare).options(*_knowledgeshare_schema_load_options()).where(
+            or_(
+                KnowledgeShare.id == knowledgeshare_id,
+                KnowledgeShare.target_kb_id == knowledgeshare_id,
+            ),
+            KnowledgeShare.source_workspace_id == source_workspace_id,
+        )
+        result = await db.execute(stmt)
+        return result.scalars().first()
+    except Exception as e:
+        db_logger.error(
+            "Failed to query knowledge share in source workspace (async): share_id=%s workspace_id=%s error=%s",
+            knowledgeshare_id,
+            source_workspace_id,
+            str(e),
+        )
         raise
 
 
@@ -253,4 +307,33 @@ async def delete_knowledgeshare_by_id_async(db: AsyncSession, knowledgeshare_id:
     except Exception as e:
         db_logger.error(f"Failed to delete knowledge share record (async): knowledgeshare_id={knowledgeshare_id} - {str(e)}")
         await db.rollback()
+        raise
+
+
+async def delete_knowledgeshare_by_id_in_source_workspace_async(
+        db: AsyncSession,
+        knowledgeshare_id: uuid.UUID,
+        source_workspace_id: uuid.UUID,
+) -> int:
+    """Delete a share only after its source workspace has been constrained."""
+    try:
+        result = await db.execute(
+            delete(KnowledgeShare).where(
+                or_(
+                    KnowledgeShare.id == knowledgeshare_id,
+                    KnowledgeShare.target_kb_id == knowledgeshare_id,
+                ),
+                KnowledgeShare.source_workspace_id == source_workspace_id,
+            )
+        )
+        await db.commit()
+        return result.rowcount or 0
+    except Exception as e:
+        await db.rollback()
+        db_logger.error(
+            "Failed to delete knowledge share in source workspace: share_id=%s workspace_id=%s error=%s",
+            knowledgeshare_id,
+            source_workspace_id,
+            str(e),
+        )
         raise

@@ -18,11 +18,15 @@ from app.schemas.response_schema import ApiResponse
 from app.services import api_key_service
 from app.services.file_storage_service import FileStorageService, get_file_storage_service
 from app.services.knowledge_retrieval_service import KnowledgeRetrievalAccessDenied
-from app.services.rag_access_service import get_api_key_retrieval_principal_async
+from app.services.rag_access_service import (
+    get_api_key_retrieval_principal_async,
+    unwrap_current_workspace_guard,
+)
 
 
 router = APIRouter(prefix="/chunks", tags=["V1 - RAG API"])
 api_logger = get_business_logger()
+chunk_controller = unwrap_current_workspace_guard(chunk_controller)
 
 
 @router.get("/{kb_id}/{document_id}/previewchunks", response_model=ApiResponse)

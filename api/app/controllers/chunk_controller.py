@@ -23,7 +23,7 @@ from app.core.rag.retrieval.models import RetrievalPrincipal
 from app.core.rag.vdb.elasticsearch.elasticsearch_vector import ElasticSearchVectorFactory
 from app.core.response_utils import success
 from app.db import get_async_db
-from app.dependencies import get_current_user_async
+from app.dependencies import cur_workspace_access_guard_async, get_current_user_async
 from app.models.document_model import Document
 from app.models.file_model import File as FileModel
 from app.models.user_model import User
@@ -95,7 +95,32 @@ router = APIRouter(
 )
 
 
+async def _require_document_in_knowledge(
+        db: AsyncSession,
+        kb_id: uuid.UUID,
+        document_id: uuid.UUID,
+        current_user: User,
+) -> Document:
+    db_document = await document_service.get_document_by_id_async(
+        db=db,
+        document_id=document_id,
+        current_user=current_user,
+        kb_id=kb_id,
+    )
+    if not db_document:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="The document does not exist or you do not have permission to access it",
+        )
+    return db_document
+
+
+def _chunk_belongs_to_document(chunk: DocumentChunk, document_id: uuid.UUID) -> bool:
+    return str(chunk.metadata.get("document_id")) == str(document_id)
+
+
 @router.get("/{kb_id}/{document_id}/previewchunks", response_model=ApiResponse)
+@cur_workspace_access_guard_async()
 async def get_preview_chunks(
         kb_id: uuid.UUID,
         document_id: uuid.UUID,
@@ -127,16 +152,16 @@ async def get_preview_chunks(
             detail="The knowledge base does not exist or access is denied"
         )
     # 3. Check if the document exists
-    db_document = await document_service.get_document_by_id_async(db, document_id=document_id, current_user=current_user)
-    if not db_document:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="The document does not exist or you do not have permission to access it"
-        )
+    db_document = await _require_document_in_knowledge(
+        db=db,
+        kb_id=kb_id,
+        document_id=document_id,
+        current_user=current_user,
+    )
 
     # 4. Check if the file exists
     db_file = await db.get(FileModel, db_document.file_id)
-    if not db_file:
+    if not db_file or db_file.kb_id != kb_id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="The file does not exist or you do not have permission to access it"
@@ -332,15 +357,15 @@ async def get_preview_chunks_hierarchy(
             detail="The knowledge base does not exist or access is denied"
         )
 
-    db_document = await document_service.get_document_by_id_async(db, document_id=document_id, current_user=current_user)
-    if not db_document:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="The document does not exist or you do not have permission to access it"
-        )
+    db_document = await _require_document_in_knowledge(
+        db=db,
+        kb_id=kb_id,
+        document_id=document_id,
+        current_user=current_user,
+    )
 
     db_file = await db.get(FileModel, db_document.file_id)
-    if not db_file:
+    if not db_file or db_file.kb_id != kb_id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="The file does not exist or you do not have permission to access it"
@@ -475,6 +500,7 @@ async def get_preview_chunks_hierarchy(
 
 
 @router.get("/{kb_id}/{document_id}/chunks", response_model=ApiResponse)
+@cur_workspace_access_guard_async()
 async def get_chunks(
         kb_id: uuid.UUID,
         document_id: uuid.UUID,
@@ -508,12 +534,12 @@ async def get_chunks(
         )
 
     # 3. 获取文档并判断分块模式
-    db_document = await document_service.get_document_by_id_async(db, document_id=document_id, current_user=current_user)
-    if not db_document:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="The document does not exist or you do not have permission to access it"
-        )
+    db_document = await _require_document_in_knowledge(
+        db=db,
+        kb_id=kb_id,
+        document_id=document_id,
+        current_user=current_user,
+    )
 
     def _build_nested_result(
         parents: list[DocumentChunk],
@@ -642,6 +668,7 @@ async def get_chunks(
 
 
 @router.post("/{kb_id}/{document_id}/chunk", response_model=ApiResponse)
+@cur_workspace_access_guard_async()
 async def create_chunk(
         kb_id: uuid.UUID,
         document_id: uuid.UUID,
@@ -664,12 +691,12 @@ async def create_chunk(
             detail="The knowledge base does not exist or access is denied"
         )
     # 1. Obtain document information
-    db_document = await db.get(Document, document_id)
-    if not db_document:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="The document does not exist or you do not have permission to access it"
-        )
+    db_document = await _require_document_in_knowledge(
+        db=db,
+        kb_id=kb_id,
+        document_id=document_id,
+        current_user=current_user,
+    )
 
     # 校验 chunk_type 与文档分块模式的一致性
     if db_document.is_parent_child_mode:
@@ -731,6 +758,7 @@ async def create_chunk(
 
 
 @router.post("/{kb_id}/{document_id}/chunk/batch", response_model=ApiResponse)
+@cur_workspace_access_guard_async()
 async def create_chunks_batch(
         kb_id: uuid.UUID,
         document_id: uuid.UUID,
@@ -753,15 +781,12 @@ async def create_chunks_batch(
     if not db_knowledge:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="The knowledge base does not exist or access is denied")
 
-    result = await db.execute(
-        select(Document).where(
-            Document.id == document_id,
-            Document.kb_id == kb_id,
-        )
+    db_document = await _require_document_in_knowledge(
+        db=db,
+        kb_id=kb_id,
+        document_id=document_id,
+        current_user=current_user,
     )
-    db_document = result.scalars().first()
-    if not db_document:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="The document does not exist or you do not have permission to access it")
 
     # 批量校验 chunk_type
     if db_document.is_parent_child_mode:
@@ -825,6 +850,7 @@ async def create_chunks_batch(
 
 
 @router.post("/{kb_id}/import_qa", response_model=ApiResponse)
+@cur_workspace_access_guard_async()
 async def import_qa_new_doc(
         kb_id: uuid.UUID,
         file: UploadFile = File(..., description="CSV 或 Excel 文件（第一行标题跳过，第一列问题，第二列答案）"),
@@ -849,6 +875,17 @@ async def import_qa_new_doc(
     db_knowledge = await knowledge_service.get_knowledge_by_id_async(db, knowledge_id=kb_id, current_user=current_user)
     if not db_knowledge:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="知识库不存在或无权访问")
+
+    if parent_id is not None and parent_id != kb_id:
+        parent_result = await db.execute(
+            select(FileModel).where(
+                FileModel.id == parent_id,
+                FileModel.kb_id == kb_id,
+                FileModel.file_ext == "folder",
+            )
+        )
+        if parent_result.scalars().first() is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="父目录不存在或无权访问")
 
     # 3. 读取文件
     contents = await file.read()
@@ -912,6 +949,7 @@ async def import_qa_new_doc(
 
 
 @router.post("/{kb_id}/{document_id}/import_qa", response_model=ApiResponse)
+@cur_workspace_access_guard_async()
 async def import_qa_chunks(
         kb_id: uuid.UUID,
         document_id: uuid.UUID,
@@ -934,9 +972,12 @@ async def import_qa_chunks(
     if not db_knowledge:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="知识库不存在或无权访问")
 
-    db_document = await db.get(Document, document_id)
-    if not db_document:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="文档不存在或无权访问")
+    await _require_document_in_knowledge(
+        db=db,
+        kb_id=kb_id,
+        document_id=document_id,
+        current_user=current_user,
+    )
 
     # 3. 读取文件内容，派发异步任务
     contents = await file.read()
@@ -952,6 +993,7 @@ async def import_qa_chunks(
 
 
 @router.get("/{kb_id}/{document_id}/{doc_id}", response_model=ApiResponse)
+@cur_workspace_access_guard_async()
 async def get_chunk(
         kb_id: uuid.UUID,
         document_id: uuid.UUID,
@@ -972,9 +1014,16 @@ async def get_chunk(
             detail="The knowledge base does not exist or access is denied"
         )
 
+    await _require_document_in_knowledge(
+        db=db,
+        kb_id=kb_id,
+        document_id=document_id,
+        current_user=current_user,
+    )
+
     vector_service = await asyncio.to_thread(ElasticSearchVectorFactory().init_vector, knowledge=db_knowledge)
     total, items = await asyncio.to_thread(vector_service.get_by_segment, doc_id=doc_id)
-    if total:
+    if total and _chunk_belongs_to_document(items[0], document_id):
         return success(data=jsonable_encoder(items[0]), msg="Document chunk query successful")
     else:
         raise HTTPException(
@@ -984,6 +1033,7 @@ async def get_chunk(
 
 
 @router.put("/{kb_id}/{document_id}/{doc_id}", response_model=ApiResponse)
+@cur_workspace_access_guard_async()
 async def update_chunk(
         kb_id: uuid.UUID,
         document_id: uuid.UUID,
@@ -1006,9 +1056,16 @@ async def update_chunk(
             detail="The knowledge base does not exist or access is denied"
         )
 
+    await _require_document_in_knowledge(
+        db=db,
+        kb_id=kb_id,
+        document_id=document_id,
+        current_user=current_user,
+    )
+
     vector_service = await asyncio.to_thread(ElasticSearchVectorFactory().init_vector, knowledge=db_knowledge)
     total, items = await asyncio.to_thread(vector_service.get_by_segment, doc_id=doc_id)
-    if total:
+    if total and _chunk_belongs_to_document(items[0], document_id):
         chunk = items[0]
         chunk.page_content = content
         # QA chunk: 更新 metadata 中的 question/answer
@@ -1029,6 +1086,7 @@ async def update_chunk(
 
 
 @router.delete("/{kb_id}/{document_id}/{doc_id}", response_model=ApiResponse)
+@cur_workspace_access_guard_async()
 async def delete_chunk(
         kb_id: uuid.UUID,
         document_id: uuid.UUID,
@@ -1049,11 +1107,18 @@ async def delete_chunk(
             detail="The knowledge base does not exist or access is denied"
         )
 
+    db_document = await _require_document_in_knowledge(
+        db=db,
+        kb_id=kb_id,
+        document_id=document_id,
+        current_user=current_user,
+    )
+
     vector_service = await asyncio.to_thread(ElasticSearchVectorFactory().init_vector, knowledge=db_knowledge)
-    if await asyncio.to_thread(vector_service.text_exists, doc_id):
+    total, items = await asyncio.to_thread(vector_service.get_by_segment, doc_id=doc_id)
+    if total and _chunk_belongs_to_document(items[0], document_id):
         await asyncio.to_thread(vector_service.delete_by_ids, [doc_id], refresh=force_refresh)
         # 更新 chunk_num
-        db_document = await db.get(Document, document_id)
         db_document.chunk_num -= 1
         await db.commit()
         _dispatch_document_graph_sync_best_effort(
@@ -1120,6 +1185,7 @@ async def retrieve_chunks_with_caller(
 
 
 @router.post("/retrieval", response_model=Any, status_code=status.HTTP_200_OK)
+@cur_workspace_access_guard_async()
 async def retrieve_chunks(
         retrieve_data: chunk_schema.ChunkRetrieve,
         current_user: User = Depends(get_current_user_async)

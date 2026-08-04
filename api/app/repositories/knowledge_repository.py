@@ -249,6 +249,31 @@ def get_knowledge_by_id(db: Session, knowledge_id: uuid.UUID) -> Knowledge | Non
         raise
 
 
+def get_knowledge_by_id_in_workspace(
+        db: Session,
+        knowledge_id: uuid.UUID,
+        workspace_id: uuid.UUID,
+) -> Knowledge | None:
+    """Return a knowledge base only when it belongs to the given workspace."""
+    try:
+        return (
+            db.query(Knowledge)
+            .filter(
+                Knowledge.id == knowledge_id,
+                Knowledge.workspace_id == workspace_id,
+            )
+            .first()
+        )
+    except Exception as e:
+        db_logger.error(
+            "Failed to query knowledge base in workspace: knowledge_id=%s workspace_id=%s error=%s",
+            knowledge_id,
+            workspace_id,
+            str(e),
+        )
+        raise
+
+
 async def get_knowledge_by_id_async(db: AsyncSession, knowledge_id: uuid.UUID) -> Knowledge | None:
     """Async version of get_knowledge_by_id."""
     db_logger.debug(f"Query knowledge base based on ID (async): knowledge_id={knowledge_id}")
@@ -264,6 +289,33 @@ async def get_knowledge_by_id_async(db: AsyncSession, knowledge_id: uuid.UUID) -
         return knowledge
     except Exception as e:
         db_logger.error(f"Failed to query the knowledge base based on the ID (async): knowledge_id={knowledge_id} - {str(e)}")
+        raise
+
+
+async def get_knowledge_by_id_in_workspace_async(
+        db: AsyncSession,
+        knowledge_id: uuid.UUID,
+        workspace_id: uuid.UUID,
+) -> Knowledge | None:
+    """Async workspace-scoped knowledge lookup with the normal detail loads."""
+    try:
+        stmt = (
+            select(Knowledge)
+            .options(*knowledge_schema_load_options())
+            .where(
+                Knowledge.id == knowledge_id,
+                Knowledge.workspace_id == workspace_id,
+            )
+        )
+        result = await db.execute(stmt)
+        return result.scalars().first()
+    except Exception as e:
+        db_logger.error(
+            "Failed to query knowledge base in workspace (async): knowledge_id=%s workspace_id=%s error=%s",
+            knowledge_id,
+            workspace_id,
+            str(e),
+        )
         raise
 
 

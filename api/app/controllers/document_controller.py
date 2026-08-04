@@ -29,7 +29,7 @@ from app.core.exceptions import BusinessException
 from app.core.error_codes import BizCode
 from app.core.response_utils import success
 from app.db import get_async_db
-from app.dependencies import get_current_user_async
+from app.dependencies import cur_workspace_access_guard_async, get_current_user_async
 from app.models import document_model
 from app.models import file_model
 from app.models.user_model import User
@@ -61,6 +61,7 @@ router = APIRouter(
 async def _delete_file_record_async(
         db: AsyncSession,
         file_id: uuid.UUID,
+        kb_id: uuid.UUID,
         storage_service: FileStorageService,
 ) -> None:
     db_file = await db.get(file_model.File, file_id)
@@ -71,9 +72,18 @@ async def _delete_file_record_async(
         )
         return
 
+    if db_file.kb_id != kb_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="The file does not exist or access is denied",
+        )
+
     if db_file.file_ext == "folder":
         result = await db.execute(
-            select(file_model.File).where(file_model.File.parent_id == db_file.id)
+            select(file_model.File).where(
+                file_model.File.parent_id == db_file.id,
+                file_model.File.kb_id == kb_id,
+            )
         )
         child_files = list(result.scalars().all())
         for child in child_files:
@@ -95,6 +105,7 @@ async def _delete_file_record_async(
 
 
 @router.get("/{kb_id}/documents", response_model=ApiResponse)
+@cur_workspace_access_guard_async()
 async def get_documents(
         kb_id: uuid.UUID,
         parent_id: Optional[uuid.UUID] = Query(None, description="parent folder id when type is Folder"),
@@ -120,6 +131,17 @@ async def get_documents(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="The paging parameter must be greater than 0"
+        )
+
+    db_knowledge = await knowledge_service.get_knowledge_by_id_async(
+        db=db,
+        knowledge_id=kb_id,
+        current_user=current_user,
+    )
+    if not db_knowledge:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="The knowledge base does not exist or access is denied",
         )
 
     # 2. Construct query conditions
@@ -178,6 +200,7 @@ async def get_documents(
 
 
 @router.post("/document", response_model=ApiResponse)
+@cur_workspace_access_guard_async()
 async def create_document(
         create_data: document_schema.DocumentCreate,
         db: AsyncSession = Depends(get_async_db),
@@ -189,6 +212,27 @@ async def create_document(
     api_logger.info(f"Create document request: file_name={create_data.file_name}, kb_id={create_data.kb_id}, username: {current_user.username}")
 
     try:
+        db_knowledge = await knowledge_service.get_knowledge_by_id_async(
+            db=db,
+            knowledge_id=create_data.kb_id,
+            current_user=current_user,
+        )
+        if not db_knowledge:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="The knowledge base does not exist or access is denied",
+            )
+        file_result = await db.execute(
+            select(file_model.File).where(
+                file_model.File.id == create_data.file_id,
+                file_model.File.kb_id == create_data.kb_id,
+            )
+        )
+        if file_result.scalars().first() is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="The file does not exist or access is denied",
+            )
         api_logger.debug(f"Start creating a document: {create_data.file_name}")
         db_document = await document_service.create_document_async(db=db, document=create_data, current_user=current_user)
         api_logger.info(f"Document created successfully: {db_document.file_name} (ID: {db_document.id})")
@@ -199,6 +243,7 @@ async def create_document(
 
 
 @router.get("/{document_id}", response_model=ApiResponse)
+@cur_workspace_access_guard_async()
 async def get_document(
         document_id: uuid.UUID,
         db: AsyncSession = Depends(get_async_db),
@@ -230,6 +275,7 @@ async def get_document(
 
 
 @router.put("/{document_id}", response_model=ApiResponse)
+@cur_workspace_access_guard_async()
 async def update_document(
         document_id: uuid.UUID,
         update_data: document_schema.DocumentUpdate,
@@ -251,6 +297,24 @@ async def update_document(
         )
 
     db_knowledge = await knowledge_service.get_knowledge_by_id_async(db, knowledge_id=db_document.kb_id, current_user=current_user)
+    if db_knowledge is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="The knowledge base does not exist or access is denied",
+        )
+
+    if update_data.file_id is not None:
+        file_result = await db.execute(
+            select(file_model.File).where(
+                file_model.File.id == update_data.file_id,
+                file_model.File.kb_id == db_document.kb_id,
+            )
+        )
+        if file_result.scalars().first() is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="The file does not exist or access is denied",
+            )
 
     # 2. 校验并处理 parser_config 更新
     update_dict = update_data.dict(exclude_unset=True)
@@ -334,6 +398,7 @@ async def update_document(
 
 
 @router.delete("/{document_id}", response_model=ApiResponse)
+@cur_workspace_access_guard_async()
 async def delete_document(
         document_id: uuid.UUID,
         db: AsyncSession = Depends(get_async_db),
@@ -409,7 +474,12 @@ async def delete_document(
             )
         except Exception:
             api_logger.warning("Failed to delete derived image assets: document_id=%s", document_id, exc_info=True)
-        await _delete_file_record_async(db=db, file_id=file_id, storage_service=storage_service)
+        await _delete_file_record_async(
+            db=db,
+            file_id=file_id,
+            kb_id=kb_id,
+            storage_service=storage_service,
+        )
 
         # 6. Delete metadata bindings (app-level cleanup, FK no longer has CASCADE)
         api_logger.debug(f"Delete metadata bindings for document: {document_id}")
@@ -433,6 +503,7 @@ async def delete_document(
 
 
 @router.post("/{document_id}/chunks", response_model=ApiResponse)
+@cur_workspace_access_guard_async()
 async def parse_documents(
         document_id: uuid.UUID,
         db: AsyncSession = Depends(get_async_db),
@@ -459,7 +530,7 @@ async def parse_documents(
         api_logger.debug(f"Check whether the file exists: {db_document.file_id}")
         db_file = await db.get(file_model.File, db_document.file_id)
 
-        if not db_file:
+        if not db_file or db_file.kb_id != db_document.kb_id:
             api_logger.warning(f"The file does not exist or you do not have permission to access it: file_id={db_document.file_id}")
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -515,6 +586,7 @@ async def parse_documents(
 
 
 @router.post("/metadata/batch", response_model=ApiResponse)
+@cur_workspace_access_guard_async()
 async def batch_update_document_metadata(
     data: metadata_schema.BatchUpdateMetadataRequest,
     db: AsyncSession = Depends(get_async_db),
@@ -561,6 +633,7 @@ async def batch_update_document_metadata(
 
 
 @router.put("/{document_id}/metadata", response_model=ApiResponse)
+@cur_workspace_access_guard_async()
 async def update_document_metadata(
     document_id: uuid.UUID,
     data: metadata_schema.DocumentMetadataUpdateRequest,
@@ -604,6 +677,7 @@ async def update_document_metadata(
 
 
 @router.get("/{document_id}/metadata", response_model=ApiResponse)
+@cur_workspace_access_guard_async()
 async def get_document_metadata(
     document_id: uuid.UUID,
     db: AsyncSession = Depends(get_async_db),
@@ -638,6 +712,7 @@ async def get_document_metadata(
 
 
 @router.post("/{document_id}/metadata", response_model=ApiResponse)
+@cur_workspace_access_guard_async()
 async def delete_document_metadata(
     document_id: uuid.UUID,
     data: metadata_schema.DocumentMetadataDeleteRequest | None = Body(None),

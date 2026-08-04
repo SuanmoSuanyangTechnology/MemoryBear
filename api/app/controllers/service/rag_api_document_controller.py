@@ -14,10 +14,12 @@ from app.schemas import document_schema
 from app.schemas.api_key_schema import ApiKeyAuth
 from app.schemas.response_schema import ApiResponse
 from app.services import api_key_service
+from app.services.rag_access_service import unwrap_current_workspace_guard
 
 
 router = APIRouter(prefix="/documents", tags=["V1 - RAG API"])
 api_logger = get_business_logger()
+document_controller = unwrap_current_workspace_guard(document_controller)
 
 
 @router.get("/{kb_id}/documents", response_model=ApiResponse)
@@ -169,4 +171,3 @@ async def parse_documents(
     return await document_controller.parse_documents(document_id=document_id,
                                                      db=db,
                                                      current_user=current_user)
-
