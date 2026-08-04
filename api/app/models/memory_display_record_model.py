@@ -18,6 +18,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import UUID
 
+from app.core.utils.datetime_utils import utcnow_naive
 from app.db import Base
 
 
@@ -45,7 +46,9 @@ class MemoryDisplayRecord(Base):
     score = Column(Float, nullable=True)
     rank = Column(Integer, nullable=True)
     search_mode = Column(String(16), nullable=True)
-    occurred_at = Column(DateTime, nullable=False)  # naive UTC
+    occurred_at = Column(
+        DateTime, nullable=False, default=utcnow_naive
+    )  # naive UTC
 
     __table_args__ = (
         UniqueConstraint(
