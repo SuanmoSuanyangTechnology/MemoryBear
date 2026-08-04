@@ -3483,7 +3483,11 @@ def write_total_memory_task(workspace_id: str) -> Dict[str, Any]:
             }
 
     try:
-        result = asyncio.run(_run())
+        # 尝试获取现有事件循环，如果不存在则创建新的（与 write_all_workspaces_memory_task 一致，
+        # 避免 asyncio.run 每次新建并关闭 loop，导致进程内共享 Neo4j driver 跨 loop 复用报错）
+        loop = set_asyncio_event_loop()
+
+        result = loop.run_until_complete(_run())
         elapsed_time = time.time() - start_time
         result["elapsed_time"] = elapsed_time
         return result
