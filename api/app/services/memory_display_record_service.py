@@ -14,7 +14,7 @@ from typing import List
 
 from sqlalchemy.orm import Session
 
-from app.core.utils.datetime_utils import to_timestamp_ms, utcnow
+from app.core.utils.datetime_utils import to_timestamp_ms, utcnow_naive
 from app.repositories.end_user_repository import EndUserRepository
 from app.repositories.memory_display_record_repository import (
     MemoryDisplayRecordRepository,
@@ -120,7 +120,7 @@ class MemoryDisplayRecordService:
 
         # 生成 operation_id（同批共用）
         operation_id = uuid.uuid4()
-        now = utcnow()
+        now = utcnow_naive()
 
         # 组装 PG 记录
         records = []
