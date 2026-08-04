@@ -35,23 +35,27 @@ class E2BAgentAdapter:
     async def run_stream(
         self,
         *,
-        agent_config: Any,
-        model_config: Any,
-        api_key_config: dict,
-        message: str,
-        workspace_id: str,
-        user_id: str,
+        agent_config: Any = None,
+        model_config: Any = None,
+        api_key_config: dict = None,
+        message: str = "",
+        workspace_id: str = "",
+        user_id: str = "",
         conversation_id: str = "",
         system_prompt: str = "",
         tools_serialized: list[dict] | None = None,
         history: list[dict] | None = None,
         context: str = "",
         variables: dict | None = None,
+        sandbox_payload: dict | None = None,
     ) -> AsyncGenerator[str, None]:
         """Execute Agent in E2B sandbox with streaming output
 
         Translates sandbox events into SSE events compatible with the
         existing frontend protocol.
+
+        Accepts either individual config params (legacy) or a pre-built
+        sandbox_payload from build_sandbox_payload() (preferred).
 
         Args:
             agent_config: Agent config object
@@ -66,6 +70,7 @@ class E2BAgentAdapter:
             history: Conversation history
             context: Knowledge context string
             variables: Template variables
+            sandbox_payload: Pre-built payload from build_sandbox_payload()
 
         Yields:
             SSE-formatted event strings
@@ -73,44 +78,54 @@ class E2BAgentAdapter:
         execution_id = str(uuid.uuid4())
         start_time = time.time()
 
-        # Build sandbox-compatible configs
-        sandbox_agent_config = {
-            "system_prompt": system_prompt or getattr(agent_config, "system_prompt", ""),
-            "tools": tools_serialized or self._serialize_tools(agent_config),
-            "max_iterations": getattr(agent_config, "max_iterations", None),
-            "strategy": getattr(agent_config, "strategy", "react"),
-            "tool_call_limit": getattr(agent_config, "tool_call_limit", 1),
-        }
+        if sandbox_payload is not None:
+            sandbox_agent_config = sandbox_payload["agent_config"]
+            sandbox_model_config = sandbox_payload["model_config"]
+            sandbox_context = sandbox_payload["context"]
+            message = sandbox_payload.get("message", message)
+            workspace_id = sandbox_payload.get("runtime_env", {}).get("workspace_id", workspace_id)
+            user_id = sandbox_payload.get("runtime_env", {}).get("user_id", user_id)
+            conversation_id = sandbox_payload.get("runtime_env", {}).get("conversation_id", conversation_id)
+            execution_id = sandbox_payload.get("runtime_env", {}).get("execution_id", execution_id)
+        else:
+            # Build sandbox-compatible configs
+            sandbox_agent_config = {
+                "system_prompt": system_prompt or getattr(agent_config, "system_prompt", ""),
+                "tools": tools_serialized or self._serialize_tools(agent_config),
+                "max_iterations": getattr(agent_config, "max_iterations", None),
+                "strategy": getattr(agent_config, "strategy", "react"),
+                "tool_call_limit": getattr(agent_config, "tool_call_limit", 1),
+            }
 
-        sandbox_model_config = {
-            "model_name": api_key_config.get("model_name", ""),
-            "api_key": api_key_config.get("api_key", ""),
-            "api_base": api_key_config.get("api_base", ""),
-            "provider": api_key_config.get("provider", "openai"),
-            "temperature": getattr(model_config, "temperature", 0.7),
-            "max_tokens": getattr(model_config, "max_tokens", 2000),
-            "top_p": getattr(model_config, "top_p", None),
-            "top_k": getattr(model_config, "top_k", None),
-            "seed": getattr(model_config, "seed", None),
-            "stop": getattr(model_config, "stop", None),
-            "repetition_penalty": getattr(model_config, "repetition_penalty", None),
-            "frequency_penalty": getattr(model_config, "frequency_penalty", None),
-            "presence_penalty": getattr(model_config, "presence_penalty", None),
-            "deep_thinking": getattr(model_config, "deep_thinking", False),
-            "thinking_budget_tokens": getattr(model_config, "thinking_budget_tokens", None),
-            "json_output": getattr(model_config, "json_output", False),
-            "enable_search": getattr(model_config, "enable_search", False),
-            "is_omni": getattr(model_config, "is_omni", False),
-            "capability": getattr(model_config, "capability", None) or [],
-            "extra_headers": getattr(model_config, "extra_headers", None),
-            "concurrency": getattr(model_config, "concurrency", 5),
-        }
+            sandbox_model_config = {
+                "model_name": api_key_config.get("model_name", ""),
+                "api_key": api_key_config.get("api_key", ""),
+                "api_base": api_key_config.get("api_base", ""),
+                "provider": api_key_config.get("provider", "openai"),
+                "temperature": getattr(model_config, "temperature", 0.7),
+                "max_tokens": getattr(model_config, "max_tokens", 2000),
+                "top_p": getattr(model_config, "top_p", None),
+                "top_k": getattr(model_config, "top_k", None),
+                "seed": getattr(model_config, "seed", None),
+                "stop": getattr(model_config, "stop", None),
+                "repetition_penalty": getattr(model_config, "repetition_penalty", None),
+                "frequency_penalty": getattr(model_config, "frequency_penalty", None),
+                "presence_penalty": getattr(model_config, "presence_penalty", None),
+                "deep_thinking": getattr(model_config, "deep_thinking", False),
+                "thinking_budget_tokens": getattr(model_config, "thinking_budget_tokens", None),
+                "json_output": getattr(model_config, "json_output", False),
+                "enable_search": getattr(model_config, "enable_search", False),
+                "is_omni": api_key_config.get("is_omni", False) or getattr(model_config, "is_omni", False),
+                "capability": api_key_config.get("capability") or getattr(model_config, "capability", None) or [],
+                "extra_headers": getattr(model_config, "extra_headers", None),
+                "concurrency": getattr(model_config, "concurrency", 5),
+            }
 
-        sandbox_context = {
-            "history": history or [],
-            "knowledge": context,
-            "variables": variables or {},
-        }
+            sandbox_context = {
+                "history": history or [],
+                "knowledge": context,
+                "variables": variables or {},
+            }
 
         logger.info(
             "Routing agent execution to E2B sandbox",
@@ -154,22 +169,26 @@ class E2BAgentAdapter:
     async def run(
         self,
         *,
-        agent_config: Any,
-        model_config: Any,
-        api_key_config: dict,
-        message: str,
-        workspace_id: str,
-        user_id: str,
+        agent_config: Any = None,
+        model_config: Any = None,
+        api_key_config: dict = None,
+        message: str = "",
+        workspace_id: str = "",
+        user_id: str = "",
         conversation_id: str = "",
         system_prompt: str = "",
         tools_serialized: list[dict] | None = None,
         history: list[dict] | None = None,
         context: str = "",
         variables: dict | None = None,
+        sandbox_payload: dict | None = None,
     ) -> dict:
         """Execute Agent in E2B sandbox (non-streaming)
 
         Collects all streaming events and returns the final result.
+
+        Accepts either individual config params (legacy) or a pre-built
+        sandbox_payload from build_sandbox_payload() (preferred).
 
         Returns:
             Dict with content, node_executions, usage, etc.
@@ -190,6 +209,7 @@ class E2BAgentAdapter:
             history=history,
             context=context,
             variables=variables,
+            sandbox_payload=sandbox_payload,
         ):
             # Parse SSE to accumulate result
             # Format: "event: {type}\ndata: {json}\n\n"
@@ -201,7 +221,7 @@ class E2BAgentAdapter:
                 elif sse_event.startswith("event: end\n"):
                     data_line = sse_event.split("\ndata: ", 1)[1].rstrip("\n")
                     data = json.loads(data_line)
-                    content = data.get("message") or content
+                    content = data.get("message", content)
             except (json.JSONDecodeError, KeyError, IndexError):
                 pass
 

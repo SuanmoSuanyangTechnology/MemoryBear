@@ -5,7 +5,7 @@ E2B Sandbox Service - API 侧的 Sandbox 客户端
 在 sandbox 内执行 Agent/Workflow 并读取流式输出事件。
 
 架构流程:
-    E2BExecutionRouter / E2BAgentAdapter
+    E2BAgentAdapter
         → E2BSandboxService.run_agent() / run_workflow()
             → POST /v1/sandboxes               (创建/获取 sandbox)
             → POST /v1/sandboxes/{id}/exec      (写入 snapshot + 执行 + SSE 流)
