@@ -1070,6 +1070,8 @@ class AppChatService:
     ) -> AsyncGenerator[str, None]:
         """聊天（流式）"""
 
+        save_messages_enqueued = False
+
         try:
             start_time = time.time()
             message_id = uuid.uuid4()
@@ -1372,6 +1374,10 @@ class AppChatService:
             _api_key_model_name = api_key_obj.model_name
             _api_key_provider = api_key_obj.provider
             _api_key_is_omni = api_key_obj.is_omni
+            # 预读 _release_id，避免 LLM 推理结束后重新获取 DB 连接
+            from app.models.app_model import App
+            _app_obj = await self._db_get(App, config.app_id)
+            _release_id = _app_obj.current_release_id if _app_obj else None
             # LLM 推理期间不再依赖共享 session，提前归还底层连接给连接池。
             await self._release_db_connection()
 
@@ -1549,12 +1555,10 @@ class AppChatService:
                     task_type="save_messages",
                     args=persist_args,
                 ))
+                save_messages_enqueued = True
 
                 # Enqueue agent execution after messages so the FK is satisfied
                 # within the same batch (messages commit first, then execution).
-                async with get_async_db_context() as _exec_db:
-                    _app_obj = await _exec_db.get(App, config.app_id)
-                    _release_id = _app_obj.current_release_id if _app_obj else None
                 await BatchPersistQueue.enqueue(PersistTask(
                     task_type="save_agent_execution",
                     args={
@@ -1585,8 +1589,6 @@ class AppChatService:
                     ))
             else:
                 async with get_async_db_context() as db:
-                    _app_obj = await db.get(App, config.app_id)
-                    _release_id = _app_obj.current_release_id if _app_obj else None
                     new_msg = Message(
                         id=message_id,
                         conversation_id=conversation_id,
@@ -1638,22 +1640,25 @@ class AppChatService:
         except Exception as e:
             logger.error(f"流式聊天失败: {str(e)}", exc_info=True)
             # 保存失败的消息，使前端可以展示失败状态
-            try:
-                from app.services.batch_persist_queue import BatchPersistQueue, PersistTask
-                await BatchPersistQueue.enqueue(PersistTask(
-                    task_type="save_failed_message",
-                    args={
-                        "conversation_id": str(conversation_id) if 'conversation_id' in locals() else "",
-                        "user_message_id": str(user_message_id) if 'user_message_id' in locals() else str(uuid.uuid4()),
-                        "message_id": str(message_id) if 'message_id' in locals() else str(uuid.uuid4()),
-                        "user_message_content": message if 'message' in locals() else "",
-                        "files_meta": [],
-                        "error_message": "An error occurred during generation.",
-                        "error_detail": str(e)[:2000],
-                    },
-                ))
-            except Exception:
-                pass
+            # 注意：如果 save_messages 已经入队，不要再入队 save_failed_message，
+            # 否则会因为相同的 message_id 导致 messages 表主键冲突。
+            if not save_messages_enqueued:
+                try:
+                    from app.services.batch_persist_queue import BatchPersistQueue, PersistTask
+                    await BatchPersistQueue.enqueue(PersistTask(
+                        task_type="save_failed_message",
+                        args={
+                            "conversation_id": str(conversation_id) if 'conversation_id' in locals() else "",
+                            "user_message_id": str(user_message_id) if 'user_message_id' in locals() else str(uuid.uuid4()),
+                            "message_id": str(message_id) if 'message_id' in locals() else str(uuid.uuid4()),
+                            "user_message_content": message if 'message' in locals() else "",
+                            "files_meta": [],
+                            "error_message": "An error occurred during generation.",
+                            "error_detail": str(e)[:2000],
+                        },
+                    ))
+                except Exception:
+                    pass
             # 失败场景也改成尾部一次写，避免依赖首包前 execution。
             try:
                 from app.services.batch_persist_queue import BatchPersistQueue, PersistTask
@@ -1780,6 +1785,8 @@ class AppChatService:
         if variables is None:
             variables = {}
 
+        save_messages_enqueued = False
+
         try:
             message_id = uuid.uuid4()
             user_message_id = uuid.uuid4()
@@ -1849,6 +1856,7 @@ class AppChatService:
                     "should_memorize": memory,
                 },
             ))
+            save_messages_enqueued = True
 
             logger.info(
                 "多 Agent 流式聊天完成",
@@ -1865,23 +1873,25 @@ class AppChatService:
             raise
         except Exception as e:
             logger.error(f"多 Agent 流式聊天失败: {str(e)}", exc_info=True)
-            # 保存失败的消息
-            try:
-                from app.services.batch_persist_queue import BatchPersistQueue, PersistTask
-                await BatchPersistQueue.enqueue(PersistTask(
-                    task_type="save_failed_message",
-                    args={
-                        "conversation_id": str(conversation_id) if 'conversation_id' in locals() else "",
-                        "user_message_id": str(user_message_id) if 'user_message_id' in locals() else str(uuid.uuid4()),
-                        "message_id": str(message_id) if 'message_id' in locals() else str(uuid.uuid4()),
-                        "user_message_content": message if 'message' in locals() else "",
-                        "files_meta": [],
-                        "error_message": "An error occurred during generation.",
-                        "error_detail": str(e)[:2000],
-                    },
-                ))
-            except Exception:
-                pass
+            # 如果 save_messages 已经入队，不要再入队 save_failed_message，
+            # 否则会因为相同的 message_id 导致 messages 表主键冲突。
+            if not save_messages_enqueued:
+                try:
+                    from app.services.batch_persist_queue import BatchPersistQueue, PersistTask
+                    await BatchPersistQueue.enqueue(PersistTask(
+                        task_type="save_failed_message",
+                        args={
+                            "conversation_id": str(conversation_id) if 'conversation_id' in locals() else "",
+                            "user_message_id": str(user_message_id) if 'user_message_id' in locals() else str(uuid.uuid4()),
+                            "message_id": str(message_id) if 'message_id' in locals() else str(uuid.uuid4()),
+                            "user_message_content": message if 'message' in locals() else "",
+                            "files_meta": [],
+                            "error_message": "An error occurred during generation.",
+                            "error_detail": str(e)[:2000],
+                        },
+                    ))
+                except Exception:
+                    pass
             # 发送错误事件
             yield f"event: error\ndata: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
 
