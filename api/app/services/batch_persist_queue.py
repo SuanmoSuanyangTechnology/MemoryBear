@@ -458,6 +458,7 @@ async def _bulk_persist_messages(
                 "content": user_content,
                 "role": "user",
                 "should_memorize": should_memorize,
+                "files": user_meta.get("files"),
             })
             _memory_params.append({
                 "conv_id": conv_id,
@@ -562,6 +563,7 @@ async def _write_memory_messages_batch(
                 content=entry.get("content", ""),
                 message_seq=next_seq,
                 should_memorize=entry.get("should_memorize", True),
+                files=entry.get("files"),
                 created_at=now,
                 dialog_at=dialog_at,
             ))
