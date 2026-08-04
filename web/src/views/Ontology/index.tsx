@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 14:10:15 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-22 11:47:38
+ * @Last Modified time: 2026-08-03 17:11:27
  */
 import { type FC, useState, useRef } from 'react';
 import type { MenuInfo } from 'rc-menu/lib/interface';
@@ -128,6 +128,7 @@ const Ontology: FC = () => {
         url={getOntologyScenesUrl}
         query={query}
         column={3}
+        heightClass="rb:h-[calc(100vh-116px)]!"
         renderItem={(item) =>(
           <RbCard
             title={

@@ -1,6 +1,6 @@
 import { type FC } from 'react';
 import { Flex, Dropdown, type MenuProps, Switch, Button, Divider } from 'antd';
-import { UnorderedListOutlined, BoldOutlined, ItalicOutlined, StrikethroughOutlined, LinkOutlined, DashOutlined } from '@ant-design/icons';
+import { UnorderedListOutlined, BoldOutlined, ItalicOutlined, StrikethroughOutlined, LinkOutlined } from '@ant-design/icons';
 import { Node } from '@antv/x6';
 import { useTranslation } from 'react-i18next'
 
@@ -133,8 +133,12 @@ const NoteNodeToolbar: FC<NoteNodeToolbarProps> = ({ node, onFormat, toolConfig,
         icon={<LinkOutlined />}
         onClick={() => {
           const sel = window.getSelection();
-          const rect = sel && sel.rangeCount > 0 ? sel.getRangeAt(0).getBoundingClientRect() : undefined;
-          window.dispatchEvent(new CustomEvent('note:edit-link', { detail: { id: nodeId, url: '', rect } }));
+          const range = sel && sel.rangeCount > 0 ? sel.getRangeAt(0) : null;
+          const hasSelection = !!(range && !range.collapsed);
+          const rect = hasSelection && range ? range.getBoundingClientRect() : undefined;
+          window.dispatchEvent(new CustomEvent('note:link-click', {
+            detail: { id: nodeId, hasSelection, hasLink: toolConfig.link, rect },
+          }));
         }}
       />
 
@@ -167,7 +171,7 @@ const NoteNodeToolbar: FC<NoteNodeToolbarProps> = ({ node, onFormat, toolConfig,
           onClick: handleClick
         }}
       >
-        <DashOutlined />
+        <div className="rb:size-4.5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/common/more.svg')]" />
       </Dropdown>
     </Flex>
   );
