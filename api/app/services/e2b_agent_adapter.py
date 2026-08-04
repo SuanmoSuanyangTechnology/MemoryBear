@@ -201,7 +201,7 @@ class E2BAgentAdapter:
                 elif sse_event.startswith("event: end\n"):
                     data_line = sse_event.split("\ndata: ", 1)[1].rstrip("\n")
                     data = json.loads(data_line)
-                    content = data.get("message", content)
+                    content = data.get("message") or content
             except (json.JSONDecodeError, KeyError, IndexError):
                 pass
 
