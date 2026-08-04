@@ -1,7 +1,11 @@
 /**
  * useConversation
- * 会话页面的核心状态与逻辑：历史记录、配置加载、消息发送/重新生成、人工干预、反馈、收藏、删除等。
- * 所有接口均使用分享态 token（shareToken）调用。
+ * Core state and logic for the conversation page: history, config loading,
+ * message send/regenerate, human-in-the-loop interventions, feedback, favorite, delete, etc.
+ * All API calls use the share-mode token (shareToken).
+ *
+ * Action handlers are extracted to utils/conversationActions.ts;
+ * SSE stream handlers live in utils/streamHandlers.ts and utils/interventionHandlers.ts.
  */
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { useParams, useLocation } from 'react-router-dom'
@@ -9,24 +13,32 @@ import { useTranslation } from 'react-i18next'
 import { App } from 'antd'
 
 import {
-  getConversationHistory, sendConversation, getConversationDetail, getShareToken, getExperienceConfig,
-  feedbackMessage, deleteConversationMessage, regenerateMessage, switchMessageVersion, accessShareConversation,
-  interventionsSubmit, interventionsResumeSubmit, favoriteMessage,
+  getConversationHistory, getConversationDetail, getShareToken, getExperienceConfig,
+  accessShareConversation,
 } from '@/api/application'
 import { formatDateTime } from '@/utils/format'
 import { randomString, updateMetaIcon } from '@/utils/common'
 import type { ChatItem } from '@/components/Chat/types'
 import type { ChatToolbarRef } from '@/components/Chat/ChatToolbar'
 import type { Variable } from '@/views/Workflow/components/Properties/VariableList/types'
-import type { Variable as AppVariable } from '@/views/ApplicationConfig/components/VariableList/types'
 import type { FeaturesConfigForm } from '@/views/ApplicationConfig/types'
-import { replaceVariables, buildOpeningStatementMessage } from '@/components/Chat/openingStatement'
+import { buildOpeningStatementMessage } from '@/components/Chat/openingStatement'
 
 import type { HistoryItem, ShareModalRef, ReportModalRef } from '../types'
 import { useChatMessages } from './useChatMessages'
-import { createSendStreamHandler, createRegenerateStreamHandler } from '../utils/streamHandlers'
-import { applyInterventionSubmit, createResumeStreamHandler } from '../utils/interventionHandlers'
-import { applyMessagePatchById } from '../utils/messageMutations'
+import { createConversationActions } from '../utils/conversationActions'
+
+/** Group conversation history by date (pure function) */
+const groupHistoryByDate = (items: HistoryItem[]): Record<string, HistoryItem[]> => {
+  return items.reduce((groups: Record<string, HistoryItem[]>, item) => {
+    const date = formatDateTime(item.updated_at, 'YYYY-MM-DD')
+    if (!groups[date]) {
+      groups[date] = []
+    }
+    groups[date].push(item)
+    return groups
+  }, {})
+}
 
 export function useConversation() {
   const { t } = useTranslation()
@@ -42,7 +54,6 @@ export function useConversation() {
   const [message, setMessage] = useState<string>('')
   const [conversation_id, setConversationId] = useState<string | null>(null)
   const [historyList, setHistoryList] = useState<HistoryItem[]>([])
-  const [groupHistoryList, setGroupHistoryList] = useState<Record<string, HistoryItem[]>>({})
   const [pageLoading, setPageLoading] = useState(false)
   const [page, setPage] = useState(1)
   const [hasMore, setHasMore] = useState(true)
@@ -73,6 +84,9 @@ export function useConversation() {
   const chatIsEnded = useRef(true)
   const shareModalRef = useRef<ShareModalRef>(null)
   const reportModalRef = useRef<ReportModalRef>(null)
+  /** Set to true when a new conversation is created via streaming; skips getChatDetail in useEffect */
+  const skipChatDetailRef = useRef(false)
+  const [disabled, setDisabled] = useState(false)
 
   const {
     chatList,
@@ -176,20 +190,40 @@ export function useConversation() {
     }
   }, [toolbarReady, config])
 
-  /** 按日期对会话历史分组 */
-  const groupHistoryByDate = (items: HistoryItem[]): Record<string, HistoryItem[]> => {
-    return items.reduce((groups: Record<string, HistoryItem[]>, item) => {
-      const date = formatDateTime(item.created_at, 'YYYY-MM-DD')
-      if (!groups[date]) {
-        groups[date] = []
-      }
-      groups[date].push(item)
-      return groups
-    }, {})
-  }
+  /** Grouped by date (derived from historyList to avoid keeping two states in sync) */
+  const groupHistoryList = useMemo(() => groupHistoryByDate(historyList), [historyList])
 
-  /** 分页拉取会话历史 */
-  const [disabled, setDisabled] = useState(false)
+  /**
+   * After send / regenerate / resume succeeds, update the history list locally instead of
+   * re-fetching getConversationHistory: insert a new entry if the conversation ID doesn't
+   * exist (title taken from the first user message), or refresh updated_at if it already exists.
+   */
+  const upsertHistory = useCallback((conversationId: string, title?: string) => {
+    const now = Date.now()
+    setHistoryList(prev => {
+      const existingIndex = prev.findIndex(item => item.id === conversationId)
+      if (existingIndex === -1) {
+        const rawTitle = title?.trim() || t('memoryConversation.newConversation')
+        const newTitle = rawTitle.length > 50 ? `${rawTitle.slice(0, 50)}…` : rawTitle
+        const newItem: HistoryItem = {
+          id: conversationId,
+          app_id: '',
+          workspace_id: '',
+          user_id: null,
+          title: newTitle,
+          is_draft: false,
+          message_count: 1,
+          is_active: true,
+          created_at: now,
+          updated_at: now,
+        }
+        return [newItem, ...prev]
+      }
+      return prev.map(item => item.id === conversationId ? { ...item, updated_at: now } : item)
+    })
+  }, [t])
+
+  /** Paginated fetch of conversation history */
   const getHistory = (flag: boolean = false) => {
     if (!shareToken || shareToken === '' || (pageLoading || !hasMore) && !flag) return
     setPageLoading(true)
@@ -206,7 +240,6 @@ export function useConversation() {
           list = [...historyList, ...results]
         }
         setHistoryList(list)
-        setGroupHistoryList(groupHistoryByDate(list))
         if (page === 1 && !flag) {
           setConversationId(list[0]?.id || '')
         }
@@ -220,29 +253,6 @@ export function useConversation() {
       .finally(() => setPageLoading(false))
   }
 
-  /** 切换会话或开启新会话 */
-  const handleChangeHistory = (id: string | null) => {
-    if (disabled && id === null) return
-    if (id !== conversation_id) setConversationId(id)
-    if (abortRef.current) {
-      getHistory(true)
-    }
-    abortRef.current?.()
-    abortRef.current = null
-    if (!id) {
-      setMessage('')
-      // 新对话流式输出中 conversation_id 仍为 null，setConversationId 不会触发 useEffect，
-      // 需手动重置聊天列表与流式状态
-      const variables = toolbarRef.current?.getVariables() || []
-      const openingMsg = buildOpeningStatementMessage(features?.opening_statement, {
-        variables,
-        withTimestamp: true,
-        extra: { is_hidden_refresh: true },
-      })
-      setChatList(openingMsg ? [openingMsg] : [])
-    }
-  }
-
   const getChatDetail = () => {
     if (!conversation_id || !shareToken || shareToken === '') return
     getConversationDetail(shareToken, conversation_id)
@@ -253,8 +263,13 @@ export function useConversation() {
 
   useEffect(() => {
     if (conversation_id) {
-      getChatDetail()
+      if (skipChatDetailRef.current) {
+        skipChatDetailRef.current = false
+      } else {
+        getChatDetail()
+      }
     } else {
+      skipChatDetailRef.current = false
       const variables = toolbarRef.current?.getVariables() || []
       const openingMsg = buildOpeningStatementMessage(features?.opening_statement, {
         variables,
@@ -265,274 +280,14 @@ export function useConversation() {
     }
   }, [conversation_id, features?.opening_statement?.statement])
 
-  /** 校验工具栏变量，返回是否可发送及参数 */
-  const validateVariables = () => {
-    const variables = toolbarRef.current?.getVariables() || []
-    let isCanSend = true
-    const params: Record<string, any> = {}
-    if (variables.length > 0) {
-      const needRequired: string[] = []
-      variables.forEach(vo => {
-        params[vo.name] = vo.value ?? vo.defaultValue
-        if (vo.required && (params[vo.name] === null || params[vo.name] === undefined || params[vo.name] === '')) {
-          isCanSend = false
-          needRequired.push(vo.name)
-        }
-      })
-      if (needRequired.length) {
-        messageApi.error(`${needRequired.join(',')} ${t('workflow.variableRequired')}`)
-      }
-    }
-    return { isCanSend, params }
-  }
-
-  /** 发送消息并处理流式响应 */
-  const handleSend = (msg?: string) => {
-    if (!shareToken || shareToken === '') return
-    const files = (toolbarRef.current?.getFiles() || []).filter(item => !['uploading', 'error'].includes(item.status))
-    const { isCanSend, params } = validateVariables()
-    if (!isCanSend) return
-
-    setLoading(true)
-    chatIsEnded.current = false
-    streamLoadingRef.current = true
-    addUserMessage(conversation_id, msg || message, files)
-    addAssistantMessage()
-    toolbarRef.current?.setFiles([])
-    setFileList([])
-
-    const handleStreamMessage = createSendStreamHandler({
-      conversationId: conversation_id,
-      setChatList,
-      setConversationId,
-      setLoading,
-      updateAssistantMessage,
-      updateAssistantReasoningMessage,
-      startAudioPolling,
-      getHistory,
-      chatIsEnded,
-      streamLoadingRef,
-    })
-
-    sendConversation({
-      web_search: webSearch,
-      memory,
-      message: msg || message || '',
-      stream: true,
-      conversation_id: conversation_id || null,
-      files: files.map(file => {
-        if (file.url) {
-          return file
-        } else {
-          return {
-            type: file.type,
-            transfer_method: 'local_file',
-            upload_file_id: file.response.data.file_id,
-            file_type: file.response.data.file_type,
-            size: file.response.data.file_size,
-            name: file.response.data.file_name
-          }
-        }
-      }),
-      variables: params,
-      thinking,
-    }, handleStreamMessage, shareToken, (abort) => { abortRef.current = abort })
-      .catch(() => {
-        setLoading(false)
-        streamLoadingRef.current = false
-        chatIsEnded.current = true
-      })
-      .finally(() => {
-        setLoading(false)
-        streamLoadingRef.current = false
-        chatIsEnded.current = true
-      })
-  }
-
-  /** 人工干预动作点击：流式进行中直接提交，否则发起恢复执行 */
-  const handleInterventionActionClick = (actionId: string, fieldValues: Record<string, string>, execution_id?: string, node_id?: string) => {
-    if (!execution_id || !node_id || !shareToken) {
-      return
-    }
-    const data = {
-      node_id,
-      action_id: actionId,
-      form_data: fieldValues,
-    }
-    if (loading) {
-      interventionsSubmit(shareToken, execution_id, data)
-        .then(() => {
-          setChatList(prev => applyInterventionSubmit(prev, node_id, actionId, fieldValues))
-        })
-    } else {
-      const handleStreamMessage = createResumeStreamHandler({
-        actionId,
-        fieldValues,
-        node_id,
-        conversationId: conversation_id,
-        setChatList,
-        setConversationId,
-        setLoading,
-        updateAssistantMessage,
-        updateAssistantReasoningMessage,
-        startAudioPolling,
-        getHistory,
-        streamLoadingRef,
-      })
-      interventionsResumeSubmit(shareToken, execution_id, data, handleStreamMessage)
-    }
-  }
-
-  /** 重新生成指定助手消息 */
-  const regenerateMessages = (vo: ChatItem) => {
-    if (!shareToken || shareToken === '' || !vo.id) return
-    const { isCanSend, params } = validateVariables()
-    if (!isCanSend) return
-
-    setLoading(true)
-    chatIsEnded.current = false
-    streamLoadingRef.current = true
-    addAssistantMessage(vo.id)
-
-    const handleStreamMessage = createRegenerateStreamHandler({
-      messageId: vo.id,
-      conversationId: conversation_id,
-      setChatList,
-      setConversationId,
-      setLoading,
-      updateAssistantMessage,
-      updateAssistantReasoningMessage,
-      startAudioPolling,
-      getHistory,
-      chatIsEnded,
-      streamLoadingRef,
-    })
-
-    regenerateMessage(vo.id as string, {
-      web_search: webSearch,
-      memory,
-      stream: true,
-      variables: params,
-      thinking,
-    }, handleStreamMessage, shareToken, (abort) => { abortRef.current = abort })
-      .catch(() => {
-        setLoading(false)
-        streamLoadingRef.current = false
-        chatIsEnded.current = true
-      })
-      .finally(() => {
-        setLoading(false)
-        streamLoadingRef.current = false
-        chatIsEnded.current = true
-      })
-  }
-
-  const handleChangeMemory = () => {
-    if (config.app_type === 'workflow') return
-    const value = !memory
-    modal.confirm({
-      title: value ? t('memoryConversation.memoryTipTitle') : t('memoryConversation.memoryCancelTipTitle'),
-      okText: t('common.confirm'),
-      cancelText: t('common.cancel'),
-      onOk: () => {
-        setMemory(value)
-      },
-      onCancel: () => {
-        setMemory(!value)
-      }
-    })
-  }
-
-  const handleChangeDeepThinking = () => {
-    setThinking(prev => !prev)
-  }
-
-  const handleChangeVariables = (variables: Variable[]) => {
-    setChatList(prev => {
-      const firstMsg = prev[0] as ChatItem
-      if (firstMsg && firstMsg.role === 'assistant' && firstMsg.content && features?.opening_statement?.enabled && features?.opening_statement.statement && variables.length > 0) {
-        firstMsg.content = replaceVariables(features?.opening_statement.statement, variables as unknown as AppVariable[])
-        return [firstMsg, ...prev.slice(1)]
-      }
-      return prev
-    })
-  }
-
-  const deleteMessage = (vo: ChatItem) => {
-    if (!shareToken || shareToken === '' || !vo.id) return
-    modal.confirm({
-      title: t('common.confirmDelete'),
-      okText: t('common.delete'),
-      cancelText: t('common.cancel'),
-      okType: 'danger',
-      onOk: () => {
-        deleteConversationMessage(shareToken, vo.id as string)
-          .then(() => {
-            getChatDetail()
-            messageApi.success(t('common.deleteSuccess'))
-          })
-      }
-    })
-  }
-
-  const reportMsg = (vo: ChatItem) => {
-    reportModalRef.current?.handleOpen(vo)
-  }
-
-  /** 切换到指定版本的消息（本地乐观更新） */
-  const handleVersionChange = (page: number, item: ChatItem) => {
-    if (!shareToken || shareToken === '' || !item.id) return
-    switchMessageVersion(shareToken, item.id, page)
-      .then(() => {
-        setChatList(prev => {
-          const lastList = [...prev]
-          const filterIndex = lastList.findIndex(vo => Array.isArray(vo) && vo.filter(msg => msg.id === item.id).length > 0)
-
-          if (filterIndex < 0) return lastList
-
-          const currentItem: ChatItem[] = lastList[filterIndex] as ChatItem[]
-          lastList[filterIndex] = [...currentItem.map(msg => {
-            return {
-              ...msg,
-              is_current: msg.id === item.id,
-            }
-          })]
-
-          return [...lastList]
-        })
-        messageApi.success(t('common.operateSuccess'))
-      })
-  }
-
-  const handleShare = () => {
-    if (!conversation_id) return
-    shareModalRef.current?.handleOpen()
-  }
-
-  const handleFeedback = (feedbackType: 'like' | 'dislike', id?: string) => {
-    if (!shareToken || shareToken === '' || !conversation_id || !id) return
-    feedbackMessage(shareToken, id, { feedback_type: feedbackType })
-      .then((res) => {
-        const { feedback_type } = res as { feedback_type: 'like' | 'dislike' | null; }
-        messageApi.success(feedback_type === 'dislike'
-          ? t('memoryConversation.dislikeMsg')
-          : feedback_type === 'like'
-            ? t('memoryConversation.likeMsg')
-            : t('memoryConversation.cancelMsg')
-        )
-        setChatList(prev => applyMessagePatchById(prev, id, { feedback_type }))
-      })
-  }
-
-  const handleFavorite = (id?: string) => {
-    if (!shareToken || shareToken === '' || !conversation_id || !id) return
-    favoriteMessage(shareToken, id)
-      .then((res) => {
-        const { is_favorited } = res as { is_favorited: boolean; }
-        messageApi.success(t('common.operateSuccess'))
-        setChatList(prev => applyMessagePatchById(prev, id, { is_favorited }))
-      })
-  }
+  const actions = createConversationActions({
+    t, messageApi, modal, shareToken, conversation_id, message, webSearch, memory, thinking,
+    features, config, loading, disabled, setConversationId, setLoading, setMemory, setThinking,
+    setFileList, setMessage, setChatList, chatIsEnded, streamLoadingRef, toolbarRef, abortRef,
+    skipChatDetailRef, shareModalRef, reportModalRef, addUserMessage, addAssistantMessage,
+    updateAssistantMessage, updateAssistantReasoningMessage, startAudioPolling, upsertHistory,
+    getHistory, getChatDetail,
+  })
 
   const chatTitle = useMemo(() => {
     const conversation = historyList.find(item => item.id === conversation_id)
@@ -576,20 +331,8 @@ export function useConversation() {
     reportModalRef,
     setMessage,
     getHistory,
-    handleChangeHistory,
-    handleSend,
-    handleInterventionActionClick,
-    regenerateMessages,
-    handleChangeMemory,
-    handleChangeDeepThinking,
-    handleChangeVariables,
-    deleteMessage,
-    reportMsg,
-    handleVersionChange,
-    handleShare,
-    handleFeedback,
-    handleFavorite,
     disabled,
+    ...actions,
   }
 }
 

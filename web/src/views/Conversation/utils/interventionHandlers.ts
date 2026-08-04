@@ -1,14 +1,15 @@
 /**
- * 人工干预（human-in-the-loop）相关处理。
- * 包含「干预提交后本地标记已解决」的纯函数，以及「恢复执行」的 SSE 流式处理工厂。
- * 逻辑与原 index.tsx 中的 handleInterventionActionClick 完全一致，仅抽离为模块。
+ * Human-in-the-loop intervention handlers.
+ * Includes a pure function that locally marks an intervention as resolved after submit,
+ * and a factory for SSE stream handling on "resume execution".
+ * Logic matches the original handleInterventionActionClick in index.tsx, extracted as a module.
  */
 import { type ButtonProps } from 'antd'
 
 import { type SSEMessage } from '@/utils/stream'
 import type { ChatItem } from '@/components/Chat/types'
 
-/** 干预提交成功后（流式进行中）本地把对应干预标记为已解决 */
+/** After intervention submit succeeds (while streaming), locally mark the matching intervention as resolved */
 export const applyInterventionSubmit = (
   prev: Array<ChatItem | ChatItem[]>,
   node_id: string,
@@ -62,13 +63,13 @@ export const applyInterventionSubmit = (
 }
 
 export interface ResumeHandlerDeps {
-  /** 触发恢复执行的动作 id */
+  /** Action id that triggers resume execution */
   actionId: string
-  /** 提交的表单数据 */
+  /** Submitted form data */
   fieldValues: Record<string, string>
-  /** 触发恢复执行的节点 id */
+  /** Node id that triggers resume execution */
   node_id: string
-  /** 当前会话 id */
+  /** Current conversation id */
   conversationId: string | null
   setChatList: React.Dispatch<React.SetStateAction<Array<ChatItem | ChatItem[]>>>
   setConversationId: (id: string | null) => void
@@ -85,17 +86,18 @@ export interface ResumeHandlerDeps {
   ) => void
   updateAssistantReasoningMessage: (content?: string, message_id?: string) => void
   startAudioPolling: (audioUrl: string, idToPoll: string) => void
-  getHistory: (flag?: boolean) => void
+  /** Locally update the history list after streaming ends (insert new / refresh updated_at for existing) */
+  upsertHistory: (conversationId: string, title?: string) => void
   streamLoadingRef: React.MutableRefObject<boolean>
 }
 
-/** 恢复执行（resume-submit）场景的流式处理器 */
+/** Stream handler for the resume-submit scenario */
 export const createResumeStreamHandler = (deps: ResumeHandlerDeps) => {
   const {
     actionId, fieldValues, node_id,
     conversationId, setChatList, setConversationId, setLoading,
     updateAssistantMessage, updateAssistantReasoningMessage, startAudioPolling,
-    getHistory, streamLoadingRef,
+    upsertHistory, streamLoadingRef,
   } = deps
 
   let currentConversationId: string | null = null
@@ -227,7 +229,7 @@ export const createResumeStreamHandler = (deps: ResumeHandlerDeps) => {
                 return prev
               }
 
-              // 找到最后一条 intervention 并更新其 form_fields 的 default_value
+              // Find the last intervention and update its form_fields default_value
               const updatedInterventions = [
                 ...lastMsg.interventions.slice(0, -1),
                 {
@@ -377,7 +379,7 @@ export const createResumeStreamHandler = (deps: ResumeHandlerDeps) => {
           })
           break
         case 'end':
-        case 'workflow_end':
+        case 'workflow_end': {
           if (audio_url) {
             updateAssistantMessage(content, audio_url, 'pending', citations, suggested_questions, error)
             const { file_id } = item.data as { file_id?: string }
@@ -386,21 +388,20 @@ export const createResumeStreamHandler = (deps: ResumeHandlerDeps) => {
             if (fileId && idToPoll) {
               startAudioPolling(audio_url, idToPoll)
             }
-          } else {
-            getHistory(true)
-            if (currentConversationId && currentConversationId !== conversationId) {
-              setConversationId(currentConversationId)
-            }
           }
           if ((citations && citations.length > 0) || (suggested_questions && suggested_questions.length > 0) || error) {
             updateAssistantMessage(content || '', audio_url, undefined, citations, suggested_questions, error)
           }
           setLoading(false)
-          getHistory(true)
+          const targetConvId = currentConversationId || conversationId
+          if (targetConvId) {
+            upsertHistory(targetConvId)
+          }
           if (currentConversationId && currentConversationId !== conversationId) {
             setConversationId(currentConversationId)
           }
           break
+        }
       }
     })
   }
