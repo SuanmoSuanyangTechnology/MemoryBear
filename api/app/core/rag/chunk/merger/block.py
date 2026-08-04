@@ -71,16 +71,10 @@ class BlockMerger(ChunkMerger):
 
         if ctx.chunk_output_mode is ChunkOutputMode.PARENT_CHILD:
             if ctx.parser_config.get("parent_chunk_mode") == "full-doc":
-                child_chunks = self._blocks_to_logical_chunks(
-                    blocks,
-                    token_num,
-                    delimiter,
-                    0,
-                )
                 full_text = "\n\n".join(
-                    str(chunk.content)
-                    for chunk in child_chunks
-                    if str(chunk.content or "").strip()
+                    str(block.content)
+                    for block in blocks
+                    if str(block.content or "").strip()
                 )
                 parent_chunks = [
                     LogicalChunk(
@@ -88,6 +82,12 @@ class BlockMerger(ChunkMerger):
                         content=full_text[:FULL_DOC_MAX_CHARS],
                     )
                 ]
+                child_chunks = self._blocks_to_logical_chunks(
+                    blocks,
+                    token_num,
+                    delimiter,
+                    0,
+                )
                 parent_id_map = {index: 0 for index in range(len(child_chunks))}
                 return MergeResult(
                     chunks=self._serialize_chunk_contents(child_chunks),
