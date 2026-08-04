@@ -151,8 +151,24 @@ async def get_documents(
     ]
 
     if parent_id:
+        if parent_id != kb_id:
+            parent_result = await db.execute(
+                select(file_model.File).where(
+                    file_model.File.id == parent_id,
+                    file_model.File.kb_id == kb_id,
+                    file_model.File.file_ext == "folder",
+                )
+            )
+            if parent_result.scalars().first() is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="The parent folder does not exist or access is denied",
+                )
         file_result = await db.execute(
-            select(file_model.File).where(file_model.File.parent_id == parent_id)
+            select(file_model.File).where(
+                file_model.File.parent_id == parent_id,
+                file_model.File.kb_id == kb_id,
+            )
         )
         files = list(file_result.scalars().all())
         files_ids = [item.id for item in files]
