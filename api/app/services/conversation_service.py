@@ -292,7 +292,7 @@ class ConversationService:
             self.db.refresh(message)
 
             if sync_memory:
-                self._dispatch_memory_sync(message, conversation, should_memorize)
+                self.dispatch_memory_sync(message, conversation, should_memorize)
 
             logger.info(
                 "Message added successfully",
@@ -371,7 +371,7 @@ class ConversationService:
                 self.db.refresh(message)
 
             if sync_memory:
-                self._dispatch_memory_sync(message, conversation, should_memorize)
+                self.dispatch_memory_sync(message, conversation, should_memorize)
 
             return message
         except Exception as e:
@@ -489,7 +489,7 @@ class ConversationService:
         )
         return msg
 
-    def _dispatch_memory_sync(
+    def dispatch_memory_sync(
         self,
         message: Message,
         conversation: Conversation,

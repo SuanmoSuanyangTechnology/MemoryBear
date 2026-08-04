@@ -5,7 +5,7 @@ import time
 import uuid
 from types import SimpleNamespace
 from typing import Optional, Dict, Any, AsyncGenerator, Annotated, List, Literal
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import Depends
 from sqlalchemy import select
@@ -111,9 +111,9 @@ class AppChatService:
 
     def __init__(self, db: Session | AsyncSession):
         self.db = db
-        self.conversation_service = ConversationService(db)
-        self.agent_service = AgentRunService(db)
-        self.workflow_service = WorkflowService(db)
+        self.conversation_service: ConversationService = ConversationService(db)
+        self.agent_service: AgentRunService = AgentRunService(db)
+        self.workflow_service: WorkflowService = WorkflowService(db)
 
     def _uses_async_session(self) -> bool:
         return isinstance(self.db, AsyncSession)
@@ -1547,6 +1547,27 @@ class AppChatService:
                     args=persist_args,
                 ))
                 save_messages_enqueued = True
+
+                # 记忆写入 + 派发：复用 conversation_service.dispatch_memory_sync
+                from app.models.conversation_model import Conversation
+
+                result_row = await self.db.execute(
+                    select(Conversation).where(Conversation.id == conversation_id)
+                )
+                conv = result_row.scalar_one_or_none()
+                if conv:
+                    now = datetime.now(timezone.utc)
+
+                    for m in [
+                        {"id": user_message_id, "role": "user", "content": message, "meta_data": human_meta, "should_memorize": memory},
+                        {"id": message_id, "role": "assistant", "content": full_content, "meta_data": assistant_meta, "should_memorize": True},
+                    ]:
+                        memorize = m.pop("should_memorize")
+                        self.conversation_service.dispatch_memory_sync(
+                            message=SimpleNamespace(conversation_id=conversation_id, created_at=now, **m),
+                            conversation=conv,
+                            should_memorize=memorize,
+                        )
 
                 # Enqueue agent execution after messages so the FK is satisfied
                 # within the same batch (messages commit first, then execution).
