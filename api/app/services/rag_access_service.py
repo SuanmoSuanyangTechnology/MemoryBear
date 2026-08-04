@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.core.rag.retrieval.models import RetrievalPrincipal
 from app.db import get_async_db_context
+from app.dependencies import CurrentUserSnapshot, make_snapshot
 from app.models.api_key_model import ApiKey
 from app.models import document_model, knowledge_model
 from app.models.user_model import User
@@ -29,6 +30,14 @@ class _CurrentWorkspaceGuardBypass:
 def unwrap_current_workspace_guard(controller: ModuleType) -> _CurrentWorkspaceGuardBypass:
     """Expose controller handlers for API Key calls after API Key scope has been verified."""
     return _CurrentWorkspaceGuardBypass(controller)
+
+
+def get_api_key_request_user(
+    api_key: ApiKey,
+    api_key_auth: ApiKeyAuth,
+) -> CurrentUserSnapshot:
+    """Build a request-local user snapshot scoped to the API Key workspace."""
+    return make_snapshot(api_key.creator, api_key_auth.workspace_id)
 
 
 async def get_api_key_retrieval_principal_async(

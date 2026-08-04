@@ -14,7 +14,10 @@ from app.schemas import file_schema
 from app.schemas.api_key_schema import ApiKeyAuth
 from app.schemas.response_schema import ApiResponse
 from app.services import api_key_service
-from app.services.rag_access_service import unwrap_current_workspace_guard
+from app.services.rag_access_service import (
+    get_api_key_request_user,
+    unwrap_current_workspace_guard,
+)
 from app.services.file_storage_service import FileStorageService, get_file_storage_service
 
 
@@ -46,8 +49,7 @@ async def get_files(
     """
     # 0. Obtain the creator of the api key
     api_key = api_key_service.ApiKeyService.get_api_key(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
-    current_user = api_key.creator
-    current_user.current_workspace_id=api_key_auth.workspace_id
+    current_user = get_api_key_request_user(api_key, api_key_auth)
 
     return await file_controller.get_files(kb_id=kb_id,
                                            parent_id=parent_id,
@@ -75,8 +77,7 @@ async def create_folder(
     """
     # 0. Obtain the creator of the api key
     api_key = api_key_service.ApiKeyService.get_api_key(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
-    current_user = api_key.creator
-    current_user.current_workspace_id = api_key_auth.workspace_id
+    current_user = get_api_key_request_user(api_key, api_key_auth)
 
     return await file_controller.create_folder(kb_id=kb_id,
                                                parent_id=parent_id,
@@ -101,8 +102,7 @@ async def upload_file(
     """
     # 0. Obtain the creator of the api key
     api_key = api_key_service.ApiKeyService.get_api_key(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
-    current_user = api_key.creator
-    current_user.current_workspace_id = api_key_auth.workspace_id
+    current_user = get_api_key_request_user(api_key, api_key_auth)
 
     return await file_controller.upload_file(kb_id=kb_id,
                                              parent_id=parent_id,
@@ -131,8 +131,7 @@ async def custom_text(
     create_data = file_schema.CustomTextFileCreate(**body)
     # 0. Obtain the creator of the api key
     api_key = api_key_service.ApiKeyService.get_api_key(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
-    current_user = api_key.creator
-    current_user.current_workspace_id = api_key_auth.workspace_id
+    current_user = get_api_key_request_user(api_key, api_key_auth)
 
     return await file_controller.custom_text(kb_id=kb_id,
                                              parent_id=parent_id,
@@ -162,8 +161,7 @@ async def get_file(
         api_key_auth.api_key_id,
         api_key_auth.workspace_id,
     )
-    current_user = api_key.creator
-    current_user.current_workspace_id = api_key_auth.workspace_id
+    current_user = get_api_key_request_user(api_key, api_key_auth)
 
     return await file_controller.get_file(
         file_id=file_id,
@@ -190,8 +188,7 @@ async def update_file(
     update_data = file_schema.FileUpdate(**body)
     # 0. Obtain the creator of the api key
     api_key = api_key_service.ApiKeyService.get_api_key(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
-    current_user = api_key.creator
-    current_user.current_workspace_id = api_key_auth.workspace_id
+    current_user = get_api_key_request_user(api_key, api_key_auth)
 
     return await file_controller.update_file(file_id=file_id,
                                              update_data=update_data,
@@ -213,8 +210,7 @@ async def delete_file(
     """
     # 0. Obtain the creator of the api key
     api_key = api_key_service.ApiKeyService.get_api_key(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
-    current_user = api_key.creator
-    current_user.current_workspace_id = api_key_auth.workspace_id
+    current_user = get_api_key_request_user(api_key, api_key_auth)
 
     return await file_controller.delete_file(file_id=file_id,
                                              db=db,

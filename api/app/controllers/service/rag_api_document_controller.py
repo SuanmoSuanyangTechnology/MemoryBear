@@ -14,7 +14,10 @@ from app.schemas import document_schema
 from app.schemas.api_key_schema import ApiKeyAuth
 from app.schemas.response_schema import ApiResponse
 from app.services import api_key_service
-from app.services.rag_access_service import unwrap_current_workspace_guard
+from app.services.rag_access_service import (
+    get_api_key_request_user,
+    unwrap_current_workspace_guard,
+)
 
 
 router = APIRouter(prefix="/documents", tags=["V1 - RAG API"])
@@ -46,8 +49,7 @@ async def get_documents(
     """
     # 0. Obtain the creator of the api key
     api_key = await api_key_service.ApiKeyService.get_api_key_async(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
-    current_user = api_key.creator
-    current_user.current_workspace_id = api_key_auth.workspace_id
+    current_user = get_api_key_request_user(api_key, api_key_auth)
 
     return await document_controller.get_documents(kb_id=kb_id,
                                                    parent_id=parent_id,
@@ -77,8 +79,7 @@ async def create_document(
     create_data = document_schema.DocumentCreate(**body)
     # 0. Obtain the creator of the api key
     api_key = await api_key_service.ApiKeyService.get_api_key_async(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
-    current_user = api_key.creator
-    current_user.current_workspace_id = api_key_auth.workspace_id
+    current_user = get_api_key_request_user(api_key, api_key_auth)
 
     return await document_controller.create_document(create_data=create_data,
                                                      db=db,
@@ -98,8 +99,7 @@ async def get_document(
     """
     # 0. Obtain the creator of the api key
     api_key = await api_key_service.ApiKeyService.get_api_key_async(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
-    current_user = api_key.creator
-    current_user.current_workspace_id = api_key_auth.workspace_id
+    current_user = get_api_key_request_user(api_key, api_key_auth)
 
     return await document_controller.get_document(document_id=document_id,
                                                   db=db,
@@ -122,8 +122,7 @@ async def update_document(
     update_data = document_schema.DocumentUpdate(**body)
     # 0. Obtain the creator of the api key
     api_key = await api_key_service.ApiKeyService.get_api_key_async(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
-    current_user = api_key.creator
-    current_user.current_workspace_id = api_key_auth.workspace_id
+    current_user = get_api_key_request_user(api_key, api_key_auth)
 
     return await document_controller.update_document(document_id=document_id,
                                                      update_data=update_data,
@@ -144,8 +143,7 @@ async def delete_document(
     """
     # 0. Obtain the creator of the api key
     api_key = await api_key_service.ApiKeyService.get_api_key_async(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
-    current_user = api_key.creator
-    current_user.current_workspace_id = api_key_auth.workspace_id
+    current_user = get_api_key_request_user(api_key, api_key_auth)
 
     return await document_controller.delete_document(document_id=document_id,
                                                      db=db,
@@ -165,8 +163,7 @@ async def parse_documents(
     """
     # 0. Obtain the creator of the api key
     api_key = await api_key_service.ApiKeyService.get_api_key_async(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
-    current_user = api_key.creator
-    current_user.current_workspace_id = api_key_auth.workspace_id
+    current_user = get_api_key_request_user(api_key, api_key_auth)
 
     return await document_controller.parse_documents(document_id=document_id,
                                                      db=db,
