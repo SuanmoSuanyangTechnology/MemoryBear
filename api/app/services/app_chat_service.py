@@ -778,20 +778,7 @@ class AppChatService:
             agent_execution_id = await self._create_agent_execution(agent_exec_repo, agent_execution)
 
             try:
-                raw_result = await _sandbox_adapter.run(
-                    agent_config=config,
-                    model_config=None,
-                    api_key_config=_api_key_config,
-                    message=message,
-                    workspace_id=str(_ws_id),
-                    user_id=user_id,
-                    conversation_id=str(conversation_id),
-                    system_prompt=system_prompt,
-                    tools_serialized=sandbox_payload["agent_config"]["tools"],
-                    history=history,
-                    context=None,
-                    variables=variables,
-                )
+                raw_result = await _sandbox_adapter.run(sandbox_payload=sandbox_payload)
                 result = {
                     "content": raw_result.get("content", ""),
                     "reasoning_content": "",
