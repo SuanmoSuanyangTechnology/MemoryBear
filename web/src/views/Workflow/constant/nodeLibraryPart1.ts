@@ -218,6 +218,15 @@ export const nodeLibraryPart1: NodeLibrary[] = [
               window_size: 20
             }
           },
+          knowledge_retrieval: {
+            type: 'knowledge',
+          },
+          long_term_memory: {
+            type: 'switch',
+            defaultValue: {
+              enable: false
+            }
+          },
           error_handle: {
             type: 'errorHandle',
             defaultValue: {

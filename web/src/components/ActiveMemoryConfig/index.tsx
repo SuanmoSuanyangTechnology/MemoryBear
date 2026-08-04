@@ -16,12 +16,14 @@ interface ActiveMemoryConfigProps {
   activeMemoryConfig: Memory | null | undefined;
   variant?: 'outline' | 'filled';
   size?: 'default' | 'small';
+  className?: string;
 }
 
 const ActiveMemoryConfig: FC<ActiveMemoryConfigProps> = ({
   activeMemoryConfig,
   variant = 'outline',
   size = 'default',
+  className,
 }) => {
   const { t } = useTranslation()
 
@@ -33,7 +35,7 @@ const ActiveMemoryConfig: FC<ActiveMemoryConfigProps> = ({
       'rb:py-2 rb:px-3 rb:rounded-lg': size === 'small',
       'rb-border rb:bg-white rb:p-3': variant === 'outline',
       'rb:bg-[#F5F5F5] rb:p-3!': variant === 'filled',
-    })}>
+    }, className)}>
       <Flex align="center" gap={12}
         className={clsx({
           'rb:text-[12px]': size === 'small'
