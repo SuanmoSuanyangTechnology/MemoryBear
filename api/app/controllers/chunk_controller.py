@@ -95,7 +95,7 @@ router = APIRouter(
 )
 
 
-# @router.get("/{kb_id}/{document_id}/previewchunks", response_model=ApiResponse)
+@router.get("/{kb_id}/{document_id}/previewchunks", response_model=ApiResponse)
 async def get_preview_chunks(
         kb_id: uuid.UUID,
         document_id: uuid.UUID,
