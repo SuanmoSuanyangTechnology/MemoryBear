@@ -15,6 +15,7 @@ from app.core.rag.chunk.context import (
     ParseResult,
 )
 from app.core.rag.chunk.parser.mineru_v3 import MinerUV3Parser
+from app.core.rag.chunk.parser.structured_markdown import StructMarkdownParser
 from app.core.rag.prompts.generator import vision_llm_figure_describe_prompt
 
 from .base import ChunkPipeline
@@ -34,26 +35,39 @@ class ImageChunkPipeline(ChunkPipeline):
         analysis_binary, analysis_filename, source_image = self._analysis_input(ctx.filename, source_binary)
 
         self._callback(ctx, 0.1, "Start to parse image.")
-        text_blocks: list[ParsedBlock] = []
+        mineru_markdown = ""
         if mode in {0, 1}:
-            text_blocks = self._parse_ocr_text(ctx, analysis_binary, analysis_filename)
+            mineru_markdown = self._parse_ocr_markdown(ctx, analysis_binary, analysis_filename)
+
+        source_image_url = None
+        markdown_parts = []
+        if mode in {1, 2}:
+            source_markdown, source_image_url = self._source_image_markdown(ctx, source_file_id)
+            markdown_parts.append(source_markdown)
+        if mineru_markdown:
+            markdown_parts.append(mineru_markdown)
+
+        blocks, source_image_block = self._parse_markdown_blocks(
+            "\n\n".join(markdown_parts),
+            source_image_url,
+        )
+        text_blocks = [block for block in blocks if block.type is not ParsedBlockType.IMAGE]
 
         vision_text = ""
         if mode in {1, 2}:
             vision_text = self._describe_source_image(ctx, source_image)
+            if vision_text:
+                source_image_block.metadata["vision_text"] = vision_text
 
         if mode == 0:
             if not self._has_content(text_blocks):
                 raise ValueError("MinerU returned no text content for image OCR mode.")
-            blocks = text_blocks
         elif mode == 1:
             if not self._has_content(text_blocks) and not vision_text:
                 raise ValueError("Image mixed mode produced neither OCR text nor visual description.")
-            blocks = [self._source_image_block(ctx, source_file_id, vision_text), *text_blocks]
         else:
             if not vision_text:
                 raise ValueError("Image pure vision mode produced no visual description.")
-            blocks = [self._source_image_block(ctx, source_file_id, vision_text)]
 
         self._callback(ctx, 0.8, "Finish parsing image.")
         return ParseResult(blocks=blocks, merge_strategy="blocks")
@@ -84,12 +98,12 @@ class ImageChunkPipeline(ChunkPipeline):
         analysis_filename = str(Path(filename).with_suffix(".png"))
         return image_binary.getvalue(), analysis_filename, first_frame
 
-    def _parse_ocr_text(
+    def _parse_ocr_markdown(
         self,
         ctx: ChunkContext,
         analysis_binary: bytes,
         analysis_filename: str,
-    ) -> list[ParsedBlock]:
+    ) -> str:
         parser_config = dict(ctx.parser_config)
         parser_config["image_vision_enabled"] = False
         ocr_ctx = replace(
@@ -98,11 +112,10 @@ class ImageChunkPipeline(ChunkPipeline):
             binary=analysis_binary,
             parser_config=parser_config,
         )
-        result = MinerUV3Parser().parse(ocr_ctx)
-        blocks = result.blocks or []
-        if not blocks:
+        markdown = MinerUV3Parser().parse_markdown(ocr_ctx)
+        if not markdown or not markdown.strip():
             raise ValueError("MinerU returned empty Markdown for image OCR mode.")
-        return [block for block in blocks if block.type is not ParsedBlockType.IMAGE]
+        return markdown
 
     def _describe_source_image(self, ctx: ChunkContext, source_image: Image.Image) -> str:
         prompt = vision_llm_figure_describe_prompt(lang=getattr(ctx.vision_model, "lang", ctx.lang))
@@ -126,11 +139,30 @@ class ImageChunkPipeline(ChunkPipeline):
         except (TypeError, ValueError) as exc:
             raise ValueError("source_file_id must be a valid UUID for image chunking.") from exc
 
-    def _source_image_block(self, ctx: ChunkContext, source_file_id: str, vision_text: str) -> ParsedBlock:
+    def _source_image_markdown(self, ctx: ChunkContext, source_file_id: str) -> tuple[str, str]:
         filename = Path(ctx.kwargs.get("source_file_name") or ctx.filename).name
-        content = f"![{filename}]({self._source_file_url(source_file_id)})"
-        metadata = {"vision_text": vision_text} if vision_text else {}
-        return ParsedBlock(type=ParsedBlockType.IMAGE, content=content, metadata=metadata)
+        source_image_url = self._source_file_url(source_file_id)
+        return f"![{filename}]({source_image_url})", source_image_url
+
+    def _parse_markdown_blocks(
+        self,
+        markdown: str,
+        source_image_url: str | None,
+    ) -> tuple[list[ParsedBlock], ParsedBlock | None]:
+        blocks = StructMarkdownParser().parse_text(markdown, normalize_escaped_structure=True)
+        source_image_block = None
+        filtered_blocks = []
+        for block in blocks:
+            if block.type is not ParsedBlockType.IMAGE:
+                filtered_blocks.append(block)
+                continue
+            if source_image_url and source_image_block is None and block.metadata.get("src") == source_image_url:
+                source_image_block = block
+                filtered_blocks.append(block)
+
+        if source_image_url and source_image_block is None:
+            raise ValueError("Failed to parse the source image Markdown tag.")
+        return filtered_blocks, source_image_block
 
     def _source_file_url(self, source_file_id) -> str:
         server_url = (settings.FILE_LOCAL_SERVER_URL or "").rstrip("/")
