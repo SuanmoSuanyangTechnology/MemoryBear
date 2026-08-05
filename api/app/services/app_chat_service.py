@@ -1616,6 +1616,9 @@ class AppChatService:
                     if conv:
                         conv.message_count += 1
                     await db.commit()
+                # assistant 消息已直写成功，标记后异常分支不再入队 save_failed_message，
+                # 避免同一 message_id 主键冲突
+                save_messages_enqueued = True
                 from app.services.batch_persist_queue import BatchPersistQueue, PersistTask
                 await BatchPersistQueue.enqueue(PersistTask(
                     task_type="save_agent_execution",
