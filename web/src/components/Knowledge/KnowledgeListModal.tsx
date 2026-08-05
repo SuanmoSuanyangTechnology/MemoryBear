@@ -178,6 +178,7 @@ const KnowledgeListModal = forwardRef<KnowledgeModalRef, KnowledgeModalProps>(({
         retrieve_type: "hybrid",
         top_k: 3,
         weight: 1,
+        enable_graph_retrieval: 0,
       }
     })), 'knowledge')
     setVisible(false);

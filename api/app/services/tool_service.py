@@ -19,7 +19,7 @@ from app.repositories.tool_repository import (
 from app.models.app_model import App
 from app.models.tool_model import (
     ToolConfig, BuiltinToolConfig, CustomToolConfig, MCPToolConfig,
-    ToolExecution, ToolType, ToolStatus, ExecutionStatus, AuthType
+    WorkflowToolConfig, ToolExecution, ToolType, ToolStatus, ExecutionStatus, AuthType
 )
 from app.schemas.tool_schema import (
     ToolInfo,
@@ -314,13 +314,6 @@ class ToolService:
         try:
             # 获取工具实例
             if self._uses_async_session():
-                tool_config = await self.get_tool_config_async(tool_id, tenant_id)
-                if tool_config and tool_config.tool_type == ToolType.WORKFLOW.value:
-                    # ponytail: workflow tools still bind sync WorkflowService; keep them off the async node hot path for now.
-                    return ToolResult.error_result(
-                        error="工作流工具暂未接入异步执行路径",
-                        execution_time=time.time() - start_time,
-                    )
                 tool = await self.get_tool_instance_async(tool_id, tenant_id)
             else:
                 tool = self.get_tool_instance(tool_id, tenant_id)
@@ -1083,8 +1076,7 @@ class ToolService:
         if config.tool_type == ToolType.MCP.value:
             return await self._create_mcp_instance_async(config)
         if config.tool_type == ToolType.WORKFLOW.value:
-            # ponytail: workflow tools still rely on sync WorkflowService internals.
-            return None
+            return await self._create_workflow_instance_async(config)
         return None
 
     def _create_builtin_instance(self, config: ToolConfig) -> Optional[BaseTool]:
@@ -1191,6 +1183,24 @@ class ToolService:
         """创建工作流工具实例"""
         workflow_config = self.workflow_repo.find_by_tool_id(self.db, config.id)
 
+        if not workflow_config:
+            return None
+
+        return WorkflowAsTool(
+            db=self.db,
+            tool_id=str(config.id),
+            workflow_app_id=workflow_config.app_id,
+            release_id=workflow_config.release_id,
+            tool_name=config.name,
+            tool_description=config.description or "",
+            input_parameters=workflow_config.input_parameters or [],
+            output_schema=workflow_config.output_schema or {},
+            timeout=workflow_config.timeout or 300,
+        )
+
+    async def _create_workflow_instance_async(self, config: ToolConfig) -> Optional[WorkflowAsTool]:
+        """异步创建工作流工具实例"""
+        workflow_config = await self._get_type_config_async(WorkflowToolConfig, config.id)
         if not workflow_config:
             return None
 

@@ -1,5 +1,5 @@
 import { useRef, useState, useLayoutEffect, useCallback, type ReactNode } from 'react'
-import { Popover, type PopoverProps } from 'antd'
+import { Popover, Flex, type PopoverProps } from 'antd'
 import Tag, { type TagProps } from '@/components/Tag'
 
 interface OverflowTagsProps {
@@ -61,29 +61,29 @@ const OverflowTags = ({ items = [], gap = 8, numTagColor = 'default', numTag, po
   const hidden = items.length - visibleCount
 
   return (
-    <div ref={containerRef} style={{ width: '100%', minWidth: 0 }}>
+    <div ref={containerRef} className="rb:w-full rb:min-w-0">
       {/* off-screen measure layer */}
-      <div ref={measureRef} style={{ display: 'flex', gap, position: 'fixed', top: -9999, left: -9999, visibility: 'hidden', pointerEvents: 'none' }}>
+      <Flex ref={measureRef} gap={gap} className="rb:fixed rb:-top-9999 rb:-left-9999 rb:hidden rb:pointer-events-none">
         {items.map((item, i) => <span key={i}>{item}</span>)}
-        <Tag>+0</Tag>
-      </div>
+        <Tag>+{hidden}</Tag>
+      </Flex>
       <Popover
         content={
-          <div style={{ display: 'flex', gap, flexWrap: 'wrap', maxWidth: 300 }}>
+          <Flex gap={gap} wrap className="rb:max-w-75 rb:max-h-50 rb:overflow-y-auto">
             {items.map((item, i) => <span key={i}>{item}</span>)}
-          </div>
+          </Flex>
         }
         placement="topLeft"
         {...(popoverProps || {})}
         open={popoverProps === false ? false : undefined}
       >
-        <div style={{ display: 'flex', gap, alignItems: 'center', flexWrap: 'nowrap' }}>
+        <Flex gap={gap} align="center" wrap>
           {items.slice(0, visibleCount).map((item, i) => <span key={i}>{item}</span>)}
           {hidden > 0 && numTag
             ? numTag(hidden)
             : hidden > 0 && <Tag color={numTagColor}>+{hidden}</Tag>
           }
-        </div>
+        </Flex>
       </Popover>
     </div>
   )

@@ -1134,11 +1134,20 @@ async def draft_run(
         if payload.stream:
             source = HitLogSource.EXTERNAL if is_shared else HitLogSource.CONSOLE
 
+            from app.db import AsyncSessionLocal
+            from app.services.draft_run_service import AgentRunService as _AgentRunService
+
+            execution_mode = "sandbox" if settings.E2B_ENABLED else "in_process"
+
+            stream_db = AsyncSessionLocal()
+            try:
+                _draft_service = _AgentRunService(stream_db)
+            except Exception:
+                await stream_db.close()
+                raise
+
             async def event_generator():
-                async with get_async_db_context() as stream_db:
-                    from app.services.draft_run_service import AgentRunService as _AgentRunService
-                    _draft_service = _AgentRunService(stream_db)
-                    execution_mode = "sandbox" if settings.E2B_ENABLED else "in_process"
+                try:
                     async for event in _draft_service.run_stream(
                             agent_config=agent_cfg,
                             model_config=model_config,
@@ -1154,6 +1163,8 @@ async def draft_run(
                             execution_mode=execution_mode,
                     ):
                         yield event
+                finally:
+                    await stream_db.close()
 
             return StreamingResponse(
                 event_generator(),
@@ -1161,8 +1172,8 @@ async def draft_run(
                 headers={
                     "Cache-Control": "no-cache",
                     "Connection": "keep-alive",
-                    "X-Accel-Buffering": "no"
-                }
+                    "X-Accel-Buffering": "no",
+                },
             )
 
         logger.debug(
@@ -1256,10 +1267,18 @@ async def draft_run(
                 }
             )
 
+            from app.db import AsyncSessionLocal
+            from app.services.multi_agent_service import MultiAgentService as _MultiAgentService
+
+            stream_db = AsyncSessionLocal()
+            try:
+                multiservice = _MultiAgentService(stream_db)
+            except Exception:
+                await stream_db.close()
+                raise
+
             async def event_generator():
-                async with get_async_db_context() as stream_db:
-                    from app.services.multi_agent_service import MultiAgentService as _MultiAgentService
-                    multiservice = _MultiAgentService(stream_db)
+                try:
                     async for event in multiservice.run_stream(
                             app_id=app_id,
                             request=multi_agent_request,
@@ -1267,6 +1286,8 @@ async def draft_run(
                             user_rag_memory_id=user_rag_memory_id
                     ):
                         yield event
+                finally:
+                    await stream_db.close()
 
             return StreamingResponse(
                 event_generator(),
@@ -1274,8 +1295,8 @@ async def draft_run(
                 headers={
                     "Cache-Control": "no-cache",
                     "Connection": "keep-alive",
-                    "X-Accel-Buffering": "no"
-                }
+                    "X-Accel-Buffering": "no",
+                },
             )
 
         logger.debug(
@@ -1416,6 +1437,7 @@ async def draft_run_compare(
     if payload.stream:
         source = HitLogSource.CONSOLE
         execution_mode = "sandbox" if settings.E2B_ENABLED else "in_process"
+
         async def event_generator():
             from app.services.draft_run_service import AgentRunService
             async with get_async_db_context() as db:
@@ -1708,9 +1730,6 @@ async def update_workflow_config(
         for var_def, resolved_def in zip(payload.variables, resolved):
             var_def.default = resolved_def.get("default", var_def.default)
     cfg = app_service.update_workflow_config(db, app_id=app_id, data=payload, workspace_id=workspace_id)
-    cache_key = workflow_config_key(app_id)
-    await delete_json_async(cache_key)
-    logger.info(f"[cache] invalidate workflow config: key={cache_key}")
     return success(data=WorkflowConfigSchema.model_validate(cfg))
 
 

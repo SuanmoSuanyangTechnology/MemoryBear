@@ -10,7 +10,7 @@
  */
 
 import { forwardRef, useImperativeHandle, useState } from 'react';
-import { Form, Input, App, Steps, Button, Select, Flex } from 'antd';
+import { Form, Input, App, Steps, Button, Flex } from 'antd';
 import { useTranslation } from 'react-i18next';
 
 import type { SpaceModalData, SpaceModalRef, Space, StorageType } from '../types'
@@ -22,8 +22,9 @@ import { getFileLink } from '@/api/fileStorage'
 import ragIcon from '@/assets/images/space/rag.png'
 import neo4jIcon from '@/assets/images/space/neo4j.png'
 import { stringRegExp } from '@/utils/validator';
-import type { ModelListItem } from '@/views/ModelManagement/types'
+import type { Model } from '@/views/ModelManagement/types'
 import { isPrivateAvailable } from '@/utils/private'
+import ModelSelect from '@/components/ModelSelect'
 
 const FormItem = Form.Item;
 
@@ -64,7 +65,7 @@ const SpaceModal = forwardRef<SpaceModalRef, SpaceModalProps>(({
   const [loading, setLoading] = useState(false)
   const [editVo, setEditVo] = useState<Space | null>(null)
   const [currentStep, setCurrentStep] = useState(0)
-  const [defaultModels, setDefaultModels] = useState<Record<string, ModelListItem>>({})
+  const [defaultModels, setDefaultModels] = useState<Record<string, Model>>({})
 
   const values = Form.useWatch([], form);
 
@@ -85,13 +86,13 @@ const SpaceModal = forwardRef<SpaceModalRef, SpaceModalProps>(({
       return
     }
     getDefaultWorkspaceModel().then(res => {
-      setDefaultModels((res || {}) as Record<string, ModelListItem>)
+      setDefaultModels((res || {}) as Record<string, Model>)
     })
   }
-  const [customModels, setCustomModels] = useState<Record<string, ModelListItem[]>>({})
+  const [customModels, setCustomModels] = useState<Record<string, Model[]>>({})
   const handleGetCustomModels = () => {
     getCustomWorkspaceModels().then(res => {
-      setCustomModels((res || {}) as Record<string, ModelListItem[]>)
+      setCustomModels((res || {}) as Record<string, Model[]>)
     })
   }
   /** Open modal with optional data */
@@ -276,13 +277,11 @@ const SpaceModal = forwardRef<SpaceModalRef, SpaceModalProps>(({
                 name={field.name}
                 rules={[{ required: field.required, message: t('common.selectPlaceholder', { title: t(`space.${field.label}`) }) }]}
               >
-                <Select
-                  allowClear
-                  showSearch
-                  optionFilterProp="label"
+                <ModelSelect
                   fieldNames={{ label: 'name', value: 'id' }}
                   placeholder={t('common.pleaseSelect')}
-                  options={customModels[field.name]}
+                  isAutoFetch={false}
+                  initialData={customModels[field.name]}
                 />
               </Form.Item>
             ))

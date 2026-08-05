@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:52:50 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-07-06 18:02:10
+ * @Last Modified time: 2026-08-03 17:12:15
  */
 import React, { useRef } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -103,6 +103,7 @@ const ApiKeyManagement: React.FC = () => {
         url={getApiKeyListUrl}
         query={{ is_active: true, type: 'service' }}
         column={3}
+        heightClass="rb:h-[calc(100vh-112px)]!"
         renderItem={(apiKeyItem) => {
           return (
             <RbCard
@@ -154,6 +155,9 @@ const ApiKeyManagement: React.FC = () => {
                     }
                   </span>
                 }))}
+                classNames={{
+                  label: 'rb:w-20!'
+                }}
               />
 
               <Flex align="center" justify="space-between" className="rb:h-8! rb:mt-4! rb:py-1! rb:pl-2.5! rb:pr-1! rb:bg-[#F6F6F6] rb:rounded-md rb:leading-5">

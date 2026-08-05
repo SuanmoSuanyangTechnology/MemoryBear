@@ -1,4 +1,3 @@
-import asyncio
 import json
 import logging
 import re
@@ -12,7 +11,7 @@ from app.core.workflow.engine.variable_pool import VariablePool
 from app.core.workflow.nodes.base_node import BaseNode
 from app.core.workflow.nodes.tool.config import ToolNodeConfig
 from app.core.workflow.variable.base_variable import VariableType
-from app.db import get_async_db_context, get_db_read, get_db_context
+from app.db import get_async_db_context
 from app.models.workspace_model import Workspace
 from app.services.tool_service import ToolService
 from app.models.tool_model import ToolType
@@ -65,30 +64,6 @@ class ToolNode(BaseNode):
                 )
             ).scalar_one_or_none()
 
-    async def _execute_workflow_tool_legacy_async(
-            self,
-            *,
-            tenant_id: uuid.UUID,
-            user_id: uuid.UUID | None,
-            workspace_id: uuid.UUID | None,
-            rendered_parameters: dict[str, Any],
-    ):
-        def _run():
-            with get_db_read() as db:
-                tool_service = ToolService(db)
-                return asyncio.run(
-                    tool_service.execute_tool(
-                        tool_id=str(self.typed_config.tool_id),
-                        parameters=rendered_parameters,
-                        tenant_id=tenant_id,
-                        user_id=user_id,
-                        workspace_id=workspace_id,
-                    )
-                )
-
-        # ponytail: workflow tools still ride sync WorkflowService internals; keep fallback isolated off the async hot path.
-        return await asyncio.to_thread(_run)
-
     async def execute(self, state: WorkflowState, variable_pool: VariablePool) -> dict[str, Any]:
         """执行工具"""
         self.typed_config = ToolNodeConfig(**self.config)
@@ -131,32 +106,24 @@ class ToolNode(BaseNode):
             if not tool_config:
                 raise ValueError(f"工具不存在或未激活: {self.typed_config.tool_id}")
 
-            if tool_config.tool_type == ToolType.WORKFLOW.value:
-                result = await self._execute_workflow_tool_legacy_async(
-                    tenant_id=tenant_id,
-                    user_id=user_id,
-                    workspace_id=workspace_id,
-                    rendered_parameters=rendered_parameters,
-                )
-            else:
-                tool_instance = await tool_service.get_tool_instance_async(str(self.typed_config.tool_id), tenant_id)
-                # MCP 工具：将 operation 映射为 tool_name，其余参数包装进 arguments
-                if tool_instance and tool_instance.tool_type == ToolType.MCP:
-                    operation = rendered_parameters.pop("operation", None)
-                    if operation:
-                        old_params = rendered_parameters
-                        rendered_parameters = {
-                            "tool_name": operation,
-                            "arguments": old_params
-                        }
+            tool_instance = await tool_service.get_tool_instance_async(str(self.typed_config.tool_id), tenant_id)
+            # MCP 工具：将 operation 映射为 tool_name，其余参数包装进 arguments
+            if tool_instance and tool_instance.tool_type == ToolType.MCP:
+                operation = rendered_parameters.pop("operation", None)
+                if operation:
+                    old_params = rendered_parameters
+                    rendered_parameters = {
+                        "tool_name": operation,
+                        "arguments": old_params
+                    }
 
-                result = await tool_service.execute_tool(
-                    tool_id=str(self.typed_config.tool_id),
-                    parameters=rendered_parameters,
-                    tenant_id=tenant_id,
-                    user_id=user_id,
-                    workspace_id=workspace_id,
-                )
+            result = await tool_service.execute_tool(
+                tool_id=str(self.typed_config.tool_id),
+                parameters=rendered_parameters,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                workspace_id=workspace_id,
+            )
 
         if result.success:
             logger.info(f"节点 {self.node_id} 工具执行成功")

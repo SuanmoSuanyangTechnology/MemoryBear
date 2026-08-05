@@ -279,11 +279,10 @@ const AutocompletePlugin: FC<AutocompletePluginProps> = ({ options }) => {
       ref={popupRef}
       data-autocomplete-popup="true"
       onMouseDown={(e) => e.preventDefault()}
-      className="rb:fixed rb:z-50 rb:bg-white rb:rounded-lg rb:border-[0.5px] rb:border-[#EBEBEB] rb:shadow-[0px_2px_6px_0px_rgba(0,0,0,0.1)] rb:py-3 rb:px-2"
+      className="rb:min-w-50 rb:fixed rb:z-50 rb:bg-white rb:rounded-lg rb:border-[0.5px] rb:border-[#EBEBEB] rb:shadow-[0px_2px_6px_0px_rgba(0,0,0,0.1)] rb:py-3 rb:px-2"
       style={{
         top: popupPosition.top,
         left: popupPosition.left,
-        minWidth: '200px',
       }}
     >
       <div className="rb:max-h-57.5 rb:overflow-y-auto">

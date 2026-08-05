@@ -6,6 +6,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import StreamingResponse
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
@@ -20,6 +21,7 @@ from app.db import get_db, get_db_context, get_async_db_context
 from app.dependencies import get_share_user_id, ShareTokenData
 from app.models.annotation_model import HitLogSource
 from app.models.app_model import AppType
+from app.models.app_release_model import AppRelease
 from app.models.workflow_model import WorkflowExecution
 from app.models.workspace_model import Workspace
 from app.repositories import knowledge_repository
@@ -41,6 +43,7 @@ from app.services.app_log_service import AppLogService
 from app.models.file_metadata_model import FileMetadata
 from app.utils.app_config_utils import workflow_config_4_app_release, \
     agent_config_4_app_release, multi_agent_config_4_app_release
+from app.utils.redis_cache import CACHE_MISS, get_json_async, set_json_async, redis_cache
 from app.services.message_feedback_service import FavoriteService
 from app.services.message_feedback_service import FeedbackService
 from app.models import Message, MessageFeedback
@@ -109,6 +112,7 @@ def get_or_generate_user_id(payload_user_id: str, request: Request) -> str:
     return f"guest_{hash_value}"
 
 
+@redis_cache(ttl=120, prefix="storage_type", skip_args=["db"], id_arg="workspace_id")
 async def _prepare_public_memory_context_async(
         db: AsyncSession,
         workspace_id: uuid.UUID,
@@ -147,6 +151,15 @@ async def _get_or_create_public_end_user_async(
         original_user_id: str | None = None,
 ):
     end_user_repo = EndUserRepository(db)
+
+    cache_key = f"cache:v2:end_user:{workspace_id}:{other_id}"
+    cached = await get_json_async(cache_key)
+    if cached is not CACHE_MISS:
+        from types import SimpleNamespace
+        cached_id = cached.get("id")
+        if cached_id and cached.get("app_id") == str(app_id):
+            return SimpleNamespace(id=uuid.UUID(cached_id), app_id=app_id)
+
     existing_end_user = await end_user_repo.get_end_user_by_other_id_async(
         workspace_id=workspace_id,
         other_id=other_id,
@@ -154,22 +167,36 @@ async def _get_or_create_public_end_user_async(
     logger.info(
         f"终端用户配额检查: workspace_id={workspace_id}, other_id={other_id}, existing={existing_end_user is not None}"
     )
-    if existing_end_user is None:
-        workspace = await db.get(Workspace, workspace_id)
-        if workspace:
-            logger.info(f"新终端用户，执行配额检查: tenant_id={workspace.tenant_id}")
-            await check_end_user_quota_async(
-                db,
-                workspace.tenant_id,
-                workspace_id=workspace_id,
-            )
+    if existing_end_user is not None:
+        if existing_end_user.app_id != app_id:
+            existing_end_user.app_id = app_id
+            await db.commit()
+        await set_json_async(cache_key, {
+            "id": str(existing_end_user.id),
+            "app_id": str(existing_end_user.app_id),
+        }, ttl=120)
+        return existing_end_user
 
-    return await end_user_repo.get_or_create_end_user_async(
+    workspace = await db.get(Workspace, workspace_id)
+    if workspace:
+        logger.info(f"新终端用户，执行配额检查: tenant_id={workspace.tenant_id}")
+        await check_end_user_quota_async(
+            db,
+            workspace.tenant_id,
+            workspace_id=workspace_id,
+        )
+
+    new_user = await end_user_repo.get_or_create_end_user_async(
         app_id=app_id,
         workspace_id=workspace_id,
         other_id=other_id,
         original_user_id=original_user_id,
     )
+    await set_json_async(cache_key, {
+        "id": str(new_user.id),
+        "app_id": str(new_user.app_id),
+    }, ttl=120)
+    return new_user
 
 
 @router.post(
@@ -631,18 +658,50 @@ async def chat(
     # 提前验证和准备（在流式响应开始前完成）
     # 这样可以确保错误能正确返回，而不是在流式响应中间出错
 
+    # 检查 share_token 缓存，命中时可跳过 share/app/workspace 三次 DB 查询
+    share_cache_key = f"cache:v2:share_token:{share_token}"
+    share_cache = await get_json_async(share_cache_key)
+    _cached_app_id = None
+    _cached_workspace_id = None
+    _cached_app_type = None
+    _cached_release_id = None
+    if share_cache is not CACHE_MISS:
+        _cached_app_id = uuid.UUID(share_cache["app_id"])
+        _cached_workspace_id = uuid.UUID(share_cache["workspace_id"])
+        _cached_app_type = share_cache["app_type"]
+        if share_cache.get("release_id"):
+            _cached_release_id = uuid.UUID(share_cache["release_id"])
+
     try:
         async with get_async_db_context() as db:
-            service = SharedChatService(db)
-            share, release = await service.get_release_by_share_token_async(share_token, password)
+            if _cached_app_id is not None and _cached_release_id is not None:
+                release = await db.get(AppRelease, _cached_release_id)
+                if not release:
+                    raise BusinessException("发布版本不存在", BizCode.NOT_FOUND)
+                app_id = _cached_app_id
+                workspace_id = _cached_workspace_id
+                app_type = _cached_app_type
+            else:
+                service = SharedChatService(db)
+                share, release = await service.get_release_by_share_token_async(share_token, password)
 
-            app_service = AppService(db)
-            app = await app_service.get_app_async(share.app_id)
-            workspace_id = app.workspace_id
+                app_service = AppService(db)
+                app = await app_service.get_app_async(share.app_id)
+                workspace_id = app.workspace_id
+                app_id = app.id
+                app_type = app.type
+
+                # 填充 share_token 缓存
+                await set_json_async(share_cache_key, {
+                    "app_id": str(app_id),
+                    "release_id": str(release.id),
+                    "workspace_id": str(workspace_id),
+                    "app_type": app_type,
+                }, ttl=60)
 
             new_end_user = await _get_or_create_public_end_user_async(
                 db,
-                app_id=share.app_id,
+                app_id=app_id,
                 workspace_id=workspace_id,
                 other_id=other_id,
                 original_user_id=user_id,
@@ -654,7 +713,6 @@ async def chat(
                 workspace_id=workspace_id,
             )
 
-            app_type = app.type
             runtime_config = None
             if app_type == AppType.AGENT:
                 model_config_id = release.default_model_config_id
@@ -682,11 +740,13 @@ async def chat(
 
             conversation_id = None
             if app_type != AppType.PURE_WORKFLOW or payload.conversation_id:
-                conversation = await service.create_or_get_conversation_async(
-                    share_token=share_data.share_token,
-                    conversation_id=payload.conversation_id,
+                conv_service = ConversationService(db)
+                conversation = await conv_service.create_or_get_conversation_async(
+                    app_id=app_id,
+                    workspace_id=workspace_id,
                     user_id=end_user_id,
-                    password=password
+                    is_draft=False,
+                    conversation_id=payload.conversation_id,
                 )
                 conversation_id = conversation.id
 
@@ -718,9 +778,18 @@ async def chat(
         if payload.stream:
             source = HitLogSource.EXTERNAL
             execution_mode = "sandbox" if settings.E2B_ENABLED else "in_process"
+
+            from app.db import AsyncSessionLocal
+
+            stream_db = AsyncSessionLocal()
+            try:
+                app_chat_service = AppChatService(stream_db)
+            except Exception:
+                await stream_db.close()
+                raise
+
             async def event_generator():
-                async with get_async_db_context() as stream_db:
-                    app_chat_service = AppChatService(stream_db)
+                try:
                     async for event in app_chat_service.agent_chat_stream(
                             message=payload.message,
                             conversation_id=conversation_id,
@@ -737,6 +806,8 @@ async def chat(
                             execution_mode=execution_mode,
                     ):
                         yield event
+                finally:
+                    await stream_db.close()
 
             return StreamingResponse(
                 event_generator(),
@@ -744,8 +815,8 @@ async def chat(
                 headers={
                     "Cache-Control": "no-cache",
                     "Connection": "keep-alive",
-                    "X-Accel-Buffering": "no"
-                }
+                    "X-Accel-Buffering": "no",
+                },
             )
         source = HitLogSource.EXTERNAL
         execution_mode = "sandbox" if settings.E2B_ENABLED else "in_process"
@@ -770,9 +841,17 @@ async def chat(
     elif app_type == AppType.MULTI_AGENT:
         config = runtime_config
         if payload.stream:
+            from app.db import AsyncSessionLocal
+
+            stream_db = AsyncSessionLocal()
+            try:
+                app_chat_service = AppChatService(stream_db)
+            except Exception:
+                await stream_db.close()
+                raise
+
             async def event_generator():
-                async with get_async_db_context() as stream_db:
-                    app_chat_service = AppChatService(stream_db)
+                try:
                     async for event in app_chat_service.multi_agent_chat_stream(
                             message=payload.message,
                             conversation_id=conversation_id,
@@ -785,6 +864,8 @@ async def chat(
                             user_rag_memory_id=user_rag_memory_id
                     ):
                         yield event
+                finally:
+                    await stream_db.close()
 
             return StreamingResponse(
                 event_generator(),
@@ -792,8 +873,8 @@ async def chat(
                 headers={
                     "Cache-Control": "no-cache",
                     "Connection": "keep-alive",
-                    "X-Accel-Buffering": "no"
-                }
+                    "X-Accel-Buffering": "no",
+                },
             )
 
         # 多 Agent 非流式返回
@@ -816,9 +897,18 @@ async def chat(
         config = runtime_config
         if payload.stream:
             source = HitLogSource.EXTERNAL
+
+            from app.db import AsyncSessionLocal
+
+            stream_db = AsyncSessionLocal()
+            try:
+                app_chat_service = AppChatService(stream_db)
+            except Exception:
+                await stream_db.close()
+                raise
+
             async def event_generator():
-                async with get_async_db_context() as stream_db:
-                    app_chat_service = AppChatService(stream_db)
+                try:
                     async for event in app_chat_service.workflow_chat_stream(
                             message=payload.message,
                             conversation_id=conversation_id,
@@ -840,6 +930,8 @@ async def chat(
                         event_data = event.get("data", {})
                         sse_message = f"event: {event_type}\ndata: {json.dumps(event_data, default=str, ensure_ascii=False)}\n\n"
                         yield sse_message
+                finally:
+                    await stream_db.close()
 
             return StreamingResponse(
                 event_generator(),
@@ -847,8 +939,8 @@ async def chat(
                 headers={
                     "Cache-Control": "no-cache",
                     "Connection": "keep-alive",
-                    "X-Accel-Buffering": "no"
-                }
+                    "X-Accel-Buffering": "no",
+                },
             )
 
         # 多 Agent 非流式返回

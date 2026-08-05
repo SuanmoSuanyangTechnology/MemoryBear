@@ -29,7 +29,7 @@ from app.core.workflow.nodes.llm.config import (
     _MULTIMODAL_COMPATIBLE_PROVIDERS,
 )
 from app.core.workflow.variable.base_variable import VariableType
-from app.db import get_async_db_context, get_db_context
+from app.db import get_async_db_context
 from app.models import ModelType
 from app.schemas.model_schema import ModelInfo
 from app.services.context_engine_manager import ContextEngineManager
@@ -497,22 +497,6 @@ class LLMNode(BaseNode):
                     return text[:pos], True
                 idx = pos + len(seq)
         return text, False
-
-    def _load_model_info_sync(self, model_id: str, variable_pool: VariablePool) -> ModelInfo:
-        with get_db_context() as db:
-            config = ModelConfigService.get_model_by_id(db=db, model_id=model_id)
-            if not config:
-                raise BusinessException("配置的模型不存在", BizCode.NOT_FOUND)
-            api_config = self.get_runtime_api_config(db, config, variable_pool)
-            return ModelInfo(
-                model_name=api_config.model_name,
-                model_type=ModelType(config.type),
-                api_key=api_config.api_key,
-                api_base=api_config.api_base,
-                provider=api_config.provider,
-                is_omni=api_config.is_omni,
-                capability=api_config.capability,
-            )
 
     async def _load_model_info_async(self, model_id: uuid.UUID, variable_pool: VariablePool) -> ModelInfo:
         tenant_id = await self.resolve_tenant_id_async(variable_pool)

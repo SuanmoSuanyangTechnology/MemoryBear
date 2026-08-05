@@ -4818,6 +4818,24 @@
             "description": "Search keyword (fuzzy match on other_name and id)"
           },
           {
+            "name": "label",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Label filter (long=has name, short=no name)",
+              "title": "Label"
+            },
+            "description": "Label filter (long=has name, short=no name)"
+          },
+          {
             "name": "page",
             "in": "query",
             "required": false,
@@ -5926,6 +5944,18 @@
             "format": "uuid",
             "title": "Workspace Id"
           },
+          "tenant_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tenant Id"
+          },
           "type": {
             "type": "string",
             "title": "Type"
@@ -5954,6 +5984,7 @@
         "required": [
           "api_key_id",
           "workspace_id",
+          "tenant_id",
           "type",
           "scopes",
           "resource_id"
@@ -7939,6 +7970,14 @@
               }
             ]
           },
+          "enable_graph_retrieval": {
+            "type": "integer",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Enable Graph Retrieval",
+            "description": "Whether to add the graph retrieval route to hybrid retrieval. 1 enables it.",
+            "default": 0
+          },
           "rerank_score_threshold": {
             "anyOf": [
               {
@@ -9845,6 +9884,43 @@
         "title": "EpisodicMemoryOverviewRequest",
         "description": "情景记忆总览查询请求"
       },
+      "ExecutionResultRequest": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "default": "completed"
+          },
+          "output": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Output"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "elapsed_time": {
+            "type": "number",
+            "title": "Elapsed Time",
+            "default": 0
+          },
+          "token_usage": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Token Usage"
+          }
+        },
+        "type": "object",
+        "title": "ExecutionResultRequest"
+      },
       "ExplicitMemoryDetailsRequest": {
         "properties": {
           "end_user_id": {
@@ -11130,6 +11206,36 @@
         "title": "KnowledgeRetrievalConfig",
         "description": "知识库检索配置（支持多个知识库，每个有独立配置）"
       },
+      "KnowledgeRetrieveRequest": {
+        "properties": {
+          "query": {
+            "type": "string",
+            "title": "Query"
+          },
+          "knowledge_base_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Knowledge Base Ids"
+          },
+          "top_k": {
+            "type": "integer",
+            "title": "Top K",
+            "default": 5
+          },
+          "score_threshold": {
+            "type": "number",
+            "title": "Score Threshold",
+            "default": 0.5
+          }
+        },
+        "type": "object",
+        "required": [
+          "query"
+        ],
+        "title": "KnowledgeRetrieveRequest"
+      },
       "KnowledgeShareCreate": {
         "properties": {
           "source_kb_id": {
@@ -11701,6 +11807,69 @@
         "type": "object",
         "title": "MemoryConfig",
         "description": "记忆配置"
+      },
+      "MemoryReadRequest": {
+        "properties": {
+          "query": {
+            "type": "string",
+            "title": "Query"
+          },
+          "memory_type": {
+            "type": "string",
+            "title": "Memory Type",
+            "default": "long_term"
+          },
+          "config_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Config Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "query"
+        ],
+        "title": "MemoryReadRequest"
+      },
+      "MemoryWriteRequest": {
+        "properties": {
+          "content": {
+            "type": "string",
+            "title": "Content"
+          },
+          "memory_type": {
+            "type": "string",
+            "title": "Memory Type",
+            "default": "long_term"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Metadata"
+          },
+          "config_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Config Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "content"
+        ],
+        "title": "MemoryWriteRequest"
       },
       "Memory_Reflection": {
         "properties": {
@@ -14614,39 +14783,6 @@
         "title": "ToolCreateRequest",
         "description": "创建工具请求"
       },
-      "ToolExecuteRequest": {
-        "properties": {
-          "tool_id": {
-            "type": "string",
-            "title": "Tool Id"
-          },
-          "parameters": {
-            "additionalProperties": true,
-            "type": "object",
-            "title": "Parameters"
-          },
-          "timeout": {
-            "anyOf": [
-              {
-                "type": "number",
-                "maximum": 300.0,
-                "exclusiveMinimum": 0.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Timeout",
-            "default": 60.0
-          }
-        },
-        "type": "object",
-        "required": [
-          "tool_id"
-        ],
-        "title": "ToolExecuteRequest",
-        "description": "执行工具请求"
-      },
       "ToolType": {
         "type": "string",
         "enum": [
@@ -15792,6 +15928,41 @@
         ],
         "title": "Write_UserInput"
       },
+      "app__controllers__internal__internal_sandbox_controller__ToolExecuteRequest": {
+        "properties": {
+          "tool_name": {
+            "type": "string",
+            "title": "Tool Name"
+          },
+          "tool_type": {
+            "type": "string",
+            "title": "Tool Type"
+          },
+          "tool_input": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Tool Input"
+          },
+          "tool_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tool Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "tool_name",
+          "tool_type",
+          "tool_input"
+        ],
+        "title": "ToolExecuteRequest"
+      },
       "app__schemas__app_schema__VariableDefinition": {
         "properties": {
           "name": {
@@ -15998,6 +16169,39 @@
           "password"
         ],
         "title": "TokenRequest"
+      },
+      "app__schemas__tool_schema__ToolExecuteRequest": {
+        "properties": {
+          "tool_id": {
+            "type": "string",
+            "title": "Tool Id"
+          },
+          "parameters": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Parameters"
+          },
+          "timeout": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 300.0,
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timeout",
+            "default": 60.0
+          }
+        },
+        "type": "object",
+        "required": [
+          "tool_id"
+        ],
+        "title": "ToolExecuteRequest",
+        "description": "执行工具请求"
       },
       "app__schemas__workflow_schema__ExecutionConfig": {
         "properties": {

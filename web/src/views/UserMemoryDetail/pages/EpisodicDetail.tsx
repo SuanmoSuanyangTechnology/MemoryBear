@@ -50,7 +50,7 @@ interface EpisodicMemoryDetail {
 }
 
 /** Maps episodic type keys to Ant Design Tag color presets. */
-const TAG_COLORS: Record<string, "processing" | "success" | "warning" | "error" | "default"> = {
+export const TAG_COLORS: Record<string, "processing" | "success" | "warning" | "error" | "default"> = {
   conversation: "processing",
   project_work: "success",
   learning: "warning",
@@ -181,7 +181,7 @@ const EpisodicDetail: FC = () => {
                   <Select
                     placeholder={t('common.pleaseSelect')}
                     options={[
-                      { value: 'all', label: t('episodicDetail.all') },
+                      { value: 'all', label: t('episodicDetail.allType') },
                       { value: 'conversation', label: t('episodicDetail.conversation') },
                       { value: 'project_work', label: t('episodicDetail.project_work') },
                       { value: 'learning', label: t('episodicDetail.learning') },

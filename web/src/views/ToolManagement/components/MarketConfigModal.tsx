@@ -141,7 +141,7 @@ const MarketConfigModal = forwardRef<MarketConfigModalRef, MarketConfigModalProp
       <div>
         {/* 市场源信息头部 */}
         <Flex gap={16} className="rb:mb-6! rb:p-4! rb:bg-gray-50 rb:rounded-lg">
-          <Flex align="center" justify="center" className="rb:size-16 rb:bg-white rb:rounded-lg rb:flex-shrink-0 rb:overflow-hidden">
+          <Flex align="center" justify="center" className="rb:size-16 rb:bg-white rb:rounded-lg rb:shrink-0 rb:overflow-hidden">
             {currentSource.logo_url ? (
               <img 
                 src={currentSource.logo_url} 
@@ -173,7 +173,7 @@ const MarketConfigModal = forwardRef<MarketConfigModalRef, MarketConfigModalProp
           initialValues={initialValues}
         >
           <FormItem label={t('tool.marketUrl')}>
-            <Space.Compact style={{ width: '100%' }}>
+            <Space.Compact className="rb:w-full!">
               <Input
                 readOnly
                 value={currentSource.url}
@@ -198,7 +198,7 @@ const MarketConfigModal = forwardRef<MarketConfigModalRef, MarketConfigModalProp
               { required: true, message: t('tool.marketApiKeyRequired') },
               { whitespace: true, message: t('tool.marketApiKeyRequired') }
             ]}
-            extra={<span style={{ display: 'inline-block', marginTop: 8 }}>{t('tool.marketApiKeyExtra')}</span>}
+            extra={<span className="rb:inline-block rb:mt-2">{t('tool.marketApiKeyExtra')}</span>}
           >
             <Input
               type={showApiKey ? 'text' : 'password'}

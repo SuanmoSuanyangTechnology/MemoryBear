@@ -20,7 +20,7 @@ from app.core.memory.constants.graph_data_constants import (
     DEPTH_HARD_MAX,
 )
 from app.core.response_utils import fail, success
-from app.db import get_async_db_context
+from app.db import get_db_context
 from app.dependencies import CurrentUserSnapshot, get_current_user_async
 from app.schemas.memory_storage_schema import GenerateCacheRequest
 from app.schemas.response_schema import ApiResponse
@@ -51,8 +51,15 @@ async def get_memory_insight_report_api(
 ) -> dict:
     """获取缓存的记忆洞察报告"""
     api_logger.info(f"记忆洞察报告查询请求: end_user_id={end_user_id}, user={current_user.username}")
+    workspace_id = current_user.current_workspace_id
+    if workspace_id is None:
+        return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
+
     try:
-        result = await user_memory_service.get_cached_memory_insight_async(end_user_id)
+        result = await user_memory_service.get_cached_memory_insight_async(
+            end_user_id,
+            workspace_id,
+        )
 
         if result.get("is_cached"):
             return success(data=result, msg="查询成功")
@@ -115,15 +122,30 @@ async def generate_cache_api(
     )
 
     try:
-        async with get_async_db_context() as db:
+        workspace_validation = await user_memory_service.validate_neo4j_cache_workspace(workspace_id)
+        if not workspace_validation.valid:
+            if workspace_validation.reason == "unsupported_storage_type":
+                return fail(
+                    BizCode.INVALID_PARAMETER,
+                    "当前接口仅支持 Neo4j 工作空间；RAG 工作空间请使用 RAG 专用画像生成入口",
+                    f"unsupported storage_type: {workspace_validation.storage_type or 'unknown'}",
+                )
+            return fail(
+                BizCode.INVALID_PARAMETER,
+                "当前工作空间不可用",
+                workspace_validation.reason,
+            )
+
+        with get_db_context() as db:
             if end_user_id:
                 api_logger.info(f"开始为单个用户生成缓存: end_user_id={end_user_id}")
 
-                insight_result = await user_memory_service.generate_and_cache_insight(db, end_user_id, workspace_id,
-                                                                                      language=language)
-
-                summary_result = await user_memory_service.generate_and_cache_summary(db, end_user_id, workspace_id,
-                                                                                      language=language)
+                insight_result = await user_memory_service.generate_and_cache_insight(
+                    end_user_id, workspace_id, language=language, db=db,
+                )
+                summary_result = await user_memory_service.generate_and_cache_summary(
+                    end_user_id, workspace_id, language=language, db=db,
+                )
 
                 result = {
                     "end_user_id": end_user_id,

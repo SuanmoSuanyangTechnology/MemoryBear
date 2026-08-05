@@ -104,11 +104,11 @@ interface ApiKeyConfigModalProps {
             <Form.Item
               name="rate_limit"
             >
-              <Slider 
-                style={{ margin: '0' }} 
+              <Slider
                 min={1} 
                 max={100} 
                 step={1}
+                className="rb:m-0!"
               />
             </Form.Item>
             <Flex align="center" justify="space-between" className="rb:text-[#5B6167] rb:leading-5 rb:-mt-6.5!">
@@ -129,11 +129,11 @@ interface ApiKeyConfigModalProps {
             <Form.Item
               name="daily_request_limit"
             >
-              <Slider 
-                style={{ margin: '0' }} 
+              <Slider
                 min={100} 
                 max={100000} 
                 step={100}
+                className="rb:m-0!"
               />
             </Form.Item>
             <Flex align="center" justify="space-between" className="rb:text-[#5B6167] rb:leading-5 rb:-mt-6.5!">

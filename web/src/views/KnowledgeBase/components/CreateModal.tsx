@@ -16,7 +16,10 @@ import {
 import RbModal from '@/components/RbModal'
 import SliderInput from '@/components/SliderInput'
 import { stringRegExp } from '@/utils/validator'
-import Tag from '@/components/Tag'
+import ModelSelect from '@/components/ModelSelect'
+import type { Model } from '@/views/ModelManagement/types'
+import { getCustomWorkspaceModels } from '@/api/workspaces'
+
 const { TextArea } = Input;
 
 // Global model data constant
@@ -29,7 +32,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
   const { modal, message: messageApi } = App.useApp()
   const [visible, setVisible] = useState(false);
   const [modelTypeList, setModelTypeList] = useState<string[]>([]);
-  const [modelOptionsByType, setModelOptionsByType] = useState<Record<string, { label: string; value: string }[]>>({});
+  const [modelOptionsByType, setModelOptionsByType] = useState<Record<string, Model[]>>({});
   const [datasets, setDatasets] = useState<KnowledgeBaseListItem | null>(null);
   const [currentType, setCurrentType] = useState<'General' | 'Web' | 'Third-party' | 'Folder'>('General');
   const [thirdPartyPlatform, setThirdPartyPlatform] = useState<'yuque' | 'feishu'>('yuque');
@@ -157,6 +160,23 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
         return `${type.toLowerCase()}_id`;
     }
   };
+  const typeToModelType = (type: string): string => {
+    switch ((type || '').toLowerCase()) {
+      case 'embedding':
+        return 'embedding';
+      case 'llm':
+        return 'llm';
+      case 'image2text':
+        return 'vision';
+      case 'rerank':
+      case 'reranker':
+        return 'rerank';
+      case 'chat':
+        return 'chat';
+      default: 
+        return type;
+    }
+  };
 
   const fetchModelLists = async (types: string[]) => {
     // If model data hasn't been fetched yet, fetch it once
@@ -171,17 +191,13 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
 
     // Filter out the required types from all model data
     const typesToFetch = types.includes('llm') ? [...types, 'chat'] : types;
-    const next: Record<string, { label: string; value: string }[]> = {};
+    const next: Record<string, Model[]> = {};
     
     typesToFetch.forEach((tp) => {
       const targetType = tp === 'image2text' ? 'chat' : tp;
       const filteredModels = (models?.items || []).filter((m: any) => m.type === targetType);
       next[tp] = filteredModels.map((m: any) => ({
-        label: <Flex gap={4} align="center">
-          <span className="rb:wrap-break-word rb:line-clamp-1">{m.name}</span>
-          {m.is_deprecated && <Tag color="default">{t('modelNew.deprecated')}</Tag>}
-        </Flex>,
-        value: m.id,
+        ...m,
         disabled: m.is_deprecated
       }));
     });
@@ -199,7 +215,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
         
         // If there are options and current field has no value, set first option as default
         if (options.length > 0 && !form.getFieldValue(fieldKey as any)) {
-          defaultValues[fieldKey] = options[0].value;
+          defaultValues[fieldKey] = options[0].id;
         }
       });
       
@@ -310,6 +326,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
     setBaseFields(record || null, actualType);
     getTypeList(record || null);
     setVisible(true);
+    handleGetCustomModels();
   };
 
   const getTypeList = async (record: KnowledgeBaseListItem | null) => {
@@ -334,6 +351,13 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
     }
   }, [visible, modelTypeList]);
 
+  const [customModels, setCustomModels] = useState<Record<string, Model[]>>({})
+  const handleGetCustomModels = () => {
+    getCustomWorkspaceModels().then(res => {
+      setCustomModels((res || {}) as Record<string, Model[]>)
+    })
+  }
+
   // Encapsulate save method, add submit logic
   const handleSave = () => {
     // Get current knowledge graph enabled status from form
@@ -345,10 +369,17 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
       modal.confirm({
         title: t('knowledgeBase.rebuildConfirmTitle'),
         content: t('knowledgeBase.rebuildConfirmContent'),
-        onOk: async() => {
-          handleDeleteGraph()
+        onOk: async () => {
+          deleteKnowledgeGraph(datasets?.id || '')
+            .then(() => {
+              console.log(t('knowledgeBase.deleteGraphSuccess'));
+              rebuildKnowledgeGraph(datasets?.id || '');
+            })
+            .catch(() => {
+              messageApi.error(t('knowledgeBase.deleteGraphFailed'));
+            })
+
           performSave();
-          await rebuildKnowledgeGraph(datasets?.id || '')
         },
         onCancel: () => {
           // User cancelled, no action taken
@@ -358,14 +389,6 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
       // Non-rebuild mode or knowledge graph not enabled, save directly
       performSave();
     }
-  };
-  const handleDeleteGraph = () => {
-     try{
-        deleteKnowledgeGraph(datasets?.id || '')
-        console.log(t('knowledgeBase.deleteGraphSuccess'))
-     }catch(e){
-        messageApi.error(t('knowledgeBase.deleteGraphFailed'))
-     }
   };
   // Actual save logic
   const performSave = async () => {
@@ -679,17 +702,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
       {currentType !== 'Folder' && dynamicTypeList.map((tp) => {
         const fieldKey = typeToFieldKey(tp);
         // When tp is 'llm', merge llm and chat options
-        let options = tp.toLowerCase() === 'llm' || tp.toLowerCase() === 'image2text'
-          ? [...(modelOptionsByType['llm'] || []), ...(modelOptionsByType['chat'] || [])]
-          : modelOptionsByType[tp] || [];
-        
-        // When tp is 'image2text', filter to only include models with 'vision' capability
-        if (tp.toLowerCase() === 'image2text') {
-          options = options.filter((opt: any) => {
-            const model = models?.items?.find((m: any) => m.id === opt.value);
-            return model?.capability?.includes('vision');
-          });
-        }
+        let options = customModels[typeToModelType(tp)] || [];
         return (
           <Form.Item
             key={tp}
@@ -697,12 +710,12 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
             label={t(`knowledgeBase.createForm.${fieldKey}`) + ' ' + 'model'}
             rules={[{ required: true, message: t('knowledgeBase.createForm.modelRequired') }]}
           >
-            <Select
-              options={options}
+            <ModelSelect
+              fieldNames={{ label: 'name', value: 'id' }}
               placeholder={t(`knowledgeBase.createForm.${fieldKey}`)}
+              isAutoFetch={false}
+              initialData={options}
               allowClear={false}
-              showSearch
-              optionFilterProp="label"
               onChange={(value) => handleChange(value, tp)}
             />
           </Form.Item>
@@ -714,7 +727,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
   // Knowledge graph configuration form content
   const renderKnowledgeGraphConfig = () => (
     <>
-      <Flex align="center" className={`rb:w-full rb:p-4! rb:border-1 rb:rounded-lg rb:mb-4! ${
+      <Flex align="center" className={`rb:w-full rb:p-4! rb:border rb:rounded-lg rb:mb-4! ${
         enableKnowledgeGraph 
           ? 'rb:border-[#155EEF] rb:bg-[rgba(21,94,239,0.06)]' 
           : 'rb:border-[#EBEBEB]'
@@ -747,7 +760,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
             <Form.Item
               name={['parser_config', 'graphrag', 'scene_name']}
               label={t('knowledgeBase.sceneName')}
-              className='rb:w-full rb:min-w-[240px]'
+              className='rb:w-full rb:min-w-60'
               rules={[{ required: true, message: t('common.pleaseEnter') + t('knowledgeBase.sceneName') }]}
             >
               <Input  placeholder={t('knowledgeBase.sceneNamePlaceholder')} />
@@ -778,7 +791,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
           </Form.Item>
 
           {/* Entity normalization */}
-          <Flex gap={8} align="center" className={`rb:w-full rb:p-4! rb:border-1 rb:rounded-lg rb:mb-4! ${
+          <Flex gap={8} align="center" className={`rb:w-full rb:p-4! rb:border rb:rounded-lg rb:mb-4! ${
             entityNormalization 
               ? 'rb:border-[#155EEF] rb:bg-[rgba(21,94,239,0.06)]' 
               : 'rb:border-[#EBEBEB]'
@@ -814,7 +827,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
           </Form.Item>
 
           {/* Community report generation */}
-          <Flex gap={8} align="center" className={`rb:w-full rb:p-4! rb:border-1 rb:rounded-lg rb:mb-4! ${
+          <Flex gap={8} align="center" className={`rb:w-full rb:p-4! rb:border rb:rounded-lg rb:mb-4! ${
             communityReportGeneration 
               ? 'rb:border-[#155EEF] rb:bg-[rgba(21,94,239,0.06)]' 
               : 'rb:border-[#EBEBEB]'

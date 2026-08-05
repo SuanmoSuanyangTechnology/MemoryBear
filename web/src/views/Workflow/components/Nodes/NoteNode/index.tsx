@@ -19,6 +19,7 @@ const NoteNode: ReactShapeConfig['component'] = ({ node }) => {
     italic: false,
     strikethrough: false,
     list: false,
+    link: false,
   })
 
   const handleFormat = (type: string, value?: unknown) => {
@@ -107,18 +108,22 @@ const NoteNode: ReactShapeConfig['component'] = ({ node }) => {
         borderColor: data.isSelected ? theme.outer : theme.border,
       }}
     >
-      <div className="rb:h-4 rb:rounded-tl-2xl rb:rounded-tr-2xl"
+      <div key="note-header" className="rb:h-4 rb:rounded-tl-2xl rb:rounded-tr-2xl"
         style={{
           background: theme.title
         }}
       ></div>
-      {data.isSelected && <NoteNodeToolbar node={node!} nodeId={nodeId} toolConfig={toolConfig} onFormat={handleFormat} />}
+      {data.isSelected && <NoteNodeToolbar key="note-toolbar" node={node!} nodeId={nodeId} toolConfig={toolConfig} onFormat={handleFormat} />}
 
       <div
+        key="note-editor"
         className="rb:w-full rb:h-[calc(100%-36px)] rb:p-2.5 rb:overflow-auto"
         onMouseDown={e => {
           e.stopPropagation()
-          node?.setData({ ...node.getData(), isSelected: true })
+          const currentData = node?.getData()
+          if (node && !currentData?.isSelected) {
+            node.setData({ ...currentData, isSelected: true })
+          }
         }}
         onWheel={e => e.stopPropagation()}
       >
@@ -127,10 +132,14 @@ const NoteNode: ReactShapeConfig['component'] = ({ node }) => {
           value={data.config.text.defaultValue || ''}
           fontSize={toolConfig.fontSize}
           onChange={updateText}
-          onFormatChange={(state) => setToolConfig(prev => ({ ...prev, ...state }))}
+          onFormatChange={(state) => setToolConfig(prev => ({
+            ...prev,
+            ...state,
+            link: Boolean(state.linkUrl),
+          }))}
         />
       </div>
-      <Flex align="center" justify="space-between" className="rb:pl-2.5! rb:pr-1!">
+      <Flex key="note-footer" align="center" justify="space-between" className="rb:pl-2.5! rb:pr-1!">
         <div className="rb:text-[12px] rb:text-[#5B6167]">
           {data.config.show_author.defaultValue
             ? data.config.author.defaultValue

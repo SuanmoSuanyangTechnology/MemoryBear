@@ -331,7 +331,7 @@ export function useAgent(
     if (invalid.length > 0) {
       modal.confirm({
         title: t('application.promptInvalidVariablesTitle'),
-        content: <Flex gap={8} wrap>{invalid.map((vo, index) => <Tag key={index}>{'{{'}{vo}{'}}'}</Tag>)}</Flex>,
+        content: <Flex gap={8} wrap>{invalid.map((vo, index) => <Tag key={index} className="rb:break-all">{'{{'}{vo}{'}}'}</Tag>)}</Flex>,
         okText: t('common.confirm'),
         cancelText: t('common.cancel'),
         onOk: () => {

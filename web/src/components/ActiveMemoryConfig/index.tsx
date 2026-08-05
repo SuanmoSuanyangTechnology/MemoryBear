@@ -5,7 +5,7 @@
  */
 import { type FC } from 'react'
 import { Flex } from 'antd'
-import { useTranslation } from 'react-i18next'
+import { Trans, useTranslation } from 'react-i18next'
 import clsx from 'clsx';
 
 import type { Memory } from '@/views/MemoryManagement/types'
@@ -29,8 +29,8 @@ const ActiveMemoryConfig: FC<ActiveMemoryConfigProps> = ({
 
   return (
     <div className={clsx({
-      'rb:px-3 rb:rounded-[8px]': size === 'default',
-      'rb:py-2 rb:px-3 rb:rounded-[8px]': size === 'small',
+      'rb:px-3 rb:rounded-lg': size === 'default',
+      'rb:py-2 rb:px-3 rb:rounded-lg': size === 'small',
       'rb-border rb:bg-white rb:p-3': variant === 'outline',
       'rb:bg-[#F5F5F5] rb:p-3!': variant === 'filled',
     })}>
@@ -57,7 +57,14 @@ const ActiveMemoryConfig: FC<ActiveMemoryConfigProps> = ({
         </span>
       </Flex>
       {activeMemoryConfig?.is_system_default
-        ? <div className="rb:mt-2 rb:text-[12px] rb:text-[#5B6167]" dangerouslySetInnerHTML={{ __html: t('application.systemDefaultDesc') }}>
+        ? <div className="rb:mt-2 rb:text-[12px] rb:text-[#5B6167]">
+          <Trans
+            i18nKey="application.systemDefaultDesc"
+            components={{
+              bold: <b />,
+              memoryLink: <a href="#/memory" />,
+            }}
+          />
         </div>
         : activeMemoryConfig?.config_desc
         ? <div className="rb:mt-2 rb:text-[12px] rb:text-[#5B6167]">

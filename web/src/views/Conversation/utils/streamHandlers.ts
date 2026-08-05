@@ -166,7 +166,10 @@ export interface StreamHandlerDeps {
   ) => void
   updateAssistantReasoningMessage: (content?: string, message_id?: string) => void
   startAudioPolling: (audioUrl: string, idToPoll: string) => void
-  getHistory: (flag?: boolean) => void
+  /** Locally update the history list after streaming ends (insert new / refresh updated_at for existing) */
+  upsertHistory: (conversationId: string, title?: string) => void
+  /** Title source for new conversations (first user message); only used in the send scenario */
+  title?: string
   chatIsEnded: React.MutableRefObject<boolean>
   streamLoadingRef: React.MutableRefObject<boolean>
 }
@@ -176,7 +179,7 @@ export const createSendStreamHandler = (deps: StreamHandlerDeps) => {
   const {
     conversationId, setChatList, setConversationId, setLoading,
     updateAssistantMessage, updateAssistantReasoningMessage, startAudioPolling,
-    getHistory, chatIsEnded, streamLoadingRef,
+    upsertHistory, title, chatIsEnded, streamLoadingRef,
   } = deps
 
   let currentConversationId: string | null = null
@@ -235,7 +238,7 @@ export const createSendStreamHandler = (deps: StreamHandlerDeps) => {
           break
         }
         case 'end':
-        case 'workflow_end':
+        case 'workflow_end': {
           if (audio_url) {
             updateAssistantMessage(content, audio_url, 'pending', citations, suggested_questions, error)
             const idToPoll = file_id || audio_url || ''
@@ -249,12 +252,16 @@ export const createSendStreamHandler = (deps: StreamHandlerDeps) => {
           }
           setChatList(prev => finalizeOutputs(prev))
           setLoading(false)
-          getHistory(true)
+          const targetConvId = currentConversationId || conversationId
+          if (targetConvId) {
+            upsertHistory(targetConvId, title)
+          }
           if (currentConversationId && currentConversationId !== conversationId) {
             setConversationId(currentConversationId)
           }
           chatIsEnded.current = true
           break
+        }
       }
     })
   }
@@ -265,7 +272,7 @@ export const createRegenerateStreamHandler = (deps: StreamHandlerDeps & { messag
   const {
     messageId, conversationId, setChatList, setConversationId, setLoading,
     updateAssistantMessage, updateAssistantReasoningMessage, startAudioPolling,
-    getHistory, chatIsEnded, streamLoadingRef,
+    upsertHistory, chatIsEnded, streamLoadingRef,
   } = deps
 
   let currentConversationId: string | null = null
@@ -328,7 +335,7 @@ export const createRegenerateStreamHandler = (deps: StreamHandlerDeps & { messag
           break
         }
         case 'end':
-        case 'workflow_end':
+        case 'workflow_end': {
           if (audio_url) {
             updateAssistantMessage(content, audio_url, 'pending', citations, suggested_questions, error, messageId)
             const idToPoll = file_id || audio_url || ''
@@ -336,23 +343,22 @@ export const createRegenerateStreamHandler = (deps: StreamHandlerDeps & { messag
             if (fileId && idToPoll) {
               startAudioPolling(audio_url, idToPoll)
             }
-          } else {
-            getHistory(true)
-            if (currentConversationId && currentConversationId !== conversationId) {
-              setConversationId(currentConversationId)
-            }
           }
           if ((citations && citations.length > 0) || (suggested_questions && suggested_questions.length > 0) || error) {
             updateAssistantMessage(content || '', audio_url, undefined, citations, suggested_questions, error, messageId)
           }
           setChatList(prev => finalizeOutputs(prev))
           setLoading(false)
-          getHistory(true)
+          const targetConvId = currentConversationId || conversationId
+          if (targetConvId) {
+            upsertHistory(targetConvId)
+          }
           if (currentConversationId && currentConversationId !== conversationId) {
             setConversationId(currentConversationId)
           }
           chatIsEnded.current = true
           break
+        }
       }
     })
   }

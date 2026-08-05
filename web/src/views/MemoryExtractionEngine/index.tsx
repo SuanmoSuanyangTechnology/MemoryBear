@@ -299,7 +299,7 @@ const MemoryExtractionEngine: FC = () => {
                                         />
                                       </>
                                       : config.control === 'inputNumber'
-                                      ? <InputNumber min={config.min || 0} style={{ width: '100%' }} placeholder={t('common.pleaseEnter')} />
+                                      ? <InputNumber min={config.min || 0} className="rb:w-full!" placeholder={t('common.pleaseEnter')} />
                                       : config.control === 'text'
                                       ? <Input placeholder={t('common.pleaseEnter')} disabled />
                                       : null

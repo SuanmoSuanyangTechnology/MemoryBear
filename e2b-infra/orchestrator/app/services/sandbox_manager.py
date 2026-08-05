@@ -185,7 +185,11 @@ class SandboxManager:
         loop = asyncio.get_running_loop()
         data = snapshot_json.encode("utf-8")
 
-        await loop.run_in_executor(None, lambda: container.exec_run(["mkdir", "-p", "/input"]))
+        exit_code, output = await loop.run_in_executor(
+            None, lambda: container.exec_run(["mkdir", "-p", "/input"])
+        )
+        if exit_code != 0:
+            raise RuntimeError(f"Failed to create /input directory: {output}")
         tar_stream = _build_tar("snapshot.json", data)
         await loop.run_in_executor(None, lambda: container.put_archive("/input", tar_stream))
 

@@ -15,6 +15,13 @@ from sqlalchemy.orm import Session
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging_config import get_logger
+from app.core.memory.analytics.memory_insight import (
+    MemoryInsightWorkspaceValidation,
+    parse_stored_memory_insight_findings,
+    refresh_memory_insight,
+    refresh_memory_insight_for_worker,
+    validate_neo4j_memory_insight_workspace,
+)
 from app.core.memory.analytics.user_card_tags import normalize_stored_user_card_tags
 from app.core.memory.constants.graph_data_constants import (
     NODE_PROPERTY_WHITELIST,
@@ -361,30 +368,46 @@ class UserMemoryService:
 
     # ======================== 异步缓存查询（纯异步，不阻塞事件循环）========================
 
-    async def get_cached_memory_insight_async(self, end_user_id: str) -> Dict[str, Any]:
+    async def get_cached_memory_insight_async(
+        self,
+        end_user_id: str,
+        workspace_id: uuid.UUID | str,
+    ) -> Dict[str, Any]:
         """获取缓存的记忆洞察（纯异步版本，通过 Repository 层查询）。"""
-        import json
         from app.db import get_async_db_context
         from app.core.utils.datetime_utils import to_timestamp_ms
 
         try:
-            uuid.UUID(end_user_id)
-        except (ValueError, TypeError):
-            logger.warning(f"无效的 end_user_id 格式: {end_user_id}")
+            end_user_uuid = uuid.UUID(end_user_id)
+            workspace_uuid = (
+                workspace_id
+                if isinstance(workspace_id, uuid.UUID)
+                else uuid.UUID(workspace_id)
+            )
+        except (TypeError, ValueError, AttributeError):
             return {
-                "memory_insight": None, "behavior_pattern": None,
-                "key_findings": None, "growth_trajectory": None,
-                "updated_at": None, "is_cached": False, "message": "无效的用户ID格式"
+                "memory_insight": None,
+                "behavior_pattern": None,
+                "key_findings": None,
+                "actionable_findings": [],
+                "growth_trajectory": None,
+                "updated_at": None,
+                "is_cached": False,
+                "message": "无效的用户或工作空间ID格式",
             }
 
         async with get_async_db_context() as db:
             repo = EndUserRepository(db)
-            row = await repo.get_memory_insight_by_end_user_id_async(end_user_id)
+            row = await repo.get_memory_insight_by_end_user_id_async(
+                end_user_uuid,
+                workspace_uuid,
+            )
 
         if not row:
             return {
                 "memory_insight": None, "behavior_pattern": None,
                 "key_findings": None, "growth_trajectory": None,
+                "actionable_findings": [],
                 "updated_at": None, "is_cached": False, "message": "用户不存在"
             }
 
@@ -393,22 +416,21 @@ class UserMemoryService:
             row["key_findings"], row["growth_trajectory"],
         ])
 
-        # key_findings: JSON 字符串 → 数组
-        key_findings_raw = row["key_findings"]
-        if key_findings_raw:
-            try:
-                key_findings_array = json.loads(key_findings_raw)
-            except (json.JSONDecodeError, TypeError):
-                key_findings_array = [item.strip() for item in key_findings_raw.split('•') if item.strip()]
-        else:
-            key_findings_array = []
+        key_findings_array, actionable_findings = parse_stored_memory_insight_findings(
+            row["key_findings"]
+        )
 
         return {
             "memory_insight": row["memory_insight"],
             "behavior_pattern": row["behavior_pattern"],
             "key_findings": key_findings_array,
+            "actionable_findings": actionable_findings,
             "growth_trajectory": row["growth_trajectory"],
-            "updated_at": to_timestamp_ms(row["memory_insight_updated_at"]) if row["memory_insight_updated_at"] else None,
+            "updated_at": (
+                to_timestamp_ms(row["memory_insight_updated_at"])
+                if row["memory_insight_updated_at"]
+                else None
+            ),
             "is_cached": has_cache,
         }
 
@@ -724,28 +746,38 @@ class UserMemoryService:
             logger.error(f"同步 aliases 到 Neo4j 失败: {e}", exc_info=True)
             raise
 
+    async def validate_neo4j_cache_workspace(
+        self,
+        workspace_id: uuid.UUID | str,
+    ) -> MemoryInsightWorkspaceValidation:
+        """为 Controller 提供不暴露 Repository 的 Workspace 校验入口。"""
+        return await validate_neo4j_memory_insight_workspace(workspace_id)
+
     async def generate_and_cache_insight(
         self, 
-        db: AsyncSession, 
         end_user_id: str,
         workspace_id: Optional[uuid.UUID] = None,
-        language: str = "zh"
+        language: str = "zh",
+        db: Optional[Session] = None,
     ) -> Dict[str, Any]:
         """
         生成并缓存记忆洞察
         
         Args:
-            db: 数据库会话
             end_user_id: 终端用户ID (UUID)
-            workspace_id: 工作空间ID (可选)
+            workspace_id: 工作空间ID（必填）
             language: 语言类型 ("zh" 中文, "en" 英文)，默认中文
+            db: 数据库会话（可选）。为 None 时内部自行管理短 session，
+                避免 Neo4j/LLM I/O 期间长时间持有 PG 连接。
             
         Returns:
             {
                 "success": bool,
+                "status": str,
                 "memory_insight": str,
                 "behavior_pattern": str,
                 "key_findings": List[str],  # 数组格式
+                "actionable_findings": List[Dict[str, str]],
                 "growth_trajectory": str,
                 "error": Optional[str]
             }
@@ -753,10 +785,15 @@ class UserMemoryService:
         try:
             logger.info(f"开始为 end_user_id {end_user_id} 生成记忆洞察, language={language}")
             
-            # 转换为UUID并查询用户
+            # --- 短 session A：验证用户存在性 ---
             user_uuid = uuid.UUID(end_user_id)
-            repo = EndUserRepository(db)
-            end_user = await repo.get_by_id_async(user_uuid)
+            if db is not None:
+                repo = EndUserRepository(db)
+                end_user = repo.get_by_id(user_uuid)
+            else:
+                with get_db_context() as _db:
+                    repo = EndUserRepository(_db)
+                    end_user = repo.get_by_id(user_uuid)
             
             if not end_user:
                 logger.error(f"end_user_id {end_user_id} 不存在")
@@ -769,7 +806,7 @@ class UserMemoryService:
                     "error": "用户不存在"
                 }
             
-            # 使用 end_user_id 调用分析函数
+            # --- Neo4j + LLM：无 PG 连接 ---
             try:
                 logger.info(f"使用 end_user_id={end_user_id} 生成记忆洞察")
                 result = await analytics_memory_insight_report(end_user_id, language=language)
@@ -794,15 +831,26 @@ class UserMemoryService:
                         "error": "生成的洞察报告为空,可能Neo4j中没有该用户的数据"
                     }
                 
-                # 更新数据库缓存（四个维度）
-                # 注意：key_findings 存储为 JSON 字符串
-                success = await repo.update_memory_insight_async(
-                    user_uuid, 
-                    memory_insight, 
-                    behavior_pattern, 
-                    key_findings_json,  # 存储 JSON 字符串
-                    growth_trajectory
-                )
+                # --- 短 session B：写入缓存 ---
+                if db is not None:
+                    write_repo = EndUserRepository(db)
+                    success = write_repo.update_memory_insight(
+                        user_uuid, 
+                        memory_insight, 
+                        behavior_pattern, 
+                        key_findings_json,
+                        growth_trajectory
+                    )
+                else:
+                    with get_db_context() as _db:
+                        write_repo = EndUserRepository(_db)
+                        success = write_repo.update_memory_insight(
+                            user_uuid, 
+                            memory_insight, 
+                            behavior_pattern, 
+                            key_findings_json,
+                            growth_trajectory
+                        )
                 
                 if success:
                     logger.info(f"成功为 end_user_id {end_user_id} 生成并缓存记忆洞察（四维度）")
@@ -856,22 +904,55 @@ class UserMemoryService:
                 "growth_trajectory": None,
                 "error": str(e)
             }
+
+    async def generate_and_cache_insight_for_worker(
+        self,
+        end_user_id: str,
+        workspace_id: uuid.UUID,
+        language: str = "zh",
+    ) -> Dict[str, Any]:
+        """Celery 专用入口：PostgreSQL 仅使用同步短 Session。"""
+        try:
+            return await refresh_memory_insight_for_worker(
+                end_user_id=end_user_id,
+                workspace_id=workspace_id,
+                language=language,
+            )
+        except Exception as e:
+            logger.error(
+                "Celery 生成并缓存记忆洞察失败: end_user_id=%s workspace_id=%s error=%s",
+                end_user_id,
+                workspace_id,
+                e,
+                exc_info=True,
+            )
+            return {
+                "success": False,
+                "status": "generation_failed",
+                "memory_insight": None,
+                "behavior_pattern": None,
+                "key_findings": None,
+                "actionable_findings": [],
+                "growth_trajectory": None,
+                "error": f"Neo4j或LLM服务不可用: {e}",
+            }
     
     async def generate_and_cache_summary(
         self, 
-        db: AsyncSession, 
         end_user_id: str,
         workspace_id: Optional[uuid.UUID] = None,
-        language: str = "zh"
+        language: str = "zh",
+        db: Optional[Session] = None,
     ) -> Dict[str, Any]:
         """
         生成并缓存用户摘要（四个部分）
         
         Args:
-            db: 数据库会话
             end_user_id: 终端用户ID (UUID)
             workspace_id: 工作空间ID (可选)
             language: 语言类型 ("zh" 中文, "en" 英文)，默认中文
+            db: 数据库会话（可选）。为 None 时内部自行管理短 session，
+                避免 Neo4j/LLM I/O 期间长时间持有 PG 连接。
             
         Returns:
             {
@@ -886,10 +967,15 @@ class UserMemoryService:
         try:
             logger.info(f"开始为 end_user_id {end_user_id} 生成用户摘要, language={language}")
             
-            # 转换为UUID并查询用户
+            # --- 短 session A：验证用户存在性 ---
             user_uuid = uuid.UUID(end_user_id)
-            repo = EndUserRepository(db)
-            end_user = await repo.get_by_id_async(user_uuid)
+            if db is not None:
+                repo = EndUserRepository(db)
+                end_user = repo.get_by_id(user_uuid)
+            else:
+                with get_db_context() as _db:
+                    repo = EndUserRepository(_db)
+                    end_user = repo.get_by_id(user_uuid)
             
             if not end_user:
                 logger.error(f"end_user_id {end_user_id} 不存在")
@@ -902,7 +988,7 @@ class UserMemoryService:
                     "error": "用户不存在"
                 }
             
-            # 使用 end_user_id 调用分析函数
+            # --- Neo4j + LLM：无 PG 连接（analytics_user_summary 内部自行开短 session 查 other_name）---
             try:
                 logger.info(f"使用 end_user_id={end_user_id} 生成用户摘要")
                 result = await analytics_user_summary(end_user_id, language=language)
@@ -923,14 +1009,26 @@ class UserMemoryService:
                         "error": "生成的用户摘要为空,可能Neo4j中没有该用户的数据"
                     }
                 
-                # 更新数据库缓存
-                success = await repo.update_user_summary_async(
-                    user_uuid, 
-                    user_summary, 
-                    personality, 
-                    core_values, 
-                    one_sentence
-                )
+                # --- 短 session B：写入缓存 ---
+                if db is not None:
+                    write_repo = EndUserRepository(db)
+                    success = write_repo.update_user_summary(
+                        user_uuid, 
+                        user_summary, 
+                        personality, 
+                        core_values, 
+                        one_sentence
+                    )
+                else:
+                    with get_db_context() as _db:
+                        write_repo = EndUserRepository(_db)
+                        success = write_repo.update_user_summary(
+                            user_uuid, 
+                            user_summary, 
+                            personality, 
+                            core_values, 
+                            one_sentence
+                        )
                 
                 if success:
                     logger.info(f"成功为 end_user_id {end_user_id} 生成并缓存用户摘要")
@@ -985,10 +1083,109 @@ class UserMemoryService:
                 "error": str(e)
             }
 
+    async def generate_and_cache_summary_for_worker(
+        self,
+        end_user_id: str,
+        workspace_id: Optional[uuid.UUID] = None,
+        language: str = "zh",
+    ) -> Dict[str, Any]:
+        """Celery 专用入口：同步 PG 读写，异步 Neo4j/LLM。"""
+        try:
+            logger.info(f"开始为 end_user_id {end_user_id} 生成用户摘要, language={language}")
+            user_uuid = uuid.UUID(end_user_id)
+
+            # Celery 旧异步查询保留如下：
+            # repo = EndUserRepository(db)
+            # end_user = await repo.get_by_id_async(user_uuid)
+            # 全局 asyncpg pool 可能复用其他 event loop 的连接，因此改用同步短 Session。
+            with get_db_context() as db:
+                end_user_exists = EndUserRepository(db).get_by_id(user_uuid) is not None
+
+            if not end_user_exists:
+                logger.error(f"end_user_id {end_user_id} 不存在")
+                return {
+                    "success": False,
+                    "user_summary": None,
+                    "personality": None,
+                    "core_values": None,
+                    "one_sentence": None,
+                    "error": "用户不存在",
+                }
+
+            logger.info(f"使用 end_user_id={end_user_id} 生成用户摘要")
+            result = await analytics_user_summary(end_user_id, language=language)
+            user_summary = result.get("user_summary", "")
+            personality = result.get("personality", "")
+            core_values = result.get("core_values", "")
+            one_sentence = result.get("one_sentence", "")
+
+            if not any([user_summary, personality, core_values, one_sentence]):
+                logger.warning(f"end_user_id {end_user_id} 的用户摘要生成结果为空")
+                return {
+                    "success": False,
+                    "user_summary": None,
+                    "personality": None,
+                    "core_values": None,
+                    "one_sentence": None,
+                    "error": "生成的用户摘要为空,可能Neo4j中没有该用户的数据",
+                }
+
+            # Celery 旧异步写回保留如下：
+            # success = await repo.update_user_summary_async(...)
+            # 异步写回也可能取到绑定其他 loop 的 asyncpg 连接。
+            with get_db_context() as db:
+                success = EndUserRepository(db).update_user_summary(
+                    user_uuid,
+                    user_summary,
+                    personality,
+                    core_values,
+                    one_sentence,
+                )
+
+            if success:
+                logger.info(f"成功为 end_user_id {end_user_id} 生成并缓存用户摘要")
+                return {
+                    "success": True,
+                    "user_summary": user_summary,
+                    "personality": personality,
+                    "core_values": core_values,
+                    "one_sentence": one_sentence,
+                    "error": None,
+                }
+            logger.error(f"更新 end_user_id {end_user_id} 的用户摘要缓存失败")
+            return {
+                "success": False,
+                "user_summary": user_summary,
+                "personality": personality,
+                "core_values": core_values,
+                "one_sentence": one_sentence,
+                "error": "数据库更新失败",
+            }
+        except ValueError:
+            logger.error(f"无效的 end_user_id 格式: {end_user_id}")
+            return {
+                "success": False,
+                "user_summary": None,
+                "personality": None,
+                "core_values": None,
+                "one_sentence": None,
+                "error": "无效的用户ID格式",
+            }
+        except Exception as e:
+            logger.error(f"Celery 生成并缓存用户摘要时出错: {str(e)}", exc_info=True)
+            return {
+                "success": False,
+                "user_summary": None,
+                "personality": None,
+                "core_values": None,
+                "one_sentence": None,
+                "error": str(e),
+            }
+
 # for workspace    
     async def generate_cache_for_workspace(
         self, 
-        db: AsyncSession, 
+        db: Session, 
         workspace_id: uuid.UUID,
         language: str = "zh"
     ) -> Dict[str, Any]:
@@ -1018,7 +1215,7 @@ class UserMemoryService:
         try:
             # 获取工作空间的所有终端用户
             repo = EndUserRepository(db)
-            end_users = await repo.get_all_by_workspace_async(workspace_id)
+            end_users = repo.get_all_by_workspace(workspace_id)
             total_users = len(end_users)
             
             logger.info(f"工作空间 {workspace_id} 共有 {total_users} 个终端用户")
@@ -1029,10 +1226,10 @@ class UserMemoryService:
                 
                 try:
                     # 生成记忆洞察
-                    insight_result = await self.generate_and_cache_insight(db, end_user_id, language=language)
+                    insight_result = await self.generate_and_cache_insight(end_user_id, language=language, db=db)
                     
                     # 生成用户摘要
-                    summary_result = await self.generate_and_cache_summary(db, end_user_id, language=language)
+                    summary_result = await self.generate_and_cache_summary(end_user_id, language=language, db=db)
                     
                     # 检查是否都成功
                     if insight_result["success"] and summary_result["success"]:

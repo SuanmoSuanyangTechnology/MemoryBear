@@ -193,7 +193,7 @@ const VariableEditModal = forwardRef<VariableEditModalRef, VariableEditModalProp
               name="max_length"
               label={t('application.maxLength')}
             >
-              <InputNumber placeholder={t('common.enter')} style={{ width: '100%' }} />
+              <InputNumber placeholder={t('common.enter')} className="rb:w-full!" />
             </FormItem>
           )}
           {/* Default Value */}
@@ -204,7 +204,7 @@ const VariableEditModal = forwardRef<VariableEditModalRef, VariableEditModalProp
             >
               {['text'].includes(values.type) && <Input placeholder={t('common.enter')} />}
               {['paragraph'].includes(values.type) && <Input.TextArea placeholder={t('common.enter')} />}
-              {['number'].includes(values.type) && <InputNumber placeholder={t('common.enter')} style={{ width: '100%' }} />}
+              {['number'].includes(values.type) && <InputNumber placeholder={t('common.enter')} className="rb:w-full!" />}
               {['checkbox'].includes(values.type) && <Select options={[{ value: true, label: t('application.defaultChecked') }, { value: false, label: t('application.notDefaultChecked') }]} />}
             </FormItem>
           )} */}
@@ -228,7 +228,7 @@ const VariableEditModal = forwardRef<VariableEditModalRef, VariableEditModalProp
                 popupRender={(menu) => (
                   <>
                     {menu}
-                    <Divider style={{ margin: '8px 0' }} />
+                    <Divider className="rb:my-2! rb:mx-0!" />
                     <Button type="text" block onClick={addApiExtension}>
                       Add item
                     </Button>

@@ -1,7 +1,7 @@
 import uuid
 from contextlib import contextmanager
 from datetime import datetime
-from typing import List, NamedTuple, Optional, Set
+from typing import List, NamedTuple, Optional, Set, TypedDict
 
 import sqlalchemy as sa
 from sqlalchemy import or_, select, update
@@ -26,6 +26,25 @@ class UserTagRefreshCandidate(NamedTuple):
     end_user_id: uuid.UUID
     workspace_id: uuid.UUID
     metadata_updated_at: datetime | None
+
+
+class MemoryCacheRefreshFields(NamedTuple):
+    """洞察/摘要 scan 使用的原始字段。"""
+
+    end_user_id: uuid.UUID
+    workspace_id: uuid.UUID
+    write_time: datetime | None
+    metadata_updated_at: datetime | None
+    memory_insight_updated_at: datetime | None
+    user_summary_updated_at: datetime | None
+
+
+class MemoryInsightSourceRow(TypedDict):
+    meta_data: object
+    metadata_row_exists: bool
+    metadata_updated_at: datetime | None
+    write_time: datetime | None
+    memory_insight_updated_at: datetime | None
 
 
 def is_uuid(value: str) -> bool:
@@ -138,6 +157,30 @@ class EndUserRepository:
         except Exception as e:
             self.db.rollback()
             db_logger.error(f"查询宿主 {end_user_id} 时出错: {str(e)}")
+            raise
+
+    def get_active_end_user_in_workspace(
+        self,
+        end_user_id: uuid.UUID,
+        workspace_id: uuid.UUID,
+    ) -> Optional[EndUser]:
+        """查询当前工作空间内的有效终端用户。"""
+        try:
+            return (
+                self.db.query(EndUser)
+                .filter(
+                    EndUser.id == end_user_id,
+                    EndUser.workspace_id == workspace_id,
+                    EndUser.is_active.is_(True),
+                )
+                .first()
+            )
+        except Exception as e:
+            self.db.rollback()
+            db_logger.error(
+                f"查询工作空间 {workspace_id} 下的终端用户 "
+                f"{end_user_id} 时出错: {str(e)}"
+            )
             raise
 
     async def get_end_user_by_id_async(self, end_user_id: uuid.UUID) -> Optional[EndUser]:
@@ -562,9 +605,12 @@ class EndUserRepository:
             db_logger.error(f"批量校验终端用户ID时出错: {str(e)}")
             raise
 
-    async def get_memory_insight_by_end_user_id_async(self, end_user_id: uuid.UUID) -> Optional[EndUser]:
-        "获取用户缓存的记忆洞察"
-        from sqlalchemy import select
+    async def get_memory_insight_by_end_user_id_async(
+            self,
+            end_user_id: uuid.UUID,
+            workspace_id: uuid.UUID,
+    ) -> Optional[dict]:
+        """按 Workspace scope 获取用户缓存的记忆洞察。"""
         result = await self.db.execute(
             select(
                 EndUser.memory_insight,
@@ -572,7 +618,16 @@ class EndUserRepository:
                 EndUser.key_findings,
                 EndUser.growth_trajectory,
                 EndUser.memory_insight_updated_at,
-            ).where(EndUser.id == end_user_id).limit(1)
+            )
+            .select_from(EndUser)
+            .join(Workspace, Workspace.id == EndUser.workspace_id)
+            .where(
+                EndUser.id == end_user_id,
+                EndUser.workspace_id == workspace_id,
+                EndUser.is_active.is_(True),
+                Workspace.is_active.is_(True),
+            )
+            .limit(1)
         )
         return result.mappings().one_or_none()
 
@@ -718,6 +773,210 @@ class EndUserRepository:
         except Exception:
             self.db.rollback()
             raise
+
+    async def get_scoped_memory_insight_source_async(
+            self,
+            workspace_id: uuid.UUID,
+            end_user_id: uuid.UUID,
+    ) -> MemoryInsightSourceRow | None:
+        """异步读取 Neo4j Workspace 下的洞察源数据和并发版本。"""
+        result = await self.db.execute(
+            select(
+                EndUserInfo.id.label("metadata_id"),
+                EndUserInfo.meta_data.label("meta_data"),
+                EndUserInfo.updated_at.label("metadata_updated_at"),
+                EndUser.write_time.label("write_time"),
+                EndUser.memory_insight_updated_at.label("memory_insight_updated_at"),
+            )
+            .select_from(EndUser)
+            .join(Workspace, Workspace.id == EndUser.workspace_id)
+            .outerjoin(EndUserInfo, EndUserInfo.end_user_id == EndUser.id)
+            .where(
+                EndUser.id == end_user_id,
+                EndUser.workspace_id == workspace_id,
+                EndUser.is_active.is_(True),
+                Workspace.is_active.is_(True),
+                Workspace.storage_type == "neo4j",
+            )
+            .limit(1)
+        )
+        row = result.mappings().one_or_none()
+        if row is None:
+            return None
+        return {
+            "meta_data": row["meta_data"],
+            "metadata_row_exists": row["metadata_id"] is not None,
+            "metadata_updated_at": row["metadata_updated_at"],
+            "write_time": row["write_time"],
+            "memory_insight_updated_at": row["memory_insight_updated_at"],
+        }
+
+    def get_scoped_memory_insight_source(
+            self,
+            workspace_id: uuid.UUID,
+            end_user_id: uuid.UUID,
+    ) -> MemoryInsightSourceRow | None:
+        """同步读取 Neo4j Workspace 下的洞察源数据和并发版本。"""
+        result = self.db.execute(
+            select(
+                EndUserInfo.id.label("metadata_id"),
+                EndUserInfo.meta_data.label("meta_data"),
+                EndUserInfo.updated_at.label("metadata_updated_at"),
+                EndUser.write_time.label("write_time"),
+                EndUser.memory_insight_updated_at.label("memory_insight_updated_at"),
+            )
+            .select_from(EndUser)
+            .join(Workspace, Workspace.id == EndUser.workspace_id)
+            .outerjoin(EndUserInfo, EndUserInfo.end_user_id == EndUser.id)
+            .where(
+                EndUser.id == end_user_id,
+                EndUser.workspace_id == workspace_id,
+                EndUser.is_active.is_(True),
+                Workspace.is_active.is_(True),
+                Workspace.storage_type == "neo4j",
+            )
+            .limit(1)
+        )
+        row = result.mappings().one_or_none()
+        if row is None:
+            return None
+        return {
+            "meta_data": row["meta_data"],
+            "metadata_row_exists": row["metadata_id"] is not None,
+            "metadata_updated_at": row["metadata_updated_at"],
+            "write_time": row["write_time"],
+            "memory_insight_updated_at": row["memory_insight_updated_at"],
+        }
+
+    def update_grounded_memory_insight_if_source_unchanged(
+            self,
+            workspace_id: uuid.UUID,
+            end_user_id: uuid.UUID,
+            expected_write_time: datetime | None,
+            expected_metadata_row_exists: bool,
+            expected_metadata_updated_at: datetime | None,
+            memory_insight: str,
+            key_findings: str,
+            refreshed_at: datetime,
+    ) -> bool:
+        """仅在洞察源版本未变化时写回当前缓存。"""
+        workspace_active = sa.exists().where(
+            Workspace.id == workspace_id,
+            Workspace.is_active.is_(True),
+            Workspace.storage_type == "neo4j",
+        )
+        metadata_exists = sa.exists().where(EndUserInfo.end_user_id == end_user_id)
+        if expected_metadata_row_exists:
+            metadata_unchanged = sa.exists().where(
+                EndUserInfo.end_user_id == end_user_id,
+                EndUserInfo.updated_at.is_not_distinct_from(expected_metadata_updated_at),
+            )
+        else:
+            metadata_unchanged = ~metadata_exists
+
+        try:
+            result = self.db.execute(
+                sa.update(EndUser)
+                .where(
+                    EndUser.id == end_user_id,
+                    EndUser.workspace_id == workspace_id,
+                    EndUser.is_active.is_(True),
+                    EndUser.write_time.is_not_distinct_from(expected_write_time),
+                    workspace_active,
+                    metadata_unchanged,
+                )
+                .values(
+                    memory_insight=memory_insight,
+                    memory_insight_updated_at=refreshed_at,
+                    key_findings=key_findings,
+                    behavior_pattern="",
+                    growth_trajectory="",
+                )
+                .execution_options(synchronize_session=False)
+            )
+            self.db.commit()
+            return bool(result.rowcount)
+        except Exception:
+            self.db.rollback()
+            raise
+
+    async def update_grounded_memory_insight_if_source_unchanged_async(
+            self,
+            workspace_id: uuid.UUID,
+            end_user_id: uuid.UUID,
+            expected_write_time: datetime | None,
+            expected_metadata_row_exists: bool,
+            expected_metadata_updated_at: datetime | None,
+            memory_insight: str,
+            key_findings: str,
+            refreshed_at: datetime,
+    ) -> bool:
+        """源数据未变化时异步写回当前洞察缓存。"""
+        workspace_active = sa.exists().where(
+            Workspace.id == workspace_id,
+            Workspace.is_active.is_(True),
+            Workspace.storage_type == "neo4j",
+        )
+        metadata_exists = sa.exists().where(EndUserInfo.end_user_id == end_user_id)
+        if expected_metadata_row_exists:
+            metadata_unchanged = sa.exists().where(
+                EndUserInfo.end_user_id == end_user_id,
+                EndUserInfo.updated_at.is_not_distinct_from(expected_metadata_updated_at),
+            )
+        else:
+            metadata_unchanged = ~metadata_exists
+
+        try:
+            result = await self.db.execute(
+                sa.update(EndUser)
+                .where(
+                    EndUser.id == end_user_id,
+                    EndUser.workspace_id == workspace_id,
+                    EndUser.is_active.is_(True),
+                    EndUser.write_time.is_not_distinct_from(expected_write_time),
+                    workspace_active,
+                    metadata_unchanged,
+                )
+                .values(
+                    memory_insight=memory_insight,
+                    memory_insight_updated_at=refreshed_at,
+                    key_findings=key_findings,
+                    behavior_pattern="",
+                    growth_trajectory="",
+                )
+                .execution_options(synchronize_session=False)
+            )
+            await self.db.commit()
+            return bool(result.rowcount)
+        except Exception:
+            await self.db.rollback()
+            raise
+
+    def get_neo4j_memory_cache_refresh_fields(
+            self,
+            workspace_id: uuid.UUID,
+    ) -> List[MemoryCacheRefreshFields]:
+        """返回指定 Neo4j Workspace 下的缓存刷新原始字段。"""
+        rows = (
+            self.db.query(
+                EndUser.id,
+                EndUser.workspace_id,
+                EndUser.write_time,
+                EndUserInfo.updated_at,
+                EndUser.memory_insight_updated_at,
+                EndUser.user_summary_updated_at,
+            )
+            .join(Workspace, Workspace.id == EndUser.workspace_id)
+            .outerjoin(EndUserInfo, EndUserInfo.end_user_id == EndUser.id)
+            .filter(
+                EndUser.workspace_id == workspace_id,
+                EndUser.is_active.is_(True),
+                Workspace.is_active.is_(True),
+                Workspace.storage_type == "neo4j",
+            )
+            .all()
+        )
+        return [MemoryCacheRefreshFields(*row) for row in rows]
 
     async def get_forgetting_threshold_async(self, end_user_id: uuid.UUID) -> Optional[float]:
         """获取用户的遗忘阈值配置。
@@ -1547,6 +1806,7 @@ class EndUserRepository:
             page: int,
             pagesize: int,
             keyword: Optional[str] = None,
+            label: Optional[str] = None,
     ) -> tuple[List[EndUser], int]:
         """Dashboard 专用：分页查询有记忆的宿主（memory_count > 0）
 
@@ -1558,6 +1818,7 @@ class EndUserRepository:
             page: 页码（从1开始）
             pagesize: 每页数量
             keyword: 搜索关键词（可选，同时模糊匹配 other_name 和 id）
+            label: 标签过滤（可选，"long" 表示有 other_name，"short" 表示无 other_name）
 
         Returns:
             tuple[List[EndUser], int]: (当前页宿主列表, 符合条件的总数)
@@ -1581,6 +1842,19 @@ class EndUserRepository:
             EndUser.memory_count > 0,
             EndUser.is_active == True,
         )
+
+        if label == "long":
+            query = query.filter(
+                EndUser.other_name.isnot(None),
+                EndUser.other_name != "",
+            )
+        elif label == "short":
+            query = query.filter(
+                or_(
+                    EndUser.other_name.is_(None),
+                    EndUser.other_name == "",
+                )
+            )
 
         if keyword:
             keyword = keyword.strip()
@@ -1611,6 +1885,7 @@ class EndUserRepository:
             page: int,
             pagesize: int,
             keyword: Optional[str] = None,
+            label: Optional[str] = None,
     ) -> tuple[list, int]:
         """Dashboard RAG 模式：分页查询有记忆的宿主
 
@@ -1624,6 +1899,7 @@ class EndUserRepository:
             page: 页码（从1开始）
             pagesize: 每页数量
             keyword: 搜索关键词（可选，同时模糊匹配 other_name 和 id）
+            label: 标签过滤（可选，"long" 表示有 other_name，"short" 表示无 other_name）
 
         Returns:
             tuple[list, int]: (items列表[{"end_user": ORM, "memory_count": int}], 总数)
@@ -1677,6 +1953,19 @@ class EndUserRepository:
                 EndUser.is_active == True,
             )
         )
+
+        if label == "long":
+            base_query = base_query.filter(
+                EndUser.other_name.isnot(None),
+                EndUser.other_name != "",
+            )
+        elif label == "short":
+            base_query = base_query.filter(
+                or_(
+                    EndUser.other_name.is_(None),
+                    EndUser.other_name == "",
+                )
+            )
 
         if keyword:
             keyword = keyword.strip()
@@ -1771,7 +2060,7 @@ async def get_end_user_by_id_async(db: AsyncSession, end_user_id: uuid.UUID) -> 
     return end_user
 
 
-@redis_cache(ttl=600, prefix='tenant', skip_args=["db"])
+# @redis_cache(ttl=600, prefix='tenant', skip_args=["db"])
 def get_tenant_id_by_end_user_id(db: Session, end_user_id: uuid.UUID) -> Optional[uuid.UUID]:
     stmt = (
         select(Workspace.tenant_id)
@@ -1782,7 +2071,7 @@ def get_tenant_id_by_end_user_id(db: Session, end_user_id: uuid.UUID) -> Optiona
     return result.scalar()
 
 
-@redis_cache(ttl=600, prefix='tenant', skip_args=["db"])
+# @redis_cache(ttl=600, prefix='tenant', skip_args=["db"])
 async def get_tenant_id_by_end_user_id_async(db: AsyncSession, end_user_id: uuid.UUID) -> Optional[uuid.UUID]:
     stmt = (
         select(Workspace.tenant_id)

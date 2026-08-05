@@ -141,9 +141,12 @@ celery_app.conf.update(
         'app.tasks.do_refresh_user_tags': {'queue': 'memory_heavy_tasks'},
         'app.tasks.scan_forget_candidates': {'queue': 'periodic_tasks'},
         'app.tasks.do_forget_for_user': {'queue': 'memory_heavy_tasks'},
-        'app.tasks.run_forgetting_cycle_task': {'queue': 'memory_heavy_tasks'},# NOTE：定时任务，跑遗忘 可以暂时关闭
+        # 'app.tasks.run_forgetting_cycle_task': {'queue': 'memory_heavy_tasks'},# NOTE：已废弃，保留路由防 unregistered
         'app.tasks.write_all_workspaces_memory_task': {'queue': 'memory_heavy_tasks'}, #NOTE：定时任务，记忆增量统计
-        'app.tasks.update_implicit_emotions_storage': {'queue': 'memory_heavy_tasks'},
+        'app.tasks.write_total_memory_task': {'queue': 'memory_heavy_tasks'},  # NOTE：单 workspace 记忆增量统计
+        'app.tasks.scan_implicit_emotions_storage': {'queue': 'periodic_tasks'},  # NOTE：扫描器，枚举+派发
+        'app.tasks.do_implicit_emotions_for_user': {'queue': 'memory_heavy_tasks'},  # NOTE：单用户隐性记忆+情绪建议
+        # 'app.tasks.update_implicit_emotions_storage': {'queue': 'memory_heavy_tasks'},  # NOTE：已废弃，保留路由防 unregistered
         'app.tasks.init_implicit_emotions_for_users': {'queue': 'memory_heavy_tasks'},
         'app.tasks.init_interest_distribution_for_users': {'queue': 'memory_heavy_tasks'},
         'app.tasks.init_community_clustering_for_users': {'queue': 'memory_heavy_tasks'},
@@ -232,8 +235,8 @@ beat_schedule_config = {
         "schedule": memory_increment_schedule,
         "args": (),
     },
-    "update-implicit-emotions-storage": {
-        "task": "app.tasks.update_implicit_emotions_storage",
+    "scan-implicit-emotions-storage": {
+        "task": "app.tasks.scan_implicit_emotions_storage",
         "schedule": implicit_emotions_update_schedule,
         "args": (),
     },

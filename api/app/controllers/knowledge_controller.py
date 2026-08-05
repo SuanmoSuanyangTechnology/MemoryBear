@@ -1,9 +1,7 @@
-import csv as csv_module
 import asyncio
 import datetime
-import io
 import json
-from typing import Any, Optional
+from typing import Optional
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query
@@ -11,6 +9,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.background import BackgroundTask
 
 from app.core.utils.datetime_utils import utcnow_naive
 from app.celery_app import celery_app
@@ -29,6 +28,7 @@ from app.core.rag.knowledge_graph.config import (
 )
 from app.core.rag.knowledge_graph.dispatch import (
     dispatch_graph_enabled_transition,
+    dispatch_knowledge_graph_rebuild,
 )
 from app.core.rag.knowledge_graph.elasticsearch_store import (
     GraphElasticsearchStore,
@@ -40,10 +40,7 @@ from app.core.rag.retrieval.async_elasticsearch import (
     AsyncElasticsearchClientProvider,
 )
 from app.core.rag.utils.redis_conn import REDIS_CONN
-from app.core.rag.vdb.elasticsearch.elasticsearch_vector import (
-    ElasticSearchVectorFactory,
-    ElasticSearchVectorIndexOps,
-)
+from app.core.rag.vdb.elasticsearch.elasticsearch_vector import ElasticSearchVectorIndexOps
 from app.core.response_utils import success, fail
 from app.db import get_async_db, get_async_db_context
 from app.dependencies import get_current_user_async
@@ -53,13 +50,19 @@ from app.models.document_model import Document
 from app.models.user_model import User
 from app.schemas import knowledge_schema
 from app.schemas import file_schema
+from app.utils.redis_cache import invalidate_cache
 from app.schemas.response_schema import ApiResponse
 from app.repositories import knowledge_repository, knowledgeshare_repository
 from app.services import knowledge_service, document_service
 from app.services import file_service
 from app.services.file_storage_service import FileStorageService, get_file_storage_service
 from app.services.model_service import ModelApiKeyService, ModelConfigService
-from app.services.qa_export_service import iter_qa_csv_chunks, make_qa_export_filename
+from app.services.qa_export_service import (
+    cleanup_qa_csv_export_file,
+    iter_qa_csv_file_chunks,
+    make_qa_export_filename,
+    write_qa_csv_export_file,
+)
 from app.core.quota_stub import check_knowledge_capacity_quota
 
 # Obtain a dedicated API logger
@@ -81,43 +84,6 @@ router = APIRouter(
     tags=["knowledges"],
     dependencies=[Depends(get_current_user_async)]  # Apply auth to all routes in this controller
 )
-
-
-def _build_qa_export_content(vector_service: Any, document_id: uuid.UUID | str, file_ext: str | None) -> bytes | None:
-    _, items = vector_service.search_by_segment(
-        document_id=str(document_id), pagesize=10000, page=1, asc=True
-    )
-    qa_pairs = []
-    for item in items:
-        if (item.metadata or {}).get("chunk_type") == "qa":
-            qa_pairs.append({
-                "question": (item.metadata or {}).get("question", ""),
-                "answer": (item.metadata or {}).get("answer", ""),
-            })
-
-    if not qa_pairs:
-        return None
-
-    file_ext_lower = file_ext.lower() if file_ext else ".csv"
-    if file_ext_lower in (".xlsx", ".xls"):
-        import openpyxl
-
-        wb = openpyxl.Workbook()
-        ws = wb.active
-        ws.append(["question", "answer"])
-        for pair in qa_pairs:
-            ws.append([pair["question"], pair["answer"]])
-        output = io.BytesIO()
-        wb.save(output)
-        wb.close()
-        return output.getvalue()
-
-    text_output = io.StringIO()
-    writer = csv_module.writer(text_output)
-    writer.writerow(["question", "answer"])
-    for pair in qa_pairs:
-        writer.writerow([pair["question"], pair["answer"]])
-    return text_output.getvalue().encode("utf-8-sig")
 
 
 async def _dispatch_reparse_tasks_for_knowledge_async(
@@ -536,12 +502,15 @@ async def export_knowledge_qa_csv(
 
     from urllib.parse import quote
 
+    export_path = await asyncio.to_thread(write_qa_csv_export_file, kb_id)
+
     return StreamingResponse(
-        iter_qa_csv_chunks(kb_id),
+        iter_qa_csv_file_chunks(export_path),
         media_type="text/csv; charset=utf-8",
         headers={
             "Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}",
         },
+        background=BackgroundTask(cleanup_qa_csv_export_file, export_path),
     )
 
 
@@ -574,31 +543,30 @@ async def kb_batch_download(
         if not files:
             raise BusinessException("该知识库下没有可下载的文件", BizCode.NOT_FOUND)
 
-        qa_export_specs = []
-        qa_vector_service = None
+        qa_export_specs: dict[str, file_service.QAExportSpec] = {}
         for f in files:
             doc_result = await db.execute(select(Document).where(Document.file_id == f.id))
             doc = doc_result.scalars().first()
             if doc and (doc.parser_config or {}).get("doc_type") == "qa":
-                if doc:
-                    if qa_vector_service is None:
-                        qa_vector_service = await asyncio.to_thread(ElasticSearchVectorFactory().init_vector, knowledge=db_knowledge)
-                    qa_export_specs.append((f.file_key, f.file_ext, doc.id, qa_vector_service))
+                qa_export_specs[f.file_key] = file_service.QAExportSpec(
+                    kb_id=kb_id,
+                    document_id=doc.id,
+                    file_ext=f.file_ext,
+                    file_name=f.file_name,
+                )
 
         entries = file_service.build_zip_arcnames(files)
         zip_name = file_service.make_zip_filename(files, request_body.zip_filename, base_name=db_knowledge.name)
         total_files = len(files)
 
-    # Prefetch QA document content before streaming so the generator does not hold a DB session.
-    pre_fetched: dict[str, bytes] = {}
-    for file_key, file_ext, document_id, vector_service in qa_export_specs:
-        content = await asyncio.to_thread(_build_qa_export_content, vector_service, document_id, file_ext)
-        if content:
-            pre_fetched[file_key] = content
-
     from urllib.parse import quote
     return StreamingResponse(
-        file_service.stream_zip_files(entries, storage_service, api_logger, pre_fetched),
+        file_service.stream_zip_files(
+            entries,
+            storage_service,
+            api_logger,
+            qa_export_specs=qa_export_specs,
+        ),
         media_type="application/zip",
         headers={
             "Content-Disposition": f"attachment; filename*=UTF-8''{quote(zip_name)}",
@@ -700,6 +668,12 @@ async def _update_knowledge(
         await db.refresh(db_knowledge)
         api_logger.info(f"The knowledge base has been successfully updated: {db_knowledge.name} (ID: {db_knowledge.id})")
 
+        if db_knowledge.name == "USER_RAG_MERORY":
+            try:
+                await invalidate_cache(prefix=f"storage_type:{db_knowledge.workspace_id}")
+            except Exception:
+                pass
+
         if graph_enabled_before is not None:
             try:
                 graph_task = dispatch_graph_enabled_transition(
@@ -789,6 +763,13 @@ async def delete_knowledge(
         db_knowledge.updated_at = utcnow_naive()
         await db.commit()
         api_logger.info(f"The knowledge base has been successfully deleted: {db_knowledge.name} (ID: {knowledge_id})")
+
+        if db_knowledge.name == "USER_RAG_MERORY":
+            try:
+                await invalidate_cache(prefix=f"storage_type:{db_knowledge.workspace_id}")
+            except Exception:
+                pass
+
         return success(msg="The knowledge base has been successfully deleted")
     except Exception as e:
         api_logger.error(f"Failed to delete from the knowledge base: knowledge_id={knowledge_id} - {str(e)}")
@@ -972,10 +953,12 @@ async def rebuild_knowledge_graph(
             if pipeline is GraphPipeline.LEGACY
             else "app.core.rag.tasks.rebuild_evidence_graph_knowledge"
         )
-        task = celery_app.send_task(
-            task_name,
-            args=[str(knowledge_id)],
+        task = dispatch_knowledge_graph_rebuild(
+            str(knowledge_id),
+            db_knowledge.parser_config,
         )
+        if task is None:
+            raise GraphPipelineConfigError("knowledge graph is not enabled")
         api_logger.info(
             "Knowledge graph rebuild task accepted"
             " kb_id=%s pipeline=%s task=%s task_id=%s",

@@ -8,6 +8,7 @@ html, body, #root {
   font-family: -apple-system, PingFangSC, 'PingFang SC', BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  font-size: 16px;
 }
 
 /* 全局样式适配 */

@@ -372,6 +372,14 @@ class KnowledgeRetrievalNode(BaseNode):
         else:
             vector_similarity_weight = first_kb.vector_similarity_weight
         
+        # 混合检索下是否叠加图谱检索路由：请求级取第一个 KB 的配置作为兜底，
+        # 每个 KB 显式配置的 enable_graph_retrieval 仍会在检索层按 KB 覆盖生效
+        enable_graph_retrieval = (
+            1
+            if first_kb.retrieve_type == RetrieveType.HYBRID and first_kb.enable_graph_retrieval
+            else 0
+        )
+
         request = KnowledgeRetrievalRequest(
             query=query,
             caller=KnowledgeRetrievalCaller.WORKFLOW,
@@ -381,6 +389,7 @@ class KnowledgeRetrievalNode(BaseNode):
             vector_similarity_weight=vector_similarity_weight,
             top_k=self.typed_config.reranker_top_k or first_kb.top_k,
             retrieve_type=first_kb.retrieve_type,
+            enable_graph_retrieval=enable_graph_retrieval,
             rerank_id=self.typed_config.reranker_id,
             metadata_filter_mode=self.typed_config.metadata_filter_mode,
             metadata_filters=(

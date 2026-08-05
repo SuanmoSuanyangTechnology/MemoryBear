@@ -1,14 +1,14 @@
 """多 Agent 配置管理服务"""
 import uuid
 import json
-from typing import Optional, List, Tuple, Any, Annotated
+from typing import AsyncGenerator, Optional, List, Tuple, Any, Annotated
 
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 from sqlalchemy import select, desc
 
-from app.db import get_db
+from app.db import get_db, get_async_db_context
 from app.models import MultiAgentConfig, App, AgentConfig
 from app.schemas.multi_agent_schema import (
     MultiAgentConfigCreate,
@@ -49,6 +49,19 @@ class MultiAgentService:
 
     def __init__(self, db: Session | AsyncSession):
         self.db = db
+
+    def _uses_async_session(self) -> bool:
+        return isinstance(self.db, AsyncSession)
+
+    async def _release_db_connection(self) -> None:
+        """Release the underlying DB connection back to the pool before LLM streaming."""
+        try:
+            if self._uses_async_session():
+                await self.db.close()
+            else:
+                self.db.close()
+        except Exception as e:
+            logger.warning(f"Failed to release DB connection: {e}")
 
     def create_config(
         self,
@@ -569,28 +582,29 @@ class MultiAgentService:
             from app.models import Conversation, Message
 
             if isinstance(self.db, AsyncSession):
-                conversation = await self.db.get(Conversation, conversation_id)
-                if not conversation:
-                    raise ResourceNotFoundException("会话", str(conversation_id))
+                async with get_async_db_context() as db:
+                    conversation = await db.get(Conversation, conversation_id)
+                    if not conversation:
+                        raise ResourceNotFoundException("会话", str(conversation_id))
 
-                for role, content, message_meta in (
-                    ("user", user_message, None),
-                    ("assistant", assistant_message, meta_data),
-                ):
-                    message = Message(
-                        id=uuid.uuid4(),
-                        conversation_id=conversation_id,
-                        role=role,
-                        content=content,
-                        meta_data=message_meta,
-                        status="completed",
-                    )
-                    self.db.add(message)
-                    conversation.message_count = (conversation.message_count or 0) + 1
-                    if conversation.message_count <= 2 and role == "user":
-                        conversation.title = content[:50] + ("..." if len(content) > 50 else "")
+                    for role, content, message_meta in (
+                        ("user", user_message, None),
+                        ("assistant", assistant_message, meta_data),
+                    ):
+                        message = Message(
+                            id=uuid.uuid4(),
+                            conversation_id=conversation_id,
+                            role=role,
+                            content=content,
+                            meta_data=message_meta,
+                            status="completed",
+                        )
+                        db.add(message)
+                        conversation.message_count = (conversation.message_count or 0) + 1
+                        if conversation.message_count <= 2 and role == "user":
+                            conversation.title = content[:50] + ("..." if len(content) > 50 else "")
 
-                await self.db.commit()
+                    await db.commit()
             else:
                 conversation_service = ConversationService(self.db)
                 conversation_service.add_message(

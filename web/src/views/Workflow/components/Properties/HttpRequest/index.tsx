@@ -428,7 +428,7 @@ const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: an
             name={['error_handle', 'body']}
             label={<>
               <span className="rb:text-[#5B6167] rb:font-medium">body</span>
-              <span className="rb:text-[#5B6167] rb:ml-1" style={{fontWeight: 400}}>string</span>
+              <span className="rb:text-[#5B6167] rb:ml-1 rb:font-normal">string</span>
             </>}
             className="rb:my-2!"
           >
@@ -438,7 +438,7 @@ const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: an
             name={['error_handle', 'status_code']}
             label={<>
               <span className="rb:text-[#5B6167] rb:font-medium">status_code</span>
-              <span className="rb:text-[#5B6167] rb:ml-1" style={{fontWeight: 400}}>number</span>
+              <span className="rb:text-[#5B6167] rb:ml-1 rb:font-normal">number</span>
             </>}
             className="rb:my-2!"
           >
@@ -452,7 +452,7 @@ const HttpRequest: FC<{ options: Suggestion[]; selectedNode?: any; graphRef?: an
             name={['error_handle', 'headers']}
             label={<>
               <span className="rb:text-[#5B6167] rb:font-medium">headers</span>
-              <span className="rb:text-[#5B6167] rb:ml-1" style={{fontWeight: 400}}>object</span>
+              <span className="rb:text-[#5B6167] rb:ml-1 rb:font-normal">object</span>
             </>}
             className="rb:my-2!"
           >

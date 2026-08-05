@@ -125,14 +125,13 @@ const Jinja2Editor: FC<Jinja2EditorProps> = ({
 
   return (
     <LexicalComposer initialConfig={initialConfig}>
-      <div style={{ position: 'relative' }} className={className}>
+      <div className={`rb:relative ${className}`}>
         <RichTextPlugin
           contentEditable={
             <div
-              className="editor-with-line-numbers"
+              className="editor-with-line-numbers rb:rounded-md"
               style={{
                 border: variant === 'borderless' ? 'none' : '1px solid #DFE4ED',
-                borderRadius: '6px',
                 minHeight: minheight,
               }}
             >
@@ -157,15 +156,11 @@ const Jinja2Editor: FC<Jinja2EditorProps> = ({
           }
           placeholder={
             <div
+              className="rb:absolute rb:top-px rb:left-4 rb:text-[#A8A9AA] rb:pointer-none:"
               style={{
                 minHeight: placeHolderMinheight,
-                position: 'absolute',
-                top: '4px',
-                left: '16px',
-                color: '#A8A9AA',
                 fontSize,
                 lineHeight: placeHolderMinheight,
-                pointerEvents: 'none',
               }}
             >
               {placeholder}

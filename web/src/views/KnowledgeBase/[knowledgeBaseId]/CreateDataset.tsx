@@ -95,6 +95,7 @@ const CreateDataset = () => {
   const pollingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [delimiter, setDelimiter] = useState<string | undefined>(undefined);
   const [blockSize, setBlockSize] = useState<number>(512);
+  const [chunkOverlap, setChunkOverlap] = useState<number>(52);
   const [qaPrompt, setQaPrompt] = useState<string | undefined>()
   console.log('qaPrompt', qaPrompt)
   const [processingMethod, setProcessingMethod] = useState<ProcessingMethod>('directBlock');
@@ -158,14 +159,23 @@ const CreateDataset = () => {
     
     // 从参数设置进入确认上传时的处理
     if(current === 1 && nextStep === 2) {
+      if (
+        processingMethod === 'directBlock' &&
+        (!Number.isInteger(chunkOverlap) || chunkOverlap <= 0 || chunkOverlap >= blockSize)
+      ) {
+        messageApi.warning(t('knowledgeBase.chunkOverlapRange'));
+        return;
+      }
+
       // debugger
         // handlePreview(data[0],0) 
-        if(parameterSettings === 'customSettings' || processingMethod === 'qaExtract' || pdfEnhancementEnabled){
+        if(parameterSettings === 'customSettings' || processingMethod === 'qaExtract' || processingMethod === 'directBlock' || pdfEnhancementEnabled){
             rechunkFileIds.map((id) => {
               let parser_config = {
                 layout_recognize: pdfEnhancementMethod || 'DeepDOC',
                 delimiter: delimiter,
                 chunk_token_num: blockSize,
+                chunk_overlap: processingMethod === 'directBlock' ? chunkOverlap : undefined,
                 auto_questions: processingMethod === 'parentChildBlock' || processingMethod === 'directBlock' ? 0 : 1,
                 qa_prompt: qaPrompt,
               }
@@ -286,12 +296,7 @@ const CreateDataset = () => {
         if ( record.run === 0 && typeof value === 'number' && value < 0) {
           return <StatusTag status="error" text={t('knowledgeBase.failed')}></StatusTag>
         } else if (value >= 1) {
-          return (
-            <span className="rb:text-xs rb:border rb:border-[#DFE4ED] rb:bg-[#FBFDFF] rb:rounded rb:items-center rb:text-[#212332] rb:py-1 rb:px-2">
-              <span className="rb:inline-block rb:w-[5px] rb:h-[5px] rb:mr-2 rb:rounded-full" style={{ backgroundColor: '#369F21' }}></span>
-              <span>{t('knowledgeBase.completed')}</span>
-            </span>
-          );
+          return <StatusTag status="success" text={t('knowledgeBase.completed')}></StatusTag>
         } else if (value >= 0 && value < 1) {
           // Processing, show progress bar
           return (
@@ -303,17 +308,12 @@ const CreateDataset = () => {
                 '0%': '#108ee9',
                 '100%': '#87d068',
               }}
-              style={{ width: '120px' }}
+              className="rb:w-30!"
             />
           );
         } else {
           // value = 0 or other cases, show pending
-          return (
-            <span className="rb:text-xs rb:border rb:border-[#DFE4ED] rb:bg-[#FBFDFF] rb:rounded rb:items-center rb:text-[#212332] rb:py-1 rb:px-2">
-              <span className="rb:inline-block rb:w-[5px] rb:h-[5px] rb:mr-2 rb:rounded-full" style={{ backgroundColor: '#FF8A4C' }}></span>
-              <span>{t('knowledgeBase.pending')}</span>
-            </span>
-          );
+          return <StatusTag status="warning" text={t('knowledgeBase.pending')}></StatusTag>
         }
       }
     },
@@ -540,7 +540,15 @@ const CreateDataset = () => {
   const handleChange = (value: number | null) =>{
       if (value !== null) {
         setBlockSize(value);
+        if (processingMethod === 'directBlock' && chunkOverlap >= value) {
+          setChunkOverlap(Math.max(1, value - 1));
+        }
       }
+  }
+  const handleChunkOverlapChange = (value: number | null) => {
+    if (value !== null) {
+      setChunkOverlap(value);
+    }
   }
   // 删除已上传的文件
   const handleDeleteFile = async (fileId: string) => {
@@ -612,6 +620,7 @@ const CreateDataset = () => {
   const handleChangeProcessingMethod = (method: ProcessingMethod) => {
     if (method === 'directBlock') {
       setBlockSize(512)
+      setChunkOverlap(52)
     }
     setProcessingMethod(method)
   }
@@ -750,7 +759,7 @@ const CreateDataset = () => {
         {current === 1 && (
           <Flex vertical  className='rb:mt-10! rb:px-40!'>
               {rechunkFileIds.length > 0 && (
-                <Flex align="center" wrap gap={8} className='rb:bg-[#F0F3F8] rb:border rb:border-[#DFE4ED] rb:rounded-[8px] rb:px-3! rb:py-2! rb:mb-4! rb:text-xs rb:text-gray-600'>
+                <Flex align="center" wrap gap={8} className='rb:bg-[#F0F3F8] rb:border rb:border-[#DFE4ED] rb:rounded-lg rb:px-3! rb:py-2! rb:mb-4! rb:text-xs rb:text-gray-600'>
                     <span className='rb:text-gray-700 rb:font-medium'>{t('knowledgeBase.rechunking')}:</span>
                     {rechunkFileIds.map((id) => (
                       <span key={id} className='rb:px-2 rb:py-0.5 rb:bg-white rb:border rb:border-[#DFE4ED] rb:rounded'>{id}</span>
@@ -773,7 +782,7 @@ const CreateDataset = () => {
                   onChange={(e) => setPdfEnhancementEnabled(e.target.checked)}
                   className='rb:mr-3'
                 >
-                  <span className='rb:text-base rb:font-medium rb:text-gray-800 rb:pl-[22px]'>
+                  <span className='rb:text-base rb:font-medium rb:text-gray-800 rb:pl-5.5'>
                     {t('knowledgeBase.pdfEnhancementAnalysis')}
                   </span>
                 </Checkbox>
@@ -782,7 +791,7 @@ const CreateDataset = () => {
                     <Select
                       value={pdfEnhancementMethod}
                       onChange={(value) => setPdfEnhancementMethod(value)}
-                      className='rb:w-[300px]'
+                      className='rb:w-75!'
                       options={[
                         { value: 'deepdoc', label: 'DeepDoc' },
                         { value: 'mineru', label: 'MinerU' },
@@ -851,14 +860,34 @@ const CreateDataset = () => {
                   </Radio>
               </Radio.Group>
               {parameterSettings === 'customSettings' && processingMethod !== 'parentChildBlock' && (<>
-                <div className='rb:grid rb:grid-cols-2 rb:mt-5 rb-border rb:rounded-xl rb:px-6 rb:py-4 rb:gap-10'> 
+                <div className='rb:grid rb:grid-cols-3 rb:mt-5 rb-border rb:rounded-xl rb:px-6 rb:py-4 rb:gap-10'> 
                   <div>
                     <div className='rb:w-full rb:text-[#5B6167] rb:leading-5 rb:mb-2'>
                       {t('knowledgeBase.delimiter')}
                     </div>
                     <DelimiterSelector value={delimiter} onChange={setDelimiter} />
                   </div>
-                  <SliderInput label={t('knowledgeBase.suggestedBlockSize')} max={1024} min={1} step={1} value={blockSize} onChange={handleChange} />
+                  <SliderInput
+                    label={t('knowledgeBase.suggestedBlockSize')}
+                    max={1024}
+                    min={processingMethod === 'directBlock' ? 2 : 1}
+                    step={1}
+                    value={blockSize}
+                    onChange={handleChange}
+                  />
+                  {processingMethod === 'directBlock' && (
+                    <SliderInput
+                      label={<span>
+                        <span className="rb:text-[#ff5d34] rb:mr-1">*</span>
+                        {t('knowledgeBase.chunkOverlap')}
+                      </span>}
+                      max={blockSize - 1}
+                      min={1}
+                      step={1}
+                      value={chunkOverlap}
+                      onChange={handleChunkOverlapChange}
+                    />
+                  )}
                 </div>
                 {processingMethod === 'qaExtract' && (
                 <div>

@@ -439,6 +439,7 @@ class MemoryService:
             limit: int = 10,
             includes: list | None = None,
             skip_summary: bool = False,
+            enable_rerank: bool = False,
     ) -> MemorySearchResult:
         if history is None:
             history = []
@@ -450,7 +451,8 @@ class MemoryService:
             history,
             limit,
             includes=includes,
-            skip_summary=skip_summary
+            skip_summary=skip_summary,
+            enable_rerank=enable_rerank,
         )
 
     async def forget(self) -> dict:

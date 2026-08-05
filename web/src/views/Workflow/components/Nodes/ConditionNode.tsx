@@ -73,14 +73,14 @@ const ConditionNode: ReactShapeConfig['component'] = ({ node }) => {
       <NodeTools node={node} />
       <Flex align="center" gap={8} className="rb:flex-1">
         <div className={`rb:size-6 rb:bg-cover ${data.icon}`} />
-        <div className="rb:wrap-break-word rb:line-clamp-1 rb:flex-1">{data.name ?? t(`workflow.${data.type}`)}</div>
+        <div className="rb:wrap-break-word rb:line-clamp-1 rb:flex-1 rb:text-[12px]">{data.name ?? t(`workflow.${data.type}`)}</div>
         {data.executionStatus === 'completed'
-          ? <CheckCircleFilled style={{ color: '#369F21', fontSize: 16 }} />
+          ? <CheckCircleFilled className="rb:text-[#369F21] rb:text-[16px]" />
           : data.executionStatus === 'failed'
-          ?  <CloseCircleFilled style={{ color: '#FF5D34', fontSize: 16 }} />
-          : data.executionStatus === 'running'
-          ? <LoadingOutlined style={{ color: '#5B6167', fontSize: 16 }} />
-          : null
+            ? <CloseCircleFilled className="rb:text-[#FF5D34] rb:text-[16px]" />
+            : data.executionStatus === 'running'
+              ? <LoadingOutlined className="rb:text-[#5B6167] rb:text-[16px]" />
+              : null
         }
       </Flex>
 
