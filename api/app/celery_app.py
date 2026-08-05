@@ -177,6 +177,24 @@ try:
 except ImportError:
     _HAS_SUBSCRIPTION_TASKS = False
 
+# 企业版通知中心任务装配（仅在 premium 模块存在时注册，避免社区版 worker 误接）
+try:
+    import premium.platform_admin.notification_center.tasks  # noqa: F401
+
+    _HAS_NOTIFICATION_TASKS = True
+    # 状态任务 → notification_state_tasks 队列（scan/publish/expire，§11.2）
+    celery_app.conf.task_routes['notification.scan_scheduled'] = {
+        'queue': 'notification_state_tasks'
+    }
+    celery_app.conf.task_routes['notification.publish'] = {
+        'queue': 'notification_state_tasks'
+    }
+    celery_app.conf.task_routes['notification.scan_expired'] = {
+        'queue': 'notification_state_tasks'
+    }
+except ImportError:
+    _HAS_NOTIFICATION_TASKS = False
+
 # Celery Beat schedule for periodic tasks
 memory_increment_schedule = crontab(hour=settings.MEMORY_INCREMENT_HOUR, minute=settings.MEMORY_INCREMENT_MINUTE)
 memory_cache_regeneration_schedule = crontab(
@@ -320,5 +338,20 @@ if _HAS_SUBSCRIPTION_TASKS:
             "task": "subscription.expiration_reminder",
             "schedule": timedelta(minutes=_SUBSCRIPTION_EMAIL_BEAT_INTERVAL_MINUTES),
             "options": {"queue": "subscription_email_tasks", "expires": 3600},
+        },
+    })
+
+# 通知中心扫描任务（每分钟，§11.2；Beat 保持全局单实例）
+if _HAS_NOTIFICATION_TASKS:
+    celery_app.conf.beat_schedule.update({
+        "notification-scan-scheduled": {
+            "task": "notification.scan_scheduled",
+            "schedule": timedelta(minutes=1),
+            "options": {"queue": "notification_state_tasks"},
+        },
+        "notification-scan-expired": {
+            "task": "notification.scan_expired",
+            "schedule": timedelta(minutes=1),
+            "options": {"queue": "notification_state_tasks"},
         },
     })
