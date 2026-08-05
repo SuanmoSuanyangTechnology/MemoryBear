@@ -137,7 +137,7 @@ const Market: React.FC<{ getStatusTag?: (status: string) => ReactNode }> = () =>
       }
       if (res?.page) {
         setMcpTotal(res.page.total || 0);
-        setHasMore(!!res.page.has_next);
+        setHasMore(!!res.page.hasnext);
         setCurrentPage(res.page.page || page);
       }
     } catch (error) {
