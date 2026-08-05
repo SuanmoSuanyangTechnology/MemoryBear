@@ -25,6 +25,7 @@ from app.core.rag.chunk.context import (
     LogicalChunk,
     LogicalChunkType,
     MergeResult,
+    ParentChildGroup,
     ParsedBlock,
     ParsedBlockType,
     ParseResult,
@@ -76,27 +77,16 @@ class BlockMerger(ChunkMerger):
                     for block in blocks
                     if str(block.content or "").strip()
                 )
-                parent_chunks = [
-                    LogicalChunk(
-                        type=LogicalChunkType.TEXT,
-                        content=full_text[:FULL_DOC_MAX_CHARS],
+                parent_chunks = []
+                if full_text:
+                    parent_chunks.append(
+                        LogicalChunk(
+                            type=LogicalChunkType.TEXT,
+                            content=full_text[:FULL_DOC_MAX_CHARS],
+                        )
                     )
-                ]
-                child_chunks = self._blocks_to_logical_chunks(
-                    blocks,
-                    token_num,
-                    delimiter,
-                    0,
-                )
-                parent_id_map = {index: 0 for index in range(len(child_chunks))}
-                return MergeResult(
-                    chunks=self._serialize_chunk_contents(child_chunks),
-                    logical_chunks=child_chunks,
-                    parent_chunks=parent_chunks,
-                    child_chunks=child_chunks,
-                    parent_id_map=parent_id_map,
-                    pdf_parser=parse_result.pdf_parser,
-                )
+                groups = self._build_parent_child_groups(parent_chunks, token_num, delimiter, 0)
+                return self._parent_child_merge_result(groups, parse_result.pdf_parser)
 
             parent_token_num = int(ctx.parser_config.get("parent_chunk_token_num", 1024))
             parent_chunk_delimiter = ctx.parser_config.get("parent_chunk_delimiter")
@@ -107,20 +97,13 @@ class BlockMerger(ChunkMerger):
                 0,
                 merge_lists_with_text=parse_result.markdown_preprocess_profile == "mineru",
             )
-            child_chunks, parent_id_map = self._build_children_from_parents(
+            groups = self._build_parent_child_groups(
                 parent_chunks,
                 token_num,
                 delimiter,
                 0,
             )
-            return MergeResult(
-                chunks=self._serialize_chunk_contents(child_chunks),
-                logical_chunks=child_chunks,
-                parent_chunks=parent_chunks,
-                child_chunks=child_chunks,
-                parent_id_map=parent_id_map,
-                pdf_parser=parse_result.pdf_parser,
-            )
+            return self._parent_child_merge_result(groups, parse_result.pdf_parser)
 
         logical_chunks = self._blocks_to_logical_chunks(
             blocks,
@@ -203,23 +186,46 @@ class BlockMerger(ChunkMerger):
         flush_text_group()
         return logical_chunks
 
-    def _build_children_from_parents(
+    def _build_parent_child_groups(
         self,
         parent_chunks: list[LogicalChunk],
         child_token_num: int,
         delimiter: str | None,
         overlap: int,
-    ) -> tuple[list[LogicalChunk], dict[int, int]]:
+    ) -> list[ParentChildGroup]:
+        return [
+            ParentChildGroup(
+                parent=parent,
+                children=self._split_parent_chunk(parent, child_token_num, delimiter, overlap),
+            )
+            for parent in parent_chunks
+        ]
+
+    def _parent_child_merge_result(
+        self,
+        groups: list[ParentChildGroup],
+        pdf_parser,
+    ) -> MergeResult:
+        parent_chunks: list[LogicalChunk] = []
         child_chunks: list[LogicalChunk] = []
         parent_id_map: dict[int, int] = {}
 
-        for parent_index, parent in enumerate(parent_chunks):
-            children = self._split_parent_chunk(parent, child_token_num, delimiter, overlap)
-            for child in children:
+        for group in groups:
+            parent_index = len(parent_chunks)
+            parent_chunks.append(group.parent)
+            for child in group.children:
                 parent_id_map[len(child_chunks)] = parent_index
                 child_chunks.append(child)
 
-        return child_chunks, parent_id_map
+        return MergeResult(
+            chunks=self._serialize_chunk_contents(child_chunks),
+            logical_chunks=child_chunks,
+            parent_child_groups=groups,
+            parent_chunks=parent_chunks,
+            child_chunks=child_chunks,
+            parent_id_map=parent_id_map,
+            pdf_parser=pdf_parser,
+        )
 
     def _split_parent_chunk(
         self,
