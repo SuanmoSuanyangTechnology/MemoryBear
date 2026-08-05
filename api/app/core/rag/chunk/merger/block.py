@@ -72,11 +72,8 @@ class BlockMerger(ChunkMerger):
 
         if ctx.chunk_output_mode is ChunkOutputMode.PARENT_CHILD:
             if ctx.parser_config.get("parent_chunk_mode") == "full-doc":
-                full_text = "\n\n".join(
-                    str(block.content)
-                    for block in blocks
-                    if str(block.content or "").strip()
-                )
+                full_doc_parts = (self._full_doc_block_content(block) for block in blocks)
+                full_text = "\n\n".join(part for part in full_doc_parts if part.strip())
                 parent_chunks = []
                 if full_text:
                     parent_chunks.append(
@@ -117,6 +114,18 @@ class BlockMerger(ChunkMerger):
             logical_chunks=logical_chunks,
             pdf_parser=parse_result.pdf_parser,
         )
+
+    def _full_doc_block_content(self, block: ParsedBlock) -> str:
+        content = str(block.content or "")
+        if block.type is not ParsedBlockType.IMAGE:
+            return content
+
+        vision_text = block.metadata.get("vision_text")
+        if not isinstance(vision_text, str) or not vision_text.strip():
+            return content
+        if not content.strip():
+            return vision_text.strip()
+        return f"{content}\n\n{vision_text.strip()}"
 
     def _blocks_to_logical_chunks(
         self,
