@@ -1,6 +1,7 @@
 from collections import defaultdict
 from copy import deepcopy
 
+from app.core.rag.chunk.hierarchy import validate_parent_child_result
 from app.core.rag.models.chunk import DocumentChunk, ChildDocumentChunk
 
 
@@ -66,6 +67,8 @@ def _build_parent_child_hierarchy(
     value 是父块在 parent_chunks 中的索引。
     子块按 child_idx 排序，确保 children 列表顺序与父块拼接文本一致。
     """
+    validate_parent_child_result(child_chunks, parent_chunks, parent_id_map, "preview parent_child")
+
     # 将子块按父块索引分组
     parent_to_children: dict[int, list[tuple[int, dict]]] = defaultdict(list)
     for child_idx, parent_idx in parent_id_map.items():

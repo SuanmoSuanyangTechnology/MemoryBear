@@ -3,6 +3,7 @@ import copy
 from app.core.rag.nlp import add_positions, tokenize
 
 from .context import ChunkContext, LogicalChunk, LogicalChunkType, MergeResult, ParseResult
+from .hierarchy import validate_parent_child_result
 
 
 ZERO_WIDTH_TRANSLATION = str.maketrans("", "", "\u200b\u200c\u200d\ufeff")
@@ -32,6 +33,9 @@ class ChunkPostProcessor:
         parse_result: ParseResult,
         merge_result: MergeResult,
     ) -> list[dict] | tuple[list[dict], list[dict], dict[int, int]]:
+        if merge_result.parent_child_groups is not None:
+            return self._serialize_parent_child_groups(ctx, merge_result)
+
         if merge_result.parent_chunks is not None and merge_result.child_chunks is not None:
             child_chunks = self._serialize_chunks(ctx, merge_result.child_chunks, merge_result)
             parent_chunks = self._serialize_chunks(ctx, merge_result.parent_chunks, merge_result)
@@ -45,6 +49,48 @@ class ChunkPostProcessor:
             ]
         return self._serialize_chunks(ctx, logical_chunks, merge_result)
 
+    def _serialize_parent_child_groups(
+        self,
+        ctx: ChunkContext,
+        merge_result: MergeResult,
+    ) -> tuple[list[dict], list[dict], dict[int, int]]:
+        child_chunks: list[dict] = []
+        parent_chunks: list[dict] = []
+        parent_id_map: dict[int, int] = {}
+        mode = str(ctx.parser_config.get("parent_chunk_mode") or "paragraph")
+
+        for group_index, group in enumerate(merge_result.parent_child_groups or []):
+            parent_chunk = self._serialize_chunk(ctx, group.parent, merge_result, len(parent_chunks))
+            if parent_chunk is None:
+                raise ValueError(
+                    f"Invalid {mode} hierarchy: parent group {group_index} was removed during serialization."
+                )
+
+            serialized_children: list[dict] = []
+            for child in group.children:
+                serialized_child = self._serialize_chunk(
+                    ctx,
+                    child,
+                    merge_result,
+                    len(child_chunks) + len(serialized_children),
+                )
+                if serialized_child is not None:
+                    serialized_children.append(serialized_child)
+
+            if not serialized_children:
+                raise ValueError(
+                    f"Invalid {mode} hierarchy: parent group {group_index} has no serializable children."
+                )
+
+            parent_index = len(parent_chunks)
+            parent_chunks.append(parent_chunk)
+            for child in serialized_children:
+                parent_id_map[len(child_chunks)] = parent_index
+                child_chunks.append(child)
+
+        validate_parent_child_result(child_chunks, parent_chunks, parent_id_map, mode)
+        return child_chunks, parent_chunks, parent_id_map
+
     def _serialize_chunks(
         self,
         ctx: ChunkContext,
@@ -53,21 +99,24 @@ class ChunkPostProcessor:
     ) -> list[dict]:
         result: list[dict] = []
         for index, chunk in enumerate(chunks):
-            if chunk.type is LogicalChunkType.TABLE:
-                table_chunk = self._serialize_table_chunk(ctx, chunk)
-                if table_chunk:
-                    result.append(table_chunk)
-                continue
-            if chunk.type is LogicalChunkType.IMAGE:
-                image_chunk = self._serialize_text_chunk(ctx, chunk, merge_result, index)
-                if image_chunk:
-                    image_chunk["doc_type_kwd"] = "image"
-                    result.append(image_chunk)
-                continue
-            text_chunk = self._serialize_text_chunk(ctx, chunk, merge_result, index)
-            if text_chunk:
-                result.append(text_chunk)
+            serialized_chunk = self._serialize_chunk(ctx, chunk, merge_result, index)
+            if serialized_chunk:
+                result.append(serialized_chunk)
         return result
+
+    def _serialize_chunk(
+        self,
+        ctx: ChunkContext,
+        chunk: LogicalChunk,
+        merge_result: MergeResult,
+        index: int,
+    ) -> dict | None:
+        if chunk.type is LogicalChunkType.TABLE:
+            return self._serialize_table_chunk(ctx, chunk)
+        serialized_chunk = self._serialize_text_chunk(ctx, chunk, merge_result, index)
+        if serialized_chunk and chunk.type is LogicalChunkType.IMAGE:
+            serialized_chunk["doc_type_kwd"] = "image"
+        return serialized_chunk
 
     def _serialize_text_chunk(
         self,
