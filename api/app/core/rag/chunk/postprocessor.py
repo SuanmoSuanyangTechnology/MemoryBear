@@ -2,7 +2,14 @@ import copy
 
 from app.core.rag.nlp import add_positions, tokenize
 
-from .context import ChunkContext, LogicalChunk, LogicalChunkType, MergeResult, ParseResult
+from .context import (
+    ChunkContext,
+    LogicalChunk,
+    LogicalChunkType,
+    MergeResult,
+    ParentChildGroup,
+    ParseResult,
+)
 from .hierarchy import GroupedChildChunks, validate_parent_child_result
 
 
@@ -37,9 +44,8 @@ class ChunkPostProcessor:
             return self._serialize_parent_child_groups(ctx, merge_result)
 
         if merge_result.parent_chunks is not None and merge_result.child_chunks is not None:
-            child_chunks = self._serialize_chunks(ctx, merge_result.child_chunks, merge_result)
-            parent_chunks = self._serialize_chunks(ctx, merge_result.parent_chunks, merge_result)
-            return child_chunks, parent_chunks, merge_result.parent_id_map or {}
+            groups = self._build_mapped_parent_child_groups(ctx, merge_result)
+            return self._serialize_parent_child_groups(ctx, merge_result, groups)
 
         logical_chunks = merge_result.logical_chunks
         if logical_chunks is None:
@@ -53,13 +59,15 @@ class ChunkPostProcessor:
         self,
         ctx: ChunkContext,
         merge_result: MergeResult,
+        groups: list[ParentChildGroup] | None = None,
     ) -> tuple[list[dict], list[dict], dict[int, int]]:
         child_chunks = GroupedChildChunks()
         parent_chunks: list[dict] = []
         parent_id_map: dict[int, int] = {}
         mode = str(ctx.parser_config.get("parent_chunk_mode") or "paragraph")
+        source_groups = groups if groups is not None else merge_result.parent_child_groups or []
 
-        for group_index, group in enumerate(merge_result.parent_child_groups or []):
+        for group_index, group in enumerate(source_groups):
             parent_chunk = self._serialize_chunk(ctx, group.parent, merge_result, len(parent_chunks))
             if parent_chunk is None:
                 raise ValueError(
@@ -90,6 +98,22 @@ class ChunkPostProcessor:
 
         validate_parent_child_result(child_chunks, parent_chunks, parent_id_map, mode)
         return child_chunks, parent_chunks, parent_id_map
+
+    def _build_mapped_parent_child_groups(
+        self,
+        ctx: ChunkContext,
+        merge_result: MergeResult,
+    ) -> list[ParentChildGroup]:
+        parent_chunks = merge_result.parent_chunks or []
+        child_chunks = merge_result.child_chunks or []
+        parent_id_map = merge_result.parent_id_map or {}
+        mode = str(ctx.parser_config.get("parent_chunk_mode") or "paragraph")
+        validate_parent_child_result(child_chunks, parent_chunks, parent_id_map, mode)
+
+        groups = [ParentChildGroup(parent=parent) for parent in parent_chunks]
+        for child_index, child in enumerate(child_chunks):
+            groups[parent_id_map[child_index]].children.append(child)
+        return groups
 
     def _serialize_chunks(
         self,
