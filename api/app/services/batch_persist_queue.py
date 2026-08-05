@@ -26,6 +26,7 @@ from sqlalchemy import (
     case as sa_case,
     text as sa_text,
 )
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.core.config import settings
 from app.db import get_async_db_context
@@ -326,12 +327,26 @@ async def _bulk_persist_messages(
 ) -> None:
     """Persist all messages from *msg_tasks* via a single multi-row INSERT
     followed by atomic ``message_count`` UPDATEs per conversation.
+
+    Idempotent on ``messages.id``: the INSERT uses ``ON CONFLICT DO NOTHING``
+    and rows are deduplicated within the batch, so re-enqueued/replayed tasks
+    (same user_message_id/message_id) neither raise ``UniqueViolationError``
+    nor roll back the whole batch. ``message_count`` is incremented only for
+    rows actually inserted (via ``RETURNING id``).
     """
     from app.models.conversation_model import Message, Conversation
     from app.services.chat_context import StreamResult
 
     rows: list[dict[str, Any]] = []
-    conv_deltas: dict[uuid_module.UUID, tuple[int, str | None]] = defaultdict(lambda: (0, None))
+    row_conv: dict[uuid_module.UUID, uuid_module.UUID] = {}
+    conv_titles: dict[uuid_module.UUID, str | None] = {}
+
+    def _add_row(row: dict[str, Any], conv_id: uuid_module.UUID) -> None:
+        rows.append(row)
+        mid = row["id"]
+        if isinstance(mid, str):
+            mid = uuid_module.UUID(mid)
+        row_conv[mid] = conv_id
 
     for task in msg_tasks:
         args = task.args
@@ -348,15 +363,14 @@ async def _bulk_persist_messages(
             user_msg_id = args.get("user_message_id", uuid_module.uuid4())
             msg_id = args.get("message_id", uuid_module.uuid4())
             user_content = args.get("user_message_content", "")
-            rows.append(_row(user_msg_id, conv_id, "user",
-                             user_content,
-                             {"files": args.get("files_meta", [])}))
-            rows.append(_row(msg_id, conv_id, "assistant",
-                             args.get("error_message", "An error occurred during generation."),
-                             {"error": args.get("error_detail", "")},
-                             status="failed"))
-            delta, _ = conv_deltas[conv_id]
-            conv_deltas[conv_id] = (delta + 2, None)
+            _add_row(_row(user_msg_id, conv_id, "user",
+                          user_content,
+                          {"files": args.get("files_meta", [])}), conv_id)
+            _add_row(_row(msg_id, conv_id, "assistant",
+                          args.get("error_message", "An error occurred during generation."),
+                          {"error": args.get("error_detail", "")},
+                          status="failed"), conv_id)
+            conv_titles[conv_id] = None
             continue
 
         # --- save_messages ---
@@ -379,9 +393,9 @@ async def _bulk_persist_messages(
         user_parent_id = args.get("user_parent_message_id")
         user_content = args.get("user_message_content", "") or ""
 
-        rows.append(_row(user_msg_id, conv_id, "user",
-                         user_content, user_meta,
-                         parent_message_id=user_parent_id))
+        _add_row(_row(user_msg_id, conv_id, "user",
+                      user_content, user_meta,
+                      parent_message_id=user_parent_id), conv_id)
 
         # assistant message meta
         if args.get("meta_override"):
@@ -409,35 +423,68 @@ async def _bulk_persist_messages(
 
         assistant_content = args.get("content_override") or (
             result.full_content if result else "")
-        rows.append(_row(msg_id, conv_id, "assistant", assistant_content, assistant_meta,
-                         parent_message_id=user_msg_id))
+        _add_row(_row(msg_id, conv_id, "assistant", assistant_content, assistant_meta,
+                      parent_message_id=user_msg_id), conv_id)
 
-        title_candidate = user_content[:50] + ("..." if len(user_content) > 50 else "") if user_content else None
-        delta, _ = conv_deltas[conv_id]
-        conv_deltas[conv_id] = (delta + 2, title_candidate)
+        conv_titles[conv_id] = (
+            user_content[:50] + ("..." if len(user_content) > 50 else "")
+            if user_content else None
+        )
 
         # opening statement
         if args.get("is_new_conversation") and args.get("opening_statement"):
             opening_id = args.get("opening_message_id")
             if opening_id:
-                rows.append(_row(opening_id, conv_id, "assistant", args["opening_statement"]))
-                d, t = conv_deltas[conv_id]
-                conv_deltas[conv_id] = (d + 1, t)
+                _add_row(_row(opening_id, conv_id, "assistant", args["opening_statement"]), conv_id)
 
-    # --- single multi-row INSERT for all messages ---
-    if rows:
-        await db.execute(sa_insert(Message).values(rows))
+    # --- dedupe rows within the batch (same task enqueued twice, or success +
+    # failed tasks sharing one message pair) ---
+    seen_ids: set[uuid_module.UUID] = set()
+    unique_rows: list[dict[str, Any]] = []
+    for r in rows:
+        mid = r["id"]
+        if isinstance(mid, str):
+            mid = uuid_module.UUID(mid)
+        if mid in seen_ids:
+            continue
+        seen_ids.add(mid)
+        unique_rows.append(r)
+    if len(unique_rows) < len(rows):
+        logger.warning(
+            "batch_persist: dropped %d duplicate message rows within one batch",
+            len(rows) - len(unique_rows),
+        )
 
-    # --- atomic UPDATE per conversation ---
-    for conv_id, (delta, title_candidate) in conv_deltas.items():
+    # --- single idempotent multi-row INSERT for all messages ---
+    inserted_ids: set[uuid_module.UUID] = set()
+    if unique_rows:
+        result = await db.execute(
+            pg_insert(Message)
+            .values(unique_rows)
+            .on_conflict_do_nothing(index_elements=["id"])
+            .returning(Message.id)
+        )
+        inserted_ids = {row[0] for row in result.all()}
+        if len(inserted_ids) < len(unique_rows):
+            logger.warning(
+                "batch_persist: %d/%d message rows skipped due to existing ids (idempotent skip)",
+                len(unique_rows) - len(inserted_ids), len(unique_rows),
+            )
+
+    # --- atomic UPDATE per conversation, counting only actually inserted rows ---
+    actual_deltas: dict[uuid_module.UUID, int] = defaultdict(int)
+    for mid in inserted_ids:
+        actual_deltas[row_conv[mid]] += 1
+
+    for conv_id, delta in actual_deltas.items():
         if delta <= 0:
             continue
         values: dict[str, Any] = {
             "message_count": Conversation.message_count + delta,
         }
-        if title_candidate:
+        if conv_titles.get(conv_id):
             values["title"] = sa_case(
-                (Conversation.message_count <= 1, title_candidate),
+                (Conversation.message_count <= 1, conv_titles[conv_id]),
                 else_=Conversation.title,
             )
         await db.execute(

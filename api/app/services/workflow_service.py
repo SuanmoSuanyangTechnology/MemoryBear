@@ -6354,6 +6354,8 @@ class WorkflowService:
         )
 
         files = []
+        # 本轮消息是否已保存/入队（与 run_stream 的守卫语义一致）
+        messages_finalized = False
         try:
             files = await self._handle_file_input(payload.files)
             if prepared_memory_storage_type is not None:
@@ -6481,7 +6483,11 @@ class WorkflowService:
                 assistant_meta = {"usage": token_usage, "audio_url": None, "execution_id": execution.execution_id}
                 if filtered_citations:
                     assistant_meta["citations"] = filtered_citations
-                if conversation_id_uuid:
+                # regenerate_mode 下由 regenerate() 统一保存版本化消息，
+                # 这里不能再入队 save_messages，否则会话里会多出一对幽灵消息
+                # （且流式重新生成会因同一 message_id 触发主键冲突）。
+                if conversation_id_uuid and not regenerate_mode:
+                    messages_finalized = True
                     _from_msg_id = await self._resolve_from_message_id_async(
                         payload.from_message_id,
                         conversation_id_uuid,
@@ -6533,9 +6539,11 @@ class WorkflowService:
                 human_message, human_meta = self._extract_human_message_and_meta(
                     final_messages, payload.message or "", files
                 )
-                await self._save_failed_conversation_async(
-                    conversation_id_uuid, message_id, human_message, human_meta, result.get("error") or ""
-                )
+                if not regenerate_mode:
+                    messages_finalized = True
+                    await self._save_failed_conversation_async(
+                        conversation_id_uuid, message_id, human_message, human_meta, result.get("error") or ""
+                    )
                 filtered_citations = []
 
             response_data = {
@@ -6599,7 +6607,9 @@ class WorkflowService:
             except Exception as persist_err:
                 logger.warning(f"Failed to persist node executions on run error: {persist_err}")
             human_message, human_meta = self._extract_human_message_and_meta([], payload.message or "", files)
-            await self._save_failed_conversation_async(conversation_id_uuid, None, human_message, human_meta, str(e))
+            # 若本轮消息已成功入队，不要再入队失败消息，避免重复写入
+            if not regenerate_mode and not messages_finalized:
+                await self._save_failed_conversation_async(conversation_id_uuid, None, human_message, human_meta, str(e))
             raise BusinessException(
                 code=BizCode.INTERNAL_ERROR,
                 message=f"工作流执行失败: {str(e)}"
@@ -6976,6 +6986,10 @@ class WorkflowService:
         _lock_value: str | None = None
         _lock_degraded = False
         _last_event_data: dict | None = None
+        # 本轮对话消息（成功对或失败对）是否已保存/入队。一旦置 True，
+        # 后续任何分支不得再为同一轮入队 save_messages / save_failed_message，
+        # 否则 BatchPersistQueue 会因相同 message id 触发 messages 主键冲突。
+        messages_finalized = False
 
         try:
             files = await self._handle_file_input(payload.files)
@@ -7404,7 +7418,11 @@ class WorkflowService:
                                 payload.from_message_id,
                                 conversation_id_uuid,
                             )
-                            if not skip_save:
+                            # regenerate_mode 下由 regenerate_stream 统一落库版本化消息，
+                            # 这里不能再入队 save_messages，否则同一 message_id 主键冲突；
+                            # messages_finalized 防止 workflow_end 被重复处理时二次入队。
+                            if not skip_save and not regenerate_mode and not messages_finalized:
+                                messages_finalized = True
                                 execution = await self._finalize_completed_execution_async(
                                     execution_id=execution.execution_id,
                                     conversation_id=conversation_id_uuid,
@@ -7465,7 +7483,8 @@ class WorkflowService:
                         _failed_output = event.get("data")
                         _error_node_id = (_failed_output or {}).get("error_node")
 
-                        if not skip_save:
+                        if not skip_save and not regenerate_mode and not messages_finalized:
+                            messages_finalized = True
                             await self._save_failed_conversation_async(
                                 conversation_id_uuid, message_id, human_message, human_meta, error_msg
                             )
@@ -7605,7 +7624,8 @@ class WorkflowService:
                             conversation_id_uuid,
                         )
                         _hitl_user_msg = None
-                        if conversation_id_uuid and not skip_save:
+                        # regenerate_mode 下占位消息同样由 regenerate_stream 末尾统一落库
+                        if conversation_id_uuid and not skip_save and not regenerate_mode:
                             _hitl_user_msg = await self._add_message_async(
                                 conversation_id=conversation_id_uuid,
                                 role="user",
@@ -8126,7 +8146,9 @@ class WorkflowService:
             from app.core.workflow.nodes.human_intervention.node import InterventionRegistry
             InterventionRegistry.cleanup(execution.execution_id)
             human_message, human_meta = self._extract_human_message_and_meta([], payload.message or "", files)
-            if not skip_save:
+            # 若本轮消息已成功入队（messages_finalized），不要再入队失败消息，
+            # 否则同一 message_id 会触发 messages 主键冲突
+            if not skip_save and not regenerate_mode and not messages_finalized:
                 await self._save_failed_conversation_async(
                     conversation_id_uuid, None, human_message, human_meta, str(e)
                 )
