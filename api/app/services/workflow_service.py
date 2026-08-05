@@ -6173,12 +6173,13 @@ class WorkflowService:
         has_existing_conversation = bool(payload.conversation_id)
         # 转换 conversation_id 为 UUID
         conversation_id_uuid = uuid.UUID(payload.conversation_id) if payload.conversation_id else None
+        # skip_save 语义：纯函数式执行（如工作流作为工具），不创建会话、不落消息
         conversation_id_uuid = await self._ensure_conversation_async(
             app_id=app_id,
             workspace_id=workspace_id,
             user_id=payload.user_id,
             conversation_id=conversation_id_uuid,
-            enable_conversation=supports_conversation,
+            enable_conversation=supports_conversation and not skip_save,
         )
         if conversation_id_uuid:
             payload.conversation_id = str(conversation_id_uuid)
@@ -6485,8 +6486,9 @@ class WorkflowService:
                     assistant_meta["citations"] = filtered_citations
                 # regenerate_mode 下由 regenerate() 统一保存版本化消息，
                 # 这里不能再入队 save_messages，否则会话里会多出一对幽灵消息
-                # （且流式重新生成会因同一 message_id 触发主键冲突）。
-                if conversation_id_uuid and not regenerate_mode:
+                # （且流式重新生成会因同一 message_id 触发主键冲突）；
+                # skip_save 下（工作流作为工具等纯函数式执行）同样不落消息。
+                if conversation_id_uuid and not regenerate_mode and not skip_save:
                     messages_finalized = True
                     _from_msg_id = await self._resolve_from_message_id_async(
                         payload.from_message_id,
@@ -6539,7 +6541,7 @@ class WorkflowService:
                 human_message, human_meta = self._extract_human_message_and_meta(
                     final_messages, payload.message or "", files
                 )
-                if not regenerate_mode:
+                if not regenerate_mode and not skip_save:
                     messages_finalized = True
                     await self._save_failed_conversation_async(
                         conversation_id_uuid, message_id, human_message, human_meta, result.get("error") or ""
@@ -6608,7 +6610,7 @@ class WorkflowService:
                 logger.warning(f"Failed to persist node executions on run error: {persist_err}")
             human_message, human_meta = self._extract_human_message_and_meta([], payload.message or "", files)
             # 若本轮消息已成功入队，不要再入队失败消息，避免重复写入
-            if not regenerate_mode and not messages_finalized:
+            if not skip_save and not regenerate_mode and not messages_finalized:
                 await self._save_failed_conversation_async(conversation_id_uuid, None, human_message, human_meta, str(e))
             raise BusinessException(
                 code=BizCode.INTERNAL_ERROR,
@@ -6751,12 +6753,13 @@ class WorkflowService:
         has_existing_conversation = bool(payload.conversation_id)
         # 转换 conversation_id 为 UUID
         conversation_id_uuid = uuid.UUID(payload.conversation_id) if payload.conversation_id else None
+        # skip_save 语义：纯函数式执行（如工作流作为工具），不创建会话、不落消息
         conversation_id_uuid = await self._ensure_conversation_async(
             app_id=app_id,
             workspace_id=workspace_id,
             user_id=payload.user_id,
             conversation_id=conversation_id_uuid,
-            enable_conversation=supports_conversation,
+            enable_conversation=supports_conversation and not skip_save,
         )
         if conversation_id_uuid:
             payload.conversation_id = str(conversation_id_uuid)

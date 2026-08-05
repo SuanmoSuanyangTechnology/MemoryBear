@@ -4126,8 +4126,11 @@ class AgentRunService:
                 "error": r.get("error")
             })
 
-        # Phase 3: enqueue per-model message saves via batch persist queue
-        if not skip_save:
+        # Phase 3: enqueue per-model message saves via batch persist queue.
+        # 内层 run_stream 在 skip_save=False 时已自行落库 user+assistant，
+        # 这里仅在内层不落库（skip_save=True）时补落库；否则同一 user_message_id
+        # 会再插入一条 assistant 消息（此前因主键冲突整批回滚而被隐藏）。
+        if skip_save:
             from app.services.batch_persist_queue import BatchPersistQueue, PersistTask
 
             # Build files_meta from FileInput list
