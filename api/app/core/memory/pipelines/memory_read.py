@@ -1,6 +1,10 @@
 import asyncio
 import logging
+<<<<<<< HEAD
 import time
+=======
+import uuid
+>>>>>>> c2157701 (feat(memory):memory-retrieve-display)
 
 from app.core.memory.enums import Neo4jNodeType, SearchStrategy, StorageType
 from app.core.memory.models.service_models import MemorySearchResult
@@ -22,8 +26,18 @@ from app.core.memory.retrieval_trace.stage_projection import (
     project_result_items,
 )
 from app.core.models import RedBearLLM
+from app.core.utils.datetime_utils import utcnow
 from app.db import get_async_db_context
 from app.repositories.memory_short_repository import ShortTermMemoryRepository
+from app.schemas.memory_retrieval_display_schema import (
+    RETRIEVE_SEARCH_MODES,
+    RetrieveDisplayTask,
+)
+from app.services.memory_retrieval_display_queue import MemoryRetrievalDisplayQueue
+from app.services.memory_retrieval_display_service import (
+    build_retrieve_snapshot,
+    clean_query_for_display,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -63,10 +77,14 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
             includes=None,
             skip_summary=False,
             enable_rerank: bool = False,
+            record_display: bool = False,
     ) -> MemorySearchResult:
         started_at = time.perf_counter()
         self._run_started_at = started_at
         query = QueryPreprocessor.process(query)
+        # 展示用主问题必须在 deep/normal 的问题拆分之前固定下来
+        display_query = clean_query_for_display(query)
+
         match search_switch:
             case SearchStrategy.DEEP:
                 res = await self._deep_read(query, history, limit,
@@ -94,8 +112,12 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
         if search_switch in [SearchStrategy.DEEP, SearchStrategy.NORMAL] and not self.ctx.draft:
             await self._save_short_term(query, search_switch, res)
 
+        if record_display:
+            self._dispatch_display_record(display_query, search_switch, res)
+
         return res
 
+<<<<<<< HEAD
     async def _emit_stage(self, stage: str, data: dict) -> None:
         await emit_memory_stage(stage, data)
 
@@ -130,6 +152,59 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
     def _ensure_run_started(self) -> None:
         if not self._run_started_at:
             self._run_started_at = time.perf_counter()
+=======
+    def _dispatch_display_record(
+            self,
+            display_query: str,
+            search_switch: SearchStrategy,
+            result: MemorySearchResult,
+    ) -> None:
+        """聚合读取展示快照并非阻塞投递，任何异常都不影响检索返回。"""
+        try:
+            search_mode = search_switch.name.lower()
+            if search_mode not in RETRIEVE_SEARCH_MODES:
+                logger.debug(
+                    f"[ReadPipeLine] 检索方式 {search_mode} 不在读取展示白名单内，跳过投递"
+                )
+                return
+
+            try:
+                end_user_uuid = uuid.UUID(str(self.ctx.end_user_id))
+            except (ValueError, AttributeError, TypeError):
+                logger.warning(
+                    f"[ReadPipeLine] end_user_id 不是合法 UUID，跳过读取展示投递: "
+                    f"{self.ctx.end_user_id}"
+                )
+                return
+
+            snapshot = build_retrieve_snapshot(
+                result=result,
+                query=display_query,
+                language=self.ctx.language,
+            )
+            if not snapshot:
+                logger.debug(
+                    "[ReadPipeLine] 本次检索没有可展示的 Summary/Entity，跳过投递"
+                )
+                return
+
+            MemoryRetrievalDisplayQueue.enqueue_nowait(
+                RetrieveDisplayTask(
+                    id=uuid.uuid4(),
+                    operation_id=uuid.uuid4(),
+                    end_user_id=end_user_uuid,
+                    search_mode=search_mode,
+                    query=snapshot["query"],
+                    content=snapshot["content"],
+                    occurred_at=utcnow(),
+                )
+            )
+        except Exception as e:
+            logger.warning(
+                f"[ReadPipeLine] 读取展示投递失败（不影响主流程）: {e}",
+                exc_info=True,
+            )
+>>>>>>> c2157701 (feat(memory):memory-retrieve-display)
 
     async def _get_search_service(
             self,

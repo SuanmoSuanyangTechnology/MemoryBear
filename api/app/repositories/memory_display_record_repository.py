@@ -9,6 +9,7 @@ from typing import List, Tuple
 
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from app.models.end_user_model import EndUser
@@ -107,6 +108,86 @@ class MemoryDisplayRecordRepository:
         base_filter = (
             (MemoryDisplayRecord.end_user_id == end_user_id)
             & (MemoryDisplayRecord.operation == "WRITE")
+            & owned_by_workspace
+        )
+
+        total = (
+            self.db.query(func.count(MemoryDisplayRecord.id))
+            .filter(base_filter)
+            .scalar()
+        ) or 0
+
+        offset = (page - 1) * pagesize
+        items = (
+            self.db.query(MemoryDisplayRecord)
+            .filter(base_filter)
+            .order_by(
+                MemoryDisplayRecord.occurred_at.desc(),
+                MemoryDisplayRecord.id.desc(),
+            )
+            .offset(offset)
+            .limit(pagesize)
+            .all()
+        )
+
+        return items, total
+
+    @staticmethod
+    async def bulk_insert_retrieved_async(
+        db: AsyncSession,
+        rows: List[dict],
+    ) -> int:
+        """异步批量插入读取展示记录（operation = 'RETRIEVE'）。
+
+        不指定冲突目标：主键或部分唯一索引
+        ``uq_memory_display_retrieve_user_operation`` 任一冲突都视为已成功写入，
+        consumer 重试因此天然幂等。
+
+        Args:
+            db: AsyncSession
+            rows: 已聚合好的行（由 RetrieveDisplayTask.to_row() 生成）
+
+        Returns:
+            实际插入的行数
+        """
+        if not rows:
+            return 0
+
+        stmt = pg_insert(MemoryDisplayRecord).values(rows)
+        stmt = stmt.on_conflict_do_nothing()
+
+        result = await db.execute(stmt)
+        await db.commit()
+        return result.rowcount or 0
+
+    def query_retrieved_paginated(
+        self,
+        end_user_id: uuid.UUID,
+        workspace_id: uuid.UUID,
+        page: int,
+        pagesize: int,
+    ) -> Tuple[List[MemoryDisplayRecord], int]:
+        """按 occurred_at DESC, id DESC 分页查询读取展示记录。
+
+        一次检索已经是一行，不再按 operation_id 分组或二次取明细。
+        查询附加 end_users 归属条件并限定 workspace_id，防止跨工作空间越权读取。
+
+        Returns:
+            (记录列表, 总条数)
+        """
+        owned_by_workspace = (
+            select(EndUser.id)
+            .where(
+                EndUser.id == end_user_id,
+                EndUser.workspace_id == workspace_id,
+                EndUser.is_active.is_(True),
+            )
+            .exists()
+        )
+
+        base_filter = (
+            (MemoryDisplayRecord.end_user_id == end_user_id)
+            & (MemoryDisplayRecord.operation == "RETRIEVE")
             & owned_by_workspace
         )
 

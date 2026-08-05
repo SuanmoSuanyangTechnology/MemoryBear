@@ -1,6 +1,6 @@
 """记忆展示控制器
 
-提供写入展示记录和引擎动态卡片的分页查询接口。
+提供写入展示记录、读取展示卡片和引擎动态卡片的分页查询接口。
 """
 
 import uuid
@@ -19,6 +19,7 @@ from app.models.user_model import User
 from app.schemas.response_schema import ApiResponse, PageData, PageMeta
 from app.services.memory_display_record_service import MemoryDisplayRecordService
 from app.services.memory_engine_display_service import MemoryEngineDisplayService
+from app.services.memory_retrieval_display_service import MemoryRetrievalDisplayService
 
 api_logger = get_api_logger()
 
@@ -102,6 +103,85 @@ async def get_written_memories(
             exc_info=True,
         )
         return fail(BizCode.INTERNAL_ERROR, "写入展示记录查询失败", str(e))
+
+
+@router.get("/retrieved", response_model=ApiResponse)
+async def get_retrieved_memories(
+    end_user_id: str = Query(..., description="终端用户 ID"),
+    page: int = Query(1, ge=1, description="页码，从 1 开始"),
+    pagesize: int = Query(10, ge=1, le=100, description="每页数量"),
+    language_type: str = Header(default=None, alias="X-Language-Type"),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    """获取读取展示卡片列表
+
+    一次用户可见的记忆检索对应一条记录，按 occurred_at 倒序分页。
+
+    X-Language-Type 只决定 search_mode 的展示文案；content 在检索发生时
+    已按当时的记忆语言聚合为快照，查询时不再翻译其中的“相关内容 / Related”文案。
+    """
+    workspace_id = current_user.current_workspace_id
+    if workspace_id is None:
+        return fail(
+            BizCode.INVALID_PARAMETER,
+            "请先切换到一个工作空间",
+            "current_workspace_id is None",
+        )
+
+    if not end_user_id or not end_user_id.strip():
+        return fail(
+            BizCode.MISSING_PARAMETER,
+            "end_user_id 不能为空",
+            "end_user_id is required",
+        )
+
+    normalized_end_user_id = end_user_id.strip()
+    try:
+        end_user_uuid = uuid.UUID(normalized_end_user_id)
+    except (ValueError, AttributeError):
+        return fail(
+            BizCode.INVALID_PARAMETER,
+            "无效的 end_user_id",
+            f"'{normalized_end_user_id}' is not a valid UUID",
+        )
+
+    try:
+        language = get_language_from_header(language_type)
+        query_result = MemoryRetrievalDisplayService.query_retrieved(
+            db=db,
+            end_user_id=end_user_uuid,
+            workspace_id=workspace_id,
+            language=language,
+            page=page,
+            pagesize=pagesize,
+        )
+        if query_result is None:
+            return fail(
+                BizCode.USER_NOT_FOUND,
+                "终端用户不存在",
+                "end_user not found in current workspace",
+            )
+        result_items, total = query_result
+
+        page_meta = PageMeta(
+            page=page,
+            pagesize=pagesize,
+            total=total,
+            hasnext=(page * pagesize < total),
+        )
+
+        return success(
+            data=PageData(page=page_meta, items=result_items),
+            msg="查询成功",
+        )
+
+    except Exception as e:
+        api_logger.error(
+            f"读取展示记录查询失败: end_user_id={end_user_id}, error={e}",
+            exc_info=True,
+        )
+        return fail(BizCode.INTERNAL_ERROR, "读取展示记录查询失败", str(e))
 
 
 @router.get("/engines", response_model=ApiResponse)
