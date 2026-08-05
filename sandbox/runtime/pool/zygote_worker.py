@@ -393,21 +393,33 @@ class Zygote:
         # WNOHANG returns (0,0) for a live child, (pid,status) for a zombie.
         # os.kill(pid,0) also succeeds on zombies -> false positives on every
         # timeout/SIGKILL.  Only flag it when the child is genuinely still alive.
+        # IMPORTANT: waitpid(WNOHANG) REAPS the zombie, so we must save the
+        # status here — a second waitpid() would fail with ChildProcessError.
+        status = None
         try:
-            alive = os.waitpid(pid, os.WNOHANG)[0] == 0
+            wpid, status = os.waitpid(pid, os.WNOHANG)
+            alive = wpid == 0
+            if alive:
+                status = None  # child still running, no status yet
         except ChildProcessError:
             alive = False
+            status = None
         if alive:
             self._send(P.MSG_STDERR, req_id, b"process terminated")
-        self.reqs.pop(req_id, None)
-        try:
-            os.kill(pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-        try:
-            _, status = os.waitpid(pid, 0)
+            self.reqs.pop(req_id, None)
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            try:
+                _, status = os.waitpid(pid, 0)
+            except ChildProcessError:
+                pass
+        else:
+            self.reqs.pop(req_id, None)
+        if status is not None:
             exit_code = os.waitstatus_to_exitcode(status)
-        except ChildProcessError:
+        else:
             exit_code = -1
         self._send(P.MSG_DONE, req_id, P.DONE_STRUCT.pack(exit_code))
 
