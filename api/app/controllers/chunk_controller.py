@@ -95,7 +95,7 @@ router = APIRouter(
 )
 
 
-@router.get("/{kb_id}/{document_id}/previewchunks", response_model=ApiResponse)
+# @router.get("/{kb_id}/{document_id}/previewchunks", response_model=ApiResponse)
 async def get_preview_chunks(
         kb_id: uuid.UUID,
         document_id: uuid.UUID,
@@ -300,7 +300,7 @@ async def get_preview_chunks(
     return success(data=jsonable_encoder(result), msg="Querying the document block preview list succeeded")
 
 
-@router.post("/{kb_id}/{document_id}/preview", response_model=ApiResponse)
+# @router.post("/{kb_id}/{document_id}/preview", response_model=ApiResponse)
 async def get_preview_chunks_hierarchy(
         kb_id: uuid.UUID,
         document_id: uuid.UUID,
