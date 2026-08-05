@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.logging_config import get_api_logger
-from app.core.rag.chunk.hierarchy import validate_parent_child_result
+from app.core.rag.chunk.hierarchy import GroupedChildChunks, validate_parent_child_result
 from app.core.rag.chunk.metadata import merge_parser_metadata
 from app.core.rag.knowledge_graph.dispatch import dispatch_document_graph_sync
 from app.core.rag.llm.cv_model import QWenCV
@@ -188,12 +188,13 @@ async def get_preview_chunks(
             source_file_id=str(db_document.file_id),
             source_file_name=db_file.file_name,
         )
-        validate_parent_child_result(
-            child_res,
-            parent_res,
-            parent_id_map,
-            str((db_document.parser_config or {}).get("parent_chunk_mode") or "paragraph"),
-        )
+        if isinstance(child_res, GroupedChildChunks):
+            validate_parent_child_result(
+                child_res,
+                parent_res,
+                parent_id_map,
+                str((db_document.parser_config or {}).get("parent_chunk_mode") or "paragraph"),
+            )
         # Combine parent and child chunks for preview
         parent_id_to_doc_id = {}
         all_preview = []
@@ -408,6 +409,7 @@ async def get_preview_chunks_hierarchy(
                 chunk_mode="parent_child",
                 parent_chunks=parent_res,
                 parent_id_map=parent_id_map,
+                parent_chunk_mode=str(parser_config.get("parent_chunk_mode") or "paragraph"),
             )
         elif chunk_mode == "qa":
             res = await asyncio.to_thread(

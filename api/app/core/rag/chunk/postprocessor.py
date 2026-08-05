@@ -3,7 +3,7 @@ import copy
 from app.core.rag.nlp import add_positions, tokenize
 
 from .context import ChunkContext, LogicalChunk, LogicalChunkType, MergeResult, ParseResult
-from .hierarchy import validate_parent_child_result
+from .hierarchy import GroupedChildChunks, validate_parent_child_result
 
 
 ZERO_WIDTH_TRANSLATION = str.maketrans("", "", "\u200b\u200c\u200d\ufeff")
@@ -54,7 +54,7 @@ class ChunkPostProcessor:
         ctx: ChunkContext,
         merge_result: MergeResult,
     ) -> tuple[list[dict], list[dict], dict[int, int]]:
-        child_chunks: list[dict] = []
+        child_chunks = GroupedChildChunks()
         parent_chunks: list[dict] = []
         parent_id_map: dict[int, int] = {}
         mode = str(ctx.parser_config.get("parent_chunk_mode") or "paragraph")

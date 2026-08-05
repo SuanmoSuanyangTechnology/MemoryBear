@@ -1,6 +1,10 @@
 from typing import Any
 
 
+class GroupedChildChunks(list[dict]):
+    pass
+
+
 def validate_parent_child_result(
     child_chunks: list[Any],
     parent_chunks: list[Any],

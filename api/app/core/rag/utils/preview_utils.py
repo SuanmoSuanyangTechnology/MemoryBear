@@ -1,7 +1,7 @@
 from collections import defaultdict
 from copy import deepcopy
 
-from app.core.rag.chunk.hierarchy import validate_parent_child_result
+from app.core.rag.chunk.hierarchy import GroupedChildChunks, validate_parent_child_result
 from app.core.rag.models.chunk import DocumentChunk, ChildDocumentChunk
 
 
@@ -19,6 +19,7 @@ def _build_preview_hierarchy(
     chunk_mode: str = "normal",
     parent_chunks: list[dict] | None = None,
     parent_id_map: dict[int, int] | None = None,
+    parent_chunk_mode: str | None = None,
 ) -> list[DocumentChunk]:
     """
     将原始分块结果转换为嵌套结构 DocumentChunk。
@@ -28,6 +29,7 @@ def _build_preview_hierarchy(
         chunk_mode: 分块模式，取值 "normal" | "parent_child" | "qa"
         parent_chunks: 父子模式下传入父块列表
         parent_id_map: 父子模式下子块索引 → 父块索引的映射
+        parent_chunk_mode: 父子模式下的父块模式
 
     Returns:
         嵌套结构的 DocumentChunk 列表
@@ -35,7 +37,12 @@ def _build_preview_hierarchy(
     if chunk_mode == "parent_child":
         if parent_chunks is None or parent_id_map is None:
             raise ValueError("parent_child mode requires parent_chunks and parent_id_map")
-        return _build_parent_child_hierarchy(parent_chunks, chunks, parent_id_map)
+        return _build_parent_child_hierarchy(
+            parent_chunks,
+            chunks,
+            parent_id_map,
+            parent_chunk_mode,
+        )
 
     if chunk_mode == "qa":
         return _build_qa_hierarchy(chunks)
@@ -59,6 +66,7 @@ def _build_parent_child_hierarchy(
     parent_chunks: list[dict],
     child_chunks: list[dict],
     parent_id_map: dict[int, int],
+    parent_chunk_mode: str | None = None,
 ) -> list[DocumentChunk]:
     """
     父子分块模式：将父块和子块组织为嵌套结构。
@@ -67,7 +75,9 @@ def _build_parent_child_hierarchy(
     value 是父块在 parent_chunks 中的索引。
     子块按 child_idx 排序，确保 children 列表顺序与父块拼接文本一致。
     """
-    validate_parent_child_result(child_chunks, parent_chunks, parent_id_map, "preview parent_child")
+    if isinstance(child_chunks, GroupedChildChunks):
+        mode = str(parent_chunk_mode or "paragraph")
+        validate_parent_child_result(child_chunks, parent_chunks, parent_id_map, f"preview {mode}")
 
     # 将子块按父块索引分组
     parent_to_children: dict[int, list[tuple[int, dict]]] = defaultdict(list)
