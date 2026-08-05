@@ -390,37 +390,34 @@ class Zygote:
             return
 
         pid = req["pid"]
-        # WNOHANG returns (0,0) for a live child, (pid,status) for a zombie.
-        # os.kill(pid,0) also succeeds on zombies -> false positives on every
-        # timeout/SIGKILL.  Only flag it when the child is genuinely still alive.
-        # IMPORTANT: waitpid(WNOHANG) REAPS the zombie, so we must save the
-        # status here — a second waitpid() would fail with ChildProcessError.
-        status = None
+        self.reqs.pop(req_id, None)
+
+        # Wait with WNOHANG to distinguish zombie (already exited) from a live
+        # child that merely closed its stdio.  WNOHANG returns (0, 0) for a live
+        # child and (pid, status) for a zombie — and REAPS the zombie.
         try:
-            wpid, status = os.waitpid(pid, os.WNOHANG)
-            alive = wpid == 0
-            if alive:
-                status = None  # child still running, no status yet
+            wpid, zombie_status = os.waitpid(pid, os.WNOHANG)
         except ChildProcessError:
-            alive = False
-            status = None
-        if alive:
+            # Already reaped (shouldn't happen, but handle gracefully).
+            self._send(P.MSG_DONE, req_id, P.DONE_STRUCT.pack(-1))
+            return
+
+        if wpid != 0:
+            # ── Path 1: child already exited (zombie, now reaped) ──
+            exit_code = os.waitstatus_to_exitcode(zombie_status)
+        else:
+            # ── Path 2: child still running but closed stdio ──
             self._send(P.MSG_STDERR, req_id, b"process terminated")
-            self.reqs.pop(req_id, None)
             try:
                 os.kill(pid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
             try:
-                _, status = os.waitpid(pid, 0)
+                _, kill_status = os.waitpid(pid, 0)
+                exit_code = os.waitstatus_to_exitcode(kill_status)
             except ChildProcessError:
-                pass
-        else:
-            self.reqs.pop(req_id, None)
-        if status is not None:
-            exit_code = os.waitstatus_to_exitcode(status)
-        else:
-            exit_code = -1
+                exit_code = -1
+
         self._send(P.MSG_DONE, req_id, P.DONE_STRUCT.pack(exit_code))
 
     # ------------------------------------------------------------------ loop
