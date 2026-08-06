@@ -2,6 +2,7 @@ import re
 
 from .pipeline.docx import DocxChunkPipeline
 from .pipeline.excel import ExcelChunkPipeline
+from .pipeline.image import ImageChunkPipeline
 from .pipeline.media import AudioChunkPipeline, PictureVideoChunkPipeline
 from .pipeline.pdf import PdfChunkPipeline, PresentationChunkPipeline
 from .pipeline.text import (
@@ -23,7 +24,9 @@ class FileTypeRouter:
             return PresentationChunkPipeline()
         if re.search(r"\.(da|wave|wav|mp3|aac|flac|ogg|aiff|au|midi|wma|realaudio|vqf|oggvorbis|ape?)$", filename, re.IGNORECASE):
             return AudioChunkPipeline()
-        if re.search(r"\.(png|jpeg|jpg|gif|bmp|svg|mp4|mov|avi|flv|mpeg|mpg|webm|wmv|3gp|3gpp|mkv?)$", filename, re.IGNORECASE):
+        if re.search(r"\.(png|jpeg|jpg|webp|gif)$", filename, re.IGNORECASE):
+            return ImageChunkPipeline()
+        if re.search(r"\.(mp4|mov|avi|flv|mpeg|mpg|webm|wmv|3gp|3gpp|mkv?)$", filename, re.IGNORECASE):
             return PictureVideoChunkPipeline()
         if re.search(r"\.(csv|xlsx?)$", filename, re.IGNORECASE):
             return ExcelChunkPipeline()
