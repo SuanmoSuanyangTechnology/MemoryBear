@@ -159,9 +159,13 @@ async def get_knowledgeshare_by_id_async(
         current_user: User
 ) -> KnowledgeShare | None:
     try:
-        return await knowledgeshare_repository.get_knowledgeshare_by_id_async(
+        workspace_id = current_user.current_workspace_id
+        if workspace_id is None:
+            return None
+        return await knowledgeshare_repository.get_knowledgeshare_by_id_in_source_workspace_async(
             db=db,
             knowledgeshare_id=knowledgeshare_id,
+            source_workspace_id=workspace_id,
         )
     except Exception as e:
         business_logger.error(f"Failed to query knowledge share (async): knowledgeshare_id={knowledgeshare_id} - {str(e)}")
@@ -190,9 +194,13 @@ async def delete_knowledgeshare_by_id_async(db: AsyncSession, knowledgeshare_id:
     business_logger.info(f"Delete knowledge base sharing (async): knowledgeshare_id={knowledgeshare_id}, operator: {current_user.username}")
 
     try:
-        await knowledgeshare_repository.delete_knowledgeshare_by_id_async(
+        workspace_id = current_user.current_workspace_id
+        if workspace_id is None:
+            return
+        await knowledgeshare_repository.delete_knowledgeshare_by_id_in_source_workspace_async(
             db=db,
             knowledgeshare_id=knowledgeshare_id,
+            source_workspace_id=workspace_id,
         )
         business_logger.info(
             f"knowledge base sharing deleted successfully (async): "

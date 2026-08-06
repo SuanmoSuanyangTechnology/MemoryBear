@@ -504,7 +504,14 @@ def get_knowledge_by_id(db: Session, knowledge_id: uuid.UUID, current_user: User
     business_logger.debug(f"Query knowledge base based on ID: knowledge_id={knowledge_id}, username: {current_user.username}")
     
     try:
-        knowledge = knowledge_repository.get_knowledge_by_id(db=db, knowledge_id=knowledge_id)
+        workspace_id = current_user.current_workspace_id
+        if workspace_id is None:
+            return None
+        knowledge = knowledge_repository.get_knowledge_by_id_in_workspace(
+            db=db,
+            knowledge_id=knowledge_id,
+            workspace_id=workspace_id,
+        )
         if knowledge:
             business_logger.info(f"knowledge base query successful: {knowledge.name} (ID: {knowledge_id})")
         else:
@@ -519,7 +526,14 @@ async def get_knowledge_by_id_async(db: AsyncSession, knowledge_id: uuid.UUID, c
     business_logger.debug(f"Query knowledge base by ID (async): knowledge_id={knowledge_id}, username: {current_user.username}")
 
     try:
-        return await knowledge_repository.get_knowledge_by_id_async(db=db, knowledge_id=knowledge_id)
+        workspace_id = current_user.current_workspace_id
+        if workspace_id is None:
+            return None
+        return await knowledge_repository.get_knowledge_by_id_in_workspace_async(
+            db=db,
+            knowledge_id=knowledge_id,
+            workspace_id=workspace_id,
+        )
     except Exception as e:
         business_logger.error(f"Failed to query knowledge by ID (async): knowledge_id={knowledge_id} - {str(e)}")
         raise
