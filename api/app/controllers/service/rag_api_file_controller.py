@@ -142,11 +142,8 @@ async def custom_text(
 
 
 @router.get("/{file_id}", response_model=Any)
-@require_api_key(scopes=["rag"])
 async def get_file(
     file_id: uuid.UUID,
-    request: Request,
-    api_key_auth: ApiKeyAuth = None,
     db: Session = Depends(get_db),
     storage_service: FileStorageService = Depends(get_file_storage_service),
 ) -> Any:
@@ -156,17 +153,10 @@ async def get_file(
     - Construct the file path and check if it exists
     - Return a FileResponse to download the file
     """
-    api_key = api_key_service.ApiKeyService.get_api_key(
-        db,
-        api_key_auth.api_key_id,
-        api_key_auth.workspace_id,
-    )
-    current_user = get_api_key_request_user(api_key, api_key_auth)
-
     return await file_controller.get_file(
         file_id=file_id,
         db=db,
-        current_user=current_user,
+        current_user=None,
         storage_service=storage_service,
     )
 
