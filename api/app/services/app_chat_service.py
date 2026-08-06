@@ -5,7 +5,7 @@ import time
 import uuid
 from types import SimpleNamespace
 from typing import Optional, Dict, Any, AsyncGenerator, Annotated, List, Literal
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import Depends
 from sqlalchemy import select
@@ -111,9 +111,9 @@ class AppChatService:
 
     def __init__(self, db: Session | AsyncSession):
         self.db = db
-        self.conversation_service = ConversationService(db)
-        self.agent_service = AgentRunService(db)
-        self.workflow_service = WorkflowService(db)
+        self.conversation_service: ConversationService = ConversationService(db)
+        self.agent_service: AgentRunService = AgentRunService(db)
+        self.workflow_service: WorkflowService = WorkflowService(db)
 
     def _uses_async_session(self) -> bool:
         return isinstance(self.db, AsyncSession)
@@ -572,27 +572,50 @@ class AppChatService:
             )
             system_prompt = system_prompt_rendered.get_text_content() or system_prompt
 
-        # 准备工具列表
+        # 并行加载工具/技能/知识库/记忆配置（各自独立 DB 会话，无相互依赖）
         tools = []
-
-        # 获取工具服务
-        base_tools = await self.agent_service.load_tools_config(config.tools, web_search, tenant_id, user_id, workspace_id)
-        tools.extend(base_tools)
-        skill_tools, skill_prompts = await self.agent_service.load_skill_config(
-            config.skills, message, tenant_id, user_id, workspace_id
-        )
-        tools.extend(skill_tools)
-        if skill_prompts:
-            system_prompt = f"{system_prompt}\n\n{skill_prompts}"
-        kb_tools, citations_collector = await self.agent_service.load_knowledge_retrieval_config(
-            config.knowledge_retrieval, user_id
-        )
-        tools.extend(kb_tools)
+        _ws_id = uuid.UUID(workspace_id) if isinstance(workspace_id, str) else workspace_id
+        coros = [
+            self.agent_service.load_tools_config(config.tools, web_search, tenant_id, user_id, workspace_id),
+            self.agent_service.load_skill_config(config.skills, message, tenant_id, user_id, workspace_id),
+            self.agent_service.load_knowledge_retrieval_config(config.knowledge_retrieval, user_id),
+        ]
         if memory:
-            memory_tools, _ = await self.agent_service.load_memory_config(
-                config.memory, user_id, uuid.UUID(workspace_id) if isinstance(workspace_id, str) else workspace_id, storage_type, user_rag_memory_id
+            coros.append(
+                self.agent_service.load_memory_config(config.memory, user_id, _ws_id, storage_type, user_rag_memory_id)
             )
+        parallel_results = await asyncio.gather(*coros, return_exceptions=True)
+
+        base_tools = parallel_results[0]
+        skill_result = parallel_results[1]
+        kb_result = parallel_results[2]
+        memory_result = parallel_results[3] if memory else None
+
+        if not isinstance(base_tools, Exception):
+            tools.extend(base_tools)
+        else:
+            logger.warning("load_tools_config failed: %s", base_tools)
+
+        if not isinstance(skill_result, Exception) and skill_result is not None:
+            skill_tools, skill_prompts = skill_result
+            tools.extend(skill_tools)
+            if skill_prompts:
+                system_prompt = f"{system_prompt}\n\n{skill_prompts}"
+        elif isinstance(skill_result, Exception):
+            logger.warning("load_skill_config failed: %s", skill_result)
+
+        if not isinstance(kb_result, Exception) and kb_result is not None:
+            kb_tools, citations_collector = kb_result
+            tools.extend(kb_tools)
+        elif isinstance(kb_result, Exception):
+            logger.warning("load_knowledge_retrieval_config failed: %s", kb_result)
+            citations_collector = []
+
+        if memory_result is not None and not isinstance(memory_result, Exception):
+            memory_tools, _ = memory_result
             tools.extend(memory_tools)
+        elif isinstance(memory_result, Exception):
+            logger.warning("load_memory_config failed: %s", memory_result)
 
         # 获取模型参数
         model_parameters = config.model_parameters
@@ -757,20 +780,7 @@ class AppChatService:
             agent_execution_id = await self._create_agent_execution(agent_exec_repo, agent_execution)
 
             try:
-                raw_result = await _sandbox_adapter.run(
-                    agent_config=config,
-                    model_config=None,
-                    api_key_config=_api_key_config,
-                    message=message,
-                    workspace_id=str(_ws_id),
-                    user_id=user_id,
-                    conversation_id=str(conversation_id),
-                    system_prompt=system_prompt,
-                    tools_serialized=sandbox_payload["agent_config"]["tools"],
-                    history=history,
-                    context=None,
-                    variables=variables,
-                )
+                raw_result = await _sandbox_adapter.run(sandbox_payload=sandbox_payload)
                 result = {
                     "content": raw_result.get("content", ""),
                     "reasoning_content": "",
@@ -1049,6 +1059,8 @@ class AppChatService:
     ) -> AsyncGenerator[str, None]:
         """聊天（流式）"""
 
+        save_messages_enqueued = False
+
         try:
             start_time = time.time()
             message_id = uuid.uuid4()
@@ -1117,26 +1129,50 @@ class AppChatService:
                 )
                 system_prompt = system_prompt_rendered.get_text_content() or system_prompt
 
-            # 准备工具列表
+            # 并行加载工具/技能/知识库/记忆配置（各自独立 DB 会话，无相互依赖）
             tools = []
-
-            # 获取工具服务
-            base_tools = await self.agent_service.load_tools_config(config.tools, web_search, tenant_id, user_id, workspace_id)
-            tools.extend(base_tools)
-
-            skill_tools, skill_prompts = await self.agent_service.load_skill_config(config.skills, message, tenant_id, user_id, workspace_id)
-            tools.extend(skill_tools)
-            if skill_prompts:
-                system_prompt = f"{system_prompt}\n\n{skill_prompts}"
-            kb_tools, citations_collector = await self.agent_service.load_knowledge_retrieval_config(
-                config.knowledge_retrieval, user_id)
-            tools.extend(kb_tools)
-            # 添加长期记忆工具
+            _ws_id = uuid.UUID(workspace_id) if isinstance(workspace_id, str) else workspace_id
+            coros = [
+                self.agent_service.load_tools_config(config.tools, web_search, tenant_id, user_id, workspace_id),
+                self.agent_service.load_skill_config(config.skills, message, tenant_id, user_id, workspace_id),
+                self.agent_service.load_knowledge_retrieval_config(config.knowledge_retrieval, user_id),
+            ]
             if memory:
-                memory_tools, _ = await self.agent_service.load_memory_config(
-                    config.memory, user_id, uuid.UUID(workspace_id) if isinstance(workspace_id, str) else workspace_id, storage_type, user_rag_memory_id
+                coros.append(
+                    self.agent_service.load_memory_config(config.memory, user_id, _ws_id, storage_type, user_rag_memory_id)
                 )
+            parallel_results = await asyncio.gather(*coros, return_exceptions=True)
+
+            base_tools = parallel_results[0]
+            skill_result = parallel_results[1]
+            kb_result = parallel_results[2]
+            memory_result = parallel_results[3] if memory else None
+
+            if not isinstance(base_tools, Exception):
+                tools.extend(base_tools)
+            else:
+                logger.warning("load_tools_config failed: %s", base_tools)
+
+            if not isinstance(skill_result, Exception) and skill_result is not None:
+                skill_tools, skill_prompts = skill_result
+                tools.extend(skill_tools)
+                if skill_prompts:
+                    system_prompt = f"{system_prompt}\n\n{skill_prompts}"
+            elif isinstance(skill_result, Exception):
+                logger.warning("load_skill_config failed: %s", skill_result)
+
+            if not isinstance(kb_result, Exception) and kb_result is not None:
+                kb_tools, citations_collector = kb_result
+                tools.extend(kb_tools)
+            elif isinstance(kb_result, Exception):
+                logger.warning("load_knowledge_retrieval_config failed: %s", kb_result)
+                citations_collector = []
+
+            if memory_result is not None and not isinstance(memory_result, Exception):
+                memory_tools, _ = memory_result
                 tools.extend(memory_tools)
+            elif isinstance(memory_result, Exception):
+                logger.warning("load_memory_config failed: %s", memory_result)
 
             # 获取模型参数
             model_parameters = config.model_parameters
@@ -1329,6 +1365,10 @@ class AppChatService:
             _api_key_model_name = api_key_obj.model_name
             _api_key_provider = api_key_obj.provider
             _api_key_is_omni = api_key_obj.is_omni
+            # 预读 _release_id，避免 LLM 推理结束后重新获取 DB 连接
+            from app.models.app_model import App
+            _app_obj = await self._db_get(App, config.app_id)
+            _release_id = _app_obj.current_release_id if _app_obj else None
             # LLM 推理期间不再依赖共享 session，提前归还底层连接给连接池。
             await self._release_db_connection()
 
@@ -1506,12 +1546,31 @@ class AppChatService:
                     task_type="save_messages",
                     args=persist_args,
                 ))
+                save_messages_enqueued = True
+
+                # 记忆写入 + 派发：复用 conversation_service.dispatch_memory_sync
+                from app.models.conversation_model import Conversation
+
+                result_row = await self.db.execute(
+                    select(Conversation).where(Conversation.id == conversation_id)
+                )
+                conv = result_row.scalar_one_or_none()
+                if conv:
+                    now = datetime.now(timezone.utc)
+
+                    for m in [
+                        {"id": user_message_id, "role": "user", "content": message, "meta_data": human_meta, "should_memorize": memory},
+                        {"id": message_id, "role": "assistant", "content": full_content, "meta_data": assistant_meta, "should_memorize": True},
+                    ]:
+                        memorize = m.pop("should_memorize")
+                        self.conversation_service.dispatch_memory_sync(
+                            message=SimpleNamespace(conversation_id=conversation_id, created_at=now, **m),
+                            conversation=conv,
+                            should_memorize=memorize,
+                        )
 
                 # Enqueue agent execution after messages so the FK is satisfied
                 # within the same batch (messages commit first, then execution).
-                async with get_async_db_context() as _exec_db:
-                    _app_obj = await _exec_db.get(App, config.app_id)
-                    _release_id = _app_obj.current_release_id if _app_obj else None
                 await BatchPersistQueue.enqueue(PersistTask(
                     task_type="save_agent_execution",
                     args={
@@ -1542,8 +1601,6 @@ class AppChatService:
                     ))
             else:
                 async with get_async_db_context() as db:
-                    _app_obj = await db.get(App, config.app_id)
-                    _release_id = _app_obj.current_release_id if _app_obj else None
                     new_msg = Message(
                         id=message_id,
                         conversation_id=conversation_id,
@@ -1559,6 +1616,9 @@ class AppChatService:
                     if conv:
                         conv.message_count += 1
                     await db.commit()
+                # assistant 消息已直写成功，标记后异常分支不再入队 save_failed_message，
+                # 避免同一 message_id 主键冲突
+                save_messages_enqueued = True
                 from app.services.batch_persist_queue import BatchPersistQueue, PersistTask
                 await BatchPersistQueue.enqueue(PersistTask(
                     task_type="save_agent_execution",
@@ -1595,22 +1655,25 @@ class AppChatService:
         except Exception as e:
             logger.error(f"流式聊天失败: {str(e)}", exc_info=True)
             # 保存失败的消息，使前端可以展示失败状态
-            try:
-                from app.services.batch_persist_queue import BatchPersistQueue, PersistTask
-                await BatchPersistQueue.enqueue(PersistTask(
-                    task_type="save_failed_message",
-                    args={
-                        "conversation_id": str(conversation_id) if 'conversation_id' in locals() else "",
-                        "user_message_id": str(user_message_id) if 'user_message_id' in locals() else str(uuid.uuid4()),
-                        "message_id": str(message_id) if 'message_id' in locals() else str(uuid.uuid4()),
-                        "user_message_content": message if 'message' in locals() else "",
-                        "files_meta": [],
-                        "error_message": "An error occurred during generation.",
-                        "error_detail": str(e)[:2000],
-                    },
-                ))
-            except Exception:
-                pass
+            # 注意：如果 save_messages 已经入队，不要再入队 save_failed_message，
+            # 否则会因为相同的 message_id 导致 messages 表主键冲突。
+            if not save_messages_enqueued:
+                try:
+                    from app.services.batch_persist_queue import BatchPersistQueue, PersistTask
+                    await BatchPersistQueue.enqueue(PersistTask(
+                        task_type="save_failed_message",
+                        args={
+                            "conversation_id": str(conversation_id) if 'conversation_id' in locals() else "",
+                            "user_message_id": str(user_message_id) if 'user_message_id' in locals() else str(uuid.uuid4()),
+                            "message_id": str(message_id) if 'message_id' in locals() else str(uuid.uuid4()),
+                            "user_message_content": message if 'message' in locals() else "",
+                            "files_meta": [],
+                            "error_message": "An error occurred during generation.",
+                            "error_detail": str(e)[:2000],
+                        },
+                    ))
+                except Exception:
+                    pass
             # 失败场景也改成尾部一次写，避免依赖首包前 execution。
             try:
                 from app.services.batch_persist_queue import BatchPersistQueue, PersistTask
@@ -1737,6 +1800,8 @@ class AppChatService:
         if variables is None:
             variables = {}
 
+        save_messages_enqueued = False
+
         try:
             message_id = uuid.uuid4()
             user_message_id = uuid.uuid4()
@@ -1806,6 +1871,7 @@ class AppChatService:
                     "should_memorize": memory,
                 },
             ))
+            save_messages_enqueued = True
 
             logger.info(
                 "多 Agent 流式聊天完成",
@@ -1822,23 +1888,25 @@ class AppChatService:
             raise
         except Exception as e:
             logger.error(f"多 Agent 流式聊天失败: {str(e)}", exc_info=True)
-            # 保存失败的消息
-            try:
-                from app.services.batch_persist_queue import BatchPersistQueue, PersistTask
-                await BatchPersistQueue.enqueue(PersistTask(
-                    task_type="save_failed_message",
-                    args={
-                        "conversation_id": str(conversation_id) if 'conversation_id' in locals() else "",
-                        "user_message_id": str(user_message_id) if 'user_message_id' in locals() else str(uuid.uuid4()),
-                        "message_id": str(message_id) if 'message_id' in locals() else str(uuid.uuid4()),
-                        "user_message_content": message if 'message' in locals() else "",
-                        "files_meta": [],
-                        "error_message": "An error occurred during generation.",
-                        "error_detail": str(e)[:2000],
-                    },
-                ))
-            except Exception:
-                pass
+            # 如果 save_messages 已经入队，不要再入队 save_failed_message，
+            # 否则会因为相同的 message_id 导致 messages 表主键冲突。
+            if not save_messages_enqueued:
+                try:
+                    from app.services.batch_persist_queue import BatchPersistQueue, PersistTask
+                    await BatchPersistQueue.enqueue(PersistTask(
+                        task_type="save_failed_message",
+                        args={
+                            "conversation_id": str(conversation_id) if 'conversation_id' in locals() else "",
+                            "user_message_id": str(user_message_id) if 'user_message_id' in locals() else str(uuid.uuid4()),
+                            "message_id": str(message_id) if 'message_id' in locals() else str(uuid.uuid4()),
+                            "user_message_content": message if 'message' in locals() else "",
+                            "files_meta": [],
+                            "error_message": "An error occurred during generation.",
+                            "error_detail": str(e)[:2000],
+                        },
+                    ))
+                except Exception:
+                    pass
             # 发送错误事件
             yield f"event: error\ndata: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
 

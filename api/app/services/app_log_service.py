@@ -292,7 +292,7 @@ class AppLogService:
             select(WorkflowExecution)
             .where(
                 WorkflowExecution.conversation_id == conversation_id,
-                WorkflowExecution.status.in_(["completed", "failed", "waiting_human", "timeout"])
+                WorkflowExecution.status.in_(["completed", "failed", "waiting_human", "timeout", "cancelled"])
             )
             .order_by(WorkflowExecution.started_at.asc())
         )
@@ -445,6 +445,12 @@ class AppLogService:
             elif execution.status == "timeout":
                 output_content = execution.error_message or ""
                 meta = {"timeout": True, "error_node_id": execution.error_node_id, "elapsed_time": execution.elapsed_time}
+            elif execution.status == "cancelled":
+                output_content = _extract_text(execution.output_data) if execution.output_data else ""
+                meta = {"cancelled": True, "elapsed_time": execution.elapsed_time}
+                logical_outputs = _extract_workflow_outputs(execution.output_data) if execution.output_data else None
+                if logical_outputs:
+                    meta["outputs"] = logical_outputs
             else:
                 # failed 状态：优先用 error_message，不要 dump output_data
                 output_content = execution.error_message or ""
@@ -490,7 +496,7 @@ class AppLogService:
         # 查询该会话关联的所有工作流执行记录（按时间正序）
         stmt = select(WorkflowExecution).where(
             WorkflowExecution.conversation_id == conversation_id,
-            WorkflowExecution.status.in_(["completed", "failed", "waiting_human", "timeout"])
+            WorkflowExecution.status.in_(["completed", "failed", "waiting_human", "timeout", "cancelled"])
         ).order_by(WorkflowExecution.started_at.asc())
 
         executions = self.db.scalars(stmt).all()
