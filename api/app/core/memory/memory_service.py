@@ -445,10 +445,7 @@ class MemoryService:
         """检索记忆。
 
         Args:
-            record_display: 是否记录读取展示卡片。仅用户可见的记忆检索入口
-                （Agent 长期记忆工具、对话流记忆节点、服务端 /read/sync、MCP）
-                传 True；内部分析、调试和管理读取保持默认 False。
-                deep/normal/quick/express 之外的检索方式即使传 True 也不落库。
+            record_display: 是否记录读取展示卡片。
         """
         if history is None:
             history = []
