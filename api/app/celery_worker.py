@@ -26,6 +26,16 @@ try:
 except ImportError:
     pass  # 社区版无 premium 模块，静默跳过
 
+# 导入企业版消息通知中心任务（队列：notification_state_tasks）
+try:
+    from premium.platform_admin.notification_center.tasks import (  # noqa: F401
+        notification_publish_task,
+        notification_scan_expired_task,
+        notification_scan_scheduled_task,
+    )
+except ImportError:
+    pass  # 社区版无 premium 模块，静默跳过
+
 
 @worker_process_init.connect
 def _reinit_db_pool(**kwargs):
