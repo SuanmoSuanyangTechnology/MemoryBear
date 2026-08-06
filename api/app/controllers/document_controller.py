@@ -19,6 +19,7 @@ from app.core.rag.knowledge_graph.dispatch import (
     dispatch_document_graph_sync,
     enqueue_document_graph_sync,
 )
+from app.core.rag.chunk.parser.image_storage import cleanup_mineru_v3_images
 from app.core.rag.utils.redis_conn import REDIS_CONN
 from app.core.rag.vdb.elasticsearch.elasticsearch_vector import (
     ElasticSearchVectorFactory,
@@ -400,6 +401,14 @@ async def delete_document(
         )
 
         # 5. Delete file (storage errors are swallowed internally)
+        try:
+            await asyncio.to_thread(
+                cleanup_mineru_v3_images,
+                document_id,
+                storage_service=storage_service,
+            )
+        except Exception:
+            api_logger.warning("Failed to delete derived image assets: document_id=%s", document_id, exc_info=True)
         await _delete_file_record_async(db=db, file_id=file_id, storage_service=storage_service)
 
         # 6. Delete metadata bindings (app-level cleanup, FK no longer has CASCADE)
