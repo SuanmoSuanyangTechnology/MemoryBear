@@ -562,7 +562,13 @@ def create_long_term_memory_tool(
         """
         logger.info(f" 长期记忆工具被调用！question={question}, user={end_user_id}")
         try:
-            memory_service = await MemoryService.create(config_id, end_user_id, workspace_id=workspace_id)
+            memory_service = await MemoryService.create(
+                config_id,
+                end_user_id,
+                workspace_id=workspace_id,
+                storage_type=storage_type or "neo4j",
+                user_rag_memory_id=user_rag_memory_id,
+            )
             search_result = await memory_service.read(question, SearchStrategy(search_mode))
             return f"检索到以下历史记忆：\n\n{search_result.content}"
         except Exception as e:

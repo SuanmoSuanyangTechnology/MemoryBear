@@ -15,7 +15,7 @@ from app.dependencies import get_current_user
 from app.models import mcp_market_model
 from app.models.user_model import User
 from app.schemas import mcp_market_schema
-from app.schemas.response_schema import ApiResponse
+from app.schemas.response_schema import ApiResponse, PageData, PageMeta
 from app.services import mcp_market_service
 
 # Obtain a dedicated API logger
@@ -88,15 +88,9 @@ async def get_mcp_markets(
         )
 
     # 4. Return structured response
-    result = {
-        "items": items,
-        "page": {
-            "page": page,
-            "pagesize": pagesize,
-            "total": total,
-            "has_next": True if page * pagesize < total else False
-        }
-    }
+    page_items = [mcp_market_schema.McpMarket.model_validate(item) for item in items]
+    meta = PageMeta(page=page, pagesize=pagesize, total=total, hasnext=(page * pagesize) < total)
+    result = PageData(page=meta, items=page_items)
     return success(data=jsonable_encoder(result), msg="Query of mcp market list successful")
 
 

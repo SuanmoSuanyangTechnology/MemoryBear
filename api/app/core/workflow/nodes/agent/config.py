@@ -8,7 +8,7 @@
 
 import uuid
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.core.workflow.nodes.base_config import BaseNodeConfig, VariableDefinition
 from app.core.workflow.nodes.enums import HttpErrorHandle
@@ -26,6 +26,19 @@ from app.core.workflow.nodes.llm.config import (
     MemoryWindowSetting,
 )
 from app.core.workflow.variable.base_variable import VariableType
+from app.schemas.app_schema import KnowledgeRetrievalConfig
+
+
+class LongTermMemoryConfig(BaseModel):
+    """工作流 Agent 的长期记忆工具配置。
+
+    与 ``memory``（对话历史窗口）分开，语义对齐 Agent 应用的长期记忆开关。
+    """
+
+    enabled: bool = Field(
+        default=False,
+        description="是否启用长期记忆检索工具",
+    )
 
 
 class ToolSelector(BaseModel):
@@ -115,6 +128,30 @@ class AgentNodeConfig(BaseNodeConfig):
     Agent 节点内部自主循环思考、选择并调用工具，直到得出最终答案。
     """
 
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_flattened_knowledge_retrieval(cls, value):
+        """兼容早期前端将 Agent 知识库配置错误展开到节点根级的工作流。"""
+        if not isinstance(value, dict) or value.get("knowledge_retrieval") is not None:
+            return value
+        if "knowledge_bases" not in value:
+            return value
+
+        migrated = dict(value)
+        knowledge_config = {
+            key: migrated.pop(key)
+            for key in (
+                "knowledge_bases",
+                "merge_strategy",
+                "reranker_id",
+                "reranker_top_k",
+                "use_graph",
+            )
+            if key in migrated
+        }
+        migrated["knowledge_retrieval"] = knowledge_config
+        return migrated
+
     # 模型选择（复用 LLM 节点的 model 选择模式）
     model: AgentModelConfig = Field(
         default_factory=AgentModelConfig,
@@ -142,6 +179,16 @@ class AgentNodeConfig(BaseNodeConfig):
     tools: list[ToolSelector] = Field(
         default_factory=list,
         description="Agent 可用工具列表（从工具库选择）"
+    )
+
+    # Agent 内置上下文工具
+    knowledge_retrieval: KnowledgeRetrievalConfig | None = Field(
+        default=None,
+        description="关联的知识库检索工具配置；知识库为空时不启用",
+    )
+    long_term_memory: LongTermMemoryConfig = Field(
+        default_factory=LongTermMemoryConfig,
+        description="长期记忆检索工具配置；与对话历史窗口 memory 独立",
     )
 
     # Agent 行为参数

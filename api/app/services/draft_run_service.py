@@ -199,12 +199,20 @@ async def _retrieve_chunks_via_standard(query: str, kb_config: Dict[str, Any]) -
     )
 
     # 透传与 kb_ids 同源的 KB 配置,避免重复过滤导致漂移
+    # 配置了全局重排模型时，reranker_top_k 决定最终重排保留数量；
+    # 未配置重排时继续沿用第一个知识库的 top_k 作为请求级默认值。
+    request_top_k = (
+        _as_int(kb_config.get("reranker_top_k"), 10)
+        if rerank_id is not None
+        else _as_int(first_kb.get("top_k"), 3)
+    )
+
     request = KnowledgeRetrievalRequest(
         query=query,
         caller=KnowledgeRetrievalCaller.AGENT,
         kb_ids=[uuid.UUID(kid) for kid in kb_ids],
         knowledge_bases=valid_kbs,
-        top_k=_as_int(first_kb.get("top_k"), 3),
+        top_k=request_top_k,
         similarity_threshold=_as_float(first_kb.get("similarity_threshold"), 0.7),
         vector_similarity_weight=vector_similarity_weight,
         retrieve_type=retrieve_type,
