@@ -1,13 +1,16 @@
 import logging
 from pathlib import Path
 
-from app.core.rag.chunk.context import ParsedBlockType, ParseResult, is_image_vision_enabled
+from app.core.rag.chunk.context import (
+    ParsedBlockType,
+    ParseResult,
+    is_embedded_image_vision_enabled,
+)
 from app.core.rag.chunk.parser.base import DocumentParser
-from app.core.rag.chunk.parser.image_vision import enhance_image_blocks_with_vision
 from app.core.rag.chunk.parser.image_storage import store_mineru_v3_image
+from app.core.rag.chunk.parser.image_vision import enhance_image_blocks_with_vision
 from app.core.rag.chunk.parser.mineru_v3_client import MinerUV3Client
 from app.core.rag.chunk.parser.structured_markdown import StructMarkdownParser
-
 
 LOGGER = logging.getLogger(__name__)
 
@@ -19,27 +22,27 @@ class MinerUV3Parser(DocumentParser):
     def parse(self, ctx) -> ParseResult:
         binary = self._read_binary(ctx)
 
-        image_vision_enabled = is_image_vision_enabled(ctx.parser_config)
+        embedded_image_vision_enabled = is_embedded_image_vision_enabled(ctx.parser_config)
         mineru_result = self.client.parse(
             file_name=ctx.filename,
             binary=binary,
             start_page_id=ctx.from_page,
             end_page_id=ctx.to_page,
             callback=ctx.callback,
-            return_images=image_vision_enabled,
+            return_images=embedded_image_vision_enabled,
         )
         blocks = StructMarkdownParser().parse_text(
             mineru_result.markdown,
             normalize_escaped_structure=True,
         )
-        if image_vision_enabled:
+        if embedded_image_vision_enabled:
             attached_count, attached_images = self._attach_images(blocks, mineru_result.images)
             LOGGER.info("[MinerUV3] markdown images attached: count=%s", attached_count)
             self._store_image_assets(attached_images, ctx)
         else:
             LOGGER.info("[MinerUV3] image block processing disabled by parser config")
 
-        if ctx.vision_model and image_vision_enabled:
+        if ctx.vision_model and embedded_image_vision_enabled:
             self._enhance_image_blocks(blocks, ctx)
         elif ctx.vision_model:
             LOGGER.info("[MinerUV3] image vision enhancement disabled by parser config")

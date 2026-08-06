@@ -5,23 +5,30 @@ from typing import Any, Callable
 
 from app.core.rag.nlp import rag_tokenizer
 
-
 DEFAULT_PARSER_CONFIG = {
     "layout_recognize": "DeepDOC",
     "chunk_token_num": 512,
     "delimiter": "\n!?。；！？",
     "analyze_hyperlink": True,
-    "image_vision_enabled": True,
 }
 
 
-def is_image_vision_enabled(parser_config: dict | None) -> bool:
-    raw_value = (parser_config or {}).get("image_vision_enabled", True)
+def _scoped_vision_enabled(parser_config: dict | None, scope: str) -> bool:
+    scope_config = (parser_config or {}).get(scope)
+    raw_value = scope_config.get("vision_enabled", True) if isinstance(scope_config, dict) else True
     if isinstance(raw_value, bool):
         return raw_value
     if isinstance(raw_value, str):
         return raw_value.strip().lower() in {"1", "true", "yes", "on"}
     return bool(raw_value)
+
+
+def is_embedded_image_vision_enabled(parser_config: dict | None) -> bool:
+    return _scoped_vision_enabled(parser_config, "embedded_image")
+
+
+def is_direct_image_vision_enabled(parser_config: dict | None) -> bool:
+    return _scoped_vision_enabled(parser_config, "image")
 
 
 class ChunkOutputMode(str, Enum):
