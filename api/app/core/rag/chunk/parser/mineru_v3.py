@@ -17,10 +17,7 @@ class MinerUV3Parser(DocumentParser):
         self.client = client or MinerUV3Client()
 
     def parse(self, ctx) -> ParseResult:
-        binary = ctx.binary
-        if binary is None:
-            with open(ctx.filename, "rb") as file:
-                binary = file.read()
+        binary = self._read_binary(ctx)
 
         image_vision_enabled = is_image_vision_enabled(ctx.parser_config)
         mineru_result = self.client.parse(
@@ -47,6 +44,24 @@ class MinerUV3Parser(DocumentParser):
         elif ctx.vision_model:
             LOGGER.info("[MinerUV3] image vision enhancement disabled by parser config")
         return ParseResult(blocks=blocks, merge_strategy="blocks", markdown_preprocess_profile="mineru")
+
+    def parse_markdown(self, ctx) -> str:
+        binary = self._read_binary(ctx)
+        mineru_result = self.client.parse(
+            file_name=ctx.filename,
+            binary=binary,
+            start_page_id=ctx.from_page,
+            end_page_id=ctx.to_page,
+            callback=ctx.callback,
+            return_images=False,
+        )
+        return mineru_result.markdown
+
+    def _read_binary(self, ctx) -> bytes:
+        if ctx.binary is not None:
+            return ctx.binary
+        with open(ctx.filename, "rb") as file:
+            return file.read()
 
     def _attach_images(self, blocks, images):
         attached_count = 0
