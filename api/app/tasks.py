@@ -2534,7 +2534,7 @@ def write_message_task(
     Returns:
         Dict containing status, result, elapsed_time, task_id
     """
-
+    loop = set_asyncio_event_loop()
     # MCP 入口兼容：收到 messages 但无 target_message 时，转换为新格式
     if target_message is None and messages:
         msg = messages[0] if messages else {"role": "user", "content": ""}
@@ -2543,32 +2543,48 @@ def write_message_task(
         context_after = []
         skip_cursor_advance = True
 
-        # RAG 存储类型走独立路径
-        if storage_type and storage_type.lower() == "rag":
-            loop = None
-            try:
-                loop = set_asyncio_event_loop()
+    # 解析 end_user_id：若排队期间用户已被合并，自动路由到目标用户
+    resolved_end_user_id = end_user_id
+    try:
+        with get_db_context() as db:
+            from app.repositories.end_user_repository import EndUserRepository
+            repo = EndUserRepository(db)
+            resolved = repo.resolve_merge_by_origin_id(uuid.UUID(end_user_id))
+            if resolved:
+                logger.info(
+                    f"[CELERY WRITE] end_user_id merged, redirecting: "
+                    f"{end_user_id} → {resolved.id}"
+                )
+                resolved_end_user_id = str(resolved.id)
+    except Exception as e:
+        logger.warning(
+            f"[CELERY WRITE] merge resolution failed for {end_user_id}: {e}, "
+            f"falling back to original ID"
+        )
 
-                async def _rag_write():
-                    from app.core.memory.memory_service import MemoryService
-                    await MemoryService.write_messages_to_rag(
-                        messages=messages,
-                        end_user_id=end_user_id,
-                        user_rag_memory_id=user_rag_memory_id,
-                    )
+    # RAG 存储类型走独立路径
+    if storage_type and storage_type.lower() == "rag":
+        try:
+            async def _rag_write():
+                from app.core.memory.memory_service import MemoryService
+                await MemoryService.write_messages_to_rag(
+                    messages=messages,
+                    end_user_id=resolved_end_user_id,
+                    user_rag_memory_id=user_rag_memory_id,
+                )
 
-                loop.run_until_complete(_rag_write())
-                return {"status": "SUCCESS", "result": "rag_write_complete", "task_id": self.request.id}
-            except Exception as e:
-                logger.error(f"[CELERY WRITE] RAG write failed: {e}", exc_info=True)
-                return {"status": "FAILURE", "error": str(e), "task_id": self.request.id}
-            finally:
-                if loop:
-                    _shutdown_loop_gracefully(loop)
+            loop.run_until_complete(_rag_write())
+            return {"status": "SUCCESS", "result": "rag_write_complete", "task_id": self.request.id}
+        except Exception as e:
+            logger.error(f"[CELERY WRITE] RAG write failed: {e}", exc_info=True)
+            return {"status": "FAILURE", "error": str(e), "task_id": self.request.id}
+        finally:
+            if loop:
+                _shutdown_loop_gracefully(loop)
 
     # 新格式：直接调用 MemoryService.write()
     logger.info(
-        f"[CELERY WRITE] Starting - end_user_id={end_user_id}, "
+        f"[CELERY WRITE] Starting - end_user_id={resolved_end_user_id}, "
         f"config_id={config_id}, conv={conversation_id or '-'}, "
         f"seq={message_seq}, language={language}"
     )
@@ -2579,7 +2595,7 @@ def write_message_task(
 
         service = MemoryService(
             config_id=uuid.UUID(config_id),
-            end_user_id=end_user_id,
+            end_user_id=resolved_end_user_id,
             workspace_id=workspace_id,
             language=language,
         )
@@ -2597,10 +2613,8 @@ def write_message_task(
         )
         return {"status": result.status, "extraction": result.extraction}
 
-    loop = None
     try:
         task_start_time = int(time.time())
-        loop = set_asyncio_event_loop()
 
         result = loop.run_until_complete(_run())
         elapsed_time = time.time() - start_time
@@ -2613,7 +2627,7 @@ def write_message_task(
             if redis_client is not None:
                 from datetime import timezone as _tz
                 _now_utc = to_iso_z(datetime.now(_tz.utc))
-                redis_client.set(f"write_message:last_done:{end_user_id}", _now_utc, ex=86400 * 30)
+                redis_client.set(f"write_message:last_done:{resolved_end_user_id}", _now_utc, ex=86400 * 30)
         except Exception as _e:
             logger.warning(f"[CELERY WRITE] 写入 last_done 时间戳失败: {_e}")
 
@@ -2625,7 +2639,7 @@ def write_message_task(
             async def _sync_count():
                 connector = Neo4jConnector()
                 try:
-                    return await sync_end_user_memory_count_from_neo4j(end_user_id, connector)
+                    return await sync_end_user_memory_count_from_neo4j(resolved_end_user_id, connector)
                 finally:
                     await connector.close()
 
@@ -2637,7 +2651,7 @@ def write_message_task(
         try:
             from app.services.memory_reflection_service import WorkspaceAppService
             with get_db_context() as db:
-                WorkspaceAppService(db).update_end_user_write_time(end_user_id)
+                WorkspaceAppService(db).update_end_user_write_time(resolved_end_user_id)
         except Exception as _wt_e:
             logger.warning(f"[CELERY WRITE] 更新 write_time 失败: {_wt_e}")
 
@@ -2730,8 +2744,27 @@ def fast_write_message_task(
     Returns:
         Dict containing status, result, task_id
     """
+    # 解析 end_user_id：若排队期间用户已被合并，自动路由到目标用户
+    resolved_end_user_id = end_user_id
+    try:
+        with get_db_context() as db:
+            from app.repositories.end_user_repository import EndUserRepository
+            repo = EndUserRepository(db)
+            resolved = repo.resolve_merge_by_origin_id(uuid.UUID(end_user_id))
+            if resolved:
+                logger.info(
+                    f"[CELERY FAST WRITE] end_user_id merged, redirecting: "
+                    f"{end_user_id} → {resolved.id}"
+                )
+                resolved_end_user_id = str(resolved.id)
+    except Exception as e:
+        logger.warning(
+            f"[CELERY FAST WRITE] merge resolution failed for {end_user_id}: {e}, "
+            f"falling back to original ID"
+        )
+
     logger.info(
-        f"[CELERY FAST WRITE] Starting - end_user_id={end_user_id}, "
+        f"[CELERY FAST WRITE] Starting - end_user_id={resolved_end_user_id}, "
         f"config_id={config_id}, conv={conversation_id or '-'}, "
         f"seq={message_seq}, language={language}, source={source or '-'}"
     )
@@ -2742,7 +2775,7 @@ def fast_write_message_task(
 
         service = MemoryService(
             config_id=uuid.UUID(config_id),
-            end_user_id=end_user_id,
+            end_user_id=resolved_end_user_id,
             workspace_id=workspace_id,
             language=language,
         )
@@ -4220,7 +4253,27 @@ def do_forget_for_user(self, end_user_id: str) -> Dict[str, Any]:
             end_user_id=end_user_id,
             workspace_id=workspace_id,
         )
-        result = await service.forget()
+
+        # 抢该用户的写锁：与反思 / 去重任务互斥，保证同一用户的图谱不被并发修改。
+        # Celery 任务线程独占 event loop，阻塞不影响其他任务，直接用同步上下文管理器。
+        sync_redis = get_sync_redis_client()
+        if sync_redis is not None:
+            write_lock = RedisFairLock(
+                key=f"memory_write:{end_user_id}",
+                redis_client=sync_redis,
+                expire=1200, timeout=60, auto_renewal=True,
+            )
+            try:
+                with write_lock:
+                    result = await service.forget()
+            except RuntimeError:
+                logger.warning(f"[ForgetDo] 获取写锁超时，跳过 user={end_user_id}")
+                if redis_client:
+                    # 移回候选集，等下一轮 scan 重新派发（与 scan_forget_candidates 派发失败的处理一致）
+                    await redis_client.smove(_FORGET_INFLIGHT_KEY, _FORGET_CANDIDATES_KEY, end_user_id)
+                return {"status": "lock_timeout"}
+        else:
+            result = await service.forget()
 
         if redis_client:
             await redis_client.srem(_FORGET_INFLIGHT_KEY, end_user_id)

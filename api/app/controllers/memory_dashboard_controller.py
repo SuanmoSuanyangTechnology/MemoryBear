@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.core.logging_config import get_api_logger
 from app.core.memory.analytics.user_card_tags import normalize_stored_user_card_tags
+from app.core.quota_manager import get_end_user_memory_limit
 from app.core.response_utils import success
 from app.core.utils.datetime_utils import to_timestamp_ms, utcnow_naive
 from app.db import get_db, get_async_db_context
@@ -201,11 +202,8 @@ async def get_workspace_end_users(
     except Exception as e:
         api_logger.warning(f"批量获取活跃节点数失败，降级为 0: {str(e)}")
         active_counts = {}
-    try:
-        memory_limits = memory_dashboard_service.batch_get_memory_limits(db, end_user_ids)
-    except Exception as e:
-        api_logger.warning(f"批量获取配额上限失败，降级为默认值: {str(e)}")
-        memory_limits = {}
+
+    memory_limits = get_end_user_memory_limit(db, current_user.tenant_id)
 
     # 构建响应数据（先返回给用户，Redis/Celery 操作放后台）
     items = []
@@ -233,7 +231,7 @@ async def get_workspace_end_users(
             "memory_num": {
                 "total": memory_total,
                 "active_count": active_counts.get(user_id, 0),
-                "memory_limit": memory_limits.get(user_id, 300),
+                "memory_limit": memory_limits,
             },
             "memory_config": workspace_config,
         })
