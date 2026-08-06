@@ -23,7 +23,6 @@ from app.repositories.end_user_repository import EndUserRepository
 from app.repositories.memory_display_record_repository import (
     MemoryDisplayRecordRepository,
 )
-from app.schemas.memory_retrieval_display_schema import translate_search_mode
 
 logger = logging.getLogger(__name__)
 
@@ -189,7 +188,6 @@ class MemoryRetrievalDisplayService:
         db: Session,
         end_user_id: uuid.UUID,
         workspace_id: uuid.UUID,
-        language: str,
         page: int,
         pagesize: int,
     ) -> tuple[List[dict], int] | None:
@@ -216,7 +214,7 @@ class MemoryRetrievalDisplayService:
         items = [
             {
                 "id": str(record.id),
-                "search_mode": translate_search_mode(record.search_mode, language),
+                "search_mode": record.search_mode,
                 "query": record.query or "",
                 "content": record.content,
                 "occurred_at": to_timestamp_ms(record.occurred_at),

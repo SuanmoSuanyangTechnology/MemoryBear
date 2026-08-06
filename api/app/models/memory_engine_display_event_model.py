@@ -18,7 +18,16 @@ class MemoryEngineDisplayEvent(Base):
     """引擎展示事件表
 
     记录每一次有效引擎触发的结构化事件。
-    同一轮写入操作最多产生三条事件（EXTRACTION/CROSS_MODAL/EMOTION）。
+
+    两类触发链路：
+    - 记忆写入（WritePipeline）：一轮最多三条事件
+      （EXTRACTION / CROSS_MODAL / EMOTION）；
+    - Celery 定时任务：一轮最多一条事件
+      （FORGETTING 来自配额驱动的定时遗忘整理，
+      REFLECTION 来自 Layer 2 高频巡检或每日全量去重）。
+
+    engine_type 的取值范围只由代码约定，PG 没有枚举类型也没有 CHECK 约束，
+    新增引擎类型不需要 migration。
     """
 
     __tablename__ = "memory_engine_display_records"
@@ -30,7 +39,8 @@ class MemoryEngineDisplayEvent(Base):
         nullable=False,
     )
     operation_id = Column(UUID(as_uuid=True), nullable=False)
-    engine_type = Column(String(32), nullable=False)  # EXTRACTION / CROSS_MODAL / EMOTION
+    # EXTRACTION / CROSS_MODAL / EMOTION / FORGETTING / REFLECTION
+    engine_type = Column(String(32), nullable=False)
     details = Column(JSONB, nullable=False, server_default="{}")
     occurred_at = Column(
         DateTime, nullable=False, default=utcnow_naive

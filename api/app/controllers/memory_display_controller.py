@@ -110,7 +110,6 @@ async def get_retrieved_memories(
     end_user_id: str = Query(..., description="终端用户 ID"),
     page: int = Query(1, ge=1, description="页码，从 1 开始"),
     pagesize: int = Query(10, ge=1, le=100, description="每页数量"),
-    language_type: str = Header(default=None, alias="X-Language-Type"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict:
@@ -118,8 +117,8 @@ async def get_retrieved_memories(
 
     一次用户可见的记忆检索对应一条记录，按 occurred_at 倒序分页。
 
-    X-Language-Type 只决定 search_mode 的展示文案；content 在检索发生时
-    已按当时的记忆语言聚合为快照，查询时不再翻译其中的“相关内容 / Related”文案。
+    search_mode 始终返回稳定英文枚举，由前端负责展示文案映射；content
+    是检索发生时按当时记忆语言聚合的快照，查询时不再翻译。
     """
     workspace_id = current_user.current_workspace_id
     if workspace_id is None:
@@ -147,12 +146,10 @@ async def get_retrieved_memories(
         )
 
     try:
-        language = get_language_from_header(language_type)
         query_result = MemoryRetrievalDisplayService.query_retrieved(
             db=db,
             end_user_id=end_user_uuid,
             workspace_id=workspace_id,
-            language=language,
             page=page,
             pagesize=pagesize,
         )
