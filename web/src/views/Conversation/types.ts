@@ -7,7 +7,7 @@
 /**
  * Type definitions for Conversation
  */
-import type { ChatItem } from '@/components/Chat/types'
+import type { ChatItem, MemoryTraceEventData } from '@/components/Chat/types'
 import { type ButtonProps } from 'antd'
 
 /**
@@ -74,7 +74,7 @@ export interface ReportMessageData {
   text_end_offset?: number;
   selected_text: string;
 }
-export interface StreamData {
+export interface StreamData extends MemoryTraceEventData {
   message_id?: string;
   user_message_id?: string;
   file_id?: string;

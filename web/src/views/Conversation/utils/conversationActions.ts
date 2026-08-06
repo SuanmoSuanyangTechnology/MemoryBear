@@ -12,7 +12,7 @@ import {
   switchMessageVersion, interventionsSubmit, interventionsResumeSubmit, favoriteMessage,
 } from '@/api/application'
 import { replaceVariables, buildOpeningStatementMessage } from '@/components/Chat/openingStatement'
-import type { ChatItem } from '@/components/Chat/types'
+import type { ChatItem, MemoryTraceEvent, MemoryTraceEventData } from '@/components/Chat/types'
 import type { ChatToolbarRef } from '@/components/Chat/ChatToolbar'
 import type { Variable } from '@/views/Workflow/components/Properties/VariableList/types'
 import type { Variable as AppVariable } from '@/views/ApplicationConfig/components/VariableList/types'
@@ -65,6 +65,10 @@ export interface ConversationActionDeps {
     replace?: boolean,
   ) => void
   updateAssistantReasoningMessage: (content?: string, message_id?: string) => void
+  updateAssistantMemoryRetrieval: (
+    event: MemoryTraceEvent,
+    data: MemoryTraceEventData,
+  ) => void
   startAudioPolling: (audioUrl: string, idToPoll: string) => void
   upsertHistory: (conversationId: string, title?: string) => void
   getHistory: (flag?: boolean) => void
@@ -77,7 +81,8 @@ export function createConversationActions(deps: ConversationActionDeps) {
     features, config, loading, disabled, setConversationId, setLoading, setMemory, setThinking,
     setFileList, setMessage, setChatList, chatIsEnded, streamLoadingRef, toolbarRef, abortRef,
     skipChatDetailRef, shareModalRef, reportModalRef, addUserMessage, addAssistantMessage,
-    updateAssistantMessage, updateAssistantReasoningMessage, startAudioPolling, upsertHistory,
+    updateAssistantMessage, updateAssistantReasoningMessage, updateAssistantMemoryRetrieval,
+    startAudioPolling, upsertHistory,
     getHistory, getChatDetail,
   } = deps
 
@@ -129,6 +134,7 @@ export function createConversationActions(deps: ConversationActionDeps) {
       setLoading,
       updateAssistantMessage,
       updateAssistantReasoningMessage,
+      updateAssistantMemoryRetrieval,
       startAudioPolling,
       upsertHistory,
       title: msg || message,
@@ -187,6 +193,8 @@ export function createConversationActions(deps: ConversationActionDeps) {
           setChatList(prev => applyInterventionSubmit(prev, node_id, actionId, fieldValues))
         })
     } else {
+      setLoading(true)
+      streamLoadingRef.current = true
       const handleStreamMessage = createResumeStreamHandler({
         actionId,
         fieldValues,
@@ -197,11 +205,20 @@ export function createConversationActions(deps: ConversationActionDeps) {
         setLoading,
         updateAssistantMessage,
         updateAssistantReasoningMessage,
+        updateAssistantMemoryRetrieval,
         startAudioPolling,
         upsertHistory,
         streamLoadingRef,
       })
       interventionsResumeSubmit(shareToken, execution_id, data, handleStreamMessage)
+        .catch(() => {
+          setLoading(false)
+          streamLoadingRef.current = false
+        })
+        .finally(() => {
+          setLoading(false)
+          streamLoadingRef.current = false
+        })
     }
   }
 
@@ -224,6 +241,7 @@ export function createConversationActions(deps: ConversationActionDeps) {
       setLoading,
       updateAssistantMessage,
       updateAssistantReasoningMessage,
+      updateAssistantMemoryRetrieval,
       startAudioPolling,
       upsertHistory,
       chatIsEnded,

@@ -27,7 +27,6 @@ import { buildOpeningStatementMessage } from '@/components/Chat/openingStatement
 import type { HistoryItem, ShareModalRef, ReportModalRef } from '../types'
 import { useChatMessages } from './useChatMessages'
 import { createConversationActions } from '../utils/conversationActions'
-
 /** Group conversation history by date (pure function) */
 const groupHistoryByDate = (items: HistoryItem[]): Record<string, HistoryItem[]> => {
   return items.reduce((groups: Record<string, HistoryItem[]>, item) => {
@@ -72,6 +71,7 @@ export function useConversation() {
   const [webSearch, setWebSearch] = useState(false)
   const [isHasMemory, setIsHasMemory] = useState(false)
   const [memory, setMemory] = useState(true)
+  const [showMemoryRecall, setShowMemoryRecall] = useState(true)
   const [features, setFeatures] = useState<FeaturesConfigForm>({} as FeaturesConfigForm)
   const [config, setConfig] = useState<Record<string, any>>({})
   const [isDeepThinking, setIsDeepThinking] = useState<Record<string, any>>({})
@@ -97,6 +97,7 @@ export function useConversation() {
     addAssistantMessage,
     updateAssistantMessage,
     updateAssistantReasoningMessage,
+    updateAssistantMemoryRetrieval,
     applyChatDetail,
   } = useChatMessages()
 
@@ -255,9 +256,11 @@ export function useConversation() {
 
   const getChatDetail = () => {
     if (!conversation_id || !shareToken || shareToken === '') return
+    // applyChatDetail({ messages: memoryRecallMocks })
+    // return
     getConversationDetail(shareToken, conversation_id)
       .then(res => {
-        applyChatDetail(res as { messages: ChatItem[]; pending_intervention: Record<string, any> })
+        applyChatDetail(res as { messages: ChatItem[]; pending_intervention?: Record<string, any> })
       })
   }
 
@@ -285,7 +288,8 @@ export function useConversation() {
     features, config, loading, disabled, setConversationId, setLoading, setMemory, setThinking,
     setFileList, setMessage, setChatList, chatIsEnded, streamLoadingRef, toolbarRef, abortRef,
     skipChatDetailRef, shareModalRef, reportModalRef, addUserMessage, addAssistantMessage,
-    updateAssistantMessage, updateAssistantReasoningMessage, startAudioPolling, upsertHistory,
+    updateAssistantMessage, updateAssistantReasoningMessage, updateAssistantMemoryRetrieval,
+    startAudioPolling, upsertHistory,
     getHistory, getChatDetail,
   })
 
@@ -313,6 +317,8 @@ export function useConversation() {
     setWebSearch,
     isHasMemory,
     memory,
+    showMemoryRecall,
+    setShowMemoryRecall,
     features,
     config,
     isDeepThinking,

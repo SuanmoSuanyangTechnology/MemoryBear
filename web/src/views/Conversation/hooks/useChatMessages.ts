@@ -5,8 +5,91 @@
  */
 import { useState, useRef, useEffect } from 'react'
 
-import type { ChatItem, Intervention } from '@/components/Chat/types'
+import type {
+  ChatItem,
+  Intervention,
+  MemoryRetrieval,
+  MemoryToolCall,
+  MemoryTraceEvent,
+  MemoryTraceEventData,
+} from '@/components/Chat/types'
 import { getFileStatusById } from '@/api/fileStorage'
+
+const normalizeMemoryInput = (input: MemoryTraceEventData['input']): Record<string, unknown> => {
+  if (input && typeof input === 'object' && !Array.isArray(input)) return input
+  if (typeof input !== 'string') return {}
+  try {
+    const parsed = JSON.parse(input) as unknown
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : {}
+  } catch {
+    return {}
+  }
+}
+
+const updateMemoryTrace = (
+  current: MemoryRetrieval | undefined,
+  event: MemoryTraceEvent,
+  data: MemoryTraceEventData,
+): MemoryRetrieval | undefined => {
+  const toolCalls = current?.tool_calls || []
+  const stepId = data.step_id
+  const toolName = data.name || data.meta?.tool_type
+
+  if (event === 'tool_start') {
+    if (toolName !== 'long_term_memory' || !stepId) return current
+    const nextToolCall: MemoryToolCall = {
+      step_id: stepId,
+      name: 'long_term_memory',
+      input: normalizeMemoryInput(data.input),
+      status: 'running',
+      stages: [],
+    }
+    const existingIndex = toolCalls.findIndex(call => call.step_id === stepId)
+    return {
+      schema_version: 1,
+      tool_calls: existingIndex < 0
+        ? [...toolCalls, nextToolCall]
+        : toolCalls.map((call, index) => index === existingIndex ? nextToolCall : call),
+    }
+  }
+
+  if (!stepId) return current
+  const targetIndex = toolCalls.findIndex(call => call.step_id === stepId)
+  if (targetIndex < 0) return current
+
+  if (event === 'memory_stage') {
+    if (!data.stage) return current
+    return {
+      schema_version: current?.schema_version || 1,
+      tool_calls: toolCalls.map((call, index) => index === targetIndex
+        ? {
+          ...call,
+          stages: [
+            ...call.stages,
+            {
+              stage: data.stage as string,
+              status: data.status || 'completed',
+              data: data.data || {},
+            },
+          ],
+        }
+        : call),
+    }
+  }
+
+  return {
+    schema_version: current?.schema_version || 1,
+    tool_calls: toolCalls.map((call, index) => index === targetIndex
+      ? {
+        ...call,
+        status: event === 'tool_error' ? 'failed' : 'completed',
+        ...(event === 'tool_error' ? { error: data.error } : {}),
+      }
+      : call),
+  }
+}
 
 export function useChatMessages() {
   const [chatList, setChatList] = useState<Array<ChatItem | ChatItem[]>>([])
@@ -220,6 +303,40 @@ export function useChatMessages() {
     })
   }
 
+  /** 将长期记忆工具事件归一到与历史消息一致的 memory_retrieval 结构 */
+  const updateAssistantMemoryRetrieval = (
+    event: MemoryTraceEvent,
+    data: MemoryTraceEventData,
+  ) => {
+    if (streamLoadingRef.current) streamLoadingRef.current = false
+    setChatList(prev => {
+      const lastList = [...prev]
+      const lastIndex = lastList.length - 1
+      const lastEntry = lastList[lastIndex]
+      const versions = Array.isArray(lastEntry) ? lastEntry : [lastEntry]
+      const lastChatIndex = versions.length - 1
+      const lastMsg = versions[lastChatIndex]
+      if (lastMsg?.role !== 'assistant') return prev
+
+      const memoryRetrieval = updateMemoryTrace(lastMsg.meta_data?.memory_retrieval, event, data)
+      if (memoryRetrieval === lastMsg.meta_data?.memory_retrieval) return prev
+
+      const assistantMsg: ChatItem = {
+        ...lastMsg,
+        meta_data: {
+          ...(lastMsg.meta_data || {}),
+          memory_retrieval: memoryRetrieval,
+        },
+      }
+      return [
+        ...lastList.slice(0, lastIndex),
+        Array.isArray(lastEntry)
+          ? [...versions.slice(0, lastChatIndex), assistantMsg]
+          : assistantMsg,
+      ]
+    })
+  }
+
   /** 写入会话详情：归一化消息、挂载待处理人工干预、并按需重启语音轮询 */
   const applyChatDetail = (response: { messages: ChatItem[]; pending_intervention?: Record<string, any> }) => {
     const messages = response?.messages || []
@@ -282,6 +399,7 @@ export function useChatMessages() {
     addAssistantMessage,
     updateAssistantMessage,
     updateAssistantReasoningMessage,
+    updateAssistantMemoryRetrieval,
     applyChatDetail,
   }
 }
