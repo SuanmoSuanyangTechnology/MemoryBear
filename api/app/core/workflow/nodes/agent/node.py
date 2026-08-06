@@ -168,7 +168,7 @@ class AgentNode(BaseNode):
 
         # 长期记忆工具：复用 Agent 应用工具，并使用本次工作流的存储上下文。
         memory_config = self.typed_config.long_term_memory
-        if memory_config.enabled:
+        if memory_config.enable:
             if not user_id:
                 logger.warning(f"节点 {self.node_id}: 缺少用户 ID，跳过长期记忆工具加载")
             elif not workspace_id:
@@ -182,8 +182,9 @@ class AgentNode(BaseNode):
                         workspace_uuid = uuid.UUID(str(workspace_id))
                         config_id = await MemoryConfigService(db).get_workspace_active_config_id_async(workspace_uuid)
 
+                    # create_long_term_memory_tool 内部以 enabled 判断开关，这里对齐补上
                     memory_tool = create_long_term_memory_tool(
-                        memory_config.model_dump(),
+                        {**memory_config.model_dump(), "enabled": memory_config.enable},
                         user_id,
                         workspace_uuid,
                         state.get("memory_storage_type") or "neo4j",

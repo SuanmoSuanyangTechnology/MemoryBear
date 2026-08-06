@@ -9103,7 +9103,7 @@ class WorkflowService:
                 return True
             # Agent 节点开启长期记忆工具时，同样视为启用记忆
             if node.get("type") == NodeType.AGENT and \
-                    node.get("config", {}).get("long_term_memory", {}).get("enabled", False):
+                    node.get("config", {}).get("long_term_memory", {}).get("enable", False):
                 return True
         return False
 

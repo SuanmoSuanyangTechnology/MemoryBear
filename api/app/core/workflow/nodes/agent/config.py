@@ -35,7 +35,7 @@ class LongTermMemoryConfig(BaseModel):
     与 ``memory``（对话历史窗口）分开，语义对齐 Agent 应用的长期记忆开关。
     """
 
-    enabled: bool = Field(
+    enable: bool = Field(
         default=False,
         description="是否启用长期记忆检索工具",
     )
