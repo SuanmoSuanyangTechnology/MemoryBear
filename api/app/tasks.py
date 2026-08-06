@@ -26,6 +26,7 @@ from app.core.config import settings
 from app.core.logging_config import get_logger
 from app.core.models import RedBearEmbeddings, RedBearLLM
 from app.core.memory.storage_services.reflection_engine import retry_registry as rr
+from app.core.rag.chunk.hierarchy import GroupedChildChunks, validate_parent_child_result
 from app.core.rag.chunk.metadata import merge_parser_metadata
 from app.core.rag.crawler.web_crawler import WebCrawler
 from app.core.rag.graphrag.general.index import init_graphrag, run_graphrag_for_kb
@@ -1209,6 +1210,13 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
                 source_file_id=document_info["file_id"],
                 source_file_name=document_info["file_name"],
             )
+            if isinstance(child_res, GroupedChildChunks):
+                validate_parent_child_result(
+                    child_res,
+                    parent_res,
+                    parent_id_map,
+                    str(parser_config.get("parent_chunk_mode") or "paragraph"),
+                )
         else:
             res = chunk(
                 filename=file_name,

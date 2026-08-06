@@ -25,6 +25,7 @@ from app.core.rag.chunk.context import (
     LogicalChunk,
     LogicalChunkType,
     MergeResult,
+    ParentChildGroup,
     ParsedBlock,
     ParsedBlockType,
     ParseResult,
@@ -56,6 +57,12 @@ LIST_ITEM_START_PATTERNS = (
     PREFIXED_LIST_PATTERN,
 )
 
+FULL_DOC_MAX_CHARS = 10000
+PARENT_CHILD_ATOMIC_TYPES = {
+    ParsedBlockType.TABLE,
+    ParsedBlockType.IMAGE,
+}
+
 
 class BlockMerger(ChunkMerger):
     def __init__(self):
@@ -68,6 +75,27 @@ class BlockMerger(ChunkMerger):
         chunk_overlap = _safe_int(ctx.parser_config.get("chunk_overlap", 0))
 
         if ctx.chunk_output_mode is ChunkOutputMode.PARENT_CHILD:
+            if ctx.parser_config.get("parent_chunk_mode") == "full-doc":
+                full_doc_blocks = self._full_doc_blocks(blocks)
+                full_text = "\n\n".join(
+                    str(block.content)
+                    for block in full_doc_blocks
+                    if str(block.content or "").strip()
+                )
+                groups = []
+                if full_text:
+                    parent = LogicalChunk(type=LogicalChunkType.TEXT, content=full_text)
+                    children = self._blocks_to_logical_chunks(
+                        full_doc_blocks,
+                        token_num,
+                        delimiter,
+                        0,
+                        merge_lists_with_text=parse_result.markdown_preprocess_profile == "mineru",
+                        preserve_atomic_blocks=True,
+                    )
+                    groups.append(ParentChildGroup(parent=parent, children=children))
+                return self._parent_child_merge_result(groups, parse_result.pdf_parser)
+
             parent_token_num = int(ctx.parser_config.get("parent_chunk_token_num", 1024))
             parent_chunk_delimiter = ctx.parser_config.get("parent_chunk_delimiter")
             parent_chunks = self._blocks_to_logical_chunks(
@@ -76,21 +104,15 @@ class BlockMerger(ChunkMerger):
                 parent_chunk_delimiter,
                 0,
                 merge_lists_with_text=parse_result.markdown_preprocess_profile == "mineru",
+                preserve_atomic_blocks=True,
             )
-            child_chunks, parent_id_map = self._build_children_from_parents(
+            groups = self._build_parent_child_groups(
                 parent_chunks,
                 token_num,
                 delimiter,
                 0,
             )
-            return MergeResult(
-                chunks=self._serialize_chunk_contents(child_chunks),
-                logical_chunks=child_chunks,
-                parent_chunks=parent_chunks,
-                child_chunks=child_chunks,
-                parent_id_map=parent_id_map,
-                pdf_parser=parse_result.pdf_parser,
-            )
+            return self._parent_child_merge_result(groups, parse_result.pdf_parser)
 
         logical_chunks = self._blocks_to_logical_chunks(
             blocks,
@@ -105,6 +127,35 @@ class BlockMerger(ChunkMerger):
             pdf_parser=parse_result.pdf_parser,
         )
 
+    def _full_doc_blocks(self, blocks: list[ParsedBlock]) -> list[ParsedBlock]:
+        selected: list[ParsedBlock] = []
+        content_length = 0
+
+        for block in blocks:
+            content = str(block.content or "")
+            if not content.strip():
+                continue
+
+            separator_length = 2 if selected else 0
+            remaining = FULL_DOC_MAX_CHARS - content_length - separator_length
+            if remaining <= 0:
+                break
+
+            if len(content) <= remaining:
+                selected.append(block)
+                content_length += separator_length + len(content)
+                continue
+
+            if block.type in PARENT_CHILD_ATOMIC_TYPES:
+                break
+
+            truncated = deepcopy(block)
+            truncated.content = content[:remaining]
+            selected.append(truncated)
+            break
+
+        return selected
+
     def _blocks_to_logical_chunks(
         self,
         blocks: list[ParsedBlock],
@@ -113,6 +164,7 @@ class BlockMerger(ChunkMerger):
         overlap: int,
         *,
         merge_lists_with_text: bool = False,
+        preserve_atomic_blocks: bool = False,
     ) -> list[LogicalChunk]:
         logical_chunks: list[LogicalChunk] = []
         text_group: list[ParsedBlock] = []
@@ -156,7 +208,18 @@ class BlockMerger(ChunkMerger):
                 continue
 
             if block.type is ParsedBlockType.TABLE:
-                logical_chunks.extend(self._table_logical_chunks(block, token_num))
+                if preserve_atomic_blocks:
+                    logical_chunks.append(
+                        LogicalChunk(
+                            type=LogicalChunkType.TABLE,
+                            content=block.content,
+                            image=block.image,
+                            positions=deepcopy(block.positions),
+                            metadata=self._metadata_for_block(block),
+                        )
+                    )
+                else:
+                    logical_chunks.extend(self._table_logical_chunks(block, token_num))
                 continue
 
             if block.type is ParsedBlockType.IMAGE:
@@ -173,23 +236,46 @@ class BlockMerger(ChunkMerger):
         flush_text_group()
         return logical_chunks
 
-    def _build_children_from_parents(
+    def _build_parent_child_groups(
         self,
         parent_chunks: list[LogicalChunk],
         child_token_num: int,
         delimiter: str | None,
         overlap: int,
-    ) -> tuple[list[LogicalChunk], dict[int, int]]:
+    ) -> list[ParentChildGroup]:
+        return [
+            ParentChildGroup(
+                parent=parent,
+                children=self._split_parent_chunk(parent, child_token_num, delimiter, overlap),
+            )
+            for parent in parent_chunks
+        ]
+
+    def _parent_child_merge_result(
+        self,
+        groups: list[ParentChildGroup],
+        pdf_parser,
+    ) -> MergeResult:
+        parent_chunks: list[LogicalChunk] = []
         child_chunks: list[LogicalChunk] = []
         parent_id_map: dict[int, int] = {}
 
-        for parent_index, parent in enumerate(parent_chunks):
-            children = self._split_parent_chunk(parent, child_token_num, delimiter, overlap)
-            for child in children:
+        for group in groups:
+            parent_index = len(parent_chunks)
+            parent_chunks.append(group.parent)
+            for child in group.children:
                 parent_id_map[len(child_chunks)] = parent_index
                 child_chunks.append(child)
 
-        return child_chunks, parent_id_map
+        return MergeResult(
+            chunks=self._serialize_chunk_contents(child_chunks),
+            logical_chunks=child_chunks,
+            parent_child_groups=groups,
+            parent_chunks=parent_chunks,
+            child_chunks=child_chunks,
+            parent_id_map=parent_id_map,
+            pdf_parser=pdf_parser,
+        )
 
     def _split_parent_chunk(
         self,
@@ -198,10 +284,7 @@ class BlockMerger(ChunkMerger):
         delimiter: str | None,
         overlap: int,
     ) -> list[LogicalChunk]:
-        if parent.type is LogicalChunkType.TABLE:
-            return self._split_logical_table_chunk(parent, token_num)
-
-        if parent.type is LogicalChunkType.IMAGE:
+        if parent.type in {LogicalChunkType.TABLE, LogicalChunkType.IMAGE}:
             return [deepcopy(parent)]
 
         block_type = parent.metadata.get("block_type")

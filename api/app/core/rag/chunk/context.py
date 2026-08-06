@@ -69,6 +69,12 @@ class LogicalChunk:
 
 
 @dataclass
+class ParentChildGroup:
+    parent: LogicalChunk
+    children: list[LogicalChunk] = field(default_factory=list)
+
+
+@dataclass
 class ChunkContext:
     filename: str
     binary: bytes | None
@@ -105,6 +111,7 @@ class MergeResult:
     chunks: list = field(default_factory=list)
     images: list | None = None
     logical_chunks: list[LogicalChunk] | None = None
+    parent_child_groups: list[ParentChildGroup] | None = None
     parent_chunks: list[LogicalChunk] | None = None
     child_chunks: list[LogicalChunk] | None = None
     parent_id_map: dict[int, int] | None = None
