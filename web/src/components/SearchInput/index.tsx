@@ -117,8 +117,7 @@ const SearchInput: FC<SearchInputProps> = ({
       placeholder={placeholder || t('user.searchPlaceholder')}
       value={value}
       onChange={handleChange}
-      style={{ width: '300px' }}
-      className={className}
+      className={`rb:w-75! ${className}`}
       variant={variant}
       {...props}
     />

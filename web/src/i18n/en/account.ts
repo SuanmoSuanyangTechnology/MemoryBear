@@ -233,5 +233,12 @@ export const account = {
       or: 'or',
       variable: 'variable',
       loadFailed: 'Load Failed',
+      uploadFile: 'Upload File',
+      listSeparator: ', ',
+      uploadFileRequirementSizeAndType: 'Please upload files no larger than <size>{{fileSize}} MB</size> in <types>{{fileTypes}}</types> format',
+      uploadFileRequirementSize: 'Please upload files no larger than <size>{{fileSize}} MB</size>',
+      uploadFileRequirementType: 'Please upload files in <types>{{fileTypes}}</types> format',
+      uploadFileRequirement: 'Please upload files',
+      uploadFileMaxCount: ', up to <count>{{maxCount}}</count> files',
     },
 }

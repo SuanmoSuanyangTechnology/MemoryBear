@@ -103,7 +103,7 @@ const SkillList: FC<{value?: SkillConfigForm; onChange?: (config: SkillConfigFor
       extra={
         <Space>
           {/* Help button for skill configuration guidance */}
-          {/* <Button style={{ padding: '0 8px', height: '24px' }}>{t('application.skillHelp')}</Button> */}
+          {/* <Button className="rb:py-0! rb:px-2! rb:h-6!">{t('application.skillHelp')}</Button> */}
           {/* Toggle switch to enable/disable skill functionality */}
           <Form.Item 
             valuePropName="checked"

@@ -587,42 +587,63 @@ def flat_uniq_list(arr, key):
     return list(set(res))
 
 
-async def rebuild_graph(workspace_id, kb_id, exclude_rebuild=None):
+def _rebuild_graph_sync(workspace_id, kb_id, exclude_rebuild=None):
     graph = nx.Graph()
     flds = ["knowledge_graph_kwd", "page_content", "source_id"]
-    bs = 256
-    for i in range(0, 1024 * bs, bs):
-        es_res = await trio.to_thread.run_sync(
-            lambda: settings.docStoreConn.search(flds, [], {"kb_id": kb_id, "knowledge_graph_kwd": ["subgraph"]}, [], OrderByExpr(), i, bs, search.index_name(workspace_id), [kb_id])
-        )
-        # tot = settings.docStoreConn.getTotal(es_res)
-        es_res = settings.docStoreConn.getFields(es_res, flds)
-
-        if len(es_res) == 0:
-            break
-
-        for id, d in es_res.items():
-            assert d["knowledge_graph_kwd"] == "subgraph"
-            if isinstance(exclude_rebuild, list):
-                if sum([n in d["source_id"] for n in exclude_rebuild]):
-                    continue
-            elif exclude_rebuild in d["source_id"]:
+    query = {
+        "bool": {
+            "filter": [
+                {"term": {"kb_id": kb_id}},
+                {"term": {"knowledge_graph_kwd": "subgraph"}},
+            ],
+        },
+    }
+    for d in settings.docStoreConn.iter_search_after(
+        index_name=search.index_name(workspace_id),
+        query=query,
+        fields=flds,
+        sort=[{"source_id": {"order": "asc", "missing": "_last"}}],
+        batch_size=256,
+    ):
+        assert d["knowledge_graph_kwd"] == "subgraph"
+        if isinstance(exclude_rebuild, list):
+            if any(n in d["source_id"] for n in exclude_rebuild):
                 continue
+        elif exclude_rebuild is not None and exclude_rebuild in d["source_id"]:
+            continue
 
-            next_graph = json_graph.node_link_graph(json.loads(d["page_content"]), edges="edges")
-            merged_graph = nx.compose(graph, next_graph)
-            merged_source = {n: graph.nodes[n]["source_id"] + next_graph.nodes[n]["source_id"] for n in graph.nodes & next_graph.nodes}
-            nx.set_node_attributes(merged_graph, merged_source, "source_id")
-            if "source_id" in graph.graph:
-                merged_graph.graph["source_id"] = graph.graph["source_id"] + next_graph.graph["source_id"]
-            else:
-                merged_graph.graph["source_id"] = next_graph.graph["source_id"]
-            graph = merged_graph
+        next_graph = json_graph.node_link_graph(
+            json.loads(d["page_content"]),
+            edges="edges",
+        )
+        merged_graph = nx.compose(graph, next_graph)
+        merged_source = {
+            node: graph.nodes[node]["source_id"]
+            + next_graph.nodes[node]["source_id"]
+            for node in graph.nodes & next_graph.nodes
+        }
+        nx.set_node_attributes(merged_graph, merged_source, "source_id")
+        if "source_id" in graph.graph:
+            merged_graph.graph["source_id"] = (
+                graph.graph["source_id"] + next_graph.graph["source_id"]
+            )
+        else:
+            merged_graph.graph["source_id"] = next_graph.graph["source_id"]
+        graph = merged_graph
 
     if len(graph.nodes) == 0:
         return None
     graph.graph["source_id"] = sorted(graph.graph["source_id"])
     return graph
+
+
+async def rebuild_graph(workspace_id, kb_id, exclude_rebuild=None):
+    return await trio.to_thread.run_sync(
+        _rebuild_graph_sync,
+        workspace_id,
+        kb_id,
+        exclude_rebuild,
+    )
 
 
 def has_canceled(task_id):

@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Index, Integer, String, Text, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import relationship
 
@@ -23,6 +23,12 @@ class EndUser(Base):
             "created_at",
             "id",
             postgresql_where="memory_count > 0",
+        ),
+        Index(
+            "idx_end_users_ws_other",
+            "workspace_id",
+            "other_id",
+            postgresql_where=text("is_active = TRUE"),
         ),
     )
 

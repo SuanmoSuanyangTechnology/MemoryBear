@@ -34,6 +34,7 @@ export interface KnowledgeConfigForm {
   vector_similarity_weight?: number;
   top_k?: number;
   retrieve_type?: RetrieveType;
+  enable_graph_retrieval?: 0 | 1;
   weight?: number;
   config?: KnowledgeConfigForm;
 }

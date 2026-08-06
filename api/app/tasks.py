@@ -13,6 +13,8 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 import redis
+from celery import states
+from celery.exceptions import Ignore, Retry
 from elasticsearch import AsyncElasticsearch
 from fastapi.encoders import jsonable_encoder
 from redis.exceptions import RedisError
@@ -39,6 +41,14 @@ from app.core.rag.knowledge_graph.elasticsearch_store import GraphElasticsearchS
 from app.core.rag.knowledge_graph.extractor import LLMEntityRelationExtractor
 from app.core.rag.knowledge_graph.index_pipeline import KnowledgeGraphIndexPipeline
 from app.core.rag.knowledge_graph.lock import create_knowledge_graph_lock
+from app.core.rag.knowledge_graph.rebuild_task_guard import (
+    acquire_rebuild_execution,
+    has_rebuild_terminal,
+    mark_rebuild_terminal,
+    refresh_rebuild_job,
+    release_rebuild_execution,
+    release_rebuild_job,
+)
 from app.core.rag.knowledge_graph.runtime import (
     build_model_config,
     snapshot_graph_runtime,
@@ -541,6 +551,199 @@ def _run_observed_graph_task(
         reason,
         int((time.perf_counter() - started_at) * 1000),
     )
+    return result
+
+
+def _log_coalesced_rebuild_task(
+        *,
+        task_id: str,
+        knowledge_id: str,
+        retry: int,
+        reason: str,
+) -> None:
+    logger.info(
+        "[EvidenceGraph] task_coalesced"
+        " task=rebuild_knowledge task_id=%s kb_id=%s retry=%d reason=%s",
+        task_id,
+        knowledge_id,
+        retry,
+        reason,
+    )
+
+
+def _retry_rebuild_guard_failure(
+        task,
+        *,
+        task_id: str,
+        knowledge_id: str,
+        retry: int,
+        exc: Exception,
+):
+    countdown = _graph_task_retry_countdown(task)
+    logger.warning(
+        "[EvidenceGraph] task_guard_retry"
+        " task=rebuild_knowledge task_id=%s kb_id=%s"
+        " error_type=%s retry=%d countdown=%d",
+        task_id,
+        knowledge_id,
+        type(exc).__name__,
+        retry,
+        countdown,
+        exc_info=_redacted_graph_exc_info(exc),
+    )
+    raise task.retry(exc=exc, countdown=countdown)
+
+
+def _release_rebuild_attempt(
+        knowledge_id: str,
+        owner_token: str,
+) -> None:
+    try:
+        released = release_rebuild_execution(knowledge_id, owner_token)
+        if not released:
+            logger.warning(
+                "[EvidenceGraph] task_guard_release_skipped"
+                " task=rebuild_knowledge kb_id=%s guard=execution",
+                knowledge_id,
+            )
+    except Exception as exc:  # noqa: BLE001
+        logger.error(
+            "[EvidenceGraph] task_guard_release_failed"
+            " task=rebuild_knowledge kb_id=%s guard=execution"
+            " error_type=%s",
+            knowledge_id,
+            type(exc).__name__,
+        )
+
+
+def _finish_rebuild_task_guard(
+        *,
+        task_id: str,
+        knowledge_id: str,
+        owner_token: str,
+        terminal: str,
+) -> None:
+    try:
+        mark_rebuild_terminal(task_id, terminal)
+    finally:
+        _release_rebuild_attempt(knowledge_id, owner_token)
+    try:
+        released = release_rebuild_job(knowledge_id, task_id)
+        if not released:
+            logger.warning(
+                "[EvidenceGraph] task_guard_release_skipped"
+                " task=rebuild_knowledge task_id=%s kb_id=%s guard=job",
+                task_id,
+                knowledge_id,
+            )
+    except Exception as exc:  # noqa: BLE001
+        logger.error(
+            "[EvidenceGraph] task_guard_release_failed"
+            " task=rebuild_knowledge task_id=%s kb_id=%s guard=job"
+            " error_type=%s",
+            task_id,
+            knowledge_id,
+            type(exc).__name__,
+        )
+
+
+def _run_guarded_evidence_graph_rebuild(
+        task,
+        knowledge_id: str,
+) -> dict[str, Any]:
+    knowledge_id = _canonical_graph_uuid(knowledge_id, "knowledge id")
+    task_id = str(getattr(task.request, "id", None) or "unknown")
+    retry = int(getattr(task.request, "retries", 0) or 0)
+    owner_token = f"{task_id}:{uuid.uuid4()}"
+
+    try:
+        if has_rebuild_terminal(task_id):
+            _log_coalesced_rebuild_task(
+                task_id=task_id,
+                knowledge_id=knowledge_id,
+                retry=retry,
+                reason="terminal",
+            )
+            raise Ignore()
+        if not refresh_rebuild_job(knowledge_id, task_id):
+            _log_coalesced_rebuild_task(
+                task_id=task_id,
+                knowledge_id=knowledge_id,
+                retry=retry,
+                reason="foreign_job",
+            )
+            raise Ignore()
+        if not acquire_rebuild_execution(knowledge_id, owner_token):
+            _log_coalesced_rebuild_task(
+                task_id=task_id,
+                knowledge_id=knowledge_id,
+                retry=retry,
+                reason="active_attempt",
+            )
+            raise Ignore()
+    except Ignore:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        _retry_rebuild_guard_failure(
+            task,
+            task_id=task_id,
+            knowledge_id=knowledge_id,
+            retry=retry,
+            exc=exc,
+        )
+
+    try:
+        task.update_state(
+            state=states.STARTED,
+            meta={
+                "knowledge_id": knowledge_id,
+                "retry": retry,
+            },
+        )
+    except Exception as exc:  # noqa: BLE001
+        _release_rebuild_attempt(knowledge_id, owner_token)
+        _retry_rebuild_guard_failure(
+            task,
+            task_id=task_id,
+            knowledge_id=knowledge_id,
+            retry=retry,
+            exc=exc,
+        )
+
+    try:
+        result = _run_observed_graph_task(
+            task,
+            task_name="rebuild_knowledge",
+            knowledge_id=knowledge_id,
+            operation=lambda: _run_evidence_graph_rebuild(knowledge_id),
+        )
+    except Retry:
+        _release_rebuild_attempt(knowledge_id, owner_token)
+        raise
+    except Exception:
+        _finish_rebuild_task_guard(
+            task_id=task_id,
+            knowledge_id=knowledge_id,
+            owner_token=owner_token,
+            terminal="failure",
+        )
+        raise
+
+    try:
+        _finish_rebuild_task_guard(
+            task_id=task_id,
+            knowledge_id=knowledge_id,
+            owner_token=owner_token,
+            terminal="success",
+        )
+    except Exception as exc:  # noqa: BLE001
+        _retry_rebuild_guard_failure(
+            task,
+            task_id=task_id,
+            knowledge_id=knowledge_id,
+            retry=retry,
+            exc=exc,
+        )
     return result
 
 
@@ -1583,13 +1786,14 @@ def sync_evidence_graph_document(
     bind=True,
     name="app.core.rag.tasks.rebuild_evidence_graph_knowledge",
     max_retries=5,
+    acks_late=False,
+    reject_on_worker_lost=False,
+    track_started=False,
 )
 def rebuild_evidence_graph_knowledge(self, knowledge_id: str):
-    return _run_observed_graph_task(
+    return _run_guarded_evidence_graph_rebuild(
         self,
-        task_name="rebuild_knowledge",
-        knowledge_id=str(knowledge_id),
-        operation=lambda: _run_evidence_graph_rebuild(knowledge_id),
+        str(knowledge_id),
     )
 
 
@@ -3196,11 +3400,7 @@ def scan_reflection_retry(self) -> Dict[str, Any]:
 #     return data
 
 
-@celery_app.task(
-    name="app.controllers.memory_storage_controller.search_all",
-    time_limit=3600,
-    soft_time_limit=3300,
-)
+@celery_app.task(name="app.tasks.write_total_memory_task")
 def write_total_memory_task(workspace_id: str) -> Dict[str, Any]:
     """定时任务：查询工作空间下所有宿主的记忆总量并写入数据库
 
@@ -3216,67 +3416,78 @@ def write_total_memory_task(workspace_id: str) -> Dict[str, Any]:
         from app.models.app_model import App
         from app.repositories.end_user_repository import EndUserRepository
         from app.repositories.memory_increment_repository import MemoryIncrementRepository
+        from app.repositories.neo4j.neo4j_connector import Neo4jConnector
         from app.services.memory_storage_service import search_all_batch
 
+        workspace_uuid = uuid.UUID(workspace_id)
+
+        # --- Session A：查询 apps + end_users，立即关闭 ---
+        has_apps = False
+        end_user_id_list: list[str] = []
         with get_db_context() as db:
-            try:
-                workspace_uuid = uuid.UUID(workspace_id)
+            apps = db.query(App).filter(
+                App.workspace_id == workspace_uuid,
+                App.is_active.is_(True)
+            ).all()
+            has_apps = len(apps) > 0
 
-                # 1. 查询当前workspace下的所有app（仅未删除的）
-                apps = db.query(App).filter(
-                    App.workspace_id == workspace_uuid,
-                    App.is_active.is_(True)
-                ).all()
-
-                if not apps:
-                    # 如果没有app，总量为0
-                    memory_increment = MemoryIncrementRepository(db).write_memory_increment(
-                        workspace_id=workspace_uuid,
-                        total_num=0
-                    )
-                    return {
-                        "status": "SUCCESS",
-                        "workspace_id": workspace_id,
-                        "total_num": 0,
-                        "end_user_count": 0,
-                        "memory_increment_id": str(memory_increment.id),
-                        "created_at": to_iso_z(memory_increment.created_at),
-                    }
-
-                # 2. 查询所有app下的end_user_id（去重）
+            if has_apps:
                 end_user_repo = EndUserRepository(db)
                 end_users = end_user_repo.get_end_users_by_workspace(workspace_uuid)
                 end_user_id_list = [str(eu.id) for eu in end_users]
 
-                # 3. 批量查询所有宿主的记忆总量
-                batch_result = await search_all_batch(end_user_id_list)
-
-                total_num = sum(batch_result.values())
-                end_user_details = [
-                    {"end_user_id": uid, "total": batch_result.get(uid, 0)}
-                    for uid in end_user_id_list
-                ]
-
-                # 4. 写入数据库
+        # 没有 app 时直接写入 0
+        if not has_apps:
+            with get_db_context() as db:
                 memory_increment = MemoryIncrementRepository(db).write_memory_increment(
                     workspace_id=workspace_uuid,
-                    total_num=total_num
+                    total_num=0
                 )
-
                 return {
                     "status": "SUCCESS",
                     "workspace_id": workspace_id,
-                    "total_num": total_num,
-                    "end_user_count": len(end_users),
-                    "end_user_details": end_user_details,
+                    "total_num": 0,
+                    "end_user_count": 0,
                     "memory_increment_id": str(memory_increment.id),
                     "created_at": to_iso_z(memory_increment.created_at),
                 }
-            except Exception as e:
-                raise e
+
+        # --- Neo4j 查询：用独立 connector 避免跨 loop 问题 ---
+        connector = Neo4jConnector()
+        try:
+            batch_result = await search_all_batch(end_user_id_list, connector=connector)
+        finally:
+            await connector.close()
+
+        total_num = sum(batch_result.values())
+        end_user_details = [
+            {"end_user_id": uid, "total": batch_result.get(uid, 0)}
+            for uid in end_user_id_list
+        ]
+
+        # --- Session B：写入统计结果 ---
+        with get_db_context() as db:
+            memory_increment = MemoryIncrementRepository(db).write_memory_increment(
+                workspace_id=workspace_uuid,
+                total_num=total_num
+            )
+
+            return {
+                "status": "SUCCESS",
+                "workspace_id": workspace_id,
+                "total_num": total_num,
+                "end_user_count": len(end_user_id_list),
+                "end_user_details": end_user_details,
+                "memory_increment_id": str(memory_increment.id),
+                "created_at": to_iso_z(memory_increment.created_at), # 这样返回字符串是否正确
+            }
 
     try:
-        result = asyncio.run(_run())
+        # 尝试获取现有事件循环，如果不存在则创建新的（与 write_all_workspaces_memory_task 一致，
+        # 避免 asyncio.run 每次新建并关闭 loop，导致进程内共享 Neo4j driver 跨 loop 复用报错）
+        loop = set_asyncio_event_loop()
+
+        result = loop.run_until_complete(_run())
         elapsed_time = time.time() - start_time
         result["elapsed_time"] = elapsed_time
         return result
@@ -3307,6 +3518,8 @@ def write_all_workspaces_memory_task(self) -> Dict[str, Any]:
     2. 对每个工作空间统计记忆总量
     3. 将统计结果写入 memory_increments 表
 
+    改造说明：拆分 DB session 与 Neo4j 查询，避免 PG 连接在 Neo4j I/O 期间空占。
+
     Returns:
         包含任务执行结果的字典
     """
@@ -3317,123 +3530,109 @@ def write_all_workspaces_memory_task(self) -> Dict[str, Any]:
         from app.models.workspace_model import Workspace
         from app.repositories.end_user_repository import EndUserRepository
         from app.repositories.memory_increment_repository import MemoryIncrementRepository
+        from app.repositories.neo4j.neo4j_connector import Neo4jConnector
         from app.services.memory_storage_service import search_all_batch
 
+        # --- 短 session：获取活跃 workspace 列表后立即关闭 ---
+        workspace_list: list[dict] = []
         with get_db_context() as db:
-            try:
-                # 获取所有活跃的工作空间
-                workspaces = db.query(Workspace).filter(
-                    Workspace.is_active.is_(True)
-                ).all()
+            workspaces = db.query(Workspace.id, Workspace.name).filter(
+                Workspace.is_active.is_(True)
+            ).all()
+            workspace_list = [{"id": workspace.id, "name": workspace.name} for workspace in workspaces]
 
-                if not workspaces:
-                    logger.warning("没有找到活跃的工作空间")
-                    return {
-                        "status": "SUCCESS",
-                        "message": "没有找到活跃的工作空间",
-                        "workspace_count": 0,
-                        "workspace_results": []
-                    }
+        if not workspace_list:
+            logger.warning("没有找到活跃的工作空间")
+            return {
+                "status": "SUCCESS",
+                "message": "没有找到活跃的工作空间",
+                "workspace_count": 0,
+                "workspace_results": []
+            }
 
-                logger.info(f"开始统计 {len(workspaces)} 个工作空间的记忆增量")
-                all_workspace_results = []
+        logger.info(f"开始统计 {len(workspace_list)} 个工作空间的记忆增量")
+        results: list[dict] = []
 
-                # 遍历每个工作空间
-                for workspace in workspaces:
-                    workspace_id = workspace.id
-                    logger.info(f"开始处理工作空间: {workspace.name} (ID: {workspace_id})")
+        # 独立 Neo4j connector：绑定当前 loop，避免跨 loop 问题
+        connector = Neo4jConnector()
+        try:
+            # 逐 workspace 处理，每轮独立短 session
+            for workspace_info in workspace_list:
+                workspace_id = workspace_info["id"]
+                workspace_name = workspace_info["name"]
 
-                    try:
-                        # 1. 查询当前workspace下的所有app（仅未删除的）
-                        apps = db.query(App).filter(
-                            App.workspace_id == workspace_id,
-                            App.is_active.is_(True)
-                        ).all()
+                try:
+                    logger.info(f"开始处理工作空间: {workspace_name} (ID: {workspace_id})")
 
-                        if not apps:
-                            # 如果没有app，总量为0
-                            memory_increment = MemoryIncrementRepository(db).write_memory_increment(
-                                workspace_id=workspace_id,
-                                total_num=0
-                            )
-                            all_workspace_results.append({
-                                "workspace_id": str(workspace_id),
-                                "workspace_name": workspace.name,
-                                "status": "SUCCESS",
-                                "total_num": 0,
-                                "end_user_count": 0,
-                                "memory_increment_id": str(memory_increment.id),
-                                "created_at": to_iso_z(memory_increment.created_at),
-                            })
-                            logger.info(f"工作空间 {workspace.name} 没有应用，记录总量为0")
-                            continue
+                    # --- Session A：判断是否有活跃 app + 获取 end_users → 关闭 ---
+                    end_user_id_list: list[str] = []
+                    with get_db_context() as db:
+                        has_apps = (
+                            db.query(App.id)
+                            .filter(App.workspace_id == workspace_id, App.is_active.is_(True))
+                            .first()
+                            is not None
+                        )
+                        if has_apps:
+                            end_users = EndUserRepository(db).get_end_users_by_workspace(workspace_id)
+                            end_user_id_list = [str(eu.id) for eu in end_users]
 
-                        # 2. 查询所有app下的end_user_id（去重）
-                        end_users = EndUserRepository(db).get_end_users_by_workspace(workspace_id)
-                        end_user_id_list = [str(eu.id) for eu in end_users]
-
-                        # 3. 批量查询所有宿主的记忆总量
-                        batch_result = await search_all_batch(end_user_id_list)
-
+                    # 无 app 或无 end_user → 直接写 0，跳过 Neo4j 调用
+                    if not has_apps or not end_user_id_list:
+                        total_num = 0
+                    else:
+                        # --- Neo4j 查询：无 PG 连接占用 ---
+                        batch_result = await search_all_batch(end_user_id_list, connector=connector)
                         total_num = sum(batch_result.values())
-                        end_user_details = [
-                            {"end_user_id": uid, "total": batch_result.get(uid, 0)}
-                            for uid in end_user_id_list
-                        ]
 
-                        # 4. 写入数据库
+                    # --- Session B：写入统计结果 ---
+                    with get_db_context() as db:
                         memory_increment = MemoryIncrementRepository(db).write_memory_increment(
                             workspace_id=workspace_id,
-                            total_num=total_num
+                            total_num=total_num,
                         )
+                        # 在 session 内提取标量，避免 detached 访问
+                        increment_id = str(memory_increment.id)
+                        increment_created_at = to_iso_z(memory_increment.created_at)
 
-                        all_workspace_results.append({
-                            "workspace_id": str(workspace_id),
-                            "workspace_name": workspace.name,
-                            "status": "SUCCESS",
-                            "total_num": total_num,
-                            "end_user_count": len(end_users),
-                            "end_user_details": end_user_details,
-                            "memory_increment_id": str(memory_increment.id),
-                            "created_at": to_iso_z(memory_increment.created_at),
-                        })
+                    results.append({
+                        "workspace_id": str(workspace_id),
+                        "workspace_name": workspace_name,
+                        "status": "SUCCESS",
+                        "total_num": total_num,
+                        "end_user_count": len(end_user_id_list),
+                        "memory_increment_id": increment_id,
+                        "created_at": increment_created_at,
+                    })
+                    logger.info(
+                        f"工作空间 {workspace_name} 统计完成: 总量={total_num}, 用户数={len(end_user_id_list)}"
+                    )
 
-                        logger.info(
-                            f"工作空间 {workspace.name} 统计完成: 总量={total_num}, 用户数={len(end_users)}"
-                        )
+                except Exception as e:
+                    # 单 workspace 失败不影响其他 workspace
+                    logger.error(f"处理工作空间 {workspace_name} (ID: {workspace_id}) 失败: {e}")
+                    results.append({
+                        "workspace_id": str(workspace_id),
+                        "workspace_name": workspace_name,
+                        "status": "FAILURE",
+                        "error": str(e),
+                        "total_num": 0,
+                        "end_user_count": 0,
+                    })
+        finally:
+            await connector.close()
 
-                    except Exception as e:
-                        db.rollback()  # 回滚失败的事务，允许继续处理下一个工作空间
-                        logger.error(f"处理工作空间 {workspace.name} (ID: {workspace_id}) 失败: {str(e)}")
-                        all_workspace_results.append({
-                            "workspace_id": str(workspace_id),
-                            "workspace_name": workspace.name,
-                            "status": "FAILURE",
-                            "error": str(e),
-                            "total_num": 0,
-                            "end_user_count": 0,
-                        })
+        total_memory = sum(r.get("total_num", 0) for r in results)
+        success_count = sum(1 for r in results if r["status"] == "SUCCESS")
 
-                total_memory = sum(r.get("total_num", 0) for r in all_workspace_results)
-                success_count = sum(1 for r in all_workspace_results if r.get("status") == "SUCCESS")
-
-                return {
-                    "status": "SUCCESS",
-                    "message": f"成功处理 {success_count}/{len(workspaces)} 个工作空间，总记忆量: {total_memory}",
-                    "workspace_count": len(workspaces),
-                    "success_count": success_count,
-                    "total_memory": total_memory,
-                    "workspace_results": all_workspace_results
-                }
-
-            except Exception as e:
-                logger.error(f"记忆增量统计任务执行失败: {str(e)}")
-                return {
-                    "status": "FAILURE",
-                    "error": str(e),
-                    "workspace_count": 0,
-                    "workspace_results": []
-                }
+        return {
+            "status": "SUCCESS",
+            "message": f"成功处理 {success_count}/{len(workspace_list)} 个工作空间，总记忆量: {total_memory}",
+            "workspace_count": len(workspace_list),
+            "success_count": success_count,
+            "total_memory": total_memory,
+            "workspace_results": results,
+        }
 
     try:
         # 尝试获取现有事件循环，如果不存在则创建新的
@@ -3464,46 +3663,6 @@ CACHE_INFLIGHT_KEY_FMT = "insight_summary_cache:inflight:{end_user_id}"
 CACHE_INFLIGHT_TTL_SEC = 1800
 
 
-def _classify_cache_refresh(insight_at, summary_at, write_at) -> str:
-    """判定单个用户本轮是否需要刷新洞察/摘要缓存。
-
-    入参为三个时间戳标量（非 ORM 对象），便于在 DB 会话外安全调用：
-        insight_at —— memory_insight_updated_at（洞察缓存最后生成时间）
-        summary_at —— user_summary_updated_at（摘要缓存最后生成时间）
-        write_at   —— write_time（最后一次记忆写入时间，覆盖 API / MCP 全部写入路径）
-
-    两层过滤：
-        1. 数据未变跳过：缓存比最后写入更新（或从未写入）→ 重算结果相同
-        2. 新鲜度窗口：数据虽有变，但缓存在 MEMORY_CACHE_FRESH_HOURS 内刚刷过 → 限频跳过
-
-    返回值：
-        "dispatch"        需要派发刷新
-        "skip_no_change"  缓存已是最新（write_time 为 null 或 updated_at > write_time）
-        "skip_fresh"      数据有变但缓存刚刷新过（未到最短刷新间隔）
-    """
-    # 1) 缓存从未生成 → 必须刷新
-    if insight_at is None or summary_at is None:
-        return "dispatch"
-
-    # 2) write_time 为 null（从未写入，或者之前没有write_time的终端用户）或 数据未变（两份缓存都比最后写入更新）→ 跳过
-    if write_at is None:
-        return "skip_no_change"
-    write_at_naive = as_utc_aware(write_at).replace(tzinfo=None)
-    insight_at_naive = as_utc_aware(insight_at).replace(tzinfo=None)
-    summary_at_naive = as_utc_aware(summary_at).replace(tzinfo=None)
-    if insight_at_naive > write_at_naive and summary_at_naive > write_at_naive:
-        return "skip_no_change"
-
-    # 3) 数据有变，但缓存在新鲜度窗口内刚刷过 → 限频跳过（取更早的一份刷新时间，两份都够新才算新鲜）
-    fresh_hours = settings.MEMORY_CACHE_FRESH_HOURS
-    last_refresh = min(insight_at_naive, summary_at_naive)
-    if (utcnow_naive() - last_refresh).total_seconds() / 3600 < fresh_hours:
-        return "skip_fresh"
-
-    # 4) 数据有变且已过新鲜度窗口 → 派发
-    return "dispatch"
-
-
 @celery_app.task(
     name="app.tasks.scan_refresh_insight_summary_cache",
     bind=True,
@@ -3514,14 +3673,9 @@ def _classify_cache_refresh(insight_at, summary_at, write_at) -> str:
     soft_time_limit=540,
 )
 def scan_refresh_insight_summary_cache(self) -> Dict[str, Any]:
-    """扫描器：遍历所有用户，筛选出需要刷新洞察/摘要缓存的，派发 do_refresh_insight_summary_cache。
-
-    轻量、无事件循环、不调 LLM、无超时风险。两层过滤：
-      1. 数据未变跳过：上次缓存生成之后没有新记忆写入（updated_at > write_time）
-      2. 新鲜度窗口：数据虽有变，但缓存在 MEMORY_CACHE_FRESH_HOURS 内刚刷过 → 限频跳过
-    在途锁（Redis SETNX）防止同一用户被并发派发多次。
-    """
+    """扫描原始刷新字段，并派发需要更新洞察或摘要的用户。"""
     start_time = time.time()
+    from app.core.memory.analytics.memory_insight import classify_memory_cache_refresh
     from app.repositories.end_user_repository import EndUserRepository
 
     redis_client = get_sync_redis_client()
@@ -3539,17 +3693,24 @@ def scan_refresh_insight_summary_cache(self) -> Dict[str, Any]:
     for ws_id in workspace_ids:
         # 列裁剪查询：返回普通元组，不受 session 关闭后 detach 影响，且内存更省
         with get_db_read() as db:
-            rows = EndUserRepository(db).get_cache_refresh_fields_by_workspace(ws_id)
+            rows = EndUserRepository(db).get_neo4j_memory_cache_refresh_fields(ws_id)
 
-        for eu_id_raw, write_at, insight_at, summary_at in rows:
-            eu_id = str(eu_id_raw)
+        for row in rows:
+            eu_id = str(row.end_user_id)
             try:
-                decision = _classify_cache_refresh(insight_at, summary_at, write_at)
-                if decision == "skip_no_change":
-                    skip_no_change += 1
-                    continue
-                if decision == "skip_fresh":
-                    skip_fresh += 1
+                decisions = classify_memory_cache_refresh(
+                    insight_at=row.memory_insight_updated_at,
+                    summary_at=row.user_summary_updated_at,
+                    write_at=row.write_time,
+                    metadata_updated_at=row.metadata_updated_at,
+                )
+                refresh_insight = decisions.insight == "dispatch"
+                refresh_summary = decisions.summary == "dispatch"
+                if not refresh_insight and not refresh_summary:
+                    if "skip_fresh" in (decisions.insight, decisions.summary):
+                        skip_fresh += 1
+                    else:
+                        skip_no_change += 1
                     continue
 
                 # 在途锁：抢不到说明该用户已有刷新任务在途，跳过
@@ -3567,8 +3728,10 @@ def scan_refresh_insight_summary_cache(self) -> Dict[str, Any]:
                 do_refresh_insight_summary_cache.apply_async(
                     kwargs={
                         "end_user_id": eu_id,
-                        "workspace_id": str(ws_id),
+                        "workspace_id": str(row.workspace_id),
                         "language": "zh",  # 与旧任务行为对齐
+                        "refresh_insight": refresh_insight,
+                        "refresh_summary": refresh_summary,
                     },
                     countdown=countdown,
                 )
@@ -3613,51 +3776,83 @@ def do_refresh_insight_summary_cache(
     end_user_id: str,
     workspace_id: str,
     language: str = "zh",
+    refresh_insight: bool = True,
+    refresh_summary: bool = True,
 ) -> Dict[str, Any]:
-    """对【单个用户】刷新一次记忆洞察 + 用户摘要缓存。
+    """按 scan 的独立判定刷新单个用户的记忆洞察或用户摘要缓存。
 
-    由 scan_refresh_insight_summary_cache 派发，每个用户一个独立任务、独立 db session，
-    跑完即释放内存。返回 status：success / partial / failed。
+    由 scan_refresh_insight_summary_cache 派发，每个用户一个独立任务；PostgreSQL
+    读写使用独立同步短 Session，Neo4j/LLM 保持异步。刷新标记默认开启，
+    兼容发布前已入队的旧消息。
     """
     start_time = time.time()
     inflight_key = CACHE_INFLIGHT_KEY_FMT.format(end_user_id=end_user_id)
 
     async def _run() -> Dict[str, Any]:
-        from app.db import get_async_db_context
         from app.services.user_memory_service import UserMemoryService
 
         service = UserMemoryService()
         ws_uuid = uuid.UUID(workspace_id)
-        async with get_async_db_context() as db:
-            insight = await service.generate_and_cache_insight(
-                db, end_user_id, ws_uuid, language=language,
+        insight = None
+        summary = None
+
+        # 旧 Celery 异步 PG 编排保留如下：
+        # async with get_async_db_context() as db:
+        #     insight = await service.generate_and_cache_insight(db, ...)
+        #     summary = await service.generate_and_cache_summary(db, ...)
+        # 模块级 asyncpg pool 会跨 Task/event loop 复用连接，存在
+        # "Future attached to a different loop" 和连接协议状态损坏风险。
+        if refresh_insight:
+            insight = await service.generate_and_cache_insight_for_worker(
+                end_user_id,
+                ws_uuid,
+                language=language,
             )
-            summary = await service.generate_and_cache_summary(
-                db, end_user_id, ws_uuid, language=language,
+        if refresh_summary:
+            summary = await service.generate_and_cache_summary_for_worker(
+                end_user_id,
+                ws_uuid,
+                language=language,
             )
+
+        insight_success = bool(insight and insight.get("success"))
+        summary_success = bool(summary and summary.get("success"))
         return {
-            "insight_success": bool(insight.get("success")),
-            "summary_success": bool(summary.get("success")),
-            "insight_error": insight.get("error"),
-            "summary_error": summary.get("error"),
+            "insight_success": insight_success if refresh_insight else None,
+            "summary_success": summary_success if refresh_summary else None,
+            "insight_status": (
+                "success" if insight_success else "failed"
+            ) if refresh_insight else "skipped",
+            "summary_status": (
+                "success" if summary_success else "failed"
+            ) if refresh_summary else "skipped",
+            "insight_error": insight.get("error") if insight else None,
+            "summary_error": summary.get("error") if summary else None,
         }
 
     loop = set_asyncio_event_loop()
     try:
         result = loop.run_until_complete(_run())
-        # 双失败 = 完全失败：raise 让 Celery 标记 FAILURE（便于 Flower 一眼发现）
-        if not result["insight_success"] and not result["summary_success"]:
+        requested_successes = []
+        if refresh_insight:
+            requested_successes.append(result["insight_success"])
+        if refresh_summary:
+            requested_successes.append(result["summary_success"])
+        if requested_successes and not any(requested_successes):
             raise RuntimeError(
-                f"insight and summary both failed: "
+                f"all requested cache refreshes failed: "
                 f"insight_error={result.get('insight_error')}, "
                 f"summary_error={result.get('summary_error')}"
             )
-        result["status"] = (
-            "success" if (result["insight_success"] and result["summary_success"]) else "partial"
-        )
+        if not requested_successes:
+            result["status"] = "skipped"
+        elif all(requested_successes):
+            result["status"] = "success"
+        else:
+            result["status"] = "partial"
         logger.info(
             f"do_refresh_insight_summary_cache 完成 user={end_user_id} status={result['status']} "
-            f"insight={result['insight_success']} summary={result['summary_success']} "
+            f"insight={result['insight_status']} summary={result['summary_status']} "
             f"耗时={time.time() - start_time:.1f}s"
         )
     # 异常不再 catch，直接冒出 → Celery FAILURE
@@ -3844,83 +4039,80 @@ def do_refresh_user_tags(
     return result
 
 
-@celery_app.task(
-    name="app.tasks.run_forgetting_cycle_task",
-    bind=True,
-    ignore_result=False,  # 改为 False 以便在 Flower 中查看结果
-    max_retries=0,
-    acks_late=False,
-    time_limit=7200,
-    soft_time_limit=7000,
-)
-def run_forgetting_cycle_task(self, config_id: Optional[uuid.UUID] = None) -> Dict[str, Any]:
-    """定时任务：运行遗忘周期
+# @celery_app.task(
+#     name="app.tasks.run_forgetting_cycle_task",
+#     bind=True,
+#     ignore_result=False,  # 改为 False 以便在 Flower 中查看结果
+#     max_retries=0,
+#     acks_late=False,
+#     time_limit=7200,
+#     soft_time_limit=7000,
+# )
+# def run_forgetting_cycle_task(self, config_id: Optional[uuid.UUID] = None) -> Dict[str, Any]:
+#     """定时任务：运行遗忘周期
     
-    遍历所有终端用户，执行遗忘周期。
-    """
-    start_time = time.time()
+#     遍历所有终端用户，执行遗忘周期。
+#     """
+#     start_time = time.time()
 
-    async def _process_users() -> Dict[str, Any]:
-        from app.db import get_async_db_context
-        from app.repositories.end_user_repository import EndUserRepository
+#     async def _process_users() -> Dict[str, Any]:
+#         from app.repositories.end_user_repository import EndUserRepository
+#         with get_db_context() as db:
+#             end_users = EndUserRepository(db).get_all_active()
+#             if not end_users:
+#                 logger.info("没有终端用户，跳过遗忘周期")
+#                 return {"status": "SUCCESS", "message": "没有终端用户",
+#                         "report": {"merged_count": 0, "failed_count": 0, "processed_users": 0},
+#                         "duration_seconds": time.time() - start_time}
 
-        # forget_service.trigger_forgetting_cycle 已迁移到 AsyncSession，
-        async with get_async_db_context() as db:
-            end_users = await EndUserRepository(db).get_all_active_async()
-            if not end_users:
-                logger.info("没有终端用户，跳过遗忘周期")
-                return {"status": "SUCCESS", "message": "没有终端用户",
-                        "report": {"merged_count": 0, "failed_count": 0, "processed_users": 0},
-                        "duration_seconds": time.time() - start_time}
+#             logger.info(f"开始处理 {len(end_users)} 个终端用户的遗忘周期")
+#             forget_service = MemoryForgetService()
+#             total_merged = total_failed = processed_users = 0
+#             failed_users = []
 
-            logger.info(f"开始处理 {len(end_users)} 个终端用户的遗忘周期")
-            forget_service = MemoryForgetService()
-            total_merged = total_failed = processed_users = 0
-            failed_users = []
+#             for end_user in end_users:
+#                 try:
+#                     config_id = MemoryConfigService(db).get_workspace_active_config_id(end_user.workspace_id)
 
-            for end_user in end_users:
-                try:
-                    config_id = await MemoryConfigService(db).get_workspace_active_config_id_async(end_user.workspace_id)
+#                     # 执行遗忘周期
+#                     report = await forget_service.trigger_forgetting_cycle(
+#                         db=db, end_user_id=str(end_user.id), config_id=config_id
+#                     )
 
-                    # 执行遗忘周期
-                    report = await forget_service.trigger_forgetting_cycle(
-                        db=db, end_user_id=str(end_user.id), config_id=config_id
-                    )
+#                     total_merged += report.get('merged_count', 0)
+#                     total_failed += report.get('failed_count', 0)
+#                     processed_users += 1
 
-                    total_merged += report.get('merged_count', 0)
-                    total_failed += report.get('failed_count', 0)
-                    processed_users += 1
+#                     logger.info(f"用户 {end_user.id}: 融合 {report.get('merged_count', 0)} 对节点")
 
-                    logger.info(f"用户 {end_user.id}: 融合 {report.get('merged_count', 0)} 对节点")
+#                 except Exception as e:
+#                     logger.error(f"处理用户 {end_user.id} 失败: {e}", exc_info=True)
+#                     failed_users.append({"end_user_id": str(end_user.id), "error": str(e)})
 
-                except Exception as e:
-                    logger.error(f"处理用户 {end_user.id} 失败: {e}", exc_info=True)
-                    failed_users.append({"end_user_id": str(end_user.id), "error": str(e)})
+#             duration = time.time() - start_time
+#             logger.info(f"遗忘周期完成: {processed_users}/{len(end_users)} 用户, "
+#                         f"融合 {total_merged} 对, 耗时 {duration:.2f}s")
 
-            duration = time.time() - start_time
-            logger.info(f"遗忘周期完成: {processed_users}/{len(end_users)} 用户, "
-                        f"融合 {total_merged} 对, 耗时 {duration:.2f}s")
+#             return {
+#                 "status": "SUCCESS",
+#                 "message": f"处理 {processed_users} 个用户",
+#                 "report": {
+#                     "merged_count": total_merged,
+#                     "failed_count": total_failed,
+#                     "processed_users": processed_users,
+#                     "total_users": len(end_users),
+#                     "failed_users": failed_users
+#                 },
+#                 "duration_seconds": duration
+#             }
 
-            return {
-                "status": "SUCCESS",
-                "message": f"处理 {processed_users} 个用户",
-                "report": {
-                    "merged_count": total_merged,
-                    "failed_count": total_failed,
-                    "processed_users": processed_users,
-                    "total_users": len(end_users),
-                    "failed_users": failed_users
-                },
-                "duration_seconds": duration
-            }
-
-    # 直接运行异步函数，全局异常自然冒出 → Celery FAILURE；
-    # 内层逐用户 try/except 已在 _process_users 中隔离单用户失败。
-    # asyncio.run 自行管理 event loop 生命周期，无需手动清理。
-    result = asyncio.run(_process_users())
-    result["elapsed_time"] = time.time() - start_time
-    result["task_id"] = self.request.id
-    return result
+#     # 直接运行异步函数，全局异常自然冒出 → Celery FAILURE；
+#     # 内层逐用户 try/except 已在 _process_users 中隔离单用户失败。
+#     # asyncio.run 自行管理 event loop 生命周期，无需手动清理。
+#     result = asyncio.run(_process_users())
+#     result["elapsed_time"] = time.time() - start_time
+#     result["task_id"] = self.request.id
+#     return result
 
 
 _FORGET_CANDIDATES_KEY = "forget:candidates"
@@ -4055,7 +4247,211 @@ def do_forget_for_user(self, end_user_id: str) -> Dict[str, Any]:
 
 
 # =============================================================================
-# 隐性记忆和情绪数据更新定时任务
+# 隐性记忆和情绪数据更新：扫描-派发模式
+# =============================================================================
+
+_IMPLICIT_EMOTIONS_INFLIGHT_KEY_FMT = "implicit_emotions:inflight:{end_user_id}"
+_IMPLICIT_EMOTIONS_INFLIGHT_TTL_SEC = 600
+_INIT_EMOTIONS_INFLIGHT_KEY_FMT = "init_emotions:inflight:{end_user_id}"
+_INIT_EMOTIONS_INFLIGHT_TTL_SEC = 600
+
+# 需要在work-periodic执行扫描任务
+@celery_app.task(
+    name="app.tasks.scan_implicit_emotions_storage",
+    bind=True,
+    ignore_result=False,
+    max_retries=0,
+    acks_late=False,
+    time_limit=300,
+    soft_time_limit=270,
+)
+def scan_implicit_emotions_storage(self) -> Dict[str, Any]:
+    """扫描器：分页读取需刷新的用户 ID，逐用户派发 do_implicit_emotions_for_user。
+
+    替代旧 update_implicit_emotions_storage 单任务串行模式。
+    每个用户一个独立 Celery 任务，独立重试、独立超时、故障隔离。
+    """
+    from app.repositories.implicit_emotions_storage_repository import (
+        ImplicitEmotionsStorageRepository,
+        TimeFilterUnavailableError,
+    )
+
+    start_time = time.time()
+    redis_client = get_sync_redis_client()
+    if redis_client is None:
+        logger.error("scan_implicit_emotions_storage 终止：Redis 不可用，拒绝无锁派发")
+        raise RuntimeError("Redis unavailable: implicit emotions scan requires inflight locks")
+
+    dispatched = 0
+    skip_inflight = 0
+
+    # --- 短 session：收集需刷新的用户 ID 列表后立即关闭 ---
+    user_ids: list[str] = []
+    new_user_ids: list[str] = []
+    with get_db_context() as db:
+        repo = ImplicitEmotionsStorageRepository(db)
+        try:
+            user_ids = list(repo.get_users_needing_refresh(redis_client, batch_size=200))
+        except TimeFilterUnavailableError as e:
+            logger.warning(f"时间轴筛选不可用，回退到全量: {e}")
+            user_ids = list(repo.get_all_user_ids(batch_size=200))
+        except Exception as e:
+            logger.warning(f"获取需刷新用户列表异常，回退到全量: {e}")
+            user_ids = list(repo.get_all_user_ids(batch_size=200))
+        new_user_ids = list(repo.get_new_user_ids_today(batch_size=200))
+    # --- session 已关闭 ---
+
+    all_ids = list(set(user_ids + new_user_ids))  # 去重：用户可能同时出现在存量和新用户列表中
+    logger.info(
+        f"scan_implicit_emotions_storage: 存量需刷新 {len(user_ids)}, "
+        f"当天新增 {len(new_user_ids)}, 总候选 {len(all_ids)}"
+    )
+
+    for end_user_id in all_ids:
+        # 互斥检查：若 init 任务正在处理该用户，跳过
+        init_inflight_key = _INIT_EMOTIONS_INFLIGHT_KEY_FMT.format(end_user_id=end_user_id)
+        if redis_client.exists(init_inflight_key):
+            skip_inflight += 1
+            continue
+
+        # inflight 锁：防止重复派发
+        inflight_key = _IMPLICIT_EMOTIONS_INFLIGHT_KEY_FMT.format(end_user_id=end_user_id)
+        ok = redis_client.set(inflight_key, "1", nx=True, ex=_IMPLICIT_EMOTIONS_INFLIGHT_TTL_SEC)
+        if not ok:
+            skip_inflight += 1
+            continue
+
+        do_implicit_emotions_for_user.apply_async(
+            kwargs={"end_user_id": end_user_id},
+            queue="memory_heavy_tasks",
+        )
+        dispatched += 1
+
+    elapsed = time.time() - start_time
+    logger.info(
+        f"scan_implicit_emotions_storage 完成: 派发 {dispatched}, "
+        f"跳过(在途) {skip_inflight}, 耗时 {elapsed:.1f}s"
+    )
+    return {
+        "status": "SUCCESS",
+        "dispatched": dispatched,
+        "skip_inflight": skip_inflight,
+        "total_candidates": len(all_ids),
+        "elapsed_time": elapsed,
+        "task_id": self.request.id,
+    }
+
+
+@celery_app.task(
+    name="app.tasks.do_implicit_emotions_for_user",
+    bind=True,
+    ignore_result=False,
+    max_retries=0,
+    acks_late=False,
+    time_limit=600,
+    soft_time_limit=540,
+)
+def do_implicit_emotions_for_user(self, end_user_id: str) -> Dict[str, Any]:
+    """对【单个用户】生成隐性记忆画像 + 情绪建议。
+
+    由 scan_implicit_emotions_storage 派发，每个用户一个独立 Celery 任务。
+    三段式短 session：Session A（工厂方法内）→ LLM（无 PG）→ Session B（写回）。
+    """
+    start_time = time.time()
+    inflight_key = _IMPLICIT_EMOTIONS_INFLIGHT_KEY_FMT.format(end_user_id=end_user_id)
+
+    async def _run() -> Dict[str, Any]:
+        from app.services.emotion_analytics_service import EmotionAnalyticsService
+        from app.services.implicit_memory_service import ImplicitMemoryService
+
+        implicit_success = False
+        emotion_success = False
+        errors = []
+
+        # --- 隐性记忆画像 ---
+        try:
+            # Session A 内置于工厂方法（短 session 查 config + 构造 LLM 客户端 → 关闭）
+            implicit_service = ImplicitMemoryService.create_without_session(end_user_id)
+
+            # LLM + Neo4j 生成（无 PG session）
+            try:
+                profile_data = await implicit_service.generate_complete_profile(user_id=end_user_id)
+            finally:
+                # 释放独立 Neo4j driver 连接池，防止泄漏
+                await implicit_service.neo4j_connector.close()
+
+            # Session B：写回
+            with get_db_context() as db:
+                await implicit_service.save_profile_cache(
+                    end_user_id=end_user_id, profile_data=profile_data, db=db
+                )
+            implicit_success = True
+            logger.info(f"成功更新用户 {end_user_id} 的隐性记忆画像")
+        except Exception as e:
+            errors.append(f"隐性记忆更新失败: {str(e)}")
+            logger.error(f"用户 {end_user_id} 隐性记忆更新失败: {e}")
+
+        # --- 情绪建议 ---
+        try:
+            emotion_service = EmotionAnalyticsService()
+            # db=None：内部自行开短 session 查 config → 关闭 → Neo4j + LLM
+            suggestions_data = await emotion_service.generate_emotion_suggestions(
+                end_user_id=end_user_id, language="zh"
+            )
+
+            # Session C：写回
+            with get_db_context() as db:
+                await emotion_service.save_suggestions_cache(
+                    end_user_id=end_user_id, suggestions_data=suggestions_data, db=db
+                )
+            emotion_success = True
+            logger.info(f"成功更新用户 {end_user_id} 的情绪建议")
+        except Exception as e:
+            errors.append(f"情绪建议更新失败: {str(e)}")
+            logger.error(f"用户 {end_user_id} 情绪建议更新失败: {e}")
+
+        return {
+            "implicit_success": implicit_success,
+            "emotion_success": emotion_success,
+            "errors": errors,
+        }
+
+    loop = set_asyncio_event_loop()
+    try:
+        result = loop.run_until_complete(_run())
+        # 双失败 = 完全失败
+        if not result["implicit_success"] and not result["emotion_success"]:
+            raise RuntimeError(
+                f"implicit and emotion both failed for user {end_user_id}: {result['errors']}"
+            )
+        result["status"] = (
+            "success" if (result["implicit_success"] and result["emotion_success"]) else "partial"
+        )
+        logger.info(
+            f"do_implicit_emotions_for_user 完成 user={end_user_id} "
+            f"status={result['status']} 耗时={time.time() - start_time:.1f}s"
+        )
+    finally:
+        # 清理 pending tasks + asyncgens，但不关闭 loop：
+        # shared_driver=True 的 Neo4j 连接池绑定在此 loop 上，关闭会导致后续任务
+        # 报 "Future attached to a different loop"。loop 在 worker 进程内复用。
+        _shutdown_loop_gracefully(loop)
+        # 删除在途标记
+        try:
+            _rc = get_sync_redis_client()
+            if _rc is not None:
+                _rc.delete(inflight_key)
+        except Exception:
+            pass
+
+    result["elapsed_time"] = time.time() - start_time
+    result["task_id"] = self.request.id
+    result["end_user_id"] = end_user_id
+    return result
+
+
+# =============================================================================
+# 隐性记忆和情绪数据更新定时任务（已废弃，由 scan_implicit_emotions_storage + do_implicit_emotions_for_user 替代）
 # =============================================================================
 
 @celery_app.task(
@@ -4336,7 +4732,10 @@ def init_implicit_emotions_for_users(self, end_user_ids: List[str]) -> Dict[str,
     """事件触发任务：对指定用户列表做存在性检查，无记录则执行首次初始化。
 
     由 /dashboard/end_users 接口触发，已有数据的用户直接跳过。
-    存量用户的数据刷新由定时任务 update_implicit_emotions_storage 负责。
+    存量用户的数据刷新由定时任务 scan_implicit_emotions_storage 负责。
+
+    改造说明：逐用户三段式短 session + per-user inflight 锁，
+    避免单个 session 跨多用户 LLM 调用期间空占 PG 连接。
 
     Args:
         end_user_ids: 需要检查的用户ID列表
@@ -4355,58 +4754,101 @@ def init_implicit_emotions_for_users(self, end_user_ids: List[str]) -> Dict[str,
 
         logger.info(f"开始按需初始化隐性记忆/情绪数据，候选用户数: {len(end_user_ids)}")
 
+        redis_client = get_sync_redis_client()
+        if redis_client is None:
+            logger.error("init_implicit_emotions_for_users 终止：Redis 不可用，拒绝无锁执行")
+            raise RuntimeError("Redis unavailable: init implicit emotions requires inflight locks")
+
         initialized = 0
         failed = 0
-        skipped = 0
+        skip_inflight = 0
+        skip_existing = 0
 
-        with get_db_context() as db:
-            repo = ImplicitEmotionsStorageRepository(db)
+        for end_user_id in end_user_ids:
+            # 互斥检查：若 scan 派发的 do_implicit_emotions_for_user 正在处理该用户，跳过
+            scan_inflight_key = _IMPLICIT_EMOTIONS_INFLIGHT_KEY_FMT.format(end_user_id=end_user_id)
+            if redis_client.exists(scan_inflight_key):
+                skip_inflight += 1
+                continue
 
-            for end_user_id in end_user_ids:
-                existing = repo.get_by_end_user_id(end_user_id)
+            # Per-user inflight 锁：防止与 scan 任务并发处理同一用户
+            inflight_key = _INIT_EMOTIONS_INFLIGHT_KEY_FMT.format(end_user_id=end_user_id)
+            ok = redis_client.set(inflight_key, "1", nx=True, ex=_INIT_EMOTIONS_INFLIGHT_TTL_SEC)
+            if not ok:
+                skip_inflight += 1
+                continue
+
+            try:
+                # --- Session A：查存在性 → 关闭 ---
+                existing = None
+                with get_db_context() as db:
+                    existing = ImplicitEmotionsStorageRepository(db).get_by_end_user_id(end_user_id)
+
                 if existing is not None:
-                    skipped += 1
+                    skip_existing += 1
                     continue
 
                 logger.info(f"用户 {end_user_id} 无记录，开始初始化")
                 implicit_ok = False
                 emotion_ok = False
+
+                # --- 隐性记忆画像：LLM 生成（无 PG session）---
                 try:
+                    implicit_service = ImplicitMemoryService.create_without_session(end_user_id)
                     try:
-                        implicit_service = ImplicitMemoryService(db=db, end_user_id=end_user_id)
                         profile_data = await implicit_service.generate_complete_profile(user_id=end_user_id)
+                    finally:
+                        # 释放独立 Neo4j driver 连接池，防止泄漏
+                        await implicit_service.neo4j_connector.close()
+                    # Session B：写回
+                    with get_db_context() as db:
                         await implicit_service.save_profile_cache(
                             end_user_id=end_user_id, profile_data=profile_data, db=db
                         )
-                        implicit_ok = True
-                    except Exception as e:
-                        logger.error(f"用户 {end_user_id} 隐性记忆初始化失败: {e}")
+                    implicit_ok = True
+                except Exception as e:
+                    logger.error(f"用户 {end_user_id} 隐性记忆初始化失败: {e}")
 
-                    try:
-                        emotion_service = EmotionAnalyticsService()
-                        suggestions_data = await emotion_service.generate_emotion_suggestions(
-                            end_user_id=end_user_id, db=db, language="zh"
-                        )
+                # --- 情绪建议：LLM 生成（内部自管理 session）---
+                try:
+                    emotion_service = EmotionAnalyticsService()
+                    suggestions_data = await emotion_service.generate_emotion_suggestions(
+                        end_user_id=end_user_id, language="zh"
+                    )
+                    # Session C：写回
+                    with get_db_context() as db:
                         await emotion_service.save_suggestions_cache(
                             end_user_id=end_user_id, suggestions_data=suggestions_data, db=db
                         )
-                        emotion_ok = True
-                    except Exception as e:
-                        logger.error(f"用户 {end_user_id} 情绪建议初始化失败: {e}")
-
-                    if implicit_ok or emotion_ok:
-                        initialized += 1
-                    else:
-                        failed += 1
+                    emotion_ok = True
                 except Exception as e:
-                    failed += 1
-                    logger.error(f"用户 {end_user_id} 初始化异常: {e}")
+                    logger.error(f"用户 {end_user_id} 情绪建议初始化失败: {e}")
 
-        logger.info(f"按需初始化完成: 初始化={initialized}, 跳过={skipped}, 失败={failed}")
+                if implicit_ok or emotion_ok:
+                    initialized += 1
+                else:
+                    failed += 1
+
+            except Exception as e:
+                failed += 1
+                logger.error(f"用户 {end_user_id} 初始化异常: {e}")
+            finally:
+                # 清理 inflight 锁
+                try:
+                    redis_client.delete(inflight_key)
+                except Exception:
+                    pass
+
+        logger.info(
+            f"按需初始化完成: 初始化={initialized}, "
+            f"跳过(在途)={skip_inflight}, 跳过(已有)={skip_existing}, 失败={failed}"
+        )
         return {
             "status": "SUCCESS",
             "initialized": initialized,
-            "skipped": skipped,
+            "skipped": skip_inflight + skip_existing,
+            "skip_inflight": skip_inflight,
+            "skip_existing": skip_existing,
             "failed": failed,
         }
 

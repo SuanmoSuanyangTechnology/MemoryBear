@@ -27,7 +27,7 @@ from app.core.memory.models.graph_models import (
     UserSourceNode,
     UserSourceEntityEdge,
 )
-from app.core.utils.datetime_utils import to_iso_z
+from app.core.utils.datetime_utils import as_utc_aware, to_iso_z
 import logging
 
 logger = logging.getLogger(__name__)
@@ -269,7 +269,13 @@ async def save_dialog_and_statements_to_neo4j(
 
         if perceptual_nodes:
             from app.repositories.neo4j.cypher_queries import PERCEPTUAL_NODE_SAVE
-            perceptual_data = [node.model_dump() for node in perceptual_nodes]
+            perceptual_data = []
+            for node in perceptual_nodes:
+                d = node.model_dump()
+                ct = d.get("created_at")
+                if ct is not None:
+                    d["created_at"] = as_utc_aware(ct).replace(tzinfo=None)
+                perceptual_data.append(d)
             result = await tx.run(PERCEPTUAL_NODE_SAVE, perceptuals=perceptual_data)
             perceptual_uuids = [record["uuid"] async for record in result]
             results["perceptuals"] = perceptual_uuids
@@ -470,7 +476,13 @@ async def save_dialog_and_statements_to_neo4j(
         # 13. Save UserSource nodes
         if user_source_nodes:
             from app.repositories.neo4j.cypher_queries import USER_SOURCE_NODE_SAVE
-            node_data = [node.model_dump() for node in user_source_nodes]
+            node_data = []
+            for node in user_source_nodes:
+                d = node.model_dump()
+                ct = d.get("created_at")
+                if ct is not None:
+                    d["created_at"] = as_utc_aware(ct).replace(tzinfo=None)
+                node_data.append(d)
             result = await tx.run(USER_SOURCE_NODE_SAVE, nodes=node_data)
             us_uuids = [record["uuid"] async for record in result]
             results['user_source_nodes'] = us_uuids

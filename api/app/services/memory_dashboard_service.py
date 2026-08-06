@@ -78,7 +78,8 @@ def get_workspace_end_users_paginated(
     current_user: User,
     page: int,
     pagesize: int,
-    keyword: Optional[str] = None
+    keyword: Optional[str] = None,
+    label: Optional[str] = None,
 ) -> Dict[str, Any]:
     """获取工作空间的宿主列表（分页版本，支持模糊搜索）
 
@@ -108,6 +109,7 @@ def get_workspace_end_users_paginated(
             page=page,
             pagesize=pagesize,
             keyword=keyword,
+            label=label,
         )
 
         business_logger.info(f"成功获取 {len(end_users_orm)} 个宿主记录，总计 {total} 条")
@@ -126,6 +128,7 @@ def get_workspace_end_users_paginated_rag(
     page: int,
     pagesize: int,
     keyword: Optional[str] = None,
+    label: Optional[str] = None,
 ) -> Dict[str, Any]:
     """RAG 模式宿主列表分页。
 
@@ -148,6 +151,7 @@ def get_workspace_end_users_paginated_rag(
             page=page,
             pagesize=pagesize,
             keyword=keyword,
+            label=label,
         )
 
         business_logger.info(f"成功获取 RAG 宿主记录 {len(items)} 条，总计 {total} 条")

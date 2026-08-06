@@ -3,6 +3,8 @@ import re
 import json
 import time
 import os
+from collections.abc import Iterator, Mapping, Sequence
+from typing import Any
 from urllib.parse import urlparse
 
 import copy
@@ -17,6 +19,10 @@ from app.core.rag.utils.doc_store_conn import DocStoreConnection, MatchExpr, Ord
 from app.core.rag.nlp import is_english, rag_tokenizer
 from app.core.rag.common.float_utils import get_float
 from app.core.rag.common.constants import PAGERANK_FLD, TAG_FLD
+from app.core.rag.vdb.elasticsearch.pit_search import iter_search_after_hits
+from app.core.rag.vdb.elasticsearch.response_validation import (
+    raise_on_delete_by_query_failure,
+)
 
 ATTEMPT_TIME = 2
 
@@ -273,6 +279,35 @@ class ESConnection(DocStoreConnection):
         logger.error(f"ESConnection.search timeout for {ATTEMPT_TIME} times!")
         raise Exception("ESConnection.search timeout.")
 
+    def iter_search_after(
+            self,
+            *,
+            index_name: str,
+            query: Mapping[str, Any],
+            fields: Sequence[str],
+            sort: Sequence[str | Mapping[str, Any]],
+            batch_size: int = 1000,
+    ) -> Iterator[dict[str, Any]]:
+        """
+        Iterate over search hits using Elasticsearch search_after.
+
+        Returned dicts are copied from each hit's source. When the ES document
+        id is available, it is exposed as ``_es_id`` to avoid colliding with
+        source-defined ``_id`` fields.
+        """
+        for hit in iter_search_after_hits(
+            self.es,
+            index=index_name,
+            query=query,
+            sort=sort,
+            source_includes=fields,
+            batch_size=batch_size,
+        ):
+            source = dict(hit.get("_source") or {})
+            if hit.get("_id") is not None:
+                source.setdefault("_es_id", hit.get("_id"))
+            yield source
+
     def get(self, chunkId: str, indexName: str, knowledgebaseIds: list[str]) -> dict | None:
         for i in range(ATTEMPT_TIME):
             try:
@@ -429,10 +464,10 @@ class ESConnection(DocStoreConnection):
             chunk_ids = condition["id"]
             if not isinstance(chunk_ids, list):
                 chunk_ids = [chunk_ids]
-            if not chunk_ids:  # when chunk_ids is empty, delete all
-                qry = Q("match_all")
-            else:
-                qry = Q("ids", values=chunk_ids)
+            qry = Q("bool")
+            qry.filter.append(Q("term", kb_id=knowledgebaseId))
+            if chunk_ids:
+                qry.filter.append(Q("ids", values=chunk_ids))
         else:
             qry = Q("bool")
             for k, v in condition.items():
@@ -457,7 +492,14 @@ class ESConnection(DocStoreConnection):
                 res = self.es.delete_by_query(
                     index=indexName,
                     body=Search().query(qry).to_dict(),
-                    refresh=True)
+                    refresh=True,
+                    conflicts="abort",
+                    wait_for_completion=True,
+                )
+                raise_on_delete_by_query_failure(
+                    res,
+                    "legacy graph document delete",
+                )
                 return res["deleted"]
             except ConnectionTimeout:
                 logger.exception("ES request timeout")
@@ -468,7 +510,8 @@ class ESConnection(DocStoreConnection):
                 logger.warning("ESConnection.delete got exception: " + str(e))
                 if re.search(r"(not_found)", str(e), re.IGNORECASE):
                     return 0
-        return 0
+                raise
+        raise RuntimeError("ESConnection.delete failed after Elasticsearch connection timeouts")
 
     """
     Helper functions for search result

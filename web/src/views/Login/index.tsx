@@ -28,7 +28,7 @@ import { useI18n } from '@/store/locale'
 /**
  * Input field styling
  */
-const inputClassName = "login-input rb:rounded-[8px]! rb:p-[12px]! rb:h-[44px]! rb:bg-transparent! rb:text-[#FFFFFF]! [&_input]:rb:text-[#FFFFFF]! [&_input]:rb:caret-[#FFFFFF]!"
+const inputClassName = "login-input rb:rounded-lg! rb:p-[12px]! rb:h-[44px]! rb:bg-transparent! rb:text-[#FFFFFF]! [&_input]:rb:text-[#FFFFFF]! [&_input]:rb:caret-[#FFFFFF]!"
 
 /**
  * Login page component

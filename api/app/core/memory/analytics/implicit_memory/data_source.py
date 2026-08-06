@@ -35,6 +35,9 @@ class MemoryDataSource:
             return datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
         elif timestamp is None:
             return utcnow_naive()
+        # neo4j.time.DateTime → 标准 datetime.datetime
+        if hasattr(timestamp, 'to_native'):
+            return timestamp.to_native()
         return timestamp
     
     def _dict_to_user_summary(self, summary_dict: Dict, user_id: str) -> Optional[UserMemorySummary]:

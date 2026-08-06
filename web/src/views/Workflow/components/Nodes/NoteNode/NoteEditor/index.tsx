@@ -28,6 +28,7 @@ const theme = {
 };
 
 const NOTE_NODES = [ListNode, ListItemNode, LinkNode];
+const NOTE_EDIT_LINK_OPEN_EVENT = 'note:edit-link-opened';
 
 const NOTE_STYLES = `
   .editor-text-bold { font-weight: bold; }
@@ -69,7 +70,33 @@ const NoteEditor: FC<NoteEditorProps> = ({ nodeId, value, fontSize = 12, onChang
   const { t } = useTranslation();
   const [linkState, setLinkState] = useState<{ url: string; rect: DOMRect } | null>(null);
   const [editLinkRect, setEditLinkRect] = useState<{ url: string; rect: DOMRect } | null>(null);
+  const editLinkRectRef = useRef<{ url: string; rect: DOMRect } | null>(null);
+  const editLinkOwner = useRef(Symbol('note-edit-link-popover'));
   const removingLink = useRef(false);
+
+  const openEditLink = useCallback((nextState: { url: string; rect: DOMRect }) => {
+    window.dispatchEvent(new CustomEvent(NOTE_EDIT_LINK_OPEN_EVENT, {
+      detail: { owner: editLinkOwner.current },
+    }));
+    editLinkRectRef.current = nextState;
+    setEditLinkRect(nextState);
+  }, []);
+
+  const closeEditLink = useCallback(() => {
+    editLinkRectRef.current = null;
+    setEditLinkRect(null);
+  }, []);
+
+  useEffect(() => {
+    const closeOtherEditLink = (event: Event) => {
+      const { owner } = (event as CustomEvent<{ owner: symbol }>).detail;
+      if (owner !== editLinkOwner.current) {
+        closeEditLink();
+      }
+    };
+    window.addEventListener(NOTE_EDIT_LINK_OPEN_EVENT, closeOtherEditLink);
+    return () => window.removeEventListener(NOTE_EDIT_LINK_OPEN_EVENT, closeOtherEditLink);
+  }, [closeEditLink]);
 
   useEffect(() => {
     if (!linkState) return;
@@ -80,24 +107,27 @@ const NoteEditor: FC<NoteEditorProps> = ({ nodeId, value, fontSize = 12, onChang
 
   useEffect(() => {
     const handler = (e: Event) => {
-      const { id, url, rect: passedRect } = (e as CustomEvent).detail;
+      const { id, hasSelection, hasLink, rect } = (e as CustomEvent).detail as {
+        id: string; hasSelection: boolean; hasLink: boolean; rect?: DOMRect;
+      };
       if (id !== nodeId) return;
-      if (passedRect) {
-        setEditLinkRect({ url: url || '', rect: passedRect });
+      // Popover already open → close (toggle)
+      if (editLinkRectRef.current) { closeEditLink(); return; }
+      // No text selected → do nothing
+      if (!hasSelection || !rect) return;
+      // Text selected with link → remove link
+      if (hasLink) {
+        window.dispatchEvent(new CustomEvent('note:format', {
+          detail: { id: nodeId, format: 'link', value: null },
+        }));
         return;
       }
-      const sel = window.getSelection();
-      if (sel && sel.rangeCount > 0) {
-        const r = sel.getRangeAt(0).getBoundingClientRect();
-        if (r.width > 0 || r.height > 0) { setEditLinkRect({ url: url || '', rect: r }); return; }
-      }
-      const linkEl = document.querySelector(`[data-note-id="${nodeId}"] a.note-link`) as HTMLElement;
-      const rect = linkEl?.getBoundingClientRect() ?? new DOMRect(window.innerWidth / 2, 200, 0, 0);
-      setEditLinkRect({ url: url || '', rect });
+      // Text selected without link → open edit popover
+      openEditLink({ url: '', rect });
     };
-    window.addEventListener('note:edit-link', handler);
-    return () => window.removeEventListener('note:edit-link', handler);
-  }, [nodeId]);
+    window.addEventListener('note:link-click', handler);
+    return () => window.removeEventListener('note:link-click', handler);
+  }, [nodeId, openEditLink, closeEditLink]);
 
   const handleFormatChange = useCallback((state: FormatState) => {
     onFormatChange?.(state);
@@ -127,7 +157,7 @@ const NoteEditor: FC<NoteEditorProps> = ({ nodeId, value, fontSize = 12, onChang
     <>
       <style>{NOTE_STYLES}</style>
       <LexicalComposer initialConfig={{ namespace: `note-${nodeId}`, theme, nodes: NOTE_NODES, onError: console.error }}>
-        <div style={{ position: 'relative' }} data-note-id={nodeId}>
+        <div className="rb:relative" data-note-id={nodeId}>
           <RichTextPlugin
             contentEditable={
               <ContentEditable
@@ -135,7 +165,9 @@ const NoteEditor: FC<NoteEditorProps> = ({ nodeId, value, fontSize = 12, onChang
               />
             }
             placeholder={
-              <div style={{ position: 'absolute', top: 0, left: 0, color: '#9CA3AF', lineHeight: '18px', pointerEvents: 'none' }}>
+              <div
+                className="rb:absolute rb:top-0 rb:left-0 rb:text-[#9CA3AF] rb:text-[12px] rb:leading-4.5 rb:pointer-none:"
+              >
                 {t('workflow.config.notes.placeholder')}
               </div>
             }
@@ -154,8 +186,8 @@ const NoteEditor: FC<NoteEditorProps> = ({ nodeId, value, fontSize = 12, onChang
               onConfirm={(url) => {
                 removingLink.current = true;
                 window.dispatchEvent(new CustomEvent('note:format', { detail: { id: nodeId, format: 'link', value: url || null } }));
-                setEditLinkRect(null);
               }}
+              onClose={closeEditLink}
             />
           )}
           {linkState && (
@@ -166,7 +198,7 @@ const NoteEditor: FC<NoteEditorProps> = ({ nodeId, value, fontSize = 12, onChang
                 removingLink.current = true;
                 const { rect, url } = linkState;
                 setLinkState(null);
-                setEditLinkRect({ url, rect });
+                openEditLink({ url, rect });
               }}
               onRemove={() => {
                 removingLink.current = true;

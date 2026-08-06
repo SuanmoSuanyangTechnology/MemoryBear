@@ -108,6 +108,8 @@ class KnowledgeBaseConfig(BaseModel):
     # weight: float = Field(default=1.0, ge=0.0, le=1.0, description="知识库权重（用于多知识库融合）")
     vector_similarity_weight: float | None = Field(default=0.5, ge=0.0, le=1.0, description="向量相似度权重（语义/混合/图谱检索使用，分词检索不使用）")
     retrieve_type: str = Field(default="hybrid", description="检索方式participle｜ semantic｜hybrid")
+    # 混合检索下是否启用证据图谱通道（仅 hybrid 类型生效）；1=启用, 0=关闭, None=沿用请求级兜底
+    enable_graph_retrieval: Optional[int] = Field(default=None, ge=0, le=1, description="混合检索下是否启用证据图谱通道")
 
 
 class KnowledgeRetrievalConfig(BaseModel):
@@ -247,6 +249,11 @@ class ContextEngineFeatureConfig(BaseModel):
     )
 
 
+class EmotionReplyConfig(BaseModel):
+    """情绪感知回复配置。"""
+    enabled: bool = Field(default=False, description="是否启用情绪感知回复")
+
+
 class AppFeatures(BaseModel):
     """应用功能特性配置"""
     file_upload: FileUploadConfig = Field(default_factory=FileUploadConfig)
@@ -256,6 +263,7 @@ class AppFeatures(BaseModel):
     citation: CitationConfig = Field(default_factory=CitationConfig)
     web_search: WebSearchConfig = Field(default_factory=WebSearchConfig)
     context_engine: Optional[ContextEngineFeatureConfig] = Field(default=None, description="上下文引擎配置")
+    emotion_reply: EmotionReplyConfig = Field( default_factory=EmotionReplyConfig, description="情绪感知回复配置")
 
 
 class ToolOldConfig(BaseModel):

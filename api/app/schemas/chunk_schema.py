@@ -10,8 +10,8 @@ class RetrieveType(StrEnum):
     """Retrieval type enumeration"""
     PARTICIPLE = "participle"
     SEMANTIC = "semantic"
-    HYBRID = "hybrid"
     Graph = "graph"
+    HYBRID = "hybrid"
 
 
 class KnowledgeRetrievalCaller(StrEnum):

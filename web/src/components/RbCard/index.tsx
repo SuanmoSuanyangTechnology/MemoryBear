@@ -62,7 +62,7 @@ const RbCard: FC<RbCardProps> = ({
             ? <Flex align="center" justify="center" className={clsx(avatarClassName, "rb:size-11 rb:rounded-lg rb:text-[24px] rb:text-[#ffffff] rb:bg-[#155EEF]")}>{avatarText}</Flex> : null
         }
         {isNeedTooltip
-          ? <Tooltip title={title}>
+          ? <Tooltip title={title} placement="topLeft">
             <div className={`rb:flex-1 rb:leading-5.5 rb:min-w-0 rb:whitespace-break-spaces rb:wrap-break-word rb:line-clamp-2 ${titleClassName}`}>
               {title}
             </div>

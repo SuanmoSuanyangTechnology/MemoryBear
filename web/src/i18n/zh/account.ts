@@ -233,5 +233,12 @@ export const account = {
       or: '或',
       variable: '变量',
       loadFailed: '加载失败',
+      uploadFile: '上传文件',
+      listSeparator: '、',
+      uploadFileRequirementSizeAndType: '请上传大小不超过 <size>{{fileSize}}MB</size>、格式为 <types>{{fileTypes}}</types> 的文件',
+      uploadFileRequirementSize: '请上传大小不超过 <size>{{fileSize}}MB</size> 的文件',
+      uploadFileRequirementType: '请上传格式为 <types>{{fileTypes}}</types> 的文件',
+      uploadFileRequirement: '请上传文件',
+      uploadFileMaxCount: '，最多上传 <count>{{maxCount}} 个</count>文件',
     },
 }

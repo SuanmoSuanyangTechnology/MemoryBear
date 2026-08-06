@@ -82,7 +82,7 @@ const EnvVariableModal = forwardRef<EnvVariableModalRef, EnvVariableModalProps>(
         >
           <Select
             options={['secret', 'string', 'number'].map((type) => ({
-              label: <span style={{ textTransform: 'capitalize' }}>{type}</span>,
+              label: <span className="rb:capitalize">{type}</span>,
               value: type,
             }))}
           />

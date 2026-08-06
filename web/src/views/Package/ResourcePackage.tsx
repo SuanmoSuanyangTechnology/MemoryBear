@@ -184,7 +184,7 @@ const ResourcePackage: FC = () => {
         style={{ height: `calc(100% - 144px - ${cartPanelHeight}px)` }}
       >
         {/* Left category list */}
-        <Flex vertical gap={8} className="rb:w-[300px] rb:shrink-0 rb:min-h-0 rb:overflow-y-auto rb:pr-1">
+        <Flex vertical gap={8} className="rb:w-75 rb:shrink-0 rb:min-h-0 rb:overflow-y-auto rb:pr-1">
           {resourcePacks.map(resource => {
             const active = resource.id === selectedResourcePack?.id;
             const current = cartItems.find(item => item.id === resource.id);
@@ -239,7 +239,7 @@ const ResourcePackage: FC = () => {
 
         {/* Right configuration area */}
         {selectedResourcePack &&
-          <Flex vertical gap={12} justify="space-between" className="rb:flex-1 rb:min-w-0 rb:min-h-0 rb:overflow-y-auto rb:bg-white rb:rounded-[12px] rb:border rb:border-[#EBEBEB]">
+          <Flex vertical gap={12} justify="space-between" className="rb:flex-1 rb:min-w-0 rb:min-h-0 rb:overflow-y-auto rb:bg-white rb:rounded-xl rb:border rb:border-[#EBEBEB]">
             <Flex vertical gap={12}>
               {/* Category title + current available total quota */}
               <Flex justify="space-between" align="center" className="rb:border-b rb:border-[#EBEBEB] rb:py-3! rb:mx-4!">
@@ -305,7 +305,7 @@ const ResourcePackage: FC = () => {
                   value={quantity}
                   controls={true}
                   onChange={val => setQuantity(Number(val) || 1)}
-                  className="rb:w-[120px]"
+                  className="rb:w-30"
                 />
               </Flex>
               <Flex align="center" gap={20}>
@@ -322,7 +322,7 @@ const ResourcePackage: FC = () => {
                 }
                 <Button
                   type="primary"
-                  className="rb:h-10! rb:rounded-[8px]! rb:bg-[#171719]! rb:border-0! rb:hover:opacity-80!"
+                  className="rb:h-10! rb:rounded-lg! rb:bg-[#171719]! rb:border-0! rb:hover:opacity-80!"
                   onClick={handleAddToCart}
                 >
                   {isHasAdd ? t('package.confirmUpdateCart') :t('package.confirmAddCart')}
@@ -345,7 +345,7 @@ const ResourcePackage: FC = () => {
           <Flex
             align="center"
             justify="center"
-            className={clsx("rb:p-1! rb:rounded-[8px] rb:border rb:border-[#EBEBEB] rb:hover:border-[#171719]", {
+            className={clsx("rb:p-1! rb:rounded-lg rb:border rb:border-[#EBEBEB] rb:hover:border-[#171719]", {
               'rb:border-[#171719]!': cartExpanded,
             })}
           >
@@ -363,7 +363,7 @@ const ResourcePackage: FC = () => {
           <Button
             type="primary"
             disabled={cartCount < 1}
-            className="rb:h-10! rb:rounded-[8px]! rb:bg-[#171719]! rb:border-0! rb:hover:opacity-80! rb:disabled:bg-[#EBEBEB]!"
+            className="rb:h-10! rb:rounded-lg! rb:bg-[#171719]! rb:border-0! rb:hover:opacity-80! rb:disabled:bg-[#EBEBEB]!"
             onClick={handleCheckout}
           >
             {t('package.goToOrder')}
@@ -401,7 +401,7 @@ const ResourcePackage: FC = () => {
             </Flex>
           </Flex>
 
-          <Flex vertical gap={12} className="rb:max-h-[280px] rb:overflow-y-auto">
+          <Flex vertical gap={12} className="rb:max-h-70 rb:overflow-y-auto">
             {cartItems.map((item, index) => {
               const key = itemKey(item.id);
               const tier = item.tiers[0];
@@ -431,7 +431,7 @@ const ResourcePackage: FC = () => {
                     size="small"
                     value={tier.amount}
                     controls={true}
-                    className="rb:w-[92px] rb:shrink-0"
+                    className="rb:w-23 rb:shrink-0"
                     onChange={val => handleUpdateCartQty(key, val as number | null)}
                   />
                   <span className="rb:w-20 rb:shrink-0 rb:text-right rb:text-[13px] rb:font-medium">

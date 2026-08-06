@@ -2,6 +2,7 @@ import logging
 from timeit import default_timer as timer
 
 from app.core.rag.chunk.parser.base import DocumentParser
+from app.core.rag.chunk.context import is_image_vision_enabled
 from app.core.rag.deepdoc.parser import PdfParser
 from app.core.rag.deepdoc.parser.figure_parser import vision_figure_parser_pdf_wrapper
 
@@ -17,7 +18,7 @@ class DeepDocPdfParser(PdfParser, DocumentParser):
         tables = vision_figure_parser_pdf_wrapper(
             tbls=tables,
             callback=ctx.callback,
-            vision_model=ctx.vision_model,
+            vision_model=ctx.vision_model if is_image_vision_enabled(ctx.parser_config) else None,
             **ctx.kwargs,
         )
         return sections, tables, self

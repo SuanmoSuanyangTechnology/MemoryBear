@@ -5,7 +5,7 @@ import uuid
 
 from sqlalchemy import (
     Column, String, DateTime, ForeignKey, Boolean, Integer,
-    Text, JSON, BigInteger, UniqueConstraint, Index
+    Text, JSON, BigInteger, UniqueConstraint, Index, text
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
@@ -29,6 +29,11 @@ class Conversation(Base):
     __tablename__ = "conversations"
     __table_args__ = (
         Index("idx_conversations_user_updated", "user_id", "updated_at"),
+        Index(
+            "idx_conversations_app_user",
+            "app_id", "user_id", "is_draft",
+            postgresql_where=text("is_active = TRUE"),
+        ),
     )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
@@ -85,11 +90,24 @@ class ConversationDetail(Base):
 class Message(Base):
     """消息表"""
     __tablename__ = "messages"
+    __table_args__ = (
+        Index(
+            "idx_messages_conv_created",
+            "conversation_id",
+            text("created_at DESC"),
+            postgresql_where=text("is_deleted = FALSE AND is_current = TRUE"),
+        ),
+        Index(
+            "idx_messages_parent",
+            "parent_message_id",
+            postgresql_where=text("parent_message_id IS NOT NULL AND is_deleted = FALSE"),
+        ),
+    )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
 
     # 关联信息
-    conversation_id = Column(UUID(as_uuid=True), ForeignKey("conversations.id"), nullable=False, comment="会话ID")
+    conversation_id = Column(UUID(as_uuid=True), ForeignKey("conversations.id"), nullable=False, index=True, comment="会话ID")
 
     # 消息内容
     role = Column(String(20), nullable=False, comment="角色: user/assistant/system")

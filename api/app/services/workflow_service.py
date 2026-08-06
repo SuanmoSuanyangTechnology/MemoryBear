@@ -7,11 +7,11 @@ import time
 import logging
 import uuid
 from dataclasses import dataclass
-from typing import Any, Annotated, Optional
+from typing import Any, Annotated, AsyncGenerator, Optional
 
 import yaml
 from fastapi import Depends
-from sqlalchemy import delete, desc, select, update
+from sqlalchemy import delete, desc, insert, select, update
 from sqlalchemy.orm import Session, selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -41,7 +41,7 @@ from app.core.workflow.executor import execute_workflow, execute_workflow_stream
 from app.core.workflow.nodes.enums import NodeType
 from app.core.workflow.variable.base_variable import VariableType, DEFAULT_VALUE
 from app.core.workflow.validator import validate_workflow_config
-from app.aioRedis import aio_redis_delete, aio_redis_get, aio_redis_set, get_thread_safe_redis
+from app.aioRedis import aio_redis, aio_redis_delete, aio_redis_get, aio_redis_set, get_thread_safe_redis
 from app.db import get_async_db_context, get_async_pool_status, get_db
 from app.models import App, AppRelease, Conversation, Message
 from app.models.workflow_model import WorkflowConfig, WorkflowExecution, WorkflowNodeCache, WorkflowNodeExecution
@@ -1003,9 +1003,10 @@ class WorkflowService:
             )
             from app.services.model_service import ModelApiKeyService
             from app.models.workspace_model import Workspace
-            from premium.platform_admin.speedbear_model import TenantSpeedBearBinding
+
 
             async with get_async_db_context() as db:
+                # Read annotation settings
                 result = await db.execute(
                     select(
                         AppAnnotationSetting.similarity_threshold,
@@ -1022,7 +1023,7 @@ class WorkflowService:
                 if not enabled or not model_config_id:
                     return None
 
-            async with get_async_db_context() as db:
+                # Read annotations + model config in same session
                 result = await db.execute(
                     select(
                         AppAnnotation.id,
@@ -1051,6 +1052,7 @@ class WorkflowService:
 
                 api_key_obj: ModelApiKey | None = None
                 if ModelApiKeyService._is_public_speedbear_model(model_cfg):
+                    from premium.platform_admin.speedbear_model import TenantSpeedBearBinding
                     result = await db.execute(
                         select(Workspace.tenant_id)
                         .join(App, App.workspace_id == Workspace.id)
@@ -2149,7 +2151,7 @@ class WorkflowService:
             app_id=app_id,
             workflow_config=workflow_config,
         )
-        state_cache = manager.get_latest_cache(include_inactive=False)
+        state_cache = manager.get_latest_cache_sync(include_inactive=False)
         result_data = state_cache.get("result_data") if state_cache else {}
         snapshot = (result_data or {}).get("snapshot") if isinstance(result_data, dict) else None
         if not isinstance(snapshot, dict):
@@ -2225,7 +2227,7 @@ class WorkflowService:
             app_id=app_id,
             workflow_config=workflow_config,
         )
-        saved_cache = manager.save_cache(
+        saved_cache = manager.save_cache_sync(
             cache_key=manager.build_cache_key({"kind": self.DEBUG_STATE_SOURCE}),
             input_data={"kind": self.DEBUG_STATE_SOURCE},
             result_data=persist_payload["result_data"],
@@ -3147,7 +3149,7 @@ class WorkflowService:
             node_type=node_type,
             node_name=node_name,
         )
-        cache = manager.get_latest_cache(include_inactive=False)
+        cache = manager.get_latest_cache_sync(include_inactive=False)
         secret_values = self._extract_secret_values_from_environment_variables(
             config.environment_variables if config else []
         )
@@ -3228,7 +3230,7 @@ class WorkflowService:
             node_type=node.get("type"),
             node_name=node.get("name"),
         )
-        latest_cache = manager.get_latest_cache(include_inactive=False)
+        latest_cache = manager.get_latest_cache_sync(include_inactive=False)
         next_result_data = self._sanitize_cache_result_data(result_data or {})
         if patches:
             if latest_cache:
@@ -3242,7 +3244,7 @@ class WorkflowService:
             next_result_data = self._apply_cache_result_patches(patch_base, patches)
         if not latest_cache:
             cache_key = manager.build_cache_key(next_result_data)
-            updated = manager.save_cache(
+            updated = manager.save_cache_sync(
                 cache_key=cache_key,
                 input_data={},
                 result_data=next_result_data,
@@ -3250,7 +3252,7 @@ class WorkflowService:
                 ttl_seconds=None,
             )
         else:
-            updated = manager.update_latest_cache(
+            updated = manager.update_latest_cache_sync(
                 result_data=next_result_data,
             )
         if not updated:
@@ -3291,7 +3293,7 @@ class WorkflowService:
             node_type=node.get("type") if node else None,
             node_name=node.get("name") if node else None,
         )
-        affected = manager.invalidate_latest_cache()
+        affected = manager.invalidate_latest_cache_sync()
         if affected > 0:
             self._sync_workflow_debug_state_node(
                 app_id=app_id,
@@ -3733,86 +3735,30 @@ class WorkflowService:
             workflow_output_data: Any,
             token_usage: Any,
     ) -> WorkflowExecutionRef:
-        async with get_async_db_context() as db:
-            started_at = time.perf_counter()
-            conversation = await db.get(Conversation, conversation_id)
-            if not conversation:
-                raise BusinessException(
-                    f"会话不存在: conversation_id={conversation_id}",
-                    code=BizCode.NOT_FOUND,
-                )
+        # Enqueue message persistence to BatchPersistQueue (async, non-blocking)
+        if conversation_id:
+            from app.services.batch_persist_queue import BatchPersistQueue, PersistTask
+            await BatchPersistQueue.enqueue(PersistTask(
+                task_type="save_messages",
+                args={
+                    "conversation_id": str(conversation_id),
+                    "user_message_id_override": user_message_id or uuid.uuid4(),
+                    "message_id_override": assistant_message_id or uuid.uuid4(),
+                    "user_message_content": human_message,
+                    "user_meta_override": human_meta or {"files": []},
+                    "content_override": assistant_message,
+                    "meta_override": assistant_meta or {},
+                    "user_parent_message_id": from_message_id,
+                    "sync_memory": False,  # workflow has its own memory ingestion via memory node
+                },
+            ))
 
-            result = await db.execute(
-                select(WorkflowExecution).where(WorkflowExecution.execution_id == execution_id)
-            )
-            execution = result.scalar_one_or_none()
-            if not execution:
-                runtime_execution = await self._get_runtime_execution_snapshot_async(execution_id)
-                if not runtime_execution:
-                    raise BusinessException(
-                        code=BizCode.NOT_FOUND,
-                        message=f"执行记录不存在: execution_id={execution_id}",
-                    )
-                execution = self._build_execution_record_from_ref(runtime_execution)
-                db.add(execution)
-
-            user_msg = Message(
-                id=user_message_id if user_message_id else uuid.uuid4(),
-                conversation_id=conversation_id,
-                role="user",
-                content=human_message,
-                meta_data=human_meta,
-                status="completed",
-                parent_message_id=from_message_id,
-            )
-            assistant_msg = Message(
-                id=assistant_message_id if assistant_message_id else uuid.uuid4(),
-                conversation_id=conversation_id,
-                role="assistant",
-                content=assistant_message,
-                meta_data=assistant_meta,
-                status="completed",
-                parent_message_id=user_msg.id,
-            )
-            db.add(user_msg)
-            db.add(assistant_msg)
-
-            message_count = int(conversation.message_count or 0)
-            if message_count + 1 <= 2:
-                conversation.title = human_message[:50] + ("..." if len(human_message) > 50 else "")
-            conversation.message_count = message_count + 2
-
-            execution.status = "completed"
-            execution.output_data = (
-                convert_uuids_to_str(workflow_output_data)
-                if workflow_output_data is not None
-                else workflow_output_data
-            )
-            execution.token_usage = token_usage
-            if not execution.completed_at:
-                execution.completed_at = utcnow_naive()
-                execution.elapsed_time = (
-                    (execution.completed_at - execution.started_at).total_seconds()
-                    if execution.started_at else 0.0
-                )
-
-            before_commit_at = time.perf_counter()
-            await db.commit()
-            after_commit_at = time.perf_counter()
-            pool_status = get_async_pool_status()
-            logger.info(
-                "[TIMING] workflow.finalize_execution stage=after_commit execution_id=%s "
-                "total_ms=%.2f commit_ms=%.2f pool_checked_out=%s pool_overflow=%s "
-                "pool_usage_percent=%s",
-                execution_id,
-                (after_commit_at - started_at) * 1000,
-                (after_commit_at - before_commit_at) * 1000,
-                pool_status["checked_out"],
-                pool_status["overflow"],
-                pool_status["usage_percent"],
-            )
-            await self._delete_runtime_execution_snapshot_async(execution_id)
-            return self._build_execution_ref(execution)
+        return await self._patch_execution_async(
+            execution_id,
+            status="completed",
+            output_data=workflow_output_data,
+            token_usage=token_usage,
+        )
 
     async def _update_message_async(
             self,
@@ -3856,19 +3802,20 @@ class WorkflowService:
     ) -> None:
         if not conversation_id:
             return
-        await self._add_message_async(
-            conversation_id=conversation_id,
-            role="user",
-            content=human_message,
-            meta_data=human_meta,
-        )
-        await self._add_message_async(
-            conversation_id=conversation_id,
-            role="assistant",
-            content="",
-            meta_data={"error": error},
-            message_id=message_id,
-        )
+        from app.services.batch_persist_queue import BatchPersistQueue, PersistTask
+        await BatchPersistQueue.enqueue(PersistTask(
+            task_type="save_failed_message",
+            args={
+                "conversation_id": str(conversation_id),
+                "message_id": message_id or uuid.uuid4(),
+                "user_message_id": uuid.uuid4(),
+                "user_message_content": human_message,
+                "files_meta": (human_meta or {}).get("files", []),
+                "error_message": "",
+                "error_detail": error,
+                "sync_memory": False,
+            },
+        ))
 
     async def _archive_resolved_intervention_async(
             self,
@@ -3958,15 +3905,15 @@ class WorkflowService:
             workflow_config=resolved_workflow_config,
         )
 
-    async def _persist_workflow_node_executions_async(
+    def _prepare_node_execution_items(
             self,
             execution: WorkflowExecution | WorkflowExecutionRef,
             workflow_config: WorkflowConfig,
             result: dict[str, Any],
-    ) -> None:
+    ) -> tuple[uuid.UUID, uuid.UUID, list[dict[str, Any]]]:
         node_outputs = result.get("node_outputs") or {}
         if not isinstance(node_outputs, dict) or not node_outputs:
-            return
+            return execution.id, execution.app_id, []
 
         items: list[dict[str, Any]] = []
         ordered_node_outputs = sorted(node_outputs.items(), key=self._node_output_sort_key)
@@ -3983,13 +3930,23 @@ class WorkflowService:
                     fallback_node_name=self._get_node_name_from_config(workflow_config, node_id),
                 )
             )
-        async with get_async_db_context() as db:
-            await db.execute(
-                delete(WorkflowNodeExecution).where(WorkflowNodeExecution.execution_id == execution.id)
-            )
-            if items:
-                db.add_all([WorkflowNodeExecution(**item) for item in items])
-            await db.commit()
+        return execution.id, execution.app_id, items
+
+    async def _persist_workflow_node_executions_async(
+            self,
+            execution: WorkflowExecution | WorkflowExecutionRef,
+            workflow_config: WorkflowConfig,
+            result: dict[str, Any],
+    ) -> None:
+        from app.services.batch_persist_queue import BatchPersistQueue, PersistTask
+
+        execution_id, _app_id, items = self._prepare_node_execution_items(execution, workflow_config, result)
+        if not items:
+            return
+        await BatchPersistQueue.enqueue(PersistTask(
+            task_type="save_node_executions",
+            args={"execution_id": str(execution_id), "items": items},
+        ))
 
     async def _write_workflow_debug_state_async(
             self,
@@ -4676,6 +4633,8 @@ class WorkflowService:
                     "message_length": len(payload.get("output", "")),
                     "error": payload.get("error", ""),
                     "output": payload.get("output", ""),
+                    "execution_id": payload.get("execution_id"),
+                    "total_tokens": (payload.get("token_usage") or {}).get("total_tokens", 0) or 0,
                 }
                 if payload.get("error_node_id"):
                     data["error_node_id"] = payload["error_node_id"]
@@ -4739,6 +4698,17 @@ class WorkflowService:
         return storage_type, user_rag_memory_id
 
     async def _get_memory_store_info_async(self, workspace_id: uuid.UUID) -> tuple[str, str]:
+        """Return (storage_type, user_rag_memory_id) with Redis caching.
+
+        Workspace storage type and RAG memory knowledge id change infrequently,
+        so this lookup is cached for 5 minutes to avoid a DB round-trip on
+        every workflow request.
+        """
+        cache_key = f"wf_mem_store:{workspace_id}"
+        cached = await get_json_async(cache_key)
+        if cached is not CACHE_MISS and isinstance(cached, dict):
+            return cached.get("storage_type", "neo4j"), cached.get("user_rag_memory_id", "")
+
         from app.models.workspace_model import Workspace
         from app.models.knowledge_model import Knowledge
 
@@ -4773,7 +4743,11 @@ class WorkflowService:
                     )
                     storage_type = "neo4j"
 
-            return storage_type, user_rag_memory_id
+        await set_json_async(cache_key, {
+            "storage_type": storage_type,
+            "user_rag_memory_id": user_rag_memory_id,
+        }, ttl=300)
+        return storage_type, user_rag_memory_id
 
     @staticmethod
     def _extract_human_message_and_meta(
@@ -5812,7 +5786,7 @@ class WorkflowService:
         conv_id = chain[0].conversation_id
         fallback_executions = self.db.query(WorkflowExecution).filter(
             WorkflowExecution.conversation_id == conv_id,
-            WorkflowExecution.status.in_(["completed", "failed", "waiting_human", "timeout"]),
+            WorkflowExecution.status.in_(["completed", "failed", "waiting_human", "timeout", "cancelled"]),
         ).all() if conv_id else []
 
         def _find_execution_by_time(target_msg: MessageModel):
@@ -5950,19 +5924,26 @@ class WorkflowService:
     def _get_history_info(self, conversation_id: uuid.UUID) -> tuple[dict, list] | None:
         """加载会话历史（兜底：from_message_id 为空时用）。
 
-        conv_vars 从最近 completed execution 取（会话级变量累积）；
+        conv_vars 从最近 terminal 状态的 execution 取（completed / cancelled）；
         conv_messages 沿最近消息的 parent 链回溯得到当前分支上下文。
         """
-        # conv_vars 从最近 execution 取
+        # conv_vars 从最近 terminal execution 取
         conv_vars: dict[str, Any] = {}
-        executions = self.execution_repo.get_by_conversation_id(
-            conversation_id=conversation_id,
-            status="completed",
-            limit_count=1,
+        result = self.db.execute(
+            select(WorkflowExecution)
+            .where(
+                WorkflowExecution.conversation_id == conversation_id,
+                WorkflowExecution.status.in_(["completed", "cancelled"]),
+            )
+            .order_by(desc(WorkflowExecution.started_at))
+            .limit(10)
         )
-        if executions and isinstance(executions[0].output_data, dict):
-            variables = executions[0].output_data.get("variables", {}) or {}
-            conv_vars = variables.get("conv", {}) if isinstance(variables, dict) else {}
+        for latest_execution in result.scalars():
+            if isinstance(latest_execution.output_data, dict):
+                variables = latest_execution.output_data.get("variables", {}) or {}
+                conv_vars = variables.get("conv", {}) if isinstance(variables, dict) else {}
+                if conv_vars:
+                    break
 
         # conv_messages 沿最近消息的 parent 链回溯
         from app.models import Message as MessageModel
@@ -6015,15 +5996,17 @@ class WorkflowService:
                 select(WorkflowExecution)
                 .where(
                     WorkflowExecution.conversation_id == conversation_id,
-                    WorkflowExecution.status == "completed",
+                    WorkflowExecution.status.in_(["completed", "cancelled"]),
                 )
                 .order_by(desc(WorkflowExecution.started_at))
-                .limit(1)
+                .limit(10)
             )
-            latest_execution = result.scalar_one_or_none()
-            if latest_execution and isinstance(latest_execution.output_data, dict):
-                variables = latest_execution.output_data.get("variables", {}) or {}
-                conv_vars = variables.get("conv", {}) if isinstance(variables, dict) else {}
+            for latest_execution in result.scalars():
+                if isinstance(latest_execution.output_data, dict):
+                    variables = latest_execution.output_data.get("variables", {}) or {}
+                    conv_vars = variables.get("conv", {}) if isinstance(variables, dict) else {}
+                    if conv_vars:
+                        break
 
             result = await db.execute(
                 select(MessageModel)
@@ -6128,6 +6111,7 @@ class WorkflowService:
             regenerate_history: Optional[tuple] = None,
             prepared_memory_storage_type: str | None = None,
             prepared_user_rag_memory_id: str | None = None,
+            skip_save: bool = False,
     ):
         """运行工作流
 
@@ -6189,12 +6173,13 @@ class WorkflowService:
         has_existing_conversation = bool(payload.conversation_id)
         # 转换 conversation_id 为 UUID
         conversation_id_uuid = uuid.UUID(payload.conversation_id) if payload.conversation_id else None
+        # skip_save 语义：纯函数式执行（如工作流作为工具），不创建会话、不落消息
         conversation_id_uuid = await self._ensure_conversation_async(
             app_id=app_id,
             workspace_id=workspace_id,
             user_id=payload.user_id,
             conversation_id=conversation_id_uuid,
-            enable_conversation=supports_conversation,
+            enable_conversation=supports_conversation and not skip_save,
         )
         if conversation_id_uuid:
             payload.conversation_id = str(conversation_id_uuid)
@@ -6214,7 +6199,7 @@ class WorkflowService:
             history = await self._get_history_info_async(conversation_id_uuid) if conversation_id_uuid else None
             if history:
                 _, prev_messages = history
-            if conversation_id_uuid:
+            if conversation_id_uuid and not skip_save:
                 await self._add_message_async(
                     message_id=user_message_id,
                     conversation_id=conversation_id_uuid,
@@ -6296,7 +6281,7 @@ class WorkflowService:
             if stop:
                 message_id = uuid.uuid4()
                 user_message_id = uuid.uuid4()
-                if conversation_id_uuid:
+                if conversation_id_uuid and not skip_save:
                     await self._add_message_async(
                         message_id=user_message_id,
                         conversation_id=conversation_id_uuid,
@@ -6370,6 +6355,8 @@ class WorkflowService:
         )
 
         files = []
+        # 本轮消息是否已保存/入队（与 run_stream 的守卫语义一致）
+        messages_finalized = False
         try:
             files = await self._handle_file_input(payload.files)
             if prepared_memory_storage_type is not None:
@@ -6379,16 +6366,12 @@ class WorkflowService:
                 storage_type, user_rag_memory_id = await self._get_memory_store_info_async(workspace_id)
             input_data["files"] = files
             message_id = uuid.uuid4()
-            # 预生成 user_message_id：重新生成模式不创建新 user 消息，置 None
-            # （add_message 收到 None 时内部生成 id，行为同原先；仅非重新生成场景
-            # 需要把 id 经由 response 返回给前端，供"未刷新即删除 user 消息"使用）
             user_message_id = None if regenerate_mode else uuid.uuid4()
 
             if regenerate_mode and regenerate_history:
                 history = regenerate_history
             elif payload.from_message_id:
                 history = await self._get_history_from_message_async(payload.from_message_id)
-                # from_message_id 找不到对应 execution 时回退到最近 completed
                 if history is None and conversation_id_uuid:
                     history = await self._get_history_info_async(conversation_id_uuid)
             elif not has_existing_conversation:
@@ -6403,7 +6386,6 @@ class WorkflowService:
 
             # 新会话时写入开场白
             is_new_conversation = init_message_length == 0
-            # 重新生成场景不重复写开场白（会话历史中已存在）
             if is_new_conversation and not regenerate_mode:
                 opening_cfg = feature_configs.get("opening_statement", {})
                 if (
@@ -6417,13 +6399,13 @@ class WorkflowService:
                     if payload.variables:
                         for var_name, var_value in payload.variables.items():
                             statement = statement.replace(f"{{{{{var_name}}}}}", str(var_value))
-                    await self._add_message_async(
-                        conversation_id=conversation_id_uuid,
-                        role="assistant",
-                        content=statement,
-                        meta_data={"suggested_questions": suggested_questions},
-                    )
-                    # 注入到 conv_messages，让 LLM 感知开场白
+                    if not skip_save:
+                        await self._add_message_async(
+                            conversation_id=conversation_id_uuid,
+                            role="assistant",
+                            content=statement,
+                            meta_data={"suggested_questions": suggested_questions},
+                        )
                     input_data["conv_messages"] = [{"role": "assistant", "content": statement}]
                     init_message_length = 1
 
@@ -6502,7 +6484,12 @@ class WorkflowService:
                 assistant_meta = {"usage": token_usage, "audio_url": None, "execution_id": execution.execution_id}
                 if filtered_citations:
                     assistant_meta["citations"] = filtered_citations
-                if conversation_id_uuid:
+                # regenerate_mode 下由 regenerate() 统一保存版本化消息，
+                # 这里不能再入队 save_messages，否则会话里会多出一对幽灵消息
+                # （且流式重新生成会因同一 message_id 触发主键冲突）；
+                # skip_save 下（工作流作为工具等纯函数式执行）同样不落消息。
+                if conversation_id_uuid and not regenerate_mode and not skip_save:
+                    messages_finalized = True
                     _from_msg_id = await self._resolve_from_message_id_async(
                         payload.from_message_id,
                         conversation_id_uuid,
@@ -6554,9 +6541,11 @@ class WorkflowService:
                 human_message, human_meta = self._extract_human_message_and_meta(
                     final_messages, payload.message or "", files
                 )
-                await self._save_failed_conversation_async(
-                    conversation_id_uuid, message_id, human_message, human_meta, result.get("error") or ""
-                )
+                if not regenerate_mode and not skip_save:
+                    messages_finalized = True
+                    await self._save_failed_conversation_async(
+                        conversation_id_uuid, message_id, human_message, human_meta, result.get("error") or ""
+                    )
                 filtered_citations = []
 
             response_data = {
@@ -6620,7 +6609,9 @@ class WorkflowService:
             except Exception as persist_err:
                 logger.warning(f"Failed to persist node executions on run error: {persist_err}")
             human_message, human_meta = self._extract_human_message_and_meta([], payload.message or "", files)
-            await self._save_failed_conversation_async(conversation_id_uuid, None, human_message, human_meta, str(e))
+            # 若本轮消息已成功入队，不要再入队失败消息，避免重复写入
+            if not skip_save and not regenerate_mode and not messages_finalized:
+                await self._save_failed_conversation_async(conversation_id_uuid, None, human_message, human_meta, str(e))
             raise BusinessException(
                 code=BizCode.INTERNAL_ERROR,
                 message=f"工作流执行失败: {str(e)}"
@@ -6645,6 +6636,7 @@ class WorkflowService:
             preserved_execution: "WorkflowExecution | None" = None,
             prepared_memory_storage_type: str | None = None,
             prepared_user_rag_memory_id: str | None = None,
+            skip_save: bool = False,
     ):
         """当 `preserved_execution` 不为 None 时，跳过本方法内部三处
         `create_execution` 调用，复用调用方已创建的 WorkflowExecution 行。
@@ -6761,12 +6753,13 @@ class WorkflowService:
         has_existing_conversation = bool(payload.conversation_id)
         # 转换 conversation_id 为 UUID
         conversation_id_uuid = uuid.UUID(payload.conversation_id) if payload.conversation_id else None
+        # skip_save 语义：纯函数式执行（如工作流作为工具），不创建会话、不落消息
         conversation_id_uuid = await self._ensure_conversation_async(
             app_id=app_id,
             workspace_id=workspace_id,
             user_id=payload.user_id,
             conversation_id=conversation_id_uuid,
-            enable_conversation=supports_conversation,
+            enable_conversation=supports_conversation and not skip_save,
         )
         if conversation_id_uuid:
             payload.conversation_id = str(conversation_id_uuid)
@@ -6790,7 +6783,7 @@ class WorkflowService:
             history = await self._get_history_info_async(conversation_id_uuid) if conversation_id_uuid else None
             if history:
                 _, prev_messages = history
-            if conversation_id_uuid:
+            if conversation_id_uuid and not skip_save:
                 await self._add_message_async(
                     message_id=user_message_id,
                     conversation_id=conversation_id_uuid,
@@ -6904,7 +6897,7 @@ class WorkflowService:
             if stop:
                 message_id = uuid.uuid4()
                 user_message_id = uuid.uuid4()
-                if conversation_id_uuid:
+                if conversation_id_uuid and not skip_save:
                     await self._add_message_async(
                         message_id=user_message_id,
                         conversation_id=conversation_id_uuid,
@@ -6992,6 +6985,15 @@ class WorkflowService:
         )
         _log_before_execute_step("before_execute_runtime_config_ready")
 
+        _lock_key: str | None = None
+        _lock_value: str | None = None
+        _lock_degraded = False
+        _last_event_data: dict | None = None
+        # 本轮对话消息（成功对或失败对）是否已保存/入队。一旦置 True，
+        # 后续任何分支不得再为同一轮入队 save_messages / save_failed_message，
+        # 否则 BatchPersistQueue 会因相同 message id 触发 messages 主键冲突。
+        messages_finalized = False
+
         try:
             files = await self._handle_file_input(payload.files)
             if prepared_memory_storage_type is not None:
@@ -7013,7 +7015,6 @@ class WorkflowService:
             elif payload.from_message_id:
                 history = await self._get_history_from_message_async(payload.from_message_id)
                 history_source = "from_message"
-                # from_message_id 找不到对应 execution 时回退到最近 completed
                 if history is None and conversation_id_uuid:
                     history = await self._get_history_info_async(conversation_id_uuid)
                     history_source = "conversation_fallback"
@@ -7033,17 +7034,14 @@ class WorkflowService:
                 history_message_count=init_message_length,
                 history_source=history_source,
             )
+
             message_id = regenerate_message_id or uuid.uuid4()
-            # 预生成 user_message_id（重新生成模式不创建新 user 消息，置 None）。
-            # 主流程 user 消息在 workflow_end 后才落库(:5550)，而 workflow_start 事件
-            # (:5822) 在其之前发射，故先预生成 id 经事件返回前端，落库时用同一 id。
             user_message_id = None if regenerate_mode else uuid.uuid4()
             _cycle_items: dict[str, list] = {}
             intervention_list = []
 
             # 新会话时写入开场白
             is_new_conversation = init_message_length == 0
-            # 重新生成场景不重复写开场白（会话历史中已存在）
             if is_new_conversation and not regenerate_mode:
                 opening_cfg = feature_configs.get("opening_statement", {})
                 if (
@@ -7057,13 +7055,13 @@ class WorkflowService:
                     if payload.variables:
                         for var_name, var_value in payload.variables.items():
                             statement = statement.replace(f"{{{{{var_name}}}}}", str(var_value))
-                    await self._add_message_async(
-                        conversation_id=conversation_id_uuid,
-                        role="assistant",
-                        content=statement,
-                        meta_data={"suggested_questions": suggested_questions},
-                    )
-                    # 注入到 conv_messages，让 LLM 感知开场白
+                    if not skip_save:
+                        await self._add_message_async(
+                            conversation_id=conversation_id_uuid,
+                            role="assistant",
+                            content=statement,
+                            meta_data={"suggested_questions": suggested_questions},
+                        )
                     input_data["conv_messages"] = [{"role": "assistant", "content": statement}]
                     init_message_length = 1
             _log_before_execute_step(
@@ -7122,6 +7120,81 @@ class WorkflowService:
                 status="running",
             )
 
+            # ── 会话执行锁 ──
+            if conversation_id_uuid:
+                _lock_key = f"workflow:exec_lock:{conversation_id_uuid}"
+                _lock_value = f"{execution.execution_id}:{time.time()}"
+                acquired = False
+                try:
+                    acquired = (await asyncio.wait_for(
+                        aio_redis.set(_lock_key, _lock_value, nx=True, ex=120),
+                        timeout=2.0,
+                    )) or False
+                except Exception as redis_exc:
+                    logger.warning(
+                        "Redis lock acquisition failed, degrading to no-lock mode: %s",
+                        redis_exc,
+                    )
+                    acquired = True
+                    _lock_degraded = True
+                    _lock_key = None
+
+                if not acquired:
+                    logger.info(
+                        "Lock held by another execution, waiting: conversation_id=%s new_execution=%s",
+                        conversation_id_uuid, execution.execution_id,
+                    )
+                    for _ in range(10):
+                        await asyncio.sleep(0.2)
+                        try:
+                            acquired = (await asyncio.wait_for(
+                                aio_redis.set(_lock_key, _lock_value, nx=True, ex=120),
+                                timeout=1.0,
+                            )) or False
+                        except Exception:
+                            acquired = True
+                            _lock_degraded = True
+                            _lock_key = None
+                            break
+                        if acquired:
+                            break
+
+                    if not acquired:
+                        logger.warning(
+                            "Lock wait timeout, using fallback vars: conversation_id=%s execution_id=%s",
+                            conversation_id_uuid, execution.execution_id,
+                        )
+                        # 尝试取消上一轮执行（A），从 Redis lock value 读取 A 的 execution_id
+                        try:
+                            holder_value = await aio_redis.get(_lock_key)
+                            if holder_value:
+                                holder_exec_id = (holder_value or "").split(":")[0]
+                                if holder_exec_id and holder_exec_id != execution.execution_id:
+                                    await self._patch_execution_async(
+                                        holder_exec_id, status="cancelled",
+                                    )
+                                    logger.info(
+                                        "Cancelled previous execution after lock timeout: "
+                                        "previous_execution=%s new_execution=%s",
+                                        holder_exec_id, execution.execution_id,
+                                    )
+                        except Exception as cancel_err:
+                            logger.warning(
+                                "Failed to cancel previous execution after lock timeout: %s",
+                                cancel_err,
+                            )
+                        _lock_key = None
+                    elif not _lock_degraded:
+                        # 锁获取成功，重新读变量（上一轮可能刚释放）
+                        try:
+                            refetched = await self._get_history_info_async(conversation_id_uuid)
+                            if refetched:
+                                refetched_vars, _ = refetched
+                                if refetched_vars:
+                                    input_data["conv"] = refetched_vars
+                        except Exception:
+                            pass
+
             accumulated_content = ""
             # One workflow execution owns one assistant message.  Individual
             # Answer/End outputs are kept as logical responses inside that
@@ -7146,6 +7219,7 @@ class WorkflowService:
                     memory_storage_type=storage_type,
                     user_rag_memory_id=user_rag_memory_id
             ):
+                _last_event_data = event.get("data") or {}
                 event_type = event.get("event")
                 event_data = event.get("data", {})
 
@@ -7188,7 +7262,7 @@ class WorkflowService:
                                 else:
                                     node_outputs[cycle_node_id] = {"cycle_items": items}
                             workflow_output_data.update(new_output_data)
-                        if conversation_id_uuid:
+                        if conversation_id_uuid and not skip_save:
                             await self._add_message_async(
                                 message_id=user_message_id,
                                 conversation_id=conversation_id_uuid,
@@ -7347,6 +7421,31 @@ class WorkflowService:
                                 payload.from_message_id,
                                 conversation_id_uuid,
                             )
+                            # regenerate_mode 下由 regenerate_stream 统一落库版本化消息，
+                            # 这里不能再入队 save_messages，否则同一 message_id 主键冲突；
+                            # messages_finalized 防止 workflow_end 被重复处理时二次入队。
+                            if not skip_save and not regenerate_mode and not messages_finalized:
+                                messages_finalized = True
+                                execution = await self._finalize_completed_execution_async(
+                                    execution_id=execution.execution_id,
+                                    conversation_id=conversation_id_uuid,
+                                    human_message=human_message,
+                                    human_meta=human_meta,
+                                    user_message_id=user_message_id,
+                                    from_message_id=_from_msg_id,
+                                    assistant_message_id=message_id,
+                                    assistant_message=assistant_message,
+                                    assistant_meta=assistant_meta,
+                                    workflow_output_data=workflow_output_data,
+                                    token_usage=_token_usage_total,
+                                )
+                            else:
+                                execution = await self._patch_execution_async(
+                                    execution.execution_id,
+                                    status="completed",
+                                    output_data=workflow_output_data,
+                                    token_usage=_token_usage_total,
+                                )
                             finalize_context_ready_at = time.perf_counter()
                             logger.info(
                                 "[TIMING] workflow.finalize_outer stage=context_ready execution_id=%s "
@@ -7354,19 +7453,6 @@ class WorkflowService:
                                 execution.execution_id,
                                 (finalize_context_ready_at - finalize_started_at) * 1000,
                                 (finalize_context_ready_at - finalize_payload_ready_at) * 1000,
-                            )
-                            execution = await self._finalize_completed_execution_async(
-                                execution_id=execution.execution_id,
-                                conversation_id=conversation_id_uuid,
-                                human_message=human_message,
-                                human_meta=human_meta,
-                                user_message_id=user_message_id,
-                                from_message_id=_from_msg_id,
-                                assistant_message_id=message_id,
-                                assistant_message=assistant_message,
-                                assistant_meta=assistant_meta,
-                                workflow_output_data=workflow_output_data,
-                                token_usage=_token_usage_total,
                             )
                         else:
                             execution = await self._patch_execution_async(
@@ -7400,9 +7486,11 @@ class WorkflowService:
                         _failed_output = event.get("data")
                         _error_node_id = (_failed_output or {}).get("error_node")
 
-                        await self._save_failed_conversation_async(
-                            conversation_id_uuid, message_id, human_message, human_meta, error_msg
-                        )
+                        if not skip_save and not regenerate_mode and not messages_finalized:
+                            messages_finalized = True
+                            await self._save_failed_conversation_async(
+                                conversation_id_uuid, message_id, human_message, human_meta, error_msg
+                            )
                         execution = await self._patch_execution_async(
                             execution.execution_id,
                             status="failed",
@@ -7539,7 +7627,8 @@ class WorkflowService:
                             conversation_id_uuid,
                         )
                         _hitl_user_msg = None
-                        if conversation_id_uuid:
+                        # regenerate_mode 下占位消息同样由 regenerate_stream 末尾统一落库
+                        if conversation_id_uuid and not skip_save and not regenerate_mode:
                             _hitl_user_msg = await self._add_message_async(
                                 conversation_id=conversation_id_uuid,
                                 role="user",
@@ -8060,12 +8149,15 @@ class WorkflowService:
             from app.core.workflow.nodes.human_intervention.node import InterventionRegistry
             InterventionRegistry.cleanup(execution.execution_id)
             human_message, human_meta = self._extract_human_message_and_meta([], payload.message or "", files)
-            await self._save_failed_conversation_async(
-                conversation_id_uuid, None, human_message, human_meta, str(e)
-            )
+            # 若本轮消息已成功入队（messages_finalized），不要再入队失败消息，
+            # 否则同一 message_id 会触发 messages 主键冲突
+            if not skip_save and not regenerate_mode and not messages_finalized:
+                await self._save_failed_conversation_async(
+                    conversation_id_uuid, None, human_message, human_meta, str(e)
+                )
             # On failure, update the waiting_human message in-place:
             # clear the flag and set content to the error message.
-            if conversation_id_uuid and message_id:
+            if conversation_id_uuid and message_id and not skip_save:
                 await self._update_message_async(
                     message_id=message_id,
                     content=str(e),
@@ -8076,6 +8168,74 @@ class WorkflowService:
                     },
                 )
             yield {"event": "error", "data": {"execution_id": execution.execution_id, "error": str(e)}}
+
+        finally:
+            # ── 中断/取消时持久化变量 + 释放锁 + 清理资源 ──
+            if execution and execution.status == "running":
+                try:
+                    # 仅当快照包含完整变量时才持久化 output_data；
+                    # 不完整快照（如 LLM 流式 chunk）不保存，避免覆盖上一个已知完整终态。
+                    snapshot = (
+                        _last_event_data
+                        if self._is_snapshot_complete(_last_event_data)
+                        else None
+                    )
+                    await self._patch_execution_async(
+                        execution.execution_id,
+                        status="cancelled",
+                        output_data=snapshot,
+                    )
+                    if snapshot is None:
+                        logger.warning(
+                            "cancelled without complete variable snapshot: "
+                            "execution_id=%s conversation_id=%s",
+                            execution.execution_id, conversation_id_uuid,
+                        )
+                except Exception as persist_err:
+                    logger.warning(
+                        "Failed to persist variables on cancel: execution_id=%s error=%s",
+                        execution.execution_id, persist_err,
+                    )
+
+            # 释放会话执行锁
+            if _lock_key and _lock_value and not _lock_degraded:
+                try:
+                    _release_script = """
+                    if redis.call("get", KEYS[1]) == ARGV[1] then
+                        return redis.call("del", KEYS[1])
+                    end
+                    return 0
+                    """
+                    await aio_redis.eval(_release_script, 1, _lock_key, _lock_value)
+                except Exception as lock_release_err:
+                    logger.warning(
+                        "Failed to release execution lock: key=%s error=%s",
+                        _lock_key, lock_release_err,
+                    )
+
+            # 清理干预注册表
+            try:
+                from app.core.workflow.nodes.human_intervention.node import InterventionRegistry
+                InterventionRegistry.cleanup(execution.execution_id)
+            except Exception as cleanup_err:
+                logger.warning(
+                    "Failed to cleanup intervention registry: execution_id=%s error=%s",
+                    execution.execution_id, cleanup_err,
+                )
+
+    @staticmethod
+    def _is_snapshot_complete(data: dict | None) -> bool:
+        """SSE 事件 data 是否包含完整变量快照（含 variables.conv）。
+
+        只有 workflow_end 事件才会携带完整 variables 字段；
+        message/node_end 等中间事件不含，不应作为 cancelled 的变量恢复源。
+        """
+        if not isinstance(data, dict):
+            return False
+        if "variables" not in data:
+            return False
+        variables = data.get("variables") or {}
+        return isinstance(variables, dict) and "conv" in variables
 
     async def resume_intervention_stream(
             self,

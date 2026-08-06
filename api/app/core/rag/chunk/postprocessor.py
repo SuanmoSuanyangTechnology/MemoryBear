@@ -96,8 +96,9 @@ class ChunkPostProcessor:
             add_positions(doc, [[index] * 5])
         if chunk.image is not None:
             doc["image"] = chunk.image
-        if chunk.metadata:
-            doc["metadata"] = copy.deepcopy(chunk.metadata)
+        metadata = self._chunk_metadata(chunk)
+        if metadata:
+            doc["metadata"] = metadata
         tokenize(doc, content, ctx.is_english)
         return doc
 
@@ -119,8 +120,9 @@ class ChunkPostProcessor:
             doc["doc_type_kwd"] = "image"
         if chunk.positions:
             add_positions(doc, chunk.positions)
-        if chunk.metadata:
-            doc["metadata"] = copy.deepcopy(chunk.metadata)
+        metadata = self._chunk_metadata(chunk)
+        if metadata:
+            doc["metadata"] = metadata
         tokenize(doc, content, ctx.is_english)
         doc["content_with_weight"] = content
         return doc
@@ -130,3 +132,8 @@ class ChunkPostProcessor:
         for entity in ZERO_WIDTH_HTML_ENTITIES:
             content = content.replace(entity, "")
         return content
+
+    def _chunk_metadata(self, chunk: LogicalChunk) -> dict:
+        metadata = copy.deepcopy(chunk.metadata) if chunk.metadata else {}
+        metadata.setdefault("heading_path", [])
+        return metadata

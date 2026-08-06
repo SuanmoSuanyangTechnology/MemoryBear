@@ -146,7 +146,8 @@ class KnowledgeRetrievalNodeConfig(BaseNodeConfig):
                         "similarity_threshold": 0.2,
                         "vector_similarity_weight": 0.3,
                         "top_k": 4,
-                        "retrieve_type": "hybrid"
+                        "retrieve_type": "hybrid",
+                        "enable_graph_retrieval": 1
                     }],
                     "metadata_filter_mode": "disabled",
                     "metadata_filters": None,

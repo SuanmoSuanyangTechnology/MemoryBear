@@ -132,7 +132,7 @@ const VariableConfigModal = forwardRef<VariableConfigModalRef, VariableEditModal
                       : field.type === 'number'
                       ? <InputNumber
                         placeholder={t('common.pleaseEnter')}
-                        style={{ width: '100%' }}
+                        className="rb:w-full!"
                         onChange={(value) => form.setFieldValue(['variables', name, 'value'], value)}
                       />
                       : field.type === 'boolean'

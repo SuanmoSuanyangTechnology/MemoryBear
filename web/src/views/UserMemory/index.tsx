@@ -9,13 +9,13 @@
  * Displays list of end users with their memory statistics and configuration
  */
 
-import { useRef } from 'react';
+import { useRef, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom'
-import { Row, Col, Form, Flex, Tooltip, App } from 'antd';
+import { Row, Col, Form, Flex, Tooltip, App, type SegmentedProps } from 'antd';
 import copy from 'copy-to-clipboard'
 
-import type { Data } from './types'
+import type { Data, Query, MemoryType } from './types'
 import { userMemoryListUrl } from '@/api/memory';
 import { useUser } from '@/store/user'
 import RbCard from '@/components/RbCard/Card'
@@ -24,9 +24,11 @@ import RbStatistic from '@/components/RbStatistic';
 import MoreDropdown from '@/components/MoreDropdown'
 import PageScrollList, { type PageScrollListRef } from '@/components/PageScrollList'
 import DeleteConfirmModal, { type DeleteConfirmModalRef } from './components/DeleteConfirmModal';
+import MemorySubjectDetailModal, { type MemorySubjectDetailModalRef } from './components/MemorySubjectDetailModal';
 import Tag from '@/components/Tag'
 import { formatQuotaStatus, StatusProgress } from './components/StatusProgress'
 import OverflowTags from '@/components/OverflowTags'
+import PageTabs from '@/components/PageTabs';
 
 export default function UserMemory() {
   const { t } = useTranslation();
@@ -39,6 +41,7 @@ export default function UserMemory() {
 
   const scrollListRef = useRef<PageScrollListRef>(null)
   const deleteConfirmModalRef = useRef<DeleteConfirmModalRef>(null)
+  const memorySubjectDetailModalRef = useRef<MemorySubjectDetailModalRef>(null)
 
   /** Navigate to user memory detail */
   const handleViewDetail = (id: string | number) => {
@@ -76,27 +79,46 @@ export default function UserMemory() {
       ? item?.end_user?.other_name 
       : item?.end_user?.id || ''
   }
+  const [activeTab, setActiveTab] = useState<'all' | MemoryType>('all');
+  const formatTabItems = useMemo(() => {
+    return ['all', 'long', 'short'].map(value => ({
+      value,
+      label: t(`userMemory.${value}TermMemory`),
+    }))
+  }, [t])
+  /** Handle tab change */
+  const handleChangeTab = (value: SegmentedProps['value']) => {
+    setActiveTab(value as ('all' | MemoryType));
+    form.resetFields()
+  }
 
   return (
     <div>
       <Form form={form}>
-        <Row gutter={16} className="rb:mb-4">
-          <Col span={8}>
+        <Flex align="center" justify="space-between" className="rb:mb-4!">
+          <PageTabs
+            value={activeTab}
+            options={formatTabItems}
+            onChange={handleChangeTab}
+          />
+          <Flex gap={12} className="rb:mb-4">
             <Form.Item name="keyword" noStyle>
               <SearchInput
                 placeholder={t('userMemory.searchPlaceholder')}
-                className="rb:w-full!"
               />
             </Form.Item>
-          </Col>
-        </Row>
+          </Flex>
+        </Flex>
       </Form>
 
     
-      <PageScrollList<Data, { keyword: string; }>
+      <PageScrollList<Data, Query>
         ref={scrollListRef}
         url={userMemoryListUrl}
-        query={{ keyword }}
+        query={{
+          keyword,
+          label: activeTab === 'all' ? undefined : activeTab
+        }}
         column={3}
         renderItem={(item) => {
           const { end_user, memory_num, memory_config, tags = [] } = item as Data;
@@ -112,6 +134,15 @@ export default function UserMemory() {
               </Flex>}
               extra={<MoreDropdown
                 items={[
+                  {
+                    key: 'detail',
+                    icon: <div className="rb:size-4 rb:bg-cover rb:cursor-pointer rb:bg-[url('@/assets/images/common/eye.svg')]" />,
+                    label: t('userMemory.memorySubject'),
+                    onClick: (info) => {
+                      info.domEvent?.stopPropagation();
+                      memorySubjectDetailModalRef.current?.handleOpen(item);
+                    },
+                  },
                   {
                     key: 'delete',
                     danger: true,
@@ -149,7 +180,7 @@ export default function UserMemory() {
                   <RbStatistic title={t('userMemory.capacity')} value={memory_num?.total || 0} suffix={t('userMemory.memoryNum')} />
                 </Col>
                 <Col span={12}>
-                  <RbStatistic title={t('userMemory.type')} value={t(`userMemory.person`)} />
+                  <RbStatistic title={t('userMemory.memoryType')} value={end_user.label ? t(`userMemory.${end_user.label}TermMemory`) : '-'} />
                 </Col>
               </Row>
 
@@ -182,6 +213,8 @@ export default function UserMemory() {
           )
         }}
       />
+
+      <MemorySubjectDetailModal ref={memorySubjectDetailModalRef} />
 
       {/* 删除确认弹窗 */}
       <DeleteConfirmModal

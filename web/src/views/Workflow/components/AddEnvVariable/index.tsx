@@ -86,7 +86,7 @@ const AddEnvVariable = forwardRef<AddEnvVariableRef, AddEnvVariableProps>(({
                     <div className="rb:flex-1 rb:font-medium rb:whitespace-break-spaces rb:wrap-break-word rb:line-clamp-1">{item.name}</div>
                     <div className="rb:text-[12px] rb:text-[#5B6167] rb:font-regular">
                       {item.required && <span className="rb:text-[#FF4D4F]">*</span>}
-                      (<span style={{ textTransform: 'capitalize' }}>{item.value_type}</span>)
+                      (<span className="rb:capitalize">{item.value_type}</span>)
                     </div>
                   </Flex>
                   <div className="rb:mt-1 rb:text-[12px] rb:text-[#5B6167] rb:font-regular rb:leading-5 rb:wrap-break-word rb:line-clamp-1 rb:max-w-[calc(100%-60px)]">

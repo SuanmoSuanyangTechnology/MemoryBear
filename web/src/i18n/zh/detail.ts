@@ -61,7 +61,8 @@ export const detail = {
     episodicDetail: {
       title: '记录你真实经历过的每一个重要场景',
       total_all: '情景记忆总数',
-      all: "全部",
+      all: "全部时间",
+      allType: '全部类型',
       today: '今天',
       this_week: '本周',
       this_month: '本月',

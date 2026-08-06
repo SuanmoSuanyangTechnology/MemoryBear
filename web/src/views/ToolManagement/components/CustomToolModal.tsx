@@ -278,7 +278,7 @@ const CustomToolModal = forwardRef<CustomToolModalRef, CustomToolModalProps>(({
         >
           <Select
             mode="tags"
-            style={{ width: '100%' }}
+            className="rb:w-full!"
             placeholder={t('tool.tagDesc')}
           />
         </FormItem>

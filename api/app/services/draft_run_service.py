@@ -52,6 +52,11 @@ from app.services.context_assembler import (
     append_external_context_rule,
 )
 from app.services.tool_service import ToolService
+from app.core.memory.emotion.emotion_resolver import (
+    apply_detection as apply_emotion_detection,
+    cancel_detection as cancel_emotion_detection,
+    start_detection as start_emotion_detection,
+)
 
 logger = get_business_logger()
 
@@ -148,11 +153,13 @@ async def _retrieve_chunks_via_standard(query: str, kb_config: Dict[str, Any]) -
     用第一个 KB 的参数作为全局默认；缺失值回落到 schema 默认值。
     """
     knowledge_bases = (kb_config or {}).get("knowledge_bases", []) or []
-    kb_ids = [kb.get("kb_id") for kb in knowledge_bases if kb.get("kb_id")]
+    # 单一过滤源:有 kb_id 的 KB 才会进入请求,request_kbs 与 kb_ids 强一致
+    valid_kbs = [kb for kb in knowledge_bases if kb.get("kb_id")]
+    kb_ids = [kb["kb_id"] for kb in valid_kbs]
     if not kb_ids:
         return []
 
-    first_kb = knowledge_bases[0] or {}
+    first_kb = valid_kbs[0] or {}
 
     def _as_float(value: Any, default: float) -> float:
         try:
@@ -184,16 +191,30 @@ async def _retrieve_chunks_via_standard(query: str, kb_config: Dict[str, Any]) -
         vector_similarity_weight = None
     else:
         vector_similarity_weight = _as_float(first_kb.get("vector_similarity_weight"), 0.5)
-    
+
+    # 混合检索下，按第一个 KB 的开关设置请求级图谱检索兜底
+    # （每个 KB 显式配置的 enable_graph_retrieval 仍会在检索层按 KB 覆盖生效）
+    enable_graph_retrieval = (
+        1
+        if (
+            retrieve_type == RetrieveType.HYBRID
+            and _as_int(first_kb.get("enable_graph_retrieval"), 0) == 1
+        )
+        else 0
+    )
+
+    # 透传与 kb_ids 同源的 KB 配置,避免重复过滤导致漂移
     request = KnowledgeRetrievalRequest(
         query=query,
         caller=KnowledgeRetrievalCaller.AGENT,
         kb_ids=[uuid.UUID(kid) for kid in kb_ids],
+        knowledge_bases=valid_kbs,
         top_k=_as_int(first_kb.get("top_k"), 3),
         similarity_threshold=_as_float(first_kb.get("similarity_threshold"), 0.7),
         vector_similarity_weight=vector_similarity_weight,
         retrieve_type=retrieve_type,
         rerank_id=rerank_id,
+        enable_graph_retrieval=enable_graph_retrieval,
     )
 
     result = await KnowledgeRetrievalService.retrieve_async(request=request, principal=None)
@@ -311,13 +332,26 @@ def create_knowledge_retrieval_tool(kb_config, kb_ids, user_id, citations_collec
 class AgentRunService:
     """Agent运行服务类"""
 
-    def __init__(self, db: Session | AsyncSession):
+    def __init__(self, db: Session | AsyncSession | None):
         """Agent运行服务
 
         Args:
             db: 数据库会话
         """
         self.db = db
+
+    def _uses_async_session(self) -> bool:
+        return isinstance(self.db, AsyncSession)
+
+    async def _release_db_connection(self) -> None:
+        """Release the underlying DB connection back to the pool before LLM streaming."""
+        try:
+            if self._uses_async_session():
+                await self.db.close()
+            else:
+                self.db.close()
+        except Exception as e:
+            logger.warning(f"Failed to release DB connection: {e}")
 
     async def _resolve_app_tenant_id_async(self, app_id: uuid.UUID) -> Optional[uuid.UUID]:
         async with get_async_db_context() as db:
@@ -1145,6 +1179,8 @@ class AgentRunService:
 
         # file_upload 校验
         self._validate_file_upload(features_config, files)
+        # 情绪感知回复：与提示词/上下文引擎/多模态准备并发，结果在 ToolOrchestrator 之前注入。
+        emotion_detection = start_emotion_detection(features_config, message)
         tenant_id = await self._get_tenant_id_by_workspace_id_async(workspace_id)
 
         try:
@@ -1180,23 +1216,47 @@ class AgentRunService:
             # 3. 处理系统提示词（支持变量替换）
             system_prompt = system_prompt.get_text_content() or "你是一个专业的AI助手"
 
-            # 4. 准备工具列表
+            # 4. 并行加载工具/技能/知识库/记忆配置（各自独立 DB 会话，无相互依赖）
             tools = []
+            parallel_results = await asyncio.gather(
+                self.load_tools_config(tools_config, web_search, tenant_id, user_id, workspace_id),
+                self.load_skill_config(skills_config, message, tenant_id, user_id, workspace_id),
+                self.load_knowledge_retrieval_config(knowledge_retrieval_config, user_id),
+                self.load_memory_config(memory_config, user_id, workspace_id, storage_type, user_rag_memory_id)
+                if memory else None,
+                return_exceptions=True,
+            )
 
-            # 从配置中获取启用的工具
-            tools.extend(await self.load_tools_config(tools_config, web_search, tenant_id, user_id, workspace_id))
-            skill_tools, skill_prompts = await self.load_skill_config(skills_config, message, tenant_id, user_id, workspace_id)
-            tools.extend(skill_tools)
-            if skill_prompts:
-                system_prompt = f"{system_prompt}\n\n{skill_prompts}"
-            kb_tools, citations_collector = await self.load_knowledge_retrieval_config(knowledge_retrieval_config, user_id)
-            tools.extend(kb_tools)
-            # 添加长期记忆工具
-            if memory:
-                memory_tools, _ = await self.load_memory_config(
-                    memory_config, user_id, workspace_id, storage_type, user_rag_memory_id
-                )
+            base_tools = parallel_results[0]
+            skill_result = parallel_results[1]
+            kb_result = parallel_results[2]
+            memory_result = parallel_results[3]
+
+            if not isinstance(base_tools, Exception):
+                tools.extend(base_tools)
+            else:
+                logger.warning("load_tools_config failed: %s", base_tools)
+
+            if not isinstance(skill_result, Exception) and skill_result is not None:
+                skill_tools, skill_prompts = skill_result
+                tools.extend(skill_tools)
+                if skill_prompts:
+                    system_prompt = f"{system_prompt}\n\n{skill_prompts}"
+            elif isinstance(skill_result, Exception):
+                logger.warning("load_skill_config failed: %s", skill_result)
+
+            if not isinstance(kb_result, Exception) and kb_result is not None:
+                kb_tools, citations_collector = kb_result
+                tools.extend(kb_tools)
+            elif isinstance(kb_result, Exception):
+                logger.warning("load_knowledge_retrieval_config failed: %s", kb_result)
+                citations_collector = []
+
+            if memory_result is not None and not isinstance(memory_result, Exception):
+                memory_tools, _ = memory_result
                 tools.extend(memory_tools)
+            elif isinstance(memory_result, Exception):
+                logger.warning("load_memory_config failed: %s", memory_result)
 
             # 5. 处理会话ID（创建或验证），新会话时写入开场白
             is_new_conversation = not conversation_id
@@ -1218,6 +1278,8 @@ class AgentRunService:
                                                                       source=source)
                 if annotation_match:
                     elapsed_time = time.time() - start_time
+                    # 标注命中直接返回
+                    cancel_emotion_detection(emotion_detection)
                     # skip_save=True 时由调用方自行保存版本化消息，跳过 run 内部重复保存
                     if not skip_save:
                         conv_uuid = uuid.UUID(conversation_id)
@@ -1327,6 +1389,10 @@ class AgentRunService:
             async def load_annotation_context():
                 return await self._load_annotation_context_evidence(agent_config.app_id, message)
             system_prompt = append_external_context_rule(system_prompt)
+            # 情绪感知回复：必须在 ToolOrchestrator / LangChainAgent 之前完成。
+            system_prompt = await apply_emotion_detection(
+                system_prompt, emotion_detection, user_message_id, write_cache=False
+            )
             use_agent_mode = ModelCapability.FUNCTION_CALL in capability
             orchestrator_node_executions = []
             if not use_agent_mode and tools:
@@ -1564,13 +1630,15 @@ class AgentRunService:
         memory_config: dict | None = agent_config.memory
         features_config: dict = agent_config.features or {}
 
-        # 从 features 中读取功能开关
+        # 从 features 中读取功能开关（features 配置为权威来源）
         web_search_feature = features_config.get("web_search", {})
-        if not (isinstance(web_search_feature, dict) and web_search_feature.get("enabled")):
-            web_search = False
+        if isinstance(web_search_feature, dict) and web_search_feature.get("enabled"):
+            web_search = True
 
         # file_upload 校验
         self._validate_file_upload(features_config, files)
+        # 情绪感知回复：提前启动，与提示词/上下文引擎/多模态准备并发，结果在 ToolOrchestrator 之前注入。
+        emotion_detection = start_emotion_detection(features_config, message)
         tenant_id = await self._get_tenant_id_by_workspace_id_async(workspace_id)
 
         start_time = time.time()
@@ -1604,24 +1672,47 @@ class AgentRunService:
             # 3. 处理系统提示词（支持变量替换）
             system_prompt = system_prompt.get_text_content() or "你是一个专业的AI助手"
 
-            # 4. 准备工具列表
+            # 4. 并行加载工具/技能/知识库/记忆配置（各自独立 DB 会话，无相互依赖）
             tools = []
+            parallel_results = await asyncio.gather(
+                self.load_tools_config(tools_config, web_search, tenant_id, user_id, workspace_id),
+                self.load_skill_config(skills_config, message, tenant_id, user_id, workspace_id),
+                self.load_knowledge_retrieval_config(knowledge_retrieval_config, user_id),
+                self.load_memory_config(memory_config, user_id, workspace_id, storage_type, user_rag_memory_id)
+                if memory else None,
+                return_exceptions=True,
+            )
 
-            # 从配置中获取启用的工具
-            tools.extend(await self.load_tools_config(tools_config, web_search, tenant_id, user_id, workspace_id))
-            skill_tools, skill_prompts = await self.load_skill_config(skills_config, message, tenant_id, user_id, workspace_id)
-            tools.extend(skill_tools)
-            if skill_prompts:
-                system_prompt = f"{system_prompt}\n\n{skill_prompts}"
-            kb_tools, citations_collector = await self.load_knowledge_retrieval_config(knowledge_retrieval_config, user_id)
-            tools.extend(kb_tools)
+            base_tools = parallel_results[0]
+            skill_result = parallel_results[1]
+            kb_result = parallel_results[2]
+            memory_result = parallel_results[3]
 
-            # 添加长期记忆工具
-            if memory:
-                memory_tools, _ = await self.load_memory_config(
-                    memory_config, user_id, workspace_id, storage_type, user_rag_memory_id
-                )
+            if not isinstance(base_tools, Exception):
+                tools.extend(base_tools)
+            else:
+                logger.warning("load_tools_config failed: %s", base_tools)
+
+            if not isinstance(skill_result, Exception) and skill_result is not None:
+                skill_tools, skill_prompts = skill_result
+                tools.extend(skill_tools)
+                if skill_prompts:
+                    system_prompt = f"{system_prompt}\n\n{skill_prompts}"
+            elif isinstance(skill_result, Exception):
+                logger.warning("load_skill_config failed: %s", skill_result)
+
+            if not isinstance(kb_result, Exception) and kb_result is not None:
+                kb_tools, citations_collector = kb_result
+                tools.extend(kb_tools)
+            elif isinstance(kb_result, Exception):
+                logger.warning("load_knowledge_retrieval_config failed: %s", kb_result)
+                citations_collector = []
+
+            if memory_result is not None and not isinstance(memory_result, Exception):
+                memory_tools, _ = memory_result
                 tools.extend(memory_tools)
+            elif isinstance(memory_result, Exception):
+                logger.warning("load_memory_config failed: %s", memory_result)
 
             # 5. 处理会话ID（创建或验证），新会话时写入开场白
             is_new_conversation = not conversation_id
@@ -1644,6 +1735,8 @@ class AgentRunService:
                                                                       source=source)
                 if annotation_match:
                     elapsed_time = time.time() - start_time
+                    # 标注命中直接返回
+                    cancel_emotion_detection(emotion_detection)
                     # skip_save=True 时由调用方自行保存版本化消息，跳过 run_stream 内部重复保存
                     if not skip_save:
                         conv_uuid = uuid.UUID(conversation_id)
@@ -1759,6 +1852,10 @@ class AgentRunService:
             async def load_annotation_context():
                 return await self._load_annotation_context_evidence(agent_config.app_id, message)
             system_prompt = append_external_context_rule(system_prompt)
+            # 情绪感知回复：必须在 ToolOrchestrator / LangChainAgent 之前完成。
+            system_prompt = await apply_emotion_detection(
+                system_prompt, emotion_detection, user_message_id, write_cache=False
+            )
             use_agent_mode = ModelCapability.FUNCTION_CALL in capability
             orchestrator_node_executions = []
             if not use_agent_mode and tools:
@@ -1880,8 +1977,7 @@ class AgentRunService:
 
             # LLM 推理期间不需要 db，提前归还连接给连接池
             # 所有工具（knowledge/memory/web_search）均使用独立连接，不依赖 self.db
-            # SQLAlchemy Session.close() 只归还底层连接，session 对象仍可复用（懒重连）
-            # self.db.close()
+            await self._release_db_connection()
 
             # 9. 流式调用 Agent（支持多模态），同时并行启动 TTS
             full_content = ""
@@ -3565,6 +3661,7 @@ class AgentRunService:
             files: list[FileInput] | None = None,
             source: str = "",
             execution_mode: Literal["in_process", "sandbox"] = "in_process",
+            skip_save: bool = False,
     ) -> AsyncGenerator[str, None]:
         """多模型对比试运行（流式返回）
 
@@ -3642,6 +3739,7 @@ class AgentRunService:
                 start_time = time.time()
                 full_content = ""
                 full_reasoning = ""
+                total_tokens = 0
                 returned_conversation_id = model_conversation_id
                 audio_url = None
                 audio_status = None
@@ -3672,6 +3770,7 @@ class AgentRunService:
                             source=source,
                             user_message_id=model_user_message_id,
                             execution_mode=execution_mode,
+                            skip_save=skip_save,
                     ):
                         # 解析原始事件
                         try:
@@ -3753,6 +3852,7 @@ class AgentRunService:
                                 citations = event_data.get("citations", [])
                                 suggested_questions = event_data.get("suggested_questions", [])
                                 message_id = event_data.get("message_id")
+                                total_tokens = event_data.get("total_tokens", 0) or 0
 
                             if event_type == "error" and event_data:
                                 stream_error = event_data.get("error") or {"message": "未知错误"}
@@ -3807,7 +3907,8 @@ class AgentRunService:
                         "audio_status": audio_status,
                         "citations": citations,
                         "suggested_questions": suggested_questions,
-                        "error": stream_error
+                        "error": stream_error,
+                        "user_message_id": str(model_user_message_id),
                     }
 
                 # 构建结果（参考 run_compare）
@@ -3824,7 +3925,9 @@ class AgentRunService:
                     "audio_status": audio_status,
                     "citations": citations,
                     "suggested_questions": suggested_questions,
-                    "error": None
+                    "error": None,
+                    "total_tokens": total_tokens,
+                    "user_message_id": str(model_user_message_id),
                 }
 
                 # 发送模型完成事件
@@ -3861,7 +3964,8 @@ class AgentRunService:
                     "conversation_id": model_conversation_id,
                     "parameters_used": model_info["parameters"],
                     "elapsed_time": timeout,
-                    "error": compact_error
+                    "error": compact_error,
+                    "user_message_id": str(model_user_message_id),
                 }
 
                 await event_queue.put(self._format_sse_event(
@@ -3903,7 +4007,8 @@ class AgentRunService:
                     "conversation_id": model_conversation_id,
                     "parameters_used": model_info["parameters"],
                     "elapsed_time": 0,
-                    "error": compact_error
+                    "error": compact_error,
+                    "user_message_id": str(model_user_message_id),
                 }
 
                 await event_queue.put(self._format_sse_event(
@@ -4020,6 +4125,59 @@ class AgentRunService:
                 "suggested_questions": r.get("suggested_questions", []),
                 "error": r.get("error")
             })
+
+        # Phase 3: enqueue per-model message saves via batch persist queue.
+        # 内层 run_stream 在 skip_save=False 时已自行落库 user+assistant，
+        # 这里仅在内层不落库（skip_save=True）时补落库；否则同一 user_message_id
+        # 会再插入一条 assistant 消息（此前因主键冲突整批回滚而被隐藏）。
+        if skip_save:
+            from app.services.batch_persist_queue import BatchPersistQueue, PersistTask
+
+            # Build files_meta from FileInput list
+            _files_meta: list[dict[str, Any]] = []
+            if files:
+                for f in files:
+                    _files_meta.append({
+                        "type": getattr(f, 'type', None),
+                        "url": getattr(f, 'url', None),
+                        "name": getattr(f, 'name', None),
+                        "size": getattr(f, 'size', None),
+                        "file_type": getattr(f, 'file_type', None),
+                    })
+
+            for r in successful:
+                _conv_id = r.get("conversation_id")
+                _user_msg_id = r.get("user_message_id")
+                if _conv_id and _user_msg_id:
+                    try:
+                        await BatchPersistQueue.enqueue(PersistTask(
+                            task_type="save_messages",
+                            args={
+                                "sync_memory": False,
+                                "ctx": None,  # unused when overrides provided
+                                "result": None,  # unused when overrides provided
+                                "conversation_id_override": uuid.UUID(_conv_id) if isinstance(_conv_id, str) else _conv_id,
+                                "user_message_id_override": uuid.UUID(_user_msg_id) if isinstance(_user_msg_id, str) else _user_msg_id,
+                                "message_id_override": uuid.uuid4(),
+                                "user_message_content": message,
+                                "files_meta": _files_meta,
+                                "content_override": r.get("message", ""),
+                                "meta_override": {
+                                    "usage": {
+                                        "prompt_tokens": 0,
+                                        "completion_tokens": 0,
+                                        "total_tokens": r.get("total_tokens", 0) or 0,
+                                    },
+                                    "reasoning": r.get("reasoning_content") or "",
+                                    "audio_url": r.get("audio_url"),
+                                    "citations": r.get("citations", []),
+                                    "suggested_questions": r.get("suggested_questions", []),
+                                    "audio_status": r.get("audio_status"),
+                                },
+                            },
+                        ))
+                    except Exception:
+                        logger.exception("Failed to enqueue compare model save for %s", r.get("label"))
 
         # 发送对比完成事件（参考 run_compare 的返回格式）
         yield self._format_sse_event("compare_end", {
