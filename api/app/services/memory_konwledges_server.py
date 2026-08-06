@@ -19,6 +19,7 @@ from app.core.response_utils import success
 from app.db import get_db_context
 from app.models.document_model import Document
 from app.models.user_model import User
+from app.repositories import knowledge_repository
 from app.schemas import file_schema, document_schema
 from app.schemas.file_schema import CustomTextFileCreate
 from app.services import document_service, file_service, knowledge_service
@@ -32,10 +33,11 @@ class ChunkCreate(BaseModel):
 
 
 class SimpleUser:
-    def __init__(self, user_id: str):
+    def __init__(self, user_id: str, current_workspace_id: uuid.UUID):
         # 确保ID是UUID类型
         self.id = user_id
         self.username = user_id
+        self.current_workspace_id = current_workspace_id
 
 
 async def parse_document_by_id(document_id: uuid.UUID, db: Session, current_user: User):
@@ -477,8 +479,18 @@ async def write_rag(end_user_id, message, user_rag_memory_id) -> DocumentChunk:
         )
 
     with get_db_context() as db:
+        db_knowledge = knowledge_repository.get_knowledge_by_id(
+            db=db,
+            knowledge_id=kb_uuid,
+        )
+        if not db_knowledge:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="知识库不存在或访问被拒绝",
+            )
+
         create_data = CustomTextFileCreate(title=end_user_id, content=message)
-        current_user = SimpleUser(user_rag_memory_id)
+        current_user = SimpleUser(user_rag_memory_id, db_knowledge.workspace_id)
         # 检查文档是否已存在
         document = find_document_id_by_kb_and_filename(db=db, kb_id=user_rag_memory_id, file_name=f"{end_user_id}.txt")
         print('======', document)
