@@ -317,6 +317,10 @@ class StatementNode(Node):
         False,
         description="Whether the statement has unresolved references (used by reflection engine layer 2)"
     )
+    is_permanent: bool = Field(
+        False,
+        description="Final permanent-memory state",
+    )
 
     # Embedding and other fields
     statement_embedding: Optional[List[float]] = Field(None, description="Statement embedding vector")

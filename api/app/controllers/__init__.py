@@ -40,6 +40,7 @@ from . import (
     memory_reflection_controller,
     memory_short_term_controller,
     memory_storage_controller,
+    memory_value_ranking_controller,
     memory_working_controller,
     message_interaction_controller,
     model_controller,
@@ -90,6 +91,7 @@ manager_router.include_router(upload_controller.router)
 manager_router.include_router(memory_agent_controller.router)
 manager_router.include_router(memory_controller.router)
 manager_router.include_router(memory_analytics_controller.router)
+manager_router.include_router(memory_value_ranking_controller.router)
 manager_router.include_router(memory_config_controller.router)
 manager_router.include_router(end_user_controller.router)
 manager_router.include_router(memory_dashboard_controller.router)

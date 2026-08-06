@@ -56,6 +56,7 @@ class StatementStepOutput(BaseModel):
     # relevance: str        # RELEVANT / IRRELEVANT
     speaker: str          # "user" / "assistant"
     has_emotional_state: bool = False  # Whether statement reflects user's emotional state
+    is_permanent: bool = False  # Permanent-memory candidate from the LLM
     valid_at: str         # ISO 8601 or "NULL"
     invalid_at: str       # ISO 8601 or "NULL"
     has_unsolved_reference: bool = False  # Whether the statement has unresolved references
