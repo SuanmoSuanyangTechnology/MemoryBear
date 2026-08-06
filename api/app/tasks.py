@@ -102,8 +102,8 @@ AUDIO_PATTERN = re.compile(
     r"\.(da|wave|wav|mp3|aac|flac|ogg|aiff|au|midi|wma|realaudio|vqf|oggvorbis|ape?)$",
     re.IGNORECASE,
 )
-VIDEO_IMAGE_PATTERN = re.compile(
-    r"\.(png|jpeg|jpg|gif|bmp|svg|mp4|mov|avi|flv|mpeg|mpg|webm|wmv|3gp|3gpp|mkv?)$",
+VIDEO_PATTERN = re.compile(
+    r"\.(mp4|mov|avi|flv|mpeg|mpg|webm|wmv|3gp|3gpp|mkv?)$",
     re.IGNORECASE,
 )
 DEFAULT_PARSE_LANGUAGE = "Chinese"
@@ -1017,8 +1017,19 @@ def process_item(item: dict):
     return result
 
 
-def _build_vision_model(file_path: str, db, image2text_id, tenant_id):
-    """根据文件类型选择合适的视觉/音频模型，避免冗余初始化。"""
+def _build_image_vision_model(db, image2text_id, tenant_id):
+    """Build the knowledge-base image-to-text model for document parsing."""
+    image2text_key = _resolve_model_api_key(db, image2text_id, tenant_id, "image2text")
+    return QWenCV(
+        key=image2text_key.api_key,
+        model_name=image2text_key.model_name,
+        lang=DEFAULT_PARSE_LANGUAGE,
+        base_url=image2text_key.api_base,
+    )
+
+
+def _build_media_model(file_path: str):
+    """Build the existing audio or video model when the file type requires one."""
     if AUDIO_PATTERN.search(file_path):
         omni_key = os.getenv("QWEN3_OMNI_API_KEY", "")
         omni_model = os.getenv("QWEN3_OMNI_MODEL_NAME", "qwen3-omni-flash")
@@ -1029,7 +1040,7 @@ def _build_vision_model(file_path: str, db, image2text_id, tenant_id):
             lang=DEFAULT_PARSE_LANGUAGE,
             base_url=omni_base,
         )
-    if VIDEO_IMAGE_PATTERN.search(file_path):
+    if VIDEO_PATTERN.search(file_path):
         omni_key = os.getenv("QWEN3_OMNI_API_KEY", "")
         omni_model = os.getenv("QWEN3_OMNI_MODEL_NAME", "qwen3-omni-flash")
         omni_base = os.getenv("QWEN3_OMNI_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
@@ -1039,14 +1050,7 @@ def _build_vision_model(file_path: str, db, image2text_id, tenant_id):
             lang=DEFAULT_PARSE_LANGUAGE,
             base_url=omni_base,
         )
-    # 默认：使用知识库配置的 image2text 模型
-    image2text_key = _resolve_model_api_key(db, image2text_id, tenant_id, "image2text")
-    return QWenCV(
-        key=image2text_key.api_key,
-        model_name=image2text_key.model_name,
-        lang=DEFAULT_PARSE_LANGUAGE,
-        base_url=image2text_key.api_base,
-    )
+    return None
 
 
 @celery_app.task(name="app.core.rag.tasks.parse_document")
@@ -1132,7 +1136,8 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
             if auto_questions_topn:
                 llm_config = _build_llm_config(db, db_knowledge.llm_id, tenant_id)
             knowledge_id = str(db_knowledge.id)
-            vision_model = _build_vision_model(file_name, db, db_knowledge.image2text_id, tenant_id)
+            image_vision_model = _build_image_vision_model(db, db_knowledge.image2text_id, tenant_id)
+            vision_model = _build_media_model(file_name) or image_vision_model
             vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
 
             progress_lines.append(f"{_progress_ts()} Start to parse.")
