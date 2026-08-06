@@ -70,6 +70,17 @@ class Settings:
     BATCH_PERSIST_MAX_WAIT_MS: int = int(os.getenv("BATCH_PERSIST_MAX_WAIT_MS", "500"))
     BATCH_PERSIST_PUT_TIMEOUT_MS: int = int(os.getenv("BATCH_PERSIST_PUT_TIMEOUT_MS", "100"))
 
+    # Memory retrieval display queue (PG snapshot of user-visible memory reads)
+    MEMORY_RETRIEVAL_DISPLAY_QUEUE_SIZE: int = int(
+        os.getenv("MEMORY_RETRIEVAL_DISPLAY_QUEUE_SIZE", "5000")
+    )
+    MEMORY_RETRIEVAL_DISPLAY_MAX_BATCH: int = int(
+        os.getenv("MEMORY_RETRIEVAL_DISPLAY_MAX_BATCH", "50")
+    )
+    MEMORY_RETRIEVAL_DISPLAY_MAX_WAIT_MS: int = int(
+        os.getenv("MEMORY_RETRIEVAL_DISPLAY_MAX_WAIT_MS", "500")
+    )
+
     DB_AUTO_UPGRADE = os.getenv("DB_AUTO_UPGRADE", "false").lower() == "true"
 
     # Redis configuration

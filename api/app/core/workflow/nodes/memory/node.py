@@ -61,7 +61,8 @@ class MemoryReadNode(BaseNode):
         # TODO: Historical Messages -> Used to refer to coreference resolution
         search_result = await memory_service.read(
             query,
-            search_switch=SearchStrategy(self.typed_config.search_switch)
+            search_switch=SearchStrategy(self.typed_config.search_switch),
+            record_display=True,
         )
         self._process["memories_count"] = len(search_result.memories)
         return {

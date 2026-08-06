@@ -16,10 +16,15 @@ from app.schemas import knowledge_schema
 from app.schemas.api_key_schema import ApiKeyAuth
 from app.schemas.response_schema import ApiResponse
 from app.services import api_key_service
+from app.services.rag_access_service import (
+    get_api_key_request_user,
+    unwrap_current_workspace_guard,
+)
 
 
 router = APIRouter(prefix="/knowledges", tags=["V1 - RAG API"])
 api_logger = get_business_logger()
+knowledge_controller = unwrap_current_workspace_guard(knowledge_controller)
 
 
 @router.get("/knowledgetype", response_model=ApiResponse)
@@ -51,8 +56,7 @@ async def get_knowledge_graph_entity_types(
     """
     # 0. Obtain the creator of the api key
     api_key = await api_key_service.ApiKeyService.get_api_key_async(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
-    current_user = api_key.creator
-    current_user.current_workspace_id = api_key_auth.workspace_id
+    current_user = get_api_key_request_user(api_key, api_key_auth)
 
     return await knowledge_controller.get_knowledge_graph_entity_types(llm_id=llm_id,
                                                                        scenario=scenario,
@@ -83,8 +87,7 @@ async def get_knowledges(
     """
     # 0. Obtain the creator of the api key
     api_key = await api_key_service.ApiKeyService.get_api_key_async(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
-    current_user = api_key.creator
-    current_user.current_workspace_id = api_key_auth.workspace_id
+    current_user = get_api_key_request_user(api_key, api_key_auth)
 
     return await knowledge_controller.get_knowledges(parent_id=parent_id,
                                                      page=page,
@@ -112,8 +115,7 @@ async def create_knowledge(
     create_data = knowledge_schema.KnowledgeCreate(**body)
     # 0. Obtain the creator of the api key
     api_key = await api_key_service.ApiKeyService.get_api_key_async(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
-    current_user = api_key.creator
-    current_user.current_workspace_id = api_key_auth.workspace_id
+    current_user = get_api_key_request_user(api_key, api_key_auth)
 
     return await knowledge_controller.create_knowledge(create_data=create_data,
                                                        db=db,
@@ -133,8 +135,7 @@ async def get_knowledge(
     """
     # 0. Obtain the creator of the api key
     api_key = await api_key_service.ApiKeyService.get_api_key_async(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
-    current_user = api_key.creator
-    current_user.current_workspace_id = api_key_auth.workspace_id
+    current_user = get_api_key_request_user(api_key, api_key_auth)
 
     return await knowledge_controller.get_knowledge(knowledge_id=knowledge_id,
                                                     db=db,
@@ -154,8 +155,7 @@ async def update_knowledge(
     update_data = knowledge_schema.KnowledgeUpdate(**body)
     # 0. Obtain the creator of the api key
     api_key = await api_key_service.ApiKeyService.get_api_key_async(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
-    current_user = api_key.creator
-    current_user.current_workspace_id = api_key_auth.workspace_id
+    current_user = get_api_key_request_user(api_key, api_key_auth)
 
     return await knowledge_controller.update_knowledge(knowledge_id=knowledge_id,
                                                        update_data=update_data,
@@ -176,8 +176,7 @@ async def delete_knowledge(
     """
     # 0. Obtain the creator of the api key
     api_key = await api_key_service.ApiKeyService.get_api_key_async(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
-    current_user = api_key.creator
-    current_user.current_workspace_id = api_key_auth.workspace_id
+    current_user = get_api_key_request_user(api_key, api_key_auth)
 
     return await knowledge_controller.delete_knowledge(knowledge_id=knowledge_id,
                                                        db=db,
@@ -197,8 +196,7 @@ async def get_knowledge_graph(
     """
     # 0. Obtain the creator of the api key
     api_key = await api_key_service.ApiKeyService.get_api_key_async(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
-    current_user = api_key.creator
-    current_user.current_workspace_id = api_key_auth.workspace_id
+    current_user = get_api_key_request_user(api_key, api_key_auth)
 
     return await knowledge_controller.get_knowledge_graph(knowledge_id=knowledge_id,
                                                           db=db,
@@ -218,8 +216,7 @@ async def delete_knowledge_graph(
     """
     # 0. Obtain the creator of the api key
     api_key = await api_key_service.ApiKeyService.get_api_key_async(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
-    current_user = api_key.creator
-    current_user.current_workspace_id = api_key_auth.workspace_id
+    current_user = get_api_key_request_user(api_key, api_key_auth)
 
     return await knowledge_controller.delete_knowledge_graph(knowledge_id=knowledge_id,
                                                              db=db,
@@ -239,8 +236,7 @@ async def rebuild_knowledge_graph(
     """
     # 0. Obtain the creator of the api key
     api_key = await api_key_service.ApiKeyService.get_api_key_async(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
-    current_user = api_key.creator
-    current_user.current_workspace_id = api_key_auth.workspace_id
+    current_user = get_api_key_request_user(api_key, api_key_auth)
 
     return await knowledge_controller.rebuild_knowledge_graph(knowledge_id=knowledge_id,
                                                               db=db,
@@ -260,8 +256,7 @@ async def check_yuque_auth(
     check yuque auth info
     """
     api_key = await api_key_service.ApiKeyService.get_api_key_async(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
-    current_user = api_key.creator
-    current_user.current_workspace_id = api_key_auth.workspace_id
+    current_user = get_api_key_request_user(api_key, api_key_auth)
 
     api_logger.info(f"check yuque auth info, username: {current_user.username}")
 
@@ -285,8 +280,7 @@ async def check_feishu_auth(
     check feishu auth info
     """
     api_key = await api_key_service.ApiKeyService.get_api_key_async(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
-    current_user = api_key.creator
-    current_user.current_workspace_id = api_key_auth.workspace_id
+    current_user = get_api_key_request_user(api_key, api_key_auth)
 
     api_logger.info(f"check feishu auth info, username: {current_user.username}")
 
@@ -309,8 +303,7 @@ async def sync_knowledge(
     sync knowledge base information based on knowledge_id
     """
     api_key = await api_key_service.ApiKeyService.get_api_key_async(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
-    current_user = api_key.creator
-    current_user.current_workspace_id = api_key_auth.workspace_id
+    current_user = get_api_key_request_user(api_key, api_key_auth)
 
     return await knowledge_controller.sync_knowledge(knowledge_id=knowledge_id,
                                                      db=db,

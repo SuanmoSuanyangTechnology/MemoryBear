@@ -87,6 +87,7 @@ async def read_memory_sync(
             memory = await service.read(
                 payload.message, search_switch=SearchStrategy(payload.search_switch),
                 enable_rerank=payload.enable_rerank,
+                record_display=True,
             )
             return euid, {
                 "answer": memory.content,
@@ -116,7 +117,8 @@ async def read_memory_sync(
     )
     memory = await service.read(
         payload.message, search_switch=SearchStrategy(payload.search_switch),
-        enable_rerank=payload.enable_rerank)
+        enable_rerank=payload.enable_rerank,
+        record_display=True)
     return success(data={
         "answer": memory.content,
         "intermediate_outputs": [_.model_dump() for _ in memory.memories]

@@ -5,7 +5,7 @@ from app.core.response_utils import success
 from app.core.logging_config import get_api_logger
 from app.core.exceptions import ResourceNotFoundException
 from app.db import get_async_db
-from app.dependencies import get_current_user_async
+from app.dependencies import cur_workspace_access_guard_async, get_current_user_async
 from app.services.rag_access_service import require_current_workspace_knowledge_async
 from app.models.user_model import User
 from app.schemas import knowledge_metadata_schema as schemas
@@ -74,6 +74,7 @@ def _format_common_metadata_fields_result(result: dict) -> dict:
 
 
 @router.post("/metadata/fields", response_model=ApiResponse)
+@cur_workspace_access_guard_async()
 async def list_common_metadata_fields(
     data: schemas.KnowledgeMetadataFieldsRequest,
     db: AsyncSession = Depends(get_async_db),
@@ -102,6 +103,7 @@ async def list_common_metadata_fields(
 
 
 @router.get("/{kb_id}/metadata", response_model=ApiResponse)
+@cur_workspace_access_guard_async()
 async def list_metadata_fields(
     kb_id: uuid.UUID,
     db: AsyncSession = Depends(get_async_db),
@@ -125,6 +127,7 @@ async def list_metadata_fields(
 
 
 @router.post("/{kb_id}/metadata", response_model=ApiResponse)
+@cur_workspace_access_guard_async()
 async def create_metadata_field(
     kb_id: uuid.UUID,
     data: schemas.KnowledgeMetadataCreate,
@@ -158,6 +161,7 @@ async def create_metadata_field(
 
 
 @router.put("/{kb_id}/metadata/{metadata_id}", response_model=ApiResponse)
+@cur_workspace_access_guard_async()
 async def update_metadata_field(
     kb_id: uuid.UUID,
     metadata_id: uuid.UUID,
@@ -191,6 +195,7 @@ async def update_metadata_field(
 
 
 @router.delete("/{kb_id}/metadata/{metadata_id}", response_model=ApiResponse)
+@cur_workspace_access_guard_async()
 async def delete_metadata_field(
     kb_id: uuid.UUID,
     metadata_id: uuid.UUID,
@@ -214,6 +219,7 @@ async def delete_metadata_field(
 
 
 @router.get("/{kb_id}/metadata/builtin", response_model=ApiResponse)
+@cur_workspace_access_guard_async()
 async def get_builtin_metadata_fields(
     kb_id: uuid.UUID,
     db: AsyncSession = Depends(get_async_db),
@@ -239,6 +245,7 @@ async def get_builtin_metadata_fields(
 
 
 @router.post("/{kb_id}/metadata/builtin/enable", response_model=ApiResponse)
+@cur_workspace_access_guard_async()
 async def toggle_builtin_metadata(
     kb_id: uuid.UUID,
     data: schemas.BuiltinMetadataEnableRequest,

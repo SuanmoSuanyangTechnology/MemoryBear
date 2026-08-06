@@ -1,6 +1,7 @@
 import uuid
 from sqlalchemy.orm import Session
 from app.models.file_model import File
+from app.models.knowledge_model import Knowledge
 from app.schemas import file_schema
 from app.core.logging_config import get_db_logger
 
@@ -79,6 +80,35 @@ def get_file_by_id(db: Session, file_id: uuid.UUID) -> File | None:
         return file
     except Exception as e:
         db_logger.error(f"Failed to query the file based on the ID: file_id={file_id} - {str(e)}")
+        raise
+
+
+def get_file_by_id_in_workspace(
+        db: Session,
+        file_id: uuid.UUID,
+        workspace_id: uuid.UUID,
+        kb_id: uuid.UUID | None = None,
+) -> File | None:
+    """Return a knowledge file only when its knowledge base is in the given workspace."""
+    try:
+        query = (
+            db.query(File)
+            .join(Knowledge, File.kb_id == Knowledge.id)
+            .filter(
+                File.id == file_id,
+                Knowledge.workspace_id == workspace_id,
+            )
+        )
+        if kb_id is not None:
+            query = query.filter(File.kb_id == kb_id)
+        return query.first()
+    except Exception as e:
+        db_logger.error(
+            "Failed to query file in workspace: file_id=%s workspace_id=%s error=%s",
+            file_id,
+            workspace_id,
+            str(e),
+        )
         raise
 
 

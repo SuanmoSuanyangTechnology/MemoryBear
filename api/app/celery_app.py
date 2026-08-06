@@ -177,12 +177,12 @@ try:
 except ImportError:
     _HAS_SUBSCRIPTION_TASKS = False
 
-# 企业版通知中心任务装配（仅在 premium 模块存在时注册，避免社区版 worker 误接）
+# 企业版消息通知中心任务路由（社区版无 premium 模块时不注册这些任务）
 try:
     import premium.platform_admin.notification_center.tasks  # noqa: F401
 
     _HAS_NOTIFICATION_TASKS = True
-    # 状态任务 → notification_state_tasks 队列（scan/publish/expire，§11.2）
+    # 通知状态任务 → notification_state_tasks 队列（扫描 + 发布 + 到期下架）
     celery_app.conf.task_routes['notification.scan_scheduled'] = {
         'queue': 'notification_state_tasks'
     }
@@ -341,17 +341,23 @@ if _HAS_SUBSCRIPTION_TASKS:
         },
     })
 
-# 通知中心扫描任务（每分钟，§11.2；Beat 保持全局单实例）
+# 消息通知中心定时任务（每分钟扫描到期排期与到期下架）
+# 可通过环境变量调整（默认 60 秒，与设计的「定时发布偏差 P95 < 60 秒」目标一致）：
+#   NOTIFICATION_SCAN_INTERVAL_SECONDS=N
+_NOTIFICATION_SCAN_INTERVAL_SECONDS = int(os.getenv("NOTIFICATION_SCAN_INTERVAL_SECONDS", "60"))
+
 if _HAS_NOTIFICATION_TASKS:
     celery_app.conf.beat_schedule.update({
+        # 扫描 scheduled + publish_at<=now，领取后投递 notification.publish
         "notification-scan-scheduled": {
             "task": "notification.scan_scheduled",
-            "schedule": timedelta(minutes=1),
-            "options": {"queue": "notification_state_tasks"},
+            "schedule": float(_NOTIFICATION_SCAN_INTERVAL_SECONDS),
+            "options": {"queue": "notification_state_tasks", "expires": 120},
         },
+        # 扫描 published + expire_at<=now，转为 expired
         "notification-scan-expired": {
             "task": "notification.scan_expired",
-            "schedule": timedelta(minutes=1),
-            "options": {"queue": "notification_state_tasks"},
+            "schedule": float(_NOTIFICATION_SCAN_INTERVAL_SECONDS),
+            "options": {"queue": "notification_state_tasks", "expires": 120},
         },
     })

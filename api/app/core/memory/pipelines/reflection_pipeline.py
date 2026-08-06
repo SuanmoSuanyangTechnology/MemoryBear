@@ -126,13 +126,16 @@ class ReflectionPipeline:
         )
 
         try:
-            return await inspector.run(
+            result = await inspector.run(
                 end_user_id=self.end_user_id,
                 baseline=baseline,
                 language=self.language,
             )
         finally:
             await connector.close()
+
+        await self._save_reflection_display_event(result, "layer2_frequent")
+        return result
 
     async def run_dedup_full_scan(self, baseline: str = "HYBRID") -> Dict[str, Any]:
         """方案B：低频全量扫描去重 — 由每天一次的定时任务调用"""
@@ -153,9 +156,36 @@ class ReflectionPipeline:
         )
 
         try:
-            return await inspector.run_dedup_full_scan(self.end_user_id, baseline=baseline)
+            result = await inspector.run_dedup_full_scan(self.end_user_id, baseline=baseline)
         finally:
             await connector.close()
+
+        await self._save_reflection_display_event(result, "dedup_full_scan")
+        return result
+
+    async def _save_reflection_display_event(
+        self,
+        result: Dict[str, Any],
+        scan_type: str,
+    ) -> None:
+        """引擎动态展示投影：五类成果合计 > 0 时落一条 REFLECTION 卡片事件。
+
+        只用内存里的汇总结果，不需要 Neo4j 连接，因此放在 connector 关闭之后，
+        不延长连接持有时间。inspector 抛异常时调用方直接跳过写入。
+        尽力写入，PG 失败不影响归并结果和定时任务返回值。
+        """
+        try:
+            from app.services.memory_engine_display_service import MemoryEngineDisplayService
+            await MemoryEngineDisplayService.save_reflection_event(
+                end_user_id=self.end_user_id,
+                layer2_result=result,
+                scan_type=scan_type,
+            )
+        except Exception as e:
+            logger.warning(
+                f"[EngineDisplay] 反思引擎展示写入异常（不影响主流程）: {e}",
+                exc_info=True,
+            )
 
     async def run_layer3(self) -> Dict[str, Any]:
         """Layer 3 知识综合 — 由低频定时任务调用（如每天一次）

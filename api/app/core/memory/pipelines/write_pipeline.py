@@ -744,26 +744,48 @@ class WritePipeline:
     # ──────────────────────────────────────────────
 
     async def _store(self, result: ExtractionResult) -> bool:
-        """
-        存储：别名清洗 → Neo4j 写入（含死锁重试）。
-
-        错误策略：
-        - 别名清洗失败 → 警告日志，继续写入
-        - Neo4j 写入部分失败 → 重试，耗尽后返回 False
-        - 非死锁异常 → 向上抛出
-
-        Returns:
-            True: Neo4j 事务整体成功
-            False: 重试后仍部分失败
-        """
+        """存储：永久容量分配 → 别名清洗 → Neo4j 写入（含死锁重试）。"""
         from app.repositories.neo4j.graph_saver import (
             save_dialog_and_statements_to_neo4j,
         )
+        from app.services.memory_value_ranking_service import (
+            assign_permanent_memory_slots,
+            disable_permanent_candidates,
+        )
 
-        # 1. 写入前别名清洗（失败不中断）
         await self._clean_cross_role_aliases(result.entity_nodes)
 
-        # 2. Neo4j 写入
+        permanent_candidates = [
+            node
+            for node in result.statement_nodes
+            if bool(getattr(node, "is_permanent", False))
+        ]
+        if permanent_candidates:
+            candidate_count = len(permanent_candidates)
+            try:
+                assigned = await assign_permanent_memory_slots(
+                    self._neo4j_connector,
+                    self.end_user_id,
+                    result.statement_nodes,
+                )
+                logger.info(
+                    "Permanent-memory slots assigned in serialized write: "
+                    "end_user_id=%s assigned=%d candidates=%d degraded=%d",
+                    self.end_user_id,
+                    assigned,
+                    candidate_count,
+                    candidate_count - assigned,
+                )
+            except Exception as exc:
+                disable_permanent_candidates(result.statement_nodes)
+                logger.error(
+                    "Permanent-memory allocation failed; candidates degraded to normal memory: "
+                    "end_user_id=%s error=%s",
+                    self.end_user_id,
+                    exc,
+                    exc_info=True,
+                )
+
         max_retries = 3
         for attempt in range(max_retries):
             try:

@@ -108,11 +108,24 @@ async def create_document_async(
         raise
 
 
-def get_document_by_id(db: Session, document_id: uuid.UUID, current_user: User) -> Document | None:
+def get_document_by_id(
+        db: Session,
+        document_id: uuid.UUID,
+        current_user: User,
+        kb_id: uuid.UUID | None = None,
+) -> Document | None:
     business_logger.debug(f"Query document based on ID: document_id={document_id}, username: {current_user.username}")
 
     try:
-        document = document_repository.get_document_by_id(db=db, document_id=document_id)
+        workspace_id = current_user.current_workspace_id
+        if workspace_id is None:
+            return None
+        document = document_repository.get_document_by_id_in_workspace(
+            db=db,
+            document_id=document_id,
+            workspace_id=workspace_id,
+            kb_id=kb_id,
+        )
         if document:
             business_logger.info(f"document query successful: {document.file_name} (ID: {document_id})")
         else:
@@ -123,11 +136,24 @@ def get_document_by_id(db: Session, document_id: uuid.UUID, current_user: User) 
         raise
 
 
-async def get_document_by_id_async(db: AsyncSession, document_id: uuid.UUID, current_user: User) -> Document | None:
+async def get_document_by_id_async(
+        db: AsyncSession,
+        document_id: uuid.UUID,
+        current_user: User,
+        kb_id: uuid.UUID | None = None,
+) -> Document | None:
     business_logger.debug(f"Query document based on ID (async): document_id={document_id}, username: {current_user.username}")
 
     try:
-        document = await document_repository.get_document_by_id_async(db=db, document_id=document_id)
+        workspace_id = current_user.current_workspace_id
+        if workspace_id is None:
+            return None
+        document = await document_repository.get_document_by_id_in_workspace_async(
+            db=db,
+            document_id=document_id,
+            workspace_id=workspace_id,
+            kb_id=kb_id,
+        )
         if document:
             business_logger.info(f"document query successful (async): {document.file_name} (ID: {document_id})")
         else:

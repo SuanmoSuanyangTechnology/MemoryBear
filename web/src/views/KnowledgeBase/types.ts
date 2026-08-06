@@ -122,6 +122,11 @@ export interface ParserConfig {
   feishu_app_id?: string; // 飞书应用ID
   feishu_app_secret?: string; // 飞书应用密钥
   feishu_folder_token?: string; // 飞书文件夹Token
+
+  image?: {
+    vision_enabled?: boolean; // 是否启用图片视觉
+    vision_mode?: 0 | 1 | 2 | string; // 图片视觉模式 0 文本图片 1 混合图片 2 纯图像
+  }
 }
 // 文件数据
 export interface KnowledgeBaseDocumentData { // 知识库文档数据

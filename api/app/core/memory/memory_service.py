@@ -440,7 +440,13 @@ class MemoryService:
             includes: list | None = None,
             skip_summary: bool = False,
             enable_rerank: bool = False,
+            record_display: bool = False,
     ) -> MemorySearchResult:
+        """检索记忆。
+
+        Args:
+            record_display: 是否记录读取展示卡片。
+        """
         if history is None:
             history = []
         if self.ctx.memory_config is None:
@@ -453,6 +459,7 @@ class MemoryService:
             includes=includes,
             skip_summary=skip_summary,
             enable_rerank=enable_rerank,
+            record_display=record_display,
         )
 
     async def forget(self) -> dict:
@@ -563,7 +570,11 @@ def create_long_term_memory_tool(
         logger.info(f" 长期记忆工具被调用！question={question}, user={end_user_id}")
         try:
             memory_service = await MemoryService.create(config_id, end_user_id, workspace_id=workspace_id)
-            search_result = await memory_service.read(question, SearchStrategy(search_mode))
+            search_result = await memory_service.read(
+                question,
+                SearchStrategy(search_mode),
+                record_display=True,
+            )
             return f"检索到以下历史记忆：\n\n{search_result.content}"
         except Exception as e:
             logger.error("长期记忆检索失败", extra={"error": str(e), "error_type": type(e).__name__})

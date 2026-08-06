@@ -1048,6 +1048,7 @@ class NewExtractionOrchestrator:
                         temporal_validity=TemporalValidityRange(valid_at=valid_at, invalid_at=invalid_at),
                         has_unsolved_reference=stmt_out.has_unsolved_reference,
                         has_emotional_state=stmt_out.has_emotional_state,
+                        is_permanent=stmt_out.is_permanent,
                         triplet_extraction_info=triplet_info,
                         statement_embedding=stmt_embedding,
                         dialog_at=getattr(chunk, "dialog_at", None),

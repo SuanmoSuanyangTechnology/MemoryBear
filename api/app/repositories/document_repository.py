@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 from app.core.utils.datetime_utils import to_iso_z, utcnow, utcnow_naive
 from app.models.document_model import Document
+from app.models.knowledge_model import Knowledge
 from app.schemas import document_schema
 from app.core.logging_config import get_db_logger
 
@@ -148,6 +149,35 @@ def get_document_by_id(db: Session, document_id: uuid.UUID) -> Document | None:
         raise
 
 
+def get_document_by_id_in_workspace(
+        db: Session,
+        document_id: uuid.UUID,
+        workspace_id: uuid.UUID,
+        kb_id: uuid.UUID | None = None,
+) -> Document | None:
+    """Return a document only when its knowledge base is in the given workspace."""
+    try:
+        query = (
+            db.query(Document)
+            .join(Knowledge, Document.kb_id == Knowledge.id)
+            .filter(
+                Document.id == document_id,
+                Knowledge.workspace_id == workspace_id,
+            )
+        )
+        if kb_id is not None:
+            query = query.filter(Document.kb_id == kb_id)
+        return query.first()
+    except Exception as e:
+        db_logger.error(
+            "Failed to query document in workspace: document_id=%s workspace_id=%s error=%s",
+            document_id,
+            workspace_id,
+            str(e),
+        )
+        raise
+
+
 async def get_document_by_id_async(db: AsyncSession, document_id: uuid.UUID) -> Document | None:
     """Async version of get_document_by_id."""
     try:
@@ -156,6 +186,36 @@ async def get_document_by_id_async(db: AsyncSession, document_id: uuid.UUID) -> 
         return result.scalars().first()
     except Exception as e:
         db_logger.error(f"Failed to query document by ID (async): document_id={document_id} - {str(e)}")
+        raise
+
+
+async def get_document_by_id_in_workspace_async(
+        db: AsyncSession,
+        document_id: uuid.UUID,
+        workspace_id: uuid.UUID,
+        kb_id: uuid.UUID | None = None,
+) -> Document | None:
+    """Async workspace-scoped document lookup."""
+    try:
+        stmt = (
+            select(Document)
+            .join(Knowledge, Document.kb_id == Knowledge.id)
+            .where(
+                Document.id == document_id,
+                Knowledge.workspace_id == workspace_id,
+            )
+        )
+        if kb_id is not None:
+            stmt = stmt.where(Document.kb_id == kb_id)
+        result = await db.execute(stmt)
+        return result.scalars().first()
+    except Exception as e:
+        db_logger.error(
+            "Failed to query document in workspace (async): document_id=%s workspace_id=%s error=%s",
+            document_id,
+            workspace_id,
+            str(e),
+        )
         raise
 
 

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-01-19 17:00:26 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-11 18:12:02
+ * @Last Modified time: 2026-08-06 15:26:06
  */
 /**
  * useVariableList Hook
@@ -140,6 +140,89 @@ const buildFileChildren = (key: string, value: string, nodeData: any, parentLabe
   }))
 };
 
+/**
+ * Unwrap a config value that may be stored directly or wrapped in
+ * { defaultValue: T } or { value: T } format.
+ */
+const unwrapConfigValue = <T,>(val: any, fallback: T): T => {
+  if (val === null || val === undefined) return fallback;
+  if (typeof val === 'object' && !Array.isArray(val)) {
+    if ('defaultValue' in val) return val.defaultValue ?? fallback;
+    if ('value' in val) return val.value ?? fallback;
+  }
+  return val as T;
+};
+const unwrapConfigArray = <T,>(val: any): T[] => {
+  if (Array.isArray(val)) return val;
+  return unwrapConfigValue<T[]>(val, []);
+};
+const unwrapConfigPrimitive = (val: any): any => {
+  if (typeof val !== 'object' || val === null || Array.isArray(val)) return val;
+  if ('defaultValue' in val) return val.defaultValue;
+  if ('value' in val) return val.value;
+  return val;
+};
+
+/**
+ * Remove all variables that belong to the given nodeId from the list and
+ * the key set. This is used before (re-)processing a deferred node so a
+ * previous "default/fallback" type pass can be replaced with the correct
+ * inferred type once upstream dependencies are available.
+ */
+const removeVariablesForNode = (
+  list: Suggestion[],
+  keys: Set<string>,
+  nodeId: string
+) => {
+  for (let i = list.length - 1; i >= 0; i--) {
+    if (list[i].nodeData?.id === nodeId) {
+      keys.delete(list[i].key);
+      list.splice(i, 1);
+    }
+  }
+};
+
+/**
+ * For dependency-based node types (list-operator, var-aggregator, iteration)
+ * determine whether the node successfully resolved its input reference to a
+ * variable already present in the variableList.
+ *
+ * When false, the multi-pass processor should keep this node in the
+ * "remaining" queue and retry it on the next pass (after its dependency has
+ * likely been processed).
+ */
+const deferredNodeResolved = (nodeData: any, variableList: Suggestion[]): boolean => {
+  const { type, config } = nodeData;
+  if (type === 'list-operator') {
+    const variableValue = unwrapConfigPrimitive(config?.input_list);
+    if (!variableValue) return false;
+    return variableList.some(v => `{{${v.value}}}` === variableValue);
+  }
+  if (type === 'var-aggregator') {
+    const groupEnabled = unwrapConfigPrimitive(config?.group);
+    const groupVariables = unwrapConfigArray<any>(config?.group_variables);
+    if (groupEnabled) {
+      // Consider resolved once at least one entry references a known variable
+      // OR no entries at all (empty group).
+      if (groupVariables.length === 0) return true;
+      return groupVariables.some((gv: any) => {
+        const gvValue = unwrapConfigArray<any>(gv.value);
+        if (!gvValue?.[0]) return false;
+        return variableList.some(v => `{{${v.value}}}` === gvValue[0]);
+      });
+    }
+    const fv = groupVariables[0];
+    if (!fv) return true;
+    return variableList.some(v => `{{${v.value}}}` === fv);
+  }
+  if (type === 'iteration') {
+    const output = unwrapConfigPrimitive(nodeData.output ?? config?.output);
+    if (!output) return false;
+    return variableList.some(v => v.value === output);
+  }
+  return true;
+};
+
 const addVariable = (
   list: Suggestion[],
   keys: Set<string>,
@@ -179,8 +262,8 @@ const processNodeVariables = (
   // Add node-specific variables
   if (type in NODE_VARIABLES) {
     if (type === 'list-operator') {
-      // Determine output type from the first variable in config
-      const variableValue = config?.input_list?.defaultValue;
+      // Determine output type from the input list variable reference
+      const variableValue = unwrapConfigPrimitive(config?.input_list);
       let itemType = 'string';
       if (variableValue) {
         const refVar = variableList.find(v => `{{${v.value}}}` === variableValue);
@@ -203,8 +286,8 @@ const processNodeVariables = (
   // Process special node types
   switch (type) {
     case 'start':
-      // Add start node variables
-      [...(config?.variables?.defaultValue ?? []), ...(config?.variables?.value ?? [])].forEach((v: any) => {
+      // Add start node variables (supports direct array OR wrapped in defaultValue/value)
+      unwrapConfigArray<any>(config?.variables).forEach((v: any) => {
         if (v?.name) {
           addVariable(
             variableList,
@@ -218,7 +301,7 @@ const processNodeVariables = (
               ui_type: v.ui_type,
               options: v.options,
             },
-            v.defaultValue ?? v.default,
+            unwrapConfigPrimitive(v.defaultValue ?? v.default),
           );
         }
       });
@@ -226,26 +309,29 @@ const processNodeVariables = (
 
     case 'parameter-extractor':
       // Add extracted parameters
-      (config?.params?.defaultValue || []).forEach((p: any) => {
-        if (p?.name) addVariable(variableList, addedKeys, `${dataNodeId}_${p.name}`, p.name, p.type || 'string', `${dataNodeId}.${p.name}`, nodeData, undefined, p.defaultValue ?? p.default);
+      unwrapConfigArray<any>(config?.params).forEach((p: any) => {
+        if (p?.name) addVariable(variableList, addedKeys, `${dataNodeId}_${p.name}`, p.name, p.type || 'string', `${dataNodeId}.${p.name}`, nodeData, undefined, unwrapConfigPrimitive(p.defaultValue ?? p.default));
       });
       break;
     
-    case 'var-aggregator':
+    case 'var-aggregator': {
       // Add aggregated variables
-      if (config.group.defaultValue) {
-        (config.group_variables.defaultValue || []).forEach((gv: any) => {
+      const groupEnabled = unwrapConfigPrimitive(config?.group);
+      const groupVariables = unwrapConfigArray<any>(config?.group_variables);
+      if (groupEnabled) {
+        groupVariables.forEach((gv: any) => {
           if (gv?.key) {
             let dt = 'string';
-            if (gv.value?.[0]) {
-              const fv = variableList.find(v => `{{${v.value}}}` === gv.value[0]);
+            const gvValue = unwrapConfigArray<any>(gv.value);
+            if (gvValue?.[0]) {
+              const fv = variableList.find(v => `{{${v.value}}}` === gvValue[0]);
               if (fv) dt = fv.dataType;
             }
-            addVariable(variableList, addedKeys, `${dataNodeId}_${gv.key}`, gv.key, dt, `${dataNodeId}.${gv.key}`, nodeData, undefined, gv.defaultValue ?? gv.default);
+            addVariable(variableList, addedKeys, `${dataNodeId}_${gv.key}`, gv.key, dt, `${dataNodeId}.${gv.key}`, nodeData, undefined, unwrapConfigPrimitive(gv.defaultValue ?? gv.default));
           }
         });
       } else {
-        const fv = (config.group_variables?.defaultValue || [])[0];
+        const fv = groupVariables[0];
         let dt = 'any';
         if (fv) {
           const found = variableList.find(v => `{{${v.value}}}` === fv);
@@ -254,6 +340,7 @@ const processNodeVariables = (
         addVariable(variableList, addedKeys, `${dataNodeId}_output`, 'output', dt, `${dataNodeId}.output`, nodeData);
       }
       break;
+    }
 
     case 'iteration':
       // Add iteration output variable
@@ -395,7 +482,8 @@ export const getCurrentNodeVariables = (nodeData: any, values: any, upstreamVari
   
   // Special case: var-aggregator without group enabled returns no variables
   const result = list.filter(v => v.nodeData?.id === dataNodeId);
-  return nodeData.type === 'var-aggregator' && !nodeData.config.group?.defaultValue ? [] : result;
+  const groupEnabled = unwrapConfigPrimitive(nodeData.config?.group);
+  return nodeData.type === 'var-aggregator' && !groupEnabled ? [] : result;
 };
 
 /**
@@ -440,35 +528,61 @@ export const getChildNodeVariables = (
     getConnectedNodes(child.id).forEach(id => relevantIds.add(id));
   });
 
-  // Process each relevant node
+  // Process each relevant node: deferred types last with multi-pass to resolve chains
+  const deferredIds: string[] = [];
   relevantIds.forEach(id => {
     const node = nodes.find(n => n.id === id);
     if (!node) return;
-
-    const nodeData = node.getData();
-    const nodeId = nodeData.id;
-    const { type } = nodeData;
-
-    // Add node-specific variables
-    if (type in NODE_VARIABLES) {
-      NODE_VARIABLES[type as keyof typeof NODE_VARIABLES].forEach(({ label, dataType, field }) => {
-        addVariable(list, keys, `${nodeId}_${label}`, label, dataType, `${nodeId}.${field}`, nodeData);
-      });
-    }
-
-    // Add parameter-extractor variables
-    if (type === 'parameter-extractor') {
-      (nodeData.config?.params?.defaultValue || []).forEach((p: any) => {
-        if (p?.name) addVariable(list, keys, `${nodeId}_${p.name}`, p.name, p.type || 'string', `${nodeId}.${p.name}`, nodeData, undefined, p.defaultValue ?? p.default);
-      });
-    }
-    // Add code node variables
-    if (type === 'code') {
-      (nodeData.config?.output_variables?.defaultValue || []).forEach((p: any) => {
-        if (p?.name) addVariable(list, keys, `${nodeId}_${p.name}`, p.name, p.type || 'string', `${nodeId}.${p.name}`, nodeData, undefined, p.defaultValue ?? p.default);
-      });
+    const t = node.getData()?.type;
+    if (['var-aggregator', 'list-operator', 'iteration'].includes(t)) {
+      deferredIds.push(id);
+    } else {
+      processNodeVariables(node.getData(), node.getData().id, list, keys);
     }
   });
+
+  // Multi-pass deferred processing.
+  //
+  // Uses the same robust strategy as useVariableList:
+  //   1. Before re-processing a node, DELETE any stale fallback entries it added
+  //      during a previous pass so processNodeVariables can re-add them with the
+  //      correct inferred type (bypasses the Set-based dedupe in addVariable).
+  //   2. deferredNodeResolved reports TRUE only when the node's input reference
+  //      actually matched a known variable in the list — NOT simply because we
+  //      added 3 default-type fallback variables.
+  //   3. If a full pass yields zero newly-resolved nodes, finalize the rest
+  //      with fallbacks (the references are unresolvable / broken).
+  const resolvedDeferred = new Set<string>();
+  let remaining = deferredIds.filter(id => !resolvedDeferred.has(id));
+  const maxPasses = Math.max(1, deferredIds.length);
+  for (let pass = 0; pass < maxPasses && remaining.length > 0; pass++) {
+    const passStartResolved = resolvedDeferred.size;
+    const nowRemaining: string[] = [];
+    for (const id of remaining) {
+      const node = nodes.find(n => n.id === id);
+      const nodeData = node?.getData();
+      if (!nodeData) continue;
+
+      removeVariablesForNode(list, keys, nodeData.id);
+      processNodeVariables(nodeData, nodeData.id, list, keys);
+
+      if (deferredNodeResolved(nodeData, list)) {
+        resolvedDeferred.add(id);
+      } else {
+        nowRemaining.push(id);
+      }
+    }
+    if (resolvedDeferred.size === passStartResolved) {
+      nowRemaining.forEach(id => {
+        const n = nodes.find(n => n.id === id);
+        if (!n) return;
+        removeVariablesForNode(list, keys, n.getData().id);
+        processNodeVariables(n.getData(), n.getData().id, list, keys);
+      });
+      break;
+    }
+    remaining = nowRemaining;
+  }
 
   return list;
 };
@@ -569,7 +683,9 @@ export const useVariableList = (
     chatVariables?.forEach(v => addVariable(list, keys, `CONVERSATION_${v.name}`, v.name, v.type, `conv.${v.name}`, { type: 'CONVERSATION', name: 'CONVERSATION', icon: '', id: 'ENV' }, { group: 'CONVERSATION' }, v.defaultValue ?? v.default));
     envVariables?.forEach(v => addVariable(list, keys, `ENV_${v.name}`, v.name, v.value_type, `env.${v.name}`, { type: 'ENV', name: 'ENV', icon: '', id: 'ENV' }, { group: 'ENV' }));
 
-    // Process each relevant node: deferred types last (they depend on prior variables)
+    // Process each relevant node: deferred types last with multi-pass to resolve chains
+    // list-operator A -> list-operator B requires A processed before B, but the DFS
+    // order from output node may return [B, A, ...], so a single pass is insufficient.
     const deferredIds: string[] = [];
     relevantIds.forEach(id => {
       const node = nodes.find(n => n.id === id);
@@ -581,25 +697,79 @@ export const useVariableList = (
         processNodeVariables(node.getData(), node.getData().id, list, keys);
       }
     });
-    deferredIds.forEach(id => {
-      const node = nodes.find(n => n.id === id);
-      if (node) processNodeVariables(node.getData(), node.getData().id, list, keys);
-    });
+
+    // Multi-pass deferred processing.
+    //
+    // Problem this two bugs that a simple "keys.size increased" as resolved check cannot detect:
+    //   1. When the first pass adds a node with a missing upstream reference still
+    //      adds the 3 default-type fallback variables (result/first_record/last_record).
+    //      Its keys.size does increase, so the old algorithm marked it "resolved" even
+    //      though it used a fallback type.
+    //   2. addVariable() uses a Set to deduplicate by key, so a second call on a
+    //      second pass with the correct type is a no-op (the key is already present).
+    //
+    // Fix strategy per pass:
+    //   1. Before (re-)processing a still-unresolved node, DELETE any
+    //      variables it added during a previous pass (removeVariablesForNode).
+    //      This allows the subsequent processNodeVariables call to push variables with
+    //      the CORRECT inferred type instead of being skipped by the key Set.
+    //   2. After processing, check deferredNodeResolved - did its input
+    //      actually reference a known variable? If yes, mark it truly resolved.
+    //      If no, keep it for the next pass so its upstream deferred dependency
+    //      has a chance to be computed first.
+    //   3. If one full pass yields zero newly-resolved nodes, all remaining nodes
+    //      have broken/missing references → let them finalize with fallbacks.
+    const resolvedDeferred = new Set<string>();
+    let remaining = deferredIds.filter(id => !resolvedDeferred.has(id));
+    const maxPasses = Math.max(1, deferredIds.length);
+    for (let pass = 0; pass < maxPasses && remaining.length > 0; pass++) {
+      const passStartResolved = resolvedDeferred.size;
+      const nowRemaining: string[] = [];
+      for (const id of remaining) {
+        const node = nodes.find(n => n.id === id);
+        const nodeData = node?.getData();
+        if (!nodeData) continue;
+
+        // Wipe any stale fallback entries this node may have pushed on an
+        // earlier pass so we can re-add them with the correct inferred type.
+        removeVariablesForNode(list, keys, nodeData.id);
+        processNodeVariables(nodeData, nodeData.id, list, keys);
+
+        if (deferredNodeResolved(nodeData, list)) {
+          resolvedDeferred.add(id);
+        } else {
+          nowRemaining.push(id);
+        }
+      }
+      // No nodes made progress this pass → references are broken forever.
+      // Finalize remaining nodes with their current fallback types.
+      if (resolvedDeferred.size === passStartResolved) {
+        nowRemaining.forEach(id => {
+          const n = nodes.find(n => n.id === id);
+          if (!n) return;
+          removeVariablesForNode(list, keys, n.getData().id);
+          processNodeVariables(n.getData(), n.getData().id, list, keys);
+        });
+        break;
+      }
+      remaining = nowRemaining;
+    }
 
     // Add parent loop variables
     if (parentLoop) {
       const pd = parentLoop.getData();
       const pid = pd.id;
       if (pd.type === 'loop') {
-        (pd.cycle_vars || []).forEach((cv: any) => addVariable(list, keys, `${pid}_cycle_${cv.name}`, cv.name, cv.type || 'string', `${pid}.${cv.name}`, pd));
-      } else if (pd.type === 'iteration' && pd.config.input.defaultValue) {
-        let itemType = 'object';
-        const iv = list.find(v => `{{${v.value}}}` === pd.config.input.defaultValue);
-        if (iv?.dataType.startsWith('array[')) {itemType = iv.dataType.replace(/^array\[(.+)\]$/, '$1');}
+        unwrapConfigArray<any>(pd.cycle_vars ?? pd.config?.cycle_vars).forEach((cv: any) => addVariable(list, keys, `${pid}_cycle_${cv.name}`, cv.name, cv.type || 'string', `${pid}.${cv.name}`, pd));
+      } else if (pd.type === 'iteration') {
+        const iterationInput = unwrapConfigPrimitive(pd.config?.input ?? pd.input);
+        let itemType = 'string';
+        if (iterationInput) {
+          itemType = 'object';
+          const iv = list.find(v => `{{${v.value}}}` === iterationInput);
+          if (iv?.dataType.startsWith('array[')) {itemType = iv.dataType.replace(/^array\[(.+)\]$/, '$1');}
+        }
         addVariable(list, keys, `${pid}_item`, 'item', itemType, `${pid}.item`, pd);
-        addVariable(list, keys, `${pid}_index`, 'index', 'number', `${pid}.index`, pd);
-      } else if (pd.type === 'iteration' && !pd.config.input.defaultValue) {
-        addVariable(list, keys, `${pid}_item`, 'item', 'string', `${pid}.item`, pd);
         addVariable(list, keys, `${pid}_index`, 'index', 'number', `${pid}.index`, pd);
       }
     }

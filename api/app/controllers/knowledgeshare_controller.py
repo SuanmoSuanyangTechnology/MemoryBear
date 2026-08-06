@@ -4,9 +4,10 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_async_db
-from app.dependencies import get_current_user_async
+from app.dependencies import cur_workspace_access_guard_async, get_current_user_async
 from app.models.user_model import User
 from app.models import knowledgeshare_model, knowledge_model
+from app.models.workspace_model import Workspace
 from app.schemas import knowledgeshare_schema, knowledge_schema
 from app.schemas.response_schema import ApiResponse
 from app.core.response_utils import success
@@ -24,6 +25,7 @@ router = APIRouter(
 
 
 @router.get("/{kb_id}/knowledgeshares", response_model=ApiResponse)
+@cur_workspace_access_guard_async()
 async def get_knowledgeshares(
         kb_id: uuid.UUID,
         page: int = Query(1, gt=0),  # Default: 1, which must be greater than 0
@@ -51,6 +53,17 @@ async def get_knowledgeshares(
         )
 
     # 2. Construct query conditions
+    db_knowledge = await knowledge_service.get_knowledge_by_id_async(
+        db=db,
+        knowledge_id=kb_id,
+        current_user=current_user,
+    )
+    if not db_knowledge:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="The knowledge base does not exist or access is denied",
+        )
+
     filters = [
         knowledgeshare_model.KnowledgeShare.source_workspace_id == current_user.current_workspace_id,
         knowledgeshare_model.KnowledgeShare.source_kb_id == kb_id
@@ -90,6 +103,7 @@ async def get_knowledgeshares(
 
 
 @router.post("/knowledgeshare", response_model=ApiResponse)
+@cur_workspace_access_guard_async()
 async def create_knowledgeshare(
         create_data: knowledgeshare_schema.KnowledgeShareCreate,
         db: AsyncSession = Depends(get_async_db),
@@ -102,8 +116,20 @@ async def create_knowledgeshare(
         f"Create a knowledge base sharing request: source_kb_id={create_data.source_kb_id}, source_workspace_id={current_user.current_workspace_id}, username: {current_user.username}")
 
     try:
+        target_workspace = await db.get(Workspace, create_data.target_workspace_id)
+        if not target_workspace:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="The target workspace does not exist",
+            )
+
         # 1.Create a knowledge base with permission_id=knowledge_model.PermissionType.Share
         db_knowledge = await knowledge_service.get_knowledge_by_id_async(db, knowledge_id=create_data.source_kb_id, current_user=current_user)
+        if not db_knowledge:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="The source knowledge base does not exist or access is denied",
+            )
         knowledge = knowledge_schema.KnowledgeCreate(
             workspace_id=create_data.target_workspace_id,
             created_by=current_user.id,
@@ -140,6 +166,7 @@ async def create_knowledgeshare(
 
 
 @router.get("/{knowledgeshare_id}", response_model=ApiResponse)
+@cur_workspace_access_guard_async()
 async def get_knowledgeshare(
         knowledgeshare_id: uuid.UUID,
         db: AsyncSession = Depends(get_async_db),
@@ -171,6 +198,7 @@ async def get_knowledgeshare(
 
 
 @router.delete("/{knowledgeshare_id}", response_model=ApiResponse)
+@cur_workspace_access_guard_async()
 async def delete_knowledgeshare(
         knowledgeshare_id: uuid.UUID,
         db: AsyncSession = Depends(get_async_db),

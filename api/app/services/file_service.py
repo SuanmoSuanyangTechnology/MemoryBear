@@ -85,11 +85,27 @@ def create_file(
         raise
 
 
-def get_file_by_id(db: Session, file_id: uuid.UUID) -> File | None:
+def get_file_by_id(
+        db: Session,
+        file_id: uuid.UUID,
+        current_user: User | None = None,
+        kb_id: uuid.UUID | None = None,
+) -> File | None:
     business_logger.debug(f"Query file based on ID: file_id={file_id}")
 
     try:
-        file = file_repository.get_file_by_id(db=db, file_id=file_id)
+        workspace_id = getattr(current_user, "current_workspace_id", None)
+        if current_user is not None:
+            if workspace_id is None:
+                return None
+            file = file_repository.get_file_by_id_in_workspace(
+                db=db,
+                file_id=file_id,
+                workspace_id=workspace_id,
+                kb_id=kb_id,
+            )
+        else:
+            file = file_repository.get_file_by_id(db=db, file_id=file_id)
         if file:
             business_logger.info(f"file query successful: {file.file_name} (ID: {file_id})")
         else:
