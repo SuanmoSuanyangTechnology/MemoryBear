@@ -3415,7 +3415,7 @@ def write_total_memory_task(workspace_id: str) -> Dict[str, Any]:
     async def _run() -> Dict[str, Any]:
         from app.models.app_model import App
         from app.repositories.end_user_repository import EndUserRepository
-        from app.repositories.memory_increment_repository import write_memory_increment
+        from app.repositories.memory_increment_repository import MemoryIncrementRepository
         from app.repositories.neo4j.neo4j_connector import Neo4jConnector
         from app.services.memory_storage_service import search_all_batch
 
@@ -3439,8 +3439,7 @@ def write_total_memory_task(workspace_id: str) -> Dict[str, Any]:
         # 没有 app 时直接写入 0
         if not has_apps:
             with get_db_context() as db:
-                memory_increment = write_memory_increment(
-                    db=db,
+                memory_increment = MemoryIncrementRepository(db).write_memory_increment(
                     workspace_id=workspace_uuid,
                     total_num=0
                 )
@@ -3468,8 +3467,7 @@ def write_total_memory_task(workspace_id: str) -> Dict[str, Any]:
 
         # --- Session B：写入统计结果 ---
         with get_db_context() as db:
-            memory_increment = write_memory_increment(
-                db=db,
+            memory_increment = MemoryIncrementRepository(db).write_memory_increment(
                 workspace_id=workspace_uuid,
                 total_num=total_num
             )
@@ -3485,7 +3483,11 @@ def write_total_memory_task(workspace_id: str) -> Dict[str, Any]:
             }
 
     try:
-        result = asyncio.run(_run())
+        # 尝试获取现有事件循环，如果不存在则创建新的（与 write_all_workspaces_memory_task 一致，
+        # 避免 asyncio.run 每次新建并关闭 loop，导致进程内共享 Neo4j driver 跨 loop 复用报错）
+        loop = set_asyncio_event_loop()
+
+        result = loop.run_until_complete(_run())
         elapsed_time = time.time() - start_time
         result["elapsed_time"] = elapsed_time
         return result
@@ -3527,7 +3529,7 @@ def write_all_workspaces_memory_task(self) -> Dict[str, Any]:
         from app.models.app_model import App
         from app.models.workspace_model import Workspace
         from app.repositories.end_user_repository import EndUserRepository
-        from app.repositories.memory_increment_repository import write_memory_increment
+        from app.repositories.memory_increment_repository import MemoryIncrementRepository
         from app.repositories.neo4j.neo4j_connector import Neo4jConnector
         from app.services.memory_storage_service import search_all_batch
 
@@ -3585,8 +3587,7 @@ def write_all_workspaces_memory_task(self) -> Dict[str, Any]:
 
                     # --- Session B：写入统计结果 ---
                     with get_db_context() as db:
-                        memory_increment = write_memory_increment(
-                            db=db,
+                        memory_increment = MemoryIncrementRepository(db).write_memory_increment(
                             workspace_id=workspace_id,
                             total_num=total_num,
                         )

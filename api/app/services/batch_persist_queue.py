@@ -24,14 +24,32 @@ from sqlalchemy import (
     insert as sa_insert,
     update as sa_update,
     case as sa_case,
-    func as sa_func,
     text as sa_text,
 )
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.core.config import settings
 from app.db import get_async_db_context
 
 logger = logging.getLogger(__name__)
+
+
+def _get_async_pool_status_safe() -> dict | None:
+    try:
+        from app.db import get_async_pool_status
+        return get_async_pool_status()
+    except Exception:
+        return None
+
+
+def _fmt_pool(status: dict | None) -> str:
+    if not status:
+        return "N/A"
+    return (
+        f"checkout={status.get('checked_out')}/{status.get('pool_size')}"
+        f" overflow={status.get('overflow')}"
+        f" usage={status.get('usage_percent')}%"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -214,14 +232,19 @@ class BatchPersistQueue:
         extracted and committed together via one multi-row INSERT plus atomic
         conversation counter UPDATEs — the DB is opened only once per batch.
         """
+        if not batch:
+            return
+
+        t0 = time.time()
         msg_tasks = [t for t in batch if t.task_type in ("save_messages", "save_failed_message")]
         other_tasks = [t for t in batch if t not in msg_tasks]
 
-        memory_conv_ids: list[str] = []
+        pool_status_before = _get_async_pool_status_safe()
+
         try:
             async with get_async_db_context() as db:
                 if msg_tasks:
-                    memory_conv_ids = await _bulk_persist_messages(db, msg_tasks) or []
+                    await _bulk_persist_messages(db, msg_tasks)
                 for task in other_tasks:
                     try:
                         await self._execute_task(db, task)
@@ -232,33 +255,32 @@ class BatchPersistQueue:
                             list(task.args.keys()),
                         )
                 await db.commit()
-            for conv_id in memory_conv_ids:
-                try:
-                    asyncio.ensure_future(_mark_memory_pending(conv_id))
-                except Exception:
-                    logger.warning(
-                        "Failed to schedule mark_pending for conv %s", conv_id, exc_info=True,
-                    )
+
+            elapsed_ms = (time.time() - t0) * 1000
+            pool_status_after = _get_async_pool_status_safe()
+            logger.info(
+                "[TIMING] batch_persist flush: batch=%d msg=%d other=%d elapsed=%.1fms "
+                "pool_before=%s pool_after=%s queue_depth=%d",
+                len(batch), len(msg_tasks), len(other_tasks), elapsed_ms,
+                _fmt_pool(pool_status_before), _fmt_pool(pool_status_after),
+                self._queue.qsize(),
+            )
         except Exception:
-            logger.exception("Batch persist failed for %d tasks (%d msg)", len(batch), len(msg_tasks))
+            elapsed_ms = (time.time() - t0) * 1000
+            logger.exception(
+                "[TIMING] batch_persist FAILED: batch=%d msg=%d elapsed=%.1fms queue_depth=%d",
+                len(batch), len(msg_tasks), elapsed_ms, self._queue.qsize(),
+            )
 
     async def _sync_write(self, task: PersistTask) -> None:
         """Synchronous (immediate) write fallback for a single task."""
-        memory_conv_ids: list[str] = []
         try:
             async with get_async_db_context() as db:
                 if task.task_type in ("save_messages", "save_failed_message"):
-                    memory_conv_ids = await _bulk_persist_messages(db, [task]) or []
+                    await _bulk_persist_messages(db, [task])
                 else:
                     await self._execute_task(db, task)
                 await db.commit()
-            for conv_id in memory_conv_ids:
-                try:
-                    asyncio.ensure_future(_mark_memory_pending(conv_id))
-                except Exception:
-                    logger.warning(
-                        "Failed to schedule mark_pending for conv %s", conv_id, exc_info=True,
-                    )
         except Exception:
             logger.exception("Sync persist failed for task %s", task.task_type)
 
@@ -302,29 +324,33 @@ def _row(
 async def _bulk_persist_messages(
     db: Any,
     msg_tasks: list[PersistTask],
-) -> list[str]:
+) -> None:
     """Persist all messages from *msg_tasks* via a single multi-row INSERT
     followed by atomic ``message_count`` UPDATEs per conversation.
 
-    When a task carries ``sync_memory=True``, also inserts into
-    ``memory_messages`` within the same transaction.
-
-    Returns a list of conversation_ids that need ``mark_conversation_pending``
-    after commit (may be empty).
+    Idempotent on ``messages.id``: the INSERT uses ``ON CONFLICT DO NOTHING``
+    and rows are deduplicated within the batch, so re-enqueued/replayed tasks
+    (same user_message_id/message_id) neither raise ``UniqueViolationError``
+    nor roll back the whole batch. ``message_count`` is incremented only for
+    rows actually inserted (via ``RETURNING id``).
     """
     from app.models.conversation_model import Message, Conversation
     from app.services.chat_context import StreamResult
 
     rows: list[dict[str, Any]] = []
-    conv_deltas: dict[uuid_module.UUID, tuple[int, str | None]] = defaultdict(lambda: (0, None))
-    memory_conv_ids: list[str] = []
-    _memory_params: list[dict[str, Any]] = []
+    row_conv: dict[uuid_module.UUID, uuid_module.UUID] = {}
+    conv_titles: dict[uuid_module.UUID, str | None] = {}
+
+    def _add_row(row: dict[str, Any], conv_id: uuid_module.UUID) -> None:
+        rows.append(row)
+        mid = row["id"]
+        if isinstance(mid, str):
+            mid = uuid_module.UUID(mid)
+        row_conv[mid] = conv_id
 
     for task in msg_tasks:
         args = task.args
         result: StreamResult | None = args.get("result")
-        sync_memory = args.get("sync_memory", True)
-        should_memorize = args.get("should_memorize", True)
 
         conv_id = args.get("conversation_id_override") or args.get("conversation_id")
         if conv_id is None:
@@ -337,23 +363,14 @@ async def _bulk_persist_messages(
             user_msg_id = args.get("user_message_id", uuid_module.uuid4())
             msg_id = args.get("message_id", uuid_module.uuid4())
             user_content = args.get("user_message_content", "")
-            rows.append(_row(user_msg_id, conv_id, "user",
-                             user_content,
-                             {"files": args.get("files_meta", [])}))
-            rows.append(_row(msg_id, conv_id, "assistant",
-                             args.get("error_message", "An error occurred during generation."),
-                             {"error": args.get("error_detail", "")},
-                             status="failed"))
-            delta, _ = conv_deltas[conv_id]
-            conv_deltas[conv_id] = (delta + 2, None)
-            if sync_memory:
-                _memory_params.append({
-                    "conv_id": conv_id,
-                    "msg_id": user_msg_id,
-                    "content": user_content,
-                    "role": "user",
-                    "should_memorize": should_memorize,
-                })
+            _add_row(_row(user_msg_id, conv_id, "user",
+                          user_content,
+                          {"files": args.get("files_meta", [])}), conv_id)
+            _add_row(_row(msg_id, conv_id, "assistant",
+                          args.get("error_message", "An error occurred during generation."),
+                          {"error": args.get("error_detail", "")},
+                          status="failed"), conv_id)
+            conv_titles[conv_id] = None
             continue
 
         # --- save_messages ---
@@ -376,9 +393,9 @@ async def _bulk_persist_messages(
         user_parent_id = args.get("user_parent_message_id")
         user_content = args.get("user_message_content", "") or ""
 
-        rows.append(_row(user_msg_id, conv_id, "user",
-                         user_content, user_meta,
-                         parent_message_id=user_parent_id))
+        _add_row(_row(user_msg_id, conv_id, "user",
+                      user_content, user_meta,
+                      parent_message_id=user_parent_id), conv_id)
 
         # assistant message meta
         if args.get("meta_override"):
@@ -406,140 +423,72 @@ async def _bulk_persist_messages(
 
         assistant_content = args.get("content_override") or (
             result.full_content if result else "")
-        rows.append(_row(msg_id, conv_id, "assistant", assistant_content, assistant_meta,
-                         parent_message_id=user_msg_id))
+        _add_row(_row(msg_id, conv_id, "assistant", assistant_content, assistant_meta,
+                      parent_message_id=user_msg_id), conv_id)
 
-        title_candidate = user_content[:50] + ("..." if len(user_content) > 50 else "") if user_content else None
-        delta, _ = conv_deltas[conv_id]
-        conv_deltas[conv_id] = (delta + 2, title_candidate)
-
-        if sync_memory:
-            _memory_params.append({
-                "conv_id": conv_id,
-                "msg_id": user_msg_id,
-                "content": user_content,
-                "role": "user",
-                "should_memorize": should_memorize,
-            })
-            _memory_params.append({
-                "conv_id": conv_id,
-                "msg_id": msg_id,
-                "content": assistant_content,
-                "role": "assistant",
-                "should_memorize": True,
-            })
+        conv_titles[conv_id] = (
+            user_content[:50] + ("..." if len(user_content) > 50 else "")
+            if user_content else None
+        )
 
         # opening statement
         if args.get("is_new_conversation") and args.get("opening_statement"):
             opening_id = args.get("opening_message_id")
             if opening_id:
-                rows.append(_row(opening_id, conv_id, "assistant", args["opening_statement"]))
-                d, t = conv_deltas[conv_id]
-                conv_deltas[conv_id] = (d + 1, t)
+                _add_row(_row(opening_id, conv_id, "assistant", args["opening_statement"]), conv_id)
 
-    # --- single multi-row INSERT for all messages ---
-    if rows:
-        await db.execute(sa_insert(Message).values(rows))
+    # --- dedupe rows within the batch (same task enqueued twice, or success +
+    # failed tasks sharing one message pair) ---
+    seen_ids: set[uuid_module.UUID] = set()
+    unique_rows: list[dict[str, Any]] = []
+    for r in rows:
+        mid = r["id"]
+        if isinstance(mid, str):
+            mid = uuid_module.UUID(mid)
+        if mid in seen_ids:
+            continue
+        seen_ids.add(mid)
+        unique_rows.append(r)
+    if len(unique_rows) < len(rows):
+        logger.warning(
+            "batch_persist: dropped %d duplicate message rows within one batch",
+            len(rows) - len(unique_rows),
+        )
 
-    # --- memory_messages (now that FK targets exist) ---
-    if _memory_params:
-        await _write_memory_messages_batch(db, _memory_params, memory_conv_ids)
+    # --- single idempotent multi-row INSERT for all messages ---
+    inserted_ids: set[uuid_module.UUID] = set()
+    if unique_rows:
+        result = await db.execute(
+            pg_insert(Message)
+            .values(unique_rows)
+            .on_conflict_do_nothing(index_elements=["id"])
+            .returning(Message.id)
+        )
+        inserted_ids = {row[0] for row in result.all()}
+        if len(inserted_ids) < len(unique_rows):
+            logger.warning(
+                "batch_persist: %d/%d message rows skipped due to existing ids (idempotent skip)",
+                len(unique_rows) - len(inserted_ids), len(unique_rows),
+            )
 
-    # --- atomic UPDATE per conversation ---
-    for conv_id, (delta, title_candidate) in conv_deltas.items():
+    # --- atomic UPDATE per conversation, counting only actually inserted rows ---
+    actual_deltas: dict[uuid_module.UUID, int] = defaultdict(int)
+    for mid in inserted_ids:
+        actual_deltas[row_conv[mid]] += 1
+
+    for conv_id, delta in actual_deltas.items():
         if delta <= 0:
             continue
         values: dict[str, Any] = {
             "message_count": Conversation.message_count + delta,
         }
-        if title_candidate:
+        if conv_titles.get(conv_id):
             values["title"] = sa_case(
-                (Conversation.message_count <= 1, title_candidate),
+                (Conversation.message_count <= 1, conv_titles[conv_id]),
                 else_=Conversation.title,
             )
         await db.execute(
             sa_update(Conversation).where(Conversation.id == conv_id).values(**values)
-        )
-
-    return memory_conv_ids
-
-
-async def _write_memory_messages_batch(
-    db: Any,
-    entries: list[dict[str, Any]],
-    memory_conv_ids: list[str],
-) -> None:
-    """Insert rows into ``memory_messages`` with per-conversation seq allocation.
-
-    Acquires an advisory lock per conversation, computes the next
-    ``message_seq``, then inserts all entries for that conversation.
-    """
-    from app.models.memory_message_model import MemoryMessage
-    from app.core.memory.enums import MemoryMessageSource
-
-    by_conv: dict[uuid_module.UUID, list[dict[str, Any]]] = defaultdict(list)
-    for entry in entries:
-        by_conv[entry["conv_id"]].append(entry)
-
-    source = MemoryMessageSource.AGENT.value
-    now = utcnow_naive()
-    dialog_at = now.isoformat()
-
-    # Resolve end_user_id per conversation from the conversation table
-    conv_ids = list(by_conv.keys())
-    conv_meta: dict[uuid_module.UUID, str] = {}
-    if conv_ids:
-        from app.models.conversation_model import Conversation
-        result = await db.execute(
-            sa_select(Conversation.id, Conversation.user_id).where(
-                Conversation.id.in_(conv_ids)
-            )
-        )
-        for row in result:
-            conv_meta[row[0]] = str(row[1]) if row[1] else ""
-
-    for conv_id, conv_entries in by_conv.items():
-        lock_key = f"mm_seq:conv:{conv_id}"
-        await db.execute(
-            sa_text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
-            {"key": lock_key},
-        )
-
-        stmt = sa_select(sa_func.coalesce(sa_func.max(MemoryMessage.message_seq), 0))
-        stmt = stmt.where(MemoryMessage.conversation_id == conv_id)
-        seq_result = await db.execute(stmt)
-        next_seq: int = seq_result.scalar() or 0
-
-        end_user_id = conv_meta.get(conv_id, "")
-
-        for entry in conv_entries:
-            next_seq += 1
-            db.add(MemoryMessage(
-                id=uuid_module.uuid4(),
-                conversation_id=conv_id,
-                original_message_id=entry["msg_id"],
-                end_user_id=end_user_id,
-                source=source,
-                role=entry["role"],
-                content=entry.get("content", ""),
-                message_seq=next_seq,
-                should_memorize=entry.get("should_memorize", True),
-                created_at=now,
-                dialog_at=dialog_at,
-            ))
-
-        memory_conv_ids.append(str(conv_id))
-
-
-async def _mark_memory_pending(conv_id: str) -> None:
-    """Best-effort: mark conversation as pending so the periodic Celery task
-    picks it up for memory extraction."""
-    try:
-        from app.core.memory.pipelines.dispatcher import mark_conversation_pending
-        mark_conversation_pending(conv_id)
-    except Exception:
-        logger.warning(
-            "mark_conversation_pending failed for conv %s", conv_id, exc_info=True,
         )
 
 

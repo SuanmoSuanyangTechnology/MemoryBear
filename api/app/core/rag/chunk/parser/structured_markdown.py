@@ -9,7 +9,11 @@ from PIL import Image
 
 from app.core.rag.chunk.context import ParsedBlock, ParsedBlockType
 from app.core.rag.chunk.parser.base import DocumentParser
-from app.core.rag.chunk.parser.markdown_preprocessor import MarkdownLineInfo, MarkdownPreprocessor
+from app.core.rag.chunk.parser.markdown_preprocessor import (
+    MarkdownLineInfo,
+    MarkdownPreprocessor,
+    QA_QUESTION_MARKERS,
+)
 from app.core.rag.nlp import find_codec
 
 
@@ -58,7 +62,10 @@ class StructMarkdownParser(DocumentParser):
                 index = self._append_image_line(index)
                 continue
             if self._is_list_line(index):
-                index = self._append_list(index)
+                if self._is_qa_list_line(index):
+                    index = self._append_qa_list(index)
+                else:
+                    index = self._append_list(index)
                 continue
             if stripped.startswith(">"):
                 index = self._append_blockquote(index)
@@ -143,6 +150,25 @@ class StructMarkdownParser(DocumentParser):
 
     def _is_list_line(self, index: int) -> bool:
         return self._line_info(index).block_hint == "list"
+
+    def _is_qa_list_line(self, index: int) -> bool:
+        return (
+            self._is_list_line(index)
+            and self._line_info(index).metadata.get("list_marker_kind") == "qa"
+        )
+
+    def _is_qa_question_line(self, index: int) -> bool:
+        return self._is_qa_list_line(index) and self._qa_marker(index) in QA_QUESTION_MARKERS
+
+    def _qa_marker(self, index: int) -> str:
+        return str(self._line_info(index).metadata.get("list_marker") or "")
+
+    def _next_nonblank_index(self, index: int) -> int | None:
+        while index < len(self.lines):
+            if self.lines[index].strip():
+                return index
+            index += 1
+        return None
 
     def _is_list_body_line(self, index: int) -> bool:
         return self._line_info(index).block_hint in {"list", "list_continuation"}
@@ -296,6 +322,40 @@ class StructMarkdownParser(DocumentParser):
         )
         return index
 
+    def _append_qa_list(self, index: int) -> int:
+        start = index
+        index += 1
+        while index < len(self.lines):
+            line = self.lines[index]
+            if not line.strip():
+                next_index = self._next_nonblank_index(index + 1)
+                if next_index is not None and self._is_qa_question_line(next_index):
+                    break
+                index += 1
+                continue
+
+            if self._is_qa_list_line(index):
+                if self._is_qa_question_line(index):
+                    break
+                index += 1
+                continue
+
+            if self._is_list_body_line(index) or line.startswith((" ", "\t")):
+                index += 1
+                continue
+
+            break
+
+        content = self._block_content(start, index, compact_blank_lines=self._compact_block_spacing)
+        self._append_block(
+            ParsedBlockType.LIST,
+            content,
+            start_line=start + 1,
+            end_line=index,
+            metadata=self._list_metadata(start, index),
+        )
+        return index
+
     def _append_blockquote(self, index: int) -> int:
         start = index
         index += 1
@@ -328,7 +388,7 @@ class StructMarkdownParser(DocumentParser):
             if self._is_block_start(index) or IMAGE_PATTERN.search(line):
                 break
             index += 1
-        content = self._block_content(start, index, compact_blank_lines=self._compact_block_spacing)
+        content = self._block_content(start, index)
         self._append_block(
             ParsedBlockType.TEXT,
             content,

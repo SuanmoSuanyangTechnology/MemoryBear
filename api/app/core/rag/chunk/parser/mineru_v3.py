@@ -46,7 +46,7 @@ class MinerUV3Parser(DocumentParser):
             self._enhance_image_blocks(blocks, ctx)
         elif ctx.vision_model:
             LOGGER.info("[MinerUV3] image vision enhancement disabled by parser config")
-        return ParseResult(blocks=blocks, merge_strategy="blocks")
+        return ParseResult(blocks=blocks, merge_strategy="blocks", markdown_preprocess_profile="mineru")
 
     def _attach_images(self, blocks, images):
         attached_count = 0
