@@ -1,10 +1,9 @@
+from __future__ import annotations
+
 import asyncio
 import logging
-<<<<<<< HEAD
 import time
-=======
 import uuid
->>>>>>> c2157701 (feat(memory):memory-retrieve-display)
 
 from app.core.memory.enums import Neo4jNodeType, SearchStrategy, StorageType
 from app.core.memory.models.service_models import MemorySearchResult
@@ -117,7 +116,6 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
 
         return res
 
-<<<<<<< HEAD
     async def _emit_stage(self, stage: str, data: dict) -> None:
         await emit_memory_stage(stage, data)
 
@@ -152,7 +150,6 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
     def _ensure_run_started(self) -> None:
         if not self._run_started_at:
             self._run_started_at = time.perf_counter()
-=======
     def _dispatch_display_record(
             self,
             display_query: str,
@@ -204,7 +201,6 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
                 f"[ReadPipeLine] 读取展示投递失败（不影响主流程）: {e}",
                 exc_info=True,
             )
->>>>>>> c2157701 (feat(memory):memory-retrieve-display)
 
     async def _get_search_service(
             self,

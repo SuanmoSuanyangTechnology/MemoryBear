@@ -206,7 +206,6 @@ class MemoryRetrievalDisplayService:
         repo = MemoryDisplayRecordRepository(db)
         records, total = repo.query_retrieved_paginated(
             end_user_id=end_user_id,
-            workspace_id=workspace_id,
             page=page,
             pagesize=pagesize,
         )

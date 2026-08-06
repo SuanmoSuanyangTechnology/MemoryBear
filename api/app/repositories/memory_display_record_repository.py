@@ -163,32 +163,20 @@ class MemoryDisplayRecordRepository:
     def query_retrieved_paginated(
         self,
         end_user_id: uuid.UUID,
-        workspace_id: uuid.UUID,
         page: int,
         pagesize: int,
     ) -> Tuple[List[MemoryDisplayRecord], int]:
         """按 occurred_at DESC, id DESC 分页查询读取展示记录。
 
         一次检索已经是一行，不再按 operation_id 分组或二次取明细。
-        查询附加 end_users 归属条件并限定 workspace_id，防止跨工作空间越权读取。
+        调用方负责校验终端用户的工作空间归属和可见性。
 
         Returns:
             (记录列表, 总条数)
         """
-        owned_by_workspace = (
-            select(EndUser.id)
-            .where(
-                EndUser.id == end_user_id,
-                EndUser.workspace_id == workspace_id,
-                EndUser.is_active.is_(True),
-            )
-            .exists()
-        )
-
         base_filter = (
             (MemoryDisplayRecord.end_user_id == end_user_id)
             & (MemoryDisplayRecord.operation == "RETRIEVE")
-            & owned_by_workspace
         )
 
         total = (
