@@ -1,3 +1,4 @@
+import logging
 import uuid
 
 from app.core.memory.models.service_models import ForgetLog
@@ -12,6 +13,8 @@ from app.repositories.end_user_repository import get_tenant_id_by_end_user_id
 from app.repositories.forget_log_repository import ForgetLogRepository
 from app.repositories.neo4j.cypher_queries import DELETE_NODE_BY_ELEMENT_ID
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+
+logger = logging.getLogger(__name__)
 
 
 class ForgettingPipeline(BasePipeline):
@@ -29,6 +32,21 @@ class ForgettingPipeline(BasePipeline):
 
         async with Neo4jConnector() as connector:
             await sync_end_user_memory_count_from_neo4j(self.ctx.end_user_id, connector)
+
+        # 引擎动态展示投影：只有本轮实际软删除数 > 0 才落一条 FORGETTING 卡片事件。
+        # 尽力写入，PG 失败不影响 Neo4j 软删除结果和定时任务返回值。
+        try:
+            from app.services.memory_engine_display_service import MemoryEngineDisplayService
+            await MemoryEngineDisplayService.save_forgetting_event(
+                end_user_id=self.ctx.end_user_id,
+                forget_summary=res,
+            )
+        except Exception as e:
+            logger.warning(
+                f"[EngineDisplay] 遗忘引擎展示写入异常（不影响主流程）: {e}",
+                exc_info=True,
+            )
+
         return res
 
     @staticmethod

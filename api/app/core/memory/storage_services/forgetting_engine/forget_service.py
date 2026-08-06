@@ -1,5 +1,6 @@
 import logging
 import uuid
+from collections import defaultdict
 from typing import Any
 
 from app.core.memory.enums import Neo4jNodeType
@@ -28,11 +29,18 @@ class ForgetService:
         self.trigger_count = memory_limit
         self._connector: Neo4jConnector | None = None
         self._audit: list[ForgetLog] = []
+        # 展示投影所需的整轮累计量，run() 开头重置，避免实例复用时累计上一轮
+        self._scanned_count: int = 0
+        self._released_count: int = 0
+        self._node_type_counts: defaultdict[str, int] = defaultdict(int)
         self.target_ratio = (1 - self.ctx.memory_config.lambda_mem)
         self.target_count = max(int(memory_limit * self.target_ratio), 50)
 
     async def run(self) -> dict[str, Any]:
         self._audit = []
+        self._scanned_count = 0
+        self._released_count = 0
+        self._node_type_counts = defaultdict(int)
         async with Neo4jConnector() as connector:
             self._connector = connector
 
@@ -51,6 +59,9 @@ class ForgetService:
                     active_count, self.trigger_count,
                 )
                 summary["deleted"] = 0
+                summary["scanned_count"] = 0
+                summary["node_type_counts"] = {}
+                summary["net_active_change"] = 0
                 summary["final_count"] = active_count
                 return summary
 
@@ -65,15 +76,23 @@ class ForgetService:
             budget = await self._mixed_clean(budget)
 
             final_count = await forget_count_active_nodes(connector, self.ctx.end_user_id)
-            deleted = summary["initial_count"] - final_count
+            # 活跃节点净变化只用于运维观察：并发写入或实体归并都会干扰它，
+            # 因此不能作为"本轮软删除了多少"的依据。
+            net_active_change = summary["initial_count"] - final_count
 
-            summary["deleted"] = deleted
+            # deleted 是逐批 SET delete_at 的实际影响行数之和
+            summary["deleted"] = self._released_count
+            summary["scanned_count"] = self._scanned_count
+            summary["node_type_counts"] = dict(self._node_type_counts)
+            summary["net_active_change"] = net_active_change
             summary["budget"] = max(budget, 0)
             summary["final_count"] = final_count
 
             logger.info(
-                "ForgetService done — deleted=%d final=%d remaining_budget=%d",
-                deleted, final_count, summary["budget"],
+                "ForgetService done — scanned=%d deleted=%d net_active_change=%d "
+                "final=%d remaining_budget=%d",
+                self._scanned_count, self._released_count, net_active_change,
+                final_count, summary["budget"],
             )
             try:
                 uid = self.ctx.end_user_id
@@ -102,16 +121,19 @@ class ForgetService:
 
             element_ids = [row["element_id"] for row in candidates]
             now = utcnow()
+            self._scanned_count += len(candidates)
 
             deleted_in_batch = await forget_soft_delete_by_element_ids(
                 connector, self.ctx.end_user_id, element_ids, to_iso_z(now),
             )
 
             total_deleted += deleted_in_batch
+            self._released_count += deleted_in_batch
             budget -= deleted_in_batch
 
             for row in candidates:
                 node_type = row.get("node_type", "unknown")
+                self._node_type_counts[node_type] += 1
                 entry: ForgetLog = ForgetLog(
                     node_id=row.get("element_id"),
                     node_type=node_type,
