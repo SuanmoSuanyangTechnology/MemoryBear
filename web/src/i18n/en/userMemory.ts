@@ -307,5 +307,10 @@ export const userMemory = {
       configurationName: 'Configuration Name',
       configurationId: 'Configuration ID',
       unnamed: 'Unnamed',
+
+      deep_mode: "Deep Retrieval",
+      normal_mode: "Standard Retrieval",
+      quick_mode: "Quick Retrieval",
+      express_mode: "Express Retrieval",
     },
 }

@@ -28,7 +28,7 @@ import {
 } from '@/api/memory'
 import { useI18n } from '@/store/locale'
 import PrivateWrap from '@/components/PrivateWrap'
-import { BrainView, ReflectMemory, type ReflectMemoryRef } from '@redbear/memory-brick'
+import { BrainView, ReflectMemory, type ReflectMemoryRef, MemoryValueRank } from '@redbear/memory-brick'
 import { request } from '@/utils/request'
 import MemoryActivity from './components/MemoryActivity'
 
@@ -88,11 +88,12 @@ const Neo4j: FC = () => {
         setLoading(false)
       })
   }
-
+  const [selectNodeId, setSelectNodeId] = useState<string | null>(null)
   const onOpenChange = (e: MouseEvent, type: string) => {
     e.preventDefault();
     e.stopPropagation();
     setSelectedKey(type)
+    setSelectNodeId(null)
     if (type !== 'Brain') {
       setBrainMemories([]);
       setRegionId(null);
@@ -204,6 +205,23 @@ const Neo4j: FC = () => {
                   />
                 )}
               </PrivateWrap>
+
+              <PrivateWrap>
+                {() => (
+                  <MemoryValueRank
+                    ref={reflectMemoryRef}
+                    request={request}
+                    onOpenChange={(e) => {
+                      onOpenChange(e, 'rank')
+                    }}
+                    selectedKey={selectedKey}
+                    onSelectNode={(item) => {
+                      console.log('onSelectNode item', item)
+                      setSelectNodeId(item.id)
+                    }}
+                  />
+                )}
+              </PrivateWrap>
             </Flex>
           </Flex>
 
@@ -227,6 +245,7 @@ const Neo4j: FC = () => {
               nodeStatisticsRef.current?.getData()
               reflectMemoryRef.current?.getData()
             }}
+            selectNodeId={selectNodeId}
           />
         </Flex>
         <MemoryActivity className="rb:w-70 rb:shrink-0" />
