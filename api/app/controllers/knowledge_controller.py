@@ -534,6 +534,7 @@ async def kb_batch_download(
         files_result = await db.execute(
             select(file_model.File).where(
                 file_model.File.kb_id == kb_id,
+                file_model.File.file_role == file_model.FILE_ROLE_SOURCE,
                 file_model.File.file_key.isnot(None),
                 file_model.File.file_key != "",
             )

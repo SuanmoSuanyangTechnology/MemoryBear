@@ -14,7 +14,8 @@ from app.core.logging_config import get_api_logger
 from app.core.response_utils import success
 from app.db import get_db
 from app.dependencies import get_current_user
-from app.models import file_model
+from app.models import document_model, file_model
+from app.core.rag.chunk.parser.image_storage import cleanup_mineru_v3_images
 from app.models.user_model import User
 from app.schemas import file_schema, document_schema
 from app.schemas.response_schema import ApiResponse
@@ -58,7 +59,10 @@ async def get_files(
     if page < 1 or pagesize < 1:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="The paging parameter must be greater than 0")
 
-    filters = [file_model.File.kb_id == kb_id]
+    filters = [
+        file_model.File.kb_id == kb_id,
+        file_model.File.file_role == file_model.FILE_ROLE_SOURCE,
+    ]
     if parent_id:
         filters.append(file_model.File.parent_id == parent_id)
     if keywords:
@@ -276,7 +280,8 @@ async def batch_download_files(
     """
 
     files = db.query(file_model.File).filter(
-        file_model.File.id.in_(request_body.file_ids)
+        file_model.File.id.in_(request_body.file_ids),
+        file_model.File.file_role == file_model.FILE_ROLE_SOURCE,
     ).all()
 
     if not files:
@@ -371,6 +376,11 @@ async def _delete_file(
     if db_file.file_ext == 'folder':
         # For folders, delete all child files from storage first
         child_files = db.query(file_model.File).filter(file_model.File.parent_id == db_file.id).all()
+        source_file_ids = [
+            child.id
+            for child in child_files
+            if child.file_role == file_model.FILE_ROLE_SOURCE
+        ]
         for child in child_files:
             if child.file_key:
                 try:
@@ -379,11 +389,33 @@ async def _delete_file(
                     api_logger.warning(f"Failed to delete child file from storage: {child.file_key} - {e}")
         db.query(file_model.File).filter(file_model.File.parent_id == db_file.id).delete()
     else:
+        source_file_ids = [db_file.id] if db_file.file_role == file_model.FILE_ROLE_SOURCE else []
         if db_file.file_key:
             try:
                 await storage_service.delete_file(db_file.file_key)
             except Exception as e:
                 api_logger.warning(f"Failed to delete file from storage: {db_file.file_key} - {e}")
+
+    if source_file_ids:
+        document_ids = [
+            document_id
+            for (document_id,) in db.query(document_model.Document.id).filter(
+                document_model.Document.file_id.in_(source_file_ids)
+            ).all()
+        ]
+        for document_id in document_ids:
+            try:
+                await asyncio.to_thread(
+                    cleanup_mineru_v3_images,
+                    document_id,
+                    storage_service=storage_service,
+                )
+            except Exception:
+                api_logger.warning(
+                    "Failed to delete derived image assets: document_id=%s",
+                    document_id,
+                    exc_info=True,
+                )
 
     db.delete(db_file)
     db.commit()

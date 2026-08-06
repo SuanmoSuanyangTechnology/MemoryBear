@@ -172,7 +172,7 @@ class ImageChunkPipeline(ChunkPipeline):
 
     def _source_file_url(self, source_file_id) -> str:
         server_url = (settings.FILE_LOCAL_SERVER_URL or "").rstrip("/")
-        path = f"/storage/permanent/{source_file_id}"
+        path = f"/files/{source_file_id}"
         return f"{server_url}{path}" if server_url else path
 
     def _has_content(self, blocks: list[ParsedBlock]) -> bool:

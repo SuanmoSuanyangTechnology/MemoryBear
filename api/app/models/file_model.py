@@ -1,9 +1,14 @@
-import datetime
 import uuid
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey
+
+from sqlalchemy import Column, DateTime, Integer, String
 from sqlalchemy.dialects.postgresql import UUID
-from app.db import Base
+
 from app.core.utils.datetime_utils import utcnow_naive
+from app.db import Base
+
+FILE_ROLE_SOURCE = "source"
+FILE_ROLE_DERIVED_IMAGE = "derived_image"
+
 
 class File(Base):
     __tablename__ = "files"
@@ -17,4 +22,18 @@ class File(Base):
     file_size = Column(Integer, default=0, comment="file size(byte)")
     file_url = Column(String, index=True, nullable=True, comment="file comes from a website url")
     file_key = Column(String(512), nullable=True, index=True, comment="storage file key for FileStorageService")
+    file_role = Column(
+        String(32),
+        nullable=False,
+        default=FILE_ROLE_SOURCE,
+        server_default=FILE_ROLE_SOURCE,
+        index=True,
+        comment="source or derived_image",
+    )
+    source_document_id = Column(
+        UUID(as_uuid=True),
+        nullable=True,
+        index=True,
+        comment="documents.id for a derived image asset",
+    )
     created_at = Column(DateTime, default=utcnow_naive)
