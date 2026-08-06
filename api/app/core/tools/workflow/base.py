@@ -3,6 +3,7 @@ import time
 import uuid
 from typing import Any, Dict, List, Optional
 
+from langchain_core.runnables.config import RunnableConfig, var_child_runnable_config
 from sqlalchemy.orm import Session
 
 from app.core.tools.base import BaseTool
@@ -104,16 +105,12 @@ class WorkflowAsTool(BaseTool):
         try:
             if self.workflow_service is None:
                 from app.services.workflow_service import WorkflowService
-                self.workflow_service = WorkflowService(self.db)
+                # WorkflowService.run 内部自管理会话，不绑定调用方 session
+                # （调用方可能是 AsyncSession，或在工具执行前已关闭）
+                self.workflow_service = WorkflowService()
 
-            workspace_id = self._resolve_workspace_id()
             user_id = self.get_runtime_context("user_id")
-            workflow_config = None
-            if self.release_id:
-                from app.services.app_service import AppService
-                app_service = AppService(self.db)
-                release = app_service.get_release_by_id(self.workflow_app_id, self.release_id)
-                workflow_config = app_service._workflow_config_from_release(release)
+            workspace_id, workflow_config = await self._load_runtime_config()
 
             payload = DraftRunRequest(
                 user_id=str(user_id) if user_id else None,
@@ -121,14 +118,26 @@ class WorkflowAsTool(BaseTool):
                 stream=False,
             )
 
-            result = await self.workflow_service.run(
-                app_id=self.workflow_app_id,
-                payload=payload,
-                config=workflow_config,
-                workspace_id=workspace_id,
-                release_id=self.release_id,
-                source="tool",
+            # 隔离 LangChain 运行配置：工作流内部节点（LLM/Agent）即使在非流式执行下
+            # 也走 llm.astream()，若继承父级 callbacks，其 on_chat_model_stream 会被外层
+            # Agent 的 astream_events 当成回答内容输出，导致答案里混入工作流原始输出。
+            config_token = var_child_runnable_config.set(
+                RunnableConfig(callbacks=[], tags=[], metadata={})
             )
+            try:
+                # 工作流作为工具调用时是纯函数式执行：不创建会话、不落任何
+                # user/assistant 消息，只保留 execution 记录用于日志。
+                result = await self.workflow_service.run(
+                    app_id=self.workflow_app_id,
+                    payload=payload,
+                    config=workflow_config,
+                    workspace_id=workspace_id,
+                    release_id=self.release_id,
+                    source="tool",
+                    skip_save=True,
+                )
+            finally:
+                var_child_runnable_config.reset(config_token)
 
             execution_time = time.time() - start_time
             structured_output = self._normalize_output(result)
@@ -158,16 +167,49 @@ class WorkflowAsTool(BaseTool):
                 execution_time=execution_time,
             )
 
-    def _resolve_workspace_id(self) -> uuid.UUID:
-        """优先使用运行时上下文中的 workspace_id，缺失时回退到工作流所属应用。"""
+    def _workspace_id_from_context(self) -> Optional[uuid.UUID]:
+        """从运行时上下文读取 workspace_id。"""
         workspace_id = self.get_runtime_context("workspace_id")
         if isinstance(workspace_id, uuid.UUID):
             return workspace_id
         if isinstance(workspace_id, str) and workspace_id:
             return uuid.UUID(workspace_id)
+        return None
 
-        app = self.db.get(App, self.workflow_app_id)
-        if app and getattr(app, "workspace_id", None):
-            return app.workspace_id
+    async def _load_runtime_config(self) -> tuple[uuid.UUID, Any]:
+        """解析 workspace_id 与发布快照配置。
 
-        raise ValueError("workflow tool execution requires workspace_id")
+        统一在独立异步会话中读取，避免依赖调用方 session 的类型（Session/AsyncSession）
+        与生命周期（工具实例可能在调用方会话关闭后才执行）。
+        """
+        workspace_id = self._workspace_id_from_context()
+        if workspace_id is not None and not self.release_id:
+            return workspace_id, None
+
+        from app.db import get_async_db_context
+
+        async with get_async_db_context() as db:
+            if workspace_id is None:
+                app = await db.get(App, self.workflow_app_id)
+                workspace_id = getattr(app, "workspace_id", None) if app else None
+                if workspace_id is None:
+                    raise ValueError("workflow tool execution requires workspace_id")
+
+            workflow_config = None
+            if self.release_id:
+                from app.repositories.workflow_repository import WorkflowConfigRepository
+                from app.services.app_service import AppService
+                from app.services.workflow_service import WorkflowService
+
+                release = await AppService(db).get_release_by_id_async(
+                    self.workflow_app_id, self.release_id
+                )
+                real_config = await WorkflowConfigRepository(db).get_by_app_id_async(
+                    self.workflow_app_id
+                )
+                workflow_config = WorkflowService._build_runtime_workflow_config_from_release(
+                    release,
+                    real_config_id=real_config.id if real_config else None,
+                )
+
+            return workspace_id, workflow_config

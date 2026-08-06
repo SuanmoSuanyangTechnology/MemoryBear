@@ -156,16 +156,14 @@ const Editor: FC<LexicalEditorProps> =({
             }
             placeholder={
               <div
+                className="rb:absolute rb:rounded-lg rb:pointer-none"
                 style={{
                   minHeight: placeHolderMinheight,
-                  position: 'absolute',
                   top: variant === 'outlined' ? '6px' : type === 'input' ? '6px' : '2px',
                   left: variant === 'outlined' ? '11px' : type === 'input' ? '8px' : '0',
                   color: 'rgba(23,23,25,0.25)',
                   fontSize: fontSize,
                   lineHeight: placeHolderMinheight,
-                  pointerEvents: 'none',
-                  borderRadius: '8px',
                 }}
               >
                 {placeholder}

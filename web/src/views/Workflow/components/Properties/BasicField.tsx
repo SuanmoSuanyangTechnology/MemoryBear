@@ -58,9 +58,10 @@ const BasicField: FC<BasicFieldProps> = ({ configKey: key, config }) => {
   }
 
   return (
+    <>
     <Form.Item
       key={key}
-      name={key}
+      name={key === 'long_term_memory' ? [key, 'enable'] : key}
       label={key === 'vision_input'
         ? undefined : key === 'parallel_count'
           ? <span className="rb:text-[10px] rb:text-[#5B6167] rb:leading-3.5 rb:-mb-1!">{t(`workflow.config.${selectedNode?.data?.type}.${key}`)}</span>
@@ -181,13 +182,15 @@ const BasicField: FC<BasicFieldProps> = ({ configKey: key, config }) => {
           size="small"
         />
         : config.type === 'switch'
-        ? <Switch onChange={
-          key === 'group'
-            ? () => { form.setFieldValue('group_variables', []) }
-            : key === 'vision'
-              ? () => { form.setFieldValue('vision_input', undefined) }
-              : undefined
-        } />
+        ? <Switch
+          onChange={
+            key === 'group'
+              ? () => { form.setFieldValue('group_variables', []) }
+              : key === 'vision'
+                ? () => { form.setFieldValue('vision_input', undefined) }
+                : undefined
+          }
+        />
         : config.type === 'categoryList'
         ? <CategoryList
           parentName={key}
@@ -200,6 +203,14 @@ const BasicField: FC<BasicFieldProps> = ({ configKey: key, config }) => {
         : null
       }
     </Form.Item>
+    {key === 'long_term_memory' && (values?.long_term_memory as any)?.enable &&
+      <ActiveMemoryConfig
+        activeMemoryConfig={activeMemoryConfig}
+        size="small"
+        className="rb:mb-3! rb:-mt-2"
+      />
+    }
+    </>
   )
 }
 

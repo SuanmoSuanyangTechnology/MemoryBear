@@ -114,8 +114,8 @@ const NodeStatistics = forwardRef<NodeStatisticsRef, { highlightKeys?: string[] 
             }
             return (
               <div key={vo.key} className={clsx("rb:col-span-3 rb:shadow-[0px_2px_6px_0px_rgba(33,35,50,0.08)] rb:rounded-xl rb:bg-[#FFFFFF] rb:overflow-hidden")}>
-                <div className="rb:w-34 rb:h-5 rb:text-xs rb:text-[#171719] rb:py-0.5 rb:font-medium rb:text-center rb:rounded-tl-xl  rb:rounded-br-xl"
-                  style={{ background: 'linear-gradient( 90deg, #F0E3FE 0%, #D1E7FF 100%)' }}
+                <div
+                  className="rb:w-34 rb:h-5 rb:text-xs rb:text-[#171719] rb:py-0.5 rb:font-medium rb:text-center rb:rounded-tl-xl  rb:rounded-br-xl rb:bg-[linear-gradient(90deg,#F0E3FE_0%,#D1E7FF_100%)]"
                 >{t(`userMemory.${vo.key}`)}</div>
                 <div className="rb:grid rb:grid-cols-3">
                   {vo.children.map((child, index) => <Flex key={child.key} align="center">

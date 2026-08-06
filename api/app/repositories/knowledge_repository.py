@@ -549,12 +549,19 @@ async def delete_knowledge_by_id_async(db: AsyncSession, knowledge_id: uuid.UUID
     try:
         knowledge = await get_knowledge_by_id_async(db, knowledge_id)
         knowledge_name = knowledge.name if knowledge else "unknown"
+        knowledge_workspace_id = knowledge.workspace_id if knowledge else None
 
         result = await db.execute(delete(Knowledge).where(Knowledge.id == knowledge_id))
         await db.commit()
 
         if result.rowcount and result.rowcount > 0:
             db_logger.info(f"knowledge base record deleted successfully (async): {knowledge_name} (ID: {knowledge_id})")
+            if knowledge_name == "USER_RAG_MERORY" and knowledge_workspace_id:
+                from app.utils.redis_cache import invalidate_cache
+                try:
+                    await invalidate_cache(prefix=f"storage_type:{knowledge_workspace_id}")
+                except Exception:
+                    pass
         else:
             db_logger.warning(f"The knowledge base record does not exist, and cannot be deleted (async): knowledge_id={knowledge_id}")
     except Exception as e:

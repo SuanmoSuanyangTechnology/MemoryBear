@@ -127,8 +127,8 @@ const SubAgentModal = forwardRef<SubAgentModalRef, SubAgentModalProps>(({
         >
           <Select
             mode="tags"
-            style={{ width: '100%' }}
             placeholder={t('common.pleaseEnter')}
+            className="rb:w-full!"
           />
         </FormItem>
       </Form>

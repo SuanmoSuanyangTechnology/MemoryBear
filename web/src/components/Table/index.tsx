@@ -19,7 +19,7 @@
  */
 
 import { useState, useEffect, useRef, useCallback, forwardRef, useImperativeHandle } from 'react';
-import { Table } from 'antd';
+import { Table, Flex } from 'antd';
 import type { TableProps } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useTranslation } from 'react-i18next';
@@ -275,9 +275,9 @@ const RbTable = forwardRef(<T = Record<string, unknown>, Q = Record<string, unkn
 
   if (fillHeight) {
     return (
-      <div ref={wrapperRef} style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+      <Flex vertical ref={wrapperRef} className="rb:h-full">
         {tableNode}
-      </div>
+      </Flex>
     )
   }
 

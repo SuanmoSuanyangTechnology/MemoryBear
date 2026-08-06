@@ -114,7 +114,9 @@ class MemoryMessageRepository:
             source: 写入来源枚举，决定 seq 分组键与 memory_messages.source 字段值
 
         Returns:
-            成功写入的消息摘要列表 [{"role": "user", "message_seq": 1, "content": "..."}, ...]
+            成功写入的消息摘要列表
+            [{"role": "user", "message_seq": 1, "content": "...", "dialog_at": ..., "files": ...,
+              "original_message_id": "uuid-str" | None}, ...]
             （跳过 content 为空的消息）
         """
         # 所有路径统一持锁分配 seq，防止同一分组的并发请求抢到重复 seq
@@ -167,6 +169,11 @@ class MemoryMessageRepository:
                 "content": content,
                 "dialog_at": memory_message.dialog_at,
                 "files": memory_message.files,
+                # 快写侧用它作为情绪缓存 key（= 回复链路的 user_message_id）；
+                "original_message_id": (
+                    str(memory_message.original_message_id)
+                    if memory_message.original_message_id else None
+                ),
             })
             logger.debug(
                 "[MemoryMessageRepository] 写入 memory_messages: "
@@ -313,15 +320,21 @@ class MemoryMessageRepository:
         ).scalar_one_or_none()
         return exists is not None
 
-    def list_recent_messages_by_source(
+    async def list_recent_messages_by_source_async(
         self,
         end_user_id: str,
         source: str,
-        limit: int = 20,
+        page: int = 1,
+        pagesize: int = 20,
     ) -> tuple[list[MemoryMessage], int]:
-        """按来源取最近 N 条消息（从旧到新排列）+ 该来源总条数。
+        """按来源分页获取消息 + 该来源总条数（异步版本）。
 
-        先按 created_at DESC 取最新 limit 条 ID，再按 created_at ASC 查询完整行返回。
+        分页语义（service_api / mcp 两种来源完全一致）：
+        - 使用 page / pagesize 分页，page 从 1 开始
+        - 按 message_seq ASC 排序：message_seq 从小到大表示消息从旧到新，
+          且在该来源分组内单调递增，保证翻页无重复、无遗漏
+        - total 通过窗口函数 count(*) OVER () 与数据同一条 SQL 返回，
+          避免独立的 COUNT 往返；页码越界时回退一次 COUNT 保证 total 准确
         """
         base_filter = [
             MemoryMessage.end_user_id == end_user_id,
@@ -329,71 +342,29 @@ class MemoryMessageRepository:
             MemoryMessage.source == source,
         ]
 
-        total = int(self.db.execute(
-            select(func.count(MemoryMessage.id)).where(*base_filter)
-        ).scalar_one())
-
-        if total == 0:
-            return [], 0
-
-        # 取最新 limit 条的 ID
-        recent_ids = list(self.db.execute(
-            select(MemoryMessage.id)
-            .where(*base_filter)
-            .order_by(MemoryMessage.created_at.desc())
-            .limit(limit)
-        ).scalars().all())
-
-        if not recent_ids:
-            return [], total
-
-        # 按 created_at ASC 排序返回完整行（从旧到新）
-        rows = list(self.db.execute(
-            select(MemoryMessage)
-            .where(MemoryMessage.id.in_(recent_ids))
-            .order_by(MemoryMessage.created_at.asc())
-        ).scalars().all())
-
-        return rows, total
-
-    async def list_recent_messages_by_source_async(
-        self,
-        end_user_id: str,
-        source: str,
-        limit: int = 20,
-    ) -> tuple[list[MemoryMessage], int]:
-        """按来源取最近 N 条消息（从旧到新排列）+ 该来源总条数（异步版本）。"""
-        base_filter = [
-            MemoryMessage.end_user_id == end_user_id,
-            MemoryMessage.conversation_id.is_(None),
-            MemoryMessage.source == source,
-        ]
-
-        total_result = await self.db.execute(
-            select(func.count(MemoryMessage.id)).where(*base_filter)
-        )
-        total = int(total_result.scalar_one())
-
-        if total == 0:
-            return [], 0
-
-        recent_ids_result = await self.db.execute(
-            select(MemoryMessage.id)
-            .where(*base_filter)
-            .order_by(MemoryMessage.created_at.desc())
-            .limit(limit)
-        )
-        recent_ids = list(recent_ids_result.scalars().all())
-
-        if not recent_ids:
-            return [], total
-
+        offset = (page - 1) * pagesize
         rows_result = await self.db.execute(
-            select(MemoryMessage)
-            .where(MemoryMessage.id.in_(recent_ids))
-            .order_by(MemoryMessage.created_at.asc())
+            select(
+                MemoryMessage,
+                func.count().over().label("total"),
+            )
+            .where(*base_filter)
+            .order_by(MemoryMessage.message_seq.asc())
+            .offset(offset)
+            .limit(pagesize)
         )
-        rows = list(rows_result.scalars().all())
+        rows_with_total = rows_result.all()
+
+        if not rows_with_total:
+            # 该页无数据：可能是该来源本身无消息，也可能是页码越界。
+            # 补一次 COUNT 返回真实 total，避免元数据失真。
+            total_result = await self.db.execute(
+                select(func.count(MemoryMessage.id)).where(*base_filter)
+            )
+            return [], int(total_result.scalar_one())
+
+        total = int(rows_with_total[0].total)
+        rows = [row[0] for row in rows_with_total]
 
         return rows, total
 

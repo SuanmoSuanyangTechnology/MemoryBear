@@ -31,7 +31,6 @@ from app.core.workflow.nodes.llm.config import strip_unsupported_llm_params, val
 from app.core.workflow.variable.base_variable import VariableType
 from app.db import get_async_db_context, get_db_read
 from app.models import ModelCapability, ModelType
-from app.models.tool_model import ToolType
 from app.models.workspace_model import Workspace
 from app.schemas.model_schema import ModelInfo
 from app.services.context_engine_manager import ContextEngineManager
@@ -112,15 +111,6 @@ class AgentNode(BaseNode):
                 )
             ).scalar_one_or_none()
 
-    def _load_single_tool_sync(self, selector: Any, tenant_id: Any, user_id: Any, workspace_id: Any):
-        with get_db_read() as db:
-            tool_service = ToolService(db)
-            tool_instance = tool_service.get_tool_instance(selector.tool_id, tenant_id)
-            if not tool_instance:
-                return None
-            tool_instance.set_runtime_context(user_id=user_id, workspace_id=workspace_id)
-            return tool_instance.to_langchain_tool(selector.operation)
-
     async def _load_tools_async(
             self,
             variable_pool: VariablePool,
@@ -142,27 +132,12 @@ class AgentNode(BaseNode):
                     tool_service = ToolService(db)
                     for selector in selectors:
                         try:
-                            tool_config = await tool_service.get_tool_config_async(str(selector.tool_id), tenant_id)
-                            if not tool_config:
+                            tool_instance = await tool_service.get_tool_instance_async(str(selector.tool_id), tenant_id)
+                            if not tool_instance:
                                 logger.warning(f"节点 {self.node_id}: 工具 {selector.tool_id} 不存在或未激活，已跳过")
                                 continue
-
-                            if tool_config.tool_type == ToolType.WORKFLOW.value:
-                                # workflow tools still bind sync WorkflowService; keep fallback isolated off the async hot path.
-                                langchain_tool = await asyncio.to_thread(
-                                    self._load_single_tool_sync,
-                                    selector,
-                                    tenant_id,
-                                    user_id,
-                                    workspace_id,
-                                )
-                            else:
-                                tool_instance = await tool_service.get_tool_instance_async(str(selector.tool_id), tenant_id)
-                                if not tool_instance:
-                                    logger.warning(f"节点 {self.node_id}: 工具 {selector.tool_id} 不存在或未激活，已跳过")
-                                    continue
-                                tool_instance.set_runtime_context(user_id=user_id, workspace_id=workspace_id)
-                                langchain_tool = tool_instance.to_langchain_tool(selector.operation)
+                            tool_instance.set_runtime_context(user_id=user_id, workspace_id=workspace_id)
+                            langchain_tool = tool_instance.to_langchain_tool(selector.operation)
 
                             if langchain_tool:
                                 langchain_tools.append(langchain_tool)

@@ -19,23 +19,27 @@ Summary {{ loop.index }}:
 ## Instructions
 1. Analyze the user's content for each dimension
 2. Calculate percentage scores (0-100%)
+3. Provide specific evidence as a LIST of strings for each dimension
+4. Provide reasoning explaining the score
+5. Assess confidence_level (0-100) based on data quality and quantity
+6. **IMPORTANT: evidence MUST be an array of strings, even if only one item**
 
 ## Output Format
 {
   "dimensions": {
-    "creativity": {"percentage": 0-100},
-    "aesthetic": {"percentage": 0-100},
-    "technology": {"percentage": 0-100},
-    "literature": {"percentage": 0-100}
+    "creativity": {"percentage": 0-100, "evidence": ["string", "string"], "reasoning": "string", "confidence_level": 0-100},
+    "aesthetic": {"percentage": 0-100, "evidence": ["string", "string"], "reasoning": "string", "confidence_level": 0-100},
+    "technology": {"percentage": 0-100, "evidence": ["string", "string"], "reasoning": "string", "confidence_level": 0-100},
+    "literature": {"percentage": 0-100, "evidence": ["string", "string"], "reasoning": "string", "confidence_level": 0-100}
   }
 }
 
 ## Example
 {
   "dimensions": {
-    "creativity": {"percentage": 75},
-    "aesthetic": {"percentage": 45},
-    "technology": {"percentage": 60},
-    "literature": {"percentage": 30}
+    "creativity": {"percentage": 75, "evidence": ["提出了多个创新性设计方案", "讨论了原创性思路"], "reasoning": "频繁展现创意思维", "confidence_level": 80},
+    "aesthetic": {"percentage": 45, "evidence": ["提到过界面设计偏好"], "reasoning": "偶尔涉及审美话题", "confidence_level": 50},
+    "technology": {"percentage": 60, "evidence": ["深入讨论了编程框架选择", "分享了技术文章"], "reasoning": "技术话题占比较高", "confidence_level": 85},
+    "literature": {"percentage": 30, "evidence": ["提到过阅读习惯"], "reasoning": "文学相关内容较少", "confidence_level": 40}
   }
 }

@@ -159,6 +159,30 @@ class EndUserRepository:
             db_logger.error(f"查询宿主 {end_user_id} 时出错: {str(e)}")
             raise
 
+    def get_active_end_user_in_workspace(
+        self,
+        end_user_id: uuid.UUID,
+        workspace_id: uuid.UUID,
+    ) -> Optional[EndUser]:
+        """查询当前工作空间内的有效终端用户。"""
+        try:
+            return (
+                self.db.query(EndUser)
+                .filter(
+                    EndUser.id == end_user_id,
+                    EndUser.workspace_id == workspace_id,
+                    EndUser.is_active.is_(True),
+                )
+                .first()
+            )
+        except Exception as e:
+            self.db.rollback()
+            db_logger.error(
+                f"查询工作空间 {workspace_id} 下的终端用户 "
+                f"{end_user_id} 时出错: {str(e)}"
+            )
+            raise
+
     async def get_end_user_by_id_async(self, end_user_id: uuid.UUID) -> Optional[EndUser]:
         try:
             result = await self.db.execute(
@@ -757,6 +781,43 @@ class EndUserRepository:
     ) -> MemoryInsightSourceRow | None:
         """异步读取 Neo4j Workspace 下的洞察源数据和并发版本。"""
         result = await self.db.execute(
+            select(
+                EndUserInfo.id.label("metadata_id"),
+                EndUserInfo.meta_data.label("meta_data"),
+                EndUserInfo.updated_at.label("metadata_updated_at"),
+                EndUser.write_time.label("write_time"),
+                EndUser.memory_insight_updated_at.label("memory_insight_updated_at"),
+            )
+            .select_from(EndUser)
+            .join(Workspace, Workspace.id == EndUser.workspace_id)
+            .outerjoin(EndUserInfo, EndUserInfo.end_user_id == EndUser.id)
+            .where(
+                EndUser.id == end_user_id,
+                EndUser.workspace_id == workspace_id,
+                EndUser.is_active.is_(True),
+                Workspace.is_active.is_(True),
+                Workspace.storage_type == "neo4j",
+            )
+            .limit(1)
+        )
+        row = result.mappings().one_or_none()
+        if row is None:
+            return None
+        return {
+            "meta_data": row["meta_data"],
+            "metadata_row_exists": row["metadata_id"] is not None,
+            "metadata_updated_at": row["metadata_updated_at"],
+            "write_time": row["write_time"],
+            "memory_insight_updated_at": row["memory_insight_updated_at"],
+        }
+
+    def get_scoped_memory_insight_source(
+            self,
+            workspace_id: uuid.UUID,
+            end_user_id: uuid.UUID,
+    ) -> MemoryInsightSourceRow | None:
+        """同步读取 Neo4j Workspace 下的洞察源数据和并发版本。"""
+        result = self.db.execute(
             select(
                 EndUserInfo.id.label("metadata_id"),
                 EndUserInfo.meta_data.label("meta_data"),

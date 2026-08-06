@@ -369,10 +369,17 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
       modal.confirm({
         title: t('knowledgeBase.rebuildConfirmTitle'),
         content: t('knowledgeBase.rebuildConfirmContent'),
-        onOk: async() => {
-          handleDeleteGraph()
+        onOk: async () => {
+          deleteKnowledgeGraph(datasets?.id || '')
+            .then(() => {
+              console.log(t('knowledgeBase.deleteGraphSuccess'));
+              rebuildKnowledgeGraph(datasets?.id || '');
+            })
+            .catch(() => {
+              messageApi.error(t('knowledgeBase.deleteGraphFailed'));
+            })
+
           performSave();
-          await rebuildKnowledgeGraph(datasets?.id || '')
         },
         onCancel: () => {
           // User cancelled, no action taken
@@ -382,14 +389,6 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
       // Non-rebuild mode or knowledge graph not enabled, save directly
       performSave();
     }
-  };
-  const handleDeleteGraph = () => {
-     try{
-        deleteKnowledgeGraph(datasets?.id || '')
-        console.log(t('knowledgeBase.deleteGraphSuccess'))
-     }catch(e){
-        messageApi.error(t('knowledgeBase.deleteGraphFailed'))
-     }
   };
   // Actual save logic
   const performSave = async () => {
@@ -728,7 +727,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
   // Knowledge graph configuration form content
   const renderKnowledgeGraphConfig = () => (
     <>
-      <Flex align="center" className={`rb:w-full rb:p-4! rb:border-1 rb:rounded-lg rb:mb-4! ${
+      <Flex align="center" className={`rb:w-full rb:p-4! rb:border rb:rounded-lg rb:mb-4! ${
         enableKnowledgeGraph 
           ? 'rb:border-[#155EEF] rb:bg-[rgba(21,94,239,0.06)]' 
           : 'rb:border-[#EBEBEB]'
@@ -761,7 +760,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
             <Form.Item
               name={['parser_config', 'graphrag', 'scene_name']}
               label={t('knowledgeBase.sceneName')}
-              className='rb:w-full rb:min-w-[240px]'
+              className='rb:w-full rb:min-w-60'
               rules={[{ required: true, message: t('common.pleaseEnter') + t('knowledgeBase.sceneName') }]}
             >
               <Input  placeholder={t('knowledgeBase.sceneNamePlaceholder')} />
@@ -792,7 +791,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
           </Form.Item>
 
           {/* Entity normalization */}
-          <Flex gap={8} align="center" className={`rb:w-full rb:p-4! rb:border-1 rb:rounded-lg rb:mb-4! ${
+          <Flex gap={8} align="center" className={`rb:w-full rb:p-4! rb:border rb:rounded-lg rb:mb-4! ${
             entityNormalization 
               ? 'rb:border-[#155EEF] rb:bg-[rgba(21,94,239,0.06)]' 
               : 'rb:border-[#EBEBEB]'
@@ -828,7 +827,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({
           </Form.Item>
 
           {/* Community report generation */}
-          <Flex gap={8} align="center" className={`rb:w-full rb:p-4! rb:border-1 rb:rounded-lg rb:mb-4! ${
+          <Flex gap={8} align="center" className={`rb:w-full rb:p-4! rb:border rb:rounded-lg rb:mb-4! ${
             communityReportGeneration 
               ? 'rb:border-[#155EEF] rb:bg-[rgba(21,94,239,0.06)]' 
               : 'rb:border-[#EBEBEB]'

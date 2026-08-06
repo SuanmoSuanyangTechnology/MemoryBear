@@ -31,14 +31,16 @@ const NoteFormatPlugin = ({ nodeId, onFormatChange, fontSize = 12 }: { nodeId: s
         const style = 'getStyle' in anchorNode ? (anchorNode as { getStyle(): string }).getStyle() : '';
         const match = style.match(/font-size:\s*([\d.]+)px/);
         const nodeFontSize = match ? Number(match[1]) : fontSize;
-        const linkNode = $getNearestNodeOfType(anchorNode, LinkNode);
+        const anchorLink = $getNearestNodeOfType(anchorNode, LinkNode);
+        const focusLink = $getNearestNodeOfType(selection.focus.getNode(), LinkNode);
+        const linkUrl = anchorLink && anchorLink === focusLink ? anchorLink.getURL() : null;
         onFormatChange?.({
           bold: selection.hasFormat('bold'),
           italic: selection.hasFormat('italic'),
           strikethrough: selection.hasFormat('strikethrough'),
           list: !!$getNearestNodeOfType(anchorNode, ListNode),
           ...(nodeFontSize ? { fontSize: nodeFontSize } : {}),
-          linkUrl: linkNode ? linkNode.getURL() : null,
+          linkUrl,
         });
       });
     });
@@ -75,26 +77,40 @@ const NoteFormatPlugin = ({ nodeId, onFormatChange, fontSize = 12 }: { nodeId: s
           });
           editor.dispatchCommand(TOGGLE_LINK_COMMAND, null);
         });
+      } else if (format === 'link' && typeof value === 'string') {
+        editor.focus(() => {
+          editor.update(() => {
+            if (!$isRangeSelection(sel)) return;
+            $setSelection(sel);
+            const anchorNode = sel.anchor.getNode();
+            const linkNode = $getNearestNodeOfType(anchorNode, LinkNode);
+            if (linkNode) {
+              linkNode.setURL(value);
+            } else if (!sel.isCollapsed()) {
+              editor.dispatchCommand(TOGGLE_LINK_COMMAND, value);
+            }
+          });
+        });
       } else if (format === 'list') {
         editor.focus(() => {
-          if (sel) editor.update(() => $setSelection(sel));
-          editor.dispatchCommand(value ? INSERT_UNORDERED_LIST_COMMAND : REMOVE_LIST_COMMAND, undefined);
-          editor.update(() => $setSelection(null));
+          editor.update(() => {
+            if (!$isRangeSelection(sel)) return;
+            $setSelection(sel);
+            editor.dispatchCommand(value ? INSERT_UNORDERED_LIST_COMMAND : REMOVE_LIST_COMMAND, undefined);
+          });
         });
       } else if (hasSelection) {
         editor.focus(() => {
-          editor.update(() => $setSelection(sel));
-          if (format === 'bold' || format === 'italic' || format === 'strikethrough') {
-            editor.dispatchCommand(FORMAT_TEXT_COMMAND, format);
-          } else if (format === 'link') {
-            editor.dispatchCommand(TOGGLE_LINK_COMMAND, value as string | null);
-          } else if (format === 'fontSize') {
-            editor.update(() => {
-              $setSelection(sel);
+          editor.update(() => {
+            $setSelection(sel);
+            if (format === 'bold' || format === 'italic' || format === 'strikethrough') {
+              editor.dispatchCommand(FORMAT_TEXT_COMMAND, format);
+            } else if (format === 'link') {
+              editor.dispatchCommand(TOGGLE_LINK_COMMAND, value as string | null);
+            } else if (format === 'fontSize') {
               $patchStyleText(sel!, { 'font-size': `${value}px` });
-            });
-          }
-          editor.update(() => $setSelection(null));
+            }
+          });
         });
       }
     };

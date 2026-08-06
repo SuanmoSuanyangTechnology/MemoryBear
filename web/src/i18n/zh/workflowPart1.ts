@@ -448,6 +448,7 @@ export const workflowPart1 = {
           context: '上下文',
           message: '查询',
           max_iterations: '迭代次数',
+          long_term_memory: '记忆配置',
         },
         name: '键',
         type: '类型',

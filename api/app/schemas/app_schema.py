@@ -249,6 +249,11 @@ class ContextEngineFeatureConfig(BaseModel):
     )
 
 
+class EmotionReplyConfig(BaseModel):
+    """情绪感知回复配置。"""
+    enabled: bool = Field(default=False, description="是否启用情绪感知回复")
+
+
 class AppFeatures(BaseModel):
     """应用功能特性配置"""
     file_upload: FileUploadConfig = Field(default_factory=FileUploadConfig)
@@ -258,6 +263,7 @@ class AppFeatures(BaseModel):
     citation: CitationConfig = Field(default_factory=CitationConfig)
     web_search: WebSearchConfig = Field(default_factory=WebSearchConfig)
     context_engine: Optional[ContextEngineFeatureConfig] = Field(default=None, description="上下文引擎配置")
+    emotion_reply: EmotionReplyConfig = Field( default_factory=EmotionReplyConfig, description="情绪感知回复配置")
 
 
 class ToolOldConfig(BaseModel):

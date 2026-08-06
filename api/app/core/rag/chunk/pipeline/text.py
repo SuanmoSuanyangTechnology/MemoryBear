@@ -2,7 +2,13 @@ import logging
 import os
 import tempfile
 
-from app.core.rag.chunk.context import ChunkContext, ParsedBlock, ParsedBlockType, ParseResult
+from app.core.rag.chunk.context import (
+    ChunkContext,
+    ParsedBlock,
+    ParsedBlockType,
+    ParseResult,
+    is_image_vision_enabled,
+)
 from app.core.rag.chunk.parser.html import HtmlParser
 from app.core.rag.chunk.parser.image_vision import enhance_image_blocks_with_vision
 from app.core.rag.chunk.parser.json import JsonParser
@@ -40,7 +46,7 @@ class MarkdownChunkPipeline(ChunkPipeline):
         markdown_parser = StructMarkdownParser()
         blocks = markdown_parser.parse(ctx)
 
-        if ctx.vision_model:
+        if ctx.vision_model and is_image_vision_enabled(ctx.parser_config):
             for block in blocks:
                 if block.type is not ParsedBlockType.IMAGE:
                     continue
@@ -56,6 +62,8 @@ class MarkdownChunkPipeline(ChunkPipeline):
                 progress_start=0.2,
                 progress_span=0.55,
             )
+        elif ctx.vision_model:
+            logging.info("Image vision enhancement disabled by parser config.")
         else:
             logging.warning("No visual model detected. Skipping figure parsing enhancement.")
 

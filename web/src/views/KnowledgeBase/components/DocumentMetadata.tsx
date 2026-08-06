@@ -139,7 +139,7 @@ const DocumentMetadata: React.FC<DocumentMetadataProps> = ({ documentId, knowled
             <Form.Item name={field.name} className="rb:mb-0!">
               <InputNumber
                 placeholder={t('knowledgeBase.enterMetadataValue')}
-                style={{ width: '100%' }}
+                className="rb:w-full!"
               />
             </Form.Item>
           );
@@ -206,11 +206,8 @@ const DocumentMetadata: React.FC<DocumentMetadataProps> = ({ documentId, knowled
                   type="dashed"
                   block
                   icon={
-                    <span
-                      className="rb:inline-block rb:w-4 rb:h-4 rb:bg-cover"
-                      style={{
-                        backgroundImage: `url('@/assets/images/common/plus_dark.svg')`,
-                      }}
+                    <div
+                      className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/plus_dark.svg')]"
                     />
                   }
                   onClick={handleAddMetadata}

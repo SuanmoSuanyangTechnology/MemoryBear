@@ -1,7 +1,7 @@
 import logging
 from pathlib import Path
 
-from app.core.rag.chunk.context import ParsedBlockType, ParseResult
+from app.core.rag.chunk.context import ParsedBlockType, ParseResult, is_image_vision_enabled
 from app.core.rag.chunk.parser.base import DocumentParser
 from app.core.rag.chunk.parser.image_vision import enhance_image_blocks_with_vision
 from app.core.rag.chunk.parser.image_storage import store_mineru_v3_image
@@ -17,25 +17,51 @@ class MinerUV3Parser(DocumentParser):
         self.client = client or MinerUV3Client()
 
     def parse(self, ctx) -> ParseResult:
-        binary = ctx.binary
-        if binary is None:
-            with open(ctx.filename, "rb") as file:
-                binary = file.read()
+        binary = self._read_binary(ctx)
 
+        image_vision_enabled = is_image_vision_enabled(ctx.parser_config)
         mineru_result = self.client.parse(
             file_name=ctx.filename,
             binary=binary,
             start_page_id=ctx.from_page,
             end_page_id=ctx.to_page,
             callback=ctx.callback,
+            return_images=image_vision_enabled,
         )
-        blocks = StructMarkdownParser().parse_text(mineru_result.markdown)
-        attached_count, attached_images = self._attach_images(blocks, mineru_result.images)
-        LOGGER.info("[MinerUV3] markdown images attached: count=%s", attached_count)
-        self._store_image_assets(attached_images, ctx)
-        if ctx.vision_model:
+        blocks = StructMarkdownParser().parse_text(
+            mineru_result.markdown,
+            normalize_escaped_structure=True,
+        )
+        if image_vision_enabled:
+            attached_count, attached_images = self._attach_images(blocks, mineru_result.images)
+            LOGGER.info("[MinerUV3] markdown images attached: count=%s", attached_count)
+            self._store_image_assets(attached_images, ctx)
+        else:
+            LOGGER.info("[MinerUV3] image block processing disabled by parser config")
+
+        if ctx.vision_model and image_vision_enabled:
             self._enhance_image_blocks(blocks, ctx)
-        return ParseResult(blocks=blocks, merge_strategy="blocks")
+        elif ctx.vision_model:
+            LOGGER.info("[MinerUV3] image vision enhancement disabled by parser config")
+        return ParseResult(blocks=blocks, merge_strategy="blocks", markdown_preprocess_profile="mineru")
+
+    def parse_markdown(self, ctx) -> str:
+        binary = self._read_binary(ctx)
+        mineru_result = self.client.parse(
+            file_name=ctx.filename,
+            binary=binary,
+            start_page_id=ctx.from_page,
+            end_page_id=ctx.to_page,
+            callback=ctx.callback,
+            return_images=False,
+        )
+        return mineru_result.markdown
+
+    def _read_binary(self, ctx) -> bytes:
+        if ctx.binary is not None:
+            return ctx.binary
+        with open(ctx.filename, "rb") as file:
+            return file.read()
 
     def _attach_images(self, blocks, images):
         attached_count = 0

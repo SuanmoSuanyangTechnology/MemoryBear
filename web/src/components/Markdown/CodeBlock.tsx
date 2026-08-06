@@ -56,14 +56,12 @@ const CodeBlock: FC<ICodeBlockProps> = ({
       >
         {value}
       </SyntaxHighlighter>
-      {needCopy && <CopyBtn
-        value={value}
-        style={{
-          position: 'absolute',
-          top: 20,
-          right: 20,
-        }}
-      />}
+      {needCopy &&
+        <CopyBtn
+          value={value}
+          className="rb:absolute! rb:top-5 rb:right-5"
+        />
+      }
     </div>
   )
 }

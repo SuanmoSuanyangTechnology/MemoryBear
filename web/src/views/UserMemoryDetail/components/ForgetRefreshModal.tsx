@@ -108,7 +108,7 @@ const ForgetRefreshModal = forwardRef<ForgetRefreshModalRef, ForgetRefreshModalP
           <Form.Item
             name="max_merge_batch_size"
           >
-            <Slider tooltip={{ open: false }} max={1000} min={1} step={1} style={{ margin: '0' }} />
+            <Slider tooltip={{ open: false }} max={1000} min={1} step={1} className="rb:m-0!" />
           </Form.Item>
           <Flex align="center" justify="space-between" className="rb:text-[12px] rb:text-[#5B6167] rb:leading-5 rb:-mt-6.5!">
             <span>{t(`forgettingEngine.range`)}: {[1, 1000]?.join('-')}</span>
@@ -123,7 +123,7 @@ const ForgetRefreshModal = forwardRef<ForgetRefreshModalRef, ForgetRefreshModalP
           <Form.Item
             name="min_days_since_access"
           >
-            <Slider tooltip={{ open: false }} max={365} min={1} step={1} style={{ margin: '0' }} />
+            <Slider tooltip={{ open: false }} max={365} min={1} step={1} className="rb:m-0!" />
           </Form.Item>
           <Flex align="center" justify="space-between" className="rb:text-[12px] rb:text-[#5B6167] rb:leading-5 rb:-mt-6.5!">
             <span>{t(`forgettingEngine.range`)}: {[1, 365]?.join('-')}</span>

@@ -79,9 +79,6 @@ const RbSlider: FC<RbSliderProps> = ({
     >
       {/* Slider with fixed width */}
       <Slider
-        style={{
-          flex: '1'
-        }}
         {...rest}
         min={min}
         max={max}
@@ -92,7 +89,7 @@ const RbSlider: FC<RbSliderProps> = ({
         classNames={size === 'small' ? {
           rail: 'rb:w-[calc(100%-6px)]!'
         } : undefined}
-        className={size === 'small' ? `${size} rb:flex-1` : undefined}
+        className={size === 'small' ? `${size} rb:flex-1!` : 'rb:flex-1!'}
       />
       {/* Display current value or minimum value */}
       {isInput

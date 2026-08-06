@@ -444,7 +444,7 @@ const PortClickHandler: React.FC<PortClickHandlerProps> = ({ graph, nodeClick, a
       autoAdjustOverflow
       getPopupContainer={() => document.body}
     >
-      <div style={{ width: '1px', height: '1px' }} />
+      <div className="rb:size-px" />
     </Popover>,
     tempElement
   );

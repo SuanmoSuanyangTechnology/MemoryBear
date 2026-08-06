@@ -217,13 +217,18 @@ async def get_workspace_end_users(
         else:
             memory_total = int(getattr(end_user, "memory_count", 0) or 0)
 
+        other_name = end_user.other_name
+        end_user_info = {
+            "id": user_id,
+            "other_name": other_name,
+            "label": "long" if other_name else "short",
+        }
+        if other_name:
+            end_user_info["other_id"] = end_user.other_id
+
         items.append({
             "end_user_id": user_id,
-            "end_user": {
-                "id": user_id,
-                "other_name": end_user.other_name,
-                "label": "long" if end_user.other_name else "short",
-            },
+            "end_user": end_user_info,
             "tags": normalize_stored_user_card_tags(getattr(end_user, "memory_tags", None)),
             "memory_num": {
                 "total": memory_total,
@@ -296,7 +301,7 @@ def write_workspace_total_memory(
     # 触发 Celery 异步任务
     from app.celery_app import celery_app
     task = celery_app.send_task(
-        "app.controllers.memory_storage_controller.search_all",
+        "app.tasks.write_total_memory_task",
         kwargs={"workspace_id": str(workspace_id)}
     )
     

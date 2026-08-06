@@ -38,8 +38,8 @@ import { isPrivateAvailable } from '@/utils/private'
 import arrowSvg from '@/assets/images/package/arrow.svg?react'
 
 const btnClassNames = {
-  permanent_free: 'rb:h-10! rb:rounded-[8px]!',
-  default: 'rb:h-10! rb:rounded-[8px]! rb:bg-[#212332]! rb:text-white! rb:border-0! rb:hover:border-0! rb:hover:opacity-[0.8]',
+  permanent_free: 'rb:h-10! rb:rounded-lg!',
+  default: 'rb:h-10! rb:rounded-lg! rb:bg-[#212332]! rb:text-white! rb:border-0! rb:hover:border-0! rb:hover:opacity-[0.8]',
 }
 
 export const UnitWrapper = ({ titleKey, value, icon, unit, theme_color = '#171719' }: { titleKey: string; value?: number | string | null; icon: string; unit?: string; theme_color?: string; }) => {

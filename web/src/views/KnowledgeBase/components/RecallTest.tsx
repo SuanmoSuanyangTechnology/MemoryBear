@@ -86,7 +86,7 @@ const RecallTest = forwardRef<RecallTestDrawerRef>(({},ref) => {
                 top_k: values.top_k || 100,
                 // hybrid: values.retrieve_type !== hybrid ? true : false,
                 retrieve_type: retrieveType,
-                enable_graph_retrieval: retrieveType === 'hybrid' ? values.enable_graph_retrieval || false: undefined,
+                enable_graph_retrieval: retrieveType === 'hybrid' ? values.enable_graph_retrieval: undefined,
             };
             console.log('RecallTest - params:', params);
             fetchData(params);
@@ -101,13 +101,13 @@ const RecallTest = forwardRef<RecallTestDrawerRef>(({},ref) => {
   return (
     <Flex vertical className='rb:w-full rb:h-full rb:overflow-hidden'>
       <div className='rb:shrink-0'>
-        <div className='rb:flexx rb:mb-2 rb:items-center rb:justify-between'>
+        <Flex align="center" justify="space-between" className='rb:mb-2!'>
           <span className='rb:font-medium'>{ t('knowledgeBase.testQuestion')}</span>
           {/* <Flex align="center" justify="end">
               <img src={refreshIcon} alt="refresh" className='rb:w-4 rb:h-4 rb:mr-2' />
               <span className='rb:text-[#155eef]'>{ t('knowledgeBase.loadSampleQuestions')}</span>
           </Flex> */}
-        </div>
+        </Flex>
         <Form form={form} layout="vertical">
           <Form.Item name="query">
               <TextArea rows={4} placeholder={t('knowledgeBase.testQuestionPlaceholder')}/>
@@ -130,7 +130,7 @@ const RecallTest = forwardRef<RecallTestDrawerRef>(({},ref) => {
                       placeholder='1 ~ 100'
                       min={1}
                       max={100}
-                      style={{ width: '100%' }}
+                      className="rb:w-full!"
                   />
               </Form.Item>
 

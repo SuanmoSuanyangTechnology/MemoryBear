@@ -32,7 +32,7 @@ const PaginationBar: FC<PaginationBarProps> = ({
         max={totalPages}
         value={currentPage}
         onChange={(val) => val && onPageChange(val)}
-        style={{ width: 56 }}
+        className="rb:w-14!"
       />
       <span>/ {totalPages}</span>
     </Flex>
