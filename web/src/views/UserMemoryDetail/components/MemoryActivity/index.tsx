@@ -19,6 +19,7 @@ import {
   filterKeys,
   filterLabelKeys,
   memoryTypeIcons,
+  searchModeIcons,
 } from './constants'
 import { getActivityDateGroup } from './utils'
 import type {
@@ -43,32 +44,50 @@ const MemoryActivity: FC<MemoryActivityProps> = ({ className }) => {
   }
 
   const renderActivity = (record: ActivityRecord) => {
-    const activityType: ActivityType = record.engine_type
+    const activityType: Exclude<ActivityType, 'all'> = record.engine_type
       ? 'engine'
       : 'write'
-    const ActivityIcon = record.memory_type
+    const memoryIconComponent = record.memory_type
       ? memoryTypeIcons[record.memory_type]
-      : activityIcons[activityType]
+      : undefined
+    const searchIcon = record.search_mode
+      ? searchModeIcons[record.search_mode]
+      : undefined
+    const activityIconComponent = !memoryIconComponent && !searchIcon
+      ? activityIcons[activityType]
+      : undefined
 
     return (
       <Flex gap={12} align="center" className="rb:rounded-xl rb:bg-white rb:p-3! rb:shadow-[0_1px_2px_rgba(0,0,0,0.05)] rb:transition-[background-color,box-shadow] rb:hover:bg-[#FAFAFC] rb:hover:shadow-[0_2px_8px_rgba(0,0,0,0.06)]">
         <div
           className={clsx('rb:flex rb:size-7.5 rb:items-center rb:justify-center rb:rounded-lg rb:text-[14px]', {
             'rb:bg-gray-900 rb:text-white': activityType === 'engine',
-            // 'rb:bg-gray-50 rb:text-gray-400': activityType === 'read',
+            'rb:bg-gray-50 rb:text-gray-400': filter === 'read',
             'rb:bg-gray-200 rb:text-gray-600': activityType === 'write',
           })}
           title={record.memory_type
             ? t(`episodicDetail.${record.memory_type}`)
             : t(`userMemory.${filterLabelKeys[activityType]}`)}
         >
-          <ActivityIcon />
+          {memoryIconComponent
+            ? (() => {
+                const MemIcon = memoryIconComponent
+                return <MemIcon />
+              })()
+            : searchIcon
+              ? <div className={`rb:size-4 rb:bg-cover ${searchIcon}`} />
+              : activityIconComponent
+                ? (() => {
+                    const ActIcon = activityIconComponent
+                    return <ActIcon />
+                  })()
+                : null}
         </div>
 
         <Flex vertical gap={4} className="rb:min-w-0 rb:flex-1 rb:shrink-0">
-          <Tooltip title={record.name || '-'} placement="topLeft">
+          <Tooltip title={record.name || record.query || '-'} placement="topLeft">
             <div className="rb:min-w-0 rb:truncate rb:text-[12px] rb:leading-4.5 rb:font-medium">
-              {record.name || '-'}
+              {record.name || record.query || '-'}
             </div>
           </Tooltip>
 
@@ -87,6 +106,9 @@ const MemoryActivity: FC<MemoryActivityProps> = ({ className }) => {
             }
             {record.engine_type &&
               <Tag size="small" color="default" className="rb:shrink-0!">{t(`userMemory.${record.engine_type}`)}</Tag>
+            }
+            {record.search_mode &&
+              <Tag size="small" color="default" className="rb:shrink-0!">{t(`userMemory.${record.search_mode}_mode`)}</Tag>
             }
           </Flex>
         </Flex>
@@ -173,7 +195,7 @@ const MemoryActivity: FC<MemoryActivityProps> = ({ className }) => {
           <PageScrollList<ActivityRecord, ActivityQuery>
             key={`${id}-${filter}`}
             url={activityUrls[filter]}
-            query={{ end_user_id: id }}
+            query={{ end_user_id: id, include_engines: filterKeys.includes('engine') }}
             column={1}
             gutter={[0, 8]}
             heightClass="rb:h-full!"

@@ -308,5 +308,10 @@ export const userMemory = {
       configurationName: '配置名称',
       configurationId: '配置 ID',
       unnamed: '未命名',
+
+      deep_mode: "深度检索",
+      normal_mode: "标准检索",
+      quick_mode: "快速检索",
+      express_mode: "极速检索",
     },
 }

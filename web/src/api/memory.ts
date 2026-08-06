@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 14:00:06 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-07-16 12:24:45
+ * @Last Modified time: 2026-08-06 15:06:37
  */
 import { request } from '@/utils/request'
 import type { AxiosRequestConfig } from 'axios'
@@ -386,7 +386,7 @@ export const getMemoryActivityWritten = (data: { end_user_id: string; page?: num
   return request.get(getMemoryActivityWrittenUrl, data)
 }
 // Get read memory activity records
-export const getMemoryActivityReadUrl = '/memory-activity/read';
+export const getMemoryActivityReadUrl = '/memory-display/retrieved';
 export const getMemoryActivityRead = (data: { end_user_id: string; page?: number; pagesize?: number; }) => {
   return request.get(getMemoryActivityReadUrl, data)
 }
@@ -396,7 +396,7 @@ export const getMemoryActivityEngine = (data: { end_user_id: string; page?: numb
   return request.get(getMemoryActivityEngineUrl, data)
 }
 // Get all memory activity records
-export const getMemoryActivityUrl = '/memory-activity/all';
+export const getMemoryActivityUrl = '/memory-display/all';
 export const getMemoryActivity = (data: { end_user_id: string; page?: number; pagesize?: number; }) => {
   return request.get(getMemoryActivityUrl, data)
 }
