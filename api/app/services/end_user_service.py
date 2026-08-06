@@ -168,16 +168,9 @@ class EndUserService:
             f"[merge_end_users] 全部完成: source={source}, target={target}"
         )
 
-        # ── 5.5 刷新 target write_time ──
-        # 合并本身不是「消息写入」，但改变了 target 的图谱数据。
-        # 刷新 write_time 确保 scan_layer2_reflection 的活跃门（_is_active_recently）
-        # 能感知到这次变更——否则 lock_timeout 时直接派发失败，scan 又因 write_time 过期
-        # 判为「不活跃」而跳过，合并后的反思就彻底丢了。
         try:
             from app.services.memory_reflection_service import WorkspaceAppService
-            from app.db import get_db_context
-            with get_db_context() as sync_db:
-                WorkspaceAppService(sync_db).update_end_user_write_time(str(target))
+            await WorkspaceAppService(self.db).update_end_user_write_time_async(str(target))
         except Exception as e:
             logger.warning(
                 f"[merge_end_users] 刷新 target write_time 失败（不影响合并结果）: {e}",

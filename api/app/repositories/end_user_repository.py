@@ -952,7 +952,7 @@ class EndUserRepository:
             self,
             end_user_ids: set[uuid.UUID],
             workspace_id: uuid.UUID | None = None
-    ) -> Set[str]:
+    ) -> Set[uuid.UUID]:
         if not end_user_ids:
             return set()
 
