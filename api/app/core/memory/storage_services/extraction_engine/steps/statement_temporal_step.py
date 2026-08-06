@@ -38,6 +38,10 @@ class _ExtractedStatement(BaseModel):
         False,
         description="Whether the statement reflects user's emotional state",
     )
+    is_permanent: bool = Field(
+        False,
+        description="Whether the user explicitly requires this statement to be retained permanently",
+    )
     dialog_at: str = Field("", description="ISO 8601 session timestamp, copied verbatim from input")
     valid_at: str = Field("NULL", description="ISO 8601 or NULL")
     invalid_at: str = Field("NULL", description="ISO 8601 or NULL")
@@ -176,6 +180,7 @@ class StatementTemporalExtractionStep(ExtractionStep[StatementStepInput, List[St
                     # relevance=stmt.relevance.strip().upper(),
                     speaker="user",  # default; orchestrator overrides from chunk metadata
                     has_emotional_state=getattr(stmt, "has_emotional_state", False),
+                    is_permanent=getattr(stmt, "is_permanent", False),
                     dialog_at=input_data.dialog_at or "",  # carry through from input
                     valid_at=stmt.valid_at or "NULL",
                     invalid_at=stmt.invalid_at or "NULL",

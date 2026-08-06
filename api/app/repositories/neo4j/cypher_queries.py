@@ -61,9 +61,45 @@ SET s.delete_at = null,
     last_access_time: statement.last_access_time,
     access_count: statement.access_count,
     dialog_at: statement.dialog_at,
-    has_unsolved_reference: statement.has_unsolved_reference
+    has_unsolved_reference: statement.has_unsolved_reference,
+    is_permanent: CASE
+        WHEN coalesce(s.is_permanent, false) THEN true
+        ELSE coalesce(statement.is_permanent, false)
+    END
 }
 RETURN s.id AS uuid
+"""
+
+PERMANENT_MEMORY_COUNT = """
+MATCH (s:Statement {end_user_id: $end_user_id})
+WHERE s.delete_at IS NULL
+  AND coalesce(s.is_permanent, false) = true
+RETURN count(s) AS used
+"""
+
+PERMANENT_MEMORY_LIST = """
+MATCH (s:Statement {end_user_id: $end_user_id})
+WHERE s.delete_at IS NULL
+  AND coalesce(s.is_permanent, false) = true
+WITH s, elementId(s) AS id
+ORDER BY s.created_at DESC, id ASC
+SKIP $skip
+LIMIT $limit
+RETURN id,
+       'Statement' AS label,
+       {
+           statement: s.statement,
+           created_at: s.created_at,
+           is_permanent: true
+       } AS properties
+"""
+
+PERMANENT_MEMORY_UNMARK = """
+MATCH (s:Statement {end_user_id: $end_user_id})
+WHERE elementId(s) = $element_id
+  AND s.delete_at IS NULL
+SET s.is_permanent = false
+RETURN elementId(s) AS id, s.is_permanent AS is_permanent
 """
 
 STATEMENT_EMOTION_UPDATE = """
@@ -2922,6 +2958,7 @@ FORGET_SOFT_DELETE_BY_ELEMENT_IDS = """
     MATCH (n {end_user_id: $end_user_id})
     WHERE n.delete_at IS NULL
       AND elementId(n) IN $element_ids
+      AND (NOT n:Statement OR coalesce(n.is_permanent, false) = false)
     SET n.delete_at = datetime($now)
     RETURN count(n) AS deleted
 """
@@ -2945,6 +2982,7 @@ CALL () {
     UNION ALL
     MATCH (s:Statement {end_user_id: $end_user_id})
     WHERE s.delete_at IS NULL
+      AND coalesce(s.is_permanent, false) = false
     RETURN 'Statement' AS node_type, elementId(s) AS element_id, s.statement AS content,
            coalesce(s.created_at) AS sort_time, 0 AS extraction_count,
            null AS name, null AS _type
