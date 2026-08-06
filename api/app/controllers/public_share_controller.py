@@ -58,6 +58,10 @@ SHARE_FORWARD_EVENTS = frozenset({
     "start",
     "message",
     "message_replace",
+    "tool_start",
+    "memory_stage",
+    "tool_end",
+    "tool_error",
     "end",
     "error",
     "regenerate_end",
@@ -1460,8 +1464,8 @@ async def regenerate_message(
                             pre_create_execution=True,  # 让 start 事件携带真实 execution_id
                     ):
                         event_type = event.get("event", "message")
-                        # 体验分享端：只透出内容类事件与端点事件，过滤掉
-                        # node_*/workflow_*/cycle_item/intervention_* 等节点类事件
+                        # 体验分享端透出内容、端点和工具调用事件，过滤掉
+                        # node_*/workflow_*/cycle_item/intervention_* 等其他节点类事件。
                         if event_type not in SHARE_FORWARD_EVENTS:
                             continue
                         event_data = event.get("data", {})
@@ -1527,7 +1531,7 @@ async def regenerate_message(
                     user_rag_memory_id=user_rag_memory_id,
             ):
                 # AGENT 路径吐出来的是已序列化的 SSE 字符串（f"event: ...\ndata: ...\n\n"）。
-                # 解析 `event:` 行做白名单过滤，丢弃 reasoning/tool_*/agent_log/
+                # 解析 `event:` 行做白名单过滤，丢弃 reasoning/agent_log 等内部事件。
                 m = SSE_EVENT_LINE.search(event)
                 if m and m.group(1) not in SHARE_FORWARD_EVENTS:
                     continue
