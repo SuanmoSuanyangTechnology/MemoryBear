@@ -14,6 +14,7 @@ from app.core.rag.chunk.context import (
     ParsedBlockType,
     ParseResult,
     is_direct_image_vision_enabled,
+    is_embedded_image_vision_enabled,
 )
 from app.core.rag.chunk.parser.mineru_v3 import MinerUV3Parser
 from app.core.rag.chunk.parser.structured_markdown import StructMarkdownParser
@@ -43,22 +44,21 @@ class ImageChunkPipeline(ChunkPipeline):
         source_binary = self._read_binary(ctx)
         analysis_binary, analysis_filename, source_image = self._analysis_input(ctx.filename, source_binary)
 
-        mineru_markdown = ""
+        mineru_blocks = []
         if mode in {0, 1}:
-            mineru_markdown = self._parse_ocr_markdown(ctx, analysis_binary, analysis_filename)
+            mineru_blocks = self._parse_ocr_blocks(ctx, analysis_binary, analysis_filename)
 
         source_image_url = None
         markdown_parts = []
         if mode in {1, 2}:
             source_markdown, source_image_url = self._source_image_markdown(ctx, source_file_id)
             markdown_parts.append(source_markdown)
-        if mineru_markdown:
-            markdown_parts.append(mineru_markdown)
 
         blocks, source_image_block = self._parse_markdown_blocks(
             "\n\n".join(markdown_parts),
             source_image_url,
         )
+        blocks.extend(mineru_blocks)
         text_blocks = [block for block in blocks if block.type is not ParsedBlockType.IMAGE]
 
         vision_text = ""
@@ -107,21 +107,23 @@ class ImageChunkPipeline(ChunkPipeline):
         analysis_filename = str(Path(filename).with_suffix(".png"))
         return image_binary.getvalue(), analysis_filename, first_frame
 
-    def _parse_ocr_markdown(
+    def _parse_ocr_blocks(
         self,
         ctx: ChunkContext,
         analysis_binary: bytes,
         analysis_filename: str,
-    ) -> str:
+    ) -> list[ParsedBlock]:
         ocr_ctx = replace(
             ctx,
             filename=analysis_filename,
             binary=analysis_binary,
         )
-        markdown = MinerUV3Parser().parse_markdown(ocr_ctx)
-        if not markdown or not markdown.strip():
+        blocks = MinerUV3Parser().parse(ocr_ctx).blocks or []
+        if not blocks:
             raise ValueError("MinerU returned empty Markdown for image OCR mode.")
-        return markdown
+        if is_embedded_image_vision_enabled(ctx.parser_config):
+            return blocks
+        return [block for block in blocks if block.type is not ParsedBlockType.IMAGE]
 
     def _describe_source_image(self, ctx: ChunkContext, source_image: Image.Image) -> str:
         prompt = vision_llm_figure_describe_prompt(lang=getattr(ctx.vision_model, "lang", ctx.lang))
