@@ -102,8 +102,8 @@ AUDIO_PATTERN = re.compile(
     r"\.(da|wave|wav|mp3|aac|flac|ogg|aiff|au|midi|wma|realaudio|vqf|oggvorbis|ape?)$",
     re.IGNORECASE,
 )
-VIDEO_IMAGE_PATTERN = re.compile(
-    r"\.(png|jpeg|jpg|gif|bmp|svg|mp4|mov|avi|flv|mpeg|mpg|webm|wmv|3gp|3gpp|mkv?)$",
+VIDEO_PATTERN = re.compile(
+    r"\.(mp4|mov|avi|flv|mpeg|mpg|webm|wmv|3gp|3gpp|mkv?)$",
     re.IGNORECASE,
 )
 DEFAULT_PARSE_LANGUAGE = "Chinese"
@@ -1017,8 +1017,19 @@ def process_item(item: dict):
     return result
 
 
-def _build_vision_model(file_path: str, db, image2text_id, tenant_id):
-    """根据文件类型选择合适的视觉/音频模型，避免冗余初始化。"""
+def _build_image_vision_model(db, image2text_id, tenant_id):
+    """Build the knowledge-base image-to-text model for document parsing."""
+    image2text_key = _resolve_model_api_key(db, image2text_id, tenant_id, "image2text")
+    return QWenCV(
+        key=image2text_key.api_key,
+        model_name=image2text_key.model_name,
+        lang=DEFAULT_PARSE_LANGUAGE,
+        base_url=image2text_key.api_base,
+    )
+
+
+def _build_media_model(file_path: str):
+    """Build the existing audio or video model when the file type requires one."""
     if AUDIO_PATTERN.search(file_path):
         omni_key = os.getenv("QWEN3_OMNI_API_KEY", "")
         omni_model = os.getenv("QWEN3_OMNI_MODEL_NAME", "qwen3-omni-flash")
@@ -1029,7 +1040,7 @@ def _build_vision_model(file_path: str, db, image2text_id, tenant_id):
             lang=DEFAULT_PARSE_LANGUAGE,
             base_url=omni_base,
         )
-    if VIDEO_IMAGE_PATTERN.search(file_path):
+    if VIDEO_PATTERN.search(file_path):
         omni_key = os.getenv("QWEN3_OMNI_API_KEY", "")
         omni_model = os.getenv("QWEN3_OMNI_MODEL_NAME", "qwen3-omni-flash")
         omni_base = os.getenv("QWEN3_OMNI_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
@@ -1039,14 +1050,7 @@ def _build_vision_model(file_path: str, db, image2text_id, tenant_id):
             lang=DEFAULT_PARSE_LANGUAGE,
             base_url=omni_base,
         )
-    # 默认：使用知识库配置的 image2text 模型
-    image2text_key = _resolve_model_api_key(db, image2text_id, tenant_id, "image2text")
-    return QWenCV(
-        key=image2text_key.api_key,
-        model_name=image2text_key.model_name,
-        lang=DEFAULT_PARSE_LANGUAGE,
-        base_url=image2text_key.api_base,
-    )
+    return None
 
 
 @celery_app.task(name="app.core.rag.tasks.parse_document")
@@ -1132,7 +1136,8 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
             if auto_questions_topn:
                 llm_config = _build_llm_config(db, db_knowledge.llm_id, tenant_id)
             knowledge_id = str(db_knowledge.id)
-            vision_model = _build_vision_model(file_name, db, db_knowledge.image2text_id, tenant_id)
+            image_vision_model = _build_image_vision_model(db, db_knowledge.image2text_id, tenant_id)
+            vision_model = _build_media_model(file_name) or image_vision_model
             vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
 
             progress_lines.append(f"{_progress_ts()} Start to parse.")
@@ -3415,7 +3420,7 @@ def write_total_memory_task(workspace_id: str) -> Dict[str, Any]:
     async def _run() -> Dict[str, Any]:
         from app.models.app_model import App
         from app.repositories.end_user_repository import EndUserRepository
-        from app.repositories.memory_increment_repository import write_memory_increment
+        from app.repositories.memory_increment_repository import MemoryIncrementRepository
         from app.repositories.neo4j.neo4j_connector import Neo4jConnector
         from app.services.memory_storage_service import search_all_batch
 
@@ -3439,8 +3444,7 @@ def write_total_memory_task(workspace_id: str) -> Dict[str, Any]:
         # 没有 app 时直接写入 0
         if not has_apps:
             with get_db_context() as db:
-                memory_increment = write_memory_increment(
-                    db=db,
+                memory_increment = MemoryIncrementRepository(db).write_memory_increment(
                     workspace_id=workspace_uuid,
                     total_num=0
                 )
@@ -3468,8 +3472,7 @@ def write_total_memory_task(workspace_id: str) -> Dict[str, Any]:
 
         # --- Session B：写入统计结果 ---
         with get_db_context() as db:
-            memory_increment = write_memory_increment(
-                db=db,
+            memory_increment = MemoryIncrementRepository(db).write_memory_increment(
                 workspace_id=workspace_uuid,
                 total_num=total_num
             )
@@ -3485,7 +3488,11 @@ def write_total_memory_task(workspace_id: str) -> Dict[str, Any]:
             }
 
     try:
-        result = asyncio.run(_run())
+        # 尝试获取现有事件循环，如果不存在则创建新的（与 write_all_workspaces_memory_task 一致，
+        # 避免 asyncio.run 每次新建并关闭 loop，导致进程内共享 Neo4j driver 跨 loop 复用报错）
+        loop = set_asyncio_event_loop()
+
+        result = loop.run_until_complete(_run())
         elapsed_time = time.time() - start_time
         result["elapsed_time"] = elapsed_time
         return result
@@ -3527,7 +3534,7 @@ def write_all_workspaces_memory_task(self) -> Dict[str, Any]:
         from app.models.app_model import App
         from app.models.workspace_model import Workspace
         from app.repositories.end_user_repository import EndUserRepository
-        from app.repositories.memory_increment_repository import write_memory_increment
+        from app.repositories.memory_increment_repository import MemoryIncrementRepository
         from app.repositories.neo4j.neo4j_connector import Neo4jConnector
         from app.services.memory_storage_service import search_all_batch
 
@@ -3585,8 +3592,7 @@ def write_all_workspaces_memory_task(self) -> Dict[str, Any]:
 
                     # --- Session B：写入统计结果 ---
                     with get_db_context() as db:
-                        memory_increment = write_memory_increment(
-                            db=db,
+                        memory_increment = MemoryIncrementRepository(db).write_memory_increment(
                             workspace_id=workspace_id,
                             total_num=total_num,
                         )

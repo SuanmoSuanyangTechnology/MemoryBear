@@ -5786,7 +5786,7 @@ class WorkflowService:
         conv_id = chain[0].conversation_id
         fallback_executions = self.db.query(WorkflowExecution).filter(
             WorkflowExecution.conversation_id == conv_id,
-            WorkflowExecution.status.in_(["completed", "failed", "waiting_human", "timeout"]),
+            WorkflowExecution.status.in_(["completed", "failed", "waiting_human", "timeout", "cancelled"]),
         ).all() if conv_id else []
 
         def _find_execution_by_time(target_msg: MessageModel):
@@ -6173,12 +6173,13 @@ class WorkflowService:
         has_existing_conversation = bool(payload.conversation_id)
         # 转换 conversation_id 为 UUID
         conversation_id_uuid = uuid.UUID(payload.conversation_id) if payload.conversation_id else None
+        # skip_save 语义：纯函数式执行（如工作流作为工具），不创建会话、不落消息
         conversation_id_uuid = await self._ensure_conversation_async(
             app_id=app_id,
             workspace_id=workspace_id,
             user_id=payload.user_id,
             conversation_id=conversation_id_uuid,
-            enable_conversation=supports_conversation,
+            enable_conversation=supports_conversation and not skip_save,
         )
         if conversation_id_uuid:
             payload.conversation_id = str(conversation_id_uuid)
@@ -6354,6 +6355,8 @@ class WorkflowService:
         )
 
         files = []
+        # 本轮消息是否已保存/入队（与 run_stream 的守卫语义一致）
+        messages_finalized = False
         try:
             files = await self._handle_file_input(payload.files)
             if prepared_memory_storage_type is not None:
@@ -6481,7 +6484,12 @@ class WorkflowService:
                 assistant_meta = {"usage": token_usage, "audio_url": None, "execution_id": execution.execution_id}
                 if filtered_citations:
                     assistant_meta["citations"] = filtered_citations
-                if conversation_id_uuid:
+                # regenerate_mode 下由 regenerate() 统一保存版本化消息，
+                # 这里不能再入队 save_messages，否则会话里会多出一对幽灵消息
+                # （且流式重新生成会因同一 message_id 触发主键冲突）；
+                # skip_save 下（工作流作为工具等纯函数式执行）同样不落消息。
+                if conversation_id_uuid and not regenerate_mode and not skip_save:
+                    messages_finalized = True
                     _from_msg_id = await self._resolve_from_message_id_async(
                         payload.from_message_id,
                         conversation_id_uuid,
@@ -6533,9 +6541,11 @@ class WorkflowService:
                 human_message, human_meta = self._extract_human_message_and_meta(
                     final_messages, payload.message or "", files
                 )
-                await self._save_failed_conversation_async(
-                    conversation_id_uuid, message_id, human_message, human_meta, result.get("error") or ""
-                )
+                if not regenerate_mode and not skip_save:
+                    messages_finalized = True
+                    await self._save_failed_conversation_async(
+                        conversation_id_uuid, message_id, human_message, human_meta, result.get("error") or ""
+                    )
                 filtered_citations = []
 
             response_data = {
@@ -6599,7 +6609,9 @@ class WorkflowService:
             except Exception as persist_err:
                 logger.warning(f"Failed to persist node executions on run error: {persist_err}")
             human_message, human_meta = self._extract_human_message_and_meta([], payload.message or "", files)
-            await self._save_failed_conversation_async(conversation_id_uuid, None, human_message, human_meta, str(e))
+            # 若本轮消息已成功入队，不要再入队失败消息，避免重复写入
+            if not skip_save and not regenerate_mode and not messages_finalized:
+                await self._save_failed_conversation_async(conversation_id_uuid, None, human_message, human_meta, str(e))
             raise BusinessException(
                 code=BizCode.INTERNAL_ERROR,
                 message=f"工作流执行失败: {str(e)}"
@@ -6741,12 +6753,13 @@ class WorkflowService:
         has_existing_conversation = bool(payload.conversation_id)
         # 转换 conversation_id 为 UUID
         conversation_id_uuid = uuid.UUID(payload.conversation_id) if payload.conversation_id else None
+        # skip_save 语义：纯函数式执行（如工作流作为工具），不创建会话、不落消息
         conversation_id_uuid = await self._ensure_conversation_async(
             app_id=app_id,
             workspace_id=workspace_id,
             user_id=payload.user_id,
             conversation_id=conversation_id_uuid,
-            enable_conversation=supports_conversation,
+            enable_conversation=supports_conversation and not skip_save,
         )
         if conversation_id_uuid:
             payload.conversation_id = str(conversation_id_uuid)
@@ -6976,6 +6989,10 @@ class WorkflowService:
         _lock_value: str | None = None
         _lock_degraded = False
         _last_event_data: dict | None = None
+        # 本轮对话消息（成功对或失败对）是否已保存/入队。一旦置 True，
+        # 后续任何分支不得再为同一轮入队 save_messages / save_failed_message，
+        # 否则 BatchPersistQueue 会因相同 message id 触发 messages 主键冲突。
+        messages_finalized = False
 
         try:
             files = await self._handle_file_input(payload.files)
@@ -7147,6 +7164,25 @@ class WorkflowService:
                             "Lock wait timeout, using fallback vars: conversation_id=%s execution_id=%s",
                             conversation_id_uuid, execution.execution_id,
                         )
+                        # 尝试取消上一轮执行（A），从 Redis lock value 读取 A 的 execution_id
+                        try:
+                            holder_value = await aio_redis.get(_lock_key)
+                            if holder_value:
+                                holder_exec_id = (holder_value or "").split(":")[0]
+                                if holder_exec_id and holder_exec_id != execution.execution_id:
+                                    await self._patch_execution_async(
+                                        holder_exec_id, status="cancelled",
+                                    )
+                                    logger.info(
+                                        "Cancelled previous execution after lock timeout: "
+                                        "previous_execution=%s new_execution=%s",
+                                        holder_exec_id, execution.execution_id,
+                                    )
+                        except Exception as cancel_err:
+                            logger.warning(
+                                "Failed to cancel previous execution after lock timeout: %s",
+                                cancel_err,
+                            )
                         _lock_key = None
                     elif not _lock_degraded:
                         # 锁获取成功，重新读变量（上一轮可能刚释放）
@@ -7385,7 +7421,11 @@ class WorkflowService:
                                 payload.from_message_id,
                                 conversation_id_uuid,
                             )
-                            if not skip_save:
+                            # regenerate_mode 下由 regenerate_stream 统一落库版本化消息，
+                            # 这里不能再入队 save_messages，否则同一 message_id 主键冲突；
+                            # messages_finalized 防止 workflow_end 被重复处理时二次入队。
+                            if not skip_save and not regenerate_mode and not messages_finalized:
+                                messages_finalized = True
                                 execution = await self._finalize_completed_execution_async(
                                     execution_id=execution.execution_id,
                                     conversation_id=conversation_id_uuid,
@@ -7446,7 +7486,8 @@ class WorkflowService:
                         _failed_output = event.get("data")
                         _error_node_id = (_failed_output or {}).get("error_node")
 
-                        if not skip_save:
+                        if not skip_save and not regenerate_mode and not messages_finalized:
+                            messages_finalized = True
                             await self._save_failed_conversation_async(
                                 conversation_id_uuid, message_id, human_message, human_meta, error_msg
                             )
@@ -7586,7 +7627,8 @@ class WorkflowService:
                             conversation_id_uuid,
                         )
                         _hitl_user_msg = None
-                        if conversation_id_uuid and not skip_save:
+                        # regenerate_mode 下占位消息同样由 regenerate_stream 末尾统一落库
+                        if conversation_id_uuid and not skip_save and not regenerate_mode:
                             _hitl_user_msg = await self._add_message_async(
                                 conversation_id=conversation_id_uuid,
                                 role="user",
@@ -8107,7 +8149,9 @@ class WorkflowService:
             from app.core.workflow.nodes.human_intervention.node import InterventionRegistry
             InterventionRegistry.cleanup(execution.execution_id)
             human_message, human_meta = self._extract_human_message_and_meta([], payload.message or "", files)
-            if not skip_save:
+            # 若本轮消息已成功入队（messages_finalized），不要再入队失败消息，
+            # 否则同一 message_id 会触发 messages 主键冲突
+            if not skip_save and not regenerate_mode and not messages_finalized:
                 await self._save_failed_conversation_async(
                     conversation_id_uuid, None, human_message, human_meta, str(e)
                 )
@@ -8129,14 +8173,21 @@ class WorkflowService:
             # ── 中断/取消时持久化变量 + 释放锁 + 清理资源 ──
             if execution and execution.status == "running":
                 try:
+                    # 仅当快照包含完整变量时才持久化 output_data；
+                    # 不完整快照（如 LLM 流式 chunk）不保存，避免覆盖上一个已知完整终态。
+                    snapshot = (
+                        _last_event_data
+                        if self._is_snapshot_complete(_last_event_data)
+                        else None
+                    )
                     await self._patch_execution_async(
                         execution.execution_id,
                         status="cancelled",
-                        output_data=_last_event_data,
+                        output_data=snapshot,
                     )
-                    if not isinstance(_last_event_data, dict) or "variables" not in (_last_event_data or {}):
+                    if snapshot is None:
                         logger.warning(
-                            "cancelled without full variable snapshot: "
+                            "cancelled without complete variable snapshot: "
                             "execution_id=%s conversation_id=%s",
                             execution.execution_id, conversation_id_uuid,
                         )
@@ -8171,6 +8222,20 @@ class WorkflowService:
                     "Failed to cleanup intervention registry: execution_id=%s error=%s",
                     execution.execution_id, cleanup_err,
                 )
+
+    @staticmethod
+    def _is_snapshot_complete(data: dict | None) -> bool:
+        """SSE 事件 data 是否包含完整变量快照（含 variables.conv）。
+
+        只有 workflow_end 事件才会携带完整 variables 字段；
+        message/node_end 等中间事件不含，不应作为 cancelled 的变量恢复源。
+        """
+        if not isinstance(data, dict):
+            return False
+        if "variables" not in data:
+            return False
+        variables = data.get("variables") or {}
+        return isinstance(variables, dict) and "conv" in variables
 
     async def resume_intervention_stream(
             self,

@@ -81,6 +81,8 @@ _sync_locks_guard = threading.Lock()
 
 
 def _orjson_default(o: Any) -> Any:
+    if isinstance(o, uuid.UUID):
+        return str(o)
     if hasattr(o, "model_dump"):
         return o.model_dump(mode="json")
     if isinstance(o, set):

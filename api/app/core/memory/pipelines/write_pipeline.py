@@ -518,8 +518,23 @@ class WritePipeline:
                         results = await asyncio.gather(
                             self._store(extraction_result),
                             self._update_stats_cache(extraction_result),
+                            return_exceptions=True,
                         )
-                        stored = results[0]
+                        store_result, stats_result = results[0], results[1]
+
+                        # 若 _store 抛异常，清理可能已写入的 Redis 统计缓存后重新抛出
+                        if isinstance(store_result, Exception):
+                            if not isinstance(stats_result, Exception):
+                                await self._rollback_stats_cache()
+                            raise store_result
+
+                        stored = store_result
+
+                        # 若 _update_stats_cache 失败，仅记录警告（统计为次级数据）
+                        if isinstance(stats_result, Exception):
+                            logger.warning(
+                                f"[Stats] Redis 统计缓存写入异常（不影响主流程）: {stats_result}"
+                            )
 
                     # Neo4j 事务成功后，触发引擎展示 PG 写入
                     if stored:
@@ -1201,6 +1216,31 @@ class WritePipeline:
         """判断异常是否为 Neo4j 死锁错误"""
         msg = str(e).lower()
         return "deadlockdetected" in msg or "deadlock" in msg
+
+    async def _rollback_stats_cache(self) -> None:
+        """
+        回滚 Redis 活动统计缓存。
+
+        当 _store（Neo4j 写入）失败但 _update_stats_cache 已成功时调用，
+        清理本次写入产生的统计快照，避免缓存领先于实际图数据。
+        失败不中断异常传播。
+        """
+        from redis.exceptions import RedisError
+
+        try:
+            from app.cache.memory.activity_stats_cache import ActivityStatsCache
+
+            await ActivityStatsCache.delete_activity_stats(
+                workspace_id=str(self.memory_config.workspace_id),
+            )
+            logger.info(
+                f"[Stats] Neo4j 写入失败，已回滚 Redis 统计缓存: "
+                f"workspace_id={self.memory_config.workspace_id}"
+            )
+        except (RedisError, OSError) as e:
+            # RedisError: Redis 连接/命令层面失败
+            # OSError: 网络层面不可达（ConnectionRefusedError 等是 OSError 子类）
+            logger.warning(f"[Stats] 回滚统计缓存失败（不影响异常传播）: {e}")
 
     async def _update_stats_cache(self, result: ExtractionResult) -> None:
         """

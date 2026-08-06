@@ -125,6 +125,8 @@ class WorkflowAsTool(BaseTool):
                 RunnableConfig(callbacks=[], tags=[], metadata={})
             )
             try:
+                # 工作流作为工具调用时是纯函数式执行：不创建会话、不落任何
+                # user/assistant 消息，只保留 execution 记录用于日志。
                 result = await self.workflow_service.run(
                     app_id=self.workflow_app_id,
                     payload=payload,
@@ -132,6 +134,7 @@ class WorkflowAsTool(BaseTool):
                     workspace_id=workspace_id,
                     release_id=self.release_id,
                     source="tool",
+                    skip_save=True,
                 )
             finally:
                 var_child_runnable_config.reset(config_token)

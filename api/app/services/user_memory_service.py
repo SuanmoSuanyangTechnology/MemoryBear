@@ -767,8 +767,7 @@ class UserMemoryService:
             end_user_id: 终端用户ID (UUID)
             workspace_id: 工作空间ID（必填）
             language: 语言类型 ("zh" 中文, "en" 英文)，默认中文
-            db: 数据库会话（可选）。为 None 时内部自行管理短 session，
-                避免 Neo4j/LLM I/O 期间长时间持有 PG 连接。
+            db: 为兼容现有调用协议保留；新洞察生成不使用该 Session
             
         Returns:
             {
@@ -782,127 +781,40 @@ class UserMemoryService:
                 "error": Optional[str]
             }
         """
-        try:
-            logger.info(f"开始为 end_user_id {end_user_id} 生成记忆洞察, language={language}")
-            
-            # --- 短 session A：验证用户存在性 ---
-            user_uuid = uuid.UUID(end_user_id)
-            if db is not None:
-                repo = EndUserRepository(db)
-                end_user = repo.get_by_id(user_uuid)
-            else:
-                with get_db_context() as _db:
-                    repo = EndUserRepository(_db)
-                    end_user = repo.get_by_id(user_uuid)
-            
-            if not end_user:
-                logger.error(f"end_user_id {end_user_id} 不存在")
-                return {
-                    "success": False,
-                    "memory_insight": None,
-                    "behavior_pattern": None,
-                    "key_findings": None,
-                    "growth_trajectory": None,
-                    "error": "用户不存在"
-                }
-            
-            # --- Neo4j + LLM：无 PG 连接 ---
-            try:
-                logger.info(f"使用 end_user_id={end_user_id} 生成记忆洞察")
-                result = await analytics_memory_insight_report(end_user_id, language=language)
-                
-                memory_insight = result.get("memory_insight", "")
-                behavior_pattern = result.get("behavior_pattern", "")
-                key_findings_array = result.get("key_findings", [])  # 现在是数组
-                growth_trajectory = result.get("growth_trajectory", "")
-                
-                # 将 key_findings 数组序列化为 JSON 字符串以存储到数据库
-                import json
-                key_findings_json = json.dumps(key_findings_array, ensure_ascii=False) if key_findings_array else ""
-                
-                if not any([memory_insight, behavior_pattern, key_findings_array, growth_trajectory]):
-                    logger.warning(f"end_user_id {end_user_id} 的记忆洞察生成结果为空")
-                    return {
-                        "success": False,
-                        "memory_insight": None,
-                        "behavior_pattern": None,
-                        "key_findings": None,
-                        "growth_trajectory": None,
-                        "error": "生成的洞察报告为空,可能Neo4j中没有该用户的数据"
-                    }
-                
-                # --- 短 session B：写入缓存 ---
-                if db is not None:
-                    write_repo = EndUserRepository(db)
-                    success = write_repo.update_memory_insight(
-                        user_uuid, 
-                        memory_insight, 
-                        behavior_pattern, 
-                        key_findings_json,
-                        growth_trajectory
-                    )
-                else:
-                    with get_db_context() as _db:
-                        write_repo = EndUserRepository(_db)
-                        success = write_repo.update_memory_insight(
-                            user_uuid, 
-                            memory_insight, 
-                            behavior_pattern, 
-                            key_findings_json,
-                            growth_trajectory
-                        )
-                
-                if success:
-                    logger.info(f"成功为 end_user_id {end_user_id} 生成并缓存记忆洞察（四维度）")
-                    return {
-                        "success": True,
-                        "memory_insight": memory_insight,
-                        "behavior_pattern": behavior_pattern,
-                        "key_findings": key_findings_array,  # 返回数组
-                        "growth_trajectory": growth_trajectory,
-                        "error": None
-                    }
-                else:
-                    logger.error(f"更新 end_user_id {end_user_id} 的记忆洞察缓存失败")
-                    return {
-                        "success": False,
-                        "memory_insight": memory_insight,
-                        "behavior_pattern": behavior_pattern,
-                        "key_findings": key_findings_array,  # 返回数组
-                        "growth_trajectory": growth_trajectory,
-                        "error": "数据库更新失败"
-                    }
-                    
-            except Exception as e:
-                logger.error(f"调用分析函数生成记忆洞察时出错: {str(e)}")
-                return {
-                    "success": False,
-                    "memory_insight": None,
-                    "behavior_pattern": None,
-                    "key_findings": None,
-                    "growth_trajectory": None,
-                    "error": f"Neo4j或LLM服务不可用: {str(e)}"
-                }
-                
-        except ValueError:
-            logger.error(f"无效的 end_user_id 格式: {end_user_id}")
+        if workspace_id is None:
             return {
                 "success": False,
+                "status": "invalid_parameter",
                 "memory_insight": None,
                 "behavior_pattern": None,
                 "key_findings": None,
+                "actionable_findings": [],
                 "growth_trajectory": None,
-                "error": "无效的用户ID格式"
+                "error": "workspace_id 不能为空",
             }
+
+        try:
+            return await refresh_memory_insight(
+                end_user_id=end_user_id,
+                workspace_id=workspace_id,
+                language=language,
+            )
         except Exception as e:
-            logger.error(f"生成并缓存记忆洞察时出错: {str(e)}")
+            logger.exception(
+                "生成并缓存记忆洞察失败: end_user_id=%s workspace_id=%s error=%s",
+                end_user_id,
+                workspace_id,
+                e,
+            )
             return {
                 "success": False,
+                "status": "generation_failed",
                 "memory_insight": None,
                 "behavior_pattern": None,
                 "key_findings": None,
+                "actionable_findings": [],
                 "growth_trajectory": None,
-                "error": str(e)
+                "error": f"Neo4j或LLM服务不可用: {e}",
             }
 
     async def generate_and_cache_insight_for_worker(
@@ -1226,7 +1138,12 @@ class UserMemoryService:
                 
                 try:
                     # 生成记忆洞察
-                    insight_result = await self.generate_and_cache_insight(end_user_id, language=language, db=db)
+                    insight_result = await self.generate_and_cache_insight(
+                        end_user_id,
+                        workspace_id,
+                        language=language,
+                        db=db,
+                    )
                     
                     # 生成用户摘要
                     summary_result = await self.generate_and_cache_summary(end_user_id, language=language, db=db)

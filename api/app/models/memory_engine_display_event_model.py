@@ -10,6 +10,7 @@ import uuid
 from sqlalchemy import Column, DateTime, ForeignKey, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 
+from app.core.utils.datetime_utils import utcnow_naive
 from app.db import Base
 
 
@@ -31,7 +32,9 @@ class MemoryEngineDisplayEvent(Base):
     operation_id = Column(UUID(as_uuid=True), nullable=False)
     engine_type = Column(String(32), nullable=False)  # EXTRACTION / CROSS_MODAL / EMOTION
     details = Column(JSONB, nullable=False, server_default="{}")
-    occurred_at = Column(DateTime, nullable=False)  # naive UTC
+    occurred_at = Column(
+        DateTime, nullable=False, default=utcnow_naive
+    )  # naive UTC
 
     __table_args__ = (
         UniqueConstraint(
