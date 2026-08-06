@@ -1508,6 +1508,7 @@ class AppChatService:
                 }
 
             all_node_executions = orchestrator_node_executions + node_executions
+            from app.models.conversation_model import Conversation
             if not skip_save:
                 from app.services.batch_persist_queue import BatchPersistQueue, PersistTask
 
@@ -1549,8 +1550,6 @@ class AppChatService:
                 save_messages_enqueued = True
 
                 # 记忆写入 + 派发：复用 conversation_service.dispatch_memory_sync
-                from app.models.conversation_model import Conversation
-
                 result_row = await self.db.execute(
                     select(Conversation).where(Conversation.id == conversation_id)
                 )
