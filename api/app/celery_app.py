@@ -177,6 +177,24 @@ try:
 except ImportError:
     _HAS_SUBSCRIPTION_TASKS = False
 
+# 企业版消息通知中心任务路由（社区版无 premium 模块时不注册这些任务）
+try:
+    import premium.platform_admin.notification_center.tasks  # noqa: F401
+
+    _HAS_NOTIFICATION_TASKS = True
+    # 通知状态任务 → notification_state_tasks 队列（扫描 + 发布 + 到期下架）
+    celery_app.conf.task_routes['notification.scan_scheduled'] = {
+        'queue': 'notification_state_tasks'
+    }
+    celery_app.conf.task_routes['notification.publish'] = {
+        'queue': 'notification_state_tasks'
+    }
+    celery_app.conf.task_routes['notification.scan_expired'] = {
+        'queue': 'notification_state_tasks'
+    }
+except ImportError:
+    _HAS_NOTIFICATION_TASKS = False
+
 # Celery Beat schedule for periodic tasks
 memory_increment_schedule = crontab(hour=settings.MEMORY_INCREMENT_HOUR, minute=settings.MEMORY_INCREMENT_MINUTE)
 memory_cache_regeneration_schedule = crontab(
@@ -320,5 +338,26 @@ if _HAS_SUBSCRIPTION_TASKS:
             "task": "subscription.expiration_reminder",
             "schedule": timedelta(minutes=_SUBSCRIPTION_EMAIL_BEAT_INTERVAL_MINUTES),
             "options": {"queue": "subscription_email_tasks", "expires": 3600},
+        },
+    })
+
+# 消息通知中心定时任务（每分钟扫描到期排期与到期下架）
+# 可通过环境变量调整（默认 60 秒，与设计的「定时发布偏差 P95 < 60 秒」目标一致）：
+#   NOTIFICATION_SCAN_INTERVAL_SECONDS=N
+_NOTIFICATION_SCAN_INTERVAL_SECONDS = int(os.getenv("NOTIFICATION_SCAN_INTERVAL_SECONDS", "60"))
+
+if _HAS_NOTIFICATION_TASKS:
+    celery_app.conf.beat_schedule.update({
+        # 扫描 scheduled + publish_at<=now，领取后投递 notification.publish
+        "notification-scan-scheduled": {
+            "task": "notification.scan_scheduled",
+            "schedule": float(_NOTIFICATION_SCAN_INTERVAL_SECONDS),
+            "options": {"queue": "notification_state_tasks", "expires": 120},
+        },
+        # 扫描 published + expire_at<=now，转为 expired
+        "notification-scan-expired": {
+            "task": "notification.scan_expired",
+            "schedule": float(_NOTIFICATION_SCAN_INTERVAL_SECONDS),
+            "options": {"queue": "notification_state_tasks", "expires": 120},
         },
     })
