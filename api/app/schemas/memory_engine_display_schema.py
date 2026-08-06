@@ -12,7 +12,13 @@ class EngineDisplayCardItem(BaseModel):
     """引擎展示卡片 - 前端列表项"""
 
     id: str = Field(..., description="确定性聚合卡片 ID（UUID v5）")
-    engine_type: Literal["EXTRACTION", "CROSS_MODAL", "EMOTION"] = Field(
+    engine_type: Literal[
+        "EXTRACTION",
+        "CROSS_MODAL",
+        "EMOTION",
+        "FORGETTING",
+        "REFLECTION",
+    ] = Field(
         ...,
         description="稳定英文引擎枚举，由前端负责文案映射",
     )

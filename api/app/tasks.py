@@ -26,7 +26,9 @@ from app.core.config import settings
 from app.core.logging_config import get_logger
 from app.core.models import RedBearEmbeddings, RedBearLLM
 from app.core.memory.storage_services.reflection_engine import retry_registry as rr
+from app.core.rag.chunk.hierarchy import GroupedChildChunks, validate_parent_child_result
 from app.core.rag.chunk.metadata import merge_parser_metadata
+from app.core.rag.chunk.parser.image_storage import cleanup_mineru_v3_images
 from app.core.rag.crawler.web_crawler import WebCrawler
 from app.core.rag.graphrag.general.index import init_graphrag, run_graphrag_for_kb
 from app.core.rag.graphrag.utils import get_llm_cache, set_llm_cache
@@ -86,6 +88,7 @@ from app.core.utils.datetime_utils import (
 )
 from app.db import get_db_context, get_db_read
 from app.models import App, AppRelease, Document, File, Knowledge, User, Workspace
+from app.models.file_model import FILE_ROLE_SOURCE
 from app.models.end_user_model import EndUser
 from app.models.models_model import ModelType
 from app.repositories.end_user_repository import get_end_users_by_workspace
@@ -1209,6 +1212,13 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
                 source_file_id=document_info["file_id"],
                 source_file_name=document_info["file_name"],
             )
+            if isinstance(child_res, GroupedChildChunks):
+                validate_parent_child_result(
+                    child_res,
+                    parent_res,
+                    parent_id_map,
+                    str(parser_config.get("parent_chunk_mode") or "paragraph"),
+                )
         else:
             res = chunk(
                 filename=file_name,
@@ -2074,11 +2084,21 @@ def sync_knowledge_for_kb(kb_id: uuid.UUID):
 
     def _get_existing_files(kb_uuid: uuid.UUID) -> list[dict]:
         with get_db_context() as db:
-            return [_snapshot_file(db_file) for db_file in db.query(File).filter(File.kb_id == kb_uuid).all()]
+            return [
+                _snapshot_file(db_file)
+                for db_file in db.query(File).filter(
+                    File.kb_id == kb_uuid,
+                    File.file_role == FILE_ROLE_SOURCE,
+                ).all()
+            ]
 
     def _get_file_by_url(kb_uuid: uuid.UUID, file_url: str) -> dict | None:
         with get_db_context() as db:
-            db_file = db.query(File).filter(File.kb_id == kb_uuid, File.file_url == file_url).first()
+            db_file = db.query(File).filter(
+                File.kb_id == kb_uuid,
+                File.file_role == FILE_ROLE_SOURCE,
+                File.file_url == file_url,
+            ).first()
             return _snapshot_file(db_file) if db_file else None
 
     def _create_file_record(
@@ -2194,7 +2214,11 @@ def sync_knowledge_for_kb(kb_id: uuid.UUID):
     def _delete_stale_files(kb_uuid: uuid.UUID, file_urls: set, vector_service):
         with get_db_context() as db:
             stale_files = []
-            db_files = db.query(File).filter(File.kb_id == kb_uuid, File.file_url.notin_(file_urls)).all()
+            db_files = db.query(File).filter(
+                File.kb_id == kb_uuid,
+                File.file_role == FILE_ROLE_SOURCE,
+                File.file_url.notin_(file_urls),
+            ).all()
             for db_file in db_files:
                 db_document = db.query(Document).filter(Document.kb_id == kb_uuid,
                                                         Document.file_id == db_file.id).first()
@@ -2206,6 +2230,14 @@ def sync_knowledge_for_kb(kb_id: uuid.UUID):
             document_id = file_state.get("document_id")
             if document_id:
                 vector_service.delete_by_metadata_field(key="document_id", value=str(document_id))
+                try:
+                    cleanup_mineru_v3_images(document_id)
+                except Exception:
+                    logger.warning(
+                        "[SyncKB] failed to delete derived image assets: document_id=%s",
+                        document_id,
+                        exc_info=True,
+                    )
             if file_state.get("file_key"):
                 from app.services.file_storage_service import FileStorageService
 

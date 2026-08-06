@@ -8,7 +8,13 @@ import asyncio
 import inspect
 import json
 import re
+from contextlib import nullcontext
 from typing import Any, Dict, List, Optional, Tuple
+
+from app.core.memory.retrieval_trace.stage_events import (
+    is_memory_stage_capture_enabled,
+    memory_stage_collector,
+)
 
 from app.core.logging_config import get_business_logger
 
@@ -366,7 +372,13 @@ class ToolOrchestrator:
             step_id = str(_uuid.uuid4())
 
             # 执行工具
-            tool_result = await self._call_tool(action, input_dict)
+            collector = (
+                memory_stage_collector()
+                if is_memory_stage_capture_enabled() and action == "long_term_memory"
+                else nullcontext([])
+            )
+            with collector as memory_stages:
+                tool_result = await self._call_tool(action, input_dict)
 
             success: bool = bool(tool_result.get("success", True))
             output: str = str(tool_result.get("output") or "")
@@ -429,6 +441,10 @@ class ToolOrchestrator:
                 "error": error,
                 "meta": tool_meta if tool_meta else None,
             }
+            if memory_stages:
+                # Request-local transport data.  AppChatService replays it and
+                # removes this key before agent-execution persistence.
+                node["_memory_stages"] = list(memory_stages)
             # 提取知识库来源
             if tool and hasattr(tool, "_last_sources") and tool._last_sources:
                 if not node["meta"]:

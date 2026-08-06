@@ -1,13 +1,16 @@
 import logging
 
-from app.core.rag.deepdoc.parser.figure_parser import vision_figure_parser_docx_wrapper
+from app.core.rag.chunk.context import (
+    ChunkContext,
+    ParseResult,
+    is_embedded_image_vision_enabled,
+)
 from app.core.rag.chunk.parser.docx import DocxParser
 from app.core.rag.chunk.parser.mineru_v3 import MinerUV3Parser
+from app.core.rag.deepdoc.parser.figure_parser import vision_figure_parser_docx_wrapper
 from app.core.rag.utils.file_utils import extract_html, extract_links_from_docx
 
-from app.core.rag.chunk.context import ChunkContext, ParseResult, is_image_vision_enabled
 from .base import ChunkPipeline
-
 
 LOGGER = logging.getLogger(__name__)
 
@@ -40,7 +43,7 @@ class DocxChunkPipeline(ChunkPipeline):
             sections=sections,
             tbls=tables,
             callback=ctx.callback,
-            vision_model=ctx.vision_model if is_image_vision_enabled(ctx.parser_config) else None,
+            vision_model=ctx.vision_model if is_embedded_image_vision_enabled(ctx.parser_config) else None,
             **ctx.kwargs,
         )
         ctx.callback(0.8, "Finish parsing.")

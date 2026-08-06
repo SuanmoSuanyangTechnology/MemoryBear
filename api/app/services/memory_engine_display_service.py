@@ -1,7 +1,8 @@
 """记忆引擎展示 Service
 
 负责：
-- 从 ExtractionResult 组装 0~3 个有效引擎事件
+- 从 ExtractionResult 组装 0~3 个有效引擎事件（EXTRACTION / CROSS_MODAL / EMOTION）
+- 从遗忘、反思引擎的汇总结果组装 FORGETTING / REFLECTION 事件
 - 查询时按用户时区日期聚合事件并生成卡片文案
 - 异常隔离（PG 写入失败不影响主流程）
 """
@@ -89,7 +90,7 @@ class MemoryEngineDisplayService:
         return cards, total
 
     # ──────────────────────────────────────────────
-    # 写入侧：从 ExtractionResult 组装事件
+    # 写入侧：从各引擎的汇总结果组装事件
     # ──────────────────────────────────────────────
 
     @staticmethod
@@ -108,11 +109,7 @@ class MemoryEngineDisplayService:
             end_user_id: 终端用户 ID（字符串形式 UUID）
             extraction_result: WritePipeline 的 ExtractionResult
         """
-        from app.db import get_db_context
-        from app.models.memory_engine_display_event_model import MemoryEngineDisplayEvent
-
         try:
-            # 组装事件
             events_data = []
 
             extraction_event = _build_extraction_event(extraction_result)
@@ -129,48 +126,67 @@ class MemoryEngineDisplayService:
 
             if not events_data:
                 return
-
-            # 生成共享标识
-            operation_id = uuid.uuid4()
-            occurred_at = utcnow_naive()
-
-            # 转换为 ORM 实例
-            # end_user_id 需要转为 UUID 对象（PG 外键是 UUID 类型）
-            try:
-                user_uuid = uuid.UUID(end_user_id)
-            except (ValueError, AttributeError):
-                logger.warning(
-                    f"[EngineDisplay] 无法将 end_user_id 转为 UUID: {end_user_id}"
-                )
-                return
-
-            records = []
-            for data in events_data:
-                record = MemoryEngineDisplayEvent(
-                    id=uuid.uuid4(),
-                    end_user_id=user_uuid,
-                    operation_id=operation_id,
-                    engine_type=data["engine_type"],
-                    details=data["details"],
-                    occurred_at=occurred_at,
-                )
-                records.append(record)
-
-            # PG 写入（一次，不重试）
-            with get_db_context() as db:
-                repo = MemoryEngineDisplayEventRepository(db)
-                repo.bulk_insert_events(records)
-
-            logger.info(
-                f"[EngineDisplay] PG 写入成功: end_user_id={end_user_id}, "
-                f"operation_id={operation_id}, engines={[d['engine_type'] for d in events_data]}"
-            )
-
         except Exception as e:
             logger.error(
-                f"[EngineDisplay] PG 写入失败: end_user_id={end_user_id}, error={e}",
+                f"[EngineDisplay] 事件组装失败: end_user_id={end_user_id}, error={e}",
                 exc_info=True,
             )
+            return
+
+        await _persist_events(end_user_id, events_data)
+
+    @staticmethod
+    async def save_forgetting_event(
+        end_user_id: str,
+        forget_summary: dict,
+    ) -> None:
+        """配额驱动的定时遗忘整理完成后调用。
+
+        只有本轮实际软删除数 > 0 才写入一条 FORGETTING 事件；
+        手动删除单节点和清空全部记忆不走这里。
+
+        Args:
+            end_user_id: 终端用户 ID（字符串形式 UUID）
+            forget_summary: ForgetService.run() 的返回值
+        """
+        try:
+            event = _build_forgetting_event(forget_summary)
+        except Exception as e:
+            logger.error(
+                f"[EngineDisplay] 遗忘事件组装失败: end_user_id={end_user_id}, error={e}",
+                exc_info=True,
+            )
+            return
+        if event is None:
+            return
+        await _persist_events(end_user_id, [event])
+
+    @staticmethod
+    async def save_reflection_event(
+        end_user_id: str,
+        layer2_result: dict,
+        scan_type: str = "layer2_frequent",
+    ) -> None:
+        """Layer 2 高频巡检或每日全量去重完成后调用。
+
+        五类成果合计为 0（含未配置 LLM、全部子问题被跳过）时不写入。
+
+        Args:
+            end_user_id: 终端用户 ID（字符串形式 UUID）
+            layer2_result: Layer2Inspector.run() 或 run_dedup_full_scan() 的返回值
+            scan_type: "layer2_frequent"（高频巡检）或 "dedup_full_scan"（全量去重）
+        """
+        try:
+            event = _build_reflection_event(layer2_result, scan_type)
+        except Exception as e:
+            logger.error(
+                f"[EngineDisplay] 反思事件组装失败: end_user_id={end_user_id}, error={e}",
+                exc_info=True,
+            )
+            return
+        if event is None:
+            return
+        await _persist_events(end_user_id, [event])
 
     # ──────────────────────────────────────────────
     # 查询侧：聚合事件并生成卡片
@@ -218,6 +234,63 @@ class MemoryEngineDisplayService:
             })
 
         return cards
+
+
+# ──────────────────────────────────────────────
+# 内部函数：统一写入
+# ──────────────────────────────────────────────
+
+
+async def _persist_events(end_user_id: str, events_data: List[Dict[str, Any]]) -> None:
+    """生成共享标识、批量写入 PG、异常隔离。三个入口共用。
+
+    每次调用新生成 operation_id，因此不会撞唯一约束
+    uq_engine_display_user_type_op；本方案不要求跨调用幂等。
+    PG 写入只执行一次，不重试，失败只记日志。
+    """
+    from app.db import get_db_context
+    from app.models.memory_engine_display_event_model import MemoryEngineDisplayEvent
+
+    if not events_data:
+        return
+
+    # end_user_id 需要转为 UUID 对象（PG 外键是 UUID 类型）
+    try:
+        user_uuid = uuid.UUID(end_user_id)
+    except (ValueError, AttributeError, TypeError):
+        logger.warning(
+            f"[EngineDisplay] 无法将 end_user_id 转为 UUID: {end_user_id}"
+        )
+        return
+
+    operation_id = uuid.uuid4()
+    occurred_at = utcnow_naive()
+
+    records = [
+        MemoryEngineDisplayEvent(
+            id=uuid.uuid4(),
+            end_user_id=user_uuid,
+            operation_id=operation_id,
+            engine_type=data["engine_type"],
+            details=data["details"],
+            occurred_at=occurred_at,
+        )
+        for data in events_data
+    ]
+
+    try:
+        with get_db_context() as db:
+            MemoryEngineDisplayEventRepository(db).bulk_insert_events(records)
+        logger.info(
+            f"[EngineDisplay] PG 写入成功: end_user_id={end_user_id}, "
+            f"operation_id={operation_id}, "
+            f"engines={[d['engine_type'] for d in events_data]}"
+        )
+    except Exception as e:
+        logger.error(
+            f"[EngineDisplay] PG 写入失败: end_user_id={end_user_id}, error={e}",
+            exc_info=True,
+        )
 
 
 # ──────────────────────────────────────────────
@@ -302,9 +375,9 @@ def _build_cross_modal_event(result: Any) -> Optional[Dict[str, Any]]:
                 if name.lower() not in _ROLE_ENTITY_NAMES:
                     topic_counter[name] += 1
 
-        # 按出现次数排序，取前3
+        # 按出现次数降序、名称升序展示全部主题
         sorted_topics = sorted(topic_counter.items(), key=lambda x: (-x[1], x[0]))
-        topics = [t[0] for t in sorted_topics[:3]]
+        topics = [t[0] for t in sorted_topics]
 
     details: Dict[str, Any] = {
         "modality_counts": dict(modality_counts),
@@ -355,6 +428,100 @@ def _build_emotion_event(result: Any) -> Optional[Dict[str, Any]]:
             "emotion_stats": emotion_stats,
         },
     }
+
+
+# 反思引擎五类成果的 details key，写入侧和聚合侧共用
+_REFLECTION_COUNT_KEYS = (
+    "entity_merged_count",
+    "alias_merged_count",
+    "description_merged_count",
+    "metadata_extracted_count",
+    "unresolved_resolved_count",
+)
+
+
+def _build_forgetting_event(summary: Any) -> Optional[Dict[str, Any]]:
+    """组装遗忘引擎事件。
+
+    released_count 取 ForgetService 逐批累加的实际软删除数
+    （summary["deleted"]），不使用 initial_count - final_count。
+    被跳过或本轮没有实际软删除时不生成事件。
+    """
+    if not isinstance(summary, dict) or summary.get("skipped"):
+        return None
+
+    released = _as_count(summary.get("deleted"))
+    if released <= 0:
+        return None
+
+    scanned = _as_count(summary.get("scanned_count"))
+    node_type_counts = summary.get("node_type_counts")
+    if not isinstance(node_type_counts, dict):
+        node_type_counts = {}
+
+    return {
+        "engine_type": "FORGETTING",
+        "details": {
+            # 老版本 ForgetService 不返回 scanned_count 时退化为 released
+            "scanned_count": scanned or released,
+            "released_count": released,
+            "node_type_counts": {
+                str(k): _as_count(v) for k, v in node_type_counts.items()
+            },
+        },
+    }
+
+
+def _build_reflection_event(
+    result: Any,
+    scan_type: str,
+) -> Optional[Dict[str, Any]]:
+    """组装反思引擎事件。五类成果全为 0 时不生成。
+
+    高频巡检返回按子问题分组的嵌套结构，低频全量去重返回扁平结构，
+    因此 entity_merged_count 按 scan_type 分两种取法。两条链路对外的
+    merged_count 都已包含确定性直接归并，不再叠加 direct_merged_count。
+
+    子问题 status 为 skipped / timeout / error 时相关 key 缺失，
+    按 0 计入，不影响其他子问题成果展示。
+    """
+    if not isinstance(result, dict) or result.get("status") == "skipped":
+        return None
+
+    if scan_type == "dedup_full_scan":
+        entity_merged = _pick(result, "merged_count")
+    else:
+        entity_merged = _pick(result.get("entity_dedup"), "merged_count")
+
+    details: Dict[str, Any] = {
+        "scan_type": scan_type,
+        "entity_merged_count": entity_merged,
+        "alias_merged_count": _pick(result.get("alias_merge"), "merge_count"),
+        "description_merged_count": _pick(result.get("description_merge"), "merged_count"),
+        "metadata_extracted_count": _pick(result.get("metadata_extraction"), "extracted"),
+        "unresolved_resolved_count": _pick(
+            result.get("unresolved_entity"), "resolved", "forced"
+        ),
+    }
+
+    if all(details[key] == 0 for key in _REFLECTION_COUNT_KEYS):
+        return None
+    return {"engine_type": "REFLECTION", "details": details}
+
+
+def _as_count(value: Any) -> int:
+    """把任意来源的计数安全转为非负 int；无法转换按 0。"""
+    try:
+        return max(int(value or 0), 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _pick(sub: Any, *keys: str) -> int:
+    """从子问题结果里安全累加计数；非 dict 或 key 缺失都按 0。"""
+    if not isinstance(sub, dict):
+        return 0
+    return sum(_as_count(sub.get(k)) for k in keys)
 
 
 # ──────────────────────────────────────────────
@@ -422,12 +589,12 @@ def _merge_event_details(
                     if e.occurred_at and e.occurred_at > topic_info[normalized]["last_at"]:
                         topic_info[normalized]["last_at"] = e.occurred_at
 
-        # 主题排序：事件数降序 > 最后出现时间降序 > 名称升序
+        # 主题排序：事件数降序 > 最后出现时间降序 > 名称升序，完整展示
         sorted_topics = sorted(
             topic_info.items(),
             key=lambda x: (-x[1]["count"], -(x[1]["last_at"].timestamp() if x[1]["last_at"] else 0), x[0]),
         )
-        topics = [t[0] for t in sorted_topics[:3]]
+        topics = [t[0] for t in sorted_topics]
 
         return {
             "modality_counts": dict(merged_modality),
@@ -466,6 +633,31 @@ def _merge_event_details(
         return {
             "emotions": [{"type": t[0], "count": t[1]["count"]} for t in top_emotions],
         }
+
+    elif engine_type == "FORGETTING":
+        scanned = 0
+        released = 0
+        node_types: Dict[str, int] = defaultdict(int)
+        for e in events:
+            d = e.details or {}
+            scanned += _as_count(d.get("scanned_count"))
+            released += _as_count(d.get("released_count"))
+            for k, v in (d.get("node_type_counts") or {}).items():
+                node_types[str(k)] += _as_count(v)
+        return {
+            "scanned_count": scanned,
+            "released_count": released,
+            "node_type_counts": dict(node_types),
+        }
+
+    elif engine_type == "REFLECTION":
+        # 高频巡检和每日全量去重的成果在同一天相加，卡片不区分 scan_type
+        merged_counts = {key: 0 for key in _REFLECTION_COUNT_KEYS}
+        for e in events:
+            d = e.details or {}
+            for key in _REFLECTION_COUNT_KEYS:
+                merged_counts[key] += _as_count(d.get(key))
+        return merged_counts
 
     return {}
 
@@ -545,6 +737,38 @@ def _generate_card_text_zh(
 
         return name, content
 
+    elif engine_type == "FORGETTING":
+        name = "我整理了不再活跃的记忆"
+        scanned = merged.get("scanned_count", 0)
+        released = merged.get("released_count", 0)
+        if scanned > released:
+            head = f"评估了 {scanned} 条较早写入的记录，将其中 {released} 条移出了活跃记忆"
+        else:
+            head = f"将 {released} 条记录移出了活跃记忆"
+        content = f"{head}；情景摘要不参与整理，高频引用的实体受到保护。"
+        return name, content
+
+    elif engine_type == "REFLECTION":
+        name = "我梳理了记忆之间的重复和缺口"
+        labels = {
+            "entity_merged_count": "完成了 {n} 次重复实体合并",
+            "alias_merged_count": "归并了 {n} 组实体别名",
+            "description_merged_count": "整合了 {n} 个实体的零散描述",
+            "metadata_extracted_count": "补全了 {n} 个实体的结构化信息",
+            "unresolved_resolved_count": "解析了 {n} 条此前无法识别的陈述",
+        }
+        parts = [
+            labels[key].format(n=count)
+            for key, count in _rank_reflection_counts(merged)
+        ]
+        if not parts:
+            content = ""
+        elif len(parts) == 1:
+            content = parts[0] + "。"
+        else:
+            content = "，".join(parts[:-1]) + "，并" + parts[-1] + "。"
+        return name, content
+
     return ("", "")
 
 
@@ -622,12 +846,81 @@ def _generate_card_text_en(
             )
         return name, content
 
+    if engine_type == "FORGETTING":
+        name = "I tidied up memories that are no longer active"
+        scanned = merged.get("scanned_count", 0)
+        released = merged.get("released_count", 0)
+        if scanned > released:
+            head = (
+                f"I reviewed {scanned} older {_pluralize('record', scanned)} and moved "
+                f"{released} of them out of active memory"
+            )
+        else:
+            head = (
+                f"I moved {released} {_pluralize('record', released)} "
+                "out of active memory"
+            )
+        content = (
+            f"{head}. Episodic summaries are never touched, and frequently "
+            "referenced entities are protected."
+        )
+        return name, content
+
+    if engine_type == "REFLECTION":
+        name = "I reviewed duplicates and gaps across memories"
+        labels = {
+            "entity_merged_count": lambda n: (
+                f"merged {n} duplicate {_pluralize('entity', n, 'entities')}"
+            ),
+            "alias_merged_count": lambda n: (
+                f"consolidated {n} {_pluralize('group', n)} of entity aliases"
+            ),
+            "description_merged_count": lambda n: (
+                f"consolidated scattered descriptions for {n} "
+                f"{_pluralize('entity', n, 'entities')}"
+            ),
+            "metadata_extracted_count": lambda n: (
+                f"filled in structured information for {n} "
+                f"{_pluralize('entity', n, 'entities')}"
+            ),
+            "unresolved_resolved_count": lambda n: (
+                f"resolved {n} previously unrecognized "
+                f"{_pluralize('statement', n)}"
+            ),
+        }
+        parts = [
+            labels[key](count) for key, count in _rank_reflection_counts(merged)
+        ]
+        content = f"I {_join_english(parts)}." if parts else ""
+        return name, content
+
     return ("", "")
 
 
-def _pluralize(noun: str, count: int) -> str:
-    """Apply the regular English plural form used by card metrics."""
-    return noun if count == 1 else f"{noun}s"
+def _rank_reflection_counts(merged: Dict[str, Any]) -> List[tuple]:
+    """按（数量降序、字段名升序）返回全部非零成果。
+
+    过滤非 int 值，避免把 scan_type 这类字符串当成计数
+    （_merge_event_details 的 REFLECTION 分支只输出五个计数键，这里是防御）。
+    """
+    return sorted(
+        (
+            (key, value)
+            for key, value in merged.items()
+            if key in _REFLECTION_COUNT_KEYS
+            and isinstance(value, int)
+            and not isinstance(value, bool)
+            and value > 0
+        ),
+        key=lambda item: (-item[1], item[0]),
+    )
+
+
+def _pluralize(noun: str, count: int, plural: str | None = None) -> str:
+    """Apply the English plural form used by card metrics."""
+    if count == 1:
+        return noun
+    return plural if plural is not None else f"{noun}s"
 
 
 def _join_english(parts: List[str]) -> str:

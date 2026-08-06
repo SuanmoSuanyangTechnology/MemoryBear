@@ -7,7 +7,7 @@ from app.core.rag.chunk.context import (
     ParsedBlock,
     ParsedBlockType,
     ParseResult,
-    is_image_vision_enabled,
+    is_embedded_image_vision_enabled,
 )
 from app.core.rag.chunk.parser.html import HtmlParser
 from app.core.rag.chunk.parser.image_vision import enhance_image_blocks_with_vision
@@ -46,7 +46,7 @@ class MarkdownChunkPipeline(ChunkPipeline):
         markdown_parser = StructMarkdownParser()
         blocks = markdown_parser.parse(ctx)
 
-        if ctx.vision_model and is_image_vision_enabled(ctx.parser_config):
+        if ctx.vision_model and is_embedded_image_vision_enabled(ctx.parser_config):
             for block in blocks:
                 if block.type is not ParsedBlockType.IMAGE:
                     continue

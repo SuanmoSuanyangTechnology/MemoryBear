@@ -282,7 +282,7 @@ export const useWorkflowGraph = ({
                 }
                 nodeLibraryConfig.config.messages.defaultValue.splice(-1, 1)
               }
-            } else if (key === 'knowledge_retrieval' && nodeLibraryConfig.config && nodeLibraryConfig.config[key]) {
+            } else if (key === 'knowledge_retrieval' && nodeLibraryConfig.config && nodeLibraryConfig.config[key] && type !== 'agent') {
               const { query, ...rest } = config
               nodeLibraryConfig.config[key].defaultValue = {
                 ...rest
@@ -1834,7 +1834,7 @@ export const useWorkflowGraph = ({
                 } else {
                   itemConfig[key].data = value.data
                 }
-              } else if (data.config[key] && 'defaultValue' in data.config[key] && key !== 'knowledge_retrieval') {
+              } else if (data.config[key] && 'defaultValue' in data.config[key] && (key !== 'knowledge_retrieval' || data.type === 'agent')) {
                 itemConfig[key] = data.config[key].defaultValue
               } else if (key === 'knowledge_retrieval' && data.config[key] && 'defaultValue' in data.config[key]) {
                 const { knowledge_bases } = data.config[key].defaultValue || {}

@@ -125,6 +125,7 @@ async def read_memory(
         result = await service.read(
             query=message,
             search_switch=strategy,
+            record_display=True,
         )
         logger.info(f"MCP read_memory succeeded for end_user={end_user_id}")
         return {

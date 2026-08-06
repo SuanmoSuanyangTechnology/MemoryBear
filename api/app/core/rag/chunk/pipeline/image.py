@@ -13,6 +13,7 @@ from app.core.rag.chunk.context import (
     ParsedBlock,
     ParsedBlockType,
     ParseResult,
+    is_direct_image_vision_enabled,
 )
 from app.core.rag.chunk.parser.mineru_v3 import MinerUV3Parser
 from app.core.rag.chunk.parser.structured_markdown import StructMarkdownParser
@@ -29,12 +30,19 @@ class ImageChunkPipeline(ChunkPipeline):
     """Parse directly uploaded images without changing embedded-image pipelines."""
 
     def parse(self, ctx: ChunkContext) -> ParseResult:
-        mode = self._image_vision_mode(ctx)
         source_file_id = self._source_file_id(ctx)
+        self._callback(ctx, 0.1, "Start to parse image.")
+
+        if not is_direct_image_vision_enabled(ctx.parser_config):
+            source_markdown, source_image_url = self._source_image_markdown(ctx, source_file_id)
+            blocks, _ = self._parse_markdown_blocks(source_markdown, source_image_url)
+            self._callback(ctx, 0.8, "Finish parsing image.")
+            return ParseResult(blocks=blocks, merge_strategy="blocks")
+
+        mode = self._image_vision_mode(ctx)
         source_binary = self._read_binary(ctx)
         analysis_binary, analysis_filename, source_image = self._analysis_input(ctx.filename, source_binary)
 
-        self._callback(ctx, 0.1, "Start to parse image.")
         mineru_markdown = ""
         if mode in {0, 1}:
             mineru_markdown = self._parse_ocr_markdown(ctx, analysis_binary, analysis_filename)
@@ -73,9 +81,10 @@ class ImageChunkPipeline(ChunkPipeline):
         return ParseResult(blocks=blocks, merge_strategy="blocks")
 
     def _image_vision_mode(self, ctx: ChunkContext) -> int:
-        raw_mode = ctx.parser_config.get("image_vision_mode", DEFAULT_IMAGE_VISION_MODE)
+        image_config = ctx.parser_config.get("image")
+        raw_mode = image_config.get("vision_mode", DEFAULT_IMAGE_VISION_MODE) if isinstance(image_config, dict) else DEFAULT_IMAGE_VISION_MODE
         if type(raw_mode) is not int or raw_mode not in IMAGE_VISION_MODES:
-            raise ValueError("parser_config.image_vision_mode must be an integer in {0, 1, 2}.")
+            raise ValueError("parser_config.image.vision_mode must be an integer in {0, 1, 2}.")
         return raw_mode
 
     def _read_binary(self, ctx: ChunkContext) -> bytes:
@@ -104,13 +113,10 @@ class ImageChunkPipeline(ChunkPipeline):
         analysis_binary: bytes,
         analysis_filename: str,
     ) -> str:
-        parser_config = dict(ctx.parser_config)
-        parser_config["image_vision_enabled"] = False
         ocr_ctx = replace(
             ctx,
             filename=analysis_filename,
             binary=analysis_binary,
-            parser_config=parser_config,
         )
         markdown = MinerUV3Parser().parse_markdown(ocr_ctx)
         if not markdown or not markdown.strip():
@@ -166,7 +172,7 @@ class ImageChunkPipeline(ChunkPipeline):
 
     def _source_file_url(self, source_file_id) -> str:
         server_url = (settings.FILE_LOCAL_SERVER_URL or "").rstrip("/")
-        path = f"/storage/permanent/{source_file_id}"
+        path = f"/files/{source_file_id}"
         return f"{server_url}{path}" if server_url else path
 
     def _has_content(self, blocks: list[ParsedBlock]) -> bool:

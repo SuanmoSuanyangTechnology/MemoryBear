@@ -3,6 +3,7 @@ import asyncio
 import json
 import time
 import uuid
+from contextlib import nullcontext
 from types import SimpleNamespace
 from typing import Optional, Dict, Any, AsyncGenerator, Annotated, List, Literal
 from datetime import datetime, timezone
@@ -47,6 +48,12 @@ from app.core.memory.emotion.emotion_resolver import (
     apply_detection as apply_emotion_detection,
     start_detection as start_emotion_detection,
 )
+from app.core.memory.retrieval_trace.message_trace import (
+    MessageTrace,
+    merge_memory_trace,
+    strip_memory_trace_transients,
+)
+from app.core.memory.retrieval_trace.stage_events import capture_memory_stage_stream, memory_stage_capture
 
 logger = get_business_logger()
 
@@ -1062,6 +1069,7 @@ class AppChatService:
         save_messages_enqueued = False
 
         try:
+            memory_trace = MessageTrace()
             start_time = time.time()
             message_id = uuid.uuid4()
             user_message_id = uuid.uuid4()
@@ -1274,21 +1282,34 @@ class AppChatService:
             }
             use_agent_mode = ModelCapability.FUNCTION_CALL in capability
             if not use_agent_mode and tools:
-                system_prompt, orchestrator_node_executions = await ToolOrchestrator.create_and_run(
-                    tools=tools,
-                    system_prompt=system_prompt,
-                    message=message,
-                    history=history,
-                    api_key_config=_api_key_config,
-                    model_config=model_info,
-                    effective_params=model_parameters,
-                    processed_files=processed_files,
-                    context_evidence_loader=load_annotation_context,
-                )
+                stage_context = memory_stage_capture() if execution_mode == "in_process" else nullcontext()
+                with stage_context:
+                    system_prompt, orchestrator_node_executions = await ToolOrchestrator.create_and_run(
+                        tools=tools,
+                        system_prompt=system_prompt,
+                        message=message,
+                        history=history,
+                        api_key_config=_api_key_config,
+                        model_config=model_info,
+                        effective_params=model_parameters,
+                        processed_files=processed_files,
+                        context_evidence_loader=load_annotation_context,
+                    )
                 # 把已完成的工具调用步骤作为事件补发给前端
                 for step in orchestrator_node_executions:
                     event_type = "tool_error" if step.get("status") == "failed" else "tool_end"
+                    memory_stages = []
+                    if execution_mode == "in_process" and step.get("node_name") == "long_term_memory":
+                        memory_stages = memory_trace.record_weak_tool(step)
                     yield f"event: tool_start\ndata: {json.dumps({'step_id': step.get('step_id'), 'name': step.get('node_name'), 'input': step.get('input'), 'meta': step.get('meta')}, cls=CustomJsonEncoder, ensure_ascii=False)}\n\n"
+                    for stage in memory_stages:
+                        stage_event = {
+                            "step_id": step.get("step_id"),
+                            "stage": stage.get("stage"),
+                            "status": stage.get("status", "completed"),
+                            "data": stage.get("data") or {},
+                        }
+                        yield f"event: memory_stage\ndata: {json.dumps(stage_event, cls=CustomJsonEncoder, ensure_ascii=False)}\n\n"
                     yield f"event: {event_type}\ndata: {json.dumps({'step_id': step.get('step_id'), 'name': step.get('node_name'), 'output': step.get('output'), 'error': step.get('error'), 'meta': step.get('meta')}, cls=CustomJsonEncoder, ensure_ascii=False)}\n\n"
                 tools = []
 
@@ -1391,6 +1412,9 @@ class AppChatService:
                 tenant_id=tenant_id, workspace_id=workspace_id
             )
 
+            capture_memory_stages = execution_mode == "in_process"
+            if capture_memory_stages:
+                _chunk_stream = capture_memory_stage_stream(_chunk_stream)
             async for chunk in _chunk_stream:
                 if isinstance(chunk, int):
                     total_tokens = chunk
@@ -1399,11 +1423,37 @@ class AppChatService:
                     yield f"event: reasoning\ndata: {json.dumps({'content': chunk['content']}, ensure_ascii=False)}\n\n"
                 elif isinstance(chunk, dict) and chunk.get("type") == "node_executions":
                     node_executions = chunk.get("data", [])
+                    if capture_memory_stages:
+                        memory_trace.reconcile_tools(node_executions)
                 elif isinstance(chunk, dict) and chunk.get("type") == "tool_start":
+                    if capture_memory_stages:
+                        memory_trace.start_tool(
+                            step_id=chunk.get("step_id"),
+                            name=chunk.get("name", ""),
+                            input_value=chunk.get("input"),
+                        )
                     yield f"event: tool_start\ndata: {json.dumps({'step_id': chunk.get('step_id'), 'name': chunk['name'], 'input': chunk.get('input'), 'meta': chunk.get('meta')}, cls=CustomJsonEncoder, ensure_ascii=False)}\n\n"
+                elif (
+                    capture_memory_stages
+                    and isinstance(chunk, dict)
+                    and chunk.get("type") == "memory_stage"
+                ):
+                    payload = memory_trace.add_stage(step_id=chunk.get("step_id"), stage=chunk)
+                    if payload is None:
+                        continue
+                    stage_event = {"step_id": chunk.get("step_id"), **payload}
+                    yield f"event: memory_stage\ndata: {json.dumps(stage_event, cls=CustomJsonEncoder, ensure_ascii=False)}\n\n"
                 elif isinstance(chunk, dict) and chunk.get("type") == "tool_end":
+                    if capture_memory_stages:
+                        memory_trace.finish_tool(step_id=chunk.get("step_id"), status="completed")
                     yield f"event: tool_end\ndata: {json.dumps({'step_id': chunk.get('step_id'), 'name': chunk['name'], 'output': chunk.get('output'), 'meta': chunk.get('meta')}, cls=CustomJsonEncoder, ensure_ascii=False)}\n\n"
                 elif isinstance(chunk, dict) and chunk.get("type") == "tool_error":
+                    if capture_memory_stages:
+                        memory_trace.finish_tool(
+                            step_id=chunk.get("step_id"),
+                            status="failed",
+                            error=chunk.get("error"),
+                        )
                     yield f"event: tool_error\ndata: {json.dumps({'step_id': chunk.get('step_id'), 'name': chunk['name'], 'error': chunk.get('error')}, cls=CustomJsonEncoder, ensure_ascii=False)}\n\n"
                 elif isinstance(chunk, dict) and chunk.get("type") == "agent_log":
                     yield f"event: agent_log\ndata: {json.dumps(chunk, cls=CustomJsonEncoder, ensure_ascii=False)}\n\n"
@@ -1478,6 +1528,7 @@ class AppChatService:
                 "suggested_questions": suggested_questions,
                 "reasoning_content": full_reasoning or None
             }
+            assistant_meta = merge_memory_trace(assistant_meta, memory_trace)
 
             # 长期记忆写入由 conversation_service.add_message → MemoryWriteDispatcher 统一接管，
             # 这里不再触发老的 write_long_term 路径。
@@ -1507,7 +1558,10 @@ class AppChatService:
                     "is_omni": _api_key_is_omni
                 }
 
-            all_node_executions = orchestrator_node_executions + node_executions
+            all_node_executions = [
+                strip_memory_trace_transients(node)
+                for node in (orchestrator_node_executions + node_executions)
+            ]
             if not skip_save:
                 from app.services.batch_persist_queue import BatchPersistQueue, PersistTask
 
