@@ -112,3 +112,13 @@ class EndUser(Base):
     
     # 与 EndUserInfo 的反向关系
     info = relationship("EndUserInfo", back_populates="end_user", cascade="all, delete-orphan")
+
+
+class EndUserMerge(Base):
+    __tablename__ = "end_user_merge"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, nullable=False, index=True)
+    workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id"), nullable=False, index=True)
+    origin_id = Column(UUID(as_uuid=True), nullable=True, index=True, comment="原始end_user_id")
+    origin_other_id = Column(String, nullable=False, index=True, comment="原始end_user other_id")
+    target_id = Column(UUID(as_uuid=True), nullable=False, index=True)

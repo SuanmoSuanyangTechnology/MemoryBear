@@ -12,9 +12,8 @@ from app.core.logging_config import get_db_logger
 from app.core.utils.datetime_utils import utcnow_naive
 from app.models import User
 from app.models.end_user_info_model import EndUserInfo
-from app.models.end_user_model import EndUser
+from app.models.end_user_model import EndUser, EndUserMerge
 from app.models.workspace_model import Workspace
-from app.utils.redis_cache import redis_cache
 
 # 获取数据库专用日志器
 db_logger = get_db_logger()
@@ -142,7 +141,7 @@ class EndUserRepository:
             raise
 
     def get_end_user_by_id(self, end_user_id: uuid.UUID) -> Optional[EndUser]:
-        """根据 end_user_id 查询宿主"""
+        """根据 end_user_id 查询宿主。若已被合并则自动路由到目标。"""
         try:
             end_user = (
                 self.db.query(EndUser)
@@ -151,13 +150,47 @@ class EndUserRepository:
             )
             if end_user:
                 db_logger.info(f"成功查询到宿主 {end_user_id}")
-            else:
-                db_logger.info(f"未找到宿主 {end_user_id}")
-            return end_user
+                return end_user
+
+            resolved = self.resolve_merge_by_origin_id(end_user_id)
+            if resolved:
+                db_logger.info(f"宿主 {end_user_id} 已合并，路由到 {resolved.id}")
+                return resolved
+
+            db_logger.info(f"未找到宿主 {end_user_id}")
+            return None
         except Exception as e:
             self.db.rollback()
             db_logger.error(f"查询宿主 {end_user_id} 时出错: {str(e)}")
             raise
+
+    def resolve_merge_by_origin_id(
+        self, origin_id: uuid.UUID
+    ) -> Optional["EndUser"]:
+        """同步版：检查合并映射并返回目标 EndUser。"""
+
+        merge_record = (
+            self.db.query(EndUserMerge)
+            .filter(EndUserMerge.origin_id == origin_id)
+            .order_by(EndUserMerge.id.desc())
+            .first()
+        )
+        if not merge_record:
+            return None
+
+        target_user = (
+            self.db.query(EndUser)
+            .filter(
+                EndUser.id == merge_record.target_id,
+                EndUser.is_active == True,
+            )
+            .first()
+        )
+        if target_user:
+            db_logger.info(
+                f"合并路由(sync): origin_id={origin_id} → target={merge_record.target_id}"
+            )
+        return target_user
 
     def get_active_end_user_in_workspace(
         self,
@@ -191,17 +224,24 @@ class EndUserRepository:
             end_user = result.scalars().first()
             if end_user:
                 db_logger.info(f"成功查询到宿主 {end_user_id}")
-            else:
-                db_logger.info(f"未找到宿主 {end_user_id}")
-            return end_user
+                return end_user
+
+            resolved = await self.resolve_merge_by_origin_id_async(end_user_id)
+            if resolved:
+                db_logger.info(f"宿主 {end_user_id} 已合并，路由到 {resolved.id}")
+                return resolved
+
+            db_logger.info(f"未找到宿主 {end_user_id}")
+            return None
         except Exception as e:
             await self.db.rollback()
             db_logger.error(f"查询宿主 {end_user_id} 时出错: {str(e)}")
             raise
 
     def get_end_user_by_other_id(self, workspace_id: uuid.UUID, other_id: str) -> Optional["EndUser"]:
-        """按 workspace_id + other_id 查找终端用户，不存在返回 None"""
-        return (
+        """按 workspace_id + other_id 查找终端用户，不存在返回 None。
+        若用户已被合并（is_active=False），自动路由到合并目标。"""
+        end_user = (
             self.db.query(EndUser)
             .filter(
                 EndUser.workspace_id == workspace_id,
@@ -210,6 +250,151 @@ class EndUserRepository:
             ).order_by(EndUser.created_at.asc())
             .first()
         )
+        if end_user:
+            return end_user
+
+        # 未找到活跃用户 → 检查是否已被合并
+        return self.resolve_merge_by_other_id(workspace_id, other_id)
+
+    def resolve_merge_by_other_id(
+        self, workspace_id: uuid.UUID, other_id: str
+    ) -> Optional["EndUser"]:
+        """同步版：检查合并映射并返回目标 EndUser。"""
+
+        merge_record = (
+            self.db.query(EndUserMerge)
+            .filter(
+                EndUserMerge.workspace_id == workspace_id,
+                EndUserMerge.origin_other_id == other_id,
+            )
+            .order_by(EndUserMerge.id.desc())
+            .first()
+        )
+        if not merge_record:
+            return None
+
+        target_user = (
+            self.db.query(EndUser)
+            .filter(
+                EndUser.id == merge_record.target_id,
+                EndUser.workspace_id == workspace_id,
+                EndUser.is_active == True,
+            )
+            .first()
+        )
+        if target_user:
+            db_logger.info(
+                f"合并路由(sync): other_id={other_id} → target={merge_record.target_id}"
+            )
+        return target_user
+
+    # ── EndUserMerge 写入操作 ──────────────────────────────────────
+
+    async def flatten_merge_chain_async(
+        self, source_ids: set[uuid.UUID], target_id: uuid.UUID, workspace_id: uuid.UUID,
+    ) -> None:
+        """将历史上指向 source 的合并记录摊平到 target。
+
+        当用户 B 之前被合并到 A，现在 A 又要合并到 C 时，
+        需要把 B→A 的记录更新为 B→C。
+        """
+        for src_id in source_ids:
+            await self.db.execute(
+                update(EndUserMerge)
+                .where(
+                    EndUserMerge.target_id == src_id,
+                    EndUserMerge.workspace_id == workspace_id,
+                )
+                .values(target_id=target_id)
+            )
+
+    def create_merge_record(
+        self,
+        origin_id: uuid.UUID,
+        origin_other_id: str,
+        target_id: uuid.UUID,
+        workspace_id: uuid.UUID,
+    ) -> EndUserMerge:
+        """创建一条 EndUserMerge 记录。"""
+        record = EndUserMerge(
+            workspace_id=workspace_id,
+            origin_id=origin_id,
+            origin_other_id=origin_other_id,
+            target_id=target_id,
+        )
+        self.db.add(record)
+        return record
+
+    async def migrate_reference_end_user_id_async(
+        self, src_id: uuid.UUID, target_id: uuid.UUID,
+    ) -> dict:
+        """将 PG 引用表中 source 的 end_user_id 迁移到 target。
+
+        小批量（1000 行/批）UPDATE，避免大事务锁表阻塞。
+
+        覆盖 conversations、memory_messages、memory_short_term、
+        memory_long_term、memory_forget_log、memory_perceptual、
+        memory_reflection_log、forgetting_cycle_history、
+        memory_display_record、memory_engine_display_event。
+
+        跳过 implicit_emotions_storage（UNIQUE 约束，需特殊处理）和
+        memory_config（end_user_id 为配置自身标识，非用户引用）。
+
+        Returns:
+            {table_name: rows_updated}
+        """
+        BATCH = 200
+        src_str = str(src_id)
+        tgt_str = str(target_id)
+        stats: dict[str, int] = {}
+
+        # ── 所有表定义：(model, col_name, src_value, tgt_value) ──
+        from app.models.conversation_model import Conversation
+        from app.models.memory_message_model import MemoryMessage
+        from app.models.memory_short_model import ShortTermMemory, LongTermMemory
+        from app.models.forgetting_cycle_history_model import ForgettingCycleHistory
+        from app.models.memory_display_record_model import MemoryDisplayRecord
+        from app.models.memory_engine_display_event_model import MemoryEngineDisplayEvent
+        from app.models.memory_forget_model import ForgetAuditModel
+        from app.models.memory_perceptual_model import MemoryPerceptualModel
+        from app.models.reflection_log_model import MemoryReflectionLog
+
+        all_tables: list[tuple[type, str, object, object]] = [
+            # String 类型
+            (Conversation, "user_id", src_str, tgt_str),
+            (MemoryMessage, "end_user_id", src_str, tgt_str),
+            (ShortTermMemory, "end_user_id", src_str, tgt_str),
+            (LongTermMemory, "end_user_id", src_str, tgt_str),
+            (ForgettingCycleHistory, "end_user_id", src_str, tgt_str),
+            (MemoryDisplayRecord, "end_user_id", src_str, tgt_str),
+            (MemoryEngineDisplayEvent, "end_user_id", src_str, tgt_str),
+            # UUID 类型（FK 到 end_users.id）
+            (ForgetAuditModel, "end_user_id", src_id, target_id),
+            (MemoryPerceptualModel, "end_user_id", src_id, target_id),
+            (MemoryReflectionLog, "end_user_id", src_id, target_id),
+        ]
+
+        for model, col_name, src_val, tgt_val in all_tables:
+            col = getattr(model, col_name)
+            total = 0
+            while True:
+                # 先 SELECT 一批主键，再 UPDATE，避免大范围锁表
+                pk_result = await self.db.execute(
+                    select(model.id).where(col == src_val).limit(BATCH)
+                )
+                ids = list(pk_result.scalars().all())
+                if not ids:
+                    break
+                upd_result = await self.db.execute(
+                    update(model)
+                    .where(model.id.in_(ids))
+                    .values(**{col_name: tgt_val})
+                )
+                total += upd_result.rowcount or 0
+            if total:
+                stats[model.__tablename__] = total
+
+        return stats
 
     def get_or_create_end_user(
             self,
@@ -248,6 +433,17 @@ class EndUserRepository:
                     self.db.commit()
                     self.db.refresh(end_user)
                     return end_user
+
+                # 未找到活跃用户 → 检查是否已被合并
+                merged_target = self.resolve_merge_by_other_id(workspace_id, other_id)
+                if merged_target:
+                    db_logger.info(
+                        f"other_id={other_id} 已合并，路由到 target={merged_target.id}"
+                    )
+                    merged_target.app_id = app_id
+                    self.db.commit()
+                    self.db.refresh(merged_target)
+                    return merged_target
 
                 # 创建新用户
                 end_user = EndUser(
@@ -289,7 +485,80 @@ class EndUserRepository:
             )
             .order_by(EndUser.created_at.asc())
         )
-        return result.scalars().first()
+        end_user = result.scalars().first()
+        if end_user:
+            return end_user
+
+        # 未找到活跃用户 → 检查是否已被合并到其它用户
+        return await self.resolve_merge_by_other_id_async(workspace_id, other_id)
+
+    async def resolve_merge_by_other_id_async(
+        self, workspace_id: uuid.UUID, other_id: str
+    ) -> Optional["EndUser"]:
+        """如果 other_id 对应的用户已被合并，返回合并目标用户。
+
+        查询 end_user_merge 表，若存在 origin_other_id 记录，
+        则返回对应的 target EndUser（活跃且属于同一 workspace）。
+        """
+
+        merge_result = await self.db.execute(
+            select(EndUserMerge.target_id)
+            .filter(
+                EndUserMerge.workspace_id == workspace_id,
+                EndUserMerge.origin_other_id == other_id,
+            )
+            .order_by(EndUserMerge.id.desc())
+            .limit(1)
+        )
+        target_id = merge_result.scalars().first()
+        if not target_id:
+            return None
+
+        target_result = await self.db.execute(
+            select(EndUser)
+            .filter(
+                EndUser.id == target_id,
+                EndUser.workspace_id == workspace_id,
+                EndUser.is_active == True,
+            )
+            .limit(1)
+        )
+        target_user = target_result.scalars().first()
+        if target_user:
+            db_logger.info(
+                f"合并路由: other_id={other_id} → target={target_id}"
+            )
+        return target_user
+
+    async def resolve_merge_by_origin_id_async(
+        self, origin_id: uuid.UUID
+    ) -> Optional["EndUser"]:
+        """如果 origin_id 对应的用户已被合并（is_active=False），返回合并目标用户。"""
+
+        merge_result = await self.db.execute(
+            select(EndUserMerge.target_id)
+            .filter(EndUserMerge.origin_id == origin_id)
+            .order_by(EndUserMerge.id.desc())
+            .limit(1)
+        )
+        target_id = merge_result.scalars().first()
+        if not target_id:
+            return None
+
+        target_result = await self.db.execute(
+            select(EndUser)
+            .filter(
+                EndUser.id == target_id,
+                EndUser.is_active == True,
+            )
+            .limit(1)
+        )
+        target_user = target_result.scalars().first()
+        if target_user:
+            db_logger.info(
+                f"合并路由: origin_id={origin_id} → target={target_id}"
+            )
+        return target_user
 
     async def get_or_create_end_user_async(
             self,
@@ -368,6 +637,38 @@ class EndUserRepository:
                 if existing:
                     return existing.id, existing.other_id
 
+                # 未找到活跃用户 → 检查是否已被合并（MCP 场景）
+                from app.models.end_user_model import EndUserMerge
+                merge_record = (
+                    self.db.query(EndUserMerge)
+                    .filter(
+                        EndUserMerge.workspace_id == workspace_id,
+                        or_(
+                            EndUserMerge.origin_id == user_id,
+                            EndUserMerge.origin_other_id == user_id,
+                        )
+                        if is_uuid(user_id)
+                        else EndUserMerge.origin_other_id == user_id,
+                    )
+                    .order_by(EndUserMerge.id.desc())
+                    .first()
+                )
+                if merge_record:
+                    target_user = (
+                        self.db.query(EndUser)
+                        .filter(
+                            EndUser.id == merge_record.target_id,
+                            EndUser.workspace_id == workspace_id,
+                            EndUser.is_active == True,
+                        )
+                        .first()
+                    )
+                    if target_user:
+                        db_logger.info(
+                            f"MCP 合并路由: user_id={user_id} → target={target_user.id}"
+                        )
+                        return target_user.id, target_user.other_id
+
                 end_user = EndUser(
                     workspace_id=workspace_id,
                     other_id=user_id
@@ -438,6 +739,20 @@ class EndUserRepository:
                 self.db.refresh(end_user)
                 return end_user
 
+            # 未找到活跃用户 → 检查是否已被合并到其它用户
+            merged_target = self.resolve_merge_by_other_id(workspace_id, other_id)
+            if merged_target:
+                db_logger.info(
+                    f"other_id={other_id} 已合并，路由到 target={merged_target.id}"
+                )
+                if app_id is not None:
+                    merged_target.app_id = app_id
+                if memory_config_id and not merged_target.memory_config_id:
+                    merged_target.memory_config_id = memory_config_id
+                self.db.commit()
+                self.db.refresh(merged_target)
+                return merged_target
+
             # 创建新用户（is_active 默认为 True）
             end_user = EndUser(
                 app_id=app_id,
@@ -505,6 +820,22 @@ class EndUserRepository:
                 await self.db.refresh(end_user)
                 return end_user
 
+            # 未找到活跃用户 → 检查是否已被合并到其它用户
+            merged_target = await self.resolve_merge_by_other_id_async(
+                workspace_id, other_id
+            )
+            if merged_target:
+                db_logger.info(
+                    f"other_id={other_id} 已合并，路由到 target={merged_target.id}"
+                )
+                if app_id is not None:
+                    merged_target.app_id = app_id
+                if memory_config_id and not merged_target.memory_config_id:
+                    merged_target.memory_config_id = memory_config_id
+                await self.db.commit()
+                await self.db.refresh(merged_target)
+                return merged_target
+
             # 创建新用户
             end_user = EndUser(
                 app_id=app_id,
@@ -538,11 +869,11 @@ class EndUserRepository:
             raise
 
     def get_by_id(self, end_user_id: uuid.UUID) -> Optional[EndUser]:
-        """根据ID获取终端用户（用于缓存操作）
-        
+        """根据ID获取终端用户（用于缓存操作）。若已合并则自动路由到目标。
+
         Args:
             end_user_id: 终端用户ID
-            
+
         Returns:
             Optional[EndUser]: 终端用户对象，如果不存在则返回None
         """
@@ -554,16 +885,22 @@ class EndUserRepository:
             )
             if end_user:
                 db_logger.debug(f"成功查询到终端用户 {end_user_id}")
-            else:
-                db_logger.debug(f"未找到终端用户 {end_user_id}")
-            return end_user
+                return end_user
+
+            resolved = self.resolve_merge_by_origin_id(end_user_id)
+            if resolved:
+                db_logger.debug(f"终端用户 {end_user_id} 已合并，路由到 {resolved.id}")
+                return resolved
+
+            db_logger.debug(f"未找到终端用户 {end_user_id}")
+            return None
         except Exception as e:
             self.db.rollback()
             db_logger.error(f"查询终端用户 {end_user_id} 时出错: {str(e)}")
             raise
 
     async def get_by_id_async(self, end_user_id: uuid.UUID) -> Optional[EndUser]:
-        """根据ID获取终端用户（异步版本，供 AsyncSession 调用方使用）。"""
+        """根据ID获取终端用户（异步版本，供 AsyncSession 调用方使用）。若已合并则自动路由。"""
         try:
             result = await self.db.execute(
                 select(EndUser).where(
@@ -574,9 +911,15 @@ class EndUserRepository:
             end_user = result.scalars().first()
             if end_user:
                 db_logger.debug(f"成功查询到终端用户 {end_user_id}(异步)")
-            else:
-                db_logger.debug(f"未找到终端用户 {end_user_id}(异步)")
-            return end_user
+                return end_user
+
+            resolved = await self.resolve_merge_by_origin_id_async(end_user_id)
+            if resolved:
+                db_logger.debug(f"终端用户 {end_user_id} 已合并，路由到 {resolved.id}(异步)")
+                return resolved
+
+            db_logger.debug(f"未找到终端用户 {end_user_id}(异步)")
+            return None
         except Exception as e:
             await self.db.rollback()
             db_logger.error(f"查询终端用户 {end_user_id} 时出错(异步): {str(e)}")
@@ -603,6 +946,28 @@ class EndUserRepository:
         except Exception as e:
             self.db.rollback()
             db_logger.error(f"批量校验终端用户ID时出错: {str(e)}")
+            raise
+
+    async def filter_existing_ids_async(
+            self,
+            end_user_ids: set[uuid.UUID],
+            workspace_id: uuid.UUID | None = None
+    ) -> Set[uuid.UUID]:
+        if not end_user_ids:
+            return set()
+
+        try:
+            stmt = select(EndUser.id).where(
+                EndUser.id.in_(end_user_ids), EndUser.is_active == True,
+            )
+            if workspace_id:
+                stmt = stmt.where(EndUser.workspace_id == workspace_id)
+            result = await self.db.execute(stmt)
+            end_user_ids = result.scalars().all()
+            return set(end_user_ids)
+        except Exception as e:
+            await self.db.rollback()
+            db_logger.error("批量校验终端用户异常%s", str(e))
             raise
 
     async def get_memory_insight_by_end_user_id_async(

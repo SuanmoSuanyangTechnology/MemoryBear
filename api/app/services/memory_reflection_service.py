@@ -6,6 +6,7 @@ import uuid
 from datetime import datetime
 from typing import Dict, Any, Optional, Set
 
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from app.core.utils.datetime_utils import to_iso_z, utcnow_naive
@@ -26,7 +27,7 @@ api_logger = get_api_logger()
 class WorkspaceAppService:
     """Workplace Application Service Class """
     
-    def __init__(self, db: Session):
+    def __init__(self, db: Session | AsyncSession):
         self.db = db
     
     def get_workspace_apps_detailed(self, workspace_id: str) -> Dict[str, Any]:
@@ -391,6 +392,22 @@ class WorkspaceAppService:
         except Exception as e:
             api_logger.error(f"更新用户写入时间失败，end_user_id: {end_user_id}, 错误: {str(e)}")
             self.db.rollback()
+            return False
+
+    async def update_end_user_write_time_async(self, end_user_id: str) -> bool:
+        try:
+            end_user = await EndUserRepository(self.db).get_end_user_by_id_async(uuid.UUID(end_user_id))
+            if end_user:
+                end_user.write_time = utcnow_naive()
+                await self.db.commit()
+                api_logger.info(f"成功更新用户写入时间，end_user_id: {end_user_id}")
+                return True
+            else:
+                api_logger.warning(f"未找到用户，end_user_id: {end_user_id}")
+                return False
+        except Exception as e:
+            api_logger.error(f"更新用户写入时间失败，end_user_id: {end_user_id}, 错误: {str(e)}")
+            await self.db.rollback()
             return False
 
 

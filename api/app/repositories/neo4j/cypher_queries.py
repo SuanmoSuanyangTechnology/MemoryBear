@@ -2121,7 +2121,7 @@ RETURN e.id AS id,
        e.entity_type AS entity_type,
        e.description AS description,
        e.description_summary AS description_summary,
-       e.description_timeline AS description_timeline,
+       e.event_timeline AS event_timeline,
        COALESCE(e.activation_value, e.importance_score, 0.5) AS activation_value,
        COALESCE(e.importance_score, 0.5) AS importance_score,
        e.last_access_time AS last_access_time,
@@ -2209,7 +2209,7 @@ RETURN e.id AS id,
        e.entity_type AS entity_type,
        e.description AS description,
        e.description_summary AS description_summary,
-       e.description_timeline AS description_timeline,
+       e.event_timeline AS event_timeline,
        COALESCE(e.activation_value, e.importance_score, 0.5) AS activation_value,
        score
 ORDER BY score DESC
@@ -2309,7 +2309,7 @@ RETURN n.description AS description,
        n.anchors AS anchors,
        n.beliefs_or_stances AS beliefs_or_stances,
        n.core_facts AS core_facts,
-       n.events AS events,
+       n.event_timeline AS event_timeline,
        n.goals AS goals,
        n.interests AS interests,
        n.relations AS relations,
@@ -3132,4 +3132,94 @@ CALL () {
 RETURN *
 ORDER BY CASE WHEN sort_time IS NULL THEN 0 ELSE 1 END, sort_time ASC, extraction_count ASC
 LIMIT $batch_size
+"""
+
+# 将所有节点的 end_user_id 从 old 改为 new
+END_USER_MERGE_REASSIGN_NODES = """
+MATCH (n)
+WHERE n.end_user_id = $old_id
+SET n.end_user_id = $new_id
+RETURN count(n) AS updated_nodes
+"""
+
+# 将所有关系的 end_user_id 从 old 改为 new
+END_USER_MERGE_REASSIGN_EDGES = """
+MATCH ()-[r]->()
+WHERE r.end_user_id = $old_id
+SET r.end_user_id = $new_id
+RETURN count(r) AS updated_edges
+"""
+
+# 查找指定 end_user 的 User 实体节点
+END_USER_MERGE_FIND_USER_ENTITIES = """
+MATCH (n:ExtractedEntity {end_user_id: $end_user_id})
+WHERE n.name = '用户'
+RETURN n, elementId(n) AS elem_id
+"""
+
+# 合并更新 User 实体的所有属性
+END_USER_MERGE_UPDATE_USER = """
+MATCH (n:ExtractedEntity)
+WHERE elementId(n) = $elem_id
+SET n.description = $description,
+    n.description_summary = $description_summary,
+    n.aliases = $aliases,
+    n.anchors = $anchors,
+    n.beliefs_or_stances = $beliefs_or_stances,
+    n.core_facts = $core_facts,
+    n.description_timeline = $description_timeline,
+    n.event_timeline = $event_timeline,
+    n.events = $events,
+    n.goals = $goals,
+    n.interests = $interests,
+    n.relations = $relations,
+    n.traits = $traits
+"""
+
+# 重定向 source User 实体的入边到 target User 实体（保留原始关系类型）
+END_USER_MERGE_REDIRECT_INCOMING = """
+MATCH (src:ExtractedEntity {end_user_id: $old_id})
+WHERE src.name = '用户'
+MATCH (tgt:ExtractedEntity)
+WHERE (tgt.name = '用户')
+  AND tgt.end_user_id = $new_id
+WITH src, tgt
+MATCH (src)<-[r_in]-(other)
+WHERE NOT (other:ExtractedEntity)
+WITH other, tgt, r_in
+CALL apoc.create.relationship(other, type(r_in), properties(r_in), tgt)
+YIELD rel AS r_new
+SET r_new.end_user_id = $new_id
+DELETE r_in
+"""
+
+# 重定向 source User 实体的出边到 target User 实体（保留原始关系类型）
+END_USER_MERGE_REDIRECT_OUTGOING = """
+MATCH (src:ExtractedEntity {end_user_id: $old_id})
+WHERE src.name = '用户'
+MATCH (tgt:ExtractedEntity)
+WHERE (tgt.name = '用户')
+  AND tgt.end_user_id = $new_id
+WITH src, tgt
+MATCH (src)-[r_out]->(other)
+WHERE NOT (other:ExtractedEntity)
+WITH other, tgt, r_out
+CALL apoc.create.relationship(tgt, type(r_out), properties(r_out), other)
+YIELD rel AS r_new
+SET r_new.end_user_id = $new_id
+DELETE r_out
+"""
+
+# 删除 source 的 User 实体节点
+END_USER_MERGE_DELETE_USER_ENTITY = """
+MATCH (n:ExtractedEntity {end_user_id: $old_id})
+WHERE n.name = '用户'
+DETACH DELETE n
+"""
+
+# 将 source User 实体的 end_user_id 改为 target（仅 source 有 User 时）
+END_USER_MERGE_REASSIGN_USER_ENTITY = """
+MATCH (n:ExtractedEntity {end_user_id: $old_id})
+WHERE n.name = '用户'
+SET n.end_user_id = $new_id
 """

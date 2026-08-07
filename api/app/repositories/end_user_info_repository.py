@@ -3,6 +3,8 @@
 """
 import uuid
 from typing import Dict, List, Optional
+
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from app.models.end_user_info_model import EndUserInfo
@@ -14,7 +16,7 @@ logger = get_logger(__name__)
 class EndUserInfoRepository:
     """终端用户信息仓储类"""
     
-    def __init__(self, db: Session):
+    def __init__(self, db: Session | AsyncSession):
         self.db = db
     
     def create(self, end_user_id: uuid.UUID, other_name: str, aliases: List[str] = None, meta_data: dict = None) -> EndUserInfo:

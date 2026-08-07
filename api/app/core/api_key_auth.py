@@ -1,6 +1,8 @@
 import asyncio
+import inspect
 import time
 import uuid
+from contextvars import ContextVar
 from functools import wraps
 from typing import Optional, List
 
@@ -23,6 +25,29 @@ from app.schemas.api_key_schema import ApiKeyAuth
 from app.services.api_key_service import ApiKeyAuthService, RateLimiterService
 
 logger = get_api_logger()
+
+# ── ContextVar: side-channel for api_key_auth ────────────────────────
+# Allows endpoints to access ApiKeyAuth without declaring it in the function
+# signature, preventing FastAPI from misinterpreting the Pydantic model as a
+# body field (which causes 422 "Field required" errors).
+
+_current_api_key_auth: ContextVar["ApiKeyAuth | None"] = ContextVar("api_key_auth", default=None)
+
+
+def get_current_api_key_auth() -> "ApiKeyAuth":
+    """Return the ApiKeyAuth injected by ``@require_api_key_self_db``.
+
+    Use this in endpoints that do **not** declare ``api_key_auth`` in their
+    function signature — for example when the endpoint has its own Pydantic
+    body parameter that would conflict.
+
+    Raises :class:`BusinessException` if called without the decorator.
+    """
+    auth = _current_api_key_auth.get()
+    if auth is None:
+        raise BusinessException("API Key 认证信息缺失", BizCode.API_KEY_NOT_FOUND)
+    return auth
+
 
 # ── Async log-writer: batched single-consumer queue ──────────────────
 # Replaces per-request ``asyncio.create_task(log_api_key_usage(...))``
@@ -296,9 +321,7 @@ def require_api_key_self_db(
 
     def decorator(func):
         @wraps(func)
-        async def wrapper(*args, **kwargs):
-            request: Request = kwargs.get("request")
-
+        async def wrapper(request: Request, **kwargs):
             api_key = extract_api_key_from_request(request)
             if not api_key:
                 logger.warning("API Key 缺失", extra={
@@ -383,10 +406,19 @@ def require_api_key_self_db(
                     resource_id=api_key_obj.resource_id,
                 )
 
-            kwargs["api_key_auth"] = _api_key_auth
+            # Set ContextVar for endpoints that use get_current_api_key_auth()
+            _current_api_key_auth.set(_api_key_auth)
+            # Backward-compat: only inject into kwargs if the function expects it
+            _func_sig = inspect.signature(func)
+            if 'api_key_auth' in _func_sig.parameters:
+                kwargs["api_key_auth"] = _api_key_auth
 
             start_time = time.perf_counter()
-            response = await func(*args, **kwargs)
+            # Conditionally pass request: old endpoints need it, new ones don't
+            if 'request' in _func_sig.parameters:
+                response = await func(request, **kwargs)
+            else:
+                response = await func(**kwargs)
             end_time = time.perf_counter()
             response_time = (end_time - start_time) * 1000
 
@@ -405,6 +437,16 @@ def require_api_key_self_db(
                 "created_at": utcnow_naive(),
             })
             return response
+
+        # Inject ``request: Request`` into the wrapper's visible signature so
+        # FastAPI always passes the Request object — even when the underlying
+        # endpoint function doesn't declare it.
+        _func_sig = inspect.signature(func)
+        _req_param = inspect.Parameter(
+            'request', inspect.Parameter.POSITIONAL_OR_KEYWORD, annotation=Request
+        )
+        _other_params = [p for name, p in _func_sig.parameters.items() if name != 'request']
+        wrapper.__signature__ = _func_sig.replace(parameters=[_req_param] + _other_params)
 
         return wrapper
 
