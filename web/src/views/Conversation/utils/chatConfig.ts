@@ -14,7 +14,7 @@ import type { ConversationCtx } from '../hooks/useConversation'
 export const buildSharedChatProps = (ctx: ConversationCtx) => {
   const {
     conversation_id, chatList, fileList, setFileList, toolbarRef, config, isShare,
-    streamLoadingRef, chatIsEnded, loading, setMessage, handleSend, regenerateMessages,
+    streamLoadingRef, chatIsEnded, loading, showMemoryRecall, setMessage, handleSend, regenerateMessages,
     deleteMessage, reportMsg, handleVersionChange, handleFeedback, handleFavorite,
     handleInterventionActionClick,
   } = ctx
@@ -28,6 +28,8 @@ export const buildSharedChatProps = (ctx: ConversationCtx) => {
     }),
     data: chatList,
     streamLoading: streamLoadingRef.current,
+    showMemoryRecall,
+    memoryRecallStreaming: loading,
     loading,
     onChange: setMessage,
     onSend: handleSend,

@@ -10,11 +10,100 @@ import { type ButtonProps } from 'antd'
 /**
  * Chat message item interface
  */
+export interface MemoryProfile {
+  aliases_name?: string[];
+  description?: string;
+  core_facts?: string[];
+  goals?: string[];
+  interests?: string[];
+  relations?: string[];
+  beliefs_or_stances?: string[];
+  anchors?: string[];
+  events?: string[];
+  traits?: string[];
+}
+
+export interface MemoryRecallItem {
+  rank?: number;
+  memory_type?: string;
+  source?: string;
+  score?: number;
+  content?: string;
+  relation?: string;
+  target?: string;
+  target_desc?: string;
+  file?: {
+    file_name?: string;
+    file_path?: string;
+    file_type?: string;
+    perceptual_type?: number;
+  };
+}
+
+export interface MemoryStageData {
+  [key: string]: unknown;
+  has_profile?: boolean;
+  profile?: MemoryProfile;
+  count?: number;
+  questions?: string[];
+  hit_count?: number;
+  memory_count?: number;
+  relation_count?: number;
+  shown_count?: number;
+  total_count?: number;
+  duration_ms?: number;
+  order?: string;
+  items?: MemoryRecallItem[];
+}
+
+export interface MemoryStage {
+  stage: string;
+  status: string;
+  data: MemoryStageData;
+}
+
+export interface MemoryToolCall {
+  /** 仅用于流式阶段归属，后端持久化结构不会返回该字段 */
+  step_id?: string;
+  name: string;
+  input: Record<string, unknown>;
+  status: 'running' | 'completed' | 'failed';
+  error?: string;
+  stages: MemoryStage[];
+}
+
+export interface MemoryRetrieval {
+  schema_version: number;
+  tool_calls: MemoryToolCall[];
+}
+
+export type MemoryTraceEvent = 'tool_start' | 'memory_stage' | 'tool_end' | 'tool_error';
+
+export interface MemoryTraceEventData {
+  step_id?: string;
+  name?: string;
+  input?: string | Record<string, unknown>;
+  stage?: string;
+  status?: string;
+  data?: MemoryStageData;
+  error?: string;
+  meta?: {
+    tool_type?: string;
+    [key: string]: unknown;
+  };
+}
+
 export interface ChatItem {
   /** Message unique identifier */
   id?: string;
   /** Conversation ID */
   conversation_id?: string | null;
+  /** Parent message ID */
+  parent_message_id?: string | null;
+  is_deleted?: boolean;
+  like_count?: number;
+  dislike_count?: number;
+  report_count?: number;
   /** Message role: user or assistant */
   role?: 'user' | 'assistant';
   /** Message content */
@@ -32,7 +121,14 @@ export interface ChatItem {
     files?: any[];
     suggested_questions?: string[];
     citations?: CitationItem[];
-    reasoning_content?: string;
+    model?: string;
+    usage?: {
+      prompt_tokens?: number;
+      completion_tokens?: number;
+      total_tokens?: number;
+    };
+    reasoning_content?: string | null;
+    memory_retrieval?: MemoryRetrieval;
     error?: string;
     waiting_human?: boolean;
     execution_id?: string;
@@ -135,6 +231,10 @@ export interface ChatContentProps {
   data: Array<ChatItem | ChatItem[]>;
   /** Streaming loading state */
   streamLoading: boolean;
+  /** Whether the active stream should show memory recall details */
+  showMemoryRecall?: boolean;
+  /** Whether the last message is still receiving stream events */
+  memoryRecallStreaming?: boolean;
   /** Empty state display content */
   empty?: ReactNode;
   /** Label position: top or bottom */

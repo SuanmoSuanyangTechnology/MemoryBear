@@ -4,7 +4,7 @@
  * into reusable factory functions.
  */
 import { type SSEMessage } from '@/utils/stream'
-import type { ChatItem } from '@/components/Chat/types'
+import type { ChatItem, MemoryTraceEvent, MemoryTraceEventData } from '@/components/Chat/types'
 import { appendOutputByNodeId, finalizeOutputs } from '@/components/Chat/utils/messageOutputs'
 import type { StreamData } from '../types';
 
@@ -165,6 +165,10 @@ export interface StreamHandlerDeps {
     replace?: boolean,
   ) => void
   updateAssistantReasoningMessage: (content?: string, message_id?: string) => void
+  updateAssistantMemoryRetrieval: (
+    event: MemoryTraceEvent,
+    data: MemoryTraceEventData,
+  ) => void
   startAudioPolling: (audioUrl: string, idToPoll: string) => void
   /** Locally update the history list after streaming ends (insert new / refresh updated_at for existing) */
   upsertHistory: (conversationId: string, title?: string) => void
@@ -178,7 +182,8 @@ export interface StreamHandlerDeps {
 export const createSendStreamHandler = (deps: StreamHandlerDeps) => {
   const {
     conversationId, setChatList, setConversationId, setLoading,
-    updateAssistantMessage, updateAssistantReasoningMessage, startAudioPolling,
+    updateAssistantMessage, updateAssistantReasoningMessage, updateAssistantMemoryRetrieval,
+    startAudioPolling,
     upsertHistory, title, chatIsEnded, streamLoadingRef,
   } = deps
 
@@ -218,6 +223,12 @@ export const createSendStreamHandler = (deps: StreamHandlerDeps) => {
         case 'reasoning':
           updateAssistantReasoningMessage(content)
           if (curId) currentConversationId = curId;
+          break
+        case 'tool_start':
+        case 'memory_stage':
+        case 'tool_end':
+        case 'tool_error':
+          updateAssistantMemoryRetrieval(item.event as MemoryTraceEvent, item.data as MemoryTraceEventData)
           break
         case 'message':
           updateAssistantMessage(content, audio_url, audio_url ? 'pending' : undefined)
@@ -271,7 +282,8 @@ export const createSendStreamHandler = (deps: StreamHandlerDeps) => {
 export const createRegenerateStreamHandler = (deps: StreamHandlerDeps & { messageId: string }) => {
   const {
     messageId, conversationId, setChatList, setConversationId, setLoading,
-    updateAssistantMessage, updateAssistantReasoningMessage, startAudioPolling,
+    updateAssistantMessage, updateAssistantReasoningMessage, updateAssistantMemoryRetrieval,
+    startAudioPolling,
     upsertHistory, chatIsEnded, streamLoadingRef,
   } = deps
 
@@ -315,6 +327,12 @@ export const createRegenerateStreamHandler = (deps: StreamHandlerDeps & { messag
         case 'reasoning':
           updateAssistantReasoningMessage(content, messageId)
           if (curId) currentConversationId = curId;
+          break
+        case 'tool_start':
+        case 'memory_stage':
+        case 'tool_end':
+        case 'tool_error':
+          updateAssistantMemoryRetrieval(item.event as MemoryTraceEvent, item.data as MemoryTraceEventData)
           break
         case 'message':
           updateAssistantMessage(content, audio_url, audio_url ? 'pending' : undefined, undefined, undefined, undefined, messageId)
