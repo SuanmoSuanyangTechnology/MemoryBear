@@ -5,11 +5,11 @@ import uuid
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.error_codes import BizCode
 from app.core.response_utils import fail, success
-from app.db import get_db
+from app.db import get_async_db
 from app.dependencies import CurrentUserSnapshot, get_current_user_async
 from app.schemas.memory_value_ranking_schema import (
     PermanentMemoryListApiResponse,
@@ -63,7 +63,7 @@ def _workspace_id(current_user: CurrentUserSnapshot) -> uuid.UUID | None:
 async def get_permanent_memory_quota(
     end_user_id: str = Query(...),
     current_user: CurrentUserSnapshot = Depends(get_current_user_async),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ) -> dict | JSONResponse:
     workspace_id = _workspace_id(current_user)
     if workspace_id is None:
@@ -84,7 +84,7 @@ async def list_permanent_memories(
     page: int = Query(1, ge=1),
     pagesize: int = Query(20, ge=1, le=100),
     current_user: CurrentUserSnapshot = Depends(get_current_user_async),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ) -> dict | JSONResponse:
     workspace_id = _workspace_id(current_user)
     if workspace_id is None:
@@ -116,7 +116,7 @@ async def unmark_permanent_memory(
     node_id: str,
     request: PermanentMemoryUnmarkRequest,
     current_user: CurrentUserSnapshot = Depends(get_current_user_async),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ) -> dict | JSONResponse:
     workspace_id = _workspace_id(current_user)
     if workspace_id is None:
