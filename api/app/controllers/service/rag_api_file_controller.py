@@ -156,7 +156,6 @@ async def get_file(
     return await file_controller.get_file(
         file_id=file_id,
         db=db,
-        current_user=None,
         storage_service=storage_service,
     )
 
