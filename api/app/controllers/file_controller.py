@@ -268,19 +268,17 @@ async def custom_text(
 
 
 @router.get("/{file_id}", response_model=Any)
-@cur_workspace_access_guard()
 async def get_file(
         file_id: uuid.UUID,
         original: bool = Query(False, description="QA 文档是否下载原始文件（默认从 ES 导出修改后内容）"),
         db: Session = Depends(get_db),
-        current_user: User = Depends(get_current_user),
         storage_service: FileStorageService = Depends(get_file_storage_service),
 ) -> Any:
     """Download file by file_id — QA 文档默认从 ES 导出修改后内容，?original=true 下载原始文件"""
     db_file = file_service.get_file_by_id(
         db,
         file_id=file_id,
-        current_user=current_user,
+        current_user=None,
     )
     if not db_file:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
