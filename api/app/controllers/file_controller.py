@@ -268,6 +268,7 @@ async def custom_text(
 
 
 @router.get("/{file_id}", response_model=Any)
+# Public compatibility exception for knowledge-base image block rendering.
 async def get_file(
         file_id: uuid.UUID,
         original: bool = Query(False, description="QA 文档是否下载原始文件（默认从 ES 导出修改后内容）"),
