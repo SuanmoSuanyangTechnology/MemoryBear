@@ -7,7 +7,7 @@ import uuid
 from numbers import Number
 from typing import Any, Callable, Sequence
 
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.quota_manager import get_end_user_memory_limit_async
 from app.core.utils.datetime_utils import (
@@ -129,18 +129,23 @@ async def assign_permanent_memory_slots(
 class MemoryValueRankingService:
     def __init__(
         self,
-        db: Session,
+        db: AsyncSession,
         connector_factory: Callable[[], Neo4jConnector] | None = None,
     ) -> None:
         self.db = db
         self.connector_factory = connector_factory or Neo4jConnector
 
-    def _get_end_user(self, end_user_id: str | uuid.UUID, workspace_id: uuid.UUID):
+    async def _get_end_user(
+        self,
+        end_user_id: str | uuid.UUID,
+        workspace_id: uuid.UUID,
+    ):
         try:
             parsed_id = end_user_id if isinstance(end_user_id, uuid.UUID) else uuid.UUID(end_user_id)
         except (ValueError, TypeError, AttributeError) as exc:
             raise PermanentMemoryNotFound("end user not found") from exc
-        end_user = EndUserRepository(self.db).get_active_end_user_in_workspace(
+        end_user_repo = EndUserRepository(self.db)
+        end_user = await end_user_repo.get_active_end_user_in_workspace_async(
             parsed_id,
             workspace_id,
         )
@@ -168,7 +173,7 @@ class MemoryValueRankingService:
         end_user_id: str | uuid.UUID,
         workspace_id: uuid.UUID,
     ) -> PermanentMemoryQuota:
-        end_user = self._get_end_user(end_user_id, workspace_id)
+        end_user = await self._get_end_user(end_user_id, workspace_id)
         connector = self.connector_factory()
         try:
             total_memory_limit = await get_total_memory_limit(str(end_user.id))
@@ -188,7 +193,7 @@ class MemoryValueRankingService:
         page: int,
         page_size: int,
     ) -> PermanentMemoryList:
-        end_user = self._get_end_user(end_user_id, workspace_id)
+        end_user = await self._get_end_user(end_user_id, workspace_id)
         connector = self.connector_factory()
         try:
             total_memory_limit = await get_total_memory_limit(str(end_user.id))
@@ -236,7 +241,7 @@ class MemoryValueRankingService:
         end_user_id: str | uuid.UUID,
         workspace_id: uuid.UUID,
     ) -> PermanentMemoryUnmarkResult:
-        end_user = self._get_end_user(end_user_id, workspace_id)
+        end_user = await self._get_end_user(end_user_id, workspace_id)
         connector = self.connector_factory()
         try:
             total_memory_limit = await get_total_memory_limit(str(end_user.id))

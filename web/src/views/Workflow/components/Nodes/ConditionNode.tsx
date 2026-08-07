@@ -100,11 +100,11 @@ const ConditionNode: ReactShapeConfig['component'] = ({ node }) => {
         <Flex vertical gap={4} className="rb:mt-3!">
           {data.config?.cases?.defaultValue.map((item: any, index: number) => (
             <div key={index}>
-              <Flex justify={item.expressions.length > 0 ? "space-between" : 'end'} className="rb:mb-1! rb:leading-4">
-                {item.expressions.length > 0 && <span className="rb:text-[#5B6167] rb:text-[10px] rb:pl-1">CASE{index + 1}</span>}
+              <Flex justify={item.expressions && item.expressions.length > 0 ? "space-between" : 'end'} className="rb:mb-1! rb:leading-4">
+                {item.expressions && item.expressions.length > 0 && <span className="rb:text-[#5B6167] rb:text-[10px] rb:pl-1">CASE{index + 1}</span>}
                 <span className="rb:text-[#212332] rb:font-medium rb:text-[12px]">{index === 0 ? 'IF' : `ELIF`}</span>
               </Flex>
-              {item.expressions.length > 0 && <Flex vertical gap={2}>
+              {item.expressions && item.expressions?.length > 0 && <Flex vertical gap={2}>
                 {item.expressions.map((expression: any, eIndex: number) => (
                   <div key={eIndex} className="rb:relative">
                     {item.expressions.length > 1 && eIndex > 0 &&

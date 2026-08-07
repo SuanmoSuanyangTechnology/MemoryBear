@@ -5,7 +5,7 @@ from datetime import timedelta
 from urllib.parse import quote
 
 from celery import Celery
-from celery.schedules import crontab
+from celery.schedules import crontab, schedule
 
 from app.core.config import settings
 from app.core.logging_config import get_logger
@@ -341,23 +341,35 @@ if _HAS_SUBSCRIPTION_TASKS:
         },
     })
 
-# 消息通知中心定时任务（每分钟扫描到期排期与到期下架）
-# 可通过环境变量调整（默认 60 秒，与设计的「定时发布偏差 P95 < 60 秒」目标一致）：
-#   NOTIFICATION_SCAN_INTERVAL_SECONDS=N
-_NOTIFICATION_SCAN_INTERVAL_SECONDS = int(os.getenv("NOTIFICATION_SCAN_INTERVAL_SECONDS", "60"))
+# 消息通知中心定时任务（每秒/每分钟扫描到期排期与到期下架）
+# 通过 settings 读取环境变量 NOTIFICATION_SCAN_INTERVAL_SECONDS（默认 60 秒）
+_NOTIFICATION_SCAN_INTERVAL_SECONDS = settings.NOTIFICATION_SCAN_INTERVAL_SECONDS
+
+
+class NoCatchupSchedule(schedule):
+    """同标准 schedule，但 `is_due` 最多返回 1，避免 Beat 重启时追赶已错过的时间窗口"""
+
+    def is_due(self, last_run_at):
+        is_due, next_time = super().is_due(last_run_at)
+        return min(is_due, 1), next_time
+
 
 if _HAS_NOTIFICATION_TASKS:
     celery_app.conf.beat_schedule.update({
         # 扫描 scheduled + publish_at<=now，领取后投递 notification.publish
         "notification-scan-scheduled": {
             "task": "notification.scan_scheduled",
-            "schedule": float(_NOTIFICATION_SCAN_INTERVAL_SECONDS),
+            "schedule": NoCatchupSchedule(
+                run_every=timedelta(seconds=_NOTIFICATION_SCAN_INTERVAL_SECONDS)
+            ),
             "options": {"queue": "notification_state_tasks", "expires": 120},
         },
         # 扫描 published + expire_at<=now，转为 expired
         "notification-scan-expired": {
             "task": "notification.scan_expired",
-            "schedule": float(_NOTIFICATION_SCAN_INTERVAL_SECONDS),
+            "schedule": NoCatchupSchedule(
+                run_every=timedelta(seconds=_NOTIFICATION_SCAN_INTERVAL_SECONDS)
+            ),
             "options": {"queue": "notification_state_tasks", "expires": 120},
         },
     })

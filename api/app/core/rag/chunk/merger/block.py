@@ -91,7 +91,7 @@ class BlockMerger(ChunkMerger):
                         delimiter,
                         0,
                         merge_lists_with_text=parse_result.markdown_preprocess_profile == "mineru",
-                        preserve_atomic_blocks=True,
+                        preserve_atomic_blocks=False,
                     )
                     groups.append(ParentChildGroup(parent=parent, children=children))
                 return self._parent_child_merge_result(groups, parse_result.pdf_parser)
@@ -284,7 +284,10 @@ class BlockMerger(ChunkMerger):
         delimiter: str | None,
         overlap: int,
     ) -> list[LogicalChunk]:
-        if parent.type in {LogicalChunkType.TABLE, LogicalChunkType.IMAGE}:
+        if parent.type is LogicalChunkType.TABLE:
+            return self._split_logical_table_chunk(parent, token_num)
+
+        if parent.type is LogicalChunkType.IMAGE:
             return [deepcopy(parent)]
 
         block_type = parent.metadata.get("block_type")
