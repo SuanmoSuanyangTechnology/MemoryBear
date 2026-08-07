@@ -299,7 +299,8 @@ class Settings:
     REDIS_DB_CELERY_BROKER: int = int(os.getenv("REDIS_DB_CELERY_BROKER", "3"))
     REDIS_DB_CELERY_BACKEND: int = int(os.getenv("REDIS_DB_CELERY_BACKEND", "4"))
 
-    # 通知中心 SSE 配置
+    # 通知中心配置
+    NOTIFICATION_REDIS_DB: int = int(os.getenv("NOTIFICATION_REDIS_DB", "8"))
     NOTIFICATION_SCAN_INTERVAL_SECONDS: int = int(os.getenv("NOTIFICATION_SCAN_INTERVAL_SECONDS", "60"))
     NOTIFICATION_HEARTBEAT_SECONDS: int = int(os.getenv("NOTIFICATION_HEARTBEAT_SECONDS", "25"))
     NOTIFICATION_MAX_SSE_PER_USER: int = int(os.getenv("NOTIFICATION_MAX_SSE_PER_USER", "3"))
