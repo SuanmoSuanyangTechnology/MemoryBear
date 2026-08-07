@@ -23,6 +23,7 @@ import { Layout } from 'antd';
 
 import { useUser } from '@/store/user';
 import ErrorBoundary from '@/components/ErrorBoundary'
+import Banners from './Banner';
 
 /**
  * Basic layout component for pages without navigation UI.
@@ -38,6 +39,7 @@ const BasicAuthLayout: FC = () => {
 
   return (
     <Layout className="rb:min-h-screen!">
+      <Banners className="rb:mb-0!" />
       <ErrorBoundary>
         {/* Render child routes without additional UI */}
         <Outlet />

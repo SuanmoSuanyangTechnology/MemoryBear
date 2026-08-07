@@ -141,22 +141,75 @@ function parseDataContent(dataContent: string): string | object {
 }
 
 /**
+ * SSE request configuration
+ */
+export interface SSERequestConfig {
+  headers?: Record<string, string>
+  method?: 'GET' | 'POST'
+  onOpen?: () => void
+}
+
+/**
+ * Append request data to URL query parameters.
+ * Arrays are represented as repeated parameters and objects are JSON encoded.
+ */
+const appendSearchParam = (params: URLSearchParams, key: string, value: unknown) => {
+  if (value === undefined) return
+
+  if (Array.isArray(value)) {
+    value.forEach(item => appendSearchParam(params, key, item))
+    return
+  }
+
+  if (value !== null && typeof value === 'object') {
+    params.append(key, JSON.stringify(value))
+    return
+  }
+
+  params.append(key, value === null ? '' : String(value))
+}
+
+const buildSSERequestUrl = (url: string, data: any) => {
+  const params = new URLSearchParams()
+
+  if (data instanceof URLSearchParams) {
+    data.forEach((value, key) => params.append(key, value))
+  } else if (data && typeof data === 'object') {
+    Object.entries(data).forEach(([key, value]) => appendSearchParam(params, key, value))
+  }
+
+  const query = params.toString()
+  if (!query) return `${API_PREFIX}${url}`
+
+  return `${API_PREFIX}${url}${url.includes('?') ? '&' : '?'}${query}`
+}
+
+/**
  * Make SSE request with authentication
  * @param url - API endpoint
- * @param data - Request payload
+ * @param data - Request body for POST or query parameters for GET
  * @param token - Authentication token
  * @param config - Additional request configuration
  * @returns Fetch response
  */
-const makeSSERequest = async (url: string, data: any, token: string, config = { headers: {} }, signal?: AbortSignal) => {
-  return fetch(`${API_PREFIX}${url}`, {
-    method: 'POST',
+const makeSSERequest = async (
+  url: string,
+  data: any,
+  token: string,
+  config: SSERequestConfig = {},
+  signal?: AbortSignal,
+) => {
+  const method = config.method ?? 'POST'
+  const requestUrl = method === 'GET' ? buildSSERequestUrl(url, data) : `${API_PREFIX}${url}`
+
+  return fetch(requestUrl, {
+    method,
     headers: {
-      'Content-Type': 'application/json',
+      ...(method === 'POST' ? { 'Content-Type': 'application/json' } : {}),
       'Authorization': `Bearer ${token}`,
       ...config.headers,
     },
-    body: JSON.stringify(data),
+    body: method === 'POST' ? JSON.stringify(data) : undefined,
     signal,
   });
 };
@@ -164,11 +217,17 @@ const makeSSERequest = async (url: string, data: any, token: string, config = { 
 /**
  * Handle SSE stream with automatic token refresh and message parsing
  * @param url - API endpoint
- * @param data - Request payload
+ * @param data - Request body for POST or query parameters for GET
  * @param onMessage - Callback for each parsed message
- * @param config - Additional request configuration
+ * @param config - Additional request configuration; defaults to POST
  */
-export const handleSSE = async (url: string, data: any, onMessage?: (data: SSEMessage[]) => void, config = { headers: {} }, onAbort?: (abort: () => void) => void) => {
+export const handleSSE = async (
+  url: string,
+  data: any,
+  onMessage?: (data: SSEMessage[]) => void,
+  config: SSERequestConfig = {},
+  onAbort?: (abort: () => void) => void,
+) => {
   const controller = new AbortController();
   const abort = () => controller.abort();
   onAbort?.(abort);

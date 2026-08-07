@@ -19,10 +19,11 @@
 
 import { Outlet } from 'react-router-dom';
 import { useEffect, type FC } from 'react';
-import { Layout } from 'antd';
+import { Layout, Flex } from 'antd';
 
 import { useUser } from '@/store/user';
 import ErrorBoundary from '@/components/ErrorBoundary'
+import Banners from './Banner';
 
 /**
  * Basic layout component for pages without navigation UI.
@@ -38,11 +39,16 @@ const BasicLayout: FC = () => {
   }, [getUserInfo, getStorageType]);
 
   return (
-    <Layout className="rb:min-h-screen!">
-      <ErrorBoundary>
-        {/* Render child routes without additional UI */}
-        <Outlet />
-      </ErrorBoundary>
+    <Layout>
+      <Flex vertical gap={0} className="rb:h-screen! rb:min-h-0! rb:overflow-hidden">
+        <Banners className="rb:mb-0!" />
+        <div className="rb:min-h-0 rb:flex-1 rb:overflow-hidden">
+          <ErrorBoundary>
+            {/* Render child routes without additional UI */}
+            <Outlet />
+          </ErrorBoundary>
+        </div>
+      </Flex>
     </Layout>
   )
 };
