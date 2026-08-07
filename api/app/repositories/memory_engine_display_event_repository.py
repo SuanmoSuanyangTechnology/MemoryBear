@@ -7,8 +7,9 @@ import logging
 import uuid
 from typing import Any, Dict, List, Tuple
 
-from sqlalchemy import and_, or_, text
+from sqlalchemy import and_, or_, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from app.models.memory_engine_display_event_model import MemoryEngineDisplayEvent
@@ -19,7 +20,7 @@ logger = logging.getLogger(__name__)
 class MemoryEngineDisplayEventRepository:
     """引擎展示事件数据访问层"""
 
-    def __init__(self, db: Session):
+    def __init__(self, db: Session | AsyncSession):
         self.db = db
 
     def bulk_insert_events(
@@ -65,7 +66,7 @@ class MemoryEngineDisplayEventRepository:
         )
         return inserted
 
-    def query_aggregated_paginated(
+    async def query_aggregated_paginated(
         self,
         end_user_id: uuid.UUID,
         workspace_id: uuid.UUID,
@@ -113,10 +114,11 @@ class MemoryEngineDisplayEventRepository:
                 GROUP BY (r.occurred_at AT TIME ZONE 'UTC' AT TIME ZONE :tz)::date, r.engine_type
             ) sub
         """)
-        total = self.db.execute(
+        total_result = await self.db.execute(
             count_sql,
             {"user_id": end_user_id, "workspace_id": workspace_id, "tz": timezone},
-        ).scalar() or 0
+        )
+        total = total_result.scalar() or 0
 
         if total == 0:
             return [], 0
@@ -148,7 +150,7 @@ class MemoryEngineDisplayEventRepository:
             ORDER BY max_occurred_at DESC, engine_type ASC
             LIMIT :limit OFFSET :offset
         """)
-        keys_result = self.db.execute(
+        keys_query_result = await self.db.execute(
             keys_sql,
             {
                 "user_id": end_user_id,
@@ -157,7 +159,8 @@ class MemoryEngineDisplayEventRepository:
                 "limit": pagesize,
                 "offset": offset,
             },
-        ).fetchall()
+        )
+        keys_result = keys_query_result.fetchall()
 
         if not keys_result:
             return [], total
@@ -188,15 +191,15 @@ class MemoryEngineDisplayEventRepository:
                 )
             )
 
-        events = (
-            self.db.query(MemoryEngineDisplayEvent)
-            .filter(
+        events_result = await self.db.execute(
+            select(MemoryEngineDisplayEvent)
+            .where(
                 MemoryEngineDisplayEvent.end_user_id == end_user_id,
                 or_(*event_filters),
             )
             .order_by(MemoryEngineDisplayEvent.occurred_at.desc())
-            .all()
         )
+        events = list(events_result.scalars().all())
 
         specs_by_engine = {}
         for spec in group_specs:
