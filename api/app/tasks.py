@@ -4940,6 +4940,7 @@ def init_interest_distribution_for_users(self, end_user_ids: List[str]) -> Dict[
         initialized = 0
         failed = 0
         skipped = 0
+        not_cached = 0
         language = "zh"
 
         service = MemoryAgentService()
@@ -4978,27 +4979,35 @@ def init_interest_distribution_for_users(self, end_user_ids: List[str]) -> Dict[
 
             logger.info(f"用户 {end_user_id} 无兴趣分布缓存，开始生成")
             try:
-                result = await service.get_interest_distribution_by_user(
+                result, cacheable = await service.generate_interest_distribution_by_user(
                     end_user_id=end_user_id,
                     limit=5,
                     language=language,
                 )
-                await InterestMemoryCache.set_interest_distribution(
-                    end_user_id=end_user_id,
-                    language=language,
-                    data=result,
-                    expire=INTEREST_CACHE_EXPIRE,
-                )
-                initialized += 1
-                logger.info(f"用户 {end_user_id} 兴趣分布缓存生成成功")
+                if cacheable:
+                    await InterestMemoryCache.set_interest_distribution(
+                        end_user_id=end_user_id,
+                        language=language,
+                        data=result,
+                        expire=INTEREST_CACHE_EXPIRE,
+                    )
+                    initialized += 1
+                    logger.info(f"用户 {end_user_id} 兴趣分布缓存生成成功")
+                else:
+                    not_cached += 1
+                    logger.info(f"用户 {end_user_id} LLM 未识别到兴趣，本次不写缓存")
             except Exception as e:
                 failed += 1
                 logger.error(f"用户 {end_user_id} 兴趣分布缓存生成失败: {e}")
 
-        logger.info(f"兴趣分布按需初始化完成: 初始化={initialized}, 跳过={skipped}, 失败={failed}")
+        logger.info(
+            f"兴趣分布按需初始化完成: 初始化={initialized}, "
+            f"未缓存={not_cached}, 跳过={skipped}, 失败={failed}"
+        )
         return {
             "status": "SUCCESS",
             "initialized": initialized,
+            "not_cached": not_cached,
             "skipped": skipped,
             "failed": failed,
         }
@@ -5006,8 +5015,13 @@ def init_interest_distribution_for_users(self, end_user_ids: List[str]) -> Dict[
     loop = set_asyncio_event_loop()
     try:
         result = loop.run_until_complete(_run())
-        # 全部失败（无初始化、无跳过）= 完全失败：raise → Celery FAILURE
-        if result["failed"] > 0 and result["initialized"] == 0 and result["skipped"] == 0:
+        # 全部失败（无初始化、无未缓存成功结果、无跳过）才标记 Celery FAILURE。
+        if (
+            result["failed"] > 0
+            and result["initialized"] == 0
+            and result["not_cached"] == 0
+            and result["skipped"] == 0
+        ):
             raise RuntimeError(
                 f"all {result['failed']} users failed to initialize interest distribution"
             )

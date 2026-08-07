@@ -358,21 +358,27 @@ async def get_interest_distribution_by_user_api(
         )
         if cached is not None:
             api_logger.info(f"Interest distribution cache hit: end_user_id={end_user_id}")
-            return success(data=cached, msg="获取兴趣分布标签成功")
+            return success(data=cached[:limit], msg="获取兴趣分布标签成功")
 
-        result = await memory_agent_service.get_interest_distribution_by_user(
+        result, cacheable = await memory_agent_service.generate_interest_distribution_by_user(
             end_user_id=end_user_id,
-            limit=limit,
+            limit=5,
             language=language
         )
 
-        await InterestMemoryCache.set_interest_distribution(
-            end_user_id=end_user_id,
-            language=language,
-            data=result,
-        )
+        if cacheable:
+            await InterestMemoryCache.set_interest_distribution(
+                end_user_id=end_user_id,
+                language=language,
+                data=result,
+            )
+        else:
+            api_logger.info(
+                "Interest distribution not cached after empty LLM result: "
+                f"end_user_id={end_user_id}"
+            )
 
-        return success(data=result, msg="获取兴趣分布标签成功")
+        return success(data=result[:limit], msg="获取兴趣分布标签成功")
     except Exception as e:
         api_logger.error(f"Interest distribution by user failed: {str(e)}")
         return fail(BizCode.INTERNAL_ERROR, "获取兴趣分布标签失败", str(e))
