@@ -399,7 +399,12 @@ class RateLimiterService:
         2. API Key 日调用量
 
         ``db`` 支持 ``Session`` 和 ``AsyncSession``，自动按类型选择同步/异步查询。
+
+        rate_limit_disabled=True 的 Key 跳过全部限流检查（如预置的 MemorySkills 空间 Key）。
         """
+        if api_key.rate_limit_disabled:
+            return True, "", {}
+
         # 1. 取套餐限额与 api_key 自身限额的最小值
         effective_limit = api_key.rate_limit
         tenant_limit = None

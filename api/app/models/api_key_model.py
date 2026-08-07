@@ -43,6 +43,7 @@ class ApiKey(Base):
     # 限制和配额
     rate_limit = Column(Integer, default=10, comment="QPS限制（请求/秒）")
     daily_request_limit = Column(Integer, default=10000, comment="日请求限制")
+    rate_limit_disabled = Column(Boolean, default=False, nullable=False, comment="跳过全部限流检查（预置服务 Key 专用）")
 
     # 配额和使用统计
     quota_limit = Column(Integer, comment="配额限制（总请求数）")
