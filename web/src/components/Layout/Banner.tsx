@@ -6,10 +6,13 @@ import { useTranslation } from 'react-i18next';
 import {
   useNotification,
 } from '@/store/notification';
+import { isPrivateAvailable } from '@/utils/private'
 
 const Banners: FC<{ className?: string }> = ({
   className
 }) => {
+  if (!isPrivateAvailable) return;
+
   const { t } = useTranslation();
   const { modal } = App.useApp()
   const {
