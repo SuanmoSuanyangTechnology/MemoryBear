@@ -247,7 +247,7 @@ const Properties: FC<PropertiesProps> = ({
   }
 
   return (
-    <div className={clsx("rb:h-[calc(100vh-132px)] rb:w-90 rb:fixed rb:right-2.5 rb:top-30 rb:bottom-2.5 rb:z-1000", styles.properties)}>
+    <div className={clsx("rb:w-90 rb:absolute rb:right-2.5 rb:top-14 rb:bottom-2.5 rb:z-1000", styles.properties)}>
       <Form key={selectedNode?.getData()?.id} form={form} size="small" layout="vertical" className="rb:h-full!">
         <RbCard
           title={() => (

@@ -120,7 +120,7 @@ const ApplicationConfig: React.FC = () => {
   }
 
   return (
-    <Flex vertical className="rb:h-screen!">
+    <Flex vertical className="rb:h-full! rb:min-h-0!">
       <ConfigHeader 
         activeTab={activeTab}
         handleChangeTab={handleChangeTab}
@@ -128,7 +128,7 @@ const ApplicationConfig: React.FC = () => {
         refresh={getApplicationInfo}
         appRef={application?.type === 'agent' ? agentRef : application?.type === 'multi_agent' ? clusterRef : workflowRef}
       />
-      <div className="rb:p-3 rb:flex-1 rb:overflow-auto">
+      <div className={`rb:flex-1 rb:min-h-0 rb:overflow-auto ${activeTab === 'arrangement' && application?.type.includes('workflow') ? '' : 'rb:p-3'}`}>
         {activeTab === 'arrangement' && application?.type === 'agent' && <Agent ref={agentRef} onFeaturesLoad={setFeatures} />}
         {activeTab === 'arrangement' && application?.type === 'multi_agent' && <Cluster ref={clusterRef} onFeaturesLoad={setFeatures} />}
         {activeTab === 'arrangement' && application?.type.includes('workflow') &&
