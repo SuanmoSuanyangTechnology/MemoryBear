@@ -43,7 +43,7 @@ const ParameterStep = ({ form, fileIds, isParentChildMode }: ParameterStepProps)
     parameterSettings = 'defaultSettings',
     pdfEnhancementEnabled = true,
     blockSize = 512,
-  } = Form.useWatch(['processingMethod', 'parameterSettings', 'pdfEnhancementEnabled', 'blockSize'], form) || {};
+  } = Form.useWatch([], form) || {};
 
   const changeProcessingMethod = (method: ProcessingMethod) => {
     form.setFieldValue('processingMethod', method);
@@ -77,7 +77,10 @@ const ParameterStep = ({ form, fileIds, isParentChildMode }: ParameterStepProps)
         desc={t('knowledgeBase.imageParsingSettingsDesc')}
       />
 
-      <Form.Item name={['image', 'vision_mode']} className="rb:mt-3!">
+      <Form.Item name={['image', 'vision_mode']} className="rb:mt-3!"
+        getValueProps={(value) => ({ value: String(value) })}
+        getValueFromEvent={(value) => Number(value)}
+      >
         <RadioGroupCard
           options={(['textImage', 'hybridImage', 'pureImage'] as const).map((type, index) => ({
             value: String(index),
