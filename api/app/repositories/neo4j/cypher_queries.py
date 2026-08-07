@@ -112,6 +112,136 @@ SET s.emotion_type = item.emotion_type,
 RETURN s.id AS uuid
 """
 
+INTEREST_ENTITY_CANDIDATES_BY_END_USER = """
+MATCH (s:Statement)-[:REFERENCES_ENTITY]->(e:ExtractedEntity)
+WHERE s.end_user_id = $id
+  AND e.end_user_id = $id
+  AND s.delete_at IS NULL
+  AND e.delete_at IS NULL
+  AND e.id IS NOT NULL
+  AND e.name IS NOT NULL
+  AND (
+    s.speaker IS NULL
+    OR toLower(trim(toString(s.speaker))) = 'user'
+  )
+WITH e.id AS entity_id,
+     trim(toString(e.name)) AS name,
+     coalesce(toString(e.entity_type), '') AS entity_type,
+     count(DISTINCT s.id) AS frequency
+WHERE name <> ''
+  AND NOT (toLower(name) IN $excluded_names)
+  AND NOT name =~ $iso_datetime_pattern
+  AND NOT name =~ $unix_timestamp_pattern
+RETURN entity_id, name, entity_type, frequency
+ORDER BY frequency DESC, toLower(name) ASC, entity_id ASC
+LIMIT $limit
+"""
+
+INTEREST_ENTITY_CANDIDATES_BY_USER = """
+MATCH (s:Statement)-[:REFERENCES_ENTITY]->(e:ExtractedEntity)
+WHERE s.user_id = $id
+  AND e.user_id = $id
+  AND s.delete_at IS NULL
+  AND e.delete_at IS NULL
+  AND e.id IS NOT NULL
+  AND e.name IS NOT NULL
+  AND (
+    s.speaker IS NULL
+    OR toLower(trim(toString(s.speaker))) = 'user'
+  )
+WITH e.id AS entity_id,
+     trim(toString(e.name)) AS name,
+     coalesce(toString(e.entity_type), '') AS entity_type,
+     count(DISTINCT s.id) AS frequency
+WHERE name <> ''
+  AND NOT (toLower(name) IN $excluded_names)
+  AND NOT name =~ $iso_datetime_pattern
+  AND NOT name =~ $unix_timestamp_pattern
+RETURN entity_id, name, entity_type, frequency
+ORDER BY frequency DESC, toLower(name) ASC, entity_id ASC
+LIMIT $limit
+"""
+
+INTEREST_STATEMENT_EVIDENCE_BY_END_USER = """
+UNWIND range(0, size($entity_ids) - 1) AS entity_rank
+WITH entity_rank, $entity_ids[entity_rank] AS entity_id
+MATCH (s:Statement)-[:REFERENCES_ENTITY]->(e:ExtractedEntity {id: entity_id})
+WHERE s.end_user_id = $id
+  AND e.end_user_id = $id
+  AND s.delete_at IS NULL
+  AND e.delete_at IS NULL
+  AND s.id IS NOT NULL
+  AND s.statement IS NOT NULL
+  AND trim(toString(s.statement)) <> ''
+  AND (
+    s.speaker IS NULL
+    OR toLower(trim(toString(s.speaker))) = 'user'
+  )
+WITH entity_rank, entity_id, s
+ORDER BY entity_rank ASC,
+         CASE WHEN toLower(trim(toString(s.speaker))) = 'user' THEN 0 ELSE 1 END ASC,
+         coalesce(s.dialog_at, s.created_at) DESC,
+         s.id ASC
+WITH entity_rank, entity_id, collect(s)[0..$per_entity_limit] AS statements
+UNWIND statements AS s
+WITH s, min(entity_rank) AS first_entity_rank
+MATCH (s)-[:REFERENCES_ENTITY]->(related_entity:ExtractedEntity)
+WHERE related_entity.id IN $entity_ids
+  AND related_entity.end_user_id = $id
+  AND related_entity.delete_at IS NULL
+WITH s,
+     first_entity_rank,
+     collect(DISTINCT toString(related_entity.id)) AS related_entity_ids
+RETURN toString(s.id) AS statement_id,
+       [entity_id IN $entity_ids WHERE entity_id IN related_entity_ids] AS entity_ids,
+       substring(trim(toString(s.statement)), 0, $max_chars) AS statement_text
+ORDER BY first_entity_rank ASC,
+         CASE WHEN toLower(trim(toString(s.speaker))) = 'user' THEN 0 ELSE 1 END ASC,
+         coalesce(s.dialog_at, s.created_at) DESC,
+         statement_id ASC
+LIMIT $limit
+"""
+
+INTEREST_STATEMENT_EVIDENCE_BY_USER = """
+UNWIND range(0, size($entity_ids) - 1) AS entity_rank
+WITH entity_rank, $entity_ids[entity_rank] AS entity_id
+MATCH (s:Statement)-[:REFERENCES_ENTITY]->(e:ExtractedEntity {id: entity_id})
+WHERE s.user_id = $id
+  AND e.user_id = $id
+  AND s.delete_at IS NULL
+  AND e.delete_at IS NULL
+  AND s.id IS NOT NULL
+  AND s.statement IS NOT NULL
+  AND trim(toString(s.statement)) <> ''
+  AND (
+    s.speaker IS NULL
+    OR toLower(trim(toString(s.speaker))) = 'user'
+  )
+WITH entity_rank, entity_id, s
+ORDER BY entity_rank ASC,
+         CASE WHEN toLower(trim(toString(s.speaker))) = 'user' THEN 0 ELSE 1 END ASC,
+         coalesce(s.dialog_at, s.created_at) DESC,
+         s.id ASC
+WITH entity_rank, entity_id, collect(s)[0..$per_entity_limit] AS statements
+UNWIND statements AS s
+WITH s, min(entity_rank) AS first_entity_rank
+MATCH (s)-[:REFERENCES_ENTITY]->(related_entity:ExtractedEntity)
+WHERE related_entity.id IN $entity_ids
+  AND related_entity.user_id = $id
+  AND related_entity.delete_at IS NULL
+WITH s,
+     first_entity_rank,
+     collect(DISTINCT toString(related_entity.id)) AS related_entity_ids
+RETURN toString(s.id) AS statement_id,
+       [entity_id IN $entity_ids WHERE entity_id IN related_entity_ids] AS entity_ids,
+       substring(trim(toString(s.statement)), 0, $max_chars) AS statement_text
+ORDER BY first_entity_rank ASC,
+         CASE WHEN toLower(trim(toString(s.speaker))) = 'user' THEN 0 ELSE 1 END ASC,
+         coalesce(s.dialog_at, s.created_at) DESC,
+         statement_id ASC
+LIMIT $limit
+"""
+
 CHUNK_NODE_SAVE = """
 UNWIND $chunks AS chunk
 MERGE (c:Chunk {id: chunk.id})
