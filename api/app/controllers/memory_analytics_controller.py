@@ -374,7 +374,7 @@ async def get_interest_distribution_by_user_api(
             )
         else:
             api_logger.info(
-                "Interest distribution not cached after empty LLM result: "
+                "Interest distribution result is not cacheable; skipping cache: "
                 f"end_user_id={end_user_id}"
             )
 

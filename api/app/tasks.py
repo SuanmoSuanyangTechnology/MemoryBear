@@ -4995,7 +4995,7 @@ def init_interest_distribution_for_users(self, end_user_ids: List[str]) -> Dict[
                     logger.info(f"用户 {end_user_id} 兴趣分布缓存生成成功")
                 else:
                     not_cached += 1
-                    logger.info(f"用户 {end_user_id} LLM 未识别到兴趣，本次不写缓存")
+                    logger.info(f"用户 {end_user_id} 兴趣分布结果不可缓存，本次不写缓存")
             except Exception as e:
                 failed += 1
                 logger.error(f"用户 {end_user_id} 兴趣分布缓存生成失败: {e}")
