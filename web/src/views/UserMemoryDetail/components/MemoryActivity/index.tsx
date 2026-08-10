@@ -195,7 +195,7 @@ const MemoryActivity: FC<MemoryActivityProps> = ({ className }) => {
           <PageScrollList<ActivityRecord, ActivityQuery>
             key={`${id}-${filter}`}
             url={activityUrls[filter]}
-            query={{ end_user_id: id, include_engines: filterKeys.includes('engine') }}
+            query={{ end_user_id: id, include_engines: filterKeys.includes('engine'), language }}
             column={1}
             gutter={[0, 8]}
             heightClass="rb:h-full!"

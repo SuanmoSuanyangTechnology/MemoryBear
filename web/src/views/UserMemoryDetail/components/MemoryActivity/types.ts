@@ -29,4 +29,5 @@ export interface ActivityRecord {
 export interface ActivityQuery {
   end_user_id: string;
   include_engines?: boolean;
+  language?: string;
 }
