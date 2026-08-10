@@ -39,7 +39,7 @@ const defaultValues: CreateDatasetFormValues = {
   ...parentChildBlockConfigValues,
   image: {
     vision_enabled: true,
-    vision_mode: '1',
+    vision_mode: 1,
   },
 };
 
