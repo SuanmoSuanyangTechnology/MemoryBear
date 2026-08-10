@@ -110,7 +110,7 @@ const Workflow = forwardRef<WorkflowRef, WorkflowProps>(({ appType }, ref) => {
     nodeClick
   }))
   return (
-    <div className="rb:h-full rb:relative">
+    <div className="rb:h-full rb:min-h-0 rb:overflow-hidden rb:relative">
       {/* 左侧节点面板 */}
       <NodeLibrary
         appType={appType}
@@ -120,7 +120,7 @@ const Workflow = forwardRef<WorkflowRef, WorkflowProps>(({ appType }, ref) => {
       
       {/* 右侧画布区域 */}
       <div 
-        className={clsx(`rb:fixed rb:top-16 rb:bottom-0 rb:left-0 rb:right-0 rb:transition-all`)}
+        className={clsx(`rb:absolute rb:top-0 rb:bottom-0 rb:left-0 rb:right-0 rb:transition-all`)}
         onDrop={onDrop}
         onDragOver={onDragOver}
       >

@@ -13,7 +13,7 @@ from collections import defaultdict
 from datetime import date, datetime
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.utils.datetime_utils import to_timestamp_ms, utcnow_naive
 from app.repositories.end_user_repository import EndUserRepository
@@ -53,8 +53,8 @@ class MemoryEngineDisplayService:
     """引擎展示业务逻辑层"""
 
     @staticmethod
-    def query_cards(
-        db: Session,
+    async def query_cards(
+        db: AsyncSession,
         end_user_id: uuid.UUID,
         workspace_id: uuid.UUID,
         timezone: str,
@@ -67,14 +67,14 @@ class MemoryEngineDisplayService:
         返回 None 表示终端用户不属于当前工作空间。
         """
         end_user_repo = EndUserRepository(db)
-        if end_user_repo.get_active_end_user_in_workspace(
+        if await end_user_repo.get_active_end_user_in_workspace_async(
             end_user_id,
             workspace_id,
         ) is None:
             return None
 
         repo = MemoryEngineDisplayEventRepository(db)
-        groups, total = repo.query_aggregated_paginated(
+        groups, total = await repo.query_aggregated_paginated(
             end_user_id=end_user_id,
             workspace_id=workspace_id,
             timezone=timezone,

@@ -23,7 +23,7 @@ const NodeLibrary: FC<NodeLibraryProps> = ({
   const { t } = useTranslation()
 
   return (
-    <div className={clsx("rb:h-[calc(100vh-88px)] rb:overflow-hidden rb:fixed rb:left-2.5 rb:top-18.5 rb:z-1000", {
+    <div className={clsx("rb:overflow-hidden rb:absolute rb:left-3 rb:top-3 rb:bottom-3 rb:z-1000", {
       'rb:w-65': !collapsed,
       'rb:w-14': collapsed
     })}>

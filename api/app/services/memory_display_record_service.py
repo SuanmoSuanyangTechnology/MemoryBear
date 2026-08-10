@@ -12,7 +12,7 @@ import logging
 import uuid
 from typing import List
 
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.utils.datetime_utils import to_timestamp_ms, utcnow_naive
 from app.repositories.end_user_repository import EndUserRepository
@@ -30,8 +30,8 @@ class MemoryDisplayRecordService:
     """记忆展示记录业务逻辑层"""
 
     @staticmethod
-    def query_written(
-        db: Session,
+    async def query_written(
+        db: AsyncSession,
         end_user_id: uuid.UUID,
         workspace_id: uuid.UUID,
         page: int,
@@ -42,14 +42,14 @@ class MemoryDisplayRecordService:
         返回 None 表示终端用户不属于当前工作空间。
         """
         end_user_repo = EndUserRepository(db)
-        if end_user_repo.get_active_end_user_in_workspace(
+        if await end_user_repo.get_active_end_user_in_workspace_async(
             end_user_id,
             workspace_id,
         ) is None:
             return None
 
         repo = MemoryDisplayRecordRepository(db)
-        records, total = repo.query_written_paginated(
+        records, total = await repo.query_written_paginated_async(
             end_user_id=end_user_id,
             workspace_id=workspace_id,
             page=page,

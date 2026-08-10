@@ -9,6 +9,7 @@ import { tool } from './zh/tool'
 import { workflow } from './zh/workflow'
 import { engine } from './zh/engine'
 import { detail } from './zh/detail'
+import { notificationCenter } from './zh/notificationCenter'
 
 export const zh = {
   translation: {
@@ -23,5 +24,6 @@ export const zh = {
     ...workflow,
     ...engine,
     ...detail,
+    ...notificationCenter,
   },
 }

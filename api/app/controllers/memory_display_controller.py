@@ -7,16 +7,15 @@
 import uuid
 
 from fastapi import APIRouter, Depends, Header, Query
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.error_codes import BizCode
 from app.core.language_utils import get_language_from_header
 from app.core.logging_config import get_api_logger
 from app.core.response_utils import fail, success
 from app.core.utils.datetime_utils import resolve_iana_timezone
-from app.db import get_db
-from app.dependencies import get_current_user
-from app.models.user_model import User
+from app.db import get_async_db
+from app.dependencies import CurrentUserSnapshot, get_current_user_async
 from app.schemas.response_schema import ApiResponse, PageData, PageMeta
 from app.services.memory_display_record_service import MemoryDisplayRecordService
 from app.services.memory_engine_display_service import MemoryEngineDisplayService
@@ -51,8 +50,8 @@ async def get_all_memory_display(
                     "合并列表和 total 都不含它",
     ),
     language_type: str = Header(default=None, alias="X-Language-Type"),
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    current_user: CurrentUserSnapshot = Depends(get_current_user_async),
+    db: AsyncSession = Depends(get_async_db),
 ) -> dict:
     """一次获取写入记录、读取卡片和引擎动态卡片
 
@@ -115,14 +114,14 @@ async def get_all_memory_display(
     try:
         language = get_language_from_header(language_type)
 
-        written_result = MemoryDisplayRecordService.query_written(
+        written_result = await MemoryDisplayRecordService.query_written(
             db=db,
             end_user_id=end_user_uuid,
             workspace_id=workspace_id,
             page=1,
             pagesize=ALL_ITEM_LIMIT,
         )
-        retrieved_result = MemoryRetrievalDisplayService.query_retrieved(
+        retrieved_result = await MemoryRetrievalDisplayService.query_retrieved(
             db=db,
             end_user_id=end_user_uuid,
             workspace_id=workspace_id,
@@ -131,7 +130,7 @@ async def get_all_memory_display(
         )
         engines_result = None
         if include_engines:
-            engines_result = MemoryEngineDisplayService.query_cards(
+            engines_result = await MemoryEngineDisplayService.query_cards(
                 db=db,
                 end_user_id=end_user_uuid,
                 workspace_id=workspace_id,
@@ -210,8 +209,8 @@ async def get_written_memories(
     end_user_id: str = Query(..., description="终端用户 ID"),
     page: int = Query(1, ge=1, description="页码，从 1 开始"),
     pagesize: int = Query(10, ge=1, le=100, description="每页数量"),
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    current_user: CurrentUserSnapshot = Depends(get_current_user_async),
+    db: AsyncSession = Depends(get_async_db),
 ) -> dict:
     """获取写入展示记录列表
 
@@ -246,7 +245,7 @@ async def get_written_memories(
         )
 
     try:
-        query_result = MemoryDisplayRecordService.query_written(
+        query_result = await MemoryDisplayRecordService.query_written(
             db=db,
             end_user_id=end_user_uuid,
             workspace_id=workspace_id,
@@ -286,8 +285,8 @@ async def get_retrieved_memories(
     end_user_id: str = Query(..., description="终端用户 ID"),
     page: int = Query(1, ge=1, description="页码，从 1 开始"),
     pagesize: int = Query(10, ge=1, le=100, description="每页数量"),
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    current_user: CurrentUserSnapshot = Depends(get_current_user_async),
+    db: AsyncSession = Depends(get_async_db),
 ) -> dict:
     """获取读取展示卡片列表
 
@@ -322,7 +321,7 @@ async def get_retrieved_memories(
         )
 
     try:
-        query_result = MemoryRetrievalDisplayService.query_retrieved(
+        query_result = await MemoryRetrievalDisplayService.query_retrieved(
             db=db,
             end_user_id=end_user_uuid,
             workspace_id=workspace_id,
@@ -368,8 +367,8 @@ async def get_engine_display_cards(
     page: int = Query(1, ge=1, description="页码，从 1 开始"),
     pagesize: int = Query(10, ge=1, le=100, description="每页数量"),
     language_type: str = Header(default=None, alias="X-Language-Type"),
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    current_user: CurrentUserSnapshot = Depends(get_current_user_async),
+    db: AsyncSession = Depends(get_async_db),
 ) -> dict:
     """获取引擎动态展示卡片列表
 
@@ -426,7 +425,7 @@ async def get_engine_display_cards(
 
     try:
         language = get_language_from_header(language_type)
-        query_result = MemoryEngineDisplayService.query_cards(
+        query_result = await MemoryEngineDisplayService.query_cards(
             db=db,
             end_user_id=end_user_uuid,
             workspace_id=workspace_id,

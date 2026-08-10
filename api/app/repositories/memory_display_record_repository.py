@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 class MemoryDisplayRecordRepository:
     """记忆展示记录数据访问层"""
 
-    def __init__(self, db: Session):
+    def __init__(self, db: Session | AsyncSession):
         self.db = db
 
     def bulk_insert_written(
@@ -132,6 +132,47 @@ class MemoryDisplayRecordRepository:
 
         return items, total
 
+    async def query_written_paginated_async(
+        self,
+        end_user_id: uuid.UUID,
+        workspace_id: uuid.UUID,
+        page: int,
+        pagesize: int,
+    ) -> Tuple[List[MemoryDisplayRecord], int]:
+        """异步按 occurred_at DESC, id DESC 分页查询写入展示记录。"""
+        owned_by_workspace = (
+            select(EndUser.id)
+            .where(
+                EndUser.id == end_user_id,
+                EndUser.workspace_id == workspace_id,
+                EndUser.is_active.is_(True),
+            )
+            .exists()
+        )
+        base_filter = (
+            (MemoryDisplayRecord.end_user_id == end_user_id)
+            & (MemoryDisplayRecord.operation == "WRITE")
+            & owned_by_workspace
+        )
+
+        total_result = await self.db.execute(
+            select(func.count(MemoryDisplayRecord.id)).where(base_filter)
+        )
+        total = total_result.scalar() or 0
+
+        offset = (page - 1) * pagesize
+        items_result = await self.db.execute(
+            select(MemoryDisplayRecord)
+            .where(base_filter)
+            .order_by(
+                MemoryDisplayRecord.occurred_at.desc(),
+                MemoryDisplayRecord.id.desc(),
+            )
+            .offset(offset)
+            .limit(pagesize)
+        )
+        return list(items_result.scalars().all()), total
+
     @staticmethod
     async def bulk_insert_retrieved_async(
         db: AsyncSession,
@@ -199,3 +240,33 @@ class MemoryDisplayRecordRepository:
         )
 
         return items, total
+
+    async def query_retrieved_paginated_async(
+        self,
+        end_user_id: uuid.UUID,
+        page: int,
+        pagesize: int,
+    ) -> Tuple[List[MemoryDisplayRecord], int]:
+        """异步按 occurred_at DESC, id DESC 分页查询读取展示记录。"""
+        base_filter = (
+            (MemoryDisplayRecord.end_user_id == end_user_id)
+            & (MemoryDisplayRecord.operation == "RETRIEVE")
+        )
+
+        total_result = await self.db.execute(
+            select(func.count(MemoryDisplayRecord.id)).where(base_filter)
+        )
+        total = total_result.scalar() or 0
+
+        offset = (page - 1) * pagesize
+        items_result = await self.db.execute(
+            select(MemoryDisplayRecord)
+            .where(base_filter)
+            .order_by(
+                MemoryDisplayRecord.occurred_at.desc(),
+                MemoryDisplayRecord.id.desc(),
+            )
+            .offset(offset)
+            .limit(pagesize)
+        )
+        return list(items_result.scalars().all()), total

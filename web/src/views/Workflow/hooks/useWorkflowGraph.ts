@@ -265,7 +265,7 @@ export const useWorkflowGraph = ({
               const { cases } = config;
               nodeLibraryConfig.config[key].defaultValue = cases && Array.isArray(cases) ? cases.map(item => ({
                 ...item,
-                expressions: item.expressions.map((expr: any) => {
+                expressions: item.expressions?.map((expr: any) => {
                   return expr.input_type ? { ...expr, input_type: expr.input_type.toLocaleLowerCase() } : expr
                 }),
               })) : []
