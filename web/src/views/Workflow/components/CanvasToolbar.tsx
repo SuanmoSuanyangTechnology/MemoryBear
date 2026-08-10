@@ -60,7 +60,7 @@ const CanvasToolbar = forwardRef<CanvasToolbarRef, CanvasToolbarProps>(({
   return (
     <>
       <div
-        className={clsx("rb:cursor-pointer rb:z-1000 rb:absolute rb:bottom-5 rb:h-8.5 rb:bg-[#FFFFFF] rb:border rb:border-[#DFE4ED] rb:rounded-lg rb:shadow-[0px_2px_6px_0px_rgba(33,35,50,0.15)] rb:px-3 rb:py-2 rb:text-[12px]", {
+        className={clsx("rb:cursor-pointer rb:z-1000  rb:absolute rb:bottom-5 rb:h-8.5 rb:bg-[#FFFFFF] rb:border rb:border-[#DFE4ED] rb:rounded-lg rb:shadow-[0px_2px_6px_0px_rgba(33,35,50,0.15)] rb:px-3 rb:py-2 rb:text-[12px]", {
           'rb:bottom-5': !isVariableInspectorVisible,
           'rb:bottom-88': isVariableInspectorVisible,
           'rb:left-73': !collapsed,

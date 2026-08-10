@@ -236,7 +236,7 @@ export function useAgent(
         model_parameters: {...(values?.model_parameters || {})} as unknown as ModelConfig,
         list: []
       }])
-      form.setFieldValue('capability', filterValue?.capability)
+      form.setFieldsValue({ capability: filterValue?.capability })
     }
   }, [modelList, values?.default_model_config_id])
 
