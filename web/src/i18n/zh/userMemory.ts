@@ -295,6 +295,8 @@ export const userMemory = {
       EXTRACTION: "记忆萃取引擎",
       CROSS_MODAL: "跨模态记忆关联联想引擎",
       EMOTION: "情感引擎",
+      FORGETTING: "遗忘引擎",
+      REFLECTION: "反思引擎",
       memorySubject: '记忆主体',
       basicInfo: '基础信息',
       subjectId: '主体 ID',
