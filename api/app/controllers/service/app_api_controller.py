@@ -1,4 +1,5 @@
 """App 服务接口 - 基于 API Key 认证"""
+import datetime
 import json
 import time
 import uuid
@@ -270,6 +271,7 @@ async def chat(
     body = await request.json()
     payload = AppChatRequest(**body)
     request_started_at = time.perf_counter()
+    request_wall_clock = datetime.datetime.now(datetime.timezone.utc)
 
     resource_id = api_key_auth.resource_id
     workspace_id = api_key_auth.workspace_id
@@ -500,6 +502,10 @@ async def chat(
         return success(data=conversation_schema.ChatResponse(**result).model_dump(mode="json"))
     elif app_type in (AppType.WORKFLOW, AppType.PURE_WORKFLOW):
         config = runtime_config
+        logger.info(
+            f">>>>>>> TIMING_TRACE request_received conversation_id={conversation_id} "
+            f"wall_clock={request_wall_clock.isoformat()}"
+        )
         if payload.stream:
             from app.db import AsyncSessionLocal
 
