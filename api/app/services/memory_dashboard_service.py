@@ -195,17 +195,16 @@ async def get_workspace_memory_increment_async(
     """获取工作空间的记忆增量（异步版本）"""
     business_logger.info(f"获取记忆增量(异步): workspace_id={workspace_id}, limit={limit}, 操作者: {current_user.username}")
     from sqlalchemy import select as sa_select, func
-    from app.models.memory_increment_model import MemoryIncrement as MemoryIncrementORM
 
     # 每天只保留一条（取当天最新），再取最新的 limit 天：
     # DISTINCT ON (date(created_at)) + ORDER BY date DESC, created_at DESC 保证
     # 同一天内返回的是 created_at 最新的一条。
-    day_expr = func.date(MemoryIncrementORM.created_at)
+    day_expr = func.date(MemoryIncrement.created_at)
     stmt = (
-        sa_select(MemoryIncrementORM)
-        .where(MemoryIncrementORM.workspace_id == workspace_id)
+        sa_select(MemoryIncrement)
+        .where(MemoryIncrement.workspace_id == workspace_id)
         .distinct(day_expr)
-        .order_by(day_expr.desc(), MemoryIncrementORM.created_at.desc())
+        .order_by(day_expr.desc(), MemoryIncrement.created_at.desc())
         .limit(limit)
     )
     result = await db.execute(stmt)

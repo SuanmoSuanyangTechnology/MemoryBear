@@ -463,7 +463,7 @@ class MemoryReflectionService:
         from app.utils.config_utils import resolve_config_id_async
         from app.repositories.memory_config_repository import MemoryConfigRepository
         from app.models.workspace_model import Workspace
-        from sqlalchemy import select
+        from sqlalchemy import select as sa_select
 
         try:
             resolved_id = await resolve_config_id_async(str(config_data_id), db)
@@ -475,7 +475,7 @@ class MemoryReflectionService:
             tenant_id = None
             if memory_config_result.workspace_id:
                 ws_result = await db.execute(
-                    select(Workspace).where(Workspace.id == memory_config_result.workspace_id)
+                    sa_select(Workspace).where(Workspace.id == memory_config_result.workspace_id)
                 )
                 workspace = ws_result.scalars().first()
                 tenant_id = str(workspace.tenant_id) if workspace and workspace.tenant_id else None
