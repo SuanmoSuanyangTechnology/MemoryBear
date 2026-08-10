@@ -1834,9 +1834,7 @@ export const useWorkflowGraph = ({
                 } else {
                   itemConfig[key].data = value.data
                 }
-              } else if (data.config[key] && 'defaultValue' in data.config[key] && (key !== 'knowledge_retrieval' || data.type === 'agent')) {
-                itemConfig[key] = data.config[key].defaultValue
-              } else if (key === 'knowledge_retrieval' && data.config[key] && 'defaultValue' in data.config[key]) {
+              } else if (data.type !== 'agent' && key === 'knowledge_retrieval' && data.config[key] && 'defaultValue' in data.config[key]) {
                 const { knowledge_bases } = data.config[key].defaultValue || {}
                 itemConfig = {
                   ...itemConfig,
@@ -1846,6 +1844,20 @@ export const useWorkflowGraph = ({
                     return { kb_id: vo.kb_id || vo.id, ...kb_config, }
                   })
                 }
+              } else if (key === 'knowledge_retrieval' && data.config[key] && 'defaultValue' in data.config[key]) {
+                const { knowledge_bases, ...rest } = data.config[key].defaultValue || {}
+                itemConfig = {
+                  ...itemConfig,
+                  knowledge_retrieval: {
+                    ...rest,
+                    knowledge_bases: knowledge_bases?.map((vo: any) => {
+                      const kb_config = vo.config || vo
+                      return { kb_id: vo.kb_id || vo.id, ...kb_config, }
+                    })
+                  }
+                }
+              } else if (data.config[key] && 'defaultValue' in data.config[key]) {
+                itemConfig[key] = data.config[key].defaultValue
               }
             })
           }
