@@ -17,7 +17,7 @@ from app.controllers import memory_display_controller
 from app.core.api_key_auth import require_api_key_self_db
 from app.core.api_key_utils import get_current_user_snapshot_from_api_key_async
 from app.core.logging_config import get_business_logger
-from app.db import get_async_db_context, get_db_context
+from app.db import get_async_db_context
 from app.schemas.api_key_schema import ApiKeyAuth
 
 router = APIRouter(prefix="/memory-display", tags=["V1 - Memory Display API"])
@@ -50,18 +50,18 @@ async def get_written_memories(
     memory_type 始终返回稳定英文枚举，由前端负责展示文案映射；name 和
     content 保持记忆生成时的原始语言，不受 X-Language-Type 影响。
     """
-    async with get_async_db_context() as auth_db:
-        current_user = await get_current_user_snapshot_from_api_key_async(auth_db, api_key_auth)
+    async with get_async_db_context() as db:
+        current_user = await get_current_user_snapshot_from_api_key_async(db, api_key_auth)
 
     logger.info(f"V1 get written memories - workspace: {api_key_auth.workspace_id}")
 
-    with get_db_context() as sync_db:
+    async with get_async_db_context() as db:
         result = await memory_display_controller.get_written_memories(
             end_user_id=end_user_id,
             page=page,
             pagesize=pagesize,
             current_user=current_user,
-            db=sync_db,
+            db=db,
         )
     return _encode_result(result)
 
@@ -95,12 +95,12 @@ async def get_engine_display_cards(
     前端统一传全局时区设置（useI18n().timeZone），
     保证卡片的聚合日期与前端展示 occurred_at 时使用的时区一致。
     """
-    async with get_async_db_context() as auth_db:
-        current_user = await get_current_user_snapshot_from_api_key_async(auth_db, api_key_auth)
+    async with get_async_db_context() as db:
+        current_user = await get_current_user_snapshot_from_api_key_async(db, api_key_auth)
 
     logger.info(f"V1 get engine display cards - workspace: {api_key_auth.workspace_id}")
 
-    with get_db_context() as sync_db:
+    async with get_async_db_context() as db:
         result = await memory_display_controller.get_engine_display_cards(
             end_user_id=end_user_id,
             timezone=timezone,
@@ -108,6 +108,6 @@ async def get_engine_display_cards(
             pagesize=pagesize,
             language_type=language_type,
             current_user=current_user,
-            db=sync_db,
+            db=db,
         )
     return _encode_result(result)
