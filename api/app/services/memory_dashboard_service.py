@@ -194,17 +194,25 @@ async def get_workspace_memory_increment_async(
 ) -> List[MemoryIncrementSchema]:
     """获取工作空间的记忆增量（异步版本）"""
     business_logger.info(f"获取记忆增量(异步): workspace_id={workspace_id}, limit={limit}, 操作者: {current_user.username}")
-    from sqlalchemy import select as sa_select
+    from sqlalchemy import select as sa_select, func
     from app.models.memory_increment_model import MemoryIncrement as MemoryIncrementORM
 
+    # 每天只保留一条（取当天最新），再取最新的 limit 天：
+    # DISTINCT ON (date(created_at)) + ORDER BY date DESC, created_at DESC 保证
+    # 同一天内返回的是 created_at 最新的一条。
+    day_expr = func.date(MemoryIncrementORM.created_at)
     stmt = (
         sa_select(MemoryIncrementORM)
         .where(MemoryIncrementORM.workspace_id == workspace_id)
-        .order_by(MemoryIncrementORM.created_at.desc())
+        .distinct(day_expr)
+        .order_by(day_expr.desc(), MemoryIncrementORM.created_at.desc())
         .limit(limit)
     )
     result = await db.execute(stmt)
     records = result.scalars().all()
+
+    # 再按时间升序输出（最旧在前）
+    records.sort(key=lambda r: r.created_at)
 
     increments = [MemoryIncrementSchema.model_validate(r) for r in records]
     business_logger.info(f"成功获取 {len(increments)} 条记忆增量记录")
