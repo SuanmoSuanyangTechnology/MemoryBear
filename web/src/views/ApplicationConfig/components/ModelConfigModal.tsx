@@ -150,8 +150,8 @@ const ModelConfigModal = forwardRef<ModelConfigModalRef, ModelConfigModalProps>(
       open={visible}
       onCancel={handleClose}
       footer={[
-        <Button onClick={handleReset}>{t('application.resetDefault')}</Button>,
-        <Button type="primary" onClick={handleSave}>{t('application.apply')}</Button>,
+        <Button key="reset" onClick={handleReset}>{t('application.resetDefault')}</Button>,
+        <Button key="apply" type="primary" onClick={handleSave}>{t('application.apply')}</Button>,
       ]}
     >
       <Form

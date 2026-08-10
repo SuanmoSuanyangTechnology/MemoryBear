@@ -188,8 +188,10 @@ const FileUploadSettingModal = forwardRef<FileUploadSettingModalRef, FileUploadS
           </Radio.Group>
         </Form.Item>
 
-        <Form.Item label={t('application.maxCount')} name="max_file_count" hidden>
-          <InputNumber min={1} max={20} precision={0} className="rb:w-full!" placeholder={t('common.pleaseEnter')} />
+        <Form.Item label={t('application.maxCount')} name="max_file_count"
+          getValueFromEvent={(value) => Number(value) || 1}
+        >
+          <InputNumber min={1} max={5} precision={0} className="rb:w-full!" placeholder={t('common.pleaseEnter')} />
         </Form.Item>
 
         <Form.Item label={t('application.supportedTypes')}>
@@ -205,9 +207,9 @@ const FileUploadSettingModal = forwardRef<FileUploadSettingModalRef, FileUploadS
                     'rb:bg-[#f5f7fc]': isEnabled
                   })}
                 >
-                  <Row gutter={12} wrap={false}>
+                  <Row wrap={false}>
                     <Col flex="36px" className="rb:self-center">{option.icon}</Col>
-                    <Col flex="1">
+                    <Col flex="1" className="rb:pl-3!">
                       <Flex align="center" justify="space-between">
                         <Flex vertical>
                           <div className="rb:font-medium">{t(`application.${option.type}`)}</div>

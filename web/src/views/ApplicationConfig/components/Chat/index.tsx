@@ -95,9 +95,9 @@ const Chat: FC<ChatProps> = ({
   const compareLoadingRef = useRef(false)
   const [fileList, setFileList] = useState<any[]>([])
   const [message, setMessage] = useState<string | undefined>(undefined)
-  const [features, setFeatures] = useState<FeaturesConfigForm>({} as FeaturesConfigForm)
   const [audioStatusMap, setAudioStatusMap] = useState<Record<string, string>>({})
   const abortRef = useRef<(() => void) | null>(null)
+  const features = useMemo(() => data?.features ?? {}, [data?.features])
 
   const cleanup = () => {
     abortRef.current?.()
@@ -115,14 +115,11 @@ const Chat: FC<ChatProps> = ({
   useEffect(() => cleanup, [])
 
   useEffect(() => {
-    if (data?.features) setFeatures(data.features)
-  }, [data?.features])
-
-  useEffect(() => {
     setIsCluster(source === 'multi_agent')
     toolbarRef.current?.setFiles([])
+    setFileList([])
     setMessage(undefined)
-  }, [source, toolbarRef.current])
+  }, [source])
 
   useEffect(() => {
     updateChatList(prev => applyAudioStatus(prev, audioStatusMap))
@@ -459,7 +456,7 @@ const Chat: FC<ChatProps> = ({
             >
               <ChatToolbar
                 ref={toolbarRef}
-                features={features}
+                features={features as FeaturesConfigForm}
                 onFilesChange={setFileList}
                 leftExtra={
                   chatVariables && chatVariables.length > 0 ?(
