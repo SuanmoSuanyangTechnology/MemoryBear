@@ -30,7 +30,7 @@ from app.schemas.app_schema import FileInput, FileType, TransferMethod
 from app.schemas.model_schema import ModelInfo
 from app.schemas.prompt_schema import render_prompt_message, PromptMessageRole
 from app.services.annotation_service import AnnotationService
-from app.services.conversation_service import ConversationService
+from app.services.conversation_service import ConversationService, fire_background_memory_task
 from app.services.context_engine_manager import ContextEngineManager
 from app.core.config import settings
 from app.services.draft_run_service import AgentRunService
@@ -1603,24 +1603,39 @@ class AppChatService:
                 ))
                 save_messages_enqueued = True
 
-                # 记忆写入 + 派发：复用 conversation_service.dispatch_memory_sync
+                # 记忆写入 + 派发：改为批量派发，一次 write_batch 分配连续 seq，
+                # 消除原先两次 fire-and-forget 并发引发的 seq 顺序颠倒问题。
                 result_row = await self.db.execute(
                     select(Conversation).where(Conversation.id == conversation_id)
                 )
                 conv = result_row.scalar_one_or_none()
                 if conv:
                     now = datetime.now(timezone.utc)
-
-                    for m in [
-                        {"id": user_message_id, "role": "user", "content": message, "meta_data": human_meta, "should_memorize": memory},
-                        {"id": message_id, "role": "assistant", "content": full_content, "meta_data": assistant_meta, "should_memorize": True},
-                    ]:
-                        memorize = m.pop("should_memorize")
-                        self.conversation_service.dispatch_memory_sync(
-                            message=SimpleNamespace(conversation_id=conversation_id, created_at=now, **m),
+                    fire_background_memory_task(
+                        self.conversation_service.dispatch_memory_batch(
+                            messages=[
+                                SimpleNamespace(
+                                    id=user_message_id,
+                                    conversation_id=conversation_id,
+                                    role="user",
+                                    content=message,
+                                    meta_data=human_meta,
+                                    created_at=now,
+                                    should_memorize=memory,
+                                ),
+                                SimpleNamespace(
+                                    id=message_id,
+                                    conversation_id=conversation_id,
+                                    role="assistant",
+                                    content=full_content,
+                                    meta_data=assistant_meta,
+                                    created_at=now,
+                                    should_memorize=True,
+                                ),
+                            ],
                             conversation=conv,
-                            should_memorize=memorize,
                         )
+                    )
 
                 # Enqueue agent execution after messages so the FK is satisfied
                 # within the same batch (messages commit first, then execution).
