@@ -30,7 +30,7 @@ from app.schemas.app_schema import FileInput, FileType, TransferMethod
 from app.schemas.model_schema import ModelInfo
 from app.schemas.prompt_schema import render_prompt_message, PromptMessageRole
 from app.services.annotation_service import AnnotationService
-from app.services.conversation_service import ConversationService, fire_background_memory_task
+from app.services.conversation_service import ConversationService
 from app.services.context_engine_manager import ContextEngineManager
 from app.core.config import settings
 from app.services.draft_run_service import AgentRunService
@@ -1611,7 +1611,7 @@ class AppChatService:
                 conv = result_row.scalar_one_or_none()
                 if conv:
                     now = datetime.now(timezone.utc)
-                    fire_background_memory_task(
+                    asyncio.create_task(
                         self.conversation_service.dispatch_memory_batch(
                             messages=[
                                 SimpleNamespace(

@@ -33,37 +33,9 @@ from app.services.prompt import prompt_manager
 logger = get_business_logger()
 
 
-# fire-and-forget 后台任务的强引用集合，避免 asyncio.ensure_future 返回的 Task
-# 因外部无引用被 GC 提前回收（官方文档明确警告）。任务完成时自动从集合中移除。
+# fire-and-forget 后台任务的强引用集合（供 dispatch_memory_sync 老链路使用；
+# Phase 3 迁移完成后可与老链路一并移除）。
 _BACKGROUND_MEMORY_TASKS: set[asyncio.Task] = set()
-
-
-def fire_background_memory_task(coro) -> Optional[asyncio.Task]:
-    """把一个 coroutine 挂到当前事件循环，返回 Task 并保留强引用防 GC。
-
-    典型用法（调用方在 async 上下文里，希望 fire-and-forget 派发）::
-
-        fire_background_memory_task(
-            self.conversation_service.dispatch_memory_batch(messages=[...], conversation=conv)
-        )
-
-    Returns:
-        创建的 Task；若当前无正在运行的事件循环则返回 None 并发 warning。
-    """
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        logger.warning(
-            "[ConversationService] fire_background_memory_task 跳过：无正在运行的事件循环"
-        )
-        # 关闭未使用的 coroutine，避免 "coroutine was never awaited" 警告
-        coro.close()
-        return None
-
-    task = loop.create_task(coro)
-    _BACKGROUND_MEMORY_TASKS.add(task)
-    task.add_done_callback(_BACKGROUND_MEMORY_TASKS.discard)
-    return task
 
 
 class ConversationService:
@@ -569,7 +541,7 @@ class ConversationService:
                     logger.warning(
                         f"[ConversationService] dispatch_agent_message 异步执行失败: "
                         f"conv={_conversation_id}, err={exc}",
-                        exc_info=exc,
+                        exc_info=True,
                     )
 
             loop = asyncio.get_event_loop()
@@ -595,7 +567,7 @@ class ConversationService:
         + 一次事务）分配连续 seq，一次滑动窗口派发。批内 seq 严格 user < assistant。
 
         本方法**本身不 fire-and-forget**。调用方决定：
-            - fire-and-forget：`fire_background_memory_task(svc.dispatch_memory_batch(...))`
+            - fire-and-forget：`asyncio.create_task(svc.dispatch_memory_batch(...))`
             - 阻塞等待：`await svc.dispatch_memory_batch(...)`
         主 chat 流程默认走 fire-and-forget，避免拖累流式响应。
 
@@ -628,7 +600,7 @@ class ConversationService:
             logger.warning(
                 f"[ConversationService] dispatch_memory_batch 执行失败: "
                 f"conv={conversation.id}, batch={len(messages)}, err={exc}",
-                exc_info=exc,
+                exc_info=True,
             )
 
     def get_messages(
