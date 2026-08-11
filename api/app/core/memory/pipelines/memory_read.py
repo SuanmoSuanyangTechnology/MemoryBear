@@ -138,14 +138,14 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
                 search_result = MemorySearchResult(memories=result.memories[1:], relations=result.relations)
         items = project_result_items(profile_result, search_result, limit=5)
         await self._emit_stage("result_ready", {
-            "duration_ms": max(0, int(round((time.perf_counter() - started_at) * 1000))),
+            "duration_ms": max(1, int(round((time.perf_counter() - started_at) * 1000))),
             "total_count": len(result.memories),
             "shown_count": len(items),
             "items": items,
         })
 
     def _elapsed_ms(self) -> int:
-        return max(0, int(round((time.perf_counter() - self._run_started_at) * 1000)))
+        return max(1, int(round((time.perf_counter() - self._run_started_at) * 1000)))
 
     def _ensure_run_started(self) -> None:
         if not self._run_started_at:
@@ -432,7 +432,7 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
         combined = memory_l0 + results
         items = project_result_items(memory_l0, results, limit=5)
         await self._emit_stage("result_ready", {
-            "duration_ms": self._elapsed_ms() if hasattr(self, "_elapsed_ms") else 0,
+            "duration_ms": self._elapsed_ms() if hasattr(self, "_elapsed_ms") else 1,
             "total_count": len(combined.memories),
             "shown_count": len(items),
             "items": items,
@@ -498,7 +498,7 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
         combined = memory_l0 + results
         items = project_result_items(memory_l0, results, limit=5)
         await self._emit_stage("result_ready", {
-            "duration_ms": self._elapsed_ms() if hasattr(self, "_elapsed_ms") else 0,
+            "duration_ms": self._elapsed_ms() if hasattr(self, "_elapsed_ms") else 1,
             "total_count": len(combined.memories),
             "shown_count": len(items),
             "items": items,
