@@ -487,7 +487,6 @@ _PARAM_PROVIDER_WARNINGS: dict[str, str] = {
 _MULTIMODAL_COMPATIBLE_PROVIDERS = frozenset({
     ModelProvider.OPENAI, ModelProvider.XINFERENCE, ModelProvider.GPUSTACK,
     ModelProvider.VOLCANO, ModelProvider.SPEEDBEAR,
-    ModelProvider.MINIMAX,
     ModelProvider.OLLAMA,
     ModelProvider.BEDROCK,
 })
