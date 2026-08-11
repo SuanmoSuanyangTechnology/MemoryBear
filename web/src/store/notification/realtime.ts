@@ -27,10 +27,27 @@ type NotificationBroadcastMessage =
 
 const BROADCAST_CHANNEL_NAME = 'memorybear:notifications:sync';
 const SSE_LEADER_LOCK_NAME = 'memorybear:notifications:sse-leader';
-const SSE_RECONNECT_DELAY_MS = 30_000;
-const SYNC_POLL_INTERVAL_MS = 30_000;
 const MAX_CHANNEL_ID_LENGTH = 256;
 const MAX_CURSOR_LENGTH = 4_096;
+
+/** Delay before reconnecting after a graceful `server.shutdown` event. */
+const SSE_RECONNECT_DELAY_MS = 30_000;
+/** Interval for the notification sync polling fallback (SSE disconnected). */
+const SYNC_POLL_INTERVAL_MS = 30_000;
+/**
+ * SSE heartbeat watchdog window.
+ *
+ * The server emits a comment line (`: heartbeat`) roughly every 60s.
+ * If nothing has been received for ~2.5× that window the stream is treated as
+ * silently dead (half-open TCP / stuck proxy) and forcefully reconnected.
+ */
+const SSE_HEARTBEAT_WATCHDOG_MS = 150_000;
+/**
+ * Reconnect delay when the heartbeat watchdog fires.
+ * Users have already waited the full watchdog window, so we reconnect fast.
+ */
+const SSE_HEARTBEAT_RECONNECT_DELAY_MS = 2_000;
+
 const TAB_ID = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
   ? crypto.randomUUID()
   : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -39,6 +56,9 @@ interface PendingSyncRequest {
   targetCursor: string | null;
   allowResponseCursor: boolean;
 }
+
+type FailureReason = 'server.shutdown' | 'heartbeat.timeout';
+type CommentName = 'heartbeat' | 'connected';
 
 let bridge: RealtimeBridge | null = null;
 let channel: BroadcastChannel | null = null;
@@ -57,6 +77,11 @@ let pollCursor: string | null = null;
 let pollGeneration: NotificationGeneration | null = null;
 let syncInFlight: Promise<void> | null = null;
 let pendingSyncRequest: PendingSyncRequest | null = null;
+let heartbeatWatchdogTimer: ReturnType<typeof setTimeout> | null = null;
+
+/* -------------------------------------------------------------------------- */
+/*                               Type predicates                              */
+/* -------------------------------------------------------------------------- */
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -65,6 +90,16 @@ const isChannelId = (value: unknown): value is string =>
   typeof value === 'string'
   && value.length > 0
   && value.length <= MAX_CHANNEL_ID_LENGTH;
+
+/**
+ * True when `connectionId` matches the current SSE session AND this tab is the
+ * elected SSE leader AND realtime has been enabled.
+ *
+ * Use this guard everywhere before mutating connection-scoped state so stale
+ * callbacks from retired connections are a no-op.
+ */
+const isActiveConnection = (connectionId: number): boolean =>
+  realtimeEnabled && isSSELeader && connectionId === sseConnectionId;
 
 const parseBroadcastMessage = (value: unknown): NotificationBroadcastMessage | null => {
   if (!isRecord(value)) return null;
@@ -87,6 +122,13 @@ const parseBroadcastMessage = (value: unknown): NotificationBroadcastMessage | n
 
   return null;
 };
+
+const hasComment = (messages: SSEMessage[], name: CommentName): boolean =>
+  messages.some((message) => message.comment === name);
+
+/* -------------------------------------------------------------------------- */
+/*                          BroadcastChannel helpers                          */
+/* -------------------------------------------------------------------------- */
 
 const getBroadcastChannel = () => {
   if (typeof BroadcastChannel === 'undefined') return null;
@@ -116,6 +158,10 @@ const broadcastSyncPayload = (
     activeChannel.postMessage({ type: 'sync', payload, targetTabId });
   } catch { /* noop */ }
 };
+
+/* -------------------------------------------------------------------------- */
+/*                          SSE event-data extraction                         */
+/* -------------------------------------------------------------------------- */
 
 const parseEventData = (value: unknown): unknown => {
   if (typeof value !== 'string') return value;
@@ -152,6 +198,10 @@ const extractEventGeneration = (
   const generation = extractEventValue(data, 'generation');
   return isNotificationGeneration(generation) ? generation : null;
 };
+
+/* -------------------------------------------------------------------------- */
+/*                          notificationSync orchestration                    */
+/* -------------------------------------------------------------------------- */
 
 const performNotificationSync = async (
   targetCursor: string | null,
@@ -245,6 +295,10 @@ const handleSSEMessages = (items: SSEMessage[]) => {
   if (shouldSync) void requestNotificationSync(targetCursor);
 };
 
+/* -------------------------------------------------------------------------- */
+/*                          Timer / poll lifecycle                            */
+/* -------------------------------------------------------------------------- */
+
 const clearSSEReconnectTimer = () => {
   if (!sseReconnectTimer) return;
   clearTimeout(sseReconnectTimer);
@@ -268,44 +322,97 @@ const startNotificationSyncPolling = () => {
   syncPollTimer = setInterval(pollWhileSSEDisconnected, SYNC_POLL_INTERVAL_MS);
 };
 
-const stopSSEConnection = () => {
+const clearHeartbeatWatchdog = () => {
+  if (!heartbeatWatchdogTimer) return;
+  clearTimeout(heartbeatWatchdogTimer);
+  heartbeatWatchdogTimer = null;
+};
+
+/**
+ * Reset the heartbeat watchdog after any server activity (comment or event).
+ * If it fires, `handleServerShutdown` is invoked with `heartbeat.timeout` so
+ * the aggressive reconnect + sync policy kicks in.
+ */
+const kickHeartbeatWatchdog = (connectionId: number) => {
+  clearHeartbeatWatchdog();
+  heartbeatWatchdogTimer = setTimeout(() => {
+    heartbeatWatchdogTimer = null;
+    if (isActiveConnection(connectionId) && sseConnected) {
+      handleServerShutdown(connectionId, 'heartbeat.timeout');
+    }
+  }, SSE_HEARTBEAT_WATCHDOG_MS);
+};
+
+/* -------------------------------------------------------------------------- */
+/*                          SSE connection lifecycle                          */
+/* -------------------------------------------------------------------------- */
+
+const markSSEConnected = (connectionId: number) => {
+  if (!isActiveConnection(connectionId)) return;
+  if (sseConnected) return;
+  sseConnected = true;
+  stopNotificationSyncPolling();
+};
+
+/**
+ * Shared teardown steps: abort the stream, clear timers/watches, bump the
+ * connection id so any pending callbacks become stale.
+ *
+ * Callers layer on the *recovery* policy (polling + reconnect delay) on top.
+ */
+const teardownSSERuntime = () => {
   sseConnected = false;
   sseConnectionId += 1;
+  sseStarted = false;
   clearSSEReconnectTimer();
-  stopNotificationSyncPolling();
+  clearHeartbeatWatchdog();
 
   const abort = sseAbort;
   sseAbort = null;
-  sseStarted = false;
   if (abort) {
     try { abort(); } catch { /* noop */ }
   }
 };
 
-function scheduleSSEReconnect() {
+const stopSSEConnection = () => {
+  teardownSSERuntime();
+  stopNotificationSyncPolling();
+};
+
+const scheduleSSEReconnect = (delayMs: number = SSE_RECONNECT_DELAY_MS) => {
   clearSSEReconnectTimer();
   if (!realtimeEnabled || !isSSELeader) return;
 
   sseReconnectTimer = setTimeout(() => {
     sseReconnectTimer = null;
     if (isSSELeader) startSSEConnection();
-  }, SSE_RECONNECT_DELAY_MS);
-}
+  }, delayMs);
+};
 
-function handleServerShutdown(connectionId: number) {
-  if (!realtimeEnabled || !isSSELeader || connectionId !== sseConnectionId) return;
+/**
+ * Teardown the active SSE stream and decide how aggressively to recover.
+ *
+ * - `heartbeat.timeout` → immediate sync + fast SSE reconnect (2s).
+ *   Users have already waited the full watchdog window.
+ * - `server.shutdown`  → sync fallback polling + graceful 30s reconnect.
+ */
+function handleServerShutdown(
+  connectionId: number,
+  reason: FailureReason = 'server.shutdown',
+) {
+  if (!isActiveConnection(connectionId)) return;
 
-  sseConnected = false;
-  sseConnectionId += 1;
-  const abort = sseAbort;
-  sseAbort = null;
-  sseStarted = false;
-  clearSSEReconnectTimer();
-  if (abort) {
-    try { abort(); } catch { /* noop */ }
-  }
+  teardownSSERuntime();
   startNotificationSyncPolling();
-  scheduleSSEReconnect();
+
+  if (reason === 'heartbeat.timeout') {
+    // startNotificationSyncPolling already fired pollWhileSSEDisconnected()
+    // which runs requestNotificationSync(null, true) once immediately, so no
+    // second fire is required here.
+    scheduleSSEReconnect(SSE_HEARTBEAT_RECONNECT_DELAY_MS);
+  } else {
+    scheduleSSEReconnect();
+  }
 }
 
 function startSSEConnection() {
@@ -317,30 +424,37 @@ function startSSEConnection() {
 
   void notificationsEvents(
     (messages) => {
-      if (!realtimeEnabled || !isSSELeader || connectionId !== sseConnectionId) return;
+      if (!isActiveConnection(connectionId)) return;
+
+      const hasHeartbeat = hasComment(messages, 'heartbeat');
+      const hasConnected = hasComment(messages, 'connected');
+      const hasAnyActivity = hasHeartbeat || hasConnected || messages.length > 0;
+
+      if (hasAnyActivity) kickHeartbeatWatchdog(connectionId);
+      if (hasHeartbeat || hasConnected) markSSEConnected(connectionId);
+
       handleSSEMessages(messages);
       if (messages.some((message) => message.event === 'server.shutdown')) {
-        handleServerShutdown(connectionId);
+        handleServerShutdown(connectionId, 'server.shutdown');
       }
     },
     (abort) => {
-      if (isSSELeader && connectionId === sseConnectionId) sseAbort = abort;
+      if (isActiveConnection(connectionId)) sseAbort = abort;
     },
     () => {
-      if (realtimeEnabled && isSSELeader && connectionId === sseConnectionId) {
-        sseConnected = true;
-        stopNotificationSyncPolling();
-      }
+      markSSEConnected(connectionId);
     },
   ).catch(() => undefined).finally(() => {
     if (connectionId !== sseConnectionId) return;
-    sseConnected = false;
-    sseStarted = false;
-    sseAbort = null;
+    teardownSSERuntime();
     startNotificationSyncPolling();
     scheduleSSEReconnect();
   });
 }
+
+/* -------------------------------------------------------------------------- */
+/*                          Leader election (Web Locks)                       */
+/* -------------------------------------------------------------------------- */
 
 const becomeSSELeaderWithoutLock = () => {
   if (!realtimeEnabled || isSSELeader) return;
@@ -401,6 +515,10 @@ const startSSELeaderElection = () => {
     if (realtimeEnabled && !isSSELeader) startSSELeaderElection();
   });
 };
+
+/* -------------------------------------------------------------------------- */
+/*                              Public API                                    */
+/* -------------------------------------------------------------------------- */
 
 export const configureNotificationRealtime = (nextBridge: RealtimeBridge) => {
   bridge = nextBridge;

@@ -7,6 +7,7 @@ import {
   useNotification,
 } from '@/store/notification';
 import { isPrivateAvailable } from '@/utils/private'
+import RbMarkdown from '@/components/Markdown';
 
 const Banners: FC<{ className?: string }> = ({
   className
@@ -74,7 +75,7 @@ const Banners: FC<{ className?: string }> = ({
     if (isConfirmRequired) {
       destroy = modal.confirm({
         title: next.title,
-        content: next.content,
+        content: <RbMarkdown content={next.content} />,
         maskClosable: false,
         closable: false,
         keyboard: false,

@@ -69,26 +69,56 @@ const refreshTokenForSSE = async (): Promise<string> => {
 export interface SSEMessage {
   event?: string
   data?: string | object
+  /**
+   * SSE comment line (starts with `:`).
+   * Commonly used for server-sent heartbeats such as `: heartbeat` or `: connected`.
+   */
+  comment?: string
 }
 
 /**
  * Parse SSE string format to JSON objects
- * @param sseString - Raw SSE string data
+ *
+ * Handles the following SSE line types:
+ * - `event: <name>`   — event type tag
+ * - `data: <payload>` — JSON / string payload (possibly multi-line)
+ * - `: <comment>`     — comment line (e.g. heartbeat / connected). Emitted as a
+ *                       message with the `comment` field set.
+ *
+ * @param sseString - Raw SSE string data (one or more events separated by `\n\n`)
  * @returns Array of parsed SSE messages
  */
 export function parseSSEToJSON(sseString: string) {
   const events: SSEMessage[] = []
   const lines = sseString.trim().split('\n')
-  
+
+  const flushCurrent = (currentEvent: SSEMessage, dataContent: string) => {
+    if (currentEvent.event || dataContent) {
+      const evt: SSEMessage = { ...currentEvent }
+      if (dataContent) evt.data = parseDataContent(dataContent)
+      events.push(evt)
+      return true
+    }
+    return false
+  }
+
   let currentEvent: SSEMessage = {}
   let dataContent = ''
-  
+  console.log('lines', sseString)
+
   for (const line of lines) {
+    // SSE comment line (`: heartbeat`, `: connected`, ...) — emit as a comment event.
+    if (line.startsWith(':')) {
+      flushCurrent(currentEvent, dataContent)
+      currentEvent = {}
+      dataContent = ''
+      const comment = line.slice(1).trim()
+      if (comment) events.push({ comment })
+      continue
+    }
+
     if (line.startsWith('event:')) {
-      if (currentEvent.event && dataContent) {
-        currentEvent.data = parseDataContent(dataContent)
-        events.push(currentEvent)
-      }
+      flushCurrent(currentEvent, dataContent)
       currentEvent = { event: line.substring(6).trim() }
       dataContent = ''
     } else if (line.startsWith('data:')) {
@@ -97,13 +127,8 @@ export function parseSSEToJSON(sseString: string) {
     }
   }
 
-  
-  if (currentEvent.event && dataContent) {
-    currentEvent.data = parseDataContent(dataContent)
-    console.log('currentEvent', currentEvent)
-    events.push(currentEvent)
-  }
-  
+  flushCurrent(currentEvent, dataContent)
+  console.log('events', events)
   return events
 }
 
