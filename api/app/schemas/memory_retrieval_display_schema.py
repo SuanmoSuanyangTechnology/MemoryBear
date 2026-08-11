@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -37,6 +37,10 @@ class RetrieveDisplayTask:
 
     def to_row(self) -> dict:
         """转换为可直接用于批量 INSERT 的行。"""
+        occurred_at = self.occurred_at
+        if occurred_at.tzinfo is not None:
+            occurred_at = occurred_at.astimezone(timezone.utc).replace(tzinfo=None)
+
         return {
             "id": self.id,
             "end_user_id": self.end_user_id,
@@ -50,7 +54,7 @@ class RetrieveDisplayTask:
             "rank": None,
             "search_mode": self.search_mode,
             "query": self.query,
-            "occurred_at": self.occurred_at,
+            "occurred_at": occurred_at,
         }
 
 

@@ -25,7 +25,7 @@ from app.core.memory.retrieval_trace.stage_projection import (
     project_result_items,
 )
 from app.core.models import RedBearLLM
-from app.core.utils.datetime_utils import utcnow
+from app.core.utils.datetime_utils import utcnow_naive
 from app.db import get_async_db_context
 from app.repositories.memory_short_repository import ShortTermMemoryRepository
 from app.schemas.memory_retrieval_display_schema import (
@@ -193,7 +193,7 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
                     search_mode=search_mode,
                     query=snapshot["query"],
                     content=snapshot["content"],
-                    occurred_at=utcnow(),
+                    occurred_at=utcnow_naive(),
                 )
             )
         except Exception as e:
