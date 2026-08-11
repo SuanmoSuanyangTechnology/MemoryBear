@@ -414,11 +414,11 @@ def require_api_key_self_db(
                 kwargs["api_key_auth"] = _api_key_auth
 
             start_time = time.perf_counter()
-            # Conditionally pass request: old endpoints need it, new ones don't
+            # Bind arguments by name so Request can appear anywhere in the endpoint signature.
+            call_kwargs = dict(kwargs)
             if 'request' in _func_sig.parameters:
-                response = await func(request, **kwargs)
-            else:
-                response = await func(**kwargs)
+                call_kwargs['request'] = request
+            response = await func(**call_kwargs)
             end_time = time.perf_counter()
             response_time = (end_time - start_time) * 1000
 
@@ -438,15 +438,14 @@ def require_api_key_self_db(
             })
             return response
 
-        # Inject ``request: Request`` into the wrapper's visible signature so
-        # FastAPI always passes the Request object — even when the underlying
-        # endpoint function doesn't declare it.
+        # Inject ``request: Request`` only when the endpoint does not declare it.
         _func_sig = inspect.signature(func)
-        _req_param = inspect.Parameter(
-            'request', inspect.Parameter.POSITIONAL_OR_KEYWORD, annotation=Request
-        )
-        _other_params = [p for name, p in _func_sig.parameters.items() if name != 'request']
-        wrapper.__signature__ = _func_sig.replace(parameters=[_req_param] + _other_params)
+        if 'request' not in _func_sig.parameters:
+            _req_param = inspect.Parameter(
+                'request', inspect.Parameter.POSITIONAL_OR_KEYWORD, annotation=Request
+            )
+            _func_sig = _func_sig.replace(parameters=[_req_param, *_func_sig.parameters.values()])
+        wrapper.__signature__ = _func_sig
 
         return wrapper
 
