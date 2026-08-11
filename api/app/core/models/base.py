@@ -529,7 +529,6 @@ def get_provider_embedding_class(provider: str) -> type[Embeddings]:
         ModelProvider.OPENAI,
         ModelProvider.XINFERENCE,
         ModelProvider.GPUSTACK,
-        ModelProvider.MINIMAX,
         ModelProvider.SPEEDBEAR,
     ]:
         from langchain_openai import OpenAIEmbeddings
