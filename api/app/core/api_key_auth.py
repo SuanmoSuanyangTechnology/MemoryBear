@@ -409,14 +409,14 @@ def require_api_key_self_db(
             # Set ContextVar for endpoints that use get_current_api_key_auth()
             _current_api_key_auth.set(_api_key_auth)
             # Backward-compat: only inject into kwargs if the function expects it
-            _func_sig = inspect.signature(func)
-            if 'api_key_auth' in _func_sig.parameters:
+            func_sig = inspect.signature(func)
+            if 'api_key_auth' in func_sig.parameters:
                 kwargs["api_key_auth"] = _api_key_auth
 
             start_time = time.perf_counter()
             # Bind arguments by name so Request can appear anywhere in the endpoint signature.
             call_kwargs = dict(kwargs)
-            if 'request' in _func_sig.parameters:
+            if 'request' in func_sig.parameters:
                 call_kwargs['request'] = request
             response = await func(**call_kwargs)
             end_time = time.perf_counter()
@@ -439,13 +439,13 @@ def require_api_key_self_db(
             return response
 
         # Inject ``request: Request`` only when the endpoint does not declare it.
-        _func_sig = inspect.signature(func)
-        if 'request' not in _func_sig.parameters:
+        wrapper_sig = inspect.signature(func)
+        if 'request' not in wrapper_sig.parameters:
             _req_param = inspect.Parameter(
                 'request', inspect.Parameter.POSITIONAL_OR_KEYWORD, annotation=Request
             )
-            _func_sig = _func_sig.replace(parameters=[_req_param, *_func_sig.parameters.values()])
-        wrapper.__signature__ = _func_sig
+            wrapper_sig = wrapper_sig.replace(parameters=[_req_param, *wrapper_sig.parameters.values()])
+        wrapper.__signature__ = wrapper_sig
 
         return wrapper
 
