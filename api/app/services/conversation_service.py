@@ -33,11 +33,6 @@ from app.services.prompt import prompt_manager
 logger = get_business_logger()
 
 
-# fire-and-forget 后台任务的强引用集合（供 dispatch_memory_sync 老链路使用；
-# Phase 3 迁移完成后可与老链路一并移除）。
-_BACKGROUND_MEMORY_TASKS: set[asyncio.Task] = set()
-
-
 class ConversationService:
     """
     Service layer for managing conversations and messages.
