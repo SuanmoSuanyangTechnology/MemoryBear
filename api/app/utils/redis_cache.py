@@ -169,9 +169,8 @@ def redis_cache(
                 可通过 ``invalidate_cache(prefix=f"{prefix}:{value}")`` 精确清除。
         key_builder: 自定义 key 构建函数。
         cache_none: 是否缓存 ``None`` 返回值。
-        return_type: 返回值 Pydantic model 类型。
-                     序列化时自动调 ``model_dump(mode='json')``，
-                     反序列化时自动调 ``model_validate(data)`` 重建对象。
+        return_type: 返回值类型。支持 Pydantic model（反序列化时自动调
+                     ``model_validate(data)`` 重建对象）和 ``uuid.UUID``（从字符串重建）。
                      不支持 dataclass（会抛 TypeError）。
                      未指定时返回 JSON dict/list。
     """
@@ -192,6 +191,9 @@ def redis_cache(
             if hasattr(return_type, "model_validate"):
                 def _deserializer(data):
                     return return_type.model_validate(data)
+            elif isinstance(return_type, type) and issubclass(return_type, uuid.UUID):
+                def _deserializer(data):
+                    return uuid.UUID(str(data))
             elif dataclasses.is_dataclass(return_type):
                 raise TypeError(
                     f"return_type={return_type.__name__} is a dataclass, not supported. "
@@ -357,6 +359,59 @@ def redis_cache(
     return deco
 
 
+def _resolve_invalidation(
+        key: str | None,
+        prefix: str | None,
+        pattern: str | None,
+        batch_size: int,
+) -> str | None:
+    """共享的参数校验与匹配模式解析。
+
+    ``key`` 精确删除时返回 ``None``；否则返回可用的 glob 匹配模式。
+
+    Raises:
+        ValueError: ``batch_size <= 0``，或未提供任何匹配条件。
+    """
+    if batch_size < 1:
+        raise ValueError(f"batch_size must be >= 1, got {batch_size}")
+    if key is not None:
+        return None
+    search = pattern or (f"cache:{prefix}:*" if prefix else None)
+    if search is None:
+        raise ValueError("Provide key=, prefix=, or pattern=")
+    return search
+
+
+async def _scan_unlink_async(redis: Any, search: str, batch_size: int) -> int:
+    """异步 SCAN + UNLINK 批量删除，返回已删除的 key 数量。"""
+    scan_hint = max(1, min(batch_size, 500))
+    deleted = 0
+    cursor = 0
+    while True:
+        cursor, keys = await redis.scan(cursor, match=search, count=scan_hint)
+        if keys:
+            for i in range(0, len(keys), batch_size):
+                deleted += await redis.unlink(*keys[i:i + batch_size])
+        if cursor == 0:
+            break
+    return deleted
+
+
+def _scan_unlink_sync(redis: Any, search: str, batch_size: int) -> int:
+    """同步 SCAN + UNLINK 批量删除，返回已删除的 key 数量。"""
+    scan_hint = max(1, min(batch_size, 500))
+    deleted = 0
+    cursor = 0
+    while True:
+        cursor, keys = redis.scan(cursor, match=search, count=scan_hint)
+        if keys:
+            for i in range(0, len(keys), batch_size):
+                deleted += redis.unlink(*keys[i:i + batch_size])
+        if cursor == 0:
+            break
+    return deleted
+
+
 async def invalidate_cache(
         key: str | None = None,
         *,
@@ -384,30 +439,33 @@ async def invalidate_cache(
     Raises:
         ValueError: 未提供任何匹配条件，或 batch_size <= 0。
     """
-    if batch_size < 1:
-        raise ValueError(f"batch_size must be >= 1, got {batch_size}")
-
+    search = _resolve_invalidation(key, prefix, pattern, batch_size)
     redis = get_thread_safe_redis()
 
     if key is not None:
         return await redis.delete(key)
 
-    search = pattern or (f"cache:{prefix}:*" if prefix else None)
-    if search is None:
-        raise ValueError("Provide key=, prefix=, or pattern=")
+    deleted = await _scan_unlink_async(redis, search, batch_size)
+    if deleted:
+        logger.info("Invalidated %d cache keys matching '%s'", deleted, search)
+    return deleted
 
-    scan_hint = max(1, min(batch_size, 500))
-    deleted = 0
-    cursor = 0
-    while True:
-        cursor, keys = await redis.scan(cursor, match=search, count=scan_hint)
-        if keys:
-            for i in range(0, len(keys), batch_size):
-                chunk = keys[i:i + batch_size]
-                deleted += await redis.unlink(*chunk)
-        if cursor == 0:
-            break
 
+def invalidate_cache_sync(
+        key: str | None = None,
+        *,
+        prefix: str | None = None,
+        pattern: str | None = None,
+        batch_size: int = 1000,
+) -> int:
+    """同步主动删除缓存，参数和 ``invalidate_cache`` 保持一致。"""
+    search = _resolve_invalidation(key, prefix, pattern, batch_size)
+    redis = get_thread_safe_sync_redis()
+
+    if key is not None:
+        return redis.delete(key)
+
+    deleted = _scan_unlink_sync(redis, search, batch_size)
     if deleted:
         logger.info("Invalidated %d cache keys matching '%s'", deleted, search)
     return deleted

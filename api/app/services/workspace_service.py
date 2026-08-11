@@ -44,6 +44,8 @@ from app.utils.redis_cache import (
     get_workspace_model_public_version,
     set_json,
     workspace_model_options_key,
+    invalidate_cache,
+    invalidate_cache_sync,
 )
 
 # 获取业务逻辑专用日志器
@@ -750,12 +752,15 @@ def update_workspace(
         db.commit()
         db.refresh(db_workspace)
 
-        # storage_type 变更时，使 _prepare_v1_chat_memory_context_async 缓存失效
         if "storage_type" in update_data:
-            import asyncio
-            from app.utils.redis_cache import invalidate_cache
             try:
-                asyncio.run(invalidate_cache(prefix=f"storage_type:{workspace_id}"))
+                invalidate_cache_sync(prefix=f"storage_type:{workspace_id}")
+            except Exception:
+                pass
+
+        if any(field in update_data for field in ("llm", "embedding", "rerank")) and db_workspace.memory_config:
+            try:
+                invalidate_cache_sync(prefix=f"memory_config:{db_workspace.memory_config}")
             except Exception:
                 pass
 
@@ -1574,8 +1579,11 @@ async def update_workspace_models_configs(
             db.add(default_memory_config)
         db.commit()
         db.refresh(db_workspace)
-        if default_memory_config:
-            db.refresh(default_memory_config)
+        if db_workspace.memory_config:
+            try:
+                await invalidate_cache(prefix=f"memory_config:{db_workspace.memory_config}")
+            except Exception:
+                pass
 
         business_logger.info(
             f"工作空间模型配置更新成功: workspace_id={workspace_id}, "

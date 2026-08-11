@@ -11,9 +11,11 @@ from typing import Dict, Any
 from uuid import UUID
 
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from app.models.memory_config_model import MemoryConfig
+from app.models.workspace_model import Workspace
 from app.core.logging_config import get_business_logger
 
 logger = get_business_logger()
@@ -31,7 +33,7 @@ class EmotionConfigService:
         db: 数据库会话
     """
     
-    def __init__(self, db: Session):
+    def __init__(self, db: AsyncSession):
         """初始化情绪配置服务
         
         Args:
@@ -46,7 +48,6 @@ class EmotionConfigService:
         验证配置参数的有效性，包括：
         - emotion_min_intensity 在 [0.0, 1.0] 范围内
         - 布尔字段类型正确
-        - emotion_model_id 格式有效（如果提供）
         
         Args:
             config_data: 配置数据字典
@@ -76,14 +77,6 @@ class EmotionConfigService:
                     if not isinstance(value, bool):
                         raise ValueError(f"{field} 必须是布尔类型")
             
-            # 验证 emotion_model_id（如果提供）
-            if "emotion_model_id" in config_data:
-                model_id = config_data["emotion_model_id"]
-                if model_id is not None and not isinstance(model_id, str):
-                    raise ValueError("emotion_model_id 必须是字符串类型或 null")
-                if model_id is not None and len(model_id.strip()) == 0:
-                    raise ValueError("emotion_model_id 不能为空字符串")
-            
             logger.debug("情绪配置参数验证通过")
             return True
             
@@ -111,18 +104,20 @@ class EmotionConfigService:
         try:
             logger.info(f"获取情绪配置（异步）: config_id={config_id}")
 
-            stmt = select(MemoryConfig).where(MemoryConfig.config_id == config_id)
+            stmt = select(MemoryConfig, Workspace).join(
+                Workspace, MemoryConfig.workspace_id == Workspace.id
+            ).where(MemoryConfig.config_id == config_id)
             result = await self.db.execute(stmt)
-            config = result.scalars().first()
-
-            if not config:
+            row = result.first()
+            if not row:
                 logger.error(f"配置不存在: config_id={config_id}")
                 raise ValueError(f"配置不存在: config_id={config_id}")
+            config, workspace = row
 
             emotion_config = {
                 "config_id": config.config_id,
                 "emotion_enabled": config.emotion_enabled,
-                "emotion_model_id": config.emotion_model_id,
+                "emotion_model_id": workspace.llm,
                 "emotion_extract_keywords": config.emotion_extract_keywords,
                 "emotion_min_intensity": config.emotion_min_intensity,
                 "emotion_enable_subject": config.emotion_enable_subject,
@@ -175,8 +170,6 @@ class EmotionConfigService:
             # 更新字段
             if "emotion_enabled" in config_data:
                 config.emotion_enabled = config_data["emotion_enabled"]
-            if "emotion_model_id" in config_data:
-                config.emotion_model_id = config_data["emotion_model_id"]
             if "emotion_extract_keywords" in config_data:
                 config.emotion_extract_keywords = config_data["emotion_extract_keywords"]
             if "emotion_min_intensity" in config_data:

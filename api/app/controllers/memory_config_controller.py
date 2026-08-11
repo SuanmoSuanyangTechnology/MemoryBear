@@ -225,18 +225,21 @@ async def start_reflection_configs(
         config_id = await resolve_config_id_async(config_id, db)
         try:
             api_logger.info(f"用户 {current_user.username} 查询反思配置，config_id: {config_id}")
-            result = await MemoryConfigRepository(db).query_reflection_config_by_id_async(config_id)
+            result = await MemoryConfigRepository(db).get_config_with_workspace_async(config_id)
+            if not result:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"未找到config_id为 {config_id} 的配置")
+            db_config, workspace = result
 
             reflection_config = {
                 "config_id": config_id,
-                "reflection_enabled": result.enable_self_reflexion,
-                "reflection_period_in_hours": result.iteration_period,
-                "reflexion_range": result.reflexion_range,
-                "baseline": result.baseline,
-                "reflection_model_id": result.reflection_model_id,
-                "memory_verify": result.memory_verify,
-                "quality_assessment": result.quality_assessment,
-                "is_default": bool(result.is_default)
+                "reflection_enabled": db_config.enable_self_reflexion,
+                "reflection_period_in_hours": db_config.iteration_period,
+                "reflexion_range": db_config.reflexion_range,
+                "baseline": db_config.baseline,
+                "reflection_model_id": workspace.llm,
+                "memory_verify": db_config.memory_verify,
+                "quality_assessment": db_config.quality_assessment,
+                "is_default": bool(db_config.is_default)
             }
             api_logger.info(f"成功查询反思配置，config_id: {config_id}")
             return success(data=reflection_config, msg="反思配置查询成功")
@@ -459,7 +462,6 @@ async def save_reflection_config(
                 iteration_period=request.reflection_period_in_hours,
                 reflexion_range=request.reflexion_range,
                 baseline=request.baseline,
-                reflection_model_id=request.reflection_model_id,
                 memory_verify=request.memory_verify,
                 quality_assessment=request.quality_assessment
             )
@@ -473,7 +475,6 @@ async def save_reflection_config(
                 "iteration_period": memory_config.iteration_period,
                 "reflexion_range": memory_config.reflexion_range,
                 "baseline": memory_config.baseline,
-                "reflection_model_id": memory_config.reflection_model_id,
                 "memory_verify": memory_config.memory_verify,
                 "quality_assessment": memory_config.quality_assessment}
 

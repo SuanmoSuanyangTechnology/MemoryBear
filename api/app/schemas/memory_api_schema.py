@@ -137,12 +137,6 @@ class ConfigUpdateExtractedRequest(BaseModel):
 
     Attributes:
         config_id: Configuration UUID to update (required)
-        llm_id: Optional LLM model configuration ID
-        audio_id: Optional audio model configuration ID
-        vision_id: Optional vision model configuration ID
-        video_id: Optional video model configuration ID
-        embedding_id: Optional embedding model configuration ID
-        rerank_id: Optional reranking model configuration ID
         enable_llm_dedup_blockwise: Optional toggle for LLM decision deduplication
         enable_llm_disambiguation: Optional toggle for LLM decision disambiguation
         deep_retrieval: Optional toggle for deep retrieval
@@ -165,12 +159,6 @@ class ConfigUpdateExtractedRequest(BaseModel):
     
     """
     config_id: str = Field(..., description="Configuration ID (UUID)")
-    llm_id: Optional[str] = Field(None, description="LLM model configuration ID")
-    audio_id: Optional[str] = Field(None, description="Audio model ID")
-    vision_id: Optional[str] = Field(None, description="Vision model ID")
-    video_id: Optional[str] = Field(None, description="Video model ID")
-    embedding_id: Optional[str] = Field(None, description="Embedding model configuration ID")
-    rerank_id: Optional[str] = Field(None, description="Reranking model configuration ID")
     enable_llm_dedup_blockwise: Optional[bool] = Field(None, description="Enable LLM decision deduplication")
     enable_llm_disambiguation: Optional[bool] = Field(None, description="Enable LLM decision disambiguation")
     deep_retrieval: Optional[bool] = Field(None, description="Deep retrieval toggle")
@@ -243,14 +231,12 @@ class EmotionConfigUpdateRequest(BaseModel):
     Attributes:
         config_id: Configuration UUID to update (required)
         emotion_enabled: Whether to enable emotion extraction
-        emotion_model_id: Emotion analysis model ID
         emotion_extract_keywords: Whether to extract emotion keywords
         emotion_min_intensity: Minimum emotion intensity threshold (0.0-1.0)
         emotion_enable_subject: Whether to enable subject classification for emotions
     """
     config_id: str = Field(..., description="Configuration ID (UUID)")
     emotion_enabled: bool = Field(..., description="Whether to enable emotion extraction")
-    emotion_model_id: Optional[str] = Field(None, description="Emotion analysis model ID")
     emotion_extract_keywords: bool = Field(..., description="Whether to extract emotion keywords")
     emotion_min_intensity: float = Field(..., ge=0.0, le=1.0, description="Minimum emotion intensity threshold")
     emotion_enable_subject: bool = Field(..., description="Whether to enable subject classification for emotions")
@@ -271,7 +257,6 @@ class ReflectionConfigUpdateRequest(BaseModel):
         reflection_period_in_hours: Reflection iteration period in hours
         reflexion_range: Reflection range (partial or all)
         baseline: Baseline for reflection (TIME/FACT/TIME-FACT)
-        reflection_model_id: Reflection model ID
         memory_verify: Whether to enable memory verification
         quality_assessment: Whether to enable quality assessment
     """
@@ -280,7 +265,6 @@ class ReflectionConfigUpdateRequest(BaseModel):
     reflection_period_in_hours: str = Field(..., description="Reflection iteration period in hours")
     reflexion_range: Literal["partial", "all"] = Field(..., description="Reflection range: partial/all")
     baseline: Literal["TIME", "FACT", "TIME-FACT"] = Field(..., description="Baseline: TIME/FACT/TIME-FACT")
-    reflection_model_id: str = Field(..., description="Reflection model ID")
     memory_verify: bool = Field(..., description="Whether to enable memory verification")
     quality_assessment: bool = Field(..., description="Whether to enable quality assessment")
 
