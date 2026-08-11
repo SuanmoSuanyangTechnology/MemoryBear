@@ -1,5 +1,6 @@
-import { useEffect, useRef, type FC } from 'react';
-import { Alert, App } from 'antd';
+import { useEffect, useRef, useState, type FC } from 'react';
+import { Alert, Flex } from 'antd';
+import { ExclamationCircleFilled } from '@ant-design/icons';
 import Marquee from 'react-fast-marquee';
 import { useTranslation } from 'react-i18next';
 
@@ -8,6 +9,16 @@ import {
 } from '@/store/notification';
 import { isPrivateAvailable } from '@/utils/private'
 import RbMarkdown from '@/components/Markdown';
+import RbModal from '@/components/RbModal';
+import type { ModalMessage } from '@/store/notification/types';
+
+type ModalMode = 'confirm' | 'warning';
+
+interface ActiveModalState {
+  mode: ModalMode;
+  message: ModalMessage;
+  token: symbol;
+}
 
 const Banners: FC<{ className?: string }> = ({
   className
@@ -15,7 +26,6 @@ const Banners: FC<{ className?: string }> = ({
   if (!isPrivateAvailable) return;
 
   const { t } = useTranslation();
-  const { modal } = App.useApp()
   const {
     bannerMessages,
     modalMessages,
@@ -27,14 +37,27 @@ const Banners: FC<{ className?: string }> = ({
     teardownRealtime,
   } = useNotification();
 
-  // Single-instance lock + active modal identity/destroy handle for cleanup
+  // Single-instance lock + active modal identity for cleanup / stale-close guard.
   const openModalRef = useRef(false);
   const currentModalRef = useRef<{ id: string; token: symbol } | null>(null);
-  const destroyModalRef = useRef<(() => void) | null>(null);
+
+  /** Controlled <RbModal> state (replaces imperative modal.confirm / .warning). */
+  const [activeModal, setActiveModal] = useState<ActiveModalState | null>(null);
 
   useEffect(() => {
     setupRealtime();
   }, [setupRealtime]);
+
+  /**
+   * Close the currently displayed modal, but only if the caller still owns the
+   * token (i.e. a subsequent message hasn't already replaced it).
+   */
+  const closeActiveModal = (token: symbol) => {
+    if (currentModalRef.current?.token !== token) return;
+    openModalRef.current = false;
+    currentModalRef.current = null;
+    setActiveModal((current) => (current?.token === token ? null : current));
+  };
 
   useEffect(() => {
     if (openModalRef.current) {
@@ -44,12 +67,11 @@ const Banners: FC<{ className?: string }> = ({
         : false;
       if (currentMessageStillExists) return;
 
-      const destroyCurrentModal = destroyModalRef.current;
+      const token = currentModal?.token;
       openModalRef.current = false;
       currentModalRef.current = null;
-      destroyModalRef.current = null;
-      if (destroyCurrentModal) {
-        try { destroyCurrentModal(); } catch { /* noop */ }
+      if (token) {
+        setActiveModal((current) => (current?.token === token ? null : current));
       }
     }
 
@@ -61,97 +83,134 @@ const Banners: FC<{ className?: string }> = ({
     openModalRef.current = true;
     currentModalRef.current = { id: next.id, token: modalToken };
 
-    const releaseLock = () => {
-      if (currentModalRef.current?.token !== modalToken) return;
-      openModalRef.current = false;
-      currentModalRef.current = null;
-      destroyModalRef.current = null;
-    };
-    let destroy = null;
-
-    const okText = t('notificationCenter.actions.confirm');
-    const cancelText = t('notificationCenter.actions.remindLater');
-
-    if (isConfirmRequired) {
-      destroy = modal.confirm({
-        title: next.title,
-        content: <RbMarkdown content={next.content} />,
-        maskClosable: false,
-        closable: false,
-        keyboard: false,
-        centered: true,
-        okText,
-        cancelText,
-        onOk: async () => {
-          try {
-            await confirmMessage(next.id);
-          } finally {
-            releaseLock();
-          }
-        },
-        onCancel: () => {
-          // Handles both the 稍后 button AND the X-close of closable=true modals.
-          // requires_confirmation=false 时 closable=false + okCancel=false，因此 onCancel 不会被触发
-          snoozeModalMessage(next.id, 1);
-          releaseLock();
-        },
-      });
-    } else {
-      destroy = modal.warning({
-        title: next.title,
-        content: next.content,
-        icon: false,
-        closable: true,
-        okText,
-        onOk: async () => {
-          try {
-            await markAsRead(next.id);
-          } finally {
-            releaseLock();
-          }
-        },
-        onCancel: releaseLock,
-      });
-    }
-
-    destroyModalRef.current = (() => { destroy.destroy(); }) as () => void;
-  }, [modalMessages, modal, confirmMessage, snoozeModalMessage, markAsRead, t]);
+    setActiveModal({
+      mode: isConfirmRequired ? 'confirm' : 'warning',
+      message: next,
+      token: modalToken,
+    });
+  }, [modalMessages, confirmMessage, snoozeModalMessage, markAsRead]);
 
   // When the Banners host unmounts (e.g. route change), ensure the dangling
   // imperative modal is torn down and the global lock is reset.
   useEffect(() => {
     return () => {
-      if (destroyModalRef.current) {
-        try { destroyModalRef.current(); } catch { /* noop */ }
-      }
       openModalRef.current = false;
       currentModalRef.current = null;
-      destroyModalRef.current = null;
       teardownRealtime();
     };
   }, [teardownRealtime]);
 
+  /* ----------------------------- Render helpers ----------------------------- */
+
+  const handleConfirmOk = async () => {
+    if (!activeModal || activeModal.mode !== 'confirm') return;
+    try {
+      await confirmMessage(activeModal.message.id);
+    } finally {
+      closeActiveModal(activeModal.token);
+    }
+  };
+
+  const handleConfirmCancel = () => {
+    if (!activeModal || activeModal.mode !== 'confirm') return;
+    // Handles both the 稍后 button AND closable=true X-close; requires_confirmation
+    // uses okCancel=true so onCancel is only fired by those two interactions.
+    snoozeModalMessage(activeModal.message.id, 1);
+    closeActiveModal(activeModal.token);
+  };
+
+  const handleWarningOk = async () => {
+    if (!activeModal || activeModal.mode !== 'warning') return;
+    try {
+      await markAsRead(activeModal.message.id);
+    } finally {
+      closeActiveModal(activeModal.token);
+    }
+  };
+
+  const handleWarningCancel = () => {
+    if (!activeModal || activeModal.mode !== 'warning') return;
+    closeActiveModal(activeModal.token);
+  };
+
+  const renderRbModal = () => {
+    if (!activeModal) return null;
+    const { mode, message } = activeModal;
+    const confirmOkText = t('notificationCenter.actions.confirm');
+    const remindLaterText = t('notificationCenter.actions.remindLater');
+    const title = (
+      <Flex gap={12}>
+        <span className="rb:text-[#faad14] rb:text-[18px]">
+        <ExclamationCircleFilled />
+        </span>
+        {message.title}
+      </Flex>
+    )
+    const content = (
+      <RbMarkdown content={message.content} />
+    )
+
+    if (mode === 'confirm') {
+      return (
+        <RbModal
+          open
+          title={title}
+          maskClosable={false}
+          closable={false}
+          keyboard={false}
+          centered
+          okText={confirmOkText}
+          cancelText={remindLaterText}
+          onOk={handleConfirmOk}
+          onCancel={handleConfirmCancel}
+        >
+          {content}
+        </RbModal>
+      );
+    }
+
+    return (
+      <RbModal
+        open
+        title={title}
+        closable={false}
+        okText={confirmOkText}
+        onOk={handleWarningOk}
+        onCancel={handleWarningCancel}
+        cancelButtonProps={{ style: { display: 'none' } }}
+        className="rb-banner-warning-modal"
+      >
+        {content}
+      </RbModal>
+    );
+  };
+
+  /* ------------------------------- Top Alert -------------------------------- */
+
   const firstBanner = bannerMessages[0];
-  if (!firstBanner) {
-    return null;
-  }
 
   return (
-    <Alert
-      key={firstBanner.id}
-      type={firstBanner.theme === 'orange' ? 'warning' : 'error'}
-      banner
-      message={
-        <Marquee pauseOnHover gradient={false}>
-            {firstBanner.title} {firstBanner.summary}
-        </Marquee>
-      }
-      closable
-      onClose={() => {
-        void closeBanner(firstBanner.id);
-      }}
-      className={className || `rb:mb-3!`}
-    />
-  )
+    <>
+      {firstBanner && (
+        <Alert
+          key={firstBanner.id}
+          type={firstBanner.theme === 'orange' ? 'warning' : 'error'}
+          banner
+          message={
+            <Marquee pauseOnHover gradient={false}>
+                {firstBanner.title} {firstBanner.summary}
+            </Marquee>
+          }
+          closable
+          onClose={() => {
+            void closeBanner(firstBanner.id);
+          }}
+          className={className || `rb:mb-3!`}
+        />
+      )}
+      {renderRbModal()}
+    </>
+  );
 };
+
 export default Banners;
