@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type FC } from 'react';
-import { Alert } from 'antd';
+import { Alert, Flex } from 'antd';
+import { ExclamationCircleFilled } from '@ant-design/icons';
 import Marquee from 'react-fast-marquee';
 import { useTranslation } from 'react-i18next';
 
@@ -135,15 +136,25 @@ const Banners: FC<{ className?: string }> = ({
   const renderRbModal = () => {
     if (!activeModal) return null;
     const { mode, message } = activeModal;
-    console.log(activeModal);
     const confirmOkText = t('notificationCenter.actions.confirm');
     const remindLaterText = t('notificationCenter.actions.remindLater');
+    const title = (
+      <Flex gap={12}>
+        <span className="rb:text-[#faad14] rb:text-[18px]">
+        <ExclamationCircleFilled />
+        </span>
+        {message.title}
+      </Flex>
+    )
+    const content = (
+      <RbMarkdown content={message.content} />
+    )
 
     if (mode === 'confirm') {
       return (
         <RbModal
           open
-          title={message.title}
+          title={title}
           maskClosable={false}
           closable={false}
           keyboard={false}
@@ -153,7 +164,7 @@ const Banners: FC<{ className?: string }> = ({
           onOk={handleConfirmOk}
           onCancel={handleConfirmCancel}
         >
-          <RbMarkdown content={message.content} />
+          {content}
         </RbModal>
       );
     }
@@ -161,15 +172,15 @@ const Banners: FC<{ className?: string }> = ({
     return (
       <RbModal
         open
-        title={message.title}
-        closable
+        title={title}
+        closable={false}
         okText={confirmOkText}
         onOk={handleWarningOk}
         onCancel={handleWarningCancel}
         cancelButtonProps={{ style: { display: 'none' } }}
         className="rb-banner-warning-modal"
       >
-        <RbMarkdown content={message.content} />
+        {content}
       </RbModal>
     );
   };
