@@ -13,6 +13,7 @@ from . import (
     memory_api_controller,
     memory_config_api_controller,
     memory_dashboard_api_controller,
+    memory_display_api_controller,
     ontology_api_controller,
     rag_api_chunk_controller,
     rag_api_document_controller,
@@ -37,6 +38,7 @@ service_router.include_router(end_user_api_controller.router)
 service_router.include_router(memory_config_api_controller.router)
 service_router.include_router(user_memory_api_controller.router)
 service_router.include_router(memory_dashboard_api_controller.router)
+service_router.include_router(memory_display_api_controller.router)
 service_router.include_router(ontology_api_controller.router)
 
 __all__ = ["service_router"]

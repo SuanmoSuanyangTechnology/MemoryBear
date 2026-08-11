@@ -22,7 +22,6 @@ import {
   getMemorySearchEdges,
 } from '@/api/memory'
 import GraphNetworkChart from '@/components/Charts/GraphNetworkChart'
-import { Colors } from '@/components/Charts/GraphNetworkChart/utils/utils'
 import type { Node, Edge, EdgeClickData } from '@/components/Charts/GraphNetworkChart/types'
 import CommunityNetwork from './CommunityNetwork'
 import PageTabs from '@/components/PageTabs'
@@ -38,6 +37,29 @@ interface RelationshipNetworkProps {
   refresh: () => void;
   selectNodeId: string | null;
 }
+
+interface NodeTypeStyle {
+  category: number;
+  color: string;
+}
+
+const NODE_TYPE_STYLES = {
+  AssistantOriginal: { category: 0, color: '#155EEF' },
+  AssistantPruned: { category: 1, color: '#02AFD5' },
+  Chunk: { category: 2, color: '#FF5D34' },
+  Dialogue: { category: 3, color: '#6473E9' },
+  ExtractedEntity: { category: 4, color: '#369F21' },
+  Perceptual: { category: 5, color: '#4DA8FF' },
+  Statement: { category: 6, color: '#C86AFF' },
+  Conversation: { category: 7, color: '#F7BA1E' },
+  MemorySummary: { category: 8, color: '#5B6167' },
+} satisfies Record<GraphNode['label'], NodeTypeStyle>
+
+const UNKNOWN_NODE_TYPE_STYLE: NodeTypeStyle = { category: 0, color: '#A8ABB2' }
+
+const getNodeTypeStyle = (nodeType: string): NodeTypeStyle =>
+  NODE_TYPE_STYLES[nodeType as GraphNode['label']] || UNKNOWN_NODE_TYPE_STYLE
+
 const RelationshipNetwork: FC<RelationshipNetworkProps> = ({ regionId, selectedKey, setRegionId, setBrainMemories, setSelectedKey, refresh, selectNodeId }) => {
   const { t } = useTranslation()
   const { id } = useParams()
@@ -80,7 +102,6 @@ const RelationshipNetwork: FC<RelationshipNetworkProps> = ({ regionId, selectedK
     getMemorySearchEdges(id, { signal: edgeAbortRef.current.signal }).then((res) => {
       const { nodes, edges, statistics } = res as GraphData
       const curNodes: Node[] = []
-      const curNodeTypes = Object.keys(statistics.node_types)
 
       // Calculate connection count for each node
       const connectionCount: Record<string, number> = {}
@@ -92,7 +113,7 @@ const RelationshipNetwork: FC<RelationshipNetworkProps> = ({ regionId, selectedK
       // Process node data
       nodes.forEach(node => {
         const connections = connectionCount[node.id] || 0
-        const categoryIndex = curNodeTypes.indexOf(node.label)
+        const nodeTypeStyle = getNodeTypeStyle(node.label)
 
         // Get display name based on node type
         let displayName = ''
@@ -123,7 +144,8 @@ const RelationshipNetwork: FC<RelationshipNetworkProps> = ({ regionId, selectedK
         curNodes.push({
           ...node,
           name: displayName,
-          category: categoryIndex >= 0 ? categoryIndex : 0,
+          category: nodeTypeStyle.category,
+          itemStyle: { color: nodeTypeStyle.color },
           symbolSize: symbolSize, // Adjust node size based on connection count
         })
       })
@@ -253,7 +275,7 @@ const RelationshipNetwork: FC<RelationshipNetworkProps> = ({ regionId, selectedK
               })}
             >
               <Flex wrap gap={8}>
-                {categories.map((item, index) => (
+                {categories.map((item) => (
                   <Flex
                     key={item.name}
                     gap={4}
@@ -265,7 +287,7 @@ const RelationshipNetwork: FC<RelationshipNetworkProps> = ({ regionId, selectedK
                     onClick={() => handleClickCategory(item.name)}
                   >
                     <div className={clsx(`rb:size-1.25 rb:rounded-full rb:mr-2`)}
-                      style={{ backgroundColor: Colors[index] }}
+                      style={{ backgroundColor: getNodeTypeStyle(item.name).color }}
                     ></div>
                     {t(`userMemory.${item.name}`)}
                     <div className="rb:px-1 rb:rounded-full rb:bg-[#F6F6F6] rb:text-[10px] rb:h-3.5">{item.value}</div>

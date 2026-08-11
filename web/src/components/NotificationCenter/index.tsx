@@ -12,6 +12,7 @@ import {
 } from '@/store/notification';
 import styles from './index.module.css';
 import { formatDateTime } from '@/utils/format';
+import { isPrivateAvailable } from '@/utils/private';
 import Empty from '@/components/Empty';
 
 const BellIcon = () => (
@@ -261,6 +262,8 @@ const NotificationPanel = ({ open }: NotificationPanelProps) => {
 };
 
 const NotificationBell = () => {
+  if (!isPrivateAvailable) return;
+
   const { t } = useTranslation();
   const { notificationStats } = useNotification();
   const [open, setOpen] = useState(false);
