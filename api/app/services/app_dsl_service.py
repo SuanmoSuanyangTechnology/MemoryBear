@@ -632,6 +632,35 @@ class AppDslService:
             result.append(entry)
         return result
 
+    def _resolve_kb_entries(
+        self,
+        knowledge_bases: list,
+        workspace_id: uuid.UUID,
+        warnings: list,
+        node_label: str,
+    ) -> list:
+        """逐条解析知识库配置，未匹配的移除并记录警告"""
+        resolved_kbs = []
+        for kb in knowledge_bases:
+            kb_id = kb.get("kb_id")
+            if not kb_id:
+                continue
+            kb_ref = {}
+            if isinstance(kb_id, str):
+                try:
+                    uuid.UUID(kb_id)
+                    kb_ref["id"] = kb_id
+                except ValueError:
+                    kb_ref["name"] = kb_id
+            else:
+                kb_ref["name"] = kb_id
+            resolved_id = self._resolve_kb(kb_ref, workspace_id, [])
+            if resolved_id:
+                resolved_kbs.append({**kb, "kb_id": resolved_id})
+            else:
+                warnings.append(f"[{node_label}] 知识库 '{kb_id}' 未匹配，已移除，请导入后手动配置")
+        return resolved_kbs
+
     def _resolve_workflow_nodes(self, nodes: list, tenant_id: uuid.UUID, workspace_id: uuid.UUID, warnings: list) -> list:
         """解析工作流节点中的工具ID和知识库ID，匹配不到则清空配置"""
         resolved_nodes = []
@@ -663,27 +692,24 @@ class AppDslService:
                         config["tool_id"] = None
                         config["tool_parameters"] = {}
             elif node_type == NodeType.KNOWLEDGE_RETRIEVAL.value:
-                knowledge_bases = config.get("knowledge_bases") or []
-                resolved_kbs = []
-                for kb in knowledge_bases:
-                    kb_id = kb.get("kb_id")
-                    if not kb_id:
-                        continue
-                    kb_ref = {}
-                    if isinstance(kb_id, str):
-                        try:
-                            uuid.UUID(kb_id)
-                            kb_ref["id"] = kb_id
-                        except ValueError:
-                            kb_ref["name"] = kb_id
-                    else:
-                        kb_ref["name"] = kb_id
-                    resolved_id = self._resolve_kb(kb_ref, workspace_id, [])
-                    if resolved_id:
-                        resolved_kbs.append({**kb, "kb_id": resolved_id})
-                    else:
-                        warnings.append(f"[{node_label}] 知识库 '{kb_id}' 未匹配，已移除，请导入后手动配置")
-                config["knowledge_bases"] = resolved_kbs
+                config["knowledge_bases"] = self._resolve_kb_entries(
+                    config.get("knowledge_bases") or [], workspace_id, warnings, node_label
+                )
+            elif node_type == NodeType.AGENT.value:
+                # Agent 节点内置知识库检索工具：清理不属于当前工作空间的知识库引用
+                knowledge_retrieval = config.get("knowledge_retrieval")
+                if knowledge_retrieval and knowledge_retrieval.get("knowledge_bases"):
+                    config["knowledge_retrieval"] = {
+                        **knowledge_retrieval,
+                        "knowledge_bases": self._resolve_kb_entries(
+                            knowledge_retrieval["knowledge_bases"], workspace_id, warnings, node_label
+                        ),
+                    }
+                # 兼容早期前端将知识库配置展开到节点根级的布局
+                if config.get("knowledge_bases"):
+                    config["knowledge_bases"] = self._resolve_kb_entries(
+                        config["knowledge_bases"], workspace_id, warnings, node_label
+                    )
             elif node_type in (NodeType.LLM.value, NodeType.QUESTION_CLASSIFIER.value, NodeType.PARAMETER_EXTRACTOR.value):
                 model_ref = config.get("model_ref") or config.get("model_id")
                 if model_ref:
