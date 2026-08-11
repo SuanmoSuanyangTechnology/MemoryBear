@@ -1,4 +1,5 @@
 """会话服务"""
+import asyncio
 import uuid
 from types import SimpleNamespace
 from datetime import timedelta
@@ -30,6 +31,39 @@ from app.services.model_service import ModelConfigService, ModelApiKeyService
 from app.services.prompt import prompt_manager
 
 logger = get_business_logger()
+
+
+# fire-and-forget 后台任务的强引用集合，避免 asyncio.ensure_future 返回的 Task
+# 因外部无引用被 GC 提前回收（官方文档明确警告）。任务完成时自动从集合中移除。
+_BACKGROUND_MEMORY_TASKS: set[asyncio.Task] = set()
+
+
+def fire_background_memory_task(coro) -> Optional[asyncio.Task]:
+    """把一个 coroutine 挂到当前事件循环，返回 Task 并保留强引用防 GC。
+
+    典型用法（调用方在 async 上下文里，希望 fire-and-forget 派发）::
+
+        fire_background_memory_task(
+            self.conversation_service.dispatch_memory_batch(messages=[...], conversation=conv)
+        )
+
+    Returns:
+        创建的 Task；若当前无正在运行的事件循环则返回 None 并发 warning。
+    """
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        logger.warning(
+            "[ConversationService] fire_background_memory_task 跳过：无正在运行的事件循环"
+        )
+        # 关闭未使用的 coroutine，避免 "coroutine was never awaited" 警告
+        coro.close()
+        return None
+
+    task = loop.create_task(coro)
+    _BACKGROUND_MEMORY_TASKS.add(task)
+    task.add_done_callback(_BACKGROUND_MEMORY_TASKS.discard)
+    return task
 
 
 class ConversationService:
@@ -291,6 +325,9 @@ class ConversationService:
             self.db.commit()
             self.db.refresh(message)
 
+            # TODO(messages-memory-decoupling Phase 2): 迁移完所有成对调用点后，移除
+            # 此处 dispatch_memory_sync 调用，改由业务层显式调 dispatch_memory_batch。
+            # 参见 .kiro/specs/messages-memory-decoupling/design.md
             if sync_memory:
                 self.dispatch_memory_sync(message, conversation, should_memorize)
 
@@ -545,6 +582,53 @@ class ConversationService:
                 f"[ConversationService] dispatch_agent_message 调度失败（不影响主流程）: "
                 f"conv={message.conversation_id}, err={e}",
                 exc_info=True,
+            )
+
+    async def dispatch_memory_batch(
+        self,
+        messages: List[Any],
+        conversation: Conversation,
+    ) -> None:
+        """批量派发同一回合的多条消息到记忆系统（async 线性实现）。
+
+        与 dispatch_memory_sync 的区别：一次 write_batch（一次 pg_advisory_xact_lock
+        + 一次事务）分配连续 seq，一次滑动窗口派发。批内 seq 严格 user < assistant。
+
+        本方法**本身不 fire-and-forget**。调用方决定：
+            - fire-and-forget：`fire_background_memory_task(svc.dispatch_memory_batch(...))`
+            - 阻塞等待：`await svc.dispatch_memory_batch(...)`
+        主 chat 流程默认走 fire-and-forget，避免拖累流式响应。
+
+        Args:
+            messages: 消息列表，元素需带 .id / .conversation_id / .role /
+                .content / .created_at / .meta_data / .should_memorize 属性。
+                所有消息应属于同一对话，seq 分配顺序 = 列表顺序。
+            conversation: 所属 Conversation 实例（提供 workspace_id / app_id / user_id）。
+        """
+        # 数据形状规范化（None → {}, 缺失字段默认等）由下游 dispatcher.ingest_agent_messages
+        # 统一处理；空/异常输入由下游 if not messages / if not written 双重拦截；
+        # 本方法只做纯派发（薄派发层），不重复防御。
+        from app.db import get_async_db_context
+        from app.core.memory.memory_service import MemoryService
+
+        try:
+            async with get_async_db_context() as db:
+                config_id = await MemoryConfigService(db).get_workspace_active_config_id_async(
+                    conversation.workspace_id
+                )
+            await MemoryService.ingest_agent_messages(
+                conversation_id=str(messages[0].conversation_id) if messages else "",
+                messages=messages,
+                app_id=str(conversation.app_id),
+                config_id=str(config_id),
+                workspace_id=str(conversation.workspace_id),
+                end_user_id=str(conversation.user_id) if conversation.user_id else "",
+            )
+        except Exception as exc:
+            logger.warning(
+                f"[ConversationService] dispatch_memory_batch 执行失败: "
+                f"conv={conversation.id}, batch={len(messages)}, err={exc}",
+                exc_info=exc,
             )
 
     def get_messages(
