@@ -13,6 +13,7 @@ from typing import Any, AsyncGenerator, Dict, List, Optional
 
 from dotenv import load_dotenv
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import BusinessException
@@ -80,7 +81,7 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
     使用 SQLAlchemy ORM 进行数据库操作。
     """
 
-    def __init__(self, db: Optional[Session] = None) -> None:
+    def __init__(self, db: Optional[Session | AsyncSession] = None) -> None:
         """初始化服务
 
         Args:
@@ -229,7 +230,10 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
         if needs_commit:
             await self.db.commit()
 
-        activate_config_id = await MemoryConfigService(self.db).get_workspace_active_config_id_async(workspace_id)
+        try:
+            activate_config_id = await MemoryConfigService(self.db).get_workspace_active_config_id_async(workspace_id)
+        except Exception:
+            activate_config_id = None
 
         # 将 ORM 对象转换为字典列表，时间字段统一转为 UTC 毫秒时间戳
         data_list = []

@@ -1081,6 +1081,7 @@ class MemoryConfigService:
     ) -> uuid.UUID:
         config_id = get_workspace_memory_config_id(self.db, workspace_id)
         if not config_id:
+            logger.error(f"空间{workspace_id}无启用的记忆配置")
             raise BusinessException(f"空间{workspace_id}无启用的记忆配置")
         return config_id
 
@@ -1090,6 +1091,7 @@ class MemoryConfigService:
     ) -> uuid.UUID:
         config_id = await get_workspace_memory_config_id_async(self.db, workspace_id)
         if not config_id:
+            logger.error(f"空间{workspace_id}无启用的记忆配置")
             raise BusinessException(f"空间{workspace_id}无启用的记忆配置")
         return config_id
 
