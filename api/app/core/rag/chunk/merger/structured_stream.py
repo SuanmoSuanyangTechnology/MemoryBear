@@ -2,7 +2,6 @@ from dataclasses import dataclass, field
 
 from app.core.rag.chunk.context import ParsedBlock, ParsedBlockType
 
-
 PROTECTED_DELIMITER_TYPES = {
     ParsedBlockType.IMAGE,
     ParsedBlockType.CODE,
