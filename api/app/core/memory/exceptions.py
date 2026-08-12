@@ -8,18 +8,15 @@ from typing import Optional
 class MemoryExtractionErrorCode(str, Enum):
     MODEL_CALL_FAILED = "MODEL_CALL_FAILED"
     STRUCTURED_RESULT_PARSE_FAILED = "STRUCTURED_RESULT_PARSE_FAILED"
-    MEMORY_SAVE_FAILED = "MEMORY_SAVE_FAILED"
 
 
 class MemoryExtractionStage(str, Enum):
     MODEL_CALL = "model_call"
     STRUCTURED_RESULT_PARSE = "structured_result_parse"
-    MEMORY_SAVE = "memory_save"
 
 
 class MemoryExtractionImpact(str, Enum):
     MEMORY_NOT_RELIABLY_FORMED = "memory_not_reliably_formed"
-    MEMORY_MAY_BE_PARTIAL = "memory_may_be_partial"
     MEMORY_VECTOR_INCOMPLETE = "memory_vector_incomplete"
 
 
@@ -90,17 +87,5 @@ class MemoryExtractionBusinessError(Exception):
             impact=MemoryExtractionImpact.MEMORY_VECTOR_INCOMPLETE,
             retryable=True,
             model_type=MemoryModelType.EMBEDDING,
-            cause=cause,
-        )
-
-    @classmethod
-    def memory_save_failed(
-        cls, cause: Exception | None = None
-    ) -> "MemoryExtractionBusinessError":
-        return cls(
-            code=MemoryExtractionErrorCode.MEMORY_SAVE_FAILED,
-            stage=MemoryExtractionStage.MEMORY_SAVE,
-            impact=MemoryExtractionImpact.MEMORY_MAY_BE_PARTIAL,
-            retryable=True,
             cause=cause,
         )

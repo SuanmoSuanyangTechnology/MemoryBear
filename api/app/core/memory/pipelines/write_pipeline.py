@@ -836,19 +836,15 @@ class WritePipeline:
                     )
                     await asyncio.sleep(1 * (attempt + 1))
                 else:
-                    cause = RuntimeError("Neo4j memory save returned false after retries")
                     logger.error(f"Neo4j 写入在 {max_retries} 次尝试后仍部分失败")
-                    raise MemoryExtractionBusinessError.memory_save_failed(cause) from cause
-            except MemoryExtractionBusinessError:
-                raise
+                    return False
             except Exception as e:
                 if self._is_deadlock(e) and attempt < max_retries - 1:
                     logger.warning(f"Neo4j 死锁，重试 ({attempt + 2}/{max_retries})")
                     await asyncio.sleep(1 * (attempt + 1))
                 else:
-                    raise MemoryExtractionBusinessError.memory_save_failed(e) from e
-        cause = RuntimeError("Neo4j memory save exhausted retries")
-        raise MemoryExtractionBusinessError.memory_save_failed(cause) from cause
+                    raise
+        return False
 
     # ──────────────────────────────────────────────
     # Step 3.5: 构建 UserSource 子图
