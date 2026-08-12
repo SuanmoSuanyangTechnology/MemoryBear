@@ -49,6 +49,16 @@ try:
 except ImportError:
     pass  # 社区版无 premium 模块，静默跳过
 
+# Web 进程由 platform_admin.plugin 注册；Celery 入口需独立注册同一门面。
+try:
+    from app.plugins import register_plugin
+    from premium.platform_admin.notification_center import alert_engine
+
+    register_plugin("alert_engine", alert_engine)
+    logger.info("Alert engine plugin registered for Celery worker")
+except ImportError:
+    pass  # 社区版无 premium 模块，静默跳过
+
 
 @worker_process_init.connect
 def _reinit_db_pool(**kwargs):

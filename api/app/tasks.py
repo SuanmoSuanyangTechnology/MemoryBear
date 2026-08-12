@@ -26,6 +26,8 @@ from app.aioRedis import get_thread_safe_redis
 from app.celery_app import celery_app
 from app.core.config import settings
 from app.core.logging_config import get_logger
+from app.core.memory.exceptions import MemoryExtractionBusinessError
+from app.core.models import RedBearEmbeddings, RedBearLLM
 from app.core.memory.storage_services.reflection_engine import retry_registry as rr
 from app.core.memory.storage_services.reflection_engine.errors import (
     ReflectionBusinessError,
@@ -2663,7 +2665,7 @@ def write_message_task(
     )
     start_time = time.time()
 
-    async def _run() -> dict:
+    async def _run():
         from app.core.memory.memory_service import MemoryService
 
         service = MemoryService(
@@ -2684,12 +2686,29 @@ def write_message_task(
             dispatch_at=dispatch_at,
             source=source,
         )
-        return {"status": result.status, "extraction": result.extraction}
+        return result
 
     try:
         task_start_time = int(time.time())
 
-        result = loop.run_until_complete(_run())
+        write_result = loop.run_until_complete(_run())
+        if write_result.degraded_error is not None:
+            from app.core.memory.alerts import emit_memory_extraction_alert_safely
+
+            emit_memory_extraction_alert_safely(
+                error=write_result.degraded_error,
+                memory_message_id=str(
+                    (target_message or {}).get("memory_message_id") or ""
+                ),
+                workspace_id=workspace_id,
+                end_user_id=resolved_end_user_id,
+                source=source,
+                task_id=str(self.request.id or ""),
+            )
+        result = {
+            "status": write_result.status,
+            "extraction": write_result.extraction,
+        }
         elapsed_time = time.time() - start_time
 
         logger.info(f"[CELERY WRITE] Task completed - elapsed_time={elapsed_time:.2f}s")
@@ -2759,7 +2778,23 @@ def write_message_task(
         logger.error(f"[CELERY WRITE] Task failed - elapsed_time={elapsed_time:.2f}s, error={detailed_error}",
                      exc_info=True)
 
-        # 配置类确定性错误：直接 raise，让 Celery 将任务标记为 FAILURE，不触发重试
+        # 只有主萃取链路的稳定业务异常会生成用户级告警。WritePipeline 的
+        # finally 已在异常到达此处前完成摘要任务取消和资源清理。
+        if isinstance(e, MemoryExtractionBusinessError):
+            from app.core.memory.alerts import emit_memory_extraction_alert_safely
+
+            emit_memory_extraction_alert_safely(
+                error=e,
+                memory_message_id=str(
+                    (target_message or {}).get("memory_message_id") or ""
+                ),
+                workspace_id=workspace_id,
+                end_user_id=resolved_end_user_id,
+                source=source,
+                task_id=str(self.request.id or ""),
+            )
+
+        # 配置类确定性错误：直接 raise，让 Celery 将任务标记为 FAILURE。
         if isinstance(e, (ModelNotFoundError, ModelInactiveError, InvalidConfigError)):
             logger.error(
                 f"[CELERY WRITE] Configuration error detected, task will not be retried - "
