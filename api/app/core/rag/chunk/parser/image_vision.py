@@ -1,14 +1,19 @@
 import logging
 import time
+from collections.abc import Callable, Sequence
 from concurrent.futures import as_completed
 from dataclasses import dataclass
-from typing import Callable, Sequence
 
 from app.core.rag.app.picture import vision_llm_chunk
-from app.core.rag.chunk.context import ParsedBlock, ParsedBlockType
+from app.core.rag.chunk.context import (
+    ImageVisionScope,
+    LogicalChunk,
+    LogicalChunkType,
+    ParsedBlock,
+    ParsedBlockType,
+)
 from app.core.rag.deepdoc.parser import figure_parser
 from app.core.rag.prompts.generator import vision_llm_figure_describe_prompt
-
 
 LOGGER = logging.getLogger(__name__)
 
@@ -108,6 +113,156 @@ def enhance_image_blocks_with_vision(
     stats.elapsed_seconds = time.monotonic() - started_at
     LOGGER.info(
         "[%s] image vision enhancement summary: total=%s success=%s empty=%s failed=%s elapsed=%.2fs",
+        log_prefix,
+        total,
+        stats.success_count,
+        stats.empty_count,
+        stats.failed_count,
+        stats.elapsed_seconds,
+    )
+    _callback(
+        callback,
+        progress_start + progress_span,
+        f"{log_prefix} image vision enhancement finished: "
+        f"success={stats.success_count}, empty={stats.empty_count}, failed={stats.failed_count}.",
+    )
+    return stats
+
+
+def enhance_complete_image_chunks_with_vision(
+    chunks: Sequence[LogicalChunk],
+    vision_model,
+    enabled_scopes: set[ImageVisionScope],
+    callback: Callable | None = None,
+    log_prefix: str = "Chunk",
+    lang: str = "Chinese",
+    progress_start: float = 0.80,
+    progress_span: float = 0.03,
+) -> ImageVisionEnhancementStats:
+    eligible_chunks = [
+        chunk
+        for chunk in chunks
+        if chunk.type is LogicalChunkType.IMAGE
+        and chunk.image_tag_complete
+        and chunk.source_image_key is not None
+        and chunk.image_vision_scope in enabled_scopes
+    ]
+    groups: dict[int, list[LogicalChunk]] = {}
+    for chunk in eligible_chunks:
+        groups.setdefault(chunk.source_image_key, []).append(chunk)
+
+    pending_groups: list[tuple[int, list[LogicalChunk], LogicalChunk]] = []
+    ready_count = 0
+    for source_key, group in groups.items():
+        existing_text = next(
+            (
+                str(chunk.metadata.get("vision_text") or "").strip()
+                for chunk in group
+                if str(chunk.metadata.get("vision_text") or "").strip()
+            ),
+            "",
+        )
+        if existing_text:
+            for chunk in group:
+                chunk.metadata["vision_text"] = existing_text
+            ready_count += 1
+            continue
+
+        representative = next((chunk for chunk in group if chunk.image is not None), None)
+        if representative is not None:
+            ready_count += 1
+            pending_groups.append((source_key, group, representative))
+
+    stats = ImageVisionEnhancementStats(
+        image_count=len(eligible_chunks),
+        ready_count=ready_count,
+    )
+    if not vision_model:
+        if eligible_chunks:
+            LOGGER.warning(
+                "[%s] no visual model detected; skipping complete image vision enhancement",
+                log_prefix,
+            )
+        return stats
+
+    if not pending_groups:
+        LOGGER.info("[%s] no complete images available for vision enhancement", log_prefix)
+        return stats
+
+    started_at = time.monotonic()
+    prompt = vision_llm_figure_describe_prompt(lang=getattr(vision_model, "lang", lang))
+    total = len(pending_groups)
+    LOGGER.info("[%s] complete image vision enhancement start: total=%s", log_prefix, total)
+    _callback(callback, progress_start, f"{log_prefix} image vision enhancement start: total={total}.")
+
+    futures = {}
+    for index, (source_key, group, representative) in enumerate(pending_groups, start=1):
+        src = str(representative.metadata.get("src", ""))
+        LOGGER.info(
+            "[%s] complete image vision enhancement submitted: index=%s total=%s source_key=%s src=%s",
+            log_prefix,
+            index,
+            total,
+            source_key,
+            src,
+        )
+        future = figure_parser.shared_executor.submit(
+            vision_llm_chunk,
+            representative.image,
+            vision_model,
+            prompt,
+            callback,
+        )
+        futures[future] = (index, source_key, group, src, time.monotonic())
+
+    completed_count = 0
+    for future in as_completed(futures):
+        index, source_key, group, src, image_started_at = futures[future]
+        completed_count += 1
+        progress = progress_start + (progress_span * completed_count / total)
+        try:
+            vision_text = str(future.result() or "").strip()
+        except Exception as exc:  # noqa: BLE001
+            stats.failed_count += 1
+            elapsed = time.monotonic() - image_started_at
+            LOGGER.warning(
+                "[%s] complete image vision enhancement failed: "
+                "index=%s total=%s source_key=%s src=%s elapsed=%.2fs error=%s",
+                log_prefix,
+                index,
+                total,
+                source_key,
+                src,
+                elapsed,
+                exc,
+            )
+            _callback(callback, progress, f"{log_prefix} image vision enhancement failed: {completed_count}/{total}.")
+            continue
+
+        if vision_text:
+            for chunk in group:
+                chunk.metadata["vision_text"] = vision_text
+            stats.success_count += 1
+        else:
+            stats.empty_count += 1
+
+        elapsed = time.monotonic() - image_started_at
+        LOGGER.info(
+            "[%s] complete image vision enhancement finished: "
+            "index=%s total=%s source_key=%s src=%s elapsed=%.2fs text_chars=%s",
+            log_prefix,
+            index,
+            total,
+            source_key,
+            src,
+            elapsed,
+            len(vision_text),
+        )
+        _callback(callback, progress, f"{log_prefix} image vision enhancement finished: {completed_count}/{total}.")
+
+    stats.elapsed_seconds = time.monotonic() - started_at
+    LOGGER.info(
+        "[%s] complete image vision enhancement summary: total=%s success=%s empty=%s failed=%s elapsed=%.2fs",
         log_prefix,
         total,
         stats.success_count,

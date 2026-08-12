@@ -4,13 +4,13 @@ import tempfile
 
 from app.core.rag.chunk.context import (
     ChunkContext,
+    ImageVisionScope,
     ParsedBlock,
     ParsedBlockType,
     ParseResult,
     is_embedded_image_vision_enabled,
 )
 from app.core.rag.chunk.parser.html import HtmlParser
-from app.core.rag.chunk.parser.image_vision import enhance_image_blocks_with_vision
 from app.core.rag.chunk.parser.json import JsonParser
 from app.core.rag.chunk.parser.structured_markdown import StructMarkdownParser
 from app.core.rag.chunk.parser.txt import TxtParser
@@ -46,22 +46,16 @@ class MarkdownChunkPipeline(ChunkPipeline):
         markdown_parser = StructMarkdownParser()
         blocks = markdown_parser.parse(ctx)
 
-        if ctx.vision_model and is_embedded_image_vision_enabled(ctx.parser_config):
+        embedded_image_vision_enabled = is_embedded_image_vision_enabled(ctx.parser_config)
+        if embedded_image_vision_enabled:
             for block in blocks:
                 if block.type is not ParsedBlockType.IMAGE:
                     continue
-                image = markdown_parser.load_image(str(block.metadata.get("src", "")))
-                if image:
-                    block.image = image
-            enhance_image_blocks_with_vision(
-                blocks,
-                vision_model=ctx.vision_model,
-                callback=ctx.callback,
-                log_prefix="Markdown",
-                lang=ctx.lang,
-                progress_start=0.2,
-                progress_span=0.55,
-            )
+                block.image_vision_scope = ImageVisionScope.EMBEDDED
+                if ctx.vision_model:
+                    image = markdown_parser.load_image(str(block.metadata.get("src", "")))
+                    if image:
+                        block.image = image
         elif ctx.vision_model:
             logging.info("Image vision enhancement disabled by parser config.")
         else:
@@ -82,7 +76,12 @@ class MarkdownChunkPipeline(ChunkPipeline):
 
         ctx.callback(0.8, "Finish parsing.")
         logging.debug(f"[Markdown Parsing Blocks]: {blocks}")
-        return ParseResult(blocks=blocks, urls=urls, merge_strategy="blocks")
+        return ParseResult(
+            blocks=blocks,
+            urls=urls,
+            merge_strategy="blocks",
+            structured_markdown_stream=True,
+        )
 
 
 class HtmlChunkPipeline(ChunkPipeline):

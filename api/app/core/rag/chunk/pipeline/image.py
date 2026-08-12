@@ -1,5 +1,4 @@
 import io
-import logging
 import uuid
 from dataclasses import replace
 from pathlib import Path
@@ -7,9 +6,9 @@ from pathlib import Path
 from PIL import Image
 
 from app.core.config import settings
-from app.core.rag.app.picture import vision_llm_chunk
 from app.core.rag.chunk.context import (
     ChunkContext,
+    ImageVisionScope,
     ParsedBlock,
     ParsedBlockType,
     ParseResult,
@@ -18,11 +17,9 @@ from app.core.rag.chunk.context import (
 )
 from app.core.rag.chunk.parser.mineru_v3 import MinerUV3Parser
 from app.core.rag.chunk.parser.structured_markdown import StructMarkdownParser
-from app.core.rag.prompts.generator import vision_llm_figure_describe_prompt
 
 from .base import ChunkPipeline
 
-LOGGER = logging.getLogger(__name__)
 DEFAULT_IMAGE_VISION_MODE = 1
 IMAGE_VISION_MODES = {0, 1, 2}
 
@@ -38,7 +35,12 @@ class ImageChunkPipeline(ChunkPipeline):
             source_markdown, source_image_url = self._source_image_markdown(ctx, source_file_id)
             blocks, _ = self._parse_markdown_blocks(source_markdown, source_image_url)
             self._callback(ctx, 0.8, "Finish parsing image.")
-            return ParseResult(blocks=blocks, merge_strategy="blocks")
+            return ParseResult(
+                blocks=blocks,
+                merge_strategy="blocks",
+                structured_markdown_stream=True,
+                direct_image_vision_mode=None,
+            )
 
         mode = self._image_vision_mode(ctx)
         source_binary = self._read_binary(ctx)
@@ -59,26 +61,24 @@ class ImageChunkPipeline(ChunkPipeline):
             source_image_url,
         )
         blocks.extend(mineru_blocks)
-        text_blocks = [block for block in blocks if block.type is not ParsedBlockType.IMAGE]
-
-        vision_text = ""
+        has_ocr_text = self._has_content(
+            [block for block in mineru_blocks if block.type is not ParsedBlockType.IMAGE]
+        )
         if mode in {1, 2}:
-            vision_text = self._describe_source_image(ctx, source_image)
-            if vision_text:
-                source_image_block.metadata["vision_text"] = vision_text
+            source_image_block.image = source_image
+            source_image_block.image_vision_scope = ImageVisionScope.DIRECT
 
-        if mode == 0:
-            if not self._has_content(text_blocks):
-                raise ValueError("MinerU returned no text content for image OCR mode.")
-        elif mode == 1:
-            if not self._has_content(text_blocks) and not vision_text:
-                raise ValueError("Image mixed mode produced neither OCR text nor visual description.")
-        else:
-            if not vision_text:
-                raise ValueError("Image pure vision mode produced no visual description.")
+        if mode == 0 and not has_ocr_text:
+            raise ValueError("MinerU returned no text content for image OCR mode.")
 
         self._callback(ctx, 0.8, "Finish parsing image.")
-        return ParseResult(blocks=blocks, merge_strategy="blocks")
+        return ParseResult(
+            blocks=blocks,
+            merge_strategy="blocks",
+            structured_markdown_stream=True,
+            direct_image_vision_mode=mode,
+            direct_image_has_ocr_text=has_ocr_text,
+        )
 
     def _image_vision_mode(self, ctx: ChunkContext) -> int:
         image_config = ctx.parser_config.get("image")
@@ -124,19 +124,6 @@ class ImageChunkPipeline(ChunkPipeline):
         if is_embedded_image_vision_enabled(ctx.parser_config):
             return blocks
         return [block for block in blocks if block.type is not ParsedBlockType.IMAGE]
-
-    def _describe_source_image(self, ctx: ChunkContext, source_image: Image.Image) -> str:
-        prompt = vision_llm_figure_describe_prompt(lang=getattr(ctx.vision_model, "lang", ctx.lang))
-        try:
-            vision_text = vision_llm_chunk(source_image, ctx.vision_model, prompt=prompt)
-        except Exception as exc:  # noqa: BLE001
-            LOGGER.warning("[ImagePipeline] source image vision failed: file_name=%s error=%s", ctx.filename, exc)
-            return ""
-
-        vision_text = str(vision_text or "").strip()
-        if not vision_text:
-            LOGGER.warning("[ImagePipeline] source image vision returned empty: file_name=%s", ctx.filename)
-        return vision_text
 
     def _source_file_id(self, ctx: ChunkContext) -> str:
         raw_file_id = ctx.kwargs.get("source_file_id")
