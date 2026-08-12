@@ -29,10 +29,17 @@ except ImportError:
 # 导入企业版消息通知中心任务（队列：notification_state_tasks）
 try:
     from premium.platform_admin.notification_center.tasks import (  # noqa: F401
+        alert_fanout_task,
         notification_publish_task,
         notification_scan_expired_task,
         notification_scan_scheduled_task,
     )
+    # Worker 不启动 FastAPI 插件加载流程，复用通知中心统一入口完成进程级注册。
+    from premium.platform_admin.notification_center.plugin import (
+        register_notification_alert_plugins,
+    )
+
+    register_notification_alert_plugins()
 except ImportError:
     pass  # 社区版无 premium 模块，静默跳过
 

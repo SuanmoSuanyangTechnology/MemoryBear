@@ -14,7 +14,11 @@ from app.core.config import settings
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
-from app.core.quota_manager import check_end_user_quota_async
+from app.core.quota_manager import (
+    check_end_user_quota_async,
+    report_quota_change,
+    report_quota_change_sync,
+)
 from app.core.response_utils import success, fail
 from app.core.utils.datetime_utils import parse_iso_to_utc_naive, to_timestamp_ms
 from app.db import get_db, get_db_context, get_async_db_context
@@ -196,6 +200,13 @@ async def _get_or_create_public_end_user_async(
         other_id=other_id,
         original_user_id=original_user_id,
     )
+    # 终端用户已落库，用量真正发生变化后才评估告警。
+    if workspace is not None:
+        await report_quota_change(
+            workspace.tenant_id,
+            "end_user_quota",
+            workspace_id=workspace_id,
+        )
     await set_json_async(cache_key, {
         "id": str(new_user.id),
         "app_id": str(new_user.app_id),
@@ -355,11 +366,13 @@ def list_conversations(
 
     # 仅在新建终端用户时检查配额
     existing_end_user = end_user_repo.get_end_user_by_other_id(workspace_id=workspace_id, other_id=other_id)
+    new_user_tenant_id = None
     if existing_end_user is None:
         from app.core.quota_manager import _check_quota
         from app.models.workspace_model import Workspace
         ws = db.query(Workspace).filter(Workspace.id == workspace_id).first()
         if ws:
+            new_user_tenant_id = ws.tenant_id
             _check_quota(db, ws.tenant_id, "end_user_quota", "end_user", workspace_id=workspace_id)
 
     new_end_user = end_user_repo.get_or_create_end_user(
@@ -367,6 +380,13 @@ def list_conversations(
         workspace_id=workspace_id,
         other_id=other_id
     )
+    # 终端用户已落库，用量真正发生变化后才评估告警。
+    if new_user_tenant_id is not None:
+        report_quota_change_sync(
+            new_user_tenant_id,
+            "end_user_quota",
+            workspace_id=workspace_id,
+        )
     logger.debug(new_end_user.id)
     conversations, total = service.list_conversations(
         share_token=share_data.share_token,

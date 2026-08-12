@@ -201,6 +201,10 @@ try:
     celery_app.conf.task_routes['notification.dispatch_channel'] = {
         'queue': 'notification_state_tasks'
     }
+    # 告警事件创建后立即扇出为用户端站内通知
+    celery_app.conf.task_routes['notification.alert_fanout'] = {
+        'queue': 'notification_state_tasks'
+    }
 except ImportError:
     _HAS_NOTIFICATION_TASKS = False
 
@@ -394,5 +398,11 @@ if _HAS_NOTIFICATION_TASKS:
             "task": "notification.cleanup_retention",
             "schedule": crontab(hour=3, minute=0),
             "options": {"queue": "notification_state_tasks", "expires": 3600},
+        },
+        # 每 10 分钟采集租户企业余额；任务内部在无启用规则时直接跳过。
+        "notification-scan-enterprise-balance": {
+            "task": "notification.scan_enterprise_balance",
+            "schedule": NoCatchupSchedule(run_every=timedelta(minutes=10)),
+            "options": {"queue": "notification_state_tasks", "expires": 600},
         },
     })
