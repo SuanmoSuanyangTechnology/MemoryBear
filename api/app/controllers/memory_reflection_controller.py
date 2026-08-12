@@ -409,17 +409,17 @@ async def reflection_run(
         config_id = resolve_config_id(config_id, db)
 
         # Query reflection configuration using MemoryConfigRepository
-        result = await MemoryConfigRepository(db).query_reflection_config_by_id_async(config_id)
-        if not result:
+        config_with_workspace = await MemoryConfigRepository(db).get_config_with_workspace_async(config_id)
+        if not config_with_workspace:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"未找到config_id为 {config_id} 的配置"
             )
+        result, workspace = config_with_workspace
 
         api_logger.info(f"成功查询反思配置，config_id: {config_id}")
 
-        # Validate model ID existence
-        model_id = result.reflection_model_id
+        model_id = workspace.llm
         if model_id:
             try:
                 await ModelConfigService.get_model_by_id_async(db=db, model_id=uuid.UUID(model_id), tenant_id=current_user.tenant_id)

@@ -268,12 +268,6 @@ class ConfigUpdate(BaseModel):  # 更新记忆萃取引擎配置参数时使用�
 
 class ConfigUpdateExtracted(BaseModel):  # 更新记忆萃取引擎配置参数时使用的模型
     config_id: Union[uuid.UUID, int, str] = None
-    llm_id: Optional[str] = Field(None, description="LLM模型配置ID")
-    audio_id: Optional[str] = Field(None, description="语音模型ID")
-    vision_id: Optional[str] = Field(None, description="视觉模型ID")
-    video_id: Optional[str] = Field(None, description="视频模型ID")
-    embedding_id: Optional[str] = Field(None, description="嵌入模型配置ID")
-    rerank_id: Optional[str] = Field(None, description="重排序模型配置ID")
     enable_llm_dedup_blockwise: Optional[bool] = None
     enable_llm_disambiguation: Optional[bool] = None
     deep_retrieval: Optional[bool] = Field(None, validation_alias="deep_retrieval")

@@ -131,7 +131,6 @@ class MemoryConfigRepository:
             iteration_period: str,
             reflexion_range: str,
             baseline: str,
-            reflection_model_id: str,
             memory_verify: bool,
             quality_assessment: bool
     ) -> MemoryConfig:
@@ -146,7 +145,6 @@ class MemoryConfigRepository:
         memory_config_obj.iteration_period = iteration_period
         memory_config_obj.reflexion_range = reflexion_range
         memory_config_obj.baseline = baseline
-        memory_config_obj.reflection_model_id = reflection_model_id
         memory_config_obj.memory_verify = memory_verify
         memory_config_obj.quality_assessment = quality_assessment
         return memory_config_obj
@@ -517,16 +515,15 @@ class MemoryConfigRepository:
         config_id = resolve_config_id(config_id, self.db)
         db_logger.debug(f"查询萃取配置(异步): config_id={config_id}")
         try:
-            stmt = select(MemoryConfig).where(MemoryConfig.config_id == config_id)
-            result = await self.db.execute(stmt)
-            db_config = result.scalar_one_or_none()
-            if not db_config:
+            result = await self.get_config_with_workspace_async(config_id)
+            if not result:
                 db_logger.debug(f"萃取配置不存在: config_id={config_id}")
                 return None
+            db_config, workspace = result
             result_dict = {
-                "llm_id": db_config.llm_id, "embedding_id": db_config.embedding_id,
-                "rerank_id": db_config.rerank_id, "vision_id": db_config.vision_id,
-                "audio_id": db_config.audio_id, "video_id": db_config.video_id,
+                "llm_id": workspace.llm, "embedding_id": workspace.embedding,
+                "rerank_id": workspace.rerank, "vision_id": workspace.vision,
+                "audio_id": workspace.audio, "video_id": workspace.video,
                 "enable_llm_dedup_blockwise": db_config.enable_llm_dedup_blockwise,
                 "enable_llm_disambiguation": db_config.enable_llm_disambiguation,
                 "deep_retrieval": db_config.deep_retrieval,

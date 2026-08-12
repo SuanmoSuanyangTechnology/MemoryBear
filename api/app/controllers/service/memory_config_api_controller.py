@@ -393,7 +393,7 @@ async def update_config_emotion(
     """
     Update emotion engine config (full update).
 
-    All fields except emotion_model_id are required.
+    All configuration fields are required.
     Only configs belonging to the authorized workspace can be updated.
     """
     body = await request.json()

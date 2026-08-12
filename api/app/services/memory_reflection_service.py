@@ -547,22 +547,17 @@ class MemoryReflectionService:
             except (ValueError, TypeError):
                 iteration_period = 24
 
-        reflection_model_id = config_data.get("reflection_model_id", "")
-        if reflection_model_id:
-            reflection_model_id = str(reflection_model_id)
-
-        # 如果模型 ID 为空，且传了同步 db，尝试查工作空间默认
-        if not reflection_model_id and db is not None:
-            workspace_id = config_data.get("workspace_id")
-            if workspace_id:
-                try:
-                    from app.db import get_db_context
-                    with get_db_context() as sync_db:
-                        workspace_models = get_workspace_models_configs(sync_db, workspace_id)
-                        if workspace_models and workspace_models.get("llm"):
-                            reflection_model_id = workspace_models["llm"]
-                except Exception:
-                    pass
+        reflection_model_id = ""
+        workspace_id = config_data.get("workspace_id")
+        if db is not None and workspace_id:
+            try:
+                from app.db import get_db_context
+                with get_db_context() as sync_db:
+                    workspace_models = get_workspace_models_configs(sync_db, workspace_id)
+                    if workspace_models:
+                        reflection_model_id = workspace_models.get("llm") or ""
+            except Exception:
+                pass
 
         return ReflectionConfig(
             enabled=config_data.get("enable_self_reflexion", False),
@@ -710,17 +705,12 @@ class MemoryReflectionService:
             except (ValueError, TypeError):
                 iteration_period = 24
 
-        reflection_model_id = config_data.get("reflection_model_id", "")
-        if reflection_model_id:
-            reflection_model_id = str(reflection_model_id)
-
-        if not reflection_model_id:
-            workspace_id = config_data.get("workspace_id")
-            if workspace_id:
-                workspace_models = get_workspace_models_configs(db, workspace_id)
-                if workspace_models and workspace_models.get("llm"):
-                    reflection_model_id = workspace_models["llm"]
-                    api_logger.info(f"reflection_model_id 为空，使用工作空间默认 LLM: {reflection_model_id}")
+        workspace_id = config_data.get("workspace_id")
+        reflection_model_id = ""
+        if workspace_id:
+            workspace_models = get_workspace_models_configs(db, workspace_id)
+            if workspace_models:
+                reflection_model_id = workspace_models.get("llm") or ""
 
         return ReflectionConfig(
             enabled=config_data.get("enable_self_reflexion", False),

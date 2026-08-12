@@ -264,100 +264,6 @@ class MemoryConfigService:
         """
         self.db = db
 
-    def _validate_model_with_fallback(
-        self,
-        model_id: str,
-        model_type: str,
-        workspace_default: str,
-        workspace_tenant_id,
-        config_id,
-        workspace_id,
-        required: bool = False,
-    ) -> tuple:
-        """Validate a model with workspace default fallback — sync variant."""
-        if model_id:
-            try:
-                return validate_and_resolve_model_id(
-                    model_id, model_type, self.db, workspace_tenant_id,
-                    required=False, config_id=config_id, workspace_id=workspace_id,
-                )
-            except Exception as e:
-                logger.warning(
-                    f"{model_type} model validation failed, trying workspace default: {e}"
-                )
-
-        if workspace_default:
-            try:
-                result = validate_and_resolve_model_id(
-                    workspace_default, model_type, self.db, workspace_tenant_id,
-                    required=required, config_id=config_id, workspace_id=workspace_id,
-                )
-                if result[0]:
-                    logger.info(f"Using workspace default {model_type} model: {workspace_default}")
-                return result
-            except Exception as e:
-                logger.error(f"Workspace default {model_type} model also invalid: {e}")
-                if required:
-                    raise
-
-        if required:
-            raise InvalidConfigError(
-                f"{model_type.title()} model is required but not configured",
-                field_name=f"{model_type}_model_id",
-                invalid_value=model_id,
-                config_id=config_id,
-                workspace_id=workspace_id,
-            )
-
-        return None, None
-
-    async def _validate_model_with_fallback_async(
-        self,
-        model_id: str,
-        model_type: str,
-        workspace_default: str,
-        workspace_tenant_id,
-        config_id,
-        workspace_id,
-        required: bool = False,
-    ) -> tuple:
-        """Validate a model with workspace default fallback — async variant."""
-        if model_id:
-            try:
-                return await validate_and_resolve_model_id_async(
-                    model_id, model_type, self.db, workspace_tenant_id,
-                    required=False, config_id=config_id, workspace_id=workspace_id,
-                )
-            except Exception as e:
-                logger.warning(
-                    f"{model_type} model validation failed, trying workspace default: {e}"
-                )
-
-        if workspace_default:
-            try:
-                result = await validate_and_resolve_model_id_async(
-                    workspace_default, model_type, self.db, workspace_tenant_id,
-                    required=required, config_id=config_id, workspace_id=workspace_id,
-                )
-                if result[0]:
-                    logger.info(f"Using workspace default {model_type} model: {workspace_default}")
-                return result
-            except Exception as e:
-                logger.error(f"Workspace default {model_type} model also invalid: {e}")
-                if required:
-                    raise
-
-        if required:
-            raise InvalidConfigError(
-                f"{model_type.title()} model is required but not configured",
-                field_name=f"{model_type}_model_id",
-                invalid_value=model_id,
-                config_id=config_id,
-                workspace_id=workspace_id,
-            )
-
-        return None, None
-
     async def _validate_model_connectivity(
             self,
             model_id: str,
@@ -532,7 +438,7 @@ class MemoryConfigService:
 
         return result
 
-    @redis_cache(ttl=300, prefix="memory", skip_args=["self"], return_type=MemoryConfig)
+    @redis_cache(ttl=300, prefix="memory_config", skip_args=["self"], id_arg="config_id", return_type=MemoryConfig)
     def load_memory_config(
             self,
             config_id: UUID
@@ -587,65 +493,44 @@ class MemoryConfigService:
 
             memory_config, workspace = result
 
-            # Step 2: Validate embedding model with workspace fallback
+            # Step 2: Validate workspace models
             embed_start = time.time()
-            embedding_uuid, embedding_name = self._validate_model_with_fallback(
-                memory_config.embedding_id, "embedding", workspace.embedding,
-                workspace.tenant_id, validated_config_id, workspace.id,
-                required=True,
+            embedding_uuid, embedding_name = validate_and_resolve_model_id(
+                workspace.embedding, "embedding", self.db, workspace.tenant_id,
+                required=True, config_id=validated_config_id, workspace_id=workspace.id,
             )
             embed_time = time.time() - embed_start
             logger.info(f"[PERF] Embedding validation: {embed_time:.4f}s")
 
-            # Step 3: Resolve LLM model with workspace fallback
+            # Step 3: Resolve workspace models
             llm_start = time.time()
-            llm_uuid, llm_name = self._validate_model_with_fallback(
-                memory_config.llm_id, "llm", workspace.llm,
-                workspace.tenant_id, validated_config_id, workspace.id,
-                required=True,
+            llm_uuid, llm_name = validate_and_resolve_model_id(
+                workspace.llm, "llm", self.db, workspace.tenant_id,
+                required=True, config_id=validated_config_id, workspace_id=workspace.id,
             )
             llm_time = time.time() - llm_start
             logger.info(f"[PERF] LLM validation: {llm_time:.4f}s")
 
-            # Step 4: Resolve optional rerank model with workspace fallback
             rerank_start = time.time()
-            rerank_uuid, rerank_name = self._validate_model_with_fallback(
-                memory_config.rerank_id, "rerank", workspace.rerank,
-                workspace.tenant_id, validated_config_id, workspace.id,
-                required=False,
+            rerank_uuid, rerank_name = validate_and_resolve_model_id(
+                workspace.rerank, "rerank", self.db, workspace.tenant_id,
+                required=False, config_id=validated_config_id, workspace_id=workspace.id,
             )
             rerank_time = time.time() - rerank_start
-            if memory_config.rerank_id or workspace.rerank:
+            if workspace.rerank:
                 logger.info(f"[PERF] Rerank validation: {rerank_time:.4f}s")
 
             vision_uuid, vision_name = validate_and_resolve_model_id(
-                memory_config.vision_id,
-                "llm",
-                self.db,
-                workspace.tenant_id,
-                required=False,
-                config_id=validated_config_id,
-                workspace_id=workspace.id,
+                workspace.vision, "llm", self.db, workspace.tenant_id,
+                required=False, config_id=validated_config_id, workspace_id=workspace.id,
             )
-
             audio_uuid, audio_name = validate_and_resolve_model_id(
-                memory_config.audio_id,
-                "llm",
-                self.db,
-                workspace.tenant_id,
-                required=False,
-                config_id=validated_config_id,
-                workspace_id=workspace.id,
+                workspace.audio, "llm", self.db, workspace.tenant_id,
+                required=False, config_id=validated_config_id, workspace_id=workspace.id,
             )
-
             video_uuid, video_name = validate_and_resolve_model_id(
-                memory_config.video_id,
-                "llm",
-                self.db,
-                workspace.tenant_id,
-                required=False,
-                config_id=validated_config_id,
-                workspace_id=workspace.id,
+                workspace.video, "llm", self.db, workspace.tenant_id,
+                required=False, config_id=validated_config_id, workspace_id=workspace.id,
             )
             # Create immutable MemoryConfig object
             config = _build_memory_config(
@@ -699,7 +584,7 @@ class MemoryConfigService:
             else:
                 raise ConfigurationError(f"Failed to load configuration {config_id}: {e}")
 
-    @redis_cache(ttl=300, prefix="memory", skip_args=["self"], return_type=MemoryConfig)
+    @redis_cache(ttl=300, prefix="memory_config", skip_args=["self"], id_arg="config_id", return_type=MemoryConfig)
     async def load_memory_config_async(self, config_id: UUID) -> MemoryConfig:
         """Async version of load_memory_config — uses true async DB calls via AsyncSession.
 
@@ -739,31 +624,28 @@ class MemoryConfigService:
                 (video_uuid, video_name),
                 ontology_class_infos,
             ) = await asyncio.gather(
-                self._validate_model_with_fallback_async(
-                    memory_config_row.embedding_id, "embedding", workspace.embedding,
-                    workspace.tenant_id, memory_config_row.config_id, workspace.id,
-                    required=True,
-                ),
-                self._validate_model_with_fallback_async(
-                    memory_config_row.llm_id, "llm", workspace.llm,
-                    workspace.tenant_id, memory_config_row.config_id, workspace.id,
-                    required=True,
-                ),
-                self._validate_model_with_fallback_async(
-                    memory_config_row.rerank_id, "rerank", workspace.rerank,
-                    workspace.tenant_id, memory_config_row.config_id, workspace.id,
-                    required=False,
+                validate_and_resolve_model_id_async(
+                    workspace.embedding, "embedding", self.db, workspace.tenant_id,
+                    required=True, config_id=memory_config_row.config_id, workspace_id=workspace.id,
                 ),
                 validate_and_resolve_model_id_async(
-                    memory_config_row.vision_id, "llm", self.db, workspace.tenant_id,
+                    workspace.llm, "llm", self.db, workspace.tenant_id,
+                    required=True, config_id=memory_config_row.config_id, workspace_id=workspace.id,
+                ),
+                validate_and_resolve_model_id_async(
+                    workspace.rerank, "rerank", self.db, workspace.tenant_id,
                     required=False, config_id=memory_config_row.config_id, workspace_id=workspace.id,
                 ),
                 validate_and_resolve_model_id_async(
-                    memory_config_row.audio_id, "llm", self.db, workspace.tenant_id,
+                    workspace.vision, "llm", self.db, workspace.tenant_id,
                     required=False, config_id=memory_config_row.config_id, workspace_id=workspace.id,
                 ),
                 validate_and_resolve_model_id_async(
-                    memory_config_row.video_id, "llm", self.db, workspace.tenant_id,
+                    workspace.audio, "llm", self.db, workspace.tenant_id,
+                    required=False, config_id=memory_config_row.config_id, workspace_id=workspace.id,
+                ),
+                validate_and_resolve_model_id_async(
+                    workspace.video, "llm", self.db, workspace.tenant_id,
                     required=False, config_id=memory_config_row.config_id, workspace_id=workspace.id,
                 ),
                 _load_ontology_class_infos_async(self.db, memory_config_row.scene_id),
