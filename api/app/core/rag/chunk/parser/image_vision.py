@@ -198,14 +198,12 @@ def enhance_complete_image_chunks_with_vision(
     futures = {}
     completed_count = 0
     for index, (source_key, group, representative) in enumerate(pending_groups, start=1):
-        src = str(representative.metadata.get("src", ""))
         LOGGER.info(
-            "[%s] complete image vision enhancement submitted: index=%s total=%s source_key=%s src=%s",
+            "[%s] complete image vision enhancement submitted: index=%s total=%s source_key=%s",
             log_prefix,
             index,
             total,
             source_key,
-            src,
         )
         image_started_at = time.monotonic()
         try:
@@ -222,13 +220,12 @@ def enhance_complete_image_chunks_with_vision(
             progress = progress_start + (progress_span * completed_count / total)
             LOGGER.warning(
                 "[%s] complete image vision enhancement submission failed: "
-                "index=%s total=%s source_key=%s src=%s error=%s",
+                "index=%s total=%s source_key=%s error_type=%s",
                 log_prefix,
                 index,
                 total,
                 source_key,
-                src,
-                exc,
+                type(exc).__name__,
             )
             _callback(
                 callback,
@@ -236,10 +233,10 @@ def enhance_complete_image_chunks_with_vision(
                 f"{log_prefix} image vision enhancement failed: {completed_count}/{total}.",
             )
             continue
-        futures[future] = (index, source_key, group, src, image_started_at)
+        futures[future] = (index, source_key, group, image_started_at)
 
     for future in as_completed(futures):
-        index, source_key, group, src, image_started_at = futures[future]
+        index, source_key, group, image_started_at = futures[future]
         completed_count += 1
         progress = progress_start + (progress_span * completed_count / total)
         try:
@@ -249,14 +246,13 @@ def enhance_complete_image_chunks_with_vision(
             elapsed = time.monotonic() - image_started_at
             LOGGER.warning(
                 "[%s] complete image vision enhancement failed: "
-                "index=%s total=%s source_key=%s src=%s elapsed=%.2fs error=%s",
+                "index=%s total=%s source_key=%s elapsed=%.2fs error_type=%s",
                 log_prefix,
                 index,
                 total,
                 source_key,
-                src,
                 elapsed,
-                exc,
+                type(exc).__name__,
             )
             _callback(callback, progress, f"{log_prefix} image vision enhancement failed: {completed_count}/{total}.")
             continue
@@ -271,12 +267,11 @@ def enhance_complete_image_chunks_with_vision(
         elapsed = time.monotonic() - image_started_at
         LOGGER.info(
             "[%s] complete image vision enhancement finished: "
-            "index=%s total=%s source_key=%s src=%s elapsed=%.2fs text_chars=%s",
+            "index=%s total=%s source_key=%s elapsed=%.2fs text_chars=%s",
             log_prefix,
             index,
             total,
             source_key,
-            src,
             elapsed,
             len(vision_text),
         )

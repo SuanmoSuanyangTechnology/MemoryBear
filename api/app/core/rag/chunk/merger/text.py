@@ -39,11 +39,16 @@ class TextMerger:
 
     def split_recursive(self, text: str, token_num: int) -> list[str]:
         limit = max(int(token_num), 1)
-        units = self._split_recursive(text, limit, 0)
-        return self._merge_split_units(units, limit, 0)
+        units = self._split_recursive(text, limit, 0, strict=True)
+        chunks = self._merge_split_units(units, limit, 0)
+        self._ensure_strict_limit(chunks, limit)
+        return chunks
 
     def hard_split(self, text: str, token_num: int) -> list[str]:
-        return self._hard_split(text, max(int(token_num), 1))
+        limit = max(int(token_num), 1)
+        chunks = self._strict_hard_split(text, limit)
+        self._ensure_strict_limit(chunks, limit)
+        return chunks
 
     def _extract_strings(self, value: str | list) -> list[str]:
         if isinstance(value, str):
@@ -64,7 +69,14 @@ class TextMerger:
             ]
         return [part for part in raw_parts if part]
 
-    def _split_recursive(self, text: str, limit: int, separator_index: int, prefix: str = "") -> list[_SplitUnit]:
+    def _split_recursive(
+        self,
+        text: str,
+        limit: int,
+        separator_index: int,
+        prefix: str = "",
+        strict: bool = False,
+    ) -> list[_SplitUnit]:
         if not text or not text.strip():
             return []
         if self._within_limit(text, limit):
@@ -72,21 +84,36 @@ class TextMerger:
 
         separator = self.separators[separator_index] if separator_index < len(self.separators) else ""
         if separator == "":
+            hard_split = self._strict_hard_split if strict else self._hard_split
             return [
                 _SplitUnit(text=chunk, prefix=prefix if index == 0 else "")
-                for index, chunk in enumerate(self._hard_split(text, limit))
+                for index, chunk in enumerate(hard_split(text, limit))
             ]
 
         parts = self._split_with_separator(text, separator)
         if len(parts) <= 1:
-            return self._split_recursive(text, limit, separator_index + 1, prefix)
+            return self._split_recursive(
+                text,
+                limit,
+                separator_index + 1,
+                prefix,
+                strict,
+            )
 
         result: list[_SplitUnit] = []
         for index, part in enumerate(parts):
             if not part or not part.text.strip():
                 continue
             unit_prefix = prefix if index == 0 else part.prefix
-            result.extend(self._split_recursive(part.text, limit, separator_index + 1, unit_prefix))
+            result.extend(
+                self._split_recursive(
+                    part.text,
+                    limit,
+                    separator_index + 1,
+                    unit_prefix,
+                    strict,
+                )
+            )
         return result
 
     def _split_with_separator(
@@ -175,6 +202,36 @@ class TextMerger:
             start = end
 
         return chunks
+
+    def _strict_hard_split(self, text: str, limit: int) -> list[str]:
+        tokens = encoder.encode(text)
+        chunks: list[str] = []
+        start = 0
+
+        while start < len(tokens):
+            end = min(start + limit, len(tokens))
+            chunk = None
+            while end > start:
+                try:
+                    chunk = encoder.decode(tokens[start:end], errors="strict")
+                    break
+                except UnicodeDecodeError:
+                    end -= 1
+            if chunk is None:
+                raise ValueError(
+                    f"Structured content cannot fit within token limit {limit}."
+                )
+            chunks.append(chunk)
+            start = end
+
+        return chunks
+
+    @staticmethod
+    def _ensure_strict_limit(chunks: list[str], limit: int) -> None:
+        if any(num_tokens_from_string(chunk) > limit for chunk in chunks):
+            raise ValueError(
+                f"Structured content cannot fit within token limit {limit}."
+            )
 
     @staticmethod
     def _within_limit(text: str, limit: int) -> bool:

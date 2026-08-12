@@ -461,7 +461,12 @@ class BlockMerger(ChunkMerger):
         language = str(block.metadata.get("language", ""))
         content = self._complete_code_fence(fragment.content, language)
         metadata = self._metadata_for_block(block)
-        pieces = self._split_code_content(content, token_num, language)
+        pieces = self._split_code_content(
+            content,
+            token_num,
+            language,
+            strict=True,
+        )
         if any(num_tokens_from_string(piece) > token_num for piece in pieces):
             raise ValueError(
                 f"Structured wrapper cannot fit within token limit {token_num}."
@@ -525,13 +530,18 @@ class BlockMerger(ChunkMerger):
                 content,
                 token_num,
                 str(block.metadata.get("language", "")),
+                strict=True,
             )
         elif block_type is ParsedBlockType.TABLE:
-            pieces = self._split_table_content(content, token_num)
+            pieces = self._split_table_content(content, token_num, strict=True)
         else:
             pieces = self.text_merger.split_recursive(content, token_num)
 
         total = len(pieces)
+        if any(num_tokens_from_string(piece) > token_num for piece in pieces):
+            raise ValueError(
+                f"Structured content cannot fit within token limit {token_num}."
+            )
         split_units: list[_StreamUnit] = []
         for index, piece in enumerate(pieces):
             piece_block = block
@@ -566,6 +576,7 @@ class BlockMerger(ChunkMerger):
     ) -> list[_ChunkDraft]:
         drafts: list[_ChunkDraft] = []
         current: list[_StreamUnit] = []
+        pending_table_overlap: _StreamUnit | None = None
 
         for index, unit in enumerate(units):
             if self._is_incomplete_table_unit(unit):
@@ -573,6 +584,28 @@ class BlockMerger(ChunkMerger):
                     drafts.append(self._units_to_draft(current))
                     current = []
                 drafts.append(self._units_to_draft([unit]))
+                pending_table_overlap = (
+                    self._table_overlap_unit(unit)
+                    if unit.fragment.structure_valid
+                    else None
+                )
+                continue
+
+            if (
+                pending_table_overlap is not None
+                and unit.fragment.block.type is ParsedBlockType.TABLE
+            ):
+                pending_table_overlap = None
+
+            if pending_table_overlap is not None and not current:
+                current = self._overlap_units(
+                    [pending_table_overlap],
+                    unit,
+                    token_num,
+                    overlap,
+                )
+                pending_table_overlap = None
+                current.append(unit)
                 continue
 
             candidate = [*current, unit]
@@ -592,6 +625,22 @@ class BlockMerger(ChunkMerger):
         return drafts
 
     @staticmethod
+    def _table_overlap_unit(unit: _StreamUnit) -> _StreamUnit:
+        block = deepcopy(unit.fragment.block)
+        block.metadata.pop("table_part_index", None)
+        block.metadata.pop("table_part_total", None)
+        return _StreamUnit(
+            fragment=SourceFragment(
+                source_key=unit.fragment.source_key,
+                block=block,
+                content=unit.fragment.content,
+                complete=unit.fragment.complete,
+                structure_valid=unit.fragment.structure_valid,
+            ),
+            separator_before=unit.separator_before,
+        )
+
+    @staticmethod
     def _is_incomplete_table_unit(unit: _StreamUnit) -> bool:
         return (
             unit.fragment.block.type is ParsedBlockType.TABLE
@@ -605,16 +654,20 @@ class BlockMerger(ChunkMerger):
         block = source_blocks[0]
 
         if single_source and block.type is ParsedBlockType.IMAGE:
+            image_tag_complete = (
+                len(draft.fragments) == 1 and draft.fragments[0].complete
+            )
+            metadata = self._metadata_for_block(block)
+            if not image_tag_complete:
+                metadata.pop("vision_text", None)
             return LogicalChunk(
                 type=LogicalChunkType.IMAGE,
                 content=draft.content,
                 image=block.image,
                 positions=deepcopy(block.positions),
-                metadata=self._metadata_for_block(block),
+                metadata=metadata,
                 source_image_key=draft.fragments[0].source_key,
-                image_tag_complete=(
-                    len(draft.fragments) == 1 and draft.fragments[0].complete
-                ),
+                image_tag_complete=image_tag_complete,
                 image_vision_scope=block.image_vision_scope,
             )
 
@@ -1077,17 +1130,53 @@ class BlockMerger(ChunkMerger):
             )
         return result
 
-    def _split_table_content(self, content: str, token_num: int) -> list[str]:
+    def _split_table_content(
+        self,
+        content: str,
+        token_num: int,
+        *,
+        strict: bool = False,
+    ) -> list[str]:
         if num_tokens_from_string(content) <= token_num:
             return [content]
 
         table = BeautifulSoup(content, "html.parser").find("table")
         if table is None:
-            return self._hard_split_wrapped(content, token_num, lambda piece: piece)
+            return self._hard_split_wrapped(
+                content,
+                token_num,
+                lambda piece: piece,
+                strict=strict,
+            )
+
+        if strict:
+            return self._split_strict_table(table, token_num)
 
         header_html, row_htmls = self._extract_table_parts(table)
         if not row_htmls:
-            return self._hard_split_wrapped(content, token_num, lambda piece: piece)
+            return self._hard_split_wrapped(
+                content,
+                token_num,
+                lambda piece: piece,
+                strict=strict,
+            )
+
+        chunks = self._split_table_rows(
+            header_html,
+            row_htmls,
+            token_num,
+            strict=False,
+        )
+        return chunks or [content]
+
+    def _split_table_rows(
+        self,
+        header_html: str,
+        row_htmls: list[str],
+        token_num: int,
+        *,
+        strict: bool,
+    ) -> list[str]:
 
         chunks: list[str] = []
         current_rows: list[str] = []
@@ -1098,7 +1187,14 @@ class BlockMerger(ChunkMerger):
                 if current_rows:
                     chunks.append(self._build_table_html(header_html, current_rows))
                     current_rows = []
-                chunks.extend(self._split_oversized_table_row(header_html, row_html, token_num))
+                chunks.extend(
+                    self._split_oversized_table_row(
+                        header_html,
+                        row_html,
+                        token_num,
+                        strict=strict,
+                    )
+                )
                 continue
 
             candidate_rows = [*current_rows, row_html]
@@ -1112,7 +1208,136 @@ class BlockMerger(ChunkMerger):
         if current_rows:
             chunks.append(self._build_table_html(header_html, current_rows))
 
-        return chunks or [content]
+        return chunks
+
+    def _split_strict_table(self, table, token_num: int) -> list[str]:
+        thead = table.find("thead")
+        if not table.find_all("tr"):
+            section = next(
+                (
+                    name
+                    for name in ("thead", "tbody", "tfoot")
+                    if table.find(name) is not None
+                ),
+                None,
+            )
+            empty_table = (
+                f"<table><{section}></{section}></table>"
+                if section
+                else "<table></table>"
+            )
+            if num_tokens_from_string(empty_table) <= token_num:
+                return [empty_table]
+            raise ValueError(
+                f"Structured wrapper cannot fit within token limit {token_num}."
+            )
+
+        if thead is not None:
+            header_html = str(thead)
+            body_rows = [
+                row
+                for row in table.find_all("tr")
+                if row.find_parent("thead") is None
+            ]
+            if body_rows and num_tokens_from_string(
+                self._build_table_html(
+                    header_html,
+                    ["<tr><td></td></tr>"],
+                )
+            ) <= token_num:
+                return self._split_table_rows(
+                    header_html,
+                    [str(row) for row in body_rows],
+                    token_num,
+                    strict=True,
+                )
+            section_rows = [
+                ("thead", row) for row in thead.find_all("tr")
+            ]
+            section_rows.extend(("tbody", row) for row in body_rows)
+        else:
+            rows = table.find_all("tr")
+            if len(rows) > 1:
+                header_html = f"<thead>{rows[0]}</thead>"
+                if num_tokens_from_string(
+                    self._build_table_html(
+                        header_html,
+                        ["<tr><td></td></tr>"],
+                    )
+                ) <= token_num:
+                    return self._split_table_rows(
+                        header_html,
+                        [str(row) for row in rows[1:]],
+                        token_num,
+                        strict=True,
+                    )
+                section_rows = [
+                    ("thead", rows[0]),
+                    *(("tbody", row) for row in rows[1:]),
+                ]
+            else:
+                section_rows = [("tbody", row) for row in rows]
+
+        chunks: list[str] = []
+        for section, row in section_rows:
+            wrapped_row = self._build_section_table_html(section, str(row))
+            if num_tokens_from_string(wrapped_row) <= token_num:
+                chunks.append(wrapped_row)
+            else:
+                chunks.extend(
+                    self._split_strict_table_row(
+                        row,
+                        section,
+                        token_num,
+                    )
+                )
+
+        if not chunks or any(
+            not self._is_valid_table_content(chunk)
+            or num_tokens_from_string(chunk) > token_num
+            for chunk in chunks
+        ):
+            raise ValueError(
+                f"Structured wrapper cannot fit within token limit {token_num}."
+            )
+        return chunks
+
+    def _split_strict_table_row(
+        self,
+        row,
+        section: str,
+        token_num: int,
+    ) -> list[str]:
+        cells = row.find_all(["th", "td"], recursive=False)
+        if not cells:
+            raise ValueError(
+                f"Structured wrapper cannot fit within token limit {token_num}."
+            )
+
+        chunks: list[str] = []
+        for cell in cells:
+            cell_name = str(cell.name or "td").lower()
+            cell_text = cell.get_text(" ", strip=True)
+
+            def wrap_cell(piece: str, cell_name: str = cell_name) -> str:
+                row_fragment = (
+                    f"<tr><{cell_name}>{escape(piece)}</{cell_name}></tr>"
+                )
+                return self._build_section_table_html(section, row_fragment)
+
+            chunks.extend(
+                self._hard_split_wrapped(
+                    cell_text,
+                    token_num,
+                    wrap_cell,
+                    strict=True,
+                )
+            )
+        return chunks
+
+    @staticmethod
+    def _build_section_table_html(section: str, row_html: str) -> str:
+        return f"<table><{section}>{row_html}</{section}></table>"
 
     @staticmethod
     def _is_valid_table_content(content: str) -> bool:
@@ -1145,17 +1370,63 @@ class BlockMerger(ChunkMerger):
             return f"<table>{header_html}<tbody>{body}</tbody></table>"
         return f"<table><tbody>{body}</tbody></table>"
 
-    def _split_oversized_table_row(self, header_html: str, row_html: str, token_num: int) -> list[str]:
+    def _split_oversized_table_row(
+        self,
+        header_html: str,
+        row_html: str,
+        token_num: int,
+        *,
+        strict: bool = False,
+    ) -> list[str]:
         row = BeautifulSoup(row_html, "html.parser").find("tr")
+        if strict and row is not None:
+            cells = row.find_all(["th", "td"], recursive=False)
+            if cells:
+                chunks: list[str] = []
+                for cell in cells:
+                    cell_name = str(cell.name or "td").lower()
+                    cell_text = cell.get_text(" ", strip=True)
+
+                    def wrap_cell(
+                        piece: str,
+                        cell_name: str = cell_name,
+                    ) -> str:
+                        row_fragment = (
+                            f"<tr><{cell_name}>{escape(piece)}</{cell_name}></tr>"
+                        )
+                        return self._build_table_html(header_html, [row_fragment])
+
+                    chunks.extend(
+                        self._hard_split_wrapped(
+                            cell_text,
+                            token_num,
+                            wrap_cell,
+                            strict=True,
+                        )
+                    )
+                return chunks
+
         row_text = row.get_text(" | ", strip=True) if row is not None else row_html
 
         def wrap(piece: str) -> str:
             row_fragment = f"<tr><td>{escape(piece)}</td></tr>"
             return self._build_table_html(header_html, [row_fragment])
 
-        return self._hard_split_wrapped(row_text, token_num, wrap)
+        return self._hard_split_wrapped(
+            row_text,
+            token_num,
+            wrap,
+            strict=strict,
+        )
 
-    def _split_code_content(self, content: str, token_num: int, language: str = "") -> list[str]:
+    def _split_code_content(
+        self,
+        content: str,
+        token_num: int,
+        language: str = "",
+        *,
+        strict: bool = False,
+    ) -> list[str]:
         if num_tokens_from_string(content) <= token_num:
             return [content]
 
@@ -1181,7 +1452,15 @@ class BlockMerger(ChunkMerger):
                 if current_lines:
                     chunks.append(self._wrap_code_lines(current_lines, fence_start, fence_end))
                     current_lines = []
-                chunks.extend(self._split_oversized_code_line(line, token_num, fence_start, fence_end))
+                chunks.extend(
+                    self._split_oversized_code_line(
+                        line,
+                        token_num,
+                        fence_start,
+                        fence_end,
+                        strict=strict,
+                    )
+                )
                 continue
 
             candidate_lines = current_lines + [line]
@@ -1195,7 +1474,15 @@ class BlockMerger(ChunkMerger):
         if current_lines:
             chunks.append(self._wrap_code_lines(current_lines, fence_start, fence_end))
 
-        return chunks or [content]
+        result = chunks or [content]
+        if strict and any(
+            num_tokens_from_string(piece) > token_num
+            for piece in result
+        ):
+            raise ValueError(
+                f"Structured wrapper cannot fit within token limit {token_num}."
+            )
+        return result
 
     def _split_oversized_code_line(
         self,
@@ -1203,27 +1490,49 @@ class BlockMerger(ChunkMerger):
         token_num: int,
         fence_start: str,
         fence_end: str,
+        *,
+        strict: bool = False,
     ) -> list[str]:
         return self._hard_split_wrapped(
             line,
             token_num,
             lambda piece: self._wrap_code_lines([piece], fence_start, fence_end),
+            strict=strict,
         )
 
-    def _hard_split_wrapped(self, text: str, token_num: int, wrap) -> list[str]:
+    def _hard_split_wrapped(
+        self,
+        text: str,
+        token_num: int,
+        wrap,
+        *,
+        strict: bool = False,
+    ) -> list[str]:
         tokens = encoder.encode(text)
         limit = max(int(token_num), 1)
-        if num_tokens_from_string(wrap("")) > limit:
+        if strict and num_tokens_from_string(wrap("")) > limit:
             raise ValueError(
                 f"Structured wrapper cannot fit within token limit {limit}."
             )
+        if strict and not tokens:
+            return [wrap("")]
         chunks: list[str] = []
         index = 0
         while index < len(tokens):
-            boundary = self._find_wrapped_token_boundary(tokens, index, limit, wrap)
+            boundary = self._find_wrapped_token_boundary(
+                tokens,
+                index,
+                limit,
+                wrap,
+                strict=strict,
+            )
             if boundary is None:
-                raise ValueError(
-                    f"Structured content cannot fit within token limit {limit}."
+                if strict:
+                    raise ValueError(
+                        f"Structured content cannot fit within token limit {limit}."
+                    )
+                raise RuntimeError(
+                    f"Unable to find a valid UTF-8 boundary from token index {index}."
                 )
 
             end, piece = boundary
@@ -1237,12 +1546,20 @@ class BlockMerger(ChunkMerger):
         start: int,
         limit: int,
         wrap,
+        *,
+        strict: bool = False,
     ) -> tuple[int, str] | None:
         search_end = min(len(tokens), start + limit)
         for end in range(search_end, start, -1):
             piece = self._decode_token_slice(tokens, start, end)
             if piece is not None and num_tokens_from_string(wrap(piece)) <= limit:
                 return end, piece
+
+        if not strict:
+            for end in range(start + 1, len(tokens) + 1):
+                piece = self._decode_token_slice(tokens, start, end)
+                if piece is not None:
+                    return end, piece
         return None
 
     @staticmethod
