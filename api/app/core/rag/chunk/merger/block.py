@@ -1,4 +1,5 @@
 from copy import deepcopy
+from dataclasses import dataclass
 from html import escape
 
 from bs4 import BeautifulSoup
@@ -29,6 +30,12 @@ from app.core.rag.chunk.context import (
     ParsedBlock,
     ParsedBlockType,
     ParseResult,
+)
+from app.core.rag.chunk.merger.structured_stream import (
+    SourceFragment,
+    StructuredStream,
+    rebuild_structured_stream,
+    split_structured_stream,
 )
 
 from .base import ChunkMerger
@@ -64,11 +71,32 @@ PARENT_CHILD_ATOMIC_TYPES = {
 }
 
 
+@dataclass(frozen=True)
+class _StreamUnit:
+    fragment: SourceFragment
+    separator_before: str = ""
+
+
+@dataclass
+class _ChunkDraft:
+    content: str
+    fragments: list[SourceFragment]
+
+
+@dataclass
+class _ParentDraft:
+    parent: LogicalChunk
+    fragments: list[SourceFragment]
+
+
 class BlockMerger(ChunkMerger):
     def __init__(self):
         self.text_merger = TextMerger()
 
     def merge(self, ctx: ChunkContext, parse_result: ParseResult) -> MergeResult:
+        if parse_result.structured_markdown_stream:
+            return self._merge_structured_stream(ctx, parse_result)
+
         blocks = parse_result.blocks or []
         token_num = int(ctx.parser_config.get("chunk_token_num", 128))
         delimiter = ctx.parser_config.get("delimiter")
@@ -126,6 +154,227 @@ class BlockMerger(ChunkMerger):
             logical_chunks=logical_chunks,
             pdf_parser=parse_result.pdf_parser,
         )
+
+    def _merge_structured_stream(self, ctx: ChunkContext, parse_result: ParseResult) -> MergeResult:
+        token_num = max(int(ctx.parser_config.get("chunk_token_num", 128)), 1)
+        delimiter = ctx.parser_config.get("delimiter")
+        overlap = TextMerger._normalize_overlap(
+            _safe_int(ctx.parser_config.get("chunk_overlap", 0)),
+            token_num,
+        )
+        stream = rebuild_structured_stream(parse_result.blocks or [])
+        drafts: list[_ChunkDraft] = []
+        for segment in split_structured_stream(stream, delimiter):
+            units = self._stream_units(segment, token_num)
+            drafts.extend(self._pack_stream_units(units, token_num, overlap))
+
+        logical_chunks = [self._draft_to_normal_chunk(draft) for draft in drafts]
+        return MergeResult(
+            chunks=self._serialize_chunk_contents(logical_chunks),
+            logical_chunks=logical_chunks,
+            pdf_parser=parse_result.pdf_parser,
+        )
+
+    def _stream_units(self, stream: StructuredStream, token_num: int) -> list[_StreamUnit]:
+        units: list[_StreamUnit] = []
+        previous_end = 0
+        for index, span in enumerate(stream.spans):
+            fragment = SourceFragment(
+                source_key=span.source_key,
+                block=span.block,
+                content=stream.text[span.start : span.end],
+                complete=stream.text[span.start : span.end] == str(span.block.content or ""),
+            )
+            unit = _StreamUnit(
+                fragment=fragment,
+                separator_before="" if index == 0 else stream.text[previous_end : span.start],
+            )
+            units.extend(self._split_stream_unit(unit, token_num))
+            previous_end = span.end
+        return units
+
+    def _split_stream_unit(self, unit: _StreamUnit, token_num: int) -> list[_StreamUnit]:
+        content = unit.fragment.content
+        if num_tokens_from_string(content) <= token_num:
+            return [unit]
+
+        block = unit.fragment.block
+        block_type = block.type
+        if block_type is ParsedBlockType.IMAGE:
+            pieces = self.text_merger.hard_split(content, token_num)
+        elif block_type is ParsedBlockType.CODE:
+            pieces = self._split_code_content(
+                content,
+                token_num,
+                str(block.metadata.get("language", "")),
+            )
+        elif block_type is ParsedBlockType.TABLE:
+            pieces = self._split_table_content(content, token_num)
+        else:
+            pieces = self.text_merger.split_recursive(content, token_num)
+
+        total = len(pieces)
+        split_units: list[_StreamUnit] = []
+        for index, piece in enumerate(pieces):
+            piece_block = block
+            if block_type is ParsedBlockType.TABLE and total > 1:
+                piece_block = deepcopy(block)
+                piece_block.metadata["table_part_index"] = index
+                piece_block.metadata["table_part_total"] = total
+            fragment = SourceFragment(
+                source_key=unit.fragment.source_key,
+                block=piece_block,
+                content=piece,
+                complete=False,
+                structure_valid=block_type is not ParsedBlockType.IMAGE,
+            )
+            separator = unit.separator_before if index == 0 else (
+                "\n" if block_type in {ParsedBlockType.CODE, ParsedBlockType.TABLE} else ""
+            )
+            split_units.append(_StreamUnit(fragment=fragment, separator_before=separator))
+        return split_units
+
+    def _pack_stream_units(
+        self,
+        units: list[_StreamUnit],
+        token_num: int,
+        overlap: int,
+    ) -> list[_ChunkDraft]:
+        drafts: list[_ChunkDraft] = []
+        current: list[_StreamUnit] = []
+
+        for index, unit in enumerate(units):
+            candidate = [*current, unit]
+            if self._heading_should_start_next_draft(current, unit, units, index, token_num):
+                drafts.append(self._units_to_draft(current))
+                current = [unit]
+                continue
+
+            if current and not self._stream_units_within_limit(candidate, token_num):
+                drafts.append(self._units_to_draft(current))
+                current = self._overlap_units(current, unit, token_num, overlap)
+
+            current.append(unit)
+
+        if current:
+            drafts.append(self._units_to_draft(current))
+        return drafts
+
+    def _draft_to_normal_chunk(self, draft: _ChunkDraft) -> LogicalChunk:
+        source_keys = {fragment.source_key for fragment in draft.fragments}
+        source_blocks = self._source_blocks(draft.fragments)
+        single_source = len(source_keys) == 1
+        block = source_blocks[0]
+
+        if single_source and block.type is ParsedBlockType.IMAGE:
+            return LogicalChunk(
+                type=LogicalChunkType.IMAGE,
+                content=draft.content,
+                image=block.image,
+                positions=deepcopy(block.positions),
+                metadata=self._metadata_for_block(block),
+                source_image_key=draft.fragments[0].source_key,
+                image_tag_complete=(
+                    len(draft.fragments) == 1 and draft.fragments[0].complete
+                ),
+                image_vision_scope=block.image_vision_scope,
+            )
+
+        if (
+            single_source
+            and block.type is ParsedBlockType.TABLE
+            and all(fragment.structure_valid for fragment in draft.fragments)
+        ):
+            return LogicalChunk(
+                type=LogicalChunkType.TABLE,
+                content=draft.content,
+                image=block.image,
+                positions=deepcopy(block.positions),
+                metadata=self._metadata_for_block(block),
+            )
+
+        if single_source and block.type is ParsedBlockType.CODE:
+            return LogicalChunk(
+                type=LogicalChunkType.TEXT,
+                content=draft.content,
+                image=block.image,
+                positions=deepcopy(block.positions),
+                metadata=self._metadata_for_block(block),
+            )
+
+        metadata = self._metadata_for_range(source_blocks, "text")
+        metadata.pop("vision_text", None)
+        metadata.pop("image", None)
+        return LogicalChunk(
+            type=LogicalChunkType.TEXT,
+            content=draft.content,
+            metadata=metadata,
+        )
+
+    def _heading_should_start_next_draft(
+        self,
+        current: list[_StreamUnit],
+        unit: _StreamUnit,
+        units: list[_StreamUnit],
+        index: int,
+        token_num: int,
+    ) -> bool:
+        if not current or unit.fragment.block.type is not ParsedBlockType.HEADING:
+            return False
+        if index + 1 >= len(units):
+            return False
+        if not self._stream_units_within_limit([*current, unit], token_num):
+            return False
+        return not self._stream_units_within_limit([*current, unit, units[index + 1]], token_num)
+
+    def _overlap_units(
+        self,
+        completed: list[_StreamUnit],
+        next_unit: _StreamUnit,
+        token_num: int,
+        overlap: int,
+    ) -> list[_StreamUnit]:
+        if overlap <= 0:
+            return []
+
+        retained: list[_StreamUnit] = []
+        for unit in reversed(completed):
+            candidate = [unit, *retained]
+            if num_tokens_from_string(self._join_stream_units(candidate)) > overlap:
+                break
+            if not self._stream_units_within_limit([*candidate, next_unit], token_num):
+                break
+            retained = candidate
+        return retained
+
+    def _units_to_draft(self, units: list[_StreamUnit]) -> _ChunkDraft:
+        return _ChunkDraft(
+            content=self._join_stream_units(units),
+            fragments=[unit.fragment for unit in units],
+        )
+
+    @staticmethod
+    def _join_stream_units(units: list[_StreamUnit]) -> str:
+        return "".join(
+            unit.fragment.content
+            if index == 0
+            else f"{unit.separator_before}{unit.fragment.content}"
+            for index, unit in enumerate(units)
+        )
+
+    def _stream_units_within_limit(self, units: list[_StreamUnit], token_num: int) -> bool:
+        return num_tokens_from_string(self._join_stream_units(units)) <= token_num
+
+    @staticmethod
+    def _source_blocks(fragments: list[SourceFragment]) -> list[ParsedBlock]:
+        blocks: list[ParsedBlock] = []
+        seen: set[int] = set()
+        for fragment in fragments:
+            if fragment.source_key in seen:
+                continue
+            seen.add(fragment.source_key)
+            blocks.append(fragment.block)
+        return blocks
 
     def _full_doc_blocks(self, blocks: list[ParsedBlock]) -> list[ParsedBlock]:
         selected: list[ParsedBlock] = []

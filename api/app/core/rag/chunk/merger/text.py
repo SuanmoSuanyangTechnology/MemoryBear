@@ -37,6 +37,14 @@ class TextMerger:
                 chunks.extend(self._merge_split_units(split_units, limit, overlap_tokens))
         return chunks
 
+    def split_recursive(self, text: str, token_num: int) -> list[str]:
+        limit = max(int(token_num), 1)
+        units = self._split_recursive(text, limit, 0)
+        return self._merge_split_units(units, limit, 0)
+
+    def hard_split(self, text: str, token_num: int) -> list[str]:
+        return self._hard_split(text, max(int(token_num), 1))
+
     def _extract_strings(self, value: str | list) -> list[str]:
         if isinstance(value, str):
             return [value]
