@@ -59,6 +59,7 @@ const inputClassName = "login-input rb:rounded-lg! rb:p-[12px]! rb:h-[44px]! rb:
       return;
     }
     
+    clearUserInfo();
     setLoading(true);
     login(values).then((res) => {
       const response = res as LoginInfo;
