@@ -34,6 +34,7 @@ from app.core.rag.chunk.context import (
 from app.core.rag.chunk.merger.structured_stream import (
     SourceFragment,
     StructuredStream,
+    block_separator,
     rebuild_structured_stream,
     split_structured_stream,
 )
@@ -158,6 +159,28 @@ class BlockMerger(ChunkMerger):
     def _merge_structured_stream(self, ctx: ChunkContext, parse_result: ParseResult) -> MergeResult:
         token_num = max(int(ctx.parser_config.get("chunk_token_num", 128)), 1)
         delimiter = ctx.parser_config.get("delimiter")
+        if ctx.chunk_output_mode is ChunkOutputMode.PARENT_CHILD:
+            if ctx.parser_config.get("parent_chunk_mode") == "full-doc":
+                parent_drafts = self._build_full_doc_parent_drafts(
+                    parse_result.blocks or []
+                )
+            else:
+                parent_token_num = max(
+                    int(ctx.parser_config.get("parent_chunk_token_num", 1024)),
+                    1,
+                )
+                parent_drafts = self._build_parent_drafts(
+                    parse_result.blocks or [],
+                    parent_token_num,
+                    ctx.parser_config.get("parent_chunk_delimiter"),
+                )
+            groups = self._parent_child_groups_from_drafts(
+                parent_drafts,
+                token_num,
+                delimiter,
+            )
+            return self._parent_child_merge_result(groups, parse_result.pdf_parser)
+
         overlap = TextMerger._normalize_overlap(
             _safe_int(ctx.parser_config.get("chunk_overlap", 0)),
             token_num,
@@ -174,6 +197,213 @@ class BlockMerger(ChunkMerger):
             logical_chunks=logical_chunks,
             pdf_parser=parse_result.pdf_parser,
         )
+
+    def _build_parent_drafts(
+        self,
+        blocks: list[ParsedBlock],
+        token_num: int,
+        delimiter: str | None,
+    ) -> list[_ParentDraft]:
+        stream = rebuild_structured_stream(blocks)
+        drafts: list[_ChunkDraft] = []
+        for segment in split_structured_stream(stream, delimiter):
+            units = self._stream_units(segment, token_num)
+            drafts.extend(self._pack_stream_units(units, token_num, 0))
+        return [self._chunk_draft_to_parent(draft) for draft in drafts]
+
+    def _build_full_doc_parent_drafts(
+        self,
+        blocks: list[ParsedBlock],
+    ) -> list[_ParentDraft]:
+        fragments: list[SourceFragment] = []
+        content_parts: list[str] = []
+        previous: ParsedBlock | None = None
+        content_length = 0
+
+        for source_key, block in enumerate(blocks):
+            content = str(block.content or "")
+            if not content.strip():
+                continue
+
+            separator = block_separator(previous, block) if previous is not None else ""
+            remaining = FULL_DOC_MAX_CHARS - content_length - len(separator)
+            if remaining <= 0:
+                break
+
+            complete = len(content) <= remaining
+            if not complete and block.type in PARENT_CHILD_ATOMIC_TYPES:
+                break
+
+            selected_content = content if complete else content[:remaining]
+            content_parts.extend([separator, selected_content])
+            fragments.append(
+                SourceFragment(
+                    source_key=source_key,
+                    block=block,
+                    content=selected_content,
+                    complete=complete,
+                    structure_valid=(
+                        block.type is not ParsedBlockType.TABLE
+                        or self._is_valid_table_content(selected_content)
+                    ),
+                )
+            )
+            content_length += len(separator) + len(selected_content)
+            previous = block
+            if not complete:
+                break
+
+        if not fragments:
+            return []
+
+        source_blocks = self._source_blocks(fragments)
+        parent = LogicalChunk(
+            type=LogicalChunkType.TEXT,
+            content="".join(content_parts),
+            metadata=self._metadata_for_range(source_blocks, "text"),
+        )
+        return [_ParentDraft(parent=parent, fragments=fragments)]
+
+    def _chunk_draft_to_parent(self, draft: _ChunkDraft) -> _ParentDraft:
+        source_blocks = self._source_blocks(draft.fragments)
+        return _ParentDraft(
+            parent=LogicalChunk(
+                type=LogicalChunkType.TEXT,
+                content=draft.content,
+                metadata=self._metadata_for_range(source_blocks, "text"),
+            ),
+            fragments=draft.fragments,
+        )
+
+    def _parent_child_groups_from_drafts(
+        self,
+        drafts: list[_ParentDraft],
+        token_num: int,
+        delimiter: str | None,
+    ) -> list[ParentChildGroup]:
+        return [
+            ParentChildGroup(
+                parent=draft.parent,
+                children=self._children_from_parent(draft, token_num, delimiter),
+            )
+            for draft in drafts
+        ]
+
+    def _children_from_parent(
+        self,
+        draft: _ParentDraft,
+        token_num: int,
+        delimiter: str | None,
+    ) -> list[LogicalChunk]:
+        children: list[LogicalChunk] = []
+        text_fragments: list[SourceFragment] = []
+
+        def flush_text_fragments() -> None:
+            if not text_fragments:
+                return
+            children.extend(
+                self._text_children_from_fragments(
+                    text_fragments,
+                    token_num,
+                    delimiter,
+                )
+            )
+            text_fragments.clear()
+
+        text_like_types = {*TEXT_LIKE_TYPES, ParsedBlockType.LIST}
+        for fragment in draft.fragments:
+            if fragment.block.type in text_like_types:
+                text_fragments.append(fragment)
+                continue
+
+            flush_text_fragments()
+            children.extend(
+                self._specialized_children_from_fragment(fragment, token_num)
+            )
+
+        flush_text_fragments()
+        return children
+
+    def _text_children_from_fragments(
+        self,
+        fragments: list[SourceFragment],
+        token_num: int,
+        delimiter: str | None,
+    ) -> list[LogicalChunk]:
+        content = self._join_text_fragments(fragments)
+        source_blocks = self._source_blocks(fragments)
+        metadata = self._metadata_for_range(source_blocks, "text")
+        metadata.pop("vision_text", None)
+        metadata.pop("image", None)
+        return [
+            LogicalChunk(
+                type=LogicalChunkType.TEXT,
+                content=chunk,
+                metadata=deepcopy(metadata),
+            )
+            for chunk in self.text_merger.merge(content, token_num, delimiter, 0)
+            if chunk.strip()
+        ]
+
+    @staticmethod
+    def _join_text_fragments(fragments: list[SourceFragment]) -> str:
+        parts: list[str] = []
+        previous: SourceFragment | None = None
+        for fragment in fragments:
+            separator = ""
+            if previous is not None and previous.source_key != fragment.source_key:
+                separator = block_separator(previous.block, fragment.block)
+            parts.extend([separator, fragment.content])
+            previous = fragment
+        return "".join(parts)
+
+    def _specialized_children_from_fragment(
+        self,
+        fragment: SourceFragment,
+        token_num: int,
+    ) -> list[LogicalChunk]:
+        if fragment.block.type is ParsedBlockType.CODE:
+            return self._code_children_from_fragment(fragment, token_num)
+
+        units = self._split_stream_unit(
+            _StreamUnit(fragment=fragment),
+            token_num,
+        )
+        return [
+            self._draft_to_normal_chunk(self._units_to_draft([unit])) for unit in units
+        ]
+
+    def _code_children_from_fragment(
+        self,
+        fragment: SourceFragment,
+        token_num: int,
+    ) -> list[LogicalChunk]:
+        block = fragment.block
+        language = str(block.metadata.get("language", ""))
+        content = self._complete_code_fence(fragment.content, language)
+        metadata = self._metadata_for_block(block)
+        return [
+            LogicalChunk(
+                type=LogicalChunkType.TEXT,
+                content=piece,
+                image=block.image,
+                positions=deepcopy(block.positions),
+                metadata=deepcopy(metadata),
+            )
+            for piece in self._split_code_content(content, token_num, language)
+            if piece.strip()
+        ]
+
+    @staticmethod
+    def _complete_code_fence(content: str, language: str) -> str:
+        lines = content.split("\n")
+        if lines and lines[0].strip().startswith("```"):
+            if len(lines) == 1 or not lines[-1].strip().startswith("```"):
+                return f"{content}\n```"
+            return content
+        if language:
+            return f"```{language}\n{content}\n```"
+        return content
 
     def _stream_units(self, stream: StructuredStream, token_num: int) -> list[_StreamUnit]:
         units: list[_StreamUnit] = []
@@ -858,6 +1088,17 @@ class BlockMerger(ChunkMerger):
         elif language:
             fence_start = f"```{language}"
             fence_end = "```"
+
+        if (
+            fence_start
+            and num_tokens_from_string(
+                self._wrap_code_lines([], fence_start, fence_end)
+            )
+            > token_num
+        ):
+            raise ValueError(
+                f"Structured wrapper cannot fit within token limit {token_num}."
+            )
 
         chunks: list[str] = []
         current_lines: list[str] = []
