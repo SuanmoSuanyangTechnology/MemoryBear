@@ -32,6 +32,7 @@ from app.core.rag.chunk.context import (
     ParseResult,
 )
 from app.core.rag.chunk.merger.structured_stream import (
+    BlockSpan,
     SourceFragment,
     StructuredStream,
     block_separator,
@@ -88,6 +89,12 @@ class _ChunkDraft:
 class _ParentDraft:
     parent: LogicalChunk
     fragments: list[SourceFragment]
+
+
+@dataclass
+class _ChildDraft:
+    chunk: LogicalChunk
+    source_key: int | None = None
 
 
 class BlockMerger(ChunkMerger):
@@ -281,12 +288,30 @@ class BlockMerger(ChunkMerger):
         token_num: int,
         delimiter: str | None,
     ) -> list[ParentChildGroup]:
+        group_drafts: list[tuple[_ParentDraft, list[_ChildDraft]]] = []
+        all_child_drafts: list[_ChildDraft] = []
+        for draft in drafts:
+            child_drafts = [
+                child_draft
+                for child_draft in self._child_drafts_from_parent(
+                    draft,
+                    token_num,
+                    delimiter,
+                )
+                if self._is_serializable_child(child_draft.chunk)
+            ]
+            if not child_drafts:
+                continue
+            group_drafts.append((draft, child_drafts))
+            all_child_drafts.extend(child_drafts)
+
+        self._normalize_table_child_parts(all_child_drafts)
         return [
             ParentChildGroup(
                 parent=draft.parent,
-                children=self._children_from_parent(draft, token_num, delimiter),
+                children=[child_draft.chunk for child_draft in child_drafts],
             )
-            for draft in drafts
+            for draft, child_drafts in group_drafts
         ]
 
     def _children_from_parent(
@@ -295,17 +320,34 @@ class BlockMerger(ChunkMerger):
         token_num: int,
         delimiter: str | None,
     ) -> list[LogicalChunk]:
-        children: list[LogicalChunk] = []
+        child_drafts = [
+            child_draft
+            for child_draft in self._child_drafts_from_parent(
+                draft,
+                token_num,
+                delimiter,
+            )
+            if self._is_serializable_child(child_draft.chunk)
+        ]
+        self._normalize_table_child_parts(child_drafts)
+        return [child_draft.chunk for child_draft in child_drafts]
+
+    def _child_drafts_from_parent(
+        self,
+        draft: _ParentDraft,
+        token_num: int,
+        delimiter: str | None,
+    ) -> list[_ChildDraft]:
+        children: list[_ChildDraft] = []
         text_fragments: list[SourceFragment] = []
 
         def flush_text_fragments() -> None:
             if not text_fragments:
                 return
             children.extend(
-                self._text_children_from_fragments(
-                    text_fragments,
-                    token_num,
-                    delimiter,
+                _ChildDraft(chunk=child)
+                for child in self._text_children_from_fragments(
+                    text_fragments, token_num, delimiter
                 )
             )
             text_fragments.clear()
@@ -318,11 +360,41 @@ class BlockMerger(ChunkMerger):
 
             flush_text_fragments()
             children.extend(
-                self._specialized_children_from_fragment(fragment, token_num)
+                _ChildDraft(chunk=child, source_key=fragment.source_key)
+                for child in self._specialized_children_from_fragment(
+                    fragment,
+                    token_num,
+                )
             )
 
         flush_text_fragments()
         return children
+
+    @staticmethod
+    def _is_serializable_child(child: LogicalChunk) -> bool:
+        return bool(str(child.content or "").strip())
+
+    @staticmethod
+    def _normalize_table_child_parts(child_drafts: list[_ChildDraft]) -> None:
+        parts_by_source: dict[int, list[LogicalChunk]] = {}
+        for child_draft in child_drafts:
+            if (
+                child_draft.source_key is None
+                or child_draft.chunk.type is not LogicalChunkType.TABLE
+            ):
+                continue
+            parts_by_source.setdefault(child_draft.source_key, []).append(
+                child_draft.chunk
+            )
+
+        for parts in parts_by_source.values():
+            if len(parts) == 1:
+                parts[0].metadata.pop("table_part_index", None)
+                parts[0].metadata.pop("table_part_total", None)
+                continue
+            for index, part in enumerate(parts):
+                part.metadata["table_part_index"] = index
+                part.metadata["table_part_total"] = len(parts)
 
     def _text_children_from_fragments(
         self,
@@ -330,32 +402,39 @@ class BlockMerger(ChunkMerger):
         token_num: int,
         delimiter: str | None,
     ) -> list[LogicalChunk]:
-        content = self._join_text_fragments(fragments)
-        source_blocks = self._source_blocks(fragments)
-        metadata = self._metadata_for_range(source_blocks, "text")
-        metadata.pop("vision_text", None)
-        metadata.pop("image", None)
-        return [
-            LogicalChunk(
-                type=LogicalChunkType.TEXT,
-                content=chunk,
-                metadata=deepcopy(metadata),
-            )
-            for chunk in self.text_merger.merge(content, token_num, delimiter, 0)
-            if chunk.strip()
-        ]
+        stream = self._text_stream_from_fragments(fragments)
+        drafts: list[_ChunkDraft] = []
+        for segment in split_structured_stream(stream, delimiter):
+            units = self._stream_units(segment, token_num)
+            drafts.extend(self._pack_stream_units(units, token_num, 0))
+        return [self._draft_to_normal_chunk(draft) for draft in drafts]
 
     @staticmethod
-    def _join_text_fragments(fragments: list[SourceFragment]) -> str:
+    def _text_stream_from_fragments(
+        fragments: list[SourceFragment],
+    ) -> StructuredStream:
         parts: list[str] = []
+        spans: list[BlockSpan] = []
         previous: SourceFragment | None = None
+        offset = 0
         for fragment in fragments:
             separator = ""
             if previous is not None and previous.source_key != fragment.source_key:
                 separator = block_separator(previous.block, fragment.block)
             parts.extend([separator, fragment.content])
+            offset += len(separator)
+            start = offset
+            offset += len(fragment.content)
+            spans.append(
+                BlockSpan(
+                    source_key=fragment.source_key,
+                    block=fragment.block,
+                    start=start,
+                    end=offset,
+                )
+            )
             previous = fragment
-        return "".join(parts)
+        return StructuredStream(text="".join(parts), spans=spans)
 
     def _specialized_children_from_fragment(
         self,
@@ -382,6 +461,11 @@ class BlockMerger(ChunkMerger):
         language = str(block.metadata.get("language", ""))
         content = self._complete_code_fence(fragment.content, language)
         metadata = self._metadata_for_block(block)
+        pieces = self._split_code_content(content, token_num, language)
+        if any(num_tokens_from_string(piece) > token_num for piece in pieces):
+            raise ValueError(
+                f"Structured wrapper cannot fit within token limit {token_num}."
+            )
         return [
             LogicalChunk(
                 type=LogicalChunkType.TEXT,
@@ -390,7 +474,7 @@ class BlockMerger(ChunkMerger):
                 positions=deepcopy(block.positions),
                 metadata=deepcopy(metadata),
             )
-            for piece in self._split_code_content(content, token_num, language)
+            for piece in pieces
             if piece.strip()
         ]
 
@@ -1088,17 +1172,6 @@ class BlockMerger(ChunkMerger):
         elif language:
             fence_start = f"```{language}"
             fence_end = "```"
-
-        if (
-            fence_start
-            and num_tokens_from_string(
-                self._wrap_code_lines([], fence_start, fence_end)
-            )
-            > token_num
-        ):
-            raise ValueError(
-                f"Structured wrapper cannot fit within token limit {token_num}."
-            )
 
         chunks: list[str] = []
         current_lines: list[str] = []
