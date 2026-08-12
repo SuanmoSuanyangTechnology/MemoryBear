@@ -12,8 +12,8 @@
 
 import { type FC, useState, useEffect, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useParams } from 'react-router-dom'
-import { Row, Col, Space, Select, InputNumber, App, Form, Input, Flex, Tooltip, Divider } from 'antd'
+import { useNavigate, useParams } from 'react-router-dom'
+import { Row, Col, Space, Select, InputNumber, App, Form, Input, Flex, Tooltip, Divider, Button } from 'antd'
 import clsx from 'clsx'
 
 import Card from './components/Card'
@@ -58,6 +58,7 @@ const MemoryExtractionEngine: FC = () => {
   const { t } = useTranslation();
   const { message } = App.useApp();
   const { id } = useParams()
+  const navigate = useNavigate()
   const { language } = useI18n()
   const [expandedKeys, setExpandedKeys] = useState<string[]>(keys)
   const [form] = Form.useForm<ConfigForm>()
@@ -170,30 +171,34 @@ const MemoryExtractionEngine: FC = () => {
               </div>
 
               <Card
-                title={t('memoryExtractionEngine.modelConfig')}
+                title={
+                  <Flex align="center" justify="space-between" className="rb:w-full!">
+                    {t('memoryExtractionEngine.modelConfig')}
+                    <Button type="link" disabled={false} className="rb:text-[12px]!" size="small" onClick={() => navigate('/space-config')}>
+                      {t('menu.spaceConfig')}
+                    </Button>
+                  </Flex>
+                }
                 type="modelConfig"
                 expanded={expandedKeys.includes('modelConfig')}
                 handleExpand={handleExpand}
               >
-                {/* <Form form={modelForm}> */}
-                  <Flex vertical gap={12}>
-                    <Flex gap={12} vertical>
-                      {modelConfigList.map(config => (
-                        <div key={config.key} className="rb:bg-[#F6F6F6] rb:rounded-xl rb:p-3">
-                          <LabelWrapper title={t(`memoryExtractionEngine.${config.key}`)} className="rb:mb-3" />
-                          <Form.Item
-                            name={config.key}
-                            className="rb:mb-0!"
-                          >
-                            <ModelSelect
-                              params={config.params}
-                            />
-                          </Form.Item>
-                        </div>
-                      ))}
-                    </Flex>
-                  </Flex>
-                {/* </Form> */}
+                <Flex gap={12} vertical>
+                  {modelConfigList.map(config => (
+                    <div key={config.key} className="rb:bg-[#F6F6F6] rb:rounded-xl rb:p-3">
+                      <LabelWrapper title={t(`memoryExtractionEngine.${config.key}`)} className="rb:mb-3!" />
+                      <Form.Item
+                        name={config.key}
+                        className="rb:mb-0!"
+                      >
+                        <ModelSelect
+                          params={config.params}
+                          disabled={true}
+                        />
+                      </Form.Item>
+                    </div>
+                  ))}
+                </Flex>
               </Card>
 
               <Flex vertical gap={16}>
@@ -296,6 +301,7 @@ const MemoryExtractionEngine: FC = () => {
                                           isInput={true}
                                           prefix={<span className="rb:text-[#5B6167]">{t('emotionEngine.currentValue')}:</span>}
                                           inputClassName="rb:w-[155px]!"
+                                          classNames={isDefault ? { track: 'rb:bg-[#171719]! rb:opacity-65' } : {}}
                                         />
                                       </>
                                       : config.control === 'inputNumber'

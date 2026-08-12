@@ -86,9 +86,11 @@ const RbSlider: FC<RbSliderProps> = ({
         value={curValue}
         disabled={disabled}
         onChange={handleSliderChange}
-        classNames={size === 'small' ? {
-          rail: 'rb:w-[calc(100%-6px)]!'
-        } : undefined}
+        classNames={Object.assign(
+          {},
+          size === 'small' ? { rail: 'rb:w-[calc(100%-6px)]!', root: 'rb:my-0!' } : {},
+          rest.classNames ?? {}
+        )}
         className={size === 'small' ? `${size} rb:flex-1!` : 'rb:flex-1!'}
       />
       {/* Display current value or minimum value */}
