@@ -225,6 +225,7 @@ const ForgettingEngine: React.FC = () => {
                           isInput={true}
                           prefix={<span className="rb:text-[#5B6167]">{t('emotionEngine.currentValue')}:</span>}
                           inputClassName="rb:w-[155px]!"
+                          classNames={isDefault ? { track: 'rb:bg-[#171719]! rb:opacity-65' } : {}}
                         />
                         : null
                       }

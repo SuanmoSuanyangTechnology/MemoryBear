@@ -12,7 +12,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Row, Col, Form, Button, App, Space, Flex, Tooltip } from 'antd';
-import { useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import clsx from 'clsx';
 
@@ -66,6 +66,7 @@ const configList = [
 const EmotionEngine: React.FC = () => {
   const { t } = useTranslation();
   const { id } = useParams();
+  const navigate = useNavigate();
   const [configData, setConfigData] = useState<ConfigForm>({} as ConfigForm);
   const [form] = Form.useForm<ConfigForm>();
   const { message: messageApi } = App.useApp();
@@ -150,6 +151,15 @@ const EmotionEngine: React.FC = () => {
             }}
           >
             <Flex vertical gap={12}>
+              <Flex
+                align="center"
+                justify="space-between"
+                className="rb:cursor-pointer rb:bg-[#F6F6F6] rb:h-8 rb:rounded-lg rb:font-medium rb:leading-5 rb:pl-2! rb:pr-1! rb:hover:shadow-[0px_2px_8px_0px_rgba(23,23,25,0.16)]"
+                onClick={() => navigate('/space-config')}
+              >
+                {t('menu.spaceConfig')}
+                <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/memory/arrow_right.svg')]" />
+              </Flex>
               {configList.map(config => {
                 if (config.type === 'decimal') {
                   return (
@@ -176,6 +186,7 @@ const EmotionEngine: React.FC = () => {
                           isInput={true}
                           prefix={<span className="rb:text-[#5B6167]">{t('emotionEngine.currentValue')}:</span>}
                           inputClassName="rb:w-[155px]!"
+                          classNames={isDefault ? { track: 'rb:bg-[#171719]! rb:opacity-65' } : {}}
                         />
                       </Form.Item>
                     </div>
@@ -184,16 +195,29 @@ const EmotionEngine: React.FC = () => {
                 if (config.type === 'modelSelect') {
                   return (
                     <div key={config.key} className="rb:bg-[#F6F6F6] rb:rounded-xl rb:p-3">
-                      <LabelWrapper title={t(`emotionEngine.${config.key}`)} className="rb:mb-3">
-                        <DescWrapper desc={t(`emotionEngine.${config.key}_desc`)} className="rb:mt-1" />
-                      </LabelWrapper>
+                      <Flex gap={24} align="center" justify="space-between" className="rb:mb-3!">
+                        <LabelWrapper title={t(`emotionEngine.${config.key}`)}>
+                          <DescWrapper desc={t(`emotionEngine.${config.key}_desc`)} className="rb:mt-1" />
+                        </LabelWrapper>
+
+                        <Button
+                          type="link"
+                          disabled={false}
+                          size="small"
+                          className="rb:text-[12px]!"
+                          onClick={() => navigate('/space-config')}
+                        >
+                          {t('menu.spaceConfig')}
+                          <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/memory/arrow_right.svg')]" />
+                        </Button>
+                      </Flex>
                       <Form.Item
                         name={config.key}
                         className="rb:mb-0!"
                       >
                         <ModelSelect
                           params={config.params}
-                          disabled={isDefault || (!values?.emotion_enabled && config.key !== 'emotion_enabled')}
+                          disabled={true}
                         />
                       </Form.Item>
                     </div>
@@ -201,6 +225,7 @@ const EmotionEngine: React.FC = () => {
                 }
                 return (
                   <SwitchFormItem
+                    key={config.key}
                     title={t(`emotionEngine.${config.key}`)}
                     name={config.key}
                     desc={<>
@@ -262,7 +287,7 @@ const EmotionEngine: React.FC = () => {
               <div className="rb:font-medium rb:leading-5 rb:px-1 rb:mb-2.5">{t('emotionEngine.configSuggest')}</div>
               <Flex gap={10} vertical>
                 {['first', 'customer_service', 'data_analysis', 'risk_warning'].map(key => (
-                  <div className="rb:bg-[#F6F6F6] rb:px-3 rb:py-2.5 rb:rounded-xl">{t(`emotionEngine.${key}`)}: {t(`emotionEngine.${key}_desc`)}</div>
+                  <div key={key} className="rb:bg-[#F6F6F6] rb:px-3 rb:py-2.5 rb:rounded-xl">{t(`emotionEngine.${key}`)}: {t(`emotionEngine.${key}_desc`)}</div>
                 ))}
               </Flex>
             </div>
@@ -278,7 +303,7 @@ const EmotionEngine: React.FC = () => {
 
                 <Flex vertical gap={4}>
                   {['neutral_emotion', 'minor_dissatisfaction', 'expect_improvement'].map((key, index) => (
-                    <Flex gap={28} align="center" justify="space-between" className="rb:bg-white rb:px-3! rb:py-2! rb:rounded-lg">
+                    <Flex key={key} gap={28} align="center" justify="space-between" className="rb:bg-white rb:px-3! rb:py-2! rb:rounded-lg">
                       <Flex align="center" justify="space-between" className="rb:w-[55%]!">
                         <span className="rb:font-medium">{t(`emotionEngine.${key}`)}</span>
                         <span>{t('emotionEngine.confidence')}: {key === 'neutral_emotion' ? 0.85 : key === 'minor_dissatisfaction' ? 0.45 : 0.32}</span>
