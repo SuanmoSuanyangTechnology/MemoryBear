@@ -47,8 +47,15 @@ class ImageChunkPipeline(ChunkPipeline):
         analysis_binary, analysis_filename, source_image = self._analysis_input(ctx.filename, source_binary)
 
         mineru_blocks = []
-        if mode in {0, 1}:
+        if mode == 0:
             mineru_blocks = self._parse_ocr_blocks(ctx, analysis_binary, analysis_filename)
+        elif mode == 1:
+            mineru_blocks = self._parse_ocr_blocks(
+                ctx,
+                analysis_binary,
+                analysis_filename,
+                allow_empty=True,
+            )
 
         source_image_url = None
         markdown_parts = []
@@ -112,6 +119,8 @@ class ImageChunkPipeline(ChunkPipeline):
         ctx: ChunkContext,
         analysis_binary: bytes,
         analysis_filename: str,
+        *,
+        allow_empty: bool = False,
     ) -> list[ParsedBlock]:
         ocr_ctx = replace(
             ctx,
@@ -120,6 +129,8 @@ class ImageChunkPipeline(ChunkPipeline):
         )
         blocks = MinerUV3Parser().parse(ocr_ctx).blocks or []
         if not blocks:
+            if allow_empty:
+                return []
             raise ValueError("MinerU returned empty Markdown for image OCR mode.")
         if is_embedded_image_vision_enabled(ctx.parser_config):
             return blocks

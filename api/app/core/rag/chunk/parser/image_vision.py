@@ -196,6 +196,7 @@ def enhance_complete_image_chunks_with_vision(
     _callback(callback, progress_start, f"{log_prefix} image vision enhancement start: total={total}.")
 
     futures = {}
+    completed_count = 0
     for index, (source_key, group, representative) in enumerate(pending_groups, start=1):
         src = str(representative.metadata.get("src", ""))
         LOGGER.info(
@@ -206,16 +207,37 @@ def enhance_complete_image_chunks_with_vision(
             source_key,
             src,
         )
-        future = figure_parser.shared_executor.submit(
-            vision_llm_chunk,
-            representative.image,
-            vision_model,
-            prompt,
-            callback,
-        )
-        futures[future] = (index, source_key, group, src, time.monotonic())
+        image_started_at = time.monotonic()
+        try:
+            future = figure_parser.shared_executor.submit(
+                vision_llm_chunk,
+                representative.image,
+                vision_model,
+                prompt,
+                callback,
+            )
+        except Exception as exc:  # noqa: BLE001
+            stats.failed_count += 1
+            completed_count += 1
+            progress = progress_start + (progress_span * completed_count / total)
+            LOGGER.warning(
+                "[%s] complete image vision enhancement submission failed: "
+                "index=%s total=%s source_key=%s src=%s error=%s",
+                log_prefix,
+                index,
+                total,
+                source_key,
+                src,
+                exc,
+            )
+            _callback(
+                callback,
+                progress,
+                f"{log_prefix} image vision enhancement failed: {completed_count}/{total}.",
+            )
+            continue
+        futures[future] = (index, source_key, group, src, image_started_at)
 
-    completed_count = 0
     for future in as_completed(futures):
         index, source_key, group, src, image_started_at = futures[future]
         completed_count += 1
