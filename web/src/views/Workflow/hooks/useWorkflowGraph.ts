@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:17:48 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-07-06 16:01:59
+ * @Last Modified time: 2026-08-12 14:22:18
  */
 import { Clipboard, Graph, Keyboard, MiniMap, Node, Snapline, History, Selection,
   Scroller,
@@ -300,7 +300,7 @@ export const useWorkflowGraph = ({
               } catch {
                 nodeLibraryConfig.config[key].defaultValue = config[key]
               }
-            } else if (nodeLibraryConfig.config && nodeLibraryConfig.config[key] && config[key]) {
+            } else if (nodeLibraryConfig.config && nodeLibraryConfig.config[key] && typeof config[key] !== 'undefined') {
               nodeLibraryConfig.config[key].defaultValue = config[key]
             }
           })
