@@ -579,6 +579,7 @@ class BlockMerger(ChunkMerger):
         pending_table_overlap: _StreamUnit | None = None
 
         for index, unit in enumerate(units):
+            current_is_pending_overlap = False
             if self._is_incomplete_table_unit(unit):
                 if current:
                     drafts.append(self._units_to_draft(current))
@@ -605,12 +606,12 @@ class BlockMerger(ChunkMerger):
                     overlap,
                 )
                 pending_table_overlap = None
-                current.append(unit)
-                continue
+                current_is_pending_overlap = bool(current)
 
             candidate = [*current, unit]
             if self._heading_should_start_next_draft(current, unit, units, index, token_num):
-                drafts.append(self._units_to_draft(current))
+                if not current_is_pending_overlap:
+                    drafts.append(self._units_to_draft(current))
                 current = [unit]
                 continue
 
@@ -1213,6 +1214,23 @@ class BlockMerger(ChunkMerger):
     def _split_strict_table(self, table, token_num: int) -> list[str]:
         thead = table.find("thead")
         if not table.find_all("tr"):
+            table_text = table.get_text(" ", strip=True)
+            if table_text:
+                container = self._rowless_table_container(table)
+
+                def wrap_rowless(piece: str) -> str:
+                    payload = escape(piece)
+                    if container:
+                        payload = f"<{container}>{payload}</{container}>"
+                    return f"<table>{payload}</table>"
+
+                return self._hard_split_wrapped(
+                    table_text,
+                    token_num,
+                    wrap_rowless,
+                    strict=True,
+                )
+
             section = next(
                 (
                     name
@@ -1301,6 +1319,25 @@ class BlockMerger(ChunkMerger):
                 f"Structured wrapper cannot fit within token limit {token_num}."
             )
         return chunks
+
+    @staticmethod
+    def _rowless_table_container(table) -> str | None:
+        direct_text = "".join(
+            str(child).strip()
+            for child in table.children
+            if getattr(child, "name", None) is None
+        )
+        containers = [
+            child
+            for child in table.find_all(
+                ["caption", "thead", "tbody", "tfoot"],
+                recursive=False,
+            )
+            if child.get_text(" ", strip=True)
+        ]
+        if direct_text or len(containers) != 1:
+            return None
+        return str(containers[0].name)
 
     def _split_strict_table_row(
         self,
