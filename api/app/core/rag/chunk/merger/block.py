@@ -803,7 +803,8 @@ class BlockMerger(ChunkMerger):
     @staticmethod
     def _is_valid_table_content(content: str) -> bool:
         stripped = content.strip()
-        if not stripped.startswith("<table") or not stripped.endswith("</table>"):
+        normalized = stripped.lower()
+        if not normalized.startswith("<table") or not normalized.endswith("</table>"):
             return False
         return BeautifulSoup(stripped, "html.parser").find("table") is not None
 
