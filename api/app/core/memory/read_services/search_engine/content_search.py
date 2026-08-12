@@ -77,7 +77,6 @@ class Neo4jSearchService:
         if includes is None:
             self.includes = [
                 Neo4jNodeType.STATEMENT,
-                # Neo4jNodeType.DIALOGUE,
                 Neo4jNodeType.CHUNK,
                 Neo4jNodeType.EXTRACTEDENTITY,
                 Neo4jNodeType.MEMORYSUMMARY,
