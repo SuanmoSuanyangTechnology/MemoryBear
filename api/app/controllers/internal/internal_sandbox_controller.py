@@ -311,7 +311,12 @@ async def read_memory(
             end_user_id=end_user_id,
             workspace_id=workspace_id,
         )
-        result = await memory_service.read(query=body.query, search_switch=SearchStrategy.QUICK, limit=5)
+        result = await memory_service.read(
+            query=body.query,
+            search_switch=SearchStrategy.QUICK,
+            limit=5,
+            record_display=True,
+        )
 
         return {"memories": [{"content": result.content, "count": result.count}]}
 

@@ -14,6 +14,7 @@ import styles from './index.module.css';
 import { formatDateTime } from '@/utils/format';
 import { isPrivateAvailable } from '@/utils/private';
 import Empty from '@/components/Empty';
+import RbMarkdown from '@/components/Markdown';
 
 const BellIcon = () => (
   <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -192,7 +193,9 @@ const NotificationPanel = ({ open }: NotificationPanelProps) => {
                       }
                       <span className={styles.itemTitle}>{message.title}</span>
                     </div>
-                    <div className={styles.itemSummary}>{message.summary}</div>
+                    <div className={styles.itemSummary}>
+                      <RbMarkdown content={message.summary} />
+                    </div>
                     <div className={styles.itemMeta}>
                       <span>{formatDateTime(message.published_at)}</span>
                       {message.requires_confirmation &&
