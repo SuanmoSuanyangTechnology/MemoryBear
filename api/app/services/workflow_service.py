@@ -4799,7 +4799,6 @@ class WorkflowService:
             role="user",
             content=human_message,
             meta_data=human_meta,
-            sync_memory=False,
         )
         self.conversation_service.add_message(
             **({"message_id": message_id} if message_id else {}),
@@ -4807,7 +4806,6 @@ class WorkflowService:
             role="assistant",
             content="",
             meta_data={"error": error},
-            sync_memory=False,
         )
 
     @staticmethod

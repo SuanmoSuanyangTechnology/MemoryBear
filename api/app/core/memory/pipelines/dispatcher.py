@@ -446,94 +446,6 @@ async def dispatch_api_service_async(
 # ──────────────────────────────────────────────
 
 
-async def ingest_agent_message(
-    conversation_id: str,
-    message: "Any",
-    app_id: str,
-    config_id: str = "",
-    workspace_id: str = "",
-    end_user_id: str = "",
-    should_memorize: bool = True,
-    language: str = "zh",
-) -> bool:
-    """Agent 消息摄入：写入 memory_messages 表 + 触发滑动窗口派发。
-
-    Returns:
-        True 表示成功写入，False 表示跳过（门禁未开或写入失败）
-    """
-
-    if not await check_memory_enabled(app_id):
-        return False
-
-    files = None
-    if hasattr(message, "meta_data") and message.meta_data:
-        files = message.meta_data.get("files")
-
-    # Agent 路径：用 message.created_at 作为 dialog_at，语义上是对话真实发生的时间
-    dialog_at: Optional[str] = None
-    if hasattr(message, "created_at") and message.created_at:
-        _created = message.created_at
-        if isinstance(_created, datetime):
-            _created = _created.replace(tzinfo=timezone.utc) if _created.tzinfo is None else _created
-            dialog_at = _created.isoformat()
-        elif isinstance(_created, str):
-            dialog_at = _created
-
-    # 写 memory_messages。original_message_id 与 messages 已解耦（无外键约束），
-    # 写入顺序不再受限，无需 FK 退避重试；异常冒泡由上层 dispatch_memory_sync
-    # 捕获并降级为 warning，不影响主流程。
-    with get_db_context() as db:
-        repo = MemoryMessageRepository(db)
-        written = repo.write_batch(
-            conversation_id=str(conversation_id),
-            messages=[{
-                "role": message.role,
-                "content": message.content,
-                "original_message_id": message.id,
-                "created_at": message.created_at,
-                "should_memorize": should_memorize,
-                "files": files,
-                "dialog_at": dialog_at,
-            }],
-            end_user_id=end_user_id,
-            source=MemoryMessageSource.AGENT,
-        )
-        if not written:
-            return False
-        db.commit()
-
-    await refresh_active_key(conversation_id)
-    mark_conversation_pending(conversation_id)
-
-    # Fast Write 派发（隔离：失败不阻断下面的滑动窗口派发）。
-    # 权限取原始 message.role / should_memorize；Agent 有应用级门禁 require_app_gate=True。
-    _target_msg = written[0] if written else None
-    if _target_msg:
-        await safe_push_fast_write(
-            role=str(message.role),
-            should_memorize=should_memorize,
-            app_id=app_id,
-            require_app_gate=True,
-            end_user_id=end_user_id,
-            target_message=_target_msg,
-            config_id=config_id,
-            workspace_id=workspace_id,
-            conversation_id=str(conversation_id),
-            message_seq=_target_msg["message_seq"],
-            language=language,
-            source=MemoryMessageSource.AGENT.value,
-        )
-
-    await check_sliding_window_and_dispatch(
-        conversation_id=str(conversation_id),
-        config_id=config_id,
-        end_user_id=end_user_id,
-        workspace_id=workspace_id,
-        language=language,
-    )
-    return True
-
-
 async def ingest_agent_messages(
     conversation_id: str,
     messages: List["Any"],
@@ -598,7 +510,7 @@ async def ingest_agent_messages(
             role_and_flag.append((str(m.role), should_memorize))
 
     # 写 memory_messages。original_message_id 与 messages 已解耦（无外键约束），
-    # 写入顺序不再受限，无需 FK 退避重试；异常冒泡由上层 dispatch_memory_sync
+    # 写入顺序不再受限，无需 FK 退避重试；异常冒泡由上层 dispatch_memory_batch
     # 捕获并降级为 warning，不影响主流程。
     with get_db_context() as db:
         repo = MemoryMessageRepository(db)
