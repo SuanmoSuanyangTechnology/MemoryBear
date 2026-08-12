@@ -480,28 +480,23 @@ class ConversationService:
         messages: List[Any],
         conversation: Conversation,
     ) -> None:
-        """批量派发同一回合的多条消息到记忆系统（async 线性实现）。
+        """批量派发同一回合的多条消息到记忆系统。
 
         一次 write_batch（一次 pg_advisory_xact_lock + 一次事务）分配连续 seq，
-        一次滑动窗口派发。批内 seq 严格 user < assistant。
-
-        本方法**本身不 fire-and-forget**。调用方决定：
-            - fire-and-forget：`asyncio.create_task(svc.dispatch_memory_batch(...))`
-            - 阻塞等待：`await svc.dispatch_memory_batch(...)`
-        主 chat 流程默认走 fire-and-forget，避免拖累流式响应。
+        批内严格 user < assistant。本方法不 fire-and-forget，由调用方决定：
+        `asyncio.create_task(...)`（默认）或 `await ...`。
 
         Args:
             messages: 消息列表，元素需带 .id / .conversation_id / .role /
-                .content / .created_at / .meta_data / .should_memorize 属性。
-                所有消息应属于同一对话，seq 分配顺序 = 列表顺序。
+                .content / .created_at / .meta_data / .should_memorize 属性，
+                顺序即 seq 分配顺序。
             conversation: 所属 Conversation 实例（提供 workspace_id / app_id / user_id）。
         """
-        # 数据形状规范化（None → {}, 缺失字段默认等）由下游 dispatcher.ingest_agent_messages
-        # 统一处理；空/异常输入由下游 if not messages / if not written 双重拦截；
-        # 本方法只做纯派发（薄派发层），不重复防御。
+        # 纯派发层：数据规范化与空输入防御由下游 ingest_agent_messages 处理。
         from app.db import get_async_db_context
         from app.core.memory.memory_service import MemoryService
-
+        if not messages:
+            return
         try:
             async with get_async_db_context() as db:
                 config_id = await MemoryConfigService(db).get_workspace_active_config_id_async(
