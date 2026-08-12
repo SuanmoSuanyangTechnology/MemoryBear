@@ -90,11 +90,14 @@ async def memory_space_entity_event_timeline(
 async def memory_space_entity_timeline(
         id: str,
         type: str = Query("all", description="来源筛选：all/key_node/statement/memory_summary"),
+        sort: str = Query("time_desc", description="排序方式：time_asc/time_desc/occurred_asc/occurred_desc/recorded_asc/recorded_desc"),
+        from_ts: int = Query(None, description="时间范围起始（UTC 毫秒时间戳），由前端按用户时区转换后传入"),
+        to_ts: int = Query(None, description="时间范围结束（UTC 毫秒时间戳），由前端按用户时区转换后传入"),
         page: int = Query(1, ge=1, description="页码，从1开始"),
         pagesize: int = Query(10, ge=1, le=100, description="每页数量"),
         current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ):
-    """ExtractedEntity 合并记忆时间线（关键节点 / 情绪记忆 / 长期沉淀），分页 + 按来源筛选。
+    """ExtractedEntity 合并记忆时间线（关键节点 / 来源陈述 / 长期沉淀），分页 + 按来源筛选 + 排序 + 日期过滤。
 
     本接口仅服务 ExtractedEntity 节点（只有它才有「关键节点」来源）；
     Statement / MemorySummary 节点仍走旧接口 timeline_memories。
@@ -102,18 +105,32 @@ async def memory_space_entity_timeline(
     Query 参数:
         id: ExtractedEntity 节点的 Neo4j elementId
         type: 来源筛选，all/key_node/statement/memory_summary，默认 all
+        sort: 排序方式，默认 time_desc（时间倒序）
+              time_asc/time_desc: key_node 按发生时间，statement/memory_summary 按记录时间
+              occurred_asc/occurred_desc: 全部按发生时间
+              recorded_asc/recorded_desc: 全部按记录时间
+        from_ts: 时间范围起始（UTC 毫秒），前端 dayjs.tz(date, timezone).startOf('day').valueOf()
+        to_ts: 时间范围结束（UTC 毫秒），前端 dayjs.tz(date, timezone).endOf('day').valueOf()
         page: 页码（从 1 开始）
         pagesize: 每页条数（1~100）
 
-    total_count 与 type_stats 始终基于全量统计，不受 type 筛选影响。
+    total_count 与 type_stats 始终基于全量统计，不受筛选影响。
     """
     allowed = {"all", "key_node", "statement", "memory_summary"}
     if type not in allowed:
         return fail(BizCode.INVALID_PARAMETER, "type 取值非法", f"type={type}")
 
+    if sort not in MemoryEntityService.VALID_SORTS:
+        return fail(BizCode.INVALID_PARAMETER, "sort 取值非法", f"sort={sort}")
+
     memory_entity = MemoryEntityService(id, "ExtractedEntity")
     result = await memory_entity.get_unified_timeline(
-        source_type=type, page=page, pagesize=pagesize
+        source_type=type,
+        page=page,
+        pagesize=pagesize,
+        sort=sort,
+        from_ts=from_ts,
+        to_ts=to_ts,
     )
     return success(data=result, msg="记忆时间线")
 
