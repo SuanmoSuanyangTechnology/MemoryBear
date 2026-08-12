@@ -192,6 +192,15 @@ try:
     celery_app.conf.task_routes['notification.scan_expired'] = {
         'queue': 'notification_state_tasks'
     }
+    celery_app.conf.task_routes['notification.scan_stuck_publishing'] = {
+        'queue': 'notification_state_tasks'
+    }
+    celery_app.conf.task_routes['notification.cleanup_retention'] = {
+        'queue': 'notification_state_tasks'
+    }
+    celery_app.conf.task_routes['notification.dispatch_channel'] = {
+        'queue': 'notification_state_tasks'
+    }
 except ImportError:
     _HAS_NOTIFICATION_TASKS = False
 
@@ -371,5 +380,19 @@ if _HAS_NOTIFICATION_TASKS:
                 run_every=timedelta(seconds=_NOTIFICATION_SCAN_INTERVAL_SECONDS)
             ),
             "options": {"queue": "notification_state_tasks", "expires": 120},
+        },
+        # 扫描 publishing 超时（publish_requested_at > 600s），回退 draft
+        "notification-scan-stuck-publishing": {
+            "task": "notification.scan_stuck_publishing",
+            "schedule": NoCatchupSchedule(
+                run_every=timedelta(seconds=_NOTIFICATION_SCAN_INTERVAL_SECONDS)
+            ),
+            "options": {"queue": "notification_state_tasks", "expires": 120},
+        },
+        # 每日凌晨 3:00 清理超过保留天数的通知及快照
+        "notification-cleanup-retention": {
+            "task": "notification.cleanup_retention",
+            "schedule": crontab(hour=3, minute=0),
+            "options": {"queue": "notification_state_tasks", "expires": 3600},
         },
     })
