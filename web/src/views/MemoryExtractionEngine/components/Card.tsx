@@ -11,7 +11,7 @@
 
 import { type FC, type ReactNode } from 'react'
 import clsx from 'clsx';
-import { Flex, Space, Tooltip } from 'antd';
+import { Flex, Tooltip } from 'antd';
 
 import RbCard from '@/components/RbCard/Card'
 
@@ -51,12 +51,12 @@ const Card: FC<CardProps> = ({
         className="rb:font-[MiSans-Bold] rb:font-bold rb:cursor-pointer"
         onClick={type && handleExpand ? () => handleExpand(type) : undefined}
       >
-        <Space size={4}>
+        <Flex gap={4} className="rb:flex-1!">
           {title}
           {subTitle && <Tooltip title={subTitle}>
             <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/question.svg')]"></div>
           </Tooltip>}
-        </Space>
+        </Flex>
         {handleExpand && <div
           className={clsx("rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/arrow_up.svg')]", {
             'rb:rotate-180': !expanded,
@@ -66,7 +66,7 @@ const Card: FC<CardProps> = ({
       headerType="borderless"
       className={className}
       headerClassName={`rb:h-[50px]! rb:pb-[12px]! rb:pt-[16px]! rb:leading-[22px]! rb:font-[MiSans-Bold] rb:font-bold rb:text-[16px] ${headerClassName}`}
-      bodyClassName={`rb:px-3! rb:py-0! ${expanded ? 'rb:pb-3!' : 'rb:pb-0!'} ${bodyClassName}`}
+      bodyClassName={`rb:px-3! rb:pt-0! ${expanded ? 'rb:pb-3!' : 'rb:pb-0!'} ${bodyClassName}`}
       extra={extra}
     >
       {(expanded || !(type && handleExpand)) && children}

@@ -294,6 +294,8 @@ export const userMemory = {
       EXTRACTION: 'Memory Extraction Engine',
       CROSS_MODAL: 'Cross-modal Memory Association Engine',
       EMOTION: 'Emotion Engine',
+      FORGETTING: 'Forgotten Engine',
+      REFLECTION: 'Self-Reflexion Engine',
       memorySubject: 'Memory Subject',
       basicInfo: 'Basic Information',
       subjectId: 'Subject ID',

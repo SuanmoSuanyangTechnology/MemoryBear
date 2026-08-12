@@ -43,6 +43,7 @@ const ParameterStep = ({ form, fileIds, isParentChildMode }: ParameterStepProps)
     parameterSettings = 'defaultSettings',
     pdfEnhancementEnabled = true,
     blockSize = 512,
+    image,
   } = Form.useWatch([], form) || {};
 
   const changeProcessingMethod = (method: ProcessingMethod) => {
@@ -77,58 +78,60 @@ const ParameterStep = ({ form, fileIds, isParentChildMode }: ParameterStepProps)
         desc={t('knowledgeBase.imageParsingSettingsDesc')}
       />
 
-      <Form.Item name={['image', 'vision_mode']} className="rb:mt-3!"
-        getValueProps={(value) => ({ value: String(value) })}
-        getValueFromEvent={(value) => Number(value)}
-      >
-        <RadioGroupCard
-          options={(['textImage', 'hybridImage', 'pureImage'] as const).map((type, index) => ({
-            value: String(index),
-            label: t(`knowledgeBase.${type}`),
-            labelDesc: t(`knowledgeBase.${type}Desc`),
-            type,
-          }))}
-          itemRender={(option) => {
-            const type = option.type as 'textImage' | 'hybridImage' | 'pureImage';
-            return (
-              <Flex gap={12} align="center" justify="center" className="rb:items-start! rb:text-left!">
-                <div className="rb:flex rb:flex-col rb:gap-2">
-                  <Flex align="center" gap={4} className="rb:font-medium rb:text-[#212332]">
-                    <span>{option.label}</span>
-                    <Popover
-                      content={
-                        <Flex align="start" gap={12} className="rb:w-64!">
-                          <div className="rb:shrink-0 rb:size-24 rb:overflow-hidden rb:rounded-lg rb-border">
-                            <div className={`rb:size-full rb:bg-cover ${typeTipImageMap[type]}`} />
-                          </div>
-                          <div>
-                            <div className="rb:text-sm rb:font-semibold rb:text-[#171719] rb:mb-2">
-                              {t(`knowledgeBase.${type}TipsTitle`)}
+      {image?.vision_enabled &&
+        <Form.Item name={['image', 'vision_mode']} className="rb:mt-3!"
+          getValueProps={(value) => ({ value: String(value) })}
+          getValueFromEvent={(value) => Number(value)}
+        >
+          <RadioGroupCard
+            options={(['textImage', 'hybridImage', 'pureImage'] as const).map((type, index) => ({
+              value: String(index),
+              label: t(`knowledgeBase.${type}`),
+              labelDesc: t(`knowledgeBase.${type}Desc`),
+              type,
+            }))}
+            itemRender={(option) => {
+              const type = option.type as 'textImage' | 'hybridImage' | 'pureImage';
+              return (
+                <Flex gap={12} align="center" justify="center" className="rb:items-start! rb:text-left!">
+                  <div className="rb:flex rb:flex-col rb:gap-2">
+                    <Flex align="center" gap={4} className="rb:font-medium rb:text-[#212332]">
+                      <span>{option.label}</span>
+                      <Popover
+                        content={
+                          <Flex align="start" gap={12} className="rb:w-64!">
+                            <div className="rb:shrink-0 rb:size-24 rb:overflow-hidden rb:rounded-lg rb-border">
+                              <div className={`rb:size-full rb:bg-cover ${typeTipImageMap[type]}`} />
                             </div>
-                            <div className="rb:text-xs rb:text-[#5B6167] rb:leading-5 rb:mb-3">
-                              {t(`knowledgeBase.${type}TipsDesc`)}
+                            <div>
+                              <div className="rb:text-sm rb:font-semibold rb:text-[#171719] rb:mb-2">
+                                {t(`knowledgeBase.${type}TipsTitle`)}
+                              </div>
+                              <div className="rb:text-xs rb:text-[#5B6167] rb:leading-5 rb:mb-3">
+                                {t(`knowledgeBase.${type}TipsDesc`)}
+                              </div>
+                              <div className="rb:text-xs rb:text-[#8A8F99]">
+                                {t(`knowledgeBase.${type}TipsSample`)}
+                              </div>
                             </div>
-                            <div className="rb:text-xs rb:text-[#8A8F99]">
-                              {t(`knowledgeBase.${type}TipsSample`)}
-                            </div>
-                          </div>
-                        </Flex>
-                      }
-                      placement="top"
-                      trigger="hover"
-                    >
-                      <div className="rb:size-4 rb:cursor-help rb:bg-cover rb:bg-[url('@/assets/images/common/question.svg')]"></div>
-                    </Popover>
-                  </Flex>
-                  <div className="rb:text-[12px] rb:text-[#5B6167] rb:font-regular rb:leading-5">
-                    {option.labelDesc}
+                          </Flex>
+                        }
+                        placement="top"
+                        trigger="hover"
+                      >
+                        <div className="rb:size-4 rb:cursor-help rb:bg-cover rb:bg-[url('@/assets/images/common/question.svg')]"></div>
+                      </Popover>
+                    </Flex>
+                    <div className="rb:text-[12px] rb:text-[#5B6167] rb:font-regular rb:leading-5">
+                      {option.labelDesc}
+                    </div>
                   </div>
-                </div>
-              </Flex>
-            );
-          }}
-        />
-      </Form.Item>
+                </Flex>
+              );
+            }}
+          />
+        </Form.Item>
+      }
 
       <div className="rb:text-base rb:font-medium rb:text-gray-800 rb:mt-4">{t('knowledgeBase.fileParsingSettings')}</div>
       <Flex

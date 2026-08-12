@@ -137,11 +137,12 @@ def _valid_stage_data(stage: str, data: dict[str, Any]) -> bool:
         count_fields = {
             "hybrid_searched": ("hit_count", "memory_count", "shown_count"),
             "relation_searched": ("hit_count", "relation_count", "shown_count"),
-            "result_ready": ("duration_ms", "total_count", "shown_count"),
+            "result_ready": ("total_count", "shown_count"),
         }[stage]
         item_validator = _valid_relation_item if stage == "relation_searched" else _valid_memory_item
         return (
-            all(_is_non_negative_int(data[field]) for field in count_fields)
+            (stage != "result_ready" or _is_positive_int(data["duration_ms"]))
+            and all(_is_non_negative_int(data[field]) for field in count_fields)
             and isinstance(data["items"], list)
             and all(item_validator(item) for item in data["items"])
             and data["shown_count"] == len(data["items"])
