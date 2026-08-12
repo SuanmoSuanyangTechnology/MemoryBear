@@ -597,44 +597,20 @@ async def ingest_agent_messages(
         if content_str.strip():
             role_and_flag.append((str(m.role), should_memorize))
 
-    # 写 memory_messages。original_message_id 外键指向 messages 表，而 messages 可能
-    # 经 BatchPersistQueue 攒批延迟落库——本表先 commit 时外键引用的行尚不存在，
-    # 会抛 IntegrityError（ForeignKeyViolation）。捕获后延迟重试，最终一致。
-    written: List[dict] = []
-    for attempt in range(AGENT_MESSAGE_FK_RETRY):
-        try:
-            with get_db_context() as db:
-                repo = MemoryMessageRepository(db)
-                written = repo.write_batch(
-                    conversation_id=str(conversation_id),
-                    messages=batch_inputs,
-                    end_user_id=end_user_id,
-                    source=MemoryMessageSource.AGENT,
-                )
-                if not written:
-                    return False
-                db.commit()
-            break
-        except IntegrityError as exc:
-            orig = getattr(exc, "orig", None)
-            is_fk = orig is not None and "ForeignKeyViolation" in type(orig).__name__
-            if not is_fk:
-                raise
-            if attempt >= AGENT_MESSAGE_FK_RETRY - 1:
-                # 重试耗尽：基本可断定 messages 行已永久缺失（落库失败/任务丢失），
-                # 该条记忆静默丢失，升级为 error 并带固定聚合标记，供日志平台配置告警。
-                logger.error(
-                    "MEMORY_MESSAGES_FK_EXHAUSTED retries=%d conv=%s end_user=%s "
-                    "batch_size=%d app_id=%s err=%s",
-                    AGENT_MESSAGE_FK_RETRY, conversation_id, end_user_id,
-                    len(batch_inputs), app_id, exc,
-                )
-                raise
-            logger.warning(
-                "ingest_agent_messages FK 冲突（messages 尚未落库），重试 %d/%d: conv=%s, err=%s",
-                attempt + 1, AGENT_MESSAGE_FK_RETRY, conversation_id, exc,
-            )
-            await asyncio.sleep(AGENT_MESSAGE_FK_RETRY_BASE_DELAY_S * (attempt + 1))
+    # 写 memory_messages。original_message_id 与 messages 已解耦（无外键约束），
+    # 写入顺序不再受限，无需 FK 退避重试；异常冒泡由上层 dispatch_memory_sync
+    # 捕获并降级为 warning，不影响主流程。
+    with get_db_context() as db:
+        repo = MemoryMessageRepository(db)
+        written = repo.write_batch(
+            conversation_id=str(conversation_id),
+            messages=batch_inputs,
+            end_user_id=end_user_id,
+            source=MemoryMessageSource.AGENT,
+        )
+        if not written:
+            return False
+        db.commit()
 
     await refresh_active_key(conversation_id)
     mark_conversation_pending(conversation_id)
