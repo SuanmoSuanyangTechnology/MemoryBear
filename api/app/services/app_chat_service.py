@@ -1603,24 +1603,39 @@ class AppChatService:
                 ))
                 save_messages_enqueued = True
 
-                # 记忆写入 + 派发：复用 conversation_service.dispatch_memory_sync
+                # 记忆写入 + 派发：改为批量派发，一次 write_batch 分配连续 seq，
+                # 消除原先两次 fire-and-forget 并发引发的 seq 顺序颠倒问题。
                 result_row = await self.db.execute(
                     select(Conversation).where(Conversation.id == conversation_id)
                 )
                 conv = result_row.scalar_one_or_none()
                 if conv:
                     now = datetime.now(timezone.utc)
-
-                    for m in [
-                        {"id": user_message_id, "role": "user", "content": message, "meta_data": human_meta, "should_memorize": memory},
-                        {"id": message_id, "role": "assistant", "content": full_content, "meta_data": assistant_meta, "should_memorize": True},
-                    ]:
-                        memorize = m.pop("should_memorize")
-                        self.conversation_service.dispatch_memory_sync(
-                            message=SimpleNamespace(conversation_id=conversation_id, created_at=now, **m),
+                    asyncio.create_task(
+                        self.conversation_service.dispatch_memory_batch(
+                            messages=[
+                                SimpleNamespace(
+                                    id=user_message_id,
+                                    conversation_id=conversation_id,
+                                    role="user",
+                                    content=message,
+                                    meta_data=human_meta,
+                                    created_at=now,
+                                    should_memorize=memory,
+                                ),
+                                SimpleNamespace(
+                                    id=message_id,
+                                    conversation_id=conversation_id,
+                                    role="assistant",
+                                    content=full_content,
+                                    meta_data=assistant_meta,
+                                    created_at=now,
+                                    should_memorize=True,
+                                ),
+                            ],
                             conversation=conv,
-                            should_memorize=memorize,
                         )
+                    )
 
                 # Enqueue agent execution after messages so the FK is satisfied
                 # within the same batch (messages commit first, then execution).
