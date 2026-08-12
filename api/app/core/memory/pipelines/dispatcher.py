@@ -448,7 +448,7 @@ async def dispatch_api_service_async(
 
 async def ingest_agent_messages(
     conversation_id: str,
-    messages: List["Any"],
+    messages: List[Any],
     app_id: str,
     config_id: str = "",
     workspace_id: str = "",

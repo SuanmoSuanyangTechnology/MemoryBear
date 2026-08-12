@@ -503,7 +503,7 @@ class ConversationService:
                     conversation.workspace_id
                 )
             await MemoryService.ingest_agent_messages(
-                conversation_id=str(messages[0].conversation_id) if messages else "",
+                conversation_id=str(conversation.id),
                 messages=messages,
                 app_id=str(conversation.app_id),
                 config_id=str(config_id),
