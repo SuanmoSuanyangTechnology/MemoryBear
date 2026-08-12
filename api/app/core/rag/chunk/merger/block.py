@@ -184,6 +184,10 @@ class BlockMerger(ChunkMerger):
                 block=span.block,
                 content=stream.text[span.start : span.end],
                 complete=stream.text[span.start : span.end] == str(span.block.content or ""),
+                structure_valid=(
+                    span.block.type is not ParsedBlockType.TABLE
+                    or self._is_valid_table_content(stream.text[span.start : span.end])
+                ),
             )
             unit = _StreamUnit(
                 fragment=fragment,
@@ -226,7 +230,13 @@ class BlockMerger(ChunkMerger):
                 block=piece_block,
                 content=piece,
                 complete=False,
-                structure_valid=block_type is not ParsedBlockType.IMAGE,
+                structure_valid=(
+                    block_type is not ParsedBlockType.IMAGE
+                    and (
+                        block_type is not ParsedBlockType.TABLE
+                        or self._is_valid_table_content(piece)
+                    )
+                ),
             )
             separator = unit.separator_before if index == 0 else (
                 "\n" if block_type in {ParsedBlockType.CODE, ParsedBlockType.TABLE} else ""
@@ -244,6 +254,13 @@ class BlockMerger(ChunkMerger):
         current: list[_StreamUnit] = []
 
         for index, unit in enumerate(units):
+            if self._is_incomplete_table_unit(unit):
+                if current:
+                    drafts.append(self._units_to_draft(current))
+                    current = []
+                drafts.append(self._units_to_draft([unit]))
+                continue
+
             candidate = [*current, unit]
             if self._heading_should_start_next_draft(current, unit, units, index, token_num):
                 drafts.append(self._units_to_draft(current))
@@ -259,6 +276,13 @@ class BlockMerger(ChunkMerger):
         if current:
             drafts.append(self._units_to_draft(current))
         return drafts
+
+    @staticmethod
+    def _is_incomplete_table_unit(unit: _StreamUnit) -> bool:
+        return (
+            unit.fragment.block.type is ParsedBlockType.TABLE
+            and not unit.fragment.complete
+        )
 
     def _draft_to_normal_chunk(self, draft: _ChunkDraft) -> LogicalChunk:
         source_keys = {fragment.source_key for fragment in draft.fragments}
@@ -776,6 +800,13 @@ class BlockMerger(ChunkMerger):
 
         return chunks or [content]
 
+    @staticmethod
+    def _is_valid_table_content(content: str) -> bool:
+        stripped = content.strip()
+        if not stripped.startswith("<table") or not stripped.endswith("</table>"):
+            return False
+        return BeautifulSoup(stripped, "html.parser").find("table") is not None
+
     def _extract_table_parts(self, table) -> tuple[str, list[str]]:
         thead = table.find("thead")
         if thead is not None:
@@ -867,12 +898,18 @@ class BlockMerger(ChunkMerger):
     def _hard_split_wrapped(self, text: str, token_num: int, wrap) -> list[str]:
         tokens = encoder.encode(text)
         limit = max(int(token_num), 1)
+        if num_tokens_from_string(wrap("")) > limit:
+            raise ValueError(
+                f"Structured wrapper cannot fit within token limit {limit}."
+            )
         chunks: list[str] = []
         index = 0
         while index < len(tokens):
             boundary = self._find_wrapped_token_boundary(tokens, index, limit, wrap)
             if boundary is None:
-                raise RuntimeError(f"Unable to find a valid UTF-8 boundary from token index {index}.")
+                raise ValueError(
+                    f"Structured content cannot fit within token limit {limit}."
+                )
 
             end, piece = boundary
             chunks.append(wrap(piece))
@@ -890,11 +927,6 @@ class BlockMerger(ChunkMerger):
         for end in range(search_end, start, -1):
             piece = self._decode_token_slice(tokens, start, end)
             if piece is not None and num_tokens_from_string(wrap(piece)) <= limit:
-                return end, piece
-
-        for end in range(start + 1, len(tokens) + 1):
-            piece = self._decode_token_slice(tokens, start, end)
-            if piece is not None:
                 return end, piece
         return None
 
