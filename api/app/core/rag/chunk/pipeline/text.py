@@ -17,6 +17,8 @@ from app.core.rag.chunk.parser.txt import TxtParser
 
 from .base import ChunkPipeline
 
+LOGGER = logging.getLogger(__name__)
+
 
 class TextChunkPipeline(ChunkPipeline):
     def parse(self, ctx: ChunkContext) -> ParseResult:
@@ -57,9 +59,9 @@ class MarkdownChunkPipeline(ChunkPipeline):
                     if image:
                         block.image = image
         elif ctx.vision_model:
-            logging.info("Image vision enhancement disabled by parser config.")
+            LOGGER.info("Image vision enhancement disabled by parser config.")
         else:
-            logging.warning("No visual model detected. Skipping figure parsing enhancement.")
+            LOGGER.warning("No visual model detected. Skipping figure parsing enhancement.")
 
         if ctx.parser_config.get("hyperlink_urls", False) and ctx.is_root:
             for block in blocks:
@@ -75,7 +77,7 @@ class MarkdownChunkPipeline(ChunkPipeline):
                 urls.update(hyperlink_urls)
 
         ctx.callback(0.8, "Finish parsing.")
-        logging.debug(f"[Markdown Parsing Blocks]: {blocks}")
+        LOGGER.debug("[Markdown Parsing Blocks]: %s", blocks)
         return ParseResult(
             blocks=blocks,
             urls=urls,
@@ -111,26 +113,30 @@ class LegacyDocChunkPipeline(ChunkPipeline):
             os.environ.setdefault("TIKA_SERVER_PORT", "9998")
             tika.initVM()
             from tika import parser as tika_parser
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - Tika initialization can fail through optional dependencies
             ctx.callback(0.8, f"tika not available: {exc}. Unsupported .doc parsing.")
-            logging.warning(f"tika not available: {exc}. Unsupported .doc parsing for {ctx.filename}.")
+            LOGGER.warning(
+                "tika not available: %s. Unsupported .doc parsing for %s.",
+                exc,
+                ctx.filename,
+            )
             return ParseResult(direct_result=[], append_embed=False)
 
-        tmp_file = None
+        tmp_path = None
         try:
             suffix = os.path.splitext(ctx.filename)[1] or ".doc"
-            tmp_file = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
-            if ctx.binary:
-                tmp_file.write(ctx.binary)
-            else:
-                with open(ctx.filename, "rb") as file:
-                    tmp_file.write(file.read())
-            tmp_file.close()
+            with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp_file:
+                tmp_path = tmp_file.name
+                if ctx.binary:
+                    tmp_file.write(ctx.binary)
+                else:
+                    with open(ctx.filename, "rb") as file:
+                        tmp_file.write(file.read())
 
-            doc_parsed = tika_parser.from_file(tmp_file.name)
+            doc_parsed = tika_parser.from_file(tmp_path)
         finally:
-            if tmp_file and os.path.exists(tmp_file.name):
-                os.unlink(tmp_file.name)
+            if tmp_path and os.path.exists(tmp_path):
+                os.unlink(tmp_path)
 
         if doc_parsed.get("content", None) is not None:
             sections = doc_parsed["content"].split("\n")
@@ -139,5 +145,5 @@ class LegacyDocChunkPipeline(ChunkPipeline):
             return ParseResult(sections=sections)
 
         ctx.callback(0.8, f"tika.parser got empty content from {ctx.filename}.")
-        logging.warning(f"tika.parser got empty content from {ctx.filename}.")
+        LOGGER.warning("tika.parser got empty content from %s.", ctx.filename)
         return ParseResult(direct_result=[], append_embed=False)

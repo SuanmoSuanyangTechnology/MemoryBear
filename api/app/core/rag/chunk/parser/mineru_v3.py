@@ -127,7 +127,7 @@ class MinerUV3Parser(DocumentParser):
                     raise ValueError("image asset was not created")
                 self._replace_image_markdown_url(block, asset.download_url)
                 stored_file_ids.add(asset.file_id)
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - isolate one asset failure from the batch
                 failed_count += 1
                 LOGGER.warning(
                     "[MinerUV3] image storage failed: index=%s total=%s src=%s error=%s",

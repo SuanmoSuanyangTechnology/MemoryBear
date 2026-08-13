@@ -4,22 +4,6 @@ from html import escape
 
 from bs4 import BeautifulSoup
 
-from app.core.rag.common.token_utils import encoder, num_tokens_from_string
-from app.core.rag.chunk.parser.markdown_preprocessor import (
-    ALPHA_LIST_PATTERN,
-    CHINESE_LIST_PATTERN,
-    CIRCLED_LIST_PATTERN,
-    DEFINITION_LIST_PATTERN,
-    EMPTY_ORDERED_LIST_PATTERN,
-    KEYCAP_LIST_PATTERN,
-    ORDERED_LIST_PATTERN,
-    ORDINAL_LIST_PATTERN,
-    PAREN_ORDERED_LIST_PATTERN,
-    PREFIXED_LIST_PATTERN,
-    QA_LIST_PATTERN,
-    STEP_LIST_PATTERN,
-    UNORDERED_LIST_PATTERN,
-)
 from app.core.rag.chunk.context import (
     ChunkContext,
     ChunkOutputMode,
@@ -39,10 +23,25 @@ from app.core.rag.chunk.merger.structured_stream import (
     rebuild_structured_stream,
     split_structured_stream,
 )
+from app.core.rag.chunk.parser.markdown_preprocessor import (
+    ALPHA_LIST_PATTERN,
+    CHINESE_LIST_PATTERN,
+    CIRCLED_LIST_PATTERN,
+    DEFINITION_LIST_PATTERN,
+    EMPTY_ORDERED_LIST_PATTERN,
+    KEYCAP_LIST_PATTERN,
+    ORDERED_LIST_PATTERN,
+    ORDINAL_LIST_PATTERN,
+    PAREN_ORDERED_LIST_PATTERN,
+    PREFIXED_LIST_PATTERN,
+    QA_LIST_PATTERN,
+    STEP_LIST_PATTERN,
+    UNORDERED_LIST_PATTERN,
+)
+from app.core.rag.common.token_utils import encoder, num_tokens_from_string
 
 from .base import ChunkMerger
 from .text import TextMerger
-
 
 TEXT_LIKE_TYPES = {
     ParsedBlockType.HEADING,

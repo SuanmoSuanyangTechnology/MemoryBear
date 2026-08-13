@@ -15,6 +15,8 @@ from app.core.rag.chunk.context import (
     is_embedded_image_vision_enabled,
 )
 
+LOGGER = logging.getLogger(__name__)
+
 
 def _append_external_parent_child_chunks(
     child_res: list[dict],
@@ -83,7 +85,7 @@ class ChunkPipeline(ABC):
         url_res = parse_result.url_res or []
         url_res.extend(self.hyperlink_preprocessor.collect_url_chunks(ctx, parse_result.urls or set(), self.run_child))
         main_result = self.postprocessor.process(ctx, parse_result, merge_result)
-        logging.info("naive_merge({}): {}".format(ctx.filename, timer() - start))
+        LOGGER.info("naive_merge(%s): %s", ctx.filename, timer() - start)
         if isinstance(main_result, tuple):
             child_res, parent_res, parent_id_map = main_result
             return _append_external_parent_child_chunks(child_res, parent_res, parent_id_map, embed_res + url_res)

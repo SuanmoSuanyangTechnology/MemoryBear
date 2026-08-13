@@ -77,7 +77,7 @@ def enhance_image_blocks_with_vision(
         progress = progress_start + (progress_span * completed_count / total)
         try:
             vision_text = future.result()
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - isolate one image failure from the batch
             stats.failed_count += 1
             elapsed = time.monotonic() - image_started_at
             LOGGER.warning(

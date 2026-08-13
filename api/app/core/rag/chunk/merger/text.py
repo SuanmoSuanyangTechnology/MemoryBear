@@ -2,7 +2,6 @@ from dataclasses import dataclass
 
 from app.core.rag.common.token_utils import encoder, num_tokens_from_string
 
-
 DEFAULT_TEXT_SEPARATORS = ["\n\n", "\n", "。", "；", " ", ""]
 
 
