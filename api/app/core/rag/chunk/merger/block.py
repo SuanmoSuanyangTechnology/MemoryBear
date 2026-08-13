@@ -578,8 +578,7 @@ class BlockMerger(ChunkMerger):
         current: list[_StreamUnit] = []
         pending_table_overlap: _StreamUnit | None = None
 
-        for index, unit in enumerate(units):
-            current_is_pending_overlap = False
+        for unit in units:
             if self._is_incomplete_table_unit(unit):
                 if current:
                     drafts.append(self._units_to_draft(current))
@@ -606,15 +605,8 @@ class BlockMerger(ChunkMerger):
                     overlap,
                 )
                 pending_table_overlap = None
-                current_is_pending_overlap = bool(current)
 
             candidate = [*current, unit]
-            if self._heading_should_start_next_draft(current, unit, units, index, token_num):
-                if not current_is_pending_overlap:
-                    drafts.append(self._units_to_draft(current))
-                current = [unit]
-                continue
-
             if current and not self._stream_units_within_limit(candidate, token_num):
                 drafts.append(self._units_to_draft(current))
                 current = self._overlap_units(current, unit, token_num, overlap)
@@ -702,22 +694,6 @@ class BlockMerger(ChunkMerger):
             content=draft.content,
             metadata=metadata,
         )
-
-    def _heading_should_start_next_draft(
-        self,
-        current: list[_StreamUnit],
-        unit: _StreamUnit,
-        units: list[_StreamUnit],
-        index: int,
-        token_num: int,
-    ) -> bool:
-        if not current or unit.fragment.block.type is not ParsedBlockType.HEADING:
-            return False
-        if index + 1 >= len(units):
-            return False
-        if not self._stream_units_within_limit([*current, unit], token_num):
-            return False
-        return not self._stream_units_within_limit([*current, unit, units[index + 1]], token_num)
 
     def _overlap_units(
         self,
