@@ -313,24 +313,6 @@ class BlockMerger(ChunkMerger):
             for draft, child_drafts in group_drafts
         ]
 
-    def _children_from_parent(
-        self,
-        draft: _ParentDraft,
-        token_num: int,
-        delimiter: str | None,
-    ) -> list[LogicalChunk]:
-        child_drafts = [
-            child_draft
-            for child_draft in self._child_drafts_from_parent(
-                draft,
-                token_num,
-                delimiter,
-            )
-            if self._is_serializable_child(child_draft.chunk)
-        ]
-        self._normalize_table_child_parts(child_drafts)
-        return [child_draft.chunk for child_draft in child_drafts]
-
     def _child_drafts_from_parent(
         self,
         draft: _ParentDraft,
