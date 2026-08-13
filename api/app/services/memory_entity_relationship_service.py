@@ -20,8 +20,41 @@ from datetime import datetime
 from app.schemas.memory_episodic_schema import EmotionType
 from app.core.utils.datetime_utils import parse_iso_to_utc_naive, to_timestamp_ms
 from app.core.memory.models.event_category_models import EVENT_CATEGORY_NAMES, EVENT_CATEGORY_NAME_TO_ID
+from enum import Enum
 
 logger = logging.getLogger(__name__)
+
+
+class TimelineSort(Enum):
+    """记忆时间线排序枚举。
+
+    成员值即对外 API 的 sort 参数字符串。
+    - time_*: 全部按 created_at 排序（key_node=发生时间，其他=记录时间）
+    - occurred_*: 仅 key_node 按发生时间排序，其余无发生时间排最后
+    - recorded_*: 仅 statement/memory_summary 按记录时间排序，key_node 无记录时间排最后
+    """
+
+    TIME_ASC = "time_asc"
+    TIME_DESC = "time_desc"
+    OCCURRED_ASC = "occurred_asc"
+    OCCURRED_DESC = "occurred_desc"
+    RECORDED_ASC = "recorded_asc"
+    RECORDED_DESC = "recorded_desc"
+
+    @property
+    def sort_mode(self) -> str:
+        """排序字段模式：time / occurred / recorded。"""
+        return self.value.rsplit("_", 1)[0]
+
+    @property
+    def is_asc(self) -> bool:
+        """是否升序。"""
+        return self.value.endswith("_asc")
+
+    @classmethod
+    def values(cls) -> set:
+        """返回所有合法 sort 字符串集合，供校验使用。"""
+        return {member.value for member in cls}
 
 
 class MemoryEntityService:
@@ -207,20 +240,6 @@ class MemoryEntityService:
         events.sort(key=lambda e: e["valid_at"], reverse=True)
         return events
 
-    # 排序模式常量
-    SORT_TIME_ASC = "time_asc"
-    SORT_TIME_DESC = "time_desc"
-    SORT_OCCURRED_ASC = "occurred_asc"
-    SORT_OCCURRED_DESC = "occurred_desc"
-    SORT_RECORDED_ASC = "recorded_asc"
-    SORT_RECORDED_DESC = "recorded_desc"
-
-    VALID_SORTS = frozenset({
-        SORT_TIME_ASC, SORT_TIME_DESC,
-        SORT_OCCURRED_ASC, SORT_OCCURRED_DESC,
-        SORT_RECORDED_ASC, SORT_RECORDED_DESC,
-    })
-
     async def get_unified_timeline(
         self,
         source_type: str = "all",
@@ -380,21 +399,15 @@ class MemoryEntityService:
 
         sort_mode: "time" | "occurred" | "recorded"
         sort_asc: True 表示升序，False 表示降序
+
+        非法值直接抛 ValueError，不再静默回退默认值；HTTP 层（controller）
+        已用 ``TimelineSort.values()`` 做同样校验，此处保持行为一致。
         """
-        if sort not in MemoryEntityService.VALID_SORTS:
-            sort = MemoryEntityService.SORT_TIME_DESC
-
-        if sort.startswith("time_"):
-            mode = "time"
-        elif sort.startswith("occurred_"):
-            mode = "occurred"
-        elif sort.startswith("recorded_"):
-            mode = "recorded"
-        else:
-            mode = "time"
-
-        asc = sort.endswith("_asc")
-        return mode, asc
+        try:
+            member = TimelineSort(sort)
+        except ValueError:
+            raise ValueError(f"非法的 sort 值: {sort}")
+        return member.sort_mode, member.is_asc
 
     @staticmethod
     def _get_sort_key(item: dict, sort_mode: str, sort_asc: bool) -> tuple:
