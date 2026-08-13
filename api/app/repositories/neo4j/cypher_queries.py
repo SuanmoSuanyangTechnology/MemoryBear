@@ -2180,7 +2180,7 @@ LIMIT $limit
 
 SEARCH_STATEMENTS_BY_FULLTEXT = """
 CALL db.index.fulltext.queryNodes("statementsFulltext", $query) YIELD node AS s, score
-WHERE ($end_user_id IS NULL OR s.end_user_id = $end_user_id)
+WHERE s.end_user_id = $end_user_id
   AND s.delete_at IS NULL
 RETURN s.id AS id,
        s.statement AS statement,
@@ -2201,7 +2201,7 @@ LIMIT $limit
 
 SEARCH_ENTITIES_BY_FULLTEXT = """
 CALL db.index.fulltext.queryNodes("entitiesFulltext", $query) YIELD node AS e, score
-WHERE ($end_user_id IS NULL OR e.end_user_id = $end_user_id)
+WHERE e.end_user_id = $end_user_id
   AND e.delete_at IS NULL
 RETURN e.id AS id,
        e.name AS name,
@@ -2218,7 +2218,7 @@ LIMIT $limit
 
 SEARCH_CHUNKS_BY_FULLTEXT = """
 CALL db.index.fulltext.queryNodes("chunksFulltext", $query) YIELD node AS c, score
-WHERE ($end_user_id IS NULL OR c.end_user_id = $end_user_id)
+WHERE c.end_user_id = $end_user_id
   AND c.delete_at IS NULL
 RETURN c.id AS id,
        c.content AS content,
@@ -2231,7 +2231,7 @@ LIMIT $limit
 # MemorySummary keyword search using fulltext index
 SEARCH_MEMORY_SUMMARIES_BY_FULLTEXT = """
 CALL db.index.fulltext.queryNodes("summariesFulltext", $query) YIELD node AS m, score
-WHERE ($end_user_id IS NULL OR m.end_user_id = $end_user_id)
+WHERE m.end_user_id = $end_user_id
 RETURN m.id AS id,
        m.name AS name,
        m.end_user_id AS end_user_id,
@@ -2251,7 +2251,7 @@ LIMIT $limit
 # Community keyword search: matches name or summary via fulltext index
 SEARCH_COMMUNITIES_BY_FULLTEXT = """
 CALL db.index.fulltext.queryNodes("communitiesFulltext", $query) YIELD node AS c, score
-WHERE ($end_user_id IS NULL OR c.end_user_id = $end_user_id)
+WHERE c.end_user_id = $end_user_id
 RETURN c.community_id AS id,
        c.name AS name,
        c.summary AS content,

@@ -41,6 +41,7 @@ RANGE_DEFS: List[Tuple[str, str]] = [
     ("user_statement", "Statement"),
     ("user_chunk", "Chunk"),
     ("user_extracted_entity", "ExtractedEntity"),
+    ("user_memorysummary", "MemorySummary")
 ]
 
 COMPOSITE_DEFS: List[Tuple[str, str, str]] = [

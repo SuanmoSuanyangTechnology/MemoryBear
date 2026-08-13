@@ -507,6 +507,13 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
 
     async def _express_read(self, query: str, limit: int, includes=None) -> MemorySearchResult:
         """仅全文检索模式：不做 embedding、关系检索、query 拆分、摘要生成。"""
+        if includes is None:
+            includes = [
+                Neo4jNodeType.CHUNK,
+                Neo4jNodeType.STATEMENT,
+                Neo4jNodeType.EXTRACTEDENTITY,
+                Neo4jNodeType.DIALOGUE,
+            ]
         meta_task = asyncio.ensure_future(self._user_meta())
         search_service = await self._get_search_service(includes, need_embedder=False, need_llm=False)
         express_res = await search_service.keyword_search(query, limit)
