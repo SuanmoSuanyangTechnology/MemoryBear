@@ -609,7 +609,7 @@ class Neo4jSearchService:
     ) -> list[Memory]:
         """对 Perceptual 类型的记忆调用多模态模型解析实际文件内容。
 
-        仅增强 memory.content（不改变 score / id / source）。
+        增强模型上下文，并单独保留公开展示文本（不改变 score / id / source）。
         失败时保留原 summary，不中断主流程。
         """
         enhanced = []
@@ -633,14 +633,17 @@ class Neo4jSearchService:
                     file_path, file_name, file_type, perceptual_type, query, llm
                 )
 
-                # 增强 content：格式化为 query 相关的解析片段
-                mem.content = (
-                    f"<history-file-input>\n"
-                    f"<file-name>{file_name}</file-name>\n"
-                    f"<file-summary>{mem.data.get('summary', '')}</file-summary>\n"
-                    f"<file-analysis>{parsed}</file-analysis>\n"
-                    f"</history-file-input>\n"
-                )
+                display_content = parsed.strip() if isinstance(parsed, str) else ""
+                if display_content:
+                    mem.data["_perceptual_display_content"] = display_content
+                    # 完整结构继续供后续总结和最终回答使用，不直接投影给前端。
+                    mem.content = (
+                        f"<history-file-input>\n"
+                        f"<file-name>{file_name}</file-name>\n"
+                        f"<file-summary>{mem.data.get('summary', '')}</file-summary>\n"
+                        f"<file-analysis>{display_content}</file-analysis>\n"
+                        f"</history-file-input>\n"
+                    )
             except Exception as e:
                 logger.warning(
                     f"[Perceptual] 多模态解析失败 file={file_name}: {e}，回退使用 summary"
@@ -664,18 +667,24 @@ class Neo4jSearchService:
         支持图片（VISION）和文档（TEXT/DOCUMENT）类型。
         返回模型对文件的针对性分析文本。
         """
-        from app.services.multimodal_service import MultimodalService
-
-        # 根据 perceptual_type 确定 FileInput 类型
-        # perceptual_type: 1=VISION | 2=AUDIO | 3=TEXT | 4=CONVERSATION
-        perceptual_type_int = int(perceptual_type) if perceptual_type else 0
-        if perceptual_type_int == 1:  # VISION
+        # 类型和文件类别必须同时匹配，避免将视频作为图片发送给模型。
+        if isinstance(perceptual_type, bool):
+            return ""
+        if isinstance(perceptual_type, int):
+            perceptual_type_int = perceptual_type
+        elif isinstance(perceptual_type, str) and perceptual_type.strip().isdigit():
+            perceptual_type_int = int(perceptual_type.strip())
+        else:
+            return ""
+        normalized_file_type = str(file_type or "").strip().lower()
+        if perceptual_type_int == 1 and normalized_file_type == FileType.IMAGE.value:
             file_input_type = FileType.IMAGE
-        elif perceptual_type_int == 3:  # TEXT/DOCUMENT
+        elif perceptual_type_int == 3 and normalized_file_type == FileType.DOCUMENT.value:
             file_input_type = FileType.DOCUMENT
         else:
-            # AUDIO / CONVERSATION / 未知 → 跳过，返回 summary
             return ""
+
+        from app.services.multimodal_service import MultimodalService
 
         file_input = FileInput(
             type=file_input_type,
@@ -692,6 +701,8 @@ class Neo4jSearchService:
         formatted = await multimodal_svc.process_files(
             files=[file_input],
             document_image_recognition=True,
+            # 公开感知结果不能包含文件处理异常；失败时返回空列表并回退已有 summary。
+            include_processing_errors=False,
         )
 
         if not formatted:

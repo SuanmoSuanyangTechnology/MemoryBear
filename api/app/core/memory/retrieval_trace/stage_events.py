@@ -22,6 +22,7 @@ _STAGE_FIELDS = {
     "query_split": {"count", "questions"},
     "hybrid_searched": {"hit_count", "memory_count", "shown_count", "items"},
     "relation_searched": {"hit_count", "relation_count", "shown_count", "items"},
+    "perceptual_processed": {"memory_count", "shown_count", "items"},
     "results_merged": {"memory_count", "relation_count"},
     "results_ranked": {"count", "order"},
     "context_prepared": {"memory_count"},
@@ -92,7 +93,10 @@ def _valid_file(file_data: Any) -> bool:
         all(isinstance(file_data[field], str) for field in ("file_name", "file_path", "file_type"))
         and (
             file_data["perceptual_type"] is None
-            or _is_non_negative_int(file_data["perceptual_type"])
+            or (
+                _is_non_negative_int(file_data["perceptual_type"])
+                and file_data["perceptual_type"] in {1, 2, 3}
+            )
         )
     )
 
@@ -146,6 +150,18 @@ def _valid_stage_data(stage: str, data: dict[str, Any]) -> bool:
             and isinstance(data["items"], list)
             and all(item_validator(item) for item in data["items"])
             and data["shown_count"] == len(data["items"])
+        )
+    if stage == "perceptual_processed":
+        return (
+            _is_non_negative_int(data["memory_count"])
+            and _is_non_negative_int(data["shown_count"])
+            and isinstance(data["items"], list)
+            and len(data["items"]) <= 5
+            and data["shown_count"] == len(data["items"])
+            and data["shown_count"] <= data["memory_count"]
+            and all(_valid_memory_item(item) for item in data["items"])
+            and all(item["memory_type"] == "file" for item in data["items"])
+            and all(item["source"] == "Perceptual" for item in data["items"])
         )
     if stage == "results_merged":
         return _is_non_negative_int(data["memory_count"]) and _is_non_negative_int(data["relation_count"])
