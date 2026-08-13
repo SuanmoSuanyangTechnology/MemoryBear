@@ -116,7 +116,7 @@ RETURN id,
            statement: s.statement,
            created_at: s.created_at,
            is_permanent: coalesce(s.is_permanent, false),
-           value_score: value_score * 100
+           value_score: sqrt(value_score) * 100
        } AS properties
 """
 
