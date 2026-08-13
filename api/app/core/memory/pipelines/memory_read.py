@@ -361,13 +361,24 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
             m for m in hybrid_search_res.memories
             if m.source == Neo4jNodeType.PERCEPTUAL
         ]
+        # 阶段事件展示的是命中的感知记忆总数，不能因解析失败或跳过解析而减少。
+        perceptual_memory_count = len(perceptual_memories)
         if perceptual_memories:
             parse_tasks = []
-            type_llm_cache: dict[int, RedBearLLM] = {}
+            # 同一感知类型复用模型客户端；初始化失败时记为 None，统一降级使用原 summary。
+            type_llm_cache: dict[int, RedBearLLM | None] = {}
 
             async def _get_llm_for_type(pt: int):
                 if pt not in type_llm_cache:
-                    type_llm_cache[pt] = await self._get_perceptual_llm_client(pt)
+                    try:
+                        type_llm_cache[pt] = await self._get_perceptual_llm_client(pt)
+                    except Exception:
+                        logger.warning(
+                            "[DeepRead] Unable to initialize perceptual model for type %s; using stored summary",
+                            pt,
+                            exc_info=True,
+                        )
+                        type_llm_cache[pt] = None
                 return type_llm_cache[pt]
 
             for i, question in enumerate(questions):
@@ -382,7 +393,31 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
 
                 by_type: dict[int, list] = {}
                 for mem in sub_percep:
-                    pt = int(mem.data.get("perceptual_type", 0))
+                    # 源数据可能是整数或数字字符串，其他格式不参与感知解析。
+                    raw_type = mem.data.get("perceptual_type", 0)
+                    if isinstance(raw_type, int) and not isinstance(raw_type, bool):
+                        pt = raw_type
+                    elif isinstance(raw_type, str) and raw_type.strip().isdigit():
+                        pt = int(raw_type.strip())
+                    else:
+                        logger.warning(
+                            "[DeepRead] Invalid perceptual_type %r for memory %s; using stored summary",
+                            raw_type,
+                            mem.id,
+                        )
+                        continue
+                    # 公开协议只允许感知类型 1、2、3，其他值保留原 summary 并对外投影为 null。
+                    if pt not in {1, 2, 3}:
+                        logger.warning(
+                            "[DeepRead] Unsupported perceptual_type %r for memory %s; using stored summary",
+                            raw_type,
+                            mem.id,
+                        )
+                        continue
+                    file_type = str(mem.data.get("file_type") or "").strip().lower()
+                    # VISION 同时包含图片和视频，本期仅图片和文档执行面向查询的内容解析。
+                    if (pt, file_type) not in {(1, "image"), (3, "document")}:
+                        continue
                     if pt not in by_type:
                         by_type[pt] = []
                     by_type[pt].append(mem)
@@ -405,16 +440,36 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
                             for existing in hybrid_search_res.memories:
                                 if existing.id == mem.id:
                                     existing.content = mem.content
+                                    # 公开纯文本独立保存，避免把内部 history-file-input 标签发给前端。
+                                    display_content = mem.data.get("_perceptual_display_content")
+                                    if display_content:
+                                        existing.data["_perceptual_display_content"] = display_content
                                     break
 
         results = hybrid_search_res + relation_res
+        merged_memory_count = len(results.memories)
+        merged_relation_count = len(results.relations)
+        results.memories.sort(key=lambda x: x.score, reverse=True)
+        # 两个完成阶段复用同一份最终前 5 投影，保证条目、排名和分数完全一致。
+        final_items = project_result_items(memory_l0, results, limit=5)
+        perceptual_items = [
+            item
+            for item in final_items
+            if item.get("memory_type") == "file" and item.get("source") == "Perceptual"
+        ]
+
+        if perceptual_memory_count > 0:
+            await self._emit_stage("perceptual_processed", {
+                "memory_count": perceptual_memory_count,
+                "shown_count": len(perceptual_items),
+                "items": perceptual_items,
+            })
 
         await self._emit_stage("results_merged", {
-            "memory_count": len(results.memories),
-            "relation_count": len(results.relations),
+            "memory_count": merged_memory_count,
+            "relation_count": merged_relation_count,
         })
 
-        results.memories.sort(key=lambda x: x.score, reverse=True)
         await self._emit_stage("results_ranked", {
             "count": len(results.memories),
             "order": "score_desc",
@@ -430,12 +485,11 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
         await self._emit_stage("context_prepared", {"memory_count": len(results.memories)})
 
         combined = memory_l0 + results
-        items = project_result_items(memory_l0, results, limit=5)
         await self._emit_stage("result_ready", {
             "duration_ms": self._elapsed_ms() if hasattr(self, "_elapsed_ms") else 1,
             "total_count": len(combined.memories),
-            "shown_count": len(items),
-            "items": items,
+            "shown_count": len(final_items),
+            "items": final_items,
         })
 
         return combined
