@@ -602,36 +602,8 @@ class BlockMerger(ChunkMerger):
     ) -> list[_ChunkDraft]:
         drafts: list[_ChunkDraft] = []
         current: list[_StreamUnit] = []
-        pending_table_overlap: _StreamUnit | None = None
 
         for unit in units:
-            if self._is_incomplete_table_unit(unit):
-                if current:
-                    drafts.append(self._units_to_draft(current))
-                    current = []
-                drafts.append(self._units_to_draft([unit]))
-                pending_table_overlap = (
-                    self._table_overlap_unit(unit)
-                    if unit.fragment.structure_valid
-                    else None
-                )
-                continue
-
-            if (
-                pending_table_overlap is not None
-                and unit.fragment.block.type is ParsedBlockType.TABLE
-            ):
-                pending_table_overlap = None
-
-            if pending_table_overlap is not None and not current:
-                current = self._overlap_units(
-                    [pending_table_overlap],
-                    unit,
-                    token_num,
-                    overlap,
-                )
-                pending_table_overlap = None
-
             candidate = [*current, unit]
             if current and not self._stream_units_within_limit(candidate, token_num):
                 drafts.append(self._units_to_draft(current))
@@ -642,29 +614,6 @@ class BlockMerger(ChunkMerger):
         if current:
             drafts.append(self._units_to_draft(current))
         return drafts
-
-    @staticmethod
-    def _table_overlap_unit(unit: _StreamUnit) -> _StreamUnit:
-        block = deepcopy(unit.fragment.block)
-        block.metadata.pop("table_part_index", None)
-        block.metadata.pop("table_part_total", None)
-        return _StreamUnit(
-            fragment=SourceFragment(
-                source_key=unit.fragment.source_key,
-                block=block,
-                content=unit.fragment.content,
-                complete=unit.fragment.complete,
-                structure_valid=unit.fragment.structure_valid,
-            ),
-            separator_before=unit.separator_before,
-        )
-
-    @staticmethod
-    def _is_incomplete_table_unit(unit: _StreamUnit) -> bool:
-        return (
-            unit.fragment.block.type is ParsedBlockType.TABLE
-            and not unit.fragment.complete
-        )
 
     def _draft_to_normal_chunk(self, draft: _ChunkDraft) -> LogicalChunk:
         source_keys = {fragment.source_key for fragment in draft.fragments}
