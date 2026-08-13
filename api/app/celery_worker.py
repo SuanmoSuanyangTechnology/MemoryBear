@@ -39,7 +39,13 @@ try:
         register_notification_alert_plugins,
     )
 
-    register_notification_alert_plugins()
+    try:
+        register_notification_alert_plugins()
+    except Exception:
+        logger.exception(
+            "Failed to register notification alert plugins; "
+            "worker will continue without alert plugins"
+        )
 except ImportError:
     pass  # 社区版无 premium 模块，静默跳过
 

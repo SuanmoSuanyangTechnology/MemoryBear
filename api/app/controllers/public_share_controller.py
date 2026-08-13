@@ -375,13 +375,13 @@ def list_conversations(
             new_user_tenant_id = ws.tenant_id
             _check_quota(db, ws.tenant_id, "end_user_quota", "end_user", workspace_id=workspace_id)
 
-    new_end_user = end_user_repo.get_or_create_end_user(
+    new_end_user, created = end_user_repo.get_or_create_end_user_with_status(
         app_id=share.app_id,
         workspace_id=workspace_id,
         other_id=other_id
     )
-    # 终端用户已落库，用量真正发生变化后才评估告警。
-    if new_user_tenant_id is not None:
+    # 仅当本次调用真正创建了终端用户时评估告警。
+    if created and new_user_tenant_id is not None:
         report_quota_change_sync(
             new_user_tenant_id,
             "end_user_quota",
