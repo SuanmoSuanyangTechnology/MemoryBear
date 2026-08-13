@@ -101,7 +101,7 @@ const Index = () => {
   return (
     <Flex gap={12} wrap="nowrap" className="rb:w-full! rb:h-full! rb:overflow-y-auto">
       <Flex vertical gap={12} className="rb:flex-1 rb:min-w-0 rb:min-h-0">
-        <div className='rb:w-full rb:h-26 rb:p-4 rb:bg-cover rb:bg-[url("@/assets/images/index/index_bg.png")] rb:rounded-xl rb:overflow-hidden'>
+        <div className='rb:shrink-0 rb:w-full rb:h-26 rb:p-4 rb:bg-cover rb:bg-[url("@/assets/images/index/index_bg.png")] rb:rounded-xl rb:overflow-hidden'>
           <div className="rb:font-[MiSans-Bold] rb:font-bold rb:text-white rb:text-[18px] rb:leading-7">
             {t('index.spaceTitle')}
           </div>

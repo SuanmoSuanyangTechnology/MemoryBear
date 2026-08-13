@@ -1,8 +1,9 @@
 import { type FC, useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useSearchParams } from 'react-router-dom'
-import { Row, Col, Flex, Skeleton, Pagination } from 'antd'
+import { Row, Col, Flex, Skeleton, Pagination, Form, Select, DatePicker, ConfigProvider } from 'antd'
 import clsx from 'clsx'
+import dayjs from 'dayjs'
 
 import { getRelationshipEvolution, getEntityEventTimeline } from '@/api/memory'
 import type { Node } from '../types'
@@ -12,7 +13,6 @@ import { formatDateTime } from '@/utils/format'
 import Tag, { type TagProps } from '@/components/Tag'
 import Empty from '@/components/Empty'
 import BtnTabs from '@/components/BtnTabs'
-
 
 interface PaginationConfig { pagesize?: number; page?: number; }
 
@@ -26,11 +26,22 @@ interface ExtractedEntityMemory {
   category: string;
   title: string;
   text: string;
-  created_at: string | number;
+  created_at: string | number;  
+  timetype: 'recording'
 }
 interface TypeStats {
   type: string;
   count: number;
+}
+type TAB = 'all' | 'key_node' | 'statement' | 'memory_summary';
+
+export interface Query extends PaginationConfig {
+  id: string;
+  type?: TAB;
+  sort?: string;
+  timeRange?: dayjs.Dayjs[];
+  from_ts?: number;
+  to_ts?: number;
 }
 
 const PAGE_SIZE = 10
@@ -53,7 +64,19 @@ const tagColors: Record<string, TagProps['color']> = {
 
   'other_life_event': 'purple'
 }
-const tabs = ['all', 'key_node', 'statement', 'memory_summary']
+
+const tabs: TAB[] = ['all', 'key_node', 'statement', 'memory_summary']
+const sortObj: Record<TAB, string[]> = {
+  all: ['time_asc', 'time_desc'],
+  key_node: ['occurred_asc', 'occurred_desc'],
+  statement: ['recorded_asc', 'recorded_desc'],
+  memory_summary: ['recorded_asc', 'recorded_desc'],
+}
+
+export interface FormValues {
+  sort?: string;
+  timeRange?: dayjs.Dayjs[];
+}
 
 const ExtractedEntityGraphDetail: FC = () => {
   const { t } = useTranslation()
@@ -64,7 +87,7 @@ const ExtractedEntityGraphDetail: FC = () => {
   const [timelineLoading, setTimelineLoading] = useState(false)
   const [timelineMemories, setTimelineMemories] = useState<ExtractedEntityMemory[]>([])
   const [typeStats, setTypeStats] = useState<TypeStats[]>([])
-  const [activeTab, setActiveTab] = useState('all')
+  const [activeTab, setActiveTab] = useState<TAB>('all')
   const [currentPagination, setCurrentPagination] = useState<PaginationConfig>({
     page: 1,
     pagesize: PAGE_SIZE,
@@ -74,6 +97,16 @@ const ExtractedEntityGraphDetail: FC = () => {
   const nodeId = searchParams.get('nodeId')
   const nodeLabel = searchParams.get('nodeLabel')
   const nodeName = searchParams.get('nodeName')
+  const [form] = Form.useForm<FormValues>()
+  const formValues = Form.useWatch([], form) || {};
+
+  const handleChangeTab = (key: string) => {
+    setActiveTab(key as TAB)
+    form.setFieldsValue({
+      sort: sortObj[key as TAB][0],
+      timeRange: undefined,
+    })
+  }
 
   useEffect(() => {
     if (nodeId && nodeLabel) {
@@ -88,23 +121,26 @@ const ExtractedEntityGraphDetail: FC = () => {
   }, [searchParams])
 
   useEffect(() => {
-    getTimelineMemoriesData(vo, {
+    getTimelineMemoriesData(vo, formValues, {
       page: 1,
       pagesize: currentPagination.pagesize,
     })
-  }, [vo, activeTab])
+  }, [vo, activeTab, formValues])
 
   const getRelationshipEvolutionData = (vo: Node) => {
     if (!vo.id || !vo.label) return
     setLoading(true)
-    getRelationshipEvolution({ id: vo.id as string, label: vo.label })
+    getRelationshipEvolution({
+      id: vo.id as string,
+      label: vo.label,
+    })
       .then(res => {
         const { emotion } = res as { emotion: Emotion[]; } || {}
         setEmotionData(emotion)
       })
       .finally(() => setLoading(false))
   }
-  const getTimelineMemoriesData = (vo: Node | null, pagination?: PaginationConfig) => {
+  const getTimelineMemoriesData = (vo: Node | null, values: FormValues, pagination?: PaginationConfig) => {
     if (!vo || !vo?.id || !vo?.label) return
     setTimelineLoading(true)
     if (pagination) {
@@ -118,6 +154,9 @@ const ExtractedEntityGraphDetail: FC = () => {
       id: vo.id as string,
       ...currentPagination,
       ...(pagination || {}),
+      sort: values?.sort,
+      from_ts: values?.timeRange?.[0].startOf('d').valueOf(),
+      to_ts: values?.timeRange?.[1].endOf('d').valueOf(),
     })
       .then(res => {
         const response = res as {
@@ -135,7 +174,7 @@ const ExtractedEntityGraphDetail: FC = () => {
   }
   const handlePageChange = (page: number, pagesize: number) => {
     if (!vo) return
-    getTimelineMemoriesData(vo, {
+    getTimelineMemoriesData(vo, formValues, {
       page: page,
       pagesize
     })
@@ -209,15 +248,65 @@ const ExtractedEntityGraphDetail: FC = () => {
             bodyClassName="rb:px-4! rb:py-0! rb:h-[calc(100%-38px)]!"
             className="rb:w-full! rb:h-full!"
           >
-            <BtnTabs
-              className="rb:mb-4!"
-              activeKey={activeTab}
-              items={tabs.map(key => ({
-                label: t(`userMemory.${key}`),
-                key
-              }))}
-              onChange={(key: string) => setActiveTab(key)}
-            />
+            <Flex wrap align="center" justify="space-between" className="rb:mb-4!">
+              <BtnTabs
+                activeKey={activeTab}
+                items={tabs.map(key => ({
+                  label: t(`userMemory.${key}`),
+                  key
+                }))}
+                onChange={handleChangeTab}
+              />
+
+              <Form form={form} size="small" initialValues={{ sort: 'time_asc' }}>
+                <Flex gap={12}>
+                  <Form.Item name="sort" noStyle>
+                    <Select
+                      placeholder={t('userMemory.sort')}
+                      options={sortObj[activeTab].map(value => ({
+                        value,
+                        label: t(`userMemory.${value}`)
+                      }))}
+                      labelRender={(props) => <span className="rb:text-[12px]">{props.label}</span>}
+                      className="rb:w-[160px] rb:h-[26px]!"
+                      popupMatchSelectWidth={false}
+                    />
+                  </Form.Item>
+                  <ConfigProvider
+                    theme={{
+                      components: {
+                        DatePicker: {
+                          inputFontSizeSM: 12,
+                        },
+                      },
+                    }}
+                  >
+                    <Form.Item name="timeRange" noStyle>
+                      <DatePicker.RangePicker
+                        placeholder={[t(`userMemory.${activeTab}_time_start`), t(`userMemory.${activeTab}_time_end`)]}
+                        presets={[
+                          {
+                            label: t('userMemory.last7Days'),
+                            value: [dayjs().subtract(7, 'days'), dayjs()],
+                          },
+                          {
+                            label: t('userMemory.last30Days'),
+                            value: [dayjs().subtract(30, 'days'), dayjs()],
+                          },
+                          {
+                            label: t('userMemory.last1Year'),
+                            value: [dayjs().subtract(1, 'year'), dayjs()],
+                          },
+                        ]}
+                        className="rb:h-[26px]! rb:w-[250px]!"
+                        suffixIcon={null}
+                        allowEmpty={[true, true]}
+                      />
+                    </Form.Item>
+                  </ConfigProvider>
+                </Flex>
+              </Form>
+            </Flex>
             <div className="rb:h-[calc(100%-42px)] rb:overflow-y-auto">
               {timelineLoading
                 ? <Skeleton active />
@@ -236,19 +325,34 @@ const ExtractedEntityGraphDetail: FC = () => {
                             </Flex>
                           </Col>
                           <Col flex="1" className="rb:bg-[#F6F6F6] rb:rounded-xl rb:py-3! rb:px-4!">
-                            <Flex vertical gap={8}>
-                              {(vo.title || vo.category) &&
-                                <div>
-                                  {vo.title && <span className="rb:font-medium rb:leading-5">{vo.title} </span>}
-                                  {vo.category &&
+                            <Flex gap={12} justify="space-between" align="center">
+                              <Flex vertical gap={8}>
+                                {(vo.title && vo.category)
+                                ?
+                                  <div>
+                                    {vo.title && <span className="rb:font-medium rb:leading-5">{vo.title} </span>}
+                                    {vo.category &&
+                                      <Tag circle={true} color={tagColors[vo.category]} className="rb:ml-2! rb:py-px!">
+                                        {t(`userMemory.${vo.category}`)}
+                                      </Tag>
+                                    }
+                                  </div>
+                                  : vo.title
+                                  ? <div className="rb:font-medium rb:leading-5">{vo.title} </div>
+                                  : null
+                                }
+                                
+                                <div className="rb:leading-5">
+                                  {vo.text}
+                                  {vo.category && !vo.title &&
                                     <Tag circle={true} color={tagColors[vo.category]} className="rb:ml-2! rb:py-px!">
                                       {t(`userMemory.${vo.category}`)}
                                     </Tag>
                                   }
                                 </div>
-                              }
-                              
-                              <div className="rb:leading-5">{vo.text}</div>
+                              </Flex>
+
+                              <Tag color={vo.timetype === 'recording' ? 'purple' : 'processing'} className="rb:shrink-0!">{t(`userMemory.${vo.timetype}`)}</Tag>
                             </Flex>
                           </Col>
                         </Row>
