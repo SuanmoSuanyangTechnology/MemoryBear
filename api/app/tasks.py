@@ -3294,7 +3294,7 @@ def do_layer2_dedup_full_scan(self, end_user_id: str | None = None, config_id: s
 
             memory_service = MemoryService(
                 config_id=uuid.UUID(config_id),
-                end_user_id=end_user_id, 
+                end_user_id=end_user_id,
                 workspace_id=workspace_id,
             )
             r = await memory_service.run_dedup_full_scan()
@@ -3384,8 +3384,8 @@ def scan_reflection_retry(self) -> Dict[str, Any]:
     dispatched_uids: Dict[str, List[str]] = {"high_freq": [], "dedup": []}
 
     for task_type, do_task, inflight_prefix in (
-        ("high_freq", do_layer2_reflection, "reflection:inflight"),
-        ("dedup", do_layer2_dedup_full_scan, "dedup:inflight"),
+            ("high_freq", do_layer2_reflection, "reflection:inflight"),
+            ("dedup", do_layer2_dedup_full_scan, "dedup:inflight"),
     ):
         zkey = f"reflection:retry:{task_type}"
         try:
@@ -3399,13 +3399,13 @@ def scan_reflection_retry(self) -> Dict[str, Any]:
             try:
                 meta = rr.load_meta(rc, task_type, uid)
                 if not meta:
-                    rc.zrem(zkey, uid)            # 孤儿（meta 已 TTL 过期）→ 清理
+                    rc.zrem(zkey, uid)  # 孤儿（meta 已 TTL 过期）→ 清理
                     cleaned += 1
                     continue
                 if meta.get("completion") == "exhausted":
                     continue
-                if meta.get("completion") == "in_progress":   # 租约到期 = 上次开工后进程死亡
-                    if not rr.mark_dead(rc, task_type, uid):   # 达 dead 上限置 exhausted 返回 False
+                if meta.get("completion") == "in_progress":  # 租约到期 = 上次开工后进程死亡
+                    if not rr.mark_dead(rc, task_type, uid):  # 达 dead 上限置 exhausted 返回 False
                         continue
                 # 仍走 inflight 锁，避免与正常 scan 派的同一用户撞车
                 if not rc.set(f"{inflight_prefix}:{uid}", "1", nx=True, ex=1500):
@@ -3558,6 +3558,68 @@ def do_gds_topology_score(self, end_user_id: str) -> Dict[str, Any]:
             pass
 
 
+@celery_app.task(
+    name="app.tasks.sync_all_end_user_memory_counts",
+    bind=True,
+    ignore_result=False,
+    max_retries=0,
+    acks_late=False
+)
+def sync_all_end_user_memory_counts(self) -> Dict[str, Any]:
+    """
+    Operations manual tasks
+    """
+    start_time = time.time()
+
+    async def _run() -> Dict[str, Any]:
+        from app.core.memory.utils.memory_count_utils import (
+            sync_end_user_memory_count_from_neo4j,
+        )
+        from app.repositories.end_user_repository import EndUserRepository
+        from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+
+        # 只读短 session 枚举活跃用户 ID，随后立即关闭
+        with get_db_read() as db:
+            user_ids = [str(u.id) for u in EndUserRepository(db).get_all_active()]
+
+        connector = Neo4jConnector()
+        succeeded = 0
+        failed = 0
+        failed_ids: list[str] = []
+        try:
+            for uid in user_ids:
+                try:
+                    await sync_end_user_memory_count_from_neo4j(uid, connector)
+                    succeeded += 1
+                except Exception as e:
+                    failed += 1
+                    failed_ids.append(uid)
+                    logger.warning(f"[MemoryCountSync] 同步失败 user={uid}: {e}")
+        finally:
+            await connector.close()
+
+        return {
+            "status": "SUCCESS",
+            "total": len(user_ids),
+            "succeeded": succeeded,
+            "failed": failed,
+            "failed_ids": failed_ids,
+        }
+
+    loop = set_asyncio_event_loop()
+    try:
+        result = loop.run_until_complete(_run())
+    except Exception as e:
+        logger.error(f"[MemoryCountSync] 全量同步异常: {e}", exc_info=True)
+        raise
+    finally:
+        _shutdown_loop_gracefully(loop)
+
+    result["elapsed_time"] = time.time() - start_time
+    result["task_id"] = self.request.id
+    return result
+
+
 # unused task
 #     """Call read_service and write latest status to Redis.
 
@@ -3684,7 +3746,7 @@ def write_total_memory_task(workspace_id: str) -> Dict[str, Any]:
                 "end_user_count": len(end_user_id_list),
                 "end_user_details": end_user_details,
                 "memory_increment_id": str(memory_increment.id),
-                "created_at": to_iso_z(memory_increment.created_at), # 这样返回字符串是否正确
+                "created_at": to_iso_z(memory_increment.created_at),  # 这样返回字符串是否正确
             }
 
     try:
@@ -3773,10 +3835,10 @@ def write_all_workspaces_memory_task(self) -> Dict[str, Any]:
                     end_user_id_list: list[str] = []
                     with get_db_context() as db:
                         has_apps = (
-                            db.query(App.id)
-                            .filter(App.workspace_id == workspace_id, App.is_active.is_(True))
-                            .first()
-                            is not None
+                                db.query(App.id)
+                                .filter(App.workspace_id == workspace_id, App.is_active.is_(True))
+                                .first()
+                                is not None
                         )
                         if has_apps:
                             end_users = EndUserRepository(db).get_end_users_by_workspace(workspace_id)
@@ -3874,7 +3936,7 @@ CACHE_INFLIGHT_TTL_SEC = 1800
     ignore_result=False,
     max_retries=0,
     acks_late=False,
-    time_limit=600,        # 10 分钟硬超时（仅枚举 + 派发，足够）
+    time_limit=600,  # 10 分钟硬超时（仅枚举 + 派发，足够）
     soft_time_limit=540,
 )
 def scan_refresh_insight_summary_cache(self) -> Dict[str, Any]:
@@ -3886,9 +3948,9 @@ def scan_refresh_insight_summary_cache(self) -> Dict[str, Any]:
     redis_client = get_sync_redis_client()
     dispatched = 0
     dispatched_user_ids: List[str] = []
-    skip_no_change = 0      # write_time 为 null 或 数据未变
-    skip_fresh = 0          # 数据有变但缓存刚刷过（未到最短刷新间隔）
-    skip_inflight = 0       # 在途锁未抢到
+    skip_no_change = 0  # write_time 为 null 或 数据未变
+    skip_fresh = 0  # 数据有变但缓存刚刷过（未到最短刷新间隔）
+    skip_inflight = 0  # 在途锁未抢到
 
     # db-session 规范：先用只读短 session 取 workspace 列表，
     # 再【按 workspace 粒度】开独立 session，处理完即释放，避免 identity-map 累积。
@@ -3973,16 +4035,16 @@ def scan_refresh_insight_summary_cache(self) -> Dict[str, Any]:
     ignore_result=False,
     max_retries=0,
     acks_late=False,
-    time_limit=900,                         # 15 分钟硬超时
-    soft_time_limit=840,                    # 14 分钟软超时
+    time_limit=900,  # 15 分钟硬超时
+    soft_time_limit=840,  # 14 分钟软超时
 )
 def do_refresh_insight_summary_cache(
-    self,
-    end_user_id: str,
-    workspace_id: str,
-    language: str = "zh",
-    refresh_insight: bool = True,
-    refresh_summary: bool = True,
+        self,
+        end_user_id: str,
+        workspace_id: str,
+        language: str = "zh",
+        refresh_insight: bool = True,
+        refresh_summary: bool = True,
 ) -> Dict[str, Any]:
     """按 scan 的独立判定刷新单个用户的记忆洞察或用户摘要缓存。
 
@@ -4207,9 +4269,9 @@ def scan_refresh_user_tags(self) -> Dict[str, Any]:
     soft_time_limit=90,
 )
 def do_refresh_user_tags(
-    self,
-    end_user_id: str,
-    workspace_id: str,
+        self,
+        end_user_id: str,
+        workspace_id: str,
 ) -> Dict[str, Any]:
     """在 heavy worker 中调用记忆领域入口，刷新单个用户的名片 Tag。
 
@@ -4255,7 +4317,7 @@ def do_refresh_user_tags(
 # )
 # def run_forgetting_cycle_task(self, config_id: Optional[uuid.UUID] = None) -> Dict[str, Any]:
 #     """定时任务：运行遗忘周期
-    
+
 #     遍历所有终端用户，执行遗忘周期。
 #     """
 #     start_time = time.time()
@@ -4479,6 +4541,7 @@ _IMPLICIT_EMOTIONS_INFLIGHT_KEY_FMT = "implicit_emotions:inflight:{end_user_id}"
 _IMPLICIT_EMOTIONS_INFLIGHT_TTL_SEC = 600
 _INIT_EMOTIONS_INFLIGHT_KEY_FMT = "init_emotions:inflight:{end_user_id}"
 _INIT_EMOTIONS_INFLIGHT_TTL_SEC = 600
+
 
 # 需要在work-periodic执行扫描任务
 @celery_app.task(
@@ -5205,10 +5268,10 @@ def init_interest_distribution_for_users(self, end_user_ids: List[str]) -> Dict[
         result = loop.run_until_complete(_run())
         # 全部失败（无初始化、无未缓存成功结果、无跳过）才标记 Celery FAILURE。
         if (
-            result["failed"] > 0
-            and result["initialized"] == 0
-            and result["not_cached"] == 0
-            and result["skipped"] == 0
+                result["failed"] > 0
+                and result["initialized"] == 0
+                and result["not_cached"] == 0
+                and result["skipped"] == 0
         ):
             raise RuntimeError(
                 f"all {result['failed']} users failed to initialize interest distribution"
@@ -5334,11 +5397,11 @@ def refresh_hot_memory_tags_cache(self) -> Dict[str, Any]:
     soft_time_limit=1700,
 )
 def run_incremental_clustering(
-    self,
-    end_user_id: str,
-    new_entity_ids: List[str],
-    config_id: Optional[str] = None,
-    language: str = "zh",
+        self,
+        end_user_id: str,
+        new_entity_ids: List[str],
+        config_id: Optional[str] = None,
+        language: str = "zh",
 ) -> Dict[str, Any]:
     """增量聚类任务：处理新增实体的社区分配和元数据生成。
     

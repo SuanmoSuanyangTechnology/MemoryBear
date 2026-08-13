@@ -130,6 +130,9 @@ celery_app.conf.update(
         'app.tasks.scan_gds_topology_score': {'queue': 'periodic_tasks'},
         'app.tasks.do_gds_topology_score': {'queue': 'memory_heavy_tasks'},
 
+        # 全量记忆计数同步（仅手动触发）
+        'app.tasks.sync_all_end_user_memory_counts': {'queue': 'memory_heavy_tasks'},
+
         # Sliding window write tasks → memory_tasks queue (IO-bound async tasks)
         'app.tasks.flush_conversation': {'queue': 'periodic_tasks'},
 
