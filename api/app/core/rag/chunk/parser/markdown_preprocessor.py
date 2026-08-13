@@ -13,6 +13,9 @@ ESCAPED_HEADING_PATTERN = re.compile(r"^(\s*)\\(#{1,6})(\s+)")
 ESCAPED_UNORDERED_LIST_PATTERN = re.compile(r"^(\s*)\\([-+*])(\s+)")
 ESCAPED_THEMATIC_BREAK_PATTERN = re.compile(r"^(\s*)\\((?:-{3,}|\*{3,}|_{3,}))(\s*)$")
 ESCAPED_EMPHASIS_PATTERN = re.compile(r"\\([*_])")
+ESCAPED_CODE_FENCE_PATTERN = re.compile(
+    r"^(?P<indent>\s*)(?P<fence>(?:\\`){3})(?!\\`)(?P<info>[^\r\n]*)$"
+)
 STRUCTURAL_LINE_PATTERN = re.compile(
     r"^\s{0,3}(?:#{1,6}\s+|[-+*]\s+|\d+[.)）、|｜]\s*|(?:-{3,}|\*{3,}|_{3,})\s*$)"
 )
@@ -97,21 +100,31 @@ class MarkdownPreprocessor:
         *,
         normalize_escaped_structure: bool = False,
     ) -> MarkdownPreprocessResult:
+        raw_lines = text.split("\n")
+        escaped_code_fence_indexes = (
+            self._paired_escaped_code_fence_indexes(raw_lines)
+            if normalize_escaped_structure
+            else set()
+        )
         line_infos: list[MarkdownLineInfo] = []
         in_code = False
         in_list_context = False
         in_qa_list_context = False
         qa_blank_lines = 0
         qa_continuation_paragraphs = 0
-        for line_number, raw_line in enumerate(text.split("\n"), start=1):
-            stripped = raw_line.strip()
+        for line_index, raw_line in enumerate(raw_lines):
+            line_number = line_index + 1
+            line = raw_line
+            if line_index in escaped_code_fence_indexes:
+                line = self._normalize_escaped_code_fence(line)
+            stripped = line.strip()
             is_code_fence = stripped.startswith("```")
 
             if in_code:
                 line_infos.append(
                     MarkdownLineInfo(
                         raw=raw_line,
-                        text=raw_line,
+                        text=line,
                         line_number=line_number,
                         in_code=True,
                         is_code_fence=is_code_fence,
@@ -121,8 +134,7 @@ class MarkdownPreprocessor:
                     in_code = False
                 continue
 
-            line = raw_line
-            if normalize_escaped_structure:
+            if normalize_escaped_structure and not is_code_fence:
                 line = self._normalize_escaped_structural_line(line)
                 line = EMPTY_HTML_ANCHOR_PATTERN.sub("", line)
             stripped = line.strip()
@@ -208,6 +220,38 @@ class MarkdownPreprocessor:
         if heading_count or list_count or rule_count or STRUCTURAL_LINE_PATTERN.match(normalized):
             normalized = ESCAPED_EMPHASIS_PATTERN.sub(r"\1", normalized)
         return normalized
+
+    @staticmethod
+    def _normalize_escaped_code_fence(line: str) -> str:
+        match = ESCAPED_CODE_FENCE_PATTERN.match(line)
+        if match is None:
+            return line
+        fence = match.group("fence").replace("\\`", "`")
+        return f'{match.group("indent")}{fence}{match.group("info")}'
+
+    @staticmethod
+    def _paired_escaped_code_fence_indexes(lines: list[str]) -> set[int]:
+        paired_indexes: set[int] = set()
+        opening_index: int | None = None
+        in_literal_code = False
+
+        for index, line in enumerate(lines):
+            if opening_index is not None:
+                match = ESCAPED_CODE_FENCE_PATTERN.match(line)
+                if match is not None and not match.group("info").strip():
+                    paired_indexes.update((opening_index, index))
+                    opening_index = None
+                continue
+
+            if line.strip().startswith("```"):
+                in_literal_code = not in_literal_code
+                continue
+            if in_literal_code:
+                continue
+            if ESCAPED_CODE_FENCE_PATTERN.match(line) is not None:
+                opening_index = index
+
+        return paired_indexes
 
     def _list_metadata(self, line: str, *, enhanced: bool = False) -> dict[str, Any] | None:
         patterns = (
