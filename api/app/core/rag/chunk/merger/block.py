@@ -192,10 +192,12 @@ class BlockMerger(ChunkMerger):
             token_num,
         )
         stream = rebuild_structured_stream(parse_result.blocks or [])
-        drafts: list[_ChunkDraft] = []
-        for segment in split_structured_stream(stream, delimiter):
-            units = self._stream_units(segment, token_num)
-            drafts.extend(self._pack_stream_units(units, token_num, overlap))
+        drafts = self._segment_drafts(
+            stream,
+            token_num,
+            delimiter,
+            overlap,
+        )
 
         logical_chunks = [self._draft_to_normal_chunk(draft) for draft in drafts]
         return MergeResult(
@@ -211,11 +213,27 @@ class BlockMerger(ChunkMerger):
         delimiter: str | None,
     ) -> list[_ParentDraft]:
         stream = rebuild_structured_stream(blocks)
+        drafts = self._segment_drafts(stream, token_num, delimiter, 0)
+        return [self._chunk_draft_to_parent(draft) for draft in drafts]
+
+    def _segment_drafts(
+        self,
+        stream: StructuredStream,
+        token_num: int,
+        delimiter: str | None,
+        overlap: int,
+    ) -> list[_ChunkDraft]:
         drafts: list[_ChunkDraft] = []
         for segment in split_structured_stream(stream, delimiter):
+            source_units = self._source_stream_units(segment)
+            if not source_units:
+                continue
+            if self._stream_units_within_limit(source_units, token_num):
+                drafts.append(self._units_to_draft(source_units))
+                continue
             units = self._stream_units(segment, token_num)
-            drafts.extend(self._pack_stream_units(units, token_num, 0))
-        return [self._chunk_draft_to_parent(draft) for draft in drafts]
+            drafts.extend(self._pack_stream_units(units, token_num, overlap))
+        return drafts
 
     def _build_full_doc_parent_drafts(
         self,
@@ -384,10 +402,7 @@ class BlockMerger(ChunkMerger):
         delimiter: str | None,
     ) -> list[LogicalChunk]:
         stream = self._text_stream_from_fragments(fragments)
-        drafts: list[_ChunkDraft] = []
-        for segment in split_structured_stream(stream, delimiter):
-            units = self._stream_units(segment, token_num)
-            drafts.extend(self._pack_stream_units(units, token_num, 0))
+        drafts = self._segment_drafts(stream, token_num, delimiter, 0)
         return [self._draft_to_normal_chunk(draft) for draft in drafts]
 
     @staticmethod
@@ -477,6 +492,12 @@ class BlockMerger(ChunkMerger):
 
     def _stream_units(self, stream: StructuredStream, token_num: int) -> list[_StreamUnit]:
         units: list[_StreamUnit] = []
+        for source_unit in self._source_stream_units(stream):
+            units.extend(self._split_stream_unit(source_unit, token_num))
+        return units
+
+    def _source_stream_units(self, stream: StructuredStream) -> list[_StreamUnit]:
+        units: list[_StreamUnit] = []
         previous_end = 0
         for index, span in enumerate(stream.spans):
             fragment = SourceFragment(
@@ -493,7 +514,7 @@ class BlockMerger(ChunkMerger):
                 fragment=fragment,
                 separator_before="" if index == 0 else stream.text[previous_end : span.start],
             )
-            units.extend(self._split_stream_unit(unit, token_num))
+            units.append(unit)
             previous_end = span.end
         return units
 
@@ -675,8 +696,34 @@ class BlockMerger(ChunkMerger):
     def _units_to_draft(self, units: list[_StreamUnit]) -> _ChunkDraft:
         return _ChunkDraft(
             content=self._join_stream_units(units),
-            fragments=[unit.fragment for unit in units],
+            fragments=self._draft_fragments(units),
         )
+
+    @staticmethod
+    def _draft_fragments(units: list[_StreamUnit]) -> list[SourceFragment]:
+        fragments: list[SourceFragment] = []
+        for unit in units:
+            fragment = unit.fragment
+            if (
+                fragments
+                and fragments[-1].source_key == fragment.source_key
+                and fragment.block.type
+                in {*TEXT_LIKE_TYPES, ParsedBlockType.LIST}
+            ):
+                previous = fragments[-1]
+                content = f"{previous.content}{unit.separator_before}{fragment.content}"
+                fragments[-1] = SourceFragment(
+                    source_key=previous.source_key,
+                    block=previous.block,
+                    content=content,
+                    complete=content == str(previous.block.content or ""),
+                    structure_valid=(
+                        previous.structure_valid and fragment.structure_valid
+                    ),
+                )
+                continue
+            fragments.append(fragment)
+        return fragments
 
     @staticmethod
     def _join_stream_units(units: list[_StreamUnit]) -> str:
