@@ -745,6 +745,7 @@ class WritePipeline:
 
     async def _store(self, result: ExtractionResult) -> bool:
         """存储：永久容量分配 → 别名清洗 → Neo4j 写入（含死锁重试）。"""
+        from app.repositories.neo4j.cypher_queries import PERMANENT_MEMORY_COUNT
         from app.repositories.neo4j.graph_saver import (
             save_dialog_and_statements_to_neo4j,
         )
@@ -763,10 +764,15 @@ class WritePipeline:
         if permanent_candidates:
             candidate_count = len(permanent_candidates)
             try:
-                assigned = await assign_permanent_memory_slots(
-                    self._neo4j_connector,
+                count_rows = await self._neo4j_connector.execute_query(
+                    PERMANENT_MEMORY_COUNT,
+                    end_user_id=self.end_user_id,
+                )
+                used = int(count_rows[0]["used"]) if count_rows else 0
+                assigned = assign_permanent_memory_slots(
                     self.end_user_id,
                     result.statement_nodes,
+                    used=used,
                 )
                 logger.info(
                     "Permanent-memory slots assigned in serialized write: "
