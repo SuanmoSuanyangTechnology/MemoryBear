@@ -10,6 +10,12 @@ from typing import Any, Dict, List, Optional, Tuple
 from pydantic import BaseModel
 from jinja2 import Environment, FileSystemLoader
 
+from app.core.memory.storage_services.reflection_engine.errors import (
+    ReflectionBusinessError,
+    ReflectionFailureReason,
+    ReflectionModelType,
+)
+
 logger = logging.getLogger(__name__)
 
 _prompt_dir = os.path.normpath(os.path.join(
@@ -51,45 +57,62 @@ async def judge_pair_for_dedup(
     直接渲染 entity_dedup_reflection.jinja2，把两路召回已计算好的分数传入。
     entity_a/entity_b 需有 name, entity_type, description, description_summary, aliases 属性。
     """
+    template = _prompt_env.get_template("entity_dedup_reflection.jinja2")
+    rendered_prompt = template.render(
+        entity_a={
+            "name": entity_a.name,
+            "entity_type": entity_a.entity_type,
+            "description_summary": getattr(entity_a, "description_summary", ""),
+            "description": getattr(entity_a, "description", ""),
+            "aliases": getattr(entity_a, "aliases", []),
+        },
+        entity_b={
+            "name": entity_b.name,
+            "entity_type": entity_b.entity_type,
+            "description_summary": getattr(entity_b, "description_summary", ""),
+            "description": getattr(entity_b, "description", ""),
+            "aliases": getattr(entity_b, "aliases", []),
+        },
+        language=language,
+        json_schema=json.dumps(DedupJudgeOutput.model_json_schema(), indent=2),
+    )
+
+    messages = [{"role": "user", "content": rendered_prompt}]
     try:
-        template = _prompt_env.get_template("entity_dedup_reflection.jinja2")
-        rendered_prompt = template.render(
-            entity_a={
-                "name": entity_a.name,
-                "entity_type": entity_a.entity_type,
-                "description_summary": getattr(entity_a, "description_summary", ""),
-                "description": getattr(entity_a, "description", ""),
-                "aliases": getattr(entity_a, "aliases", []),
-            },
-            entity_b={
-                "name": entity_b.name,
-                "entity_type": entity_b.entity_type,
-                "description_summary": getattr(entity_b, "description_summary", ""),
-                "description": getattr(entity_b, "description", ""),
-                "aliases": getattr(entity_b, "aliases", []),
-            },
-            language=language,
-            json_schema=json.dumps(DedupJudgeOutput.model_json_schema(), indent=2),
+        response = await llm_client.call_structured(messages, DedupJudgeOutput)
+    except Exception as exc:
+        logger.error("LLM 去重模型调用失败", exc_info=True)
+        raise ReflectionBusinessError(
+            ReflectionFailureReason.MODEL_CALL_FAILED,
+            "entity_dedup_model_call",
+            model_type=ReflectionModelType.LLM,
+        ) from exc
+
+    if not isinstance(response, DedupJudgeOutput):
+        logger.error("LLM 去重返回结构无效")
+        raise ReflectionBusinessError(
+            ReflectionFailureReason.RESULT_PARSE_FAILED,
+            "entity_dedup_result_parse",
+            model_type=ReflectionModelType.LLM,
+        )
+    if response.canonical_idx not in (0, 1) or not (0 <= response.confidence <= 1):
+        logger.error("LLM 去重返回字段校验失败")
+        raise ReflectionBusinessError(
+            ReflectionFailureReason.RESULT_PARSE_FAILED,
+            "entity_dedup_result_parse",
+            model_type=ReflectionModelType.LLM,
         )
 
-        messages = [{"role": "user", "content": rendered_prompt}]
-        response = await llm_client.call_structured(messages, DedupJudgeOutput)
-
-        if isinstance(response, DedupJudgeOutput):
-            # new_name 为空时回退到 canonical_idx 对应实体名
-            fallback_name = entity_a.name if response.canonical_idx == 0 else entity_b.name
-            return DedupLLMDecision(
-                same_entity=response.same_entity,
-                confidence=response.confidence,
-                winner_id="a" if response.canonical_idx == 0 else "b",
-                merged_name=(response.new_name or fallback_name),
-                new_aliases=response.new_aliases or [],
-                reason=response.reason,
-            )
-        return None
-    except Exception as e:
-        logger.error(f"LLM 去重判定失败: {e}")
-        return None
+    # new_name 为空时回退到 canonical_idx 对应实体名
+    fallback_name = entity_a.name if response.canonical_idx == 0 else entity_b.name
+    return DedupLLMDecision(
+        same_entity=response.same_entity,
+        confidence=response.confidence,
+        winner_id="a" if response.canonical_idx == 0 else "b",
+        merged_name=(response.new_name or fallback_name),
+        new_aliases=response.new_aliases or [],
+        reason=response.reason,
+    )
 
 
 async def judge_batch(

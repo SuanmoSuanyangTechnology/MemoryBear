@@ -18,14 +18,19 @@ from celery.exceptions import Ignore, Retry
 from elasticsearch import AsyncElasticsearch
 from fastapi.encoders import jsonable_encoder
 from redis.exceptions import RedisError
-from sqlalchemy import select, cast, String
+from sqlalchemy import String, cast, select
 
 from app.aioRedis import get_thread_safe_redis
 from app.celery_app import celery_app
 from app.core.config import settings
 from app.core.logging_config import get_logger
-from app.core.models import RedBearEmbeddings, RedBearLLM
 from app.core.memory.storage_services.reflection_engine import retry_registry as rr
+from app.core.memory.storage_services.reflection_engine.errors import (
+    ReflectionBusinessError,
+    ReflectionFailureReason,
+    ReflectionRetriesExhausted,
+)
+from app.core.models import RedBearEmbeddings, RedBearLLM
 from app.core.rag.chunk.hierarchy import GroupedChildChunks, validate_parent_child_result
 from app.core.rag.chunk.metadata import merge_parser_metadata
 from app.core.rag.chunk.parser.image_storage import cleanup_mineru_v3_images
@@ -88,8 +93,8 @@ from app.core.utils.datetime_utils import (
 )
 from app.db import get_db_context, get_db_read
 from app.models import App, AppRelease, Document, File, Knowledge, User, Workspace
-from app.models.file_model import FILE_ROLE_SOURCE
 from app.models.end_user_model import EndUser
+from app.models.file_model import FILE_ROLE_SOURCE
 from app.models.models_model import ModelType
 from app.repositories.end_user_repository import get_end_users_by_workspace
 from app.schemas import document_schema, file_schema
@@ -2989,6 +2994,39 @@ def scan_layer2_reflection(self) -> Dict[str, Any]:
             "skip_period_or_new": skip_period_or_new, "skip_inflight": skip_inflight}
 
 
+def _report_reflection_failure(
+    *,
+    task_type: str,
+    end_user_id: str,
+    workspace_id: str,
+    reason_code: str | None,
+    model_type: str | None,
+    failed_operations: List[str],
+    last_failed_at_ms: int | None,
+) -> None:
+    """把重试耗尽事件交给可选插件；社区版未注册时静默跳过。"""
+    if reason_code is None or last_failed_at_ms is None:
+        return
+
+    from app.plugins import get_plugin
+
+    reporter = get_plugin("reflection_failure_reporter")
+    if reporter is None:
+        return
+    try:
+        reporter.report(
+            task_type=task_type,
+            end_user_id=end_user_id,
+            workspace_id=workspace_id,
+            reason_code=reason_code,
+            model_type=model_type,
+            failed_operations=failed_operations,
+            last_failed_at_ms=last_failed_at_ms,
+        )
+    except Exception:
+        logger.error("反思最终失败上报插件执行失败", exc_info=True)
+
+
 @celery_app.task(
     name="app.tasks.do_layer2_reflection",
     bind=True,
@@ -3082,6 +3120,11 @@ def do_layer2_reflection(self, end_user_id: str | None = None, config_id: str = 
             dedup_info = r.get("entity_dedup", {})
             meta_info = r.get("metadata_extraction", {})
             merge_info = r.get("description_merge", {})
+            reason_codes = rr.reason_codes_of_layer2(r)
+            primary_reason = rr.select_primary_reason(reason_codes)
+            primary_model_type = rr.select_primary_model_type(
+                reason_codes, rr.model_types_of_layer2(r), primary_reason
+            )
 
             if completion == "full":
                 # 步骤4 完整跑完：刷新"上次反思时间"，注销重试登记
@@ -3113,8 +3156,30 @@ def do_layer2_reflection(self, end_user_id: str | None = None, config_id: str = 
                 with get_db_context() as db:
                     WorkspaceAppService(db).update_end_user_reflection_time(end_user_id)
             skipped_steps = rr.skipped_steps_of_layer2(r)
-            rr.record(_rc, "high_freq", end_user_id, completion, progressed,
-                      skipped_steps=skipped_steps)
+            record_result = rr.record(
+                _rc,
+                "high_freq",
+                end_user_id,
+                completion,
+                progressed,
+                skipped_steps=skipped_steps,
+                reason_code=primary_reason,
+                model_type=primary_model_type,
+            )
+            if record_result.outcome is rr.RetryRecordOutcome.EXHAUSTED:
+                _report_reflection_failure(
+                    task_type="high_freq",
+                    end_user_id=end_user_id,
+                    workspace_id=workspace_id,
+                    reason_code=primary_reason,
+                    model_type=primary_model_type,
+                    failed_operations=skipped_steps,
+                    last_failed_at_ms=record_result.last_failed_at_ms,
+                )
+                if primary_reason is not None:
+                    raise ReflectionRetriesExhausted(
+                        ReflectionFailureReason(primary_reason)
+                    )
             logger.warning(
                 f"反思高频do 未完整完成 user={end_user_id} completion={completion} "
                 f"progressed={progressed} skipped={skipped_steps} "
@@ -3136,12 +3201,44 @@ def do_layer2_reflection(self, end_user_id: str | None = None, config_id: str = 
     loop = set_asyncio_event_loop()
     try:
         result = loop.run_until_complete(_run())
+    except ReflectionRetriesExhausted:
+        raise
+    except ReflectionBusinessError as e:
+        logger.error(f"反思高频do 业务失败 user={end_user_id}: {e}", exc_info=True)
+        try:
+            _rc = get_sync_redis_client()
+            record_result = rr.record(
+                _rc,
+                "high_freq",
+                end_user_id,
+                "failed",
+                progressed=False,
+                skipped_steps=[e.failed_operation],
+                reason_code=e.reason_code,
+                model_type=e.model_type,
+            )
+            if record_result.outcome is rr.RetryRecordOutcome.EXHAUSTED:
+                _report_reflection_failure(
+                    task_type="high_freq",
+                    end_user_id=end_user_id,
+                    workspace_id=workspace_id,
+                    reason_code=e.reason_code.value,
+                    model_type=e.model_type.value,
+                    failed_operations=[e.failed_operation],
+                    last_failed_at_ms=record_result.last_failed_at_ms,
+                )
+        except Exception:
+            logger.error("反思高频do 业务失败登记失败", exc_info=True)
+        raise
     except Exception as e:
         # 真异常：run() 抛出未达 completion 逻辑，补登记 failed（无推进），再 re-raise（FAILURE + traceback，需排查）
         logger.error(f"反思高频do 失败 user={end_user_id}: {e}", exc_info=True)
         try:
             _rc = get_sync_redis_client()
-            rr.record(_rc, "high_freq", end_user_id, "failed", progressed=False, last_error=str(e))
+            rr.record(
+                _rc, "high_freq", end_user_id, "failed",
+                progressed=False, last_error=str(e),
+            )
         except Exception:
             pass
         raise
@@ -3294,6 +3391,10 @@ def do_layer2_dedup_full_scan(self, end_user_id: str | None = None, config_id: s
             completion = rr.completion_of_dedup(r)
             progressed = rr.progressed_dedup(r)
             merged = r.get("merged_count", 0)
+            primary_reason = rr.select_primary_reason(rr.reason_codes_of_dedup(r))
+            primary_model_type = rr.select_primary_model_type(
+                rr.reason_codes_of_dedup(r), rr.model_types_of_dedup(r), primary_reason
+            )
 
             if completion == "full":
                 rr.resolve(_rc, "dedup", end_user_id)
@@ -3305,7 +3406,31 @@ def do_layer2_dedup_full_scan(self, end_user_id: str | None = None, config_id: s
                 return {"status": "success", "merged_count": merged}
 
             # partial：truncated / had_type_error。低频不刷 reflection_time（靠 update_scan_time 续扫）。
-            rr.record(_rc, "dedup", end_user_id, completion, progressed)
+            record_result = rr.record(
+                _rc,
+                "dedup",
+                end_user_id,
+                completion,
+                progressed,
+                reason_code=primary_reason,
+                model_type=primary_model_type,
+            )
+            if record_result.outcome is rr.RetryRecordOutcome.EXHAUSTED:
+                _report_reflection_failure(
+                    task_type="dedup",
+                    end_user_id=end_user_id,
+                    workspace_id=workspace_id,
+                    reason_code=primary_reason,
+                    model_type=primary_model_type,
+                    failed_operations=[
+                        str(r["failed_operation"])
+                    ] if r.get("failed_operation") else [],
+                    last_failed_at_ms=record_result.last_failed_at_ms,
+                )
+                if primary_reason is not None:
+                    raise ReflectionRetriesExhausted(
+                        ReflectionFailureReason(primary_reason)
+                    )
             logger.warning(
                 f"反思低频去重do 未完整完成 user={end_user_id} completion={completion} "
                 f"progressed={progressed} truncated={r.get('truncated')} "
@@ -3328,11 +3453,43 @@ def do_layer2_dedup_full_scan(self, end_user_id: str | None = None, config_id: s
     loop = set_asyncio_event_loop()
     try:
         result = loop.run_until_complete(_run())
+    except ReflectionRetriesExhausted:
+        raise
+    except ReflectionBusinessError as e:
+        logger.error(f"反思低频去重do 业务失败 user={end_user_id}: {e}", exc_info=True)
+        try:
+            _rc = get_sync_redis_client()
+            record_result = rr.record(
+                _rc,
+                "dedup",
+                end_user_id,
+                "failed",
+                progressed=False,
+                skipped_steps=[e.failed_operation],
+                reason_code=e.reason_code,
+                model_type=e.model_type,
+            )
+            if record_result.outcome is rr.RetryRecordOutcome.EXHAUSTED:
+                _report_reflection_failure(
+                    task_type="dedup",
+                    end_user_id=end_user_id,
+                    workspace_id=workspace_id,
+                    reason_code=e.reason_code.value,
+                    model_type=e.model_type.value,
+                    failed_operations=[e.failed_operation],
+                    last_failed_at_ms=record_result.last_failed_at_ms,
+                )
+        except Exception:
+            logger.error("反思低频去重业务失败登记失败", exc_info=True)
+        raise
     except Exception as e:
         logger.error(f"反思低频去重do 失败 user={end_user_id}: {e}", exc_info=True)
         try:
             _rc = get_sync_redis_client()
-            rr.record(_rc, "dedup", end_user_id, "failed", progressed=False, last_error=str(e))
+            rr.record(
+                _rc, "dedup", end_user_id, "failed",
+                progressed=False, last_error=str(e),
+            )
         except Exception:
             pass
         raise
@@ -3398,7 +3555,7 @@ def scan_reflection_retry(self) -> Dict[str, Any]:
                 if meta.get("completion") == "exhausted":
                     continue
                 if meta.get("completion") == "in_progress":   # 租约到期 = 上次开工后进程死亡
-                    if not rr.mark_dead(rc, task_type, uid):   # 达 dead 上限置 exhausted 返回 False
+                    if not rr.mark_dead(rc, task_type, uid):
                         continue
                 # 仍走 inflight 锁，避免与正常 scan 派的同一用户撞车
                 if not rc.set(f"{inflight_prefix}:{uid}", "1", nx=True, ex=1500):

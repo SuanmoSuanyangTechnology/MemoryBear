@@ -16,7 +16,12 @@ ReflectionPipeline — 反思引擎流水线（离线部分）
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Optional, TYPE_CHECKING
+from typing import Any, Dict, TYPE_CHECKING
+
+from app.core.memory.storage_services.reflection_engine.errors import (
+    ReflectionFailureReason,
+    ReflectionModelType,
+)
 
 if TYPE_CHECKING:
     from app.schemas.memory_config_schema import MemoryConfig
@@ -112,7 +117,18 @@ class ReflectionPipeline:
         await self._lazy_init()
 
         if not self._llm_client:
-            return {"status": "skipped", "reason": "no llm_id configured"}
+            return {
+                "status": "error",
+                "reason_code": ReflectionFailureReason.REFLECTION_MODEL_UNAVAILABLE.value,
+                "model_type": ReflectionModelType.LLM.value,
+                "failed_operation": "reflection_model_init",
+                "business_failure_count": 1,
+                "reason_codes": [
+                    ReflectionFailureReason.REFLECTION_MODEL_UNAVAILABLE.value
+                ],
+                "model_types": [ReflectionModelType.LLM.value],
+                "failed_operations": ["reflection_model_init"],
+            }
 
         from app.repositories.neo4j.neo4j_connector import Neo4jConnector
         from app.core.memory.storage_services.reflection_engine.layer2_inspector import Layer2Inspector
@@ -142,7 +158,18 @@ class ReflectionPipeline:
         await self._lazy_init()
 
         if not self._llm_client:
-            return {"status": "skipped", "reason": "no llm_id configured"}
+            return {
+                "status": "error",
+                "reason_code": ReflectionFailureReason.REFLECTION_MODEL_UNAVAILABLE.value,
+                "model_type": ReflectionModelType.LLM.value,
+                "failed_operation": "reflection_model_init",
+                "business_failure_count": 1,
+                "reason_codes": [
+                    ReflectionFailureReason.REFLECTION_MODEL_UNAVAILABLE.value
+                ],
+                "model_types": [ReflectionModelType.LLM.value],
+                "failed_operations": ["reflection_model_init"],
+            }
 
         from app.repositories.neo4j.neo4j_connector import Neo4jConnector
         from app.core.memory.storage_services.reflection_engine.layer2_inspector import Layer2Inspector
