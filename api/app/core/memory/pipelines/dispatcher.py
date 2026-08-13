@@ -510,7 +510,7 @@ async def ingest_agent_messages(
             role_and_flag.append((str(m.role), should_memorize))
 
     # 写 memory_messages。original_message_id 与 messages 已解耦（无外键约束），
-    # 写入顺序不再受限，无需 FK 退避重试；异常冒泡由上层 dispatch_memory_batch
+    # 写入顺序不再受限，无需 FK 退避重试；异常冒泡由上层 dispatch_memory_pair
     # 捕获并降级为 warning，不影响主流程。
     with get_db_context() as db:
         repo = MemoryMessageRepository(db)
