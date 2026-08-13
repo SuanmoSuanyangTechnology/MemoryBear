@@ -517,11 +517,40 @@ class BlockMerger(ChunkMerger):
 
     def _split_stream_unit(self, unit: _StreamUnit, token_num: int) -> list[_StreamUnit]:
         content = unit.fragment.content
+        block = unit.fragment.block
+        block_type = block.type
+        if block_type not in {
+            ParsedBlockType.IMAGE,
+            ParsedBlockType.CODE,
+            ParsedBlockType.TABLE,
+        }:
+            text_units = self.text_merger.split_recursive_units(
+                content,
+                token_num,
+                split_top_level=True,
+            )
+            if len(text_units) == 1 and text_units[0].text == content:
+                return [unit]
+
+            return [
+                _StreamUnit(
+                    fragment=SourceFragment(
+                        source_key=unit.fragment.source_key,
+                        block=block,
+                        content=text_unit.text,
+                        complete=False,
+                        structure_valid=True,
+                    ),
+                    separator_before=(
+                        unit.separator_before if index == 0 else text_unit.prefix
+                    ),
+                )
+                for index, text_unit in enumerate(text_units)
+            ]
+
         if num_tokens_from_string(content) <= token_num:
             return [unit]
 
-        block = unit.fragment.block
-        block_type = block.type
         if block_type is ParsedBlockType.IMAGE:
             pieces = self.text_merger.hard_split(content, token_num)
         elif block_type is ParsedBlockType.CODE:
@@ -533,8 +562,6 @@ class BlockMerger(ChunkMerger):
             )
         elif block_type is ParsedBlockType.TABLE:
             pieces = self._split_table_content(content, token_num, strict=True)
-        else:
-            pieces = self.text_merger.split_recursive(content, token_num)
 
         total = len(pieces)
         if any(num_tokens_from_string(piece) > token_num for piece in pieces):
