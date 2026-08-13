@@ -399,6 +399,10 @@ class Settings:
     # 反思失败用户重试：派发任务扫描间隔（分钟）。默认 10。
     # beat 注册需从 settings 读取，故放这里；其余重试策略常量在 retry_registry.py。
     REFLECTION_RETRY_SCAN_INTERVAL_MINUTES: int = int(os.getenv("REFLECTION_RETRY_SCAN_INTERVAL_MINUTES", "10"))
+    # GDS 拓扑分数：扫描活跃用户（write_time<24h）派发计算的间隔（分钟）。默认 60。
+    GDS_TOPOLOGY_SCAN_INTERVAL_MINUTES: int = TypeAdapter(
+        Annotated[int, Field(ge=1, description="GDS topology score scan interval in minutes, must be >= 1")]
+    ).validate_python(int(os.getenv("GDS_TOPOLOGY_SCAN_INTERVAL_MINUTES", "60")))
     # 热门记忆标签缓存预热时间（UTC 小时，0-23）。19 = 北京时间 03:00
     HOT_MEMORY_TAGS_REFRESH_HOUR: int = TypeAdapter(
         Annotated[int, Field(ge=0, le=23, description="Hot memory tags cache refresh hour (UTC), 0-23. 19=Beijing 03:00")]

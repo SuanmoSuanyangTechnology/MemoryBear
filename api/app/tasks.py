@@ -91,7 +91,7 @@ from app.models import App, AppRelease, Document, File, Knowledge, User, Workspa
 from app.models.file_model import FILE_ROLE_SOURCE
 from app.models.end_user_model import EndUser
 from app.models.models_model import ModelType
-from app.repositories.end_user_repository import get_end_users_by_workspace
+from app.repositories.end_user_repository import get_end_users_by_workspace, get_all_active_workspaces
 from app.schemas import document_schema, file_schema
 from app.services.memory_config_service import MemoryConfigService
 from app.services.memory_forget_service import MemoryForgetService
@@ -118,6 +118,13 @@ EMBEDDING_MAX_WORKERS = int(os.getenv("EMBEDDING_MAX_WORKERS", "3"))
 AUTO_QUESTIONS_MAX_WORKERS = int(os.getenv("AUTO_QUESTIONS_MAX_WORKERS", "5"))
 # 文档解析页数上限
 MAX_DOCUMENT_PAGES = int(os.getenv("MAX_DOCUMENT_PAGES", "200"))
+
+# ── GDS 拓扑分数（eigenvector 中心性）扫描/计算常量 ──────────────
+# 在途锁 key：避免相邻两轮 scan 重复派发同一用户
+_GDS_TOPOLOGY_INFLIGHT_KEY_FMT = "gds_topology:inflight:{end_user_id}"
+_GDS_TOPOLOGY_INFLIGHT_TTL_SEC = 1500
+# 活跃口径：write_time 距今 < 24 小时才参与 GDS 拓扑分数计算
+_GDS_TOPOLOGY_ACTIVE_HOURS = 24
 
 
 @dataclass(frozen=True)
@@ -3421,6 +3428,134 @@ def scan_reflection_retry(self) -> Dict[str, Any]:
         "cleaned": cleaned,
         "dispatched_uids": dispatched_uids,
     }
+
+
+# =============================================================================
+# GDS 拓扑分数（eigenvector 中心性）：扫描活跃用户 → heavy 计算
+# =============================================================================
+
+
+@celery_app.task(
+    name="app.tasks.scan_gds_topology_score",
+    bind=True,
+    ignore_result=False,
+    max_retries=0,
+    acks_late=False,
+)
+def scan_gds_topology_score(self) -> Dict[str, Any]:
+    start_time = time.time()
+
+    redis_client = get_sync_redis_client()
+    dispatched = 0
+    dispatched_user_ids = []
+    skip_inactive = 0
+    skip_inflight = 0
+
+    with get_db_read() as db:
+        workspace_ids = get_all_active_workspaces(db)
+
+    for ws_id_uuid in workspace_ids:
+        with get_db_read() as db:
+            for user in get_end_users_by_workspace(db, ws_id_uuid):
+                uid = str(user.id)
+                try:
+                    if not _is_active_recently(db, uid, _GDS_TOPOLOGY_ACTIVE_HOURS):
+                        skip_inactive += 1
+                        continue
+                    # 在途锁：抢不到说明该用户已有 GDS 任务在途，跳过（纯 SET NX EX 粗过滤）
+                    if redis_client is not None:
+                        ok = redis_client.set(
+                            _GDS_TOPOLOGY_INFLIGHT_KEY_FMT.format(end_user_id=uid),
+                            "1", nx=True, ex=_GDS_TOPOLOGY_INFLIGHT_TTL_SEC,
+                        )
+                        if not ok:
+                            skip_inflight += 1
+                            continue
+                    do_gds_topology_score.apply_async(
+                        kwargs={"end_user_id": uid},
+                        queue="memory_heavy_tasks",
+                    )
+                    dispatched += 1
+                    dispatched_user_ids.append(uid)
+                    if dispatched % 10 == 0:
+                        logger.info(
+                            f"scan_gds_topology_score 进度: 已派发 {dispatched} 个用户, "
+                            f"最近10个: {dispatched_user_ids[-10:]}"
+                        )
+                except Exception as e:
+                    logger.error(f"GDS拓扑scan 处理用户失败 user={uid}: {e}")
+                    try:
+                        db.rollback()
+                    except Exception:
+                        pass
+
+    logger.info(
+        f"scan_gds_topology_score 完成: 派发 {dispatched} {dispatched_user_ids}, "
+        f"跳过(不活跃) {skip_inactive}, 在途 {skip_inflight}, "
+        f"耗时 {time.time() - start_time:.1f}s"
+    )
+    return {"status": "SUCCESS", "dispatched": dispatched,
+            "dispatched_user_ids": dispatched_user_ids,
+            "skip_inactive": skip_inactive, "skip_inflight": skip_inflight}
+
+
+@celery_app.task(
+    name="app.tasks.do_gds_topology_score",
+    bind=True,
+    ignore_result=False,
+    max_retries=0,
+    acks_late=False,
+    time_limit=600,
+    soft_time_limit=540,
+)
+def do_gds_topology_score(self, end_user_id: str) -> Dict[str, Any]:
+    if not end_user_id:
+        raise ValueError("end_user_id is required")
+
+    inflight_key = _GDS_TOPOLOGY_INFLIGHT_KEY_FMT.format(end_user_id=end_user_id)
+    start_time = time.time()
+
+    async def _run() -> Dict[str, Any]:
+        from app.repositories.neo4j.gds_topology_repository import compute_topology_score
+
+        # 抢该用户的写锁，避免 eigenvector.write 写回与并发写入冲突。
+        write_lock = None
+        redis_client = get_sync_redis_client()
+        if redis_client is not None:
+            write_lock = RedisFairLock(
+                key=f"memory_write:{end_user_id}",
+                redis_client=redis_client,
+                expire=600, timeout=30, auto_renewal=True,
+            )
+            if not await asyncio.to_thread(write_lock.acquire):
+                logger.warning(f"GDS拓扑do 获取写锁超时，跳过 user={end_user_id}")
+                return {"status": "lock_timeout"}
+        try:
+            return await compute_topology_score(end_user_id)
+        finally:
+            if write_lock is not None:
+                await asyncio.to_thread(write_lock.release)
+
+    loop = set_asyncio_event_loop()
+    try:
+        result = loop.run_until_complete(_run())
+        result["end_user_id"] = end_user_id
+        result["elapsed_time"] = time.time() - start_time
+        result["task_id"] = self.request.id
+        return result
+    except Exception as e:
+        # GDS 投影 / eigenvector.write / drop 抛错，re-raise 让 Celery 标记 FAILURE（带 traceback）
+        logger.error(f"GDS拓扑do 失败 user={end_user_id}: {e}", exc_info=True)
+        raise
+    finally:
+        _shutdown_loop_gracefully(loop)
+        # 释放在途标记：放行下一轮 scan 对该用户的派发（成功/失败/跳过都删）
+        try:
+            redis_client = get_sync_redis_client()
+            if redis_client is not None:
+                redis_client.delete(inflight_key)
+        except Exception:
+            pass
 
 
 # unused task
