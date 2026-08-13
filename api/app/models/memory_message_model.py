@@ -47,9 +47,8 @@ class MemoryMessage(Base):
     )
     original_message_id = Column(
         UUID(as_uuid=True),
-        ForeignKey("messages.id"),
         nullable=True,
-        comment="原始消息 ID（对 messages 表的引用；工作流/API/MCP 消息为 NULL）",
+        comment="原始消息 ID（对 messages 表的逻辑引用，非外键；工作流/API/MCP 消息为 NULL）",
     )
 
     # 归属与来源标识（用于替代哨兵 App 机制）

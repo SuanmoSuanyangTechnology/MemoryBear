@@ -388,13 +388,15 @@ class MultimodalService:
             files: Optional[List[FileInput]],
             workspace_id: uuid.UUID = None,
             document_image_recognition: bool = False,
+            include_processing_errors: bool = True,
     ) -> List[Dict[str, Any]]:
         """
         处理文件列表，返回 LLM 可用的格式
-        
+
         Args:
             files: 文件输入列表
-            
+            include_processing_errors: 是否把失败文件的占位文本加入结果；为 False 时跳过失败文件并继续处理后续文件
+
         Returns:
             List[Dict]: LLM 可用的内容格式列表（根据 provider 返回不同格式）
         """
@@ -419,9 +421,13 @@ class MultimodalService:
             try:
                 if file.type == FileType.IMAGE and ModelCapability.VISION in self.capability:
                     is_support, content = await self._process_image(file, strategy)
-                    result.append(content)
+                    if is_support or include_processing_errors:
+                        result.append(content)
                 elif file.type == FileType.DOCUMENT:
                     is_support, content = await self._process_document(file, strategy)
+                    if not is_support and not include_processing_errors:
+                        # 只跳过当前失败文档，后续文件仍会继续处理；若最终无成功结果，上层回退已有 summary。
+                        continue
                     result.append(content)
                     # 仅当开关开启且模型支持视觉时，才提取文档内嵌图片
                     if document_image_recognition and ModelCapability.VISION in self.capability:
@@ -446,17 +452,20 @@ class MultimodalService:
                                     url=img_url,
                                     file_type="image/png",
                                 )
-                                _, img_content = await self._process_image(img_file, strategy_class(img_file))
-                                img_result.append(img_content)
+                                img_support, img_content = await self._process_image(img_file, strategy_class(img_file))
+                                if img_support or include_processing_errors:
+                                    img_result.append(img_content)
                             except Exception as img_err:
                                 logger.warning(f"文档图片处理失败: {img_err}")
                         result.extend(img_result)
                 elif file.type == FileType.AUDIO and "audio" in self.capability:
                     is_support, content = await self._process_audio(file, strategy)
-                    result.append(content)
+                    if is_support or include_processing_errors:
+                        result.append(content)
                 elif file.type == FileType.VIDEO and "video" in self.capability:
                     is_support, content = await self._process_video(file, strategy)
-                    result.append(content)
+                    if is_support or include_processing_errors:
+                        result.append(content)
                 else:
                     logger.warning(f"不支持的文件类型: {file.type}")
             except Exception as e:
@@ -469,11 +478,12 @@ class MultimodalService:
                     },
                     exc_info=True
                 )
-                # 继续处理其他文件，不中断整个流程
-                result.append({
-                    "type": "text",
-                    "text": f"[文件处理失败: {str(e)}]"
-                })
+                # 默认保留历史错误占位；关闭后只跳过当前失败文件，后续文件仍会继续处理。
+                if include_processing_errors:
+                    result.append({
+                        "type": "text",
+                        "text": f"[文件处理失败: {str(e)}]"
+                    })
 
         logger.info(f"成功处理 {len(result)}/{len(files)} 个文件，provider={self.provider}")
         return result
