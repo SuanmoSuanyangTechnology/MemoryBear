@@ -1,7 +1,8 @@
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable
+from typing import Any
 
 from app.core.rag.nlp import rag_tokenizer
 
@@ -43,6 +44,11 @@ class LogicalChunkType(str, Enum):
     IMAGE = "image"
 
 
+class ImageVisionScope(str, Enum):
+    EMBEDDED = "embedded"
+    DIRECT = "direct"
+
+
 class ParsedBlockType(str, Enum):
     HEADING = "heading"
     TEXT = "text"
@@ -64,6 +70,7 @@ class ParsedBlock:
     image: Any = None
     positions: list | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    image_vision_scope: ImageVisionScope | None = None
 
 
 @dataclass
@@ -73,6 +80,9 @@ class LogicalChunk:
     image: Any = None
     positions: list | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    source_image_key: int | None = None
+    image_tag_complete: bool = False
+    image_vision_scope: ImageVisionScope | None = None
 
 
 @dataclass
@@ -111,6 +121,9 @@ class ParseResult:
     append_embed: bool = True
     blocks: list[ParsedBlock] | None = None
     markdown_preprocess_profile: str | None = None
+    structured_markdown_stream: bool = False
+    direct_image_vision_mode: int | None = None
+    direct_image_has_ocr_text: bool = False
 
 
 @dataclass

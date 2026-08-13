@@ -3,6 +3,7 @@ import uuid
 from pathlib import Path
 
 from app.core.rag.chunk.context import (
+    ImageVisionScope,
     ParsedBlockType,
     ParseResult,
     is_embedded_image_vision_enabled,
@@ -12,7 +13,6 @@ from app.core.rag.chunk.parser.image_storage import (
     cleanup_mineru_v3_images,
     store_mineru_v3_image,
 )
-from app.core.rag.chunk.parser.image_vision import enhance_image_blocks_with_vision
 from app.core.rag.chunk.parser.mineru_v3_client import MinerUV3Client
 from app.core.rag.chunk.parser.structured_markdown import StructMarkdownParser
 
@@ -40,6 +40,9 @@ class MinerUV3Parser(DocumentParser):
             normalize_escaped_structure=True,
         )
         if embedded_image_vision_enabled:
+            for block in blocks:
+                if block.type is ParsedBlockType.IMAGE:
+                    block.image_vision_scope = ImageVisionScope.EMBEDDED
             attached_count, attached_images, unresolved_count = self._attach_images(blocks, mineru_result.images)
             LOGGER.info("[MinerUV3] markdown images attached: count=%s", attached_count)
             retained_file_ids, all_assets_stored = self._store_image_assets(attached_images, ctx)
@@ -54,11 +57,14 @@ class MinerUV3Parser(DocumentParser):
         else:
             LOGGER.warning("[MinerUV3] stale image cleanup skipped because one or more image assets were not stored")
 
-        if ctx.vision_model and embedded_image_vision_enabled:
-            self._enhance_image_blocks(blocks, ctx)
-        elif ctx.vision_model:
+        if ctx.vision_model and not embedded_image_vision_enabled:
             LOGGER.info("[MinerUV3] image vision enhancement disabled by parser config")
-        return ParseResult(blocks=blocks, merge_strategy="blocks", markdown_preprocess_profile="mineru")
+        return ParseResult(
+            blocks=blocks,
+            merge_strategy="blocks",
+            markdown_preprocess_profile="mineru",
+            structured_markdown_stream=True,
+        )
 
     def parse_markdown(self, ctx) -> str:
         binary = self._read_binary(ctx)
@@ -121,7 +127,7 @@ class MinerUV3Parser(DocumentParser):
                     raise ValueError("image asset was not created")
                 self._replace_image_markdown_url(block, asset.download_url)
                 stored_file_ids.add(asset.file_id)
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - isolate one asset failure from the batch
                 failed_count += 1
                 LOGGER.warning(
                     "[MinerUV3] image storage failed: index=%s total=%s src=%s error=%s",
@@ -172,17 +178,6 @@ class MinerUV3Parser(DocumentParser):
             return
         if deleted_count:
             LOGGER.info("[MinerUV3] stale image assets deleted: document_id=%s count=%s", document_uuid, deleted_count)
-
-    def _enhance_image_blocks(self, blocks, ctx) -> None:
-        enhance_image_blocks_with_vision(
-            blocks,
-            vision_model=ctx.vision_model,
-            callback=ctx.callback,
-            log_prefix="MinerUV3",
-            lang=ctx.lang,
-            progress_start=0.77,
-            progress_span=0.02,
-        )
 
     def _callback(self, ctx, progress, message: str) -> None:
         if ctx.callback:
