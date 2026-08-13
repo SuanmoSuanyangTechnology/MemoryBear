@@ -139,26 +139,31 @@ class MemoryService:
         return await refresh_user_card_tags(end_user_id, workspace_id)
 
     @staticmethod
-    async def ingest_agent_message(
+    async def ingest_agent_messages(
         conversation_id: str,
-        message: Any,
+        messages: List[Any],
         app_id: str,
         config_id: str = "",
         workspace_id: str = "",
         end_user_id: str = "",
-        should_memorize: bool = True,
         language: str = "zh",
     ) -> bool:
-        """Agent 消息摄入：写入 memory_messages 表 + 触发滑动窗口派发。"""
-        from app.core.memory.pipelines.dispatcher import ingest_agent_message
-        return await ingest_agent_message(
+        """批量 Agent 消息摄入：一次事务写入 + 一次滑动窗口派发。
+
+        同一回合的 user + assistant 应通过此入口一次派发，避免两次
+        fire-and-forget 造成的 seq 分配竞态（顺序颠倒）。
+
+        每条 message 需带以下属性：
+            .id, .role, .content, .created_at, .meta_data, .should_memorize
+        """
+        from app.core.memory.pipelines.dispatcher import ingest_agent_messages
+        return await ingest_agent_messages(
             conversation_id=conversation_id,
-            message=message,
+            messages=messages,
             app_id=app_id,
             config_id=config_id,
             workspace_id=workspace_id,
             end_user_id=end_user_id,
-            should_memorize=should_memorize,
             language=language,
         )
 
