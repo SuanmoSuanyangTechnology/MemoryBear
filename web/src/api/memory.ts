@@ -26,6 +26,7 @@ import type { EndUser } from '@/views/UserMemoryDetail/types'
 import { handleSSE, type SSEMessage } from '@/utils/stream'
 import type { ChatItem } from '@/components/Chat/types'
 import type { Query } from '@/views/UserMemory/types';
+import type { Query as ExtractedEntityQuery } from '@/views/UserMemoryDetail/pages/ExtractedEntityGraphDetail'
 
 // Memory conversation
 export const readService = (query: TestParams) => {
@@ -237,7 +238,7 @@ export const getTimelineMemories = (data: { id: string; label: string; }) => {
 }
 
 // ExtractedEntity memory timeline
-export const getEntityEventTimeline = (data: { id: string; type?: string; page?: number; pagesize?: number; }) => {
+export const getEntityEventTimeline = (data: ExtractedEntityQuery) => {
   return request.get('/memory-storage/memory_space/entity_timeline', data)
 }
 export const getExplicitMemory = (end_user_id: string) => {
