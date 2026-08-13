@@ -4,7 +4,7 @@ import logging
 from typing import Any, Dict
 
 from app.repositories.neo4j.cypher_queries import (
-    GDS_GARPH_BUILD,
+    GDS_GRAPH_BUILD,
     G_SCORE,
     CLEAR_GRAPH,
 )
@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 async def compute_topology_score(end_user_id: str) -> Dict[str, Any]:
     connector = Neo4jConnector()
     try:
-        await connector.execute_query(GDS_GARPH_BUILD, end_user_id=end_user_id)
+        await connector.execute_query(GDS_GRAPH_BUILD, end_user_id=end_user_id)
 
         try:
             score_rows = await connector.execute_query(G_SCORE, end_user_id=end_user_id)

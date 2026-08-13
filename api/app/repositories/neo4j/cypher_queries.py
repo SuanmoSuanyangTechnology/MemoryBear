@@ -3246,7 +3246,7 @@ WHERE n.name = '用户'
 SET n.end_user_id = $new_id
 """
 
-GDS_GARPH_BUILD = """
+GDS_GRAPH_BUILD = """
 CALL gds.graph.project.cypher(
     $end_user_id,
     'MATCH (n)
