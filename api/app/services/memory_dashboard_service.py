@@ -828,6 +828,7 @@ def get_rag_content(
                 "page": {
                     "page": page,
                     "pagesize": pagesize,
+                    "total": 0,
                     "hasnext": False,
                 },
                 "items": []
@@ -835,13 +836,8 @@ def get_rag_content(
         
         business_logger.info(f"找到 {len(documents)} 个文档记录")
         
-        # 3. 按全局偏移量计算当前页数据
-        # 全局偏移范围：[offset_start, offset_end)
-        offset_start = (page - 1) * pagesize
-        offset_end = offset_start + pagesize
-        
-        global_total = 0    # 所有文档的 chunk 总数
-        page_contents = []  # 当前页的内容
+        # 3. 全量拉取所有文档的 chunks，按顺序拼接 page_content
+        all_page_contents = []
         
         for document in documents:
             try:
@@ -852,34 +848,9 @@ def get_rag_content(
                 
                 vector_service = ElasticSearchVectorFactory().init_vector(knowledge=kb)
                 
-                # 先用 pagesize=1 获取该文档的 chunk 总数
-                doc_total, _ = vector_service.search_by_segment(
-                    document_id=str(document.id),
-                    query=None,
-                    pagesize=1,
-                    page=1,
-                    asc=True
-                )
-                
-                doc_offset_start = global_total            # 该文档在全局中的起始偏移
-                doc_offset_end = global_total + doc_total  # 该文档在全局中的结束偏移
-                global_total += doc_total
-                
-                # 当前页与该文档无交集，跳过
-                if doc_offset_end <= offset_start or doc_offset_start >= offset_end:
-                    continue
-                
-                # 计算需要从该文档取的局部范围
-                local_start = max(offset_start - doc_offset_start, 0)
-                local_end = min(offset_end - doc_offset_start, doc_total)
-                need_count = local_end - local_start
-                
-                # 换算成 ES 分页参数（ES page 从1开始）
-                es_page = (local_start // pagesize) + 1
-                es_offset_in_page = local_start % pagesize
-                
-                fetched = []
-                while len(fetched) < es_offset_in_page + need_count:
+                # 分页循环拉取该文档的全部 chunk（asc 顺序）
+                es_page = 1
+                while True:
                     _, items = vector_service.search_by_segment(
                         document_id=str(document.id),
                         query=None,
@@ -889,18 +860,17 @@ def get_rag_content(
                     )
                     if not items:
                         break
-                    fetched.extend(items)
+                    all_page_contents.extend([item.page_content for item in items])
+                    if len(items) < pagesize:
+                        break
                     es_page += 1
-                
-                slice_items = fetched[es_offset_in_page: es_offset_in_page + need_count]
-                page_contents.extend([item.page_content for item in slice_items])
                 
             except Exception as e:
                 business_logger.error(f"获取文档 {document.id} 的chunks失败: {str(e)}")
                 continue
         
         # 4. 将所有 page_content 拼接后按角色分割为对话列表
-        merged_text = "\n".join(page_contents)
+        merged_text = "\n".join(all_page_contents)
         conversations = []
         if merged_text.strip():
             import re
@@ -917,16 +887,23 @@ def get_rag_content(
                     conversations.append({"role": role, "content": content})
                 i += 2
 
+        # 5. 对话级分页（total 代表对话条数）
+        total = len(conversations)
+        start = (page - 1) * pagesize
+        end = start + pagesize
+        page_items = conversations[start:end]
+
         result = {
             "page": {
                 "page": page,
                 "pagesize": pagesize,
-                "hasnext": offset_end < global_total,
+                "total": total,
+                "hasnext": (page * pagesize) < total,
             },
-            "items": conversations
+            "items": page_items
         }
         
-        business_logger.info(f"成功获取RAG内容: page={page}, 返回={len(conversations)} 条对话")
+        business_logger.info(f"成功获取RAG内容: page={page}, total={total}, 返回={len(page_items)} 条对话")
         return result
         
     except Exception as e:
