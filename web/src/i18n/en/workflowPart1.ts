@@ -448,6 +448,7 @@ export const workflowPart1 = {
           context: 'Context',
           message: 'Query',
           max_iterations: 'Max Iterations',
+          long_term_memory: 'Memory Configuration',
         },
         name: 'Key',
         type: 'Type',

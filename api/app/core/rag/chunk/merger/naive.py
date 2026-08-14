@@ -28,7 +28,7 @@ def build_parent_child_logical_chunks(
         child_chunks: list[LogicalChunk] = []
         parent_id_map: dict[int, int] = {}
         child_token_num = int(parser_config.get("chunk_token_num", 128))
-        for child_text in split_text(full_text, child_token_num):
+        for child_text in split_text(truncated, child_token_num):
             if not child_text.strip():
                 continue
             parent_id_map[len(child_chunks)] = 0

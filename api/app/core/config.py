@@ -70,6 +70,17 @@ class Settings:
     BATCH_PERSIST_MAX_WAIT_MS: int = int(os.getenv("BATCH_PERSIST_MAX_WAIT_MS", "500"))
     BATCH_PERSIST_PUT_TIMEOUT_MS: int = int(os.getenv("BATCH_PERSIST_PUT_TIMEOUT_MS", "100"))
 
+    # Memory retrieval display queue (PG snapshot of user-visible memory reads)
+    MEMORY_RETRIEVAL_DISPLAY_QUEUE_SIZE: int = int(
+        os.getenv("MEMORY_RETRIEVAL_DISPLAY_QUEUE_SIZE", "5000")
+    )
+    MEMORY_RETRIEVAL_DISPLAY_MAX_BATCH: int = int(
+        os.getenv("MEMORY_RETRIEVAL_DISPLAY_MAX_BATCH", "50")
+    )
+    MEMORY_RETRIEVAL_DISPLAY_MAX_WAIT_MS: int = int(
+        os.getenv("MEMORY_RETRIEVAL_DISPLAY_MAX_WAIT_MS", "500")
+    )
+
     DB_AUTO_UPGRADE = os.getenv("DB_AUTO_UPGRADE", "false").lower() == "true"
 
     # Redis configuration
@@ -287,6 +298,12 @@ class Settings:
     # 如需使用 RabbitMQ，在 .env 中设置 CELERY_BROKER_URL=amqp://user:pass@host:5672/vhost
     REDIS_DB_CELERY_BROKER: int = int(os.getenv("REDIS_DB_CELERY_BROKER", "3"))
     REDIS_DB_CELERY_BACKEND: int = int(os.getenv("REDIS_DB_CELERY_BACKEND", "4"))
+
+    # 通知中心配置
+    NOTIFICATION_REDIS_DB: int = int(os.getenv("NOTIFICATION_REDIS_DB", "8"))
+    NOTIFICATION_SCAN_INTERVAL_SECONDS: int = int(os.getenv("NOTIFICATION_SCAN_INTERVAL_SECONDS", "60"))
+    NOTIFICATION_HEARTBEAT_SECONDS: int = int(os.getenv("NOTIFICATION_HEARTBEAT_SECONDS", "25"))
+    NOTIFICATION_MAX_SSE_PER_USER: int = int(os.getenv("NOTIFICATION_MAX_SSE_PER_USER", "3"))
 
     # SMTP Email Configuration
     SMTP_SERVER: str = os.getenv("SMTP_SERVER", "smtp.gmail.com")

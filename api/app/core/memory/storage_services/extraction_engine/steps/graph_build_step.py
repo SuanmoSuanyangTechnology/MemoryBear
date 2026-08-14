@@ -204,6 +204,7 @@ def _build_statement_node(
         emotion_subject=statement.emotion_subject,
         emotion_target=statement.emotion_target,
         has_unsolved_reference=statement.has_unsolved_reference,
+        is_permanent=statement.is_permanent,
         dialog_at=statement.dialog_at,
         chunk_id=chunk.id,
         connect_strength=_coalesce_connect_strength(statement),

@@ -102,6 +102,10 @@ class Statement(BaseModel):
         False,
         description="Whether the statement reflects user's emotional state",
     )
+    is_permanent: bool = Field(
+        False,
+        description="Whether this statement is a permanent-memory candidate",
+    )
     dialog_at: Optional[str] = Field(None, description="Absolute timestamp of the source message (ISO 8601).")
 
 

@@ -7,10 +7,11 @@ export type ActivityDateGroup = 'today' | 'yesterday' | 'earlier';
 export type MemoryType = 'conversation' | 'project_work' | 'learning' | 'decision' | 'important_event';
 
 export type EngineType = 'EXTRACTION' | 'CROSS_MODAL' | 'EMOTION';
+
+export type SearchMode = 'deep' | 'normal' | 'quick' | 'express'
 export interface MemoryActivityProps {
   className?: string
 }
-
 
 export interface ActivityRecord {
   id: string
@@ -20,8 +21,13 @@ export interface ActivityRecord {
   name: string
   content: string
   occurred_at: number
+
+  search_mode?: SearchMode;
+  query?: string;
 }
 
 export interface ActivityQuery {
-  end_user_id: string
+  end_user_id: string;
+  include_engines?: boolean;
+  language?: string;
 }

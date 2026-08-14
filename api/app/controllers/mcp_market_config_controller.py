@@ -122,7 +122,7 @@ async def get_mcp_servers(
             "page": page,
             "pagesize": pagesize,
             "total": total,
-            "has_next": True if page * pagesize < total else False
+            "hasnext": True if page * pagesize < total else False
         }
     }
     # 5. Update mck_market.mcp_count

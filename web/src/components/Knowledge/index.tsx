@@ -32,12 +32,14 @@ interface KnowledgeProps {
   value?: KnowledgeConfig;
   onChange?: (config: KnowledgeConfig) => void;
   variant?: KnowledgeVariant;
+  required?: boolean;
 }
 
 const Knowledge: FC<KnowledgeProps> = ({
   value = { knowledge_bases: [] },
   onChange,
   variant = 'application',
+  required
 }) => {
   const { t } = useTranslation()
   const knowledgeModalRef = useRef<KnowledgeModalRef>(null)
@@ -210,7 +212,7 @@ const Knowledge: FC<KnowledgeProps> = ({
     <div>
       <Flex align="center" justify="space-between" className="rb:mb-2!">
         <div className="rb:text-[12px] rb:font-medium rb:leading-4.5">
-          <span className="rb:text-[#ff5d34] rb:text-[14px] rb:font-[SimSun,sans-serif] rb:mr-1">*</span>{t('application.knowledgeBaseAssociation')}
+          {required && <span className="rb:text-[#ff5d34] rb:text-[14px] rb:font-[SimSun,sans-serif] rb:mr-1">*</span>}{t('application.knowledgeBaseAssociation')}
         </div>
 
         <Button

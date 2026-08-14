@@ -18,11 +18,16 @@ from app.schemas.response_schema import ApiResponse
 from app.services import api_key_service
 from app.services.file_storage_service import FileStorageService, get_file_storage_service
 from app.services.knowledge_retrieval_service import KnowledgeRetrievalAccessDenied
-from app.services.rag_access_service import get_api_key_retrieval_principal_async
+from app.services.rag_access_service import (
+    get_api_key_request_user,
+    get_api_key_retrieval_principal_async,
+    unwrap_current_workspace_guard,
+)
 
 
 router = APIRouter(prefix="/chunks", tags=["V1 - RAG API"])
 api_logger = get_business_logger()
+chunk_controller = unwrap_current_workspace_guard(chunk_controller)
 
 
 @router.get("/{kb_id}/{document_id}/previewchunks", response_model=ApiResponse)
@@ -45,8 +50,7 @@ async def get_preview_chunks(
     """
     # 0. Obtain the creator of the api key
     api_key = await api_key_service.ApiKeyService.get_api_key_async(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
-    current_user = api_key.creator
-    current_user.current_workspace_id = api_key_auth.workspace_id
+    current_user = get_api_key_request_user(api_key, api_key_auth)
 
     return await chunk_controller.get_preview_chunks(kb_id=kb_id,
                                                      document_id=document_id,
@@ -77,8 +81,7 @@ async def get_chunks(
     """
     # 0. Obtain the creator of the api key
     api_key = await api_key_service.ApiKeyService.get_api_key_async(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
-    current_user = api_key.creator
-    current_user.current_workspace_id = api_key_auth.workspace_id
+    current_user = get_api_key_request_user(api_key, api_key_auth)
 
     return await chunk_controller.get_chunks(kb_id=kb_id,
                                              document_id=document_id,
@@ -106,8 +109,7 @@ async def create_chunk(
     create_data = chunk_schema.ChunkCreate(**body)
     # 0. Obtain the creator of the api key
     api_key = await api_key_service.ApiKeyService.get_api_key_async(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
-    current_user = api_key.creator
-    current_user.current_workspace_id = api_key_auth.workspace_id
+    current_user = get_api_key_request_user(api_key, api_key_auth)
 
     return await chunk_controller.create_chunk(kb_id=kb_id,
                                                document_id=document_id,
@@ -133,8 +135,7 @@ async def create_chunks_batch(
     batch_data = chunk_schema.ChunkBatchCreate(**body)
     # 0. Obtain the creator of the api key
     api_key = await api_key_service.ApiKeyService.get_api_key_async(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
-    current_user = api_key.creator
-    current_user.current_workspace_id = api_key_auth.workspace_id
+    current_user = get_api_key_request_user(api_key, api_key_auth)
 
     return await chunk_controller.create_chunks_batch(kb_id=kb_id,
                                                       document_id=document_id,
@@ -158,8 +159,7 @@ async def get_chunk(
     """
     # 0. Obtain the creator of the api key
     api_key = await api_key_service.ApiKeyService.get_api_key_async(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
-    current_user = api_key.creator
-    current_user.current_workspace_id = api_key_auth.workspace_id
+    current_user = get_api_key_request_user(api_key, api_key_auth)
 
     return await chunk_controller.get_chunk(kb_id=kb_id,
                                             document_id=document_id,
@@ -186,8 +186,7 @@ async def update_chunk(
     update_data = chunk_schema.ChunkUpdate(**body)
     # 0. Obtain the creator of the api key
     api_key = await api_key_service.ApiKeyService.get_api_key_async(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
-    current_user = api_key.creator
-    current_user.current_workspace_id = api_key_auth.workspace_id
+    current_user = get_api_key_request_user(api_key, api_key_auth)
 
     return await chunk_controller.update_chunk(kb_id=kb_id,
                                                document_id=document_id,
@@ -213,8 +212,7 @@ async def delete_chunk(
     """
     # 0. Obtain the creator of the api key
     api_key = await api_key_service.ApiKeyService.get_api_key_async(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
-    current_user = api_key.creator
-    current_user.current_workspace_id = api_key_auth.workspace_id
+    current_user = get_api_key_request_user(api_key, api_key_auth)
 
     return await chunk_controller.delete_chunk(kb_id=kb_id,
                                                document_id=document_id,
@@ -270,8 +268,7 @@ async def import_qa_new_doc(
     导入 QA 问答对并新建文档（CSV/Excel），异步处理（API Key 认证）
     """
     api_key = await api_key_service.ApiKeyService.get_api_key_async(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
-    current_user = api_key.creator
-    current_user.current_workspace_id = api_key_auth.workspace_id
+    current_user = get_api_key_request_user(api_key, api_key_auth)
 
     return await chunk_controller.import_qa_new_doc(
         kb_id=kb_id,

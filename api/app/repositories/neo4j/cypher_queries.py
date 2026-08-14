@@ -61,9 +61,45 @@ SET s.delete_at = null,
     last_access_time: statement.last_access_time,
     access_count: statement.access_count,
     dialog_at: statement.dialog_at,
-    has_unsolved_reference: statement.has_unsolved_reference
+    has_unsolved_reference: statement.has_unsolved_reference,
+    is_permanent: CASE
+        WHEN coalesce(s.is_permanent, false) THEN true
+        ELSE coalesce(statement.is_permanent, false)
+    END
 }
 RETURN s.id AS uuid
+"""
+
+PERMANENT_MEMORY_COUNT = """
+MATCH (s:Statement {end_user_id: $end_user_id})
+WHERE s.delete_at IS NULL
+  AND coalesce(s.is_permanent, false) = true
+RETURN count(s) AS used
+"""
+
+PERMANENT_MEMORY_LIST = """
+MATCH (s:Statement {end_user_id: $end_user_id})
+WHERE s.delete_at IS NULL
+  AND coalesce(s.is_permanent, false) = true
+WITH s, elementId(s) AS id
+ORDER BY s.created_at DESC, id ASC
+SKIP $skip
+LIMIT $limit
+RETURN id,
+       'Statement' AS label,
+       {
+           statement: s.statement,
+           created_at: s.created_at,
+           is_permanent: true
+       } AS properties
+"""
+
+PERMANENT_MEMORY_UNMARK = """
+MATCH (s:Statement {end_user_id: $end_user_id})
+WHERE elementId(s) = $element_id
+  AND s.delete_at IS NULL
+SET s.is_permanent = false
+RETURN elementId(s) AS id, s.is_permanent AS is_permanent
 """
 
 STATEMENT_EMOTION_UPDATE = """
@@ -74,6 +110,136 @@ SET s.emotion_type = item.emotion_type,
     s.emotion_intensity = item.emotion_intensity,
     s.emotion_keywords = item.emotion_keywords
 RETURN s.id AS uuid
+"""
+
+INTEREST_ENTITY_CANDIDATES_BY_END_USER = """
+MATCH (s:Statement)-[:REFERENCES_ENTITY]->(e:ExtractedEntity)
+WHERE s.end_user_id = $id
+  AND e.end_user_id = $id
+  AND s.delete_at IS NULL
+  AND e.delete_at IS NULL
+  AND e.id IS NOT NULL
+  AND e.name IS NOT NULL
+  AND (
+    s.speaker IS NULL
+    OR toLower(trim(toString(s.speaker))) = 'user'
+  )
+WITH e.id AS entity_id,
+     trim(toString(e.name)) AS name,
+     coalesce(toString(e.entity_type), '') AS entity_type,
+     count(DISTINCT s.id) AS frequency
+WHERE name <> ''
+  AND NOT (toLower(name) IN $excluded_names)
+  AND NOT name =~ $iso_datetime_pattern
+  AND NOT name =~ $unix_timestamp_pattern
+RETURN entity_id, name, entity_type, frequency
+ORDER BY frequency DESC, toLower(name) ASC, entity_id ASC
+LIMIT $limit
+"""
+
+INTEREST_ENTITY_CANDIDATES_BY_USER = """
+MATCH (s:Statement)-[:REFERENCES_ENTITY]->(e:ExtractedEntity)
+WHERE s.user_id = $id
+  AND e.user_id = $id
+  AND s.delete_at IS NULL
+  AND e.delete_at IS NULL
+  AND e.id IS NOT NULL
+  AND e.name IS NOT NULL
+  AND (
+    s.speaker IS NULL
+    OR toLower(trim(toString(s.speaker))) = 'user'
+  )
+WITH e.id AS entity_id,
+     trim(toString(e.name)) AS name,
+     coalesce(toString(e.entity_type), '') AS entity_type,
+     count(DISTINCT s.id) AS frequency
+WHERE name <> ''
+  AND NOT (toLower(name) IN $excluded_names)
+  AND NOT name =~ $iso_datetime_pattern
+  AND NOT name =~ $unix_timestamp_pattern
+RETURN entity_id, name, entity_type, frequency
+ORDER BY frequency DESC, toLower(name) ASC, entity_id ASC
+LIMIT $limit
+"""
+
+INTEREST_STATEMENT_EVIDENCE_BY_END_USER = """
+UNWIND range(0, size($entity_ids) - 1) AS entity_rank
+WITH entity_rank, $entity_ids[entity_rank] AS entity_id
+MATCH (s:Statement)-[:REFERENCES_ENTITY]->(e:ExtractedEntity {id: entity_id})
+WHERE s.end_user_id = $id
+  AND e.end_user_id = $id
+  AND s.delete_at IS NULL
+  AND e.delete_at IS NULL
+  AND s.id IS NOT NULL
+  AND s.statement IS NOT NULL
+  AND trim(toString(s.statement)) <> ''
+  AND (
+    s.speaker IS NULL
+    OR toLower(trim(toString(s.speaker))) = 'user'
+  )
+WITH entity_rank, entity_id, s
+ORDER BY entity_rank ASC,
+         CASE WHEN toLower(trim(toString(s.speaker))) = 'user' THEN 0 ELSE 1 END ASC,
+         coalesce(s.dialog_at, s.created_at) DESC,
+         s.id ASC
+WITH entity_rank, entity_id, collect(s)[0..$per_entity_limit] AS statements
+UNWIND statements AS s
+WITH s, min(entity_rank) AS first_entity_rank
+MATCH (s)-[:REFERENCES_ENTITY]->(related_entity:ExtractedEntity)
+WHERE related_entity.id IN $entity_ids
+  AND related_entity.end_user_id = $id
+  AND related_entity.delete_at IS NULL
+WITH s,
+     first_entity_rank,
+     collect(DISTINCT toString(related_entity.id)) AS related_entity_ids
+RETURN toString(s.id) AS statement_id,
+       [entity_id IN $entity_ids WHERE entity_id IN related_entity_ids] AS entity_ids,
+       substring(trim(toString(s.statement)), 0, $max_chars) AS statement_text
+ORDER BY first_entity_rank ASC,
+         CASE WHEN toLower(trim(toString(s.speaker))) = 'user' THEN 0 ELSE 1 END ASC,
+         coalesce(s.dialog_at, s.created_at) DESC,
+         statement_id ASC
+LIMIT $limit
+"""
+
+INTEREST_STATEMENT_EVIDENCE_BY_USER = """
+UNWIND range(0, size($entity_ids) - 1) AS entity_rank
+WITH entity_rank, $entity_ids[entity_rank] AS entity_id
+MATCH (s:Statement)-[:REFERENCES_ENTITY]->(e:ExtractedEntity {id: entity_id})
+WHERE s.user_id = $id
+  AND e.user_id = $id
+  AND s.delete_at IS NULL
+  AND e.delete_at IS NULL
+  AND s.id IS NOT NULL
+  AND s.statement IS NOT NULL
+  AND trim(toString(s.statement)) <> ''
+  AND (
+    s.speaker IS NULL
+    OR toLower(trim(toString(s.speaker))) = 'user'
+  )
+WITH entity_rank, entity_id, s
+ORDER BY entity_rank ASC,
+         CASE WHEN toLower(trim(toString(s.speaker))) = 'user' THEN 0 ELSE 1 END ASC,
+         coalesce(s.dialog_at, s.created_at) DESC,
+         s.id ASC
+WITH entity_rank, entity_id, collect(s)[0..$per_entity_limit] AS statements
+UNWIND statements AS s
+WITH s, min(entity_rank) AS first_entity_rank
+MATCH (s)-[:REFERENCES_ENTITY]->(related_entity:ExtractedEntity)
+WHERE related_entity.id IN $entity_ids
+  AND related_entity.user_id = $id
+  AND related_entity.delete_at IS NULL
+WITH s,
+     first_entity_rank,
+     collect(DISTINCT toString(related_entity.id)) AS related_entity_ids
+RETURN toString(s.id) AS statement_id,
+       [entity_id IN $entity_ids WHERE entity_id IN related_entity_ids] AS entity_ids,
+       substring(trim(toString(s.statement)), 0, $max_chars) AS statement_text
+ORDER BY first_entity_rank ASC,
+         CASE WHEN toLower(trim(toString(s.speaker))) = 'user' THEN 0 ELSE 1 END ASC,
+         coalesce(s.dialog_at, s.created_at) DESC,
+         statement_id ASC
+LIMIT $limit
 """
 
 CHUNK_NODE_SAVE = """
@@ -1955,7 +2121,7 @@ RETURN e.id AS id,
        e.entity_type AS entity_type,
        e.description AS description,
        e.description_summary AS description_summary,
-       e.description_timeline AS description_timeline,
+       e.event_timeline AS event_timeline,
        COALESCE(e.activation_value, e.importance_score, 0.5) AS activation_value,
        COALESCE(e.importance_score, 0.5) AS importance_score,
        e.last_access_time AS last_access_time,
@@ -2043,7 +2209,7 @@ RETURN e.id AS id,
        e.entity_type AS entity_type,
        e.description AS description,
        e.description_summary AS description_summary,
-       e.description_timeline AS description_timeline,
+       e.event_timeline AS event_timeline,
        COALESCE(e.activation_value, e.importance_score, 0.5) AS activation_value,
        score
 ORDER BY score DESC
@@ -2143,7 +2309,7 @@ RETURN n.description AS description,
        n.anchors AS anchors,
        n.beliefs_or_stances AS beliefs_or_stances,
        n.core_facts AS core_facts,
-       n.events AS events,
+       n.event_timeline AS event_timeline,
        n.goals AS goals,
        n.interests AS interests,
        n.relations AS relations,
@@ -2922,6 +3088,7 @@ FORGET_SOFT_DELETE_BY_ELEMENT_IDS = """
     MATCH (n {end_user_id: $end_user_id})
     WHERE n.delete_at IS NULL
       AND elementId(n) IN $element_ids
+      AND (NOT n:Statement OR coalesce(n.is_permanent, false) = false)
     SET n.delete_at = datetime($now)
     RETURN count(n) AS deleted
 """
@@ -2945,6 +3112,7 @@ CALL () {
     UNION ALL
     MATCH (s:Statement {end_user_id: $end_user_id})
     WHERE s.delete_at IS NULL
+      AND coalesce(s.is_permanent, false) = false
     RETURN 'Statement' AS node_type, elementId(s) AS element_id, s.statement AS content,
            coalesce(s.created_at) AS sort_time, 0 AS extraction_count,
            null AS name, null AS _type
@@ -2964,4 +3132,94 @@ CALL () {
 RETURN *
 ORDER BY CASE WHEN sort_time IS NULL THEN 0 ELSE 1 END, sort_time ASC, extraction_count ASC
 LIMIT $batch_size
+"""
+
+# 将所有节点的 end_user_id 从 old 改为 new
+END_USER_MERGE_REASSIGN_NODES = """
+MATCH (n)
+WHERE n.end_user_id = $old_id
+SET n.end_user_id = $new_id
+RETURN count(n) AS updated_nodes
+"""
+
+# 将所有关系的 end_user_id 从 old 改为 new
+END_USER_MERGE_REASSIGN_EDGES = """
+MATCH ()-[r]->()
+WHERE r.end_user_id = $old_id
+SET r.end_user_id = $new_id
+RETURN count(r) AS updated_edges
+"""
+
+# 查找指定 end_user 的 User 实体节点
+END_USER_MERGE_FIND_USER_ENTITIES = """
+MATCH (n:ExtractedEntity {end_user_id: $end_user_id})
+WHERE n.name = '用户'
+RETURN n, elementId(n) AS elem_id
+"""
+
+# 合并更新 User 实体的所有属性
+END_USER_MERGE_UPDATE_USER = """
+MATCH (n:ExtractedEntity)
+WHERE elementId(n) = $elem_id
+SET n.description = $description,
+    n.description_summary = $description_summary,
+    n.aliases = $aliases,
+    n.anchors = $anchors,
+    n.beliefs_or_stances = $beliefs_or_stances,
+    n.core_facts = $core_facts,
+    n.description_timeline = $description_timeline,
+    n.event_timeline = $event_timeline,
+    n.events = $events,
+    n.goals = $goals,
+    n.interests = $interests,
+    n.relations = $relations,
+    n.traits = $traits
+"""
+
+# 重定向 source User 实体的入边到 target User 实体（保留原始关系类型）
+END_USER_MERGE_REDIRECT_INCOMING = """
+MATCH (src:ExtractedEntity {end_user_id: $old_id})
+WHERE src.name = '用户'
+MATCH (tgt:ExtractedEntity)
+WHERE (tgt.name = '用户')
+  AND tgt.end_user_id = $new_id
+WITH src, tgt
+MATCH (src)<-[r_in]-(other)
+WHERE NOT (other:ExtractedEntity)
+WITH other, tgt, r_in
+CALL apoc.create.relationship(other, type(r_in), properties(r_in), tgt)
+YIELD rel AS r_new
+SET r_new.end_user_id = $new_id
+DELETE r_in
+"""
+
+# 重定向 source User 实体的出边到 target User 实体（保留原始关系类型）
+END_USER_MERGE_REDIRECT_OUTGOING = """
+MATCH (src:ExtractedEntity {end_user_id: $old_id})
+WHERE src.name = '用户'
+MATCH (tgt:ExtractedEntity)
+WHERE (tgt.name = '用户')
+  AND tgt.end_user_id = $new_id
+WITH src, tgt
+MATCH (src)-[r_out]->(other)
+WHERE NOT (other:ExtractedEntity)
+WITH other, tgt, r_out
+CALL apoc.create.relationship(tgt, type(r_out), properties(r_out), other)
+YIELD rel AS r_new
+SET r_new.end_user_id = $new_id
+DELETE r_out
+"""
+
+# 删除 source 的 User 实体节点
+END_USER_MERGE_DELETE_USER_ENTITY = """
+MATCH (n:ExtractedEntity {end_user_id: $old_id})
+WHERE n.name = '用户'
+DETACH DELETE n
+"""
+
+# 将 source User 实体的 end_user_id 改为 target（仅 source 有 User 时）
+END_USER_MERGE_REASSIGN_USER_ENTITY = """
+MATCH (n:ExtractedEntity {end_user_id: $old_id})
+WHERE n.name = '用户'
+SET n.end_user_id = $new_id
 """

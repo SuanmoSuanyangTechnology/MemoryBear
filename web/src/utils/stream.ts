@@ -69,26 +69,56 @@ const refreshTokenForSSE = async (): Promise<string> => {
 export interface SSEMessage {
   event?: string
   data?: string | object
+  /**
+   * SSE comment line (starts with `:`).
+   * Commonly used for server-sent heartbeats such as `: heartbeat` or `: connected`.
+   */
+  comment?: string
 }
 
 /**
  * Parse SSE string format to JSON objects
- * @param sseString - Raw SSE string data
+ *
+ * Handles the following SSE line types:
+ * - `event: <name>`   — event type tag
+ * - `data: <payload>` — JSON / string payload (possibly multi-line)
+ * - `: <comment>`     — comment line (e.g. heartbeat / connected). Emitted as a
+ *                       message with the `comment` field set.
+ *
+ * @param sseString - Raw SSE string data (one or more events separated by `\n\n`)
  * @returns Array of parsed SSE messages
  */
 export function parseSSEToJSON(sseString: string) {
   const events: SSEMessage[] = []
   const lines = sseString.trim().split('\n')
-  
+
+  const flushCurrent = (currentEvent: SSEMessage, dataContent: string) => {
+    if (currentEvent.event || dataContent) {
+      const evt: SSEMessage = { ...currentEvent }
+      if (dataContent) evt.data = parseDataContent(dataContent)
+      events.push(evt)
+      return true
+    }
+    return false
+  }
+
   let currentEvent: SSEMessage = {}
   let dataContent = ''
-  
+  console.log('lines', sseString)
+
   for (const line of lines) {
+    // SSE comment line (`: heartbeat`, `: connected`, ...) — emit as a comment event.
+    if (line.startsWith(':')) {
+      flushCurrent(currentEvent, dataContent)
+      currentEvent = {}
+      dataContent = ''
+      const comment = line.slice(1).trim()
+      if (comment) events.push({ comment })
+      continue
+    }
+
     if (line.startsWith('event:')) {
-      if (currentEvent.event && dataContent) {
-        currentEvent.data = parseDataContent(dataContent)
-        events.push(currentEvent)
-      }
+      flushCurrent(currentEvent, dataContent)
       currentEvent = { event: line.substring(6).trim() }
       dataContent = ''
     } else if (line.startsWith('data:')) {
@@ -97,13 +127,8 @@ export function parseSSEToJSON(sseString: string) {
     }
   }
 
-  
-  if (currentEvent.event && dataContent) {
-    currentEvent.data = parseDataContent(dataContent)
-    console.log('currentEvent', currentEvent)
-    events.push(currentEvent)
-  }
-  
+  flushCurrent(currentEvent, dataContent)
+  console.log('events', events)
   return events
 }
 
@@ -141,22 +166,75 @@ function parseDataContent(dataContent: string): string | object {
 }
 
 /**
+ * SSE request configuration
+ */
+export interface SSERequestConfig {
+  headers?: Record<string, string>
+  method?: 'GET' | 'POST'
+  onOpen?: () => void
+}
+
+/**
+ * Append request data to URL query parameters.
+ * Arrays are represented as repeated parameters and objects are JSON encoded.
+ */
+const appendSearchParam = (params: URLSearchParams, key: string, value: unknown) => {
+  if (value === undefined) return
+
+  if (Array.isArray(value)) {
+    value.forEach(item => appendSearchParam(params, key, item))
+    return
+  }
+
+  if (value !== null && typeof value === 'object') {
+    params.append(key, JSON.stringify(value))
+    return
+  }
+
+  params.append(key, value === null ? '' : String(value))
+}
+
+const buildSSERequestUrl = (url: string, data: any) => {
+  const params = new URLSearchParams()
+
+  if (data instanceof URLSearchParams) {
+    data.forEach((value, key) => params.append(key, value))
+  } else if (data && typeof data === 'object') {
+    Object.entries(data).forEach(([key, value]) => appendSearchParam(params, key, value))
+  }
+
+  const query = params.toString()
+  if (!query) return `${API_PREFIX}${url}`
+
+  return `${API_PREFIX}${url}${url.includes('?') ? '&' : '?'}${query}`
+}
+
+/**
  * Make SSE request with authentication
  * @param url - API endpoint
- * @param data - Request payload
+ * @param data - Request body for POST or query parameters for GET
  * @param token - Authentication token
  * @param config - Additional request configuration
  * @returns Fetch response
  */
-const makeSSERequest = async (url: string, data: any, token: string, config = { headers: {} }, signal?: AbortSignal) => {
-  return fetch(`${API_PREFIX}${url}`, {
-    method: 'POST',
+const makeSSERequest = async (
+  url: string,
+  data: any,
+  token: string,
+  config: SSERequestConfig = {},
+  signal?: AbortSignal,
+) => {
+  const method = config.method ?? 'POST'
+  const requestUrl = method === 'GET' ? buildSSERequestUrl(url, data) : `${API_PREFIX}${url}`
+
+  return fetch(requestUrl, {
+    method,
     headers: {
-      'Content-Type': 'application/json',
+      ...(method === 'POST' ? { 'Content-Type': 'application/json' } : {}),
       'Authorization': `Bearer ${token}`,
       ...config.headers,
     },
-    body: JSON.stringify(data),
+    body: method === 'POST' ? JSON.stringify(data) : undefined,
     signal,
   });
 };
@@ -164,11 +242,17 @@ const makeSSERequest = async (url: string, data: any, token: string, config = { 
 /**
  * Handle SSE stream with automatic token refresh and message parsing
  * @param url - API endpoint
- * @param data - Request payload
+ * @param data - Request body for POST or query parameters for GET
  * @param onMessage - Callback for each parsed message
- * @param config - Additional request configuration
+ * @param config - Additional request configuration; defaults to POST
  */
-export const handleSSE = async (url: string, data: any, onMessage?: (data: SSEMessage[]) => void, config = { headers: {} }, onAbort?: (abort: () => void) => void) => {
+export const handleSSE = async (
+  url: string,
+  data: any,
+  onMessage?: (data: SSEMessage[]) => void,
+  config: SSERequestConfig = {},
+  onAbort?: (abort: () => void) => void,
+) => {
   const controller = new AbortController();
   const abort = () => controller.abort();
   onAbort?.(abort);

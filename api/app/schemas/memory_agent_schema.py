@@ -104,6 +104,11 @@ class Write_UserInput(BaseModel):
     )
 
 
+class MergeEndUserInput(BaseModel):
+    end_user_ids: set[uuid.UUID] = Field()
+    target: uuid.UUID = Field(...)
+
+
 class AgentMemoryDataset(ABC):
     PRONOUN = ['我', '本人', '在下', '自己', '咱', '鄙人', '吴', '余']
     NAME = '用户'

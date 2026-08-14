@@ -163,6 +163,35 @@ class MemoryService:
         )
 
     @staticmethod
+    async def ingest_agent_messages(
+        conversation_id: str,
+        messages: List[Any],
+        app_id: str,
+        config_id: str = "",
+        workspace_id: str = "",
+        end_user_id: str = "",
+        language: str = "zh",
+    ) -> bool:
+        """批量 Agent 消息摄入：一次事务写入 + 一次滑动窗口派发。
+
+        同一回合的 user + assistant 应通过此入口一次派发，避免两次
+        fire-and-forget 造成的 seq 分配竞态（顺序颠倒）。
+
+        每条 message 需带以下属性：
+            .id, .role, .content, .created_at, .meta_data, .should_memorize
+        """
+        from app.core.memory.pipelines.dispatcher import ingest_agent_messages
+        return await ingest_agent_messages(
+            conversation_id=conversation_id,
+            messages=messages,
+            app_id=app_id,
+            config_id=config_id,
+            workspace_id=workspace_id,
+            end_user_id=end_user_id,
+            language=language,
+        )
+
+    @staticmethod
     async def ingest_workflow_messages(
         messages: List[dict],
         conversation_id: str,
@@ -440,7 +469,13 @@ class MemoryService:
             includes: list | None = None,
             skip_summary: bool = False,
             enable_rerank: bool = False,
+            record_display: bool = False,
     ) -> MemorySearchResult:
+        """检索记忆。
+
+        Args:
+            record_display: 是否记录读取展示卡片。
+        """
         if history is None:
             history = []
         if self.ctx.memory_config is None:
@@ -453,6 +488,7 @@ class MemoryService:
             includes=includes,
             skip_summary=skip_summary,
             enable_rerank=enable_rerank,
+            record_display=record_display,
         )
 
     async def forget(self) -> dict:
@@ -562,8 +598,18 @@ def create_long_term_memory_tool(
         """
         logger.info(f" 长期记忆工具被调用！question={question}, user={end_user_id}")
         try:
-            memory_service = await MemoryService.create(config_id, end_user_id, workspace_id=workspace_id)
-            search_result = await memory_service.read(question, SearchStrategy(search_mode))
+            memory_service = await MemoryService.create(
+                config_id,
+                end_user_id,
+                workspace_id=workspace_id,
+                storage_type=storage_type or "neo4j",
+                user_rag_memory_id=user_rag_memory_id,
+            )
+            search_result = await memory_service.read(
+                question,
+                SearchStrategy(search_mode),
+                record_display=True,
+            )
             return f"检索到以下历史记忆：\n\n{search_result.content}"
         except Exception as e:
             logger.error("长期记忆检索失败", extra={"error": str(e), "error_type": type(e).__name__})

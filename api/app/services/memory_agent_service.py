@@ -26,7 +26,10 @@ from app.core.config import settings
 from app.core.logging_config import get_config_logger, get_logger
 from app.core.memory.agent.logger_file.log_streamer import LogStreamer
 from app.core.memory.agent.utils.type_classifier import status_typle
-from app.core.memory.analytics.hot_memory_tags import get_interest_distribution
+from app.core.memory.analytics.hot_memory_tags import (
+    generate_interest_distribution,
+    get_interest_distribution,
+)
 from app.db import get_db_context, get_db_read
 from app.models.knowledge_model import Knowledge, KnowledgeType
 from app.repositories.end_user_repository import get_tenant_id_by_end_user_id
@@ -490,6 +493,36 @@ class MemoryAgentService:
         except Exception as e:
             logger.error(f"兴趣分布标签查询失败: {e}")
             raise Exception(f"兴趣分布标签查询失败: {e}")
+
+    async def generate_interest_distribution_by_user(
+            self,
+            end_user_id: Optional[str] = None,
+            limit: int = 5,
+            language: str = "zh",
+    ) -> tuple[List[Dict[str, Any]], bool]:
+        """生成兴趣分布，并返回是否应写入缓存。"""
+        try:
+            generation = await generate_interest_distribution(
+                end_user_id=end_user_id,
+                limit=limit,
+                by_user=False,
+                language=language,
+            )
+            items = [
+                {"name": name, "frequency": frequency}
+                for name, frequency in generation.items
+            ]
+            return items, generation.cacheable
+        except Exception as e:
+            error_type = type(e).__name__
+            logger.error(
+                "兴趣分布标签生成失败: error_type=%s error=%r",
+                error_type,
+                e,
+            )
+            raise Exception(
+                f"兴趣分布标签生成失败: {error_type}: {e!r}"
+            ) from e
 
     async def get_user_profile(
             self,

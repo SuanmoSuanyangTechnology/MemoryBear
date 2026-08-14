@@ -12,7 +12,6 @@ from app.core.logging_config import get_business_logger
 from app.core.response_utils import success
 from app.db import get_async_db
 from app.models import Conversation, Message, MessageFeedback
-from app.models.end_user_model import EndUser
 from app.schemas import app_schema, conversation_schema
 from app.schemas.api_key_schema import ApiKeyAuth
 
@@ -25,19 +24,18 @@ async def _resolve_v1_internal_user_id(
     workspace_id: uuid.UUID,
     external_user_id: str,
 ) -> str | None:
-    """将外部 user_id 解析为内部终端用户 ID，不存在时返回 None。"""
-    result = await db.execute(
-        select(EndUser.id)
-        .where(
-            EndUser.workspace_id == workspace_id,
-            EndUser.other_id == external_user_id,
-            EndUser.is_active.is_(True),
-        )
-        .order_by(EndUser.created_at.asc())
-        .limit(1)
+    """将外部 user_id 解析为内部终端用户 ID，不存在时返回 None。
+
+    通过 EndUserRepository 查询，自动处理合并路由：
+    若用户已被合并（is_active=False），会通过 EndUserMerge 表路由到目标用户。
+    """
+    from app.repositories.end_user_repository import EndUserRepository
+
+    user_repo = EndUserRepository(db)
+    end_user = await user_repo.get_end_user_by_other_id_async(
+        workspace_id, external_user_id
     )
-    end_user_id = result.scalar_one_or_none()
-    return str(end_user_id) if end_user_id else None
+    return str(end_user.id) if end_user else None
 
 
 @router.post("/messages/{message_id}/feedback", summary="提交消息反馈（点赞/点踩）")

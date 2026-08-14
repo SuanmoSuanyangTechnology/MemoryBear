@@ -18,7 +18,6 @@ import {
   getConversationMessages,
   getConversationDetail,
   getApiMcpDataSources,
-  getApiMcpMessages,
   getMemoryInsightReport,
   getUserSummary,
 } from '@/api/memory'
@@ -30,7 +29,11 @@ import type { ChatItem } from '@/components/Chat/types'
 import PageLoading from '@/components/Empty/PageLoading'
 import type { Data as SummaryData } from '../components/AboutMe'
 import { type Data as InsightData, INSIGHT_KEYS } from '../components/MemoryInsight'
-import Markdown from '@/components/Markdown'
+import ApiMcpMessageList, {
+  type ApiMcpMessageItem,
+  type ApiMcpMessageListRef,
+  type ApiMcpSource,
+} from '../components/ApiMcpMessageList'
 
 /** A conversation session entry in the sidebar list. */
 export interface Conversation {
@@ -58,16 +61,9 @@ interface Detail {
 }
 
 interface ApiMcpListItem {
-  source: 'mcp' | 'service_api';
+  source: ApiMcpSource;
   message_count: number;
   latest_at: number;
-}
-interface ApiMcpMessageItem {
-  role: 'user' | 'assistant';
-  content: string;
-  dialog_at: number;
-  message_seq: number;
-  created_at: number;
 }
 
 /**
@@ -98,6 +94,7 @@ const WorkingDetail: FC = () => {
   const [summaryLoading, setSummaryLoading] = useState<boolean>(false)
   const [summary, setSummary] = useState<SummaryData>({} as SummaryData)
   const [selected, setSelected] = useState<Conversation | ApiMcpListItem | null>(null)
+  const apiMcpMessageListRef = useRef<ApiMcpMessageListRef>(null)
 
   /* Fetch conversation list + api/mcp data sources whenever the route user ID changes. */
   useEffect(() => {
@@ -130,18 +127,6 @@ const WorkingDetail: FC = () => {
         return response
       })
       .catch(() => [] as ApiMcpListItem[])
-  }
-  const getApiMcpDetail = (item: ApiMcpListItem) => {
-    if (!id || !item || !item.source) return
-    setDetailLoading(true)
-    getApiMcpMessages(id, { source: item.source, limit: 20 })
-      .then(res => {
-        setMessages((res as { items: ChatItem[] }).items)
-      })
-      .finally(() => {
-        setMessagesLoading(false)
-      })
-    getUserInsight()
   }
   /** Load the first page of conversations; resolves with the fetched items. */
   const getData = () => {
@@ -194,7 +179,6 @@ const WorkingDetail: FC = () => {
   }
 
   useEffect(() => {
-    console.log('conversationId', !id, selected, selected && !(selected as Conversation)?.id && !(selected as ApiMcpListItem)?.source)
     if (!id || !selected || (!(selected as Conversation)?.id && !(selected as ApiMcpListItem)?.source)) return
     getDetail(selected)
   }, [id, selected])
@@ -210,9 +194,9 @@ const WorkingDetail: FC = () => {
 
     setDetail(null)
     setMessages([])
-    setDetailLoading(true)
-    setMessagesLoading(true)
     if (conversationId) {
+      setDetailLoading(true)
+      setMessagesLoading(true)
       getConversationMessages(id, conversationId)
         .then(res => {
           setMessages(res as ChatItem[])
@@ -220,15 +204,26 @@ const WorkingDetail: FC = () => {
         .finally(() => {
           setMessagesLoading(false)
         })
-        getConversationDetail(id, conversationId)
-          .then(res => {
-            setDetail(res as Detail)
-          })
-          .finally(() => {
-            setDetailLoading(false)
-          })
+      getConversationDetail(id, conversationId)
+        .then(res => {
+          setDetail(res as Detail)
+        })
+        .finally(() => {
+          setDetailLoading(false)
+        })
     } else {
-      getApiMcpDetail(conversation as ApiMcpListItem)
+      setDetailLoading(false)
+      setMessagesLoading(false)
+      getUserInsight()
+    }
+  }
+
+  const handleRefresh = () => {
+    if ((selected as ApiMcpListItem)?.source) {
+      apiMcpMessageListRef.current?.refresh()
+      getUserInsight()
+    } else if (selected) {
+      getDetail(selected)
     }
   }
   /** Derive a human-readable date range (e.g. "2024.01 - 2024.03") from message timestamps. */
@@ -342,53 +337,30 @@ const WorkingDetail: FC = () => {
                   <div className="rb:text-[#5B6167] rb:leading-4.5 rb:text-[12px]">{timeRange}</div>
                   <Flex justify="space-between" align="center" className="rb:bg-[#F6F6F6] rb:rounded-lg rb:py-2.5! rb:pr-2.5! rb:pl-3.25! rb:mt-3!">
                     {t('workingDetail.conversationStream')}
-                    <Button className="rb:h-6!" onClick={() => getDetail(selected)}>{t('workingDetail.refresh')}</Button>
+                    <Button className="rb:h-6!" onClick={handleRefresh}>{t('workingDetail.refresh')}</Button>
                   </Flex>
-                  {messagesLoading
-                    ? <Skeleton active />
-                    : messages.length === 0
-                      ? <Empty />
-                      : (selected as ApiMcpListItem).source
-                      ? (
-                        <Flex vertical gap={12} className="rb:mt-5! rb:h-[calc(100%-89px)]! rb:overflow-y-auto! rb:w-full! rb:overflow-x-hidden!">
-                          {(messages as ApiMcpMessageItem[]).map((item, index) => (
-                            <div>
-                              {index !== 0 && <Divider className="rb:mt-1! rb:mb-3! rb:ml-11! rb:w-[calc(100%-44px)]!" />}
-                              <Flex
-                                align="start"
-                                gap={12}
-                              >
-                                <div className={clsx("rb:size-8 rb:bg-cover", {
-                                  'rb:bg-[url(@/assets/images/conversation/user.png)]': item.role === 'user',
-                                  'rb:bg-[url(@/assets/images/conversation/ai.png)]': item.role === 'assistant',
-                                })}></div>
-                                <div
-                                  className="rb:flex-1"
-                                >
-                                  <Flex gap={12} justify="space-between">
-                                    <div className="rb:text-[12px] rb:text-[#5B6167] rb:leading-4.5 rb:mb-0.5">
-                                      {item.role === 'assistant' ? t('userMemory.assistant') : t('userMemory.user')}
-                                    </div>
-                                    <div className="rb:text-[12px] rb:text-[#5B6167] rb:leading-4.5 rb:mb-0.5">
-                                      {formatDateTime(item.dialog_at)}
-                                    </div>
-                                  </Flex>
-                                  <Markdown content={item.content || ''} />
-                                </div>
-                              </Flex>
-                            </div>
-                          ))}
-                        </Flex>
-                      )
-                      : (
-                        <ChatContent
-                          classNames="rb:h-[calc(100%-77px)] rb:pt-5"
-                          contentClassNames="rb:max-w-110!"
-                          data={messages}
-                          streamLoading={false}
-                          labelFormat={(item) => formatDateTime(item.created_at)}
-                        />
-                      )
+                  {(selected as ApiMcpListItem).source && id
+                    ? (
+                      <ApiMcpMessageList
+                        ref={apiMcpMessageListRef}
+                        endUserId={id}
+                        source={(selected as ApiMcpListItem).source}
+                        onMessagesChange={setMessages}
+                      />
+                    )
+                    : messagesLoading
+                      ? <Skeleton active />
+                      : messages.length === 0
+                        ? <Empty />
+                        : (
+                          <ChatContent
+                            classNames="rb:h-[calc(100%-77px)] rb:pt-5"
+                            contentClassNames="rb:max-w-110!"
+                            data={messages}
+                            streamLoading={false}
+                            labelFormat={(item) => formatDateTime(item.created_at)}
+                          />
+                        )
                   }
                 </RbCard>
               </Col>

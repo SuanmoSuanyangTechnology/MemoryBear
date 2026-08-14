@@ -7,7 +7,7 @@
 import { type ButtonProps } from 'antd'
 
 import { type SSEMessage } from '@/utils/stream'
-import type { ChatItem } from '@/components/Chat/types'
+import type { ChatItem, MemoryTraceEvent, MemoryTraceEventData } from '@/components/Chat/types'
 
 /** After intervention submit succeeds (while streaming), locally mark the matching intervention as resolved */
 export const applyInterventionSubmit = (
@@ -85,6 +85,10 @@ export interface ResumeHandlerDeps {
     replace?: boolean,
   ) => void
   updateAssistantReasoningMessage: (content?: string, message_id?: string) => void
+  updateAssistantMemoryRetrieval: (
+    event: MemoryTraceEvent,
+    data: MemoryTraceEventData,
+  ) => void
   startAudioPolling: (audioUrl: string, idToPoll: string) => void
   /** Locally update the history list after streaming ends (insert new / refresh updated_at for existing) */
   upsertHistory: (conversationId: string, title?: string) => void
@@ -96,7 +100,8 @@ export const createResumeStreamHandler = (deps: ResumeHandlerDeps) => {
   const {
     actionId, fieldValues, node_id,
     conversationId, setChatList, setConversationId, setLoading,
-    updateAssistantMessage, updateAssistantReasoningMessage, startAudioPolling,
+    updateAssistantMessage, updateAssistantReasoningMessage, updateAssistantMemoryRetrieval,
+    startAudioPolling,
     upsertHistory, streamLoadingRef,
   } = deps
 
@@ -189,6 +194,12 @@ export const createResumeStreamHandler = (deps: ResumeHandlerDeps) => {
         case 'reasoning':
           updateAssistantReasoningMessage(content)
           if (curId) currentConversationId = curId;
+          break
+        case 'tool_start':
+        case 'memory_stage':
+        case 'tool_end':
+        case 'tool_error':
+          updateAssistantMemoryRetrieval(item.event as MemoryTraceEvent, item.data as MemoryTraceEventData)
           break
         case 'message':
           setChatList(prev => {

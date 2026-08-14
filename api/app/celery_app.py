@@ -5,7 +5,7 @@ from datetime import timedelta
 from urllib.parse import quote
 
 from celery import Celery
-from celery.schedules import crontab
+from celery.schedules import crontab, schedule
 
 from app.core.config import settings
 from app.core.logging_config import get_logger
@@ -177,6 +177,24 @@ try:
 except ImportError:
     _HAS_SUBSCRIPTION_TASKS = False
 
+# 企业版消息通知中心任务路由（社区版无 premium 模块时不注册这些任务）
+try:
+    import premium.platform_admin.notification_center.tasks  # noqa: F401
+
+    _HAS_NOTIFICATION_TASKS = True
+    # 通知状态任务 → notification_state_tasks 队列（扫描 + 发布 + 到期下架）
+    celery_app.conf.task_routes['notification.scan_scheduled'] = {
+        'queue': 'notification_state_tasks'
+    }
+    celery_app.conf.task_routes['notification.publish'] = {
+        'queue': 'notification_state_tasks'
+    }
+    celery_app.conf.task_routes['notification.scan_expired'] = {
+        'queue': 'notification_state_tasks'
+    }
+except ImportError:
+    _HAS_NOTIFICATION_TASKS = False
+
 # Celery Beat schedule for periodic tasks
 memory_increment_schedule = crontab(hour=settings.MEMORY_INCREMENT_HOUR, minute=settings.MEMORY_INCREMENT_MINUTE)
 memory_cache_regeneration_schedule = crontab(
@@ -320,5 +338,38 @@ if _HAS_SUBSCRIPTION_TASKS:
             "task": "subscription.expiration_reminder",
             "schedule": timedelta(minutes=_SUBSCRIPTION_EMAIL_BEAT_INTERVAL_MINUTES),
             "options": {"queue": "subscription_email_tasks", "expires": 3600},
+        },
+    })
+
+# 消息通知中心定时任务（每秒/每分钟扫描到期排期与到期下架）
+# 通过 settings 读取环境变量 NOTIFICATION_SCAN_INTERVAL_SECONDS（默认 60 秒）
+_NOTIFICATION_SCAN_INTERVAL_SECONDS = settings.NOTIFICATION_SCAN_INTERVAL_SECONDS
+
+
+class NoCatchupSchedule(schedule):
+    """同标准 schedule，但 `is_due` 最多返回 1，避免 Beat 重启时追赶已错过的时间窗口"""
+
+    def is_due(self, last_run_at):
+        is_due, next_time = super().is_due(last_run_at)
+        return min(is_due, 1), next_time
+
+
+if _HAS_NOTIFICATION_TASKS:
+    celery_app.conf.beat_schedule.update({
+        # 扫描 scheduled + publish_at<=now，领取后投递 notification.publish
+        "notification-scan-scheduled": {
+            "task": "notification.scan_scheduled",
+            "schedule": NoCatchupSchedule(
+                run_every=timedelta(seconds=_NOTIFICATION_SCAN_INTERVAL_SECONDS)
+            ),
+            "options": {"queue": "notification_state_tasks", "expires": 120},
+        },
+        # 扫描 published + expire_at<=now，转为 expired
+        "notification-scan-expired": {
+            "task": "notification.scan_expired",
+            "schedule": NoCatchupSchedule(
+                run_every=timedelta(seconds=_NOTIFICATION_SCAN_INTERVAL_SECONDS)
+            ),
+            "options": {"queue": "notification_state_tasks", "expires": 120},
         },
     })

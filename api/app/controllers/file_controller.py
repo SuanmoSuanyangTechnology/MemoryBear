@@ -13,8 +13,10 @@ from app.core.config import settings
 from app.core.logging_config import get_api_logger
 from app.core.response_utils import success
 from app.db import get_db
-from app.dependencies import get_current_user
-from app.models import file_model
+from app.dependencies import cur_workspace_access_guard, get_current_user
+from app.models import document_model, file_model
+from app.core.rag.chunk.parser.image_storage import cleanup_mineru_v3_images
+from app.models.knowledge_model import Knowledge
 from app.models.user_model import User
 from app.schemas import file_schema, document_schema
 from app.schemas.response_schema import ApiResponse
@@ -40,7 +42,43 @@ router = APIRouter(
 )
 
 
+def _require_workspace_knowledge(
+        db: Session,
+        kb_id: uuid.UUID,
+        current_user: User,
+):
+    db_knowledge = get_kb_by_id(db, knowledge_id=kb_id, current_user=current_user)
+    if not db_knowledge:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="The knowledge base does not exist or access is denied",
+        )
+    return db_knowledge
+
+
+def _require_parent_folder(
+        db: Session,
+        kb_id: uuid.UUID,
+        parent_id: uuid.UUID | None,
+        current_user: User,
+) -> None:
+    if parent_id is None or parent_id == kb_id:
+        return
+    parent = file_service.get_file_by_id(
+        db=db,
+        file_id=parent_id,
+        current_user=current_user,
+        kb_id=kb_id,
+    )
+    if not parent or parent.file_ext != "folder":
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="The parent folder does not exist or access is denied",
+        )
+
+
 @router.get("/{kb_id}/{parent_id}/files", response_model=ApiResponse)
+@cur_workspace_access_guard()
 async def get_files(
         kb_id: uuid.UUID,
         parent_id: uuid.UUID,
@@ -58,7 +96,13 @@ async def get_files(
     if page < 1 or pagesize < 1:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="The paging parameter must be greater than 0")
 
-    filters = [file_model.File.kb_id == kb_id]
+    _require_workspace_knowledge(db, kb_id, current_user)
+    _require_parent_folder(db, kb_id, parent_id, current_user)
+
+    filters = [
+        file_model.File.kb_id == kb_id,
+        file_model.File.file_role == file_model.FILE_ROLE_SOURCE,
+    ]
     if parent_id:
         filters.append(file_model.File.parent_id == parent_id)
     if keywords:
@@ -80,6 +124,7 @@ async def get_files(
 
 
 @router.post("/folder", response_model=ApiResponse)
+@cur_workspace_access_guard()
 async def create_folder(
         kb_id: uuid.UUID,
         parent_id: uuid.UUID,
@@ -90,6 +135,8 @@ async def create_folder(
     """Create a new folder"""
     api_logger.info(f"Create folder request: kb_id={kb_id}, parent_id={parent_id}, folder_name={folder_name}")
     try:
+        _require_workspace_knowledge(db, kb_id, current_user)
+        _require_parent_folder(db, kb_id, parent_id, current_user)
         create_folder_data = file_schema.FileCreate(
             kb_id=kb_id, created_by=current_user.id, parent_id=parent_id,
             file_name=folder_name, file_ext='folder', file_size=0,
@@ -102,6 +149,7 @@ async def create_folder(
 
 
 @router.post("/file", response_model=ApiResponse)
+@cur_workspace_access_guard()
 @check_knowledge_capacity_quota
 async def upload_file(
         kb_id: uuid.UUID,
@@ -113,6 +161,9 @@ async def upload_file(
 ):
     """Upload file to storage backend"""
     api_logger.info(f"upload file request: kb_id={kb_id}, parent_id={parent_id}, filename={file.filename}")
+
+    db_knowledge = _require_workspace_knowledge(db, kb_id, current_user)
+    _require_parent_folder(db, kb_id, parent_id, current_user)
 
     contents = await file.read()
     file_size = len(contents)
@@ -150,7 +201,6 @@ async def upload_file(
         "auto_keywords": 0, "auto_questions": 0, "html4excel": "false"
     }
     try:
-        db_knowledge = get_kb_by_id(db, knowledge_id=kb_id, current_user=current_user)
         if db_knowledge and db_knowledge.parser_config:
             default_parser_config.update(dict(db_knowledge.parser_config))
     except Exception:
@@ -168,6 +218,7 @@ async def upload_file(
 
 
 @router.post("/customtext", response_model=ApiResponse)
+@cur_workspace_access_guard()
 async def custom_text(
         kb_id: uuid.UUID,
         parent_id: uuid.UUID,
@@ -177,6 +228,8 @@ async def custom_text(
         storage_service: FileStorageService = Depends(get_file_storage_service),
 ):
     """Custom text upload"""
+    _require_workspace_knowledge(db, kb_id, current_user)
+    _require_parent_folder(db, kb_id, parent_id, current_user)
     content_bytes = create_data.content.encode('utf-8')
     file_size = len(content_bytes)
     if file_size == 0:
@@ -215,6 +268,7 @@ async def custom_text(
 
 
 @router.get("/{file_id}", response_model=Any)
+# Public compatibility exception for knowledge-base image block rendering.
 async def get_file(
         file_id: uuid.UUID,
         original: bool = Query(False, description="QA 文档是否下载原始文件（默认从 ES 导出修改后内容）"),
@@ -222,7 +276,11 @@ async def get_file(
         storage_service: FileStorageService = Depends(get_file_storage_service),
 ) -> Any:
     """Download file by file_id — QA 文档默认从 ES 导出修改后内容，?original=true 下载原始文件"""
-    db_file = file_service.get_file_by_id(db, file_id=file_id)
+    db_file = file_service.get_file_by_id(
+        db,
+        file_id=file_id,
+        current_user=None,
+    )
     if not db_file:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
 
@@ -265,6 +323,7 @@ async def get_file(
 
 
 @router.post("/batch-download")
+@cur_workspace_access_guard()
 async def batch_download_files(
         request_body: file_schema.BatchDownloadRequest,
         current_user: User = Depends(get_current_user),
@@ -275,14 +334,22 @@ async def batch_download_files(
     QA 文档从 ES 导出修改后的内容，其余从存储下载。
     """
 
-    files = db.query(file_model.File).filter(
-        file_model.File.id.in_(request_body.file_ids)
-    ).all()
+    requested_file_ids = set(request_body.file_ids)
+    files = (
+        db.query(file_model.File)
+        .join(Knowledge, file_model.File.kb_id == Knowledge.id)
+        .filter(
+            file_model.File.id.in_(requested_file_ids),
+            Knowledge.workspace_id == current_user.current_workspace_id,
+            file_model.File.file_role == file_model.FILE_ROLE_SOURCE,
+        )
+        .all()
+    )
 
-    if not files:
+    if len(files) != len(requested_file_ids):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="未找到任何文件",
+            detail="文件不存在或无权访问",
         )
 
     valid_files = [f for f in files if f.file_key]
@@ -318,6 +385,7 @@ async def batch_download_files(
 
 
 @router.put("/{file_id}", response_model=ApiResponse)
+@cur_workspace_access_guard()
 async def update_file(
         file_id: uuid.UUID,
         update_data: file_schema.FileUpdate,
@@ -325,11 +393,24 @@ async def update_file(
         current_user: User = Depends(get_current_user)
 ):
     """Update file information (such as file name)"""
-    db_file = file_service.get_file_by_id(db, file_id=file_id)
+    db_file = file_service.get_file_by_id(
+        db,
+        file_id=file_id,
+        current_user=current_user,
+    )
     if not db_file:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
 
-    for field, value in update_data.dict(exclude_unset=True).items():
+    update_fields = update_data.dict(exclude_unset=True)
+    if "parent_id" in update_fields:
+        _require_parent_folder(
+            db=db,
+            kb_id=db_file.kb_id,
+            parent_id=update_fields["parent_id"],
+            current_user=current_user,
+        )
+
+    for field, value in update_fields.items():
         if hasattr(db_file, field):
             setattr(db_file, field, value)
 
@@ -344,6 +425,7 @@ async def update_file(
 
 
 @router.delete("/{file_id}", response_model=ApiResponse)
+@cur_workspace_access_guard()
 async def delete_file(
         file_id: uuid.UUID,
         db: Session = Depends(get_db),
@@ -363,27 +445,72 @@ async def _delete_file(
         storage_service: FileStorageService,
 ) -> None:
     """Delete a file or folder from storage and database"""
-    db_file = file_service.get_file_by_id(db, file_id=file_id)
+    db_file = file_service.get_file_by_id(
+        db,
+        file_id=file_id,
+        current_user=current_user,
+    )
     if not db_file:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
 
     # Delete from storage backend
     if db_file.file_ext == 'folder':
         # For folders, delete all child files from storage first
-        child_files = db.query(file_model.File).filter(file_model.File.parent_id == db_file.id).all()
+        child_files = (
+            db.query(file_model.File)
+            .filter(
+                file_model.File.parent_id == db_file.id,
+                file_model.File.kb_id == db_file.kb_id,
+            )
+            .all()
+        )
+        source_file_ids = [
+            child.id
+            for child in child_files
+            if child.file_role == file_model.FILE_ROLE_SOURCE
+        ]
         for child in child_files:
             if child.file_key:
                 try:
                     await storage_service.delete_file(child.file_key)
                 except Exception as e:
                     api_logger.warning(f"Failed to delete child file from storage: {child.file_key} - {e}")
-        db.query(file_model.File).filter(file_model.File.parent_id == db_file.id).delete()
+        (
+            db.query(file_model.File)
+            .filter(
+                file_model.File.parent_id == db_file.id,
+                file_model.File.kb_id == db_file.kb_id,
+            )
+            .delete()
+        )
     else:
+        source_file_ids = [db_file.id] if db_file.file_role == file_model.FILE_ROLE_SOURCE else []
         if db_file.file_key:
             try:
                 await storage_service.delete_file(db_file.file_key)
             except Exception as e:
                 api_logger.warning(f"Failed to delete file from storage: {db_file.file_key} - {e}")
+
+    if source_file_ids:
+        document_ids = [
+            document_id
+            for (document_id,) in db.query(document_model.Document.id).filter(
+                document_model.Document.file_id.in_(source_file_ids)
+            ).all()
+        ]
+        for document_id in document_ids:
+            try:
+                await asyncio.to_thread(
+                    cleanup_mineru_v3_images,
+                    document_id,
+                    storage_service=storage_service,
+                )
+            except Exception:
+                api_logger.warning(
+                    "Failed to delete derived image assets: document_id=%s",
+                    document_id,
+                    exc_info=True,
+                )
 
     db.delete(db_file)
     db.commit()

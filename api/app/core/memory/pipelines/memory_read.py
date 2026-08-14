@@ -1,5 +1,9 @@
+from __future__ import annotations
+
 import asyncio
 import logging
+import time
+import uuid
 
 from app.core.memory.enums import Neo4jNodeType, SearchStrategy, StorageType
 from app.core.memory.models.service_models import MemorySearchResult
@@ -12,9 +16,27 @@ from app.core.memory.read_services.search_engine.content_search import (
     HistorySearchService,
     MetaSearchService
 )
+from app.core.memory.retrieval_trace.stage_events import emit_memory_stage
+from app.core.memory.retrieval_trace.stage_projection import (
+    project_memory_items,
+    project_profile_data,
+    profile_has_content,
+    project_relation_items,
+    project_result_items,
+)
 from app.core.models import RedBearLLM
+from app.core.utils.datetime_utils import utcnow_naive
 from app.db import get_async_db_context
 from app.repositories.memory_short_repository import ShortTermMemoryRepository
+from app.schemas.memory_retrieval_display_schema import (
+    RETRIEVE_SEARCH_MODES,
+    RetrieveDisplayTask,
+)
+from app.services.memory_retrieval_display_queue import MemoryRetrievalDisplayQueue
+from app.services.memory_retrieval_display_service import (
+    build_retrieve_snapshot,
+    clean_query_for_display,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +65,7 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
         self._vision_llm_client = None
         self._audio_llm_client = None
         self._rerank_client = None
+        self._run_started_at = 0.0
 
     async def run(
             self,
@@ -53,8 +76,14 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
             includes=None,
             skip_summary=False,
             enable_rerank: bool = False,
+            record_display: bool = False,
     ) -> MemorySearchResult:
+        started_at = time.perf_counter()
+        self._run_started_at = started_at
         query = QueryPreprocessor.process(query)
+        # 展示用主问题必须在 deep/normal 的问题拆分之前固定下来
+        display_query = clean_query_for_display(query)
+
         match search_switch:
             case SearchStrategy.DEEP:
                 res = await self._deep_read(query, history, limit,
@@ -65,21 +94,113 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
                                               includes=includes, skip_summary=skip_summary,
                                               enable_rerank=enable_rerank)
             case SearchStrategy.QUICK:
-                return await self._quick_read(query, limit, includes,
-                                              enable_rerank=enable_rerank)
+                res = await self._quick_read(query, limit, includes,
+                                             enable_rerank=enable_rerank)
             case SearchStrategy.EXPRESS:
-                return await self._express_read(query, limit, includes)
+                res = await self._express_read(query, limit, includes)
             case SearchStrategy.RECENT:
                 return await self._conv_history()
             case SearchStrategy.META:
-                return await self._user_meta()
+                res = await self._user_meta()
             case _:
                 raise RuntimeError("Unsupported search strategy")
+
+        if search_switch in [SearchStrategy.QUICK, SearchStrategy.EXPRESS, SearchStrategy.META]:
+            await self._emit_result_ready(res, started_at)
 
         if search_switch in [SearchStrategy.DEEP, SearchStrategy.NORMAL] and not self.ctx.draft:
             await self._save_short_term(query, search_switch, res)
 
+        if record_display:
+            self._dispatch_display_record(display_query, search_switch, res)
+
         return res
+
+    async def _emit_stage(self, stage: str, data: dict) -> None:
+        await emit_memory_stage(stage, data)
+
+    @staticmethod
+    def _raw_memory_count(results: list) -> int:
+        return sum(len(result.memories) for result in results if isinstance(result, MemorySearchResult))
+
+    @staticmethod
+    def _raw_relation_count(results: list) -> int:
+        return sum(len(result.relations) for result in results if isinstance(result, MemorySearchResult))
+
+    async def _emit_result_ready(self, result: MemorySearchResult, started_at: float) -> None:
+        profile_result = MemorySearchResult(memories=[])
+        search_result = result
+        if result.memories:
+            first = result.memories[0]
+            # 非深度策略返回扁平列表，只有首项满足用户实体约定时才按画像投影。
+            if first.id == getattr(self.ctx, "end_user_id", None) and first.source == Neo4jNodeType.EXTRACTEDENTITY:
+                profile_result = MemorySearchResult(memories=[first])
+                search_result = MemorySearchResult(memories=result.memories[1:], relations=result.relations)
+        items = project_result_items(profile_result, search_result, limit=5)
+        await self._emit_stage("result_ready", {
+            "duration_ms": max(1, int(round((time.perf_counter() - started_at) * 1000))),
+            "total_count": len(result.memories),
+            "shown_count": len(items),
+            "items": items,
+        })
+
+    def _elapsed_ms(self) -> int:
+        return max(1, int(round((time.perf_counter() - self._run_started_at) * 1000)))
+
+    def _ensure_run_started(self) -> None:
+        if not self._run_started_at:
+            self._run_started_at = time.perf_counter()
+    def _dispatch_display_record(
+            self,
+            display_query: str,
+            search_switch: SearchStrategy,
+            result: MemorySearchResult,
+    ) -> None:
+        """聚合读取展示快照并非阻塞投递，任何异常都不影响检索返回。"""
+        try:
+            search_mode = search_switch.name.lower()
+            if search_mode not in RETRIEVE_SEARCH_MODES:
+                logger.debug(
+                    f"[ReadPipeLine] 检索方式 {search_mode} 不在读取展示白名单内，跳过投递"
+                )
+                return
+
+            try:
+                end_user_uuid = uuid.UUID(str(self.ctx.end_user_id))
+            except (ValueError, AttributeError, TypeError):
+                logger.warning(
+                    f"[ReadPipeLine] end_user_id 不是合法 UUID，跳过读取展示投递: "
+                    f"{self.ctx.end_user_id}"
+                )
+                return
+
+            snapshot = build_retrieve_snapshot(
+                result=result,
+                query=display_query,
+                language=self.ctx.language,
+            )
+            if not snapshot:
+                logger.debug(
+                    "[ReadPipeLine] 本次检索没有可展示的 Summary/Entity，跳过投递"
+                )
+                return
+
+            MemoryRetrievalDisplayQueue.enqueue_nowait(
+                RetrieveDisplayTask(
+                    id=uuid.uuid4(),
+                    operation_id=uuid.uuid4(),
+                    end_user_id=end_user_uuid,
+                    search_mode=search_mode,
+                    query=snapshot["query"],
+                    content=snapshot["content"],
+                    occurred_at=utcnow_naive(),
+                )
+            )
+        except Exception as e:
+            logger.warning(
+                f"[ReadPipeLine] 读取展示投递失败（不影响主流程）: {e}",
+                exc_info=True,
+            )
 
     async def _get_search_service(
             self,
@@ -191,14 +312,24 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
             skip_summary=False,
             enable_rerank: bool = False,
     ) -> MemorySearchResult:
+        self._ensure_run_started()
         search_service = await self._get_search_service(includes, enable_rerank=enable_rerank)
         memory_l0 = await self._user_meta()
+        profile = project_profile_data(memory_l0)
+        await self._emit_stage("profile_loaded", {
+            "has_profile": profile_has_content(profile),
+            "profile": profile,
+        })
         questions = await QueryPreprocessor.split(
             query,
             history,
             memory_l0.content,
             await self._get_llm_client()
         )
+        await self._emit_stage("query_split", {
+            "count": len(questions),
+            "questions": [str(question)[:100] for question in questions[:5]],
+        })
         all_tasks = []
         for question in questions:
             all_tasks.append(_run_with_semaphore(search_service.hybrid_search(question, limit)))
@@ -211,6 +342,20 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
 
         hybrid_search_res = _safe_merge_results(hybrid_results, "hybrid")
         relation_res = _safe_merge_results(relation_results, "relation")
+        hybrid_search_res.memories.sort(key=lambda item: item.score, reverse=True)
+        relation_res.relations = list(relation_res.relations)
+        await self._emit_stage("hybrid_searched", {
+            "hit_count": self._raw_memory_count(hybrid_results),
+            "memory_count": len(hybrid_search_res.memories),
+            "shown_count": min(3, len(hybrid_search_res.memories)),
+            "items": project_memory_items(hybrid_search_res.memories, limit=3),
+        })
+        await self._emit_stage("relation_searched", {
+            "hit_count": self._raw_relation_count(relation_results),
+            "relation_count": len(relation_res.relations),
+            "shown_count": min(3, len(relation_res.relations)),
+            "items": project_relation_items(relation_res.relations, limit=3),
+        })
 
         perceptual_memories = [
             m for m in hybrid_search_res.memories
@@ -264,7 +409,16 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
 
         results = hybrid_search_res + relation_res
 
+        await self._emit_stage("results_merged", {
+            "memory_count": len(results.memories),
+            "relation_count": len(results.relations),
+        })
+
         results.memories.sort(key=lambda x: x.score, reverse=True)
+        await self._emit_stage("results_ranked", {
+            "count": len(results.memories),
+            "order": "score_desc",
+        })
         if not skip_summary:
             results.content_str = await RetrievalSummaryProcessor.summary(
                 query,
@@ -273,7 +427,18 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
                 await self._get_llm_client()
             )
 
-        return memory_l0 + results
+        await self._emit_stage("context_prepared", {"memory_count": len(results.memories)})
+
+        combined = memory_l0 + results
+        items = project_result_items(memory_l0, results, limit=5)
+        await self._emit_stage("result_ready", {
+            "duration_ms": self._elapsed_ms() if hasattr(self, "_elapsed_ms") else 1,
+            "total_count": len(combined.memories),
+            "shown_count": len(items),
+            "items": items,
+        })
+
+        return combined
 
     async def _normal_read(
             self, query: str,
@@ -283,20 +448,45 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
             skip_summary=False,
             enable_rerank: bool = False,
     ) -> MemorySearchResult:
+        self._ensure_run_started()
         search_service = await self._get_search_service(includes, enable_rerank=enable_rerank)
 
         memory_l0 = await self._user_meta()
+        profile = project_profile_data(memory_l0)
+        await self._emit_stage("profile_loaded", {
+            "has_profile": profile_has_content(profile),
+            "profile": profile,
+        })
         questions = await QueryPreprocessor.split(
             query,
             history,
             memory_l0.content,
             await self._get_llm_client()
         )
+        await self._emit_stage("query_split", {
+            "count": len(questions),
+            "questions": [str(question)[:100] for question in questions[:5]],
+        })
         all_results = list(await asyncio.gather(*(
             _run_with_semaphore(search_service.hybrid_search(question, limit)) for question in questions
         ), return_exceptions=True))
         results = _safe_merge_results(all_results, "normal")
         results.memories.sort(key=lambda x: x.score, reverse=True)
+        await self._emit_stage("hybrid_searched", {
+            "hit_count": self._raw_memory_count(all_results),
+            "memory_count": len(results.memories),
+            "shown_count": min(3, len(results.memories)),
+            "items": project_memory_items(results.memories, limit=3),
+        })
+        await self._emit_stage("results_merged", {
+            "memory_count": len(results.memories),
+            "relation_count": 0,
+        })
+        results.memories.sort(key=lambda x: x.score, reverse=True)
+        await self._emit_stage("results_ranked", {
+            "count": len(results.memories),
+            "order": "score_desc",
+        })
         if not skip_summary:
             results.content_str = await RetrievalSummaryProcessor.summary(
                 query,
@@ -304,7 +494,16 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
                 memory_l0.content if memory_l0 else '',
                 await self._get_llm_client()
             )
-        return memory_l0 + results
+        await self._emit_stage("context_prepared", {"memory_count": len(results.memories)})
+        combined = memory_l0 + results
+        items = project_result_items(memory_l0, results, limit=5)
+        await self._emit_stage("result_ready", {
+            "duration_ms": self._elapsed_ms() if hasattr(self, "_elapsed_ms") else 1,
+            "total_count": len(combined.memories),
+            "shown_count": len(items),
+            "items": items,
+        })
+        return combined
 
     async def _express_read(self, query: str, limit: int, includes=None) -> MemorySearchResult:
         """仅全文检索模式：不做 embedding、关系检索、query 拆分、摘要生成。"""

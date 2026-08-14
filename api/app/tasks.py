@@ -26,7 +26,9 @@ from app.core.config import settings
 from app.core.logging_config import get_logger
 from app.core.models import RedBearEmbeddings, RedBearLLM
 from app.core.memory.storage_services.reflection_engine import retry_registry as rr
+from app.core.rag.chunk.hierarchy import GroupedChildChunks, validate_parent_child_result
 from app.core.rag.chunk.metadata import merge_parser_metadata
+from app.core.rag.chunk.parser.image_storage import cleanup_mineru_v3_images
 from app.core.rag.crawler.web_crawler import WebCrawler
 from app.core.rag.graphrag.general.index import init_graphrag, run_graphrag_for_kb
 from app.core.rag.graphrag.utils import get_llm_cache, set_llm_cache
@@ -86,6 +88,7 @@ from app.core.utils.datetime_utils import (
 )
 from app.db import get_db_context, get_db_read
 from app.models import App, AppRelease, Document, File, Knowledge, User, Workspace
+from app.models.file_model import FILE_ROLE_SOURCE
 from app.models.end_user_model import EndUser
 from app.models.models_model import ModelType
 from app.repositories.end_user_repository import get_end_users_by_workspace
@@ -102,8 +105,8 @@ AUDIO_PATTERN = re.compile(
     r"\.(da|wave|wav|mp3|aac|flac|ogg|aiff|au|midi|wma|realaudio|vqf|oggvorbis|ape?)$",
     re.IGNORECASE,
 )
-VIDEO_IMAGE_PATTERN = re.compile(
-    r"\.(png|jpeg|jpg|gif|bmp|svg|mp4|mov|avi|flv|mpeg|mpg|webm|wmv|3gp|3gpp|mkv?)$",
+VIDEO_PATTERN = re.compile(
+    r"\.(mp4|mov|avi|flv|mpeg|mpg|webm|wmv|3gp|3gpp|mkv?)$",
     re.IGNORECASE,
 )
 DEFAULT_PARSE_LANGUAGE = "Chinese"
@@ -1017,8 +1020,19 @@ def process_item(item: dict):
     return result
 
 
-def _build_vision_model(file_path: str, db, image2text_id, tenant_id):
-    """根据文件类型选择合适的视觉/音频模型，避免冗余初始化。"""
+def _build_image_vision_model(db, image2text_id, tenant_id):
+    """Build the knowledge-base image-to-text model for document parsing."""
+    image2text_key = _resolve_model_api_key(db, image2text_id, tenant_id, "image2text")
+    return QWenCV(
+        key=image2text_key.api_key,
+        model_name=image2text_key.model_name,
+        lang=DEFAULT_PARSE_LANGUAGE,
+        base_url=image2text_key.api_base,
+    )
+
+
+def _build_media_model(file_path: str):
+    """Build the existing audio or video model when the file type requires one."""
     if AUDIO_PATTERN.search(file_path):
         omni_key = os.getenv("QWEN3_OMNI_API_KEY", "")
         omni_model = os.getenv("QWEN3_OMNI_MODEL_NAME", "qwen3-omni-flash")
@@ -1029,7 +1043,7 @@ def _build_vision_model(file_path: str, db, image2text_id, tenant_id):
             lang=DEFAULT_PARSE_LANGUAGE,
             base_url=omni_base,
         )
-    if VIDEO_IMAGE_PATTERN.search(file_path):
+    if VIDEO_PATTERN.search(file_path):
         omni_key = os.getenv("QWEN3_OMNI_API_KEY", "")
         omni_model = os.getenv("QWEN3_OMNI_MODEL_NAME", "qwen3-omni-flash")
         omni_base = os.getenv("QWEN3_OMNI_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
@@ -1039,14 +1053,7 @@ def _build_vision_model(file_path: str, db, image2text_id, tenant_id):
             lang=DEFAULT_PARSE_LANGUAGE,
             base_url=omni_base,
         )
-    # 默认：使用知识库配置的 image2text 模型
-    image2text_key = _resolve_model_api_key(db, image2text_id, tenant_id, "image2text")
-    return QWenCV(
-        key=image2text_key.api_key,
-        model_name=image2text_key.model_name,
-        lang=DEFAULT_PARSE_LANGUAGE,
-        base_url=image2text_key.api_base,
-    )
+    return None
 
 
 @celery_app.task(name="app.core.rag.tasks.parse_document")
@@ -1132,7 +1139,8 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
             if auto_questions_topn:
                 llm_config = _build_llm_config(db, db_knowledge.llm_id, tenant_id)
             knowledge_id = str(db_knowledge.id)
-            vision_model = _build_vision_model(file_name, db, db_knowledge.image2text_id, tenant_id)
+            image_vision_model = _build_image_vision_model(db, db_knowledge.image2text_id, tenant_id)
+            vision_model = _build_media_model(file_name) or image_vision_model
             vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
 
             progress_lines.append(f"{_progress_ts()} Start to parse.")
@@ -1204,6 +1212,13 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
                 source_file_id=document_info["file_id"],
                 source_file_name=document_info["file_name"],
             )
+            if isinstance(child_res, GroupedChildChunks):
+                validate_parent_child_result(
+                    child_res,
+                    parent_res,
+                    parent_id_map,
+                    str(parser_config.get("parent_chunk_mode") or "paragraph"),
+                )
         else:
             res = chunk(
                 filename=file_name,
@@ -2069,11 +2084,21 @@ def sync_knowledge_for_kb(kb_id: uuid.UUID):
 
     def _get_existing_files(kb_uuid: uuid.UUID) -> list[dict]:
         with get_db_context() as db:
-            return [_snapshot_file(db_file) for db_file in db.query(File).filter(File.kb_id == kb_uuid).all()]
+            return [
+                _snapshot_file(db_file)
+                for db_file in db.query(File).filter(
+                    File.kb_id == kb_uuid,
+                    File.file_role == FILE_ROLE_SOURCE,
+                ).all()
+            ]
 
     def _get_file_by_url(kb_uuid: uuid.UUID, file_url: str) -> dict | None:
         with get_db_context() as db:
-            db_file = db.query(File).filter(File.kb_id == kb_uuid, File.file_url == file_url).first()
+            db_file = db.query(File).filter(
+                File.kb_id == kb_uuid,
+                File.file_role == FILE_ROLE_SOURCE,
+                File.file_url == file_url,
+            ).first()
             return _snapshot_file(db_file) if db_file else None
 
     def _create_file_record(
@@ -2189,7 +2214,11 @@ def sync_knowledge_for_kb(kb_id: uuid.UUID):
     def _delete_stale_files(kb_uuid: uuid.UUID, file_urls: set, vector_service):
         with get_db_context() as db:
             stale_files = []
-            db_files = db.query(File).filter(File.kb_id == kb_uuid, File.file_url.notin_(file_urls)).all()
+            db_files = db.query(File).filter(
+                File.kb_id == kb_uuid,
+                File.file_role == FILE_ROLE_SOURCE,
+                File.file_url.notin_(file_urls),
+            ).all()
             for db_file in db_files:
                 db_document = db.query(Document).filter(Document.kb_id == kb_uuid,
                                                         Document.file_id == db_file.id).first()
@@ -2201,6 +2230,14 @@ def sync_knowledge_for_kb(kb_id: uuid.UUID):
             document_id = file_state.get("document_id")
             if document_id:
                 vector_service.delete_by_metadata_field(key="document_id", value=str(document_id))
+                try:
+                    cleanup_mineru_v3_images(document_id)
+                except Exception:
+                    logger.warning(
+                        "[SyncKB] failed to delete derived image assets: document_id=%s",
+                        document_id,
+                        exc_info=True,
+                    )
             if file_state.get("file_key"):
                 from app.services.file_storage_service import FileStorageService
 
@@ -2534,7 +2571,7 @@ def write_message_task(
     Returns:
         Dict containing status, result, elapsed_time, task_id
     """
-
+    loop = set_asyncio_event_loop()
     # MCP 入口兼容：收到 messages 但无 target_message 时，转换为新格式
     if target_message is None and messages:
         msg = messages[0] if messages else {"role": "user", "content": ""}
@@ -2543,32 +2580,48 @@ def write_message_task(
         context_after = []
         skip_cursor_advance = True
 
-        # RAG 存储类型走独立路径
-        if storage_type and storage_type.lower() == "rag":
-            loop = None
-            try:
-                loop = set_asyncio_event_loop()
+    # 解析 end_user_id：若排队期间用户已被合并，自动路由到目标用户
+    resolved_end_user_id = end_user_id
+    try:
+        with get_db_context() as db:
+            from app.repositories.end_user_repository import EndUserRepository
+            repo = EndUserRepository(db)
+            resolved = repo.resolve_merge_by_origin_id(uuid.UUID(end_user_id))
+            if resolved:
+                logger.info(
+                    f"[CELERY WRITE] end_user_id merged, redirecting: "
+                    f"{end_user_id} → {resolved.id}"
+                )
+                resolved_end_user_id = str(resolved.id)
+    except Exception as e:
+        logger.warning(
+            f"[CELERY WRITE] merge resolution failed for {end_user_id}: {e}, "
+            f"falling back to original ID"
+        )
 
-                async def _rag_write():
-                    from app.core.memory.memory_service import MemoryService
-                    await MemoryService.write_messages_to_rag(
-                        messages=messages,
-                        end_user_id=end_user_id,
-                        user_rag_memory_id=user_rag_memory_id,
-                    )
+    # RAG 存储类型走独立路径
+    if storage_type and storage_type.lower() == "rag":
+        try:
+            async def _rag_write():
+                from app.core.memory.memory_service import MemoryService
+                await MemoryService.write_messages_to_rag(
+                    messages=messages,
+                    end_user_id=resolved_end_user_id,
+                    user_rag_memory_id=user_rag_memory_id,
+                )
 
-                loop.run_until_complete(_rag_write())
-                return {"status": "SUCCESS", "result": "rag_write_complete", "task_id": self.request.id}
-            except Exception as e:
-                logger.error(f"[CELERY WRITE] RAG write failed: {e}", exc_info=True)
-                return {"status": "FAILURE", "error": str(e), "task_id": self.request.id}
-            finally:
-                if loop:
-                    _shutdown_loop_gracefully(loop)
+            loop.run_until_complete(_rag_write())
+            return {"status": "SUCCESS", "result": "rag_write_complete", "task_id": self.request.id}
+        except Exception as e:
+            logger.error(f"[CELERY WRITE] RAG write failed: {e}", exc_info=True)
+            return {"status": "FAILURE", "error": str(e), "task_id": self.request.id}
+        finally:
+            if loop:
+                _shutdown_loop_gracefully(loop)
 
     # 新格式：直接调用 MemoryService.write()
     logger.info(
-        f"[CELERY WRITE] Starting - end_user_id={end_user_id}, "
+        f"[CELERY WRITE] Starting - end_user_id={resolved_end_user_id}, "
         f"config_id={config_id}, conv={conversation_id or '-'}, "
         f"seq={message_seq}, language={language}"
     )
@@ -2579,7 +2632,7 @@ def write_message_task(
 
         service = MemoryService(
             config_id=uuid.UUID(config_id),
-            end_user_id=end_user_id,
+            end_user_id=resolved_end_user_id,
             workspace_id=workspace_id,
             language=language,
         )
@@ -2597,10 +2650,8 @@ def write_message_task(
         )
         return {"status": result.status, "extraction": result.extraction}
 
-    loop = None
     try:
         task_start_time = int(time.time())
-        loop = set_asyncio_event_loop()
 
         result = loop.run_until_complete(_run())
         elapsed_time = time.time() - start_time
@@ -2613,7 +2664,7 @@ def write_message_task(
             if redis_client is not None:
                 from datetime import timezone as _tz
                 _now_utc = to_iso_z(datetime.now(_tz.utc))
-                redis_client.set(f"write_message:last_done:{end_user_id}", _now_utc, ex=86400 * 30)
+                redis_client.set(f"write_message:last_done:{resolved_end_user_id}", _now_utc, ex=86400 * 30)
         except Exception as _e:
             logger.warning(f"[CELERY WRITE] 写入 last_done 时间戳失败: {_e}")
 
@@ -2625,7 +2676,7 @@ def write_message_task(
             async def _sync_count():
                 connector = Neo4jConnector()
                 try:
-                    return await sync_end_user_memory_count_from_neo4j(end_user_id, connector)
+                    return await sync_end_user_memory_count_from_neo4j(resolved_end_user_id, connector)
                 finally:
                     await connector.close()
 
@@ -2637,7 +2688,7 @@ def write_message_task(
         try:
             from app.services.memory_reflection_service import WorkspaceAppService
             with get_db_context() as db:
-                WorkspaceAppService(db).update_end_user_write_time(end_user_id)
+                WorkspaceAppService(db).update_end_user_write_time(resolved_end_user_id)
         except Exception as _wt_e:
             logger.warning(f"[CELERY WRITE] 更新 write_time 失败: {_wt_e}")
 
@@ -2730,8 +2781,27 @@ def fast_write_message_task(
     Returns:
         Dict containing status, result, task_id
     """
+    # 解析 end_user_id：若排队期间用户已被合并，自动路由到目标用户
+    resolved_end_user_id = end_user_id
+    try:
+        with get_db_context() as db:
+            from app.repositories.end_user_repository import EndUserRepository
+            repo = EndUserRepository(db)
+            resolved = repo.resolve_merge_by_origin_id(uuid.UUID(end_user_id))
+            if resolved:
+                logger.info(
+                    f"[CELERY FAST WRITE] end_user_id merged, redirecting: "
+                    f"{end_user_id} → {resolved.id}"
+                )
+                resolved_end_user_id = str(resolved.id)
+    except Exception as e:
+        logger.warning(
+            f"[CELERY FAST WRITE] merge resolution failed for {end_user_id}: {e}, "
+            f"falling back to original ID"
+        )
+
     logger.info(
-        f"[CELERY FAST WRITE] Starting - end_user_id={end_user_id}, "
+        f"[CELERY FAST WRITE] Starting - end_user_id={resolved_end_user_id}, "
         f"config_id={config_id}, conv={conversation_id or '-'}, "
         f"seq={message_seq}, language={language}, source={source or '-'}"
     )
@@ -2742,7 +2812,7 @@ def fast_write_message_task(
 
         service = MemoryService(
             config_id=uuid.UUID(config_id),
-            end_user_id=end_user_id,
+            end_user_id=resolved_end_user_id,
             workspace_id=workspace_id,
             language=language,
         )
@@ -4221,7 +4291,27 @@ def do_forget_for_user(self, end_user_id: str) -> Dict[str, Any]:
             end_user_id=end_user_id,
             workspace_id=workspace_id,
         )
-        result = await service.forget()
+
+        # 抢该用户的写锁：与反思 / 去重任务互斥，保证同一用户的图谱不被并发修改。
+        # Celery 任务线程独占 event loop，阻塞不影响其他任务，直接用同步上下文管理器。
+        sync_redis = get_sync_redis_client()
+        if sync_redis is not None:
+            write_lock = RedisFairLock(
+                key=f"memory_write:{end_user_id}",
+                redis_client=sync_redis,
+                expire=1200, timeout=60, auto_renewal=True,
+            )
+            try:
+                with write_lock:
+                    result = await service.forget()
+            except RuntimeError:
+                logger.warning(f"[ForgetDo] 获取写锁超时，跳过 user={end_user_id}")
+                if redis_client:
+                    # 移回候选集，等下一轮 scan 重新派发（与 scan_forget_candidates 派发失败的处理一致）
+                    await redis_client.smove(_FORGET_INFLIGHT_KEY, _FORGET_CANDIDATES_KEY, end_user_id)
+                return {"status": "lock_timeout"}
+        else:
+            result = await service.forget()
 
         if redis_client:
             await redis_client.srem(_FORGET_INFLIGHT_KEY, end_user_id)
@@ -4903,6 +4993,7 @@ def init_interest_distribution_for_users(self, end_user_ids: List[str]) -> Dict[
         initialized = 0
         failed = 0
         skipped = 0
+        not_cached = 0
         language = "zh"
 
         service = MemoryAgentService()
@@ -4941,27 +5032,35 @@ def init_interest_distribution_for_users(self, end_user_ids: List[str]) -> Dict[
 
             logger.info(f"用户 {end_user_id} 无兴趣分布缓存，开始生成")
             try:
-                result = await service.get_interest_distribution_by_user(
+                result, cacheable = await service.generate_interest_distribution_by_user(
                     end_user_id=end_user_id,
                     limit=5,
                     language=language,
                 )
-                await InterestMemoryCache.set_interest_distribution(
-                    end_user_id=end_user_id,
-                    language=language,
-                    data=result,
-                    expire=INTEREST_CACHE_EXPIRE,
-                )
-                initialized += 1
-                logger.info(f"用户 {end_user_id} 兴趣分布缓存生成成功")
+                if cacheable:
+                    await InterestMemoryCache.set_interest_distribution(
+                        end_user_id=end_user_id,
+                        language=language,
+                        data=result,
+                        expire=INTEREST_CACHE_EXPIRE,
+                    )
+                    initialized += 1
+                    logger.info(f"用户 {end_user_id} 兴趣分布缓存生成成功")
+                else:
+                    not_cached += 1
+                    logger.info(f"用户 {end_user_id} 兴趣分布结果不可缓存，本次不写缓存")
             except Exception as e:
                 failed += 1
                 logger.error(f"用户 {end_user_id} 兴趣分布缓存生成失败: {e}")
 
-        logger.info(f"兴趣分布按需初始化完成: 初始化={initialized}, 跳过={skipped}, 失败={failed}")
+        logger.info(
+            f"兴趣分布按需初始化完成: 初始化={initialized}, "
+            f"未缓存={not_cached}, 跳过={skipped}, 失败={failed}"
+        )
         return {
             "status": "SUCCESS",
             "initialized": initialized,
+            "not_cached": not_cached,
             "skipped": skipped,
             "failed": failed,
         }
@@ -4969,8 +5068,13 @@ def init_interest_distribution_for_users(self, end_user_ids: List[str]) -> Dict[
     loop = set_asyncio_event_loop()
     try:
         result = loop.run_until_complete(_run())
-        # 全部失败（无初始化、无跳过）= 完全失败：raise → Celery FAILURE
-        if result["failed"] > 0 and result["initialized"] == 0 and result["skipped"] == 0:
+        # 全部失败（无初始化、无未缓存成功结果、无跳过）才标记 Celery FAILURE。
+        if (
+            result["failed"] > 0
+            and result["initialized"] == 0
+            and result["not_cached"] == 0
+            and result["skipped"] == 0
+        ):
             raise RuntimeError(
                 f"all {result['failed']} users failed to initialize interest distribution"
             )

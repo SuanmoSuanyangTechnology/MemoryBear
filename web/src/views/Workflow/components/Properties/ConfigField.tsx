@@ -166,7 +166,7 @@ const ConfigField: FC<ConfigFieldProps> = ({ configKey: key }) => {
         key={key}
         name={key}
       >
-        <Knowledge variant="workflow" />
+        <Knowledge variant="workflow" required={config.required} />
       </Form.Item>
     )
   }

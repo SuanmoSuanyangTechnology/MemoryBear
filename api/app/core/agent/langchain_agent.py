@@ -22,6 +22,7 @@ from langchain_core.tools import BaseTool
 from langgraph.errors import GraphRecursionError
 
 from app.core.logging_config import get_business_logger
+from app.core.memory.retrieval_trace.stage_events import is_memory_stage_capture_enabled
 from app.core.models import RedBearLLM, RedBearModelConfig
 from app.core.utils.datetime_utils import to_iso_z, utcnow
 from app.models.models_model import ModelType
@@ -1046,6 +1047,8 @@ class LangChainAgent:
         # 收集节点执行记录
         node_executions: List[Dict[str, Any]] = []
         _tool_stack: List[Dict[str, Any]] = []
+        # LangChain 自定义事件只携带 run lineage；该映射用于把并行阶段事件归属到产品 step_id。
+        _tool_runs: Dict[str, str] = {}
 
         try:
             # 准备消息列表（支持多模态）
@@ -1196,6 +1199,9 @@ class LangChainAgent:
                         }
                         _tool_stack.append(node)
                         node_executions.append(node)
+                        run_id = event.get("run_id")
+                        if run_id:
+                            _tool_runs[str(run_id)] = step_id
                         trace.start_tool(
                             step_id=step_id,
                             tool_name=tool_name,
@@ -1206,18 +1212,61 @@ class LangChainAgent:
                         # 实时推送工具调用开始事件
                         yield {"type": "agent_log", "data": trace.to_dict()}
                         yield {"type": "tool_start", "step_id": step_id, "name": tool_name, "input": self._truncate_data(tool_input), "meta": tool_meta if tool_meta else None}
+                    elif kind == "on_custom_event" and event.get("name") == "memory_stage":
+                        if not is_memory_stage_capture_enabled():
+                            continue
+                        raw_stage = event.get("data") or {}
+                        event_run_id = event.get("run_id")
+                        parents = event.get("parent_ids") or []
+                        # Provider 对自定义事件的 run_id 层级不同，按自身到祖先顺序寻找最近的工具调用。
+                        candidate_run_ids = [event_run_id, *reversed(parents)]
+                        matched_step_id = None
+                        for candidate in candidate_run_ids:
+                            if candidate and str(candidate) in _tool_runs:
+                                matched_step_id = _tool_runs[str(candidate)]
+                                break
+                        if not matched_step_id:
+                            logger.warning("丢弃无法归属工具调用的 memory_stage: run_id=%s", event_run_id)
+                            continue
+                        matched_node = next(
+                            (node for node in reversed(node_executions) if node.get("step_id") == matched_step_id),
+                            None,
+                        )
+                        if not matched_node or matched_node.get("node_name") != "long_term_memory":
+                            logger.warning("丢弃归属非长期记忆工具的 memory_stage: run_id=%s", event_run_id)
+                            continue
+                        stage_payload = {
+                            "type": "memory_stage",
+                            "step_id": matched_step_id,
+                            "stage": raw_stage.get("stage"),
+                            "status": raw_stage.get("status", "completed"),
+                            "data": raw_stage.get("data") or {},
+                        }
+                        matched_node.setdefault("_memory_stages", []).append(stage_payload)
+                        yield stage_payload
                     elif kind == "on_tool_end":
                         tool_output = event.get("data", {}).get("output")
                         tool_name = event.get("name", "unknown")
+                        run_id = event.get("run_id")
+                        matched_step_id = _tool_runs.pop(str(run_id), None) if run_id else None
                         matched_node = None
-                        if _tool_stack:
+                        if matched_step_id:
+                            matched_node = next(
+                                (node for node in reversed(node_executions) if node.get("step_id") == matched_step_id),
+                                None,
+                            )
+                            _tool_stack[:] = [
+                                node for node in _tool_stack
+                                if node.get("step_id") != matched_step_id
+                            ]
+                        elif _tool_stack:
                             matched_node = _tool_stack.pop()
                         else:
                             for n in reversed(node_executions):
                                 if n["node_name"] == tool_name and n["status"] == "running":
                                     matched_node = n
                                     break
-                        matched_step_id = matched_node.get("step_id") if matched_node else None
+                        matched_step_id = matched_node.get("step_id") if matched_node else matched_step_id
                         if matched_node:
                             matched_node["status"] = "completed"
                             matched_node["output"] = self._truncate_data(tool_output)
@@ -1240,15 +1289,26 @@ class LangChainAgent:
                     elif kind == "on_tool_error":
                         error_msg = str(event.get("data", {}).get("error", ""))
                         tool_name = event.get("name", "unknown")
+                        run_id = event.get("run_id")
+                        matched_step_id = _tool_runs.pop(str(run_id), None) if run_id else None
                         matched_node = None
-                        if _tool_stack:
+                        if matched_step_id:
+                            matched_node = next(
+                                (node for node in reversed(node_executions) if node.get("step_id") == matched_step_id),
+                                None,
+                            )
+                            _tool_stack[:] = [
+                                node for node in _tool_stack
+                                if node.get("step_id") != matched_step_id
+                            ]
+                        elif _tool_stack:
                             matched_node = _tool_stack.pop()
                         else:
                             for n in reversed(node_executions):
                                 if n["node_name"] == tool_name and n["status"] == "running":
                                     matched_node = n
                                     break
-                        matched_step_id = matched_node.get("step_id") if matched_node else None
+                        matched_step_id = matched_node.get("step_id") if matched_node else matched_step_id
                         if matched_node:
                             matched_node["status"] = "failed"
                             matched_node["error"] = error_msg[:500]
@@ -1331,6 +1391,7 @@ class LangChainAgent:
             logger.error("=" * 80, exc_info=True)
             raise
         finally:
+            _tool_runs.clear()
             logger.info("=" * 80)
             logger.info("chat_stream 方法执行结束")
             logger.info("=" * 80)

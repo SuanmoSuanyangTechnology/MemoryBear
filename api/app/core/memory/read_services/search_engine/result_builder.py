@@ -87,7 +87,7 @@ class EntityBuilder(BaseBuilder):
             "aliases_name": self.record.get("aliases", []),
             "description": self.record.get("description"),
             "description_summary": self.record.get("description_summary"),
-            "description_timeline": self.record.get("description_timeline"),
+            "event_timeline": self.record.get("event_timeline"),
             "kw_score": self.record.get("kw_score", 0.0),
             "emb_score": self.record.get("embedding_score", 0.0)
         }
@@ -101,9 +101,9 @@ class EntityBuilder(BaseBuilder):
             (
                 "description",
                 (self.record.get("description", "") or "") +
-                (self.record.get("description_summary", "") or "") +
-                (self.record.get("description_timeline", "") or "")
+                (self.record.get("description_summary", "") or "")
             ),
+            ("event_timeline", self.record.get("event_timeline") or "")
         ]
         for tag, value in fields:
             if value:
@@ -230,7 +230,7 @@ class MetadataBuilder(BaseBuilder):
             "anchors": self.record.get("anchors", []) or [],
             "beliefs_or_stances": self.record.get("beliefs_or_stances", []) or [],
             "core_facts": self.record.get("core_facts", []) or [],
-            "events": self.record.get("events", []) or [],
+            "event_timeline": self.record.get("event_timeline", []) or [],
             "goals": self.record.get("goals", []) or [],
             "interests": self.record.get("interests", []) or [],
             "relations": self.record.get("relations", []) or [],
@@ -246,7 +246,7 @@ class MetadataBuilder(BaseBuilder):
             ("anchors", self.record.get("anchors", [])),
             ("beliefs-or-stances", self.record.get("beliefs_or_stances", [])),
             ("core-facts", self.record.get("core_facts", [])),
-            ("events", self.record.get("events", [])),
+            ("event_timeline", self.record.get("event_timeline", [])),
             ("goals", self.record.get("goals", [])),
             ("interests", self.record.get("interests", [])),
             ("relations", self.record.get("relations", [])),

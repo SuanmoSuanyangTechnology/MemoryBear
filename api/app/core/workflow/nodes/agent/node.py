@@ -111,36 +111,91 @@ class AgentNode(BaseNode):
                 )
             ).scalar_one_or_none()
 
-    async def _load_tools_async(self, variable_pool: VariablePool) -> list:
-        """根据配置加载工具并转换为 LangChain BaseTool 列表"""
+    async def _load_tools_async(
+            self,
+            variable_pool: VariablePool,
+            state: WorkflowState,
+    ) -> list:
+        """加载工具库工具及 Agent 内置的知识库/长期记忆工具。"""
         selectors = [s for s in (self.typed_config.tools or []) if s.enabled]
-        if not selectors:
-            return []
-
-        tenant_id = await self._resolve_tenant_id_async(variable_pool)
-        if not tenant_id:
-            logger.warning(f"节点 {self.node_id}: 缺少租户 ID，无法加载工具，Agent 将仅使用推理能力")
-            return []
-
         user_id = self.get_variable("sys.user_id", variable_pool, strict=False)
         workspace_id = self.get_variable("sys.workspace_id", variable_pool, strict=False)
-
         langchain_tools = []
-        async with get_async_db_context() as db:
-            tool_service = ToolService(db)
-            for selector in selectors:
-                try:
-                    tool_instance = await tool_service.get_tool_instance_async(str(selector.tool_id), tenant_id)
-                    if not tool_instance:
-                        logger.warning(f"节点 {self.node_id}: 工具 {selector.tool_id} 不存在或未激活，已跳过")
-                        continue
-                    tool_instance.set_runtime_context(user_id=user_id, workspace_id=workspace_id)
-                    langchain_tool = tool_instance.to_langchain_tool(selector.operation)
 
-                    if langchain_tool:
-                        langchain_tools.append(langchain_tool)
+        # 普通工具需要租户上下文；内置知识库/记忆工具不应被普通工具的租户解析失败阻断。
+        if selectors:
+            tenant_id = await self._resolve_tenant_id_async(variable_pool)
+            if not tenant_id:
+                logger.warning(f"节点 {self.node_id}: 缺少租户 ID，跳过工具库工具加载")
+            else:
+                async with get_async_db_context() as db:
+                    tool_service = ToolService(db)
+                    for selector in selectors:
+                        try:
+                            tool_instance = await tool_service.get_tool_instance_async(str(selector.tool_id), tenant_id)
+                            if not tool_instance:
+                                logger.warning(f"节点 {self.node_id}: 工具 {selector.tool_id} 不存在或未激活，已跳过")
+                                continue
+                            tool_instance.set_runtime_context(user_id=user_id, workspace_id=workspace_id)
+                            langchain_tool = tool_instance.to_langchain_tool(selector.operation)
+
+                            if langchain_tool:
+                                langchain_tools.append(langchain_tool)
+                        except Exception as e:
+                            logger.error(f"节点 {self.node_id}: 加载工具 {selector.tool_id} 失败: {e}")
+
+        # 知识库检索工具：复用 Agent 应用的标准检索适配器和参数语义。
+        knowledge_config = self.typed_config.knowledge_retrieval
+        if knowledge_config and knowledge_config.knowledge_bases:
+            try:
+                from app.services.draft_run_service import create_knowledge_retrieval_tool
+
+                kb_config = knowledge_config.model_dump(mode="json")
+                kb_ids = [str(kb.kb_id) for kb in knowledge_config.knowledge_bases]
+                kb_tool = create_knowledge_retrieval_tool(
+                    kb_config,
+                    kb_ids,
+                    user_id,
+                )
+                if kb_tool:
+                    langchain_tools.append(kb_tool)
+                    logger.debug(
+                        f"节点 {self.node_id}: 已添加知识库检索工具",
+                        extra={"kb_ids": kb_ids},
+                    )
+            except Exception as e:
+                logger.error(f"节点 {self.node_id}: 加载知识库检索工具失败: {e}", exc_info=True)
+
+        # 长期记忆工具：复用 Agent 应用工具，并使用本次工作流的存储上下文。
+        memory_config = self.typed_config.long_term_memory
+        if memory_config.enable:
+            if not user_id:
+                logger.warning(f"节点 {self.node_id}: 缺少用户 ID，跳过长期记忆工具加载")
+            elif not workspace_id:
+                logger.warning(f"节点 {self.node_id}: 缺少工作空间 ID，跳过长期记忆工具加载")
+            else:
+                try:
+                    from app.core.memory.memory_service import create_long_term_memory_tool
+                    from app.services.memory_config_service import MemoryConfigService
+
+                    async with get_async_db_context() as db:
+                        workspace_uuid = uuid.UUID(str(workspace_id))
+                        config_id = await MemoryConfigService(db).get_workspace_active_config_id_async(workspace_uuid)
+
+                    # create_long_term_memory_tool 内部以 enabled 判断开关，这里对齐补上
+                    memory_tool = create_long_term_memory_tool(
+                        {**memory_config.model_dump(), "enabled": memory_config.enable},
+                        user_id,
+                        workspace_uuid,
+                        state.get("memory_storage_type") or "neo4j",
+                        state.get("user_rag_memory_id") or "",
+                        config_id=config_id,
+                    )
+                    if memory_tool:
+                        langchain_tools.append(memory_tool)
+                        logger.debug(f"节点 {self.node_id}: 已添加长期记忆工具")
                 except Exception as e:
-                    logger.error(f"节点 {self.node_id}: 加载工具 {selector.tool_id} 失败: {e}")
+                    logger.error(f"节点 {self.node_id}: 加载长期记忆工具失败: {e}", exc_info=True)
 
         logger.debug(f"节点 {self.node_id} 加载了 {len(langchain_tools)} 个工具")
         return langchain_tools
@@ -330,7 +385,7 @@ class AgentNode(BaseNode):
             self._param_warnings.extend(param_warnings)
 
         # 3. 加载工具
-        langchain_tools = await self._load_tools_async(variable_pool)
+        langchain_tools = await self._load_tools_async(variable_pool, state)
 
         # 4. 构建历史
         history = self._build_history(state)

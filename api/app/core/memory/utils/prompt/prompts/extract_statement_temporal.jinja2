@@ -14,6 +14,7 @@
 - speaker
 - has_emotional_state
 - has_unsolved_reference
+- is_permanent
 - dialog_at
 - valid_at
 - invalid_at
@@ -29,6 +30,7 @@ Your task is to identify and extract declarative statements from the provided ta
 - speaker
 - has_emotional_state
 - has_unsolved_reference
+- is_permanent
 - dialog_at
 - valid_at
 - invalid_at
@@ -46,11 +48,12 @@ Each output item should be a structured candidate memory statement.
 - supporting_context: 完整对话上下文，仅用于辅助理解 target_content，不能单独贡献新的可抽取事实
 - supporting_context.before_msgs: 发生在 target_content **之前**的上下文消息列表（按时间升序），可包含 User 和 Assistant
 - supporting_context.after_msgs: 发生在 target_content **之后**的上下文消息列表（按时间升序），可包含 User 和 Assistant
+- `role` 的大小写不改变语义：`user` / `User` 都表示用户消息，`assistant` / `Assistant` 都表示 Assistant 消息。
 - 注意：target_content 在结构上夹在 before_msgs 与 after_msgs 之间，但与两侧消息**不一定直接相邻**，中间可能存在被剪枝或省略的消息
 - supporting_context 可用于解析 target_content 中已经出现的指代、省略和槽位；例如 target_content 中的“他俩”“另一个人”“她/他”“这件事”等可引用同一对话链路里可唯一确定的人物或事件。
 - `supporting_context.before_msgs` 可以提供 target 之前已经确认的事实、人物、事件和时间锚点，用于理解 target_content。
-- `supporting_context.after_msgs` 只能用于指代消融：把 target_content 里已经存在的人物指代、集合指代、角色槽位或事件指代映射到具体对象；不能提供新的事实、人物属性、任务、动作、计划、日期或事件锚点，也不能反向覆盖 target_content / before_msgs 中已有的时间锚点。
-- supporting_context 只能用于补全 target_content 的指代与锚点，不能单独产生新 statement。
+- 对 `statement_text` 而言，`supporting_context.after_msgs` 只能用于指代消融：把 target_content 里已经存在的人物指代、集合指代、角色槽位或事件指代映射到具体对象；不能提供新的事实、人物属性、任务、动作、计划、日期或事件锚点，也不能反向覆盖 target_content / before_msgs 中已有的时间锚点。
+- supporting_context 只能补全 target_content 已有的指代与允许使用的锚点，不能单独产生新 statement。唯一的字段级例外是：能明确指向当前 statement 的 User 上下文消息可以影响 `is_permanent`，但不能因此改变 `statement_text` 或增加 statement。
   {% else %}
 - chunk_id: unique chunk identifier
 - end_user_id: end-user identifier
@@ -59,18 +62,19 @@ Each output item should be a structured candidate memory statement.
 - supporting_context: full dialogue context used only to help interpret target_content and must not independently contribute new extractable facts
 - supporting_context.before_msgs: ordered list of messages that occurred **before** target_content (chronological), may include User and Assistant
 - supporting_context.after_msgs: ordered list of messages that occurred **after** target_content (chronological), may include User and Assistant
+- Role matching is case-insensitive: `user` / `User` both denote a User message, and `assistant` / `Assistant` both denote an Assistant message.
 - Note: target_content sits structurally between before_msgs and after_msgs, but is **not necessarily directly adjacent** to either side — pruned or omitted messages may exist in between
 - supporting_context may be used to resolve references, ellipsis, and slots already present in target_content; for example, "the two of them," "the other person," "she/he," or "this matter" may refer to uniquely identifiable people or events in the same dialogue chain.
 - `supporting_context.before_msgs` may provide already-confirmed facts, people, events, and temporal anchors that existed before the target and can be used to understand target_content.
-- `supporting_context.after_msgs` is only for reference resolution: it may map person references, group references, role slots, or event references already present in target_content to concrete objects. It must not provide new facts, person attributes, tasks, actions, plans, dates, or event anchors, and it must not retroactively overwrite temporal anchors already available from target_content / before_msgs.
-- supporting_context may only fill references and anchors in target_content; it must not independently produce new statements.
+- For `statement_text`, `supporting_context.after_msgs` is only for reference resolution: it may map person references, group references, role slots, or event references already present in target_content to concrete objects. It must not provide new facts, person attributes, tasks, actions, plans, dates, or event anchors, and it must not retroactively overwrite temporal anchors already available from target_content / before_msgs.
+- supporting_context may only fill references and allowed anchors already present in target_content; it must not independently produce new statements. The only field-level exception is that a User context message that unambiguously points to the current statement may affect `is_permanent`, but it must not change `statement_text` or add a statement.
   {% endif %}
 
 === Scope ===
 {% if language == "zh" %}
 
 - 只从 `target_content` 中提取陈述句。
-- `supporting_context.before_msgs` 与 `supporting_context.after_msgs` 只用于解释 `target_content` 中的代词、省略、主体、时间和语义背景。
+- `supporting_context.before_msgs` 与 `supporting_context.after_msgs` 只用于解释 `target_content` 中已有的代词、省略、主体和允许解析的锚点；以及在明确指向当前 statement 时提供 User 的永久记忆意图。它们不是待抽取文本。
 - 不要从 `before_msgs` 或 `after_msgs` 中单独提取任何陈述句。
 - 如果某条信息没有出现在 `target_content` 中，即使它出现在 `before_msgs` 或 `after_msgs` 中，也不能把它作为独立 statement 输出。
 - 如果 Assistant 在 `before_msgs` 或 `after_msgs` 中提供了总结、猜测、解释或改写，这些内容只能作为理解辅助，不能被当作事实直接提取。
@@ -80,7 +84,7 @@ Each output item should be a structured candidate memory statement.
 - 每条输出的 statement 都必须能够在 `target_content` 中找到直接对应的表达依据。
   {% else %}
 - Extract statements only from `target_content`.
-- `supporting_context.before_msgs` and `supporting_context.after_msgs` are used only to interpret references, ellipsis, subjects, temporal expressions, and semantic background in `target_content`.
+- `supporting_context.before_msgs` and `supporting_context.after_msgs` are used only to interpret references, ellipsis, subjects, and allowed anchors already present in `target_content`, plus a User's permanent-memory intent when it unambiguously points to the current statement. They are not extraction text.
 - Do not extract any standalone statement from `before_msgs` or `after_msgs`.
 - If a piece of information does not appear in `target_content`, it must not be output as an independent statement even if it appears in `before_msgs` or `after_msgs`.
 - If the Assistant in `before_msgs` or `after_msgs` provides a summary, guess, interpretation, or rephrasing, treat it only as interpretive support and never as a direct factual source for extraction.
@@ -89,6 +93,41 @@ Each output item should be a structured candidate memory statement.
 - Additional restriction for `after_msgs`: it must not provide new entity attributes, occupations, experiences, abilities, tasks, actions, plans, dates, or event times. It may only map references or slots already present in target_content to concrete objects.
 - Every output statement must be directly grounded in wording from `target_content`.
   {% endif %}
+
+=== Statement Source Gate ===
+{% if language == "zh" %}
+
+严格按以下两个阶段处理，不能颠倒，也不能把两个阶段合并：
+
+1. **仅从 target 生成候选**：先只根据 `target_content` 确定完整的候选 statement 集合。每个候选的核心谓词、动作、关系、态度、属性、任务、计划和源时间表达都必须在 `target_content` 中有直接文字依据。
+2. **再用 context 受限补全**：候选集合确定后，才可使用 supporting_context。context 只能把候选中已经存在的代词、集合指代、人物槽位、角色槽位或事件指代替换成唯一可确定的对象；按既有时间规则解析 target 已有的时间表达；或者仅修改该候选的 `is_permanent`。
+
+来源硬约束：
+
+- supporting_context 绝不能增加候选 statement 的数量。候选数量只能因为 `target_content` 自身包含多个可独立抽取的完整意思而变化。
+- context 补全可以替换名词性指代，但不能从 context 增加 target 没有的谓词、动作、关系、态度、属性、职业、经历、能力、任务名、子任务、计划或源时间表达。
+- 对每条最终 statement 做来源检查：忽略仅用于替换指代的具体实体名后，如果无法在 `target_content` 中指出支撑其核心命题的原始表达，必须删除该 statement。
+- 快速反事实检查：如果移除 `before_msgs` 和 `after_msgs` 后，某条候选的核心谓词或动作也随之消失，那么该候选来自 context，禁止输出。
+- User 上下文中明确要求永久、永远或长期保留，或明确要求不要遗忘的指令，只能改变已存在候选的 `is_permanent`；不能改变候选的 `statement_text`，也不能创建新候选。
+- Assistant 上下文中的“重要”“记住”“保存”等措辞不代表用户的永久记忆意图，不能影响 `is_permanent`。
+
+{% else %}
+
+Process the input in exactly these two ordered stages. Do not reverse or merge them:
+
+1. **Generate candidates from the target only**: first determine the complete candidate statement set using only `target_content`. Every candidate's core predicate, action, relationship, attitude, attribute, task, plan, and source temporal expression must have direct textual support in `target_content`.
+2. **Then enrich candidates from context under strict limits**: only after the candidate set is fixed may supporting_context be used. Context may replace a pronoun, group reference, person slot, role slot, or event reference already present in a candidate with a uniquely resolved object; resolve a temporal expression already present in the target under the existing temporal rules; or change only that candidate's `is_permanent`.
+
+Hard source constraints:
+
+- supporting_context must never increase the number of candidate statements. Candidate count may change only because `target_content` itself contains multiple independently extractable complete thoughts.
+- Context enrichment may replace nominal references, but it must not add a predicate, action, relationship, attitude, attribute, occupation, experience, ability, task name, subtask, plan, or source temporal expression absent from the target.
+- Apply a provenance check to every final statement: after ignoring concrete entity names used only to replace references, drop the statement unless its core proposition can be traced to a specific expression in `target_content`.
+- Use this counterfactual check: if removing `before_msgs` and `after_msgs` would also remove a candidate's core predicate or action, that candidate came from context and must not be output.
+- A User-context instruction explicitly requiring permanent, forever, or long-term retention, or requiring the system never to forget the information, may change only `is_permanent` on an existing candidate. It must not change `statement_text` or create a candidate.
+- Wording such as "important", "remember", or "save" in Assistant context is not the user's permanent-memory intent and must not affect `is_permanent`.
+
+{% endif %}
 
 === Extraction Rules ===
 {% if language == "zh" %}
@@ -101,9 +140,9 @@ Each output item should be a structured candidate memory statement.
 
 用户主语归一化：
 
-- 如果陈述句的主语是用户本人，无论上下文中给出的用户名称、昵称、别名或真实姓名是什么，都必须使用与 `target_content` 主要语言一致的用户锚点，不要使用用户的具体名字或别名。
-- `target_content` 主要是中文时使用“用户”作为主语。
-- `target_content` 主要是英文时使用 `the user` 作为主语。
+- 如果陈述句的主语是用户本人，无论上下文中给出的用户名称、昵称、别名或真实姓名是什么，都必须使用与输出语言一致的用户锚点，不要使用用户的具体名字或别名。
+- 中文输出使用“用户”作为主语。
+- 英文输出使用 `the user` 作为主语。
 - 这是硬规则；如果用户主语没有按输出语言统一成对应锚点，则该 statement 视为不合格。
 
 共指消解：
@@ -255,6 +294,24 @@ statement_type：
 - 即使没有明确情绪词，只要语义足以表明用户当前具有情感状态，也可以标为 `true`，例如“我很好”。
 - 普通评价、偏好、难易判断、能力判断或事实安排不自动代表用户当前情绪；例如“李教授讲课清晰透彻”“这个项目有点难”本身不应仅因是评价就标为 `true`。
 - 如果只是客观事实、动作描述或安排，且无法从当前上下文稳定判断用户情感状态，则输出 `false`。
+
+永久记忆判断：
+
+- `is_permanent` 表示用户是否明确要求当前 statement 被永久、永远或长期保留，或明确要求系统不要遗忘该信息；它不表示 statement 描述的事实永远有效。
+- 必须先完成 statement 提取、条件保留、指代消融和时间改写，得到最终 `statement_text`，再单独判断该 statement 的 `is_permanent`。
+- 只有用户明确表达“永久记住/永久保留”“永远记住/永远不要忘记”“长期保留”或“不要遗忘这条信息”等永久保留意图时，才输出 `true`；其他所有情况一律输出 `false`。
+- 普通“记住/保存”、一般重要性、内容自身价值、长期事实、偏好、健康信息、亲属日期或人生目标都不能自行触发 `true`。
+- 普通行动提醒，如“别忘了开会”“记得买蛋糕”，不是要求系统永久保存信息，必须输出 `false`。
+- 永久保留指令必须在 `target_content` 中，或出现在 supporting_context 的 `role="user"` 消息中并且能唯一指向当前 statement。Assistant 消息不能提供这种意图。
+- 每条 statement 独立判断。证据不足、含义不清、作用范围不明确或规则冲突时，一律输出 `false`。
+- 不判断或推测任何存储容量、永久记忆配额或分配结果；`is_permanent` 只表示用户明确表达的永久保留意图，容量由后端确定性处理。
+- 如果一句输入产生多条 statement，而永久保留指令无法唯一指向其中一条，不要把 `true` 扩散到全部 statement。只有用户明确要求“这些内容全部永久保留”等且无歧义地覆盖全部候选时，才可全部标为 `true`。
+- 对 context 中的永久保留指令必须执行以下绑定算法：
+  1. 先计算 `target_content` 已产生的候选数量 N。
+  2. 若 N=1，明确的单数永久保留指令可绑定唯一候选。
+  3. 若 N>1 且明确要求“这些/以上内容/两件事/全部永久保留”，可绑定全部候选。
+  4. 若 N>1 且永久保留指令复述了能唯一匹配某一候选的主题、对象、谓词或日期，只绑定该候选。
+  5. 若 N>1 且指令没有唯一复述，也没有明确的全部量词，则不绑定任何候选，所有候选均输出 `false`。
 
 temporal_type：
 
@@ -438,6 +495,24 @@ Emotional-state detection:
 - Ordinary evaluations, preferences, difficulty judgments, ability judgments, or factual arrangements do not automatically indicate the user's current emotional state; for example, “Professor Li explains things clearly” or “this project is difficult” should not be marked `true` merely because they are evaluations.
 - If the statement is only an objective fact or action description and the user's emotional state cannot be stably inferred from the current context, output `false`.
 
+Permanent-memory detection:
+
+- `is_permanent` indicates whether the user explicitly asks for the current statement to be retained permanently, forever, or long-term, or explicitly asks the system never to forget it. It does not mean the proposition remains currently valid forever.
+- First finish extraction, condition preservation, reference resolution, and temporal rewriting to obtain the final `statement_text`. Then judge `is_permanent` independently.
+- Output `true` only when the user explicitly says to retain the information permanently, forever, long-term, or never forget it. Output `false` in every other case.
+- Ordinary wording such as “remember” or “save”, general importance, inherent content value, durable facts, preferences, health information, family dates, or life goals cannot trigger `true` by themselves.
+- Ordinary action reminders such as “don't forget the meeting” or “remember to buy a cake” are not requests for permanent retention and must be `false`.
+- The permanent-retention instruction must occur in `target_content`, or in a supporting_context message with `role="user"` that unambiguously points to the current statement. Assistant messages cannot supply this intent.
+- Judge every statement separately. If evidence, meaning, or instruction scope is missing, unclear, ambiguous, or conflicting, output `false`.
+- Never infer or evaluate storage capacity, permanent-memory quota, or allocation results. `is_permanent` represents only the user's explicit permanent-retention intent; capacity is handled deterministically by the backend.
+- If one input produces multiple statements and the permanent-retention instruction cannot uniquely identify one, do not propagate `true` to every statement. Apply it to all candidates only when the user explicitly and unambiguously asks for all of them to be retained permanently.
+- Apply this binding algorithm to every permanent-retention instruction in context:
+  1. First count the candidates N already produced from `target_content`.
+  2. If N=1, an explicit singular permanent-retention instruction may bind the sole candidate.
+  3. If N>1 and the instruction explicitly says all/these/both items must be retained permanently, it may bind all candidates.
+  4. If N>1 and the instruction repeats a topic, object, predicate, or date that uniquely matches one candidate, bind only that candidate.
+  5. If N>1 and the instruction contains neither uniquely repeated content nor an explicit all-quantifier, bind no candidate and output `false` for every candidate.
+
 temporal_type:
 
 - `STATIC`: relatively stable, ongoing states, identities, attributes, long-term preferences, long-term relationships, occupations, or residence states.
@@ -461,6 +536,10 @@ Rewrite boundary:
 边界示例 B：`我的名字是 Jack。` 是明确命名陈述，可以输出“用户的名字是 Jack。”。
 边界示例 C：`dialog_at=2026-06-08`，上下文为“用户打算2026年7月15日举办活动E，邀请人物A和人物B。人物A擅长任务甲，另一个人擅长任务乙。”，target_content 为“我让他俩提前一周准备吧，她负责事项甲，他负责事项乙。”正确输出应解析为“人物A和人物B从2026年7月8日开始准备”“人物A负责事项甲”“人物B负责事项乙”。不能输出“2026年6月1日准备”，也不能把后文人物身份归给用户。实际输出时必须替换为当前 input/context 中真实出现过的实体名，禁止输出示例占位名或示例实体名。
 边界示例 D（与示例 C 方向相反，演示 after_msgs 边界）：`dialog_at=2026-06-09`，target_content 为“我下个月10号要在公司做一场活动E，想请两位同事一起帮忙，一个负责任务甲，一个负责任务乙。”，after_msgs 中后续依次出现“他们是人物A和人物B。人物A是后端工程师”“另一个人是行政负责人，控场能力很强”“我让他俩提前一周开始准备吧，他负责任务甲细节X，她负责任务乙细节Y”。正确做法是只从 target_content 抽取：`用户计划于2026年7月10日在公司举办活动E。`、`用户邀请人物A和人物B协助活动E。`，以及在 after_msgs 唯一指认人物后回填 target 已有的两个槽位：`人物A负责活动E的任务甲。`、`人物B负责活动E的任务乙。`。不允许输出 `用户计划让人物A和人物B从2026年7月3日开始为活动E做准备。`、`人物A负责活动E的任务甲细节X。`、`人物B负责活动E的任务乙细节Y。` 这些核心谓词只在 after_msgs 中出现，必须丢弃。
+边界示例 E（上下文只影响永久字段）：target_content 为“她的生日是9月12日”，上下文唯一确认“她”是用户女儿，且后续 `role="user"` 消息明确说“这件事请永久保留，不要遗忘”。可以把 `statement_text` 改写为“用户女儿的生日是9月12日”，并设置 `is_permanent=true`；后续永久保留指令本身不能成为新 statement。
+边界示例 F（非永久提示不触发）：`明天记得去买蛋糕`、`别忘了，我明天下午三点开会`、`记住，我明天下午三点开会`、`我明天一定要去医院`都应在完成时间改写后设置 `is_permanent=false`。
+边界示例 G（明确永久意图触发）：`请永久记住，我明天下午三点开会，永远不要忘记`应先根据 `dialog_at` 将时间改写为具体日期和时间，再设置 `is_permanent=true`。
+边界示例 H（多候选歧义）：target_content 同时表达普通事项甲和普通事项乙，后文只说“请永久记住这个”且没有复述甲或乙的任何内容，则甲、乙两条 statement 的 `is_permanent` 都必须为 `false`；不能把单数“这个”扩散为“全部永久保留”。
 
 示例 1:
 示例输入: {
@@ -493,6 +572,7 @@ Rewrite boundary:
       "speaker": "user",
       "has_emotional_state": false,
       "has_unsolved_reference": false,
+      "is_permanent": false,
       "dialog_at": "2023-09-04T18:00:00Z",
       "valid_at": "2023-09-04T18:00:00Z",
       "invalid_at": "NULL"
@@ -505,6 +585,7 @@ Rewrite boundary:
       "speaker": "user",
       "has_emotional_state": false,
       "has_unsolved_reference": false,
+      "is_permanent": false,
       "dialog_at": "2023-09-04T18:00:00Z",
       "valid_at": "NULL",
       "invalid_at": "NULL"
@@ -517,6 +598,7 @@ Rewrite boundary:
       "speaker": "user",
       "has_emotional_state": true,
       "has_unsolved_reference": false,
+      "is_permanent": false,
       "dialog_at": "2023-09-04T18:00:00Z",
       "valid_at": "2023-09-04T18:00:00Z",
       "invalid_at": "NULL"
@@ -555,6 +637,7 @@ Rewrite boundary:
       "speaker": "user",
       "has_emotional_state": false,
       "has_unsolved_reference": false,
+      "is_permanent": false,
       "dialog_at": "2026-04-01T00:00:00Z",
       "valid_at": "NULL",
       "invalid_at": "NULL"
@@ -567,6 +650,7 @@ Rewrite boundary:
       "speaker": "user",
       "has_emotional_state": false,
       "has_unsolved_reference": false,
+      "is_permanent": false,
       "dialog_at": "2026-04-01T00:00:00Z",
       "valid_at": "NULL",
       "invalid_at": "NULL"
@@ -579,6 +663,7 @@ Rewrite boundary:
       "speaker": "user",
       "has_emotional_state": false,
       "has_unsolved_reference": false,
+      "is_permanent": false,
       "dialog_at": "2026-04-01T00:00:00Z",
       "valid_at": "2026-04-01T00:00:00Z",
       "invalid_at": "NULL"
@@ -622,6 +707,7 @@ Rewrite boundary:
       "speaker": "user",
       "has_emotional_state": false,
       "has_unsolved_reference": true,
+      "is_permanent": false,
       "dialog_at": "2026-04-01T00:00:00Z",
       "valid_at": "NULL",
       "invalid_at": "NULL"
@@ -634,6 +720,7 @@ Rewrite boundary:
       "speaker": "user",
       "has_emotional_state": false,
       "has_unsolved_reference": true,
+      "is_permanent": false,
       "dialog_at": "2026-04-01T00:00:00Z",
       "valid_at": "2026-03-31T00:00:00Z",
       "invalid_at": "2026-03-31T23:59:59Z"
@@ -646,6 +733,7 @@ Rewrite boundary:
       "speaker": "user",
       "has_emotional_state": false,
       "has_unsolved_reference": true,
+      "is_permanent": false,
       "dialog_at": "2026-04-01T00:00:00Z",
       "valid_at": "2026-04-01T00:00:00Z",
       "invalid_at": "NULL"
@@ -657,6 +745,10 @@ Boundary Example A: `Hey, Jack` is a pure vocative or greeting addressee, not a 
 Boundary Example B: `My name is Jack.` is explicit naming evidence, so it may output “The user's name is Jack.”
 Boundary Example C: if `dialog_at=2026-06-08`, the context says “the user plans to hold event E on July 15, 2026, and invites Person A and Person B. Person A is good at task X, and the other person is good at task Y,” and target_content says “I'll ask the two of them to prepare one week in advance; she handles item X, and he handles item Y,” the correct resolution is “Person A and Person B start preparing on July 8, 2026,” “Person A handles item X,” and “Person B handles item Y.” Do not output “prepare on June 1, 2026,” and do not assign a later person identity to the user. In actual output, replace placeholders with entity names that really appear in the current input/context; never output example placeholders or example entities.
 Boundary Example D (mirror of Example C, demonstrating the after_msgs boundary): if `dialog_at=2026-06-09`, target_content says “Next month on the 10th I'll hold event E at the company and want to invite two colleagues to help — one handles task X and the other handles task Y,” and after_msgs later says, in order, “They are Person A and Person B. Person A is a backend engineer,” “The other one is the head of administration with strong floor-control skills,” and “I'll ask the two of them to start preparing one week in advance; he handles task X detail X1, and she handles task Y detail Y1.” The correct behavior is to extract from target_content only: `The user plans to hold event E at the company on July 10, 2026.` and `The user invites Person A and Person B to help with event E.`, plus, after after_msgs uniquely identifies the two members, backfill the two slots already present in target_content into: `Person A is responsible for task X for event E.` and `Person B is responsible for task Y for event E.` Do NOT output `The user plans to ask Person A and Person B to start preparing for event E from July 3, 2026.`, `Person A is responsible for task X detail X1 of event E.`, or `Person B is responsible for task Y detail Y1 of event E.` These core predicates (“start preparing one week in advance,” “task X detail X1,” “task Y detail Y1”) appear only in after_msgs and must be dropped.
+Boundary Example E (context affects only the permanence field): target_content says “Her birthday is September 12,” context uniquely resolves “her” to the user's daughter, and a later message with `role="user"` explicitly says “Retain this permanently and never forget it.” You may rewrite `statement_text` as “The user's daughter's birthday is September 12” and set `is_permanent=true`; the later permanent-retention instruction must not become a new statement.
+Boundary Example F (non-permanent signals do not trigger): “Remember to buy a cake tomorrow,” “Don't forget, I have a meeting tomorrow at 3 p.m.,” “Remember, I have a meeting tomorrow at 3 p.m.,” and “I must go to the hospital tomorrow” must all receive `is_permanent=false` after temporal rewriting.
+Boundary Example G (explicit permanent intent triggers): for “Retain this permanently: I have a meeting tomorrow at 3 p.m. Never forget it,” first rewrite the time to a concrete date and time using `dialog_at`, then set `is_permanent=true`.
+Boundary Example H (ambiguous scope over multiple candidates): target_content contains ordinary item A and ordinary item B, and a later message says only “retain this permanently” without repeating any content from A or B. Both statements must keep `is_permanent=false`; do not expand singular “this” into “retain everything permanently”.
 
 Example 1:
 Example Input: {
@@ -689,6 +781,7 @@ Example Output: {
       "speaker": "user",
       "has_emotional_state": false,
       "has_unsolved_reference": false,
+      "is_permanent": false,
       "dialog_at": "2023-09-04T18:00:00Z",
       "valid_at": "2023-09-04T18:00:00Z",
       "invalid_at": "NULL"
@@ -701,6 +794,7 @@ Example Output: {
       "speaker": "user",
       "has_emotional_state": false,
       "has_unsolved_reference": false,
+      "is_permanent": false,
       "dialog_at": "2023-09-04T18:00:00Z",
       "valid_at": "NULL",
       "invalid_at": "NULL"
@@ -713,6 +807,7 @@ Example Output: {
       "speaker": "user",
       "has_emotional_state": true,
       "has_unsolved_reference": false,
+      "is_permanent": false,
       "dialog_at": "2023-09-04T18:00:00Z",
       "valid_at": "2023-09-04T18:00:00Z",
       "invalid_at": "NULL"
@@ -751,6 +846,7 @@ Example Output: {
       "speaker": "user",
       "has_emotional_state": false,
       "has_unsolved_reference": false,
+      "is_permanent": false,
       "dialog_at": "2026-04-01T00:00:00Z",
       "valid_at": "NULL",
       "invalid_at": "NULL"
@@ -763,6 +859,7 @@ Example Output: {
       "speaker": "user",
       "has_emotional_state": false,
       "has_unsolved_reference": false,
+      "is_permanent": false,
       "dialog_at": "2026-04-01T00:00:00Z",
       "valid_at": "NULL",
       "invalid_at": "NULL"
@@ -775,6 +872,7 @@ Example Output: {
       "speaker": "user",
       "has_emotional_state": false,
       "has_unsolved_reference": false,
+      "is_permanent": false,
       "dialog_at": "2026-04-01T00:00:00Z",
       "valid_at": "2026-04-01T00:00:00Z",
       "invalid_at": "NULL"
@@ -818,6 +916,7 @@ Example Output: {
       "speaker": "user",
       "has_emotional_state": false,
       "has_unsolved_reference": true,
+      "is_permanent": false,
       "dialog_at": "2026-04-01T00:00:00Z",
       "valid_at": "NULL",
       "invalid_at": "NULL"
@@ -830,6 +929,7 @@ Example Output: {
       "speaker": "user",
       "has_emotional_state": false,
       "has_unsolved_reference": true,
+      "is_permanent": false,
       "dialog_at": "2026-04-01T00:00:00Z",
       "valid_at": "2026-03-31T00:00:00Z",
       "invalid_at": "2026-03-31T23:59:59Z"
@@ -842,6 +942,7 @@ Example Output: {
       "speaker": "user",
       "has_emotional_state": false,
       "has_unsolved_reference": true,
+      "is_permanent": false,
       "dialog_at": "2026-04-01T00:00:00Z",
       "valid_at": "2026-04-01T00:00:00Z",
       "invalid_at": "NULL"
@@ -856,6 +957,8 @@ Example Output: {
 最终输出前检查：
 
 - 是否只保留 `target_content` 中可直接支持的陈述句
+- 是否先只根据 `target_content` 固定候选集合，再用 context 做受限补全；context 是否完全没有增加候选数量
+- 忽略仅用于替换指代的具体实体名后，每条 statement 的核心命题是否仍能指向 `target_content` 中的直接文字依据；不能指向则删除
 - `statement_text` 中的人物名、事件名、地点名和日期是否都来自当前 input 或由当前 input 可解析，且没有混入 prompt 示例里的实体或占位名
 - 如果主语是用户，是否统一写“用户”
 - 非用户主体是否尽量写成具体名称；若无法做到，是否已正确标记 `has_unsolved_reference = true`
@@ -876,11 +979,18 @@ Example Output: {
 - 如果包含 `<input-file-summary>`，是否已改写成“用户上传/分享了...”而不是独立客观描述
 - statement_type 是否合法，且没有把一般事实机械标成 `OPINION`
 - `has_emotional_state` 是否仅用于判断是否存在情感状态，而没有被当作情绪分类字段
+- 是否在完成 `statement_text` 的指代与时间改写后，才逐条独立判断 `is_permanent`
+- `is_permanent=true` 是否仅来自唯一指向当前 statement 的明确永久/永远/长期保留或不要遗忘指令；普通记住/保存、内容重要性和内容自身价值是否均保持 `false`
+- 如果 target 产生多条 statement，而 context 的永久保留指令没有复述可唯一匹配的内容、也没有明确覆盖全部候选，是否已完全忽略该指令并将各候选保持为 `false`
+- 来自 supporting_context 的永久记忆意图是否只取自 `role="user"` 消息，且只改变已有候选的 `is_permanent`，没有改变 `statement_text` 或创建新 statement
+- 每条 statement 是否都包含 JSON 布尔值 `is_permanent`，没有省略、`null` 或字符串值
 - temporal_type 是否与 valid_at / invalid_at 一致
 - 输出是否严格符合 JSON schema
   {% else %}
   Final checks before output:
 - Keep only statements directly supported by `target_content`
+- First fix the candidate set using only `target_content`, then enrich it under strict context limits; make sure context has not increased the candidate count
+- After ignoring concrete entity names used only for reference replacement, ensure every statement's core proposition still points to direct wording in `target_content`; otherwise drop it
 - Ensure every person name, event name, place name, and date in `statement_text` comes from the current input or can be resolved from the current input; do not include entities or placeholders from prompt examples
 - If the subject is the user, render it as “the user”
 - Render non-user subjects as concrete names when possible; otherwise mark `has_unsolved_reference = true`
@@ -901,6 +1011,11 @@ Example Output: {
 - If `<input-file-summary>` appears, rewrite it as "the user uploaded/shared..." rather than an independent objective description
 - Ensure statement_type is valid and do not mechanically label ordinary facts as `OPINION`
 - Ensure `has_emotional_state` is used only for emotional-state presence detection, not emotion classification
+- Judge `is_permanent` independently for each statement only after finishing reference and temporal rewriting in `statement_text`
+- Ensure `is_permanent=true` comes only from an explicit permanently/forever/long-term/never-forget instruction uniquely scoped to the current statement; ordinary remember/save wording, importance, and inherent content value must remain `false`
+- If the target produces multiple statements and a permanent-retention instruction contains neither content uniquely matching one candidate nor an explicit scope covering all candidates, ignore it completely and keep every candidate `false`
+- Accept permanent-memory intent from supporting_context only in messages with `role="user"`, and use it only to change `is_permanent` on an existing candidate, never to change `statement_text` or create a statement
+- Ensure every statement contains JSON Boolean `is_permanent`, never an omitted, `null`, or string value
 - Ensure temporal_type is consistent with valid_at and invalid_at
 - Ensure the output strictly matches the JSON schema
   {% endif %}
@@ -956,28 +1071,51 @@ Example Output: {
 - Do not output non-ISO values such as `2026/04/01`, `2026-04-01 00:00:00`, `yesterday evening`, or `下周三`.
 - When only a date is known, still output an ISO 8601 UTC datetime boundary ending with `Z`.
 
+**IS_PERMANENT HARD CONSTRAINT:**
+{% if language == "zh" %}
+
+- 每条最终 statement 都必须包含 JSON 布尔值 `is_permanent`。
+- 先确定最终 `statement_text`，再判断 `is_permanent`；不能为了永久记忆判断从 context 新增 statement 或改写其核心命题。
+- 只有用户明确要求该信息被永久、永远或长期保留，或明确要求系统不要遗忘时，才能设置为 `true`；普通“记住/保存”、内容重要性或内容自身价值一律不能触发 `true`。
+- supporting_context 中只有 `role="user"` 且明确指向当前候选的上述永久保留指令可以设置该字段；Assistant 消息不能设置该字段。
+- 如果不存在上述明确永久保留意图，或存在任何歧义，必须输出 `false`。
+- 不判断存储容量、永久记忆配额或后端分配结果。
+- 多候选场景中，若永久保留指令没有复述可唯一绑定的内容，也没有明确覆盖全部候选，则不绑定任何候选，全部输出 `false`。
+
+{% else %}
+
+- Every final statement must contain JSON Boolean `is_permanent`.
+- Determine the final `statement_text` before judging `is_permanent`; permanence detection must not create a statement from context or alter its core proposition.
+- Set this field to `true` only when the user explicitly asks for the information to be retained permanently, forever, or long-term, or explicitly asks the system never to forget it. Ordinary “remember/save” wording, importance, or inherent content value cannot trigger `true`.
+- In supporting_context, only such a permanent-retention instruction in a `role="user"` message that unambiguously points to the current candidate may set this field. Assistant messages cannot set it.
+- If that explicit permanent-retention intent is absent or any ambiguity remains, output `false`.
+- Never infer or evaluate storage capacity, permanent-memory quota, or backend allocation results.
+- With multiple candidates, if the permanent-retention instruction contains neither uniquely repeated content nor explicit scope covering all candidates, bind none and output `false` for every candidate.
+
+{% endif %}
+
 **SCHEMA HARD CONSTRAINT:**
 
-- Every statement object must include exactly these fields: `statement_id`, `statement_text`, `statement_type`, `temporal_type`, `speaker`, `has_emotional_state`, `has_unsolved_reference`, `dialog_at`, `valid_at`, `invalid_at`.
+- Every statement object must include exactly these fields: `statement_id`, `statement_text`, `statement_type`, `temporal_type`, `speaker`, `has_emotional_state`, `has_unsolved_reference`, `is_permanent`, `dialog_at`, `valid_at`, `invalid_at`.
 - Do not omit `speaker`, `dialog_at`, `valid_at`, or `invalid_at`.
 - Do not output extra fields.
 - `statement_type` must be one of `"FACT"`, `"OPINION"`, `"OTHER"`.
 - `temporal_type` must be one of `"STATIC"`, `"DYNAMIC"`, `"ATEMPORAL"`.
 - `speaker` must be one of `"user"`, `"assistant"`.
-- `has_emotional_state` and `has_unsolved_reference` must be JSON booleans, not strings.
+- `has_emotional_state`, `has_unsolved_reference`, and `is_permanent` must be JSON booleans, not strings.
 - Missing time must be the string `"NULL"`, not JSON null.
 
 **LANGUAGE REQUIREMENT:**
 {% if language == "zh" %}
 
-- `statement_text` 的语言必须跟随 `target_content` 的主要语言，不要跟随前端传入的 `language` 参数。
-- 如果 `target_content` 主要是中文，用中文提取陈述句。
-- 如果 `target_content` 主要是英文，用英文提取陈述句。
+- 输出语言应以 `language` 参数为准。
+- 如果 `language == "zh"`，用中文提取陈述句。
+- 如果 `language` 参数缺失或无法判断，才跟随输入文本的主要语言。
 - 保留原始专有名词和代码片段，不要无必要翻译。
   {% else %}
-- `statement_text` must follow the primary language of `target_content`; do not use the frontend `language` parameter as the source of truth.
-- If `target_content` is primarily Chinese, extract statements in Chinese.
-- If `target_content` is primarily English, extract statements in English.
+- The output language should follow the `language` parameter.
+- If `language != "zh"`, extract statements in English.
+- Only follow the dominant language of the input text when the `language` parameter is missing or unclear.
 - Preserve original proper nouns and code snippets; do not translate them unnecessarily.
   {% endif %}
 
@@ -997,6 +1135,7 @@ Each item in `statements` must be a JSON object with exactly these fields and va
 - `speaker`: one of `"user"`, `"assistant"`
 - `has_emotional_state`: boolean, choose `true` or `false` according to the rules above
 - `has_unsolved_reference`: boolean, choose `true` or `false` according to the rules above
+- `is_permanent`: boolean, choose `true` or `false` independently for each final statement according to the rules above
 - `dialog_at`: ISO 8601 datetime string
 - `valid_at`: ISO 8601 UTC datetime string ending with `Z` or `"NULL"`
 - `invalid_at`: ISO 8601 UTC datetime string ending with `Z` or `"NULL"`

@@ -526,21 +526,35 @@ async def render_ontology_extraction_prompt(
     return rendered_prompt
 
 
-def render_interest_filter_prompt(tag_list: str, language: str = "zh") -> str:
+def render_interest_filter_prompt(
+    candidates: list[dict[str, object]],
+    language: str = "zh",
+    evidence: list[dict[str, object]] | None = None,
+    existing_interests: list[str] | None = None,
+) -> str:
     """
     Renders the interest filter prompt using the interest_filter.jinja2 template.
 
     Args:
-        tag_list: Comma-separated string of raw tags to filter
+        candidates: Interest candidate entities with source IDs and frequencies
         language: Output language ("zh" for Chinese, "en" for English)
+        evidence: Optional Statement evidence associated with candidate entities
+        existing_interests: Accepted interests that the fallback must not duplicate
 
     Returns:
         Rendered prompt content as string
     """
     template = prompt_env.get_template("interest_filter.jinja2")
-    rendered_prompt = template.render(tag_list=tag_list, language=language)
-    log_prompt_rendering('interest filter', rendered_prompt)
-    return rendered_prompt
+    return template.render(
+        candidates_json=json.dumps(candidates, ensure_ascii=False),
+        evidence_json=json.dumps(evidence, ensure_ascii=False) if evidence else None,
+        existing_interests_json=(
+            json.dumps(existing_interests, ensure_ascii=False)
+            if existing_interests
+            else None
+        ),
+        language=language,
+    )
 
 
 async def render_neo4j_memory_summary_prompt(

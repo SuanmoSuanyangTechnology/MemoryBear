@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:17:48 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-07-06 16:01:59
+ * @Last Modified time: 2026-08-12 14:22:18
  */
 import { Clipboard, Graph, Keyboard, MiniMap, Node, Snapline, History, Selection,
   Scroller,
@@ -265,7 +265,7 @@ export const useWorkflowGraph = ({
               const { cases } = config;
               nodeLibraryConfig.config[key].defaultValue = cases && Array.isArray(cases) ? cases.map(item => ({
                 ...item,
-                expressions: item.expressions.map((expr: any) => {
+                expressions: item.expressions?.map((expr: any) => {
                   return expr.input_type ? { ...expr, input_type: expr.input_type.toLocaleLowerCase() } : expr
                 }),
               })) : []
@@ -282,7 +282,7 @@ export const useWorkflowGraph = ({
                 }
                 nodeLibraryConfig.config.messages.defaultValue.splice(-1, 1)
               }
-            } else if (key === 'knowledge_retrieval' && nodeLibraryConfig.config && nodeLibraryConfig.config[key]) {
+            } else if (key === 'knowledge_retrieval' && nodeLibraryConfig.config && nodeLibraryConfig.config[key] && type !== 'agent') {
               const { query, ...rest } = config
               nodeLibraryConfig.config[key].defaultValue = {
                 ...rest
@@ -300,7 +300,7 @@ export const useWorkflowGraph = ({
               } catch {
                 nodeLibraryConfig.config[key].defaultValue = config[key]
               }
-            } else if (nodeLibraryConfig.config && nodeLibraryConfig.config[key] && config[key]) {
+            } else if (nodeLibraryConfig.config && nodeLibraryConfig.config[key] && typeof config[key] !== 'undefined') {
               nodeLibraryConfig.config[key].defaultValue = config[key]
             }
           })
@@ -1834,9 +1834,7 @@ export const useWorkflowGraph = ({
                 } else {
                   itemConfig[key].data = value.data
                 }
-              } else if (data.config[key] && 'defaultValue' in data.config[key] && key !== 'knowledge_retrieval') {
-                itemConfig[key] = data.config[key].defaultValue
-              } else if (key === 'knowledge_retrieval' && data.config[key] && 'defaultValue' in data.config[key]) {
+              } else if (data.type !== 'agent' && key === 'knowledge_retrieval' && data.config[key] && 'defaultValue' in data.config[key]) {
                 const { knowledge_bases } = data.config[key].defaultValue || {}
                 itemConfig = {
                   ...itemConfig,
@@ -1846,6 +1844,20 @@ export const useWorkflowGraph = ({
                     return { kb_id: vo.kb_id || vo.id, ...kb_config, }
                   })
                 }
+              } else if (key === 'knowledge_retrieval' && data.config[key] && 'defaultValue' in data.config[key]) {
+                const { knowledge_bases, ...rest } = data.config[key].defaultValue || {}
+                itemConfig = {
+                  ...itemConfig,
+                  knowledge_retrieval: {
+                    ...rest,
+                    knowledge_bases: knowledge_bases?.map((vo: any) => {
+                      const kb_config = vo.config || vo
+                      return { kb_id: vo.kb_id || vo.id, ...kb_config, }
+                    })
+                  }
+                }
+              } else if (data.config[key] && 'defaultValue' in data.config[key]) {
+                itemConfig[key] = data.config[key].defaultValue
               }
             })
           }

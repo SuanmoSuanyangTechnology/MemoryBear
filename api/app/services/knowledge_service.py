@@ -1,7 +1,7 @@
 import uuid
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 from app.models.user_model import User
@@ -14,7 +14,7 @@ from app.repositories import knowledge_repository
 from app.core.logging_config import get_business_logger
 from app.core.exceptions import BusinessException
 from app.core.error_codes import BizCode
-from app.models.models_model import ModelType
+from app.models.models_model import ModelProvider, ModelType
 from app.core.rag.parser_config import normalize_new_knowledge_parser_config
 
 business_logger = get_business_logger()
@@ -387,7 +387,14 @@ def create_knowledge(
 
         if not knowledge.image2text_id:
             model = db.query(ModelConfig).filter(
-                ModelConfig.tenant_id == tenant_id,
+                # 与工作空间可选模型口径一致：租户自有模型或公共系统模型
+                or_(
+                    ModelConfig.tenant_id == tenant_id,
+                    (
+                        (ModelConfig.provider == ModelProvider.SPEEDBEAR.value)
+                        & ModelConfig.is_public.is_(True)
+                    ),
+                ),
                 ModelConfig.type.in_([ModelType.CHAT.value, ModelType.LLM.value]),
                 ModelConfig.capability.contains(["vision"]),
                 ModelConfig.is_active == True,
@@ -470,7 +477,14 @@ async def create_knowledge_async(
             stmt = (
                 select(ModelConfig)
                 .where(
-                    ModelConfig.tenant_id == tenant_id,
+                    # 与工作空间可选模型口径一致：租户自有模型或公共系统模型
+                    or_(
+                        ModelConfig.tenant_id == tenant_id,
+                        (
+                            (ModelConfig.provider == ModelProvider.SPEEDBEAR.value)
+                            & ModelConfig.is_public.is_(True)
+                        ),
+                    ),
                     ModelConfig.type.in_([ModelType.CHAT.value, ModelType.LLM.value]),
                     ModelConfig.capability.contains(["vision"]),
                     ModelConfig.is_active == True,
@@ -504,7 +518,14 @@ def get_knowledge_by_id(db: Session, knowledge_id: uuid.UUID, current_user: User
     business_logger.debug(f"Query knowledge base based on ID: knowledge_id={knowledge_id}, username: {current_user.username}")
     
     try:
-        knowledge = knowledge_repository.get_knowledge_by_id(db=db, knowledge_id=knowledge_id)
+        workspace_id = current_user.current_workspace_id
+        if workspace_id is None:
+            return None
+        knowledge = knowledge_repository.get_knowledge_by_id_in_workspace(
+            db=db,
+            knowledge_id=knowledge_id,
+            workspace_id=workspace_id,
+        )
         if knowledge:
             business_logger.info(f"knowledge base query successful: {knowledge.name} (ID: {knowledge_id})")
         else:
@@ -519,7 +540,14 @@ async def get_knowledge_by_id_async(db: AsyncSession, knowledge_id: uuid.UUID, c
     business_logger.debug(f"Query knowledge base by ID (async): knowledge_id={knowledge_id}, username: {current_user.username}")
 
     try:
-        return await knowledge_repository.get_knowledge_by_id_async(db=db, knowledge_id=knowledge_id)
+        workspace_id = current_user.current_workspace_id
+        if workspace_id is None:
+            return None
+        return await knowledge_repository.get_knowledge_by_id_in_workspace_async(
+            db=db,
+            knowledge_id=knowledge_id,
+            workspace_id=workspace_id,
+        )
     except Exception as e:
         business_logger.error(f"Failed to query knowledge by ID (async): knowledge_id={knowledge_id} - {str(e)}")
         raise

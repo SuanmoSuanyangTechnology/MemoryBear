@@ -6,27 +6,28 @@
 最终路径: /v1/memory/...
 认证方式: API Key (@require_api_key)
 """
-
 import asyncio
 
 from fastapi import APIRouter, Body, Header, Request, Depends
 from fastapi.encoders import jsonable_encoder
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 from starlette.responses import Response
 
-# 包装内部 controller
 from app.controllers import memory_controller
-from app.core.api_key_auth import require_api_key, require_api_key_self_db
-from app.core.api_key_utils import get_current_user_snapshot_from_api_key_async, \
-    validate_end_user_in_workspace_async
+from app.core.api_key_auth import require_api_key, require_api_key_self_db, get_current_api_key_auth
+from app.core.api_key_utils import get_current_user_snapshot_from_api_key_async, validate_end_user_in_workspace_async
+from app.core.error_codes import BizCode
 from app.core.logging_config import get_business_logger
 from app.core.memory.enums import Neo4jNodeType, SearchStrategy
 from app.core.memory.memory_service import MemoryService
 from app.core.quota_stub import check_end_user_quota
-from app.core.response_utils import success
-from app.db import get_async_db_context, get_db
+from app.core.response_utils import success, fail
+from app.db import get_db, get_async_db_context, get_async_db
+from app.repositories.end_user_repository import EndUserRepository
 from app.schemas.api_key_schema import ApiKeyAuth
-from app.schemas.memory_agent_schema import Write_UserInput, InternalReadInput, ReadSyncInput
+from app.schemas.memory_agent_schema import Write_UserInput, InternalReadInput, ReadSyncInput, MergeEndUserInput
+from app.services.end_user_service import EndUserService
 from app.services.memory_config_service import MemoryConfigService
 
 router = APIRouter(prefix="/memory", tags=["V1 - Memory API"])
@@ -87,6 +88,7 @@ async def read_memory_sync(
             memory = await service.read(
                 payload.message, search_switch=SearchStrategy(payload.search_switch),
                 enable_rerank=payload.enable_rerank,
+                record_display=True,
             )
             return euid, {
                 "answer": memory.content,
@@ -116,7 +118,8 @@ async def read_memory_sync(
     )
     memory = await service.read(
         payload.message, search_switch=SearchStrategy(payload.search_switch),
-        enable_rerank=payload.enable_rerank)
+        enable_rerank=payload.enable_rerank,
+        record_display=True)
     return success(data={
         "answer": memory.content,
         "intermediate_outputs": [_.model_dump() for _ in memory.memories]
@@ -198,3 +201,28 @@ async def write_memory_async(
         current_user=current_user,
     )
     return _encode_result(result)
+
+
+@router.post("/merge")
+@require_api_key_self_db(scopes=["memory"])
+async def merge_memory(
+        payload: MergeEndUserInput,
+        db: AsyncSession = Depends(get_async_db)
+):
+    auth = get_current_api_key_auth()
+    if not payload.end_user_ids:
+        return fail(code=BizCode.USER_NOT_FOUND, msg="No users found.")
+    if payload.target in payload.end_user_ids:
+        payload.end_user_ids.remove(payload.target)
+    all_users = payload.end_user_ids | {payload.target}
+    activate_end_users = await EndUserRepository(db).filter_existing_ids_async(
+        all_users,
+        workspace_id=auth.workspace_id
+    )
+    not_found = all_users - activate_end_users
+    if not_found:
+        return fail(code=BizCode.USER_NOT_FOUND, msg=f"Not found users - {not_found}.")
+
+    await EndUserService(db).merge_end_users(payload.end_user_ids, payload.target)
+
+    return success(data={"end_user_id": payload.target.hex})

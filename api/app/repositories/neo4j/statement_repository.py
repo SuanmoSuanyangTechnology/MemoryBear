@@ -7,13 +7,19 @@ Classes:
     StatementRepository: 陈述句仓储，管理StatementNode的CRUD操作
 """
 
-from typing import Dict, List, Sequence
+from typing import Any, Dict, List, Sequence
 from datetime import datetime
 
 from app.repositories.neo4j.base_neo4j_repository import BaseNeo4jRepository
 from app.core.memory.models.graph_models import StatementNode
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.core.memory.utils.data.ontology import TemporalInfo
+from app.repositories.neo4j.cypher_queries import (
+    INTEREST_ENTITY_CANDIDATES_BY_END_USER,
+    INTEREST_ENTITY_CANDIDATES_BY_USER,
+    INTEREST_STATEMENT_EVIDENCE_BY_END_USER,
+    INTEREST_STATEMENT_EVIDENCE_BY_USER,
+)
 
 
 class StatementRepository(BaseNeo4jRepository[StatementNode]):
@@ -122,3 +128,54 @@ class StatementRepository(BaseNeo4jRepository[StatementNode]):
             limit=limit,
         )
         return [record["statement"] for record in results]
+
+    async def find_interest_entity_candidates(
+        self,
+        user_id: str,
+        limit: int,
+        excluded_names: Sequence[str],
+        iso_datetime_pattern: str,
+        unix_timestamp_pattern: str,
+        by_user: bool = False,
+    ) -> List[Dict[str, Any]]:
+        """按有效 Statement 数量查询兴趣候选实体。"""
+        query = (
+            INTEREST_ENTITY_CANDIDATES_BY_USER
+            if by_user
+            else INTEREST_ENTITY_CANDIDATES_BY_END_USER
+        )
+        return await self.connector.execute_query(
+            query,
+            id=user_id,
+            limit=limit,
+            excluded_names=list(excluded_names),
+            iso_datetime_pattern=iso_datetime_pattern,
+            unix_timestamp_pattern=unix_timestamp_pattern,
+        )
+
+    async def find_interest_statement_evidence(
+        self,
+        user_id: str,
+        entity_ids: Sequence[str],
+        per_entity_limit: int,
+        limit: int,
+        max_chars: int,
+        by_user: bool = False,
+    ) -> List[Dict[str, Any]]:
+        """批量查询兴趣候选实体关联的有效 Statement 证据。"""
+        if not entity_ids:
+            return []
+
+        query = (
+            INTEREST_STATEMENT_EVIDENCE_BY_USER
+            if by_user
+            else INTEREST_STATEMENT_EVIDENCE_BY_END_USER
+        )
+        return await self.connector.execute_query(
+            query,
+            id=user_id,
+            entity_ids=list(entity_ids),
+            per_entity_limit=per_entity_limit,
+            limit=limit,
+            max_chars=max_chars,
+        )

@@ -169,14 +169,13 @@ async def _get_or_create_draft_end_user_id(
         other_id: str,
 ) -> str:
     from app.models import EndUser, EndUserInfo
+    from app.repositories.end_user_repository import EndUserRepository
 
     async with get_async_db_context() as db:
-        existing_end_user = await db.scalar(
-            select(EndUser).where(
-                EndUser.workspace_id == workspace_id,
-                EndUser.other_id == other_id,
-                EndUser.is_active.is_(True),
-            ).order_by(EndUser.created_at.asc()).limit(1)
+        user_repo = EndUserRepository(db)
+
+        existing_end_user = await user_repo.get_end_user_by_other_id_async(
+            workspace_id, other_id
         )
         if existing_end_user and existing_end_user.app_id == app_id:
             return str(existing_end_user.id)
@@ -185,12 +184,8 @@ async def _get_or_create_draft_end_user_id(
             text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
             {"key": f"{workspace_id}|{other_id}"},
         )
-        end_user = await db.scalar(
-            select(EndUser).where(
-                EndUser.workspace_id == workspace_id,
-                EndUser.other_id == other_id,
-                EndUser.is_active.is_(True),
-            ).order_by(EndUser.created_at.asc()).limit(1)
+        end_user = await user_repo.get_end_user_by_other_id_async(
+            workspace_id, other_id
         )
         if end_user:
             end_user.app_id = app_id

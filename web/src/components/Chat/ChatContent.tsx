@@ -16,6 +16,7 @@ import type { ChatContentProps, ChatItem, CitationItem } from './types'
 import MessageFiles from './MessageFiles'
 import MoreDropdown from '@/components/MoreDropdown'
 import InterventionList from './InterventionList'
+import MemoryRecall from './MemoryRecall'
 
 const getFileUrl = (file: any) => {
   return file.thumbUrl || file.url || (file.originFileObj ? URL.createObjectURL(file.originFileObj) : undefined)
@@ -30,6 +31,8 @@ const ChatContent: FC<ChatContentProps> = ({
   contentClassNames,
   data = [],
   streamLoading = false,
+  showMemoryRecall = true,
+  memoryRecallStreaming = false,
   empty,
   labelPosition = 'bottom',
   labelFormat,
@@ -227,6 +230,10 @@ const ChatContent: FC<ChatContentProps> = ({
         : data.map((vo, index) => {
           const item: ChatItem | undefined = Array.isArray(vo) ? vo?.find(v => v.is_current) : vo;
           const isNotSupportRegenerate = typeof regenerateMaxCount === 'number' && regenerateMaxCount <= (Array.isArray(vo) ? vo.length : 1)
+          const isActiveStream = memoryRecallStreaming && index === data.length - 1
+          const hasMemoryRecall = Boolean(item?.meta_data?.memory_retrieval?.tool_calls?.length)
+          const shouldShowMemoryRecall = hasMemoryRecall && (!isActiveStream || showMemoryRecall)
+          const shouldShowStreamSpinner = isActiveStream && item?.content === '' && !renderRuntime && !shouldShowMemoryRecall
           if (!item) return null
           return (
             <div key={index} className={clsx("rb:relative", {
@@ -234,8 +241,8 @@ const ChatContent: FC<ChatContentProps> = ({
               'rb:right-0 rb:text-right': item.role === 'user', // User messages right-aligned
               'rb:left-0 rb:text-left': item.role === 'assistant', // Assistant messages left-aligned
             })}>
-              {/* Don't display if streaming and content is empty */}
-              {streamLoading && index === data.length - 1 && item.content === '' && !renderRuntime
+              {/* 流式过程中若尚无可展示内容，则显示加载状态 */}
+              {shouldShowStreamSpinner || (streamLoading && index === data.length - 1 && item.content === '' && !renderRuntime && !shouldShowMemoryRecall)
                 ? <Spin />
                 : <>
                   <Flex
@@ -265,8 +272,16 @@ const ChatContent: FC<ChatContentProps> = ({
                         'rb:text-[#212332]': item.role === 'assistant' && (item.content || item.content === '' || typeof renderRuntime === 'function'),
                         'rb:mt-1': labelPosition === 'top',
                         'rb:mb-1': labelPosition === 'bottom',
-                        'rb:pl-7': item.role === 'assistant' && typeof item.meta_data?.error === 'string',
+                        'rb:pl-7': item.role === 'assistant' && typeof item.meta_data?.error === 'string' && typeof renderRuntime !== 'function',
                       })}>
+                        {item.subContent && renderRuntime && renderRuntime(item, index)}
+                        {shouldShowMemoryRecall && item.meta_data?.memory_retrieval && (
+                          <MemoryRecall
+                            retrieval={item.meta_data.memory_retrieval}
+                            assistantContent={item.content}
+                            isStreaming={isActiveStream}
+                          />
+                        )}
                         {item.meta_data?.reasoning_content &&
                           <div className={clsx("rb:mb-4 rb-border rb:rounded-xl rb:px-4 rb:pt-4 rb:bg-white", {
                             'rb:hover:bg-[#F6F6F6] rb:w-64': !isReasoningExpanded(index)
@@ -304,7 +319,6 @@ const ChatContent: FC<ChatContentProps> = ({
                             'rb:left-0!': item.role === 'assistant' && typeof item.meta_data?.error === 'string',
                           })}></div>
                         }
-                        {item.subContent && renderRuntime && renderRuntime(item, index)}
                         {item.interventions && item.interventions.length > 0 && (
                           <InterventionList
                             interventions={item.interventions}

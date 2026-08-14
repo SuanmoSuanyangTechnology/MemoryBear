@@ -295,6 +295,8 @@ export const userMemory = {
       EXTRACTION: "记忆萃取引擎",
       CROSS_MODAL: "跨模态记忆关联联想引擎",
       EMOTION: "情感引擎",
+      FORGETTING: "遗忘引擎",
+      REFLECTION: "反思引擎",
       memorySubject: '记忆主体',
       basicInfo: '基础信息',
       subjectId: '主体 ID',
@@ -308,5 +310,10 @@ export const userMemory = {
       configurationName: '配置名称',
       configurationId: '配置 ID',
       unnamed: '未命名',
+
+      deep_mode: "深度检索",
+      normal_mode: "标准检索",
+      quick_mode: "快速检索",
+      express_mode: "极速检索",
     },
 }

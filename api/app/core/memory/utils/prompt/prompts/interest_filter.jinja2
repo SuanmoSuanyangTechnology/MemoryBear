@@ -1,67 +1,59 @@
 {% if language == "zh" %}
-You are a user interest analysis expert. Your task is to infer and extract the user's core hobby/interest activities from a tag list. The tags may be specific project names, tool names, or compound nouns — your job is to identify the underlying interest they represent.
+你是用户兴趣分析器。输入是按用户记忆 Statement 频次排序的候选实体 JSON。{% if evidence_json %}本次还提供了与候选实体直接关联的用户记忆 Statement，仅用于补充实体语境。{% endif %}{% if existing_interests_json %}本次是补充判断，系统已经接受了一部分已有兴趣。{% endif %}
 
-**Step 1 - Infer the underlying interest from each tag**:
-Look at each tag and ask: "What hobby or interest does this tag suggest the user has?"
+请完成以下任务：
+1. 识别输入实体能够合理支撑的用户兴趣，包括运动与户外、旅行与地点体验、观赏体验、娱乐、阅读、学习、创作、收藏、美食及其他明确偏好，不限于主动参与的活动。
+2. frequency 只表示记忆中的提及次数，用于后端计算权重，不是筛选门槛。即使 frequency=1，只要实体能合理支撑某项兴趣，也应保留。
+3. 地点、物品或具体体验可以作为兴趣证据。例如“九溪十八涧”可支撑徒步或出游兴趣，“观日落”可支撑观赏日落兴趣；无法合理关联到兴趣的系统词、时间戳、天气或路况才忽略。
+4. 将同义、近义或表达同一兴趣的实体合并成一个简洁兴趣名称；在证据支持的范围内尽量识别不同兴趣，最多返回 5 项，但不强制补足。
+5. 每个兴趣必须返回支撑它的全部来源 entity_id；entity_id 只能从输入中选择。
+6. 可以根据实体含义做合理归纳，但不要根据输入之外的信息生成兴趣。无法由任何输入实体支撑时才返回空数组。
+{% if evidence_json %}7. Statement 是实体的语境证据。明确偏好、持续参与、主动学习或多次行为可以支撑兴趣；一次偶然事件、工作任务、他人偏好或普通事实不能单独认定为用户兴趣。仍然只返回候选 entity_id，不返回 statement_id。{% endif %}
+{% if existing_interests_json %}8. 只返回与已有兴趣不同的新增兴趣。不要重复、改名、细分或换一种说法返回已有兴趣；没有独立的新兴趣证据时返回空数组。{% endif %}
 
-Examples of inference:
-- '攀岩', '室内攀岩馆', '攀岩者数据仪表盘', '路线解锁地图', '指力', '路线等级', '当日攀岩流畅度' → '攀岩'
-- '风光摄影元数据增强器', 'EXIF数据', '.CR2文件', '.NEF文件', '日出拍摄点', '曝光补偿', '光圈', '太阳高度角', '云量预测图层' → '摄影'
-- '晨间冥想坚持天数', '身心协同峰值' → '冥想'
-- '川味可视化', '川菜' → '烹饪'
-- '开源项目命名建议', 'climbviz', '可视化', '力量增长雷达图' → '编程' 或 '数据可视化'
-- '吉他', '指弹', '琴谱' → '吉他'
-- '跑步', '5公里', '跑鞋' → '跑步'
-- '瑜伽垫', '瑜伽课' → '瑜伽'
+只返回符合结构化 Schema 的 JSON 对象，不要返回顶层数组、Markdown、频次、百分比、解释或额外字段。
+完整格式示例（示例 ID 仅用于说明格式，实际 entity_id 必须来自本次输入）：
+{"interests":[{"name":"徒步","entity_ids":["example_entity_id_1"]},{"name":"摄影","entity_ids":["example_entity_id_2"]}]}
+没有任何兴趣时返回：
+{"interests":[]}
 
-**Step 2 - Consolidate and deduplicate**:
-- Merge tags that point to the same interest into one representative label
-- Use concise, standard hobby names (e.g., '攀岩', '摄影', '编程', '烹饪', '冥想', '吉他', '跑步')
-- If multiple tags all point to '攀岩', output '攀岩' only once
-
-**Step 3 - Filter out non-interest tags**:
-Remove tags that do NOT suggest any hobby or interest:
-- Generic system/assistant terms (e.g., '助手', '用户', 'AI')
-- Pure abstract metrics with no clear hobby link (e.g., '完成时间', '日期', '自我评分')
-- Location names with no clear hobby link (e.g., '青城山后山' alone — but if combined with photography context, infer '摄影')
-
-**Output format**: Return a strict JSON object with a single key `interest_tags`, whose value is a list of concise interest activity names in Chinese. Do NOT return a bare list. Do NOT include any prose, markdown fences, or extra keys.
-
-**Example**:
-Input: ['攀岩', '攀岩者数据仪表盘', '路线解锁地图', '指力', '风光摄影元数据增强器', 'EXIF数据', '晨间冥想坚持天数', '川味可视化', '可视化', '助手', '完成时间']
-Output: {"interest_tags": ["攀岩", "摄影", "冥想", "烹饪", "编程"]}
-
-Now process the following tag list and return the inferred interest activities in Chinese as the specified JSON object: {{ tag_list }}
+候选实体：
+{{ candidates_json }}
+{% if existing_interests_json %}
+已有兴趣（不得重复）：
+{{ existing_interests_json }}
+{% endif %}
+{% if evidence_json %}
+关联 Statement 证据：
+{{ evidence_json }}
+{% endif %}
 {% else %}
-You are a user interest analysis expert. Your task is to infer and extract the user's core hobby/interest activities from a tag list. The tags may be specific project names, tool names, or compound nouns — your job is to identify the underlying interest they represent.
+You analyze user interests. The input is a JSON array of candidate entities ranked by the number of supporting user-memory Statements.{% if evidence_json %} This request also includes user-memory Statements directly linked to the candidate entities, solely to clarify entity context.{% endif %}{% if existing_interests_json %} This is a supplemental pass and some interests have already been accepted.{% endif %}
 
-**Step 1 - Infer the underlying interest from each tag**:
-Look at each tag and ask: "What hobby or interest does this tag suggest the user has?"
+Tasks:
+1. Identify interests reasonably supported by the input entities, including sports and outdoors, travel and place-based experiences, viewing experiences, entertainment, reading, learning, creation, collecting, food, and other clear preferences. Interests are not limited to activities the user actively performs.
+2. Frequency is only the number of mentions used by the backend for weighting; it is not a filtering threshold. Keep a clearly supported interest even when frequency=1.
+3. Places, objects, and specific experiences may provide interest evidence. For example, a hiking destination may support hiking or travel, and watching a sunset may support a sunset-viewing interest. Ignore only items that cannot reasonably support an interest, such as system terms, timestamps, weather, or traffic alone.
+4. Merge synonymous or closely related entities representing the same interest under one concise name. Identify distinct supported interests when possible, up to 5, but never pad the result.
+5. Return every supporting source entity_id for each interest. Use only entity IDs from the input.
+6. Reasonable semantic generalization from the entities is allowed, but do not invent interests unsupported by the input. Return an empty interests array only when no input entity supports an interest.
+{% if evidence_json %}7. Statements provide context for entities. Explicit preferences, sustained participation, active learning, or repeated behavior may support an interest. A one-off event, work task, another person's preference, or ordinary fact alone must not be treated as the user's interest. Return candidate entity IDs only, not statement IDs.{% endif %}
+{% if existing_interests_json %}8. Return only new interests distinct from the accepted interests. Do not repeat, rename, subdivide, or paraphrase an accepted interest. Return an empty array when there is no independently supported new interest.{% endif %}
 
-Examples of inference:
-- 'rock climbing', 'indoor climbing gym', 'climber dashboard', 'route map', 'finger strength' → 'rock climbing'
-- 'landscape photography metadata enhancer', 'EXIF data', 'sunrise shooting spot', 'exposure compensation' → 'photography'
-- 'morning meditation streak', 'mind-body peak' → 'meditation'
-- 'Sichuan cuisine visualization', 'Sichuan food' → 'cooking'
-- 'open source project', 'data visualization tool', 'Python' → 'programming'
-- 'guitar', 'fingerpicking', 'sheet music' → 'guitar'
-- 'running', '5km', 'running shoes' → 'running'
+Return only a JSON object matching the structured Schema. Do not return a top-level array, Markdown, frequencies, percentages, explanations, or extra fields.
+Complete format example (the example IDs only illustrate the format; actual entity IDs must come from the current input):
+{"interests":[{"name":"Hiking","entity_ids":["example_entity_id_1"]},{"name":"Photography","entity_ids":["example_entity_id_2"]}]}
+When no interest is supported, return:
+{"interests":[]}
 
-**Step 2 - Consolidate and deduplicate**:
-- Merge tags that point to the same interest into one representative label
-- Use concise, standard hobby names (e.g., 'rock climbing', 'photography', 'programming', 'cooking', 'meditation')
-- If multiple tags all point to 'rock climbing', output 'rock climbing' only once
-
-**Step 3 - Filter out non-interest tags**:
-Remove tags that do NOT suggest any hobby or interest:
-- Generic system/assistant terms (e.g., 'assistant', 'user', 'AI')
-- Pure abstract metrics with no clear hobby link (e.g., 'completion time', 'date', 'self-rating')
-
-**Output format**: Return a strict JSON object with a single key `interest_tags`, whose value is a list of concise interest activity names in English. Do NOT return a bare list. Do NOT include any prose, markdown fences, or extra keys.
-
-**Example**:
-Input: ['rock climbing', 'climber dashboard', 'route map', 'finger strength', 'landscape photography metadata enhancer', 'EXIF data', 'morning meditation streak', 'Sichuan cuisine visualization', 'visualization', 'assistant', 'completion time']
-Output: {"interest_tags": ["rock climbing", "photography", "meditation", "cooking", "programming"]}
-
-Now process the following tag list and return the inferred interest activities in English as the specified JSON object: {{ tag_list }}
+Candidate entities:
+{{ candidates_json }}
+{% if existing_interests_json %}
+Accepted interests (do not repeat):
+{{ existing_interests_json }}
+{% endif %}
+{% if evidence_json %}
+Linked Statement evidence:
+{{ evidence_json }}
+{% endif %}
 {% endif %}

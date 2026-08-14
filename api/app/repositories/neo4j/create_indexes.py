@@ -38,6 +38,9 @@ RANGE_DEFS: List[Tuple[str, str]] = [
     ("user_assistant_original", "AssistantOriginal"),
     ("user_assistant_pruned", "AssistantPruned"),
     ("user_conversation", "Conversation"),
+    ("user_statement", "Statement"),
+    ("user_chunk", "Chunk"),
+    ("user_extracted_entity", "ExtractedEntity"),
 ]
 
 COMPOSITE_DEFS: List[Tuple[str, str, str]] = [
@@ -55,15 +58,6 @@ DELETE_AT_DEFS: List[Tuple[str, str, str]] = [
     ("user_entity_delete_at", "ExtractedEntity", "delete_at"),
     ("user_chunk_delete_at", "Chunk", "delete_at"),
 ]
-
-# 旧的单列 end_user_id 索引名称（已被复合索引替代，创建复合索引前需先删除）
-_LEGACY_RANGE_NAMES: set[str] = {
-    "user_chunk",
-    "user_statement",
-    "user_extracted_entity",
-    "user_memory_summary",
-    "user_perceptual",
-}
 
 # Uniqueness 约束: (name, label, property)
 CONSTRAINT_DEFS: List[Tuple[str, str, str]] = [
@@ -345,7 +339,8 @@ async def create_end_user_id_indexes():
                 SHOW INDEXES
                 YIELD name, labelsOrTypes, properties, type
                 WHERE type = 'RANGE'
-                  AND any(prop IN properties WHERE prop = 'end_user_id')
+                  AND size(properties) = 1
+                  AND properties[0] = 'end_user_id'
                 RETURN name,
                        labelsOrTypes[0] AS label,
                        properties[0] AS property,
@@ -363,28 +358,11 @@ async def create_composite_indexes():
     加速 search_by_embedding 游标批查询：
         WHERE end_user_id = $x AND id > $last ORDER BY id
 
-    复合索引的前缀列覆盖 end_user_id 单列查询，创建前会先删除旧的
-    单列 end_user_id 索引以避 Neo4j 的等价索引冲突。
+    注意：Neo4j 复合索引仅在查询同时过滤全部属性时才可用，并不覆盖
+    end_user_id 单列查询；单列查询由 create_end_user_id_indexes 负责。
     """
     connector = Neo4jConnector()
     try:
-        # 1. 删除旧的单列 end_user_id 索引（已被复合索引替代）
-        existing_rows = await connector.execute_query(
-            "SHOW INDEXES YIELD name, labelsOrTypes, properties, type "
-            "WHERE type = 'RANGE' "
-            "  AND size(properties) = 1 "
-            "  AND properties[0] = 'end_user_id' "
-            "RETURN name, labelsOrTypes[0] AS label"
-        )
-        for row in (existing_rows or []):
-            name = row.get("name", "")
-            if name in _LEGACY_RANGE_NAMES:
-                try:
-                    await connector.execute_query(f"DROP INDEX {name}")
-                    logger.info(f"[Index] 删除旧单列索引: {name}")
-                except Exception as e:
-                    logger.warning(f"[Index] 删除旧单列索引失败 {name}: {e}")
-
         desired: List[Dict[str, Any]] = []
         for name, label, id_prop in COMPOSITE_DEFS + DELETE_AT_DEFS:
             desired.append({

@@ -35,9 +35,10 @@ interface RelationshipNetworkProps {
   setRegionId: Dispatch<SetStateAction<string | null>>;
   setSelectedKey: Dispatch<SetStateAction<string | null>>;
   setBrainMemories: Dispatch<SetStateAction<string[]>>;
-  refresh: () => void
+  refresh: () => void;
+  selectNodeId: string | null;
 }
-const RelationshipNetwork: FC<RelationshipNetworkProps> = ({ regionId, selectedKey, setRegionId, setBrainMemories, setSelectedKey, refresh }) => {
+const RelationshipNetwork: FC<RelationshipNetworkProps> = ({ regionId, selectedKey, setRegionId, setBrainMemories, setSelectedKey, refresh, selectNodeId }) => {
   const { t } = useTranslation()
   const { id } = useParams()
   const [nodes, setNodes] = useState<Node[]>([])
@@ -206,6 +207,14 @@ const RelationshipNetwork: FC<RelationshipNetworkProps> = ({ regionId, selectedK
       setSelectedNode(node)
     }, 0)
   }, [])
+
+  useEffect(() => {
+    if (selectNodeId) {
+      setSelectedNode(nodes.find(node => node.id === selectNodeId) as GraphNode)
+    } else {
+      setSelectedNode(null)
+    }
+  }, [nodes, selectNodeId])
   const handleReset = () => {
     console.log('handleReset')
     setActiveRelationIndex(0)
@@ -238,9 +247,9 @@ const RelationshipNetwork: FC<RelationshipNetworkProps> = ({ regionId, selectedK
               className={clsx('rb:absolute! rb:z-999 rb:top-4 rb:bg-[#FFFFFF] rb:rounded-xl rb:py-2! rb:px-3!', {
                 'rb:w-full': !selectedNode && !selectedKey,
                 'rb:w-[calc(100%-412px)]': selectedNode,
-                'rb:left-103 rb:w-[calc(100%-412px)]': selectedKey,
+                'rb:left-103 rb:w-[calc(100%-412px)]': selectedKey && selectedKey !== 'rank',
                 'rb:left-0': !selectedKey,
-                'rb:left-103 rb:w-[calc(100%-824px)]': selectedKey && selectedNode,
+                'rb:left-103 rb:w-[calc(100%-824px)]': (selectedKey && selectedKey !== 'rank') && selectedNode,
               })}
             >
               <Flex wrap gap={8}>

@@ -9,6 +9,7 @@ import { tool } from './en/tool'
 import { workflow } from './en/workflow'
 import { engine } from './en/engine'
 import { detail } from './en/detail'
+import { notificationCenter } from './en/notificationCenter'
 
 export const en = {
   translation: {
@@ -23,5 +24,6 @@ export const en = {
     ...workflow,
     ...engine,
     ...detail,
+    ...notificationCenter,
   },
 }
