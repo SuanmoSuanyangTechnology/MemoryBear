@@ -7,6 +7,7 @@ from typing import Optional
 from app.core.config import settings
 from app.core.utils.datetime_utils import utcnow_naive
 from app.core.sensitive_filter import SensitiveDataFilter
+from app.core.trace import get_trace_id
 
 
 class SensitiveDataLoggingFilter(logging.Filter):
@@ -36,6 +37,20 @@ class SensitiveDataLoggingFilter(logging.Filter):
                     for arg in record.args
                 )
         
+        return True
+
+
+class TraceIdFilter(logging.Filter):
+    """日志过滤器：将请求上下文中的 trace_id 注入 LogRecord。
+
+    在 handler 格式化之前执行，把 ContextVar 中的 trace_id 写入
+    record.trace_id，使 LOG_FORMAT 中的 %(trace_id)s 能取到值。
+    无请求上下文（如后台任务）时 trace_id 为空字符串。
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if not hasattr(record, "trace_id"):
+            record.trace_id = get_trace_id()
         return True
 
 
@@ -144,6 +159,9 @@ class LoggingConfig:
         
         # 创建敏感信息过滤器
         sensitive_filter = SensitiveDataLoggingFilter()
+
+        # 创建 trace_id 过滤器（将请求上下文中的 trace_id 注入每条日志）
+        trace_id_filter = TraceIdFilter()
         
         # 控制台处理器
         if settings.LOG_TO_CONSOLE:
@@ -151,6 +169,7 @@ class LoggingConfig:
             console_handler.setFormatter(formatter)
             console_handler.setLevel(getattr(logging, settings.LOG_LEVEL.upper()))
             console_handler.addFilter(sensitive_filter)
+            console_handler.addFilter(trace_id_filter)
             console_handler.addFilter(neo4j_filter)
             root_logger.addHandler(console_handler)
         
@@ -165,6 +184,7 @@ class LoggingConfig:
             file_handler.setFormatter(formatter)
             file_handler.setLevel(getattr(logging, settings.LOG_LEVEL.upper()))
             file_handler.addFilter(sensitive_filter)
+            file_handler.addFilter(trace_id_filter)
             file_handler.addFilter(neo4j_filter)
             root_logger.addHandler(file_handler)
         
