@@ -20,6 +20,7 @@ from app.repositories.end_user_repository import (
     get_tenant_id_by_end_user_id_async,
 )
 from app.repositories.neo4j.cypher_queries import (
+    LIVE_STATEMENT_COUNT,
     PERMANENT_MEMORY_COUNT,
     PERMANENT_MEMORY_LIST,
     PERMANENT_MEMORY_UNMARK,
@@ -32,7 +33,7 @@ from app.schemas.memory_value_ranking_schema import (
     PermanentMemoryQuota,
     PermanentMemoryUnmarkResult,
 )
-from app.utils.redis_cache import invalidate_cache
+from app.utils.redis_cache import invalidate_cache, redis_cache
 
 logger = logging.getLogger(__name__)
 
@@ -159,6 +160,11 @@ class MemoryValueRankingService:
         return int(rows[0]["used"]) if rows else 0
 
     @staticmethod
+    async def _count_live_statements(connector: Neo4jConnector, end_user_id: str) -> int:
+        rows = await connector.execute_query(LIVE_STATEMENT_COUNT, end_user_id=end_user_id)
+        return int(rows[0]["total"]) if rows else 0
+
+    @staticmethod
     def _quota(total_memory_limit: int, used: int) -> PermanentMemoryQuota:
         permanent_limit = calculate_permanent_memory_limit(total_memory_limit)
         return PermanentMemoryQuota(
@@ -186,6 +192,13 @@ class MemoryValueRankingService:
         finally:
             await connector.close()
 
+    @redis_cache(
+        ttl=600,
+        prefix="permanent_memories",
+        skip_args=["self"],
+        id_arg="end_user_id",
+        return_type=PermanentMemoryList,
+    )
     async def list_permanent_memories(
         self,
         end_user_id: str | uuid.UUID,
@@ -198,6 +211,7 @@ class MemoryValueRankingService:
         try:
             total_memory_limit = await get_total_memory_limit(str(end_user.id))
             used = await self._count(connector, str(end_user.id))
+            total = await self._count_live_statements(connector, str(end_user.id))
             rows = await connector.execute_query(
                 PERMANENT_MEMORY_LIST,
                 json_format=True,
@@ -222,8 +236,8 @@ class MemoryValueRankingService:
                 page={
                     "page": page,
                     "pagesize": page_size,
-                    "total": used,
-                    "hasnext": page * page_size < used,
+                    "total": total,
+                    "hasnext": page * page_size < total,
                 },
                 quota=self._quota(total_memory_limit, used),
                 items=items,
@@ -258,6 +272,13 @@ class MemoryValueRankingService:
             except Exception:
                 logger.exception(
                     "Failed to invalidate forgetting candidates after unmark: end_user_id=%s",
+                    end_user.id,
+                )
+            try:
+                await invalidate_cache(prefix=f"permanent_memories:{end_user.id}")
+            except Exception:
+                logger.exception(
+                    "Failed to invalidate permanent memories cache after unmark: end_user_id=%s",
                     end_user.id,
                 )
             return PermanentMemoryUnmarkResult(

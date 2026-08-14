@@ -101,6 +101,7 @@ async def list_permanent_memories(
         )
         return success(data=result.model_dump(), msg="查询成功")
     except Exception as exc:
+        logger.exception("Unexpected permanent-memory API failure", exc_info=exc)
         return _error_response(exc)
 
 
