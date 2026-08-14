@@ -2,12 +2,11 @@ from dataclasses import dataclass
 
 from app.core.rag.common.token_utils import encoder, num_tokens_from_string
 
-
 DEFAULT_TEXT_SEPARATORS = ["\n\n", "\n", "。", "；", " ", ""]
 
 
 @dataclass(frozen=True)
-class _SplitUnit:
+class TextSplitUnit:
     text: str
     prefix: str = ""
 
@@ -37,6 +36,53 @@ class TextMerger:
                 chunks.extend(self._merge_split_units(split_units, limit, overlap_tokens))
         return chunks
 
+    def split_recursive(self, text: str, token_num: int) -> list[str]:
+        limit = max(int(token_num), 1)
+        units = self.split_recursive_units(text, limit)
+        chunks = self._merge_split_units(units, limit, 0)
+        self._ensure_strict_limit(chunks, limit)
+        return chunks
+
+    def split_recursive_units(
+        self,
+        text: str,
+        token_num: int,
+        *,
+        split_top_level: bool = False,
+    ) -> list[TextSplitUnit]:
+        """Return recursive split units without packing or overlap."""
+        limit = max(int(token_num), 1)
+        if not split_top_level or not self.separators:
+            return self._split_recursive(text, limit, 0, strict=True)
+
+        separator = self.separators[0]
+        if not separator:
+            return self._split_recursive(text, limit, 0, strict=True)
+
+        parts = self._split_with_separator(text, separator)
+        if len(parts) <= 1:
+            return self._split_recursive(text, limit, 0, strict=True)
+
+        units: list[TextSplitUnit] = []
+        for index, part in enumerate(parts):
+            prefix = "" if index == 0 else part.prefix
+            units.extend(
+                self._split_recursive(
+                    part.text,
+                    limit,
+                    1,
+                    prefix,
+                    strict=True,
+                )
+            )
+        return units
+
+    def hard_split(self, text: str, token_num: int) -> list[str]:
+        limit = max(int(token_num), 1)
+        chunks = self._strict_hard_split(text, limit)
+        self._ensure_strict_limit(chunks, limit)
+        return chunks
+
     def _extract_strings(self, value: str | list) -> list[str]:
         if isinstance(value, str):
             return [value]
@@ -56,52 +102,79 @@ class TextMerger:
             ]
         return [part for part in raw_parts if part]
 
-    def _split_recursive(self, text: str, limit: int, separator_index: int, prefix: str = "") -> list[_SplitUnit]:
+    def _split_recursive(
+        self,
+        text: str,
+        limit: int,
+        separator_index: int,
+        prefix: str = "",
+        strict: bool = False,
+    ) -> list[TextSplitUnit]:
         if not text or not text.strip():
             return []
         if self._within_limit(text, limit):
-            return [_SplitUnit(text=text, prefix=prefix)]
+            return [TextSplitUnit(text=text, prefix=prefix)]
 
         separator = self.separators[separator_index] if separator_index < len(self.separators) else ""
         if separator == "":
+            hard_split = self._strict_hard_split if strict else self._hard_split
             return [
-                _SplitUnit(text=chunk, prefix=prefix if index == 0 else "")
-                for index, chunk in enumerate(self._hard_split(text, limit))
+                TextSplitUnit(text=chunk, prefix=prefix if index == 0 else "")
+                for index, chunk in enumerate(hard_split(text, limit))
             ]
 
         parts = self._split_with_separator(text, separator)
         if len(parts) <= 1:
-            return self._split_recursive(text, limit, separator_index + 1, prefix)
+            return self._split_recursive(
+                text,
+                limit,
+                separator_index + 1,
+                prefix,
+                strict,
+            )
 
-        result: list[_SplitUnit] = []
+        result: list[TextSplitUnit] = []
         for index, part in enumerate(parts):
             if not part or not part.text.strip():
                 continue
             unit_prefix = prefix if index == 0 else part.prefix
-            result.extend(self._split_recursive(part.text, limit, separator_index + 1, unit_prefix))
+            result.extend(
+                self._split_recursive(
+                    part.text,
+                    limit,
+                    separator_index + 1,
+                    unit_prefix,
+                    strict,
+                )
+            )
         return result
 
     def _split_with_separator(
         self,
         text: str,
         separator: str,
-    ) -> list[_SplitUnit]:
+    ) -> list[TextSplitUnit]:
         raw_parts = text.split(separator)
         if separator in {"。", "；"}:
             return [
-                _SplitUnit(text=part + (separator if index < len(raw_parts) - 1 else ""))
+                TextSplitUnit(text=part + (separator if index < len(raw_parts) - 1 else ""))
                 for index, part in enumerate(raw_parts)
                 if part
             ]
         return [
-            _SplitUnit(text=part, prefix="" if index == 0 else separator)
+            TextSplitUnit(text=part, prefix="" if index == 0 else separator)
             for index, part in enumerate(raw_parts)
             if part
         ]
 
-    def _merge_split_units(self, split_units: list[_SplitUnit], limit: int, overlap: int) -> list[str]:
+    def _merge_split_units(
+        self,
+        split_units: list[TextSplitUnit],
+        limit: int,
+        overlap: int,
+    ) -> list[str]:
         docs: list[str] = []
-        current_doc: list[_SplitUnit] = []
+        current_doc: list[TextSplitUnit] = []
         total = 0
 
         for split_unit in split_units:
@@ -123,7 +196,7 @@ class TextMerger:
         return docs
 
     @staticmethod
-    def _join_units(split_units: list[_SplitUnit]) -> str:
+    def _join_units(split_units: list[TextSplitUnit]) -> str:
         if not split_units:
             return ""
         return "".join(
@@ -167,6 +240,36 @@ class TextMerger:
             start = end
 
         return chunks
+
+    def _strict_hard_split(self, text: str, limit: int) -> list[str]:
+        tokens = encoder.encode(text)
+        chunks: list[str] = []
+        start = 0
+
+        while start < len(tokens):
+            end = min(start + limit, len(tokens))
+            chunk = None
+            while end > start:
+                try:
+                    chunk = encoder.decode(tokens[start:end], errors="strict")
+                    break
+                except UnicodeDecodeError:
+                    end -= 1
+            if chunk is None:
+                raise ValueError(
+                    f"Structured content cannot fit within token limit {limit}."
+                )
+            chunks.append(chunk)
+            start = end
+
+        return chunks
+
+    @staticmethod
+    def _ensure_strict_limit(chunks: list[str], limit: int) -> None:
+        if any(num_tokens_from_string(chunk) > limit for chunk in chunks):
+            raise ValueError(
+                f"Structured content cannot fit within token limit {limit}."
+            )
 
     @staticmethod
     def _within_limit(text: str, limit: int) -> bool:
