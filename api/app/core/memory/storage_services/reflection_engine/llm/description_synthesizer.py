@@ -7,6 +7,12 @@ from typing import List, Optional
 from jinja2 import Environment, FileSystemLoader
 from pydantic import BaseModel
 
+from app.core.memory.storage_services.reflection_engine.errors import (
+    ReflectionBusinessError,
+    ReflectionFailureReason,
+    ReflectionModelType,
+)
+
 logger = logging.getLogger(__name__)
 
 _prompt_dir = os.path.join(
@@ -43,25 +49,33 @@ async def merge_description(
         language: 语言类型 "zh" | "en"
 
     Returns:
-        合并后的纯文本摘要，失败返回 None
+        合并后的纯文本摘要；失败时抛出受控业务异常
     """
+    template = _prompt_env.get_template("description_merge.jinja2")
+    json_schema = json.dumps(DescriptionMergeOutput.model_json_schema(), indent=2)
+
+    rendered_prompt = template.render(
+        entity_name=entity_name,
+        entity_type=entity_type,
+        summary=summary,
+        fragments=fragments,
+        parts_count=len(fragments) + (1 if summary else 0),
+        json_schema=json_schema,
+        language=language,
+    )
+
+    messages = [{"role": "user", "content": rendered_prompt}]
     try:
-        template = _prompt_env.get_template("description_merge.jinja2")
-        json_schema = json.dumps(DescriptionMergeOutput.model_json_schema(), indent=2)
-
-        rendered_prompt = template.render(
-            entity_name=entity_name,
-            entity_type=entity_type,
-            summary=summary,
-            fragments=fragments,
-            parts_count=len(fragments) + (1 if summary else 0),
-            json_schema=json_schema,
-            language=language,
-        )
-
-        messages = [{"role": "user", "content": rendered_prompt}]
         response = await llm_client.call_structured(messages, DescriptionMergeOutput)
+    except Exception as exc:
+        logger.error("LLM 描述合并模型调用失败 entity=%s", entity_name, exc_info=True)
+        raise ReflectionBusinessError(
+            ReflectionFailureReason.MODEL_CALL_FAILED,
+            "description_merge_model_call",
+            model_type=ReflectionModelType.LLM,
+        ) from exc
 
+    try:
         if isinstance(response, DescriptionMergeOutput):
             result = response.merged_description
         elif isinstance(response, dict):
@@ -69,16 +83,22 @@ async def merge_description(
         elif isinstance(response, BaseModel):
             result = response.model_dump().get("merged_description")
         else:
-            return None
+            raise ValueError("unsupported response type")
 
         # 后处理：将中文分号替换为逗号，避免与碎片分隔符 ；混淆
         if result:
             result = result.replace('；', '，')
-        return result or None
+        if not result:
+            raise ValueError("merged_description is empty")
+        return result
 
-    except Exception as e:
-        logger.error(f"LLM 描述合并失败 entity={entity_name}: {e}", exc_info=True)
-        return None
+    except Exception as exc:
+        logger.error("LLM 描述合并返回解析失败 entity=%s", entity_name, exc_info=True)
+        raise ReflectionBusinessError(
+            ReflectionFailureReason.RESULT_PARSE_FAILED,
+            "description_merge_result_parse",
+            model_type=ReflectionModelType.LLM,
+        ) from exc
 
 
 # ===== 新增：描述合并 + 事件提取 + 更名判断（一次调用） =====
@@ -202,27 +222,39 @@ async def summarize_extract_and_rename(
         language: 语言类型
 
     Returns:
-        SummarizeExtractRenameOutput 实例，失败返回 None
+        SummarizeExtractRenameOutput 实例；失败时抛出受控业务异常
     """
+    template = _prompt_env.get_template("reflection_summary_timeline.prompt.jinja2")
+
+    input_data = {
+        "entity_name": entity_name,
+        "entity_type": entity_type,
+        "description": description,
+        "description_summary": summary or "",
+        "event_timeline": _parse_timeline_full(event_timeline) if event_timeline else [],
+    }
+
+    rendered_prompt = template.render(
+        input_json=json.dumps(input_data, ensure_ascii=False, indent=2),
+        language=language,
+    )
+
+    messages = [{"role": "user", "content": rendered_prompt}]
     try:
-        template = _prompt_env.get_template("reflection_summary_timeline.prompt.jinja2")
-
-        input_data = {
-            "entity_name": entity_name,
-            "entity_type": entity_type,
-            "description": description,
-            "description_summary": summary or "",
-            "event_timeline": _parse_timeline_full(event_timeline) if event_timeline else [],
-        }
-
-        rendered_prompt = template.render(
-            input_json=json.dumps(input_data, ensure_ascii=False, indent=2),
-            language=language,
-        )
-
-        messages = [{"role": "user", "content": rendered_prompt}]
         response = await llm_client.call_structured(messages, SummarizeExtractRenameOutput)
+    except Exception as exc:
+        logger.error(
+            "LLM 描述合并、事件提取和更名模型调用失败 entity=%s",
+            entity_name,
+            exc_info=True,
+        )
+        raise ReflectionBusinessError(
+            ReflectionFailureReason.MODEL_CALL_FAILED,
+            "description_synthesis_model_call",
+            model_type=ReflectionModelType.LLM,
+        ) from exc
 
+    try:
         if isinstance(response, SummarizeExtractRenameOutput):
             result = response
         elif isinstance(response, dict):
@@ -241,7 +273,7 @@ async def summarize_extract_and_rename(
                 suggested_entity_name=data.get("suggested_entity_name"),
             )
         else:
-            return None
+            raise ValueError("unsupported response type")
 
         # 后处理：summary 中的中文分号替换为逗号
         if result.description_summary:
@@ -253,6 +285,14 @@ async def summarize_extract_and_rename(
 
         return result
 
-    except Exception as e:
-        logger.error(f"LLM 描述合并+事件提取+更名失败 entity={entity_name}: {e}", exc_info=True)
-        return None
+    except Exception as exc:
+        logger.error(
+            "LLM 描述合并、事件提取和更名返回解析失败 entity=%s",
+            entity_name,
+            exc_info=True,
+        )
+        raise ReflectionBusinessError(
+            ReflectionFailureReason.RESULT_PARSE_FAILED,
+            "description_synthesis_result_parse",
+            model_type=ReflectionModelType.LLM,
+        ) from exc

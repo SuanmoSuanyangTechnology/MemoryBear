@@ -507,6 +507,9 @@ class ApiKeyAuthService:
         if api_key_obj.quota_limit and api_key_obj.quota_used >= api_key_obj.quota_limit:
             return None
 
+        from app.core.alert_metric_bridge import report_api_key_expiry
+
+        report_api_key_expiry(api_key_obj)
         return api_key_obj
 
     @staticmethod
@@ -529,6 +532,9 @@ class ApiKeyAuthService:
         if api_key_obj.quota_limit and api_key_obj.quota_used >= api_key_obj.quota_limit:
             return None
 
+        from app.core.alert_metric_bridge import report_api_key_expiry_async
+
+        await report_api_key_expiry_async(api_key_obj)
         return api_key_obj
 
     @staticmethod

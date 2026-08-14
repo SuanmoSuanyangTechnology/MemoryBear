@@ -9,6 +9,11 @@ from pydantic import BaseModel
 
 from datetime import datetime
 from app.core.config import settings
+from app.core.memory.storage_services.reflection_engine.errors import (
+    ReflectionBusinessError,
+    ReflectionFailureReason,
+    ReflectionModelType,
+)
 from app.core.utils.datetime_utils import (
     utcnow_naive,
     as_utc_aware,
@@ -186,6 +191,8 @@ class Layer2Inspector:
         self.dedup_config = self.config.entity_dedup
         self._semaphore = asyncio.Semaphore(self.desc_config.merge_concurrency)
         self._recorder: Optional[ReflectionSnapshotRecorder] = None
+        # 实体合并后 name_embedding 重算失败记录（不中断合并，由步骤聚合进告警）
+        self._embedding_errors: List[str] = []
 
     def _snap(self, subproblem: str, stage: str, data) -> None:
         """安全落普通阶段文件；recorder 为 None / 关闭 / 异常时只告警，不影响主流程。"""
@@ -235,6 +242,23 @@ class Layer2Inspector:
         except asyncio.TimeoutError:
             logger.warning(f"[Layer2 高频] {name}超时跳过 end_user_id={end_user_id}")
             return {"status": "timeout"}
+        except ReflectionBusinessError as exc:
+            logger.error(
+                f"[Layer2 高频] {name}业务失败 end_user_id={end_user_id} "
+                f"reason_code={exc.reason_code.value} "
+                f"failed_operation={exc.failed_operation}",
+                exc_info=True,
+            )
+            return {
+                "status": "error",
+                "reason_code": exc.reason_code.value,
+                "model_type": exc.model_type.value,
+                "failed_operation": exc.failed_operation,
+                "business_failure_count": 1,
+                "reason_codes": [exc.reason_code.value],
+                "model_types": [exc.model_type.value],
+                "failed_operations": [exc.failed_operation],
+            }
 
     async def run(self, end_user_id: str, baseline: str = "HYBRID",
                   language: str = "zh") -> Dict[str, Any]:
@@ -311,7 +335,10 @@ class Layer2Inspector:
                 self._run_metadata_extraction(end_user_id, language), remaining(),
             )
             results["metadata_extraction"] = meta
-            meta_ok = meta.get("status") not in ("timeout", "skipped")
+            meta_ok = (
+                meta.get("status") not in ("timeout", "skipped", "error")
+                and int(meta.get("business_failure_count", 0) or 0) == 0
+            )
             if meta_ok:
                 logger.info(
                     f"[Layer2 高频] 元数据提取完成 end_user_id={end_user_id}, "
@@ -506,6 +533,8 @@ class Layer2Inspector:
             result["merge_count"] = len(merge_ids)
             result["drop_count"] = len(drop_ids)
             return result
+        except ReflectionBusinessError:
+            raise
         except Exception as e:
             logger.warning(f"[AliasMerge] 执行失败 end_user_id={end_user_id}: {e}")
             return {"status": "error", "error": str(e)}
@@ -559,6 +588,8 @@ class Layer2Inspector:
                 self._snap("metadata_extraction", "2_llm_raw", trace.get("llm_raw"))
                 self._snap_changes("metadata_extraction", trace.get("changes") or [])
             return {"status": "success", **result}
+        except ReflectionBusinessError:
+            raise
         except Exception as e:
             logger.warning(
                 f"[Metadata] 元数据提取失败 end_user_id={end_user_id}: {e}"
@@ -575,6 +606,7 @@ class Layer2Inspector:
         from .llm.entity_dedup_judge import judge_batch
         from .deterministic.cypher_merger import choose_keeper, execute_merge, build_merged_aliases
 
+        self._embedding_errors = []
         config = self.dedup_config
 
         # 1. 两路候选召回（并行）— 计时
@@ -784,14 +816,24 @@ class Layer2Inspector:
                 })
                 self._snap_changes("entity_dedup", snap_changes)
 
+        embedding_failed = bool(self._embedding_errors)
         return {
-            "status": "success",
+            "status": "error" if embedding_failed else "success",
             "candidate_count": total_candidates,
             "llm_pool": len(llm_pool),
             "discard_pool": len(discard_pool),
             "merged_count": merged_count,
             "direct_merged_count": direct_merged_count,
             "recorded_count": recorded_count,
+            "business_failure_count": len(self._embedding_errors),
+            "reason_codes": (
+                [ReflectionFailureReason.MODEL_CALL_FAILED.value]
+                if embedding_failed else []
+            ),
+            "model_types": (
+                [ReflectionModelType.EMBEDDING.value] if embedding_failed else []
+            ),
+            "failed_operations": list(dict.fromkeys(self._embedding_errors)),
         }
 
 
@@ -1001,6 +1043,11 @@ class Layer2Inspector:
         total_direct_merged = 0
         truncated = False
         had_type_error = False
+        business_failure_count = 0
+        reason_codes: list[str] = []
+        model_types: list[str] = []
+        failed_operations: list[str] = []
+        self._embedding_errors = []
         # 快照累积（跨类型聚合到 entity_dedup 一个子目录）
         snap_input: list = []
         snap_llm: list = []
@@ -1026,6 +1073,24 @@ class Layer2Inspector:
                     truncated = True
                     logger.warning(f"[Layer2 低频] 触发软超时 type={entity_type}")
                     break
+                except ReflectionBusinessError as exc:
+                    had_type_error = True
+                    business_failure_count += 1
+                    if exc.reason_code.value not in reason_codes:
+                        reason_codes.append(exc.reason_code.value)
+                        model_types.append(exc.model_type.value)
+                    elif model_types[reason_codes.index(exc.reason_code.value)] == \
+                            ReflectionModelType.UNKNOWN.value and exc.model_type.value != \
+                            ReflectionModelType.UNKNOWN.value:
+                        model_types[reason_codes.index(exc.reason_code.value)] = exc.model_type.value
+                    if exc.failed_operation not in failed_operations:
+                        failed_operations.append(exc.failed_operation)
+                    logger.error(
+                        f"[Layer2 低频] 类型业务失败 type={entity_type} "
+                        f"reason_code={exc.reason_code.value} "
+                        f"failed_operation={exc.failed_operation}",
+                    )
+                    continue
                 except Exception as e:                  # 单类型真异常：跳过、继续下一个
                     had_type_error = True
                     logger.warning(f"[Layer2 低频] 类型处理失败 type={entity_type}: {e}")
@@ -1042,6 +1107,20 @@ class Layer2Inspector:
                 self._snap("entity_dedup", "2_llm_raw", {"types": snap_llm})
                 self._snap_changes("entity_dedup", snap_changes)
 
+        # 合并 name_embedding 重算失败（Embedding 模型，不中断合并）
+        for op in self._embedding_errors:
+            if op not in failed_operations:
+                failed_operations.append(op)
+        if self._embedding_errors:
+            business_failure_count += len(self._embedding_errors)
+            if ReflectionFailureReason.MODEL_CALL_FAILED.value not in reason_codes:
+                reason_codes.append(ReflectionFailureReason.MODEL_CALL_FAILED.value)
+                model_types.append(ReflectionModelType.EMBEDDING.value)
+            else:
+                idx = reason_codes.index(ReflectionFailureReason.MODEL_CALL_FAILED.value)
+                if model_types[idx] == ReflectionModelType.UNKNOWN.value:
+                    model_types[idx] = ReflectionModelType.EMBEDDING.value
+
         return {
             "scanned_types": scanned_types,
             "merged_count": total_merged,
@@ -1049,6 +1128,11 @@ class Layer2Inspector:
             "total_types": len(entity_types),     # 新增
             "truncated": truncated,               # 新增：预算耗尽/类型超时未扫完
             "had_type_error": had_type_error,     # 新增：有类型抛异常被兜底跳过
+            "status": "error" if business_failure_count else "success",
+            "business_failure_count": business_failure_count,
+            "reason_codes": reason_codes,
+            "model_types": model_types,
+            "failed_operations": failed_operations,
         }
     @staticmethod
     def _merged_description(keeper_desc: str, loser_desc: str) -> str:
@@ -1319,7 +1403,11 @@ class Layer2Inspector:
         return True
 
     async def _reembed_if_name_changed(self, keeper: Dict, merged_name: str) -> None:
-        """合并后若 name 变化，重算 name_embedding（与更名流程一致；失败只告警不回滚）"""
+        """合并后若 name 变化，重算 name_embedding（与更名流程一致；失败只告警不回滚）。
+
+        Embedding 重算失败不中断合并，但记入 ``_embedding_errors`` 供步骤聚合为
+        MODEL_CALL_FAILED + Embedding，让告警能区分是 Embedding 模型出问题。
+        """
         old_name = keeper.get("name") or ""
         if not merged_name or merged_name == old_name:
             return
@@ -1327,14 +1415,20 @@ class Layer2Inspector:
             return
         try:
             emb = self.embedding_client.embed_query(merged_name)
-            if emb:
+        except Exception as e:
+            self._embedding_errors.append("entity_dedup_name_embedding")
+            logger.warning(f"合并后重算 name_embedding 失败 name={merged_name}: {e}")
+            return
+
+        if emb:
+            try:
                 await self.connector.execute_query(
                     REFLECTION_UPDATE_NAME_EMBEDDING,
                     entity_id=keeper.get("entity_id") or keeper.get("id"),
                     name_embedding=emb,
                 )
-        except Exception as e:
-            logger.warning(f"合并后重算 name_embedding 失败 name={merged_name}: {e}")
+            except Exception as e:
+                logger.warning(f"合并后写入 name_embedding 失败 name={merged_name}: {e}")
 
     async def _apply_direct_merge(
         self, pair, end_user_id: str, baseline: str,
@@ -1593,10 +1687,33 @@ class Layer2Inspector:
         resolved_count = 0
         forced_count = 0
         failed_count = 0
+        model_failure_count = 0
+        reason_codes: list[str] = []
+        model_types: list[str] = []
+        failed_operations: list[str] = []
         for i, result in enumerate(results):
-            if isinstance(result, Exception):
+            if isinstance(result, ReflectionBusinessError):
                 logger.error(
-                    f"未识别实体处理异常 statement={candidates[i].get('statement_id', '?')}: {result}"
+                    f"未识别实体处理业务失败 "
+                    f"statement={candidates[i].get('statement_id', '?')} "
+                    f"reason_code={result.reason_code.value} "
+                    f"failed_operation={result.failed_operation}"
+                )
+                failed_count += 1
+                model_failure_count += 1
+                if result.reason_code.value not in reason_codes:
+                    reason_codes.append(result.reason_code.value)
+                    model_types.append(result.model_type.value)
+                elif model_types[reason_codes.index(result.reason_code.value)] == \
+                        ReflectionModelType.UNKNOWN.value and result.model_type.value != \
+                        ReflectionModelType.UNKNOWN.value:
+                    model_types[reason_codes.index(result.reason_code.value)] = result.model_type.value
+                if result.failed_operation not in failed_operations:
+                    failed_operations.append(result.failed_operation)
+            elif isinstance(result, Exception):
+                logger.error(
+                    f"未识别实体处理异常 statement="
+                    f"{candidates[i].get('statement_id', '?')}"
                 )
                 failed_count += 1
             elif result is None:
@@ -1607,11 +1724,15 @@ class Layer2Inspector:
                 forced_count += 1
 
         return {
-            "status": "success",
+            "status": "error" if model_failure_count else "success",
             "total": len(candidates),
             "resolved": resolved_count,
             "forced": forced_count,
             "failed": failed_count,
+            "business_failure_count": model_failure_count,
+            "reason_codes": reason_codes,
+            "model_types": model_types,
+            "failed_operations": failed_operations,
         }
 
     async def _resolve_one_statement(self, stmt: Dict, end_user_id: str,
@@ -1902,17 +2023,38 @@ class Layer2Inspector:
         results = await asyncio.gather(*tasks, return_exceptions=True)
         merged_count = sum(1 for r in results if r is True)
         failed_count = sum(1 for r in results if isinstance(r, Exception))
+        model_failure_count = sum(
+            1 for r in results if isinstance(r, ReflectionBusinessError)
+        )
+        reason_codes: list[str] = []
+        model_types: list[str] = []
+        failed_operations: list[str] = []
 
         # 记录失败的异常
         for i, r in enumerate(results):
-            if isinstance(r, Exception):
-                logger.error(f"描述合并异常 entity={candidates[i].get('name', '?')}: {r}")
+            if isinstance(r, ReflectionBusinessError):
+                logger.error(
+                    f"描述合并业务失败 entity={candidates[i].get('name', '?')} "
+                    f"reason_code={r.reason_code.value} "
+                    f"failed_operation={r.failed_operation}"
+                )
+                if r.reason_code.value not in reason_codes:
+                    reason_codes.append(r.reason_code.value)
+                    model_types.append(r.model_type.value)
+                if r.failed_operation not in failed_operations:
+                    failed_operations.append(r.failed_operation)
+            elif isinstance(r, Exception):
+                logger.error(f"描述合并异常 entity={candidates[i].get('name', '?')}")
 
         return {
-            "status": "success",
+            "status": "error" if model_failure_count else "success",
             "candidate_count": len(candidates),
             "merged_count": merged_count,
             "failed_count": failed_count,
+            "business_failure_count": model_failure_count,
+            "reason_codes": reason_codes,
+            "model_types": model_types,
+            "failed_operations": failed_operations,
         }
 
     async def _merge_one_entity(self, entity: Dict, end_user_id: str,
@@ -1999,7 +2141,11 @@ class Layer2Inspector:
             logger.warning(
                 f"描述合并校验失败 entity={entity['name']}, reason={reason}, 跳过写入"
             )
-            return False
+            raise ReflectionBusinessError(
+                ReflectionFailureReason.RESULT_PARSE_FAILED,
+                "description_synthesis_result_validate",
+                model_type=ReflectionModelType.LLM,
+            )
         tracker.end_step("校验通过")
 
         # Step 4: 应用事件操作（企业版能力；社区版跳过，不记 tracker/快照）

@@ -3,7 +3,19 @@ from abc import ABC, abstractmethod
 from copy import deepcopy
 from timeit import default_timer as timer
 
-from app.core.rag.chunk.context import ChunkContext, ChunkOutputMode, MergeResult, ParseResult
+from app.core.rag.chunk.context import (
+    ChunkContext,
+    ChunkOutputMode,
+    ImageVisionScope,
+    LogicalChunk,
+    LogicalChunkType,
+    MergeResult,
+    ParseResult,
+    is_direct_image_vision_enabled,
+    is_embedded_image_vision_enabled,
+)
+
+LOGGER = logging.getLogger(__name__)
 
 
 def _append_external_parent_child_chunks(
@@ -65,13 +77,15 @@ class ChunkPipeline(ABC):
 
         start = timer()
         merge_result = self.merge(ctx, parse_result)
+        self.enhance_merged_images(ctx, parse_result, merge_result)
+        self.validate_direct_image_result(parse_result, merge_result)
         if ctx.kwargs.get("section_only", False):
             return self.finalize_result(merge_result.chunks, embed_res, parse_result.url_res or [])
 
         url_res = parse_result.url_res or []
         url_res.extend(self.hyperlink_preprocessor.collect_url_chunks(ctx, parse_result.urls or set(), self.run_child))
         main_result = self.postprocessor.process(ctx, parse_result, merge_result)
-        logging.info("naive_merge({}): {}".format(ctx.filename, timer() - start))
+        LOGGER.info("naive_merge(%s): %s", ctx.filename, timer() - start)
         if isinstance(main_result, tuple):
             child_res, parent_res, parent_id_map = main_result
             return _append_external_parent_child_chunks(child_res, parent_res, parent_id_map, embed_res + url_res)
@@ -102,6 +116,73 @@ class ChunkPipeline(ABC):
             return ImageMerger().merge(ctx, parse_result)
 
         return NaiveMerger().merge(ctx, parse_result)
+
+    def enhance_merged_images(
+        self,
+        ctx: ChunkContext,
+        parse_result: ParseResult,
+        merge_result: MergeResult,
+    ) -> None:
+        from app.core.rag.chunk.parser.image_vision import (
+            enhance_complete_image_chunks_with_vision,
+        )
+
+        enabled_scopes = set()
+        if is_embedded_image_vision_enabled(ctx.parser_config):
+            enabled_scopes.add(ImageVisionScope.EMBEDDED)
+        if is_direct_image_vision_enabled(ctx.parser_config):
+            enabled_scopes.add(ImageVisionScope.DIRECT)
+
+        enhance_complete_image_chunks_with_vision(
+            self._vision_candidate_chunks(ctx, merge_result),
+            vision_model=ctx.vision_model,
+            enabled_scopes=enabled_scopes,
+            callback=ctx.callback,
+            lang=ctx.lang,
+        )
+
+    def validate_direct_image_result(
+        self,
+        parse_result: ParseResult,
+        merge_result: MergeResult,
+    ) -> None:
+        mode = parse_result.direct_image_vision_mode
+        if mode not in {1, 2}:
+            return
+
+        has_direct_vision_text = any(
+            chunk.type is LogicalChunkType.IMAGE
+            and chunk.image_tag_complete
+            and chunk.image_vision_scope is ImageVisionScope.DIRECT
+            and bool(str(chunk.metadata.get("vision_text") or "").strip())
+            for chunk in self._all_vision_result_chunks(merge_result)
+        )
+        if mode == 1 and not parse_result.direct_image_has_ocr_text and not has_direct_vision_text:
+            raise ValueError("Image mixed mode produced neither OCR text nor visual description.")
+        if mode == 2 and not has_direct_vision_text:
+            raise ValueError("Image pure vision mode produced no visual description.")
+
+    def _vision_candidate_chunks(
+        self,
+        ctx: ChunkContext,
+        merge_result: MergeResult,
+    ) -> list[LogicalChunk]:
+        if ctx.chunk_output_mode is ChunkOutputMode.PARENT_CHILD:
+            return [
+                child
+                for group in merge_result.parent_child_groups or []
+                for child in group.children
+            ]
+        return list(merge_result.logical_chunks or [])
+
+    def _all_vision_result_chunks(self, merge_result: MergeResult) -> list[LogicalChunk]:
+        if merge_result.parent_child_groups is not None:
+            return [
+                child
+                for group in merge_result.parent_child_groups
+                for child in group.children
+            ]
+        return list(merge_result.logical_chunks or [])
 
     def run_child(
         self,

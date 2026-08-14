@@ -20,7 +20,7 @@ from app.core.config import settings
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
-from app.core.quota_manager import check_end_user_quota_async
+from app.core.quota_manager import check_end_user_quota_async, report_quota_change
 from app.core.response_utils import success
 from app.db import get_db, get_async_db_context
 from app.models.app_model import AppType
@@ -121,6 +121,13 @@ async def _get_or_create_v1_end_user_async(
         workspace_id=workspace_id,
         other_id=other_id,
     )
+    # 终端用户已落库，用量真正发生变化后才评估告警。
+    if workspace is not None:
+        await report_quota_change(
+            workspace.tenant_id,
+            "end_user_quota",
+            workspace_id=workspace_id,
+        )
     await set_json_async(cache_key, {
         "id": str(new_user.id),
         "app_id": str(new_user.app_id),

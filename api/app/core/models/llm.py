@@ -1,4 +1,5 @@
 from __future__ import annotations
+import time
 from typing import Any, Iterator, AsyncIterator, List, Optional, Literal, Type
 
 from json_repair import json_repair
@@ -6,7 +7,12 @@ from langchain_core.callbacks import CallbackManagerForLLMRun, AsyncCallbackMana
 from langchain_core.language_models import BaseLLM
 from langchain_core.messages import AIMessage
 from langchain_core.outputs import LLMResult, GenerationChunk
+from langchain_core.runnables import Runnable
 from app.core.models import RedBearModelConfig, RedBearModelFactory, get_provider_llm_class
+from app.core.alert_metric_bridge import (
+    report_model_gateway_failure,
+    report_model_gateway_failure_async,
+)
 from app.models.models_model import ModelType
 
 
@@ -76,6 +82,59 @@ class StructResponse:
         return fixed_json
 
 
+class _ObservedRunnable(Runnable):
+    """观察由 bind/bind_tools/with_structured_output 派生出的真实调用。"""
+
+    def __init__(self, runnable: Any, config: RedBearModelConfig, operation: str):
+        self._runnable = runnable
+        self._model_config = config
+        self._operation = operation
+
+    def invoke(self, input: Any, config: Optional[dict] = None, **kwargs: Any) -> Any:
+        started = time.perf_counter()
+        try:
+            return self._runnable.invoke(input, config=config, **kwargs)
+        except Exception as exc:
+            report_model_gateway_failure(
+                self._model_config, self._operation, exc, started
+            )
+            raise
+
+    async def ainvoke(self, input: Any, config: Optional[dict] = None, **kwargs: Any) -> Any:
+        started = time.perf_counter()
+        try:
+            return await self._runnable.ainvoke(input, config=config, **kwargs)
+        except Exception as exc:
+            await report_model_gateway_failure_async(
+                self._model_config, self._operation, exc, started
+            )
+            raise
+
+    def stream(self, input: Any, config: Optional[dict] = None, **kwargs: Any):
+        started = time.perf_counter()
+        try:
+            yield from self._runnable.stream(input, config=config, **kwargs)
+        except Exception as exc:
+            report_model_gateway_failure(
+                self._model_config, f"{self._operation}.stream", exc, started
+            )
+            raise
+
+    async def astream(self, input: Any, config: Optional[dict] = None, **kwargs: Any):
+        started = time.perf_counter()
+        try:
+            async for chunk in self._runnable.astream(input, config=config, **kwargs):
+                yield chunk
+        except Exception as exc:
+            await report_model_gateway_failure_async(
+                self._model_config, f"{self._operation}.astream", exc, started
+            )
+            raise
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._runnable, name)
+
+
 class RedBearLLM(BaseLLM):
     """
     RedBear LLM Model Wrapper
@@ -116,7 +175,12 @@ class RedBearLLM(BaseLLM):
             **kwargs: Any
     ) -> LLMResult:
         """Synchronous text generation (required by BaseLLM)"""
-        return self._model._generate(prompts, stop=stop, run_manager=run_manager, **kwargs)
+        started = time.perf_counter()
+        try:
+            return self._model._generate(prompts, stop=stop, run_manager=run_manager, **kwargs)
+        except Exception as exc:
+            report_model_gateway_failure(self._config, "generate", exc, started)
+            raise
 
     async def _agenerate(
             self,
@@ -126,7 +190,12 @@ class RedBearLLM(BaseLLM):
             **kwargs: Any
     ) -> LLMResult:
         """Asynchronous text generation (required by BaseLLM)"""
-        return await self._model._agenerate(prompts, stop=stop, run_manager=run_manager, **kwargs)
+        started = time.perf_counter()
+        try:
+            return await self._model._agenerate(prompts, stop=stop, run_manager=run_manager, **kwargs)
+        except Exception as exc:
+            await report_model_gateway_failure_async(self._config, "agenerate", exc, started)
+            raise
 
     # ==================== Advanced Methods (Support Message Lists) ====================
 
@@ -144,6 +213,7 @@ class RedBearLLM(BaseLLM):
         Returns:
             Model response
         """
+        started = time.perf_counter()
         try:
             return self._model.invoke(input, config=config, **kwargs)
         except AttributeError as e:
@@ -151,8 +221,8 @@ class RedBearLLM(BaseLLM):
                 # Underlying model doesn't support invoke, fallback to parent implementation
                 return super().invoke(input, config=config, **kwargs)
             raise
-        except Exception:
-            # Other exceptions are raised directly
+        except Exception as exc:
+            report_model_gateway_failure(self._config, "invoke", exc, started)
             raise
 
     async def ainvoke(self, input: Any, config: Optional[dict] = None, **kwargs: Any) -> Any:
@@ -169,6 +239,7 @@ class RedBearLLM(BaseLLM):
         Returns:
             Model response
         """
+        started = time.perf_counter()
         try:
             return await self._model.ainvoke(input, config=config, **kwargs)
         except AttributeError as e:
@@ -176,8 +247,8 @@ class RedBearLLM(BaseLLM):
                 # Underlying model doesn't support ainvoke, fallback to parent implementation
                 return await super().ainvoke(input, config=config, **kwargs)
             raise
-        except Exception:
-            # Other exceptions are raised directly
+        except Exception as exc:
+            await report_model_gateway_failure_async(self._config, "ainvoke", exc, started)
             raise
 
     # ==================== Streaming Methods (Critical) ====================
@@ -201,15 +272,23 @@ class RedBearLLM(BaseLLM):
         Yields:
             GenerationChunk: Generated text chunks
         """
+        started = time.perf_counter()
         try:
             yield from self._model.stream(input, config=config, stop=stop, **kwargs)
         except AttributeError as e:
             if 'stream' in str(e):
                 # Underlying model doesn't support stream, fallback to parent implementation
-                yield from super().stream(input, config=config, stop=stop, **kwargs)
+                try:
+                    yield from super().stream(input, config=config, stop=stop, **kwargs)
+                except Exception as fallback_exc:
+                    report_model_gateway_failure(
+                        self._config, "stream", fallback_exc, started
+                    )
+                    raise
             else:
                 raise
-        except Exception:
+        except Exception as exc:
+            report_model_gateway_failure(self._config, "stream", exc, started)
             raise
 
     async def astream(
@@ -235,17 +314,25 @@ class RedBearLLM(BaseLLM):
         Yields:
             GenerationChunk: Generated text chunks
         """
+        started = time.perf_counter()
         try:
             async for chunk in self._model.astream(input, config=config, stop=stop, **kwargs):
                 yield chunk
         except AttributeError as e:
             if 'astream' in str(e):
                 # Underlying model doesn't support astream, fallback to parent implementation
-                async for chunk in super().astream(input, config=config, stop=stop, **kwargs):
-                    yield chunk
+                try:
+                    async for chunk in super().astream(input, config=config, stop=stop, **kwargs):
+                        yield chunk
+                except Exception as fallback_exc:
+                    await report_model_gateway_failure_async(
+                        self._config, "astream", fallback_exc, started
+                    )
+                    raise
             else:
                 raise
-        except Exception:
+        except Exception as exc:
+            await report_model_gateway_failure_async(self._config, "astream", exc, started)
             raise
 
     # ==================== Structured Output ====================
@@ -260,7 +347,9 @@ class RedBearLLM(BaseLLM):
         """
         with_so = getattr(self._model, "with_structured_output", None)
         if callable(with_so):
-            return with_so(schema, **kwargs)
+            return _ObservedRunnable(
+                with_so(schema, **kwargs), self._config, "structured_output"
+            )
         raise NotImplementedError(
             f"Underlying model {type(self._model).__name__} does not implement "
             f"with_structured_output"
@@ -352,7 +441,10 @@ class RedBearLLM(BaseLLM):
                 # Wrap other methods for easier debugging and error handling
                 def method_wrapper(*args, **kwargs):
                     try:
-                        return attr(*args, **kwargs)
+                        result = attr(*args, **kwargs)
+                        if name in {"bind", "bind_tools"} and hasattr(result, "invoke"):
+                            return _ObservedRunnable(result, self._config, name)
+                        return result
                     except Exception:
                         # Can add logging or error handling here
                         raise
