@@ -19,11 +19,12 @@ from app.models.models_model import ModelProvider, ModelType, ModelCapability
 from app.core.models.compatible_chat import CompatibleChatOpenAI
 
 T = TypeVar("T")
-_OPENAI_HTTP_CLIENTS: dict[
+_OPENAI_SYNC_CLIENTS: dict[
     tuple[float | None, float | None, float | None, float | None],
-    tuple[httpx.Client, httpx.AsyncClient],
+    httpx.Client,
 ] = {}
 _OPENAI_HTTP_CLIENTS_LOCK = threading.Lock()
+_OPENAI_ASYNC_CLIENTS_LOCAL = threading.local()
 
 
 def _get_shared_openai_clients(
@@ -35,21 +36,31 @@ def _get_shared_openai_clients(
         getattr(timeout_config, "write", None),
         getattr(timeout_config, "pool", None),
     )
-    with _OPENAI_HTTP_CLIENTS_LOCK:
-        clients = _OPENAI_HTTP_CLIENTS.get(key)
-        if clients is not None:
-            return clients
+    limits = httpx.Limits(
+        max_connections=int(os.getenv("LLM_HTTP_MAX_CONNECTIONS", "300")),
+        max_keepalive_connections=int(os.getenv("LLM_HTTP_MAX_KEEPALIVE", "50")),
+    )
 
-        limits = httpx.Limits(
-            max_connections=int(os.getenv("LLM_HTTP_MAX_CONNECTIONS", "300")),
-            max_keepalive_connections=int(os.getenv("LLM_HTTP_MAX_KEEPALIVE", "50")),
+    with _OPENAI_HTTP_CLIENTS_LOCK:
+        sync_client = _OPENAI_SYNC_CLIENTS.get(key)
+        if sync_client is None:
+            sync_client = httpx.Client(
+                timeout=timeout_config, limits=limits, follow_redirects=True
+            )
+            _OPENAI_SYNC_CLIENTS[key] = sync_client
+
+    async_clients = getattr(_OPENAI_ASYNC_CLIENTS_LOCAL, "clients", None)
+    if async_clients is None:
+        async_clients = {}
+        _OPENAI_ASYNC_CLIENTS_LOCAL.clients = async_clients
+    async_client = async_clients.get(key)
+    if async_client is None:
+        async_client = httpx.AsyncClient(
+            timeout=timeout_config, limits=limits, follow_redirects=True
         )
-        clients = (
-            httpx.Client(timeout=timeout_config, limits=limits, follow_redirects=True),
-            httpx.AsyncClient(timeout=timeout_config, limits=limits, follow_redirects=True),
-        )
-        _OPENAI_HTTP_CLIENTS[key] = clients
-        return clients
+        async_clients[key] = async_client
+
+    return sync_client, async_client
 
 
 class RedBearModelConfig(BaseModel):
