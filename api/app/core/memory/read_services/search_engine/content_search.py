@@ -640,7 +640,6 @@ class Neo4jSearchService:
                     # 完整结构继续供后续总结和最终回答使用，不直接投影给前端。
                     mem.content = (
                         f"<history-file-input>\n"
-                        f"<file-name>{file_name}</file-name>\n"
                         f"<file-summary>{mem.data.get('summary', '')}</file-summary>\n"
                         f"<file-analysis>{display_content}</file-analysis>\n"
                         f"</history-file-input>\n"

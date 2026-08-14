@@ -158,8 +158,6 @@ class PerceptualBuilder(BaseBuilder):
     def content(self) -> str:
         parts = ["<history-file-input>\n"]
         fields = [
-            ("file-name", self.record.get("file_name", "")),
-            ("file-path", self.record.get("file_path", "")),
             ("summary", self.record.get("summary", "")),
             ("topic", self.record.get("topic", "")),
             ("domain", self.record.get("domain", "")),
