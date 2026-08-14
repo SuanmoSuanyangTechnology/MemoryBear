@@ -9,6 +9,12 @@ from typing import Any, Dict, List
 from pydantic import BaseModel, Field
 from jinja2 import Environment, FileSystemLoader
 
+from app.core.memory.storage_services.reflection_engine.errors import (
+    ReflectionBusinessError,
+    ReflectionFailureReason,
+    ReflectionModelType,
+)
+
 logger = logging.getLogger(__name__)
 
 # 加载模板（与 entity_dedup_batch_judge 同路径）
@@ -55,44 +61,52 @@ async def judge_alias_belongs(
     if not candidates:
         return []
 
+    template = _prompt_env.get_template("alias_belongs_judge.jinja2")
+    rendered_prompt = template.render(
+        canonical_entity=canonical,
+        candidates=candidates,
+        language=language,
+    )
+    messages = [{"role": "user", "content": rendered_prompt}]
     try:
-        template = _prompt_env.get_template("alias_belongs_judge.jinja2")
-        rendered_prompt = template.render(
-            canonical_entity=canonical,
-            candidates=candidates,
-            language=language,
-        )
-        messages = [{"role": "user", "content": rendered_prompt}]
         response = await llm_client.call_structured(messages, AliasBatchJudgeOutput)
+    except Exception as exc:
+        logger.error("[AliasJudge] 别名校验模型调用失败", exc_info=True)
+        raise ReflectionBusinessError(
+            ReflectionFailureReason.MODEL_CALL_FAILED,
+            "alias_merge_model_call",
+            model_type=ReflectionModelType.LLM,
+        ) from exc
 
-        if not isinstance(response, AliasBatchJudgeOutput):
-            logger.warning("[AliasJudge] LLM 返回类型异常，整组按 skip 处理")
-            return []
+    if not isinstance(response, AliasBatchJudgeOutput):
+        logger.error("[AliasJudge] 别名校验返回结构无效")
+        raise ReflectionBusinessError(
+            ReflectionFailureReason.RESULT_PARSE_FAILED,
+            "alias_merge_result_parse",
+            model_type=ReflectionModelType.LLM,
+        )
 
-        # alias_index(1-based) → AliasJudgeItem
-        by_index: Dict[int, AliasJudgeItem] = {}
-        for item in response.results:
-            if 1 <= item.alias_index <= len(candidates):
-                by_index[item.alias_index] = item
+    # alias_index(1-based) → AliasJudgeItem
+    by_index: Dict[int, AliasJudgeItem] = {}
+    for item in response.results:
+        if 1 <= item.alias_index <= len(candidates):
+            by_index[item.alias_index] = item
 
-        decided: List[Dict[str, Any]] = []
-        for i, cand in enumerate(candidates, start=1):
-            item = by_index.get(i)
-            if item is None:
-                continue  # 未返回 → skip
-            try:
-                conf = float(item.confidence)
-            except (TypeError, ValueError):
-                continue  # 非法分数 → skip
-            if not (0.0 <= conf <= 1.0):
-                continue  # 越界 → skip
-            decided.append({
-                "alias_id": cand["alias_id"],
-                "decision": "merge" if conf >= threshold else "drop",
-                "confidence": conf,
-                "reason": (item.reason or "")[:200],
-            })
-        return decided
-    except Exception as e:
-        logger.error(f"[AliasJudge] 别名校验 LLM 判定失败，整组 skip: {e}")
-        return []
+    decided: List[Dict[str, Any]] = []
+    for i, cand in enumerate(candidates, start=1):
+        item = by_index.get(i)
+        if item is None:
+            continue  # 未返回 → skip
+        try:
+            conf = float(item.confidence)
+        except (TypeError, ValueError):
+            continue  # 非法分数 → skip
+        if not (0.0 <= conf <= 1.0):
+            continue  # 越界 → skip
+        decided.append({
+            "alias_id": cand["alias_id"],
+            "decision": "merge" if conf >= threshold else "drop",
+            "confidence": conf,
+            "reason": (item.reason or "")[:200],
+        })
+    return decided

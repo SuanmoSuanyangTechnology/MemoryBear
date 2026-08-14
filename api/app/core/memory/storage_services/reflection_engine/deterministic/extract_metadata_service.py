@@ -15,6 +15,12 @@ import json
 import logging
 from typing import Any, Dict, List, Tuple
 
+from app.core.memory.storage_services.reflection_engine.errors import (
+    ReflectionBusinessError,
+    ReflectionFailureReason,
+    ReflectionModelType,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -244,6 +250,10 @@ async def extract_metadata_for_user(
 
     extracted = 0
     failed = 0
+    model_failure_count = 0
+    reason_codes: List[str] = []
+    model_types: List[str] = []
+    failed_operations: List[str] = []
     details: List[Dict[str, Any]] = []  # 每个实体的详细变更记录
     trace_entities: List[dict] = []
     trace_llm: List[dict] = []
@@ -294,11 +304,34 @@ async def extract_metadata_for_user(
                             "field_changes": [], "status": "applied", "reason": None,
                             "extra": {"synced_fields": list((patched["post_state"] or {}).keys())},
                         })
+        except ReflectionBusinessError as exc:
+            failed += 1
+            model_failure_count += 1
+            reason = exc.reason_code.value
+            if reason not in reason_codes:
+                reason_codes.append(reason)
+                model_types.append(exc.model_type.value)
+            if exc.failed_operation not in failed_operations:
+                failed_operations.append(exc.failed_operation)
+            logger.error(
+                f"[Metadata] 实体 {entity_id} 元数据提取失败 "
+                f"reason_code={reason} failed_operation={exc.failed_operation}",
+                exc_info=True,
+            )
         except Exception as e:
             failed += 1
             logger.warning(f"[Metadata] 实体 {entity_id} 元数据提取失败: {e}")
 
-    out: Dict[str, Any] = {"extracted": extracted, "failed": failed, "details": details}
+    out: Dict[str, Any] = {
+        "status": "error" if model_failure_count else "success",
+        "extracted": extracted,
+        "failed": failed,
+        "details": details,
+        "business_failure_count": model_failure_count,
+        "reason_codes": reason_codes,
+        "model_types": model_types,
+        "failed_operations": failed_operations,
+    }
     if collect_trace:
         out["_trace"] = {
             "input": {"entities": trace_entities},
@@ -318,7 +351,8 @@ async def _run_metadata_llm(
     绕开 MetadataExtractionStep：其基类的 call_structured 依赖
     llm_client.response_structured（OpenAIClient 接口），反思注入的 RedBearLLM
     仅提供 call_structured 实例方法。此处复用抽取引擎的模板与 Pydantic schema，
-    仅由反思侧接管调用协议。sidecar 语义：LLM 失败返回空结果、不中断反思。
+    仅由反思侧接管调用协议。合法的空 operations 表示本轮无变更；模型调用或
+    结构化结果异常必须抛出受控领域异常，由实体循环聚合，不能伪装成空结果。
     """
     from app.core.memory.utils.prompt.prompt_utils import prompt_env
     from app.core.memory.models.metadata_models import MetadataExtractionResponse
@@ -344,15 +378,31 @@ async def _run_metadata_llm(
             [{"role": "user", "content": prompt}],
             MetadataExtractionResponse,
         )
-    except Exception as e:
-        logger.warning(f"[Metadata] LLM 提取失败，返回空 operations: {e}")
-        return MetadataStepOutput(operations=[])
+    except Exception as exc:
+        logger.error("[Metadata] LLM 提取失败", exc_info=True)
+        raise ReflectionBusinessError(
+            ReflectionFailureReason.MODEL_CALL_FAILED,
+            "metadata_extraction_model_call",
+            model_type=ReflectionModelType.LLM,
+        ) from exc
 
     if raw is None:
-        return MetadataStepOutput(operations=[])
-    operations = list(getattr(raw, "operations", []) or [])
-    dropped = getattr(raw, "_dropped_ops_count", 0) or 0
-    return MetadataStepOutput(operations=operations, dropped_ops_count=dropped)
+        raise ReflectionBusinessError(
+            ReflectionFailureReason.RESULT_PARSE_FAILED,
+            "metadata_extraction_result_parse",
+            model_type=ReflectionModelType.LLM,
+        )
+    try:
+        operations = list(raw.operations or [])
+        dropped = getattr(raw, "_dropped_ops_count", 0) or 0
+        return MetadataStepOutput(operations=operations, dropped_ops_count=dropped)
+    except Exception as exc:
+        logger.error("[Metadata] LLM 结构化结果解析失败", exc_info=True)
+        raise ReflectionBusinessError(
+            ReflectionFailureReason.RESULT_PARSE_FAILED,
+            "metadata_extraction_result_parse",
+            model_type=ReflectionModelType.LLM,
+        ) from exc
 
 
 async def _extract_single_entity(
@@ -429,7 +479,6 @@ async def _extract_single_entity(
             truncated_sink=truncated_recs if collect_trace else None,
         ),
     )
-
     counts = result.counts()
     logger.info(
         f"[Metadata] 实体 {entity_name}({entity_id}) patch 完成: "
