@@ -2,8 +2,6 @@ import { request } from '@/utils/request'
 import { handleSSE, type SSEMessage } from '@/utils/stream'
 import type { NotificationMessageTab } from '@/store/notification/types'
 
-const encodePathSegment = (value: string) => encodeURIComponent(value)
-
 // Notification list
 export const getNotificationListUrl = '/notifications'
 export const getNotifications = (data?: {

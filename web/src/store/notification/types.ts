@@ -29,6 +29,8 @@ export interface NotificationMessage {
   is_confirmed: boolean;
   requires_confirmation: boolean;
   read_at: number;
+
+  alert_severity: 'P0' | 'P1' | 'P2' | 'P3';
 }
 
 export interface BannerMessage {

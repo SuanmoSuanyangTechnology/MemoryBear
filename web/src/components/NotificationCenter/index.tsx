@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type MouseEvent } from 'react';
-import { Badge, Button, Checkbox, Modal, Popover, Spin, Tag } from 'antd';
+import { Badge, Button, Checkbox, Popover, Spin } from 'antd';
 import ReactMarkdown from 'react-markdown';
 import { useTranslation } from 'react-i18next';
 // import { useNavigate } from 'react-router-dom';
@@ -10,17 +10,26 @@ import {
   type NotificationMessage,
   type NotificationMessageTab,
 } from '@/store/notification';
+import { getNotificationDetail } from '@/api/notification';
 import styles from './index.module.css';
 import { formatDateTime } from '@/utils/format';
 import { isPrivateAvailable } from '@/utils/private';
 import Empty from '@/components/Empty';
 import RbMarkdown from '@/components/Markdown';
+import Tag, { type TagProps } from '@/components/Tag';
+import RbModal from '@/components/RbModal'
 
 const BellIcon = () => (
   <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden="true">
     <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9ZM10 21h4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
   </svg>
 );
+const severityColors: Record<NotificationMessage['alert_severity'], TagProps['color']> = {
+  P0: 'error',
+  P1: 'error',
+  P2: 'warning',
+  P3: 'processing',
+};
 
 interface NotificationPanelProps {
   open: boolean;
@@ -37,6 +46,7 @@ const NotificationPanel = ({ open }: NotificationPanelProps) => {
     markAsRead,
     markAllAsRead,
     confirmMessage,
+    snoozeModalMessage,
     fetchMessages,
     loadMore,
     cursor,
@@ -62,7 +72,7 @@ const NotificationPanel = ({ open }: NotificationPanelProps) => {
 
   useEffect(() => {
     if (!open) return;
-
+    console.log('open', open)
     const filter: { tab: NotificationMessageTab; is_read?: boolean } = { tab };
     if (unreadOnly) filter.is_read = false;
     void fetchMessages(filter);
@@ -97,10 +107,13 @@ const NotificationPanel = ({ open }: NotificationPanelProps) => {
   }, []);
 
   const openDetail = (message: NotificationMessage) => {
-    if (!message.is_read) {
+    if (!message.is_read && !message.requires_confirmation) {
       void markAsRead(message.id);
     }
-    // setSelected(message);
+    getNotificationDetail(message.id)
+      .then(res => {
+        setSelected(res as NotificationMessage);
+      })
   };
 
   const handleConfirm = (event: MouseEvent, id: string) => {
@@ -108,13 +121,23 @@ const NotificationPanel = ({ open }: NotificationPanelProps) => {
     void confirmMessage(id);
   };
 
-  const confirmSelected = () => {
-    if (!selected) return;
-    void confirmMessage(selected.id);
-  };
-
   const handleMarkAllRead = () => {
     void markAllAsRead();
+  };
+  const handleConfirmOk = async () => {
+    if (!selected || !(selected?.requires_confirmation && !selected?.is_confirmed)) return;
+    try {
+      await confirmMessage(selected.id);
+    } finally {
+      setSelected(null);
+    }
+  };
+  const handleConfirmCancel = () => {
+    if (!selected) return;
+    // Handles both the 稍后 button AND closable=true X-close; requires_confirmation
+    // uses okCancel=true so onCancel is only fired by those two interactions.
+    snoozeModalMessage(selected.id, 1);
+    setSelected(null);
   };
 
   return (
@@ -177,15 +200,18 @@ const NotificationPanel = ({ open }: NotificationPanelProps) => {
                       {!message.is_read && <span className={styles.unreadDot} />}
                       {message.priority !== 'normal' && (
                         <Tag
-                          color={message.priority === 'pinned' ? 'red' : 'orange'}
+                          color={message.priority === 'pinned' ? 'error' : 'warning'}
                           className="rb:text-[10px]! rb:leading-4! rb:m-0!"
                         >
                           {t(`notificationCenter.priorities.${message.priority}`)}
                         </Tag>
                       )}
+                      {message.alert_severity &&
+                        <Tag color={severityColors[message.alert_severity]}>{message.alert_severity}</Tag>
+                      }
                       {message.type !== 'announcement' &&
                         <Tag
-                          color={message.type === 'activity' ? 'orange' : 'default'}
+                          color={message.type === 'activity' ? 'warning' : 'default'}
                           className="rb:text-[10px]! rb:leading-4! rb:m-0!"
                         >
                           {t(`notificationCenter.types.${message.type}`)}
@@ -230,16 +256,22 @@ const NotificationPanel = ({ open }: NotificationPanelProps) => {
         )}
       </div>
 
-      <Modal
+      <RbModal
         open={Boolean(selected)}
         title={t('notificationCenter.detail.title')}
         footer={
-          <Button type="primary" onClick={() => setSelected(null)}>
-            {t('notificationCenter.actions.close')}
-          </Button>
+          selected?.requires_confirmation && !selected?.is_confirmed
+          ? [
+            <Button key="remindLater" onClick={handleConfirmCancel}>
+              {t('notificationCenter.actions.remindLater')}
+            </Button>,
+            <Button key="confirm" type="primary" onClick={handleConfirmOk}>
+              {t('notificationCenter.actions.confirm')}
+            </Button>
+          ]
+          : null
         }
         onCancel={() => setSelected(null)}
-        width={560}
       >
         {selected && (
           <>
@@ -252,14 +284,9 @@ const NotificationPanel = ({ open }: NotificationPanelProps) => {
             <div className={styles.markdown}>
               <ReactMarkdown>{selected.content}</ReactMarkdown>
             </div>
-            {selected.requires_confirmation && !selected.is_confirmed && (
-              <Button danger className="rb:mt-4!" onClick={confirmSelected}>
-                {t('notificationCenter.actions.confirm')}
-              </Button>
-            )}
           </>
         )}
-      </Modal>
+      </RbModal>
     </div>
   );
 };
@@ -268,13 +295,17 @@ const NotificationBell = () => {
   if (!isPrivateAvailable) return;
 
   const { t } = useTranslation();
-  const { notificationStats } = useNotification();
+  const { notificationStats, fetchMessages } = useNotification();
   const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (!open) return
+    fetchMessages({ tab: 'system' })
+  }, [open])
 
   return (
     <Popover
       open={open}
-      onOpenChange={setOpen}
+      onOpenChange={(newOpen) => setOpen(newOpen)}
       placement="bottomRight"
       trigger="click"
       arrow={false}
