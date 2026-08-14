@@ -1906,7 +1906,7 @@ async def import_app(
     target_app_id = uuid.UUID(app_id) if app_id else None
     # 仅新建应用时检查配额，覆盖已有应用时跳过
     if target_app_id is None:
-        from app.core.quota_manager import _check_quota
+        from app.core.quota_manager import _check_quota, report_quota_change
         _check_quota(db, current_user.tenant_id, "app_quota", "app", workspace_id=current_user.current_workspace_id)
     result_app, warnings = AppDslService(db).import_dsl(
         dsl=dsl,
@@ -1915,6 +1915,13 @@ async def import_app(
         user_id=current_user.id,
         app_id=target_app_id,
     )
+    # import_dsl 返回时新应用已提交；此时按权威计数重新评估配额告警。
+    if target_app_id is None:
+        await report_quota_change(
+            current_user.tenant_id,
+            "app_quota",
+            current_user.current_workspace_id,
+        )
     return success(
         data={"app": app_schema.App.model_validate(result_app), "warnings": warnings},
         msg="应用导入成功" + ("，但部分资源需手动配置" if warnings else "")

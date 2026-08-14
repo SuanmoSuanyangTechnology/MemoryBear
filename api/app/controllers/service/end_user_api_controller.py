@@ -11,9 +11,11 @@ from app.core.api_key_utils import get_current_user_snapshot_from_api_key_async
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
+from app.core.quota_manager import report_quota_change
 from app.core.quota_stub import check_end_user_quota
 from app.core.response_utils import success
 from app.db import get_db_context, get_async_db_context, get_db
+from app.models.workspace_model import Workspace
 from app.repositories.end_user_repository import EndUserRepository
 from app.schemas.api_key_schema import ApiKeyAuth
 from app.schemas.end_user_info_schema import EndUserInfoUpdate
@@ -100,6 +102,15 @@ async def create_end_user(
         end_user.other_name = payload.other_name
         await async_db.commit()
         logger.info(f"End user ready: {end_user.id}")
+
+        # 终端用户已落库，用量真正发生变化后才评估告警。
+        workspace = await async_db.get(Workspace, workspace_id)
+        if workspace is not None:
+            await report_quota_change(
+                workspace.tenant_id,
+                "end_user_quota",
+                workspace_id=workspace_id,
+            )
 
         result = {
             "id": str(end_user.id),

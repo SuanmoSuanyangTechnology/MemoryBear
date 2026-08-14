@@ -430,14 +430,27 @@ class EndUserRepository:
             original_user_id: Optional[str] = None,
             other_name: Optional[str] = None
     ) -> EndUser:
-        """获取或创建终端用户
-        
-        Args:
-            app_id: 应用ID
-            workspace_id: 工作空间ID
-            other_id: 第三方ID
-            original_user_id: 原始用户ID (存储到 other_id)
-            other_name: 用户名称（用于创建 EndUserInfo）
+        """获取或创建终端用户。"""
+        end_user, _ = self.get_or_create_end_user_with_status(
+            app_id=app_id,
+            workspace_id=workspace_id,
+            other_id=other_id,
+            original_user_id=original_user_id,
+            other_name=other_name,
+        )
+        return end_user
+
+    def get_or_create_end_user_with_status(
+            self,
+            app_id: uuid.UUID,
+            workspace_id: uuid.UUID,
+            other_id: str,
+            original_user_id: Optional[str] = None,
+            other_name: Optional[str] = None
+    ) -> tuple[EndUser, bool]:
+        """获取或创建终端用户，并返回本次调用是否真正创建了用户。
+
+        创建状态在 advisory lock 内确定，避免调用方根据锁外预查结果误判。
         """
         try:
             with self._acquire_eu_lock(workspace_id, other_id):
@@ -458,7 +471,7 @@ class EndUserRepository:
                     end_user.app_id = app_id
                     self.db.commit()
                     self.db.refresh(end_user)
-                    return end_user
+                    return end_user, False
 
                 # 未找到活跃用户 → 检查是否已被合并
                 merged_target = self.resolve_merge_by_other_id(workspace_id, other_id)
@@ -469,7 +482,7 @@ class EndUserRepository:
                     merged_target.app_id = app_id
                     self.db.commit()
                     self.db.refresh(merged_target)
-                    return merged_target
+                    return merged_target, False
 
                 # 创建新用户
                 end_user = EndUser(
@@ -494,7 +507,7 @@ class EndUserRepository:
             self.db.refresh(end_user)
 
             db_logger.info(f"创建新终端用户及其信息: (other_id: {other_id}) for workspace {workspace_id}")
-            return end_user
+            return end_user, True
 
         except Exception as e:
             self.db.rollback()

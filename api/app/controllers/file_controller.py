@@ -32,6 +32,7 @@ from app.services.qa_export_service import (
     cleanup_qa_export_file,
     iter_qa_export_file_chunks,
 )
+from app.core.quota_manager import report_quota_change
 from app.core.quota_stub import check_knowledge_capacity_quota
 
 api_logger = get_api_logger()
@@ -228,7 +229,7 @@ async def custom_text(
         storage_service: FileStorageService = Depends(get_file_storage_service),
 ):
     """Custom text upload"""
-    _require_workspace_knowledge(db, kb_id, current_user)
+    db_knowledge = _require_workspace_knowledge(db, kb_id, current_user)
     _require_parent_folder(db, kb_id, parent_id, current_user)
     content_bytes = create_data.content.encode('utf-8')
     file_size = len(content_bytes)
@@ -263,6 +264,13 @@ async def custom_text(
                        "auto_keywords": 0, "auto_questions": 0, "html4excel": "false"}
     )
     db_document = document_service.create_document(db=db, document=create_document_data, current_user=current_user)
+
+    # 文档已落库并计入知识容量用量，提交后评估告警。
+    await report_quota_change(
+        current_user.tenant_id,
+        "knowledge_capacity_quota",
+        workspace_id=db_knowledge.workspace_id,
+    )
 
     return success(data=jsonable_encoder(document_schema.Document.model_validate(db_document)), msg="custom text upload successful")
 

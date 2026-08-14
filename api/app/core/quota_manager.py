@@ -857,6 +857,217 @@ def check_quota(quota_type: str, resource_name: str, usage_func: Optional[Callab
     return decorator
 
 
+# ─── 配额告警触发 ────────────────────────────────────────────────────────────
+
+
+def get_quota_snapshot(
+        db: Session,
+        tenant_id: UUID,
+        quota_type: str,
+        workspace_id: Optional[UUID] = None,
+) -> Optional[Dict[str, Any]]:
+    """按 :func:`_check_quota` 的同一口径返回单个配额的用量快照。
+
+    这与 :func:`get_quota_usage` 的租户汇总口径不同：按空间计量的配额必须用
+    「单空间用量 / 单空间额度」评估，否则把额度乘以活跃空间数后，填满某一个
+    空间也推不高租户百分比，告警永远不会触发。
+    """
+    plan_quota, pack_quota = _get_quota_breakdown(db, tenant_id)
+    if not plan_quota and not pack_quota:
+        return None
+
+    per_workspace = quota_type in PER_WORKSPACE_QUOTA_KEYS
+    scoped = per_workspace and workspace_id is not None
+
+    plan_limit = (plan_quota or {}).get(quota_type)
+    pack_limit = (pack_quota or {}).get(quota_type) or 0
+    if plan_limit is None and not pack_limit:
+        return None
+    limit = (plan_limit or 0) + pack_limit
+
+    repo = QuotaUsageRepository(db)
+    if scoped:
+        used = repo.get_usage_by_quota_type(tenant_id, quota_type, workspace_id)
+    else:
+        used = repo.get_usage_by_quota_type(tenant_id, quota_type)
+        if per_workspace:
+            # 无空间上下文时退回租户汇总：额度按活跃空间数折算，与 get_quota_usage 一致。
+            workspace_count = repo.count_workspaces(tenant_id)
+            if workspace_count > 0:
+                limit = limit * workspace_count
+
+    percentage = round(used / limit * 100, 1) if limit else None
+    return {
+        "used": round(used, 2) if isinstance(used, float) else used,
+        "limit": round(limit, 4) if isinstance(limit, float) else limit,
+        "percentage": percentage,
+        "unit": "GB" if quota_type == "knowledge_capacity_quota" else None,
+        "scope": "workspace" if scoped else "tenant",
+        "workspace_id": str(workspace_id) if scoped else None,
+        "limit_source": {"plan": plan_limit, "resource_pack": pack_limit},
+    }
+
+
+async def report_quota_change(
+        tenant_id: UUID,
+        quota_type: str,
+        workspace_id: Optional[UUID] = None,
+) -> None:
+    """用量变更提交后调用的告警入口（async）。
+
+    任何真正改变配额用量的代码路径都应在主事务提交成功后调用本函数，
+    不要依赖准入检查装饰器——检查点和消费点并不总是同一个接口。
+    告警基础设施故障不会影响主业务。
+    """
+    await _evaluate_quota_alert_async(tenant_id, quota_type, workspace_id)
+
+
+def report_quota_change_sync(
+        tenant_id: UUID,
+        quota_type: str,
+        workspace_id: Optional[UUID] = None,
+) -> None:
+    """:func:`report_quota_change` 的同步版本，供同步接口与后台任务使用。"""
+    _evaluate_quota_alert_sync(tenant_id, quota_type, workspace_id)
+
+
+def _quota_operation_succeeded(result: Any) -> bool:
+    """仅在业务成功后评估告警，兼容统一响应字典与 Response。"""
+    status_code = getattr(result, "status_code", None)
+    if status_code is not None and status_code >= 400:
+        return False
+    if isinstance(result, dict) and "code" in result:
+        return result.get("code") == 0
+    return True
+
+
+async def _evaluate_quota_alert_async(
+        tenant_id: UUID,
+        quota_type: str,
+        workspace_id: Optional[UUID] = None,
+) -> None:
+    """异步触发提交后的配额告警；告警基础设施故障不影响主业务。"""
+    try:
+        from app.plugins import get_plugin
+
+        reporter = get_plugin("quota_usage_alert_reporter")
+        if reporter is not None:
+            await reporter.evaluate(
+                tenant_id=tenant_id,
+                quota_type=quota_type,
+                workspace_id=workspace_id,
+            )
+    except Exception as exc:
+        logger.error(
+            "配额告警评估失败: tenant=%s, workspace=%s, type=%s, error=%s",
+            tenant_id,
+            workspace_id,
+            quota_type,
+            exc,
+            exc_info=True,
+        )
+
+
+def _evaluate_quota_alert_sync(
+        tenant_id: UUID,
+        quota_type: str,
+        workspace_id: Optional[UUID] = None,
+) -> None:
+    """同步入口通常运行在线程池中；必要时复用当前事件循环。"""
+    try:
+        from app.plugins import get_plugin
+
+        reporter = get_plugin("quota_usage_alert_reporter")
+        if reporter is None:
+            return
+        evaluation = reporter.evaluate(
+            tenant_id=tenant_id,
+            quota_type=quota_type,
+            workspace_id=workspace_id,
+        )
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            asyncio.run(evaluation)
+        else:
+            # 防御直接从事件循环调用同步控制器的场景，避免 asyncio.run 嵌套。
+            loop.create_task(evaluation)
+    except Exception as exc:
+        logger.error(
+            "配额告警评估失败: tenant=%s, workspace=%s, type=%s, error=%s",
+            tenant_id,
+            workspace_id,
+            quota_type,
+            exc,
+            exc_info=True,
+        )
+
+
+def _with_post_success_quota_alert(check_decorator: Callable, quota_type: str) -> Callable:
+    """为既有配额检查装饰器增加统一的业务成功后告警评估。"""
+    def decorator(func: Callable) -> Callable:
+        checked_func = check_decorator(func)
+        # 按空间计量的配额必须带上空间上下文，评估口径才与准入校验一致。
+        needs_workspace = quota_type in PER_WORKSPACE_QUOTA_KEYS
+
+        if asyncio.iscoroutinefunction(checked_func):
+            @wraps(checked_func)
+            async def async_wrapper(*args, **kwargs):
+                result = await checked_func(*args, **kwargs)
+                db = kwargs.get("db")
+                if isinstance(db, AsyncSession):
+                    tenant_id = await _get_tenant_id_from_kwargs_async(db, kwargs)
+                else:
+                    tenant_id = _get_tenant_id_from_kwargs(db, kwargs)
+                if tenant_id and _quota_operation_succeeded(result):
+                    workspace_id = _get_workspace_id_from_kwargs(kwargs) if needs_workspace else None
+                    await _evaluate_quota_alert_async(tenant_id, quota_type, workspace_id)
+                return result
+
+            return async_wrapper
+
+        @wraps(checked_func)
+        def sync_wrapper(*args, **kwargs):
+            result = checked_func(*args, **kwargs)
+            tenant_id = _get_tenant_id_from_kwargs(kwargs.get("db"), kwargs)
+            if tenant_id and _quota_operation_succeeded(result):
+                workspace_id = _get_workspace_id_from_kwargs(kwargs) if needs_workspace else None
+                _evaluate_quota_alert_sync(tenant_id, quota_type, workspace_id)
+            return result
+
+        return sync_wrapper
+
+    return decorator
+
+
+# 对所有可聚合出「已用量 / 总额度」的套餐配额启用同一套触发逻辑。
+# 三类速率/单用户限制没有租户级累计用量，不使用 quota_usage 百分比告警。
+#
+# end_user_quota 不在此列：它的检查装饰器挂在 write_memory 等热路径上，
+# 而绝大多数请求并不新建终端用户。改由各创建点显式调用 report_quota_change，
+# 避免每次记忆写入都做一轮配额聚合。
+check_workspace_quota = _with_post_success_quota_alert(check_workspace_quota, "workspace_quota")
+check_skill_quota = _with_post_success_quota_alert(check_skill_quota, "skill_quota")
+check_app_quota = _with_post_success_quota_alert(check_app_quota, "app_quota")
+check_knowledge_capacity_quota = _with_post_success_quota_alert(
+    check_knowledge_capacity_quota,
+    "knowledge_capacity_quota",
+)
+check_memory_engine_quota = _with_post_success_quota_alert(
+    check_memory_engine_quota,
+    "memory_engine_quota",
+)
+check_ontology_project_quota = _with_post_success_quota_alert(
+    check_ontology_project_quota,
+    "ontology_project_quota",
+)
+check_model_quota = _with_post_success_quota_alert(check_model_quota, "model_quota")
+check_model_activation_quota = _with_post_success_quota_alert(
+    check_model_activation_quota,
+    "model_quota",
+)
+
+
 # ─── 配额使用统计 ────────────────────────────────────────────────────────────
 
 async def get_quota_usage(db: Session, tenant_id: UUID) -> dict:
