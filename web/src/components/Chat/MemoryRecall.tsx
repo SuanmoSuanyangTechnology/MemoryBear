@@ -75,19 +75,31 @@ const getResultStage = (call: MemoryToolCall) => (
   call.stages.find(stage => stage.stage === 'result_ready')
 )
 
-const getPerceptualImageItems = (stages: MemoryStage[]): MemoryRecallItem[] => {
+const filterUniqueImageItems = (items: MemoryRecallItem[]): MemoryRecallItem[] => {
   const paths = new Set<string>()
-  return stages
-    .filter(stage => stage.stage === 'perceptual_processed')
-    .flatMap(stage => stage.data.items || [])
-    .filter(item => {
-      const path = item.file?.file_path
-      const isImage = item.file?.file_type === 'image' || item.file?.perceptual_type === 1
-      if (!path || !isImage || paths.has(path)) return false
-      paths.add(path)
-      return true
-    })
+  return items.filter(item => {
+    const path = item.file?.file_path
+    const isImage = item.file?.file_type === 'image' || item.file?.perceptual_type === 1
+    if (!path || !isImage || paths.has(path)) return false
+    paths.add(path)
+    return true
+  })
 }
+
+const getPerceptualImageItems = (stages: MemoryStage[]): MemoryRecallItem[] => (
+  filterUniqueImageItems(
+    stages
+      .filter(stage => stage.stage === 'perceptual_processed')
+      .flatMap(stage => typeof stage.data?.shown_count === 'number' && stage.data?.shown_count > 0 ? stage.data.items || [] : []),
+  )
+)
+
+const getCollapsedImageItems = (
+  perceptualImageItems: MemoryRecallItem[],
+  resultItems: MemoryRecallItem[],
+): MemoryRecallItem[] => (
+  filterUniqueImageItems([...perceptualImageItems, ...resultItems])
+)
 
 const PerceptualImageList: FC<{
   items: MemoryRecallItem[]
@@ -126,6 +138,7 @@ const MemoryItems: FC<{ items: MemoryRecallItem[] }> = ({ items }) => {
       {items.map((item, index) => {
         const memoryType = item.memory_type || 'unknown'
         const content = item.content || [item.source, item.relation, item.target].filter(Boolean).join(' ')
+        const file = item.file
         return (
           <div key={`${item.rank ?? index}-${item.source ?? ''}-${content}`} className="rb:flex rb:items-start rb:gap-3">
             <div className="rb:min-w-0 rb:flex-1 rb:flex rb:items-start rb:gap-2 rb:text-[11px] rb:leading-4 rb:text-[#5B6167]">
@@ -135,7 +148,10 @@ const MemoryItems: FC<{ items: MemoryRecallItem[] }> = ({ items }) => {
                   defaultValue: t('memoryConversation.memoryRecall.memoryTypes.unknown'),
                 })}
               </span>
-              <span className="rb:min-w-0 rb:wrap-break-word">{content}</span>
+              <div>
+                <span className="rb:min-w-0 rb:wrap-break-word">{content}</span>
+                {file && <PerceptualImageList items={[item]} compact={true} />}
+              </div>
             </div>
             {typeof item.score === 'number' && (
               <span className="rb:shrink-0 rb:text-[10px] rb:leading-4 rb:text-[#8A8D93]">
@@ -231,11 +247,13 @@ const StageContent: FC<{ stage: MemoryStage }> = ({ stage }) => {
         <StageRow
           title={t('memoryConversation.memoryRecall.resultReady')}
           badge={`${data.shown_count ?? items.length} ${t('memoryConversation.memoryRecall.unitItems')}`}
-          description={items.length > 0
+          description={items.length > 0 && typeof data.shown_count === 'number' && data.shown_count > 0
             ? t('memoryConversation.memoryRecall.resultReadyDesc', { shownCount: data.shown_count ?? items.length })
             : t('memoryConversation.memoryRecall.resultEmpty')}
         >
-          {items.length > 0 && <MemoryItems items={items} />}
+          {items.length > 0 && typeof data.shown_count === 'number' && data.shown_count > 0 &&
+            <MemoryItems items={items} />
+          }
         </StageRow>
       )
     }
@@ -324,8 +342,15 @@ const ToolCallRecall: FC<{
   const question = getQuestion(call)
   const resultStage = getResultStage(call)
   const duration = resultStage?.data.duration_ms
-  const items = resultStage?.data.items || []
+  const resultItems = resultStage?.data.items || []
   const perceptualImageItems = getPerceptualImageItems(call.stages)
+  const collapsedImageItems = getCollapsedImageItems(perceptualImageItems, resultItems)
+  const hasPerceptualNoMatch = call.stages.some(stage => (
+    stage.stage === 'perceptual_processed'
+    && stage.status === 'completed'
+    && (stage.data.memory_count ?? 0) > 0
+    && stage.data.shown_count === 0
+  ))
   const hasMemoryEngineStages = call.stages.some(stage => MEMORY_ENGINE_STAGE_NAMES.has(stage.stage))
   const hasFailed = call.status === 'failed'
   const hasCompletedWriting = call.status === 'completed' && !isStreaming
@@ -341,9 +366,11 @@ const ToolCallRecall: FC<{
   const multimodalMemoryEngineDescription = t(
     isProcessing
       ? 'memoryConversation.memoryRecall.multimodalMemoryRetrievalEngineRunningDesc'
-      : perceptualImageItems.length > 0
-        ? 'memoryConversation.memoryRecall.multimodalMemoryRetrievalEngineCompletedDesc'
-        : 'memoryConversation.memoryRecall.multimodalMemoryRetrievalEngineDisabledDesc',
+      : hasPerceptualNoMatch
+        ? 'memoryConversation.memoryRecall.resultEmpty'
+        : perceptualImageItems.length > 0
+          ? 'memoryConversation.memoryRecall.multimodalMemoryRetrievalEngineCompletedDesc'
+          : 'memoryConversation.memoryRecall.multimodalMemoryRetrievalEngineDisabledDesc',
   )
   const title = hasFailed
     ? t('memoryConversation.memoryRecall.failed')
@@ -376,7 +403,7 @@ const ToolCallRecall: FC<{
           ? {
             title: t('memoryConversation.memoryRecall.contextInjected'),
             description: t('memoryConversation.memoryRecall.contextInjectedDesc', {
-              count: resultStage.data.shown_count ?? items.length,
+              count: resultStage.data.shown_count ?? resultItems.length,
             }),
           }
           : latestStageSummary || {
@@ -412,14 +439,17 @@ const ToolCallRecall: FC<{
 
       {!expanded && (
         <div className="rb:min-w-0">
-          <div className="rb:flex rb:min-w-0 rb:items-center rb:gap-1 rb:text-[11px] rb:leading-4 rb:text-[#8A8D93]">
+          {collapsedImageItems.length > 0 && (
+            <PerceptualImageList items={collapsedImageItems} compact />
+          )}
+          <div className={clsx(
+            'rb:flex rb:min-w-0 rb:items-center rb:gap-1 rb:text-[11px] rb:leading-4 rb:text-[#8A8D93]',
+            collapsedImageItems.length > 0 && 'rb:mt-2',
+          )}>
             <span className="rb:shrink-0 rb:font-medium rb:text-[#5B6167]">{collapsedSummary.title}</span>
             <span className="rb:shrink-0">·</span>
             <span className="rb:truncate">{collapsedSummary.description}</span>
           </div>
-          {perceptualImageItems.length > 0 && (
-            <PerceptualImageList items={perceptualImageItems} compact />
-          )}
         </div>
       )}
 
@@ -459,14 +489,16 @@ const ToolCallRecall: FC<{
               )}
             </EngineModule>
 
-            <EngineModule
-              title={t('memoryConversation.memoryRecall.multimodalMemoryRetrievalEngine')}
-              description={multimodalMemoryEngineDescription}
-            >
-              {perceptualImageItems.length > 0 && (
-                <PerceptualImageList items={perceptualImageItems} />
-              )}
-            </EngineModule>
+            {mode === 'deep' && (
+              <EngineModule
+                title={t('memoryConversation.memoryRecall.multimodalMemoryRetrievalEngine')}
+                description={multimodalMemoryEngineDescription}
+              >
+                {perceptualImageItems.length > 0 && (
+                  <PerceptualImageList items={perceptualImageItems} />
+                )}
+              </EngineModule>
+            )}
 
             {call.stages.map((stage, index) => {
               if (
@@ -494,7 +526,7 @@ const ToolCallRecall: FC<{
             <StageRow
               title={t('memoryConversation.memoryRecall.contextInjected')}
               description={t('memoryConversation.memoryRecall.contextInjectedDesc', {
-                count: resultStage.data.shown_count ?? items.length,
+                count: resultStage.data.shown_count ?? resultItems.length,
               })}
             />
           )}
