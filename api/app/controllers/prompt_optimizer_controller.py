@@ -218,7 +218,7 @@ def delete_prompt(
 )
 def get_release_list(
         page: int = 1,
-        page_size: int = 20,
+        pagesize: int = 20,
         keyword: str | None = None,
         db: Session = Depends(get_db),
         current_user=Depends(get_current_user),
@@ -229,7 +229,7 @@ def get_release_list(
 
     Args:
         page (int): Page number (starting from 1)
-        page_size (int): Number of items per page (max 100)
+        pagesize (int): Number of items per page (max 100)
         keyword (str | None): Optional keyword to filter prompt titles
         db (Session): Database session
         current_user: Current logged-in user
@@ -241,7 +241,7 @@ def get_release_list(
     result = service.get_release_list(
         tenant_id=current_user.tenant_id,
         page=max(1, page),
-        page_size=min(max(1, page_size), 100),
+        page_size=min(max(1, pagesize), 100),
         filter_keyword=keyword
     )
     return success(data=result)
