@@ -172,6 +172,10 @@ app.add_middleware(LanguageMiddleware)
 # MCP API Key 鉴权中间件（仅拦截 /mcp/* 路径）
 app.add_middleware(MCPAuthMiddleware)
 
+# Trace ID 中间件（最外层：为每个请求生成 trace_id，注入日志上下文并在响应头回传）
+from app.core.trace_middleware import TraceIdMiddleware
+app.add_middleware(TraceIdMiddleware)
+
 logger.info("FastAPI应用程序启动")
 
 

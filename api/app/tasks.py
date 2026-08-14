@@ -11,10 +11,12 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
+import logging
 
 import redis
-from celery import states
+from celery import states, current_task
 from celery.exceptions import Ignore, Retry
+from celery.signals import after_setup_logger
 from elasticsearch import AsyncElasticsearch
 from fastapi.encoders import jsonable_encoder
 from redis.exceptions import RedisError
@@ -102,6 +104,28 @@ from app.services.memory_config_service import MemoryConfigService
 from app.services.memory_forget_service import MemoryForgetService
 from app.services.model_service import ModelApiKeyService
 from app.utils.redis_lock import RedisFairLock
+
+
+class CeleryTaskIdFilter(logging.Filter):
+    def filter(self, record):
+        try:
+            record.task_id = current_task.request.id
+        except Exception:
+            record.task_id = "-"
+        return True
+
+
+@after_setup_logger.connect
+def setup_logger(logger, *args, **kwargs):
+    formatter = logging.Formatter(
+        "[%(asctime)s: %(levelname)s/%(processName)s] "
+        "[task_id=%(task_id)s] %(message)s"
+    )
+
+    for handler in logger.handlers:
+        handler.setFormatter(formatter)
+        handler.addFilter(CeleryTaskIdFilter())
+
 
 logger = get_logger(__name__)
 
@@ -3002,14 +3026,14 @@ def scan_layer2_reflection(self) -> Dict[str, Any]:
 
 
 def _report_reflection_failure(
-    *,
-    task_type: str,
-    end_user_id: str,
-    workspace_id: str,
-    reason_code: str | None,
-    model_type: str | None,
-    failed_operations: List[str],
-    last_failed_at_ms: int | None,
+        *,
+        task_type: str,
+        end_user_id: str,
+        workspace_id: str,
+        reason_code: str | None,
+        model_type: str | None,
+        failed_operations: List[str],
+        last_failed_at_ms: int | None,
 ) -> None:
     """把重试耗尽事件交给可选插件；社区版未注册时静默跳过。"""
     if reason_code is None or last_failed_at_ms is None:
@@ -3561,7 +3585,7 @@ def scan_reflection_retry(self) -> Dict[str, Any]:
                     continue
                 if meta.get("completion") == "exhausted":
                     continue
-                if meta.get("completion") == "in_progress":   # 租约到期 = 上次开工后进程死亡
+                if meta.get("completion") == "in_progress":  # 租约到期 = 上次开工后进程死亡
                     if not rr.mark_dead(rc, task_type, uid):
                         continue
                 # 仍走 inflight 锁，避免与正常 scan 派的同一用户撞车

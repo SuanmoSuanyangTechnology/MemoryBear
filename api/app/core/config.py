@@ -262,7 +262,7 @@ class Settings:
 
     # Logging settings
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
-    LOG_FORMAT: str = os.getenv("LOG_FORMAT", "%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    LOG_FORMAT: str = os.getenv("LOG_FORMAT", "%(asctime)s - [%(trace_id)s] -%(name)s - %(levelname)s - %(message)s")
     LOG_FILE_PATH: str = os.getenv("LOG_FILE_PATH", "logs/app.log")
     LOG_MAX_SIZE: int = int(os.getenv("LOG_MAX_SIZE", "10485760"))  # 10MB
     LOG_BACKUP_COUNT: int = int(os.getenv("LOG_BACKUP_COUNT", "5"))
