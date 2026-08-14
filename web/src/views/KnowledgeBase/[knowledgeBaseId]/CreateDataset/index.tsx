@@ -60,7 +60,7 @@ const CreateDataset = () => {
   const [form] = Form.useForm<CreateDatasetFormValues>();
   const tableRef = useRef<TableRef>(null);
   const uploadRef = useRef<UploadFilesRef>(null);
-  const { title, content } = Form.useWatch(['title', 'content'], form) || {};
+  const { title, content } = Form.useWatch([], form) || {};
 
   const handleBack = useCallback(() => {
     if (!knowledgeBaseId) return;
@@ -140,12 +140,16 @@ const CreateDataset = () => {
       qa_prompt: values.qaPrompt,
       image: values.image,
     };
-    if (values.processingMethod === 'parentChildBlock') {
+    if (values.parameterSettings === 'customSettings' && values.processingMethod === 'parentChildBlock') {
       Object.assign(config, {
         parent_chunk_mode: values.parent_chunk_mode,
         parent_chunk_delimiter: values.parent_chunk_delimiter,
         parent_chunk_token_num: values.parent_chunk_token_num,
         chunk_token_num: values.chunk_token_num,
+      });
+    } else if (values.parameterSettings === 'defaultSettings' && values.processingMethod === 'parentChildBlock') {
+      Object.assign(config, {
+        ...parentChildBlockConfigValues,
       });
     }
     return config;

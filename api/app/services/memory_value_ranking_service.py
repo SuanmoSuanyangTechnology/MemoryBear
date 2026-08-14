@@ -9,14 +9,18 @@ from typing import Any, Callable, Sequence
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.quota_manager import get_end_user_memory_limit_async
+from app.core.quota_manager import (
+    get_end_user_memory_limit,
+    get_end_user_memory_limit_async,
+)
 from app.core.utils.datetime_utils import (
     convert_neo4j_datetime_to_python,
     to_timestamp_ms,
 )
-from app.db import get_async_db_context
+from app.db import get_async_db_context, get_db_context
 from app.repositories.end_user_repository import (
     EndUserRepository,
+    get_tenant_id_by_end_user_id,
     get_tenant_id_by_end_user_id_async,
 )
 from app.repositories.neo4j.cypher_queries import (
@@ -83,18 +87,14 @@ def disable_permanent_candidates(statement_nodes: Sequence[Any]) -> None:
             node.is_permanent = False
 
 
-async def get_total_memory_limit(end_user_id: str) -> int:
+def _parse_end_user_id(end_user_id: str) -> uuid.UUID:
     try:
-        parsed_id = uuid.UUID(end_user_id)
+        return uuid.UUID(end_user_id)
     except (ValueError, TypeError, AttributeError) as exc:
         raise PermanentMemoryNotFound("end user not found") from exc
 
-    async with get_async_db_context() as db:
-        tenant_id = await get_tenant_id_by_end_user_id_async(db, parsed_id)
-        if tenant_id is None:
-            raise PermanentMemoryNotFound("end user not found")
-        total_memory_limit = await get_end_user_memory_limit_async(db, tenant_id)
 
+def _normalize_total_memory_limit(total_memory_limit: Any) -> int:
     if (
         isinstance(total_memory_limit, bool)
         or not isinstance(total_memory_limit, Number)
@@ -107,19 +107,41 @@ async def get_total_memory_limit(end_user_id: str) -> int:
     return normalized
 
 
-async def assign_permanent_memory_slots(
-    connector: Neo4jConnector,
+async def get_total_memory_limit(end_user_id: str) -> int:
+    parsed_id = _parse_end_user_id(end_user_id)
+    async with get_async_db_context() as db:
+        tenant_id = await get_tenant_id_by_end_user_id_async(db, parsed_id)
+        if tenant_id is None:
+            raise PermanentMemoryNotFound("end user not found")
+        total_memory_limit = await get_end_user_memory_limit_async(db, tenant_id)
+
+    return _normalize_total_memory_limit(total_memory_limit)
+
+
+def get_total_memory_limit_sync(end_user_id: str) -> int:
+    """Load the memory quota through the sync SQLAlchemy engine for Celery."""
+    parsed_id = _parse_end_user_id(end_user_id)
+    with get_db_context() as db:
+        tenant_id = get_tenant_id_by_end_user_id(db, parsed_id)
+        if tenant_id is None:
+            raise PermanentMemoryNotFound("end user not found")
+        total_memory_limit = get_end_user_memory_limit(db, tenant_id)
+
+    return _normalize_total_memory_limit(total_memory_limit)
+
+
+def assign_permanent_memory_slots(
     end_user_id: str,
     statement_nodes: Sequence[Any],
+    *,
+    used: int,
 ) -> int:
-    """Read capacity state and assign final flags inside the serialized worker write."""
+    """Assign final flags using synchronous PostgreSQL access in a Celery worker."""
     candidates = [n for n in statement_nodes if bool(getattr(n, "is_permanent", False))]
     if not candidates:
         return 0
-    total_memory_limit = await get_total_memory_limit(end_user_id)
+    total_memory_limit = get_total_memory_limit_sync(end_user_id)
     limit = calculate_permanent_memory_limit(total_memory_limit)
-    count_rows = await connector.execute_query(PERMANENT_MEMORY_COUNT, end_user_id=end_user_id)
-    used = int(count_rows[0]["used"]) if count_rows else 0
     return allocate_permanent_slots(
         statement_nodes,
         used=used,
