@@ -60,7 +60,7 @@ const CreateDataset = () => {
   const [form] = Form.useForm<CreateDatasetFormValues>();
   const tableRef = useRef<TableRef>(null);
   const uploadRef = useRef<UploadFilesRef>(null);
-  const { title, content } = Form.useWatch(['title', 'content'], form) || {};
+  const { title, content } = Form.useWatch([], form) || {};
 
   const handleBack = useCallback(() => {
     if (!knowledgeBaseId) return;
