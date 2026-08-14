@@ -3,6 +3,7 @@ import { DownOutlined, LoadingOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
 import clsx from 'clsx'
+import { Image } from 'antd';
 
 import type {
   MemoryRecallItem,
@@ -37,6 +38,29 @@ const StageRow: FC<StageRowProps> = ({ title, description, badge, children }) =>
   </div>
 )
 
+const EngineModule: FC<{
+  title: string
+  description: string
+  children?: ReactNode
+}> = ({ title, description, children }) => (
+  <div className="rb:relative rb:ml-0.5 rb:border-l rb:border-[#EBEBEB] rb:pb-2 rb:mb-3 rb:pl-3.5 rb:last:pb-0 rb:last:mb-0">
+    <span className="rb:absolute rb:top-2 rb:-left-[2.5px] rb:size-1 rb:rounded-full rb:bg-[#A8A9AA]" />
+    <div className="rb:text-[12px] rb:leading-5 rb:font-semibold rb:text-[#5B6167]">
+      {title}
+    </div>
+    <div className="rb:mt-0.5 rb:text-[11px] rb:leading-5 rb:text-[#7B8491]">{description}</div>
+    {children}
+  </div>
+)
+
+const MEMORY_ENGINE_STAGE_NAMES = new Set([
+  'profile_loaded',
+  'query_split',
+  'hybrid_searched',
+  'relation_searched',
+  'results_merged',
+])
+
 const getMode = (call: MemoryToolCall) => {
   const mode = call.input.search_mode
   return typeof mode === 'string' && mode ? mode : 'unknown'
@@ -50,6 +74,43 @@ const getQuestion = (call: MemoryToolCall) => {
 const getResultStage = (call: MemoryToolCall) => (
   call.stages.find(stage => stage.stage === 'result_ready')
 )
+
+const getPerceptualImageItems = (stages: MemoryStage[]): MemoryRecallItem[] => {
+  const paths = new Set<string>()
+  return stages
+    .filter(stage => stage.stage === 'perceptual_processed')
+    .flatMap(stage => stage.data.items || [])
+    .filter(item => {
+      const path = item.file?.file_path
+      const isImage = item.file?.file_type === 'image' || item.file?.perceptual_type === 1
+      if (!path || !isImage || paths.has(path)) return false
+      paths.add(path)
+      return true
+    })
+}
+
+const PerceptualImageList: FC<{
+  items: MemoryRecallItem[]
+  compact?: boolean
+}> = ({ items, compact = false }) => {
+  const { t } = useTranslation()
+
+  return (
+    <div className="rb:mt-2 rb:flex rb:flex-wrap rb:gap-2">
+      {items.map((item, index) => (
+        <Image
+          key={`${item.file?.file_path}-${index}`}
+          src={item.file?.file_path}
+          alt={item.file?.file_name || t('memoryConversation.memoryRecall.unknownFile')}
+          loading="lazy"
+          width={compact ? 72 : 88}
+          height={compact ? 48 : 60}
+          className="rb:rounded-md rb:overflow-hidden"
+        />
+      ))}
+    </div>
+  )
+}
 
 const formatScore = (score?: number) => {
   if (typeof score !== 'number' || Number.isNaN(score)) return '--'
@@ -146,8 +207,8 @@ const StageContent: FC<{ stage: MemoryStage }> = ({ stage }) => {
     case 'perceptual_processed':
       return (
         <StageRow
-          title={t('memoryConversation.memoryRecall.perceptualProcessed')}
-          description={t('memoryConversation.memoryRecall.perceptualProcessedDesc')}
+          title={t('memoryConversation.memoryRecall.multimodalMemoryRetrievalEngine')}
+          description={t('memoryConversation.memoryRecall.multimodalMemoryRetrievalEngineCompletedDesc')}
         />
       )
     case 'results_ranked':
@@ -225,8 +286,8 @@ const getStageSummary = (stage: MemoryStage, t: TFunction): RecallStepSummary | 
       }
     case 'perceptual_processed':
       return {
-        title: t('memoryConversation.memoryRecall.perceptualProcessed'),
-        description: t('memoryConversation.memoryRecall.perceptualProcessedDesc'),
+        title: t('memoryConversation.memoryRecall.multimodalMemoryRetrievalEngine'),
+        description: t('memoryConversation.memoryRecall.multimodalMemoryRetrievalEngineCompletedDesc'),
       }
     case 'results_ranked':
       return {
@@ -264,10 +325,26 @@ const ToolCallRecall: FC<{
   const resultStage = getResultStage(call)
   const duration = resultStage?.data.duration_ms
   const items = resultStage?.data.items || []
+  const perceptualImageItems = getPerceptualImageItems(call.stages)
+  const hasMemoryEngineStages = call.stages.some(stage => MEMORY_ENGINE_STAGE_NAMES.has(stage.stage))
   const hasFailed = call.status === 'failed'
   const hasCompletedWriting = call.status === 'completed' && !isStreaming
   const isThinking = Boolean(resultStage) && isStreaming && !hasFailed
   const isProcessing = isStreaming && !hasFailed
+  const memoryEngineDescription = t(
+    isProcessing
+      ? 'memoryConversation.memoryRecall.memoryRetrievalEngineRunningDesc'
+      : hasMemoryEngineStages
+        ? 'memoryConversation.memoryRecall.memoryRetrievalEngineCompletedDesc'
+        : 'memoryConversation.memoryRecall.memoryRetrievalEngineDisabledDesc',
+  )
+  const multimodalMemoryEngineDescription = t(
+    isProcessing
+      ? 'memoryConversation.memoryRecall.multimodalMemoryRetrievalEngineRunningDesc'
+      : perceptualImageItems.length > 0
+        ? 'memoryConversation.memoryRecall.multimodalMemoryRetrievalEngineCompletedDesc'
+        : 'memoryConversation.memoryRecall.multimodalMemoryRetrievalEngineDisabledDesc',
+  )
   const title = hasFailed
     ? t('memoryConversation.memoryRecall.failed')
     : hasCompletedWriting
@@ -328,16 +405,21 @@ const ToolCallRecall: FC<{
         )}
         <span className={clsx({ 'rb:text-[#E5484D]': hasFailed })}>{title}</span>
         <span className={clsx("rb:text-[10px] rb:font-medium rb:text-[#a0a6b0]", {
-          'rb:text-[#6D5BD0]': mode === 'deep'
+          'rb:text-[#155EEF]': mode === 'deep'
         })}>{mode.toUpperCase()}</span>
         <DownOutlined className={clsx('rb:text-[9px] rb:transition-transform', { 'rb:-rotate-90': !expanded })} />
       </button>
 
       {!expanded && (
-        <div className="rb:flex rb:min-w-0 rb:items-center rb:gap-1 rb:text-[11px] rb:leading-4 rb:text-[#8A8D93]">
-          <span className="rb:shrink-0 rb:font-medium rb:text-[#5B6167]">{collapsedSummary.title}</span>
-          <span className="rb:shrink-0">·</span>
-          <span className="rb:truncate">{collapsedSummary.description}</span>
+        <div className="rb:min-w-0">
+          <div className="rb:flex rb:min-w-0 rb:items-center rb:gap-1 rb:text-[11px] rb:leading-4 rb:text-[#8A8D93]">
+            <span className="rb:shrink-0 rb:font-medium rb:text-[#5B6167]">{collapsedSummary.title}</span>
+            <span className="rb:shrink-0">·</span>
+            <span className="rb:truncate">{collapsedSummary.description}</span>
+          </div>
+          {perceptualImageItems.length > 0 && (
+            <PerceptualImageList items={perceptualImageItems} compact />
+          )}
         </div>
       )}
 
@@ -358,9 +440,43 @@ const ToolCallRecall: FC<{
           >
           </StageRow>
 
-          {call.stages.map((stage, index) => (
-            <StageContent key={`${stage.stage}-${index}`} stage={stage} />
-          ))}
+          <div className="rb:mb-4">
+            <EngineModule
+              title={t('memoryConversation.memoryRecall.memoryRetrievalEngine')}
+              description={memoryEngineDescription}
+            >
+              {hasMemoryEngineStages && (
+                <div className="rb:mt-3 rb:border-l-[3px] rb:border-[#EBEBEB] rb:pl-3">
+                  {call.stages
+                    .filter(stage => MEMORY_ENGINE_STAGE_NAMES.has(stage.stage))
+                    .map((stage, index) => (
+                      <StageContent
+                        key={`${stage.stage}-${index}`}
+                        stage={stage}
+                      />
+                    ))}
+                </div>
+              )}
+            </EngineModule>
+
+            <EngineModule
+              title={t('memoryConversation.memoryRecall.multimodalMemoryRetrievalEngine')}
+              description={multimodalMemoryEngineDescription}
+            >
+              {perceptualImageItems.length > 0 && (
+                <PerceptualImageList items={perceptualImageItems} />
+              )}
+            </EngineModule>
+
+            {call.stages.map((stage, index) => {
+              if (
+                MEMORY_ENGINE_STAGE_NAMES.has(stage.stage)
+                || stage.stage === 'perceptual_processed'
+              ) return null
+
+              return <StageContent key={`${stage.stage}-${index}`} stage={stage} />
+            })}
+          </div>
 
           {call.status === 'completed' && !resultStage && (
             <StageRow

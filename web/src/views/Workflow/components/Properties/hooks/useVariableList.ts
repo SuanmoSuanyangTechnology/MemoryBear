@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-01-19 17:00:26 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-08-06 15:26:06
+ * @Last Modified time: 2026-08-13 17:25:29
  */
 /**
  * useVariableList Hook
@@ -342,15 +342,16 @@ const processNodeVariables = (
       break;
     }
 
-    case 'iteration':
-      // Add iteration output variable
-      let dt = 'string';
-      if (nodeData.output) {
-        const sv = variableList.find(v => v.value === nodeData.output);
-        if (sv) dt = sv.dataType;
-      }
-      addVariable(variableList, addedKeys, `${dataNodeId}_output`, 'output', `array[${dt}]`, `${dataNodeId}.output`, nodeData);
+    case 'iteration': {
+      // The output may reference a child variable as a raw path or a {{...}} expression.
+      const output = unwrapConfigPrimitive(nodeData.output ?? config?.output);
+      const sourceVariable = variableList.find(v =>
+        v.value === output || `{{${v.value}}}` === output
+      );
+      const outputType = sourceVariable?.dataType ?? 'string';
+      addVariable(variableList, addedKeys, `${dataNodeId}_output`, 'output', `array[${outputType}]`, `${dataNodeId}.output`, nodeData);
       break;
+    }
 
     case 'loop':
       // Add loop cycle variables
@@ -668,10 +669,28 @@ export const useVariableList = (
       return null;
     };
 
-    // Collect relevant node IDs
+    // Collect relevant node IDs. Expand every relevant loop/iteration so an
+    // iteration output can resolve variables produced by its child nodes even
+    // when those children were added after the iteration was configured.
     const childIds = nodes.filter(n => n.getData()?.cycle === selectedNode.id).map(n => n.id);
     const parentLoop = getParentLoop(selectedNode.id);
-    const relevantIds = [...getPreviousNodes(selectedNode.id), ...childIds, ...(parentLoop ? getPreviousNodes(parentLoop.id) : [])];
+    const relevantIds = new Set([
+      ...getPreviousNodes(selectedNode.id),
+      ...childIds,
+      ...(parentLoop ? getPreviousNodes(parentLoop.id) : []),
+    ]);
+
+    let hasNewCycleChildren = true;
+    while (hasNewCycleChildren) {
+      hasNewCycleChildren = false;
+      nodes.forEach(node => {
+        const cycleId = node.getData()?.cycle;
+        if (cycleId && relevantIds.has(cycleId) && !relevantIds.has(node.id)) {
+          relevantIds.add(node.id);
+          hasNewCycleChildren = true;
+        }
+      });
+    }
 
     // Add system variables
     sysVariable.forEach((v: any) => {
