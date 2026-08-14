@@ -256,8 +256,6 @@ export function useConversation() {
 
   const getChatDetail = () => {
     if (!conversation_id || !shareToken || shareToken === '') return
-    // applyChatDetail({ messages: memoryRecallMocks })
-    // return
     getConversationDetail(shareToken, conversation_id)
       .then(res => {
         applyChatDetail(res as { messages: ChatItem[]; pending_intervention?: Record<string, any> })
