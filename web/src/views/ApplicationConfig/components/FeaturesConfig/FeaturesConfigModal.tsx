@@ -34,7 +34,6 @@ interface FeaturesConfigModalProps {
   capability?: Capability[];
   chatVariables: Variable[];
 }
-const max_file_count = 1;
 /**
  * Modal for copying applications
  */
@@ -275,7 +274,7 @@ const FeaturesConfigModal = forwardRef<FeaturesConfigModalRef, FeaturesConfigMod
                     </div>
                     <div>
                       <div className="rb:text-[12px] rb:text-[#5B6167] rb:py-1">{t('application.maxCount')}</div>
-                      {max_file_count} {t('application.unix')}
+                      {values?.file_upload.max_file_count} {t('application.unix')}
                     </div>
                   </Flex>
                   <Button block onClick={handleOpenSettings}>{t('application.setting')}</Button>
