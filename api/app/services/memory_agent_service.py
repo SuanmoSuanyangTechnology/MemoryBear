@@ -377,7 +377,7 @@ class MemoryAgentService:
             prompt = ChatPromptTemplate.from_template("{input}")
             chain = prompt | llm
             response = await chain.ainvoke({"input": system_prompt})
-            answer = response.content if hasattr(response, 'content') else str(response)
+            answer = response.content if hasattr(response, 'content') and isinstance(response.content, str) else response.content[0]["text"]
 
             logger.info(f"Successfully generated summary: {answer[:100] if answer else 'None'}...")
             return answer if answer else "信息不足，无法回答。"
