@@ -27,6 +27,8 @@ export const space = {
       multimodalModelDesc: '按需启用，处理图像 / 音频 / 视频内容',
       optional: '（选填）',
       configAlert: '空间模型配置为空间的模型模型，保障空间运行时能正确的调用到相应的模型来处理业务数据。',
+      embeddingSwitchConfirmTitle: '切换 Embedding 模型确认',
+      embeddingSwitchConfirmContent: '切换 embedding 模型可能导致相关检索功能效果下降，确定要切换吗？',
 
       basic: '基础配置',
       models: '模型配置',
