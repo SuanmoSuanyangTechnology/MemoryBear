@@ -13,6 +13,8 @@ import uuid
 from math import sqrt
 from typing import Dict, List, Optional
 
+from pydantic import BaseModel, Field
+
 from app.repositories.neo4j.community_repository import CommunityRepository
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.schemas.memory_config_schema import MemoryConfig
@@ -36,6 +38,13 @@ CONCURRENT_BATCH = 10
 
 # P1：_generate_community_metadata 最大并发 Neo4j 查询数（不超过连接池上限）
 METADATA_PREPARE_CONCURRENCY = 10
+
+
+class CommunityMetadataOutput(BaseModel):
+    """LLM 为社区生成的名称与摘要（结构化输出）。"""
+
+    name: str = Field(..., description="社区主题的简洁名称")
+    summary: str = Field(..., description="社区主题的一句话摘要")
 
 
 def _cosine_similarity(v1: Optional[List[float]], v2: Optional[List[float]]) -> float:
@@ -573,8 +582,7 @@ class LabelPropagationEngine:
                             f"For the topic represented by this group of entities:\n"
                             f"1. Give a concise name (no more than 10 words)\n"
                             f"2. Write a one-sentence summary (no more than 80 words)\n\n"
-                            f"Output strictly in the following format, nothing else:\n"
-                            f"Name: <name>\nSummary: <summary>"
+                            f'Return a JSON object with exactly two fields: "name" and "summary".'
                         )
                     else:
                         rel_section = (
@@ -586,8 +594,7 @@ class LabelPropagationEngine:
                             f"请为这组实体所代表的主题：\n"
                             f"1. 起一个简洁的中文名称（不超过10个字）\n"
                             f"2. 写一句话摘要（不超过80个字）\n\n"
-                            f"严格按以下格式输出，不要有其他内容：\n"
-                            f"名称：<名称>\n摘要：<摘要>"
+                            f"只返回一个 JSON 对象，包含两个字段：name 和 summary。"
                         )
 
                 return {
@@ -643,41 +650,39 @@ class LabelPropagationEngine:
                     logger.info(f"[Clustering] 批量调用 LLM 生成 {len(prompts_to_process)} 个社区元数据")
 
                     async def _call_llm(idx: int, meta: Dict) -> tuple:
-                        """单个 LLM 调用"""
+                        """单个 LLM 调用（结构化输出）。"""
                         try:
-                            response = await llm_client.ainvoke(
+                            result = await llm_client.call_structured(
                                 [{"role": "user", "content": meta["prompt"]}],
-                                config={"callbacks": []},
+                                CommunityMetadataOutput,
                             )
-                            text = response.content
-                            return (idx, text, None)
+                            if not isinstance(result, CommunityMetadataOutput):
+                                return (idx, None, None)
+                            name = (result.name or "").strip()
+                            summary = (result.summary or "").strip()
+                            return (idx, name, summary)
                         except Exception as e:
                             logger.warning(f"[Clustering] 社区 {meta['community_id']} LLM 生成失败: {e}")
-                            return (idx, None, e)
+                            return (idx, None, None)
                     
                     llm_results = await asyncio.gather(
                         *[_call_llm(idx, meta) for idx, meta in prompts_to_process],
                         return_exceptions=True
                     )
                     
-                    # 解析 LLM 响应
+                    # 解析 LLM 响应（结构化结果，无需按行解析）
                     for result in llm_results:
                         if isinstance(result, Exception):
                             continue
-                        idx, text, error = result
-                        if error or not text:
+                        idx, name, summary = result
+                        if not name and not summary:
                             continue
                         
                         meta = metadata_list[idx]
-                        for line in text.strip().splitlines():
-                            if line.startswith("名称："):
-                                meta["name"] = line[3:].strip()
-                            elif line.startswith("摘要："):
-                                meta["summary"] = line[3:].strip()
-                            elif line.startswith("Name:"):
-                                meta["name"] = line[5:].strip()
-                            elif line.startswith("Summary:"):
-                                meta["summary"] = line[8:].strip()
+                        if name:
+                            meta["name"] = name
+                        if summary:
+                            meta["summary"] = summary
                     
                     logger.info(f"[Clustering] LLM 批量生成完成")
 
