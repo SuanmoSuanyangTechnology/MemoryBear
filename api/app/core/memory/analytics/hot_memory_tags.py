@@ -7,10 +7,16 @@ from typing import Any, List, Tuple
 from pydantic import BaseModel, Field
 
 from app.core.memory.pipelines.base_pipeline import ModelClientMixin
+from app.core.validators.memory_config_validators import validate_and_resolve_model_id
 from app.db import get_db_context
+from app.repositories.memory_config_repository import MemoryConfigRepository
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.repositories.neo4j.statement_repository import StatementRepository
-from app.services.memory_config_service import MemoryConfigService
+from app.services.memory_config_service import (
+    MemoryConfigService,
+    _effective_workspace_models,
+    _get_default_model_preset,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +91,44 @@ class InterestDistributionGeneration(BaseModel):
     items: List[Tuple[str, int]] = Field(default_factory=list)
     cacheable: bool = True
 
+#增加一个只校验llm的薄封装，不应该校验功能以外的模型。
+def _get_interest_llm_client(db: Any, end_user_id: str):
+    """只解析兴趣分布需要的 LLM，不校验其他工作空间模型。"""
+    config_service = MemoryConfigService(db)
+    config_id = config_service.get_config_id_by_end_user(end_user_id)
+    if not config_id:
+        raise ValueError(
+            f"No memory_config_id found for end_user_id: {end_user_id}."
+        )
+
+    config_with_workspace = MemoryConfigRepository(db).get_config_with_workspace(
+        config_id
+    )
+    if not config_with_workspace:
+        raise ValueError(f"Memory configuration not found: {config_id}")
+
+    _, workspace = config_with_workspace
+    preset = (
+        _get_default_model_preset(db)
+        if workspace.is_default_config
+        else None
+    )
+    llm_model_id = _effective_workspace_models(workspace, preset)["llm"]
+    llm_uuid, _ = validate_and_resolve_model_id(
+        llm_model_id,
+        "llm",
+        db,
+        workspace.tenant_id,
+        required=True,
+        config_id=config_id,
+        workspace_id=workspace.id,
+    )
+    return ModelClientMixin.get_llm_client(
+        db,
+        llm_uuid,
+        workspace.tenant_id,
+    )
+
 
 async def filter_tags_with_llm(tags: List[str], end_user_id: str) -> List[str]:
     """
@@ -158,19 +202,7 @@ async def filter_interests_with_llm(
 ) -> InterestTags:
     """让 LLM 筛选并合并兴趣，可选使用 Statement 证据补充实体语境。"""
     with get_db_context() as db:
-        config_service = MemoryConfigService(db)
-        config_id = config_service.get_config_id_by_end_user(end_user_id)
-        if not config_id:
-            raise ValueError(
-                f"No memory_config_id found for end_user_id: {end_user_id}."
-            )
-
-        memory_config = config_service.load_memory_config(config_id=config_id)
-        llm_client = ModelClientMixin.get_llm_client(
-            db,
-            memory_config.llm_model_id,
-            memory_config.tenant_id,
-        )
+        llm_client = _get_interest_llm_client(db, end_user_id)
 
     from app.core.memory.utils.prompt.prompt_utils import render_interest_filter_prompt
 
@@ -485,15 +517,20 @@ async def generate_interest_distribution(
     # 总预算从生成入口统一起算，后续查询、LLM 调用和结果校验共享同一截止时间。
     started_at = time.monotonic()
     second_call_executed = False
+    primary_items: List[Tuple[str, int]] = []
+    failure_stage = "input_validation"
     if not end_user_id or not end_user_id.strip():
         raise ValueError(
             "end_user_id is required. Please provide a valid end_user_id or user_id."
         )
 
-    connector = Neo4jConnector()
+    connector: Neo4jConnector | None = None
     try:
+        failure_stage = "connector_init"
+        connector = Neo4jConnector()
         repository = StatementRepository(connector)
         # 候选查询也属于完整生成链路，不能只限制 LLM 调用时间。
+        failure_stage = "candidate_query"
         try:
             candidate_records = await _await_with_interest_budget(
                 lambda: repository.find_interest_entity_candidates(
@@ -519,6 +556,7 @@ async def generate_interest_distribution(
                 ),
             )
             raise
+        failure_stage = "candidate_validation"
         candidates = [
             InterestEntityCandidate.model_validate(record)
             for record in candidate_records
@@ -549,6 +587,7 @@ async def generate_interest_distribution(
             INTEREST_DISTRIBUTION_LLM_TIMEOUT_SECONDS,
             _remaining_interest_budget(started_at),
         )
+        failure_stage = "primary_llm"
         try:
             interests = await _await_with_interest_budget(
                 lambda: filter_interests_with_llm(
@@ -584,6 +623,7 @@ async def generate_interest_distribution(
             raise TimeoutError(
                 "interest distribution total time budget exhausted before primary validation"
             )
+        failure_stage = "primary_validation"
         validated_primary_groups = validate_interest_groups(
             candidates,
             interests.interests,
@@ -623,6 +663,7 @@ async def generate_interest_distribution(
             if evidence_candidates:
                 try:
                     # Statement 证据查询继续消耗同一总预算，超时后只能降级到首次结果。
+                    failure_stage = "statement_evidence"
                     evidence_records = await _await_with_interest_budget(
                         lambda: repository.find_interest_statement_evidence(
                             user_id=end_user_id,
@@ -682,6 +723,7 @@ async def generate_interest_distribution(
                                 INTEREST_DISTRIBUTION_LLM_TIMEOUT_SECONDS,
                                 remaining,
                             )
+                            failure_stage = "second_llm"
                             supplemental_interests = await _await_with_interest_budget(
                                 lambda: filter_interests_with_llm(
                                     fallback_candidates,
@@ -733,6 +775,7 @@ async def generate_interest_distribution(
                     )
 
         # 聚合与排序也计入总预算；若处理期间越界，不返回未经预算内确认的补充结果。
+        failure_stage = "final_validation"
         items = aggregate_interest_groups(candidates, combined_groups, limit=limit)
         if _remaining_interest_budget(started_at) <= 0:
             _log_interest_budget(
@@ -756,9 +799,46 @@ async def generate_interest_distribution(
             items=items,
             cacheable=bool(items),
         )
+    except Exception as exc:
+        # 兴趣分布是展示型增强数据。合法请求的生成依赖失败时，不让异常进入页面；
+        # 首轮已有可信结果则保留首轮，否则返回并缓存空列表，24 小时后再生成。
+        # 同一个人结构化输出失败，两天同时发生的概率较低
+        fallback_items = primary_items[:limit]
+        cacheable = not fallback_items
+        logger.error(
+            "interest_distribution stage=%s_failed end_user_id=%s language=%s "
+            "elapsed=%.3fs second_call_executed=%s fallback=%s cacheable=%s "
+            "error_type=%s error=%r",
+            failure_stage,
+            end_user_id,
+            language,
+            time.monotonic() - started_at,
+            second_call_executed,
+            "primary_items" if fallback_items else "empty",
+            cacheable,
+            type(exc).__name__,
+            exc,
+            exc_info=True,
+        )
+        return InterestDistributionGeneration(
+            items=fallback_items,
+            cacheable=cacheable,
+        )
     finally:
         # Connector 清理不受业务预算限制，任何返回或异常路径都必须等待关闭完成。
-        await connector.close()
+        if connector is not None:
+            try:
+                await connector.close()
+            except Exception as exc:
+                logger.error(
+                    "interest_distribution stage=connector_close_failed "
+                    "end_user_id=%s language=%s error_type=%s error=%r",
+                    end_user_id,
+                    language,
+                    type(exc).__name__,
+                    exc,
+                    exc_info=True,
+                )
 
 
 async def get_interest_distribution(
