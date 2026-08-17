@@ -9,7 +9,7 @@
  * Configures default models for workspace (LLM, embedding, rerank)
  */
 
-import { type FC, useEffect, useState } from 'react';
+import { type FC, useEffect, useRef, useState } from 'react';
 import { Form, App, Button, Skeleton, Flex } from 'antd';
 import { useTranslation } from 'react-i18next';
 
@@ -36,10 +36,11 @@ const multimodalModelFields: { name: string; label: string; capability: Capabili
 
 const SpaceConfig: FC = () => {
   const { t } = useTranslation();
-  const { message } = App.useApp();
+  const { message, modal } = App.useApp();
   const [pageLoading, setPageLoading] = useState(false)
   const [form] = Form.useForm<SpaceConfigData>();
   const [loading, setLoading] = useState(false)
+  const lastConfirmedEmbeddingRef = useRef<SpaceConfigData['embedding']>(undefined)
 
   const values = Form.useWatch([], form);
 
@@ -92,6 +93,27 @@ const SpaceConfig: FC = () => {
     handleGetDefaultModels()
     handleGetCustomModels()
   }, [])
+
+  useEffect(() => {
+    lastConfirmedEmbeddingRef.current = lastConfig.embedding
+  }, [lastConfig.embedding])
+
+  const handleEmbeddingChange = (newValue: SpaceConfigData['embedding']) => {
+    const prevValue = lastConfirmedEmbeddingRef.current
+    if (newValue === prevValue) return
+    modal.confirm({
+      title: t('space.embeddingSwitchConfirmTitle'),
+      content: t('space.embeddingSwitchConfirmContent'),
+      okText: t('common.confirm'),
+      cancelText: t('common.cancel'),
+      onOk: () => {
+        lastConfirmedEmbeddingRef.current = newValue
+      },
+      onCancel: () => {
+        form.setFieldsValue({ embedding: prevValue })
+      },
+    })
+  }
   /** Save configuration */
   const handleSave = () => {
     form
@@ -170,6 +192,7 @@ const SpaceConfig: FC = () => {
                     isAutoFetch={false}
                     initialData={customModels[field.name]}
                     className="rb:w-137.5!"
+                    {...(field.name === 'embedding' ? { onChange: handleEmbeddingChange } : {})}
                   />
                 </Form.Item>
               ))}
