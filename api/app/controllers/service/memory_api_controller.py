@@ -105,7 +105,7 @@ async def read_memory_sync(
                 pass
             res[data[0]] = data[1]
 
-        return success(data={euid: data for data in results})
+        return success(data=res)
 
     # ── Single-user mode (backward-compatible) ──
     async with get_async_db_context() as db:
