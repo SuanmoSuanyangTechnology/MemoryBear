@@ -280,6 +280,7 @@ class RedBearModelFactory:
             ModelProvider.OPENAI,
             ModelProvider.XINFERENCE,
             ModelProvider.GPUSTACK,
+            ModelProvider.MINIMAX,
             ModelProvider.OLLAMA,
             ModelProvider.VOLCANO,
             ModelProvider.SPEEDBEAR,
@@ -501,6 +502,7 @@ def get_provider_llm_class(config: RedBearModelConfig, type: ModelType = ModelTy
         ModelProvider.OPENAI,
         ModelProvider.XINFERENCE,
         ModelProvider.GPUSTACK,
+        ModelProvider.MINIMAX,
         ModelProvider.SPEEDBEAR,
     ]:
         return CompatibleChatOpenAI
