@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:34:12 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-28 10:03:51
+ * @Last Modified time: 2026-08-14 18:42:08
  */
 /**
  * Application Management Page
@@ -140,8 +140,8 @@ const ApplicationManagement: React.FC = () => {
     } as Query
   }
   return (
-    <>
-      <Flex justify="space-between" className="rb:mb-4!">
+    <Flex vertical gap={16} className="rb:h-full">
+      <Flex justify="space-between">
         <PageTabs
           value={activeTab}
           options={formatTabItems}
@@ -158,7 +158,7 @@ const ApplicationManagement: React.FC = () => {
             <Space size={8}>
               <Form.Item name="type" noStyle>
                 <Select
-                  placeholder={t('application.applicationType')}
+                  placeholder={t('application.applicationTypePlaceholder')}
                   options={(activeTab === 'sharing' ? types.filter(type => type !== 'multi_agent') : types).map((type) => ({
                     value: type,
                     label: t(`application.${type}`),
@@ -166,6 +166,7 @@ const ApplicationManagement: React.FC = () => {
                   allowClear
                   variant="filled"
                   className="rb:w-30!"
+                  popupMatchSelectWidth={false}
                 />
               </Form.Item>
               <Flex
@@ -191,7 +192,7 @@ const ApplicationManagement: React.FC = () => {
                   <SearchInput
                     hasPrefix={false}
                     placeholder={t('application.searchPlaceholder')}
-                    className="rb:w-75!"
+                    className="rb:w-55!"
                     variant="borderless"
                     onFocus={() => setFocus(true)}
                     onBlur={() => setFocus(false)}
@@ -227,6 +228,7 @@ const ApplicationManagement: React.FC = () => {
           url={getApplicationListUrl}
           needLoading={false}
           query={formatQuery()}
+          heightClass="rb:flex-1!"
           renderItem={(item) => (
             <RbCard
               title={item.name}
@@ -290,7 +292,7 @@ const ApplicationManagement: React.FC = () => {
         ref={uploadModalRef}
         refresh={refresh}
       />
-    </>
+    </Flex>
   );
 };
 

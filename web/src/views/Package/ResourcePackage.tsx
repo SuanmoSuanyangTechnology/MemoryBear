@@ -169,7 +169,7 @@ const ResourcePackage: FC = () => {
     return cartItems.find(item => item.id === selectedResourcePack?.id)
   }, [cartItems, selectedResourcePack])
   return (
-    <Flex vertical gap={16} className="rb:relative rb:h-[calc(100vh-104px)]">
+    <Flex vertical gap={16} className="rb:relative rb:h-full! rb:min-h-0!">
       {/* Top description */}
       <Flex justify="space-between" align="start">
         <div>

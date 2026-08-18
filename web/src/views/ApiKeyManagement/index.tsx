@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 15:52:50 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-08-03 17:12:15
+ * @Last Modified time: 2026-08-14 18:52:25
  */
 import React, { useRef } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -85,8 +85,8 @@ const ApiKeyManagement: React.FC = () => {
     openHelpCenter(i18n.language as 'zh' | 'en', 'api-key')
   }
   return (
-    <>
-      <Flex justify="flex-end" className="rb:mb-3!">
+    <Flex vertical gap={16} className="rb:h-full!">
+      <Flex justify="flex-end">
         <Space>
           <Button onClick={() => handleGotoEndpointConfig()}>
             {t('apiKey.endpointConfig')}
@@ -103,7 +103,7 @@ const ApiKeyManagement: React.FC = () => {
         url={getApiKeyListUrl}
         query={{ is_active: true, type: 'service' }}
         column={3}
-        heightClass="rb:h-[calc(100vh-112px)]!"
+        heightClass="rb:flex-1!"
         renderItem={(apiKeyItem) => {
           return (
             <RbCard
@@ -138,7 +138,7 @@ const ApiKeyManagement: React.FC = () => {
               <Flex gap={6} className="rb:-mt-2! rb:mb-4!">
                 {apiKeyItem.scopes?.includes('memory') && <Tag>{t('apiKey.memoryEngine')}</Tag>}
                 {apiKeyItem.scopes?.includes('rag') && <Tag color="success">{t('apiKey.knowledgeBase')}</Tag>}
-                {!apiKeyItem.scopes?.includes('memory') && !apiKeyItem.scopes?.includes('rag') && <div className="rb:font-regular!">{t('apiKey.noScopes')}</div>}
+                {!apiKeyItem.scopes?.includes('memory') && !apiKeyItem.scopes?.includes('rag') && <div className="rb:font-regular! rb:text-[#5B6167]">{t('apiKey.noScopes')}</div>}
               </Flex>
               <RbDescriptions
                 items={['id', 'is_expired', 'created_at'].map(key => ({
@@ -178,7 +178,7 @@ const ApiKeyManagement: React.FC = () => {
         ref={apiKeyDetailModalRef}
         handleCopy={handleCopy}
       />
-    </>
+    </Flex>
   );
 };
 

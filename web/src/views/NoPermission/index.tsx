@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:34:18 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 17:34:18 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-08-14 14:08:04
  */
 /**
  * No Permission Page
@@ -23,7 +23,7 @@ const NoPermission = () => {
       size={[240, 240]}
       title={t('empty.noPermission')}
       subTitle={t('empty.noPermissionDesc')}
-      className="rb:h-[calc(100vh-84px)]"
+      className="rb:h-full!"
     />
   )
 }

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:57:11 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-14 16:56:36
+ * @Last Modified time: 2026-08-17 10:57:06
  */
 /**
  * RAG User Memory Detail View
@@ -117,69 +117,73 @@ const Rag: FC = () => {
       })
   }
   return (
-    <Row gutter={[16, 16]} className="rb:h-full!">
-      <Col span={8} className="rb:h-full!">
+    <Row gutter={[16, 16]} className="rb:h-full! rb:overflow-hidden!">
+      <Col span={8} className="rb:h-full! rb:overflow-hidden!">
         <RbCard
-          bodyClassName="rb:p-3! rb:pt-4!"
-          className="rb:h-full!"
+          bodyClassName="rb:p-3! rb:pt-4! rb:h-full! rb:overflow-hidden!"
+          className="rb:h-full! rb:overflow-hidden!"
         >
-          <Flex align="center" gap={12} className="rb:mb-6!">
-            <div className="rb:size-12 rb:text-center rb:font-semibold rb:text-[28px] rb:leading-12 rb:rounded-xl rb:text-white rb:bg-[#155EEF]">{name?.[0]}</div>
-            <Flex justify="space-between">
-              <div className="rb:text-[16px] rb:font-semibold rb:leading-6 rb:line-clamp-2 rb:flex-1">
-                {name}
-              </div>
-              <Tooltip title={t('common.refresh')}>
-                {refreshLoading
-                  ? <Spin indicator={<LoadingOutlined spin />} />
-                  : (
-                    <div
-                      className="rb:size-5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/refresh.svg')]"
-                      onClick={handleRefresh}
-                    ></div>
-                  )
-                }
-              </Tooltip>
+          <Flex vertical gap={24} className="rb:h-full! rb:overflow-hidden!">
+            <Flex align="center" gap={12}>
+              <div className="rb:size-12 rb:text-center rb:font-semibold rb:text-[28px] rb:leading-12 rb:rounded-xl rb:text-white rb:bg-[#155EEF]">{name?.[0]}</div>
+              <Flex justify="space-between">
+                <div className="rb:text-[16px] rb:font-semibold rb:leading-6 rb:line-clamp-2 rb:flex-1">
+                  {name}
+                </div>
+                <Tooltip title={t('common.refresh')}>
+                  {refreshLoading
+                    ? <Spin indicator={<LoadingOutlined spin />} />
+                    : (
+                      <div
+                        className="rb:size-5 rb:cursor-pointer rb:bg-cover rb:bg-[url('@/assets/images/refresh.svg')]"
+                        onClick={handleRefresh}
+                      ></div>
+                    )
+                  }
+                </Tooltip>
+              </Flex>
             </Flex>
-          </Flex>
 
-          {/* About Me */}
-          <>
-            <Title
-              title={t('userMemory.aboutMe')}
-              iconClassName="rb:bg-[url('@/assets/images/userMemory/aboutUs.svg')]"
-            />
-            <div className="rb:bg-[#F6F6F6] rb:rounded-lg rb:py-2.5 rb:px-3 rb:mb-4">
-              {loading.summary
-                ? <Skeleton />
-                : summary 
-                ? <div className="rb:leading-5 rb:text-[#5B6167]">
-                  {summary || '-'}
+            <div className="rb:flex-1 rb:overflow-auto">
+              {/* About Me */}
+              <>
+                <Title
+                  title={t('userMemory.aboutMe')}
+                  iconClassName="rb:bg-[url('@/assets/images/userMemory/aboutUs.svg')]"
+                />
+                <div className="rb:bg-[#F6F6F6] rb:rounded-lg rb:py-2.5 rb:px-3 rb:mb-4">
+                  {loading.summary
+                    ? <Skeleton />
+                    : summary 
+                    ? <div className="rb:leading-5 rb:text-[#5B6167]">
+                      {summary || '-'}
+                    </div>
+                    : <Empty size={88} />
+                  }
                 </div>
-                : <Empty size={88} />
-              }
-            </div>
-          </>
-          {/* Memory Insights */}
-          <>
-            <Title
-              title={t('userMemory.memoryInsight')}
-              iconClassName="rb:bg-[url('@/assets/images/userMemory/memoryInsight.svg')]"
-            />
-            <div className="rb:bg-[#F6F6F6] rb:rounded-lg rb:py-2.5 rb:px-3">
-              {loading.insight
-                ? <Skeleton />
-                : insight
-                ? <div className="rb:leading-5 rb:text-[#5B6167]">
-                  {insight || '-'}
+              </>
+              {/* Memory Insights */}
+              <>
+                <Title
+                  title={t('userMemory.memoryInsight')}
+                  iconClassName="rb:bg-[url('@/assets/images/userMemory/memoryInsight.svg')]"
+                />
+                <div className="rb:bg-[#F6F6F6] rb:rounded-lg rb:py-2.5 rb:px-3">
+                  {loading.insight
+                    ? <Skeleton />
+                    : insight
+                    ? <div className="rb:leading-5 rb:text-[#5B6167]">
+                      {insight || '-'}
+                    </div>
+                    : <Empty size={88} />
+                  }
                 </div>
-                : <Empty size={88} />
-              }
+              </>
             </div>
-          </>
+          </Flex>
         </RbCard>
       </Col>
-      <Col span={16} className="rb:h-full!">
+      <Col span={16} className="rb:h-full! rb:overflow-hidden!">
         <ConversationMemory />
       </Col>
     </Row>

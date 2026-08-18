@@ -105,7 +105,7 @@ const GraphDetail = forwardRef<GraphDetailRef>((_props, ref) => {
   }, [activeTab, timelineMemories])
 
   return (
-    <>
+    <Flex vertical className="rb:h-full! rb:overflow-hidden!">
       <PageHeader
         title={vo?.label === 'ExtractedEntity' || !vo ? undefined : <>{t(`userMemory.${vo?.label}`)}: {vo?.id}</>}
         extra={
@@ -123,7 +123,7 @@ const GraphDetail = forwardRef<GraphDetailRef>((_props, ref) => {
       {vo?.label === 'ExtractedEntity'
         ? <ExtractedEntityGraphDetail />
         :
-        <Row gutter={12} wrap={false} className="rb:p-3! rb:pr-0! rb:h-[calc(100vh-64px)] rb:w-full! rb:flex-nowrap! rb:overflow-hidden!">
+        <Row gutter={12} wrap={false} className="rb:py-3! rb:pl-3! rb:pr-0! rb:flex-1! rb:w-full! rb:flex-nowrap! rb:overflow-hidden!">
           <Col flex="480px" className="rb:h-full!">
             <RbCard
               title={t('userMemory.relationshipEvolution')}
@@ -180,7 +180,7 @@ const GraphDetail = forwardRef<GraphDetailRef>((_props, ref) => {
           </Col>
         </Row>
       }
-    </>
+    </Flex>
   )
 })
 export default GraphDetail

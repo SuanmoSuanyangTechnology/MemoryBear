@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:33 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-07 20:37:43
+ * @Last Modified time: 2026-08-13 12:18:11
  */
 import { useEffect, useState, useRef, forwardRef, useImperativeHandle } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -195,23 +195,20 @@ const Cluster = forwardRef<ClusterRef, { onFeaturesLoad?: (features: FeaturesCon
   //   form.setFieldValue('features', value)
   // }
 
-
-  console.log('subAgents', subAgents)
-
   return (
     <>
       {loading && <Spin fullscreen></Spin>}
       <Row className="rb:h-full!" gutter={12}>
-        <Col span={12}>
-          <Form form={form} layout="vertical">
-            <Flex gap={12} vertical>
+        <Col span={12} className="rb:h-full! rb:overflow-y-hidden">
+          <Form form={form} layout="vertical" className="rb:h-full! rb:overflow-hidden!">
+            <Flex gap={12} vertical className="rb:h-full! rb:overflow-hidden!">
               <Flex align="center" justify="end" className="rb:p-3! rb:bg-white rb:rounded-xl">
                 {/* <FeaturesConfig value={values?.features as FeaturesConfigForm} refresh={handleSaveFeaturesConfig} /> */}
                 <Button type="primary" onClick={() => handleSave()}>
                   {t('common.save')}
                 </Button>
               </Flex>
-              <Flex gap={12} vertical className="rb:h-[calc(100vh-158px)]! rb:overflow-y-auto!">
+              <Flex gap={12} vertical className="rb:h-[calc(100%-68px)]! rb:overflow-y-auto!">
                 <Form.Item name="features" hidden noStyle></Form.Item>
                 <Card title={t('application.collaboration')}>
                   <Form.Item

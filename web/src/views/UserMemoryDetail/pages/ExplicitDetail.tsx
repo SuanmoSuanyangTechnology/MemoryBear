@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-01-10 17:35:17 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-27 11:19:38
+ * @Last Modified time: 2026-08-17 12:13:51
  */
 import { type FC, useEffect, useState, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -160,57 +160,108 @@ const ExplicitDetail: FC = () => {
     explicitDetailModalRef.current?.handleOpen(item)
   }
 
+  /** Build word-cloud option so initial render and resize-rebuild share the same config. */
+  const buildWordCloudOption = () => ({
+    series: [{
+      type: 'wordCloud' as const,
+      gridSize: 8,
+      sizeRange: [14, 56],
+      rotationRange: [-45, 45],
+      shape: 'pentagon',
+      width: '100%',
+      height: '100%',
+      textStyle: { fontFamily: 'sans-serif', fontWeight: 'bold' },
+      emphasis: { textStyle: { shadowBlur: 10, shadowColor: '#333' } },
+      data: semanticsMemory.map((item, index) => ({
+        name: item.name,
+        value: 50 + (index % 5) * 10,
+        itemIndex: index,
+        textStyle: { color: DEFAULT_COLORS[index % DEFAULT_COLORS.length] }
+      }))
+    }]
+  })
+
   /**
-   * Initialise / re-render the word cloud whenever semantic memories change.
-   * Each word is clickable and opens the detail modal for that entity.
-   * The chart instance is disposed on cleanup to prevent memory leaks.
+   * (Re)mount the ECharts word-cloud instance.
+   * - Disposes any previous instance first to avoid leaking GL contexts.
+   * - Reads container dimensions from the current DOM (so it always picks up
+   *   the latest size when called from the resize observer below).
+   * - Registers the click handler to open the detail modal.
    */
-  useEffect(() => {
-    if (!wordCloudRef.current || !semanticsMemory?.length) return
-    if (chartInstance.current) chartInstance.current.dispose()
-    chartInstance.current = echarts.init(wordCloudRef.current)
-    chartInstance.current.setOption({
-      series: [{
-        type: 'wordCloud',
-        gridSize: 8,
-        sizeRange: [14, 56],
-        rotationRange: [-45, 45],
-        shape: 'pentagon',
-        width: '100%',
-        height: '100%',
-        textStyle: { fontFamily: 'sans-serif', fontWeight: 'bold' },
-        emphasis: { textStyle: { shadowBlur: 10, shadowColor: '#333' } },
-        data: semanticsMemory.map((item, index) => ({
-          name: item.name,
-          value: 50 + (index % 5) * 10,
-          itemIndex: index,
-          textStyle: { color: DEFAULT_COLORS[index % DEFAULT_COLORS.length] }
-        }))
-      }]
-    })
-    chartInstance.current.on('click', (params) => {
+  const mountWordCloud = () => {
+    const el = wordCloudRef.current
+    if (!el || !semanticsMemory?.length) return
+    const { clientWidth, clientHeight } = el
+    if (clientWidth < 8 || clientHeight < 8) return
+    if (chartInstance.current) {
+      chartInstance.current.dispose()
+      chartInstance.current = null
+    }
+    const inst = echarts.init(el)
+    inst.setOption(buildWordCloudOption())
+    inst.on('click', (params) => {
       const item = semanticsMemory[(params.data as any).itemIndex]
       if (item) handleView(item)
     })
-    return () => { chartInstance.current?.dispose(); chartInstance.current = null }
-  }, [semanticsMemory])
+    chartInstance.current = inst
+  }
 
-  /* Redraw the word cloud when the container dimensions change. */
+  /**
+   * Initialise / re-render the word cloud whenever semantic memories change.
+   * The chart instance is disposed on cleanup to prevent memory leaks.
+   */
   useEffect(() => {
-    const target = wordCloudRef.current?.parentElement
-    if (!target) return
-    const observer = new ResizeObserver(() => {
-      if (!chartInstance.current) return
-      chartInstance.current.resize()
-      chartInstance.current.setOption({ series: [{ type: 'wordCloud' }] })
-    })
-    observer.observe(target)
+    mountWordCloud()
     return () => {
-      observer.disconnect()
-      chartInstance.current?.dispose();
+      chartInstance.current?.dispose()
       chartInstance.current = null
     }
-  }, [])
+  }, [semanticsMemory])
+
+  /* Re-layout the word cloud when its container size changes (window resize,
+     layout shifts, Row/Col reflow, sidebar toggle…).
+     - ResizeObserver watches the word-cloud div itself (NOT the parent), so any
+       dimensional change applied to the host element triggers a refresh.
+     - Debounce + rAF smooths out noisy per-frame reflows and avoids
+       "ResizeObserver loop limit exceeded" console warnings.
+     - echarts-wordcloud layout is computed at init time only, so a plain
+       `chart.resize()` leaves glyphs positioned at the old extents. We have to
+       dispose + re-init the instance to re-run the layout algorithm against
+       the new container dimensions. */
+  useEffect(() => {
+    if (!semanticsMemory?.length) return
+    const el = wordCloudRef.current
+    if (!el) return
+
+    // Tiny debounce — we don't want a rebuild for every single pixel delta
+    // during an interactive window drag, but we still react promptly.
+    let timer: ReturnType<typeof setTimeout> | null = null
+    let rafId: number | null = null
+    const trigger = () => {
+      if (timer) clearTimeout(timer)
+      timer = setTimeout(() => {
+        timer = null
+        rafId = requestAnimationFrame(() => {
+          rafId = null
+          if (!el.isConnected) return
+          const { clientWidth, clientHeight } = el
+          if (clientWidth < 8 || clientHeight < 8) return
+          mountWordCloud()
+        })
+      }, 120)
+    }
+
+    const observer = new ResizeObserver(trigger)
+    observer.observe(el)
+
+    return () => {
+      observer.disconnect()
+      if (timer) clearTimeout(timer)
+      if (rafId !== null) cancelAnimationFrame(rafId)
+      // NOTE: do NOT dispose the chart here — the real instance is owned by
+      // the semanticsMemory effect above and must outlive the observer.
+    }
+  }, [semanticsMemory])
 
   return (
     <Row gutter={12} className="rb:h-full!">
@@ -296,7 +347,7 @@ const ExplicitDetail: FC = () => {
           title={t('explicitDetail.semantic_memories')}
           headerType="borderless"
           headerClassName="rb:min-h-[54px]! rb:font-[MiSans-Bold] rb:font-bold"
-          bodyClassName="rb:p-3! rb:pt-0! rb:h-[calc(100%-54px)] rb:overflow-y-auto!"
+          bodyClassName="rb:p-3! rb:pt-0! rb:h-[calc(100%-54px)] rb:overflow-y-hidden!"
           className="rb:h-full!"
         >
           {loading ?

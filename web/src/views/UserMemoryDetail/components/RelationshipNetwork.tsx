@@ -1,16 +1,10 @@
-/*
- * @Author: ZhaoYing 
- * @Date: 2026-02-03 18:32:00 
- * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-17 17:40:02
- */
 /**
  * Relationship Network Component
  * Displays memory relationship graph with node details
  * Interactive force-directed graph visualization
  */
 
-import React, { type FC, useEffect, useState, useCallback, useRef, type Dispatch, type SetStateAction } from 'react'
+import React, { useEffect, useState, useCallback, useRef, forwardRef, useImperativeHandle, type Dispatch, type SetStateAction } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Flex, type SegmentedProps, Button } from 'antd'
@@ -37,7 +31,9 @@ interface RelationshipNetworkProps {
   refresh: () => void;
   selectNodeId: string | null;
 }
-
+export interface RelationshipNetworkRef {
+  reset: () => void;
+}
 interface NodeTypeStyle {
   category: number;
   color: string;
@@ -60,7 +56,7 @@ const UNKNOWN_NODE_TYPE_STYLE: NodeTypeStyle = { category: 0, color: '#A8ABB2' }
 const getNodeTypeStyle = (nodeType: string): NodeTypeStyle =>
   NODE_TYPE_STYLES[nodeType as GraphNode['label']] || UNKNOWN_NODE_TYPE_STYLE
 
-const RelationshipNetwork: FC<RelationshipNetworkProps> = ({ regionId, selectedKey, setRegionId, setBrainMemories, setSelectedKey, refresh, selectNodeId }) => {
+const RelationshipNetwork = forwardRef<RelationshipNetworkRef, RelationshipNetworkProps>(({ regionId, selectedKey, setRegionId, setBrainMemories, setSelectedKey, refresh, selectNodeId }, ref) => {
   const { t } = useTranslation()
   const { id } = useParams()
   const [nodes, setNodes] = useState<Node[]>([])
@@ -247,9 +243,16 @@ const RelationshipNetwork: FC<RelationshipNetworkProps> = ({ regionId, selectedK
     setBrainMemories([])
     setSelectedKey(null)
   }
+
+  /** Expose loadData and getList methods to parent component via ref */
+  useImperativeHandle(ref, () => ({
+    reset: () => {
+      setSelectedNode(null)
+    }
+  }));
   console.log('selectedCategory', selectedCategory, selectedNode)
   return (
-    <div className="rb:flex-1 rb:relative">
+    <div className="rb:h-full rb:relative rb:z-1">
       <div className="rb:absolute rb:z-111 rb:bottom-10 rb:left-[calc(50%-96px)] rb:transition-transform-[translateX(-50%]">
         <PageTabs
           value={activeTab}
@@ -334,6 +337,6 @@ const RelationshipNetwork: FC<RelationshipNetworkProps> = ({ regionId, selectedK
       />
     </div>
   )
-}
+})
 /** Use React.memo to avoid unnecessary renders */
 export default React.memo(RelationshipNetwork)

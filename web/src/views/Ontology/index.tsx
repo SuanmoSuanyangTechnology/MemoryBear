@@ -104,8 +104,8 @@ const Ontology: FC = () => {
   }
 
   return (
-    <>
-      <Flex align="center" justify="space-between" className="rb:mb-4!">
+    <Flex vertical gap={16} className="rb:h-full!">
+      <Flex align="center" justify="space-between">
         <SearchInput
           placeholder={t('ontology.searchPlaceholder')}
           onSearch={(value) => setQuery({ scene_name: value })}
@@ -128,7 +128,7 @@ const Ontology: FC = () => {
         url={getOntologyScenesUrl}
         query={query}
         column={3}
-        heightClass="rb:h-[calc(100vh-116px)]!"
+        heightClass="rb:flex-1!"
         renderItem={(item) =>(
           <RbCard
             title={
@@ -203,7 +203,7 @@ const Ontology: FC = () => {
         ref={ontologyExportModalRef}
         refresh={handleRefresh}
       />
-    </>
+    </Flex>
   )
 }
 

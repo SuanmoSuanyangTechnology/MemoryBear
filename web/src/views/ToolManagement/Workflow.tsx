@@ -77,7 +77,6 @@ const Workflow: React.FC<{ getStatusTag: (status: string) => ReactNode; keyword?
       <BodyWrapper loading={loading} empty={data.length === 0}>
         <Row
           gutter={[16, 16]}
-          className="rb:max-h-[calc(100%-48px)] rb:overflow-y-auto"
         >
           {data.map(item => (
             <Col key={item.id} span={6}>

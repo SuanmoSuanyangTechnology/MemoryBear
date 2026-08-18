@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:29:45 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-03 18:57:44
+ * @Last Modified time: 2026-08-13 16:57:28
  */
 import { type FC, useState, useEffect } from 'react';
 import { Row, Col, Flex, DatePicker } from 'antd';
@@ -79,8 +79,8 @@ const Statistics: FC<{ application: Application | null }> = ({ application }) =>
     })
   }
   return (
-    <div className="rb:w-250 rb:mx-auto">
-      <Row gutter={[16, 16]}>
+    <div className="rb:w-250 rb:mx-auto rb:h-full rb:overflow-hidden">
+      <Row gutter={[16, 16]} className="rb:max-h-full! rb:overflow-y-auto!">
         <Col span={24}>
           <Flex justify="end">
             <RangePicker className="rb:w-70" defaultValue={[query.start_date, query.end_date]} onChange={handleChange} />

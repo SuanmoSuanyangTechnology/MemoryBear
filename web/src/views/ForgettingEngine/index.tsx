@@ -242,7 +242,8 @@ const ForgettingEngine: React.FC = () => {
           title={t('forgettingEngine.forgettingCurve')}
           headerType="borderless"
           headerClassName="rb:min-h-[54px]! rb:font-[MiSans-Bold] rb:font-bold"
-          bodyClassName="rb:p-3! rb:pt-0!"
+          bodyClassName="rb:p-3! rb:pt-0! rb:h-[calc(100%-54px)]!"
+          className="rb:h-full! rb:max-h-[478px]!"
         >
           <LineChart
             config={values}

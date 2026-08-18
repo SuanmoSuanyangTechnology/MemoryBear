@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:46:47 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-07-02 13:42:43
+ * @Last Modified time: 2026-08-17 10:09:19
  */
 /**
  * Self Reflection Engine Configuration Page
@@ -167,6 +167,9 @@ const SelfReflectionEngine: React.FC = () => {
           language_type: language
         })
           .then((res) => {
+            if ((res as { message: string }).message) {
+              message.error((res as { message: string }).message)
+            }
             setResult(res as Result)
             setExpanded({ conflict: true, quality: true, privacy: true })
             setActiveTabMap({})
@@ -298,7 +301,7 @@ const SelfReflectionEngine: React.FC = () => {
             {result && <>
               <Flex justify="space-between" className="rb:bg-[#F6F6F6] rb:rounded-xl rb:py-2.5! rb:px-3! rb:leading-5">
                 <span className="rb:font-medium rb:text-[#212332]">{t('reflectionEngine.runTitle')}</span>
-                <span className="rb:text-[#5B6167]">{t(`reflectionEngine.baseline`)}: {t(`reflectionEngine.${result.baseline}`)}</span>
+                {result.baseline && <span className="rb:text-[#5B6167]">{t(`reflectionEngine.baseline`)}: {t(`reflectionEngine.${result.baseline}`)}</span>}
               </Flex>
 
               {result.reflexion_data?.length > 0 &&

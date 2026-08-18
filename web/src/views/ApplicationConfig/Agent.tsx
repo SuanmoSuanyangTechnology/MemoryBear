@@ -2,7 +2,7 @@
  * @Author: ZhaoYing
  * @Date: 2026-02-03 16:29:21
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-07-02 16:40:04
+ * @Last Modified time: 2026-08-13 10:47:30
  */
 import { forwardRef } from 'react';
 import { useTranslation } from 'react-i18next'
@@ -59,9 +59,9 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
   return (
     <>
       <Row className="rb:h-full!" gutter={12}>
-        <Col span={12} className="rb:h-full!">
-          <Form form={form}>
-            <Flex gap={12} vertical>
+        <Col span={12} className="rb:h-full! rb:overflow-hidden!">
+          <Form form={form} className="rb:h-full! rb:overflow-hidden!">
+            <Flex gap={12} vertical className="rb:h-full! rb:overflow-hidden!">
               <Flex align="center" justify="space-between" className="rb:p-3! rb:bg-white rb:rounded-xl">
                 <Button type="primary" ghost onClick={handleModelConfig} className="rb:group">
                   {modelLogo
@@ -83,7 +83,7 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
                 </Space>
               </Flex>
 
-              <Flex gap={12} vertical className="rb:h-[calc(100vh-156px)]! rb:overflow-y-auto!">
+              <Flex gap={12} vertical className="rb:h-[calc(100%-68px)]! rb:overflow-y-auto!">
                 <Form.Item name="default_model_config_id" hidden noStyle></Form.Item>
                 <Form.Item name="capability" hidden noStyle></Form.Item>
                 <Form.Item name="model_parameters" hidden noStyle></Form.Item>

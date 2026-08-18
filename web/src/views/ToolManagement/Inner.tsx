@@ -78,7 +78,6 @@ const Inner: React.FC<{ getStatusTag: (status: string) => ReactNode; keyword?: s
       <BodyWrapper loading={loading} empty={data.length === 0}>
         <Row
           gutter={[12, 12]}
-          className="rb:max-h-[calc(100%-48px)] rb:overflow-y-auto"
         >
           {data.map((item) => (
             <Col span={8} key={item.id}>

@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:12:42 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-07-14 16:13:15 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-08-14 17:27:58
  */
 /**
  * BasicLayout Component
@@ -39,8 +39,8 @@ const BasicLayout: FC = () => {
   }, [getUserInfo, getStorageType]);
 
   return (
-    <Layout>
-      <Flex vertical gap={0} className="rb:h-screen! rb:min-h-0! rb:overflow-hidden">
+    <Layout className="rb:min-h-screen!">
+      <Flex vertical gap={0} className="rb:h-screen! rb:min-h-0! rb:overflow-hidden!">
         <Banners className="rb:mb-0!" />
         <div className="rb:min-h-0 rb:flex-1 rb:overflow-hidden">
           <ErrorBoundary>

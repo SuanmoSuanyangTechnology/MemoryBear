@@ -83,9 +83,9 @@ const EndUserProfile = forwardRef<EndUserProfileRef, EndUserProfileProps>(({ cla
           onClick={handleEdit}
         ></div>
       }
-      headerClassName="rb:min-h-[46px]!! rb:font-medium!"
-      className={clsx("rb:bg-[#FFFFFF]! rb:shadow-[0px_2px_6px_0px_rgba(33,35,50,0.13)]! rb:absolute! rb:w-100 rb:top-29 rb:left-26", className)}
-      bodyClassName="rb:px-5! rb:pb-5! rb:pt-3.75! rb:max-h-[calc(100vh-186px)] rb:overflow-auto"
+      headerClassName="rb:min-h-[46px]! rb:font-medium!"
+      className={clsx("rb:bg-[#FFFFFF]! rb:shadow-[0px_2px_6px_0px_rgba(33,35,50,0.13)]! rb:absolute! rb:w-100 rb:top-3 rb:left-0 rb:bottom-0 rb:z-100", className)}
+      bodyClassName="rb:px-5! rb:pb-5! rb:pt-3.75! rb:max-h-[calc(100%-46px)]! rb:overflow-auto"
     >
       {loading
         ? <Skeleton />

@@ -86,7 +86,6 @@ const Mcp = forwardRef<McpRef, { getStatusTag: (status: string) => ReactNode; ke
       <BodyWrapper loading={loading} empty={data?.length === 0}>
         <Row
           gutter={[16, 16]}
-          className="rb:max-h-[calc(100%-48px)] rb:overflow-y-auto"
         >
           {data.map((item) => (
             <Col span={8} key={item.id}>

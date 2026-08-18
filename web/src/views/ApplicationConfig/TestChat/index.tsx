@@ -2,7 +2,7 @@
  * @Author: ZhaoYing
  * @Date: 2026-03-13 17:27:52
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-07-02 15:45:25
+ * @Last Modified time: 2026-08-13 11:55:09
  */
 import { type FC, useState, useRef, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -358,7 +358,7 @@ const TestChat: FC<TestChatProps> = ({
         bodyClassName="rb:h-[calc(100%-56px)]! rb:overflow-y-auto rb:px-3! rb:py-0!"
       >
         <Chat
-          empty={<Empty url={ChatIcon} title={t('application.testChatEmpty')} isNeedSubTitle={false} size={[240, 200]} />}
+          empty={<Empty url={ChatIcon} title={t('application.testChatEmpty')} isNeedSubTitle={false} size={[240, 200]} className="rb:h-full!" />}
           contentClassName={clsx(`rb:mx-[16px] rb:pt-[24px]`, {
             'rb:h-[calc(100%-140px)]': !fileList.length,
             'rb:h-[calc(100%-208px)]': !!fileList.length,
