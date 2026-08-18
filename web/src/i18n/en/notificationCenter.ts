@@ -25,6 +25,8 @@ export const notificationCenter = {
     empty: {
       all: 'No messages',
       unread: 'No unread messages',
+      noMore: 'No more messages',
+      hasMore: 'Up to {{total}} unread messages are displayed',
     },
     detail: {
       title: 'Message Details',
