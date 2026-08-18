@@ -1,0 +1,39 @@
+[build-system]
+requires = ["hatchling>=1.26"]
+build-backend = "hatchling.build"
+
+[project]
+name = "redbear-model"
+version = "0.1.0"
+description = "Shared RedBear model contracts, resolution, and provider runtime"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "pydantic>=2.12,<3",
+]
+
+[project.optional-dependencies]
+runtime = [
+    "httpx>=0.28,<1",
+    "json-repair>=0.53,<1",
+    "langchain-core>=1.0,<2",
+    "langchain-openai>=1.0,<2",
+    "langchain-community>=0.3,<1",
+]
+ollama = ["langchain-ollama>=1.0,<2"]
+bedrock = ["langchain-aws>=1.0.0a1,<2"]
+dashscope = ["dashscope>=1.25,<2"]
+generation = ["volcengine-python-sdk[ark]>=5.0.19,<6"]
+all = [
+    "httpx>=0.28,<1",
+    "json-repair>=0.53,<1",
+    "langchain-core>=1.0,<2",
+    "langchain-openai>=1.0,<2",
+    "langchain-community>=0.3,<1",
+    "langchain-ollama>=1.0,<2",
+    "langchain-aws>=1.0.0a1,<2",
+    "dashscope>=1.25,<2",
+    "volcengine-python-sdk[ark]>=5.0.19,<6",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/redbear_model"]

@@ -1,14 +1,12 @@
-#!/usr/bin/env python3
 """Validate import and initialization boundaries for root public packages."""
 
 from __future__ import annotations
 
 import argparse
 import ast
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
-
 
 FORBIDDEN_ROOTS = {"api", "app", "mem_knowledge", "fastapi", "celery"}
 PACKAGE_FORBIDDEN_ROOTS = {
