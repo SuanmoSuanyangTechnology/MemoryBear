@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-04-14 11:34:42 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-07-21 11:03:07
+ * @Last Modified time: 2026-08-14 14:17:14
  */
 /**
  * Package Component
@@ -199,11 +199,9 @@ const Package: FC = () => {
 
   const isHasTop = isPrivateAvailable || showTabs
   return (
-    <>
+    <Flex vertical gap={16} className="rb:h-full! rb:min-h-0! rb:overflow-hidden!">
       {isHasTop &&
-        <Flex justify={showTabs ? "space-between" : 'end'}
-          className="rb:mb-4!"
-        >
+        <Flex justify={showTabs ? "space-between" : 'end'}>
           {showTabs &&
             <PageTabs
               value={activeTab}
@@ -229,148 +227,145 @@ const Package: FC = () => {
       {activeTab === 'upgrade_package' ? (
         <ResourcePackage />
       ) : (
-      <BodyWrapper empty={filteredData.length < 1}>
-        <div ref={scrollRef} className="rb:relative rb:mx-9">
-          {showArrows && (
-            <Flex
-              align="center"
-              justify="center"
-              className={clsx("rb:absolute rb:-left-6 rb:top-1/2 rb:-translate-y-1/2 rb:-translate-x-3 rb:z-10 rb:h-25 rb:rounded-lg rb:w-6 rb:bg-[rgba(255,255,255,0.6)] rb:border rb:border-[rgba(255,255,255,0.6)]", {
-                'rb:hover:border-[#171719] rb:cursor-pointer': currentPage > 0,
-                'rb:cursor-not-allowed': currentPage === 0
-              })}
-              onClick={() => {
-                if (currentPage === 0) return
-                setCurrentPage(p => p - 1)
-              }}
-            >
-              <Icon component={arrowSvg} style={{ color: currentPage === 0 ? '#E1E2E7' : '#171719', fontSize: 24 }} />
-            </Flex>
-          )}
+        <BodyWrapper empty={filteredData.length < 1}>
+          <div ref={scrollRef} className="rb:relative rb:mx-9 rb:flex-1 rb:min-h-0! rb:overflow-hidden!">
+            {showArrows && (
+              <Flex
+                align="center"
+                justify="center"
+                className={clsx("rb:absolute rb:-left-6 rb:top-1/2 rb:-translate-y-1/2 rb:-translate-x-3 rb:z-10 rb:h-25 rb:rounded-lg rb:w-6 rb:bg-[rgba(255,255,255,0.6)] rb:border rb:border-[rgba(255,255,255,0.6)]", {
+                  'rb:hover:border-[#171719] rb:cursor-pointer': currentPage > 0,
+                  'rb:cursor-not-allowed': currentPage === 0
+                })}
+                onClick={() => {
+                  if (currentPage === 0) return
+                  setCurrentPage(p => p - 1)
+                }}
+              >
+                <Icon component={arrowSvg} style={{ color: currentPage === 0 ? '#E1E2E7' : '#171719', fontSize: 24 }} />
+              </Flex>
+            )}
 
-          <Flex gap={GAP} justify="center">
-            {pageData.map((pkg) => (
-              <div key={pkg.id} style={{ width: CARD_WIDTH, flexShrink: 0 }}>
-                <RbCard
-                  className="rb:h-full! rb:hover:shadow-[0px_4px_10px_0px_rgba(0,0,0,0.12)]!"
-                  bodyClassName="rb:p-0! rb:pb-4! rb:h-full!"
-                  headerClassName="rb:min-h-0!"
-                >
-                  <div className="rb:px-5 rb:pt-4">
-                    <div className="rb:h-25!">
-                      {/* Header */}
-                      <Flex justify="space-between" align="start" className="rb:mb-1!">
-                        <Tooltip title={String(pkg[getKeyWithLanguage('name')] ?? '')}>
-                          <h3 className="rb:text-[18px] rb:font-bold rb:text-[MiSans-Bold] rb:w-54.5 rb:line-clamp-2" style={{ color: pkg.theme_color }}>
-                            {String(pkg[getKeyWithLanguage('name')] ?? '')}
-                          </h3>
+            <Flex gap={GAP} justify="center" className="rb:h-full! rb:min-h-0! rb:overflow-hidden!">
+              {pageData.map((pkg) => (
+                <div key={pkg.id} style={{ width: CARD_WIDTH, flexShrink: 0 }} className="rb:h-full! rb:min-h-0! rb:overflow-hidden!">
+                  <RbCard
+                    className="rb:h-full! rb:hover:shadow-[0px_4px_10px_0px_rgba(0,0,0,0.12)]!"
+                    bodyClassName="rb:p-0! rb:pb-4! rb:h-full! rb:overflow-hidden!"
+                    headerClassName="rb:min-h-0!"
+                  >
+                    <Flex vertical className="rb:px-5! rb:pt-4! rb:h-full! rb:overflow-hidden!">
+                      <div className="rb:h-25!">
+                        {/* Header */}
+                        <Flex justify="space-between" align="start" className="rb:mb-1!">
+                          <Tooltip title={String(pkg[getKeyWithLanguage('name')] ?? '')}>
+                            <h3 className="rb:text-[18px] rb:font-bold rb:text-[MiSans-Bold] rb:w-54.5 rb:line-clamp-2" style={{ color: pkg.theme_color }}>
+                              {String(pkg[getKeyWithLanguage('name')] ?? '')}
+                            </h3>
+                          </Tooltip>
+                        </Flex>
+
+                        {/* Subtitle */}
+                        <Tooltip title={String(pkg[getKeyWithLanguage('core_value')] ?? '')}>
+                          <p className="rb:text-[#5B6167] rb:mb-4 rb:line-clamp-1">
+                            {String(pkg[getKeyWithLanguage('core_value')] ?? '')}
+                          </p>
                         </Tooltip>
-                      </Flex>
+                      </div>
 
-                      {/* Subtitle */}
-                      <Tooltip title={String(pkg[getKeyWithLanguage('core_value')] ?? '')}>
-                        <p className="rb:text-[#5B6167] rb:mb-4 rb:line-clamp-1">
-                          {String(pkg[getKeyWithLanguage('core_value')] ?? '')}
-                        </p>
-                      </Tooltip>
-                    </div>
+                      {/* Price */}
+                      <div className="rb:h-10 rb:mb-4">
+                        {pkg.billing_cycle !== 'permanent_free' && <>
+                          <span className="rb:text-[#5B6167] rb:inline-block rb:leading-5 rb:pt-3.25 rb:pb-1.75 rb:mr-1">¥</span>
+                          <span className="rb:text-[28px] rb:text-[MiSans-Bold] rb:font-bold rb:leading-10">{pkg.price}</span>
+                        </>}
+                        {pkg.billing_cycle && (
+                          <span className={clsx({
+                            'rb:text-[28px] rb:text-[MiSans-Bold] rb:font-bold rb:leading-10': pkg.billing_cycle === 'permanent_free',
+                            'rb:text-[#5B6167] rb:inline-block rb:leading-5 rb:pt-3.25 rb:pb-1.75 rb:ml-1': pkg.billing_cycle !== 'permanent_free'
+                          })}>
+                            {pkg.billing_cycle !== 'permanent_free' && ' /'}
+                            {t(`package.${pkg.billing_cycle}`)}
+                          </span>
+                        )}
+                      </div>
 
-                    {/* Price */}
-                    <div className="rb:h-10 rb:mb-4">
-                      {pkg.billing_cycle !== 'permanent_free' && <>
-                        <span className="rb:text-[#5B6167] rb:inline-block rb:leading-5 rb:pt-3.25 rb:pb-1.75 rb:mr-1">¥</span>
-                        <span className="rb:text-[28px] rb:text-[MiSans-Bold] rb:font-bold rb:leading-10">{pkg.price}</span>
-                      </>}
-                      {pkg.billing_cycle && (
-                        <span className={clsx({
-                          'rb:text-[28px] rb:text-[MiSans-Bold] rb:font-bold rb:leading-10': pkg.billing_cycle === 'permanent_free',
-                          'rb:text-[#5B6167] rb:inline-block rb:leading-5 rb:pt-3.25 rb:pb-1.75 rb:ml-1': pkg.billing_cycle !== 'permanent_free'
-                        })}>
-                          {pkg.billing_cycle !== 'permanent_free' && ' /'}
-                          {t(`package.${pkg.billing_cycle}`)}
-                        </span>
-                      )}
-                    </div>
+                      <Button
+                        type={['permanent_free', 'local_deployment'].includes(pkg.billing_cycle) ? 'default' : 'primary'}
+                        block
+                        className={btnClassNames[['permanent_free', 'local_deployment'].includes(pkg.billing_cycle) ? 'permanent_free' : 'default']}
+                        onClick={() => handleChoosePlan(pkg)}
+                      >
+                        {pkg.billing_cycle === 'permanent_free'
+                          ? t('pricing.startedBtn')
+                          : pkg.billing_cycle === 'local_deployment'
+                          ? t('pricing.contactBtn')
+                          : t('pricing.choosePlanBtn')
+                        }
+                      </Button>
 
-                    <Button
-                      type={['permanent_free', 'local_deployment'].includes(pkg.billing_cycle) ? 'default' : 'primary'}
-                      block
-                      className={btnClassNames[['permanent_free', 'local_deployment'].includes(pkg.billing_cycle) ? 'permanent_free' : 'default']}
-                      onClick={() => handleChoosePlan(pkg)}
-                    >
-                      {pkg.billing_cycle === 'permanent_free'
-                        ? t('pricing.startedBtn')
-                        : pkg.billing_cycle === 'local_deployment'
-                        ? t('pricing.contactBtn')
-                        : t('pricing.choosePlanBtn')
-                      }
-                    </Button>
+                      <Divider className="rb:my-4" />
 
-                    <Divider className="rb:my-4" />
-
-                    {/* Features */}
-                    <Flex gap={12} vertical
-                      className={clsx("rb:mb-4! rb:overflow-y-auto ", {
-                        'rb:h-[calc(100vh-346px)]!': !isHasTop,
-                        'rb:h-[calc(100vh-396px)]!': isHasTop,
-                      })}
-                    >
-                      {billingUnits.map(({ key, unit, icon }) => {
-                        const value = pkg?.quotas?.[key as keyof Package['quotas']];
-                        return (
+                      {/* Features */}
+                      <Flex gap={12} vertical
+                        className="rb:mb-4! rb:overflow-y-auto rb:flex-1!"
+                      >
+                        {billingUnits.map(({ key, unit, icon }) => {
+                          const value = pkg?.quotas?.[key as keyof Package['quotas']];
+                          return (
+                            <UnitWrapper
+                              key={key}
+                              titleKey={key}
+                              value={value}
+                              unit={unit}
+                              icon={icon}
+                              theme_color={pkg.theme_color}
+                            />
+                          )
+                        })}
+                        {pkg.tech_support && pkg[getKeyWithLanguage('tech_support')] && (
                           <UnitWrapper
-                            key={key}
-                            titleKey={key}
-                            value={value}
-                            unit={unit}
-                            icon={icon}
+                              titleKey="tech_support"
+                              value={String(pkg[getKeyWithLanguage('tech_support')] ?? '')}
+                              icon="technical_support"
+                              theme_color={pkg.theme_color}
+                            />
+                        )}
+                        {pkg.sla_compliance && pkg[getKeyWithLanguage('sla_compliance')] && (
+                          <UnitWrapper
+                            titleKey="sla"
+                            value={String(pkg[getKeyWithLanguage('sla_compliance')] ?? '')}
+                            icon="sla"
                             theme_color={pkg.theme_color}
                           />
-                        )
-                      })}
-                      {pkg.tech_support && pkg[getKeyWithLanguage('tech_support')] && (
-                        <UnitWrapper
-                            titleKey="tech_support"
-                            value={String(pkg[getKeyWithLanguage('tech_support')] ?? '')}
-                            icon="technical_support"
-                            theme_color={pkg.theme_color}
-                          />
-                      )}
-                      {pkg.sla_compliance && pkg[getKeyWithLanguage('sla_compliance')] && (
-                        <UnitWrapper
-                          titleKey="sla"
-                          value={String(pkg[getKeyWithLanguage('sla_compliance')] ?? '')}
-                          icon="sla"
-                          theme_color={pkg.theme_color}
-                        />
-                      )}
+                        )}
+                      </Flex>
                     </Flex>
-                  </div>
-                </RbCard>
-              </div>
-            ))}
-          </Flex>
-
-          {showArrows && (
-            <Flex
-              align="center"
-              justify="center"
-              className={clsx("rb:absolute rb:-right-12 rb:top-1/2 rb:-translate-y-1/2 rb:-translate-x-3 rb:z-10 rb:h-25 rb:rounded-lg rb:w-6 rb:bg-[rgba(255,255,255,0.6)] rb:border rb:border-[rgba(255,255,255,0.6)]", {
-                'rb:hover:border-[#171719] rb:cursor-pointer': currentPage < totalPages - 1,
-                'rb:cursor-not-allowed': currentPage >= totalPages - 1
-              })}
-              onClick={() => {
-                if (currentPage >= totalPages - 1) return
-                setCurrentPage(p => p + 1)
-              }}
-            >
-              <Icon component={arrowSvg} className="rb:rotate-180" style={{ color: currentPage >= totalPages - 1 ? '#E1E2E7' : '#171719', fontSize: 24 }} />
+                  </RbCard>
+                </div>
+              ))}
             </Flex>
-          )}
-        </div>
-      </BodyWrapper>
+
+            {showArrows && (
+              <Flex
+                align="center"
+                justify="center"
+                className={clsx("rb:absolute rb:-right-12 rb:top-1/2 rb:-translate-y-1/2 rb:-translate-x-3 rb:z-10 rb:h-25 rb:rounded-lg rb:w-6 rb:bg-[rgba(255,255,255,0.6)] rb:border rb:border-[rgba(255,255,255,0.6)]", {
+                  'rb:hover:border-[#171719] rb:cursor-pointer': currentPage < totalPages - 1,
+                  'rb:cursor-not-allowed': currentPage >= totalPages - 1
+                })}
+                onClick={() => {
+                  if (currentPage >= totalPages - 1) return
+                  setCurrentPage(p => p + 1)
+                }}
+              >
+                <Icon component={arrowSvg} className="rb:rotate-180" style={{ color: currentPage >= totalPages - 1 ? '#E1E2E7' : '#171719', fontSize: 24 }} />
+              </Flex>
+            )}
+          </div>
+        </BodyWrapper>
       )}
-    </>
+    </Flex>
   );
 };
 

@@ -2,16 +2,15 @@
  * @Author: ZhaoYing 
  * @Date: 2026-01-12 14:42:02 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-08-03 16:45:38
+ * @Last Modified time: 2026-08-14 14:51:27
  */
 import { type FC, useEffect, useState, useMemo, useRef, Fragment } from 'react'
 import clsx from 'clsx'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
 import { Row, Col, Skeleton, Button, Divider, Tooltip, Flex } from 'antd'
-
-
 import InfiniteScroll from 'react-infinite-scroll-component'
+
 import RbCard from '@/components/RbCard/Card'
 import {
   getConversations,
@@ -331,37 +330,39 @@ const WorkingDetail: FC = () => {
                   }
                   headerType="borderless"
                   headerClassName="rb:min-h-[42px]! rb:pt-4! rb:font-[MiSans-Bold] rb:font-bold"
-                  bodyClassName='rb:p-4! rb:pt-0! rb:h-[calc(100%-42px)]'
+                  bodyClassName='rb:p-4! rb:pt-0! rb:h-[calc(100%-42px)]! rb:overflow-hidden!'
                   className="rb:h-full!"
                 >
-                  <div className="rb:text-[#5B6167] rb:leading-4.5 rb:text-[12px]">{timeRange}</div>
-                  <Flex justify="space-between" align="center" className="rb:bg-[#F6F6F6] rb:rounded-lg rb:py-2.5! rb:pr-2.5! rb:pl-3.25! rb:mt-3!">
-                    {t('workingDetail.conversationStream')}
-                    <Button className="rb:h-6!" onClick={handleRefresh}>{t('workingDetail.refresh')}</Button>
+                  <Flex vertical className="rb:h-full! rb:overflow-y-hidden!">
+                    <div className="rb:text-[#5B6167] rb:leading-4.5 rb:text-[12px]">{timeRange}</div>
+                    <Flex justify="space-between" align="center" className="rb:bg-[#F6F6F6] rb:rounded-lg rb:py-2.5! rb:pr-2.5! rb:pl-3.25! rb:mt-3!">
+                      {t('workingDetail.conversationStream')}
+                      <Button className="rb:h-6!" onClick={handleRefresh}>{t('workingDetail.refresh')}</Button>
+                    </Flex>
+                    {(selected as ApiMcpListItem).source && id
+                      ? (
+                        <ApiMcpMessageList
+                          ref={apiMcpMessageListRef}
+                          endUserId={id}
+                          source={(selected as ApiMcpListItem).source}
+                          onMessagesChange={setMessages}
+                        />
+                      )
+                      : messagesLoading
+                        ? <Skeleton active />
+                        : messages.length === 0
+                          ? <Empty />
+                          : (
+                            <ChatContent
+                              classNames="rb:flex-1 rb:pt-5"
+                              contentClassNames="rb:max-w-110!"
+                              data={messages}
+                              streamLoading={false}
+                              labelFormat={(item) => formatDateTime(item.created_at)}
+                            />
+                          )
+                    }
                   </Flex>
-                  {(selected as ApiMcpListItem).source && id
-                    ? (
-                      <ApiMcpMessageList
-                        ref={apiMcpMessageListRef}
-                        endUserId={id}
-                        source={(selected as ApiMcpListItem).source}
-                        onMessagesChange={setMessages}
-                      />
-                    )
-                    : messagesLoading
-                      ? <Skeleton active />
-                      : messages.length === 0
-                        ? <Empty />
-                        : (
-                          <ChatContent
-                            classNames="rb:h-[calc(100%-77px)] rb:pt-5"
-                            contentClassNames="rb:max-w-110!"
-                            data={messages}
-                            streamLoading={false}
-                            labelFormat={(item) => formatDateTime(item.created_at)}
-                          />
-                        )
-                  }
                 </RbCard>
               </Col>
               <Col flex='360px' className="rb:h-full!">

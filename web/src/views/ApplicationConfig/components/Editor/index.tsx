@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:25:17 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-18 12:24:31
+ * @Last Modified time: 2026-08-12 18:44:17
  */
 /**
  * Rich text editor component using Lexical framework
@@ -43,6 +43,7 @@ export interface EditorRef {
  * Editor component props
  */
 interface LexicalEditorProps {
+  wrapperClassName?: string;
   /** Additional CSS class names */
   className?: string;
   /** Placeholder text when editor is empty */
@@ -74,6 +75,7 @@ const theme = {
  */
 const EditorContent = forwardRef<EditorRef, LexicalEditorProps>(({
   className = '',
+  wrapperClassName = '',
   value,
   placeholder = "Please enter content...",
   onChange,
@@ -137,7 +139,7 @@ const EditorContent = forwardRef<EditorRef, LexicalEditorProps>(({
   }), [editor]);
 
   return (
-    <div className="rb:relative">
+    <div className={clsx("rb:relative", wrapperClassName)}>
       <RichTextPlugin
         contentEditable={
           <ContentEditable

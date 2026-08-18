@@ -63,19 +63,20 @@ const NodeDetailPanel: FC<NodeDetailPanelProps> = ({
   onViewAll,
 }) => {
   const { t } = useTranslation()
-
+  const isEdge = selectedNode && 'type' in selectedNode && (selectedNode as EdgeClickData).type === 'edge'
   return (
     <RbCard
       title={t('userMemory.memoryDetails')}
-      className="rb:absolute! rb:top-4 rb:right-0 rb:w-100! rb:bg-white! rb:max-h-[calc(100vh-140px)]!"
+      className="rb:absolute! rb:top-4 rb:right-0 rb:w-100! rb:bottom-0 rb:bg-white! rb:max-h-full!"
       headerType="borderless"
       headerClassName="rb:min-h-[60px]!"
-      bodyClassName={clsx('rb:px-5! rb:pt-0! rb:pb-3! rb:max-h-[calc(100vh-194px)]! rb:overflow-auto!', {
-        'rb:pb-[76px]!': activeTab !== 'communityNetwork' && !(selectedNode && 'type' in selectedNode && (selectedNode as EdgeClickData).type === 'edge'),
+      bodyClassName={clsx('rb:px-5! rb:pt-0! rb:h-[calc(100%-60px)]!', {
+        'rb:pb-3! rb:overflow-auto!': activeTab === 'communityNetwork' || isEdge,
+        'rb:pb-[76px]! rb:overflow-hidden!': activeTab !== 'communityNetwork' && !isEdge,
       })}
       extra={<div className="rb:cursor-pointer rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/userMemory/close.svg')]" onClick={onClose}></div>}
     >
-      {selectedNode && 'type' in selectedNode && (selectedNode as EdgeClickData).type === 'edge'
+      {isEdge
         ? <EdgeDetailPanel
             selectedNode={selectedNode as any}
             nodes={nodes}
@@ -85,10 +86,7 @@ const NodeDetailPanel: FC<NodeDetailPanelProps> = ({
             onRelationChange={onRelationChange}
           />
         : <>
-          <div className={clsx("rb:max-h-[calc(100vh-272px)] rb:overflow-auto", {
-            'rb:max-h-[calc(100vh-269px)]': activeTab !== 'communityNetwork',
-            'rb:max-h-[calc(100vh-205px)]': activeTab == 'communityNetwork',
-          })}>
+          <div className="rb:overflow-auto rb:h-full">
             {(selectedNode as RawCommunityNode).properties.community_id
               ? <div>
                   <div className="rb:font-medium rb:text-[#212332] rb:text-[16px] rb:leading-5.5 rb:pl-1">
@@ -304,7 +302,7 @@ const NodeDetailPanel: FC<NodeDetailPanelProps> = ({
           </div>
 
           {activeTab !== 'communityNetwork' &&
-            <div className="rb:absolute rb:bottom-3 rb:left-6 rb:right-6">
+            <div className="rb:absolute rb:bottom-3 rb:left-6 rb:right-6 rb:bg-white">
               <Flex align="center" gap={12}>
                 <Flex align="center" justify="center" gap={6} className="rb:flex-1 rb:border rb:border-[#E5E6EB] rb:rounded-xl rb:h-11 rb:font-medium rb:leading-5 rb:text-[#212332] rb:cursor-pointer rb:hover:border-[#171719]" onClick={onForget}>
                   {t('userMemory.forgetThisMemory')}

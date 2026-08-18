@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-06 21:10:56 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-07-06 18:51:50
+ * @Last Modified time: 2026-08-14 14:29:48
  */
 /**
  * Workflow Chat Component
@@ -502,78 +502,78 @@ const Chat = forwardRef<ChatRef, ChatProps>(({
         headerType="borderless"
         headerClassName={clsx("rb:font-[MiSans-Bold] rb:font-bold rb:min-h-[48px]!")}
         className="rb:h-full!"
-        bodyClassName={clsx('rb:overflow-hidden! rb:h-[calc(100%-48px)]! rb:px-0! rb:pt-0! rb:pb-3!')}
+        bodyClassName={clsx('rb:overflow-hidden! rb:h-[calc(100%-48px)]! rb:p-0! rb:relative')}
       >
-        <ChatContent
-          classNames={clsx("rb:mx-[16px] rb:pt-[24px] rb:h-[calc(100%-130px)]", {
-            'rb:h-[calc(100%-194px)]': fileList.length > 0
-          })}
-          contentClassNames="rb:max-w-[400px]!'"
-          empty={<Empty url={ChatIcon} title={t('application.chatEmpty')} isNeedSubTitle={false} size={[240, 200]} className="rb:h-full" />}
-          data={chatList}
-          streamLoading={streamLoading}
-          labelPosition="bottom"
-          labelFormat={(item) => dayjs(item.created_at).locale('en').format('MMMM D, YYYY [at] h:mm A')}
-          // errorDesc={t('application.ReplyException')}
-          renderRuntime={(item, index) => {
-            return <Runtime item={item} index={index} source="workflow" />
-          }}
-          onSend={handleSend}
-          handleInterventionActionClick={handleInterventionActionClick}
-          isEnded={chatIsEnded.current}
-          isSupportTools={isWorkflow}
-          isAlwaysShowAssistantTools={isWorkflow}
-          handleFavorite={isWorkflow ? handleFavorite : undefined}
-          handleFeedback={isWorkflow ? handleFeedback : undefined}
-          deleteMsg={isWorkflow ? deleteMsg : undefined}
-          reportMsg={isWorkflow ? reportMsg : undefined}
-          regenerateMaxCount={5}
-          regenerateMessages={isWorkflow ? regenerateMessages : undefined}
-          handleVersionChange={isWorkflow ? handleVersionChange : undefined}
-        />
-        {isWorkflow &&
-          <Flex align="center" gap={10} className="rb:relative rb:m-4! rb:mb-0!">
-            <ChatInput
-              message={message}
-              className="rb:relative!"
-              loading={loading}
-              fileChange={updateFileList}
-              fileList={fileList}
-              onSend={handleSend}
-              onChange={(msg) => setMessage(msg)}
-            >
-              <ChatToolbar
-                ref={toolbarCallbackRef}
-                features={features as FeaturesConfigForm}
-                onFilesChange={setFileList}
-                onVariablesChange={setVariables}
-              />
-            </ChatInput>
-          </Flex>
-        }
-        {!isWorkflow &&
-          <Flex align="center" justify="center" gap={10} className="rb:relative rb:m-4! rb:mb-1!">
-            {variables.length > 0 &&
-              <Button
-                danger={isNeedVariableConfig}
-                icon={<div className={clsx("rb:size-4 rb:bg-cover", {
-                  "rb:bg-[url('@/assets/images/conversation/variables_red.svg')]": isNeedVariableConfig,
-                  "rb:bg-[url('@/assets/images/conversation/variables.svg')]": !isNeedVariableConfig
-                })} />}
-                onClick={() => variableConfigModalRef.current?.handleOpen(variables)}
+        <Flex vertical className="rb:h-full! rb:overflow-hidden">
+          <ChatContent
+            classNames="rb:mx-[16px] rb:pt-3! rb:flex-1! rb:min-h-0!"
+            contentClassNames="rb:max-w-[400px]!'"
+            empty={<Empty url={ChatIcon} title={t('application.chatEmpty')} isNeedSubTitle={false} size={[240, 200]} className="rb:h-full" />}
+            data={chatList}
+            streamLoading={streamLoading}
+            labelPosition="bottom"
+            labelFormat={(item) => dayjs(item.created_at).locale('en').format('MMMM D, YYYY [at] h:mm A')}
+            // errorDesc={t('application.ReplyException')}
+            renderRuntime={(item, index) => {
+              return <Runtime item={item} index={index} source="workflow" />
+            }}
+            onSend={handleSend}
+            handleInterventionActionClick={handleInterventionActionClick}
+            isEnded={chatIsEnded.current}
+            isSupportTools={isWorkflow}
+            isAlwaysShowAssistantTools={isWorkflow}
+            handleFavorite={isWorkflow ? handleFavorite : undefined}
+            handleFeedback={isWorkflow ? handleFeedback : undefined}
+            deleteMsg={isWorkflow ? deleteMsg : undefined}
+            reportMsg={isWorkflow ? reportMsg : undefined}
+            regenerateMaxCount={5}
+            regenerateMessages={isWorkflow ? regenerateMessages : undefined}
+            handleVersionChange={isWorkflow ? handleVersionChange : undefined}
+          />
+          {isWorkflow &&
+            <Flex align="center" gap={10} className="rb:relative rb:mx-4! rb:mt-4! rb:mb-0!">
+              <ChatInput
+                message={message}
+                className="rb:relative! rb:mt-4!"
+                loading={loading}
+                fileChange={updateFileList}
+                fileList={fileList}
+                onSend={handleSend}
+                onChange={(msg) => setMessage(msg)}
               >
-                {t('memoryConversation.variableConfig')}
+                <ChatToolbar
+                  ref={toolbarCallbackRef}
+                  features={features as FeaturesConfigForm}
+                  onFilesChange={setFileList}
+                  onVariablesChange={setVariables}
+                />
+              </ChatInput>
+            </Flex>
+          }
+          {!isWorkflow &&
+            <Flex align="center" justify="center" gap={10} className="rb:relative rb:m-4!">
+              {variables.length > 0 &&
+                <Button
+                  danger={isNeedVariableConfig}
+                  icon={<div className={clsx("rb:size-4 rb:bg-cover", {
+                    "rb:bg-[url('@/assets/images/conversation/variables_red.svg')]": isNeedVariableConfig,
+                    "rb:bg-[url('@/assets/images/conversation/variables.svg')]": !isNeedVariableConfig
+                  })} />}
+                  onClick={() => variableConfigModalRef.current?.handleOpen(variables)}
+                >
+                  {t('memoryConversation.variableConfig')}
+                </Button>
+              }
+              <Button
+                type="primary"
+                onClick={() => handleSend()}
+                loading={loading}
+              >
+                {t('workflow.startRun')}
               </Button>
-            }
-            <Button
-              type="primary"
-              onClick={() => handleSend()}
-              loading={loading}
-            >
-              {t('workflow.startRun')}
-            </Button>
-          </Flex>
-        }
+            </Flex>
+          }
+        </Flex>
         <VariableConfigModal
           ref={variableConfigModalRef}
           refresh={setVariables}

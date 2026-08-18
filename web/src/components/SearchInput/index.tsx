@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:24:23 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-25 11:15:26
+ * @Last Modified time: 2026-08-14 18:42:04
  */
 /**
  * SearchInput Component
@@ -117,7 +117,7 @@ const SearchInput: FC<SearchInputProps> = ({
       placeholder={placeholder || t('user.searchPlaceholder')}
       value={value}
       onChange={handleChange}
-      className={`rb:w-75! ${className}`}
+      className={className?.includes('rb:w-') ? className : `rb:w-75! ${className}`}
       variant={variant}
       {...props}
     />

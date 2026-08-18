@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:53:44 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-31 12:15:59
+ * @Last Modified time: 2026-08-14 14:41:07
  */
 /**
  * User Memory Page
@@ -93,9 +93,9 @@ export default function UserMemory() {
   }
 
   return (
-    <div>
+    <Flex vertical gap={16} className="rb:h-full!">
       <Form form={form}>
-        <Flex align="center" justify="space-between" className="rb:mb-4!">
+        <Flex align="center" justify="space-between">
           <PageTabs
             value={activeTab}
             options={formatTabItems}
@@ -110,8 +110,6 @@ export default function UserMemory() {
           </Flex>
         </Flex>
       </Form>
-
-    
       <PageScrollList<Data, Query>
         ref={scrollListRef}
         url={userMemoryListUrl}
@@ -212,6 +210,7 @@ export default function UserMemory() {
             </RbCard>
           )
         }}
+        heightClass="rb:flex-1!"
       />
 
       <MemorySubjectDetailModal ref={memorySubjectDetailModalRef} />
@@ -221,6 +220,6 @@ export default function UserMemory() {
         ref={deleteConfirmModalRef}
         refreshTable={() => scrollListRef.current?.refresh()}
       />
-    </div>
+    </Flex>
   );
 }

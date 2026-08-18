@@ -23,7 +23,7 @@ from app.core.validators.memory_config_validators import (
     validate_and_resolve_model_id_async,
 )
 from app.i18n.service import t
-from app.models import Workspace
+from app.models import Workspace, WorkspaceDefaultModelPreset
 from app.models.app_model import AppType
 from app.models.memory_config_model import MemoryConfig as MemoryConfigModel
 from app.repositories.end_user_repository import get_end_user_by_id, get_end_user_by_id_async
@@ -165,16 +165,64 @@ async def _load_ontology_class_infos_async(db: AsyncSession, scene_id) -> list:
         return []
 
 
+def _get_default_model_preset(db: Session):
+    from app.services.workspace_service import DEFAULT_PRESET_KEY
+
+    return (
+        db.query(WorkspaceDefaultModelPreset)
+        .filter(WorkspaceDefaultModelPreset.singleton_key == DEFAULT_PRESET_KEY)
+        .first()
+    )
+
+
+async def _get_default_model_preset_async(db: AsyncSession):
+    """Fetch the singleton workspace default model preset (async)."""
+    from app.services.workspace_service import DEFAULT_PRESET_KEY
+
+    result = await db.execute(
+        select(WorkspaceDefaultModelPreset).where(
+            WorkspaceDefaultModelPreset.singleton_key == DEFAULT_PRESET_KEY
+        )
+    )
+    return result.scalars().first()
+
+
+def _effective_workspace_models(workspace, preset) -> dict:
+    """Return the model IDs a workspace should resolve at runtime.
+
+    Default-config workspaces follow the singleton ``WorkspaceDefaultModelPreset``
+    (their own columns are only a copy). Other workspaces use their own columns.
+    Falls back to the workspace's own columns when the preset is missing.
+    """
+    if workspace.is_default_config and preset is not None:
+        return {
+            "llm": preset.llm_model_config_id,
+            "embedding": preset.embedding_model_config_id,
+            "rerank": preset.rerank_model_config_id,
+            "vision": preset.vision_model_config_id,
+            "audio": preset.audio_model_config_id,
+            "video": preset.video_model_config_id,
+        }
+    return {
+        "llm": workspace.llm,
+        "embedding": workspace.embedding,
+        "rerank": workspace.rerank,
+        "vision": workspace.vision,
+        "audio": workspace.audio,
+        "video": workspace.video,
+    }
+
+
 def _build_memory_config(
-    memory_config_row,
-    workspace,
-    llm_uuid, llm_name,
-    embedding_uuid, embedding_name,
-    rerank_uuid, rerank_name,
-    vision_uuid, vision_name,
-    audio_uuid, audio_name,
-    video_uuid, video_name,
-    ontology_class_infos,
+        memory_config_row,
+        workspace,
+        llm_uuid, llm_name,
+        embedding_uuid, embedding_name,
+        rerank_uuid, rerank_name,
+        vision_uuid, vision_name,
+        audio_uuid, audio_name,
+        video_uuid, video_name,
+        ontology_class_infos,
 ) -> MemoryConfig:
     """Construct a MemoryConfig from validated models — shared by sync and async paths."""
     return MemoryConfig(
@@ -493,10 +541,13 @@ class MemoryConfigService:
 
             memory_config, workspace = result
 
+            preset = _get_default_model_preset(self.db) if workspace.is_default_config else None
+            models = _effective_workspace_models(workspace, preset)
+
             # Step 2: Validate workspace models
             embed_start = time.time()
             embedding_uuid, embedding_name = validate_and_resolve_model_id(
-                workspace.embedding, "embedding", self.db, workspace.tenant_id,
+                models["embedding"], "embedding", self.db, workspace.tenant_id,
                 required=True, config_id=validated_config_id, workspace_id=workspace.id,
             )
             embed_time = time.time() - embed_start
@@ -505,7 +556,7 @@ class MemoryConfigService:
             # Step 3: Resolve workspace models
             llm_start = time.time()
             llm_uuid, llm_name = validate_and_resolve_model_id(
-                workspace.llm, "llm", self.db, workspace.tenant_id,
+                models["llm"], "llm", self.db, workspace.tenant_id,
                 required=True, config_id=validated_config_id, workspace_id=workspace.id,
             )
             llm_time = time.time() - llm_start
@@ -513,23 +564,23 @@ class MemoryConfigService:
 
             rerank_start = time.time()
             rerank_uuid, rerank_name = validate_and_resolve_model_id(
-                workspace.rerank, "rerank", self.db, workspace.tenant_id,
+                models["rerank"], "rerank", self.db, workspace.tenant_id,
                 required=False, config_id=validated_config_id, workspace_id=workspace.id,
             )
             rerank_time = time.time() - rerank_start
-            if workspace.rerank:
+            if models["rerank"]:
                 logger.info(f"[PERF] Rerank validation: {rerank_time:.4f}s")
 
             vision_uuid, vision_name = validate_and_resolve_model_id(
-                workspace.vision, "llm", self.db, workspace.tenant_id,
+                models["vision"], "llm", self.db, workspace.tenant_id,
                 required=False, config_id=validated_config_id, workspace_id=workspace.id,
             )
             audio_uuid, audio_name = validate_and_resolve_model_id(
-                workspace.audio, "llm", self.db, workspace.tenant_id,
+                models["audio"], "llm", self.db, workspace.tenant_id,
                 required=False, config_id=validated_config_id, workspace_id=workspace.id,
             )
             video_uuid, video_name = validate_and_resolve_model_id(
-                workspace.video, "llm", self.db, workspace.tenant_id,
+                models["video"], "llm", self.db, workspace.tenant_id,
                 required=False, config_id=validated_config_id, workspace_id=workspace.id,
             )
             # Create immutable MemoryConfig object
@@ -613,6 +664,9 @@ class MemoryConfigService:
                 )
             memory_config_row, workspace = result
 
+            preset = await _get_default_model_preset_async(self.db) if workspace.is_default_config else None
+            models = _effective_workspace_models(workspace, preset)
+
             # Step 2: validate all models + load ontology concurrently
             v_start = time.time()
             (
@@ -625,27 +679,27 @@ class MemoryConfigService:
                 ontology_class_infos,
             ) = await asyncio.gather(
                 validate_and_resolve_model_id_async(
-                    workspace.embedding, "embedding", self.db, workspace.tenant_id,
+                    models["embedding"], "embedding", self.db, workspace.tenant_id,
                     required=True, config_id=memory_config_row.config_id, workspace_id=workspace.id,
                 ),
                 validate_and_resolve_model_id_async(
-                    workspace.llm, "llm", self.db, workspace.tenant_id,
+                    models["llm"], "llm", self.db, workspace.tenant_id,
                     required=True, config_id=memory_config_row.config_id, workspace_id=workspace.id,
                 ),
                 validate_and_resolve_model_id_async(
-                    workspace.rerank, "rerank", self.db, workspace.tenant_id,
+                    models["rerank"], "rerank", self.db, workspace.tenant_id,
                     required=False, config_id=memory_config_row.config_id, workspace_id=workspace.id,
                 ),
                 validate_and_resolve_model_id_async(
-                    workspace.vision, "llm", self.db, workspace.tenant_id,
+                    models["vision"], "llm", self.db, workspace.tenant_id,
                     required=False, config_id=memory_config_row.config_id, workspace_id=workspace.id,
                 ),
                 validate_and_resolve_model_id_async(
-                    workspace.audio, "llm", self.db, workspace.tenant_id,
+                    models["audio"], "llm", self.db, workspace.tenant_id,
                     required=False, config_id=memory_config_row.config_id, workspace_id=workspace.id,
                 ),
                 validate_and_resolve_model_id_async(
-                    workspace.video, "llm", self.db, workspace.tenant_id,
+                    models["video"], "llm", self.db, workspace.tenant_id,
                     required=False, config_id=memory_config_row.config_id, workspace_id=workspace.id,
                 ),
                 _load_ontology_class_infos_async(self.db, memory_config_row.scene_id),

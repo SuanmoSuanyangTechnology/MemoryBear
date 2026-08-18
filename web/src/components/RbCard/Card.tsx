@@ -145,7 +145,7 @@ const RbCard: FC<RbCardProps> = ({
             )
           }>
             {/* Title with tooltip for overflow text */}
-            <Tooltip title={title}>
+            <Tooltip title={title} placement="topLeft">
               <div className={`rb:w-full rb:text-ellipsis rb:overflow-hidden rb:whitespace-nowrap ${titleClassName}`}>{title}</div>
             </Tooltip>
             {/* Optional subtitle */}
@@ -159,7 +159,8 @@ const RbCard: FC<RbCardProps> = ({
           'rb:font-medium',
           {
             /** Borderless header style */
-            'rb:border-[0]! rb:text-[16px] rb:p-[0_16px]! rb:min-h-10!': headerType === 'borderless',
+            'rb:border-[0]! rb:text-[16px] rb:p-[0_16px]!': headerType === 'borderless',
+            'rb:min-h-10!': headerType === 'borderless' && !headerClassName?.includes('rb:min-h-'),
             /** Header with avatar */
             'rb:border-[0]! rb:text-[16px] rb:p-[16px_16px_0_16px]!': avatarUrl || avatar,
             /** Standard border header */
@@ -167,7 +168,8 @@ const RbCard: FC<RbCardProps> = ({
             /** Border bottom-left style */
             "rb:m-[0_16px]!  rb:p-[0]! rb:relative rb:before:content-[''] rb:before:w-[4px] rb:before:h-[16px] rb:before:bg-[#5B6167] rb:before:absolute rb:before:top-[50%] rb:before:left-[-16px] rb:before:translate-y-[-50%] rb:before:bg-[#5B6167]! rb:before:h-[16px]!": headerType === 'borderBL',
             /** Border left style */
-            "rb:m-[0_16px]! rb:p-[0]! rb:leading-[20px] rb:min-h-[48px]! rb:relative rb:border-[0]! rb:before:content-[''] rb:before:w-[4px] rb:before:h-[16px] rb:before:bg-[#5B6167] rb:before:absolute rb:before:top-[50%] rb:before:left-[-16px] rb:before:translate-y-[-50%] rb:before:bg-[#5B6167]! rb:before:h-[16px]!": headerType === 'borderL',
+            "rb:m-[0_16px]! rb:p-[0]! rb:leading-[20px] rb:relative rb:border-[0]! rb:before:content-[''] rb:before:w-[4px] rb:before:h-[16px] rb:before:bg-[#5B6167] rb:before:absolute rb:before:top-[50%] rb:before:left-[-16px] rb:before:translate-y-[-50%] rb:before:bg-[#5B6167]! rb:before:h-[16px]!": headerType === 'borderL',
+            'rb:min-h-[48px]!': headerType === 'borderL' && !headerClassName?.includes('rb:min-h-'),
           },
           headerClassName,
         ),

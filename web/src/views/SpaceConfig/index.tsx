@@ -2,14 +2,14 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:48:03 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-07-21 18:15:35
+ * @Last Modified time: 2026-08-17 10:30:48
  */
 /**
  * Space Configuration Page
  * Configures default models for workspace (LLM, embedding, rerank)
  */
 
-import { type FC, useEffect, useState } from 'react';
+import { type FC, useEffect, useRef, useState } from 'react';
 import { Form, App, Button, Skeleton, Flex } from 'antd';
 import { useTranslation } from 'react-i18next';
 
@@ -36,10 +36,11 @@ const multimodalModelFields: { name: string; label: string; capability: Capabili
 
 const SpaceConfig: FC = () => {
   const { t } = useTranslation();
-  const { message } = App.useApp();
+  const { message, modal } = App.useApp();
   const [pageLoading, setPageLoading] = useState(false)
   const [form] = Form.useForm<SpaceConfigData>();
   const [loading, setLoading] = useState(false)
+  const lastConfirmedEmbeddingRef = useRef<SpaceConfigData['embedding']>(undefined)
 
   const values = Form.useWatch([], form);
 
@@ -92,6 +93,27 @@ const SpaceConfig: FC = () => {
     handleGetDefaultModels()
     handleGetCustomModels()
   }, [])
+
+  useEffect(() => {
+    lastConfirmedEmbeddingRef.current = lastConfig.embedding
+  }, [lastConfig.embedding])
+
+  const handleEmbeddingChange = (newValue: SpaceConfigData['embedding']) => {
+    const prevValue = lastConfirmedEmbeddingRef.current
+    if (newValue === prevValue) return
+    modal.confirm({
+      title: t('space.embeddingSwitchConfirmTitle'),
+      content: t('space.embeddingSwitchConfirmContent'),
+      okText: t('common.confirm'),
+      cancelText: t('common.cancel'),
+      onOk: () => {
+        lastConfirmedEmbeddingRef.current = newValue
+      },
+      onCancel: () => {
+        form.setFieldsValue({ embedding: prevValue })
+      },
+    })
+  }
   /** Save configuration */
   const handleSave = () => {
     form
@@ -119,104 +141,116 @@ const SpaceConfig: FC = () => {
   }
 
   return (
-    <div className="rb:bg-white rb:rounded-lg rb:p-6 rb:pb-8">
-      <div className="rb:font-[MiSans-Bold] rb:font-bold rb:text-[#212332] rb:leading-5">{t('menu.spaceConfig')}</div>
-      <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4 rb:mt-2 rb:mb-6">{t('space.configAlert')}</div>
+    <Flex vertical gap={24} className="rb:bg-white rb:rounded-lg rb:p-6! rb:h-full rb:overflow-auto">
+      <Flex vertical gap={8}>
+        <div className="rb:font-[MiSans-Bold] rb:font-bold rb:text-[#212332] rb:leading-5">{t('menu.spaceConfig')}</div>
+        <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4">{t('space.configAlert')}</div>
+      </Flex>
       {pageLoading
         ? <Skeleton active />
-        : <Form
-          form={form}
-          layout="vertical"
-          initialValues={{ is_default_config: isPrivateAvailable ? '1' : '0' }}
-        >
-          {isPrivateAvailable && Object.keys(defaultModels).length > 0 &&
-            <Form.Item name="is_default_config" className="rb:mb-6! rb:max-w-137.5">
-              <RadioGroupCard
-                allowClear={false}
-                options={[
-                  {
-                    value: '1',
-                    label: t('space.defaultConfigPackage'),
-                    labelDesc: t('space.defaultConfigPackageDesc'),
-                    recommend: true,
-                  },
-                  {
-                    value: '0',
-                    label: t('space.customConfig'),
-                    labelDesc: t('space.customConfigDesc'),
-                  },
-                ]}
-              />
-            </Form.Item>
-          }
+        : (
+          <Form
+            form={form}
+            layout="vertical"
+            initialValues={{ is_default_config: isPrivateAvailable ? '1' : '0' }}
+            className="rb:flex-1! rb:overflow-hidden!"
+          >
+            <Flex vertical gap={4} className="rb:h-full! rb:overflow-hidden!">
+              <div className="rb:flex-1! rb:overflow-auto">
+                {isPrivateAvailable && Object.keys(defaultModels).length > 0 &&
+                  <Form.Item name="is_default_config" className="rb:mb-6! rb:max-w-137.5">
+                    <RadioGroupCard
+                      allowClear={false}
+                      options={[
+                        {
+                          value: '1',
+                          label: t('space.defaultConfigPackage'),
+                          labelDesc: t('space.defaultConfigPackageDesc'),
+                          recommend: true,
+                        },
+                        {
+                          value: '0',
+                          label: t('space.customConfig'),
+                          labelDesc: t('space.customConfigDesc'),
+                        },
+                      ]}
+                    />
+                  </Form.Item>
+                }
 
-          {!isPrivateAvailable || Object.keys(defaultModels).length === 0 || values?.is_default_config === '0' ? (
-            <>
-              <Flex align="baseline" gap={8} className="rb:pb-3! rb:mb-6! rb:border-b rb:border-[#EBEBEB] rb:max-w-137.5">
-                <span className="rb:font-medium rb:text-[#212332]">{t('space.baseModel')}</span>
-                <span className="rb:text-[12px] rb:text-[#5B6167]">{t('space.baseModelDesc')}</span>
-              </Flex>
-              {baseModelFields.map(field => (
-                <Form.Item
-                  key={field.name}
-                  label={t(`space.${field.label}`)}
-                  className="rb:font-medium rb:text-[#212332] rb:mb-6!"
-                  name={field.name}
-                  rules={[{ required: true, message: t('common.pleaseSelect') }]}
-                >
-                  <ModelSelect
-                    fieldNames={{ label: 'name', value: 'id' }}
-                    placeholder={t('common.pleaseSelect')}
-                    isAutoFetch={false}
-                    initialData={customModels[field.name]}
-                    className="rb:w-137.5!"
-                  />
-                </Form.Item>
-              ))}
+                {!isPrivateAvailable || Object.keys(defaultModels).length === 0 || values?.is_default_config === '0' ? (
+                  <>
+                    <Flex align="baseline" gap={8} className="rb:pb-3! rb:mb-6! rb:border-b rb:border-[#EBEBEB] rb:max-w-137.5">
+                      <span className="rb:font-medium rb:text-[#212332]">{t('space.baseModel')}</span>
+                      <span className="rb:text-[12px] rb:text-[#5B6167]">{t('space.baseModelDesc')}</span>
+                    </Flex>
+                    {baseModelFields.map(field => (
+                      <Form.Item
+                        key={field.name}
+                        label={t(`space.${field.label}`)}
+                        className="rb:font-medium rb:text-[#212332] rb:mb-6!"
+                        name={field.name}
+                        rules={[{ required: true, message: t('common.pleaseSelect') }]}
+                      >
+                        <ModelSelect
+                          fieldNames={{ label: 'name', value: 'id' }}
+                          placeholder={t('common.pleaseSelect')}
+                          isAutoFetch={false}
+                          initialData={customModels[field.name]}
+                          className="rb:w-137.5!"
+                          {...(field.name === 'embedding' ? { onChange: handleEmbeddingChange } : {})}
+                        />
+                      </Form.Item>
+                    ))}
 
-              <Flex align="baseline" gap={8} className="rb:pb-3! rb:mb-6! rb:border-b rb:border-[#EBEBEB] rb:max-w-137.5">
-                <span className="rb:font-medium rb:text-[#212332]">{t('space.multimodalModel')}</span>
-                <span className="rb:text-[12px] rb:text-[#5B6167]">{t('space.multimodalModelDesc')}</span>
-              </Flex>
-              {multimodalModelFields.map(field => (
-                <Form.Item
-                  key={field.name}
-                  label={<>{t(`space.${field.label}`)}<span className="rb:text-[#5B6167] rb:font-regular">{t('space.optional')}</span></>}
-                  className="rb:font-medium rb:text-[#212332] rb:mb-6!"
-                  name={field.name}
-                >
-                  <ModelSelect
-                    fieldNames={{ label: 'name', value: 'id' }}
-                    placeholder={t('common.pleaseSelect')}
-                    isAutoFetch={false}
-                    initialData={customModels[field.name]}
-                    className="rb:w-137.5!"
-                  />
-                </Form.Item>
-              ))}
-            </>
-          ) : (
-            <div className="rb:rounded-lg rb:bg-[#F6F6F6] rb:px-4 rb:mb-6 rb:max-w-137.5">
-              {[...baseModelFields, ...multimodalModelFields].map(field => (
-                <Flex
-                  key={field.name}
-                  align="center"
-                  justify="space-between"
-                  className="rb:py-3.5! rb:border-b rb:border-[#EBEBEB] rb:last:border-b-0"
-                >
-                  <span className="rb:text-[#5B6167]">{t(`space.${field.label}`)}</span>
-                  <span className="rb:font-medium rb:text-[#212332]">{defaultModels[field.name]?.name || '-'}</span>
-                </Flex>
-              ))}
-            </div>
-          )}
+                    <Flex align="baseline" gap={8} className="rb:pb-3! rb:mb-6! rb:border-b rb:border-[#EBEBEB] rb:max-w-137.5">
+                      <span className="rb:font-medium rb:text-[#212332]">{t('space.multimodalModel')}</span>
+                      <span className="rb:text-[12px] rb:text-[#5B6167]">{t('space.multimodalModelDesc')}</span>
+                    </Flex>
+                    {multimodalModelFields.map(field => (
+                      <Form.Item
+                        key={field.name}
+                        label={<>{t(`space.${field.label}`)}<span className="rb:text-[#5B6167] rb:font-regular">{t('space.optional')}</span></>}
+                        className="rb:font-medium rb:text-[#212332] rb:mb-6!"
+                        name={field.name}
+                      >
+                        <ModelSelect
+                          fieldNames={{ label: 'name', value: 'id' }}
+                          placeholder={t('common.pleaseSelect')}
+                          isAutoFetch={false}
+                          initialData={customModels[field.name]}
+                          className="rb:w-137.5!"
+                        />
+                      </Form.Item>
+                    ))}
+                  </>
+                ) : (
+                  <div className="rb:rounded-lg rb:bg-[#F6F6F6] rb:px-4 rb:mb-6 rb:max-w-137.5">
+                    {[...baseModelFields, ...multimodalModelFields].map(field => (
+                      <Flex
+                        key={field.name}
+                        align="center"
+                        justify="space-between"
+                        className="rb:py-3.5! rb:border-b rb:border-[#EBEBEB] rb:last:border-b-0"
+                      >
+                        <span className="rb:text-[#5B6167]">{t(`space.${field.label}`)}</span>
+                        <span className="rb:font-medium rb:text-[#212332]">{defaultModels[field.name]?.name || '-'}</span>
+                      </Flex>
+                    ))}
+                  </div>
+                )}
+              </div>
 
-          <Button type="primary" className="rb:mt-1" onClick={handleSave} loading={loading}>
-            {t('common.save')}
-          </Button>
-        </Form>
+              <div className="rb:shrink-0 rb:pt-3!">
+                <Button type="primary" onClick={handleSave} loading={loading}>
+                  {t('common.save')}
+                </Button>
+              </div>
+            </Flex>
+          </Form>
+        )
       }
-    </div>
+    </Flex>
   );
 };
 

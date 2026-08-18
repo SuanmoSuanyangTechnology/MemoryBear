@@ -10,6 +10,7 @@ export const applicationPart1 = {
       applicationName: 'Application Name',
       applicationIcon: 'Application Icon',
       applicationType: 'Application Type',
+      applicationTypePlaceholder: 'App Type',
       allType: 'All types',
 
       agent: 'Agent',

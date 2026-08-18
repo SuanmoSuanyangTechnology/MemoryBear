@@ -1,7 +1,6 @@
 import { type FC, useState } from 'react'
 import { Flex, Tooltip, type SegmentedProps } from 'antd'
 import { useTranslation } from 'react-i18next'
-import { useParams } from 'react-router-dom'
 import clsx from 'clsx'
 
 import PageScrollList from '@/components/PageScrollList'
@@ -30,8 +29,7 @@ import type {
   MemoryActivityProps,
 } from './types'
 
-const MemoryActivity: FC<MemoryActivityProps> = ({ className }) => {
-  const { id } = useParams()
+const MemoryActivity: FC<MemoryActivityProps> = ({ id }) => {
   const { t } = useTranslation()
   const { language, changeLanguage, timeZone } = useI18n()
   const [filter, setFilter] = useState<ActivityFilter>(filterKeys[0])
@@ -148,9 +146,11 @@ const MemoryActivity: FC<MemoryActivityProps> = ({ className }) => {
   }
 
   return (
-    <Flex vertical className={clsx('rb:h-full rb:min-h-0 rb:overflow-hidden rb:bg-[#F5F6F6] rb:rounded-xl rb:p-3!', className)}>
+    <Flex vertical
+      className="rb:h-full! rb:min-h-0 rb:overflow-hidden rb:bg-[#F5F6F6] rb:rounded-xl rb:p-3! rb:w-70 rb:shrink-0"
+    >
       <header className="rb:pt-2 rb:pb-3">
-        <Flex align="center" justify="space-between" gap={16} className="rb:pl-1! rb:pr-2!">
+        <Flex align="center" justify="space-between" gap={16} className="rb:pr-2!">
           <div className="rb:text-[16px] rb:leading-6 rb:font-bold rb:font-[MiSans-Bold] rb:tracking-normal">{t('userMemory.memoryActivity')}</div>
 
           <Flex align="center" gap={8} className="rb:mt-0.5 rb:shrink-0">
@@ -184,29 +184,25 @@ const MemoryActivity: FC<MemoryActivityProps> = ({ className }) => {
             onChange={handleFilterChange}
             size="small"
             block
-            className="rb:mt-2!"
+            className="rb:mt-2! rb:ml-0!"
           />
           : null
         }
       </header>
 
-      <div className="rb:min-h-0 rb:flex-1">
-        {id && (
-          <PageScrollList<ActivityRecord, ActivityQuery>
-            key={`${id}-${filter}`}
-            url={activityUrls[filter]}
-            query={{ end_user_id: id, include_engines: filterKeys.includes('engine'), language }}
-            column={1}
-            gutter={[0, 8]}
-            heightClass="rb:h-full!"
-            onTotalChange={setTotal}
-            renderItem={renderActivity}
-            renderItems={renderGroupedActivities}
-            empty={<Empty size={88} className="rb:h-[calc(100vh-166px)]!" />}
-            needLoading={false}
-          />
-        )}
-      </div>
+      <PageScrollList<ActivityRecord, ActivityQuery>
+        key={`${id}-${filter}`}
+        url={activityUrls[filter]}
+        query={{ end_user_id: id, include_engines: filterKeys.includes('engine'), language }}
+        column={1}
+        gutter={[0, 8]}
+        heightClass="rb:flex-1! rb:h-auto! rb:min-h-0!"
+        onTotalChange={setTotal}
+        renderItem={renderActivity}
+        renderItems={renderGroupedActivities}
+        empty={<Empty size={88} className="rb:h-full!" />}
+        needLoading={false}
+      />
     </Flex>
   )
 }

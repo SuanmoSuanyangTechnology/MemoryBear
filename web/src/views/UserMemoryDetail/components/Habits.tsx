@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 18:33:06 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-27 11:18:47
+ * @Last Modified time: 2026-08-12 12:14:30
  */
 import { useEffect, useState, forwardRef, useImperativeHandle } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -88,7 +88,7 @@ const Habits = forwardRef<{ handleRefresh: () => void; }>((_props, ref) => {
       {loading
         ? <Skeleton active />
         : data.length === 0
-          ? <Empty size={88} />
+          ? <Empty size={88} className="rb:h-full!" />
           : <Flex gap={12} vertical>
             {data.map((vo, voIdx) => (
               <div key={voIdx} className="rb:leading-5 rb-border rb:rounded-xl rb:p-3">

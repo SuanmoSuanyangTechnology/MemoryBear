@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:09:03 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-26 12:23:32
+ * @Last Modified time: 2026-08-14 18:47:09
  */
 /**
  * Memory Conversation Page
@@ -193,7 +193,7 @@ const MemoryConversation: FC = () => {
             title={t('memoryConversation.conversationContent')}
             headerType="borderless"
             headerClassName="rb:min-h-[52px]! rb:font-[MiSans-Bold] rb:font-bold"
-            bodyClassName="rb:px-3! rb:py-0! rb:h-[calc(100%-52px)]!"
+            bodyClassName="rb:px-0! rb:py-0! rb:h-[calc(100%-52px)]!"
             className="rb:h-full!"
           >
             <Chat
@@ -201,7 +201,7 @@ const MemoryConversation: FC = () => {
                 <Empty url={ConversationEmptyIcon} className="rb:h-full" size={[140, 100]} title={t('memoryConversation.conversationContentEmpty')} isNeedSubTitle={false} />
               }
               className="rb:pt-0!"
-              contentClassName='rb:h-[calc(100%-144px)]'
+              contentClassName='rb:h-[calc(100%-144px)] rb:px-6!'
               data={chatData}
               onChange={setMsg}
               onSend={handleSend}
@@ -246,7 +246,7 @@ const MemoryConversation: FC = () => {
                     key={logIndex}
                     title={log.title}
                     isMiSans={false}
-                    bodyClassName={`rb:p-3! rb:pt-0! ${!!expandedLogs[logIndex] ? 'rb:pb-3!' : 'rb:pb-0!'}`}
+                    bodyClassName={`rb:pt-0! ${!!expandedLogs[logIndex] ? 'rb:p-3! ' : 'rb:pb-0!'}`}
                     expanded={!!expandedLogs[logIndex]}
                     handleExpand={() => setExpandedLogs(prev => ({ ...prev, [logIndex]: !prev[logIndex] }))}
                     extra={log.type === 'verification' && <div className="rb-border rb:rounded-lg rb:py-1 rb:px-2 rb:text-[12px] rb:font-medium rb:leading-4.5 rb:text-[#FF5D34]">{log.result}</div>}

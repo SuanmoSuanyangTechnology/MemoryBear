@@ -52,8 +52,8 @@ const ToolManagement: React.FC = () => {
   };
 
   return (
-    <>
-      <Flex justify="space-between" className="rb:mb-4!">
+    <Flex vertical gap={16} className="rb:h-full!">
+      <Flex justify="space-between">
         <PageTabs
           value={activeTab}
           options={formatTabItems()}
@@ -77,12 +77,14 @@ const ToolManagement: React.FC = () => {
           </Space>
         </Form>}
       </Flex>
-      {activeTab === 'mcp' && <Mcp ref={mcpRef} keyword={name} getStatusTag={getStatusTag} />}
-      {activeTab === 'inner' && <Inner keyword={name} getStatusTag={getStatusTag} />}
-      {activeTab === 'custom' && <Custom ref={customRef} keyword={name} getStatusTag={getStatusTag} />}
-      {activeTab === 'market' && <Market getStatusTag={getStatusTag} />}
-      {activeTab === 'workflow' && <Workflow  getStatusTag={getStatusTag} keyword={name} />}
-    </>
+      <div className="rb:flex-1 rb:min-h-0! rb:overflow-y-auto rb:overflow-x-hidden">
+        {activeTab === 'mcp' && <Mcp ref={mcpRef} keyword={name} getStatusTag={getStatusTag} />}
+        {activeTab === 'inner' && <Inner keyword={name} getStatusTag={getStatusTag} />}
+        {activeTab === 'custom' && <Custom ref={customRef} keyword={name} getStatusTag={getStatusTag} />}
+        {activeTab === 'market' && <Market getStatusTag={getStatusTag} />}
+        {activeTab === 'workflow' && <Workflow  getStatusTag={getStatusTag} keyword={name} />}
+      </div>
+    </Flex>
   );
 };
 

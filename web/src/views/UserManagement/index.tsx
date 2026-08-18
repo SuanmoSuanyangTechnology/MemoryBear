@@ -155,8 +155,7 @@ const UserManagement: React.FC = () => {
         }}
         columns={columns}
         rowKey="id"
-        isScroll={true}
-        scrollY="calc(100vh - 248px)"
+        fillHeight={true}
       />
 
       <CreateModal

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:44:15 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-07-21 18:52:25
+ * @Last Modified time: 2026-08-17 12:26:08
  */
 /**
  * Prompt Editor Component
@@ -98,7 +98,7 @@ const Prompt: FC = () => {
 
     const handleStreamMessage = (data: SSEMessage[]) => {
       data.map(item => {
-        const { content, desc, variables } = item.data as { content: string; desc: string; variables: string[] };
+        const { content, desc, variables, error } = item.data as { content: string; desc: string; variables: string[]; error: string };
 
         switch (item.event) {
           case 'start':
@@ -125,6 +125,11 @@ const Prompt: FC = () => {
             if (variables) {
               setVariables(variables)
             }
+            break;
+          case 'error':
+              setChatList(prev => {
+                return [...prev, { role: 'assistant', meta_data: { error } }]
+              })
             break;
           case 'end':
             setLoading(false)
@@ -190,63 +195,64 @@ const Prompt: FC = () => {
 
   return (
     <>
-      <Form form={form} className="rb:h-full!">
-        <div className="rb:grid rb:grid-cols-2 rb:gap-3 rb:h-full!">
-          <Flex vertical gap={12} className="rb:h-full!">
+      <Form form={form} className="rb:h-full! rb:min-h-0! rb:overflow-hidden!">
+        <div className="rb:grid rb:grid-cols-2 rb:gap-3 rb:h-full! rb:min-h-0!">
+          <Flex vertical gap={12} className="rb:h-full! rb:min-h-0! rb:overflow-hidden!">
             <Header title={t(`menu.prompt`)} desc={t('prompt.promptDesc')} />
 
             <RbCard
               title={t('prompt.chatTitle')}
               headerClassName="rb:min-h-[52px]! rb:font-[MiSans-Bold] rb:font-bold"
               headerType="borderless"
-              bodyClassName="rb:px-4! rb:pt-0! rb:pb-3!"
-              className="rb:h-full!"
+              bodyClassName="rb:px-4! rb:pt-0! rb:pb-3! rb:h-[calc(100%-52px)]! rb:min-h-0!"
+              className="rb:flex-1! rb:min-h-0! rb:overflow-hidden!"
             >
-              <ChatContent
-                classNames="rb:h-[calc(100vh-254px)] rb:mb-[12px]!"
-                contentClassNames="rb:max-w-75!"
-                empty={<Empty url={ConversationEmptyIcon} title={t(`prompt.promptChatEmpty`)} isNeedSubTitle={false} size={[140, 100]} className="rb:h-full" />}
-                data={chatList || []}
-                streamLoading={false}
-                labelPosition="top"
-                labelFormat={(item) => item.role === 'user' ? t(`prompt.you`) : t(`prompt.ai`)}
-              />
-              <Flex align="center" gap={12} justify="space-between"
-                className={clsx("rb-border rb:shadow-[0px_2px_12px_0px_rgba(23,23,25,0.1)] rb:rounded-2xl rb:h-13 rb:px-3!", {
-                  'rb:border rb:border-[#171719]!': isFocus
-                })}
-              >
-                <Form.Item name="message" className="rb:flex-1 rb:mb-0!">
-                  <Input
-                    placeholder={t(`prompt.promptChatPlaceholder`)}
-                    onCompositionStart={() => setIsComposing(true)}
-                    onCompositionEnd={() => setIsComposing(false)}
-                    onKeyDown={(e) => { if (e.key === 'Enter' && !isComposing) handleSend() }}
-                    variant="borderless"
-                    className="rb:p-0!"
-                    onFocus={handleFocus}
-                    onBlur={handleBlur}
-                  />
-                </Form.Item>
-                <Flex align="center" justify="center"
-                  className={clsx('rb:size-7 rb:rounded-full rb:shadow-[0px 2px 12px 0px rgba(23,23,25,0.1)]', {
-                    'rb:cursor-not-allowed rb:bg-[#F6F6F6]': loading || !values || !values?.message || values?.message?.trim() === '',
-                    'rb:cursor-pointer rb:bg-[#171719]': !loading && !(!values || !values?.message || values?.message?.trim() === '')
+              <Flex vertical gap={12} className="rb:h-full! rb:min-h-0! rb:overflow-hidden!">
+                <ChatContent
+                  classNames="rb:flex-1! rb:overflow-auto!"
+                  contentClassNames="rb:max-w-75!"
+                  empty={<Empty url={ConversationEmptyIcon} title={t(`prompt.promptChatEmpty`)} isNeedSubTitle={false} size={[140, 100]} className="rb:h-full!" />}
+                  data={chatList || []}
+                  streamLoading={false}
+                  labelPosition="top"
+                  labelFormat={(item) => item.role === 'user' ? t(`prompt.you`) : t(`prompt.ai`)}
+                />
+                <Flex align="center" gap={12} justify="space-between"
+                  className={clsx("rb-border rb:shadow-[0px_2px_12px_0px_rgba(23,23,25,0.1)] rb:rounded-2xl rb:h-13 rb:px-3!", {
+                    'rb:border rb:border-[#171719]!': isFocus
                   })}
-                  onClick={handleSend}
                 >
-                  <div className={clsx("rb:size-4 rb:bg-cover", {
-                    "rb:bg-[url('@/assets/images/conversation/loading.svg')]": loading,
-                    "rb:bg-[url('@/assets/images/conversation/sendDisabled.svg')]": !loading && (!values || !values?.message || values?.message?.trim() === ''),
-                    "rb:bg-[url('@/assets/images/conversation/send.svg')]": !loading && !(!values || !values?.message || values?.message?.trim() === '')
-                  })}></div>
+                  <Form.Item name="message" className="rb:flex-1 rb:mb-0!">
+                    <Input
+                      placeholder={t(`prompt.promptChatPlaceholder`)}
+                      onCompositionStart={() => setIsComposing(true)}
+                      onCompositionEnd={() => setIsComposing(false)}
+                      onKeyDown={(e) => { if (e.key === 'Enter' && !isComposing) handleSend() }}
+                      variant="borderless"
+                      className="rb:p-0!"
+                      onFocus={handleFocus}
+                      onBlur={handleBlur}
+                    />
+                  </Form.Item>
+                  <Flex align="center" justify="center"
+                    className={clsx('rb:size-7 rb:rounded-full rb:shadow-[0px 2px 12px 0px rgba(23,23,25,0.1)]', {
+                      'rb:cursor-not-allowed rb:bg-[#F6F6F6]': loading || !values || !values?.message || values?.message?.trim() === '',
+                      'rb:cursor-pointer rb:bg-[#171719]': !loading && !(!values || !values?.message || values?.message?.trim() === '')
+                    })}
+                    onClick={handleSend}
+                  >
+                    <div className={clsx("rb:size-4 rb:bg-cover", {
+                      "rb:bg-[url('@/assets/images/conversation/loading.svg')]": loading,
+                      "rb:bg-[url('@/assets/images/conversation/sendDisabled.svg')]": !loading && (!values || !values?.message || values?.message?.trim() === ''),
+                      "rb:bg-[url('@/assets/images/conversation/send.svg')]": !loading && !(!values || !values?.message || values?.message?.trim() === '')
+                    })}></div>
+                  </Flex>
                 </Flex>
               </Flex>
-
             </RbCard>
           </Flex>
 
-          <Flex vertical gap={12} className="rb:h-full!">
+          <Flex vertical gap={12} className="rb:h-full! rb:min-h-0! rb:overflow-hidden!">
             <Flex align="center" justify="end" gap={8} className="rb:h-12.5">
               <Form.Item
                 name="model_id"
@@ -265,8 +271,8 @@ const Prompt: FC = () => {
               title={t('prompt.conversationOptimizationPrompt')}
               headerClassName="rb:min-h-[52px]! rb:font-[MiSans-Bold] rb:font-bold"
               headerType="borderless"
-              bodyClassName="rb:px-4! rb:pt-0! rb:pb-3!"
-              className="rb:h-full!"
+              bodyClassName="rb:px-4! rb:pt-0! rb:pb-3! rb:h-[calc(100%-52px)]! rb:h-0! rb:min-h-0!"
+              className="rb:flex-1! rb:min-h-0! rb:overflow-hidden!"
               extra={
                 <Space size={8}>
                   <Button
@@ -287,18 +293,25 @@ const Prompt: FC = () => {
                 </Space>
               }
             >
-              <Form.Item name="current_prompt" noStyle>
+              <Form.Item name="current_prompt" noStyle className="rb:h-full! rb:m-0! rb:min-h-0!">
                 {values?.current_prompt
                   ? <Editor
                     ref={editorRef}
                     disabled={loading}
-                    className="rb:h-[calc(100vh-193px)] rb:bg-white! rb:border-none! rb:p-0! rb:text-[#212332] rb:leading-5"
+                    wrapperClassName="rb:h-full! rb:h-0! rb:min-h-0! rb:overflow-y-auto!"
+                    className="rb:h-full! rb:bg-white! rb:border-none! rb:p-0! rb:text-[#212332] rb:leading-5 rb:min-h-0!"
                     onChange={(value) => {
                       if (loading) return
                       form.setFieldValue('current_prompt', value)
                     }}
                   />
-                  : <Empty url={analysisEmptyIcon} title={t(`prompt.promptPlaceholder`)} isNeedSubTitle={false} size={[270, 170]} className="rb:h-[calc(100vh-193px)] rb:mx-auto! rb:text-center! rb:text-[12px]! rb:leading-4!" />
+                  : <Empty
+                    url={analysisEmptyIcon}
+                    title={t(`prompt.promptPlaceholder`)}
+                    isNeedSubTitle={false}
+                    size={[270, 170]}
+                    className="rb:h-full! rb:mx-auto! rb:text-center! rb:text-[12px]! rb:leading-4!"
+                  />
                 }
               </Form.Item>
             </RbCard>

@@ -13,13 +13,15 @@ interface TablePageLayoutProps {
  */
 const TablePageLayout: FC<TablePageLayoutProps> = ({ title, extra, children }) => {
   return (
-    <div className="rb:h-full rb:overflow-hidden rb:bg-white rb:rounded-lg rb:pt-3 rb:px-3">
-      <Flex justify="space-between" align="center" className="rb:px-1! rb:mb-3!">
+    <Flex vertical gap={12} className="rb:h-full! rb:overflow-hidden rb:bg-white rb:rounded-lg rb:pt-3! rb:px-3!">
+      <Flex justify="space-between" align="center" className="rb:px-1!">
         <div className="rb:font-[MiSans-Bold] rb:font-bold rb:text-[#212332] rb:leading-5">{title}</div>
         {extra && <div>{extra}</div>}
       </Flex>
-      {children}
-    </div>
+      <div className="rb:flex-1">
+        {children}
+      </div>
+    </Flex>
   );
 };
 

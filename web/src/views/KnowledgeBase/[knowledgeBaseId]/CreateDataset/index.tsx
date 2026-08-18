@@ -236,11 +236,13 @@ const CreateDataset = () => {
           <span className="rb:text-gray-500 rb:text-sm">{t('common.exit')}</span>
         </Flex>
         {source !== 'csv' && <div className="rb:px-24 rb:py-5 rb:bg-white rb:rounded-xl"><Steps current={current} items={steps} className="custom-steps" /></div>}
-        <div className="rb:bg-white rb:rounded-xl rb:flex-1 rb:mt-3">
-          {current === 0 && <SourceStep source={source} uploadRef={uploadRef} onUpload={upload} onRemove={remove} fileList={fileList} onFileListChange={onFileListChange} />}
-          {current === 1 && <ParameterStep form={form} fileIds={fileIds} isParentChildMode={isParentChildMode} />}
-          {current === 2 && <ConfirmStep tableRef={tableRef} knowledgeBaseId={knowledgeBaseId} fileIds={fileIds} onDelete={handleDelete} />}
-          <Flex gap={12} className={`rb:p-6! rb:mt-6! ${current === 1 || ((source === 'link' || source === 'text') && current === 0) ? 'rb:pl-28! rb:mt-10!' : ''}`}>
+        <Flex vertical className="rb:bg-white rb:rounded-xl rb:flex-1 rb:mt-3! rb:overflow-hidden!">
+          <div className="rb:flex-1 rb:overflow-auto">
+            {current === 0 && <SourceStep source={source} uploadRef={uploadRef} onUpload={upload} onRemove={remove} fileList={fileList} onFileListChange={onFileListChange} />}
+            {current === 1 && <ParameterStep form={form} fileIds={fileIds} isParentChildMode={isParentChildMode} />}
+            {current === 2 && <ConfirmStep tableRef={tableRef} knowledgeBaseId={knowledgeBaseId} fileIds={fileIds} onDelete={handleDelete} />}
+          </div>
+          <Flex gap={12} className={`rb:p-6! ${current === 1 || ((source === 'link' || source === 'text') && current === 0) ? 'rb:pl-28!' : ''}`}>
             {current !== 0 && <Button onClick={() => setCurrent((value) => Math.max(value - 1, 0))} disabled={pollingLoading}>{t('common.previous') || 'Prev'}</Button>}
             {source !== 'csv' && (
               <Button
@@ -252,7 +254,7 @@ const CreateDataset = () => {
               </Button>
             )}
           </Flex>
-        </div>
+        </Flex>
       </Flex>
     </Form>
   );

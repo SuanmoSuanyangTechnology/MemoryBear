@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-05-07 18:37:31 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-05 18:44:16
+ * @Last Modified time: 2026-08-14 14:23:38
  */
 import { type FC, useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -262,7 +262,7 @@ const SingleNodeRun: FC<SingleNodeRunProps> = ({ open, onClose, selectedNode, ap
 
   return (
     // 与 Properties 完全相同的定位容器
-    <div className={clsx('rb:h-[calc(100vh-88px)] rb:w-90 rb:absolute rb:right-0 rb:top-0 rb:bottom-2.5 rb:z-1002', styles.properties)}>
+    <div className={clsx('rb:w-90 rb:absolute rb:right-0 rb:top-0 rb:bottom-0 rb:z-1002', styles.properties)}>
       {/* mask：仅覆盖 header 以下的区域，header 保持透明露出节点名 */}
       <div
         className="rb:absolute rb:inset-x-0 rb:bottom-0 rb:top-0 rb:rounded-xl rb:bg-[rgba(0,0,0,0.3)] rb:z-1002"

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 18:31:50 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-27 11:36:27
+ * @Last Modified time: 2026-08-12 12:11:11
  */
 import { useEffect, useState, useRef, forwardRef, useImperativeHandle } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -84,7 +84,7 @@ const Suggestions = forwardRef<{ handleRefresh: () => void; }, { refresh: () => 
       headerType="borderless"
       headerClassName="rb:min-h-[46px]! rb:font-[MiSans-Bold] rb:font-bold"
       bodyClassName="rb:p-3! rb:pt-0! rb:h-[calc(100%-46px)]! rb:overflow-y-auto!"
-      className="rb:h-[calc(100vh-88px)]!"
+      className="rb:h-full!"
     >
       {suggestions?.suggestions && suggestions?.suggestions.length > 0
         ? <Flex vertical gap={16} className="rb:h-full! rb:overflow-y-auto!">

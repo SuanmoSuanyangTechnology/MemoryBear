@@ -2,7 +2,7 @@
  * @Author: ZhaoYing
  * @Date: 2026-01-07 20:37:34
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-25 12:05:26
+ * @Last Modified time: 2026-08-12 12:12:55
  */
 import { useEffect, useState, useMemo, forwardRef, useImperativeHandle, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -241,10 +241,12 @@ const ForgetDetail = forwardRef((_props, ref) => {
 
               <div className="rb:bg-white rb:rounded-lg rb:p-3 rb:pt-2">
                 <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4.5 rb:mb-1">{t('forgetDetail.currentStatus')}</div>
-                <div className={clsx('rb:font-medium rb:text-[18px]', data.quotaColorClassObj)}>{t(`userMemory.${data.quotaStatus}`)}</div>
-                {data.quotaStatus !== 'normal' &&
-                  <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4.5">{t(`forgetDetail.${data.quotaStatus}StatusTip`, { num: data.overLimitCount })}</div>
-                }
+                {data.quotaStatus && <>
+                  <div className={clsx('rb:font-medium rb:text-[18px]', data.quotaColorClassObj)}>{t(`userMemory.${data.quotaStatus}`)}</div>
+                  {data.quotaStatus !== 'normal' &&
+                    <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4.5">{t(`forgetDetail.${data.quotaStatus}StatusTip`, { num: data.overLimitCount })}</div>
+                  }
+                </>}
               </div>
             </div>
 
