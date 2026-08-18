@@ -86,6 +86,9 @@ export interface PaginationState {
   pageSize: number;
   hasMore: boolean;
   loadingMore: boolean;
+  has_more: boolean;
+  pagesize: number;
+  total: number;
 }
 
 export interface NotificationState {

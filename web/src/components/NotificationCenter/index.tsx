@@ -248,8 +248,8 @@ const NotificationPanel = ({ open }: NotificationPanelProps) => {
               </div>
             )}
             {!pagination.loadingMore && !pagination.hasMore && (
-              <div className="rb:py-2 rb:text-center rb:text-[11px] rb:text-[#B8BAC0]">
-                — {t('notificationCenter.empty.noMore', { defaultValue: '没有更多了' })} —
+              <div key="end" className="rb:py-2 rb:text-center rb:text-[11px] rb:text-[#B8BAC0]">
+                — {unreadOnly && pagination.has_more ? t('notificationCenter.empty.hasMore', { total: pagination.total }) : t('notificationCenter.empty.noMore')} —
               </div>
             )}
           </>

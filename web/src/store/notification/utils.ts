@@ -80,9 +80,12 @@ export const emptyPagination = (
   pageSize: number = NOTIFICATION_PAGE_SIZE,
 ): PaginationState => ({
   page: 1,
+  pagesize: pageSize,
   pageSize,
   hasMore: true,
   loadingMore: false,
+  total: 0,
+  has_more: false,
 });
 
 export const extractPaginatedMessages = (
@@ -109,7 +112,6 @@ export const extractPaginatedMessages = (
 
   if (!isRecord(response)) return empty;
   const root = response as NotificationListResponse & Record<string, unknown>;
-
   let payload: NotificationListResponse = root;
   if (isRecord(root.data)) {
     payload = root.data as NotificationListResponse;
@@ -118,7 +120,8 @@ export const extractPaginatedMessages = (
     return {
       ...empty,
       messages,
-      hasMore: messages.length >= requestedPageSize,
+      ...root.page,
+      hasMore: root.page?.hasnext ?? false,
       total: messages.length,
     };
   }
