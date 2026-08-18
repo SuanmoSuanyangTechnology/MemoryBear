@@ -84,11 +84,13 @@ export const useNotification = create<NotificationState>((set, get) => {
           page,
           pagesize: pageSize,
         });
-        const { messages, hasMore } = extractPaginatedMessages(response, pageSize);
+        const { messages, hasMore, ...rest } = extractPaginatedMessages(response, pageSize);
+        console.log('rest', rest)
         set((state) => ({
           messages,
           pagination: {
             ...state.pagination,
+            ...rest,
             page,
             pageSize,
             hasMore,
