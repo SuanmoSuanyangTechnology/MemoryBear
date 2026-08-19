@@ -5,10 +5,10 @@ import { Row, Col, Flex, Skeleton, Pagination, Form, Select, DatePicker, ConfigP
 import clsx from 'clsx'
 import dayjs from 'dayjs'
 
-import { getRelationshipEvolution, getEntityEventTimeline } from '@/api/memory'
+import { getEntityEventTimeline } from '@/api/memory'
 import type { Node } from '../types'
 import RbCard from '@/components/RbCard/Card'
-import EmotionLine from '../components/EmotionLine'
+import EmotionTimeAnalysis from '../components/EmotionTimeAnalysis'
 import { formatDateTime } from '@/utils/format'
 import Tag, { type TagProps } from '@/components/Tag'
 import Empty from '@/components/Empty'
@@ -16,11 +16,6 @@ import BtnTabs from '@/components/BtnTabs'
 
 interface PaginationConfig { pagesize?: number; page?: number; }
 
-export interface Emotion {
-  emotion_intensity: number;
-  emotion_type: string;
-  created_at: string | number;
-}
 interface ExtractedEntityMemory {
   type: string;
   category: string;
@@ -82,8 +77,6 @@ const ExtractedEntityGraphDetail: FC = () => {
   const { t } = useTranslation()
   const [searchParams] = useSearchParams()
   const [vo, setVo] = useState<Node | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [emotionData, setEmotionData] = useState<Emotion[]>([])
   const [timelineLoading, setTimelineLoading] = useState(false)
   const [timelineMemories, setTimelineMemories] = useState<ExtractedEntityMemory[]>([])
   const [typeStats, setTypeStats] = useState<TypeStats[]>([])
@@ -116,7 +109,6 @@ const ExtractedEntityGraphDetail: FC = () => {
         name: nodeName || nodeLabel
       } as Node
       setVo(nodeFromUrl)
-      getRelationshipEvolutionData(nodeFromUrl)
     }
   }, [searchParams])
 
@@ -127,19 +119,6 @@ const ExtractedEntityGraphDetail: FC = () => {
     })
   }, [vo, activeTab, formValues])
 
-  const getRelationshipEvolutionData = (vo: Node) => {
-    if (!vo.id || !vo.label) return
-    setLoading(true)
-    getRelationshipEvolution({
-      id: vo.id as string,
-      label: vo.label,
-    })
-      .then(res => {
-        const { emotion } = res as { emotion: Emotion[]; } || {}
-        setEmotionData(emotion)
-      })
-      .finally(() => setLoading(false))
-  }
   const getTimelineMemoriesData = (vo: Node | null, values: FormValues, pagination?: PaginationConfig) => {
     if (!vo || !vo?.id || !vo?.label) return
     setTimelineLoading(true)
@@ -231,12 +210,7 @@ const ExtractedEntityGraphDetail: FC = () => {
               </Flex>
             }
           </RbCard>
-          <EmotionLine
-            chartData={emotionData}
-            loading={loading}
-            className="rb:bg-white"
-            headerClassName="rb:font-[MiSans-Bold] rb:font-bold rb:h-[54px] rb:text-[16px]"
-          />
+          <EmotionTimeAnalysis id={vo?.id as string | undefined} />
         </Flex>
       </Col>
       <Col flex="1" className="rb:h-full!">
@@ -268,7 +242,7 @@ const ExtractedEntityGraphDetail: FC = () => {
                         label: t(`userMemory.${value}`)
                       }))}
                       labelRender={(props) => <span className="rb:text-[12px]">{props.label}</span>}
-                      className="rb:w-[160px] rb:h-[26px]!"
+                      className="rb:w-40 rb:h-6.5!"
                       popupMatchSelectWidth={false}
                     />
                   </Form.Item>
@@ -298,7 +272,7 @@ const ExtractedEntityGraphDetail: FC = () => {
                             value: [dayjs().subtract(1, 'year'), dayjs()],
                           },
                         ]}
-                        className="rb:h-[26px]! rb:w-[250px]!"
+                        className="rb:h-6.5! rb:w-62.5!"
                         suffixIcon={null}
                         allowEmpty={[true, true]}
                       />
