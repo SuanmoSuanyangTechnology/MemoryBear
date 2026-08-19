@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from importlib import import_module
 from typing import Any
 
 from redbear_model.contracts import ModelCapability, ResolvedModelConfig
@@ -62,6 +63,7 @@ def build_dashscope_params(config: ResolvedModelConfig) -> dict[str, Any]:
 
 def load_dashscope_chat_class():
     try:
+        import_module("dashscope")
         from langchain_community.chat_models import ChatTongyi
     except ModuleNotFoundError as exc:
         raise ProviderDependencyMissingError("dashscope", "runtime,dashscope") from exc
@@ -70,6 +72,7 @@ def load_dashscope_chat_class():
 
 def load_dashscope_embedding_class():
     try:
+        import_module("dashscope")
         from langchain_community.embeddings import DashScopeEmbeddings
     except ModuleNotFoundError as exc:
         raise ProviderDependencyMissingError("dashscope", "runtime,dashscope") from exc
@@ -78,6 +81,7 @@ def load_dashscope_embedding_class():
 
 def load_dashscope_rerank_class():
     try:
+        import_module("dashscope")
         from langchain_community.document_compressors.dashscope_rerank import (
             DashScopeRerank,
         )

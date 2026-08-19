@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 from enum import StrEnum
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, SecretStr
+
+logger = logging.getLogger(__name__)
 
 
 class ModelType(StrEnum):
@@ -116,3 +119,50 @@ class ResolvedModelConfig(ContractModel):
     json_output: bool = False
     provider_params: dict[str, JsonValue] = Field(default_factory=dict)
     runtime: ModelRuntimeOptions = Field(default_factory=ModelRuntimeOptions)
+
+
+def normalize_runtime_flags(
+    capabilities: tuple[ModelCapability, ...],
+    deep_thinking: bool,
+    thinking_budget_tokens: int | None,
+    json_output: bool,
+    model_name: str,
+) -> tuple[bool, int | None, bool]:
+    """Preserve the legacy RedBearModelConfig capability normalization."""
+    has_thinking = ModelCapability.THINKING in capabilities
+    has_thinking_only = ModelCapability.THINKING_ONLY in capabilities
+    supports_json_output = ModelCapability.JSON_OUTPUT in capabilities
+
+    if deep_thinking and not has_thinking and not has_thinking_only:
+        logger.warning(
+            "Model %s does not support thinking; disabling deep_thinking",
+            model_name,
+        )
+        deep_thinking = False
+        thinking_budget_tokens = None
+
+    if not deep_thinking and thinking_budget_tokens is not None:
+        logger.warning(
+            "Thinking is disabled for model %s; clearing thinking_budget_tokens",
+            model_name,
+        )
+        thinking_budget_tokens = None
+
+    if has_thinking_only:
+        deep_thinking = True
+        thinking_budget_tokens = None
+        if json_output:
+            logger.warning(
+                "thinking_only model %s does not support JSON output",
+                model_name,
+            )
+            json_output = False
+
+    if json_output and not supports_json_output:
+        logger.warning(
+            "Model %s capability does not include json_output; disabling it",
+            model_name,
+        )
+        json_output = False
+
+    return deep_thinking, thinking_budget_tokens, json_output

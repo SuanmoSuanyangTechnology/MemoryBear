@@ -203,11 +203,16 @@ def build_openai_embedding_params(
     config: ResolvedModelConfig,
     clients: HttpClients,
 ) -> dict[str, Any]:
-    params = build_openai_compatible_params(config, clients)
-    params.pop("stream_usage", None)
-    params.pop("model_kwargs", None)
-    params.pop("extra_body", None)
-    params.pop("reasoning_effort", None)
+    params: dict[str, Any] = {
+        "model": config.model_name,
+        "base_url": config.base_url,
+        "api_key": config.api_key.get_secret_value(),
+        "max_retries": config.runtime.max_retries,
+        "http_client": clients.sync,
+        "http_async_client": clients.async_client,
+    }
+    if clients.timeout is not None:
+        params["timeout"] = clients.timeout
     if config.provider is ModelProvider.SPEEDBEAR:
         params["check_embedding_ctx_length"] = False
     return params

@@ -9,9 +9,15 @@ from redbear_model.errors import ProviderDependencyMissingError
 
 BEDROCK_MODEL_MAPPING = {
     "claude-3.5-sonnet": "anthropic.claude-3-5-sonnet-20240620-v1:0",
+    "claude-3-5-sonnet": "anthropic.claude-3-5-sonnet-20240620-v1:0",
+    "claude-sonnet-3.5": "anthropic.claude-3-5-sonnet-20240620-v1:0",
+    "claude-sonnet-3-5": "anthropic.claude-3-5-sonnet-20240620-v1:0",
     "claude-3-sonnet": "anthropic.claude-3-sonnet-20240229-v1:0",
     "claude-3-haiku": "anthropic.claude-3-haiku-20240307-v1:0",
     "claude-3-opus": "anthropic.claude-3-opus-20240229-v1:0",
+    "claude-sonnet": "anthropic.claude-3-sonnet-20240229-v1:0",
+    "claude-haiku": "anthropic.claude-3-haiku-20240307-v1:0",
+    "claude-opus": "anthropic.claude-3-opus-20240229-v1:0",
     "claude-2": "anthropic.claude-v2",
     "claude-2.1": "anthropic.claude-v2:1",
     "claude-instant": "anthropic.claude-instant-v1",
@@ -21,9 +27,14 @@ BEDROCK_MODEL_MAPPING = {
     "titan-embed-image": "amazon.titan-embed-image-v1",
     "llama3-70b": "meta.llama3-70b-instruct-v1:0",
     "llama3-8b": "meta.llama3-8b-instruct-v1:0",
+    "llama2-70b": "meta.llama2-70b-chat-v1",
+    "llama2-13b": "meta.llama2-13b-chat-v1",
     "mistral-7b": "mistral.mistral-7b-instruct-v0:2",
     "mixtral-8x7b": "mistral.mixtral-8x7b-instruct-v0:1",
     "mistral-large": "mistral.mistral-large-2402-v1:0",
+    "claude-sonnet-4-5": "anthropic.claude-3-5-sonnet-20240620-v1:0",
+    "claude-4-5-sonnet": "anthropic.claude-3-5-sonnet-20240620-v1:0",
+    "claude-sonnet-4.5": "anthropic.claude-3-5-sonnet-20240620-v1:0",
 }
 
 

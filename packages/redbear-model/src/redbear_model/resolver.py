@@ -5,14 +5,18 @@ from __future__ import annotations
 from collections.abc import Sequence
 from uuid import UUID
 
+from pydantic import SecretStr
+
 from .contracts import (
     LoadBalanceStrategy,
+    ModelCapability,
     ModelConfigSnapshot,
     ModelKeySnapshot,
     ModelProvider,
     ModelRuntimeOptions,
     PublicModelBindingSnapshot,
     ResolvedModelConfig,
+    normalize_runtime_flags,
 )
 from .errors import (
     ModelAccessDeniedError,
@@ -53,12 +57,60 @@ def _select_key(
     return active_keys[0]
 
 
-def _runtime_flags(params: dict) -> tuple[bool, int | None, bool]:
+def _runtime_flags(
+    params: dict,
+    capabilities: tuple[ModelCapability, ...],
+    model_name: str,
+) -> tuple[bool, int | None, bool]:
     deep_thinking = bool(params.get("deep_thinking", False))
     raw_budget = params.get("thinking_budget_tokens")
     thinking_budget = int(raw_budget) if raw_budget is not None else None
     json_output = bool(params.get("json_output", False))
-    return deep_thinking, thinking_budget, json_output
+    return normalize_runtime_flags(
+        capabilities,
+        deep_thinking,
+        thinking_budget,
+        json_output,
+        model_name,
+    )
+
+
+def _build_resolved(
+    config: ModelConfigSnapshot,
+    *,
+    key_id: UUID | None,
+    tenant_id: UUID,
+    provider: ModelProvider,
+    model_name: str,
+    api_key: SecretStr,
+    base_url: str | None,
+    capabilities: tuple[ModelCapability, ...],
+    is_omni: bool,
+    params: dict,
+    runtime_options: ModelRuntimeOptions | None,
+) -> ResolvedModelConfig:
+    deep_thinking, thinking_budget, json_output = _runtime_flags(
+        params,
+        capabilities,
+        model_name,
+    )
+    return ResolvedModelConfig(
+        model_config_id=config.model_config_id,
+        key_id=key_id,
+        tenant_id=tenant_id,
+        provider=provider,
+        model_type=config.model_type,
+        model_name=model_name,
+        api_key=api_key,
+        base_url=base_url,
+        capabilities=capabilities,
+        is_omni=is_omni,
+        deep_thinking=deep_thinking,
+        thinking_budget_tokens=thinking_budget,
+        json_output=json_output,
+        provider_params=params,
+        runtime=runtime_options or ModelRuntimeOptions(),
+    )
 
 
 def _build_from_key(
@@ -67,24 +119,18 @@ def _build_from_key(
     tenant_id: UUID,
     runtime_options: ModelRuntimeOptions | None,
 ) -> ResolvedModelConfig:
-    params = dict(key.config or config.config)
-    deep_thinking, thinking_budget, json_output = _runtime_flags(params)
-    return ResolvedModelConfig(
-        model_config_id=config.model_config_id,
+    return _build_resolved(
+        config,
         key_id=key.key_id,
         tenant_id=tenant_id,
         provider=key.provider,
-        model_type=config.model_type,
         model_name=key.model_name,
         api_key=key.api_key,
         base_url=key.base_url,
         capabilities=key.capabilities or config.capabilities,
         is_omni=key.is_omni or config.is_omni,
-        deep_thinking=deep_thinking,
-        thinking_budget_tokens=thinking_budget,
-        json_output=json_output,
-        provider_params=params,
-        runtime=runtime_options or ModelRuntimeOptions(),
+        params=dict(key.config or config.config),
+        runtime_options=runtime_options,
     )
 
 
@@ -94,24 +140,18 @@ def _build_from_binding(
     tenant_id: UUID,
     runtime_options: ModelRuntimeOptions | None,
 ) -> ResolvedModelConfig:
-    params = dict(binding.config or config.config)
-    deep_thinking, thinking_budget, json_output = _runtime_flags(params)
-    return ResolvedModelConfig(
-        model_config_id=config.model_config_id,
+    return _build_resolved(
+        config,
         key_id=None,
         tenant_id=tenant_id,
         provider=binding.provider,
-        model_type=config.model_type,
         model_name=binding.model_name,
         api_key=binding.api_key,
         base_url=binding.base_url,
         capabilities=binding.capabilities or config.capabilities,
         is_omni=binding.is_omni or config.is_omni,
-        deep_thinking=deep_thinking,
-        thinking_budget_tokens=thinking_budget,
-        json_output=json_output,
-        provider_params=params,
-        runtime=runtime_options or ModelRuntimeOptions(),
+        params=dict(binding.config or config.config),
+        runtime_options=runtime_options,
     )
 
 
