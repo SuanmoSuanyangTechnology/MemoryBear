@@ -286,10 +286,22 @@ class RedBearLLM(BaseLLM):
         )
 
     def invoke(self, input: Any, config: dict | None = None, **kwargs: Any) -> Any:
-        return self._observe(
-            "invoke",
-            lambda: self._model.invoke(input, config=config, **kwargs),
-        )
+        started = time.perf_counter()
+        try:
+            return self._model.invoke(input, config=config, **kwargs)
+        except AttributeError as exc:
+            if "invoke" in str(exc):
+                return super().invoke(input, config=config, **kwargs)
+            raise
+        except Exception as exc:
+            report_failure_safely(
+                self._telemetry,
+                self._config,
+                operation="invoke",
+                exc=exc,
+                started_at=started,
+            )
+            raise
 
     async def ainvoke(
         self,
@@ -297,10 +309,22 @@ class RedBearLLM(BaseLLM):
         config: dict | None = None,
         **kwargs: Any,
     ) -> Any:
-        return await self._observe_async(
-            "ainvoke",
-            lambda: self._model.ainvoke(input, config=config, **kwargs),
-        )
+        started = time.perf_counter()
+        try:
+            return await self._model.ainvoke(input, config=config, **kwargs)
+        except AttributeError as exc:
+            if "ainvoke" in str(exc):
+                return await super().ainvoke(input, config=config, **kwargs)
+            raise
+        except Exception as exc:
+            report_failure_safely(
+                self._telemetry,
+                self._config,
+                operation="ainvoke",
+                exc=exc,
+                started_at=started,
+            )
+            raise
 
     def stream(
         self,

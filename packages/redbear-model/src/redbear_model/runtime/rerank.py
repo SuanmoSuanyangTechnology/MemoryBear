@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from copy import deepcopy
 from typing import Any
@@ -61,10 +62,16 @@ class RedBearRerank(BaseDocumentCompressor):
         config: ResolvedModelConfig,
         *,
         model: Any | None = None,
+        owns_model: bool | None = None,
         telemetry: ModelTelemetry | None = None,
     ):
         object.__setattr__(self, "_config", config)
         object.__setattr__(self, "_telemetry", telemetry or NoOpModelTelemetry())
+        object.__setattr__(
+            self,
+            "_owns_model",
+            model is None if owns_model is None else owns_model,
+        )
         object.__setattr__(
             self,
             "_model",
@@ -135,3 +142,29 @@ class RedBearRerank(BaseDocumentCompressor):
                 started_at=started,
             )
             raise
+
+    def _close_target(self):
+        close = getattr(self._model, "close", None)
+        if callable(close):
+            return close
+        session = getattr(self._model, "session", None)
+        close = getattr(session, "close", None)
+        return close if callable(close) else None
+
+    def close(self) -> None:
+        if not self._owns_model:
+            return
+        close = self._close_target()
+        if close is not None:
+            close()
+
+    async def aclose(self) -> None:
+        if not self._owns_model:
+            return
+        aclose = getattr(self._model, "aclose", None)
+        if callable(aclose):
+            await aclose()
+            return
+        close = self._close_target()
+        if close is not None:
+            await asyncio.to_thread(close)

@@ -42,6 +42,24 @@ class _ObservedGenerator:
             )
             raise
 
+    def close(self) -> None:
+        if not self._owns_client:
+            return
+        close = getattr(self._client, "close", None)
+        if callable(close):
+            close()
+
+    async def aclose(self) -> None:
+        if not self._owns_client:
+            return
+        aclose = getattr(self._client, "aclose", None)
+        if callable(aclose):
+            await aclose()
+            return
+        close = getattr(self._client, "close", None)
+        if callable(close):
+            await asyncio.to_thread(close)
+
 
 class RedBearImageGenerator(_ObservedGenerator):
     def __init__(
@@ -49,10 +67,12 @@ class RedBearImageGenerator(_ObservedGenerator):
         config: ResolvedModelConfig,
         *,
         client: Any | None = None,
+        owns_client: bool | None = None,
         telemetry: ModelTelemetry | None = None,
     ):
         self._config = config
         self._telemetry = telemetry or NoOpModelTelemetry()
+        self._owns_client = client is None if owns_client is None else owns_client
         self._client = client if client is not None else self._create_client(config)
 
     @staticmethod
@@ -133,10 +153,12 @@ class RedBearVideoGenerator(_ObservedGenerator):
         config: ResolvedModelConfig,
         *,
         client: Any | None = None,
+        owns_client: bool | None = None,
         telemetry: ModelTelemetry | None = None,
     ):
         self._config = config
         self._telemetry = telemetry or NoOpModelTelemetry()
+        self._owns_client = client is None if owns_client is None else owns_client
         self._client = client if client is not None else self._create_client(config)
 
     @staticmethod
