@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from redbear_model.contracts import ResolvedModelConfig
+from redbear_model.contracts import ModelCapability, ResolvedModelConfig
 from redbear_model.errors import ProviderDependencyMissingError
 
 BEDROCK_MODEL_MAPPING = {
@@ -63,17 +63,86 @@ def _credentials(config: ResolvedModelConfig) -> tuple[str, str | None]:
 
 
 def build_bedrock_params(config: ResolvedModelConfig) -> dict[str, Any]:
+    try:
+        from botocore.config import Config as BotoConfig
+    except ModuleNotFoundError as exc:
+        raise ProviderDependencyMissingError("bedrock", "bedrock") from exc
+
     access_key, secret_key = _credentials(config)
     region = config.base_url or str(config.provider_params.get("region", "us-east-1"))
+    config_only = {
+        "deep_thinking",
+        "thinking_budget_tokens",
+        "enable_search",
+        "enable_thinking",
+        "response_format",
+        "json_output",
+        "default_headers",
+    }
+    provider_specific = {
+        "top_k",
+        "repetition_penalty",
+        "seed",
+        "enable_search",
+        "stop",
+        "temperature",
+        "max_tokens",
+    }
+    filtered = {
+        key: value
+        for key, value in config.provider_params.items()
+        if key not in config_only
+        and key not in provider_specific
+        and key != "region"
+    }
     params: dict[str, Any] = {
         "model_id": normalize_bedrock_model_id(config.model_name),
         "region_name": region,
         "aws_access_key_id": access_key,
+        "config": BotoConfig(
+            max_pool_connections=config.runtime.bedrock_max_pool_connections,
+            retries={
+                "max_attempts": config.runtime.bedrock_max_retries,
+                "mode": "adaptive",
+            },
+        ),
+        **filtered,
     }
     if secret_key:
         params["aws_secret_access_key"] = secret_key
-    model_kwargs = dict(config.provider_params)
-    model_kwargs.pop("region", None)
+    model_kwargs: dict[str, Any] = {}
+    for key in ("top_k", "seed"):
+        value = config.provider_params.get(key)
+        if value is not None:
+            model_kwargs[key] = value
+    stop = config.provider_params.get("stop")
+    if stop is not None:
+        model_kwargs["stop_sequences"] = stop
+    for key in ("temperature", "max_tokens"):
+        value = config.provider_params.get(key)
+        if value is not None:
+            params[key] = value
+    if config.deep_thinking:
+        params["additional_model_request_fields"] = {
+            "thinking": {
+                "type": "enabled",
+                "budget_tokens": config.thinking_budget_tokens or 1024,
+            }
+        }
+    should_send_json = config.json_output or isinstance(
+        config.provider_params.get("response_format"),
+        dict,
+    )
+    thinking_conflict = (
+        ModelCapability.THINKING in config.capabilities and config.deep_thinking
+    )
+    if should_send_json and not thinking_conflict:
+        response_format = config.provider_params.get("response_format")
+        model_kwargs["response_format"] = (
+            response_format
+            if isinstance(response_format, dict)
+            else {"type": "json_object"}
+        )
     if model_kwargs:
         params["model_kwargs"] = model_kwargs
     return params

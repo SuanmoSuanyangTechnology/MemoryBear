@@ -55,6 +55,8 @@ class ModelRuntimeOptions(ContractModel):
     http_max_connections: int = Field(default=300, ge=1)
     http_max_keepalive_connections: int = Field(default=50, ge=0)
     http_trust_env: bool = True
+    bedrock_max_pool_connections: int = Field(default=50, ge=1)
+    bedrock_max_retries: int = Field(default=2, ge=0)
     embedding_batch_size: int = Field(default=10, ge=1)
 
 
