@@ -67,10 +67,17 @@ class ImageChunkPipeline(ChunkPipeline):
             "\n\n".join(markdown_parts),
             source_image_url,
         )
-        blocks.extend(mineru_blocks)
         has_ocr_text = self._has_content(
             [block for block in mineru_blocks if block.type is not ParsedBlockType.IMAGE]
         )
+        if (
+            mode == 1
+            and not has_ocr_text
+            and len(mineru_blocks) == 1
+            and mineru_blocks[0].type is ParsedBlockType.IMAGE
+        ):
+            mineru_blocks = []
+        blocks.extend(mineru_blocks)
         if mode in {1, 2}:
             source_image_block.image = source_image
             source_image_block.image_vision_scope = ImageVisionScope.DIRECT
