@@ -13,7 +13,13 @@ from .s3 import S3Storage
 
 
 class MinIOStorage(S3Storage):
-    def __init__(self, config: MinIOStorageConfig, *, client: Any | None = None):
+    def __init__(
+        self,
+        config: MinIOStorageConfig,
+        *,
+        client: Any | None = None,
+        owns_client: bool | None = None,
+    ):
         self.minio_config = config
         self._bucket_ready = not config.ensure_bucket
         self._bucket_lock = asyncio.Lock()
@@ -27,6 +33,7 @@ class MinIOStorage(S3Storage):
                 multipart_part_size=config.multipart_part_size,
             ),
             client=client,
+            owns_client=owns_client,
         )
 
     async def _ensure_ready(self) -> None:

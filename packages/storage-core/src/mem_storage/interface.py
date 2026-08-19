@@ -46,3 +46,11 @@ class StorageBackend(ABC):
         expires: int = 3600,
         file_name: str | None = None,
     ) -> str | None: ...
+
+    def close(self) -> None:
+        """Release resources owned by this backend."""
+        return
+
+    async def aclose(self) -> None:
+        """Asynchronously release resources owned by this backend."""
+        self.close()

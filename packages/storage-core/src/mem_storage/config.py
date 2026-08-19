@@ -8,6 +8,9 @@ from typing import Annotated, Literal, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 
+S3_MIN_MULTIPART_PART_SIZE = 5 * 1024 * 1024
+OSS_MIN_MULTIPART_PART_SIZE = 100 * 1024
+
 
 class StorageType(StrEnum):
     LOCAL = "local"
@@ -39,7 +42,10 @@ class OSSStorageConfig(StorageConfigBase):
     access_key_secret: SecretStr
     bucket_name: str = Field(min_length=1)
     connect_timeout_s: int = Field(default=30, ge=1)
-    multipart_part_size: int = Field(default=5 * 1024 * 1024, ge=1)
+    multipart_part_size: int = Field(
+        default=5 * 1024 * 1024,
+        ge=OSS_MIN_MULTIPART_PART_SIZE,
+    )
 
 
 class S3StorageConfig(StorageConfigBase):
@@ -49,7 +55,10 @@ class S3StorageConfig(StorageConfigBase):
     secret_access_key: SecretStr
     bucket_name: str = Field(min_length=1)
     endpoint_url: str | None = None
-    multipart_part_size: int = Field(default=5 * 1024 * 1024, ge=1)
+    multipart_part_size: int = Field(
+        default=S3_MIN_MULTIPART_PART_SIZE,
+        ge=S3_MIN_MULTIPART_PART_SIZE,
+    )
 
 
 class MinIOStorageConfig(StorageConfigBase):
@@ -59,7 +68,10 @@ class MinIOStorageConfig(StorageConfigBase):
     secret_access_key: SecretStr
     bucket_name: str = Field(min_length=1)
     endpoint_url: str = Field(min_length=1)
-    multipart_part_size: int = Field(default=5 * 1024 * 1024, ge=1)
+    multipart_part_size: int = Field(
+        default=S3_MIN_MULTIPART_PART_SIZE,
+        ge=S3_MIN_MULTIPART_PART_SIZE,
+    )
     ensure_bucket: bool = True
 
 

@@ -18,7 +18,21 @@ class LocalStorage(StorageBackend):
     def __init__(self, config: LocalStorageConfig):
         self.config = config
         self.root_path = config.root_path
-        self.root_path.mkdir(parents=True, exist_ok=True)
+        self._ready = False
+        self._ready_lock = asyncio.Lock()
+
+    async def _ensure_ready(self) -> None:
+        if self._ready:
+            return
+        async with self._ready_lock:
+            if self._ready:
+                return
+            await asyncio.to_thread(
+                self.root_path.mkdir,
+                parents=True,
+                exist_ok=True,
+            )
+            self._ready = True
 
     def _path(self, file_key: str) -> Path:
         return self.root_path / file_key
@@ -29,6 +43,7 @@ class LocalStorage(StorageBackend):
         content: bytes,
         content_type: str | None = None,
     ) -> str:
+        await self._ensure_ready()
         path = self._path(file_key)
         try:
             await asyncio.to_thread(path.parent.mkdir, parents=True, exist_ok=True)
@@ -48,6 +63,7 @@ class LocalStorage(StorageBackend):
         stream: AsyncIterator[bytes],
         content_type: str | None = None,
     ) -> int:
+        await self._ensure_ready()
         path = self._path(file_key)
         try:
             await asyncio.to_thread(path.parent.mkdir, parents=True, exist_ok=True)
@@ -67,6 +83,7 @@ class LocalStorage(StorageBackend):
             ) from exc
 
     async def download(self, file_key: str) -> bytes:
+        await self._ensure_ready()
         path = self._path(file_key)
         if not await asyncio.to_thread(path.exists):
             raise FileNotFoundError(f"File not found: {file_key}")
@@ -87,6 +104,7 @@ class LocalStorage(StorageBackend):
         file_key: str,
         chunk_size: int = 64 * 1024,
     ) -> AsyncIterator[bytes]:
+        await self._ensure_ready()
         path = self._path(file_key)
         if not await asyncio.to_thread(path.exists):
             raise FileNotFoundError(f"File not found: {file_key}")
@@ -104,6 +122,7 @@ class LocalStorage(StorageBackend):
             ) from exc
 
     async def delete(self, file_key: str) -> bool:
+        await self._ensure_ready()
         path = self._path(file_key)
         if not await asyncio.to_thread(path.exists):
             return False
@@ -120,6 +139,7 @@ class LocalStorage(StorageBackend):
             ) from exc
 
     async def exists(self, file_key: str) -> bool:
+        await self._ensure_ready()
         return await asyncio.to_thread(self._path(file_key).exists)
 
     async def get_signed_url(

@@ -22,11 +22,18 @@ from .interface import StorageBackend
 
 
 class OSSStorage(StorageBackend):
-    def __init__(self, config: OSSStorageConfig, *, bucket: Any | None = None):
+    def __init__(
+        self,
+        config: OSSStorageConfig,
+        *,
+        bucket: Any | None = None,
+        owns_bucket: bool | None = None,
+    ):
         self.config = config
         self.endpoint = config.endpoint
         self.bucket_name = config.bucket_name
         self.part_size = config.multipart_part_size
+        self._owns_bucket = bucket is None if owns_bucket is None else owns_bucket
         if bucket is not None:
             self.bucket = bucket
             return
@@ -247,3 +254,29 @@ class OSSStorage(StorageBackend):
         except OssError:
             host = self.endpoint.removeprefix("https://").removeprefix("http://")
             return f"https://{self.bucket_name}.{host}/{file_key}"
+
+    def _close_target(self):
+        close = getattr(self.bucket, "close", None)
+        if callable(close):
+            return close
+        session = getattr(self.bucket, "session", None)
+        close = getattr(session, "close", None)
+        return close if callable(close) else None
+
+    def close(self) -> None:
+        if not self._owns_bucket:
+            return
+        close = self._close_target()
+        if close is not None:
+            close()
+
+    async def aclose(self) -> None:
+        if not self._owns_bucket:
+            return
+        aclose = getattr(self.bucket, "aclose", None)
+        if callable(aclose):
+            await aclose()
+            return
+        close = self._close_target()
+        if close is not None:
+            await asyncio.to_thread(close)

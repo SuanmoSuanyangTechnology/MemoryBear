@@ -13,10 +13,18 @@ class StorageError(Exception):
     ):
         self.message = message
         self.file_key = file_key
+        self.cause = cause
         if cause is not None:
             self.__cause__ = cause
-        suffix = f"; file_key={file_key}" if file_key else ""
-        super().__init__(f"{message}{suffix}")
+        super().__init__(message)
+
+    def __str__(self) -> str:
+        parts = [self.message]
+        if self.file_key:
+            parts.append(f"file_key={self.file_key}")
+        if self.cause:
+            parts.append(f"cause={self.cause}")
+        return ", ".join(parts)
 
 
 class StorageConfigError(StorageError):

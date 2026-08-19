@@ -23,11 +23,18 @@ from .interface import StorageBackend
 
 
 class S3Storage(StorageBackend):
-    def __init__(self, config: S3StorageConfig, *, client: Any | None = None):
+    def __init__(
+        self,
+        config: S3StorageConfig,
+        *,
+        client: Any | None = None,
+        owns_client: bool | None = None,
+    ):
         self.config = config
         self.region = config.region
         self.bucket_name = config.bucket_name
         self.part_size = config.multipart_part_size
+        self._owns_client = client is None if owns_client is None else owns_client
         if client is not None:
             self.client = client
             return
@@ -279,3 +286,17 @@ class S3Storage(StorageBackend):
             )
         except (ClientError, BotoCoreError):
             return f"https://{self.bucket_name}.s3.{self.region}.amazonaws.com/{file_key}"
+
+    def close(self) -> None:
+        if not self._owns_client:
+            return
+        close = getattr(self.client, "close", None)
+        if callable(close):
+            close()
+
+    async def aclose(self) -> None:
+        if not self._owns_client:
+            return
+        close = getattr(self.client, "close", None)
+        if callable(close):
+            await asyncio.to_thread(close)
