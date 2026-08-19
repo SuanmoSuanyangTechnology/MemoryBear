@@ -9,10 +9,12 @@ description = "Independent MemoryBear knowledge service"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "asyncpg>=0.31,<1",
-    "celery>=5.5,<6",
+    "amqp==5.3.1",
+    "billiard==4.2.2",
+    "celery==5.5.3",
     "elasticsearch>=8.17,<9",
     "fastapi>=0.119,<1",
-    "kombu>=5.5,<6",
+    "kombu==5.5.4",
     "mem-storage-core",
     "psycopg[binary]>=3.2,<4",
     "pydantic-settings>=2.11,<3",
