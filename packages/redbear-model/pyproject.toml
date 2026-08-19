@@ -19,7 +19,10 @@ runtime = [
     "langchain-openai>=1.0,<2",
     "langchain-community>=0.3,<1",
 ]
-ollama = ["langchain-ollama>=1.0,<2"]
+ollama = [
+    "httpx[socks]>=0.28,<1",
+    "langchain-ollama>=1.0,<2",
+]
 bedrock = ["langchain-aws>=1.0.0a1,<2"]
 dashscope = ["dashscope>=1.25,<2"]
 generation = ["volcengine-python-sdk[ark]>=5.0.19,<6"]
@@ -30,6 +33,7 @@ all = [
     "langchain-openai>=1.0,<2",
     "langchain-community>=0.3,<1",
     "langchain-ollama>=1.0,<2",
+    "httpx[socks]>=0.28,<1",
     "langchain-aws>=1.0.0a1,<2",
     "dashscope>=1.25,<2",
     "volcengine-python-sdk[ark]>=5.0.19,<6",
