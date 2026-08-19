@@ -3468,6 +3468,45 @@
         }
       }
     },
+    "/v1/memory/merge": {
+      "post": {
+        "tags": [
+          "V1 - Memory API"
+        ],
+        "summary": "Merge Memory",
+        "operationId": "merge_memory_v1_memory_merge_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MergeEndUserInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/end_user/create": {
       "post": {
         "tags": [
@@ -4163,7 +4202,7 @@
           "V1 - Memory Config API"
         ],
         "summary": "Update Config Emotion",
-        "description": "Update emotion engine config (full update).\n\nAll fields except emotion_model_id are required.\nOnly configs belonging to the authorized workspace can be updated.",
+        "description": "Update emotion engine config (full update).\n\nAll configuration fields are required.\nOnly configs belonging to the authorized workspace can be updated.",
         "operationId": "update_config_emotion_v1_memory_config_update_config_emotion_put",
         "requestBody": {
           "content": {
@@ -4879,6 +4918,191 @@
                 "schema": {
                   "$ref": "#/components/schemas/ApiResponse"
                 }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/memory-display/written": {
+      "get": {
+        "tags": [
+          "V1 - Memory Display API"
+        ],
+        "summary": "Get Written Memories",
+        "description": "获取写入展示记录列表\n\n返回指定用户的写入记忆展示记录，按 occurred_at 倒序分页。\n\nmemory_type 始终返回稳定英文枚举，由前端负责展示文案映射；name 和\ncontent 保持记忆生成时的原始语言，不受 X-Language-Type 影响。",
+        "operationId": "get_written_memories_v1_memory_display_written_get",
+        "parameters": [
+          {
+            "name": "end_user_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "终端用户 ID",
+              "title": "End User Id"
+            },
+            "description": "终端用户 ID"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "页码，从 1 开始",
+              "default": 1,
+              "title": "Page"
+            },
+            "description": "页码，从 1 开始"
+          },
+          {
+            "name": "pagesize",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "每页数量",
+              "default": 10,
+              "title": "Pagesize"
+            },
+            "description": "每页数量"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiKeyAuth"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/memory-display/engines": {
+      "get": {
+        "tags": [
+          "V1 - Memory Display API"
+        ],
+        "summary": "Get Engine Display Cards",
+        "description": "获取引擎动态展示卡片列表\n\n按\"指定时区下的自然日 + 引擎类型\"聚合事件并返回卡片。\n\nengine_type 始终返回 EXTRACTION、CROSS_MODAL 或 EMOTION，\n由前端负责展示文案映射；X-Language-Type 仅控制 name/content 文案。\n\n聚合边界必须在服务端确定，因此 X-Timezone 为必传请求头，\n前端统一传全局时区设置（useI18n().timeZone），\n保证卡片的聚合日期与前端展示 occurred_at 时使用的时区一致。",
+        "operationId": "get_engine_display_cards_v1_memory_display_engines_get",
+        "parameters": [
+          {
+            "name": "end_user_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "终端用户 ID",
+              "title": "End User Id"
+            },
+            "description": "终端用户 ID"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "页码，从 1 开始",
+              "default": 1,
+              "title": "Page"
+            },
+            "description": "页码，从 1 开始"
+          },
+          {
+            "name": "pagesize",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "每页数量",
+              "default": 10,
+              "title": "Pagesize"
+            },
+            "description": "每页数量"
+          },
+          {
+            "name": "X-Timezone",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "IANA 时区名称，前端必传 useI18n().timeZone，如 Asia/Shanghai",
+              "title": "X-Timezone"
+            },
+            "description": "IANA 时区名称，前端必传 useI18n().timeZone，如 Asia/Shanghai"
+          },
+          {
+            "name": "X-Language-Type",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Language-Type"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiKeyAuth"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
               }
             }
           },
@@ -5984,7 +6208,6 @@
         "required": [
           "api_key_id",
           "workspace_id",
-          "tenant_id",
           "type",
           "scopes",
           "resource_id"
@@ -6627,6 +6850,10 @@
               }
             ],
             "description": "上下文引擎配置"
+          },
+          "emotion_reply": {
+            "$ref": "#/components/schemas/EmotionReplyConfig",
+            "description": "情绪感知回复配置"
           }
         },
         "type": "object",
@@ -8485,78 +8712,6 @@
             ],
             "title": "Config Id"
           },
-          "llm_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Llm Id",
-            "description": "LLM模型配置ID"
-          },
-          "audio_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Audio Id",
-            "description": "语音模型ID"
-          },
-          "vision_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Vision Id",
-            "description": "视觉模型ID"
-          },
-          "video_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Video Id",
-            "description": "视频模型ID"
-          },
-          "embedding_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Embedding Id",
-            "description": "嵌入模型配置ID"
-          },
-          "rerank_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Rerank Id",
-            "description": "重排序模型配置ID"
-          },
           "enable_llm_dedup_blockwise": {
             "anyOf": [
               {
@@ -9508,18 +9663,6 @@
             "title": "Emotion Enabled",
             "description": "是否启用情绪提取"
           },
-          "emotion_model_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Emotion Model Id",
-            "description": "情绪分析专用模型ID"
-          },
           "emotion_extract_keywords": {
             "type": "boolean",
             "title": "Emotion Extract Keywords",
@@ -9584,6 +9727,19 @@
         ],
         "title": "EmotionHealthRequest",
         "description": "获取情绪健康指数请求"
+      },
+      "EmotionReplyConfig": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "description": "是否启用情绪感知回复",
+            "default": false
+          }
+        },
+        "type": "object",
+        "title": "EmotionReplyConfig",
+        "description": "情绪感知回复配置。"
       },
       "EmotionSuggestionsRequest": {
         "properties": {
@@ -10880,6 +11036,20 @@
             "title": "Retrieve Type",
             "description": "检索方式participle｜ semantic｜hybrid",
             "default": "hybrid"
+          },
+          "enable_graph_retrieval": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enable Graph Retrieval",
+            "description": "混合检索下是否启用证据图谱通道"
           }
         },
         "type": "object",
@@ -11920,10 +12090,6 @@
             "title": "Baseline",
             "default": "TIME"
           },
-          "reflection_model_id": {
-            "type": "string",
-            "title": "Reflection Model Id"
-          },
           "memory_verify": {
             "type": "boolean",
             "title": "Memory Verify"
@@ -12012,11 +12178,34 @@
         "required": [
           "reflection_enabled",
           "reflection_period_in_hours",
-          "reflection_model_id",
           "memory_verify",
           "quality_assessment"
         ],
         "title": "Memory_Reflection"
+      },
+      "MergeEndUserInput": {
+        "properties": {
+          "end_user_ids": {
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": "array",
+            "uniqueItems": true,
+            "title": "End User Ids"
+          },
+          "target": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Target"
+          }
+        },
+        "type": "object",
+        "required": [
+          "end_user_ids",
+          "target"
+        ],
+        "title": "MergeEndUserInput"
       },
       "MessageFeedbackRequest": {
         "properties": {
@@ -13132,6 +13321,7 @@
         "enum": [
           "openai",
           "speedbear",
+          "minimax",
           "dashscope",
           "ollama",
           "xinference",
@@ -13703,6 +13893,38 @@
         "title": "OptimizationStrategy",
         "description": "优化策略枚举"
       },
+      "PageMeta": {
+        "properties": {
+          "page": {
+            "type": "integer",
+            "title": "Page",
+            "description": "当前页码，从1开始"
+          },
+          "pagesize": {
+            "type": "integer",
+            "title": "Pagesize",
+            "description": "每页数量"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "description": "总条数"
+          },
+          "hasnext": {
+            "type": "boolean",
+            "title": "Hasnext",
+            "description": "是否有下一页"
+          }
+        },
+        "type": "object",
+        "required": [
+          "page",
+          "pagesize",
+          "total",
+          "hasnext"
+        ],
+        "title": "PageMeta"
+      },
       "ParseSchemaRequest": {
         "properties": {
           "schema_content": {
@@ -13758,6 +13980,296 @@
           4
         ],
         "title": "PerceptualType"
+      },
+      "PermanentMemoryItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "Neo4j elementId"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label",
+            "default": "Statement"
+          },
+          "properties": {
+            "$ref": "#/components/schemas/PermanentMemoryProperties"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "properties"
+        ],
+        "title": "PermanentMemoryItem"
+      },
+      "PermanentMemoryList-Input": {
+        "properties": {
+          "page": {
+            "$ref": "#/components/schemas/PageMeta"
+          },
+          "quota": {
+            "$ref": "#/components/schemas/PermanentMemoryQuota"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PermanentMemoryItem"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "page",
+          "quota",
+          "items"
+        ],
+        "title": "PermanentMemoryList"
+      },
+      "PermanentMemoryList-Output": {
+        "properties": {
+          "page": {
+            "$ref": "#/components/schemas/PageMeta"
+          },
+          "quota": {
+            "$ref": "#/components/schemas/PermanentMemoryQuota"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PermanentMemoryItem"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "page",
+          "quota",
+          "items"
+        ],
+        "title": "PermanentMemoryList"
+      },
+      "PermanentMemoryListApiResponse": {
+        "properties": {
+          "code": {
+            "type": "integer",
+            "title": "Code",
+            "description": "业务状态码，0=成功，非0=各类业务异常",
+            "default": 0
+          },
+          "msg": {
+            "type": "string",
+            "title": "Msg",
+            "description": "给人看的简短提示",
+            "default": "OK"
+          },
+          "data": {
+            "$ref": "#/components/schemas/PermanentMemoryList-Output"
+          },
+          "error": {
+            "type": "string",
+            "title": "Error",
+            "description": "失败时的字段级错误信息，成功时为空字符串",
+            "default": ""
+          },
+          "time": {
+            "type": "integer",
+            "title": "Time",
+            "description": "Unix时间戳（秒）"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "PermanentMemoryListApiResponse"
+      },
+      "PermanentMemoryProperties": {
+        "properties": {
+          "statement": {
+            "type": "string",
+            "title": "Statement"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At",
+            "description": "UTC Unix timestamp in milliseconds"
+          },
+          "is_permanent": {
+            "type": "boolean",
+            "title": "Is Permanent",
+            "description": "是否永久记忆",
+            "default": false
+          },
+          "value_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value Score",
+            "description": "动态价值分：永久=1.0；普通=0.75*topology_score + 0.25*T（T 为时间新近度）"
+          }
+        },
+        "type": "object",
+        "required": [
+          "statement"
+        ],
+        "title": "PermanentMemoryProperties"
+      },
+      "PermanentMemoryQuota": {
+        "properties": {
+          "total_memory_limit": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Total Memory Limit",
+            "description": "当前有效记忆总容量"
+          },
+          "permanent_limit": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Permanent Limit",
+            "description": "记忆总容量向下取整后的 10%"
+          },
+          "used": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Used"
+          },
+          "remaining": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Remaining"
+          }
+        },
+        "type": "object",
+        "required": [
+          "total_memory_limit",
+          "permanent_limit",
+          "used",
+          "remaining"
+        ],
+        "title": "PermanentMemoryQuota"
+      },
+      "PermanentMemoryQuotaApiResponse": {
+        "properties": {
+          "code": {
+            "type": "integer",
+            "title": "Code",
+            "description": "业务状态码，0=成功，非0=各类业务异常",
+            "default": 0
+          },
+          "msg": {
+            "type": "string",
+            "title": "Msg",
+            "description": "给人看的简短提示",
+            "default": "OK"
+          },
+          "data": {
+            "$ref": "#/components/schemas/PermanentMemoryQuota"
+          },
+          "error": {
+            "type": "string",
+            "title": "Error",
+            "description": "失败时的字段级错误信息，成功时为空字符串",
+            "default": ""
+          },
+          "time": {
+            "type": "integer",
+            "title": "Time",
+            "description": "Unix时间戳（秒）"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "PermanentMemoryQuotaApiResponse"
+      },
+      "PermanentMemoryUnmarkApiResponse": {
+        "properties": {
+          "code": {
+            "type": "integer",
+            "title": "Code",
+            "description": "业务状态码，0=成功，非0=各类业务异常",
+            "default": 0
+          },
+          "msg": {
+            "type": "string",
+            "title": "Msg",
+            "description": "给人看的简短提示",
+            "default": "OK"
+          },
+          "data": {
+            "$ref": "#/components/schemas/PermanentMemoryUnmarkResult"
+          },
+          "error": {
+            "type": "string",
+            "title": "Error",
+            "description": "失败时的字段级错误信息，成功时为空字符串",
+            "default": ""
+          },
+          "time": {
+            "type": "integer",
+            "title": "Time",
+            "description": "Unix时间戳（秒）"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "PermanentMemoryUnmarkApiResponse"
+      },
+      "PermanentMemoryUnmarkRequest": {
+        "properties": {
+          "end_user_id": {
+            "type": "string",
+            "minLength": 1,
+            "title": "End User Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "end_user_id"
+        ],
+        "title": "PermanentMemoryUnmarkRequest"
+      },
+      "PermanentMemoryUnmarkResult": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "Neo4j elementId"
+          },
+          "is_permanent": {
+            "type": "boolean",
+            "title": "Is Permanent",
+            "default": false
+          },
+          "quota": {
+            "$ref": "#/components/schemas/PermanentMemoryQuota"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "quota"
+        ],
+        "title": "PermanentMemoryUnmarkResult"
       },
       "PermissionType": {
         "type": "string",
@@ -14156,8 +14668,8 @@
         "enum": [
           "participle",
           "semantic",
-          "hybrid",
-          "graph"
+          "graph",
+          "hybrid"
         ],
         "title": "RetrieveType",
         "description": "Retrieval type enumeration"
