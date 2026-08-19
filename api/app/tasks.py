@@ -3732,12 +3732,16 @@ def sync_all_end_user_memory_counts(self) -> Dict[str, Any]:
         from app.core.memory.utils.memory_count_utils import (
             sync_end_user_memory_count_from_neo4j,
         )
-        from app.repositories.end_user_repository import EndUserRepository
         from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 
         # 只读短 session 枚举活跃用户 ID，随后立即关闭
         with get_db_read() as db:
-            user_ids = [str(u.id) for u in EndUserRepository(db).get_all_active()]
+            user_ids = [
+                str(u.id)
+                for u in db.query(EndUser)
+                .filter(EndUser.is_active == True, EndUser.memory_count >= 300)
+                .all()
+            ]
 
         connector = Neo4jConnector()
         succeeded = 0
