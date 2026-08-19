@@ -72,6 +72,7 @@ class RedBearRerank(BaseDocumentCompressor):
             "_owns_model",
             model is None if owns_model is None else owns_model,
         )
+        object.__setattr__(self, "_closed", False)
         object.__setattr__(
             self,
             "_model",
@@ -152,19 +153,23 @@ class RedBearRerank(BaseDocumentCompressor):
         return close if callable(close) else None
 
     def close(self) -> None:
-        if not self._owns_model:
+        if self._closed:
             return
-        close = self._close_target()
-        if close is not None:
-            close()
+        if self._owns_model:
+            close = self._close_target()
+            if close is not None:
+                close()
+        object.__setattr__(self, "_closed", True)
 
     async def aclose(self) -> None:
-        if not self._owns_model:
+        if self._closed:
             return
-        aclose = getattr(self._model, "aclose", None)
-        if callable(aclose):
-            await aclose()
-            return
-        close = self._close_target()
-        if close is not None:
-            await asyncio.to_thread(close)
+        if self._owns_model:
+            aclose = getattr(self._model, "aclose", None)
+            if callable(aclose):
+                await aclose()
+            else:
+                close = self._close_target()
+                if close is not None:
+                    await asyncio.to_thread(close)
+        object.__setattr__(self, "_closed", True)

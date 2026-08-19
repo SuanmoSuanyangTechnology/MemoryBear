@@ -48,6 +48,7 @@ class RedBearEmbeddings(Embeddings):
         self._owns_pool = client_pool is None
         self._is_volcano = config.provider is ModelProvider.VOLCANO
         self._owns_provider_client = model is None and self._is_volcano
+        self._closed = False
         if model is not None:
             self._model = model
             self._client = None
@@ -216,14 +217,19 @@ class RedBearEmbeddings(Embeddings):
         return self._config.provider.value
 
     def close(self) -> None:
+        if self._closed:
+            return
         if self._owns_provider_client:
             close = getattr(self._client, "close", None)
             if callable(close):
                 close()
         if self._owns_pool:
             self._client_pool.close()
+        self._closed = True
 
     async def aclose(self) -> None:
+        if self._closed:
+            return
         if self._owns_provider_client:
             aclose = getattr(self._client, "aclose", None)
             if callable(aclose):
@@ -234,6 +240,7 @@ class RedBearEmbeddings(Embeddings):
                     await asyncio.to_thread(close)
         if self._owns_pool:
             await self._client_pool.aclose()
+        self._closed = True
 
 
 RedBearMultimodalEmbeddings = RedBearEmbeddings

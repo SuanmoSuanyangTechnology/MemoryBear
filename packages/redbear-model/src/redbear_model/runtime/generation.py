@@ -43,22 +43,26 @@ class _ObservedGenerator:
             raise
 
     def close(self) -> None:
-        if not self._owns_client:
+        if self._closed:
             return
-        close = getattr(self._client, "close", None)
-        if callable(close):
-            close()
+        if self._owns_client:
+            close = getattr(self._client, "close", None)
+            if callable(close):
+                close()
+        self._closed = True
 
     async def aclose(self) -> None:
-        if not self._owns_client:
+        if self._closed:
             return
-        aclose = getattr(self._client, "aclose", None)
-        if callable(aclose):
-            await aclose()
-            return
-        close = getattr(self._client, "close", None)
-        if callable(close):
-            await asyncio.to_thread(close)
+        if self._owns_client:
+            aclose = getattr(self._client, "aclose", None)
+            if callable(aclose):
+                await aclose()
+            else:
+                close = getattr(self._client, "close", None)
+                if callable(close):
+                    await asyncio.to_thread(close)
+        self._closed = True
 
 
 class RedBearImageGenerator(_ObservedGenerator):
@@ -73,6 +77,7 @@ class RedBearImageGenerator(_ObservedGenerator):
         self._config = config
         self._telemetry = telemetry or NoOpModelTelemetry()
         self._owns_client = client is None if owns_client is None else owns_client
+        self._closed = False
         self._client = client if client is not None else self._create_client(config)
 
     @staticmethod
@@ -159,6 +164,7 @@ class RedBearVideoGenerator(_ObservedGenerator):
         self._config = config
         self._telemetry = telemetry or NoOpModelTelemetry()
         self._owns_client = client is None if owns_client is None else owns_client
+        self._closed = False
         self._client = client if client is not None else self._create_client(config)
 
     @staticmethod

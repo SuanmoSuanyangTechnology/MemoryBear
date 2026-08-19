@@ -23,8 +23,11 @@ class ModelClientPool:
     def __init__(self, options: ModelRuntimeOptions):
         self._options = options
         self._clients: HttpClients | None = None
+        self._closed = False
 
     def get_http_clients(self) -> HttpClients:
+        if self._closed:
+            raise RuntimeError("ModelClientPool is closed")
         if self._clients is None:
             timeout = httpx.Timeout(
                 timeout=self._options.timeout_s,
@@ -57,7 +60,10 @@ class ModelClientPool:
         return self._clients
 
     def close(self) -> None:
+        if self._closed:
+            return
         if self._clients is None:
+            self._closed = True
             return
         try:
             asyncio.get_running_loop()
@@ -74,9 +80,13 @@ class ModelClientPool:
         aclose = getattr(self._clients.async_client, "aclose", None)
         if callable(aclose):
             asyncio.run(aclose())
+        self._closed = True
 
     async def aclose(self) -> None:
+        if self._closed:
+            return
         if self._clients is None:
+            self._closed = True
             return
         close = getattr(self._clients.sync, "close", None)
         if callable(close):
@@ -84,3 +94,4 @@ class ModelClientPool:
         aclose = getattr(self._clients.async_client, "aclose", None)
         if callable(aclose):
             await aclose()
+        self._closed = True
