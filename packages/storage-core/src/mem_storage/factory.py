@@ -10,19 +10,23 @@ from .config import (
     StorageConfig,
 )
 from .interface import StorageBackend
-from .local import LocalStorage
-from .minio import MinIOStorage
-from .oss import OSSStorage
-from .s3 import S3Storage
 
 
 def create_storage(config: StorageConfig) -> StorageBackend:
     if isinstance(config, LocalStorageConfig):
+        from .local import LocalStorage
+
         return LocalStorage(config)
     if isinstance(config, OSSStorageConfig):
+        from .oss import OSSStorage
+
         return OSSStorage(config)
     if isinstance(config, MinIOStorageConfig):
+        from .minio import MinIOStorage
+
         return MinIOStorage(config)
     if isinstance(config, S3StorageConfig):
+        from .s3 import S3Storage
+
         return S3Storage(config)
     raise TypeError(f"Unsupported storage config: {type(config).__name__}")
