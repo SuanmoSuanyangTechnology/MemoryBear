@@ -6,7 +6,14 @@ import logging
 from enum import StrEnum
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, SecretStr
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    JsonValue,
+    SecretStr,
+    model_validator,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -119,6 +126,20 @@ class ResolvedModelConfig(ContractModel):
     json_output: bool = False
     provider_params: dict[str, JsonValue] = Field(default_factory=dict)
     runtime: ModelRuntimeOptions = Field(default_factory=ModelRuntimeOptions)
+
+    @model_validator(mode="after")
+    def normalize_capability_flags(self) -> ResolvedModelConfig:
+        deep_thinking, thinking_budget_tokens, json_output = normalize_runtime_flags(
+            self.capabilities,
+            self.deep_thinking,
+            self.thinking_budget_tokens,
+            self.json_output,
+            self.model_name,
+        )
+        object.__setattr__(self, "deep_thinking", deep_thinking)
+        object.__setattr__(self, "thinking_budget_tokens", thinking_budget_tokens)
+        object.__setattr__(self, "json_output", json_output)
+        return self
 
 
 def normalize_runtime_flags(

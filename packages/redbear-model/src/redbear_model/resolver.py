@@ -16,7 +16,6 @@ from .contracts import (
     ModelRuntimeOptions,
     PublicModelBindingSnapshot,
     ResolvedModelConfig,
-    normalize_runtime_flags,
 )
 from .errors import (
     ModelAccessDeniedError,
@@ -59,20 +58,12 @@ def _select_key(
 
 def _runtime_flags(
     params: dict,
-    capabilities: tuple[ModelCapability, ...],
-    model_name: str,
 ) -> tuple[bool, int | None, bool]:
     deep_thinking = bool(params.get("deep_thinking", False))
     raw_budget = params.get("thinking_budget_tokens")
     thinking_budget = int(raw_budget) if raw_budget is not None else None
     json_output = bool(params.get("json_output", False))
-    return normalize_runtime_flags(
-        capabilities,
-        deep_thinking,
-        thinking_budget,
-        json_output,
-        model_name,
-    )
+    return deep_thinking, thinking_budget, json_output
 
 
 def _build_resolved(
@@ -91,8 +82,6 @@ def _build_resolved(
 ) -> ResolvedModelConfig:
     deep_thinking, thinking_budget, json_output = _runtime_flags(
         params,
-        capabilities,
-        model_name,
     )
     return ResolvedModelConfig(
         model_config_id=config.model_config_id,
