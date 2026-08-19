@@ -8,7 +8,7 @@
  * SSE stream handlers live in utils/streamHandlers.ts and utils/interventionHandlers.ts.
  */
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
-import { useParams, useLocation } from 'react-router-dom'
+import { useParams, useLocation, useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { App } from 'antd'
 
@@ -44,11 +44,11 @@ export function useConversation() {
   const { message: messageApi, modal } = App.useApp()
   const { token, shareUuid } = useParams()
   const location = useLocation()
-  const searchParams = new URLSearchParams(location.search)
+  const [searchParams] = useSearchParams()
   const userId = searchParams.get('user_id')
   const windowType = searchParams.get('type')
+  const source = searchParams.get('source')
   const isFloatBtn = windowType === 'floatBtn'
-
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState<string>('')
   const [conversation_id, setConversationId] = useState<string | null>(null)
@@ -78,6 +78,7 @@ export function useConversation() {
   const [thinking, setThinking] = useState(false)
   const [isIframe, setIsIframe] = useState(false)
   const [isSmallScreen, setIsSmallScreen] = useState(false)
+  const [isNarrowScreen, setIsNarrowScreen] = useState(false)
   const [isShare, setIsShare] = useState(false)
   const [showHistory, setShowHistory] = useState(false)
   const [configLoading, setConfigLoading] = useState(true)
@@ -108,6 +109,7 @@ export function useConversation() {
   useEffect(() => {
     const handleResize = () => {
       setIsSmallScreen(window.innerWidth < 1080)
+      setIsNarrowScreen(window.innerWidth < 600)
     }
     handleResize()
     window.addEventListener('resize', handleResize)
@@ -322,7 +324,9 @@ export function useConversation() {
     isDeepThinking,
     thinking,
     isIframe,
+    source,
     isSmallScreen,
+    isNarrowScreen,
     isShare,
     showHistory,
     setShowHistory,

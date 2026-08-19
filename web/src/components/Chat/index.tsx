@@ -43,7 +43,7 @@ const Chat: FC<ChatProps> = ({
 
       {/* Chat input area */}
       {!readOnly &&
-        <Flex className="rb:relative rb:mx-4! rb:mt-4! rb:mb-0!">
+        <Flex className="rb:relative rb:mx-4! rb:mt-3! rb:mb-0!">
           <ChatInput
             fileList={fileList}
             message={message}

@@ -32,6 +32,7 @@ interface EmptyProps {
   subTitle?: string;
   /** Additional CSS classes */
   className?: string;
+  subClassName?: string;
 }
 const  Empty: FC<EmptyProps> = ({
   url,
@@ -40,6 +41,7 @@ const  Empty: FC<EmptyProps> = ({
   isNeedSubTitle = true,
   subTitle,
   className = '',
+  subClassName = ''
 }) => {
   const { t } = useTranslation();
   // Calculate width and height from size prop (supports single value or [width, height] array)
@@ -70,7 +72,7 @@ const  Empty: FC<EmptyProps> = ({
             {/* Optional title */}
             {title && <div className="rb:mt-2 rb:leading-5 rb:text-[#212332]">{title}</div>}
             {/* Optional subtitle with conditional styling */}
-            {curSubTitle && <div className={`rb:mt-[${url ? 8 : 5}px] rb:leading-4 rb:text-[12px] rb:text-[#5B6167]`}>{curSubTitle}</div>}
+            {curSubTitle && <div className={`rb:mt-[${url ? 8 : 5}px] rb:leading-4 rb:text-[12px] rb:text-[#5B6167] ${subClassName}`}>{curSubTitle}</div>}
           </Flex>
         </div>
       </Flex>
