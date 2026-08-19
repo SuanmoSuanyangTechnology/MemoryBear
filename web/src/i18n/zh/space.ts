@@ -358,6 +358,7 @@ export const space = {
       timeout_at: '此操作将在 {{timeout_at}} 过期',
       favorite: '收藏',
       unfavorite: '取消收藏',
+      MemorySkills: '记忆对话',
     },
     login: {
       title: '红熊记忆科学',

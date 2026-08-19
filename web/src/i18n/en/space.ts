@@ -358,6 +358,7 @@ export const space = {
       timeout_at: 'Operation will expire {{timeout_at}} expires',
       favorite: 'Favorite',
       unfavorite: 'Unfavorite',
+      MemorySkills: 'Memory Chat',
     },
     login: {
       title: 'Red Bear Memory Science',
