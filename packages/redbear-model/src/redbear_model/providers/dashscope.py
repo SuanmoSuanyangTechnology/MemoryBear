@@ -22,7 +22,6 @@ _CONFIG_ONLY_KEYS = {
     "thinking_budget_tokens",
     "json_output",
     "response_format",
-    "streaming",
 }
 
 
@@ -49,7 +48,11 @@ def build_dashscope_params(config: ResolvedModelConfig) -> dict[str, Any]:
     thinking_conflict = (
         ModelCapability.THINKING in config.capabilities and config.deep_thinking
     )
-    if config.json_output and not thinking_conflict:
+    should_send_json = config.json_output or isinstance(
+        config.provider_params.get("response_format"),
+        dict,
+    )
+    if should_send_json and not thinking_conflict:
         response_format = config.provider_params.get("response_format")
         model_kwargs["response_format"] = (
             response_format

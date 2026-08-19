@@ -80,7 +80,7 @@ def build_bedrock_params(config: ResolvedModelConfig) -> dict[str, Any]:
         raise ProviderDependencyMissingError("bedrock", "bedrock") from exc
 
     access_key, secret_key = _credentials(config)
-    region = config.base_url or str(config.provider_params.get("region", "us-east-1"))
+    region = config.base_url or "us-east-1"
     config_only = {
         "deep_thinking",
         "thinking_budget_tokens",
@@ -104,7 +104,6 @@ def build_bedrock_params(config: ResolvedModelConfig) -> dict[str, Any]:
         for key, value in config.provider_params.items()
         if key not in config_only
         and key not in provider_specific
-        and key != "region"
     }
     params: dict[str, Any] = {
         "model_id": normalize_bedrock_model_id(config.model_name),

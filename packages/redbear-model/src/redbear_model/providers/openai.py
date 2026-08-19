@@ -86,7 +86,6 @@ _CONFIG_ONLY_KEYS = {
     "response_format",
     "json_output",
     "default_headers",
-    "streaming",
 }
 _PROVIDER_SPECIFIC_KEYS = {
     "top_k",
