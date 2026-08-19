@@ -228,41 +228,6 @@ export const getEpisodicOverview = (data: { end_user_id: string; time_range: str
 export const getEpisodicDetail = (data: { end_user_id: string; summary_id: string; } ) => {
   return request.post(`/memory/episodic-memory/details`, data)
 }
-const emotionTimelineMock = {
-  timeline: [
-    { emotion_type: 'anxiety', emotion_intensity: 0.72, created_at: '2026-03-02 09:15:00' },
-    { emotion_type: 'anxiety', emotion_intensity: 0.64, created_at: '2026-03-02 14:40:00' },
-    { emotion_type: 'confusion', emotion_intensity: 0.51, created_at: '2026-03-02 18:20:00' },
-    { emotion_type: 'neutral', emotion_intensity: 0.43, created_at: '2026-03-03 10:05:00' },
-    { emotion_type: 'hope', emotion_intensity: 0.58, created_at: '2026-03-05 16:30:00' },
-    { emotion_type: 'hope', emotion_intensity: 0.67, created_at: '2026-03-09 08:50:00' },
-    { emotion_type: 'relief', emotion_intensity: 0.74, created_at: '2026-03-09 13:10:00' },
-    { emotion_type: 'relief', emotion_intensity: 0.79, created_at: '2026-03-09 19:25:00' },
-    { emotion_type: 'joy', emotion_intensity: 0.83, created_at: '2026-03-14 11:00:00' },
-    { emotion_type: 'joy', emotion_intensity: 0.88, created_at: '2026-03-14 15:45:00' },
-    { emotion_type: 'hope', emotion_intensity: 0.76, created_at: '2026-03-14 20:10:00' },
-  ],
-}
-
-const emotionOverviewMock = {
-  overview: [
-    { emotion_type: 'anxiety', emotion_intensity: 0.68, created_at: '2026-03-02 12:00:00' },
-    { emotion_type: 'hope', emotion_intensity: 0.63, created_at: '2026-03-05 12:00:00' },
-    { emotion_type: 'relief', emotion_intensity: 0.77, created_at: '2026-03-09 12:00:00' },
-    { emotion_type: 'joy', emotion_intensity: 0.86, created_at: '2026-03-14 12:00:00' },
-  ],
-}
-
-// Emotion timeline
-export const getEmotionTimeline = (data: { id: string }) => {
-  if (import.meta.env.DEV) return Promise.resolve(emotionTimelineMock)
-  return request.get('/memory-storage/memory_space/emotion_timeline', data)
-}
-// Emotion overview
-export const getEmotionOverview = (data: { id: string }) => {
-  if (import.meta.env.DEV) return Promise.resolve(emotionOverviewMock)
-  return request.get('/memory-storage/memory_space/emotion_overview', data)
-}
 // Relationship evolution
 export const getRelationshipEvolution = (data: { id: string; label: string; } ) => {
   return request.get(`/memory-storage/memory_space/relationship_evolution`, data)
