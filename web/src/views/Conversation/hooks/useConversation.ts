@@ -132,8 +132,13 @@ export function useConversation() {
 
   useEffect(() => {
     if (!token) return
-    const localShareToken = localStorage.getItem(`shareToken_${token}`)
-    setShareToken(localShareToken)
+    let localShareToken = null
+    if (source === 'MemorySkills' && userId) {
+      localStorage.removeItem(`shareToken_${token}`)
+    } else {
+      localShareToken = localStorage.getItem(`shareToken_${token}`)
+      setShareToken(localShareToken)
+    }
     if (localShareToken && localShareToken !== '') return
     getShareToken(token as string, userId || randomString(12, false))
       .then(res => {
@@ -141,7 +146,7 @@ export function useConversation() {
         localStorage.setItem(`shareToken_${token}`, response.access_token ?? '')
         setShareToken(response.access_token ?? '')
       })
-  }, [token])
+  }, [token, source, userId])
 
   useEffect(() => {
     if (page === 1 && hasMore && historyList.length === 0 && shareToken) {
