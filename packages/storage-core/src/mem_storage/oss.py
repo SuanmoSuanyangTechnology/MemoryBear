@@ -34,6 +34,7 @@ class OSSStorage(StorageBackend):
         self.bucket_name = config.bucket_name
         self.part_size = config.multipart_part_size
         self._owns_bucket = bucket is None if owns_bucket is None else owns_bucket
+        self._closed = False
         if bucket is not None:
             self.bucket = bucket
             return
@@ -69,9 +70,15 @@ class OSSStorage(StorageBackend):
                 headers=headers,
             )
             return file_key
+        except OssError as exc:
+            raise StorageUploadError(
+                f"Failed to upload file to OSS: {exc}",
+                file_key=file_key,
+                cause=exc,
+            ) from exc
         except Exception as exc:
             raise StorageUploadError(
-                "Failed to upload file to OSS",
+                f"Failed to upload file to OSS: {exc}",
                 file_key=file_key,
                 cause=exc,
             ) from exc
@@ -147,7 +154,7 @@ class OSSStorage(StorageBackend):
                         upload_id,
                     )
             raise StorageUploadError(
-                "Failed to stream file to OSS",
+                f"Failed to stream upload file to OSS: {exc}",
                 file_key=file_key,
                 cause=exc,
             ) from exc
@@ -159,13 +166,13 @@ class OSSStorage(StorageBackend):
             raise FileNotFoundError(f"File not found: {file_key}") from exc
         except OssError as exc:
             raise StorageDownloadError(
-                "Failed to download file from OSS",
+                f"Failed to download file from OSS: {exc}",
                 file_key=file_key,
                 cause=exc,
             ) from exc
         except Exception as exc:
             raise StorageDownloadError(
-                "Failed to download file from OSS",
+                f"Failed to download file from OSS: {exc}",
                 file_key=file_key,
                 cause=exc,
             ) from exc
@@ -176,7 +183,7 @@ class OSSStorage(StorageBackend):
             return await asyncio.to_thread(result.read)
         except Exception as exc:
             raise StorageDownloadError(
-                "Failed to read file body from OSS",
+                f"Failed to download file from OSS: {exc}",
                 file_key=file_key,
                 cause=exc,
             ) from exc
@@ -205,7 +212,7 @@ class OSSStorage(StorageBackend):
                     yield chunk
         except Exception as exc:
             raise StorageDownloadError(
-                "Failed to read file stream from OSS",
+                f"Failed to download file from OSS: {exc}",
                 file_key=file_key,
                 cause=exc,
             ) from exc
@@ -218,9 +225,15 @@ class OSSStorage(StorageBackend):
         try:
             await asyncio.to_thread(self.bucket.delete_object, file_key)
             return True
+        except OssError as exc:
+            raise StorageDeleteError(
+                f"Failed to delete file from OSS: {exc}",
+                file_key=file_key,
+                cause=exc,
+            ) from exc
         except Exception as exc:
             raise StorageDeleteError(
-                "Failed to delete file from OSS",
+                f"Failed to delete file from OSS: {exc}",
                 file_key=file_key,
                 cause=exc,
             ) from exc
@@ -264,19 +277,23 @@ class OSSStorage(StorageBackend):
         return close if callable(close) else None
 
     def close(self) -> None:
-        if not self._owns_bucket:
+        if self._closed:
             return
-        close = self._close_target()
-        if close is not None:
-            close()
+        if self._owns_bucket:
+            close = self._close_target()
+            if close is not None:
+                close()
+        self._closed = True
 
     async def aclose(self) -> None:
-        if not self._owns_bucket:
+        if self._closed:
             return
-        aclose = getattr(self.bucket, "aclose", None)
-        if callable(aclose):
-            await aclose()
-            return
-        close = self._close_target()
-        if close is not None:
-            await asyncio.to_thread(close)
+        if self._owns_bucket:
+            aclose = getattr(self.bucket, "aclose", None)
+            if callable(aclose):
+                await aclose()
+            else:
+                close = self._close_target()
+                if close is not None:
+                    await asyncio.to_thread(close)
+        self._closed = True

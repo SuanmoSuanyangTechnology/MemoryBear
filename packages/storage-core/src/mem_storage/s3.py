@@ -35,6 +35,7 @@ class S3Storage(StorageBackend):
         self.bucket_name = config.bucket_name
         self.part_size = config.multipart_part_size
         self._owns_client = client is None if owns_client is None else owns_client
+        self._closed = False
         if client is not None:
             self.client = client
             return
@@ -75,9 +76,23 @@ class S3Storage(StorageBackend):
         try:
             await asyncio.to_thread(self.client.put_object, **params)
             return file_key
+        except ClientError as exc:
+            code = exc.response.get("Error", {}).get("Code", "Unknown")
+            message = exc.response.get("Error", {}).get("Message", str(exc))
+            raise StorageUploadError(
+                f"Failed to upload file to S3 ({code}): {message}",
+                file_key=file_key,
+                cause=exc,
+            ) from exc
+        except BotoCoreError as exc:
+            raise StorageUploadError(
+                f"Failed to upload file to S3: {exc}",
+                file_key=file_key,
+                cause=exc,
+            ) from exc
         except Exception as exc:
             raise StorageUploadError(
-                "Failed to upload file to S3",
+                f"Failed to upload file to S3: {exc}",
                 file_key=file_key,
                 cause=exc,
             ) from exc
@@ -163,7 +178,7 @@ class S3Storage(StorageBackend):
                         UploadId=upload_id,
                     )
             raise StorageUploadError(
-                "Failed to stream file to S3",
+                f"Failed to stream upload file to S3: {exc}",
                 file_key=file_key,
                 cause=exc,
             ) from exc
@@ -181,13 +196,14 @@ class S3Storage(StorageBackend):
             if code in {"NoSuchKey", "404"}:
                 raise FileNotFoundError(f"File not found: {file_key}") from exc
             raise StorageDownloadError(
-                "Failed to download file from S3",
+                f"Failed to download file from S3 ({code}): "
+                f"{exc.response.get('Error', {}).get('Message', str(exc))}",
                 file_key=file_key,
                 cause=exc,
             ) from exc
         except Exception as exc:
             raise StorageDownloadError(
-                "Failed to download file from S3",
+                f"Failed to download file from S3: {exc}",
                 file_key=file_key,
                 cause=exc,
             ) from exc
@@ -199,7 +215,7 @@ class S3Storage(StorageBackend):
             return await asyncio.to_thread(body.read)
         except Exception as exc:
             raise StorageDownloadError(
-                "Failed to read file body from S3",
+                f"Failed to download file from S3: {exc}",
                 file_key=file_key,
                 cause=exc,
             ) from exc
@@ -225,7 +241,7 @@ class S3Storage(StorageBackend):
                     yield chunk
         except Exception as exc:
             raise StorageDownloadError(
-                "Failed to read file stream from S3",
+                f"Failed to download file from S3: {exc}",
                 file_key=file_key,
                 cause=exc,
             ) from exc
@@ -243,9 +259,23 @@ class S3Storage(StorageBackend):
                 Key=file_key,
             )
             return True
+        except ClientError as exc:
+            code = exc.response.get("Error", {}).get("Code", "Unknown")
+            message = exc.response.get("Error", {}).get("Message", str(exc))
+            raise StorageDeleteError(
+                f"Failed to delete file from S3 ({code}): {message}",
+                file_key=file_key,
+                cause=exc,
+            ) from exc
+        except BotoCoreError as exc:
+            raise StorageDeleteError(
+                f"Failed to delete file from S3: {exc}",
+                file_key=file_key,
+                cause=exc,
+            ) from exc
         except Exception as exc:
             raise StorageDeleteError(
-                "Failed to delete file from S3",
+                f"Failed to delete file from S3: {exc}",
                 file_key=file_key,
                 cause=exc,
             ) from exc
@@ -288,15 +318,19 @@ class S3Storage(StorageBackend):
             return f"https://{self.bucket_name}.s3.{self.region}.amazonaws.com/{file_key}"
 
     def close(self) -> None:
-        if not self._owns_client:
+        if self._closed:
             return
-        close = getattr(self.client, "close", None)
-        if callable(close):
-            close()
+        if self._owns_client:
+            close = getattr(self.client, "close", None)
+            if callable(close):
+                close()
+        self._closed = True
 
     async def aclose(self) -> None:
-        if not self._owns_client:
+        if self._closed:
             return
-        close = getattr(self.client, "close", None)
-        if callable(close):
-            await asyncio.to_thread(close)
+        if self._owns_client:
+            close = getattr(self.client, "close", None)
+            if callable(close):
+                await asyncio.to_thread(close)
+        self._closed = True

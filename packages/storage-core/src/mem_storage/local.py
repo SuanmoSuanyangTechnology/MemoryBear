@@ -52,7 +52,7 @@ class LocalStorage(StorageBackend):
             return str(path)
         except Exception as exc:
             raise StorageUploadError(
-                "Failed to upload local file",
+                f"Failed to upload file: {exc}",
                 file_key=file_key,
                 cause=exc,
             ) from exc
@@ -77,7 +77,7 @@ class LocalStorage(StorageBackend):
             return total
         except Exception as exc:
             raise StorageUploadError(
-                "Failed to upload local file stream",
+                f"Failed to stream upload file: {exc}",
                 file_key=file_key,
                 cause=exc,
             ) from exc
@@ -94,7 +94,7 @@ class LocalStorage(StorageBackend):
             raise
         except Exception as exc:
             raise StorageDownloadError(
-                "Failed to download local file",
+                f"Failed to download file: {exc}",
                 file_key=file_key,
                 cause=exc,
             ) from exc
@@ -116,7 +116,7 @@ class LocalStorage(StorageBackend):
             raise
         except Exception as exc:
             raise StorageDownloadError(
-                "Failed to stream local file",
+                f"Failed to stream download file: {exc}",
                 file_key=file_key,
                 cause=exc,
             ) from exc
@@ -133,7 +133,7 @@ class LocalStorage(StorageBackend):
             return False
         except Exception as exc:
             raise StorageDeleteError(
-                "Failed to delete local file",
+                f"Failed to delete file: {exc}",
                 file_key=file_key,
                 cause=exc,
             ) from exc
