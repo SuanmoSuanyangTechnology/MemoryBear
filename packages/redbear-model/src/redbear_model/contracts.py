@@ -54,6 +54,7 @@ class ModelRuntimeOptions(ContractModel):
     concurrency: int = Field(default=5, ge=1)
     http_max_connections: int = Field(default=300, ge=1)
     http_max_keepalive_connections: int = Field(default=50, ge=0)
+    http_trust_env: bool = True
     embedding_batch_size: int = Field(default=10, ge=1)
 
 
