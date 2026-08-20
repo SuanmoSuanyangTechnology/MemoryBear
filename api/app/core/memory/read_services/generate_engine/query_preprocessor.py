@@ -1,7 +1,13 @@
 import logging
 import re
+from typing import Callable
 
 from app.core.memory.models.service_models import QuestionSplit
+from app.core.memory.exceptions import (
+    MemoryModelType,
+    MemoryRetrievalBusinessError,
+    MemoryRetrievalStage,
+)
 from app.core.utils.datetime_utils import utcnow_naive
 from app.core.memory.prompt import prompt_manager
 from app.core.models.llm import StructResponse
@@ -22,7 +28,13 @@ class QueryPreprocessor:
         return text
 
     @staticmethod
-    async def split(query: str, history: list, memory_l0_str: str, llm_client: RedBearLLM) -> list:
+    async def split(
+        query: str,
+        history: list,
+        memory_l0_str: str,
+        llm_client: RedBearLLM,
+        on_error: Callable[[MemoryRetrievalBusinessError], None] | None = None,
+    ) -> list:
         system_prompt = prompt_manager.render(
             name="problem_split",
             datetime=utcnow_naive().strftime("%Y-%m-%d"),
@@ -34,11 +46,33 @@ class QueryPreprocessor:
                                         f"<query>{query}</query>"},
         ]
         try:
-            sub_queries = await llm_client.ainvoke(messages, config={
+            response = await llm_client.ainvoke(messages, config={
                 "callbacks": []
-            }) | StructResponse(QuestionSplit)
+            })
+        except Exception as e:
+            logger.error(f"[QueryPreprocessor] Sub-question segmentation failed - {e}")
+            if on_error is not None:
+                on_error(
+                    MemoryRetrievalBusinessError.model_call_failed(
+                        MemoryRetrievalStage.QUERY_PROCESS,
+                        e,
+                        model_type=MemoryModelType.LLM,
+                    )
+                )
+            return [query]
+
+        try:
+            sub_queries = response | StructResponse(QuestionSplit)
             queries = sub_queries.questions
         except Exception as e:
             logger.error(f"[QueryPreprocessor] Sub-question segmentation failed - {e}")
+            if on_error is not None:
+                on_error(
+                    MemoryRetrievalBusinessError.structured_result_parse_failed(
+                        MemoryRetrievalStage.QUERY_PROCESS,
+                        e,
+                        model_type=MemoryModelType.LLM,
+                    )
+                )
             queries = [query]
         return queries
