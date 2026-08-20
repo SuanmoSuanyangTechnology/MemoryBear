@@ -47,15 +47,15 @@ class DatabaseManager:
             if self._sync_engine is None:
                 self._sync_engine = create_engine(
                     self._settings.database_url_sync,
-                    pool_size=self._settings.db_pool_size,
-                    max_overflow=self._settings.db_max_overflow,
-                    pool_pre_ping=self._settings.db_pool_pre_ping,
-                    pool_recycle=self._settings.db_pool_recycle,
-                    pool_timeout=self._settings.db_pool_timeout,
+                    pool_size=self._settings.kb_db_pool_size,
+                    max_overflow=self._settings.kb_db_max_overflow,
+                    pool_pre_ping=self._settings.kb_db_pool_pre_ping,
+                    pool_recycle=self._settings.kb_db_pool_recycle,
+                    pool_timeout=self._settings.kb_db_pool_timeout,
                     connect_args={
                         "options": (
                             "-c timezone=UTC "
-                            f"-c statement_timeout={self._settings.db_statement_timeout_ms}"
+                            f"-c statement_timeout={self._settings.kb_db_statement_timeout_ms}"
                         )
                     },
                 )
@@ -66,16 +66,16 @@ class DatabaseManager:
             if self._async_engine is None:
                 self._async_engine = create_async_engine(
                     self._settings.database_url_async,
-                    pool_size=self._settings.db_pool_size,
-                    max_overflow=self._settings.db_max_overflow,
-                    pool_pre_ping=self._settings.db_pool_pre_ping,
-                    pool_recycle=self._settings.db_pool_recycle,
-                    pool_timeout=self._settings.db_pool_timeout,
+                    pool_size=self._settings.kb_db_pool_size,
+                    max_overflow=self._settings.kb_db_max_overflow,
+                    pool_pre_ping=self._settings.kb_db_pool_pre_ping,
+                    pool_recycle=self._settings.kb_db_pool_recycle,
+                    pool_timeout=self._settings.kb_db_pool_timeout,
                     connect_args={
                         "server_settings": {
                             "timezone": "UTC",
                             "statement_timeout": str(
-                                self._settings.db_statement_timeout_ms
+                                self._settings.kb_db_statement_timeout_ms
                             ),
                         }
                     },

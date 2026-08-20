@@ -8,7 +8,7 @@ from pathlib import Path
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 SERVICE_ROOT = REPOSITORY_ROOT / "mem-knowledge"
-SOURCE_ROOT = SERVICE_ROOT / "src" / "mem_knowledge"
+SOURCE_ROOT = SERVICE_ROOT / "src"
 API_ROOT = (REPOSITORY_ROOT / "api").resolve()
 PUBLIC_PACKAGE_ROOTS = (
     REPOSITORY_ROOT / "packages" / "redbear-model" / "src",
@@ -109,7 +109,7 @@ def main() -> int:
         errors.extend(
             _scan_python_tree(
                 package_root,
-                {"mem_knowledge"},
+                {"src"},
                 forbid_task_decorators=False,
             )
         )

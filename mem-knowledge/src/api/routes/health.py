@@ -48,7 +48,7 @@ async def live(request: Request) -> HealthResponse:
     runtime: ProcessRuntime = request.app.state.runtime
     return HealthResponse(
         status="alive",
-        process_role=runtime.settings.process_role,
+        process_role=runtime.settings.kb_process_role,
         checked_at_ms=_timestamp_ms(),
         trace_id=request.state.trace_id,
     )
@@ -57,7 +57,7 @@ async def live(request: Request) -> HealthResponse:
 @router.get("/ready", response_model=HealthResponse)
 async def ready(request: Request) -> HealthResponse | JSONResponse:
     runtime: ProcessRuntime = request.app.state.runtime
-    timeout_seconds = runtime.settings.health_probe_timeout_seconds
+    timeout_seconds = runtime.settings.kb_health_probe_timeout_seconds
     names = ("database", "redis", "elasticsearch", "storage")
     probes = (
         runtime.database.ping,
@@ -72,7 +72,7 @@ async def ready(request: Request) -> HealthResponse | JSONResponse:
     is_ready = all(component.status == "up" for component in results)
     response = HealthResponse(
         status="ready" if is_ready else "not_ready",
-        process_role=runtime.settings.process_role,
+        process_role=runtime.settings.kb_process_role,
         checked_at_ms=_timestamp_ms(),
         trace_id=request.state.trace_id,
         code=None if is_ready else "KNOWLEDGE_NOT_READY",

@@ -33,7 +33,7 @@ class RedisManager:
                 self._client = redis.Redis.from_url(
                     self._settings.redis_url,
                     decode_responses=True,
-                    max_connections=self._settings.redis_pool_size,
+                    max_connections=self._settings.kb_redis_pool_size,
                     health_check_interval=30,
                 )
                 self._pid = os.getpid()

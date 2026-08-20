@@ -12,7 +12,7 @@ from starlette.responses import Response
 
 TRACE_ID_HEADER = "X-Trace-Id"
 _TRACE_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
-_trace_id: ContextVar[str] = ContextVar("mem_knowledge_trace_id", default="")
+_trace_id: ContextVar[str] = ContextVar("kb_trace_id", default="")
 
 
 def get_trace_id() -> str:

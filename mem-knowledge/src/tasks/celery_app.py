@@ -31,7 +31,7 @@ def create_celery_app(settings: KnowledgeSettings) -> Celery:
     """Construct the routing app without connecting to the broker."""
 
     application = Celery(
-        "mem_knowledge",
+        "kb",
         broker=settings.celery_broker_url,
         backend=settings.celery_result_backend,
     )
@@ -43,11 +43,11 @@ def create_celery_app(settings: KnowledgeSettings) -> Celery:
         enable_utc=True,
         task_track_started=True,
         task_ignore_result=False,
-        task_time_limit=settings.task_time_limit_seconds,
-        task_soft_time_limit=settings.task_soft_time_limit_seconds,
-        worker_prefetch_multiplier=settings.worker_prefetch_multiplier,
+        task_time_limit=settings.kb_task_time_limit_seconds,
+        task_soft_time_limit=settings.kb_task_soft_time_limit_seconds,
+        worker_prefetch_multiplier=settings.kb_worker_prefetch_multiplier,
         worker_redirect_stdouts_level="INFO",
-        result_expires=settings.result_expires_seconds,
+        result_expires=settings.kb_result_expires_seconds,
         task_acks_late=True,
         task_reject_on_worker_lost=True,
         worker_disable_rate_limits=True,

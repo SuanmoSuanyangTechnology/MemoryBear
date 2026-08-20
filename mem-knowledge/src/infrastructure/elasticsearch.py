@@ -38,7 +38,7 @@ class ElasticsearchManager:
                     "retry_on_timeout": self._settings.elasticsearch_retry_on_timeout,
                     "max_retries": self._settings.elasticsearch_max_retries,
                     "connections_per_node": (
-                        self._settings.elasticsearch_connections_per_node
+                        self._settings.kb_es_connections_per_node
                     ),
                     "verify_certs": self._settings.elasticsearch_verify_certs,
                 }

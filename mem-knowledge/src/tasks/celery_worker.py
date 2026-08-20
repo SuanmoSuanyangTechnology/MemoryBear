@@ -25,7 +25,7 @@ def initialize_worker_process(**kwargs: object) -> None:
     logger.info(
         "Knowledge worker process initialized pid=%s role=%s",
         runtime.pid,
-        settings.process_role,
+        settings.kb_process_role,
     )
 
 

@@ -21,52 +21,14 @@ class KnowledgeSettings(BaseSettings):
     )
 
     service_name: Literal["mem-knowledge"] = "mem-knowledge"
-    deployment_mode: str = Field(default="community", validation_alias="DEPLOYMENT_MODE")
-    host: str = Field(default="0.0.0.0", validation_alias="MEM_KNOWLEDGE_HOST")
-    port: int = Field(default=8080, ge=1, le=65535, validation_alias="MEM_KNOWLEDGE_PORT")
-    process_role: Literal[
-        "api",
-        "document_worker",
-        "graphrag_worker",
-        "qa_import_worker",
-    ] = Field(default="api", validation_alias="MEM_KNOWLEDGE_PROCESS_ROLE")
-    log_level: str = Field(default="INFO", validation_alias="MEM_KNOWLEDGE_LOG_LEVEL")
 
+    # Shared environment variables
+    deployment_mode: str = Field(default="community", validation_alias="DEPLOYMENT_MODE")
     db_host: str = Field(default="127.0.0.1", validation_alias="DB_HOST")
     db_port: int = Field(default=5432, ge=1, le=65535, validation_alias="DB_PORT")
     db_user: str = Field(default="postgres", validation_alias="DB_USER")
     db_password: SecretStr = Field(default=SecretStr("password"), validation_alias="DB_PASSWORD")
     db_name: str = Field(default="redbear-mem", validation_alias="DB_NAME")
-    db_pool_size: int = Field(
-        default=20,
-        ge=1,
-        validation_alias="MEM_KNOWLEDGE_DB_POOL_SIZE",
-    )
-    db_max_overflow: int = Field(
-        default=10,
-        ge=0,
-        validation_alias="MEM_KNOWLEDGE_DB_MAX_OVERFLOW",
-    )
-    db_pool_recycle: int = Field(
-        default=1800,
-        ge=1,
-        validation_alias="MEM_KNOWLEDGE_DB_POOL_RECYCLE",
-    )
-    db_pool_timeout: int = Field(
-        default=30,
-        ge=1,
-        validation_alias="MEM_KNOWLEDGE_DB_POOL_TIMEOUT",
-    )
-    db_pool_pre_ping: bool = Field(
-        default=True,
-        validation_alias="MEM_KNOWLEDGE_DB_POOL_PRE_PING",
-    )
-    db_statement_timeout_ms: int = Field(
-        default=60000,
-        ge=1,
-        validation_alias="MEM_KNOWLEDGE_DB_STATEMENT_TIMEOUT_MS",
-    )
-
     redis_host: str = Field(default="127.0.0.1", validation_alias="REDIS_HOST")
     redis_port: int = Field(default=6379, ge=1, le=65535, validation_alias="REDIS_PORT")
     redis_password: SecretStr = Field(default=SecretStr(""), validation_alias="REDIS_PASSWORD")
@@ -80,11 +42,6 @@ class KnowledgeSettings(BaseSettings):
         default=4,
         ge=0,
         validation_alias="REDIS_DB_CELERY_BACKEND",
-    )
-    redis_pool_size: int = Field(
-        default=50,
-        ge=1,
-        validation_alias="MEM_KNOWLEDGE_REDIS_POOL_SIZE",
     )
     celery_broker_url_value: SecretStr | None = Field(
         default=None,
@@ -135,12 +92,6 @@ class KnowledgeSettings(BaseSettings):
         ge=0,
         validation_alias="ELASTICSEARCH_MAX_RETRIES",
     )
-    elasticsearch_connections_per_node: int = Field(
-        default=10,
-        ge=1,
-        validation_alias="MEM_KNOWLEDGE_ES_CONNECTIONS_PER_NODE",
-    )
-
     storage_type: Literal["local", "oss", "s3", "minio"] = Field(
         default="local",
         validation_alias="STORAGE_TYPE",
@@ -220,31 +171,83 @@ class KnowledgeSettings(BaseSettings):
         validation_alias="BEDROCK_MAX_RETRIES",
     )
 
-    health_probe_timeout_seconds: float = Field(
+    # Knowledge service environment variables
+    kb_host: str = Field(default="0.0.0.0", validation_alias="KB_HOST")
+    kb_port: int = Field(default=8080, ge=1, le=65535, validation_alias="KB_PORT")
+    kb_process_role: Literal[
+        "api",
+        "document_worker",
+        "graphrag_worker",
+        "qa_import_worker",
+    ] = Field(default="api", validation_alias="KB_PROCESS_ROLE")
+    kb_log_level: str = Field(default="INFO", validation_alias="KB_LOG_LEVEL")
+    kb_db_pool_size: int = Field(
+        default=20,
+        ge=1,
+        validation_alias="KB_DB_POOL_SIZE",
+    )
+    kb_db_max_overflow: int = Field(
+        default=10,
+        ge=0,
+        validation_alias="KB_DB_MAX_OVERFLOW",
+    )
+    kb_db_pool_recycle: int = Field(
+        default=1800,
+        ge=1,
+        validation_alias="KB_DB_POOL_RECYCLE",
+    )
+    kb_db_pool_timeout: int = Field(
+        default=30,
+        ge=1,
+        validation_alias="KB_DB_POOL_TIMEOUT",
+    )
+    kb_db_pool_pre_ping: bool = Field(
+        default=True,
+        validation_alias="KB_DB_POOL_PRE_PING",
+    )
+    kb_db_statement_timeout_ms: int = Field(
+        default=60000,
+        ge=1,
+        validation_alias="KB_DB_STATEMENT_TIMEOUT_MS",
+    )
+    kb_redis_pool_size: int = Field(
+        default=50,
+        ge=1,
+        validation_alias="KB_REDIS_POOL_SIZE",
+    )
+    kb_es_connections_per_node: int = Field(
+        default=10,
+        ge=1,
+        validation_alias="KB_ES_CONNECTIONS_PER_NODE",
+    )
+    kb_health_probe_timeout_seconds: float = Field(
         default=3.0,
         gt=0,
-        validation_alias="MEM_KNOWLEDGE_HEALTH_PROBE_TIMEOUT_SECONDS",
+        validation_alias="KB_HEALTH_PROBE_TIMEOUT_SECONDS",
     )
-    worker_prefetch_multiplier: int = Field(
+    kb_worker_prefetch_multiplier: int = Field(
         default=1,
         ge=1,
-        validation_alias="MEM_KNOWLEDGE_WORKER_PREFETCH_MULTIPLIER",
+        validation_alias="KB_WORKER_PREFETCH_MULTIPLIER",
     )
-    task_time_limit_seconds: int = Field(
+    kb_task_time_limit_seconds: int = Field(
         default=3600,
         ge=1,
-        validation_alias="MEM_KNOWLEDGE_TASK_TIME_LIMIT_SECONDS",
+        validation_alias="KB_TASK_TIME_LIMIT_SECONDS",
     )
-    task_soft_time_limit_seconds: int = Field(
+    kb_task_soft_time_limit_seconds: int = Field(
         default=3000,
         ge=1,
-        validation_alias="MEM_KNOWLEDGE_TASK_SOFT_TIME_LIMIT_SECONDS",
+        validation_alias="KB_TASK_SOFT_TIME_LIMIT_SECONDS",
     )
-    result_expires_seconds: int = Field(
+    kb_result_expires_seconds: int = Field(
         default=3600,
         ge=1,
-        validation_alias="MEM_KNOWLEDGE_RESULT_EXPIRES_SECONDS",
+        validation_alias="KB_RESULT_EXPIRES_SECONDS",
     )
+
+    # Knowledge business environment variables
+    # Add migrated A3/A4/A5 business settings only in this contiguous block.
 
     @classmethod
     def settings_customise_sources(
@@ -260,12 +263,12 @@ class KnowledgeSettings(BaseSettings):
         del cls, settings_cls, env_settings, dotenv_settings, file_secret_settings
         return (init_settings,)
 
-    @field_validator("log_level")
+    @field_validator("kb_log_level")
     @classmethod
     def normalize_log_level(cls, value: str) -> str:
         normalized = value.upper()
         if normalized not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
-            raise ValueError("MEM_KNOWLEDGE_LOG_LEVEL is invalid")
+            raise ValueError("KB_LOG_LEVEL is invalid")
         return normalized
 
     @model_validator(mode="after")
@@ -296,10 +299,10 @@ class KnowledgeSettings(BaseSettings):
             raw_value = value.get_secret_value() if isinstance(value, SecretStr) else value
             if not raw_value:
                 raise ValueError(f"{field_name} is required for {self.storage_type} storage")
-        if self.task_soft_time_limit_seconds >= self.task_time_limit_seconds:
+        if self.kb_task_soft_time_limit_seconds >= self.kb_task_time_limit_seconds:
             raise ValueError(
-                "MEM_KNOWLEDGE_TASK_SOFT_TIME_LIMIT_SECONDS must be less than "
-                "MEM_KNOWLEDGE_TASK_TIME_LIMIT_SECONDS"
+                "KB_TASK_SOFT_TIME_LIMIT_SECONDS must be less than "
+                "KB_TASK_TIME_LIMIT_SECONDS"
             )
         return self
 
@@ -359,14 +362,14 @@ class KnowledgeSettings(BaseSettings):
         return {
             "service": self.service_name,
             "deployment_mode": self.deployment_mode,
-            "process_role": self.process_role,
-            "host": self.host,
-            "port": self.port,
+            "process_role": self.kb_process_role,
+            "host": self.kb_host,
+            "port": self.kb_port,
             "db_host": self.db_host,
             "db_port": self.db_port,
             "redis_host": self.redis_host,
             "redis_port": self.redis_port,
             "elasticsearch_hosts": self.elasticsearch_hosts,
             "storage_type": self.storage_type,
-            "db_pool_size": self.db_pool_size,
+            "db_pool_size": self.kb_db_pool_size,
         }

@@ -12,7 +12,7 @@ from dotenv import dotenv_values
 
 from .config import KnowledgeSettings
 
-_SOURCE_SERVICE_ROOT = Path(__file__).resolve().parents[2]
+_SOURCE_SERVICE_ROOT = Path(__file__).resolve().parents[1]
 _SOURCE_REPOSITORY_ROOT = _SOURCE_SERVICE_ROOT.parent
 
 
@@ -41,13 +41,13 @@ def resolve_bootstrap_paths(
     )
     service_root = _absolute_path(
         process_env.get(
-            "MEM_KNOWLEDGE_SERVICE_DIR",
+            "KB_SERVICE_DIR",
             repository_root / "mem-knowledge",
         )
     )
 
     explicit_root_env = process_env.get("MEMORYBEAR_ROOT_ENV_FILE")
-    explicit_service_env = process_env.get("MEM_KNOWLEDGE_ENV_FILE")
+    explicit_service_env = process_env.get("KB_ENV_FILE")
     root_env_file = _absolute_path(explicit_root_env or repository_root / ".env")
     service_env_file = _absolute_path(explicit_service_env or service_root / ".env")
 

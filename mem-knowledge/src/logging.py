@@ -73,15 +73,15 @@ def setup_logging(settings: KnowledgeSettings) -> None:
 
     with _configure_lock:
         root = logging.getLogger()
-        root.setLevel(settings.log_level)
+        root.setLevel(settings.kb_log_level)
         for handler in list(root.handlers):
-            if getattr(handler, "_mem_knowledge_handler", False):
+            if getattr(handler, "_kb_handler", False):
                 root.removeHandler(handler)
                 handler.close()
 
         handler = logging.StreamHandler()
-        handler._mem_knowledge_handler = True  # type: ignore[attr-defined]
-        handler.setLevel(settings.log_level)
+        handler._kb_handler = True  # type: ignore[attr-defined]
+        handler.setLevel(settings.kb_log_level)
         handler.setFormatter(
             RedactingFormatter(
                 "%(asctime)s %(levelname)s [%(trace_id)s] %(name)s %(message)s"

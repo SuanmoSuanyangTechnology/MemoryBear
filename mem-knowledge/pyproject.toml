@@ -38,7 +38,7 @@ redbear-model = { path = "../packages/redbear-model" }
 mem-storage-core = { path = "../packages/storage-core" }
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/mem_knowledge"]
+packages = ["src"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

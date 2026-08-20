@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import sys
 
-from mem_knowledge.main import app
+from src.main import app
 
 EXPECTED_PATHS = {
     "/internal/v1/health/live",

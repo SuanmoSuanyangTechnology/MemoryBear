@@ -6,7 +6,7 @@ ARG PYPI_INDEX_URL=https://pypi.org/simple
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     MEMORYBEAR_ROOT_DIR=/code \
-    MEM_KNOWLEDGE_SERVICE_DIR=/code/mem-knowledge \
+    KB_SERVICE_DIR=/code/mem-knowledge \
     PATH=/code/mem-knowledge/.venv/bin:$PATH
 
 WORKDIR /code
@@ -34,4 +34,4 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/internal/v1/health/live', timeout=3).read()"]
 
-CMD ["uvicorn", "mem_knowledge.main:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8080"]
