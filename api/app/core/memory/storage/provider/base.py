@@ -1,0 +1,81 @@
+from abc import ABC, abstractmethod
+
+from app.core.memory.storage.enums import MemoryNodeLabel
+from app.core.memory.storage.models import NodeFilter, NodeProjection, NodeSort
+
+
+class BaseClient(ABC):
+
+    @staticmethod
+    def verify_label(label: MemoryNodeLabel) -> None:
+        if not isinstance(label, MemoryNodeLabel):
+            raise KeyError(f"node type - {label} not supported")
+
+    @classmethod
+    def verify_input(cls, label: MemoryNodeLabel, data: dict) -> str:
+        cls.verify_label(label)
+        node_id = data.get("id")
+        if node_id is None:
+            raise ValueError("Memory Node id field is required")
+        return node_id
+
+    @abstractmethod
+    async def health(self):
+        pass
+
+    @abstractmethod
+    async def connect(self):
+        pass
+
+    @abstractmethod
+    async def close(self):
+        pass
+
+    @abstractmethod
+    async def save_node(self, label: MemoryNodeLabel, data: dict):
+        pass
+
+    @abstractmethod
+    async def update_node(self, label: MemoryNodeLabel, data: dict, node_filter: NodeFilter):
+        pass
+
+    @abstractmethod
+    async def delete_node(
+        self,
+        label: MemoryNodeLabel,
+        node_filter: NodeFilter,
+        draft: bool = False,
+    ):
+        pass
+
+    @abstractmethod
+    async def get_node(
+        self,
+        label: MemoryNodeLabel,
+        node_filter: NodeFilter,
+        projection: NodeProjection | None = None,
+        node_sort: NodeSort | None = None,
+    ):
+        pass
+
+    @abstractmethod
+    async def search_by_fulltext(
+            self,
+            label: MemoryNodeLabel,
+            node_filter: NodeFilter,
+            text: str,
+            limit: int,
+            projection: NodeProjection | None = None,
+    ):
+        pass
+
+    @abstractmethod
+    async def search_by_embedding(
+            self,
+            label: MemoryNodeLabel,
+            node_filter: NodeFilter,
+            embed: list,
+            limit: int,
+            projection: NodeProjection | None = None,
+    ):
+        pass
