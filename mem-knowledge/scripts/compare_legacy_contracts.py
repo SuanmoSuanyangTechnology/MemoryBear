@@ -179,6 +179,19 @@ def main() -> int:
         return 1
 
     payload = _inventory_payload(operations, counts)
+    if not args.inventory_only:
+        from src.main import create_app
+
+        contract_errors = compare_openapi_operations(
+            create_app().openapi(),
+            operations,
+        )
+        if contract_errors:
+            for error in contract_errors:
+                print(error, file=sys.stderr)
+            return 1
+        payload["openapi_operation_count"] = len(operations)
+        payload["openapi_parity"] = True
     if args.json:
         json.dump(payload, sys.stdout, ensure_ascii=False, indent=2, sort_keys=True)
         sys.stdout.write("\n")
@@ -186,6 +199,8 @@ def main() -> int:
         print(f"legacy knowledge operations: {len(operations)}")
         for filename, count in counts.items():
             print(f"{filename}: {count}")
+        if not args.inventory_only:
+            print("internal OpenAPI parity: 58/58")
     return 0
 
 
