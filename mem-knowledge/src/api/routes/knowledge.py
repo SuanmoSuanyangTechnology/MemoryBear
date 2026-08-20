@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 from typing import Annotated, Any
 from urllib.parse import quote
@@ -14,12 +15,21 @@ from starlette.background import BackgroundTask
 
 from ...errors import KnowledgeError
 from ...models.owned import FILE_ROLE_SOURCE, File, KnowledgeType, ParserType, PermissionType
+from ...rag.integrations.feishu import FeishuAPIClient
+from ...rag.integrations.yuque import YuqueAPIClient
 from ...rag.knowledge_graph.elasticsearch_store import GraphElasticsearchStore
+from ...rag.retrieval.async_elasticsearch import collection_name_for_knowledge
 from ...repositories.model_registry import AsyncSQLModelRegistry
 from ...runtime import ProcessRuntime
 from ...services import file as file_service
 from ...services import graph as graph_service
 from ...services import knowledge as knowledge_service
+from ...services.knowledge_commands import (
+    dispatch_graph_transition,
+    dispatch_reparse_snapshots,
+    dispatch_sync,
+    load_reparse_snapshots,
+)
 from ...services.knowledge_file_storage import KnowledgeFileStorage
 from ...services.qa_export import (
     cleanup_export_file,
@@ -39,6 +49,8 @@ router = APIRouter(
     tags=["knowledges"],
     dependencies=[Depends(get_principal)],
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _success(request: Request, data: Any = None) -> SuccessEnvelope[Any]:
@@ -82,6 +94,54 @@ async def get_knowledge_graph_entity_types(
             ) from exc
     result = await graph_service.graph_entity_types(runtime, resolved, scenario)
     return _success(request, result)
+
+
+@router.get("/check/yuque/auth", response_model=SuccessEnvelope[None])
+async def check_yuque_auth(
+    request: Request,
+    yuque_user_id: str,
+    yuque_token: str,
+) -> SuccessEnvelope[None]:
+    try:
+        async with YuqueAPIClient(yuque_user_id, yuque_token) as client:
+            repositories = await client.get_user_repos()
+    except Exception as exc:
+        raise KnowledgeError.from_code(
+            "KB_VALIDATION_ERROR",
+            "Yuque authentication failed",
+        ) from exc
+    if not repositories:
+        raise KnowledgeError.from_code(
+            "KB_VALIDATION_ERROR",
+            "Yuque authentication failed",
+        )
+    return _success(request)
+
+
+@router.get("/check/feishu/auth", response_model=SuccessEnvelope[None])
+async def check_feishu_auth(
+    request: Request,
+    feishu_app_id: str,
+    feishu_app_secret: str,
+    feishu_folder_token: str,
+) -> SuccessEnvelope[None]:
+    try:
+        async with FeishuAPIClient(feishu_app_id, feishu_app_secret) as client:
+            files = await client.list_all_folder_files(
+                feishu_folder_token,
+                recursive=True,
+            )
+    except Exception as exc:
+        raise KnowledgeError.from_code(
+            "KB_VALIDATION_ERROR",
+            "Feishu authentication failed",
+        ) from exc
+    if not files:
+        raise KnowledgeError.from_code(
+            "KB_VALIDATION_ERROR",
+            "Feishu authentication failed",
+        )
+    return _success(request)
 
 
 @router.get("/knowledges", response_model=SuccessEnvelope[dict[str, Any]])
@@ -180,14 +240,54 @@ async def update_knowledge(
     runtime: Annotated[ProcessRuntime, Depends(get_runtime)],
 ) -> SuccessEnvelope[dict[str, Any]]:
     async with runtime.database.async_session() as db:
-        knowledge = await knowledge_service.update_knowledge(
+        plan = await knowledge_service.prepare_knowledge_update(
             db,
             knowledge_id,
             update_data,
             principal,
+        )
+    if plan.delete_vector_index:
+        await (await runtime.elasticsearch.client()).indices.delete(
+            index=collection_name_for_knowledge(knowledge_id),
+            ignore_unavailable=True,
+        )
+    async with runtime.database.async_session() as db:
+        knowledge = await knowledge_service.apply_knowledge_update(
+            db,
+            plan,
+            principal,
             runtime.redis,
         )
         data = await knowledge_service.knowledge_to_data(db, knowledge)
+    dispatcher = TaskDispatcher()
+    if plan.graph_enabled_before is not None:
+        try:
+            await dispatch_graph_transition(
+                dispatcher,
+                knowledge_id,
+                plan.graph_enabled_before,
+                knowledge.parser_config,
+            )
+        except Exception:
+            logger.error(
+                "Failed to dispatch graph transition knowledge_id=%s",
+                knowledge_id,
+            )
+    if plan.embedding_changed:
+        try:
+            async with runtime.database.async_session() as db:
+                snapshots, skipped = await load_reparse_snapshots(db, knowledge_id)
+            await dispatch_reparse_snapshots(
+                await runtime.redis.client(),
+                dispatcher,
+                snapshots,
+                skipped=skipped,
+            )
+        except Exception:
+            logger.error(
+                "Failed to dispatch reparse tasks knowledge_id=%s",
+                knowledge_id,
+            )
     return _success(request, data)
 
 
@@ -271,6 +371,21 @@ async def rebuild_knowledge_graph(
         )
     except ValueError as exc:
         raise KnowledgeError.from_code("KB_VALIDATION_ERROR", str(exc)) from exc
+    return _success(request, {"task_id": task_id})
+
+
+@router.post("/{knowledge_id}/sync", response_model=SuccessEnvelope[dict[str, str]])
+async def sync_knowledge(
+    request: Request,
+    knowledge_id: uuid.UUID,
+    principal: Annotated[Principal, Depends(get_principal)],
+    runtime: Annotated[ProcessRuntime, Depends(get_runtime)],
+) -> SuccessEnvelope[dict[str, str]]:
+    async with runtime.database.async_session() as db:
+        knowledge = await knowledge_service.get_knowledge(db, knowledge_id, principal)
+        if knowledge is None:
+            raise knowledge_service._not_found()
+    task_id = await dispatch_sync(TaskDispatcher(), knowledge_id)
     return _success(request, {"task_id": task_id})
 
 

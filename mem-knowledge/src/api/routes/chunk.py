@@ -5,13 +5,19 @@ from __future__ import annotations
 import uuid
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, File, Query, Request, UploadFile
 
 from ...errors import KnowledgeError
 from ...runtime import ProcessRuntime
 from ...services import chunk as chunk_service
 from ...services.knowledge_file_storage import KnowledgeFileStorage
 from ...services.knowledge_retrieval import KnowledgeRetrievalService
+from ...services.qa_import import (
+    create_qa_import_resources,
+    dispatch_qa_import,
+    validate_qa_upload,
+)
+from ...tasks.dispatch import TaskDispatcher
 from ..dependencies import Principal, get_principal, get_runtime
 from ..schemas.chunk import (
     ChunkBatchCreate,
@@ -347,6 +353,78 @@ async def retrieve_chunks(
     )
     data = result.model_dump(mode="json") if result.has_graph_data() else result.chunks
     return _success(request, data)
+
+
+@router.post("/{kb_id}/import_qa", response_model=SuccessEnvelope[dict[str, str]])
+async def import_qa_new_doc(
+    request: Request,
+    kb_id: uuid.UUID,
+    file: Annotated[UploadFile, File(description="CSV or Excel QA file")],
+    principal: Annotated[Principal, Depends(get_principal)],
+    runtime: Annotated[ProcessRuntime, Depends(get_runtime)],
+    parent_id: Annotated[uuid.UUID | None, Query()] = None,
+) -> SuccessEnvelope[dict[str, str]]:
+    filename = file.filename or ""
+    content = await file.read()
+    validate_qa_upload(filename, content)
+    async with runtime.database.async_session() as db:
+        resources = await create_qa_import_resources(
+            db,
+            KnowledgeFileStorage(runtime.storage),
+            kb_id=kb_id,
+            parent_id=parent_id,
+            filename=filename,
+            content=content,
+            content_type=file.content_type,
+            principal=principal,
+        )
+    task_id = await dispatch_qa_import(
+        TaskDispatcher(),
+        kb_id,
+        resources.document.id,
+        filename,
+        content,
+    )
+    return _success(
+        request,
+        {
+            "task_id": task_id,
+            "document_id": str(resources.document.id),
+            "file_id": str(resources.file.id),
+        },
+    )
+
+
+@router.post(
+    "/{kb_id}/{document_id}/import_qa",
+    response_model=SuccessEnvelope[dict[str, str]],
+)
+async def import_qa_chunks(
+    request: Request,
+    kb_id: uuid.UUID,
+    document_id: uuid.UUID,
+    file: Annotated[UploadFile, File(description="CSV or Excel QA file")],
+    principal: Annotated[Principal, Depends(get_principal)],
+    runtime: Annotated[ProcessRuntime, Depends(get_runtime)],
+) -> SuccessEnvelope[dict[str, str]]:
+    filename = file.filename or ""
+    content = await file.read()
+    validate_qa_upload(filename, content, require_non_empty=False)
+    async with runtime.database.async_session() as db:
+        snapshot = await chunk_service.get_chunk_document_snapshot(
+            db,
+            kb_id,
+            document_id,
+            principal,
+        )
+    task_id = await dispatch_qa_import(
+        TaskDispatcher(),
+        snapshot.knowledge_id,
+        snapshot.document_id,
+        filename,
+        content,
+    )
+    return _success(request, {"task_id": task_id})
 
 
 __all__ = ["router"]

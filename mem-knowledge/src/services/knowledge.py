@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy import or_
@@ -19,6 +20,7 @@ from ..api.schemas.knowledge import (
 from ..errors import KnowledgeError
 from ..models.owned import Knowledge, KnowledgeType, PermissionType
 from ..models.references import ModelBase, ModelConfig, User
+from ..rag.knowledge_graph.config import is_graph_enabled
 from ..rag.parser_config import normalize_knowledge_parser_config_update
 from ..repositories import knowledge as knowledge_repository
 from ..repositories.knowledge_share import get_knowledgeshare_by_id_async
@@ -417,6 +419,30 @@ async def update_knowledge(
     principal: Principal,
     redis_manager: Any | None = None,
 ) -> Knowledge:
+    plan = await prepare_knowledge_update(
+        db,
+        knowledge_id,
+        update_data,
+        principal,
+    )
+    return await apply_knowledge_update(db, plan, principal, redis_manager)
+
+
+@dataclass(frozen=True)
+class KnowledgeUpdatePlan:
+    knowledge_id: uuid.UUID
+    update_fields: dict[str, Any]
+    embedding_changed: bool
+    delete_vector_index: bool
+    graph_enabled_before: bool | None
+
+
+async def prepare_knowledge_update(
+    db: AsyncSession,
+    knowledge_id: uuid.UUID,
+    update_data: KnowledgeUpdate,
+    principal: Principal,
+) -> KnowledgeUpdatePlan:
     knowledge = await get_knowledge(db, knowledge_id, principal)
     if knowledge is None:
         raise _not_found()
@@ -434,12 +460,51 @@ async def update_knowledge(
             principal.workspace_id,
         ):
             raise _conflict(f"Knowledge name already exists: {update_dict['name']}")
+    graph_enabled_before = None
     if "parser_config" in update_dict:
-        update_dict["parser_config"] = normalize_knowledge_parser_config_update(
-            knowledge.parser_config,
-            update_dict["parser_config"],
-        )
-    for field, value in update_dict.items():
+        try:
+            graph_enabled_before = is_graph_enabled(knowledge.parser_config)
+            update_dict["parser_config"] = normalize_knowledge_parser_config_update(
+                knowledge.parser_config,
+                update_dict["parser_config"],
+            )
+        except ValueError as exc:
+            raise KnowledgeError.from_code(
+                "KB_VALIDATION_ERROR",
+                str(exc),
+            ) from exc
+    embedding_changed = (
+        "embedding_id" in update_dict and update_dict["embedding_id"] != knowledge.embedding_id
+    )
+    return KnowledgeUpdatePlan(
+        knowledge_id=knowledge.id,
+        update_fields=update_dict,
+        embedding_changed=embedding_changed,
+        delete_vector_index=bool(
+            embedding_changed and knowledge.embedding_id and knowledge.reranker_id
+        ),
+        graph_enabled_before=graph_enabled_before,
+    )
+
+
+async def apply_knowledge_update(
+    db: AsyncSession,
+    plan: KnowledgeUpdatePlan,
+    principal: Principal,
+    redis_manager: Any | None = None,
+) -> Knowledge:
+    knowledge = await get_knowledge(db, plan.knowledge_id, principal)
+    if knowledge is None:
+        raise _not_found()
+    if plan.embedding_changed:
+        from ..repositories.document import reset_documents_progress_by_kb_id_async
+
+        await reset_documents_progress_by_kb_id_async(db, knowledge.id)
+        knowledge = await get_knowledge(db, plan.knowledge_id, principal)
+        if knowledge is None:
+            raise _not_found()
+        knowledge.chunk_num = 0
+    for field, value in plan.update_fields.items():
         if hasattr(knowledge, field):
             setattr(knowledge, field, value)
     knowledge.updated_at = utcnow_naive()

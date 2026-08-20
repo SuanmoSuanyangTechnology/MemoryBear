@@ -15,6 +15,7 @@ dependencies = [
     "celery==5.5.3",
     "elasticsearch>=8.17,<9",
     "fastapi>=0.119,<1",
+    "httpx>=0.28,<1",
     "kombu==5.5.4",
     "json-repair==0.53.0",
     "mem-storage-core",
