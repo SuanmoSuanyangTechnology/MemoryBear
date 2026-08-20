@@ -2,14 +2,18 @@
  * Debug chat logic (streaming AI reply: start / message / end)
  */
 import { useState, useRef, type MutableRefObject } from 'react'
+import type { AnyObject } from 'antd/es/_util/type'
 import { useTranslation } from 'react-i18next'
+
 import type { ChatItem } from '@/components/Chat/types'
 import { type ChatToolbarRef } from '@/components/Chat/ChatToolbar'
+import { memoryExtractionChat } from '@/api/memory'
+import { type SSEMessage } from '@/utils/stream'
 
 /**
  * Debug chat hook
  * @param id config id
- * @param abortRef abort reference shared with the extraction stream (kept as a placeholder, not used by the current send logic)
+ * @param abortRef abort reference shared with the extraction stream (used to cancel ongoing chat streaming)
  */
 export const useDebugChat = (
   id: string | undefined,
@@ -23,22 +27,6 @@ export const useDebugChat = (
   const [conversationId] = useState<string | null>(null)
   const toolbarRef = useRef<ChatToolbarRef>(null)
   const streamLoadingRef = useRef(false)
-
-  /** Append a user message */
-  const appendUserMessage = (content: string, files: any[]) => {
-    const userMessage: ChatItem = {
-      role: 'user',
-      content,
-      created_at: Date.now(),
-      meta_data: { files },
-    }
-    setChatList(prev => [...prev, userMessage])
-  }
-
-  /** Append an empty assistant message placeholder */
-  const appendAssistantPlaceholder = () => {
-    setChatList(prev => [...prev, { role: 'assistant', content: '', created_at: Date.now() }])
-  }
 
   /** Append streaming content to the last assistant message */
   const updateAssistantContent = (content?: string, patch?: Partial<ChatItem>) => {
@@ -57,21 +45,89 @@ export const useDebugChat = (
     })
   }
 
-  /** Send a debug chat message: no API call, just append a fixed reply */
+  /** Send a debug chat message: invoke memoryExtractionChat and update chatList via the returned message events */
   const handleChatSend = (msg?: string) => {
     if (!id || chatLoading) return
     const content = (msg || '').trim()
     if (!content) return
     const files = (toolbarRef.current?.getFiles() || []).filter(item => !['uploading', 'error'].includes(item.status))
 
-    appendUserMessage(content, files)
-    appendAssistantPlaceholder()
+    const userMessage: ChatItem = {
+      role: 'user',
+      content,
+      created_at: Date.now(),
+      meta_data: { files },
+    }
+    const assistantPlaceholder: ChatItem = { role: 'assistant', content: '', created_at: Date.now() + 1 }
+    setChatList(prev => [...prev, userMessage, assistantPlaceholder])
     toolbarRef.current?.setFiles([])
     setFileList([])
     setMsg('')
+    setChatLoading(true)
+    streamLoadingRef.current = true
 
-    streamLoadingRef.current = false
-    updateAssistantContent(t('memoryExtractionEngine.debugReply'))
+    abortRef.current?.()
+    abortRef.current = null
+
+    const handleStreamMessage = (list: SSEMessage[]) => {
+      list.forEach((item: AnyObject) => {
+        const { content, error } = (item.data || {}) as AnyObject
+        switch (item.event) {
+          case 'message':
+            updateAssistantContent(typeof content === 'string' ? content : '')
+            break
+          case 'error':
+            updateAssistantContent(t('memoryExtractionEngine.debugReply'))
+            break;
+          case 'end':
+            if (error) {
+              setChatList(prev => {
+                const next = [...prev]
+                const lastIdx = next.length - 1
+                const lastMsg = next[lastIdx]
+                if (lastMsg?.role !== 'assistant') return prev
+                const metaData = { ...(lastMsg.meta_data || {}) } as AnyObject
+                next[lastIdx] = {
+                  ...lastMsg,
+                  ...(error ? { error } : {}),
+                  meta_data: metaData as ChatItem['meta_data'],
+                }
+                return next
+              })
+            }
+            streamLoadingRef.current = false
+            setChatLoading(false)
+            break
+        }
+      })
+    }
+
+    memoryExtractionChat({
+      config_id: id,
+      files: files?.map(file => {
+        if (file.transfer_method === 'remote_url') {
+          return file
+        }
+        return {
+          type: file.type,
+          transfer_method: 'local_file',
+          upload_file_id: file.response?.data?.file_id,
+        }
+      }) || undefined,
+      history: chatList.map(item => ({
+        role: item.role,
+        content: item.content,
+        meta_data: item.meta_data,
+      })),
+      message: content,
+    }, handleStreamMessage, (abort) => { abortRef.current = abort })
+      .catch(() => {
+        updateAssistantContent(t('memoryExtractionEngine.debugReply'))
+      })
+      .finally(() => {
+        streamLoadingRef.current = false
+        setChatLoading(false)
+      })
   }
 
   /** Clear the debug chat content */
