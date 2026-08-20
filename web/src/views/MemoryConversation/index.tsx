@@ -322,7 +322,7 @@ const MemoryConversation: FC = () => {
                                     ? <Image src={vo.file_path} alt={vo.file_name} width={432} className="rb:rounded-xl rb:h-45!" />
                                     : /(mp4|webm|ogg|mov)$/i.test(vo.file_type)
                                     ? <VideoPlayer src={vo.file_path} />
-                                    : /(mp3|wav|ogg|m4a|aac)$/i.test(vo.file_type)
+                                    : /(mp3|wav|ogg|m4a|aac|mpeg)$/i.test(vo.file_type)
                                     ? <AudioPlayer src={vo.file_path} fileName={vo.file_name} fileSize='-' />
                                     : <Flex gap={11} align="center" justify="space-between" className="rb:bg-[#F6F6F6] rb:min-h-15.5! rb:rounded-xl rb:p-3!">
                                       <Flex gap={12} align="center">

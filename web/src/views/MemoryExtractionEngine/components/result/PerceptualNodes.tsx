@@ -33,10 +33,10 @@ const PerceptualNodes: FC<PerceptualNodesProps> = ({ nodes }) => {
           {node.url
             ? <>
               {/(jpg|jpeg|png|gif|webp|svg)$/i.test(node.file_type)
-                ? <Image src={node.url} alt={node.file_name} width={432} className="rb:rounded-xl rb:h-45!" />
+                ? <Image src={node.url} alt={node.file_name} className="rb:rounded-xl rb:h-45!" />
                 : /(mp4|webm|ogg|mov)$/i.test(node.file_type)
                 ? <VideoPlayer src={node.url} />
-                : /(mp3|wav|ogg|m4a|aac)$/i.test(node.file_type)
+                : /(mp3|wav|ogg|m4a|aac|mpeg)$/i.test(node.file_type)
                 ? <AudioPlayer src={node.url} fileName={node.file_name} fileSize='-' />
                 : <Flex gap={11} align="center" justify="space-between" className="rb:bg-[#F6F6F6] rb:min-h-15.5! rb:rounded-xl rb:p-3!">
                   <Flex gap={12} align="center">

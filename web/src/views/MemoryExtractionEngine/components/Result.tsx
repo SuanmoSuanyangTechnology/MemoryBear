@@ -87,7 +87,7 @@ const Result: FC<ResultProps> = ({ loading, handleSave, disabled = false, prunin
       bodyClassName="rb:h-[calc(100%-50px)]! rb:overflow-y-auto rb:p-[16px_20px]!"
       extra={<Space size={8}>
         <Button
-          disabled={disabled || runLoading || chatList.length === 0}
+          disabled={runLoading || chatList.length === 0}
           onClick={clearChat}
         >{t('memoryExtractionEngine.clearChat')}</Button>
         <Button

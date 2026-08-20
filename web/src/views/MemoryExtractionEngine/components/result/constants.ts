@@ -49,7 +49,7 @@ export const chatFeatures = {
   file_upload: {
     enabled: true,
     allowed_transfer_methods: ['local_file', 'remote_url'],
-    max_file_count: 1,
+    max_file_count: 5,
     image_enabled: true,
     image_max_size_mb: 20,
     image_allowed_extensions: ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg'],

@@ -40,7 +40,7 @@ const DebugChat: FC<DebugChatProps> = ({
   const { t } = useTranslation()
 
   return (
-    <div className="rb-border rb:rounded-xl rb:px-3 rb:mb-4 rb:h-[300px]">
+    <div className="rb-border rb:rounded-xl rb:pt-3 rb:mb-4 rb:h-75">
       <Chat
         data={chatList}
         loading={chatLoading}
@@ -49,9 +49,9 @@ const DebugChat: FC<DebugChatProps> = ({
         labelPosition="bottom"
         labelFormat={(item) => formatDateTime(item.created_at)}
         empty={
-          <Empty url={ConversationEmptyIcon} className="rb:h-full!" size={[140, 100]} title={t('memoryExtractionEngine.chatEmpty')} isNeedSubTitle={false} />
+          <Empty url={ConversationEmptyIcon} className="rb:h-full! rb:text-[12px]" size={[98, 70]} title={t('memoryExtractionEngine.chatEmpty')} isNeedSubTitle={false} />
         }
-        contentClassName={clsx({
+        contentClassName={clsx('rb:px-4', {
           'rb:h-[calc(100%-140px)]': !fileList.length,
           'rb:h-[calc(100%-208px)]': !!fileList.length,
         })}
