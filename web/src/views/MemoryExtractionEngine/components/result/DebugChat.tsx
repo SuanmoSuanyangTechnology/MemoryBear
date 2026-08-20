@@ -49,7 +49,7 @@ const DebugChat: FC<DebugChatProps> = ({
         labelPosition="bottom"
         labelFormat={(item) => formatDateTime(item.created_at)}
         empty={
-          <Empty url={ConversationEmptyIcon} className="rb:h-full!" size={[140, 100]} title={t('memoryExtractionEngine.chatEmpty')} isNeedSubTitle={false} />
+          <Empty url={ConversationEmptyIcon} className="rb:h-full! rb:text-[12px]" size={[98, 70]} title={t('memoryExtractionEngine.chatEmpty')} isNeedSubTitle={false} />
         }
         contentClassName={clsx('rb:px-4', {
           'rb:h-[calc(100%-140px)]': !fileList.length,

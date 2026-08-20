@@ -117,7 +117,7 @@ export const useDebugChat = (
       history: chatList.map(item => ({
         role: item.role,
         content: item.content,
-        meta_data: item.meta_data,
+        files: item.meta_data?.files,
       })),
       message: content,
     }, handleStreamMessage, (abort) => { abortRef.current = abort })
