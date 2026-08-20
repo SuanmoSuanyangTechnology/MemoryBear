@@ -30,6 +30,40 @@ class KnowledgeMetadataService:
     BUILTIN_FIELD_NAMES = {field.name for field in BuiltinFieldResolver.get_all()}
 
     @staticmethod
+    async def get_metadata_defs_for_filtering_async(
+        db: AsyncSession,
+        knowledge_id: uuid.UUID,
+    ) -> dict[str, dict[str, Any]]:
+        response = await KnowledgeMetadataService.list_metadata_fields_for_knowledge_ids_async(
+            db,
+            [knowledge_id],
+            include_builtin_when_disabled=False,
+            preserve_single_ids=True,
+            include_counts=False,
+        )
+        definitions: dict[str, dict[str, Any]] = {
+            item["name"]: {
+                "id": item.get("id"),
+                "name": item["name"],
+                "type": item["type"],
+                "is_builtin": False,
+            }
+            for item in response["custom"]
+        }
+        if response["builtin_enabled"]:
+            definitions.update(
+                {
+                    field.name: {
+                        "name": field.name,
+                        "type": field.type,
+                        "is_builtin": True,
+                    }
+                    for field in response["builtin_fields"]
+                }
+            )
+        return definitions
+
+    @staticmethod
     async def list_metadata_fields_async(
         db: AsyncSession,
         knowledge_id: uuid.UUID,

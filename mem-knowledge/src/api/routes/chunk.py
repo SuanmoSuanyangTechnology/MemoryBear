@@ -11,14 +11,18 @@ from ...errors import KnowledgeError
 from ...runtime import ProcessRuntime
 from ...services import chunk as chunk_service
 from ...services.knowledge_file_storage import KnowledgeFileStorage
+from ...services.knowledge_retrieval import KnowledgeRetrievalService
 from ..dependencies import Principal, get_principal, get_runtime
 from ..schemas.chunk import (
     ChunkBatchCreate,
     ChunkCreate,
+    ChunkRetrieve,
     ChunkUpdate,
+    KnowledgeRetrievalCaller,
     RetrieveType,
 )
 from ..schemas.common import SuccessEnvelope
+from ..schemas.knowledge_retrieval import KnowledgeRetrievalRequest
 
 router = APIRouter(
     prefix="/chunks",
@@ -324,6 +328,25 @@ async def delete_chunk(
 @router.get("/retrieve_type", response_model=SuccessEnvelope[list[str]])
 async def get_retrieve_types(request: Request) -> SuccessEnvelope[list[str]]:
     return _success(request, list(RetrieveType))
+
+
+@router.post("/retrieval", response_model=SuccessEnvelope[Any])
+async def retrieve_chunks(
+    request: Request,
+    retrieve_data: ChunkRetrieve,
+    principal: Annotated[Principal, Depends(get_principal)],
+    runtime: Annotated[ProcessRuntime, Depends(get_runtime)],
+) -> SuccessEnvelope[Any]:
+    payload = retrieve_data.model_dump(exclude_none=True)
+    payload["caller"] = KnowledgeRetrievalCaller.IN_API
+    retrieval_request = KnowledgeRetrievalRequest(**payload)
+    result = await KnowledgeRetrievalService.retrieve_async(
+        runtime,
+        retrieval_request,
+        principal,
+    )
+    data = result.model_dump(mode="json") if result.has_graph_data() else result.chunks
+    return _success(request, data)
 
 
 __all__ = ["router"]

@@ -4,17 +4,32 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
-from typing import Any
+from typing import Any, Protocol
 
 from elasticsearch.helpers import async_bulk
 
 from ..models.chunk import DocumentChunk, chunk_retrieval_content
 from ..vdb.field import Field
 from ..vdb.pit_search import iter_async_search_after_hits
+from .elasticsearch_queries import (
+    build_filter_clauses,
+    build_full_text_query,
+    build_parent_lookup_query,
+    build_vector_script_query,
+    full_text_hits_to_chunks,
+    merge_parent_chunks,
+    normalize_vector,
+    vector_hits_to_chunks,
+)
+from .models import RetrievalSearchOptions
 
 ES_DEFAULT_MAX_RESULT_WINDOW = 10000
 ES_FULL_SCAN_BATCH_SIZE = 1000
 EmbedFunction = Callable[[list[str]], Awaitable[list[list[float]]]]
+
+
+class AsyncEmbeddingClient(Protocol):
+    async def aembed_query(self, text: str) -> list[float]: ...
 
 
 def collection_name_for_knowledge(knowledge_id: uuid.UUID | str) -> str:
@@ -92,9 +107,7 @@ class AsyncChunkStore:
         if chunk_type == "qa":
             metadata["question"] = source.get(Field.QUESTION.value, "")
             metadata["answer"] = source.get(Field.ANSWER.value, "")
-            page_content = (
-                f"question: {metadata['question']}\nanswer: {metadata['answer']}"
-            )
+            page_content = f"question: {metadata['question']}\nanswer: {metadata['answer']}"
         metadata["score"] = hit.get("_score")
         return DocumentChunk(page_content=page_content, vector=None, metadata=metadata)
 
@@ -225,8 +238,7 @@ class AsyncChunkStore:
         if chunk_type != "source":
             vector = (await self._embed_texts([chunk_retrieval_content(chunk)]))[0]
         source = (
-            "ctx._source.page_content = params.new_content; "
-            "ctx._source.vector = params.new_vector;"
+            "ctx._source.page_content = params.new_content; ctx._source.vector = params.new_vector;"
         )
         params: dict[str, Any] = {
             "new_content": chunk.page_content,
@@ -329,4 +341,88 @@ class AsyncChunkStore:
             raise RuntimeError(f"Elasticsearch {operation} failed")
 
 
-__all__ = ["AsyncChunkStore", "collection_name_for_knowledge"]
+class AsyncElasticSearchRetrieval:
+    """Native asynchronous vector and full-text retrieval."""
+
+    def __init__(self, client: Any):
+        self.client = client
+
+    async def search_by_vector(
+        self,
+        embedding: AsyncEmbeddingClient,
+        query: str,
+        options: RetrievalSearchOptions,
+    ) -> list[DocumentChunk]:
+        vector = normalize_vector(await embedding.aembed_query(query))
+        response = await self.client.search(
+            index=options.indices,
+            from_=0,
+            size=options.top_k,
+            query=build_vector_script_query(
+                vector,
+                build_filter_clauses(
+                    options.file_names_filter,
+                    options.document_ids_include,
+                    require_vector=True,
+                ),
+            ),
+            allow_partial_search_results=False,
+        )
+        return await self.resolve_parent_chunks(
+            vector_hits_to_chunks(response, options.score_threshold),
+            options.indices,
+        )
+
+    async def search_by_full_text(
+        self,
+        query: str,
+        options: RetrievalSearchOptions,
+    ) -> list[DocumentChunk]:
+        response = await self.client.search(
+            index=options.indices,
+            from_=0,
+            size=options.top_k,
+            query=build_full_text_query(
+                query,
+                options.file_names_filter,
+                options.document_ids_include,
+            ),
+            allow_partial_search_results=False,
+        )
+        return await self.resolve_parent_chunks(
+            full_text_hits_to_chunks(response, options.score_threshold),
+            options.indices,
+        )
+
+    async def resolve_parent_chunks(
+        self,
+        chunks: list[DocumentChunk],
+        index: str,
+    ) -> list[DocumentChunk]:
+        parent_ids = list(
+            dict.fromkeys(
+                str(chunk.metadata.get("parent_id"))
+                for chunk in chunks
+                if (chunk.metadata or {}).get("chunk_type") == "child"
+                and chunk.metadata.get("parent_id")
+            )
+        )
+        if not parent_ids:
+            return chunks
+        try:
+            response = await self.client.search(
+                index=index,
+                size=len(parent_ids),
+                query=build_parent_lookup_query(parent_ids),
+                allow_partial_search_results=False,
+            )
+        except Exception:
+            return chunks
+        return merge_parent_chunks(chunks, (response.get("hits") or {}).get("hits", []))
+
+
+__all__ = [
+    "AsyncChunkStore",
+    "AsyncElasticSearchRetrieval",
+    "collection_name_for_knowledge",
+]

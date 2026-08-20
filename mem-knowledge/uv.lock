@@ -691,11 +691,11 @@ wheels = [
 
 [[package]]
 name = "json-repair"
-version = "0.63.2"
+version = "0.53.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/f7/1b/c23bee35d532ea9c2038f31245fd2b50e6a8308d38a8b965bf0f9c6d49ba/json_repair-0.63.2.tar.gz", hash = "sha256:8385ca04afbf411eebd9f0ba064155d1afe37442aaad52f693825c65cc314586", size = 52426, upload-time = "2026-08-14T07:39:27.637Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/69/9c/be1d84106529aeacbe6151c1e1dc202f5a5cfa0d9bac748d4a1039ebb913/json_repair-0.53.0.tar.gz", hash = "sha256:97fcbf1eea0bbcf6d5cc94befc573623ab4bbba6abdc394cfd3b933a2571266d", size = 36204, upload-time = "2025-11-08T13:45:15.807Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/66/fe/edc09f67290861ab6b97dfd530189ae07092a708e90abe5a0e55f863f35c/json_repair-0.63.2-py3-none-any.whl", hash = "sha256:7354c2dd433bf15dedf98d2932ae9cd1ea197d7edc77e6c0538f08e34616580e", size = 50916, upload-time = "2026-08-14T07:39:26.339Z" },
+    { url = "https://files.pythonhosted.org/packages/ba/49/e588ec59b64222c8d38585f9ceffbf71870c3cbfb2873e53297c4f4afd0b/json_repair-0.53.0-py3-none-any.whl", hash = "sha256:17f7439e41ae39964e1d678b1def38cb8ec43d607340564acf3e62d8ce47a727", size = 27404, upload-time = "2025-11-08T13:45:14.464Z" },
 ]
 
 [[package]]
@@ -975,6 +975,7 @@ dependencies = [
     { name = "celery" },
     { name = "elasticsearch" },
     { name = "fastapi" },
+    { name = "json-repair" },
     { name = "kombu" },
     { name = "mem-storage-core" },
     { name = "openpyxl" },
@@ -1010,6 +1011,7 @@ requires-dist = [
     { name = "celery", specifier = "==5.5.3" },
     { name = "elasticsearch", specifier = ">=8.17,<9" },
     { name = "fastapi", specifier = ">=0.119,<1" },
+    { name = "json-repair", specifier = "==0.53.0" },
     { name = "kombu", specifier = "==5.5.4" },
     { name = "mem-storage-core", directory = "../packages/storage-core" },
     { name = "openpyxl", specifier = "==3.1.5" },

@@ -8,12 +8,17 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import StreamingResponse
+from redbear_model import resolve_model_async
 from sqlalchemy import select
 from starlette.background import BackgroundTask
 
+from ...errors import KnowledgeError
 from ...models.owned import FILE_ROLE_SOURCE, File, KnowledgeType, ParserType, PermissionType
+from ...rag.knowledge_graph.elasticsearch_store import GraphElasticsearchStore
+from ...repositories.model_registry import AsyncSQLModelRegistry
 from ...runtime import ProcessRuntime
 from ...services import file as file_service
+from ...services import graph as graph_service
 from ...services import knowledge as knowledge_service
 from ...services.knowledge_file_storage import KnowledgeFileStorage
 from ...services.qa_export import (
@@ -23,6 +28,7 @@ from ...services.qa_export import (
     write_document_export,
     write_knowledge_csv,
 )
+from ...tasks.dispatch import TaskDispatcher
 from ..dependencies import Principal, get_principal, get_runtime
 from ..schemas.common import SuccessEnvelope
 from ..schemas.file import KBBatchDownloadRequest
@@ -52,6 +58,30 @@ async def get_permission_types(request: Request) -> SuccessEnvelope[list[str]]:
 @router.get("/parsertype", response_model=SuccessEnvelope[list[str]])
 async def get_parser_types(request: Request) -> SuccessEnvelope[list[str]]:
     return _success(request, list(ParserType))
+
+
+@router.get("/knowledge_graph_entity_types", response_model=SuccessEnvelope[str])
+async def get_knowledge_graph_entity_types(
+    request: Request,
+    llm_id: uuid.UUID,
+    scenario: str,
+    principal: Annotated[Principal, Depends(get_principal)],
+    runtime: Annotated[ProcessRuntime, Depends(get_runtime)],
+) -> SuccessEnvelope[str]:
+    async with runtime.database.async_session() as db:
+        try:
+            resolved = await resolve_model_async(
+                AsyncSQLModelRegistry(db),
+                model_config_id=llm_id,
+                tenant_id=principal.tenant_id,
+            )
+        except Exception as exc:
+            raise KnowledgeError.from_code(
+                "KB_MODEL_UNAVAILABLE",
+                "No available API key for the selected model",
+            ) from exc
+    result = await graph_service.graph_entity_types(runtime, resolved, scenario)
+    return _success(request, result)
 
 
 @router.get("/knowledges", response_model=SuccessEnvelope[dict[str, Any]])
@@ -176,6 +206,72 @@ async def delete_knowledge(
             runtime.redis,
         )
     return _success(request)
+
+
+@router.get(
+    "/{knowledge_id}/knowledge_graph",
+    response_model=SuccessEnvelope[dict[str, Any]],
+)
+async def get_knowledge_graph(
+    request: Request,
+    knowledge_id: uuid.UUID,
+    principal: Annotated[Principal, Depends(get_principal)],
+    runtime: Annotated[ProcessRuntime, Depends(get_runtime)],
+) -> SuccessEnvelope[dict[str, Any]]:
+    async with runtime.database.async_session() as db:
+        knowledge = await knowledge_service.get_knowledge(db, knowledge_id, principal)
+        if knowledge is None:
+            raise knowledge_service._not_found()
+    store = GraphElasticsearchStore(await runtime.elasticsearch.client())
+    try:
+        data = await graph_service.get_graph(knowledge, store)
+    except ValueError as exc:
+        raise KnowledgeError.from_code("KB_VALIDATION_ERROR", str(exc)) from exc
+    return _success(request, data)
+
+
+@router.delete(
+    "/{knowledge_id}/knowledge_graph",
+    response_model=SuccessEnvelope[dict[str, str]],
+)
+async def delete_knowledge_graph(
+    request: Request,
+    knowledge_id: uuid.UUID,
+    principal: Annotated[Principal, Depends(get_principal)],
+    runtime: Annotated[ProcessRuntime, Depends(get_runtime)],
+) -> SuccessEnvelope[dict[str, str]]:
+    async with runtime.database.async_session() as db:
+        knowledge = await knowledge_service.get_knowledge(db, knowledge_id, principal)
+        if knowledge is None:
+            raise knowledge_service._not_found()
+    task_id = await graph_service.delete_graph(knowledge, TaskDispatcher())
+    return _success(request, {"task_id": task_id})
+
+
+@router.post(
+    "/{knowledge_id}/knowledge_graph",
+    response_model=SuccessEnvelope[dict[str, str]],
+)
+async def rebuild_knowledge_graph(
+    request: Request,
+    knowledge_id: uuid.UUID,
+    principal: Annotated[Principal, Depends(get_principal)],
+    runtime: Annotated[ProcessRuntime, Depends(get_runtime)],
+) -> SuccessEnvelope[dict[str, str]]:
+    async with runtime.database.async_session() as db:
+        knowledge = await knowledge_service.get_knowledge(db, knowledge_id, principal)
+        if knowledge is None:
+            raise knowledge_service._not_found()
+    store = GraphElasticsearchStore(await runtime.elasticsearch.client())
+    try:
+        task_id = await graph_service.rebuild_graph(
+            knowledge,
+            store,
+            TaskDispatcher(),
+        )
+    except ValueError as exc:
+        raise KnowledgeError.from_code("KB_VALIDATION_ERROR", str(exc)) from exc
+    return _success(request, {"task_id": task_id})
 
 
 @router.get("/{kb_id}/qa/export")

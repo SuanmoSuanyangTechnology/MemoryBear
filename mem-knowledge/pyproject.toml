@@ -16,6 +16,7 @@ dependencies = [
     "elasticsearch>=8.17,<9",
     "fastapi>=0.119,<1",
     "kombu==5.5.4",
+    "json-repair==0.53.0",
     "mem-storage-core",
     "openpyxl==3.1.5",
     "psycopg[binary]>=3.2,<4",
