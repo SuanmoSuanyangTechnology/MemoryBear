@@ -82,7 +82,7 @@ def create_app(settings: KnowledgeSettings | None = None) -> FastAPI:
             status_code=500,
             headers={TRACE_ID_HEADER: trace_id},
             content={
-                "code": "KNOWLEDGE_INTERNAL_ERROR",
+                "code": "KB_INTERNAL_ERROR",
                 "message": "Internal knowledge service error",
                 "retryable": False,
                 "trace_id": trace_id,
