@@ -141,7 +141,7 @@ const PerceptualLastInfo: FC = () => {
                   ? <Image src={data.file_path} alt={data.file_name} width={432} className="rb:rounded-xl rb:h-45!" />
                   : /\.(mp4|webm|ogg|mov)$/i.test(data.file_name)
                   ? <VideoPlayer src={data.file_path} />
-                  : /\.(mp3|wav|ogg|m4a|aac)$/i.test(data.file_name)
+                  : /\.(mp3|wav|ogg|m4a|aac|mpeg)$/i.test(data.file_name)
                   ? <AudioPlayer src={data.file_path} fileName={data.file_name} fileSize={fileSize} />
                   : <Flex gap={11} align="center" justify="space-between" className="rb:bg-[#F6F6F6] rb:min-h-15.5! rb:rounded-xl rb:p-3!">
                     <Flex gap={12} align="center">
