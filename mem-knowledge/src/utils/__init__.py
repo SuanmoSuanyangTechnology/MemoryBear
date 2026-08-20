@@ -1,0 +1,1 @@
+"""Knowledge service utility functions."""
