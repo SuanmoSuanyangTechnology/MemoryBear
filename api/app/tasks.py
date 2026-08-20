@@ -32,7 +32,6 @@ from app.core.memory.storage_services.reflection_engine import retry_registry as
 from app.core.memory.storage_services.forgetting_engine.constants import (
     FORGET_CANDIDATES_KEY as _FORGET_CANDIDATES_KEY,
     FORGET_INFLIGHT_KEY as _FORGET_INFLIGHT_KEY,
-    forget_cooldown_key,
 )
 from app.core.memory.storage_services.reflection_engine.errors import (
     ReflectionBusinessError,
@@ -4631,19 +4630,11 @@ def scan_forget_candidates(self) -> Dict[str, Any]:
 
         candidates = await redis_client.smembers(_FORGET_CANDIDATES_KEY)
         if not candidates:
-            return {
-                "status": "SUCCESS",
-                "dispatched": 0,
-                "skipped_cooldown": 0,
-            }
+            return {"status": "SUCCESS", "dispatched": 0}
 
         dispatched = 0
         skipped_inflight = 0
-        skipped_cooldown = 0
         for uid in candidates:
-            if await redis_client.exists(forget_cooldown_key(uid)):
-                skipped_cooldown += 1
-                continue
             if await redis_client.sismember(_FORGET_INFLIGHT_KEY, uid):
                 await redis_client.srem(_FORGET_CANDIDATES_KEY, uid)
                 skipped_inflight += 1
@@ -4666,7 +4657,6 @@ def scan_forget_candidates(self) -> Dict[str, Any]:
         logger.info(
             f"[ForgetScan] 完成: dispatched={dispatched}/{len(candidates)}, "
             f"skip_inflight={skipped_inflight}, "
-            f"skipped_cooldown={skipped_cooldown}, "
             f"耗时={time.time() - start_time:.1f}s"
         )
         return {
@@ -4674,7 +4664,6 @@ def scan_forget_candidates(self) -> Dict[str, Any]:
             "dispatched": dispatched,
             "candidates": len(candidates),
             "skip_inflight": skipped_inflight,
-            "skipped_cooldown": skipped_cooldown,
         }
 
     return asyncio.run(_run())

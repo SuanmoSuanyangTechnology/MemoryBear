@@ -6,7 +6,6 @@ from sqlalchemy.orm import Session
 
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_db_logger
-from app.core.utils.datetime_utils import to_iso_z, utcnow
 from app.core.memory.models.service_models import ForgetLog
 from app.models.memory_forget_model import ForgetAuditModel, ForgetTrigger
 from app.models.user_model import User
@@ -122,7 +121,6 @@ class ForgetLogRepository:
                 connector,
                 element_id,
                 end_user_id=str(end_user_id),
-                now=to_iso_z(utcnow()),
             )
 
         if recovered is None:

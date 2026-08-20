@@ -11,7 +11,6 @@ from app.core.memory.storage_services.forgetting_engine.constants import (
     AUXILIARY_MAX_PER_RUN,
     DIALOGUE_AUDIT_CONTENT_MAX_LENGTH,
     FORGET_CORE_BATCH_SIZE,
-    MILLISECONDS_PER_DAY,
 )
 from app.core.utils.datetime_utils import to_iso_z, to_timestamp_ms, utcnow
 from app.db import get_db_context
@@ -61,16 +60,6 @@ class ForgetService:
 
         config = self.ctx.memory_config
         lambda_mem = float(getattr(config, "lambda_mem", 0.5))
-        self.forgetting_threshold = float(
-            getattr(config, "forgetting_threshold", 0.3)
-        )
-        self.min_days_since_access = int(
-            getattr(config, "min_days_since_access", 30)
-        )
-        self.cutoff_ms = (
-            self.evaluated_at_ms
-            - self.min_days_since_access * MILLISECONDS_PER_DAY
-        )
         self.target_ratio = 1 - lambda_mem
         self.target_count = max(int(memory_limit * self.target_ratio), 50)
 
@@ -109,15 +98,12 @@ class ForgetService:
             budget = active_count - self.target_count
             logger.info(
                 "ForgetService start — active=%d trigger=%d target=%d budget=%d "
-                "batch_size=%d threshold=%.4f min_days_since_access=%d cutoff_ms=%d",
+                "batch_size=%d",
                 active_count,
                 self.trigger_count,
                 self.target_count,
                 budget,
                 self.BATCH_SIZE,
-                self.forgetting_threshold,
-                self.min_days_since_access,
-                self.cutoff_ms,
             )
 
             budget = await self._mixed_clean(budget)
@@ -257,8 +243,6 @@ class ForgetService:
                 batch_size,
                 self.ENTITY_PROTECTION_THRESHOLD,
                 self.evaluated_at_ms,
-                self.cutoff_ms,
-                self.forgetting_threshold,
             )
             if not candidates:
                 self._core_candidate_query_empty = True

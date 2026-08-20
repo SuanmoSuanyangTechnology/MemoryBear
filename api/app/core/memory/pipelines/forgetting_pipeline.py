@@ -1,17 +1,12 @@
 import logging
 import uuid
-from datetime import datetime
 
 from app.core.memory.models.service_models import ForgetLog
 from app.core.memory.pipelines.base_pipeline import BasePipeline
 from app.core.memory.storage_services.forgetting_engine.forget_service import ForgetService
-from app.core.memory.storage_services.forgetting_engine.constants import (
-    FORGET_COOLDOWN_TTL_SECONDS,
-    forget_cooldown_key,
-)
 from app.core.memory.utils.memory_count_utils import sync_end_user_memory_count_from_neo4j
 from app.core.quota_manager import get_end_user_memory_limit
-from app.core.utils.datetime_utils import to_iso_z, utcnow
+from app.core.utils.datetime_utils import utcnow
 from app.db import get_db_context
 from app.models.memory_forget_model import ForgetTrigger
 from app.repositories.end_user_repository import get_tenant_id_by_end_user_id
@@ -20,27 +15,6 @@ from app.repositories.neo4j.cypher_queries import DELETE_NODE_BY_ELEMENT_ID
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 
 logger = logging.getLogger(__name__)
-
-
-async def _apply_no_candidate_cooldown(
-    end_user_id: str,
-    evaluated_at: datetime,
-    *,
-    redis_client=None,
-) -> bool:
-    """Set the no-candidate cooldown while keeping the user eligible for retry."""
-    if redis_client is None:
-        from app.aioRedis import get_thread_safe_redis
-
-        redis_client = get_thread_safe_redis()
-    if redis_client is None:
-        return False
-    await redis_client.set(
-        forget_cooldown_key(end_user_id),
-        to_iso_z(evaluated_at),
-        ex=FORGET_COOLDOWN_TTL_SECONDS,
-    )
-    return True
 
 
 class ForgettingPipeline(BasePipeline):
@@ -54,34 +28,10 @@ class ForgettingPipeline(BasePipeline):
                 raise Exception(f"Memory limit not found. - Tenant ID:{tenant_id}")
         if memory_limit <= 0:
             return {"skipped": True, "reason": "memory_limit <= 0"}
-        evaluated_at = utcnow()
-        res = await ForgetService(
-            self.ctx,
-            memory_limit,
-            evaluated_at=evaluated_at,
-        ).run()
+        res = await ForgetService(self.ctx, memory_limit).run()
 
         async with Neo4jConnector() as connector:
             await sync_end_user_memory_count_from_neo4j(self.ctx.end_user_id, connector)
-
-        if res.get("no_candidate"):
-            try:
-                applied = await _apply_no_candidate_cooldown(
-                    self.ctx.end_user_id,
-                    evaluated_at,
-                )
-                if applied:
-                    logger.warning(
-                        "forget_no_candidate_runs=1 end_user_id=%s cooldown_seconds=%d",
-                        self.ctx.end_user_id,
-                        FORGET_COOLDOWN_TTL_SECONDS,
-                    )
-            except Exception:
-                logger.warning(
-                    "Failed to apply forgetting cooldown: end_user_id=%s",
-                    self.ctx.end_user_id,
-                    exc_info=True,
-                )
 
         # 引擎动态展示投影：只有本轮实际软删除数 > 0 才落一条 FORGETTING 卡片事件。
         # 尽力写入，PG 失败不影响 Neo4j 软删除结果和定时任务返回值。

@@ -3149,8 +3149,7 @@ FORGET_RECOVER_IDEMPOTENT_BY_ELEMENT_ID = """
       AND n.end_user_id = $end_user_id
       AND (n:Statement OR n:Chunk OR n:ExtractedEntity OR n:MemorySummary OR n:Dialogue)
     WITH n, n.delete_at IS NOT NULL AS recovered_now
-    SET n.delete_at = CASE WHEN recovered_now THEN NULL ELSE n.delete_at END,
-        n.last_access_time = CASE WHEN recovered_now THEN $now ELSE n.last_access_time END
+    SET n.delete_at = CASE WHEN recovered_now THEN NULL ELSE n.delete_at END
     RETURN elementId(n) AS node_id, labels(n) AS labels, recovered_now
 """
 
@@ -3159,32 +3158,25 @@ CALL () {{
     MATCH (c:Chunk {{end_user_id: $end_user_id}})
     WHERE c.delete_at IS NULL
     WITH c, elementId(c) AS element_id,
-         toString(c.created_at) AS created_text,
-         toFloat(c.topology_score) AS raw_g
-    WHERE created_text =~ $iso_datetime_pattern
-    WITH c, element_id, created_text, raw_g,
          CASE
-           WHEN coalesce(toString(c.last_access_time) =~ $iso_datetime_pattern, false)
-           THEN toString(c.last_access_time) ELSE created_text
-         END AS access_text
-    WITH c, element_id,
-         datetime(created_text).epochMillis AS created_epoch,
-         datetime(access_text).epochMillis AS eff_access_ms,
+           WHEN coalesce(toString(c.created_at) =~ $iso_datetime_pattern, false)
+           THEN datetime(toString(c.created_at)).epochMillis
+           ELSE 0
+         END AS created_epoch,
+         toFloat(c.topology_score) AS raw_g
+    WITH c, element_id, created_epoch,
          CASE
            WHEN raw_g IS NULL OR isNaN(raw_g) THEN 0.0
            WHEN raw_g < 0.0 THEN 0.0
            WHEN raw_g > 1.0 THEN 1.0
            ELSE raw_g
          END AS g
-    WHERE eff_access_ms < $cutoff_ms
-    WITH c, element_id, created_epoch, eff_access_ms,
-         g, {T_CYPHER_EXPR} AS t
-    WITH c, element_id, created_epoch, eff_access_ms,
+    WITH c, element_id, created_epoch, g, {T_CYPHER_EXPR} AS t
+    WITH c, element_id, created_epoch,
          {G_WEIGHT} * g + {T_WEIGHT} * t AS forgetting_activation
-    WHERE forgetting_activation < $forgetting_threshold
     RETURN 'Chunk' AS node_type, element_id, coalesce(c.content, '') AS content,
-           forgetting_activation, eff_access_ms, created_epoch
-    ORDER BY forgetting_activation ASC, eff_access_ms ASC, created_epoch ASC, element_id ASC
+           forgetting_activation, created_epoch
+    ORDER BY forgetting_activation ASC, created_epoch ASC, element_id ASC
     LIMIT $batch_size
 
     UNION ALL
@@ -3193,32 +3185,25 @@ CALL () {{
     WHERE s.delete_at IS NULL
       AND coalesce(s.is_permanent, false) = false
     WITH s, elementId(s) AS element_id,
-         toString(s.created_at) AS created_text,
-         toFloat(s.topology_score) AS raw_g
-    WHERE created_text =~ $iso_datetime_pattern
-    WITH s, element_id, created_text, raw_g,
          CASE
-           WHEN coalesce(toString(s.last_access_time) =~ $iso_datetime_pattern, false)
-           THEN toString(s.last_access_time) ELSE created_text
-         END AS access_text
-    WITH s, element_id,
-         datetime(created_text).epochMillis AS created_epoch,
-         datetime(access_text).epochMillis AS eff_access_ms,
+           WHEN coalesce(toString(s.created_at) =~ $iso_datetime_pattern, false)
+           THEN datetime(toString(s.created_at)).epochMillis
+           ELSE 0
+         END AS created_epoch,
+         toFloat(s.topology_score) AS raw_g
+    WITH s, element_id, created_epoch,
          CASE
            WHEN raw_g IS NULL OR isNaN(raw_g) THEN 0.0
            WHEN raw_g < 0.0 THEN 0.0
            WHEN raw_g > 1.0 THEN 1.0
            ELSE raw_g
          END AS g
-    WHERE eff_access_ms < $cutoff_ms
-    WITH s, element_id, created_epoch, eff_access_ms,
-         g, {T_CYPHER_EXPR} AS t
-    WITH s, element_id, created_epoch, eff_access_ms,
+    WITH s, element_id, created_epoch, g, {T_CYPHER_EXPR} AS t
+    WITH s, element_id, created_epoch,
          {G_WEIGHT} * g + {T_WEIGHT} * t AS forgetting_activation
-    WHERE forgetting_activation < $forgetting_threshold
     RETURN 'Statement' AS node_type, element_id, coalesce(s.statement, '') AS content,
-           forgetting_activation, eff_access_ms, created_epoch
-    ORDER BY forgetting_activation ASC, eff_access_ms ASC, created_epoch ASC, element_id ASC
+           forgetting_activation, created_epoch
+    ORDER BY forgetting_activation ASC, created_epoch ASC, element_id ASC
     LIMIT $batch_size
 
     UNION ALL
@@ -3228,36 +3213,29 @@ CALL () {{
       AND coalesce(e.extraction_count, 0) < $protection_threshold
       AND e.name <> '用户'
     WITH e, elementId(e) AS element_id,
-         toString(e.created_at) AS created_text,
-         toFloat(e.topology_score) AS raw_g
-    WHERE created_text =~ $iso_datetime_pattern
-    WITH e, element_id, created_text, raw_g,
          CASE
-           WHEN coalesce(toString(e.last_access_time) =~ $iso_datetime_pattern, false)
-           THEN toString(e.last_access_time) ELSE created_text
-         END AS access_text
-    WITH e, element_id,
-         datetime(created_text).epochMillis AS created_epoch,
-         datetime(access_text).epochMillis AS eff_access_ms,
+           WHEN coalesce(toString(e.created_at) =~ $iso_datetime_pattern, false)
+           THEN datetime(toString(e.created_at)).epochMillis
+           ELSE 0
+         END AS created_epoch,
+         toFloat(e.topology_score) AS raw_g
+    WITH e, element_id, created_epoch,
          CASE
            WHEN raw_g IS NULL OR isNaN(raw_g) THEN 0.0
            WHEN raw_g < 0.0 THEN 0.0
            WHEN raw_g > 1.0 THEN 1.0
            ELSE raw_g
          END AS g
-    WHERE eff_access_ms < $cutoff_ms
-    WITH e, element_id, created_epoch, eff_access_ms,
-         g, {T_CYPHER_EXPR} AS t
-    WITH e, element_id, created_epoch, eff_access_ms,
+    WITH e, element_id, created_epoch, g, {T_CYPHER_EXPR} AS t
+    WITH e, element_id, created_epoch,
          {G_WEIGHT} * g + {T_WEIGHT} * t AS forgetting_activation
-    WHERE forgetting_activation < $forgetting_threshold
     RETURN 'ExtractedEntity' AS node_type, element_id, coalesce(e.name, '') AS content,
-           forgetting_activation, eff_access_ms, created_epoch
-    ORDER BY forgetting_activation ASC, eff_access_ms ASC, created_epoch ASC, element_id ASC
+           forgetting_activation, created_epoch
+    ORDER BY forgetting_activation ASC, created_epoch ASC, element_id ASC
     LIMIT $batch_size
 }}
 RETURN *
-ORDER BY forgetting_activation ASC, eff_access_ms ASC, created_epoch ASC, element_id ASC
+ORDER BY forgetting_activation ASC, created_epoch ASC, element_id ASC
 LIMIT $batch_size
 """
 

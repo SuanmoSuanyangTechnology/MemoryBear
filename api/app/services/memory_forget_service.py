@@ -23,7 +23,6 @@ from app.core.memory.storage_services.forgetting_engine.actr_calculator import A
 from app.core.memory.storage_services.forgetting_engine.constants import (
     AUXILIARY_MAX_PER_RUN,
     DIALOGUE_AUDIT_CONTENT_MAX_LENGTH,
-    MILLISECONDS_PER_DAY,
 )
 from app.core.memory.storage_services.forgetting_engine.config_utils import (
     calculate_forgetting_rate,
@@ -34,7 +33,6 @@ from app.core.memory.storage_services.forgetting_engine.forgetting_scheduler imp
 from app.core.memory.storage_services.forgetting_engine.forgetting_strategy import ForgettingStrategy
 from app.core.utils.datetime_utils import (
     to_timestamp_ms,
-    utcnow,
     utcnow_naive,
     convert_neo4j_datetime_to_python as _convert_neo4j_datetime_to_python,
 )
@@ -991,8 +989,6 @@ async def compute_forgetting_candidates(end_user_id: str) -> list[dict]:
 
     memory_limit = 300
     lambda_mem = 0.5
-    forgetting_threshold = 0.3
-    min_days_since_access = 30
 
     async with get_async_db_context() as db:
         try:
@@ -1015,22 +1011,6 @@ async def compute_forgetting_candidates(end_user_id: str) -> list[dict]:
                     if cfg:
                         if cfg.lambda_mem is not None:
                             lambda_mem = float(cfg.lambda_mem)
-                        from app.services.memory_config_service import (
-                            _clamp_ratio,
-                            _non_negative_int,
-                        )
-                        forgetting_threshold = _clamp_ratio(
-                            cfg.forgetting_threshold,
-                            default=0.3,
-                            field="forgetting_threshold",
-                            config_id=cfg.config_id,
-                        )
-                        min_days_since_access = _non_negative_int(
-                            cfg.min_days_since_access,
-                            default=30,
-                            field="min_days_since_access",
-                            config_id=cfg.config_id,
-                        )
         except Exception:
             pass
 
@@ -1044,16 +1024,13 @@ async def compute_forgetting_candidates(end_user_id: str) -> list[dict]:
         if budget <= 0:
             return []
 
-        evaluated_at_ms = to_timestamp_ms(utcnow())
-        cutoff_ms = evaluated_at_ms - min_days_since_access * MILLISECONDS_PER_DAY
+        evaluated_at_ms = to_timestamp_ms(utcnow_naive())
         core_items = await forget_get_core_candidates(
             conn,
             end_user_id,
             budget,
             protection_threshold=10,
             evaluated_at_ms=evaluated_at_ms,
-            cutoff_ms=cutoff_ms,
-            forgetting_threshold=forgetting_threshold,
         )
         planned_core_deleted = min(len(core_items), budget)
         auxiliary_active_count = await forget_count_auxiliary_active_nodes(
@@ -1085,7 +1062,6 @@ async def compute_forgetting_candidates(end_user_id: str) -> list[dict]:
             "created_at": int(item["created_epoch"]),
             "content": item.get("content") or "",
             "forgetting_activation": item.get("forgetting_activation"),
-            "effective_last_access_time": item.get("eff_access_ms"),
         }
         for item in core_items[:budget]
     ]

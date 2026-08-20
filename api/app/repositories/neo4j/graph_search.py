@@ -1159,10 +1159,8 @@ async def forget_get_core_candidates(
         batch_size: int,
         protection_threshold: int,
         evaluated_at_ms: int,
-        cutoff_ms: int,
-        forgetting_threshold: float,
 ) -> list[dict[str, Any]]:
-    """Return eligible core candidates ordered by low memory value."""
+    """Return active core candidates ordered by low memory value."""
     from app.repositories.neo4j.cypher_queries import FORGET_CORE_CANDIDATES
     return await connector.execute_query(
         FORGET_CORE_CANDIDATES,
@@ -1170,8 +1168,6 @@ async def forget_get_core_candidates(
         batch_size=batch_size,
         protection_threshold=protection_threshold,
         evaluated_at_ms=evaluated_at_ms,
-        cutoff_ms=cutoff_ms,
-        forgetting_threshold=forgetting_threshold,
         iso_datetime_pattern=FORGET_ISO_DATETIME_PATTERN,
     )
 
@@ -1229,7 +1225,6 @@ async def forget_recover_by_element_id(
         connector: Neo4jConnector,
         element_id: str,
         end_user_id: str,
-        now: str,
 ) -> dict | None:
     """幂等恢复节点，并返回本次是否实际清除了软删除标记。
 
@@ -1247,6 +1242,5 @@ async def forget_recover_by_element_id(
         FORGET_RECOVER_IDEMPOTENT_BY_ELEMENT_ID,
         element_id=element_id,
         end_user_id=end_user_id,
-        now=now,
     )
     return result[0] if result else None
