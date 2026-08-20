@@ -8,7 +8,10 @@
 import time
 from typing import Any, Dict, Optional
 
-from app.core.alert_metric_bridge import report_model_gateway_failure
+from app.core.alert_metric_bridge import (
+    report_model_gateway_failure,
+    report_model_gateway_success,
+)
 from app.core.models.base import RedBearModelConfig
 from app.core.exceptions import BusinessException
 from app.core.error_codes import BizCode
@@ -41,10 +44,12 @@ class _ObservedGenerator:
     def _observed_call(self, operation: str, call):
         started = time.perf_counter()
         try:
-            return call()
+            result = call()
         except Exception as exc:
             report_model_gateway_failure(self._config, operation, exc, started)
             raise
+        report_model_gateway_success(self._config, operation, started)
+        return result
 
 
 class RedBearImageGenerator(_ObservedGenerator):
