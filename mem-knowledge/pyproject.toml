@@ -10,6 +10,7 @@ requires-python = ">=3.12,<3.13"
 dependencies = [
     "asyncpg>=0.31,<1",
     "amqp==5.3.1",
+    "beautifulsoup4>=4.13,<5",
     "billiard==4.2.2",
     "celery==5.5.3",
     "elasticsearch>=8.17,<9",
@@ -19,12 +20,17 @@ dependencies = [
     "openpyxl==3.1.5",
     "psycopg[binary]>=3.2,<4",
     "pydantic-settings>=2.11,<3",
+    "pypdf>=6.1,<7",
+    "python-docx>=1.2,<2",
     "python-dotenv>=1.1,<2",
     "python-multipart>=0.0.20,<1",
+    "python-pptx>=1.0,<2",
     "redbear-model[all]",
     "redis>=6.4,<7",
     "sqlalchemy>=2.0.44,<3",
+    "tiktoken>=0.12,<1",
     "uvicorn[standard]>=0.37,<1",
+    "xlrd>=2.0,<3",
 ]
 
 [dependency-groups]

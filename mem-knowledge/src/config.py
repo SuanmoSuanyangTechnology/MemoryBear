@@ -252,6 +252,11 @@ class KnowledgeSettings(BaseSettings):
         ge=1,
         validation_alias="MAX_FILE_SIZE",
     )
+    max_chunk_batch_size: int = Field(
+        default=8,
+        ge=1,
+        validation_alias="MAX_CHUNK_BATCH_SIZE",
+    )
 
     @classmethod
     def settings_customise_sources(
