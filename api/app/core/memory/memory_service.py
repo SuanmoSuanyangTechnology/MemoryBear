@@ -456,6 +456,7 @@ class MemoryService:
             history = []
         if self.ctx.memory_config is None:
             raise RuntimeError("MemoryService.read() 需要 memory_config，但当前实例未加载配置")
+        retrieval_operation_id = uuid.uuid4().hex
         return await ReadPipeLine(self.ctx).run(
             query,
             search_switch,
@@ -465,6 +466,7 @@ class MemoryService:
             skip_summary=skip_summary,
             enable_rerank=enable_rerank,
             record_display=record_display,
+            retrieval_operation_id=retrieval_operation_id,
         )
 
     async def forget(self) -> dict:

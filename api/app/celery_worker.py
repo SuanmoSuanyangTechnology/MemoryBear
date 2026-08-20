@@ -28,6 +28,10 @@ except ImportError:
 
 # 导入企业版消息通知中心任务（队列：notification_state_tasks）
 try:
+    from premium.platform_admin.notification_center.alert_emit_tasks import (  # noqa: F401
+        emit_alert_obligation_task,
+        scan_alert_emit_obligations_task,
+    )
     from premium.platform_admin.notification_center.tasks import (  # noqa: F401
         alert_fanout_task,
         notification_publish_task,

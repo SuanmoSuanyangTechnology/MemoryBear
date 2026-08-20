@@ -1,4 +1,4 @@
-"""记忆萃取主链路的稳定业务异常定义。"""
+"""记忆萃取与检索链路的稳定业务异常定义。"""
 from __future__ import annotations
 
 from enum import Enum
@@ -88,4 +88,90 @@ class MemoryExtractionBusinessError(Exception):
             retryable=True,
             model_type=MemoryModelType.EMBEDDING,
             cause=cause,
+        )
+
+
+class MemoryRetrievalErrorCode(str, Enum):
+    MODEL_CALL_FAILED = "MODEL_CALL_FAILED"
+    STRUCTURED_RESULT_PARSE_FAILED = "STRUCTURED_RESULT_PARSE_FAILED"
+
+
+class MemoryRetrievalStage(str, Enum):
+    QUERY_PROCESS = "query_process"
+    VECTOR_SEARCH = "vector_search"
+    RELATION_SEARCH = "relation_search"
+    PERCEPTUAL_ANALYSIS = "perceptual_analysis"
+    RERANK = "rerank"
+    SUMMARY = "summary"
+
+
+class MemoryRetrievalImpact(str, Enum):
+    INCOMPLETE = "incomplete"
+    ORDERING_DEGRADED = "ordering_degraded"
+    UNAVAILABLE = "unavailable"
+
+
+class MemoryRetrievalBusinessError(Exception):
+    """影响最终检索结果、但不携带原始输入或异常文本的业务异常。"""
+
+    def __init__(
+        self,
+        *,
+        code: MemoryRetrievalErrorCode,
+        stage: MemoryRetrievalStage,
+        impact: MemoryRetrievalImpact,
+        model_type: MemoryModelType,
+        cause: Exception | None = None,
+    ) -> None:
+        self.code = code.value
+        self.stage = stage.value
+        self.impact = impact.value
+        self.model_type = model_type.value
+        self.cause = cause
+        super().__init__(f"{self.code} at {self.stage}")
+
+    @classmethod
+    def model_call_failed(
+        cls,
+        stage: MemoryRetrievalStage,
+        cause: Exception,
+        *,
+        model_type: MemoryModelType,
+        impact: MemoryRetrievalImpact = MemoryRetrievalImpact.INCOMPLETE,
+    ) -> "MemoryRetrievalBusinessError":
+        return cls(
+            code=MemoryRetrievalErrorCode.MODEL_CALL_FAILED,
+            stage=stage,
+            impact=impact,
+            model_type=model_type,
+            cause=cause,
+        )
+
+    @classmethod
+    def structured_result_parse_failed(
+        cls,
+        stage: MemoryRetrievalStage,
+        cause: Exception,
+        *,
+        model_type: MemoryModelType,
+        impact: MemoryRetrievalImpact = MemoryRetrievalImpact.INCOMPLETE,
+    ) -> "MemoryRetrievalBusinessError":
+        return cls(
+            code=MemoryRetrievalErrorCode.STRUCTURED_RESULT_PARSE_FAILED,
+            stage=stage,
+            impact=impact,
+            model_type=model_type,
+            cause=cause,
+        )
+
+    def with_impact(
+        self, impact: MemoryRetrievalImpact
+    ) -> "MemoryRetrievalBusinessError":
+        """在跨子任务合并边界按实际覆盖率调整影响，不改变错误分类。"""
+        return MemoryRetrievalBusinessError(
+            code=MemoryRetrievalErrorCode(self.code),
+            stage=MemoryRetrievalStage(self.stage),
+            impact=impact,
+            model_type=MemoryModelType(self.model_type),
+            cause=self.cause,
         )

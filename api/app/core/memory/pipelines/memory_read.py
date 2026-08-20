@@ -8,6 +8,11 @@ import uuid
 from app.core.memory.enums import Neo4jNodeType, SearchStrategy, StorageType
 from app.core.memory.models.service_models import MemorySearchResult
 from app.core.memory.pipelines.base_pipeline import BasePipeline, ModelClientMixin
+from app.core.memory.alerts import enqueue_memory_retrieval_alert_safely
+from app.core.memory.exceptions import (
+    MemoryRetrievalBusinessError,
+    MemoryRetrievalImpact,
+)
 from app.core.memory.read_services.generate_engine.query_preprocessor import QueryPreprocessor
 from app.core.memory.read_services.generate_engine.retrieval_summary import RetrievalSummaryProcessor
 from app.core.memory.read_services.search_engine.content_search import (
@@ -46,11 +51,18 @@ async def _run_with_semaphore(coro):
     return await coro
 
 
-def _safe_merge_results(results: list, label: str) -> MemorySearchResult:
+def _safe_merge_results(
+    results: list,
+    label: str,
+    *,
+    on_error,
+) -> MemorySearchResult:
     """合并搜索结果列表，跳过异常项并记录警告。"""
     merged = MemorySearchResult(memories=[])
     for i, result in enumerate(results):
         if isinstance(result, Exception):
+            if isinstance(result, MemoryRetrievalBusinessError):
+                on_error(result.with_impact(MemoryRetrievalImpact.INCOMPLETE))
             logger.warning(f"[DeepRead] {label} search error (question #{i}): {result}")
         elif isinstance(result, MemorySearchResult):
             merged = merged + result
@@ -66,6 +78,31 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
         self._audio_llm_client = None
         self._rerank_client = None
         self._run_started_at = 0.0
+        self._notification_error: MemoryRetrievalBusinessError | None = None
+        self._retrieval_operation_id = ""
+
+    def _record_retrieval_error(self, error: MemoryRetrievalBusinessError) -> None:
+        if self._notification_error is None:
+            self._notification_error = error
+
+    async def _enqueue_retrieval_alert(self, error: MemoryRetrievalBusinessError) -> None:
+        tenant_id = str(getattr(self.ctx.memory_config, "tenant_id", "") or "")
+        workspace_id = str(getattr(self.ctx.memory_config, "workspace_id", "") or "")
+        try:
+            await enqueue_memory_retrieval_alert_safely(
+                error,
+                operation_id=self._retrieval_operation_id,
+                tenant_id=tenant_id,
+                workspace_id=workspace_id,
+                end_user_id=str(self.ctx.end_user_id),
+            )
+        except Exception:
+            # 双层保护：即使安全上报封装自身回归，也不能改变检索结果或原异常。
+            logger.exception(
+                "[ReadPipeLine] retrieval alert enqueue escaped safe wrapper; ignored "
+                "operation_id=%s",
+                self._retrieval_operation_id,
+            )
 
     async def run(
             self,
@@ -77,33 +114,42 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
             skip_summary=False,
             enable_rerank: bool = False,
             record_display: bool = False,
+            retrieval_operation_id: str | None = None,
     ) -> MemorySearchResult:
         started_at = time.perf_counter()
         self._run_started_at = started_at
+        self._retrieval_operation_id = retrieval_operation_id or uuid.uuid4().hex
+        self._notification_error = None
         query = QueryPreprocessor.process(query)
         # 展示用主问题必须在 deep/normal 的问题拆分之前固定下来
         display_query = clean_query_for_display(query)
 
-        match search_switch:
-            case SearchStrategy.DEEP:
-                res = await self._deep_read(query, history, limit,
-                                            includes=includes, skip_summary=skip_summary,
-                                            enable_rerank=enable_rerank)
-            case SearchStrategy.NORMAL:
-                res = await self._normal_read(query, history, limit,
-                                              includes=includes, skip_summary=skip_summary,
-                                              enable_rerank=enable_rerank)
-            case SearchStrategy.QUICK:
-                res = await self._quick_read(query, limit, includes,
-                                             enable_rerank=enable_rerank)
-            case SearchStrategy.EXPRESS:
-                res = await self._express_read(query, limit, includes)
-            case SearchStrategy.RECENT:
-                return await self._conv_history()
-            case SearchStrategy.META:
-                res = await self._user_meta()
-            case _:
-                raise RuntimeError("Unsupported search strategy")
+        try:
+            match search_switch:
+                case SearchStrategy.DEEP:
+                    res = await self._deep_read(query, history, limit,
+                                                includes=includes, skip_summary=skip_summary,
+                                                enable_rerank=enable_rerank)
+                case SearchStrategy.NORMAL:
+                    res = await self._normal_read(query, history, limit,
+                                                  includes=includes, skip_summary=skip_summary,
+                                                  enable_rerank=enable_rerank)
+                case SearchStrategy.QUICK:
+                    res = await self._quick_read(query, limit, includes,
+                                                 enable_rerank=enable_rerank)
+                case SearchStrategy.EXPRESS:
+                    res = await self._express_read(query, limit, includes)
+                case SearchStrategy.RECENT:
+                    return await self._conv_history()
+                case SearchStrategy.META:
+                    res = await self._user_meta()
+                case _:
+                    raise RuntimeError("Unsupported search strategy")
+        except Exception:
+            # 只做旁路通知，随后原样抛出原检索异常，不改变异常类型和调用栈。
+            if self._notification_error is not None:
+                await self._enqueue_retrieval_alert(self._notification_error)
+            raise
 
         if search_switch in [SearchStrategy.QUICK, SearchStrategy.EXPRESS, SearchStrategy.META]:
             await self._emit_result_ready(res, started_at)
@@ -113,6 +159,9 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
 
         if record_display:
             self._dispatch_display_record(display_query, search_switch, res)
+
+        if self._notification_error is not None:
+            await self._enqueue_retrieval_alert(self._notification_error)
 
         return res
 
@@ -234,6 +283,7 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
                 llm=llm,
                 reranker=reranker,
                 includes=includes,
+                on_error=self._record_retrieval_error,
             )
         else:
             return RAGSearchService(self.ctx)
@@ -324,7 +374,8 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
             query,
             history,
             memory_l0.content,
-            await self._get_llm_client()
+            await self._get_llm_client(),
+            on_error=self._record_retrieval_error,
         )
         await self._emit_stage("query_split", {
             "count": len(questions),
@@ -340,8 +391,16 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
         hybrid_results = all_results[::2]
         relation_results = all_results[1::2]
 
-        hybrid_search_res = _safe_merge_results(hybrid_results, "hybrid")
-        relation_res = _safe_merge_results(relation_results, "relation")
+        hybrid_search_res = _safe_merge_results(
+            hybrid_results,
+            "hybrid",
+            on_error=self._record_retrieval_error,
+        )
+        relation_res = _safe_merge_results(
+            relation_results,
+            "relation",
+            on_error=self._record_retrieval_error,
+        )
         hybrid_search_res.memories.sort(key=lambda item: item.score, reverse=True)
         relation_res.relations = list(relation_res.relations)
         await self._emit_stage("hybrid_searched", {
@@ -479,7 +538,8 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
                 query,
                 results.content,
                 memory_l0.content if memory_l0 else '',
-                await self._get_llm_client()
+                await self._get_llm_client(),
+                on_error=self._record_retrieval_error,
             )
 
         await self._emit_stage("context_prepared", {"memory_count": len(results.memories)})
@@ -515,7 +575,8 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
             query,
             history,
             memory_l0.content,
-            await self._get_llm_client()
+            await self._get_llm_client(),
+            on_error=self._record_retrieval_error,
         )
         await self._emit_stage("query_split", {
             "count": len(questions),
@@ -524,7 +585,11 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
         all_results = list(await asyncio.gather(*(
             _run_with_semaphore(search_service.hybrid_search(question, limit)) for question in questions
         ), return_exceptions=True))
-        results = _safe_merge_results(all_results, "normal")
+        results = _safe_merge_results(
+            all_results,
+            "normal",
+            on_error=self._record_retrieval_error,
+        )
         results.memories.sort(key=lambda x: x.score, reverse=True)
         await self._emit_stage("hybrid_searched", {
             "hit_count": self._raw_memory_count(all_results),
@@ -546,7 +611,8 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
                 query,
                 results.content,
                 memory_l0.content if memory_l0 else '',
-                await self._get_llm_client()
+                await self._get_llm_client(),
+                on_error=self._record_retrieval_error,
             )
         await self._emit_stage("context_prepared", {"memory_count": len(results.memories)})
         combined = memory_l0 + results

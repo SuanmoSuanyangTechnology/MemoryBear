@@ -2693,17 +2693,19 @@ def write_message_task(
 
         write_result = loop.run_until_complete(_run())
         if write_result.degraded_error is not None:
-            from app.core.memory.alerts import emit_memory_extraction_alert_safely
+            from app.core.memory.alerts import enqueue_memory_extraction_alert_safely
 
-            emit_memory_extraction_alert_safely(
-                error=write_result.degraded_error,
-                memory_message_id=str(
-                    (target_message or {}).get("memory_message_id") or ""
-                ),
-                workspace_id=workspace_id,
-                end_user_id=resolved_end_user_id,
-                source=source,
-                task_id=str(self.request.id or ""),
+            loop.run_until_complete(
+                enqueue_memory_extraction_alert_safely(
+                    error=write_result.degraded_error,
+                    memory_message_id=str(
+                        (target_message or {}).get("memory_message_id") or ""
+                    ),
+                    workspace_id=workspace_id,
+                    end_user_id=resolved_end_user_id,
+                    source=source,
+                    task_id=str(self.request.id or ""),
+                )
             )
         result = {
             "status": write_result.status,
@@ -2781,17 +2783,19 @@ def write_message_task(
         # 只有主萃取链路的稳定业务异常会生成用户级告警。WritePipeline 的
         # finally 已在异常到达此处前完成摘要任务取消和资源清理。
         if isinstance(e, MemoryExtractionBusinessError):
-            from app.core.memory.alerts import emit_memory_extraction_alert_safely
+            from app.core.memory.alerts import enqueue_memory_extraction_alert_safely
 
-            emit_memory_extraction_alert_safely(
-                error=e,
-                memory_message_id=str(
-                    (target_message or {}).get("memory_message_id") or ""
-                ),
-                workspace_id=workspace_id,
-                end_user_id=resolved_end_user_id,
-                source=source,
-                task_id=str(self.request.id or ""),
+            loop.run_until_complete(
+                enqueue_memory_extraction_alert_safely(
+                    error=e,
+                    memory_message_id=str(
+                        (target_message or {}).get("memory_message_id") or ""
+                    ),
+                    workspace_id=workspace_id,
+                    end_user_id=resolved_end_user_id,
+                    source=source,
+                    task_id=str(self.request.id or ""),
+                )
             )
 
         # 配置类确定性错误：直接 raise，让 Celery 将任务标记为 FAILURE。

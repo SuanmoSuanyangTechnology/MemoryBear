@@ -3,6 +3,7 @@ import json
 import logging
 import math
 import uuid
+from typing import Callable
 
 from langchain_core.documents import Document
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
@@ -19,6 +20,12 @@ from app.core.memory.models.service_models import (
     EntityPair
 )
 from app.core.memory.models.service_models import MemoryContext
+from app.core.memory.exceptions import (
+    MemoryModelType,
+    MemoryRetrievalBusinessError,
+    MemoryRetrievalImpact,
+    MemoryRetrievalStage,
+)
 from app.core.memory.prompt import prompt_manager
 from app.core.memory.read_services.search_engine.result_builder import MetadataBuilder
 from app.core.memory.read_services.search_engine.result_builder import data_builder_factory
@@ -57,6 +64,7 @@ class Neo4jSearchService:
             llm: RedBearLLM | None = None,
             reranker: RedBearRerank | None = None,
             includes: list[Neo4jNodeType] | None = None,
+            on_error: Callable[[MemoryRetrievalBusinessError], None] | None = None,
             alpha: float = DEFAULT_ALPHA,
             fulltext_score_threshold: float = DEFAULT_FULLTEXT_SCORE_THRESHOLD,
             cosine_score_threshold: float = DEFAULT_COSINE_SCORE_THRESHOLD,
@@ -71,6 +79,7 @@ class Neo4jSearchService:
         self.embedder: RedBearEmbeddings | None = embedder
         self.llm: RedBearLLM | None = llm
         self.reranker: RedBearRerank | None = reranker
+        self.on_error = on_error
         self.connector: Neo4jConnector | None = None
 
         self.includes = includes
@@ -204,8 +213,8 @@ class Neo4jSearchService:
                 id=memory.id,
             ))
 
+        rerank_applied = False
         try:
-
             documents = [
                 Document(
                     page_content=mem.content[:MAX_RERANK_CHARS_PER_DOC],
@@ -215,34 +224,58 @@ class Neo4jSearchService:
             ]
             reranked = []
             if documents:
-                reranked = await asyncio.to_thread(
-                    self.reranker.compress_documents,
-                    documents,
-                    query,
-                    top_n=min(limit, len(documents))
-                )
-            index_to_score = {
-                doc.metadata["index"]: doc.metadata.get("relevance_score", 0.0)
-                for doc in reranked
-            }
-            for i, mem in enumerate(memories):
-                if i in index_to_score:
-                    mem.score = index_to_score[i]
+                try:
+                    reranked = await asyncio.to_thread(
+                        self.reranker.compress_documents,
+                        documents,
+                        query,
+                        top_n=min(limit, len(documents))
+                    )
+                except Exception as e:
+                    if self.on_error is not None:
+                        self.on_error(
+                            MemoryRetrievalBusinessError.model_call_failed(
+                                MemoryRetrievalStage.RERANK,
+                                e,
+                                model_type=MemoryModelType.RERANK,
+                                impact=MemoryRetrievalImpact.ORDERING_DEGRADED,
+                            )
+                        )
+                    raise
 
-            memories.sort(key=lambda x: x.score, reverse=True)
-            memories = memories[:limit]
+            try:
+                index_to_score = {
+                    doc.metadata["index"]: doc.metadata.get("relevance_score", 0.0)
+                    for doc in reranked
+                }
+                for i, mem in enumerate(memories):
+                    if i in index_to_score:
+                        mem.score = index_to_score[i]
+            except Exception as e:
+                if self.on_error is not None:
+                    self.on_error(
+                        MemoryRetrievalBusinessError.structured_result_parse_failed(
+                            MemoryRetrievalStage.RERANK,
+                            e,
+                            model_type=MemoryModelType.RERANK,
+                            impact=MemoryRetrievalImpact.ORDERING_DEGRADED,
+                        )
+                    )
+                raise
 
-            logger.info(
-                f"[Neo4jSearch] Model rerank applied: {len(documents)} → {len(memories)} memories"
-            )
+            rerank_applied = True
         except Exception as e:
             logger.warning(
                 f"[Neo4jSearch] Model rerank failed, falling back to content_score: {e}",
                 exc_info=True,
             )
-            memories.sort(key=lambda x: x.score, reverse=True)
-            memories = memories[:limit]
 
+        memories.sort(key=lambda x: x.score, reverse=True)
+        memories = memories[:limit]
+        if rerank_applied:
+            logger.info(
+                f"[Neo4jSearch] Model rerank applied: {len(documents)} → {len(memories)} memories"
+            )
         return memories
 
     def _normalize_kw_scores(self, items: list[dict]) -> list[dict]:
@@ -311,6 +344,14 @@ class Neo4jSearchService:
             kw_results = {}
         if isinstance(emb_results, Exception):
             logger.warning(f"[MemorySearch] embedding search error: {emb_results}")
+            if self.on_error is not None:
+                self.on_error(
+                    MemoryRetrievalBusinessError.model_call_failed(
+                        MemoryRetrievalStage.VECTOR_SEARCH,
+                        emb_results,
+                        model_type=MemoryModelType.EMBEDDING,
+                    )
+                )
             emb_results = {}
 
         if self.reranker is not None:
@@ -357,13 +398,23 @@ class Neo4jSearchService:
                 f"<user-query>{query}</user-query>"
             ))
         ]
-
         for _ in range(RELATIONSHIP_LOOP_LIMIT):
             _config_token = var_child_runnable_config.set(
                 RunnableConfig(callbacks=[], tags=[], metadata={})
             )
             try:
-                response: AIMessage = await llm_with_tools.ainvoke(messages)
+                try:
+                    response: AIMessage = await llm_with_tools.ainvoke(messages)
+                except Exception as e:
+                    if self.on_error is not None:
+                        self.on_error(
+                            MemoryRetrievalBusinessError.model_call_failed(
+                                MemoryRetrievalStage.RELATION_SEARCH,
+                                e,
+                                model_type=MemoryModelType.LLM,
+                            )
+                        )
+                    raise
                 messages.append(response)
 
                 if not response.tool_calls:
@@ -399,11 +450,19 @@ class Neo4jSearchService:
         )
         try:
             return final_message | StructResponse(RelationSearchResult)
-        except Exception:
+        except Exception as e:
             logger.debug(
                 "[RelationSearch] LLM final message parsing failed, "
                 "falling back to tool-call extraction", exc_info=True
             )
+            if self.on_error is not None:
+                self.on_error(
+                    MemoryRetrievalBusinessError.structured_result_parse_failed(
+                        MemoryRetrievalStage.RELATION_SEARCH,
+                        e,
+                        model_type=MemoryModelType.LLM,
+                    )
+                )
             return self._extract_pairs_from_messages(messages)
 
     @staticmethod
@@ -630,7 +689,8 @@ class Neo4jSearchService:
 
             try:
                 parsed = await self._call_multimodal_for_query(
-                    file_path, file_name, file_type, perceptual_type, query, llm
+                    file_path, file_name, file_type, perceptual_type, query, llm,
+                    on_error=self.on_error,
                 )
 
                 display_content = parsed.strip() if isinstance(parsed, str) else ""
@@ -661,6 +721,7 @@ class Neo4jSearchService:
             perceptual_type: str | int,
             query: str,
             llm: RedBearLLM,
+            on_error: Callable[[MemoryRetrievalBusinessError], None] | None = None,
     ) -> str:
         """调用多模态 LLM，让模型针对 query 解析文件内容。
 
@@ -716,10 +777,20 @@ class Neo4jSearchService:
         )
 
         # 调用 LLM（支持多模态输入）
-        response = await llm.ainvoke([HumanMessage(content=[
-            {"type": "text", "text": prompt},
-            *formatted,
-        ])])
+        try:
+            response = await llm.ainvoke([HumanMessage(content=[
+                {"type": "text", "text": prompt},
+                *formatted,
+            ])])
+        except Exception as e:
+            if on_error is not None:
+                on_error(MemoryRetrievalBusinessError.model_call_failed(
+                    MemoryRetrievalStage.PERCEPTUAL_ANALYSIS,
+                    e,
+                    model_type=MemoryModelType.LLM,
+                    impact=MemoryRetrievalImpact.INCOMPLETE,
+                ))
+            raise
 
         return response.content if hasattr(response, 'content') else str(response)
 
