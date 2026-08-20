@@ -70,7 +70,7 @@ async def enqueue_memory_extraction_alert_safely(
             ),
             timeout=_ALERT_ENQUEUE_TIMEOUT_SECONDS,
         )
-        logger.error(
+        logger.info(
             "[MemoryExtractionAlert] business anomaly enqueued task_id=%s "
             "error_code=%s obligation_id=%s dispatched=%s",
             task_id,
@@ -135,7 +135,7 @@ async def enqueue_memory_retrieval_alert_safely(
             ),
             timeout=_ALERT_ENQUEUE_TIMEOUT_SECONDS,
         )
-        logger.error(
+        logger.info(
             "[MemoryRetrievalAlert] business anomaly enqueued operation_id=%s "
             "error_code=%s obligation_id=%s dispatched=%s",
             operation_id,
