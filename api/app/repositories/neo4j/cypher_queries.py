@@ -3,6 +3,11 @@ from app.core.memory.constants.graph_data_constants import (
     SUPPORTED_NODE_TYPES,
     _DEFAULT_FIELDS,
 )
+from app.core.memory.constants.value_weight_constants import (
+    G_WEIGHT,
+    T_CYPHER_EXPR,
+    T_WEIGHT,
+)
 from app.core.memory.enums import Neo4jNodeType
 
 DIALOGUE_NODE_SAVE = """
@@ -19,7 +24,7 @@ DIALOGUE_NODE_SAVE = """
         SET n.end_user_id = dialogue.end_user_id,
             n.run_id = dialogue.run_id,
             n.ref_id = dialogue.ref_id,
-            n.created_at = dialogue.created_at,
+            n.created_at = coalesce(n.created_at, dialogue.created_at),
             n.content = dialogue.content,
             n.name = dialogue.name,
             n.dialog_embedding = dialogue.dialog_embedding,
@@ -87,37 +92,40 @@ RETURN count(s) AS total
 # （原文档权重 G=0.30/T=0.10；仅用两因子时按 3:1 比例归一化，使普通节点上限=1）
 # G = topology_score（缺失取 0）
 # T = 2^(-age_days/30)，age_days 按 created_at 距今（未来时间按 0 天，T=1）
-PERMANENT_MEMORY_LIST = """
-MATCH (s:Statement {end_user_id: $end_user_id})
+PERMANENT_MEMORY_LIST = f"""
+MATCH (s:Statement {{end_user_id: $end_user_id}})
 WHERE s.delete_at IS NULL
 WITH s, elementId(s) AS id,
-     coalesce(s.topology_score, 0.0) AS g,
+     toFloat(s.topology_score) AS raw_g,
      CASE
        WHEN s.created_at IS NULL THEN null
        ELSE datetime(s.created_at).epochMillis
      END AS created_epoch
-WITH id, s, g,
+WITH id, s, created_epoch,
      CASE
-       WHEN created_epoch IS NULL THEN 0.0
-       WHEN created_epoch >= datetime().epochMillis THEN 1.0
-       ELSE 2.0 ^ (- (datetime().epochMillis - created_epoch) / 2592000000.0)
-     END AS t
+       WHEN raw_g IS NULL OR isNaN(raw_g) THEN 0.0
+       WHEN raw_g < 0.0 THEN 0.0
+       WHEN raw_g > 1.0 THEN 1.0
+       ELSE raw_g
+     END AS g
+WITH id, s, g,
+     CASE WHEN created_epoch IS NULL THEN 0.0 ELSE {T_CYPHER_EXPR} END AS t
 WITH id, s,
      CASE
        WHEN coalesce(s.is_permanent, false) THEN 1.0
-       ELSE 0.75 * g + 0.25 * t
+       ELSE {G_WEIGHT} * g + {T_WEIGHT} * t
      END AS value_score
 ORDER BY value_score DESC, s.created_at DESC, id ASC
 SKIP $skip
 LIMIT $limit
 RETURN id,
        'Statement' AS label,
-       {
+       {{
            statement: s.statement,
            created_at: s.created_at,
            is_permanent: coalesce(s.is_permanent, false),
            value_score: sqrt(value_score) * 100
-       } AS properties
+       }} AS properties
 """
 
 PERMANENT_MEMORY_UNMARK = """
@@ -530,7 +538,8 @@ DIALOGUE_STATEMENT_EDGE_SAVE = """
     UNWIND $dialogue_statement_edges AS edge
     // 支持按 uuid 或 ref_id 连接到 Dialogue，避免因来源 ID 不一致而断链
     MATCH (dialogue:Dialogue)
-    WHERE dialogue.uuid = edge.source OR dialogue.ref_id = edge.source
+    WHERE (dialogue.uuid = edge.source OR dialogue.ref_id = edge.source)
+      AND dialogue.delete_at IS NULL
     MATCH (statement:Statement {id: edge.target})
     WHERE statement.delete_at IS NULL
     // 仅按端点去重，关系属性可更新
@@ -783,6 +792,7 @@ SEARCH_DIALOGUE_BY_DIALOG_ID = """
 MATCH (d:Dialogue)
 WHERE ($end_user_id IS NULL OR d.end_user_id = $end_user_id)
   AND d.id = $dialog_id
+  AND d.delete_at IS NULL
 RETURN d.id AS dialog_id,
        d.end_user_id AS end_user_id,
        d.content AS content,
@@ -1042,6 +1052,7 @@ RETURN m.id AS uuid
 MEMORY_SUMMARY_STATEMENT_EDGE_SAVE = """
 UNWIND $edges AS e
 MATCH (ms:MemorySummary {id: e.summary_id, run_id: e.run_id})
+WHERE ms.delete_at IS NULL
 MATCH (c:Chunk {id: e.chunk_id, run_id: e.run_id})
 WHERE c.delete_at IS NULL
 MATCH (c)-[:CONTAINS]->(s:Statement {run_id: e.run_id})
@@ -1196,6 +1207,7 @@ WHERE elementId(n) = $id
   AND (ms:ExtractedEntity OR ms:MemorySummary)
   AND n.delete_at IS NULL
   AND e.delete_at IS NULL
+  AND ms.delete_at IS NULL
 
 RETURN
   collect(
@@ -1236,6 +1248,7 @@ WHERE elementId(n) =$id
   AND (ms:MemorySummary OR ms:ExtractedEntity)
   AND n.delete_at IS NULL
   AND e.delete_at IS NULL
+  AND ms.delete_at IS NULL
 RETURN
   collect(
     DISTINCT
@@ -1596,6 +1609,7 @@ UNION ALL
 
 MATCH (n:Dialogue)
 WHERE n.end_user_id =  $end_user_id
+  AND n.delete_at IS NULL
 RETURN
   elementId(n) AS id,
   labels(n) AS labels,
@@ -2068,6 +2082,7 @@ LIMIT $batch_size
 SEARCH_MEMORY_SUMMARIES_BY_USER_ID = """
 MATCH (s:MemorySummary)
 WHERE s.end_user_id = $end_user_id AND s.id > $last_id
+  AND s.delete_at IS NULL
 RETURN s.id AS id,
        s.summary_embedding AS embedding
 ORDER BY s.id
@@ -2155,6 +2170,7 @@ RETURN e.id AS id,
 SEARCH_MEMORY_SUMMARIES_BY_IDS = """
 MATCH (m:MemorySummary)
 WHERE m.id IN $ids
+  AND m.delete_at IS NULL
 RETURN m.id AS id,
        m.name AS name,
        m.end_user_id AS end_user_id,
@@ -2256,6 +2272,7 @@ LIMIT $limit
 SEARCH_MEMORY_SUMMARIES_BY_FULLTEXT = """
 CALL db.index.fulltext.queryNodes("summariesFulltext", $query) YIELD node AS m, score
 WHERE m.end_user_id = $end_user_id
+  AND m.delete_at IS NULL
 RETURN m.id AS id,
        m.name AS name,
        m.end_user_id AS end_user_id,
@@ -2359,6 +2376,7 @@ RETURN n.id AS entity_id,
 SEARCH_DIALOGUE_BY_FULLTEXT = """
 CALL db.index.fulltext.queryNodes("dialogueFulltext", $query) YIELD node AS d, score
 WHERE ($end_user_id IS NULL OR d.end_user_id = $end_user_id)
+  AND d.delete_at IS NULL
   AND d.write_mode = 'fast'
 RETURN d.id AS id,
        d.content AS content,
@@ -2373,6 +2391,7 @@ LIMIT $limit
 SEARCH_DIALOGUE_BY_USER_ID = """
 MATCH (d:Dialogue)
 WHERE d.end_user_id = $end_user_id AND d.id > $last_id
+  AND d.delete_at IS NULL
   AND d.write_mode = 'fast'
   AND d.dialog_embedding IS NOT NULL
 RETURN d.id AS id,
@@ -2384,6 +2403,7 @@ LIMIT $batch_size
 SEARCH_DIALOGUE_BY_IDS = """
 MATCH (d:Dialogue)
 WHERE d.id IN $ids
+  AND d.delete_at IS NULL
   AND d.write_mode = 'fast'
 RETURN d.id AS id,
        d.end_user_id AS end_user_id,
@@ -3103,7 +3123,15 @@ FORGET_QUOTA_BREAKDOWN = """
       sum(CASE WHEN n:Statement THEN 1 ELSE 0 END) AS statement,
       sum(CASE WHEN n:Chunk THEN 1 ELSE 0 END) AS chunk,
       sum(CASE WHEN n:ExtractedEntity THEN 1 ELSE 0 END) AS entity,
-      sum(CASE WHEN n:MemorySummary THEN 1 ELSE 0 END) AS summary
+      sum(CASE WHEN n:MemorySummary THEN 1 ELSE 0 END) AS summary,
+      sum(CASE WHEN n:Dialogue THEN 1 ELSE 0 END) AS dialogue
+"""
+
+FORGET_COUNT_AUXILIARY_ACTIVE_NODES = """
+    MATCH (n {end_user_id: $end_user_id})
+    WHERE n.delete_at IS NULL
+      AND (n:MemorySummary OR n:Dialogue)
+    RETURN count(n) AS cnt
 """
 
 FORGET_SOFT_DELETE_BY_ELEMENT_IDS = """
@@ -3112,48 +3140,119 @@ FORGET_SOFT_DELETE_BY_ELEMENT_IDS = """
       AND elementId(n) IN $element_ids
       AND (NOT n:Statement OR coalesce(n.is_permanent, false) = false)
     SET n.delete_at = datetime($now)
-    RETURN count(n) AS deleted
+    RETURN collect(elementId(n)) AS deleted_element_ids
 """
 
-FORGET_RECOVER_BY_ELEMENT_ID = """
+FORGET_RECOVER_IDEMPOTENT_BY_ELEMENT_ID = """
     MATCH (n)
     WHERE elementId(n) = $element_id
-    SET n.delete_at = NULL, n.created_at = datetime($now)
-    RETURN n.id AS node_id, labels(n) AS labels
+      AND n.end_user_id = $end_user_id
+      AND (n:Statement OR n:Chunk OR n:ExtractedEntity OR n:MemorySummary OR n:Dialogue)
+    WITH n, n.delete_at IS NOT NULL AS recovered_now
+    SET n.delete_at = CASE WHEN recovered_now THEN NULL ELSE n.delete_at END
+    RETURN elementId(n) AS node_id, labels(n) AS labels, recovered_now
 """
 
-FORGET_MIXED_CANDIDATES = """
-CALL () {
-    MATCH (c:Chunk {end_user_id: $end_user_id})
+FORGET_CORE_CANDIDATES = f"""
+CALL () {{
+    MATCH (c:Chunk {{end_user_id: $end_user_id}})
     WHERE c.delete_at IS NULL
-    RETURN 'Chunk' AS node_type, elementId(c) AS element_id, c.content AS content,
-           coalesce(c.created_at) AS sort_time, 0 AS extraction_count,
-           null AS name, null AS _type
-    ORDER BY sort_time ASC
+    WITH c, elementId(c) AS element_id,
+         CASE
+           WHEN coalesce(toString(c.created_at) =~ $iso_datetime_pattern, false)
+           THEN datetime(toString(c.created_at)).epochMillis
+           ELSE 0
+         END AS created_epoch,
+         toFloat(c.topology_score) AS raw_g
+    WITH c, element_id, created_epoch,
+         CASE
+           WHEN raw_g IS NULL OR isNaN(raw_g) THEN 0.0
+           WHEN raw_g < 0.0 THEN 0.0
+           WHEN raw_g > 1.0 THEN 1.0
+           ELSE raw_g
+         END AS g
+    WITH c, element_id, created_epoch, g, {T_CYPHER_EXPR} AS t
+    WITH c, element_id, created_epoch,
+         {G_WEIGHT} * g + {T_WEIGHT} * t AS forgetting_activation
+    RETURN 'Chunk' AS node_type, element_id, coalesce(c.content, '') AS content,
+           forgetting_activation, created_epoch
+    ORDER BY forgetting_activation ASC, created_epoch ASC, element_id ASC
     LIMIT $batch_size
+
     UNION ALL
-    MATCH (s:Statement {end_user_id: $end_user_id})
+
+    MATCH (s:Statement {{end_user_id: $end_user_id}})
     WHERE s.delete_at IS NULL
       AND coalesce(s.is_permanent, false) = false
-    RETURN 'Statement' AS node_type, elementId(s) AS element_id, s.statement AS content,
-           coalesce(s.created_at) AS sort_time, 0 AS extraction_count,
-           null AS name, null AS _type
-    ORDER BY sort_time ASC
+    WITH s, elementId(s) AS element_id,
+         CASE
+           WHEN coalesce(toString(s.created_at) =~ $iso_datetime_pattern, false)
+           THEN datetime(toString(s.created_at)).epochMillis
+           ELSE 0
+         END AS created_epoch,
+         toFloat(s.topology_score) AS raw_g
+    WITH s, element_id, created_epoch,
+         CASE
+           WHEN raw_g IS NULL OR isNaN(raw_g) THEN 0.0
+           WHEN raw_g < 0.0 THEN 0.0
+           WHEN raw_g > 1.0 THEN 1.0
+           ELSE raw_g
+         END AS g
+    WITH s, element_id, created_epoch, g, {T_CYPHER_EXPR} AS t
+    WITH s, element_id, created_epoch,
+         {G_WEIGHT} * g + {T_WEIGHT} * t AS forgetting_activation
+    RETURN 'Statement' AS node_type, element_id, coalesce(s.statement, '') AS content,
+           forgetting_activation, created_epoch
+    ORDER BY forgetting_activation ASC, created_epoch ASC, element_id ASC
     LIMIT $batch_size
+
     UNION ALL
-    MATCH (e:ExtractedEntity {end_user_id: $end_user_id})
+
+    MATCH (e:ExtractedEntity {{end_user_id: $end_user_id}})
     WHERE e.delete_at IS NULL
-      AND coalesce(e.extraction_count, 0) < $protection_threshold AND e.name <> "用户"
-    RETURN 'ExtractedEntity' AS node_type, elementId(e) AS element_id, e.name AS content,
-           coalesce(e.created_at) AS sort_time,
-           coalesce(e.extraction_count, 0) AS extraction_count,
-           e.name AS name, e.entity_type AS _type
-    ORDER BY sort_time ASC, extraction_count ASC
+      AND coalesce(e.extraction_count, 0) < $protection_threshold
+      AND e.name <> '用户'
+    WITH e, elementId(e) AS element_id,
+         CASE
+           WHEN coalesce(toString(e.created_at) =~ $iso_datetime_pattern, false)
+           THEN datetime(toString(e.created_at)).epochMillis
+           ELSE 0
+         END AS created_epoch,
+         toFloat(e.topology_score) AS raw_g
+    WITH e, element_id, created_epoch,
+         CASE
+           WHEN raw_g IS NULL OR isNaN(raw_g) THEN 0.0
+           WHEN raw_g < 0.0 THEN 0.0
+           WHEN raw_g > 1.0 THEN 1.0
+           ELSE raw_g
+         END AS g
+    WITH e, element_id, created_epoch, g, {T_CYPHER_EXPR} AS t
+    WITH e, element_id, created_epoch,
+         {G_WEIGHT} * g + {T_WEIGHT} * t AS forgetting_activation
+    RETURN 'ExtractedEntity' AS node_type, element_id, coalesce(e.name, '') AS content,
+           forgetting_activation, created_epoch
+    ORDER BY forgetting_activation ASC, created_epoch ASC, element_id ASC
     LIMIT $batch_size
-}
+}}
 RETURN *
-ORDER BY CASE WHEN sort_time IS NULL THEN 0 ELSE 1 END, sort_time ASC, extraction_count ASC
+ORDER BY forgetting_activation ASC, created_epoch ASC, element_id ASC
 LIMIT $batch_size
+"""
+
+FORGET_AUXILIARY_CANDIDATES = """
+    MATCH (n {end_user_id: $end_user_id})
+    WHERE n.delete_at IS NULL
+      AND (n:MemorySummary OR n:Dialogue)
+      AND toString(n.created_at) =~ $iso_datetime_pattern
+    WITH n, elementId(n) AS element_id,
+         datetime(toString(n.created_at)).epochMillis AS created_epoch
+    RETURN CASE WHEN n:MemorySummary THEN 'MemorySummary' ELSE 'Dialogue' END AS node_type,
+           element_id,
+           CASE WHEN n:MemorySummary THEN coalesce(n.content, n.name, '')
+                ELSE left(coalesce(n.content, ''), $content_max_len) END AS content,
+           created_epoch
+    ORDER BY created_epoch ASC, element_id ASC
+    LIMIT $batch_size
 """
 
 # 将所有节点的 end_user_id 从 old 改为 new
