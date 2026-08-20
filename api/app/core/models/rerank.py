@@ -3,7 +3,10 @@ from typing import Any, Dict, List, Optional, Sequence, Union
 from copy import deepcopy
 from langchain_core.documents import BaseDocumentCompressor, Document
 from langchain_core.callbacks import Callbacks
-from app.core.alert_metric_bridge import report_model_gateway_failure
+from app.core.alert_metric_bridge import (
+    report_model_gateway_failure,
+    report_model_gateway_success,
+)
 from app.core.models.base import RedBearModelConfig, get_provider_rerank_class, RedBearModelFactory
 from app.models import ModelProvider
 
@@ -108,12 +111,15 @@ class RedBearRerank(BaseDocumentCompressor):
             if provider in _JINA_RERANK_PROVIDERS:
                 from langchain_community.document_compressors import JinaRerank
                 model_instance: JinaRerank = self._model
-                return model_instance.rerank(documents=documents, query=query, top_n=top_n)
-            if provider == ModelProvider.DASHSCOPE:
+                result = model_instance.rerank(documents=documents, query=query, top_n=top_n)
+            elif provider == ModelProvider.DASHSCOPE:
                 from langchain_community.document_compressors.dashscope_rerank import DashScopeRerank
                 model_instance: DashScopeRerank = self._model
-                return model_instance.rerank(documents=documents, query=query, top_n=top_n)
-            raise ValueError(f"不支持的模型提供商: {provider}")
+                result = model_instance.rerank(documents=documents, query=query, top_n=top_n)
+            else:
+                raise ValueError(f"不支持的模型提供商: {provider}")
         except Exception as exc:
             report_model_gateway_failure(self._config, "rerank", exc, started)
             raise
+        report_model_gateway_success(self._config, "rerank", started)
+        return result
