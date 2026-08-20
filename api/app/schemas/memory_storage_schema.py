@@ -8,6 +8,7 @@ import uuid
 from pydantic import BaseModel, Field, ConfigDict, field_validator, model_validator
 
 from app.core.utils.datetime_utils import to_iso_z, utcnow_naive
+from app.schemas.app_schema import FileInput
 from app.schemas.memory_agent_schema import WriteMessageItem
 
 
@@ -349,6 +350,41 @@ class PilotRunInput(BaseModel):  # 试运行触发请求模型（QA 消息格式
         description="QA 格式消息列表，role 为 user/assistant，files 可选",
     )
     model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+
+class DebugChatHistoryMessage(BaseModel):
+    """萃取调试对话的显式历史消息。"""
+
+    role: Literal["user", "assistant"] = Field(..., description="消息角色")
+    content: str = Field(..., min_length=1, description="文本内容")
+    files: List[FileInput] = Field(default_factory=list, description="该条历史用户消息的附件")
+
+    model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="after")
+    def validate_history_files(self):
+        if self.role == "assistant" and self.files:
+            raise ValueError("assistant 历史消息不能包含附件")
+        return self
+
+
+class DebugChatInput(BaseModel):
+    """萃取调试 AI 对话请求。"""
+
+    config_id: Union[uuid.UUID, int, str] = Field(..., description="萃取引擎配置 ID")
+    message: str = Field(..., min_length=1, description="当前用户消息")
+    files: List[FileInput] = Field(default_factory=list, description="当前消息附件")
+    history: List[DebugChatHistoryMessage] = Field(default_factory=list, description="显式对话上下文")
+
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+    @field_validator("message")
+    @classmethod
+    def validate_message(cls, value: str) -> str:
+        message = value.strip()
+        if not message:
+            raise ValueError("消息内容不能为空")
+        return message
 
 
 class ConfigFilter(BaseModel):  # 查询配置参数时使用的模型

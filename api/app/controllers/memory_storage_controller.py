@@ -9,8 +9,9 @@ from app.core.language_utils import get_language_from_header
 from app.core.logging_config import get_api_logger
 from app.core.response_utils import fail, success
 from app.db import get_async_db_context
-from app.dependencies import get_current_user_async, CurrentUserSnapshot
+from app.dependencies import cur_workspace_access_guard_async, get_current_user_async, CurrentUserSnapshot
 from app.schemas.memory_storage_schema import (
+    DebugChatInput,
     PilotRunInput,
 )
 from app.schemas.response_schema import ApiResponse
@@ -30,7 +31,7 @@ from app.services.memory_storage_service import (
     search_statement,
 )
 
-from app.utils.config_utils import resolve_config_id
+from app.utils.config_utils import resolve_config_id, resolve_config_id_async
 
 # Get API logger
 api_logger = get_api_logger()
@@ -94,6 +95,44 @@ async def pilot_run(
     svc = DataConfigService()
     return StreamingResponse(
         svc.pilot_run_stream(payload, language=language),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.post("/chat", response_model=None)
+@cur_workspace_access_guard_async()
+async def debug_chat_stream(
+        payload: DebugChatInput,
+        language_type: str = Header(default=None, alias="X-Language-Type"),
+        current_user: CurrentUserSnapshot = Depends(get_current_user_async),
+) -> StreamingResponse:
+    """萃取调试界面使用的无状态多模态流式对话。"""
+    language = get_language_from_header(language_type)
+    async with get_async_db_context() as db:
+        payload.config_id = await resolve_config_id_async(payload.config_id, db)
+
+    history_files_count = sum(len(message.files) for message in payload.history)
+    api_logger.info(
+        "Debug chat requested: config_id=%s, history_count=%s, files_count=%s, workspace_id=%s",
+        payload.config_id,
+        len(payload.history),
+        len(payload.files) + history_files_count,
+        current_user.current_workspace_id,
+    )
+
+    svc = DataConfigService()
+    return StreamingResponse(
+        svc.debug_chat_stream(
+            payload,
+            language=language,
+            workspace_id=current_user.current_workspace_id,
+            tenant_id=current_user.tenant_id,
+        ),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

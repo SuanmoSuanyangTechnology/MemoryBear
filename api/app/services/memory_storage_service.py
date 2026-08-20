@@ -5,6 +5,7 @@ Handles business logic for memory storage operations.
 """
 
 import asyncio
+import base64
 import json
 import os
 import time
@@ -29,11 +30,13 @@ from app.models import Workspace
 from app.models.user_model import User
 from app.repositories.memory_config_repository import MemoryConfigRepository
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+from app.schemas.app_schema import FileType, TransferMethod
 from app.schemas.memory_config_schema import ConfigurationError
 from app.schemas.memory_storage_schema import (
     ConfigKey,
     ConfigParamsCreate,
     ConfigParamsDelete,
+    DebugChatInput,
     PilotRunInput,
     ConfigUpdate,
     ConfigUpdateExtracted,
@@ -47,6 +50,19 @@ config_logger = get_config_logger()
 # Load environment variables for Neo4j connector
 load_dotenv()
 _neo4j_connector = Neo4jConnector(shared_driver=True)
+
+DEBUG_CHAT_SYSTEM_PROMPT = """
+You are a neutral and helpful AI assistant in a debugging conversation. Answer
+general questions normally using your own general knowledge. Use the explicit
+conversation history and attachments in both historical and current user messages
+as additional context when they are relevant. Attachment marker text identifies
+the position and type of every attachment. When asked about multiple attachments,
+account for every marker; if an attachment cannot be understood, say so instead of
+silently omitting it. Do not claim to have accessed long-term memory, a private
+knowledge base, tools, or skills. If a question requires unavailable private or
+up-to-date information, state that limitation clearly. Reply in the language used
+by the user; when it is unclear, use the requested interface language.
+""".strip()
 
 
 class MemoryStorageService:
@@ -288,6 +304,444 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
             data_list.append(config_dict)
 
         return data_list
+
+    @staticmethod
+    def _resolve_chat_model_id(memory_config, files) -> uuid.UUID:
+        """按当前消息的最高多模态需求选择模型，专用模型缺失时回退 LLM。"""
+        file_types = {file.type for file in files or []}
+        if FileType.VIDEO in file_types:
+            return memory_config.video_model_id or memory_config.llm_model_id
+        if FileType.AUDIO in file_types:
+            return memory_config.audio_model_id or memory_config.llm_model_id
+        if FileType.IMAGE in file_types:
+            return memory_config.vision_model_id or memory_config.llm_model_id
+        return memory_config.llm_model_id
+
+    @staticmethod
+    def _normalize_capabilities(capabilities) -> set[str]:
+        return {
+            str(getattr(capability, "value", capability)).lower()
+            for capability in capabilities or []
+        }
+
+    @staticmethod
+    def _unsupported_file_part(file_type: FileType, language: str) -> dict[str, str]:
+        labels = {
+            "zh": {
+                FileType.IMAGE: "图片",
+                FileType.AUDIO: "音频",
+                FileType.VIDEO: "视频",
+            },
+            "en": {
+                FileType.IMAGE: "image",
+                FileType.AUDIO: "audio",
+                FileType.VIDEO: "video",
+            },
+        }
+        locale = "en" if language == "en" else "zh"
+        label = labels[locale].get(file_type, str(file_type))
+        if locale == "en":
+            text = f"[The selected model does not support this {label} attachment.]"
+        else:
+            text = f"[当前选中的模型不支持该{label}附件。]"
+        return {"type": "text", "text": text}
+
+    @staticmethod
+    def _local_file_error_part(language: str) -> dict[str, str]:
+        if language == "en":
+            text = "[The local attachment could not be loaded.]"
+        else:
+            text = "[本地附件加载失败。]"
+        return {"type": "text", "text": text}
+
+    @staticmethod
+    def _file_marker_part(file, position: int, language: str) -> dict[str, str]:
+        """为每个附件添加稳定的顺序和类型标记，避免模型静默忽略媒体块。"""
+        file_type = str(getattr(file.type, "value", file.type))
+        file_name = file.name or str(file.upload_file_id or file.url or "")
+        if language == "en":
+            text = f"[Attachment {position}: type={file_type}, name={file_name}]"
+        else:
+            text = f"[附件 {position}：类型={file_type}，名称={file_name}]"
+        return {"type": "text", "text": text}
+
+    @staticmethod
+    def _replace_local_media_url(
+            parts: list[dict[str, Any]],
+            content: bytes,
+            mime_type: str,
+    ) -> None:
+        """将 URL 型多模态 part 中的本地地址替换为 Base64 Data URL。"""
+        data_url: str | None = None
+
+        def get_data_url() -> str:
+            nonlocal data_url
+            if data_url is None:
+                encoded = base64.b64encode(content).decode("ascii")
+                data_url = f"data:{mime_type};base64,{encoded}"
+            return data_url
+
+        for part in parts:
+            if not isinstance(part, dict):
+                continue
+            part_type = part.get("type")
+            if part_type == "image_url" and isinstance(part.get("image_url"), dict):
+                part["image_url"]["url"] = get_data_url()
+            elif part_type == "image" and isinstance(part.get("image"), str):
+                part["image"] = get_data_url()
+            elif part_type == "audio_url" and isinstance(part.get("audio_url"), dict):
+                part["audio_url"]["url"] = get_data_url()
+            elif part_type == "audio" and isinstance(part.get("audio"), str):
+                part["audio"] = get_data_url()
+            elif part_type == "video_url" and isinstance(part.get("video_url"), dict):
+                part["video_url"]["url"] = get_data_url()
+            elif part_type == "video" and isinstance(part.get("video"), str):
+                part["video"] = get_data_url()
+
+    @staticmethod
+    async def _load_debug_local_file(
+            file,
+            multimodal_service,
+            workspace_id: uuid.UUID,
+            tenant_id: uuid.UUID,
+    ) -> tuple[bytes, str]:
+        """校验本地附件归属并从配置的存储后端读取原始字节。"""
+        import magic
+        from app.services.file_storage_service import FileStorageService
+
+        metadata = await multimodal_service._get_file_metadata(
+            file.upload_file_id,
+            completed_only=True,
+        )
+        if (
+                metadata is None
+                or metadata.workspace_id != workspace_id
+                or metadata.tenant_id != tenant_id
+        ):
+            raise ValueError("local attachment is unavailable in the current workspace")
+
+        content = await FileStorageService().download_file(metadata.file_key)
+        if not content:
+            raise ValueError("local attachment is empty")
+
+        detected_mime = magic.from_buffer(content, mime=True)
+        mime_type = detected_mime or metadata.content_type or "application/octet-stream"
+        file.set_content(content)
+        if file.type == FileType.AUDIO and metadata.file_ext:
+            audio_ext = metadata.file_ext.lstrip(".").lower()
+            file.file_type = f"audio/{audio_ext}"
+        else:
+            file.file_type = mime_type
+        if not file.name:
+            file.name = metadata.file_name
+        return content, mime_type
+
+    @classmethod
+    async def _process_debug_files(
+            cls,
+            files,
+            multimodal_service,
+            workspace_id: uuid.UUID,
+            tenant_id: uuid.UUID,
+            capabilities,
+            language: str,
+    ) -> list[dict[str, Any]]:
+        """按请求顺序处理附件，对模型不支持的类型生成可见文本提示。"""
+        normalized_capabilities = cls._normalize_capabilities(capabilities)
+        required_capabilities = {
+            FileType.IMAGE: "vision",
+            FileType.AUDIO: "audio",
+            FileType.VIDEO: "video",
+        }
+        processed_parts: list[dict[str, Any]] = []
+        for position, file in enumerate(files or [], start=1):
+            required = required_capabilities.get(file.type)
+            if required and required not in normalized_capabilities:
+                processed_parts.append(cls._file_marker_part(file, position, language))
+                processed_parts.append(cls._unsupported_file_part(file.type, language))
+                continue
+
+            local_media: tuple[bytes, str] | None = None
+            if file.transfer_method == TransferMethod.LOCAL_FILE:
+                try:
+                    content, mime_type = await cls._load_debug_local_file(
+                        file,
+                        multimodal_service,
+                        workspace_id,
+                        tenant_id,
+                    )
+                    if file.type in {FileType.IMAGE, FileType.AUDIO, FileType.VIDEO}:
+                        local_media = (content, mime_type)
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    logger.error(
+                        "[DEBUG_CHAT_STREAM] Failed to load local attachment: file_id=%s",
+                        file.upload_file_id,
+                        exc_info=True,
+                    )
+                    processed_parts.append(cls._file_marker_part(file, position, language))
+                    processed_parts.append(cls._local_file_error_part(language))
+                    continue
+
+            parts = await multimodal_service.process_files(
+                [file],
+                workspace_id=workspace_id,
+                document_image_recognition=False,
+                include_processing_errors=True,
+            )
+            if local_media:
+                cls._replace_local_media_url(parts, *local_media)
+            processed_parts.append(cls._file_marker_part(file, position, language))
+            processed_parts.extend(parts)
+        return processed_parts
+
+    @staticmethod
+    def _stream_content_to_texts(content: Any) -> list[str]:
+        """从不同 provider 的流式 content 形态中提取文本块。"""
+        if isinstance(content, str):
+            return [content] if content else []
+        if isinstance(content, dict):
+            text = content.get("text")
+            return [str(text)] if text else []
+        if not isinstance(content, list):
+            return []
+
+        texts: list[str] = []
+        for item in content:
+            if isinstance(item, str) and item:
+                texts.append(item)
+            elif isinstance(item, dict):
+                text = item.get("text")
+                if text:
+                    texts.append(str(text))
+        return texts
+
+    @staticmethod
+    def _extract_message_from_event_output(output: Any) -> Any | None:
+        if output is None:
+            return None
+        if getattr(output, "usage_metadata", None) or getattr(output, "response_metadata", None):
+            return output
+        if isinstance(output, dict):
+            value = output.get("message") or output.get("output")
+            if value is not None and not isinstance(value, (dict, list, str)):
+                return value
+            generations = output.get("generations")
+            if isinstance(generations, list):
+                for generation_group in generations:
+                    items = generation_group if isinstance(generation_group, list) else [generation_group]
+                    for generation in items:
+                        message = getattr(generation, "message", None)
+                        if message is not None:
+                            return message
+        return getattr(output, "message", None)
+
+    @staticmethod
+    def _extract_total_tokens(message: Any) -> int:
+        if message is None:
+            return 0
+        response_metadata = getattr(message, "response_metadata", None)
+        if isinstance(response_metadata, dict):
+            usage = response_metadata.get("token_usage") or response_metadata.get("usage") or {}
+            if isinstance(usage, dict) and usage.get("total_tokens"):
+                return int(usage["total_tokens"])
+        usage_metadata = getattr(message, "usage_metadata", None)
+        if isinstance(usage_metadata, dict):
+            return int(usage_metadata.get("total_tokens") or 0)
+        return int(getattr(usage_metadata, "total_tokens", 0) or 0)
+
+    @staticmethod
+    def _debug_chat_error_data(language: str, kind: str = "generation") -> dict[str, Any]:
+        english = language == "en"
+        if kind == "model":
+            message = "Model unavailable" if english else "模型不可用"
+            error = "no available api key"
+        elif kind == "access":
+            message = "Configuration access denied" if english else "无权访问该配置"
+            error = "configuration access denied"
+        else:
+            message = "Chat generation failed" if english else "对话生成失败"
+            error = "debug chat generation failed"
+        return {"code": 5000, "message": message, "error": error}
+
+    async def debug_chat_stream(
+            self,
+            payload: DebugChatInput,
+            language: str = "zh",
+            workspace_id: uuid.UUID | None = None,
+            tenant_id: uuid.UUID | None = None,
+    ) -> AsyncGenerator[str, None]:
+        """执行无记忆、无工具的萃取调试流式对话。"""
+        from app.core.models import RedBearLLM, RedBearModelConfig
+        from app.db import get_async_db_context
+        from app.models.models_model import ModelType
+        from app.schemas.model_schema import ModelInfo
+        from app.services.model_service import ModelApiKeyService
+        from app.services.multimodal_service import MultimodalService
+        from langchain.agents import create_agent
+        from langchain_core.messages import AIMessage, HumanMessage
+
+        start_time = time.perf_counter()
+        api_key_obj = None
+        api_key_id: uuid.UUID | None = None
+        try:
+            async with get_async_db_context() as db:
+                memory_config = await MemoryConfigService(db).load_memory_config_async(payload.config_id)
+                if (
+                        workspace_id is None
+                        or tenant_id is None
+                        or memory_config.workspace_id != workspace_id
+                        or memory_config.tenant_id != tenant_id
+                ):
+                    logger.warning(
+                        "Debug chat configuration access denied: config_id=%s, config_workspace=%s, request_workspace=%s",
+                        payload.config_id,
+                        memory_config.workspace_id,
+                        workspace_id,
+                    )
+                    yield format_sse_message("error", self._debug_chat_error_data(language, "access"))
+                    return
+
+                all_files = [
+                    file
+                    for history_message in payload.history
+                    for file in history_message.files
+                ]
+                all_files.extend(payload.files)
+                model_config_id = self._resolve_chat_model_id(memory_config, all_files)
+                api_key_obj = await ModelApiKeyService.get_available_api_key_bridge_async(
+                    db,
+                    model_config_id,
+                    tenant_id=memory_config.tenant_id,
+                )
+                if not api_key_obj:
+                    yield format_sse_message("error", self._debug_chat_error_data(language, "model"))
+                    return
+
+                # get_async_db_context exits with a rollback for read-only transactions,
+                # which expires ORM attributes. Keep the scalar id before the object is
+                # detached so the post-stream usage update never touches api_key_obj.
+                api_key_id = api_key_obj.id
+
+                model_info = ModelInfo(
+                    model_name=api_key_obj.model_name,
+                    provider=api_key_obj.provider,
+                    api_key=api_key_obj.api_key,
+                    api_base=api_key_obj.api_base,
+                    is_omni=api_key_obj.is_omni,
+                    model_type=ModelType.LLM,
+                    capability=api_key_obj.capability or [],
+                )
+
+            llm = RedBearLLM(
+                RedBearModelConfig(
+                    model_name=model_info.model_name,
+                    provider=model_info.provider,
+                    api_key=model_info.api_key,
+                    base_url=model_info.api_base,
+                    is_omni=model_info.is_omni,
+                    capability=model_info.capability,
+                    extra_params={"temperature": 0.7, "max_tokens": 2000, "streaming": True},
+                ),
+                type=ModelType.CHAT,
+            )
+            requested_language = "English" if language == "en" else "Chinese"
+            system_prompt = f"{DEBUG_CHAT_SYSTEM_PROMPT}\nThe requested interface language is {requested_language}."
+            agent = create_agent(model=llm, tools=[], system_prompt=system_prompt)
+
+            yield format_sse_message("start", {
+                "conversation_id": "",
+                "message_id": str(uuid.uuid4()),
+                "user_message_id": str(uuid.uuid4()),
+            })
+
+            processed_history_files: list[list[dict[str, Any]]] = [
+                [] for _ in payload.history
+            ]
+            processed_files: list[dict[str, Any]] = []
+            if any(history_message.files for history_message in payload.history) or payload.files:
+                async with get_async_db_context() as db:
+                    multimodal_service = MultimodalService(db, model_info)
+                    for index, history_message in enumerate(payload.history):
+                        if history_message.files:
+                            processed_history_files[index] = await self._process_debug_files(
+                                history_message.files,
+                                multimodal_service,
+                                memory_config.workspace_id,
+                                memory_config.tenant_id,
+                                model_info.capability,
+                                language,
+                            )
+                    processed_files = await self._process_debug_files(
+                        payload.files,
+                        multimodal_service,
+                        memory_config.workspace_id,
+                        memory_config.tenant_id,
+                        model_info.capability,
+                        language,
+                    )
+
+            messages: list[Any] = []
+            for index, history_message in enumerate(payload.history):
+                if history_message.role == "user":
+                    history_file_parts = processed_history_files[index]
+                    history_content: str | list[dict[str, Any]]
+                    if history_file_parts:
+                        history_content = [
+                            {"type": "text", "text": history_message.content},
+                            *history_file_parts,
+                        ]
+                    else:
+                        history_content = history_message.content
+                    messages.append(HumanMessage(content=history_content))
+                else:
+                    messages.append(AIMessage(content=history_message.content))
+
+            if processed_files:
+                current_content: str | list[dict[str, Any]] = [
+                    {"type": "text", "text": payload.message},
+                    *processed_files,
+                ]
+            else:
+                current_content = payload.message
+            messages.append(HumanMessage(content=current_content))
+
+            full_content = ""
+            total_tokens = 0
+            async for event in agent.astream_events({"messages": messages}, version="v2"):
+                event_type = event.get("event")
+                if event_type == "on_chat_model_stream":
+                    chunk = event.get("data", {}).get("chunk")
+                    for text_chunk in self._stream_content_to_texts(getattr(chunk, "content", None)):
+                        full_content += text_chunk
+                        yield format_sse_message("message", {"content": text_chunk})
+                elif event_type == "on_chat_model_end":
+                    output = event.get("data", {}).get("output")
+                    message = self._extract_message_from_event_output(output)
+                    total_tokens = max(total_tokens, self._extract_total_tokens(message))
+
+            try:
+                async with get_async_db_context() as db:
+                    await ModelApiKeyService.record_api_key_usage_bridge_async(db, api_key_id)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                # Usage accounting is observability metadata. A write failure here must
+                # not turn an already completed model response into an SSE error event.
+                logger.error("[DEBUG_CHAT_STREAM] Failed to record API key usage", exc_info=True)
+
+            yield format_sse_message("end", {
+                "elapsed_time": time.perf_counter() - start_time,
+                "message_length": len(full_content),
+                "usage": {"total_tokens": total_tokens},
+            })
+        except asyncio.CancelledError:
+            logger.info("[DEBUG_CHAT_STREAM] Client disconnected during streaming")
+            raise
+        except Exception:
+            logger.error("[DEBUG_CHAT_STREAM] Error during streaming", exc_info=True)
+            yield format_sse_message("error", self._debug_chat_error_data(language))
 
     async def pilot_run_stream(self, payload: PilotRunInput, language: str = "zh") -> AsyncGenerator[str, None]:
         """
