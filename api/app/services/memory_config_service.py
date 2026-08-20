@@ -6,6 +6,7 @@ This service eliminates code duplication between MemoryAgentService and MemorySt
 """
 
 import asyncio
+import math
 import time
 import uuid
 from typing import Optional
@@ -211,6 +212,58 @@ def _effective_workspace_models(workspace, preset) -> dict:
         "audio": workspace.audio,
         "video": workspace.video,
     }
+def _clamp_ratio(
+    value,
+    *,
+    default: float,
+    field: str,
+    config_id,
+) -> float:
+    """Validate a [0, 1] ratio without ever breaking config loading."""
+    try:
+        if isinstance(value, (bool, str)):
+            raise ValueError("expected a numeric ratio")
+        normalized = float(value)
+        if not math.isfinite(normalized) or not 0.0 <= normalized <= 1.0:
+            raise ValueError("ratio is outside [0, 1]")
+        return normalized
+    except (TypeError, ValueError, OverflowError):
+        logger.warning(
+            "Invalid forgetting config; using default: field=%s value=%r "
+            "default=%s config_id=%s",
+            field,
+            value,
+            default,
+            config_id,
+        )
+        return default
+
+
+def _non_negative_int(
+    value,
+    *,
+    default: int,
+    field: str,
+    config_id,
+) -> int:
+    """Validate a non-negative integral value without raising."""
+    try:
+        if isinstance(value, (bool, str)):
+            raise ValueError("expected an integer")
+        numeric = float(value)
+        if not math.isfinite(numeric) or numeric < 0 or not numeric.is_integer():
+            raise ValueError("expected a non-negative integer")
+        return int(numeric)
+    except (TypeError, ValueError, OverflowError):
+        logger.warning(
+            "Invalid forgetting config; using default: field=%s value=%r "
+            "default=%s config_id=%s",
+            field,
+            value,
+            default,
+            config_id,
+        )
+        return default
 
 
 def _build_memory_config(
@@ -276,6 +329,18 @@ def _build_memory_config(
         lambda_mem=float(
             memory_config_row.lambda_mem) if memory_config_row.lambda_mem is not None else 0.5,
         offset=float(memory_config_row.offset) if memory_config_row.offset is not None else 0.0,
+        forgetting_threshold=_clamp_ratio(
+            getattr(memory_config_row, "forgetting_threshold", None),
+            default=0.3,
+            field="forgetting_threshold",
+            config_id=memory_config_row.config_id,
+        ),
+        min_days_since_access=_non_negative_int(
+            getattr(memory_config_row, "min_days_since_access", None),
+            default=30,
+            field="min_days_since_access",
+            config_id=memory_config_row.config_id,
+        ),
         # Pipeline config: Pruning
         pruning_enabled=bool(
             memory_config_row.pruning_enabled) if memory_config_row.pruning_enabled is not None else False,

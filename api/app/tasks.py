@@ -29,6 +29,11 @@ from app.core.logging_config import get_logger
 from app.core.memory.exceptions import MemoryExtractionBusinessError
 from app.core.models import RedBearEmbeddings, RedBearLLM
 from app.core.memory.storage_services.reflection_engine import retry_registry as rr
+from app.core.memory.storage_services.forgetting_engine.constants import (
+    FORGET_CANDIDATES_KEY as _FORGET_CANDIDATES_KEY,
+    FORGET_INFLIGHT_KEY as _FORGET_INFLIGHT_KEY,
+    forget_cooldown_key,
+)
 from app.core.memory.storage_services.reflection_engine.errors import (
     ReflectionBusinessError,
     ReflectionFailureReason,
@@ -4602,10 +4607,6 @@ def do_refresh_user_tags(
 #     return result
 
 
-_FORGET_CANDIDATES_KEY = "forget:candidates"
-_FORGET_INFLIGHT_KEY = "forget:inflight"
-
-
 @celery_app.task(
     name="app.tasks.scan_forget_candidates",
     bind=True,
@@ -4630,11 +4631,19 @@ def scan_forget_candidates(self) -> Dict[str, Any]:
 
         candidates = await redis_client.smembers(_FORGET_CANDIDATES_KEY)
         if not candidates:
-            return {"status": "SUCCESS", "dispatched": 0}
+            return {
+                "status": "SUCCESS",
+                "dispatched": 0,
+                "skipped_cooldown": 0,
+            }
 
         dispatched = 0
         skipped_inflight = 0
+        skipped_cooldown = 0
         for uid in candidates:
+            if await redis_client.exists(forget_cooldown_key(uid)):
+                skipped_cooldown += 1
+                continue
             if await redis_client.sismember(_FORGET_INFLIGHT_KEY, uid):
                 await redis_client.srem(_FORGET_CANDIDATES_KEY, uid)
                 skipped_inflight += 1
@@ -4657,6 +4666,7 @@ def scan_forget_candidates(self) -> Dict[str, Any]:
         logger.info(
             f"[ForgetScan] 完成: dispatched={dispatched}/{len(candidates)}, "
             f"skip_inflight={skipped_inflight}, "
+            f"skipped_cooldown={skipped_cooldown}, "
             f"耗时={time.time() - start_time:.1f}s"
         )
         return {
@@ -4664,6 +4674,7 @@ def scan_forget_candidates(self) -> Dict[str, Any]:
             "dispatched": dispatched,
             "candidates": len(candidates),
             "skip_inflight": skipped_inflight,
+            "skipped_cooldown": skipped_cooldown,
         }
 
     return asyncio.run(_run())
@@ -4722,7 +4733,10 @@ def do_forget_for_user(self, end_user_id: str) -> Dict[str, Any]:
                 with write_lock:
                     result = await service.forget()
             except RuntimeError:
-                logger.warning(f"[ForgetDo] 获取写锁超时，跳过 user={end_user_id}")
+                logger.warning(
+                    f"[ForgetDo] 获取写锁超时，跳过 user={end_user_id} "
+                    "forget_lock_timeout_count=1"
+                )
                 if redis_client:
                     # 移回候选集，等下一轮 scan 重新派发（与 scan_forget_candidates 派发失败的处理一致）
                     await redis_client.smove(_FORGET_INFLIGHT_KEY, _FORGET_CANDIDATES_KEY, end_user_id)

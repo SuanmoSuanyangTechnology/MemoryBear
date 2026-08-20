@@ -10,6 +10,7 @@
 所有业务逻辑从控制器层分离到此服务层。
 """
 
+import math
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any, Tuple
 from uuid import UUID
@@ -19,6 +20,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging_config import get_api_logger
 from app.core.memory.storage_services.forgetting_engine.actr_calculator import ACTRCalculator
+from app.core.memory.storage_services.forgetting_engine.constants import (
+    AUXILIARY_MAX_PER_RUN,
+    DIALOGUE_AUDIT_CONTENT_MAX_LENGTH,
+    MILLISECONDS_PER_DAY,
+)
 from app.core.memory.storage_services.forgetting_engine.config_utils import (
     calculate_forgetting_rate,
     load_actr_config_from_db,
@@ -28,6 +34,7 @@ from app.core.memory.storage_services.forgetting_engine.forgetting_scheduler imp
 from app.core.memory.storage_services.forgetting_engine.forgetting_strategy import ForgettingStrategy
 from app.core.utils.datetime_utils import (
     to_timestamp_ms,
+    utcnow,
     utcnow_naive,
     convert_neo4j_datetime_to_python as _convert_neo4j_datetime_to_python,
 )
@@ -132,6 +139,7 @@ class MemoryForgetService:
         query = """
         MATCH (n)
         WHERE (n:Statement OR n:ExtractedEntity OR n:MemorySummary)
+          AND n.delete_at IS NULL
         """
 
         if end_user_id:
@@ -218,6 +226,7 @@ class MemoryForgetService:
         MATCH (n)
         WHERE (n:Statement OR n:ExtractedEntity OR n:MemorySummary)
           AND n.end_user_id = $end_user_id
+          AND n.delete_at IS NULL
           AND n.activation_value IS NOT NULL
           AND n.activation_value < $threshold
           AND n.last_access_time IS NOT NULL
@@ -230,6 +239,7 @@ class MemoryForgetService:
         MATCH (n)
         WHERE (n:Statement OR n:ExtractedEntity OR n:MemorySummary)
           AND n.end_user_id = $end_user_id
+          AND n.delete_at IS NULL
           AND n.activation_value IS NOT NULL
           AND n.activation_value < $threshold
           AND n.last_access_time IS NOT NULL
@@ -371,6 +381,7 @@ class MemoryForgetService:
             MATCH (n)
             WHERE (n:Statement OR n:ExtractedEntity OR n:MemorySummary OR n:Chunk)
               AND n.end_user_id = $end_user_id
+              AND n.delete_at IS NULL
             RETURN 
                 count(n) as total_nodes,
                 avg(n.activation_value) as average_activation,
@@ -635,6 +646,7 @@ class MemoryForgetService:
         activation_query = """
         MATCH (n)
         WHERE (n:Statement OR n:ExtractedEntity OR n:MemorySummary OR n:Chunk)
+          AND n.delete_at IS NULL
         """
 
         if end_user_id:
@@ -682,6 +694,7 @@ class MemoryForgetService:
         distribution_query = """
         MATCH (n)
         WHERE (n:Statement OR n:ExtractedEntity OR n:MemorySummary OR n:Chunk)
+          AND n.delete_at IS NULL
         """
 
         if end_user_id:
@@ -935,8 +948,25 @@ async def get_quota_breakdown(end_user_id: str) -> dict:
         Neo4jNodeType.CHUNK.value: int(b.get("chunk", 0) or 0),
         Neo4jNodeType.EXTRACTEDENTITY.value: int(b.get("entity", 0) or 0),
         Neo4jNodeType.MEMORYSUMMARY.value: int(b.get("summary", 0) or 0),
+        Neo4jNodeType.DIALOGUE.value: int(b.get("dialogue", 0) or 0),
     }
-    return {"breakdown": breakdown}
+    active_count = (
+        breakdown[Neo4jNodeType.STATEMENT.value]
+        + breakdown[Neo4jNodeType.CHUNK.value]
+        + breakdown[Neo4jNodeType.EXTRACTEDENTITY.value]
+    )
+    auxiliary_breakdown = {
+        Neo4jNodeType.MEMORYSUMMARY.value: breakdown[
+            Neo4jNodeType.MEMORYSUMMARY.value
+        ],
+        Neo4jNodeType.DIALOGUE.value: breakdown[Neo4jNodeType.DIALOGUE.value],
+    }
+    return {
+        "breakdown": breakdown,
+        "active_count": active_count,
+        "auxiliary_active_count": sum(auxiliary_breakdown.values()),
+        "auxiliary_breakdown": auxiliary_breakdown,
+    }
 
 
 @redis_cache(ttl=300, prefix="forget_candidates", id_arg="end_user_id")
@@ -950,12 +980,19 @@ async def compute_forgetting_candidates(end_user_id: str) -> list[dict]:
     from app.db import get_async_db_context
     from app.repositories.end_user_repository import get_tenant_id_by_end_user_id_async
     from app.repositories.memory_config_repository import MemoryConfigRepository as _Repo
-    from app.repositories.neo4j.graph_search import forget_count_active_nodes, forget_get_mixed_candidates
+    from app.repositories.neo4j.graph_search import (
+        forget_count_active_nodes,
+        forget_count_auxiliary_active_nodes,
+        forget_get_auxiliary_candidates,
+        forget_get_core_candidates,
+    )
     from app.repositories.neo4j.neo4j_connector import Neo4jConnector
     from app.repositories.workspace_repository import get_workspace_memory_config_id_async
 
     memory_limit = 300
     lambda_mem = 0.5
+    forgetting_threshold = 0.3
+    min_days_since_access = 30
 
     async with get_async_db_context() as db:
         try:
@@ -975,8 +1012,25 @@ async def compute_forgetting_candidates(end_user_id: str) -> list[dict]:
                 active_config_id = await get_workspace_memory_config_id_async(db, end_user.workspace_id)
                 if active_config_id:
                     cfg = await _Repo(db).get_by_id_async(active_config_id)
-                    if cfg and cfg.lambda_mem is not None:
-                        lambda_mem = float(cfg.lambda_mem)
+                    if cfg:
+                        if cfg.lambda_mem is not None:
+                            lambda_mem = float(cfg.lambda_mem)
+                        from app.services.memory_config_service import (
+                            _clamp_ratio,
+                            _non_negative_int,
+                        )
+                        forgetting_threshold = _clamp_ratio(
+                            cfg.forgetting_threshold,
+                            default=0.3,
+                            field="forgetting_threshold",
+                            config_id=cfg.config_id,
+                        )
+                        min_days_since_access = _non_negative_int(
+                            cfg.min_days_since_access,
+                            default=30,
+                            field="min_days_since_access",
+                            config_id=cfg.config_id,
+                        )
         except Exception:
             pass
 
@@ -990,19 +1044,58 @@ async def compute_forgetting_candidates(end_user_id: str) -> list[dict]:
         if budget <= 0:
             return []
 
-        items = await forget_get_mixed_candidates(
-            conn, end_user_id, budget, protection_threshold=10,
+        evaluated_at_ms = to_timestamp_ms(utcnow())
+        cutoff_ms = evaluated_at_ms - min_days_since_access * MILLISECONDS_PER_DAY
+        core_items = await forget_get_core_candidates(
+            conn,
+            end_user_id,
+            budget,
+            protection_threshold=10,
+            evaluated_at_ms=evaluated_at_ms,
+            cutoff_ms=cutoff_ms,
+            forgetting_threshold=forgetting_threshold,
+        )
+        planned_core_deleted = min(len(core_items), budget)
+        auxiliary_active_count = await forget_count_auxiliary_active_nodes(
+            conn, end_user_id
+        )
+        release_ratio = (
+            planned_core_deleted / active_count if planned_core_deleted else 0.0
+        )
+        auxiliary_budget = min(
+            math.ceil(auxiliary_active_count * release_ratio),
+            planned_core_deleted,
+            AUXILIARY_MAX_PER_RUN,
+        )
+        auxiliary_items = (
+            await forget_get_auxiliary_candidates(
+                conn,
+                end_user_id,
+                auxiliary_budget,
+                content_max_len=DIALOGUE_AUDIT_CONTENT_MAX_LENGTH,
+            )
+            if auxiliary_budget > 0
+            else []
         )
 
-    # 稳定排序：sort_time ASC，element_id 作 tiebreaker
-    items.sort(key=lambda c: (c["sort_time"] or "", c.get("element_id", "")))
-    items = items[:budget]
-
-    return [
+    core_preview = [
         {
-            "node_type": c["node_type"],
-            "created_at": to_timestamp_ms(convert_neo4j_datetime_to_python(c["sort_time"])),
-            "content": c["content"],
+            "pool": "core",
+            "node_type": item["node_type"],
+            "created_at": int(item["created_epoch"]),
+            "content": item.get("content") or "",
+            "forgetting_activation": item.get("forgetting_activation"),
+            "effective_last_access_time": item.get("eff_access_ms"),
         }
-        for c in items
+        for item in core_items[:budget]
     ]
+    auxiliary_preview = [
+        {
+            "pool": "auxiliary",
+            "node_type": item["node_type"],
+            "created_at": int(item["created_epoch"]),
+            "content": item.get("content") or "",
+        }
+        for item in auxiliary_items[:auxiliary_budget]
+    ]
+    return core_preview + auxiliary_preview

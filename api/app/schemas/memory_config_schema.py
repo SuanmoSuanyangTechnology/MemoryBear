@@ -416,6 +416,8 @@ class MemoryConfig(BaseModel):
     lambda_time: float = 0.5
     lambda_mem: float = 0.5
     offset: float = 0.0
+    forgetting_threshold: float = 0.3
+    min_days_since_access: int = 30
 
     # Pipeline config: Pruning
     pruning_enabled: bool = True

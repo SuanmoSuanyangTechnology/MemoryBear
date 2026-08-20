@@ -168,7 +168,9 @@ class MemoryInsightHelper:
         """
         query = """
         MATCH (d:Dialogue)
-        WHERE d.end_user_id = $end_user_id AND d.created_at IS NOT NULL AND d.created_at <> ''
+        WHERE d.end_user_id = $end_user_id
+          AND d.delete_at IS NULL
+          AND d.created_at IS NOT NULL AND d.created_at <> ''
         RETURN d.created_at AS creation_time
         """
         records = await self.neo4j_connector.execute_query(query, end_user_id=self.user_id)

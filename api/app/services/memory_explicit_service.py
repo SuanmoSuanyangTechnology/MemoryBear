@@ -61,6 +61,7 @@ class MemoryExplicitService(MemoryBaseService):
             episodic_query = """
             MATCH (s:MemorySummary)
             WHERE s.end_user_id = $end_user_id
+              AND s.delete_at IS NULL
             RETURN elementId(s) AS id, 
                    s.name AS title,
                    s.content AS content,
@@ -190,6 +191,7 @@ class MemoryExplicitService(MemoryBaseService):
             total_all_query = """
             MATCH (s:MemorySummary)
             WHERE s.end_user_id = $end_user_id
+              AND s.delete_at IS NULL
             RETURN count(s) AS total
             """
             total_all_result = await self.neo4j_connector.execute_query(
@@ -198,7 +200,10 @@ class MemoryExplicitService(MemoryBaseService):
             total_all = total_all_result[0]["total"] if total_all_result else 0
 
             # 2. 构建筛选条件
-            where_clauses = ["s.end_user_id = $end_user_id"]
+            where_clauses = [
+                "s.end_user_id = $end_user_id",
+                "s.delete_at IS NULL",
+            ]
             params = {"end_user_id": end_user_id}
 
             # 时间戳筛选（毫秒时间戳转为 UTC ISO 字符串，使用 Neo4j datetime() 精确比较）
@@ -393,6 +398,7 @@ class MemoryExplicitService(MemoryBaseService):
             episodic_query = """
             MATCH (s:MemorySummary)
             WHERE elementId(s) = $memory_id AND s.end_user_id = $end_user_id
+              AND s.delete_at IS NULL
             RETURN s.name AS title,
                    s.content AS content,
                    s.created_at AS created_at

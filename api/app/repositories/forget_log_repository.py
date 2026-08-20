@@ -79,9 +79,10 @@ class ForgetLogRepository:
 
     @staticmethod
     async def recover_memory(db: AsyncSession, element_id: str, operator: uuid.UUID):
-        """恢复被软删除的记忆节点并更新审计日志。
+        """幂等恢复记忆节点，并将 PostgreSQL 审计记录对账为已恢复。
 
-        先查 DB 确认 ``recoverable=True``，通过后再恢复 Neo4j。
+        先确认审计记录允许恢复，再恢复 Neo4j。若节点已恢复但审计提交曾失败，
+        重试时仍会补齐审计状态，且不会重复刷新节点访问时间。
 
         Args:
             db: SQLAlchemy 异步会话。
@@ -92,7 +93,11 @@ class ForgetLogRepository:
             ResourceNotFoundException: 未找到可恢复的审计记录或 Neo4j 节点。
         """
         result = await db.execute(
-            select(ForgetAuditModel.id, ForgetAuditModel.is_recovered).where(
+            select(
+                ForgetAuditModel.id,
+                ForgetAuditModel.is_recovered,
+                ForgetAuditModel.end_user_id,
+            ).where(
                 ForgetAuditModel.node_id == element_id,
                 ForgetAuditModel.recoverable == True,
             )
@@ -104,7 +109,7 @@ class ForgetLogRepository:
                 "该记忆不可恢复，可能已恢复或不可恢复类型", 400,
             )
 
-        audit_id, already_recovered = row
+        audit_id, already_recovered, end_user_id = row
 
         if already_recovered:
             logger.info(
@@ -114,12 +119,15 @@ class ForgetLogRepository:
 
         async with Neo4jConnector() as connector:
             recovered = await forget_recover_by_element_id(
-                connector, element_id, now=to_iso_z(utcnow()),
+                connector,
+                element_id,
+                end_user_id=str(end_user_id),
+                now=to_iso_z(utcnow()),
             )
 
         if recovered is None:
             raise BusinessException(
-                "Neo4j 节点不存在或已被删除", 400,
+                "Neo4j 节点不存在", 400,
             )
 
         values = {"is_recovered": True, "operator": operator}
@@ -130,7 +138,12 @@ class ForgetLogRepository:
             .values(**values)
         )
         await db.commit()
-        logger.info("Memory recovered: element_id=%s operator=%s", element_id, operator)
+        logger.info(
+            "Memory recovery persisted: element_id=%s operator=%s recovered_now=%s",
+            element_id,
+            operator,
+            bool(recovered.get("recovered_now")),
+        )
 
     @staticmethod
     async def get_forget_logs(

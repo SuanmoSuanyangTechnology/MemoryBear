@@ -276,6 +276,7 @@ class MemoryBaseService:
             query = """
             MATCH (n:MemorySummary)-[:DERIVED_FROM_STATEMENT]->(:Statement)
             WHERE n.end_user_id = $end_user_id
+              AND n.delete_at IS NULL
             RETURN count(DISTINCT n) as count
             """
             result = await self.neo4j_connector.execute_query(
@@ -356,6 +357,7 @@ class MemoryBaseService:
             query = """
             MATCH (s:MemorySummary)
             WHERE elementId(s) = $summary_id AND s.end_user_id = $end_user_id
+              AND s.delete_at IS NULL
             MATCH (s)-[:DERIVED_FROM_STATEMENT]->(stmt:Statement)
             WHERE stmt.emotion_type IS NOT NULL 
               AND stmt.emotion_intensity IS NOT NULL
@@ -403,12 +405,14 @@ class MemoryBaseService:
                 query = """
                 MATCH (n:MemorySummary)
                 WHERE n.end_user_id = $end_user_id
+                  AND n.delete_at IS NULL
                 RETURN count(n) as count
                 """
                 result = await self.neo4j_connector.execute_query(query, end_user_id=end_user_id)
             else:
                 query = """
                 MATCH (n:MemorySummary)
+                WHERE n.delete_at IS NULL
                 RETURN count(n) as count
                 """
                 result = await self.neo4j_connector.execute_query(query)
