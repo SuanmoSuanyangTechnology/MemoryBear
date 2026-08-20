@@ -247,7 +247,11 @@ class KnowledgeSettings(BaseSettings):
     )
 
     # Knowledge business environment variables
-    # Add migrated A3/A4/A5 business settings only in this contiguous block.
+    max_file_size: int = Field(
+        default=52428800,
+        ge=1,
+        validation_alias="MAX_FILE_SIZE",
+    )
 
     @classmethod
     def settings_customise_sources(

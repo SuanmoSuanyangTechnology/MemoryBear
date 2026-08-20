@@ -4,14 +4,28 @@ from __future__ import annotations
 
 import uuid
 from typing import Annotated, Any
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, Query, Request
+from fastapi.responses import StreamingResponse
+from sqlalchemy import select
+from starlette.background import BackgroundTask
 
-from ...models.owned import KnowledgeType, ParserType, PermissionType
+from ...models.owned import FILE_ROLE_SOURCE, File, KnowledgeType, ParserType, PermissionType
 from ...runtime import ProcessRuntime
+from ...services import file as file_service
 from ...services import knowledge as knowledge_service
+from ...services.knowledge_file_storage import KnowledgeFileStorage
+from ...services.qa_export import (
+    cleanup_export_file,
+    iter_export_file,
+    make_qa_export_filename,
+    write_document_export,
+    write_knowledge_csv,
+)
 from ..dependencies import Principal, get_principal, get_runtime
 from ..schemas.common import SuccessEnvelope
+from ..schemas.file import KBBatchDownloadRequest
 from ..schemas.knowledge import KnowledgeCreate, KnowledgeUpdate
 
 router = APIRouter(
@@ -162,3 +176,85 @@ async def delete_knowledge(
             runtime.redis,
         )
     return _success(request)
+
+
+@router.get("/{kb_id}/qa/export")
+async def export_knowledge_qa_csv(
+    kb_id: uuid.UUID,
+    principal: Annotated[Principal, Depends(get_principal)],
+    runtime: Annotated[ProcessRuntime, Depends(get_runtime)],
+) -> StreamingResponse:
+    async with runtime.database.async_session() as db:
+        knowledge = await knowledge_service.get_knowledge(db, kb_id, principal)
+        if knowledge is None:
+            raise knowledge_service._not_found()
+        filename = make_qa_export_filename(knowledge.name)
+    path = await write_knowledge_csv(await runtime.elasticsearch.client(), kb_id)
+    return StreamingResponse(
+        iter_export_file(path),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}"},
+        background=BackgroundTask(cleanup_export_file, path),
+    )
+
+
+@router.post("/{kb_id}/batch-download")
+async def kb_batch_download(
+    kb_id: uuid.UUID,
+    request_body: KBBatchDownloadRequest,
+    principal: Annotated[Principal, Depends(get_principal)],
+    runtime: Annotated[ProcessRuntime, Depends(get_runtime)],
+) -> StreamingResponse:
+    async with runtime.database.async_session() as db:
+        knowledge = await knowledge_service.get_knowledge(db, kb_id, principal)
+        if knowledge is None:
+            raise knowledge_service._not_found()
+        result = await db.execute(
+            select(File).where(
+                File.kb_id == kb_id,
+                File.file_role == FILE_ROLE_SOURCE,
+                File.file_key.is_not(None),
+                File.file_key != "",
+            )
+        )
+        files = list(result.scalars().all())
+        if not files:
+            raise file_service._not_found("Knowledge has no downloadable files")
+        specs = [await file_service.get_qa_export_spec(db, file) for file in files]
+        knowledge_name = knowledge.name
+    client = await runtime.elasticsearch.client()
+    qa_exports = {}
+    for file, spec in zip(files, specs, strict=True):
+        if spec is None:
+            continue
+        result = await write_document_export(
+            client,
+            spec.kb_id,
+            spec.document_id,
+            spec.file_ext,
+        )
+        if result:
+            path, media_type = result
+            qa_exports[file.file_key] = file_service.QAExportFile(
+                path,
+                spec.file_name,
+                media_type,
+            )
+    entries = file_service.build_zip_arcnames(files)
+    zip_name = file_service.make_zip_filename(
+        files,
+        request_body.zip_filename,
+        base_name=knowledge_name,
+    )
+    return StreamingResponse(
+        file_service.stream_zip_files(
+            entries,
+            KnowledgeFileStorage(runtime.storage),
+            qa_exports,
+        ),
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{quote(zip_name)}",
+            "X-Total-Files": str(len(files)),
+        },
+    )
