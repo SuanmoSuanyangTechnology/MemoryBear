@@ -6,6 +6,9 @@ import re
 from datetime import UTC, datetime
 
 _NUMERIC_TIMESTAMP_RE = re.compile(r"^[+-]?\d+(?:\.\d+)?$")
+_BARE_CLOCK_LINE_RE = re.compile(
+    r"(?m)^(?P<hour>[01]\d|2[0-3]):(?P<minute>[0-5]\d):(?P<second>[0-5]\d)(?P<rest>\s+)"
+)
 
 
 def utcnow() -> datetime:
@@ -46,6 +49,28 @@ def to_iso_z(value: datetime | None) -> str | None:
     if aware_value is None:
         return None
     return aware_value.isoformat().replace("+00:00", "Z")
+
+
+def normalize_progress_message_timestamps(
+    message: str | None,
+    reference_dt: datetime | None,
+) -> str | None:
+    """Add an explicit UTC date to legacy leading clock-only progress lines."""
+
+    if not message:
+        return message
+    reference = as_utc_aware(reference_dt) or utcnow()
+
+    def _replace(match: re.Match[str]) -> str:
+        normalized = reference.replace(
+            hour=int(match.group("hour")),
+            minute=int(match.group("minute")),
+            second=int(match.group("second")),
+            microsecond=0,
+        )
+        return f"{to_iso_z(normalized)}{match.group('rest')}"
+
+    return _BARE_CLOCK_LINE_RE.sub(_replace, message)
 
 
 def parse_timestamp_to_utc_naive(timestamp: int | float | None) -> datetime | None:
@@ -109,6 +134,7 @@ def parse_metadata_time_to_utc_naive(
 __all__ = [
     "UTC",
     "as_utc_aware",
+    "normalize_progress_message_timestamps",
     "parse_iso_to_utc_naive",
     "parse_metadata_time_to_utc_naive",
     "parse_timestamp_to_utc",
