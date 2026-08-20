@@ -86,6 +86,7 @@ class ModelConfig(ReferenceBase):
         comment="base model id",
     )
     tenant_id = Column(UUID(as_uuid=True), nullable=False, index=True, comment="tenant id")
+    logo = Column(String(255), nullable=True, comment="model logo URL")
     name = Column(String, nullable=False, comment="display name")
     provider = Column(
         String,
@@ -101,6 +102,7 @@ class ModelConfig(ReferenceBase):
         nullable=False,
         comment="composite model",
     )
+    description = Column(String, comment="model description")
     capability = Column(
         ARRAY(String),
         default=list,
