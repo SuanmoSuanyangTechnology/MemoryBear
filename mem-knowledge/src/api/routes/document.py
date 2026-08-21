@@ -14,7 +14,7 @@ from ...services.knowledge_file_storage import KnowledgeFileStorage
 from ...services.knowledge_metadata import KnowledgeMetadataService
 from ...tasks.dispatch import TaskDispatcher
 from ..dependencies import Principal, get_principal, get_runtime
-from ..schemas.common import SuccessEnvelope
+from ..schemas.common import SuccessEnvelope, success
 from ..schemas.document import DocumentCreate, DocumentUpdate
 from ..schemas.knowledge_metadata import (
     BatchUpdateMetadataRequest,
@@ -29,8 +29,12 @@ router = APIRouter(
 )
 
 
-def _success(request: Request, data: Any = None) -> SuccessEnvelope[Any]:
-    return SuccessEnvelope(data=data, trace_id=request.state.trace_id)
+def _success(
+    _request: Request,
+    data: Any = None,
+    msg: str = "OK",
+) -> dict[str, Any]:
+    return success(data=data, msg=msg)
 
 
 async def _require_document(
@@ -80,6 +84,7 @@ async def get_documents(
                 "has_next": page * pagesize < total,
             },
         },
+        "Query of document list succeeded",
     )
 
 
@@ -92,7 +97,11 @@ async def create_document(
 ) -> SuccessEnvelope[dict[str, Any]]:
     async with runtime.database.async_session() as db:
         document = await document_service.create_document(db, create_data, principal)
-    return _success(request, document_service.document_to_data(document))
+    return _success(
+        request,
+        document_service.document_to_data(document),
+        "Document creation successful",
+    )
 
 
 @router.get("/{document_id}", response_model=SuccessEnvelope[dict[str, Any]])
@@ -107,7 +116,11 @@ async def get_document(
         if document is None:
             raise document_service._not_found()
         data = document_service.document_to_data(document)
-    return _success(request, data)
+    return _success(
+        request,
+        data,
+        "Successfully obtained document information",
+    )
 
 
 @router.put("/{document_id}", response_model=SuccessEnvelope[dict[str, Any]])
@@ -143,7 +156,11 @@ async def update_document(
             plan.graph_parser_config,
             dispatch_legacy=False,
         )
-    return _success(request, data)
+    return _success(
+        request,
+        data,
+        "Document information updated successfully",
+    )
 
 
 @router.delete("/{document_id}", response_model=SuccessEnvelope[None])
@@ -181,7 +198,10 @@ async def delete_document(
         delete_search=delete_search,
         delete_records=delete_records,
     )
-    return _success(request)
+    return _success(
+        request,
+        msg="The document has been successfully deleted",
+    )
 
 
 @router.post("/{document_id}/chunks", response_model=SuccessEnvelope[dict[str, Any]])
@@ -210,7 +230,15 @@ async def parse_documents(
         TaskDispatcher(),
         snapshot,
     )
-    return _success(request, {"task_id": result.task_id})
+    return _success(
+        request,
+        {"task_id": result.task_id},
+        (
+            "Task accepted. The document is being processed in the background."
+            if result.dispatched
+            else "Document is already being parsed."
+        ),
+    )
 
 
 @router.post("/metadata/batch", response_model=SuccessEnvelope[dict[str, Any]])
@@ -232,7 +260,7 @@ async def batch_update_document_metadata(
             principal.tenant_id,
             principal.actor_id,
         )
-    return _success(request, result)
+    return _success(request, result, "批量更新完成")
 
 
 @router.put("/{document_id}/metadata", response_model=SuccessEnvelope[dict[str, Any]])
@@ -252,7 +280,7 @@ async def update_document_metadata(
             principal.tenant_id,
             principal.actor_id,
         )
-    return _success(request, result)
+    return _success(request, result, "文档元数据更新成功")
 
 
 @router.get("/{document_id}/metadata", response_model=SuccessEnvelope[dict[str, Any]])
@@ -265,7 +293,7 @@ async def get_document_metadata(
     async with runtime.database.async_session() as db:
         await _require_document(db, document_id, principal)
         result = await KnowledgeMetadataService.get_document_metadata_async(db, document_id)
-    return _success(request, result)
+    return _success(request, result, "获取文档元数据成功")
 
 
 @router.post("/{document_id}/metadata", response_model=SuccessEnvelope[dict[str, Any]])
@@ -283,7 +311,7 @@ async def delete_document_metadata(
             document_id,
             data.field_names if data else None,
         )
-    return _success(request, result)
+    return _success(request, result, "文档元数据删除成功")
 
 
 __all__ = ["router"]

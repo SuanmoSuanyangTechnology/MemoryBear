@@ -25,6 +25,36 @@ from ..utils.datetime_utils import (
 )
 
 
+def _validation(message: str, *, response_code: int = 1001) -> KnowledgeError:
+    return KnowledgeError.from_code(
+        "KB_VALIDATION_ERROR",
+        message,
+        status_code=400,
+        response_code=response_code,
+        response_style="business",
+    )
+
+
+def _resource_not_found(resource_type: str) -> KnowledgeError:
+    return KnowledgeError.from_code(
+        "KB_RESOURCE_NOT_FOUND",
+        f"{resource_type} 不存在",
+        status_code=400,
+        response_code=4006,
+        response_style="business",
+    )
+
+
+def _duplicate(message: str) -> KnowledgeError:
+    return KnowledgeError.from_code(
+        "KB_CONFLICT",
+        message,
+        status_code=409,
+        response_code=5001,
+        response_style="business",
+    )
+
+
 class KnowledgeMetadataService:
     repository = KnowledgeMetadataRepository
     BUILTIN_FIELD_NAMES = {field.name for field in BuiltinFieldResolver.get_all()}
@@ -206,20 +236,14 @@ class KnowledgeMetadataService:
         created_by: uuid.UUID,
     ) -> KnowledgeMetadata:
         if name in KnowledgeMetadataService.BUILTIN_FIELD_NAMES:
-            raise KnowledgeError.from_code(
-                "KB_VALIDATION_ERROR",
-                f"Metadata field '{name}' conflicts with a builtin field",
-            )
+            raise _validation(f"字段名 '{name}' 与内置字段冲突")
         existing = await KnowledgeMetadataService.repository.get_by_name_async(
             db,
             knowledge_id,
             name,
         )
         if existing:
-            raise KnowledgeError.from_code(
-                "KB_CONFLICT",
-                f"Metadata field '{name}' already exists",
-            )
+            raise _duplicate(f"字段 '{name}' 已存在")
         field = KnowledgeMetadata(
             tenant_id=tenant_id,
             knowledge_id=knowledge_id,
@@ -240,27 +264,18 @@ class KnowledgeMetadataService:
     ) -> KnowledgeMetadata:
         field = await KnowledgeMetadataService.repository.get_by_id_async(db, metadata_id)
         if field is None or field.knowledge_id != knowledge_id:
-            raise KnowledgeError.from_code(
-                "KB_RESOURCE_NOT_FOUND",
-                "Metadata field not found",
-            )
+            raise _resource_not_found("元数据字段")
         update_data = {"updated_by": updated_by}
         if name and name != field.name:
             if name in KnowledgeMetadataService.BUILTIN_FIELD_NAMES:
-                raise KnowledgeError.from_code(
-                    "KB_VALIDATION_ERROR",
-                    f"Metadata field '{name}' conflicts with a builtin field",
-                )
+                raise _validation(f"字段名 '{name}' 与内置字段冲突")
             existing = await KnowledgeMetadataService.repository.get_by_name_async(
                 db,
                 knowledge_id,
                 name,
             )
             if existing and existing.id != metadata_id:
-                raise KnowledgeError.from_code(
-                    "KB_CONFLICT",
-                    f"Metadata field '{name}' already exists",
-                )
+                raise _duplicate(f"字段 '{name}' 已存在")
             update_data["name"] = name
         await KnowledgeMetadataService.repository.update_async(
             db,
@@ -278,10 +293,7 @@ class KnowledgeMetadataService:
     ) -> None:
         field = await KnowledgeMetadataService.repository.get_by_id_async(db, metadata_id)
         if field is None or field.knowledge_id != knowledge_id:
-            raise KnowledgeError.from_code(
-                "KB_RESOURCE_NOT_FOUND",
-                "Metadata field not found",
-            )
+            raise _resource_not_found("元数据字段")
         try:
             await db.execute(
                 delete(KnowledgeMetadataBinding).where(
@@ -323,10 +335,7 @@ class KnowledgeMetadataService:
     ) -> bool:
         knowledge = await db.get(Knowledge, knowledge_id)
         if knowledge is None:
-            raise KnowledgeError.from_code(
-                "KB_RESOURCE_NOT_FOUND",
-                "Knowledge resource not found",
-            )
+            raise _resource_not_found("知识库")
         knowledge.builtin_metadata_enabled = 1 if enabled else 0
         await db.commit()
         await db.refresh(knowledge)
@@ -347,16 +356,12 @@ class KnowledgeMetadataService:
         documents = list(result.scalars().all())
         document_by_id = {document.id: document for document in documents}
         if len(document_by_id) != len(set(document_ids)):
-            missing = set(document_ids) - set(document_by_id)
-            raise KnowledgeError.from_code(
-                "KB_RESOURCE_NOT_FOUND",
-                f"Document resource not found: {next(iter(missing))}",
-            )
+            raise _resource_not_found("文档")
         knowledge_ids = {document.kb_id for document in documents}
         if len(knowledge_ids) != 1:
-            raise KnowledgeError.from_code(
-                "KB_VALIDATION_ERROR",
+            raise _validation(
                 "批量更新的文档必须属于同一知识库",
+                response_code=9104,
             )
 
         knowledge_id = next(iter(knowledge_ids))
@@ -439,10 +444,7 @@ class KnowledgeMetadataService:
     ) -> dict[str, Any]:
         document = await db.get(Document, document_id)
         if document is None:
-            raise KnowledgeError.from_code(
-                "KB_RESOURCE_NOT_FOUND",
-                "Document resource not found",
-            )
+            raise _resource_not_found("文档")
         custom_fields = await KnowledgeMetadataService.repository.get_by_knowledge_id_async(
             db,
             document.kb_id,
@@ -451,14 +453,11 @@ class KnowledgeMetadataService:
         for field_name, value in metadata.items():
             field_def = field_defs.get(field_name)
             if field_def is None:
-                raise KnowledgeError.from_code(
-                    "KB_VALIDATION_ERROR",
-                    f"Metadata field is not defined: {field_name}",
-                )
+                raise _validation(f"字段 '{field_name}' 未在知识库中定义")
             if not KnowledgeMetadataService._validate_value_type(field_def.type, value):
                 raise KnowledgeError.from_code(
                     "KB_METADATA_TYPE_MISMATCH",
-                    f"Metadata value type does not match: {field_name}",
+                    f"字段 '{field_name}' 的值类型不匹配，期望 {field_def.type}",
                 )
 
         normalized = KnowledgeMetadataService._normalize_metadata_for_storage(
@@ -502,10 +501,7 @@ class KnowledgeMetadataService:
     ) -> dict[str, Any]:
         document = await db.get(Document, document_id)
         if document is None:
-            raise KnowledgeError.from_code(
-                "KB_RESOURCE_NOT_FOUND",
-                "Document resource not found",
-            )
+            raise _resource_not_found("文档")
         bindings = (
             await KnowledgeMetadataService.repository.get_bindings_by_document_id_async(
                 db,
@@ -548,10 +544,7 @@ class KnowledgeMetadataService:
     ) -> dict[str, Any]:
         document = await db.get(Document, document_id)
         if document is None:
-            raise KnowledgeError.from_code(
-                "KB_RESOURCE_NOT_FOUND",
-                "Document resource not found",
-            )
+            raise _resource_not_found("文档")
         document.meta_data = dict(document.meta_data or {})
         deleted_fields: list[str] = []
         if not field_names:

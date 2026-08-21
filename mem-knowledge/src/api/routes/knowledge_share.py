@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, Query, Request
 from ...runtime import ProcessRuntime
 from ...services import knowledge_share as share_service
 from ..dependencies import Principal, get_principal, get_runtime
-from ..schemas.common import SuccessEnvelope
+from ..schemas.common import SuccessEnvelope, success
 from ..schemas.knowledge_share import KnowledgeShareCreate
 
 router = APIRouter(
@@ -20,8 +20,12 @@ router = APIRouter(
 )
 
 
-def _success(request: Request, data: Any = None) -> SuccessEnvelope[Any]:
-    return SuccessEnvelope(data=data, trace_id=request.state.trace_id)
+def _success(
+    _request: Request,
+    data: Any = None,
+    msg: str = "OK",
+) -> dict[str, Any]:
+    return success(data=data, msg=msg)
 
 
 @router.get("/{kb_id}/knowledgeshares", response_model=SuccessEnvelope[dict[str, Any]])
@@ -56,6 +60,7 @@ async def get_knowledgeshares(
                 "has_next": page * pagesize < total,
             },
         },
+        "Query of knowledge base sharing list successful",
     )
 
 
@@ -68,7 +73,11 @@ async def create_knowledgeshare(
 ) -> SuccessEnvelope[dict[str, Any]]:
     async with runtime.database.async_session() as db:
         data = await share_service.create_share(db, create_data, principal)
-    return _success(request, data)
+    return _success(
+        request,
+        data,
+        "The knowledge base sharing has been successfully created",
+    )
 
 
 @router.get("/{knowledgeshare_id}", response_model=SuccessEnvelope[dict[str, Any]])
@@ -83,7 +92,11 @@ async def get_knowledgeshare(
         if share is None:
             raise share_service._not_found("Knowledge share does not exist")
         data = await share_service.share_to_data(db, share)
-    return _success(request, data)
+    return _success(
+        request,
+        data,
+        "Successfully obtained knowledge base sharing information",
+    )
 
 
 @router.delete("/{knowledgeshare_id}", response_model=SuccessEnvelope[None])
@@ -95,4 +108,7 @@ async def delete_knowledgeshare(
 ) -> SuccessEnvelope[None]:
     async with runtime.database.async_session() as db:
         await share_service.delete_share(db, knowledgeshare_id, principal)
-    return _success(request)
+    return _success(
+        request,
+        msg="The knowledge base sharing has been successfully deleted",
+    )

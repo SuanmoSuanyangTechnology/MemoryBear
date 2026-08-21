@@ -42,7 +42,13 @@ def _not_found(message: str = "Knowledge resource not found") -> KnowledgeError:
 
 
 def _conflict(message: str) -> KnowledgeError:
-    return KnowledgeError.from_code("KB_CONFLICT", message)
+    return KnowledgeError.from_code(
+        "KB_CONFLICT",
+        message,
+        status_code=400,
+        response_code=400,
+        response_style="http",
+    )
 
 
 def _reference_not_found(message: str) -> KnowledgeError:
@@ -339,14 +345,18 @@ async def _prepare_knowledge_create(
         knowledge.name,
         workspace_id,
     ):
-        raise _conflict(f"Knowledge name already exists: {knowledge.name}")
+        raise _conflict(f"The knowledge base name already exists: {knowledge.name}")
     if knowledge.external_id and await knowledge_repository.get_knowledge_by_external_id_async(
         db,
         knowledge.external_id,
         workspace_id,
     ):
-        raise _conflict(
-            f"external_id already exists in this workspace: {knowledge.external_id}"
+        raise KnowledgeError.from_code(
+            "KB_CONFLICT",
+            f"external_id already exists in this workspace: {knowledge.external_id}",
+            status_code=400,
+            response_code=1001,
+            response_style="business",
         )
 
     workspace = await ReferenceRepository.get_workspace(db, workspace_id)
@@ -381,7 +391,7 @@ async def create_knowledge(
     if requested_parent_id and requested_parent_id != principal.workspace_id:
         parent = await get_knowledge(db, requested_parent_id, principal)
         if parent is None:
-            raise _not_found("Parent knowledge does not exist")
+            raise _not_found("The parent knowledge base does not exist or access is denied")
     knowledge = await _prepare_knowledge_create(
         db,
         create_data,
@@ -452,14 +462,14 @@ async def prepare_knowledge_update(
         if parent_id is not None and parent_id != principal.workspace_id:
             parent = await get_knowledge(db, parent_id, principal)
             if parent is None:
-                raise _not_found("Parent knowledge does not exist")
+                raise _not_found("The parent knowledge base does not exist or access is denied")
     if "name" in update_dict and update_dict["name"] != knowledge.name:
         if await knowledge_repository.get_knowledge_by_name_async(
             db,
             update_dict["name"],
             principal.workspace_id,
         ):
-            raise _conflict(f"Knowledge name already exists: {update_dict['name']}")
+            raise _conflict(f"The knowledge base name already exists: {update_dict['name']}")
     graph_enabled_before = None
     if "parser_config" in update_dict:
         try:

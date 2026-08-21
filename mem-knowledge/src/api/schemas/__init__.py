@@ -1,6 +1,6 @@
 """Internal API schemas."""
 
-from .common import SuccessEnvelope
+from .common import ApiResponse, SuccessEnvelope
 from .document import Document, DocumentCreate, DocumentUpdate
 from .file import File, FileCreate, FileUpdate
 from .health import ComponentHealth, HealthResponse
@@ -13,6 +13,7 @@ from .knowledge_metadata import (
 from .knowledge_share import KnowledgeShare, KnowledgeShareCreate
 
 __all__ = [
+    "ApiResponse",
     "BatchUpdateMetadataRequest",
     "ComponentHealth",
     "Document",

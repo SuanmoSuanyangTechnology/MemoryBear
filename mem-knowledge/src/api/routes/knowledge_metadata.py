@@ -7,11 +7,12 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Request
 
+from ...errors import KnowledgeError
 from ...runtime import ProcessRuntime
 from ...services import knowledge as knowledge_service
 from ...services.knowledge_metadata import KnowledgeMetadataService
 from ..dependencies import Principal, get_principal, get_runtime
-from ..schemas.common import SuccessEnvelope
+from ..schemas.common import SuccessEnvelope, success
 from ..schemas.knowledge_metadata import (
     BuiltinMetadataEnableRequest,
     KnowledgeMetadataCreate,
@@ -27,8 +28,12 @@ router = APIRouter(
 )
 
 
-def _success(request: Request, data: Any = None) -> SuccessEnvelope[Any]:
-    return SuccessEnvelope(data=data, trace_id=request.state.trace_id)
+def _success(
+    _request: Request,
+    data: Any = None,
+    msg: str = "OK",
+) -> dict[str, Any]:
+    return success(data=data, msg=msg)
 
 
 async def _require_knowledge(
@@ -37,7 +42,13 @@ async def _require_knowledge(
     principal: Principal,
 ) -> None:
     if await knowledge_service.get_knowledge(db, knowledge_id, principal) is None:
-        raise knowledge_service._not_found()
+        raise KnowledgeError.from_code(
+            "KB_RESOURCE_NOT_FOUND",
+            "知识库 不存在",
+            status_code=400,
+            response_code=4006,
+            response_style="business",
+        )
 
 
 def _builtin_fields(fields) -> list[dict[str, Any]]:
@@ -131,6 +142,7 @@ async def create_metadata_field(
     return _success(
         request,
         KnowledgeMetadataResponse.model_validate(field).model_dump(mode="json"),
+        "字段创建成功",
     )
 
 
@@ -158,6 +170,7 @@ async def update_metadata_field(
     return _success(
         request,
         KnowledgeMetadataResponse.model_validate(field).model_dump(mode="json"),
+        "字段更新成功",
     )
 
 
@@ -172,7 +185,7 @@ async def delete_metadata_field(
     async with runtime.database.async_session() as db:
         await _require_knowledge(db, kb_id, principal)
         await KnowledgeMetadataService.delete_metadata_field_async(db, metadata_id, kb_id)
-    return _success(request)
+    return _success(request, msg="字段删除成功")
 
 
 @router.get("/{kb_id}/metadata/builtin", response_model=SuccessEnvelope[dict[str, Any]])
@@ -209,4 +222,8 @@ async def toggle_builtin_metadata(
             kb_id,
             data.enabled,
         )
-    return _success(request, {"enabled": enabled})
+    return _success(
+        request,
+        {"enabled": enabled},
+        "内置元数据开关更新成功",
+    )

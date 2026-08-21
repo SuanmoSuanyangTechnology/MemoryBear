@@ -5,11 +5,14 @@ from __future__ import annotations
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .api.router import internal_v1_router
+from .api.schemas.common import ApiResponse, fail
 from .bootstrap import get_settings
 from .config import KnowledgeSettings
 from .errors import KnowledgeError
@@ -18,6 +21,54 @@ from .runtime import ProcessRuntime
 from .trace import TRACE_ID_HEADER, TraceIdMiddleware, get_trace_id
 
 logger = logging.getLogger(__name__)
+
+_HTTP_MESSAGES = {
+    "zh": {
+        400: "请求参数错误",
+        401: "未授权访问",
+        403: "没有权限访问",
+        404: "请求的资源不存在",
+        405: "不支持的请求方法",
+        409: "资源冲突",
+        422: "数据验证失败",
+        429: "请求过于频繁，请稍后再试",
+        500: "服务器内部错误",
+        503: "服务暂时不可用",
+    },
+    "en": {
+        400: "Bad request parameters",
+        401: "Unauthorized access",
+        403: "Access forbidden",
+        404: "Resource not found",
+        405: "Method not allowed",
+        409: "Resource conflict",
+        422: "Validation failed",
+        429: "Too many requests, please try again later",
+        500: "Internal server error",
+        503: "Service temporarily unavailable",
+    },
+}
+
+_LEGACY_ERROR_RESPONSES = {
+    status_code: {
+        "model": ApiResponse[Any],
+        "description": "Legacy-compatible error response",
+    }
+    for status_code in (400, 404, 409, 500)
+}
+
+
+def _request_language(request: Request) -> str:
+    requested = request.query_params.get("lang", "").lower()
+    if requested.startswith("en"):
+        return "en"
+    accepted = request.headers.get("Accept-Language", "").lower()
+    return "en" if accepted.startswith("en") else "zh"
+
+
+def _http_message(request: Request, status_code: int, detail: object) -> str:
+    language = _request_language(request)
+    return _HTTP_MESSAGES[language].get(status_code, str(detail))
 
 
 def create_app(settings: KnowledgeSettings | None = None) -> FastAPI:
@@ -45,6 +96,7 @@ def create_app(settings: KnowledgeSettings | None = None) -> FastAPI:
         version="0.1.0",
         docs_url=None,
         redoc_url=None,
+        responses=_LEGACY_ERROR_RESPONSES,
         lifespan=lifespan,
     )
     application.state.runtime = runtime
@@ -57,15 +109,50 @@ def create_app(settings: KnowledgeSettings | None = None) -> FastAPI:
         exc: KnowledgeError,
     ) -> JSONResponse:
         trace_id = getattr(request.state, "trace_id", get_trace_id())
+        logger.warning(
+            "Knowledge request failed internal_code=%s response_code=%s status=%s"
+            " path=%s method=%s trace_id=%s retryable=%s",
+            exc.code,
+            exc.response_code,
+            exc.status_code,
+            request.url.path,
+            request.method,
+            trace_id,
+            exc.retryable,
+        )
+        if exc.response_style == "business":
+            message = exc.message
+            error = exc.message
+        elif exc.response_style == "internal":
+            message = _http_message(request, 500, exc.message)
+            error = message
+        else:
+            message = _http_message(request, exc.status_code, exc.message)
+            error = exc.message
         return JSONResponse(
             status_code=exc.status_code,
             headers={TRACE_ID_HEADER: trace_id},
-            content={
-                "code": exc.code,
-                "message": exc.message,
-                "retryable": exc.retryable,
-                "trace_id": trace_id,
-            },
+            content=fail(
+                code=exc.response_code,
+                msg=message,
+                error=error,
+            ),
+        )
+
+    @application.exception_handler(StarletteHTTPException)
+    async def http_error_handler(
+        request: Request,
+        exc: StarletteHTTPException,
+    ) -> JSONResponse:
+        trace_id = getattr(request.state, "trace_id", get_trace_id())
+        return JSONResponse(
+            status_code=exc.status_code,
+            headers={TRACE_ID_HEADER: trace_id, **(exc.headers or {})},
+            content=fail(
+                code=exc.status_code,
+                msg=_http_message(request, exc.status_code, exc.detail),
+                error=exc.detail,
+            ),
         )
 
     @application.exception_handler(Exception)
@@ -81,12 +168,11 @@ def create_app(settings: KnowledgeSettings | None = None) -> FastAPI:
         return JSONResponse(
             status_code=500,
             headers={TRACE_ID_HEADER: trace_id},
-            content={
-                "code": "KB_INTERNAL_ERROR",
-                "message": "Internal knowledge service error",
-                "retryable": False,
-                "trace_id": trace_id,
-            },
+            content=fail(
+                code=10001,
+                msg=_http_message(request, 500, exc),
+                error=_http_message(request, 500, exc),
+            ),
         )
 
     return application

@@ -27,7 +27,7 @@ from ..schemas.chunk import (
     KnowledgeRetrievalCaller,
     RetrieveType,
 )
-from ..schemas.common import SuccessEnvelope
+from ..schemas.common import SuccessEnvelope, success
 from ..schemas.knowledge_retrieval import KnowledgeRetrievalRequest
 
 router = APIRouter(
@@ -37,8 +37,12 @@ router = APIRouter(
 )
 
 
-def _success(request: Request, data: Any = None) -> SuccessEnvelope[Any]:
-    return SuccessEnvelope(data=data, trace_id=request.state.trace_id)
+def _success(
+    _request: Request,
+    data: Any = None,
+    msg: str = "OK",
+) -> dict[str, Any]:
+    return success(data=data, msg=msg)
 
 
 @router.get(
@@ -97,6 +101,11 @@ async def get_preview_chunks(
                 "has_next": page * pagesize < total,
             },
         },
+        (
+            "Querying document chunk preview hierarchy succeeded"
+            if snapshot.parent_child_mode
+            else "Querying the document block preview list succeeded"
+        ),
     )
 
 
@@ -135,6 +144,7 @@ async def get_chunks(
             pagesize=pagesize,
             keywords=keywords,
         ),
+        "Query of document chunk list succeeded",
     )
 
 
@@ -194,7 +204,11 @@ async def create_chunk(
     async with runtime.database.async_session() as db:
         await chunk_service.update_document_chunk_count(db, snapshot, 1)
     await chunk_service.dispatch_graph_best_effort(snapshot)
-    return _success(request, chunk.model_dump(mode="json"))
+    return _success(
+        request,
+        chunk.model_dump(mode="json"),
+        "Document chunk creation successful",
+    )
 
 
 @router.post(
@@ -240,7 +254,11 @@ async def create_chunks_batch(
     async with runtime.database.async_session() as db:
         await chunk_service.update_document_chunk_count(db, snapshot, len(chunks))
     await chunk_service.dispatch_graph_best_effort(snapshot)
-    return _success(request, [chunk.model_dump(mode="json") for chunk in chunks])
+    return _success(
+        request,
+        [chunk.model_dump(mode="json") for chunk in chunks],
+        f"Batch created {len(chunks)} chunks successfully",
+    )
 
 
 @router.get(
@@ -268,7 +286,11 @@ async def get_chunk(
         snapshot,
     )
     chunk = await chunk_service.require_owned_chunk(store, snapshot, doc_id)
-    return _success(request, chunk.model_dump(mode="json"))
+    return _success(
+        request,
+        chunk.model_dump(mode="json"),
+        "Document chunk query successful",
+    )
 
 
 @router.put(
@@ -298,7 +320,11 @@ async def update_chunk(
         chunk.metadata.update(update_data.qa_metadata)
     await store.update_chunk(chunk)
     await chunk_service.dispatch_graph_best_effort(snapshot)
-    return _success(request, chunk.model_dump(mode="json"))
+    return _success(
+        request,
+        chunk.model_dump(mode="json"),
+        "The document chunk has been successfully updated",
+    )
 
 
 @router.delete("/{kb_id}/{document_id}/{doc_id}", response_model=SuccessEnvelope[None])
@@ -328,12 +354,19 @@ async def delete_chunk(
     async with runtime.database.async_session() as db:
         await chunk_service.update_document_chunk_count(db, snapshot, -1)
     await chunk_service.dispatch_graph_best_effort(snapshot)
-    return _success(request)
+    return _success(
+        request,
+        msg="The document chunk has been successfully deleted",
+    )
 
 
 @router.get("/retrieve_type", response_model=SuccessEnvelope[list[str]])
 async def get_retrieve_types(request: Request) -> SuccessEnvelope[list[str]]:
-    return _success(request, list(RetrieveType))
+    return _success(
+        request,
+        list(RetrieveType),
+        "Successfully obtained the retrieval type",
+    )
 
 
 @router.post("/retrieval", response_model=SuccessEnvelope[Any])
@@ -352,7 +385,7 @@ async def retrieve_chunks(
         principal,
     )
     data = result.model_dump(mode="json") if result.has_graph_data() else result.chunks
-    return _success(request, data)
+    return _success(request, data, "retrieval successful")
 
 
 @router.post("/{kb_id}/import_qa", response_model=SuccessEnvelope[dict[str, str]])
@@ -392,6 +425,7 @@ async def import_qa_new_doc(
             "document_id": str(resources.document.id),
             "file_id": str(resources.file.id),
         },
+        "QA 导入任务已提交，后台处理中",
     )
 
 
@@ -424,7 +458,11 @@ async def import_qa_chunks(
         filename,
         content,
     )
-    return _success(request, {"task_id": task_id})
+    return _success(
+        request,
+        {"task_id": task_id},
+        "QA 导入任务已提交，后台处理中",
+    )
 
 
 __all__ = ["router"]

@@ -410,7 +410,10 @@ async def resolve_vision_config(
     if snapshot.image2text_id is None:
         raise KnowledgeError.from_code(
             "KB_MODEL_UNAVAILABLE",
-            "Image-to-text model config is unavailable",
+            "image2text model config is unavailable",
+            status_code=400,
+            response_code=400,
+            response_style="http",
         )
     try:
         return await resolve_model_async(
@@ -421,7 +424,10 @@ async def resolve_vision_config(
     except Exception as exc:
         raise KnowledgeError.from_code(
             "KB_MODEL_UNAVAILABLE",
-            "Image-to-text model config is unavailable",
+            "No available image2text api key found",
+            status_code=400,
+            response_code=400,
+            response_style="http",
         ) from exc
 
 

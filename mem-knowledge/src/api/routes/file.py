@@ -21,7 +21,7 @@ from ...services import file as file_service
 from ...services.knowledge_file_storage import KnowledgeFileStorage
 from ...services.qa_export import cleanup_export_file, iter_export_file, write_document_export
 from ..dependencies import Principal, get_principal, get_runtime
-from ..schemas.common import SuccessEnvelope
+from ..schemas.common import SuccessEnvelope, success
 from ..schemas.file import (
     BatchDownloadRequest,
     CustomTextFileCreate,
@@ -35,8 +35,12 @@ router = APIRouter(
 )
 
 
-def _success(request: Request, data: Any = None) -> SuccessEnvelope[Any]:
-    return SuccessEnvelope(data=data, trace_id=request.state.trace_id)
+def _success(
+    _request: Request,
+    data: Any = None,
+    msg: str = "OK",
+) -> dict[str, Any]:
+    return success(data=data, msg=msg)
 
 
 async def _qa_export(
@@ -91,6 +95,7 @@ async def get_files(
                 "has_next": page * pagesize < total,
             },
         },
+        "Query of file list succeeded",
     )
 
 
@@ -111,7 +116,11 @@ async def create_folder(
             folder_name,
             principal,
         )
-    return _success(request, file_service.file_to_data(folder))
+    return _success(
+        request,
+        file_service.file_to_data(folder),
+        "Folder creation successful",
+    )
 
 
 @router.post("/file", response_model=SuccessEnvelope[dict[str, Any]])
@@ -143,7 +152,11 @@ async def upload_file(
             principal=principal,
             inherit_parser_config=True,
         )
-    return _success(request, file_service.document_to_data(document))
+    return _success(
+        request,
+        file_service.document_to_data(document),
+        "File upload successful",
+    )
 
 
 @router.post("/customtext", response_model=SuccessEnvelope[dict[str, Any]])
@@ -173,7 +186,11 @@ async def custom_text(
             principal=principal,
             inherit_parser_config=False,
         )
-    return _success(request, file_service.document_to_data(document))
+    return _success(
+        request,
+        file_service.document_to_data(document),
+        "custom text upload successful",
+    )
 
 
 @router.get("/{file_id}")
@@ -268,7 +285,11 @@ async def update_file(
 ) -> SuccessEnvelope[dict[str, Any]]:
     async with runtime.database.async_session() as db:
         file = await file_service.update_file(db, file_id, update_data, principal)
-    return _success(request, file_service.file_to_data(file))
+    return _success(
+        request,
+        file_service.file_to_data(file),
+        "File information updated successfully",
+    )
 
 
 @router.delete("/{file_id}", response_model=SuccessEnvelope[None])
@@ -285,4 +306,4 @@ async def delete_file(
             file_id,
             principal,
         )
-    return _success(request)
+    return _success(request, msg="File deleted successfully")

@@ -9,7 +9,12 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import StreamingResponse
-from redbear_model import resolve_model_async
+from redbear_model import (
+    ModelConfigNotFoundError,
+    ModelCredentialNotFoundError,
+    PublicCredentialUnavailableError,
+    resolve_model_async,
+)
 from sqlalchemy import select
 from starlette.background import BackgroundTask
 
@@ -40,7 +45,7 @@ from ...services.qa_export import (
 )
 from ...tasks.dispatch import TaskDispatcher
 from ..dependencies import Principal, get_principal, get_runtime
-from ..schemas.common import SuccessEnvelope
+from ..schemas.common import SuccessEnvelope, fail, success
 from ..schemas.file import KBBatchDownloadRequest
 from ..schemas.knowledge import KnowledgeCreate, KnowledgeUpdate
 
@@ -53,23 +58,39 @@ router = APIRouter(
 logger = logging.getLogger(__name__)
 
 
-def _success(request: Request, data: Any = None) -> SuccessEnvelope[Any]:
-    return SuccessEnvelope(data=data, trace_id=request.state.trace_id)
+def _success(
+    _request: Request,
+    data: Any = None,
+    msg: str = "OK",
+) -> dict[str, Any]:
+    return success(data=data, msg=msg)
 
 
 @router.get("/knowledgetype", response_model=SuccessEnvelope[list[str]])
 async def get_knowledge_types(request: Request) -> SuccessEnvelope[list[str]]:
-    return _success(request, list(KnowledgeType))
+    return _success(
+        request,
+        list(KnowledgeType),
+        "Successfully obtained the knowledge type",
+    )
 
 
 @router.get("/permissiontype", response_model=SuccessEnvelope[list[str]])
 async def get_permission_types(request: Request) -> SuccessEnvelope[list[str]]:
-    return _success(request, list(PermissionType))
+    return _success(
+        request,
+        list(PermissionType),
+        "Successfully obtained the knowledge permission type",
+    )
 
 
 @router.get("/parsertype", response_model=SuccessEnvelope[list[str]])
 async def get_parser_types(request: Request) -> SuccessEnvelope[list[str]]:
-    return _success(request, list(ParserType))
+    return _success(
+        request,
+        list(ParserType),
+        "Successfully obtained the knowledge parser type",
+    )
 
 
 @router.get("/knowledge_graph_entity_types", response_model=SuccessEnvelope[str])
@@ -87,13 +108,31 @@ async def get_knowledge_graph_entity_types(
                 model_config_id=llm_id,
                 tenant_id=principal.tenant_id,
             )
-        except Exception as exc:
+        except ModelConfigNotFoundError as exc:
+            raise KnowledgeError.from_code(
+                "KB_RESOURCE_NOT_FOUND",
+                "Model config does not exist",
+                status_code=404,
+                response_code=404,
+                response_style="http",
+            ) from exc
+        except (
+            ModelCredentialNotFoundError,
+            PublicCredentialUnavailableError,
+        ) as exc:
             raise KnowledgeError.from_code(
                 "KB_MODEL_UNAVAILABLE",
                 "No available API key for the selected model",
+                status_code=400,
+                response_code=400,
+                response_style="http",
             ) from exc
     result = await graph_service.graph_entity_types(runtime, resolved, scenario)
-    return _success(request, result)
+    return _success(
+        request,
+        result,
+        "Successfully obtained knowledge graph entity types",
+    )
 
 
 @router.get("/check/yuque/auth", response_model=SuccessEnvelope[None])
@@ -102,20 +141,15 @@ async def check_yuque_auth(
     yuque_user_id: str,
     yuque_token: str,
 ) -> SuccessEnvelope[None]:
-    try:
-        async with YuqueAPIClient(yuque_user_id, yuque_token) as client:
-            repositories = await client.get_user_repos()
-    except Exception as exc:
-        raise KnowledgeError.from_code(
-            "KB_VALIDATION_ERROR",
-            "Yuque authentication failed",
-        ) from exc
+    async with YuqueAPIClient(yuque_user_id, yuque_token) as client:
+        repositories = await client.get_user_repos()
     if not repositories:
-        raise KnowledgeError.from_code(
-            "KB_VALIDATION_ERROR",
-            "Yuque authentication failed",
+        return fail(
+            2001,
+            msg="auth yuque info failed",
+            error="user_id or token is incorrect",
         )
-    return _success(request)
+    return _success(request, msg="Successfully auth yuque info")
 
 
 @router.get("/check/feishu/auth", response_model=SuccessEnvelope[None])
@@ -125,23 +159,18 @@ async def check_feishu_auth(
     feishu_app_secret: str,
     feishu_folder_token: str,
 ) -> SuccessEnvelope[None]:
-    try:
-        async with FeishuAPIClient(feishu_app_id, feishu_app_secret) as client:
-            files = await client.list_all_folder_files(
-                feishu_folder_token,
-                recursive=True,
-            )
-    except Exception as exc:
-        raise KnowledgeError.from_code(
-            "KB_VALIDATION_ERROR",
-            "Feishu authentication failed",
-        ) from exc
-    if not files:
-        raise KnowledgeError.from_code(
-            "KB_VALIDATION_ERROR",
-            "Feishu authentication failed",
+    async with FeishuAPIClient(feishu_app_id, feishu_app_secret) as client:
+        files = await client.list_all_folder_files(
+            feishu_folder_token,
+            recursive=True,
         )
-    return _success(request)
+    if not files:
+        return fail(
+            2001,
+            msg="auth feishu info failed",
+            error="app_id or app_secret or feishu_folder_token is incorrect",
+        )
+    return _success(request, msg="Successfully auth feishu info")
 
 
 @router.get("/knowledges", response_model=SuccessEnvelope[dict[str, Any]])
@@ -180,6 +209,7 @@ async def get_knowledges(
                 "has_next": page * pagesize < total,
             },
         },
+        "Query of knowledge base list successful",
     )
 
 
@@ -193,7 +223,11 @@ async def create_knowledge(
     async with runtime.database.async_session() as db:
         knowledge = await knowledge_service.create_knowledge(db, create_data, principal)
         data = await knowledge_service.knowledge_to_data(db, knowledge)
-    return _success(request, data)
+    return _success(
+        request,
+        data,
+        "The knowledge base has been successfully created",
+    )
 
 
 @router.get("/{knowledge_id}", response_model=SuccessEnvelope[dict[str, Any]])
@@ -208,7 +242,11 @@ async def get_knowledge(
         if knowledge is None:
             raise knowledge_service._not_found()
         data = await knowledge_service.build_knowledge_detail_data(db, knowledge)
-    return _success(request, data)
+    return _success(
+        request,
+        data,
+        "Successfully obtained knowledge base information",
+    )
 
 
 @router.get(
@@ -228,6 +266,7 @@ async def get_knowledge_chunk_policy(
     return _success(
         request,
         {"parent_child_mode": {0: None, 1: False, 2: True}[knowledge.chunk_mode]},
+        "Successfully obtained knowledge base chunk policy",
     )
 
 
@@ -288,7 +327,11 @@ async def update_knowledge(
                 "Failed to dispatch reparse tasks knowledge_id=%s",
                 knowledge_id,
             )
-    return _success(request, data)
+    return _success(
+        request,
+        data,
+        "The knowledge base information has been successfully updated",
+    )
 
 
 @router.delete("/{knowledge_id}", response_model=SuccessEnvelope[None])
@@ -305,7 +348,10 @@ async def delete_knowledge(
             principal,
             runtime.redis,
         )
-    return _success(request)
+    return _success(
+        request,
+        msg="The knowledge base has been successfully deleted",
+    )
 
 
 @router.get(
@@ -327,7 +373,11 @@ async def get_knowledge_graph(
         data = await graph_service.get_graph(knowledge, store)
     except ValueError as exc:
         raise KnowledgeError.from_code("KB_VALIDATION_ERROR", str(exc)) from exc
-    return _success(request, data)
+    return _success(
+        request,
+        data,
+        "Successfully obtained knowledge graph information",
+    )
 
 
 @router.delete(
@@ -345,7 +395,11 @@ async def delete_knowledge_graph(
         if knowledge is None:
             raise knowledge_service._not_found()
     task_id = await graph_service.delete_graph(knowledge, TaskDispatcher())
-    return _success(request, {"task_id": task_id})
+    return _success(
+        request,
+        {"task_id": task_id},
+        "Task accepted. Knowledge graph cleanup is being processed in the background.",
+    )
 
 
 @router.post(
@@ -371,7 +425,11 @@ async def rebuild_knowledge_graph(
         )
     except ValueError as exc:
         raise KnowledgeError.from_code("KB_VALIDATION_ERROR", str(exc)) from exc
-    return _success(request, {"task_id": task_id})
+    return _success(
+        request,
+        {"task_id": task_id},
+        "Task accepted. rebuild knowledge graph is being processed in the background.",
+    )
 
 
 @router.post("/{knowledge_id}/sync", response_model=SuccessEnvelope[dict[str, str]])
@@ -386,7 +444,11 @@ async def sync_knowledge(
         if knowledge is None:
             raise knowledge_service._not_found()
     task_id = await dispatch_sync(TaskDispatcher(), knowledge_id)
-    return _success(request, {"task_id": task_id})
+    return _success(
+        request,
+        {"task_id": task_id},
+        "Task accepted. sync knowledge is being processed in the background.",
+    )
 
 
 @router.get("/{kb_id}/qa/export")
