@@ -13,6 +13,7 @@ from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException, PermissionDeniedException
 from app.core.logging_config import get_business_logger
 from app.core.utils.datetime_utils import utcnow_naive
+from app.models.memory_config_model import MemoryConfig as MemoryConfigModel
 from app.models.models_model import ModelCapability, ModelConfig, ModelProvider, ModelType
 from app.models.user_model import User
 from app.models.workspace_model import (
@@ -44,12 +45,14 @@ from app.utils.redis_cache import (
     get_workspace_model_public_version,
     set_json,
     workspace_model_options_key,
+    invalidate_cache,
+    invalidate_cache_sync,
 )
 
 # 获取业务逻辑专用日志器
 business_logger = get_business_logger()
 
-_DEFAULT_PRESET_KEY = "default"
+DEFAULT_PRESET_KEY = "default"
 _WORKSPACE_MODEL_SLOTS = ("llm", "embedding", "rerank", "vision", "audio", "video")
 _REQUIRED_WORKSPACE_MODEL_SLOTS = ("llm", "embedding", "rerank")
 
@@ -132,7 +135,7 @@ def _group_workspace_model_options(models: list[ModelConfig]) -> dict[str, list[
 def _get_default_workspace_preset(db: Session) -> WorkspaceDefaultModelPreset:
     preset = (
         db.query(WorkspaceDefaultModelPreset)
-        .filter(WorkspaceDefaultModelPreset.singleton_key == _DEFAULT_PRESET_KEY)
+        .filter(WorkspaceDefaultModelPreset.singleton_key == DEFAULT_PRESET_KEY)
         .first()
     )
     if not preset:
@@ -280,40 +283,39 @@ def _resolve_workspace_model_update_target(
     return target_is_default, selection, validation_slots
 
 
-def _sync_workspace_default_memory_config(workspace: Workspace, memory_config) -> None:
-    if not memory_config:
+def _invalidate_default_config_memory_caches(db: Session) -> None:
+    """Invalidate Redis-cached memory configs of all default-config workspaces.
+
+    Called after the default model preset changes so ``load_memory_config``
+    re-resolves the new default models instead of returning stale cache.
+    Invalidate every memory config under the affected workspaces (not just the
+    default one), since they all resolve models from the preset.
+    """
+    workspace_ids = [
+        row[0]
+        for row in (
+            db.query(Workspace.id)
+            .filter(Workspace.is_active.is_(True))
+            .filter(Workspace.is_default_config.is_(True))
+            .all()
+        )
+    ]
+    if not workspace_ids:
         return
 
-    memory_config.llm_id = workspace.llm
-    memory_config.reflection_model_id = workspace.llm
-    memory_config.emotion_model_id = workspace.llm
-    memory_config.embedding_id = workspace.embedding
-    memory_config.rerank_id = workspace.rerank
-    memory_config.vision_id = workspace.vision
-    memory_config.audio_id = workspace.audio
-    memory_config.video_id = workspace.video
-
-
-def _sync_default_config_workspaces(
-    db: Session,
-    resolved_models: dict[str, str | None],
-) -> None:
-    workspaces = (
-        db.query(Workspace)
-        .filter(Workspace.is_active.is_(True))
-        .filter(Workspace.is_default_config.is_(True))
+    config_ids = (
+        db.query(MemoryConfigModel.config_id)
+        .filter(MemoryConfigModel.workspace_id.in_(workspace_ids))
         .all()
     )
-    if not workspaces:
-        return
-
-    memory_config_service = MemoryConfigService(db)
-    for workspace in workspaces:
-        for slot, value in resolved_models.items():
-            setattr(workspace, slot, value)
-        workspace.default_model_notice_pending = True
-        default_memory_config = memory_config_service.get_workspace_default_config(workspace.id)
-        _sync_workspace_default_memory_config(workspace, default_memory_config)
+    for (config_id,) in config_ids:
+        try:
+            invalidate_cache_sync(prefix=f"memory_config:{config_id}")
+        except Exception:
+            business_logger.warning(
+                "Failed to invalidate memory_config cache for config=%s",
+                config_id,
+            )
 
 
 async def _validate_workspace_model_runtime(
@@ -414,11 +416,11 @@ def update_default_workspace_models(db: Session, data) -> dict:
     )
     preset = (
         db.query(WorkspaceDefaultModelPreset)
-        .filter(WorkspaceDefaultModelPreset.singleton_key == _DEFAULT_PRESET_KEY)
+        .filter(WorkspaceDefaultModelPreset.singleton_key == DEFAULT_PRESET_KEY)
         .first()
     )
     if not preset:
-        preset = WorkspaceDefaultModelPreset(singleton_key=_DEFAULT_PRESET_KEY)
+        preset = WorkspaceDefaultModelPreset(singleton_key=DEFAULT_PRESET_KEY)
 
     preset.llm_model_config_id = uuid.UUID(validated["llm"])
     preset.embedding_model_config_id = uuid.UUID(validated["embedding"])
@@ -426,10 +428,10 @@ def update_default_workspace_models(db: Session, data) -> dict:
     preset.vision_model_config_id = uuid.UUID(validated["vision"])
     preset.audio_model_config_id = uuid.UUID(validated["audio"])
     preset.video_model_config_id = uuid.UUID(validated["video"])
-    _sync_default_config_workspaces(db, validated)
     db.add(preset)
     db.commit()
     db.refresh(preset)
+    _invalidate_default_config_memory_caches(db)
     return _build_workspace_preset_response(db, preset)
 
 
@@ -750,12 +752,15 @@ def update_workspace(
         db.commit()
         db.refresh(db_workspace)
 
-        # storage_type 变更时，使 _prepare_v1_chat_memory_context_async 缓存失效
         if "storage_type" in update_data:
-            import asyncio
-            from app.utils.redis_cache import invalidate_cache
             try:
-                asyncio.run(invalidate_cache(prefix=f"storage_type:{workspace_id}"))
+                invalidate_cache_sync(prefix=f"storage_type:{workspace_id}")
+            except Exception:
+                pass
+
+        if any(field in update_data for field in ("llm", "embedding", "rerank")) and db_workspace.memory_config:
+            try:
+                invalidate_cache_sync(prefix=f"memory_config:{db_workspace.memory_config}")
             except Exception:
                 pass
 
@@ -1574,8 +1579,19 @@ async def update_workspace_models_configs(
             db.add(default_memory_config)
         db.commit()
         db.refresh(db_workspace)
-        if default_memory_config:
-            db.refresh(default_memory_config)
+
+        # Invalidate all cached memory configs under the workspace so the new
+        # models take effect immediately (not just the default config).
+        config_ids = (
+            db.query(MemoryConfigModel.config_id)
+            .filter(MemoryConfigModel.workspace_id == db_workspace.id)
+            .all()
+        )
+        for (config_id,) in config_ids:
+            try:
+                await invalidate_cache(prefix=f"memory_config:{config_id}")
+            except Exception:
+                pass
 
         business_logger.info(
             f"工作空间模型配置更新成功: workspace_id={workspace_id}, "

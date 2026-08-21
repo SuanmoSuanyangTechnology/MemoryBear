@@ -5,7 +5,7 @@
  * @Last Modified time: 2026-07-01 17:46:19
  */
 // Toolbar component for chat input area, supporting file upload, audio recording, and variable configuration
-import { useRef, forwardRef, useImperativeHandle, type ReactNode, useEffect } from 'react'
+import { useRef, forwardRef, useImperativeHandle, type ReactNode, useEffect, useMemo } from 'react'
 import { Flex, Dropdown, Divider, App, Form, type MenuProps, Tooltip } from 'antd'
 import { useTranslation } from 'react-i18next'
 import clsx from 'clsx'
@@ -51,7 +51,6 @@ interface FormValues {
   memory?: boolean;
 }
 
-const max_file_count = 1;
 const ChatToolbar = forwardRef<ChatToolbarRef, ChatToolbarProps>(({
   features,
   leftExtra,
@@ -87,10 +86,10 @@ const ChatToolbar = forwardRef<ChatToolbarRef, ChatToolbarProps>(({
   }))
 
   const { file_upload } = features || {}
+  const max_file_count = useMemo(() => file_upload?.max_file_count ?? 1, [file_upload?.max_file_count]);
 
   // Append newly uploaded file to the file list when upload is complete
   const fileChange = (file?: any) => {
-    console.log('file', file)
     const lastFiles = form.getFieldValue('files') || [];
     const index = lastFiles.findIndex((item: any) => item.uid === file.uid)
     if (index > -1) {

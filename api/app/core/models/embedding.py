@@ -1,8 +1,13 @@
 import asyncio
+import time
 from typing import Any, Dict, List, Union
 
 from langchain_core.embeddings import Embeddings
 
+from app.core.alert_metric_bridge import (
+    report_model_gateway_failure,
+    report_model_gateway_failure_async,
+)
 from app.core.config import settings
 from app.core.models.base import RedBearModelConfig, get_provider_embedding_class, RedBearModelFactory
 from app.models.models_model import ModelProvider
@@ -23,6 +28,24 @@ class RedBearEmbeddings(Embeddings):
             # 其他 provider 使用 LangChain
             self._model = self._create_model(config)
             self._client = None
+
+    def _observed_call(self, operation: str, call):
+        started = time.perf_counter()
+        try:
+            return call()
+        except Exception as exc:
+            report_model_gateway_failure(self._config, operation, exc, started)
+            raise
+
+    async def _observed_async_call(self, operation: str, call):
+        started = time.perf_counter()
+        try:
+            return await call()
+        except Exception as exc:
+            await report_model_gateway_failure_async(
+                self._config, operation, exc, started
+            )
+            raise
 
     @staticmethod
     def _create_model(config: RedBearModelConfig) -> Embeddings:
@@ -77,37 +100,43 @@ class RedBearEmbeddings(Embeddings):
         """批量文本向量化（LangChain 标准接口）"""
         if self._is_volcano:
             contents = [{"type": "text", "text": text} for text in texts]
-            response = self._client.multimodal_embeddings.create(
-                model=self._config.model_name,
-                input=contents,
-                encoding_format="float"
-            )
-            return [response.data.embedding]
-        else:
-            return self._model.embed_documents(texts)
+
+            def invoke():
+                response = self._client.multimodal_embeddings.create(
+                    model=self._config.model_name,
+                    input=contents,
+                    encoding_format="float"
+                )
+                return [response.data.embedding]
+
+            return self._observed_call("embed_documents", invoke)
+        return self._observed_call(
+            "embed_documents", lambda: self._model.embed_documents(texts)
+        )
 
     def embed_query(self, text: str) -> List[float]:
         """单个文本向量化（LangChain 标准接口）"""
         if self._is_volcano:
             result = self.embed_documents([text])
             return result[0] if result else []
-        else:
-            return self._model.embed_query(text)
+        return self._observed_call("embed_query", lambda: self._model.embed_query(text))
 
     async def aembed_documents(self, texts: list[str]) -> list[list[float]]:
         """批量文本向量化（异步）"""
         if self._is_volcano:
             return await asyncio.to_thread(self.embed_documents, texts)
-        else:
-            return await self._model.aembed_documents(texts)
+        return await self._observed_async_call(
+            "aembed_documents", lambda: self._model.aembed_documents(texts)
+        )
 
     async def aembed_query(self, text: str) -> List[float]:
         """单个文本向量化（异步）"""
         if self._is_volcano:
             result = await self.aembed_documents([text])
             return result[0] if result else []
-        else:
-            return await self._model.aembed_query(text)
+        return await self._observed_async_call(
+            "aembed_query", lambda: self._model.aembed_query(text)
+        )
     
     # ==================== 多模态扩展方法 ====================
     
@@ -134,12 +163,15 @@ class RedBearEmbeddings(Embeddings):
                 f"多模态 Embedding 仅支持火山引擎，当前 provider: {self._config.provider}"
             )
         
-        response = self._client.multimodal_embeddings.create(
-            model=self._config.model_name,
-            input=contents,
-            **kwargs
-        )
-        return [response.data.embedding]
+        def invoke():
+            response = self._client.multimodal_embeddings.create(
+                model=self._config.model_name,
+                input=contents,
+                **kwargs
+            )
+            return [response.data.embedding]
+
+        return self._observed_call("embed_multimodal", invoke)
     
     async def aembed_multimodal(
         self,

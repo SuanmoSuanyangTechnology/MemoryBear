@@ -46,6 +46,7 @@ const SwitchFormItem: FC<SwitchFormItemProps> = ({
     <Flex
       align="center"
       justify="space-between"
+      gap={12}
       className={className}
     >
       {/* Label and description section */}

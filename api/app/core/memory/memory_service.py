@@ -139,30 +139,6 @@ class MemoryService:
         return await refresh_user_card_tags(end_user_id, workspace_id)
 
     @staticmethod
-    async def ingest_agent_message(
-        conversation_id: str,
-        message: Any,
-        app_id: str,
-        config_id: str = "",
-        workspace_id: str = "",
-        end_user_id: str = "",
-        should_memorize: bool = True,
-        language: str = "zh",
-    ) -> bool:
-        """Agent 消息摄入：写入 memory_messages 表 + 触发滑动窗口派发。"""
-        from app.core.memory.pipelines.dispatcher import ingest_agent_message
-        return await ingest_agent_message(
-            conversation_id=conversation_id,
-            message=message,
-            app_id=app_id,
-            config_id=config_id,
-            workspace_id=workspace_id,
-            end_user_id=end_user_id,
-            should_memorize=should_memorize,
-            language=language,
-        )
-
-    @staticmethod
     async def ingest_agent_messages(
         conversation_id: str,
         messages: List[Any],

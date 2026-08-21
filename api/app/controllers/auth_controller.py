@@ -19,12 +19,29 @@ from app.core.error_codes import BizCode
 from app.dependencies import get_current_user, oauth2_scheme
 from app.models.user_model import User
 from app.i18n.dependencies import get_translator
+from app.core.alert_metric_bridge import report_login_failure_async
 
 # 获取专用日志器
 auth_logger = get_auth_logger()
 security_logger = get_security_logger()
 
 router = APIRouter(tags=["Authentication"])
+
+
+def _login_failure_context(db: Session, email: str, error_code: BizCode):
+    """内部解析租户和稳定失败分类；结果不会改变对外登录响应。"""
+    default_reason = (
+        "bad_credential" if error_code == BizCode.PASSWORD_ERROR else "unknown_principal"
+    )
+    try:
+        row = db.query(User.tenant_id, User.is_active).filter(User.email == email).first()
+        if row is None:
+            return None, "unknown_principal"
+        tenant_id, is_active = row
+        return tenant_id, "disabled" if not is_active else default_reason
+    except Exception:
+        return None, default_reason
+
 
 @router.post("/token", response_model=ApiResponse)
 async def login_for_access_token(
@@ -75,6 +92,15 @@ async def login_for_access_token(
             elif e.code == BizCode.PASSWORD_ERROR:
                 # 用户存在但密码错误
                 auth_logger.warning(f"接受邀请失败，密码验证错误: {form_data.email}")
+                tenant_id, reason_class = _login_failure_context(
+                    db, form_data.email, e.code
+                )
+                await report_login_failure_async(
+                    principal=form_data.email,
+                    auth_surface="password",
+                    reason_class=reason_class,
+                    tenant_id=tenant_id,
+                )
                 raise BusinessException(t("auth.invite.password_verification_failed"), BizCode.LOGIN_FAILED)
             else:
                 # 其他认证失败情况，直接抛出
@@ -86,7 +112,13 @@ async def login_for_access_token(
             auth_logger.info(f"用户认证成功: {user.email} (ID: {user.id})")
 
         except BusinessException as e:
-            
+            tenant_id, reason_class = _login_failure_context(db, form_data.email, e.code)
+            await report_login_failure_async(
+                principal=form_data.email,
+                auth_surface="password",
+                reason_class=reason_class,
+                tenant_id=tenant_id,
+            )
             # 其他认证失败情况，直接抛出
             raise BusinessException(e.message, BizCode.LOGIN_FAILED)
 

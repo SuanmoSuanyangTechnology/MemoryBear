@@ -3615,6 +3615,10 @@ class WorkflowService:
                 pool_status["usage_percent"],
             )
             logger.info(f"创建工作流执行记录: execution_id={execution_id}")
+            logger.info(
+                f">>>>>>> TIMING_TRACE execution_started execution_id={execution_id} "
+                f"started_at={execution.started_at.isoformat() if execution.started_at else 'None'}"
+            )
             return self._build_execution_ref(execution)
 
     async def _get_execution_async(self, execution_id: str) -> WorkflowExecutionRef | None:
@@ -3662,6 +3666,12 @@ class WorkflowService:
                 execution.elapsed_time = (
                     (execution.completed_at - execution.started_at).total_seconds()
                     if execution.started_at else 0.0
+                )
+                logger.info(
+                    f">>>>>>> TIMING_TRACE execution_completed execution_id={execution_id} "
+                    f"status={status} "
+                    f"started_at={execution.started_at.isoformat() if execution.started_at else 'None'} "
+                    f"completed_at={execution.completed_at.isoformat()}"
                 )
 
             before_commit_at = time.perf_counter()
@@ -4799,7 +4809,6 @@ class WorkflowService:
             role="user",
             content=human_message,
             meta_data=human_meta,
-            sync_memory=False,
         )
         self.conversation_service.add_message(
             **({"message_id": message_id} if message_id else {}),
@@ -4807,7 +4816,6 @@ class WorkflowService:
             role="assistant",
             content="",
             meta_data={"error": error},
-            sync_memory=False,
         )
 
     @staticmethod
@@ -7113,6 +7121,11 @@ class WorkflowService:
                     status="running",
                 )
                 await self._store_runtime_execution_snapshot_async(execution)
+                logger.info(
+                    f">>>>>>> TIMING_TRACE execution_started execution_id={execution.execution_id} "
+                    f"started_at={execution.started_at.isoformat() if execution.started_at else 'None'} "
+                    f"(transient)"
+                )
             timing_execution_id = execution.execution_id
             _log_before_execute_step(
                 "before_execute_execution_ready",

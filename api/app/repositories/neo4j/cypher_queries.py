@@ -77,12 +77,37 @@ WHERE s.delete_at IS NULL
 RETURN count(s) AS used
 """
 
+# 用户全部存活 Statement 总数（用于 value-ranking 列表分页，非永久节点也算）
+LIVE_STATEMENT_COUNT = """
+MATCH (s:Statement {end_user_id: $end_user_id})
+WHERE s.delete_at IS NULL
+RETURN count(s) AS total
+"""
+# 动态价值重排（v1.3）：value_score = 0.75*G + 0.25*T；is_permanent=true 恒为 1.0
+# （原文档权重 G=0.30/T=0.10；仅用两因子时按 3:1 比例归一化，使普通节点上限=1）
+# G = topology_score（缺失取 0）
+# T = 2^(-age_days/30)，age_days 按 created_at 距今（未来时间按 0 天，T=1）
 PERMANENT_MEMORY_LIST = """
 MATCH (s:Statement {end_user_id: $end_user_id})
 WHERE s.delete_at IS NULL
-  AND coalesce(s.is_permanent, false) = true
-WITH s, elementId(s) AS id
-ORDER BY s.created_at DESC, id ASC
+WITH s, elementId(s) AS id,
+     coalesce(s.topology_score, 0.0) AS g,
+     CASE
+       WHEN s.created_at IS NULL THEN null
+       ELSE datetime(s.created_at).epochMillis
+     END AS created_epoch
+WITH id, s, g,
+     CASE
+       WHEN created_epoch IS NULL THEN 0.0
+       WHEN created_epoch >= datetime().epochMillis THEN 1.0
+       ELSE 2.0 ^ (- (datetime().epochMillis - created_epoch) / 2592000000.0)
+     END AS t
+WITH id, s,
+     CASE
+       WHEN coalesce(s.is_permanent, false) THEN 1.0
+       ELSE 0.75 * g + 0.25 * t
+     END AS value_score
+ORDER BY value_score DESC, s.created_at DESC, id ASC
 SKIP $skip
 LIMIT $limit
 RETURN id,
@@ -90,7 +115,8 @@ RETURN id,
        {
            statement: s.statement,
            created_at: s.created_at,
-           is_permanent: true
+           is_permanent: coalesce(s.is_permanent, false),
+           value_score: sqrt(value_score) * 100
        } AS properties
 """
 
@@ -683,7 +709,6 @@ RETURN e.id AS id,
 ORDER BY score DESC
 LIMIT $limit
 """
-
 
 SEARCH_CHUNKS_BY_CONTENT = """
 CALL db.index.fulltext.queryNodes("chunksFulltext", $query) YIELD node AS c, score
@@ -1553,7 +1578,6 @@ RETURN
     properties(r) as properties
 """
 
-
 # DEPRECATED: Graph_Node_query 已被 build_graph_nodes_by_type_query() 取代，
 # 后者按 SUPPORTED_NODE_TYPES 内联 label 字面量，可命中 end_user_id 索引并支持
 # 独立 Per_Type_Limit。此常量仅保留以避免破坏式改动；新代码不应再使用。
@@ -2180,7 +2204,7 @@ LIMIT $limit
 
 SEARCH_STATEMENTS_BY_FULLTEXT = """
 CALL db.index.fulltext.queryNodes("statementsFulltext", $query) YIELD node AS s, score
-WHERE ($end_user_id IS NULL OR s.end_user_id = $end_user_id)
+WHERE s.end_user_id = $end_user_id
   AND s.delete_at IS NULL
 RETURN s.id AS id,
        s.statement AS statement,
@@ -2201,7 +2225,7 @@ LIMIT $limit
 
 SEARCH_ENTITIES_BY_FULLTEXT = """
 CALL db.index.fulltext.queryNodes("entitiesFulltext", $query) YIELD node AS e, score
-WHERE ($end_user_id IS NULL OR e.end_user_id = $end_user_id)
+WHERE e.end_user_id = $end_user_id
   AND e.delete_at IS NULL
 RETURN e.id AS id,
        e.name AS name,
@@ -2218,7 +2242,7 @@ LIMIT $limit
 
 SEARCH_CHUNKS_BY_FULLTEXT = """
 CALL db.index.fulltext.queryNodes("chunksFulltext", $query) YIELD node AS c, score
-WHERE ($end_user_id IS NULL OR c.end_user_id = $end_user_id)
+WHERE c.end_user_id = $end_user_id
   AND c.delete_at IS NULL
 RETURN c.id AS id,
        c.content AS content,
@@ -2231,7 +2255,7 @@ LIMIT $limit
 # MemorySummary keyword search using fulltext index
 SEARCH_MEMORY_SUMMARIES_BY_FULLTEXT = """
 CALL db.index.fulltext.queryNodes("summariesFulltext", $query) YIELD node AS m, score
-WHERE ($end_user_id IS NULL OR m.end_user_id = $end_user_id)
+WHERE m.end_user_id = $end_user_id
 RETURN m.id AS id,
        m.name AS name,
        m.end_user_id AS end_user_id,
@@ -2251,7 +2275,7 @@ LIMIT $limit
 # Community keyword search: matches name or summary via fulltext index
 SEARCH_COMMUNITIES_BY_FULLTEXT = """
 CALL db.index.fulltext.queryNodes("communitiesFulltext", $query) YIELD node AS c, score
-WHERE ($end_user_id IS NULL OR c.end_user_id = $end_user_id)
+WHERE c.end_user_id = $end_user_id
 RETURN c.community_id AS id,
        c.name AS name,
        c.summary AS content,
@@ -2985,7 +3009,6 @@ DELETE r
 RETURN count(r) AS dropped_count
 """
 
-
 # 查询用户实体节点的最新 aliases：用于别名归并完成后，将归并结果同步回 PostgreSQL
 # end_user_info.aliases / other_name。判定用户实体的口径与 metadata_extractor.is_user_entity
 # 保持一致：name 命中常见用户称呼，或 entity_type 为 '用户'。
@@ -2996,7 +3019,6 @@ WHERE e.delete_at IS NULL
    OR e.entity_type = '用户')
 RETURN e.id AS entity_id, e.name AS name, coalesce(e.aliases, []) AS aliases
 """
-
 
 # ── 查询已有的特殊实体（用户、AI助手）以便复用 ID ──
 # 用于 graph_saver 预处理阶段，确保同一个 end_user_id 下只有一个"用户"节点和一个"AI助手"节点
@@ -3121,7 +3143,7 @@ CALL () {
     UNION ALL
     MATCH (e:ExtractedEntity {end_user_id: $end_user_id})
     WHERE e.delete_at IS NULL
-      AND coalesce(e.extraction_count, 0) < $protection_threshold
+      AND coalesce(e.extraction_count, 0) < $protection_threshold AND e.name <> "用户"
     RETURN 'ExtractedEntity' AS node_type, elementId(e) AS element_id, e.name AS content,
            coalesce(e.created_at) AS sort_time,
            coalesce(e.extraction_count, 0) AS extraction_count,
@@ -3223,3 +3245,42 @@ MATCH (n:ExtractedEntity {end_user_id: $old_id})
 WHERE n.name = '用户'
 SET n.end_user_id = $new_id
 """
+
+GDS_GRAPH_BUILD = """
+CALL gds.graph.project.cypher(
+    $end_user_id,
+    'MATCH (n)
+    WHERE n.end_user_id = $endUserId
+     AND n.delete_at IS NULL
+     AND n.id IS NOT NULL
+     AND any(l IN labels(n) WHERE l IN ["Statement","MemorySummary","Chunk","ExtractedEntity","Perceptual"])
+     AND (n.name IS NULL OR n.name <> "用户")
+    RETURN id(n) AS id',
+    'MATCH (a)-[r]-(b)
+    WHERE a.end_user_id = $endUserId AND b.end_user_id = $endUserId
+     AND a.delete_at IS NULL AND b.delete_at IS NULL
+     AND a <> b AND a.id IS NOT NULL AND b.id IS NOT NULL
+     AND any(l IN labels(a) WHERE l IN ["Statement","MemorySummary","Chunk","ExtractedEntity","Perceptual"])
+     AND any(l IN labels(b) WHERE l IN ["Statement","MemorySummary","Chunk","ExtractedEntity","Perceptual"])
+     AND (a.name IS NULL OR a.name <> "用户") AND (b.name IS NULL OR b.name <> "用户")
+    WITH a, b, count(r) AS parallel_count
+    WITH a, b, parallel_count,
+        [[id(a), id(b)], [id(b), id(a)]] AS directed_pairs
+    UNWIND directed_pairs AS pair
+    RETURN pair[0] AS source, pair[1] AS target, toFloat(parallel_count) AS weight',
+    {
+        parameters: {endUserId: $end_user_id }
+    }
+);"""
+
+G_SCORE = """
+CALL gds.eigenvector.write($end_user_id, {
+      relationshipWeightProperty: 'weight',
+      scaler: 'Max',
+      writeProperty: 'topology_score',
+      maxIterations: 50,
+      tolerance: 0.000005
+  })
+"""
+
+CLEAR_GRAPH = f"CALL gds.graph.drop($end_user_id, false);"

@@ -1,8 +1,8 @@
 """会话服务"""
 import asyncio
 import uuid
-from types import SimpleNamespace
 from datetime import timedelta
+from types import SimpleNamespace
 from typing import Annotated
 from typing import Optional, List, Tuple, Dict, Any
 
@@ -16,7 +16,7 @@ from app.core.exceptions import BusinessException
 from app.core.exceptions import ResourceNotFoundException
 from app.core.logging_config import get_business_logger
 from app.core.models import RedBearLLM, RedBearModelConfig
-from app.core.utils.datetime_utils import to_timestamp_ms, utcnow_naive
+from app.core.utils.datetime_utils import to_timestamp_ms, utcnow, utcnow_naive
 from app.db import get_db
 from app.models import Conversation, Message, MessageFeedback, User, ModelType
 from app.models.conversation_model import ConversationDetail
@@ -238,8 +238,6 @@ class ConversationService:
             meta_data: Optional[dict] = None,
             message_id: Optional[uuid.UUID] = None,
             status: str = "completed",
-            sync_memory: bool = True,
-            should_memorize: bool = True,
             parent_message_id: Optional[uuid.UUID] = None,
     ) -> Message:
         """
@@ -252,11 +250,6 @@ class ConversationService:
             meta_data (Optional[dict]): Optional metadata.
             message_id (Optional[uuid.UUID]): Optional custom message UUID.
             status (str): Message status, default "completed".
-            should_memorize (bool): 会话级记忆开关——用户在会话中切换的"记忆"按钮状态。
-                True → memory_messages.should_memorize=true，会触发 Write_Pipeline；
-                False → memory_messages.should_memorize=false，cursor 只推进不萃取。
-                由调用方根据请求 payload.memory 透传。
-                注：仅当 sync_memory=True 时生效；sync_memory=False 时本参数被忽略。
 
         Returns:
             Message: Newly created Message instance.
@@ -292,11 +285,7 @@ class ConversationService:
             self.db.commit()
             self.db.refresh(message)
 
-            # TODO(messages-memory-decoupling Phase 2): 迁移完所有成对调用点后，移除
-            # 此处 dispatch_memory_sync 调用，改由业务层显式调 dispatch_memory_batch。
-            # 参见 .kiro/specs/messages-memory-decoupling/design.md
-            if sync_memory:
-                self.dispatch_memory_sync(message, conversation, should_memorize)
+            # 由业务层成对调用点显式调 dispatch_memory_pair
 
             logger.info(
                 "Message added successfully",
@@ -305,8 +294,6 @@ class ConversationService:
                     "message_id": str(message.id),
                     "role": role,
                     "content_length": len(content),
-                    "sync_memory": sync_memory,
-                    "should_memorize": should_memorize,
                 },
             )
 
@@ -334,8 +321,6 @@ class ConversationService:
             meta_data: Optional[dict] = None,
             message_id: Optional[uuid.UUID] = None,
             status: str = "completed",
-            sync_memory: bool = True,
-            should_memorize: bool = True,
             parent_message_id: Optional[uuid.UUID] = None,
     ) -> Message:
         """AsyncSession 版本的消息写入。"""
@@ -374,8 +359,7 @@ class ConversationService:
                 self.db.commit()
                 self.db.refresh(message)
 
-            if sync_memory:
-                self.dispatch_memory_sync(message, conversation, should_memorize)
+            # 由业务层成对调用点显式调 dispatch_memory_pair
 
             return message
         except Exception as e:
@@ -493,88 +477,29 @@ class ConversationService:
         )
         return msg
 
-    def dispatch_memory_sync(
+    async def dispatch_memory_pair(
         self,
-        message: Message,
-        conversation: Conversation,
-        should_memorize: bool = True,
+        conversation_id: uuid.UUID,
+        user_message: dict[str, Any],
+        assistant_message: dict[str, Any],
     ) -> None:
-        try:
-            import asyncio
-            from app.db import get_async_db_context
+        """查会话 + 解析记忆配置 + 组装成对消息 + fire-and-forget 批量派发。
 
-            workspace_id = str(conversation.workspace_id) if conversation.workspace_id else ""
-            end_user_id = str(conversation.user_id) if conversation.user_id else ""
-            _workspace_id = conversation.workspace_id
-            _app_id = str(conversation.app_id)
-            _conversation_id = str(message.conversation_id)
-            message_snapshot = SimpleNamespace(
-                id=message.id,
-                conversation_id=message.conversation_id,
-                role=message.role,
-                content=message.content,
-                meta_data=dict(message.meta_data or {}),
-                created_at=message.created_at,
-            )
-
-            from app.core.memory.memory_service import MemoryService
-
-            async def _run():
-                try:
-                    async with get_async_db_context() as db:
-                        config_id = await MemoryConfigService(db).get_workspace_active_config_id_async(_workspace_id)
-                    await MemoryService.ingest_agent_message(
-                        conversation_id=_conversation_id,
-                        message=message_snapshot,
-                        app_id=_app_id,
-                        config_id=str(config_id),
-                        workspace_id=workspace_id,
-                        end_user_id=end_user_id,
-                        should_memorize=should_memorize,
-                    )
-                except Exception as exc:
-                    logger.warning(
-                        f"[ConversationService] dispatch_agent_message 异步执行失败: "
-                        f"conv={_conversation_id}, err={exc}",
-                        exc_info=True,
-                    )
-
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                asyncio.ensure_future(_run())
-            else:
-                loop.run_until_complete(_run())
-        except Exception as e:
-            logger.warning(
-                f"[ConversationService] dispatch_agent_message 调度失败（不影响主流程）: "
-                f"conv={message.conversation_id}, err={e}",
-                exc_info=True,
-            )
-
-    async def dispatch_memory_batch(
-        self,
-        messages: List[Any],
-        conversation: Conversation,
-    ) -> None:
-        """批量派发同一回合的多条消息到记忆系统（async 线性实现）。
-
-        与 dispatch_memory_sync 的区别：一次 write_batch（一次 pg_advisory_xact_lock
-        + 一次事务）分配连续 seq，一次滑动窗口派发。批内 seq 严格 user < assistant。
-
-        本方法**本身不 fire-and-forget**。调用方决定：
-            - fire-and-forget：`asyncio.create_task(svc.dispatch_memory_batch(...))`
-            - 阻塞等待：`await svc.dispatch_memory_batch(...)`
-        主 chat 流程默认走 fire-and-forget，避免拖累流式响应。
+        一次 write_batch（一次 pg_advisory_xact_lock + 一次事务）分配连续 seq，
+        批内严格 user < assistant。
 
         Args:
-            messages: 消息列表，元素需带 .id / .conversation_id / .role /
-                .content / .created_at / .meta_data / .should_memorize 属性。
-                所有消息应属于同一对话，seq 分配顺序 = 列表顺序。
-            conversation: 所属 Conversation 实例（提供 workspace_id / app_id / user_id）。
+            conversation_id: 会话 ID。
+            user_message / assistant_message: 消息字段字典，支持键：
+                - id: uuid.UUID（消息 ID）
+                - content: str
+                - meta_data: dict | None
+                - should_memorize: bool（默认 True）
         """
-        # 数据形状规范化（None → {}, 缺失字段默认等）由下游 dispatcher.ingest_agent_messages
-        # 统一处理；空/异常输入由下游 if not messages / if not written 双重拦截；
-        # 本方法只做纯派发（薄派发层），不重复防御。
+        conversation = await self.conversation_repo.get_conversation_by_conversation_id_async(conversation_id)
+        if not conversation:
+            return
+
         from app.db import get_async_db_context
         from app.core.memory.memory_service import MemoryService
 
@@ -583,18 +508,33 @@ class ConversationService:
                 config_id = await MemoryConfigService(db).get_workspace_active_config_id_async(
                     conversation.workspace_id
                 )
-            await MemoryService.ingest_agent_messages(
-                conversation_id=str(messages[0].conversation_id) if messages else "",
-                messages=messages,
-                app_id=str(conversation.app_id),
-                config_id=str(config_id),
-                workspace_id=str(conversation.workspace_id),
-                end_user_id=str(conversation.user_id) if conversation.user_id else "",
+            now = utcnow()
+            messages = [
+                SimpleNamespace(
+                    id=m["id"],
+                    conversation_id=conversation_id,
+                    role=role,
+                    content=m["content"],
+                    meta_data=m.get("meta_data"),
+                    created_at=now,
+                    should_memorize=m.get("should_memorize", True),
+                )
+                for role, m in (("user", user_message), ("assistant", assistant_message))
+            ]
+            asyncio.create_task(
+                MemoryService.ingest_agent_messages(
+                    conversation_id=str(conversation.id),
+                    messages=messages,
+                    app_id=str(conversation.app_id),
+                    config_id=str(config_id),
+                    workspace_id=str(conversation.workspace_id),
+                    end_user_id=str(conversation.user_id) if conversation.user_id else "",
+                )
             )
         except Exception as exc:
             logger.warning(
-                f"[ConversationService] dispatch_memory_batch 执行失败: "
-                f"conv={conversation.id}, batch={len(messages)}, err={exc}",
+                f"[ConversationService] dispatch_memory_pair 执行失败: "
+                f"conv={conversation.id}, err={exc}",
                 exc_info=True,
             )
 

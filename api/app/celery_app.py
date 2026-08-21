@@ -126,6 +126,13 @@ celery_app.conf.update(
         'app.tasks.regenerate_memory_cache': {'queue': 'periodic_tasks'},
         'app.tasks.refresh_hot_memory_tags_cache': {'queue': 'periodic_tasks'},
 
+        # GDS 拓扑分数：scan 在 periodic 扫描，计算在 memory_heavy 执行
+        'app.tasks.scan_gds_topology_score': {'queue': 'periodic_tasks'},
+        'app.tasks.do_gds_topology_score': {'queue': 'memory_heavy_tasks'},
+
+        # 全量记忆计数同步（仅手动触发）
+        'app.tasks.sync_all_end_user_memory_counts': {'queue': 'memory_heavy_tasks'},
+
         # Sliding window write tasks → memory_tasks queue (IO-bound async tasks)
         'app.tasks.flush_conversation': {'queue': 'periodic_tasks'},
 
@@ -192,6 +199,19 @@ try:
     celery_app.conf.task_routes['notification.scan_expired'] = {
         'queue': 'notification_state_tasks'
     }
+    celery_app.conf.task_routes['notification.scan_stuck_publishing'] = {
+        'queue': 'notification_state_tasks'
+    }
+    celery_app.conf.task_routes['notification.cleanup_retention'] = {
+        'queue': 'notification_state_tasks'
+    }
+    celery_app.conf.task_routes['notification.dispatch_channel'] = {
+        'queue': 'notification_state_tasks'
+    }
+    # 告警事件创建后立即扇出为用户端站内通知
+    celery_app.conf.task_routes['notification.alert_fanout'] = {
+        'queue': 'notification_state_tasks'
+    }
 except ImportError:
     _HAS_NOTIFICATION_TASKS = False
 
@@ -217,6 +237,7 @@ implicit_emotions_update_schedule = crontab(
 layer2_reflection_schedule = timedelta(minutes=settings.LAYER2_REFLECTION_INTERVAL_MINUTES)
 layer2_dedup_full_scan_schedule = crontab(hour=settings.LAYER2_DEDUP_FULL_SCAN_HOUR, minute=0)
 reflection_retry_schedule = timedelta(minutes=settings.REFLECTION_RETRY_SCAN_INTERVAL_MINUTES)
+gds_topology_scan_schedule = timedelta(minutes=settings.GDS_TOPOLOGY_SCAN_INTERVAL_MINUTES)
 hot_memory_tags_refresh_schedule = crontab(hour=settings.HOT_MEMORY_TAGS_REFRESH_HOUR, minute=0)
 draft_data_clean_schedule = crontab(hour=settings.DRAFT_DATA_CLEAN_HOUR, minute=0)
 forget_scan_schedule = timedelta(minutes=settings.FORGET_SCAN_INTERVAL_MINUTES)
@@ -271,6 +292,11 @@ beat_schedule_config = {
     "scan-reflection-retry": {
         "task": "app.tasks.scan_reflection_retry",
         "schedule": reflection_retry_schedule,
+        "args": (),
+    },
+    "run-gds-topology-score": {
+        "task": "app.tasks.scan_gds_topology_score",
+        "schedule": gds_topology_scan_schedule,
         "args": (),
     },
     "refresh-hot-memory-tags-cache": {
@@ -371,5 +397,25 @@ if _HAS_NOTIFICATION_TASKS:
                 run_every=timedelta(seconds=_NOTIFICATION_SCAN_INTERVAL_SECONDS)
             ),
             "options": {"queue": "notification_state_tasks", "expires": 120},
+        },
+        # 扫描 publishing 超时（publish_requested_at > 600s），回退 draft
+        "notification-scan-stuck-publishing": {
+            "task": "notification.scan_stuck_publishing",
+            "schedule": NoCatchupSchedule(
+                run_every=timedelta(seconds=_NOTIFICATION_SCAN_INTERVAL_SECONDS)
+            ),
+            "options": {"queue": "notification_state_tasks", "expires": 120},
+        },
+        # 每日凌晨 3:00 清理超过保留天数的通知及快照
+        "notification-cleanup-retention": {
+            "task": "notification.cleanup_retention",
+            "schedule": crontab(hour=3, minute=0),
+            "options": {"queue": "notification_state_tasks", "expires": 3600},
+        },
+        # 每 10 分钟采集租户企业余额；任务内部在无启用规则时直接跳过。
+        "notification-scan-enterprise-balance": {
+            "task": "notification.scan_enterprise_balance",
+            "schedule": NoCatchupSchedule(run_every=timedelta(minutes=10)),
+            "options": {"queue": "notification_state_tasks", "expires": 600},
         },
     })

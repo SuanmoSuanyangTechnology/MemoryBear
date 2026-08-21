@@ -8,6 +8,12 @@ from dataclasses import dataclass
 from jinja2 import Environment, FileSystemLoader
 from pydantic import BaseModel
 
+from app.core.memory.storage_services.reflection_engine.errors import (
+    ReflectionBusinessError,
+    ReflectionFailureReason,
+    ReflectionModelType,
+)
+
 logger = logging.getLogger(__name__)
 
 _prompt_dir = os.path.join(
@@ -115,42 +121,54 @@ async def resolve_unresolved_statement(
     language: str = "zh",
 ) -> Optional[UnresolvedResult]:
     """调用 LLM 对 unresolved statement 进行消解 + 三元组提取"""
+    template = _prompt_env.get_template("resolve_unresolved_triplet.jinja2")
+
+    input_json = {
+        "statement_id": statement["statement_id"],
+        "statement_text": statement["statement_text"],
+        "statement_type": statement.get("stmt_type", "FACT"),
+        "temporal_type": statement.get("temporal_info", "DYNAMIC"),
+        "supporting_context": context_chunks,
+        "speaker": statement.get("speaker", "user"),
+        "dialog_at": str(statement.get("dialog_at", "")),
+        "valid_at": str(statement.get("valid_at", "NULL")),
+        "invalid_at": str(statement.get("invalid_at", "NULL")),
+        "has_unsolved_reference": True,
+    }
+
+    rendered_prompt = template.render(
+        statement_text=statement["statement_text"],
+        speaker=statement.get("speaker", "user"),
+        input_json=json.dumps(input_json, ensure_ascii=False),
+        language=language,
+    )
+
+    messages = [{"role": "user", "content": rendered_prompt}]
     try:
-        template = _prompt_env.get_template("resolve_unresolved_triplet.jinja2")
-
-        input_json = {
-            "statement_id": statement["statement_id"],
-            "statement_text": statement["statement_text"],
-            "statement_type": statement.get("stmt_type", "FACT"),
-            "temporal_type": statement.get("temporal_info", "DYNAMIC"),
-            "supporting_context": context_chunks,
-            "speaker": statement.get("speaker", "user"),
-            "dialog_at": str(statement.get("dialog_at", "")),
-            "valid_at": str(statement.get("valid_at", "NULL")),
-            "invalid_at": str(statement.get("invalid_at", "NULL")),
-            "has_unsolved_reference": True,
-        }
-
-        rendered_prompt = template.render(
-            statement_text=statement["statement_text"],
-            speaker=statement.get("speaker", "user"),
-            input_json=json.dumps(input_json, ensure_ascii=False),
-            language=language,
-        )
-
-        messages = [{"role": "user", "content": rendered_prompt}]
         response = await llm_client.call_structured(messages, UnresolvedResult)
+    except Exception as exc:
+        logger.error(
+            "LLM 未识别实体消解模型调用失败 statement=%s",
+            statement.get("statement_id", "?"),
+            exc_info=True,
+        )
+        raise ReflectionBusinessError(
+            ReflectionFailureReason.MODEL_CALL_FAILED,
+            "unresolved_resolver_model_call",
+            model_type=ReflectionModelType.LLM,
+        ) from exc
 
+    try:
         if isinstance(response, UnresolvedResult):
             return response
-        elif isinstance(response, dict):
+        if isinstance(response, dict):
             return UnresolvedResult(
                 resolved=response.get("resolved", False),
                 resolution_note=response.get("resolution_note", ""),
                 entities=[EntityOutput(**e) for e in response.get("entities", [])],
                 triplets=[TripletOutput(**t) for t in response.get("triplets", [])],
             )
-        elif isinstance(response, BaseModel):
+        if isinstance(response, BaseModel):
             data = response.model_dump()
             return UnresolvedResult(
                 resolved=data.get("resolved", False),
@@ -158,12 +176,17 @@ async def resolve_unresolved_statement(
                 entities=[EntityOutput(**e) for e in data.get("entities", [])],
                 triplets=[TripletOutput(**t) for t in data.get("triplets", [])],
             )
-        else:
-            return None
+    except Exception as exc:
+        logger.error("LLM 未识别实体消解返回解析失败", exc_info=True)
+        raise ReflectionBusinessError(
+            ReflectionFailureReason.RESULT_PARSE_FAILED,
+            "unresolved_resolver_result_parse",
+            model_type=ReflectionModelType.LLM,
+        ) from exc
 
-    except Exception as e:
-        logger.error(
-            f"LLM 未识别实体消解失败 statement={statement.get('statement_id', '?')}: {e}",
-            exc_info=True,
-        )
-        return None
+    logger.error("LLM 未识别实体消解返回结构无效")
+    raise ReflectionBusinessError(
+        ReflectionFailureReason.RESULT_PARSE_FAILED,
+        "unresolved_resolver_result_parse",
+        model_type=ReflectionModelType.LLM,
+    )

@@ -16,13 +16,10 @@ MemoryWriteDispatcher — 记忆写入派发层
 各入口点保持原位置，通过本模块的函数进行统一派发。
 """
 
-import asyncio
 import logging
 import uuid
 from datetime import datetime, timezone
 from typing import Any, List, Optional
-
-from sqlalchemy.exc import IntegrityError
 
 from app.core.memory.enums import MemoryMessageSource
 from app.db import get_db_context, get_db_read
@@ -32,11 +29,6 @@ logger = logging.getLogger(__name__)
 
 # 滑动窗口大小
 WINDOW_SIZE = 3
-
-# ingest_agent_message 写 memory_messages 时，original_message_id 外键引用的 messages
-# 行可能因 BatchPersistQueue 攒批而尚未落库（FK 竞态），捕获后延迟重试直到最终一致。
-AGENT_MESSAGE_FK_RETRY = 4
-AGENT_MESSAGE_FK_RETRY_BASE_DELAY_S = 0.3
 
 
 # ──────────────────────────────────────────────
@@ -454,121 +446,9 @@ async def dispatch_api_service_async(
 # ──────────────────────────────────────────────
 
 
-async def ingest_agent_message(
-    conversation_id: str,
-    message: "Any",
-    app_id: str,
-    config_id: str = "",
-    workspace_id: str = "",
-    end_user_id: str = "",
-    should_memorize: bool = True,
-    language: str = "zh",
-) -> bool:
-    """Agent 消息摄入：写入 memory_messages 表 + 触发滑动窗口派发。
-
-    Returns:
-        True 表示成功写入，False 表示跳过（门禁未开或写入失败）
-    """
-
-    if not await check_memory_enabled(app_id):
-        return False
-
-    files = None
-    if hasattr(message, "meta_data") and message.meta_data:
-        files = message.meta_data.get("files")
-
-    # Agent 路径：用 message.created_at 作为 dialog_at，语义上是对话真实发生的时间
-    dialog_at: Optional[str] = None
-    if hasattr(message, "created_at") and message.created_at:
-        _created = message.created_at
-        if isinstance(_created, datetime):
-            _created = _created.replace(tzinfo=timezone.utc) if _created.tzinfo is None else _created
-            dialog_at = _created.isoformat()
-        elif isinstance(_created, str):
-            dialog_at = _created
-
-    # 写 memory_messages。original_message_id 外键指向 messages 表，而 messages 可能
-    # 经 BatchPersistQueue 攒批延迟落库——本表先 commit 时外键引用的行尚不存在，
-    # 会抛 IntegrityError（ForeignKeyViolation）。捕获后延迟重试，最终一致。
-    written: List[dict] = []
-    for attempt in range(AGENT_MESSAGE_FK_RETRY):
-        try:
-            with get_db_context() as db:
-                repo = MemoryMessageRepository(db)
-                written = repo.write_batch(
-                    conversation_id=str(conversation_id),
-                    messages=[{
-                        "role": message.role,
-                        "content": message.content,
-                        "original_message_id": message.id,
-                        "created_at": message.created_at,
-                        "should_memorize": should_memorize,
-                        "files": files,
-                        "dialog_at": dialog_at,
-                    }],
-                    end_user_id=end_user_id,
-                    source=MemoryMessageSource.AGENT,
-                )
-                if not written:
-                    return False
-                db.commit()
-            break
-        except IntegrityError as exc:
-            orig = getattr(exc, "orig", None)
-            is_fk = orig is not None and "ForeignKeyViolation" in type(orig).__name__
-            if not is_fk:
-                raise
-            if attempt >= AGENT_MESSAGE_FK_RETRY - 1:
-                # 重试耗尽：基本可断定 messages 行已永久缺失（落库失败/任务丢失），
-                # 该条记忆静默丢失，升级为 error 并带固定聚合标记，供日志平台配置告警。
-                logger.error(
-                    "MEMORY_MESSAGES_FK_EXHAUSTED retries=%d conv=%s end_user=%s "
-                    "original_message_id=%s app_id=%s err=%s",
-                    AGENT_MESSAGE_FK_RETRY, conversation_id, end_user_id,
-                    getattr(message, "id", ""), app_id, exc,
-                )
-                raise
-            logger.warning(
-                "ingest_agent_message FK 冲突（messages 尚未落库），重试 %d/%d: conv=%s, err=%s",
-                attempt + 1, AGENT_MESSAGE_FK_RETRY, conversation_id, exc,
-            )
-            await asyncio.sleep(AGENT_MESSAGE_FK_RETRY_BASE_DELAY_S * (attempt + 1))
-
-    await refresh_active_key(conversation_id)
-    mark_conversation_pending(conversation_id)
-
-    # Fast Write 派发（隔离：失败不阻断下面的滑动窗口派发）。
-    # 权限取原始 message.role / should_memorize；Agent 有应用级门禁 require_app_gate=True。
-    _target_msg = written[0] if written else None
-    if _target_msg:
-        await safe_push_fast_write(
-            role=str(message.role),
-            should_memorize=should_memorize,
-            app_id=app_id,
-            require_app_gate=True,
-            end_user_id=end_user_id,
-            target_message=_target_msg,
-            config_id=config_id,
-            workspace_id=workspace_id,
-            conversation_id=str(conversation_id),
-            message_seq=_target_msg["message_seq"],
-            language=language,
-            source=MemoryMessageSource.AGENT.value,
-        )
-
-    await check_sliding_window_and_dispatch(
-        conversation_id=str(conversation_id),
-        config_id=config_id,
-        end_user_id=end_user_id,
-        workspace_id=workspace_id,
-        language=language,
-    )
-    return True
-
-
 async def ingest_agent_messages(
     conversation_id: str,
-    messages: List["Any"],
+    messages: List[Any],
     app_id: str,
     config_id: str = "",
     workspace_id: str = "",
@@ -629,44 +509,20 @@ async def ingest_agent_messages(
         if content_str.strip():
             role_and_flag.append((str(m.role), should_memorize))
 
-    # 写 memory_messages。original_message_id 外键指向 messages 表，而 messages 可能
-    # 经 BatchPersistQueue 攒批延迟落库——本表先 commit 时外键引用的行尚不存在，
-    # 会抛 IntegrityError（ForeignKeyViolation）。捕获后延迟重试，最终一致。
-    written: List[dict] = []
-    for attempt in range(AGENT_MESSAGE_FK_RETRY):
-        try:
-            with get_db_context() as db:
-                repo = MemoryMessageRepository(db)
-                written = repo.write_batch(
-                    conversation_id=str(conversation_id),
-                    messages=batch_inputs,
-                    end_user_id=end_user_id,
-                    source=MemoryMessageSource.AGENT,
-                )
-                if not written:
-                    return False
-                db.commit()
-            break
-        except IntegrityError as exc:
-            orig = getattr(exc, "orig", None)
-            is_fk = orig is not None and "ForeignKeyViolation" in type(orig).__name__
-            if not is_fk:
-                raise
-            if attempt >= AGENT_MESSAGE_FK_RETRY - 1:
-                # 重试耗尽：基本可断定 messages 行已永久缺失（落库失败/任务丢失），
-                # 该条记忆静默丢失，升级为 error 并带固定聚合标记，供日志平台配置告警。
-                logger.error(
-                    "MEMORY_MESSAGES_FK_EXHAUSTED retries=%d conv=%s end_user=%s "
-                    "batch_size=%d app_id=%s err=%s",
-                    AGENT_MESSAGE_FK_RETRY, conversation_id, end_user_id,
-                    len(batch_inputs), app_id, exc,
-                )
-                raise
-            logger.warning(
-                "ingest_agent_messages FK 冲突（messages 尚未落库），重试 %d/%d: conv=%s, err=%s",
-                attempt + 1, AGENT_MESSAGE_FK_RETRY, conversation_id, exc,
-            )
-            await asyncio.sleep(AGENT_MESSAGE_FK_RETRY_BASE_DELAY_S * (attempt + 1))
+    # 写 memory_messages。original_message_id 与 messages 已解耦（无外键约束），
+    # 写入顺序不再受限，无需 FK 退避重试；异常冒泡由上层 dispatch_memory_pair
+    # 捕获并降级为 warning，不影响主流程。
+    with get_db_context() as db:
+        repo = MemoryMessageRepository(db)
+        written = repo.write_batch(
+            conversation_id=str(conversation_id),
+            messages=batch_inputs,
+            end_user_id=end_user_id,
+            source=MemoryMessageSource.AGENT,
+        )
+        if not written:
+            return False
+        db.commit()
 
     await refresh_active_key(conversation_id)
     mark_conversation_pending(conversation_id)

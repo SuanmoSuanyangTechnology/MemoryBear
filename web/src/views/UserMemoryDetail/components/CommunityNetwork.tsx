@@ -13,7 +13,7 @@ import { getMemoryCommunityGraph } from '@/api/memory'
 const NodeTooltip: FC<{ node: CommunityD3Node }> = ({ node }) => {
   const { t } = useTranslation()
   return (
-    <div className="rb:min-w-45 rb:max-w-65 rb:rounded-lg rb:border rb:border-[#DFE4ED] rb:bg-white rb:px-3.5 rb:py-2.5 rb:text-[13px] rb:shadow-[0_4px_16px_rgba(0,0,0,0.12)]">
+    <div className="rb:min-w-45 rb:max-w-65 rb:max-h-62.5 rb:overflow-y-auto rb:rounded-lg rb:border rb:border-[#DFE4ED] rb:bg-white rb:px-3.5 rb:py-2.5 rb:text-[13px] rb:shadow-[0_4px_16px_rgba(0,0,0,0.12)]">
       <div className="rb:mb-1.5 rb:text-sm rb:font-semibold rb:text-[#1a1a1a]">
         {node.properties?.name ?? node.name}
       </div>
@@ -23,11 +23,11 @@ const NodeTooltip: FC<{ node: CommunityD3Node }> = ({ node }) => {
         </div>
       )}
       <div className="rb:leading-5.5 rb:text-[#5B6167]">
-        {t('userMemory.type')}：
+        {t('userMemory.type')}: 
         <span className="rb:text-[#1a1a1a]">{node.properties?.entity_type}</span>
       </div>
       <div className="rb:leading-5.5 rb:text-[#5B6167]">
-        {t('userMemory.community')}：
+        {t('userMemory.community')}: 
         <span className="rb:font-medium" style={{ color: node.color }}>{node.properties?.community_name}</span>
       </div>
     </div>

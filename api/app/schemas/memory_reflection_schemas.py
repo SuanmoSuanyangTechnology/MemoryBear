@@ -84,7 +84,6 @@ class Memory_Reflection(BaseModel):
     reflection_period_in_hours: str
     reflexion_range: Optional[str] = "partial"
     baseline: Optional[str] = "TIME"
-    reflection_model_id: str
     memory_verify: bool
     quality_assessment: bool
     

@@ -528,6 +528,12 @@ class AppChatService:
                 content=annotation_match["answer"],
                 meta_data={"usage": {}}
             )
+            # messages-memory-decoupling Phase 2: 记忆批量派发收敛到公共 helper。
+            await self.conversation_service.dispatch_memory_pair(
+                conversation_id,
+                user_message={"id": user_message_id, "content": message, "meta_data": {"files": []}},
+                assistant_message={"id": message_id, "content": annotation_match["answer"], "meta_data": {"usage": {}}},
+            )
             elapsed_time = time.time() - start_time
             return {
                 "conversation_id": str(conversation_id),
@@ -971,7 +977,6 @@ class AppChatService:
                 role="user",
                 content=message,
                 meta_data=human_meta,
-                should_memorize=memory,
             )
             await self.conversation_service.add_message_async(
                 message_id=message_id,
@@ -979,7 +984,12 @@ class AppChatService:
                 role="assistant",
                 content=result["content"],
                 meta_data=assistant_meta,
-                should_memorize=memory,
+            )
+            # messages-memory-decoupling Phase 2: 记忆批量派发收敛到公共 helper。
+            await self.conversation_service.dispatch_memory_pair(
+                conversation_id,
+                user_message={"id": user_message_id, "content": message, "meta_data": human_meta, "should_memorize": memory},
+                assistant_message={"id": message_id, "content": result["content"], "meta_data": assistant_meta, "should_memorize": memory},
             )
             if used_context_engine:
                 _ctx_kwargs = dict(
@@ -1095,6 +1105,12 @@ class AppChatService:
                     role="assistant",
                     content=annotation_match["answer"],
                     meta_data={"usage": {}}
+                )
+                # messages-memory-decoupling Phase 2: 记忆批量派发收敛到公共 helper。
+                await self.conversation_service.dispatch_memory_pair(
+                    conversation_id,
+                    user_message={"id": user_message_id, "content": message, "meta_data": {"files": []}},
+                    assistant_message={"id": message_id, "content": annotation_match["answer"], "meta_data": {"usage": {}}},
                 )
                 yield f"event: start\ndata: {json.dumps({'conversation_id': str(conversation_id), 'message_id': str(message_id), 'user_message_id': str(user_message_id)}, ensure_ascii=False)}\n\n"
                 yield f"event: message\ndata: {json.dumps({'content': annotation_match['answer'], 'conversation_id': str(conversation_id)}, ensure_ascii=False)}\n\n"
@@ -1562,7 +1578,6 @@ class AppChatService:
                 strip_memory_trace_transients(node)
                 for node in (orchestrator_node_executions + node_executions)
             ]
-            from app.models.conversation_model import Conversation
             if not skip_save:
                 from app.services.batch_persist_queue import BatchPersistQueue, PersistTask
 
@@ -1603,39 +1618,13 @@ class AppChatService:
                 ))
                 save_messages_enqueued = True
 
-                # 记忆写入 + 派发：改为批量派发，一次 write_batch 分配连续 seq，
-                # 消除原先两次 fire-and-forget 并发引发的 seq 顺序颠倒问题。
-                result_row = await self.db.execute(
-                    select(Conversation).where(Conversation.id == conversation_id)
+                # messages-memory-decoupling Phase 2: 记忆批量派发收敛到公共 helper，
+                # 一次 write_batch 分配连续 seq，消除原先双 fire-and-forget 的 seq 颠倒。
+                await self.conversation_service.dispatch_memory_pair(
+                    conversation_id,
+                    user_message={"id": user_message_id, "content": message, "meta_data": human_meta, "should_memorize": memory},
+                    assistant_message={"id": message_id, "content": full_content, "meta_data": assistant_meta, "should_memorize": True},
                 )
-                conv = result_row.scalar_one_or_none()
-                if conv:
-                    now = datetime.now(timezone.utc)
-                    asyncio.create_task(
-                        self.conversation_service.dispatch_memory_batch(
-                            messages=[
-                                SimpleNamespace(
-                                    id=user_message_id,
-                                    conversation_id=conversation_id,
-                                    role="user",
-                                    content=message,
-                                    meta_data=human_meta,
-                                    created_at=now,
-                                    should_memorize=memory,
-                                ),
-                                SimpleNamespace(
-                                    id=message_id,
-                                    conversation_id=conversation_id,
-                                    role="assistant",
-                                    content=full_content,
-                                    meta_data=assistant_meta,
-                                    created_at=now,
-                                    should_memorize=True,
-                                ),
-                            ],
-                            conversation=conv,
-                        )
-                    )
 
                 # Enqueue agent execution after messages so the FK is satisfied
                 # within the same batch (messages commit first, then execution).
@@ -1835,6 +1824,7 @@ class AppChatService:
                 })
             }
         )
+
 
         return {
             "conversation_id": conversation_id,

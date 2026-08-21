@@ -12,7 +12,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Row, Col, Form, App, Button, Space, Select, Flex, Divider } from 'antd';
-import { useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import clsx from 'clsx';
 
@@ -87,6 +87,7 @@ const configList = [
 const SelfReflectionEngine: React.FC = () => {
   const { t } = useTranslation();
   const { id } = useParams();
+  const navigate = useNavigate();
   const [configData, setConfigData] = useState<ConfigForm>({} as ConfigForm);
   const [form] = Form.useForm<ConfigForm>();
   const { message } = App.useApp();
@@ -208,9 +209,22 @@ const SelfReflectionEngine: React.FC = () => {
                 if (config.type === 'modelSelect') {
                   return (
                     <div key={config.key}>
-                      <LabelWrapper title={t(`reflectionEngine.${config.key}`)} className="rb:mb-3">
-                        <DescWrapper desc={t(`reflectionEngine.${config.key}_desc`)} className="rb:mt-1" />
-                      </LabelWrapper>
+                      <Flex gap={24} align="center" justify="space-between" className="rb:mb-3!">
+                        <LabelWrapper title={t(`reflectionEngine.${config.key}`)}>
+                          <DescWrapper desc={t(`reflectionEngine.${config.key}_desc`)} className="rb:mt-1" />
+                        </LabelWrapper>
+
+                        <Button
+                          type="link"
+                          disabled={false}
+                          size="small"
+                          className="rb:text-[12px]!"
+                          onClick={() => navigate('/space-config')}
+                        >
+                          {t('menu.spaceConfig')}
+                          <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/memory/arrow_right.svg')]" />
+                        </Button>
+                      </Flex>
                       <Form.Item
                         name={config.key}
                         className="rb:mb-0!"
@@ -218,7 +232,7 @@ const SelfReflectionEngine: React.FC = () => {
                         <ModelSelect
                           params={config.params}
                           placeholder={t('common.pleaseSelect')}
-                          disabled={isDefault || (!values?.reflection_enabled && config.key !== 'reflection_enabled')}
+                          disabled={true}
                         />
                       </Form.Item>
                     </div>

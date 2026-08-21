@@ -20,8 +20,41 @@ from datetime import datetime
 from app.schemas.memory_episodic_schema import EmotionType
 from app.core.utils.datetime_utils import parse_iso_to_utc_naive, to_timestamp_ms
 from app.core.memory.models.event_category_models import EVENT_CATEGORY_NAMES, EVENT_CATEGORY_NAME_TO_ID
+from enum import Enum
 
 logger = logging.getLogger(__name__)
+
+
+class TimelineSort(Enum):
+    """记忆时间线排序枚举。
+
+    成员值即对外 API 的 sort 参数字符串。
+    - time_*: 全部按 created_at 排序（key_node=发生时间，其他=记录时间）
+    - occurred_*: 仅 key_node 按发生时间排序，其余无发生时间排最后
+    - recorded_*: 仅 statement/memory_summary 按记录时间排序，key_node 无记录时间排最后
+    """
+
+    TIME_ASC = "time_asc"
+    TIME_DESC = "time_desc"
+    OCCURRED_ASC = "occurred_asc"
+    OCCURRED_DESC = "occurred_desc"
+    RECORDED_ASC = "recorded_asc"
+    RECORDED_DESC = "recorded_desc"
+
+    @property
+    def sort_mode(self) -> str:
+        """排序字段模式：time / occurred / recorded。"""
+        return self.value.rsplit("_", 1)[0]
+
+    @property
+    def is_asc(self) -> bool:
+        """是否升序。"""
+        return self.value.endswith("_asc")
+
+    @classmethod
+    def values(cls) -> set:
+        """返回所有合法 sort 字符串集合，供校验使用。"""
+        return {member.value for member in cls}
 
 
 class MemoryEntityService:
@@ -207,15 +240,33 @@ class MemoryEntityService:
         events.sort(key=lambda e: e["valid_at"], reverse=True)
         return events
 
-    async def get_unified_timeline(self, source_type: str = "all", page: int = 1, pagesize: int = 10) -> dict:
-        """ExtractedEntity 合并时间线（关键节点 / 情绪记忆 / 长期沉淀），分页 + 按来源筛选。
+    async def get_unified_timeline(
+        self,
+        source_type: str = "all",
+        page: int = 1,
+        pagesize: int = 10,
+        sort: str = "time_desc",
+        from_ts: int = None,
+        to_ts: int = None,
+    ) -> dict:
+        """ExtractedEntity 合并时间线（关键节点 / 来源陈述 / 长期沉淀），分页 + 按来源筛选 + 排序 + 日期过滤。
 
         本方法仅服务 ExtractedEntity 节点：
-        - 关键节点：读自身 event_timeline 结构化事件。
-        - 情绪记忆 / 长期沉淀：走图遍历查询，取关联 Statement / MemorySummary。
-        三类合并按 created_at 毫秒降序（时间未知排最后），再按 source_type 筛选 + 分页。
+        - 关键节点：读自身 event_timeline 结构化事件。created_at = 发生时间（valid_at）。
+        - 来源陈述 / 长期沉淀：走图遍历查询，取关联 Statement / MemorySummary。created_at = 记录时间。
+
+        排序规则（基于 created_at，不同类型语义不同）：
+        - time_asc/desc: 全部按 created_at 排序
+        - occurred_asc/desc: key_node 按 created_at（发生时间），其他为 null → 永远最后
+        - recorded_asc/desc: statement/memory_summary 按 created_at（记录时间），key_node 为 null → 永远最后
+
+        日期过滤：from_ts / to_ts 为 UTC 毫秒时间戳，由前端传入，后端直接数值比较。
+
         total_count / type_stats 始终基于全量，不受筛选影响。
         """
+        # 解析排序参数
+        sort_mode, sort_asc = self._parse_sort(sort)
+
         # 1. 关键节点：读 ExtractedEntity 自身 event_timeline
         entity_name = None
         entity_type = None
@@ -237,11 +288,12 @@ class MemoryEntityService:
                     "title": e.get("title"),
                     "text": e.get("fact"),
                     "created_at": e.get("valid_at"),
+                    "timetype": "occurred",
                 }
                 for e in events
             ]
 
-        # 2. 情绪记忆 + 长期沉淀：走 ExtractedEntity 图遍历查询
+        # 2. 来源陈述 + 长期沉淀：走 ExtractedEntity 图遍历查询
         graph_results = await self.connector.execute_query(
             Memory_Timeline_ExtractedEntity, id=self.id
         )
@@ -269,25 +321,31 @@ class MemoryEntityService:
             {"type": "memory_summary", "count": len(summary_items)},
         ]
 
-        # 4. 合并 + 排序（created_at 均非空，按毫秒降序）
+        # 4. 合并
         all_items = key_node_items + statement_items + summary_items
-        all_items.sort(key=lambda x: x["created_at"], reverse=True)
-        sorted_items = all_items
 
-        # 5. type 筛选（入参 type 即英文 key，直接比对）
+        # 5. 日期过滤（from_date / to_date 共用，不同类型用不同时间字段）
+        if from_ts is not None or to_ts is not None:
+            all_items = [i for i in all_items if self._match_date_filter(i, from_ts, to_ts)]
+
+        # 6. 排序
+        all_items.sort(key=lambda x: self._get_sort_key(x, sort_mode, sort_asc))
+
+        # 7. type 筛选
         if source_type != "all":
-            filtered = [i for i in sorted_items if i["type"] == source_type]
+            filtered = [i for i in all_items if i["type"] == source_type]
         else:
-            filtered = sorted_items
+            filtered = all_items
 
-        # 6. 分页
+        # 8. 分页
         total = len(filtered)
         start = (page - 1) * pagesize
         items = filtered[start:start + pagesize]
         hasnext = page * pagesize < total
 
         logger.info(
-            f"合并时间线: id={self.id}, type={source_type}, "
+            f"合并时间线: id={self.id}, type={source_type}, sort={sort}, "
+            f"from_ts={from_ts}, to_ts={to_ts}, "
             f"key_node={len(key_node_items)}, statement={len(statement_items)}, "
             f"summary={len(summary_items)}, total={total}, page={page}, pagesize={pagesize}"
         )
@@ -308,6 +366,8 @@ class MemoryEntityService:
         raw_value 可能是 collect 列表（ExtractedEntity / MemorySummary 查询）或单个对象
         （Statement 查询的 statement 字段）；CASE 未匹配会产生 None，需过滤。
         时间无法解析（created_at 为 None）的记录直接丢弃，保证每条都有有效时间。
+
+        created_at 即为记录时间；category / timetype 按来源类型设置。
         """
         items = []
         candidates = raw_value if isinstance(raw_value, list) else [raw_value]
@@ -320,14 +380,80 @@ class MemoryEntityService:
             created_at = self._neo4j_dt_to_ms(c.get("created_at"))
             if created_at is None:
                 continue
+
+            category = "source_statement" if source_type == "statement" else "long_term_memory"
+
             items.append({
                 "type": source_type,
-                "category": None,
+                "category": category,
                 "title": None,
                 "text": text,
                 "created_at": created_at,
+                "timetype": "recording",
             })
         return items
+
+    @staticmethod
+    def _parse_sort(sort: str) -> tuple:
+        """解析排序参数，返回 (sort_mode, sort_asc)。
+
+        sort_mode: "time" | "occurred" | "recorded"
+        sort_asc: True 表示升序，False 表示降序
+
+        非法值直接抛 ValueError，不再静默回退默认值；HTTP 层（controller）
+        已用 ``TimelineSort.values()`` 做同样校验，此处保持行为一致。
+        """
+        try:
+            member = TimelineSort(sort)
+        except ValueError:
+            raise ValueError(f"非法的 sort 值: {sort}")
+        return member.sort_mode, member.is_asc
+
+    @staticmethod
+    def _get_sort_key(item: dict, sort_mode: str, sort_asc: bool) -> tuple:
+        """生成排序键：(is_null, timestamp)。
+
+        created_at 在不同类型中的语义不同：
+        - key_node: created_at = 发生时间
+        - statement / memory_summary: created_at = 记录时间
+
+        sort_mode="time": 全部按 created_at 排序（key_node=发生, 其他=记录）
+        sort_mode="occurred": key_node 有发生时间（created_at），其他为 null → 永远最后
+        sort_mode="recorded": statement/memory_summary 有记录时间（created_at），key_node 为 null → 永远最后
+
+        null 的 is_null=1 保证永远排最后；时间戳按方向取值，升序用原值，降序取负值。
+        """
+        if sort_mode == "occurred":
+            # key_node 的 created_at 就是发生时间；其他类型没有发生时间
+            ts = item["created_at"] if item["type"] == "key_node" else None
+        elif sort_mode == "recorded":
+            # statement / memory_summary 的 created_at 就是记录时间；key_node 没有记录时间
+            ts = item["created_at"] if item["type"] != "key_node" else None
+        else:  # "time" — 全部按 created_at
+            ts = item.get("created_at")
+
+        is_null = 1 if ts is None else 0
+        if ts is None:
+            ts = 0
+        # 降序时取负值，这样 Python 默认升序排列后实际是降序
+        if not sort_asc:
+            ts = -ts
+        return (is_null, ts)
+
+    @staticmethod
+    def _match_date_filter(item: dict, from_ts: int | None, to_ts: int | None) -> bool:
+        """判断 item.created_at 是否在 [from_ts, to_ts] 范围内。
+
+        from_ts / to_ts 为 UTC 毫秒时间戳，由前端传入，后端直接数值比较。
+        """
+        ts = item.get("created_at")
+        if ts is None:
+            return False
+        if from_ts is not None and ts < from_ts:
+            return False
+        if to_ts is not None and ts > to_ts:
+            return False
+        return True
 
     @staticmethod
     def _dedup_by_text(items: list) -> list:

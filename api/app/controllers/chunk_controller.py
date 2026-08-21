@@ -21,6 +21,7 @@ from app.core.rag.llm.cv_model import QWenCV
 from app.core.rag.models.chunk import DocumentChunk
 from app.core.rag.retrieval.models import RetrievalPrincipal
 from app.core.rag.vdb.elasticsearch.elasticsearch_vector import ElasticSearchVectorFactory
+from app.core.quota_manager import report_quota_change
 from app.core.response_utils import success
 from app.db import get_async_db
 from app.dependencies import cur_workspace_access_guard_async, get_current_user_async
@@ -932,6 +933,13 @@ async def import_qa_new_doc(
     db_document = await document_service.create_document_async(db=db, document=doc_data, current_user=current_user)
 
     api_logger.info(f"Created doc for QA import: file_id={db_file.id}, document_id={db_document.id}, file_key={file_key}")
+
+    # 文档已落库并计入知识容量用量，提交后评估告警。
+    await report_quota_change(
+        current_user.tenant_id,
+        "knowledge_capacity_quota",
+        workspace_id=db_knowledge.workspace_id,
+    )
 
     # 7. 派发异步任务
     from app.celery_app import celery_app

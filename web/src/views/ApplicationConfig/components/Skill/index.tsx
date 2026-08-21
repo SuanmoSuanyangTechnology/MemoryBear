@@ -4,7 +4,7 @@
  * @Last Modified by: ZhaoYing
  * @Last Modified time: 2026-02-26 10:18:56
  */
-import { useEffect, type FC } from 'react'
+import { Fragment, useEffect, type FC } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Space, Switch, Form, Flex } from 'antd'
 import clsx from 'clsx'
@@ -84,14 +84,13 @@ const SkillList: FC<{value?: SkillConfigForm; onChange?: (config: SkillConfigFor
    * Clears all_skills flag and skill_ids array when enabled is set to false
    */
   useEffect(() => {
-    if (!skillConfig?.enabled) {
-      form.setFieldValue('skills', {
-        ...skillConfig,
-        all_skills: false,
-        skill_ids: []
-      })
+    if (skillConfig?.enabled === false) {
+      form.setFields([
+        { name: ['skills', 'all_skills'], value: false },
+        { name: ['skills', 'skill_ids'], value: [] }
+      ])
     }
-  }, [skillConfig?.enabled])
+  }, [skillConfig?.enabled, form])
 
 
   return (
@@ -125,16 +124,18 @@ const SkillList: FC<{value?: SkillConfigForm; onChange?: (config: SkillConfigFor
         <div className="rb:text-[#212332] rb:font-medium rb:leading-4.5 rb:px-1">{t('application.executeProcessPreview')}</div>
         <Flex align="center" justify="space-between" gap={14} className="rb:text-[12px] rb:bg-[#FFFFFF]! rb:rounded-lg rb-border rb:py-2.5! rb:pl-4! rb:pr-3.25! rb:mb-2!">
           {/* Render each step in the process flow with numbered badges */}
-          {processObj.map((key, index) => (<>
-            <Flex align="center" gap={8}>
-              {/* Step number badge */}
-              <Flex align="center" justify="center" className="rb:size-4 rb:rounded-full rb:bg-[#171719] rb:text-white rb:font-medium">{index + 1}</Flex>
-              {/* Step label */}
-              <span className="rb:inline-block rb:max-w-16">{t(`application.${key}`)}</span>
-            </Flex>
-            {/* Arrow separator between steps (except after last step) */}
-            {index !== processObj.length - 1 && <div className="rb:w-10 rb:h-4.5 rb:bg-cover rb:bg-[url('@/assets/images/application/arrow_right.svg')]"></div>}
-          </>))}
+          {processObj.map((key, index) => (
+            <Fragment key={index}>
+              <Flex align="center" gap={8}>
+                {/* Step number badge */}
+                <Flex align="center" justify="center" className="rb:size-4 rb:rounded-full rb:bg-[#171719] rb:text-white rb:font-medium">{index + 1}</Flex>
+                {/* Step label */}
+                <span className="rb:inline-block rb:max-w-16">{t(`application.${key}`)}</span>
+              </Flex>
+              {/* Arrow separator between steps (except after last step) */}
+              {index !== processObj.length - 1 && <div className="rb:w-10 rb:h-4.5 rb:bg-cover rb:bg-[url('@/assets/images/application/arrow_right.svg')]"></div>}
+            </Fragment>
+          ))}
         </Flex>
         {/* Dynamic skill binding configuration section */}
         <Form.Item noStyle>

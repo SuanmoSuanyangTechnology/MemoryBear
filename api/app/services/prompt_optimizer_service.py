@@ -553,7 +553,7 @@ class PromptOptimizerService:
             "page": {
                 "total": total,
                 "page": page,
-                "page_size": page_size,
+                "pagesize": page_size,
                 "hasnext": page * page_size < total
             },
             "keyword": filter_keyword,

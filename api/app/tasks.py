@@ -18,14 +18,19 @@ from celery.exceptions import Ignore, Retry
 from elasticsearch import AsyncElasticsearch
 from fastapi.encoders import jsonable_encoder
 from redis.exceptions import RedisError
-from sqlalchemy import select, cast, String
+from sqlalchemy import String, cast, select
 
 from app.aioRedis import get_thread_safe_redis
 from app.celery_app import celery_app
 from app.core.config import settings
 from app.core.logging_config import get_logger
-from app.core.models import RedBearEmbeddings, RedBearLLM
 from app.core.memory.storage_services.reflection_engine import retry_registry as rr
+from app.core.memory.storage_services.reflection_engine.errors import (
+    ReflectionBusinessError,
+    ReflectionFailureReason,
+    ReflectionRetriesExhausted,
+)
+from app.core.models import RedBearEmbeddings, RedBearLLM
 from app.core.rag.chunk.hierarchy import GroupedChildChunks, validate_parent_child_result
 from app.core.rag.chunk.metadata import merge_parser_metadata
 from app.core.rag.chunk.parser.image_storage import cleanup_mineru_v3_images
@@ -88,10 +93,10 @@ from app.core.utils.datetime_utils import (
 )
 from app.db import get_db_context, get_db_read
 from app.models import App, AppRelease, Document, File, Knowledge, User, Workspace
-from app.models.file_model import FILE_ROLE_SOURCE
 from app.models.end_user_model import EndUser
+from app.models.file_model import FILE_ROLE_SOURCE
 from app.models.models_model import ModelType
-from app.repositories.end_user_repository import get_end_users_by_workspace
+from app.repositories.end_user_repository import get_end_users_by_workspace, get_all_active_workspaces
 from app.schemas import document_schema, file_schema
 from app.services.memory_config_service import MemoryConfigService
 from app.services.memory_forget_service import MemoryForgetService
@@ -118,6 +123,13 @@ EMBEDDING_MAX_WORKERS = int(os.getenv("EMBEDDING_MAX_WORKERS", "3"))
 AUTO_QUESTIONS_MAX_WORKERS = int(os.getenv("AUTO_QUESTIONS_MAX_WORKERS", "5"))
 # 文档解析页数上限
 MAX_DOCUMENT_PAGES = int(os.getenv("MAX_DOCUMENT_PAGES", "200"))
+
+# ── GDS 拓扑分数（eigenvector 中心性）扫描/计算常量 ──────────────
+# 在途锁 key：避免相邻两轮 scan 重复派发同一用户
+_GDS_TOPOLOGY_INFLIGHT_KEY_FMT = "gds_topology:inflight:{end_user_id}"
+_GDS_TOPOLOGY_INFLIGHT_TTL_SEC = 1500
+# 活跃口径：write_time 距今 < 24 小时才参与 GDS 拓扑分数计算
+_GDS_TOPOLOGY_ACTIVE_HOURS = 24
 
 
 @dataclass(frozen=True)
@@ -2989,6 +3001,39 @@ def scan_layer2_reflection(self) -> Dict[str, Any]:
             "skip_period_or_new": skip_period_or_new, "skip_inflight": skip_inflight}
 
 
+def _report_reflection_failure(
+    *,
+    task_type: str,
+    end_user_id: str,
+    workspace_id: str,
+    reason_code: str | None,
+    model_type: str | None,
+    failed_operations: List[str],
+    last_failed_at_ms: int | None,
+) -> None:
+    """把重试耗尽事件交给可选插件；社区版未注册时静默跳过。"""
+    if reason_code is None or last_failed_at_ms is None:
+        return
+
+    from app.plugins import get_plugin
+
+    reporter = get_plugin("reflection_failure_reporter")
+    if reporter is None:
+        return
+    try:
+        reporter.report(
+            task_type=task_type,
+            end_user_id=end_user_id,
+            workspace_id=workspace_id,
+            reason_code=reason_code,
+            model_type=model_type,
+            failed_operations=failed_operations,
+            last_failed_at_ms=last_failed_at_ms,
+        )
+    except Exception:
+        logger.error("反思最终失败上报插件执行失败", exc_info=True)
+
+
 @celery_app.task(
     name="app.tasks.do_layer2_reflection",
     bind=True,
@@ -3082,6 +3127,11 @@ def do_layer2_reflection(self, end_user_id: str | None = None, config_id: str = 
             dedup_info = r.get("entity_dedup", {})
             meta_info = r.get("metadata_extraction", {})
             merge_info = r.get("description_merge", {})
+            reason_codes = rr.reason_codes_of_layer2(r)
+            primary_reason = rr.select_primary_reason(reason_codes)
+            primary_model_type = rr.select_primary_model_type(
+                reason_codes, rr.model_types_of_layer2(r), primary_reason
+            )
 
             if completion == "full":
                 # 步骤4 完整跑完：刷新"上次反思时间"，注销重试登记
@@ -3113,8 +3163,30 @@ def do_layer2_reflection(self, end_user_id: str | None = None, config_id: str = 
                 with get_db_context() as db:
                     WorkspaceAppService(db).update_end_user_reflection_time(end_user_id)
             skipped_steps = rr.skipped_steps_of_layer2(r)
-            rr.record(_rc, "high_freq", end_user_id, completion, progressed,
-                      skipped_steps=skipped_steps)
+            record_result = rr.record(
+                _rc,
+                "high_freq",
+                end_user_id,
+                completion,
+                progressed,
+                skipped_steps=skipped_steps,
+                reason_code=primary_reason,
+                model_type=primary_model_type,
+            )
+            if record_result.outcome is rr.RetryRecordOutcome.EXHAUSTED:
+                _report_reflection_failure(
+                    task_type="high_freq",
+                    end_user_id=end_user_id,
+                    workspace_id=workspace_id,
+                    reason_code=primary_reason,
+                    model_type=primary_model_type,
+                    failed_operations=skipped_steps,
+                    last_failed_at_ms=record_result.last_failed_at_ms,
+                )
+                if primary_reason is not None:
+                    raise ReflectionRetriesExhausted(
+                        ReflectionFailureReason(primary_reason)
+                    )
             logger.warning(
                 f"反思高频do 未完整完成 user={end_user_id} completion={completion} "
                 f"progressed={progressed} skipped={skipped_steps} "
@@ -3136,12 +3208,44 @@ def do_layer2_reflection(self, end_user_id: str | None = None, config_id: str = 
     loop = set_asyncio_event_loop()
     try:
         result = loop.run_until_complete(_run())
+    except ReflectionRetriesExhausted:
+        raise
+    except ReflectionBusinessError as e:
+        logger.error(f"反思高频do 业务失败 user={end_user_id}: {e}", exc_info=True)
+        try:
+            _rc = get_sync_redis_client()
+            record_result = rr.record(
+                _rc,
+                "high_freq",
+                end_user_id,
+                "failed",
+                progressed=False,
+                skipped_steps=[e.failed_operation],
+                reason_code=e.reason_code,
+                model_type=e.model_type,
+            )
+            if record_result.outcome is rr.RetryRecordOutcome.EXHAUSTED:
+                _report_reflection_failure(
+                    task_type="high_freq",
+                    end_user_id=end_user_id,
+                    workspace_id=workspace_id,
+                    reason_code=e.reason_code.value,
+                    model_type=e.model_type.value,
+                    failed_operations=[e.failed_operation],
+                    last_failed_at_ms=record_result.last_failed_at_ms,
+                )
+        except Exception:
+            logger.error("反思高频do 业务失败登记失败", exc_info=True)
+        raise
     except Exception as e:
         # 真异常：run() 抛出未达 completion 逻辑，补登记 failed（无推进），再 re-raise（FAILURE + traceback，需排查）
         logger.error(f"反思高频do 失败 user={end_user_id}: {e}", exc_info=True)
         try:
             _rc = get_sync_redis_client()
-            rr.record(_rc, "high_freq", end_user_id, "failed", progressed=False, last_error=str(e))
+            rr.record(
+                _rc, "high_freq", end_user_id, "failed",
+                progressed=False, last_error=str(e),
+            )
         except Exception:
             pass
         raise
@@ -3287,13 +3391,17 @@ def do_layer2_dedup_full_scan(self, end_user_id: str | None = None, config_id: s
 
             memory_service = MemoryService(
                 config_id=uuid.UUID(config_id),
-                end_user_id=end_user_id, 
+                end_user_id=end_user_id,
                 workspace_id=workspace_id,
             )
             r = await memory_service.run_dedup_full_scan()
             completion = rr.completion_of_dedup(r)
             progressed = rr.progressed_dedup(r)
             merged = r.get("merged_count", 0)
+            primary_reason = rr.select_primary_reason(rr.reason_codes_of_dedup(r))
+            primary_model_type = rr.select_primary_model_type(
+                rr.reason_codes_of_dedup(r), rr.model_types_of_dedup(r), primary_reason
+            )
 
             if completion == "full":
                 rr.resolve(_rc, "dedup", end_user_id)
@@ -3305,7 +3413,31 @@ def do_layer2_dedup_full_scan(self, end_user_id: str | None = None, config_id: s
                 return {"status": "success", "merged_count": merged}
 
             # partial：truncated / had_type_error。低频不刷 reflection_time（靠 update_scan_time 续扫）。
-            rr.record(_rc, "dedup", end_user_id, completion, progressed)
+            record_result = rr.record(
+                _rc,
+                "dedup",
+                end_user_id,
+                completion,
+                progressed,
+                reason_code=primary_reason,
+                model_type=primary_model_type,
+            )
+            if record_result.outcome is rr.RetryRecordOutcome.EXHAUSTED:
+                _report_reflection_failure(
+                    task_type="dedup",
+                    end_user_id=end_user_id,
+                    workspace_id=workspace_id,
+                    reason_code=primary_reason,
+                    model_type=primary_model_type,
+                    failed_operations=[
+                        str(r["failed_operation"])
+                    ] if r.get("failed_operation") else [],
+                    last_failed_at_ms=record_result.last_failed_at_ms,
+                )
+                if primary_reason is not None:
+                    raise ReflectionRetriesExhausted(
+                        ReflectionFailureReason(primary_reason)
+                    )
             logger.warning(
                 f"反思低频去重do 未完整完成 user={end_user_id} completion={completion} "
                 f"progressed={progressed} truncated={r.get('truncated')} "
@@ -3328,11 +3460,43 @@ def do_layer2_dedup_full_scan(self, end_user_id: str | None = None, config_id: s
     loop = set_asyncio_event_loop()
     try:
         result = loop.run_until_complete(_run())
+    except ReflectionRetriesExhausted:
+        raise
+    except ReflectionBusinessError as e:
+        logger.error(f"反思低频去重do 业务失败 user={end_user_id}: {e}", exc_info=True)
+        try:
+            _rc = get_sync_redis_client()
+            record_result = rr.record(
+                _rc,
+                "dedup",
+                end_user_id,
+                "failed",
+                progressed=False,
+                skipped_steps=[e.failed_operation],
+                reason_code=e.reason_code,
+                model_type=e.model_type,
+            )
+            if record_result.outcome is rr.RetryRecordOutcome.EXHAUSTED:
+                _report_reflection_failure(
+                    task_type="dedup",
+                    end_user_id=end_user_id,
+                    workspace_id=workspace_id,
+                    reason_code=e.reason_code.value,
+                    model_type=e.model_type.value,
+                    failed_operations=[e.failed_operation],
+                    last_failed_at_ms=record_result.last_failed_at_ms,
+                )
+        except Exception:
+            logger.error("反思低频去重业务失败登记失败", exc_info=True)
+        raise
     except Exception as e:
         logger.error(f"反思低频去重do 失败 user={end_user_id}: {e}", exc_info=True)
         try:
             _rc = get_sync_redis_client()
-            rr.record(_rc, "dedup", end_user_id, "failed", progressed=False, last_error=str(e))
+            rr.record(
+                _rc, "dedup", end_user_id, "failed",
+                progressed=False, last_error=str(e),
+            )
         except Exception:
             pass
         raise
@@ -3377,8 +3541,8 @@ def scan_reflection_retry(self) -> Dict[str, Any]:
     dispatched_uids: Dict[str, List[str]] = {"high_freq": [], "dedup": []}
 
     for task_type, do_task, inflight_prefix in (
-        ("high_freq", do_layer2_reflection, "reflection:inflight"),
-        ("dedup", do_layer2_dedup_full_scan, "dedup:inflight"),
+            ("high_freq", do_layer2_reflection, "reflection:inflight"),
+            ("dedup", do_layer2_dedup_full_scan, "dedup:inflight"),
     ):
         zkey = f"reflection:retry:{task_type}"
         try:
@@ -3392,13 +3556,13 @@ def scan_reflection_retry(self) -> Dict[str, Any]:
             try:
                 meta = rr.load_meta(rc, task_type, uid)
                 if not meta:
-                    rc.zrem(zkey, uid)            # 孤儿（meta 已 TTL 过期）→ 清理
+                    rc.zrem(zkey, uid)  # 孤儿（meta 已 TTL 过期）→ 清理
                     cleaned += 1
                     continue
                 if meta.get("completion") == "exhausted":
                     continue
                 if meta.get("completion") == "in_progress":   # 租约到期 = 上次开工后进程死亡
-                    if not rr.mark_dead(rc, task_type, uid):   # 达 dead 上限置 exhausted 返回 False
+                    if not rr.mark_dead(rc, task_type, uid):
                         continue
                 # 仍走 inflight 锁，避免与正常 scan 派的同一用户撞车
                 if not rc.set(f"{inflight_prefix}:{uid}", "1", nx=True, ex=1500):
@@ -3421,6 +3585,200 @@ def scan_reflection_retry(self) -> Dict[str, Any]:
         "cleaned": cleaned,
         "dispatched_uids": dispatched_uids,
     }
+
+
+# =============================================================================
+# GDS 拓扑分数（eigenvector 中心性）：扫描活跃用户 → heavy 计算
+# =============================================================================
+
+
+@celery_app.task(
+    name="app.tasks.scan_gds_topology_score",
+    bind=True,
+    ignore_result=False,
+    max_retries=0,
+    acks_late=False,
+)
+def scan_gds_topology_score(self) -> Dict[str, Any]:
+    start_time = time.time()
+
+    redis_client = get_sync_redis_client()
+    dispatched = 0
+    dispatched_user_ids = []
+    skip_inactive = 0
+    skip_inflight = 0
+
+    with get_db_read() as db:
+        workspace_ids = get_all_active_workspaces(db)
+
+    for ws_id_uuid in workspace_ids:
+        with get_db_read() as db:
+            for user in get_end_users_by_workspace(db, ws_id_uuid):
+                uid = str(user.id)
+                try:
+                    if not _is_active_recently(db, uid, _GDS_TOPOLOGY_ACTIVE_HOURS):
+                        skip_inactive += 1
+                        continue
+                    # 在途锁：抢不到说明该用户已有 GDS 任务在途，跳过（纯 SET NX EX 粗过滤）
+                    if redis_client is not None:
+                        ok = redis_client.set(
+                            _GDS_TOPOLOGY_INFLIGHT_KEY_FMT.format(end_user_id=uid),
+                            "1", nx=True, ex=_GDS_TOPOLOGY_INFLIGHT_TTL_SEC,
+                        )
+                        if not ok:
+                            skip_inflight += 1
+                            continue
+                    do_gds_topology_score.apply_async(
+                        kwargs={"end_user_id": uid},
+                        queue="memory_heavy_tasks",
+                    )
+                    dispatched += 1
+                    dispatched_user_ids.append(uid)
+                    if dispatched % 10 == 0:
+                        logger.info(
+                            f"scan_gds_topology_score 进度: 已派发 {dispatched} 个用户, "
+                            f"最近10个: {dispatched_user_ids[-10:]}"
+                        )
+                except Exception as e:
+                    logger.error(f"GDS拓扑scan 处理用户失败 user={uid}: {e}")
+                    try:
+                        db.rollback()
+                    except Exception:
+                        pass
+
+    logger.info(
+        f"scan_gds_topology_score 完成: 派发 {dispatched} {dispatched_user_ids}, "
+        f"跳过(不活跃) {skip_inactive}, 在途 {skip_inflight}, "
+        f"耗时 {time.time() - start_time:.1f}s"
+    )
+    return {"status": "SUCCESS", "dispatched": dispatched,
+            "dispatched_user_ids": dispatched_user_ids,
+            "skip_inactive": skip_inactive, "skip_inflight": skip_inflight}
+
+
+@celery_app.task(
+    name="app.tasks.do_gds_topology_score",
+    bind=True,
+    ignore_result=False,
+    max_retries=0,
+    acks_late=False,
+    time_limit=600,
+    soft_time_limit=540,
+)
+def do_gds_topology_score(self, end_user_id: str) -> Dict[str, Any]:
+    if not end_user_id:
+        raise ValueError("end_user_id is required")
+
+    inflight_key = _GDS_TOPOLOGY_INFLIGHT_KEY_FMT.format(end_user_id=end_user_id)
+    start_time = time.time()
+
+    async def _run() -> Dict[str, Any]:
+        from app.repositories.neo4j.gds_topology_repository import compute_topology_score
+
+        # 抢该用户的写锁，避免 eigenvector.write 写回与并发写入冲突。
+        write_lock = None
+        redis_client = get_sync_redis_client()
+        if redis_client is not None:
+            write_lock = RedisFairLock(
+                key=f"memory_write:{end_user_id}",
+                redis_client=redis_client,
+                expire=600, timeout=30, auto_renewal=True,
+            )
+            if not await asyncio.to_thread(write_lock.acquire):
+                logger.warning(f"GDS拓扑do 获取写锁超时，跳过 user={end_user_id}")
+                return {"status": "lock_timeout"}
+        try:
+            return await compute_topology_score(end_user_id)
+        finally:
+            if write_lock is not None:
+                await asyncio.to_thread(write_lock.release)
+
+    loop = set_asyncio_event_loop()
+    try:
+        result = loop.run_until_complete(_run())
+        result["end_user_id"] = end_user_id
+        result["elapsed_time"] = time.time() - start_time
+        result["task_id"] = self.request.id
+        return result
+    except Exception as e:
+        # GDS 投影 / eigenvector.write / drop 抛错，re-raise 让 Celery 标记 FAILURE（带 traceback）
+        logger.error(f"GDS拓扑do 失败 user={end_user_id}: {e}", exc_info=True)
+        raise
+    finally:
+        _shutdown_loop_gracefully(loop)
+        # 释放在途标记：放行下一轮 scan 对该用户的派发（成功/失败/跳过都删）
+        try:
+            redis_client = get_sync_redis_client()
+            if redis_client is not None:
+                redis_client.delete(inflight_key)
+        except Exception:
+            pass
+
+
+@celery_app.task(
+    name="app.tasks.sync_all_end_user_memory_counts",
+    bind=True,
+    ignore_result=False,
+    max_retries=0,
+    acks_late=False
+)
+def sync_all_end_user_memory_counts(self) -> Dict[str, Any]:
+    """
+    Operations manual tasks
+    """
+    start_time = time.time()
+
+    async def _run() -> Dict[str, Any]:
+        from app.core.memory.utils.memory_count_utils import (
+            sync_end_user_memory_count_from_neo4j,
+        )
+        from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+
+        # 只读短 session 枚举活跃用户 ID，随后立即关闭
+        with get_db_read() as db:
+            user_ids = [
+                str(u.id)
+                for u in db.query(EndUser)
+                .filter(EndUser.is_active == True, EndUser.memory_count >= 300)
+                .all()
+            ]
+
+        connector = Neo4jConnector()
+        succeeded = 0
+        failed = 0
+        failed_ids: list[str] = []
+        try:
+            for uid in user_ids:
+                try:
+                    await sync_end_user_memory_count_from_neo4j(uid, connector)
+                    succeeded += 1
+                except Exception as e:
+                    failed += 1
+                    failed_ids.append(uid)
+                    logger.warning(f"[MemoryCountSync] 同步失败 user={uid}: {e}")
+        finally:
+            await connector.close()
+
+        return {
+            "status": "SUCCESS",
+            "total": len(user_ids),
+            "succeeded": succeeded,
+            "failed": failed,
+            "failed_ids": failed_ids,
+        }
+
+    loop = set_asyncio_event_loop()
+    try:
+        result = loop.run_until_complete(_run())
+    except Exception as e:
+        logger.error(f"[MemoryCountSync] 全量同步异常: {e}", exc_info=True)
+        raise
+    finally:
+        _shutdown_loop_gracefully(loop)
+
+    result["elapsed_time"] = time.time() - start_time
+    result["task_id"] = self.request.id
+    return result
 
 
 # unused task
@@ -3549,7 +3907,7 @@ def write_total_memory_task(workspace_id: str) -> Dict[str, Any]:
                 "end_user_count": len(end_user_id_list),
                 "end_user_details": end_user_details,
                 "memory_increment_id": str(memory_increment.id),
-                "created_at": to_iso_z(memory_increment.created_at), # 这样返回字符串是否正确
+                "created_at": to_iso_z(memory_increment.created_at),  # 这样返回字符串是否正确
             }
 
     try:
@@ -3638,10 +3996,10 @@ def write_all_workspaces_memory_task(self) -> Dict[str, Any]:
                     end_user_id_list: list[str] = []
                     with get_db_context() as db:
                         has_apps = (
-                            db.query(App.id)
-                            .filter(App.workspace_id == workspace_id, App.is_active.is_(True))
-                            .first()
-                            is not None
+                                db.query(App.id)
+                                .filter(App.workspace_id == workspace_id, App.is_active.is_(True))
+                                .first()
+                                is not None
                         )
                         if has_apps:
                             end_users = EndUserRepository(db).get_end_users_by_workspace(workspace_id)
@@ -3739,7 +4097,7 @@ CACHE_INFLIGHT_TTL_SEC = 1800
     ignore_result=False,
     max_retries=0,
     acks_late=False,
-    time_limit=600,        # 10 分钟硬超时（仅枚举 + 派发，足够）
+    time_limit=600,  # 10 分钟硬超时（仅枚举 + 派发，足够）
     soft_time_limit=540,
 )
 def scan_refresh_insight_summary_cache(self) -> Dict[str, Any]:
@@ -3751,9 +4109,9 @@ def scan_refresh_insight_summary_cache(self) -> Dict[str, Any]:
     redis_client = get_sync_redis_client()
     dispatched = 0
     dispatched_user_ids: List[str] = []
-    skip_no_change = 0      # write_time 为 null 或 数据未变
-    skip_fresh = 0          # 数据有变但缓存刚刷过（未到最短刷新间隔）
-    skip_inflight = 0       # 在途锁未抢到
+    skip_no_change = 0  # write_time 为 null 或 数据未变
+    skip_fresh = 0  # 数据有变但缓存刚刷过（未到最短刷新间隔）
+    skip_inflight = 0  # 在途锁未抢到
 
     # db-session 规范：先用只读短 session 取 workspace 列表，
     # 再【按 workspace 粒度】开独立 session，处理完即释放，避免 identity-map 累积。
@@ -3838,16 +4196,16 @@ def scan_refresh_insight_summary_cache(self) -> Dict[str, Any]:
     ignore_result=False,
     max_retries=0,
     acks_late=False,
-    time_limit=900,                         # 15 分钟硬超时
-    soft_time_limit=840,                    # 14 分钟软超时
+    time_limit=900,  # 15 分钟硬超时
+    soft_time_limit=840,  # 14 分钟软超时
 )
 def do_refresh_insight_summary_cache(
-    self,
-    end_user_id: str,
-    workspace_id: str,
-    language: str = "zh",
-    refresh_insight: bool = True,
-    refresh_summary: bool = True,
+        self,
+        end_user_id: str,
+        workspace_id: str,
+        language: str = "zh",
+        refresh_insight: bool = True,
+        refresh_summary: bool = True,
 ) -> Dict[str, Any]:
     """按 scan 的独立判定刷新单个用户的记忆洞察或用户摘要缓存。
 
@@ -4072,9 +4430,9 @@ def scan_refresh_user_tags(self) -> Dict[str, Any]:
     soft_time_limit=90,
 )
 def do_refresh_user_tags(
-    self,
-    end_user_id: str,
-    workspace_id: str,
+        self,
+        end_user_id: str,
+        workspace_id: str,
 ) -> Dict[str, Any]:
     """在 heavy worker 中调用记忆领域入口，刷新单个用户的名片 Tag。
 
@@ -4120,7 +4478,7 @@ def do_refresh_user_tags(
 # )
 # def run_forgetting_cycle_task(self, config_id: Optional[uuid.UUID] = None) -> Dict[str, Any]:
 #     """定时任务：运行遗忘周期
-    
+
 #     遍历所有终端用户，执行遗忘周期。
 #     """
 #     start_time = time.time()
@@ -4344,6 +4702,7 @@ _IMPLICIT_EMOTIONS_INFLIGHT_KEY_FMT = "implicit_emotions:inflight:{end_user_id}"
 _IMPLICIT_EMOTIONS_INFLIGHT_TTL_SEC = 600
 _INIT_EMOTIONS_INFLIGHT_KEY_FMT = "init_emotions:inflight:{end_user_id}"
 _INIT_EMOTIONS_INFLIGHT_TTL_SEC = 600
+
 
 # 需要在work-periodic执行扫描任务
 @celery_app.task(
@@ -5070,10 +5429,10 @@ def init_interest_distribution_for_users(self, end_user_ids: List[str]) -> Dict[
         result = loop.run_until_complete(_run())
         # 全部失败（无初始化、无未缓存成功结果、无跳过）才标记 Celery FAILURE。
         if (
-            result["failed"] > 0
-            and result["initialized"] == 0
-            and result["not_cached"] == 0
-            and result["skipped"] == 0
+                result["failed"] > 0
+                and result["initialized"] == 0
+                and result["not_cached"] == 0
+                and result["skipped"] == 0
         ):
             raise RuntimeError(
                 f"all {result['failed']} users failed to initialize interest distribution"
@@ -5199,11 +5558,11 @@ def refresh_hot_memory_tags_cache(self) -> Dict[str, Any]:
     soft_time_limit=1700,
 )
 def run_incremental_clustering(
-    self,
-    end_user_id: str,
-    new_entity_ids: List[str],
-    config_id: Optional[str] = None,
-    language: str = "zh",
+        self,
+        end_user_id: str,
+        new_entity_ids: List[str],
+        config_id: Optional[str] = None,
+        language: str = "zh",
 ) -> Dict[str, Any]:
     """增量聚类任务：处理新增实体的社区分配和元数据生成。
     

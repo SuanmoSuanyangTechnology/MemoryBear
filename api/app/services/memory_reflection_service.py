@@ -198,9 +198,9 @@ class WorkspaceAppService:
 
     async def get_workspace_apps_detailed_async(self, workspace_id) -> Dict[str, Any]:
         """异步版：获取 workspace 下所有应用的详情。"""
-        from sqlalchemy import select as sa_select
+        from sqlalchemy import select
 
-        stmt = sa_select(App).where(
+        stmt = select(App).where(
             App.workspace_id == workspace_id,
             App.is_active.is_(True),
         )
@@ -225,9 +225,9 @@ class WorkspaceAppService:
 
     async def _process_app_releases_async(self, app: App, app_info: Dict[str, Any]) -> None:
         """异步版：处理应用的发布版本和配置信息。"""
-        from sqlalchemy import select as sa_select
+        from sqlalchemy import select
 
-        stmt = sa_select(AppRelease).where(AppRelease.app_id == app.id)
+        stmt = select(AppRelease).where(AppRelease.app_id == app.id)
         result = await self.db.execute(stmt)
         app_releases = list(result.scalars().all())
 
@@ -257,7 +257,7 @@ class WorkspaceAppService:
 
     async def _get_memory_config_async(self, memory_content: str) -> Optional[Dict[str, Any]]:
         """异步版：根据 memory_content 获取 memory_config 信息。"""
-        from sqlalchemy import select as sa_select
+        from sqlalchemy import select
         from app.utils.config_utils import resolve_config_id_async
 
         try:
@@ -271,7 +271,7 @@ class WorkspaceAppService:
             tenant_id = None
             if memory_config_result.workspace_id:
                 ws_result = await self.db.execute(
-                    sa_select(Workspace).where(Workspace.id == memory_config_result.workspace_id)
+                    select(Workspace).where(Workspace.id == memory_config_result.workspace_id)
                 )
                 workspace = ws_result.scalars().first()
                 tenant_id = str(workspace.tenant_id) if workspace and workspace.tenant_id else None
@@ -295,10 +295,10 @@ class WorkspaceAppService:
 
     async def _process_end_users_async(self, app: App, app_info: Dict[str, Any]) -> None:
         """异步版：查询应用关联的终端用户。"""
-        from sqlalchemy import select as sa_select
+        from sqlalchemy import select
         from app.models.end_user_model import EndUser
 
-        stmt = sa_select(EndUser).where(
+        stmt = select(EndUser).where(
             EndUser.app_id == app.id,
             EndUser.is_active.is_(True),
         )
@@ -547,22 +547,17 @@ class MemoryReflectionService:
             except (ValueError, TypeError):
                 iteration_period = 24
 
-        reflection_model_id = config_data.get("reflection_model_id", "")
-        if reflection_model_id:
-            reflection_model_id = str(reflection_model_id)
-
-        # 如果模型 ID 为空，且传了同步 db，尝试查工作空间默认
-        if not reflection_model_id and db is not None:
-            workspace_id = config_data.get("workspace_id")
-            if workspace_id:
-                try:
-                    from app.db import get_db_context
-                    with get_db_context() as sync_db:
-                        workspace_models = get_workspace_models_configs(sync_db, workspace_id)
-                        if workspace_models and workspace_models.get("llm"):
-                            reflection_model_id = workspace_models["llm"]
-                except Exception:
-                    pass
+        reflection_model_id = ""
+        workspace_id = config_data.get("workspace_id")
+        if db is not None and workspace_id:
+            try:
+                from app.db import get_db_context
+                with get_db_context() as sync_db:
+                    workspace_models = get_workspace_models_configs(sync_db, workspace_id)
+                    if workspace_models:
+                        reflection_model_id = workspace_models.get("llm") or ""
+            except Exception:
+                pass
 
         return ReflectionConfig(
             enabled=config_data.get("enable_self_reflexion", False),
@@ -710,17 +705,12 @@ class MemoryReflectionService:
             except (ValueError, TypeError):
                 iteration_period = 24
 
-        reflection_model_id = config_data.get("reflection_model_id", "")
-        if reflection_model_id:
-            reflection_model_id = str(reflection_model_id)
-
-        if not reflection_model_id:
-            workspace_id = config_data.get("workspace_id")
-            if workspace_id:
-                workspace_models = get_workspace_models_configs(db, workspace_id)
-                if workspace_models and workspace_models.get("llm"):
-                    reflection_model_id = workspace_models["llm"]
-                    api_logger.info(f"reflection_model_id 为空，使用工作空间默认 LLM: {reflection_model_id}")
+        workspace_id = config_data.get("workspace_id")
+        reflection_model_id = ""
+        if workspace_id:
+            workspace_models = get_workspace_models_configs(db, workspace_id)
+            if workspace_models:
+                reflection_model_id = workspace_models.get("llm") or ""
 
         return ReflectionConfig(
             enabled=config_data.get("enable_self_reflexion", False),

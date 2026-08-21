@@ -2,7 +2,7 @@
 
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.schemas.response_schema import ApiResponse, PageMeta
 
@@ -20,7 +20,16 @@ class PermanentMemoryProperties(BaseModel):
         default=None,
         description="UTC Unix timestamp in milliseconds",
     )
-    is_permanent: bool = True
+    is_permanent: bool = Field(default=False, description="是否永久记忆")
+    value_score: Optional[float] = Field(
+        default=None,
+        description="动态价值分：永久=1.0；普通=0.75*topology_score + 0.25*T（T 为时间新近度）",
+    )
+
+    @field_validator("value_score")
+    @classmethod
+    def round_value_score(cls, v):
+        return round(v, 1) if v is not None else None
 
 
 class PermanentMemoryItem(BaseModel):

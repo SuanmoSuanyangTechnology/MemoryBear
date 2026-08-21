@@ -5,8 +5,10 @@
 - Volcano (火山引擎): 使用 volcenginesdkarkruntime
 - OpenAI: 使用 openai SDK
 """
+import time
 from typing import Any, Dict, Optional
 
+from app.core.alert_metric_bridge import report_model_gateway_failure
 from app.core.models.base import RedBearModelConfig
 from app.core.exceptions import BusinessException
 from app.core.error_codes import BizCode
@@ -33,7 +35,19 @@ def _get_optimize_prompt_options(**kwargs):
     return OptimizePromptOptions(**kwargs)
 
 
-class RedBearImageGenerator:
+class _ObservedGenerator:
+    _config: RedBearModelConfig
+
+    def _observed_call(self, operation: str, call):
+        started = time.perf_counter()
+        try:
+            return call()
+        except Exception as exc:
+            report_model_gateway_failure(self._config, operation, exc, started)
+            raise
+
+
+class RedBearImageGenerator(_ObservedGenerator):
     """图片生成模型封装"""
     
     def __init__(self, config: RedBearModelConfig):
@@ -122,7 +136,9 @@ class RedBearImageGenerator:
                 params["stream"] = True
             
             params.update(kwargs)
-            response = self._client.images.generate(**params)
+            response = self._observed_call(
+                "image.generate", lambda: self._client.images.generate(**params)
+            )
             
         # elif provider == ModelProvider.OPENAI:
         #     response = self._client.images.generate(
@@ -154,7 +170,7 @@ class RedBearImageGenerator:
         return self.generate(prompt, image, size, output_format, response_format, watermark, **kwargs)
 
 
-class RedBearVideoGenerator:
+class RedBearVideoGenerator(_ObservedGenerator):
     """视频生成模型封装"""
     
     def __init__(self, config: RedBearModelConfig):
@@ -268,7 +284,9 @@ class RedBearVideoGenerator:
                 params["draft"] = draft
             
             params.update(kwargs)
-            response = self._client.content_generation.tasks.create(**params)
+            response = self._observed_call(
+                "video.create", lambda: self._client.content_generation.tasks.create(**params)
+            )
         else:
             raise BusinessException(
                 f"不支持的提供商: {provider}",
@@ -300,7 +318,10 @@ class RedBearVideoGenerator:
         provider = self._config.provider.lower()
         
         if provider == ModelProvider.VOLCANO:
-            response = self._client.content_generation.tasks.get(task_id=task_id)
+            response = self._observed_call(
+                "video.get_task",
+                lambda: self._client.content_generation.tasks.get(task_id=task_id),
+            )
             return response.model_dump() if hasattr(response, 'model_dump') else response
         else:
             raise BusinessException(
@@ -331,7 +352,10 @@ class RedBearVideoGenerator:
             if status:
                 params["status"] = status
             params.update(kwargs)
-            response = self._client.content_generation.tasks.list(**params)
+            response = self._observed_call(
+                "video.list_tasks",
+                lambda: self._client.content_generation.tasks.list(**params),
+            )
             return response.model_dump() if hasattr(response, 'model_dump') else response
         else:
             raise BusinessException(
@@ -349,7 +373,10 @@ class RedBearVideoGenerator:
         provider = self._config.provider.lower()
         
         if provider == ModelProvider.VOLCANO:
-            self._client.content_generation.tasks.delete(task_id=task_id)
+            self._observed_call(
+                "video.delete_task",
+                lambda: self._client.content_generation.tasks.delete(task_id=task_id),
+            )
         else:
             raise BusinessException(
                 f"不支持的提供商: {provider}",

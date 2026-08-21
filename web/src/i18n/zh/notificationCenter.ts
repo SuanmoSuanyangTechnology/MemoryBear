@@ -26,6 +26,8 @@ export const notificationCenter = {
     empty: {
       all: '暂无消息',
       unread: '没有未读消息',
+      noMore: '没有更多了',
+      hasMore: '未读消息最多展示{{total}}条',
     },
     detail: {
       title: '消息详情',

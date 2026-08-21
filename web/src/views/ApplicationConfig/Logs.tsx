@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-03-24 15:41:20 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-06-17 17:04:45
+ * @Last Modified time: 2026-08-14 13:37:24
  */
 import { type FC, useRef, useState, useMemo, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -45,28 +45,34 @@ const Logs: FC<{ application: Application; }> = ({ application }) => {
       title: t('application.logTitle'),
       dataIndex: 'title',
       key: 'title',
-      className: 'rb:text-[#212332]'
+      width: 500,
+      className: 'rb:text-[#212332]',
     },
     {
       title: 'User ID',
       dataIndex: 'user_id',
       key: 'user_id',
+      width: 360,
     },
     {
       title: t('application.created_at'),
       dataIndex: 'created_at',
       key: 'created_at',
+      width: 180,
       render: (createdAt: string) => formatDateTime(createdAt, 'YYYY-MM-DD HH:mm:ss'),
     },
     {
       title: t('common.updated_at'),
       dataIndex: 'updated_at',
       key: 'updated_at',
+      width: 180,
       render: (updatedAt: string) => updatedAt ? formatDateTime(updatedAt, 'YYYY-MM-DD HH:mm:ss') : '-',
     },
     {
       title: t('common.operation'),
       key: 'action',
+      fixed: 'right',
+      width: 80,
       render: (_, record) => (
         <Flex wrap>
           <Button

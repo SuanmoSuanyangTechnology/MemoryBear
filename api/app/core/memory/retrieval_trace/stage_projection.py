@@ -106,6 +106,22 @@ def _score(value: Any) -> float:
     return round(score, 4) if math.isfinite(score) else 0.0
 
 
+def _perceptual_type(value: Any) -> int | None:
+    """规范化公开感知类型，避免把异常源数据透传给前端。"""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        normalized = value
+    elif isinstance(value, str):
+        stripped = value.strip()
+        if not stripped.isdigit():
+            return None
+        normalized = int(stripped)
+    else:
+        return None
+    return normalized if normalized in {1, 2, 3} else None
+
+
 def sanitize_relevance(value: Any) -> float:
     """Backward-compatible legacy helper; new payloads use ``score``."""
     try:
@@ -117,7 +133,7 @@ def sanitize_relevance(value: Any) -> float:
     return round(min(max(score, 0.0), 1.0), 4)
 
 
-def _memory_content(memory: Memory, kind: str) -> str:
+def _memory_content(memory: Memory, kind: str, *, prefer_perceptual_display: bool = False) -> str:
     data = memory.data if isinstance(memory.data, dict) else {}
     if kind == "profile":
         profile = project_profile_data(MemorySearchResult(memories=[memory]))
@@ -125,6 +141,9 @@ def _memory_content(memory: Memory, kind: str) -> str:
         return display_text("；".join(values), 300)
     if memory_type(memory.source) == "entity":
         candidates = (data.get("description"), data.get("description_summary"), data.get("name"), memory.content)
+    elif memory.source == Neo4jNodeType.PERCEPTUAL and prefer_perceptual_display:
+        # 最终结果只展示纯解析文本；解析为空或失败时回退到已存储的 summary。
+        candidates = (data.get("_perceptual_display_content"), data.get("summary"))
     elif memory.source == Neo4jNodeType.PERCEPTUAL:
         candidates = (memory.content, data.get("summary"))
     elif memory.source == Neo4jNodeType.RAG:
@@ -138,14 +157,24 @@ def _memory_content(memory: Memory, kind: str) -> str:
     return ""
 
 
-def project_memory_item(memory: Memory, rank: int, *, kind: str | None = None) -> dict[str, Any]:
+def project_memory_item(
+        memory: Memory,
+        rank: int,
+        *,
+        kind: str | None = None,
+        prefer_perceptual_display: bool = False,
+) -> dict[str, Any]:
     resolved_kind = kind or memory_type(memory.source)
     item: dict[str, Any] = {
         "rank": rank,
         "memory_type": resolved_kind,
         "source": memory.source.value if isinstance(memory.source, Neo4jNodeType) else str(memory.source),
         "score": 1.0 if resolved_kind == "profile" else _score(memory.score),
-        "content": _memory_content(memory, resolved_kind),
+        "content": _memory_content(
+            memory,
+            resolved_kind,
+            prefer_perceptual_display=prefer_perceptual_display,
+        ),
     }
     # Rag 与 Perceptual 都展示为文件记忆，但只有 Perceptual 有稳定的文件元数据协议。
     if resolved_kind == "file" and memory.source == Neo4jNodeType.PERCEPTUAL:
@@ -154,7 +183,8 @@ def project_memory_item(memory: Memory, rank: int, *, kind: str | None = None) -
             "file_name": display_text(data.get("file_name"), 1000),
             "file_path": display_text(data.get("file_path"), 2000),
             "file_type": display_text(data.get("file_type"), 200),
-            "perceptual_type": data.get("perceptual_type"),
+            # 对外仅暴露协议定义的 1、2、3，非法类型统一返回 null。
+            "perceptual_type": _perceptual_type(data.get("perceptual_type")),
         }
         if any(value not in (None, "") for value in file_data.values()):
             item["file"] = file_data
@@ -193,7 +223,12 @@ def project_result_items(
         for memory in search_result.memories:
             if len(items) >= limit:
                 break
-            items.append(project_memory_item(memory, len(items) + 1))
+            # 最终阶段启用公开感知文本，内部增强上下文仍保留在 memory.content 中。
+            items.append(project_memory_item(
+                memory,
+                len(items) + 1,
+                prefer_perceptual_display=True,
+            ))
     for index, item in enumerate(items, start=1):
         item["rank"] = index
     return items

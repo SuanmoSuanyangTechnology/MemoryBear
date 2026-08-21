@@ -78,32 +78,20 @@ const RecallTestResult = ({
     return `**${t('knowledgeBase.question')}:** ${question}\n**${t('knowledgeBase.answer')}:** ${answer}`;
   };
 
-  // Check if content is valid HTML
-  const isValidHTML = (content: string): boolean => {
-    if (!content) return false;
-    // Check if content contains HTML tags
-    const htmlTagPattern = /<[^>]+>/;
-    return htmlTagPattern.test(content);
-  };
-
-  // Render content with HTML or Markdown fallback
+  // Render content via RbMarkdown exclusively.
+  //
+  // Previous implementation short-circuited any content containing an HTML
+  // tag (`<[^>]+>`) into `dangerouslySetInnerHTML`, which completely bypassed
+  // the Markdown parser and caused plain-text Markdown image syntax like
+  // `![](http://localhost:5173/api/files/xxx)` to render as literal text
+  // instead of an `<img>` element.
+  //
+  // RbMarkdown already enables `rehypeRaw` when `showHtmlComments=true`, so
+  // any legitimate embedded HTML (e.g. QA-parser output, inline `<span>`
+  // styles, etc.) is still rendered as HTML AND the surrounding Markdown
+  // (images, links, tables) is correctly processed in a single pass.
   const renderTextContent = useMemo(() => {
     return (content: string) => {
-      // Try to render as HTML first
-      if (isValidHTML(content)) {
-        try {
-          return (
-            <div 
-              className='rb:prose rb:prose-sm rb:max-w-none'
-              dangerouslySetInnerHTML={{ __html: content }}
-            />
-          );
-        } catch (error) {
-          console.warn('HTML parsing failed, falling back to Markdown:', error);
-        }
-      }
-      
-      // Fallback to Markdown rendering
       return <RbMarkdown content={content} showHtmlComments={true} isNeedCopy={false} />;
     };
   }, []);

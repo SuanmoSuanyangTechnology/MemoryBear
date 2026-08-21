@@ -8,6 +8,12 @@ from typing import Any, Dict, List, Optional, Tuple
 from pydantic import BaseModel, Field
 from jinja2 import Environment, FileSystemLoader
 
+from app.core.memory.storage_services.reflection_engine.errors import (
+    ReflectionBusinessError,
+    ReflectionFailureReason,
+    ReflectionModelType,
+)
+
 logger = logging.getLogger(__name__)
 
 # 加载模板
@@ -49,37 +55,48 @@ async def judge_batch_dedup(
     Returns:
         [(idx_a, idx_b, confidence, reason), ...] 索引从0开始（内部已转换）
     """
+    template = _prompt_env.get_template("entity_dedup_batch.jinja2")
+    rendered_prompt = template.render(
+        entities=entities,
+        entity_type=entity_type,
+        language=language,
+    )
+
+    messages = [{"role": "user", "content": rendered_prompt}]
     try:
-        template = _prompt_env.get_template("entity_dedup_batch.jinja2")
-        rendered_prompt = template.render(
-            entities=entities,
-            entity_type=entity_type,
-            language=language,
+        response = await llm_client.call_structured(messages, BatchDedupOutput)
+    except Exception as exc:
+        logger.error("反思引擎实体去重方案B模型调用失败", exc_info=True)
+        raise ReflectionBusinessError(
+            ReflectionFailureReason.MODEL_CALL_FAILED,
+            "dedup_full_scan_model_call",
+            model_type=ReflectionModelType.LLM,
+        ) from exc
+
+    if not isinstance(response, BatchDedupOutput):
+        logger.error("反思引擎实体去重方案B返回结构无效")
+        raise ReflectionBusinessError(
+            ReflectionFailureReason.RESULT_PARSE_FAILED,
+            "dedup_full_scan_result_parse",
+            model_type=ReflectionModelType.LLM,
         )
 
-        messages = [{"role": "user", "content": rendered_prompt}]
-        response = await llm_client.call_structured(messages, BatchDedupOutput)
+    # 校验 + 转换索引 + 去重（每个实体最多出现在一个配对中）
+    results = []
+    seen_entities = set()
+    for item in response.results:
+        if len(item.pair) != 2:
+            continue
+        idx_a, idx_b = item.pair[0] - 1, item.pair[1] - 1  # 转为0-based
+        if not (0 <= idx_a < len(entities) and 0 <= idx_b < len(entities)):
+            continue
+        if not (0 <= item.confidence <= 1):
+            continue
+        if idx_a in seen_entities or idx_b in seen_entities:
+            continue
+        seen_entities.add(idx_a)
+        seen_entities.add(idx_b)
+        results.append((idx_a, idx_b, item.confidence, item.reason,
+                        item.new_name, item.new_aliases or []))
 
-        if not isinstance(response, BatchDedupOutput):
-            return []
-
-        # 校验 + 转换索引 + 去重（每个实体最多出现在一个配对中）
-        results = []
-        seen_entities = set()
-        for item in response.results:
-            if len(item.pair) != 2:
-                continue
-            idx_a, idx_b = item.pair[0] - 1, item.pair[1] - 1  # 转为0-based
-            if not (0 <= idx_a < len(entities) and 0 <= idx_b < len(entities)):
-                continue
-            if idx_a in seen_entities or idx_b in seen_entities:
-                continue
-            seen_entities.add(idx_a)
-            seen_entities.add(idx_b)
-            results.append((idx_a, idx_b, item.confidence, item.reason,
-                            item.new_name, item.new_aliases or []))
-
-        return results
-    except Exception as e:
-        logger.error(f"反思引擎 实体去重方案B LLM 分组判定失败: {e}")
-        return []
+    return results
