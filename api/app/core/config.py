@@ -404,6 +404,12 @@ class Settings:
     GDS_TOPOLOGY_SCAN_INTERVAL_MINUTES: int = TypeAdapter(
         Annotated[int, Field(ge=1, description="GDS topology score scan interval in minutes, must be >= 1")]
     ).validate_python(int(os.getenv("GDS_TOPOLOGY_SCAN_INTERVAL_MINUTES", "60")))
+    GDS_TOPOLOGY_INFLIGHT_TTL_SEC: int = TypeAdapter(
+        Annotated[int, Field(ge=1, description="GDS topology in-flight lock TTL in seconds, must be >= 1")]
+    ).validate_python(int(os.getenv("GDS_TOPOLOGY_INFLIGHT_TTL_SEC", "86400")))
+    GDS_TOPOLOGY_ACTIVE_HOURS: int = TypeAdapter(
+        Annotated[int, Field(ge=1, description="GDS topology active window in hours, must be >= 1")]
+    ).validate_python(int(os.getenv("GDS_TOPOLOGY_ACTIVE_HOURS", "2")))
     # 热门记忆标签缓存预热时间（UTC 小时，0-23）。19 = 北京时间 03:00
     HOT_MEMORY_TAGS_REFRESH_HOUR: int = TypeAdapter(
         Annotated[int, Field(ge=0, le=23, description="Hot memory tags cache refresh hour (UTC), 0-23. 19=Beijing 03:00")]
