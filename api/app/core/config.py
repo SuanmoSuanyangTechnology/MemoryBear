@@ -125,6 +125,7 @@ class Settings:
     # LLM Request Configuration
     LLM_TIMEOUT: float = float(os.getenv("LLM_TIMEOUT", "120.0"))
     LLM_MAX_RETRIES: int = int(os.getenv("LLM_MAX_RETRIES", "2"))
+    LLM_NETWORK_RETRY_ATTEMPTS: int = int(os.getenv("LLM_NETWORK_RETRY_ATTEMPTS", "3"))
     EMBEDDING_BATCH_SIZE: int = int(os.getenv("EMBEDDING_BATCH_SIZE", "10"))
 
     # Fast Write BERT 
