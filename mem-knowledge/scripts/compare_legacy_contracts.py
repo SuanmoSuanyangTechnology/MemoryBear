@@ -48,6 +48,14 @@ EXPECTED_COUNTS = {
 }
 
 HTTP_METHODS = {"get", "post", "put", "patch", "delete"}
+LEGACY_RESPONSE_FIELDS = {"code", "msg", "data", "error", "time"}
+LEGACY_ERROR_STATUSES = ("400", "404", "409", "500")
+STREAM_OPERATIONS = {
+    ("GET", "/internal/v1/knowledges/{kb_id}/qa/export"),
+    ("POST", "/internal/v1/knowledges/{kb_id}/batch-download"),
+    ("GET", "/internal/v1/files/{file_id}"),
+    ("POST", "/internal/v1/files/batch-download"),
+}
 
 
 def normalize_internal_operation(method: str, legacy_path: str) -> tuple[str, str]:
@@ -151,6 +159,78 @@ def compare_openapi_operations(
     return errors
 
 
+def _resolve_schema(
+    schema: Mapping[str, Any],
+    candidate: Mapping[str, Any],
+) -> Mapping[str, Any]:
+    reference = candidate.get("$ref")
+    if not isinstance(reference, str):
+        return candidate
+    prefix = "#/components/schemas/"
+    if not reference.startswith(prefix):
+        return {}
+    name = reference.removeprefix(prefix)
+    resolved = schema.get("components", {}).get("schemas", {}).get(name, {})
+    return resolved if isinstance(resolved, Mapping) else {}
+
+
+def _operation_response_schema(
+    schema: Mapping[str, Any],
+    operation: Operation,
+    status_code: str,
+) -> Mapping[str, Any]:
+    operation_schema = (
+        schema.get("paths", {}).get(operation.path, {}).get(operation.method.lower(), {})
+    )
+    response_schema = (
+        operation_schema.get("responses", {})
+        .get(status_code, {})
+        .get("content", {})
+        .get("application/json", {})
+        .get("schema", {})
+    )
+    return _resolve_schema(schema, response_schema)
+
+
+def compare_openapi_responses(
+    schema: Mapping[str, Any],
+    expected: Sequence[Operation],
+) -> list[str]:
+    """Return response-envelope errors for the 54 JSON business operations."""
+
+    errors: list[str] = []
+    json_count = 0
+    for operation in expected:
+        for status_code in LEGACY_ERROR_STATUSES:
+            error_schema = _operation_response_schema(schema, operation, status_code)
+            error_properties = error_schema.get("properties", {})
+            if set(error_properties) != LEGACY_RESPONSE_FIELDS:
+                errors.append(
+                    "incompatible error envelope: "
+                    f"{operation.method} {operation.path} status={status_code} "
+                    f"fields={sorted(error_properties)}"
+                )
+        key = (operation.method, operation.path)
+        if key in STREAM_OPERATIONS:
+            continue
+        resolved = _operation_response_schema(schema, operation, "200")
+        properties = resolved.get("properties", {})
+        if set(properties) != LEGACY_RESPONSE_FIELDS:
+            errors.append(
+                "incompatible success envelope: "
+                f"{operation.method} {operation.path} fields={sorted(properties)}"
+            )
+            continue
+        if properties["code"].get("type") != "integer":
+            errors.append(f"response code is not numeric: {operation.method} {operation.path}")
+        if properties["time"].get("type") != "integer":
+            errors.append(f"response time is not numeric: {operation.method} {operation.path}")
+        json_count += 1
+    if json_count != 54:
+        errors.append(f"expected 54 legacy JSON envelopes, found {json_count}")
+    return errors
+
+
 def _inventory_payload(
     operations: Sequence[Operation],
     counts: Mapping[str, int],
@@ -186,11 +266,19 @@ def main() -> int:
             create_app().openapi(),
             operations,
         )
+        response_errors = compare_openapi_responses(
+            create_app().openapi(),
+            operations,
+        )
+        contract_errors.extend(response_errors)
         if contract_errors:
             for error in contract_errors:
                 print(error, file=sys.stderr)
             return 1
         payload["openapi_operation_count"] = len(operations)
+        payload["openapi_json_envelope_count"] = 54
+        payload["openapi_error_envelope_operation_count"] = 58
+        payload["openapi_stream_operation_count"] = len(STREAM_OPERATIONS)
         payload["openapi_parity"] = True
     if args.json:
         json.dump(payload, sys.stdout, ensure_ascii=False, indent=2, sort_keys=True)
@@ -200,7 +288,10 @@ def main() -> int:
         for filename, count in counts.items():
             print(f"{filename}: {count}")
         if not args.inventory_only:
-            print("internal OpenAPI parity: 58/58")
+            print(
+                "internal OpenAPI parity: 58/58 operations, 54/54 JSON envelopes, "
+                "58/58 error envelopes"
+            )
     return 0
 
 

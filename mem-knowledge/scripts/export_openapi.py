@@ -9,6 +9,7 @@ from pathlib import Path
 from scripts.compare_legacy_contracts import (
     collect_legacy_operations,
     compare_openapi_operations,
+    compare_openapi_responses,
 )
 from src.main import create_app
 
@@ -23,6 +24,7 @@ def main() -> None:
     legacy_root = Path(__file__).resolve().parents[2] / "api"
     operations, _counts = collect_legacy_operations(legacy_root)
     errors = compare_openapi_operations(schema, operations)
+    errors.extend(compare_openapi_responses(schema, operations))
     if errors:
         raise RuntimeError("Internal OpenAPI mismatch: " + "; ".join(errors))
     paths = set(schema.get("paths", {}))
