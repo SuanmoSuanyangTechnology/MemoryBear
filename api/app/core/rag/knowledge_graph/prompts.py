@@ -22,7 +22,31 @@ Each relation: "from_ref" (string entity ref), "to_ref" (string entity ref),
 grounded in the source). Optional: "keywords" (string array), "directed"
 (boolean), "confidence" (number 0-1).
 Example:
-{"entities": [{"ref": "e1", "name": "Acme Corp", "entity_type": "organization", "description": "Semiconductor company headquartered in Hsinchu."}, {"ref": "e2", "name": "Zeta", "entity_type": "product", "description": "AI accelerator chip launched by Acme Corp in 2025."}], "relations": [{"from_ref": "e1", "to_ref": "e2", "predicate": "launched", "description": "Acme Corp launched the Zeta chip in 2025.", "keywords": ["product launch"]}]}
+{
+  "entities": [
+    {
+      "ref": "e1",
+      "name": "Acme Corp",
+      "entity_type": "organization",
+      "description": "Semiconductor company headquartered in Hsinchu."
+    },
+    {
+      "ref": "e2",
+      "name": "Zeta",
+      "entity_type": "product",
+      "description": "AI accelerator chip launched by Acme Corp in 2025."
+    }
+  ],
+  "relations": [
+    {
+      "from_ref": "e1",
+      "to_ref": "e2",
+      "predicate": "launched",
+      "description": "Acme Corp launched the Zeta chip in 2025.",
+      "keywords": ["product launch"]
+    }
+  ]
+}
 """.strip()
 
 EXTRACTION_PROMPT_VERSION = "2026-07-27-v1"
