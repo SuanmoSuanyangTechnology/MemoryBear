@@ -27,6 +27,7 @@ from app.core.memory.analytics.hot_memory_tags import (
 from app.core.memory.analytics.recent_activity_stats import get_recent_activity_stats
 from app.core.utils.datetime_utils import to_timestamp_ms
 from app.models import Workspace
+from app.models.file_metadata_model import FileMetadata
 from app.models.user_model import User
 from app.repositories.memory_config_repository import MemoryConfigRepository
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
@@ -36,7 +37,7 @@ from app.schemas.memory_storage_schema import (
     ConfigKey,
     ConfigParamsCreate,
     ConfigParamsDelete,
-    DebugChatInput,
+    TrialRunChatInput,
     PilotRunInput,
     ConfigUpdate,
     ConfigUpdateExtracted,
@@ -51,26 +52,32 @@ config_logger = get_config_logger()
 load_dotenv()
 _neo4j_connector = Neo4jConnector(shared_driver=True)
 
-DEBUG_CHAT_SYSTEM_PROMPT = """
-You are a neutral and helpful AI assistant in a debugging conversation. Answer
+TRIAL_RUN_CHAT_SYSTEM_PROMPT = """
+You are a neutral and helpful AI assistant in a trial-run conversation. Answer
 general questions normally using your own general knowledge. Use the explicit
 conversation history and the supplied attachment analysis results as additional
-context when they are relevant. Attachment labels identify the original message,
-position, and type of every attachment. When asked about multiple attachments,
-account for every label; if an attachment could not be understood, say so instead
-of silently omitting it. Do not claim to have accessed long-term memory, a private
-knowledge base, tools, or skills. If a question requires unavailable private or
-up-to-date information, state that limitation clearly. Reply in the language used
-by the user; when it is unclear, use the requested interface language.
+context when they are relevant. Attachment labels identify every current-message
+attachment. Answer the user's question directly, but do not reproduce the complete
+attachment analyses or add an attachment-details appendix; the backend appends the
+original analyses after your answer. If an attachment could not be understood, say
+so instead of silently omitting it. Do not claim to have accessed long-term memory,
+a private knowledge base, tools, or skills. If a question requires unavailable
+private or up-to-date information, state that limitation clearly. Reply in the
+language used by the user; when it is unclear, use the requested interface language.
 """.strip()
 
-DEBUG_ATTACHMENT_ANALYSIS_PROMPT = """
-Analyze every supplied attachment independently and return concise plain-text
-descriptions. Preserve each attachment label exactly so another language model can
-reliably associate the description with the original conversation message. Do not
-answer the user's overall question and do not omit an attachment. If an attachment
-cannot be understood, state the failure under that attachment label.
+TRIAL_RUN_ATTACHMENT_ANALYSIS_PROMPT = """
+Analyze every supplied attachment independently and return detailed plain-text
+descriptions. Preserve each attachment label exactly. For images, cover visible
+objects, text, layout, and relevant context. For audio, cover speech, speakers,
+important sounds, and sequence. For video, cover scenes, actions, visible text,
+speech or audio, and the timeline. Do not answer the user's overall question and do
+not omit an attachment. If an attachment cannot be understood, state the failure
+under that attachment label.
 """.strip()
+
+TRIAL_RUN_CHAT_DEFAULT_HISTORY_ROUNDS = 20
+TRIAL_RUN_CHAT_HISTORY_ROUNDS_ENV = "TRIAL_RUN_CHAT_HISTORY_ROUNDS"
 
 
 class MemoryStorageService:
@@ -314,7 +321,7 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
         return data_list
 
     @staticmethod
-    def _debug_media_model_id(memory_config, file_type: FileType) -> uuid.UUID:
+    def _trial_run_media_model_id(memory_config, file_type: FileType) -> uuid.UUID:
         """返回某一媒体类型的专用模型，未配置时回退文本模型。"""
         if file_type == FileType.IMAGE:
             return memory_config.vision_model_id or memory_config.llm_model_id
@@ -323,6 +330,39 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
         if file_type == FileType.VIDEO:
             return memory_config.video_model_id or memory_config.llm_model_id
         return memory_config.llm_model_id
+
+    @staticmethod
+    def _trial_run_history_round_limit() -> int:
+        """返回试运行对话保留的最新用户轮次数。"""
+        raw_limit = os.getenv(
+            TRIAL_RUN_CHAT_HISTORY_ROUNDS_ENV,
+            str(TRIAL_RUN_CHAT_DEFAULT_HISTORY_ROUNDS),
+        )
+        try:
+            return max(0, int(raw_limit))
+        except (TypeError, ValueError):
+            logger.warning(
+                "Invalid %s=%r; falling back to %s",
+                TRIAL_RUN_CHAT_HISTORY_ROUNDS_ENV,
+                raw_limit,
+                TRIAL_RUN_CHAT_DEFAULT_HISTORY_ROUNDS,
+            )
+            return TRIAL_RUN_CHAT_DEFAULT_HISTORY_ROUNDS
+
+    @staticmethod
+    def _latest_trial_run_history(history: list[Any], max_rounds: int) -> list[Any]:
+        """以 user 消息为一轮的起点，保留最新 max_rounds 轮及其后续回复。"""
+        if max_rounds <= 0:
+            return []
+
+        user_rounds = 0
+        for index in range(len(history) - 1, -1, -1):
+            if history[index].role != "user":
+                continue
+            user_rounds += 1
+            if user_rounds == max_rounds:
+                return list(history[index:])
+        return list(history)
 
     @staticmethod
     def _normalize_capabilities(capabilities) -> set[str]:
@@ -406,45 +446,51 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
                 part["video"] = get_data_url()
 
     @staticmethod
-    async def _load_debug_local_file(
+    async def _load_trial_run_local_file(
             file,
-            multimodal_service,
             workspace_id: uuid.UUID,
             tenant_id: uuid.UUID,
     ) -> tuple[bytes, str]:
         """校验本地附件归属并从配置的存储后端读取原始字节。"""
         import magic
+        from app.db import get_async_db_context
         from app.services.file_storage_service import FileStorageService
 
-        metadata = await multimodal_service._get_file_metadata(
-            file.upload_file_id,
-            completed_only=True,
-        )
-        if (
-                metadata is None
-                or metadata.workspace_id != workspace_id
-                or metadata.tenant_id != tenant_id
-        ):
-            raise ValueError("local attachment is unavailable in the current workspace")
+        async with get_async_db_context() as db:
+            metadata = await db.scalar(
+                select(FileMetadata).where(
+                    FileMetadata.id == file.upload_file_id,
+                    FileMetadata.status == "completed",
+                    FileMetadata.workspace_id == workspace_id,
+                    FileMetadata.tenant_id == tenant_id,
+                )
+            )
+            if metadata is None:
+                raise ValueError("local attachment is unavailable in the current workspace")
+            file_key = metadata.file_key
+            metadata_content_type = metadata.content_type
+            metadata_file_ext = metadata.file_ext
+            metadata_file_name = metadata.file_name
 
-        content = await FileStorageService().download_file(metadata.file_key)
+        content = await FileStorageService().download_file(file_key)
         if not content:
             raise ValueError("local attachment is empty")
 
         detected_mime = magic.from_buffer(content, mime=True)
-        mime_type = detected_mime or metadata.content_type or "application/octet-stream"
+        mime_type = detected_mime or metadata_content_type or "application/octet-stream"
         file.set_content(content)
-        if file.type == FileType.AUDIO and metadata.file_ext:
-            audio_ext = metadata.file_ext.lstrip(".").lower()
+        file.url = file.url or f"local-file://{file.upload_file_id}"
+        if file.type == FileType.AUDIO and metadata_file_ext:
+            audio_ext = metadata_file_ext.lstrip(".").lower()
             file.file_type = f"audio/{audio_ext}"
         else:
             file.file_type = mime_type
         if not file.name:
-            file.name = metadata.file_name
+            file.name = metadata_file_name
         return content, mime_type
 
     @classmethod
-    async def _process_debug_files(
+    async def _process_trial_run_files(
             cls,
             files,
             multimodal_service,
@@ -471,9 +517,8 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
             local_media: tuple[bytes, str] | None = None
             if file.transfer_method == TransferMethod.LOCAL_FILE:
                 try:
-                    content, mime_type = await cls._load_debug_local_file(
+                    content, mime_type = await cls._load_trial_run_local_file(
                         file,
-                        multimodal_service,
                         workspace_id,
                         tenant_id,
                     )
@@ -483,7 +528,7 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
                     raise
                 except Exception:
                     logger.error(
-                        "[DEBUG_CHAT_STREAM] Failed to load local attachment: file_id=%s",
+                        "[TRIAL_RUN_CHAT_STREAM] Failed to load local attachment: file_id=%s",
                         file.upload_file_id,
                         exc_info=True,
                     )
@@ -559,7 +604,7 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
         return int(getattr(usage_metadata, "total_tokens", 0) or 0)
 
     @staticmethod
-    def _debug_chat_error_data(language: str, kind: str = "generation") -> dict[str, Any]:
+    def _trial_run_chat_error_data(language: str, kind: str = "generation") -> dict[str, Any]:
         english = language == "en"
         if kind == "model":
             message = "Model unavailable" if english else "模型不可用"
@@ -569,12 +614,12 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
             error = "configuration access denied"
         else:
             message = "Chat generation failed" if english else "对话生成失败"
-            error = "debug chat generation failed"
+            error = "trial run chat generation failed"
         return {"code": 5000, "message": message, "error": error}
 
-    async def debug_chat_stream(
+    async def trial_run_chat_stream(
             self,
-            payload: DebugChatInput,
+            payload: TrialRunChatInput,
             language: str = "zh",
             workspace_id: uuid.UUID | None = None,
             tenant_id: uuid.UUID | None = None,
@@ -597,19 +642,12 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
             FileType.VIDEO: [],
             FileType.DOCUMENT: [],
         }
-        for message_index, history_message in enumerate(payload.history):
-            for file_index, file in enumerate(history_message.files):
-                attachment_groups[file.type].append({
-                    "scope": "history",
-                    "message_index": message_index,
-                    "file_index": file_index,
-                    "file": file,
-                })
+        attachment_type_counts = {file_type: 0 for file_type in attachment_groups}
         for file_index, file in enumerate(payload.files):
+            attachment_type_counts[file.type] += 1
             attachment_groups[file.type].append({
-                "scope": "current",
-                "message_index": None,
                 "file_index": file_index,
+                "type_index": attachment_type_counts[file.type],
                 "file": file,
             })
 
@@ -617,15 +655,17 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
             file = ref["file"]
             file_type = str(getattr(file.type, "value", file.type))
             name = file.name or str(file.upload_file_id or file.url or "")
-            if ref["scope"] == "history":
-                location_zh = f"历史消息 {ref['message_index'] + 1} 的附件 {ref['file_index'] + 1}"
-                location_en = f"history message {ref['message_index'] + 1}, attachment {ref['file_index'] + 1}"
-            else:
-                location_zh = f"当前消息的附件 {ref['file_index'] + 1}"
-                location_en = f"current message, attachment {ref['file_index'] + 1}"
+            type_labels_zh = {
+                FileType.IMAGE: "图片文件",
+                FileType.AUDIO: "音频文件",
+                FileType.VIDEO: "视频文件",
+                FileType.DOCUMENT: "文档文件",
+            }
+            location_zh = f"{type_labels_zh[file.type]} {ref['type_index']}"
+            location_en = f"{file_type} file {ref['type_index']}"
             if language == "en":
-                return f"[{location_en}: type={file_type}, name={name}]"
-            return f"[{location_zh}：类型={file_type}，名称={name}]"
+                return f"[Details of {location_en}: name={name}]"
+            return f"[{location_zh}的详细内容：名称={name}]"
 
         def group_failure_text(refs: list[dict[str, Any]], reason: str) -> str:
             return "\n".join(f"{attachment_label(ref)}\n{reason}" for ref in refs)
@@ -672,12 +712,12 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
                         or memory_config.tenant_id != tenant_id
                 ):
                     logger.warning(
-                        "Debug chat configuration access denied: config_id=%s, config_workspace=%s, request_workspace=%s",
+                        "Trial-run chat configuration access denied: config_id=%s, config_workspace=%s, request_workspace=%s",
                         payload.config_id,
                         memory_config.workspace_id,
                         workspace_id,
                     )
-                    yield format_sse_message("error", self._debug_chat_error_data(language, "access"))
+                    yield format_sse_message("error", self._trial_run_chat_error_data(language, "access"))
                     return
 
                 runtime_cache: dict[uuid.UUID, tuple[ModelInfo, uuid.UUID] | None] = {}
@@ -696,7 +736,7 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
 
                 final_runtime = await get_runtime(memory_config.llm_model_id)
                 if final_runtime is None:
-                    yield format_sse_message("error", self._debug_chat_error_data(language, "model"))
+                    yield format_sse_message("error", self._trial_run_chat_error_data(language, "model"))
                     return
 
                 media_runtimes: dict[FileType, tuple[ModelInfo, uuid.UUID] | None] = {}
@@ -708,7 +748,7 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
                 for file_type in (FileType.IMAGE, FileType.AUDIO, FileType.VIDEO):
                     if not attachment_groups[file_type]:
                         continue
-                    model_config_id = self._debug_media_model_id(memory_config, file_type)
+                    model_config_id = self._trial_run_media_model_id(memory_config, file_type)
                     runtime = await get_runtime(model_config_id)
                     required = required_capabilities[file_type]
                     if runtime is not None and required not in self._normalize_capabilities(runtime[0].capability):
@@ -743,16 +783,16 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
 
                 model_info, api_key_id = runtime
                 try:
-                    async with get_async_db_context() as db:
-                        multimodal_service = MultimodalService(db, model_info)
-                        parts = await self._process_debug_files(
-                            [ref["file"] for ref in refs],
-                            multimodal_service,
-                            config_workspace_id,
-                            config_tenant_id,
-                            model_info.capability,
-                            language,
-                        )
+                    # 本地文件已由短会话加载，远程文件已有 URL；后续格式化不需要数据库。
+                    multimodal_service = MultimodalService(None, model_info)
+                    parts = await self._process_trial_run_files(
+                        [ref["file"] for ref in refs],
+                        multimodal_service,
+                        config_workspace_id,
+                        config_tenant_id,
+                        model_info.capability,
+                        language,
+                    )
 
                     mapping = "\n".join(
                         f"Attachment {index} = {attachment_label(ref)}"
@@ -760,7 +800,7 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
                     )
                     requested_language = "English" if language == "en" else "Chinese"
                     parser_prompt = (
-                        f"{DEBUG_ATTACHMENT_ANALYSIS_PROMPT}\n"
+                        f"{TRIAL_RUN_ATTACHMENT_ANALYSIS_PROMPT}\n"
                         f"Reply in {requested_language}.\n{mapping}"
                     )
                     parser_llm = build_llm(model_info, streaming=False, max_tokens=2000)
@@ -783,7 +823,7 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
                     raise
                 except Exception:
                     logger.error(
-                        "[DEBUG_CHAT_STREAM] %s attachment analysis failed",
+                        "[TRIAL_RUN_CHAT_STREAM] %s attachment analysis failed",
                         file_type.value,
                         exc_info=True,
                     )
@@ -793,29 +833,28 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
             async def extract_document_group() -> dict[str, Any]:
                 refs = attachment_groups[FileType.DOCUMENT]
                 documents: list[str] = []
-                async with get_async_db_context() as db:
-                    multimodal_service = MultimodalService(db, final_model_info)
-                    for ref in refs:
-                        file = ref["file"]
-                        try:
-                            if file.transfer_method == TransferMethod.LOCAL_FILE:
-                                await self._load_debug_local_file(
-                                    file,
-                                    multimodal_service,
-                                    config_workspace_id,
-                                    config_tenant_id,
-                                )
-                            text = await multimodal_service.extract_document_text(file)
-                            documents.append(f"{attachment_label(ref)}\n{text}")
-                        except asyncio.CancelledError:
-                            raise
-                        except Exception:
-                            logger.error(
-                                "[DEBUG_CHAT_STREAM] Document extraction failed",
-                                exc_info=True,
+                # 文档字节在短会话关闭后下载和解析，避免长时间占用连接。
+                multimodal_service = MultimodalService(None, final_model_info)
+                for ref in refs:
+                    file = ref["file"]
+                    try:
+                        if file.transfer_method == TransferMethod.LOCAL_FILE:
+                            await self._load_trial_run_local_file(
+                                file,
+                                config_workspace_id,
+                                config_tenant_id,
                             )
-                            reason = "[Document extraction failed.]" if language == "en" else "[文档解析失败。]"
-                            documents.append(f"{attachment_label(ref)}\n{reason}")
+                        text = await multimodal_service.extract_document_text(file)
+                        documents.append(f"{attachment_label(ref)}\n{text}")
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception:
+                        logger.error(
+                            "[TRIAL_RUN_CHAT_STREAM] Document extraction failed",
+                            exc_info=True,
+                        )
+                        reason = "[Document extraction failed.]" if language == "en" else "[文档解析失败。]"
+                        documents.append(f"{attachment_label(ref)}\n{reason}")
                 return {"text": "\n\n".join(documents), "tokens": 0, "api_key_id": None}
 
             analysis_tasks = [
@@ -837,8 +876,21 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
                 if result.get("api_key_id") is not None
             ]
 
+            history_round_limit = self._trial_run_history_round_limit()
+            limited_history = self._latest_trial_run_history(
+                payload.history,
+                history_round_limit,
+            )
+            if len(limited_history) < len(payload.history):
+                logger.info(
+                    "[TRIAL_RUN_CHAT_STREAM] History truncated: original_messages=%s, retained_messages=%s, max_rounds=%s",
+                    len(payload.history),
+                    len(limited_history),
+                    history_round_limit,
+                )
+
             messages: list[Any] = []
-            for history_message in payload.history:
+            for history_message in limited_history:
                 if history_message.role == "user":
                     messages.append(HumanMessage(content=history_message.content))
                 else:
@@ -855,7 +907,7 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
 
             final_llm = build_llm(final_model_info, streaming=True, max_tokens=2000)
             requested_language = "English" if language == "en" else "Chinese"
-            system_prompt = f"{DEBUG_CHAT_SYSTEM_PROMPT}\nThe requested interface language is {requested_language}."
+            system_prompt = f"{TRIAL_RUN_CHAT_SYSTEM_PROMPT}\nThe requested interface language is {requested_language}."
             agent = create_agent(model=final_llm, tools=[], system_prompt=system_prompt)
 
             full_content = ""
@@ -872,6 +924,21 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
                     message = self._extract_message_from_event_output(output)
                     final_tokens = max(final_tokens, self._extract_total_tokens(message))
 
+            if attachment_context:
+                details_title = (
+                    "Current attachment details"
+                    if language == "en"
+                    else "当前附件详细信息"
+                )
+                attachment_details = (
+                    f"\n\n---\n\n## {details_title}\n\n"
+                    f"{attachment_context}"
+                )
+                for offset in range(0, len(attachment_details), 2000):
+                    details_chunk = attachment_details[offset:offset + 2000]
+                    full_content += details_chunk
+                    yield format_sse_message("message", {"content": details_chunk})
+
             total_tokens += final_tokens
             usage_api_key_ids.append(final_api_key_id)
 
@@ -884,7 +951,7 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
             except Exception:
                 # Usage accounting is observability metadata. A write failure here must
                 # not turn an already completed model response into an SSE error event.
-                logger.error("[DEBUG_CHAT_STREAM] Failed to record API key usage", exc_info=True)
+                logger.error("[TRIAL_RUN_CHAT_STREAM] Failed to record API key usage", exc_info=True)
 
             yield format_sse_message("end", {
                 "elapsed_time": time.perf_counter() - start_time,
@@ -892,11 +959,11 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
                 "usage": {"total_tokens": total_tokens},
             })
         except asyncio.CancelledError:
-            logger.info("[DEBUG_CHAT_STREAM] Client disconnected during streaming")
+            logger.info("[TRIAL_RUN_CHAT_STREAM] Client disconnected during streaming")
             raise
         except Exception:
-            logger.error("[DEBUG_CHAT_STREAM] Error during streaming", exc_info=True)
-            yield format_sse_message("error", self._debug_chat_error_data(language))
+            logger.error("[TRIAL_RUN_CHAT_STREAM] Error during streaming", exc_info=True)
+            yield format_sse_message("error", self._trial_run_chat_error_data(language))
 
     async def pilot_run_stream(self, payload: PilotRunInput, language: str = "zh") -> AsyncGenerator[str, None]:
         """

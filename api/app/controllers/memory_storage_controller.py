@@ -11,7 +11,7 @@ from app.core.response_utils import fail, success
 from app.db import get_async_db_context
 from app.dependencies import cur_workspace_access_guard_async, get_current_user_async, CurrentUserSnapshot
 from app.schemas.memory_storage_schema import (
-    DebugChatInput,
+    TrialRunChatInput,
     PilotRunInput,
 )
 from app.schemas.response_schema import ApiResponse
@@ -106,28 +106,27 @@ async def pilot_run(
 
 @router.post("/chat", response_model=None)
 @cur_workspace_access_guard_async()
-async def debug_chat_stream(
-        payload: DebugChatInput,
+async def trial_run_chat_stream(
+        payload: TrialRunChatInput,
         language_type: str = Header(default=None, alias="X-Language-Type"),
         current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ) -> StreamingResponse:
-    """萃取调试界面使用的无状态多模态流式对话。"""
+    """萃取试运行界面使用的无状态多模态流式对话。"""
     language = get_language_from_header(language_type)
     async with get_async_db_context() as db:
         payload.config_id = await resolve_config_id_async(payload.config_id, db)
 
-    history_files_count = sum(len(message.files) for message in payload.history)
     api_logger.info(
-        "Debug chat requested: config_id=%s, history_count=%s, files_count=%s, workspace_id=%s",
+        "Trial-run chat requested: config_id=%s, history_count=%s, files_count=%s, workspace_id=%s",
         payload.config_id,
         len(payload.history),
-        len(payload.files) + history_files_count,
+        len(payload.files),
         current_user.current_workspace_id,
     )
 
     svc = DataConfigService()
     return StreamingResponse(
-        svc.debug_chat_stream(
+        svc.trial_run_chat_stream(
             payload,
             language=language,
             workspace_id=current_user.current_workspace_id,

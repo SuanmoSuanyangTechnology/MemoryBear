@@ -352,12 +352,15 @@ class PilotRunInput(BaseModel):  # 试运行触发请求模型（QA 消息格式
     model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
 
-class DebugChatHistoryMessage(BaseModel):
-    """萃取调试对话的显式历史消息。"""
+class TrialRunChatHistoryMessage(BaseModel):
+    """萃取试运行对话的显式历史消息。"""
 
     role: Literal["user", "assistant"] = Field(..., description="消息角色")
     content: str = Field(..., min_length=1, description="文本内容")
-    files: List[FileInput] = Field(default_factory=list, description="该条历史用户消息的附件")
+    files: List[FileInput] = Field(
+        default_factory=list,
+        description="历史附件仅为请求格式兼容保留，试运行对话不会解析",
+    )
 
     model_config = ConfigDict(extra="forbid")
 
@@ -368,13 +371,13 @@ class DebugChatHistoryMessage(BaseModel):
         return self
 
 
-class DebugChatInput(BaseModel):
-    """萃取调试 AI 对话请求。"""
+class TrialRunChatInput(BaseModel):
+    """萃取试运行 AI 对话请求。"""
 
     config_id: Union[uuid.UUID, int, str] = Field(..., description="萃取引擎配置 ID")
     message: str = Field(..., min_length=1, description="当前用户消息")
     files: List[FileInput] = Field(default_factory=list, description="当前消息附件")
-    history: List[DebugChatHistoryMessage] = Field(default_factory=list, description="显式对话上下文")
+    history: List[TrialRunChatHistoryMessage] = Field(default_factory=list, description="显式对话上下文")
 
     model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
