@@ -17,42 +17,41 @@ from app.models.workflow_model import (
 )
 from app.db import get_db
 
-# 工作流执行的终态。只有终态执行的节点行才允许被保留策略清理，
-# pending / running / waiting_human 一律保留，避免破坏正在运行的执行与人工介入恢复链路。
-WORKFLOW_EXECUTION_TERMINAL_STATUSES: tuple[str, ...] = (
-    "completed",
-    "failed",
-    "timeout",
-    "cancelled",
-)
-
 # 单节点调试记录在 meta_data.source 中的标识
 SINGLE_NODE_DEBUG_SOURCE = "single_node_debug"
 
-# 终态状态的 SQL 字面量列表。取值来自上面的代码内常量元组，不含外部输入。
-_TERMINAL_STATUSES_SQL = ", ".join(f"'{status}'" for status in WORKFLOW_EXECUTION_TERMINAL_STATUSES)
-
 # 完整工作流节点行的保留策略清理 SQL（异步队列落库路径使用）。
 #
-# 语义：当前 execution（:eid）已处于终态时，删除同一 app_id + workflow_config_id 下
-# 其他终态 execution 的节点行。
+# 语义：每次成功写入节点投影后，按 started_at / created_at / id 确定
+# 同一 app_id + workflow_config_id 下真正最新的 execution，只保留它的节点行。
 #
-# 安全性：
-#   - cur.status 限定终态：执行中的 execution 不触发清理
-#   - stale_exec.status 限定终态：不会删掉 running / pending / waiting_human 的节点行
-#   - stale.execution_id = stale_exec.id 天然排除单节点调试行（execution_id IS NULL）
-#   - 必须在 INSERT 成功之后执行，否则写入失败时会连「上次执行记录」一起丢失
-NODE_EXECUTION_RETENTION_SQL = f"""
+# 不能简单保留本次写入的 execution：较旧的 waiting_human 执行可能在较新的执行
+# 之后恢复并再次写入；如果固定保留本次 execution，会错误淘汰真正最新的执行。
+# 本清理只处理 execution_id 非空的整图执行行，不影响单节点调试行。
+NODE_EXECUTION_RETENTION_SQL = """
+WITH current_scope AS (
+    SELECT app_id, workflow_config_id
+    FROM workflow_executions
+    WHERE id = CAST(:eid AS uuid)
+),
+latest_execution AS (
+    SELECT candidate.id
+    FROM workflow_executions AS candidate
+    JOIN current_scope AS scope
+      ON candidate.app_id = scope.app_id
+     AND candidate.workflow_config_id = scope.workflow_config_id
+    ORDER BY candidate.started_at DESC,
+             candidate.created_at DESC,
+             candidate.id DESC
+    LIMIT 1
+)
 DELETE FROM workflow_node_executions AS stale
 USING workflow_executions AS stale_exec,
-      workflow_executions AS cur
-WHERE cur.id = CAST(:eid AS uuid)
-  AND cur.status IN ({_TERMINAL_STATUSES_SQL})
-  AND stale.execution_id = stale_exec.id
-  AND stale_exec.id <> cur.id
-  AND stale_exec.app_id = cur.app_id
-  AND stale_exec.workflow_config_id = cur.workflow_config_id
-  AND stale_exec.status IN ({_TERMINAL_STATUSES_SQL})
+      current_scope AS scope
+WHERE stale.execution_id = stale_exec.id
+  AND stale_exec.app_id = scope.app_id
+  AND stale_exec.workflow_config_id = scope.workflow_config_id
+  AND stale_exec.id <> (SELECT id FROM latest_execution)
 """
 
 
@@ -316,36 +315,43 @@ class WorkflowNodeExecutionRepository:
         workflow_config_id: uuid.UUID,
         keep_execution_id: uuid.UUID,
     ) -> int:
-        """清理同一工作流下除 keep_execution_id 外、其他终态执行的节点记录。
+        """只保留同一工作流真正最新一次整图执行的节点记录。
 
-        仅清理终态执行；running / pending / waiting_human 一律保留。
-        keep_execution_id 自身未进入终态时不做任何清理。
-        必须在当前执行的节点行写入成功之后调用。
-
-        Args:
-            app_id: 应用 ID
-            workflow_config_id: 工作流配置 ID
-            keep_execution_id: 需要保留的执行 ID（本次执行）
-
-        Returns:
-            删除的行数
+        最新执行按 started_at、created_at、id 倒序确定，不要求执行已进入终态。
+        这样 waiting_human 记录也受保留策略约束，并避免较旧的人工介入执行
+        稍后恢复时淘汰更新执行的节点记录。单节点调试行的 execution_id 为空，
+        不会被本方法删除。
         """
-        keep_is_terminal = (
+        current_execution_exists = (
             select(WorkflowExecution.id)
             .where(
                 WorkflowExecution.id == keep_execution_id,
-                WorkflowExecution.status.in_(WORKFLOW_EXECUTION_TERMINAL_STATUSES),
+                WorkflowExecution.app_id == app_id,
+                WorkflowExecution.workflow_config_id == workflow_config_id,
             )
             .exists()
+        )
+        latest_execution_id = (
+            select(WorkflowExecution.id)
+            .where(
+                WorkflowExecution.app_id == app_id,
+                WorkflowExecution.workflow_config_id == workflow_config_id,
+            )
+            .order_by(
+                desc(WorkflowExecution.started_at),
+                desc(WorkflowExecution.created_at),
+                desc(WorkflowExecution.id),
+            )
+            .limit(1)
+            .scalar_subquery()
         )
         stale_execution_ids = select(WorkflowExecution.id).where(
             WorkflowExecution.app_id == app_id,
             WorkflowExecution.workflow_config_id == workflow_config_id,
-            WorkflowExecution.id != keep_execution_id,
-            WorkflowExecution.status.in_(WORKFLOW_EXECUTION_TERMINAL_STATUSES),
+            WorkflowExecution.id != latest_execution_id,
         )
         stmt = delete(WorkflowNodeExecution).where(
-            keep_is_terminal,
+            current_execution_exists,
             WorkflowNodeExecution.execution_id.in_(stale_execution_ids),
         )
         result = self.db.execute(

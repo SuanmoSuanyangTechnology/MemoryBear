@@ -171,7 +171,8 @@ class WorkflowService:
     DEBUG_STATE_NODE_TYPE = "debug-state"
     DEBUG_STATE_NODE_NAME = "Workflow Debug State"
     DEBUG_STATE_SOURCE = "debug_state"
-    SKIP_EXECUTION_ARTIFACT_PERSIST_FOR_EXPERIMENT = True
+    # 节点执行投影必须正常落库；历史明细仍以 WorkflowExecution.output_data 为准。
+    SKIP_EXECUTION_ARTIFACT_PERSIST_FOR_EXPERIMENT = False
 
     # 重新生成版本上限：同一轮（同 parent_message_id）允许的最大 assistant 版本数（含原始回复）
     MAX_REGENERATE_VERSIONS = 5
@@ -2954,7 +2955,7 @@ class WorkflowService:
             )
         self.node_execution_repo.bulk_create(items)
         if settings.WORKFLOW_NODE_EXECUTION_RETENTION_ENABLED:
-            # 写入成功后再清理同工作流下其他终态执行的节点行
+            # 写入成功后，按执行开始时间只保留同工作流真正最新一次执行的节点行。
             self.db.flush()
             self.node_execution_repo.delete_stale_workflow_executions(
                 app_id=execution.app_id,
@@ -7902,6 +7903,22 @@ class WorkflowService:
                             execution.execution_id,
                             output_data=execution.output_data,
                         )
+
+                    # 普通流式执行此前只更新 workflow_executions，遗漏了节点投影。
+                    # 必须在 cycle_items 合并完成后、workflow_end 返回客户端前入队，
+                    # 让试运行和体验分享都能写入 workflow_node_executions。
+                    if status in ("completed", "failed"):
+                        try:
+                            await self._persist_execution_artifacts_async(
+                                execution.execution_id,
+                                config,
+                            )
+                        except Exception as persist_err:
+                            logger.warning(
+                                "Failed to persist node executions on workflow end: %s",
+                                persist_err,
+                                exc_info=True,
+                            )
                 elif event.get("event") == "workflow_start":
                     event["data"]["message_id"] = str(message_id)
                     if user_message_id:

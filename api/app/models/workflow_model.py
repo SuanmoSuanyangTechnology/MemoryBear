@@ -155,7 +155,8 @@ class WorkflowNodeExecution(Base):
     """工作流节点执行记录表
 
     保留策略：本表只保留「最近一次」执行明细，不保存历史。
-      - 完整工作流：同 app_id + workflow_config_id 下最近 1 次终态执行的全部节点行
+      - 完整工作流：同 app_id + workflow_config_id 下按执行开始时间最近 1 次的全部节点行
+        （包括 waiting_human，且较旧人工介入执行恢复时不会覆盖更新执行）
       - 单节点调试：同 app_id + workflow_config_id + node_id 下最近 1 条
     历史节点明细的权威数据源是 workflow_executions.output_data["node_outputs"]。
     由 settings.WORKFLOW_NODE_EXECUTION_RETENTION_ENABLED 控制。

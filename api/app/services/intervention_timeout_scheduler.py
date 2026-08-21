@@ -185,6 +185,17 @@ async def _terminate_timed_out_workflow(entry):
         intervention_ctx = (execution.context or {}).get("human_intervention", {})
         checkpoint_thread_id = intervention_ctx.get("checkpoint_thread_id", "")
 
+    # The fallback bypasses the normal resume stream, so explicitly refresh the
+    # node-execution projection after the terminal output_data has committed.
+    try:
+        from app.services.workflow_service import WorkflowService
+        await WorkflowService()._persist_execution_artifacts_async(entry.execution_id)
+    except Exception as persist_err:
+        logger.warning(
+            f"Failed to persist node executions after intervention timeout: {persist_err}",
+            exc_info=True,
+        )
+
     # Clean up registries and checkpoint
     InterventionRegistry.cleanup(entry.execution_id)
 
