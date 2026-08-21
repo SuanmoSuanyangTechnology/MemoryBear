@@ -157,9 +157,6 @@ MAX_DOCUMENT_PAGES = int(os.getenv("MAX_DOCUMENT_PAGES", "200"))
 # ── GDS 拓扑分数（eigenvector 中心性）扫描/计算常量 ──────────────
 # 在途锁 key：避免相邻两轮 scan 重复派发同一用户
 _GDS_TOPOLOGY_INFLIGHT_KEY_FMT = "gds_topology:inflight:{end_user_id}"
-_GDS_TOPOLOGY_INFLIGHT_TTL_SEC = 1500
-# 活跃口径：write_time 距今 < 24 小时才参与 GDS 拓扑分数计算
-_GDS_TOPOLOGY_ACTIVE_HOURS = 24
 
 
 @dataclass(frozen=True)
@@ -3683,14 +3680,14 @@ def scan_gds_topology_score(self) -> Dict[str, Any]:
             for user in get_end_users_by_workspace(db, ws_id_uuid):
                 uid = str(user.id)
                 try:
-                    if not _is_active_recently(db, uid, _GDS_TOPOLOGY_ACTIVE_HOURS):
+                    if not _is_active_recently(db, uid, settings.GDS_TOPOLOGY_ACTIVE_HOURS):
                         skip_inactive += 1
                         continue
                     # 在途锁：抢不到说明该用户已有 GDS 任务在途，跳过（纯 SET NX EX 粗过滤）
                     if redis_client is not None:
                         ok = redis_client.set(
                             _GDS_TOPOLOGY_INFLIGHT_KEY_FMT.format(end_user_id=uid),
-                            "1", nx=True, ex=_GDS_TOPOLOGY_INFLIGHT_TTL_SEC,
+                            "1", nx=True, ex=settings.GDS_TOPOLOGY_INFLIGHT_TTL_SEC,
                         )
                         if not ok:
                             skip_inflight += 1
