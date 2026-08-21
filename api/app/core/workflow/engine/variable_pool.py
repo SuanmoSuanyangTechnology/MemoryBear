@@ -379,6 +379,13 @@ class VariablePool:
                 await self.set(f"{namespace}.{key}", value)
             except KeyError:
                 pass
+            except TypeError:
+                # The existing instance may be a placeholder of a different
+                # type (e.g. STRING placeholders pre-populated from graph
+                # state during workflow resume). It is replaced by the
+                # correctly-typed instance created below, so a type mismatch
+                # on the stale instance must not abort node execution.
+                pass
         instance = create_variable_instance(var_type, value)
         variable_struct = VariableStruct(type=var_type, instance=instance, mut=mut)
         namespace_variable = self.variables.get(namespace)

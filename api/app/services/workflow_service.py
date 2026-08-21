@@ -171,17 +171,21 @@ class WorkflowService:
     DEBUG_STATE_NODE_TYPE = "debug-state"
     DEBUG_STATE_NODE_NAME = "Workflow Debug State"
     DEBUG_STATE_SOURCE = "debug_state"
-    SKIP_EXECUTION_ARTIFACT_PERSIST_FOR_EXPERIMENT = True
+    # 节点执行投影必须正常落库；历史明细仍以 WorkflowExecution.output_data 为准。
+    SKIP_EXECUTION_ARTIFACT_PERSIST_FOR_EXPERIMENT = False
 
     # 重新生成版本上限：同一轮（同 parent_message_id）允许的最大 assistant 版本数（含原始回复）
     MAX_REGENERATE_VERSIONS = 5
 
     def __init__(self, db: Session | AsyncSession | None = None):
         self.db = db
-        self.config_repo = WorkflowConfigRepository(db) if db is not None else None
-        self.execution_repo = WorkflowExecutionRepository(db) if db is not None else None
-        self.node_execution_repo = WorkflowNodeExecutionRepository(db) if db is not None else None
-        self.node_cache_repo = WorkflowNodeCacheRepository(db) if db is not None else None
+        # Sync repositories only work with a sync Session; for AsyncSession
+        # (or no db) we use async DB contexts in the methods that need them.
+        self._is_async_db = isinstance(db, AsyncSession)
+        self.config_repo = WorkflowConfigRepository(db) if (db is not None and not self._is_async_db) else None
+        self.execution_repo = WorkflowExecutionRepository(db) if (db is not None and not self._is_async_db) else None
+        self.node_execution_repo = WorkflowNodeExecutionRepository(db) if (db is not None and not self._is_async_db) else None
+        self.node_cache_repo = WorkflowNodeCacheRepository(db) if (db is not None and not self._is_async_db) else None
         self.conversation_service = ConversationService(db) if db is not None else None
         self.multimodal_service = MultimodalService(db) if db is not None else None
 
@@ -1855,6 +1859,46 @@ class WorkflowService:
             )
         }
 
+    # output_data["node_outputs"][node_id] 中属于节点元信息的键。
+    # 剥离这些键后剩余的部分才是节点输出变量（与 _build_node_execution_record 的取值规则一致）。
+    _NODE_OUTPUT_META_KEYS = frozenset({
+        "node_type",
+        "node_name",
+        "status",
+        "error",
+        "input",
+        "output",
+        "execution_order",
+        "retry_count",
+        "elapsed_time",
+        "token_usage",
+        "process",
+        "agent_log",
+        "cache_hit",
+        "cache_key",
+    })
+
+    @classmethod
+    def _extract_node_output_value(cls, node_data: Any) -> Any:
+        """从 output_data["node_outputs"][node_id] 中取节点输出值。
+
+        取值规则与 _build_node_execution_record() 保持一致：
+        存在 "output" 键时取其值，否则取剥离元信息键后的剩余部分。
+
+        Returns:
+            节点输出值；None 表示没有可用值（调用方需保留原有占位逻辑）
+        """
+        if not isinstance(node_data, dict):
+            return node_data
+        if "output" in node_data:
+            return node_data.get("output")
+        remainder = {
+            key: value
+            for key, value in node_data.items()
+            if key not in cls._NODE_OUTPUT_META_KEYS
+        }
+        return remainder or None
+
     @classmethod
     def _build_ordered_node_snapshots(
             cls,
@@ -1862,9 +1906,24 @@ class WorkflowService:
             node_executions: list[WorkflowNodeExecution],
             raw_node_vars: Any,
             node_type_maps: dict[str, dict[str, str]],
+            node_outputs: Any = None,
     ) -> dict[str, Any]:
+        """组装快照中的 nodes 分组。
+
+        取值优先级：
+            output_data.snapshot.nodes[node_id]
+              → workflow_node_executions.output_data
+                → output_data.node_outputs[node_id].output
+                  → 按类型定义补缺失值占位
+
+        node_outputs 兜底用于节点表按保留策略清理后的历史执行：此时 node_executions 为空，
+        节点顺序与取值都从父执行的 node_outputs 重建。
+        """
         ordered_node_vars: dict[str, Any] = {}
         serialized_raw_node_vars = cls._serialize_execution_value(raw_node_vars or {})
+        serialized_node_outputs = cls._serialize_execution_value(node_outputs or {})
+        if not isinstance(serialized_node_outputs, dict):
+            serialized_node_outputs = {}
 
         for node_execution in node_executions:
             node_id = node_execution.node_id
@@ -1877,11 +1936,41 @@ class WorkflowService:
                     type_map=node_type_map,
                 )
                 continue
-            serialized_output = cls._serialize_execution_value(node_execution.output_data or {})
-            if isinstance(serialized_output, dict) and "output" in serialized_output:
-                serialized_output = serialized_output.get("output")
+            if node_execution.output_data:
+                serialized_output = cls._serialize_execution_value(node_execution.output_data)
+                if isinstance(serialized_output, dict) and "output" in serialized_output:
+                    serialized_output = serialized_output.get("output")
+            else:
+                # 节点行存在但 output_data 为空时继续往 node_outputs 兜底；
+                # 两者都没有则保持原有的空分组行为，交给下面的占位补齐。
+                fallback_output = cls._extract_node_output_value(
+                    serialized_node_outputs.get(node_id)
+                )
+                serialized_output = fallback_output if fallback_output is not None else {}
             ordered_node_vars[node_id] = cls._build_typed_node_snapshot(
                 serialized_output,
+                type_map=node_type_map,
+            )
+
+        # 节点表已按保留策略清理时，从 node_outputs 按 execution_order 重建顺序与取值
+        for node_id, node_data in sorted(
+                serialized_node_outputs.items(),
+                key=cls._node_output_sort_key,
+        ):
+            if node_id in ordered_node_vars:
+                continue
+            node_type_map = node_type_maps.get(node_id)
+            if isinstance(serialized_raw_node_vars, dict) and node_id in serialized_raw_node_vars:
+                ordered_node_vars[node_id] = cls._build_typed_node_snapshot(
+                    serialized_raw_node_vars[node_id],
+                    type_map=node_type_map,
+                )
+                continue
+            fallback_output = cls._extract_node_output_value(node_data)
+            if fallback_output is None:
+                continue
+            ordered_node_vars[node_id] = cls._build_typed_node_snapshot(
+                fallback_output,
                 type_map=node_type_map,
             )
 
@@ -1918,6 +2007,7 @@ class WorkflowService:
             node_executions=node_executions,
             raw_node_vars=raw_groups["nodes"],
             node_type_maps=type_maps["nodes"],
+            node_outputs=output_data.get("node_outputs") if isinstance(output_data, dict) else None,
         )
         return {
             "system": self._normalize_typed_group(
@@ -1953,6 +2043,7 @@ class WorkflowService:
             node_executions=node_executions,
             raw_node_vars=raw_groups["nodes"],
             node_type_maps=type_maps["nodes"],
+            node_outputs=output_data.get("node_outputs") if isinstance(output_data, dict) else None,
         )
         return {
             "conversation": self._normalize_typed_group(
@@ -2774,6 +2865,68 @@ class WorkflowService:
             }
         }
 
+    def _build_node_executions_from_output_data(
+            self,
+            output_data: dict[str, Any],
+            *,
+            execution: WorkflowExecution,
+            workflow_config: WorkflowConfig | None = None,
+    ) -> list[dict[str, Any]]:
+        """从 workflow_executions.output_data["node_outputs"] 重建执行详情的节点明细。
+
+        workflow_node_executions 按保留策略只保留最近一次执行，历史执行直读节点表会得到空列表，
+        因此需要从父执行的 node_outputs 兜底重建。
+
+        复用 _build_node_execution_record() 的字段映射规则（节点表写入时用的就是它），
+        保证输出与直读节点表的结果逐字段同构，避免两套解析逻辑漂移。
+
+        Args:
+            output_data: 已序列化的父执行 output_data
+            execution: 父执行记录（提供 started_at / completed_at / app_id 等基准值）
+            workflow_config: 工作流配置，用于补 node_name
+
+        Returns:
+            与 get_execution_detail 中 node_executions 元素同构的字典列表（按 execution_order 排序）
+        """
+        node_outputs = output_data.get("node_outputs") if isinstance(output_data, dict) else None
+        if not isinstance(node_outputs, dict) or not node_outputs:
+            return []
+
+        ordered_node_outputs = sorted(node_outputs.items(), key=self._node_output_sort_key)
+        payload: list[dict[str, Any]] = []
+        for index, (node_id, node_data) in enumerate(ordered_node_outputs, start=1):
+            if not isinstance(node_data, dict):
+                continue
+            record = self._build_node_execution_record(
+                execution=execution,
+                node_id=node_id,
+                node_data=node_data,
+                source="workflow_execution",
+                fallback_execution_order=index,
+                fallback_node_name=self._get_node_name_from_config(workflow_config, node_id),
+            )
+            record_meta_data = record.get("meta_data") or {}
+            payload.append({
+                "node_id": record["node_id"],
+                "node_type": record["node_type"],
+                "node_name": record["node_name"],
+                "execution_order": record["execution_order"],
+                "retry_count": record["retry_count"],
+                "status": record["status"],
+                "input_data": self._serialize_execution_value(record["input_data"] or {}),
+                "output_data": self._serialize_execution_value(record["output_data"] or {}),
+                "agent_log": self._serialize_execution_value(record_meta_data.get("agent_log")),
+                "error_message": record["error_message"],
+                "started_at": to_iso_z(record["started_at"]),
+                "completed_at": to_iso_z(record["completed_at"]),
+                "elapsed_time": record["elapsed_time"],
+                "token_usage": self._serialize_execution_value(record["token_usage"]),
+                "cache_hit": record["cache_hit"],
+                "cache_key": record["cache_key"],
+                "meta_data": self._serialize_execution_value(record_meta_data),
+            })
+        return payload
+
     def _persist_workflow_node_executions(
             self,
             execution: WorkflowExecution,
@@ -2801,6 +2954,14 @@ class WorkflowService:
                 )
             )
         self.node_execution_repo.bulk_create(items)
+        if settings.WORKFLOW_NODE_EXECUTION_RETENTION_ENABLED:
+            # 写入成功后，按执行开始时间只保留同工作流真正最新一次执行的节点行。
+            self.db.flush()
+            self.node_execution_repo.delete_stale_workflow_executions(
+                app_id=execution.app_id,
+                workflow_config_id=execution.workflow_config_id,
+                keep_execution_id=execution.id,
+            )
         self.db.commit()
 
     @staticmethod
@@ -2856,6 +3017,23 @@ class WorkflowService:
                 "debug_input": normalize_cache_value(debug_input_data or {}),
             },
         )
+        if settings.WORKFLOW_NODE_EXECUTION_RETENTION_ENABLED:
+            # 先 flush 拿到新行 id，再清理同节点历史调试行：
+            # 保证写入成功后才删除旧记录，失败时不会连上一条调试记录一起丢掉。
+            self.db.flush()
+            removed = self.node_execution_repo.delete_stale_single_node_debug(
+                app_id=app_id,
+                workflow_config_id=workflow_config.id,
+                node_id=node_id,
+                keep_id=node_execution.id,
+            )
+            if removed:
+                logger.debug(
+                    "single node debug retention removed %s stale rows (app_id=%s node_id=%s)",
+                    removed,
+                    app_id,
+                    node_id,
+                )
         self.db.commit()
         self.db.refresh(node_execution)
         return node_execution
@@ -3376,9 +3554,13 @@ class WorkflowService:
             invalidate_cache: bool = False,
             bypass_cache: bool = False,
     ) -> dict[str, Any]:
+        # 必须按 source 过滤：本方法语义是「基于最近一次单节点调试输入重跑」，
+        # 不加过滤会取到最近一次完整工作流执行的节点行，与
+        # _has_single_node_debug_input 的判定不一致。
         node_execution = self.node_execution_repo.get_latest_by_app_node(
             app_id=app_id,
             node_id=node_id,
+            source="single_node_debug",
         )
         if not node_execution:
             raise BusinessException("没有可用于重跑的单节点调试输入", BizCode.NOT_FOUND)
@@ -3421,6 +3603,7 @@ class WorkflowService:
         input_data = self._serialize_execution_value(execution.input_data or {})
         output_data = self._serialize_execution_value(execution.output_data or {})
         meta_data = self._serialize_execution_value(execution.meta_data or {})
+        workflow_config = execution.workflow_config or self.db.get(WorkflowConfig, execution.workflow_config_id)
         snapshot = self._build_execution_snapshot_from_record(execution)
         if self._get_execution_source(execution) == "single_node_debug":
             base_execution = self._resolve_base_execution(
@@ -3451,30 +3634,41 @@ class WorkflowService:
             "completed_at": to_iso_z(execution.completed_at),
             "elapsed_time": execution.elapsed_time,
             "token_usage": self._serialize_execution_value(execution.token_usage),
-            "node_executions": [
-                {
-                    "node_id": node_execution.node_id,
-                    "node_type": node_execution.node_type,
-                    "node_name": node_execution.node_name,
-                    "execution_order": node_execution.execution_order,
-                    "retry_count": node_execution.retry_count,
-                    "status": node_execution.status,
-                    "input_data": self._serialize_execution_value(node_execution.input_data or {}),
-                    "output_data": self._serialize_execution_value(node_execution.output_data or {}),
-                    "agent_log": self._serialize_execution_value((node_execution.meta_data or {}).get("agent_log")),
-                    "error_message": node_execution.error_message,
-                    "started_at": to_iso_z(node_execution.started_at),
-                    "completed_at": to_iso_z(node_execution.completed_at),
-                    "elapsed_time": node_execution.elapsed_time,
-                    "token_usage": self._serialize_execution_value(node_execution.token_usage),
-                    "cache_hit": node_execution.cache_hit,
-                    "cache_key": node_execution.cache_key,
-                    "meta_data": self._serialize_execution_value(node_execution.meta_data or {}),
-                }
-                for node_execution in node_executions
-            ],
+            "node_executions": (
+                [
+                    {
+                        "node_id": node_execution.node_id,
+                        "node_type": node_execution.node_type,
+                        "node_name": node_execution.node_name,
+                        "execution_order": node_execution.execution_order,
+                        "retry_count": node_execution.retry_count,
+                        "status": node_execution.status,
+                        "input_data": self._serialize_execution_value(node_execution.input_data or {}),
+                        "output_data": self._serialize_execution_value(node_execution.output_data or {}),
+                        "agent_log": self._serialize_execution_value(
+                            (node_execution.meta_data or {}).get("agent_log")
+                        ),
+                        "error_message": node_execution.error_message,
+                        "started_at": to_iso_z(node_execution.started_at),
+                        "completed_at": to_iso_z(node_execution.completed_at),
+                        "elapsed_time": node_execution.elapsed_time,
+                        "token_usage": self._serialize_execution_value(node_execution.token_usage),
+                        "cache_hit": node_execution.cache_hit,
+                        "cache_key": node_execution.cache_key,
+                        "meta_data": self._serialize_execution_value(node_execution.meta_data or {}),
+                    }
+                    for node_execution in node_executions
+                ]
+                if node_executions
+                # 节点表按保留策略只保留最近一次执行，历史执行从父执行的
+                # output_data["node_outputs"] 重建，保证节点明细不为空。
+                else self._build_node_executions_from_output_data(
+                    output_data,
+                    execution=execution,
+                    workflow_config=workflow_config,
+                )
+            ),
         }
-        workflow_config = execution.workflow_config or self.db.get(WorkflowConfig, execution.workflow_config_id)
         secret_values = self._extract_secret_values_from_environment_variables(
             workflow_config.environment_variables if workflow_config else []
         )
@@ -7656,7 +7850,7 @@ class WorkflowService:
                                 role="assistant",
                                 content="",
                                 meta_data={"waiting_human": True, "execution_id": execution.execution_id},
-                                parent_message_id=_hitl_user_msg.id if _hitl_user_msg else None,
+                                parent_message_id=user_message_id if _hitl_user_msg else None,
                             )
 
                         # message_id is already saved in execution.context["human_intervention"]["message_id"]
@@ -7709,6 +7903,22 @@ class WorkflowService:
                             execution.execution_id,
                             output_data=execution.output_data,
                         )
+
+                    # 普通流式执行此前只更新 workflow_executions，遗漏了节点投影。
+                    # 必须在 cycle_items 合并完成后、workflow_end 返回客户端前入队，
+                    # 让试运行和体验分享都能写入 workflow_node_executions。
+                    if status in ("completed", "failed"):
+                        try:
+                            await self._persist_execution_artifacts_async(
+                                execution.execution_id,
+                                config,
+                            )
+                        except Exception as persist_err:
+                            logger.warning(
+                                "Failed to persist node executions on workflow end: %s",
+                                persist_err,
+                                exc_info=True,
+                            )
                 elif event.get("event") == "workflow_start":
                     event["data"]["message_id"] = str(message_id)
                     if user_message_id:
@@ -8282,7 +8492,24 @@ class WorkflowService:
         )
         from app.core.workflow.nodes.human_intervention.node import InterventionRegistry as _IR
 
-        execution = self.get_execution(execution_id)
+        if self.execution_repo is None:
+            async with get_async_db_context() as db:
+                _stmt = (
+                    select(WorkflowExecution)
+                    .options(selectinload(WorkflowExecution.app))
+                    .where(WorkflowExecution.execution_id == execution_id)
+                )
+                execution = (await db.execute(_stmt)).scalar_one_or_none()
+                if not execution:
+                    runtime_execution = await self._get_runtime_execution_snapshot_async(execution_id)
+                    if runtime_execution:
+                        execution = self._build_execution_record_from_ref(runtime_execution)
+                if execution:
+                    db.expunge(execution)
+                    if execution.app is not None:
+                        db.expunge(execution.app)
+        else:
+            execution = self.get_execution(execution_id)
         if not execution:
             raise BusinessException("执行记录不存在", BizCode.NOT_FOUND)
         if execution.status != "waiting_human":
@@ -8392,7 +8619,10 @@ class WorkflowService:
             resolved_node_ids.add(node_id)
             all_intervention_node_ids.update(resolved_node_ids)
 
-        config = self.get_workflow_config(app_id)
+        if self.config_repo is None:
+            config = await self.get_workflow_config_snapshot_async(app_id)
+        else:
+            config = self.get_workflow_config(app_id)
         if not config:
             raise BusinessException("工作流配置不存在", BizCode.CONFIG_MISSING)
 
@@ -8713,7 +8943,10 @@ class WorkflowService:
         from app.core.workflow.nodes.node_factory import NodeFactory
 
         if not config:
-            config = self.get_workflow_config(app_id)
+            if self.config_repo is None:
+                config = await self.get_workflow_config_snapshot_async(app_id)
+            else:
+                config = self.get_workflow_config(app_id)
         if not config:
             raise BusinessException(code=BizCode.CONFIG_MISSING, message="工作流配置不存在")
 
@@ -9218,14 +9451,38 @@ class WorkflowService:
         from app.core.workflow.engine.runtime_schema import ExecutionContext
         from app.core.workflow.engine.variable_pool import VariablePoolInitializer
 
-        execution = self.get_execution(execution_id)
+        # When WorkflowService is created without a db (e.g. streaming path in
+        # app_controller that uses WorkflowService()), the sync repos are None.
+        # Use async DB context in that case; eager-load the App relationship so
+        # that execution.app.workspace_id is accessible after the session closes.
+        if self.execution_repo is None:
+            async with get_async_db_context() as db:
+                _stmt = (
+                    select(WorkflowExecution)
+                    .options(selectinload(WorkflowExecution.app))
+                    .where(WorkflowExecution.execution_id == execution_id)
+                )
+                execution = (await db.execute(_stmt)).scalar_one_or_none()
+                if not execution:
+                    runtime_execution = await self._get_runtime_execution_snapshot_async(execution_id)
+                    if runtime_execution:
+                        execution = self._build_execution_record_from_ref(runtime_execution)
+                if execution:
+                    db.expunge(execution)
+                    if execution.app is not None:
+                        db.expunge(execution.app)
+        else:
+            execution = self.get_execution(execution_id)
         if not execution:
             raise BusinessException("执行记录不存在", BizCode.NOT_FOUND)
 
         intervention_ctx = (execution.context or {}).get("human_intervention", {})
         thread_id_str = intervention_ctx.get("checkpoint_thread_id")
 
-        config = self.get_workflow_config(app_id)
+        if self.config_repo is None:
+            config = await self.get_workflow_config_snapshot_async(app_id)
+        else:
+            config = self.get_workflow_config(app_id)
         if not config:
             raise BusinessException("工作流配置不存在", BizCode.CONFIG_MISSING)
 
