@@ -17,6 +17,44 @@ from app.models.workflow_model import (
 )
 from app.db import get_db
 
+# 工作流执行的终态。只有终态执行的节点行才允许被保留策略清理，
+# pending / running / waiting_human 一律保留，避免破坏正在运行的执行与人工介入恢复链路。
+WORKFLOW_EXECUTION_TERMINAL_STATUSES: tuple[str, ...] = (
+    "completed",
+    "failed",
+    "timeout",
+    "cancelled",
+)
+
+# 单节点调试记录在 meta_data.source 中的标识
+SINGLE_NODE_DEBUG_SOURCE = "single_node_debug"
+
+# 终态状态的 SQL 字面量列表。取值来自上面的代码内常量元组，不含外部输入。
+_TERMINAL_STATUSES_SQL = ", ".join(f"'{status}'" for status in WORKFLOW_EXECUTION_TERMINAL_STATUSES)
+
+# 完整工作流节点行的保留策略清理 SQL（异步队列落库路径使用）。
+#
+# 语义：当前 execution（:eid）已处于终态时，删除同一 app_id + workflow_config_id 下
+# 其他终态 execution 的节点行。
+#
+# 安全性：
+#   - cur.status 限定终态：执行中的 execution 不触发清理
+#   - stale_exec.status 限定终态：不会删掉 running / pending / waiting_human 的节点行
+#   - stale.execution_id = stale_exec.id 天然排除单节点调试行（execution_id IS NULL）
+#   - 必须在 INSERT 成功之后执行，否则写入失败时会连「上次执行记录」一起丢失
+NODE_EXECUTION_RETENTION_SQL = f"""
+DELETE FROM workflow_node_executions AS stale
+USING workflow_executions AS stale_exec,
+      workflow_executions AS cur
+WHERE cur.id = CAST(:eid AS uuid)
+  AND cur.status IN ({_TERMINAL_STATUSES_SQL})
+  AND stale.execution_id = stale_exec.id
+  AND stale_exec.id <> cur.id
+  AND stale_exec.app_id = cur.app_id
+  AND stale_exec.workflow_config_id = cur.workflow_config_id
+  AND stale_exec.status IN ({_TERMINAL_STATUSES_SQL})
+"""
+
 
 class WorkflowConfigRepository:
     """工作流配置仓储"""
@@ -270,6 +308,90 @@ class WorkflowNodeExecutionRepository:
             WorkflowNodeExecution.execution_id == execution_id
         )
         self.db.execute(stmt)
+
+    def delete_stale_workflow_executions(
+        self,
+        *,
+        app_id: uuid.UUID,
+        workflow_config_id: uuid.UUID,
+        keep_execution_id: uuid.UUID,
+    ) -> int:
+        """清理同一工作流下除 keep_execution_id 外、其他终态执行的节点记录。
+
+        仅清理终态执行；running / pending / waiting_human 一律保留。
+        keep_execution_id 自身未进入终态时不做任何清理。
+        必须在当前执行的节点行写入成功之后调用。
+
+        Args:
+            app_id: 应用 ID
+            workflow_config_id: 工作流配置 ID
+            keep_execution_id: 需要保留的执行 ID（本次执行）
+
+        Returns:
+            删除的行数
+        """
+        keep_is_terminal = (
+            select(WorkflowExecution.id)
+            .where(
+                WorkflowExecution.id == keep_execution_id,
+                WorkflowExecution.status.in_(WORKFLOW_EXECUTION_TERMINAL_STATUSES),
+            )
+            .exists()
+        )
+        stale_execution_ids = select(WorkflowExecution.id).where(
+            WorkflowExecution.app_id == app_id,
+            WorkflowExecution.workflow_config_id == workflow_config_id,
+            WorkflowExecution.id != keep_execution_id,
+            WorkflowExecution.status.in_(WORKFLOW_EXECUTION_TERMINAL_STATUSES),
+        )
+        stmt = delete(WorkflowNodeExecution).where(
+            keep_is_terminal,
+            WorkflowNodeExecution.execution_id.in_(stale_execution_ids),
+        )
+        result = self.db.execute(
+            stmt,
+            execution_options={"synchronize_session": False},
+        )
+        return result.rowcount or 0
+
+    def delete_stale_single_node_debug(
+        self,
+        *,
+        app_id: uuid.UUID,
+        workflow_config_id: uuid.UUID,
+        node_id: str,
+        keep_id: uuid.UUID,
+    ) -> int:
+        """清理同一节点除 keep_id 外的历史单节点调试记录。
+
+        过滤条件必须同时满足，否则会误删完整工作流的节点行：
+          execution_id IS NULL
+          meta_data['source'] == 'single_node_debug'
+          id != keep_id
+
+        Args:
+            app_id: 应用 ID
+            workflow_config_id: 工作流配置 ID
+            node_id: 节点 ID
+            keep_id: 需要保留的记录 ID（本次调试新写入的行）
+
+        Returns:
+            删除的行数
+        """
+        stmt = delete(WorkflowNodeExecution).where(
+            WorkflowNodeExecution.app_id == app_id,
+            WorkflowNodeExecution.workflow_config_id == workflow_config_id,
+            WorkflowNodeExecution.node_id == node_id,
+            WorkflowNodeExecution.execution_id.is_(None),
+            WorkflowNodeExecution.meta_data["source"].as_string() == SINGLE_NODE_DEBUG_SOURCE,
+            WorkflowNodeExecution.id != keep_id,
+        )
+        result = self.db.execute(
+            stmt,
+            execution_options={"synchronize_session": False},
+        )
+        return result.rowcount or 0
+
     
     def get_by_execution_id(
         self,

@@ -431,6 +431,15 @@ class Settings:
     WORKFLOW_IMPORT_CACHE_TIMEOUT: int = int(os.getenv("WORKFLOW_IMPORT_CACHE_TIMEOUT", 1800))
     WORKFLOW_NODE_TIMEOUT: int = int(os.getenv("WORKFLOW_NODE_TIMEOUT", 600))
 
+    # workflow_node_executions 保留策略开关。
+    # 开启后该表只保留「最近一次」记录：
+    #   - 完整工作流：同 app_id + workflow_config_id 下最近 1 次终态执行的全部节点行
+    #   - 单节点调试：同 app_id + workflow_config_id + node_id 下最近 1 条
+    # 历史明细的权威数据源是 workflow_executions.output_data["node_outputs"]，不受影响。
+    WORKFLOW_NODE_EXECUTION_RETENTION_ENABLED: bool = os.getenv(
+        "WORKFLOW_NODE_EXECUTION_RETENTION_ENABLED", "true"
+    ).lower() == "true"
+
     # ========================================================================
     # General Ontology Type Configuration
     # ========================================================================

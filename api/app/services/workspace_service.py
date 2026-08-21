@@ -34,7 +34,6 @@ from app.schemas.workspace_schema import (
     WorkspaceModelsUpdate,
     WorkspaceUpdate,
 )
-from app.schemas.memory_config_schema import ConfigurationError
 from app.i18n import t
 from app.services.memory_config_service import MemoryConfigService
 from app.services.session_service import SessionService
@@ -169,31 +168,208 @@ def _build_workspace_preset_response(db: Session, preset: WorkspaceDefaultModelP
     return result
 
 
-def _validate_workspace_model_selection(
+def _slot_label(slot: str, locale: str = "zh") -> str:
+    """获取模型位的可读名称（如 llm -> 对话模型），缺少翻译时回退为原始 slot。"""
+    key = f"workspace.models.slots.{slot}"
+    label = t(key, locale=locale)
+    return slot if label == key else label
+
+
+def _display_model_id(model_id: uuid.UUID | str | None) -> str:
+    """返回用于消息展示的短模型 ID（完整 UUID 会被敏感信息过滤器脱敏）。"""
+    if not model_id:
+        return "-"
+    text = str(model_id)
+    return text[:8] if len(text) > 8 else text
+
+
+def _model_issue(
+    slot: str,
+    *,
+    reason: str,
+    locale: str = "zh",
+    model_id: uuid.UUID | str | None = None,
+    model_name: str | None = None,
+    provider: str | None = None,
+    model_type: str | None = None,
+    detail: str | None = None,
+) -> dict:
+    """构造一条结构化的模型配置问题，供告警/错误详情返回给前端。
+
+    Args:
+        slot: 模型位（llm / embedding / rerank / vision / audio / video）
+        reason: 问题原因码（not_configured / not_found / inactive / not_accessible /
+            deprecated / capability_mismatch / no_api_key / api_verify_failed / verify_failed）
+        locale: 语言代码（zh / en）
+        model_id: 出问题的模型 ID
+        model_name: 出问题的模型名称
+        provider: 模型提供商
+        model_type: 模型类型（用于能力不匹配提示）
+        detail: 底层错误详情
+
+    Returns:
+        dict: 包含 slot / slot_label / model_id / model_name / reason / message 的问题详情
+    """
+    slot_label = _slot_label(slot, locale)
+    display_name = model_name or (_display_model_id(model_id) if model_id else "-")
+    message = t(
+        f"workspace.models.errors.{reason}",
+        locale=locale,
+        slot=slot_label,
+        model_id=_display_model_id(model_id) if model_id else "-",
+        model_name=display_name,
+        model_type=model_type or "-",
+        error=detail or "-",
+    )
+    return {
+        "slot": slot,
+        # 兼容旧字段名，前端/调用方可继续使用 model_type 定位模型位
+        "model_type": slot,
+        "slot_label": slot_label,
+        "model_id": str(model_id) if model_id else None,
+        "model_name": model_name,
+        "provider": provider,
+        "reason": reason,
+        "message": message,
+        "detail": detail,
+    }
+
+
+def _issue_summary_message(issues: list[dict], locale: str = "zh") -> str:
+    separator = "；" if str(locale).lower().startswith("zh") else "; "
+    return t(
+        "workspace.models.errors.save_failed",
+        locale=locale,
+        count=len(issues),
+        reasons=separator.join(issue["message"] for issue in issues),
+    )
+
+
+def _raise_model_config_error(
+    issues: list[dict],
+    locale: str = "zh",
+    *,
+    code: BizCode = BizCode.INVALID_PARAMETER,
+) -> None:
+    """将模型配置问题聚合为一条 BusinessException 抛出，并携带结构化详情。"""
+    raise BusinessException(
+        _issue_summary_message(issues, locale),
+        code,
+        context={"error_details": {"errors": issues}},
+    )
+
+
+def _serialize_provider(model: ModelConfig) -> str | None:
+    provider = getattr(model, "provider", None)
+    return getattr(provider, "value", provider)
+
+
+def _diagnose_unavailable_model(
+    db: Session | None,
+    slot: str,
+    model_id: str,
+    tenant_id: uuid.UUID | None,
+    locale: str,
+) -> dict:
+    """诊断不在可选范围内的模型：不存在 / 已禁用 / 不属于当前租户 / 已弃用。"""
+    model = None
+    if db is not None:
+        try:
+            model = db.query(ModelConfig).filter(ModelConfig.id == uuid.UUID(str(model_id))).first()
+        except Exception:  # 无效 UUID 或查询异常时按“不存在”处理
+            model = None
+
+    if model is None:
+        return _model_issue(slot, reason="not_found", locale=locale, model_id=model_id)
+
+    common = {
+        "locale": locale,
+        "model_id": model_id,
+        "model_name": model.name,
+        "provider": _serialize_provider(model),
+        "model_type": str(getattr(model.type, "value", model.type)),
+    }
+    is_tenant_model = tenant_id is None or model.tenant_id == tenant_id
+    is_public_speedbear = (
+        model.provider == ModelProvider.SPEEDBEAR and bool(model.is_public)
+    )
+    if not (is_tenant_model or is_public_speedbear):
+        # 跨租户模型只返回请求中的模型 ID，不泄露名称、供应商或状态。
+        return _model_issue(slot, reason="not_accessible", locale=locale, model_id=model_id)
+    if not model.is_active:
+        return _model_issue(slot, reason="inactive", **common)
+    if getattr(model, "model_base", None) is not None and getattr(model.model_base, "is_deprecated", False):
+        return _model_issue(slot, reason="deprecated", **common)
+    return _model_issue(slot, reason="not_accessible", **common)
+
+
+def _collect_workspace_model_selection_issues(
     available_models: list[ModelConfig],
     selection: dict[str, uuid.UUID | str | None],
     *,
     require_all_slots: bool,
-) -> dict[str, str | None]:
+    locale: str = "zh",
+    db: Session | None = None,
+    tenant_id: uuid.UUID | None = None,
+) -> tuple[dict[str, str | None], list[dict]]:
+    """校验模型位与模型的匹配关系，收集全部问题而非遇错即停。"""
     model_map = {str(model.id): model for model in available_models}
     normalized: dict[str, str | None] = {}
+    issues: list[dict] = []
 
     for slot in _WORKSPACE_MODEL_SLOTS:
         raw_value = selection.get(slot)
         if raw_value is None:
             if require_all_slots or slot in _REQUIRED_WORKSPACE_MODEL_SLOTS:
-                raise BusinessException(f"{slot} 模型未配置", BizCode.INVALID_PARAMETER)
+                issues.append(_model_issue(slot, reason="not_configured", locale=locale))
             normalized[slot] = None
             continue
 
         model_id = str(raw_value)
         model = model_map.get(model_id)
         if not model:
-            raise BusinessException(f"{slot} 模型不存在或不可用", BizCode.MODEL_NOT_FOUND)
+            issues.append(_diagnose_unavailable_model(db, slot, model_id, tenant_id, locale))
+            normalized[slot] = None
+            continue
         if not _slot_matches_model(slot, model):
-            raise BusinessException(f"{slot} 模型能力不匹配", BizCode.INVALID_PARAMETER)
+            issues.append(
+                _model_issue(
+                    slot,
+                    reason="capability_mismatch",
+                    locale=locale,
+                    model_id=model_id,
+                    model_name=model.name,
+                    provider=_serialize_provider(model),
+                    model_type=str(getattr(model.type, "value", model.type)),
+                )
+            )
+            normalized[slot] = None
+            continue
         normalized[slot] = model_id
 
+    return normalized, issues
+
+
+def _validate_workspace_model_selection(
+    available_models: list[ModelConfig],
+    selection: dict[str, uuid.UUID | str | None],
+    *,
+    require_all_slots: bool,
+    locale: str = "zh",
+    db: Session | None = None,
+    tenant_id: uuid.UUID | None = None,
+) -> dict[str, str | None]:
+    normalized, issues = _collect_workspace_model_selection_issues(
+        available_models,
+        selection,
+        require_all_slots=require_all_slots,
+        locale=locale,
+        db=db,
+        tenant_id=tenant_id,
+    )
+    if issues:
+        business_logger.warning(f"工作空间模型选择校验失败: {[issue['message'] for issue in issues]}")
+        _raise_model_config_error(issues, locale)
     return normalized
 
 
@@ -245,9 +421,17 @@ def _resolve_workspace_model_update_target(
     db: Session,
     workspace: Workspace,
     models_update: WorkspaceModelsUpdate | None,
-) -> tuple[bool, dict[str, str | None], tuple[str, ...]]:
+    *,
+    locale: str = "zh",
+) -> tuple[bool, dict[str, str | None], tuple[str, ...], list[dict]]:
+    """解析本次更新的目标配置。
+
+    Returns:
+        (是否使用默认配置, 归一化后的模型选择, 需要运行时校验的模型位, 静态校验问题列表)
+    """
     selection = _extract_workspace_model_values(workspace)
     target_is_default = bool(workspace.is_default_config)
+    issues: list[dict] = []
 
     if models_update:
         mode_explicit = models_update.is_default_config is not None
@@ -270,16 +454,19 @@ def _resolve_workspace_model_update_target(
                 )
                 for slot in _WORKSPACE_MODEL_SLOTS
             }
-            selection = _validate_workspace_model_selection(
+            selection, issues = _collect_workspace_model_selection_issues(
                 _get_accessible_workspace_models(db, workspace.tenant_id),
                 merged_selection,
+                locale=locale,
+                db=db,
+                tenant_id=workspace.tenant_id,
                 require_all_slots=False,
             )
 
     validation_slots = (
         _WORKSPACE_MODEL_SLOTS if target_is_default else _REQUIRED_WORKSPACE_MODEL_SLOTS
     )
-    return target_is_default, selection, validation_slots
+    return target_is_default, selection, validation_slots, issues
 
 
 def _sync_workspace_default_memory_config(workspace: Workspace, memory_config) -> None:
@@ -318,6 +505,96 @@ def _sync_default_config_workspaces(
         _sync_workspace_default_memory_config(workspace, default_memory_config)
 
 
+_VALIDATE_AS_LLM_SLOTS = {"vision", "video", "audio"}
+
+
+async def _validate_workspace_slot_runtime(
+    async_db: AsyncSession,
+    slot: str,
+    model_id: str,
+    tenant_id: uuid.UUID | None,
+    *,
+    locale: str,
+) -> dict | None:
+    """校验单个模型位的运行时可用性，返回精确的问题详情（可用则返回 None）。
+
+    区分以下失败原因：模型不存在/已弃用/无权访问、缺少可用 API Key、API 连通性校验失败。
+    """
+    from app.services.model_service import ModelApiKeyService
+    from app.services.model_service import ModelConfigService as ModelSvc
+
+    try:
+        model_config = await ModelSvc.get_model_by_id_async(async_db, uuid.UUID(str(model_id)), tenant_id)
+    except BusinessException as exc:
+        reason = "deprecated" if exc.code == BizCode.MODEL_DEPRECATED else "not_found"
+        return _model_issue(slot, reason=reason, locale=locale, model_id=model_id, detail=exc.message)
+    except Exception as exc:  # 无效 ID / 数据库异常等
+        return _model_issue(slot, reason="not_found", locale=locale, model_id=model_id, detail=str(exc))
+
+    model_name = model_config.name
+    provider = _serialize_provider(model_config)
+
+    try:
+        api_key_config = await ModelApiKeyService.get_available_api_key_async(
+            async_db, model_config.id, tenant_id
+        )
+    except Exception as exc:
+        return _model_issue(
+            slot,
+            reason="verify_failed",
+            locale=locale,
+            model_id=model_id,
+            model_name=model_name,
+            provider=provider,
+            detail=str(exc),
+        )
+
+    if not api_key_config:
+        return _model_issue(
+            slot,
+            reason="no_api_key",
+            locale=locale,
+            model_id=model_id,
+            model_name=model_name,
+            provider=provider,
+        )
+
+    validate_type = "llm" if slot in _VALIDATE_AS_LLM_SLOTS else slot
+    try:
+        result = await ModelSvc.validate_model_config(
+            async_db,
+            model_name=api_key_config.model_name,
+            provider=api_key_config.provider,
+            api_key=api_key_config.api_key,
+            api_base=api_key_config.api_base,
+            model_type=validate_type,
+            is_omni=api_key_config.is_omni,
+            capability=api_key_config.capability,
+        )
+    except Exception as exc:
+        return _model_issue(
+            slot,
+            reason="verify_failed",
+            locale=locale,
+            model_id=model_id,
+            model_name=api_key_config.model_name or model_name,
+            provider=provider,
+            detail=str(exc),
+        )
+
+    if not result.get("valid"):
+        return _model_issue(
+            slot,
+            reason="api_verify_failed",
+            locale=locale,
+            model_id=model_id,
+            model_name=api_key_config.model_name or model_name,
+            provider=provider,
+            detail=str(result.get("error") or result.get("message") or "Unknown error"),
+        )
+    return None
+
+
 async def _validate_workspace_model_runtime(
     db: Session,
     values: dict[str, str | None],
@@ -327,52 +604,41 @@ async def _validate_workspace_model_runtime(
     locale: str,
     slots_to_validate: tuple[str, ...],
 ) -> list[dict]:
+    """校验各模型位的运行时可用性，收集全部问题（不中断）。"""
     from app.db import get_async_db_context
 
+    _ = db  # 运行时校验使用独立的异步会话
+    warnings: list[dict] = []
+
     async with get_async_db_context() as async_db:
-        service = MemoryConfigService(async_db)
-        warnings: list[dict] = []
-        validate_as_llm = {"vision", "video", "audio"}
-
-        async def _validate_one(model_type: str, model_id: str) -> dict | None:
-            validate_type = "llm" if model_type in validate_as_llm else model_type
-            try:
-                await service._validate_model_connectivity(
-                    model_id,
-                    validate_type,
-                    tenant_id,
-                    None,
-                    workspace_id,
-                    locale=locale,
-                )
-                return None
-            except ConfigurationError as exc:
-                return {
-                    "model_type": model_type,
-                    "model_id": str(model_id),
-                    "message": exc.err_message,
-                }
-
         for slot in slots_to_validate:
             if not values.get(slot):
-                warnings.append({
-                    "model_type": slot,
-                    "model_id": None,
-                    "message": t("memory_config.model.not_configured", locale=locale, model_type=slot),
-                })
+                warnings.append(_model_issue(slot, reason="not_configured", locale=locale))
 
         for slot in slots_to_validate:
             model_id = values.get(slot)
             if not model_id:
                 continue
-            result = await _validate_one(slot, model_id)
-            if result is not None:
-                warnings.append(result)
+            issue = await _validate_workspace_slot_runtime(
+                async_db, slot, str(model_id), tenant_id, locale=locale
+            )
+            if issue is not None:
+                business_logger.warning(
+                    f"工作空间模型校验失败: workspace_id={workspace_id}, slot={slot}, "
+                    f"model_id={model_id}, reason={issue['reason']}, detail={issue.get('detail')}"
+                )
+                warnings.append(issue)
 
     return warnings
 
 
-def _resolve_workspace_create_payload(db: Session, workspace: WorkspaceCreate, tenant_id: uuid.UUID) -> WorkspaceCreate:
+def _resolve_workspace_create_payload(
+    db: Session,
+    workspace: WorkspaceCreate,
+    tenant_id: uuid.UUID,
+    *,
+    locale: str = "zh",
+) -> WorkspaceCreate:
     if workspace.is_default_config:
         return workspace.model_copy(update=_get_default_workspace_model_values(db))
 
@@ -387,6 +653,9 @@ def _resolve_workspace_create_payload(db: Session, workspace: WorkspaceCreate, t
             "video": workspace.video,
         },
         require_all_slots=False,
+        locale=locale,
+        db=db,
+        tenant_id=tenant_id,
     )
     return workspace.model_copy(update=validated)
 
@@ -401,7 +670,7 @@ def get_default_workspace_models(db: Session, *, allow_empty: bool = False) -> d
     return _build_workspace_preset_response(db, preset)
 
 
-def update_default_workspace_models(db: Session, data) -> dict:
+def update_default_workspace_models(db: Session, data, *, locale: str = "zh") -> dict:
     validated = _validate_workspace_model_selection(
         _get_public_speedbear_models(db),
         {
@@ -413,6 +682,8 @@ def update_default_workspace_models(db: Session, data) -> dict:
             "video": data.video,
         },
         require_all_slots=True,
+        locale=locale,
+        db=db,
     )
     preset = (
         db.query(WorkspaceDefaultModelPreset)
@@ -571,10 +842,14 @@ async def create_workspace(
             message="同名工作空间已存在",
             code=BizCode.RESOURCE_ALREADY_EXISTS
         )
-    workspace = _resolve_workspace_create_payload(db, workspace, user.tenant_id)
+    workspace = _resolve_workspace_create_payload(db, workspace, user.tenant_id, locale=language)
 
-    validation_slots = _WORKSPACE_MODEL_SLOTS if workspace.is_default_config else _REQUIRED_WORKSPACE_MODEL_SLOTS
     selection = _extract_workspace_model_values(workspace)
+    validation_slots = (
+        _WORKSPACE_MODEL_SLOTS
+        if workspace.is_default_config
+        else _REQUIRED_WORKSPACE_MODEL_SLOTS
+    )
     warnings = await _validate_workspace_model_runtime(
         db,
         selection,
@@ -584,7 +859,7 @@ async def create_workspace(
         slots_to_validate=validation_slots,
     )
     if warnings:
-        raise BusinessException(warnings[0]["message"], BizCode.INVALID_PARAMETER)
+        _raise_model_config_error(warnings, language)
 
     llm = workspace.llm
     embedding = workspace.embedding
@@ -1490,19 +1765,24 @@ async def validate_workspace_models_configs(
         models_update: WorkspaceModelsUpdate | None = None,
 ) -> dict:
     db_workspace = _check_workspace_member_permission(db, workspace_id, user)
-    target_is_default, selection, validation_slots = _resolve_workspace_model_update_target(
+    target_is_default, selection, validation_slots, selection_issues = _resolve_workspace_model_update_target(
         db,
         db_workspace,
         models_update,
-    )
-    warnings = await _validate_workspace_model_runtime(
-        db,
-        selection,
-        db_workspace.tenant_id,
-        db_workspace.id,
         locale=locale,
-        slots_to_validate=validation_slots,
     )
+    if selection_issues:
+        # 选择本身不合法（模型不存在/已禁用/能力不匹配）时无需再做连通性校验
+        warnings = selection_issues
+    else:
+        warnings = await _validate_workspace_model_runtime(
+            db,
+            selection,
+            db_workspace.tenant_id,
+            db_workspace.id,
+            locale=locale,
+            slots_to_validate=validation_slots,
+        )
     workspace_payload = _build_workspace_models_response(
         {
             **selection,
@@ -1546,11 +1826,15 @@ async def update_workspace_models_configs(
     default_memory_config = MemoryConfigService(db).get_workspace_default_config(workspace_id=workspace_id)
 
     try:
-        use_default_config, resolved_models, validation_slots = _resolve_workspace_model_update_target(
+        use_default_config, resolved_models, validation_slots, selection_issues = _resolve_workspace_model_update_target(
             db,
             db_workspace,
             models_update,
+            locale=locale,
         )
+        if selection_issues:
+            _raise_model_config_error(selection_issues, locale)
+
         warnings = await _validate_workspace_model_runtime(
             db,
             resolved_models,
@@ -1560,7 +1844,7 @@ async def update_workspace_models_configs(
             slots_to_validate=validation_slots,
         )
         if warnings:
-            raise BusinessException(warnings[0]["message"], BizCode.INVALID_PARAMETER)
+            _raise_model_config_error(warnings, locale)
 
         _assign_workspace_models(db_workspace, resolved_models, is_default_config=use_default_config)
 
