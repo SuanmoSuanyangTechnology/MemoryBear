@@ -117,9 +117,11 @@ const ReleasePage: FC<{data: Application; refresh: () => void}> = ({data, refres
                     headerType="borderless"
                     onClick={() => setSelectedVersion(version)}
                   >
-                    <div className="rb:leading-5 rb:line-clamp-2 rb:overflow-hidden rb:text-ellipsis rb:whitespace-nowrap">
-                      <Markdown content={version.release_notes} />
-                    </div>
+                    {version.release_notes &&
+                      <div className="rb:leading-5 rb:line-clamp-2 rb:overflow-hidden rb:text-ellipsis rb:whitespace-nowrap">
+                        <Markdown content={version.release_notes} />
+                      </div>
+                    }
                     <div className="rb:mt-4 rb:text-[12px] rb:text-[#5B6167] rb:leading-4.5">
                       {t('application.publishedOn')} {formatDateTime(version.published_at, 'YYYY-MM-DD HH:mm:ss')}
                     </div>
@@ -234,9 +236,11 @@ const ReleasePage: FC<{data: Application; refresh: () => void}> = ({data, refres
                     bodyClassName="rb:pt-0! rb:pb-3! rb:px-4!"
                     variant="outlined"
                   >
-                    <div className="rb:font-regular rb:text-[#5B6167] rb:leading-4">
-                      <Markdown content={selectedVersion.release_notes} />
-                    </div>
+                    {selectedVersion.release_notes &&
+                      <div className="rb:font-regular rb:text-[#5B6167] rb:leading-4">
+                        <Markdown content={selectedVersion.release_notes} />
+                      </div>
+                    }
                   </RbCard>
                 )}
               </RbCard>
