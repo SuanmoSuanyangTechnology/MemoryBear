@@ -1285,7 +1285,7 @@ MATCH (n)
 WHERE elementId(n) = $id
   AND n.delete_at IS NULL
 
-CALL () {
+CALL (n) {
   WITH n
   MATCH (n)-[]-(m:ExtractedEntity)
   WHERE NOT m:MemorySummary AND NOT m:Chunk
@@ -1299,7 +1299,7 @@ CALL () {
   ) AS ExtractedEntity
 }
 
-CALL () {
+CALL (n) {
   WITH n
   MATCH (n)-[]-(m:MemorySummary)
   WHERE NOT m:Chunk
