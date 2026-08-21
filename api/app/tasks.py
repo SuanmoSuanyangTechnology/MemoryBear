@@ -109,7 +109,7 @@ from app.schemas import document_schema, file_schema
 from app.services.memory_config_service import MemoryConfigService
 from app.services.memory_forget_service import MemoryForgetService
 from app.services.model_service import ModelApiKeyService
-from app.utils.redis_lock import RedisFairLock
+from app.utils.redis_lock import UNLOCK_SCRIPT, RedisFairLock
 
 
 class CeleryTaskIdFilter(logging.Filter):
@@ -155,7 +155,6 @@ AUTO_QUESTIONS_MAX_WORKERS = int(os.getenv("AUTO_QUESTIONS_MAX_WORKERS", "5"))
 MAX_DOCUMENT_PAGES = int(os.getenv("MAX_DOCUMENT_PAGES", "200"))
 
 # ── GDS 拓扑分数（eigenvector 中心性）扫描/计算常量 ──────────────
-# 在途锁 key：避免相邻两轮 scan 重复派发同一用户
 _GDS_TOPOLOGY_INFLIGHT_KEY_FMT = "gds_topology:inflight:{end_user_id}"
 
 
@@ -3667,6 +3666,10 @@ def scan_gds_topology_score(self) -> Dict[str, Any]:
     start_time = time.time()
 
     redis_client = get_sync_redis_client()
+    if redis_client is None:
+        logger.error("scan_gds_topology_score 终止：Redis 不可用，拒绝无锁派发")
+        raise RuntimeError("Redis unavailable: gds topology scan requires inflight locks")
+
     dispatched = 0
     dispatched_user_ids = []
     skip_inactive = 0
@@ -3683,17 +3686,16 @@ def scan_gds_topology_score(self) -> Dict[str, Any]:
                     if not _is_active_recently(db, uid, settings.GDS_TOPOLOGY_ACTIVE_HOURS):
                         skip_inactive += 1
                         continue
-                    # 在途锁：抢不到说明该用户已有 GDS 任务在途，跳过（纯 SET NX EX 粗过滤）
-                    if redis_client is not None:
-                        ok = redis_client.set(
-                            _GDS_TOPOLOGY_INFLIGHT_KEY_FMT.format(end_user_id=uid),
-                            "1", nx=True, ex=settings.GDS_TOPOLOGY_INFLIGHT_TTL_SEC,
-                        )
-                        if not ok:
-                            skip_inflight += 1
-                            continue
+                    inflight_token = uuid.uuid4().hex
+                    ok = redis_client.set(
+                        _GDS_TOPOLOGY_INFLIGHT_KEY_FMT.format(end_user_id=uid),
+                        inflight_token, nx=True, ex=settings.GDS_TOPOLOGY_INFLIGHT_TTL_SEC,
+                    )
+                    if not ok:
+                        skip_inflight += 1
+                        continue
                     do_gds_topology_score.apply_async(
-                        kwargs={"end_user_id": uid},
+                        kwargs={"end_user_id": uid, "inflight_token": inflight_token},
                         queue="memory_heavy_tasks",
                     )
                     dispatched += 1
@@ -3729,33 +3731,39 @@ def scan_gds_topology_score(self) -> Dict[str, Any]:
     time_limit=600,
     soft_time_limit=540,
 )
-def do_gds_topology_score(self, end_user_id: str) -> Dict[str, Any]:
+def do_gds_topology_score(self, end_user_id: str, inflight_token: Optional[str] = None) -> Dict[str, Any]:
     if not end_user_id:
         raise ValueError("end_user_id is required")
 
     inflight_key = _GDS_TOPOLOGY_INFLIGHT_KEY_FMT.format(end_user_id=end_user_id)
     start_time = time.time()
 
+    redis_client = get_sync_redis_client()
+    if redis_client is None:
+        logger.warning(f"GDS拓扑do 跳过：Redis 不可用 user={end_user_id}")
+        return {"status": "skipped_no_redis", "end_user_id": end_user_id}
+    if not inflight_token:
+        logger.warning(f"GDS拓扑do 跳过：缺少在途锁 token user={end_user_id}")
+        return {"status": "skipped_no_token", "end_user_id": end_user_id}
+    if redis_client.get(inflight_key) != inflight_token:
+        logger.warning(f"GDS拓扑do 跳过：在途锁已失效（过期或被新一轮 scan 重设）user={end_user_id}")
+        return {"status": "skipped_stale_inflight", "end_user_id": end_user_id}
+
     async def _run() -> Dict[str, Any]:
         from app.repositories.neo4j.gds_topology_repository import compute_topology_score
 
-        # 抢该用户的写锁，避免 eigenvector.write 写回与并发写入冲突。
-        write_lock = None
-        redis_client = get_sync_redis_client()
-        if redis_client is not None:
-            write_lock = RedisFairLock(
-                key=f"memory_write:{end_user_id}",
-                redis_client=redis_client,
-                expire=600, timeout=30, auto_renewal=True,
-            )
-            if not await asyncio.to_thread(write_lock.acquire):
-                logger.warning(f"GDS拓扑do 获取写锁超时，跳过 user={end_user_id}")
-                return {"status": "lock_timeout"}
+        write_lock = RedisFairLock(
+            key=f"memory_write:{end_user_id}",
+            redis_client=redis_client,
+            expire=600, timeout=30, auto_renewal=True,
+        )
+        if not await asyncio.to_thread(write_lock.acquire):
+            logger.warning(f"GDS拓扑do 获取写锁超时，跳过 user={end_user_id}")
+            return {"status": "lock_timeout"}
         try:
             return await compute_topology_score(end_user_id)
         finally:
-            if write_lock is not None:
-                await asyncio.to_thread(write_lock.release)
+            await asyncio.to_thread(write_lock.release)
 
     loop = set_asyncio_event_loop()
     try:
@@ -3770,13 +3778,10 @@ def do_gds_topology_score(self, end_user_id: str) -> Dict[str, Any]:
         raise
     finally:
         _shutdown_loop_gracefully(loop)
-        # 释放在途标记：放行下一轮 scan 对该用户的派发（成功/失败/跳过都删）
         try:
-            redis_client = get_sync_redis_client()
-            if redis_client is not None:
-                redis_client.delete(inflight_key)
-        except Exception:
-            pass
+            redis_client.eval(UNLOCK_SCRIPT, 1, inflight_key, inflight_token)
+        except Exception as e:
+            logger.warning(f"GDS拓扑do 释放在途锁失败 user={end_user_id}: {e}")
 
 
 @celery_app.task(
