@@ -1099,17 +1099,31 @@ class WorkflowService:
                 if not api_key_obj:
                     return None
 
+                # Snapshot ORM-backed fields before the async session closes. The
+                # session context may expire attributes on rollback/close, and using
+                # api_key_obj afterwards would raise DetachedInstanceError.
+                api_key_data = {
+                    "model_name": api_key_obj.model_name,
+                    "provider": api_key_obj.provider,
+                    "api_key": api_key_obj.api_key,
+                    "api_base": api_key_obj.api_base,
+                }
+
             config = RedBearModelConfig(
-                model_name=api_key_obj.model_name,
-                provider=api_key_obj.provider,
-                api_key=api_key_obj.api_key,
-                base_url=api_key_obj.api_base or None,
+                model_name=api_key_data["model_name"],
+                provider=api_key_data["provider"],
+                api_key=api_key_data["api_key"],
+                base_url=api_key_data["api_base"] or None,
                 timeout=60,
                 max_retries=3,
             )
 
-            # ponytail: this helper only needs pure math; don't keep a DB session around for it.
-            query_embedding = AnnotationService.generate_embedding(message, config)
+            # Embedding clients are synchronous; keep them off the async event loop.
+            query_embedding = await asyncio.to_thread(
+                AnnotationService.generate_embedding,
+                message,
+                config,
+            )
             best_match = None
             best_similarity = 0.0
             for annotation in annotations:
