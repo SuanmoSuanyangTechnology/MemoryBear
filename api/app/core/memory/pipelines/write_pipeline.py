@@ -1060,6 +1060,20 @@ class WritePipeline:
             for file_info in files:
                 url = file_info.get("url", "")
                 if not url:
+                    # local_file 场景：memory_messages.files 只带 upload_file_id
+                    # （FileInput.model_dump(exclude_none=True) 剔除了空 url），
+                    # 必须先解析为可访问 URL，否则整条感知记忆会被跳过。
+                    url = await self._resolve_upload_file_url(file_info)
+                    if url:
+                        file_info = {**file_info, "url": url}
+                if not url:
+                    logger.warning(
+                        "[WritePipeline] 文件缺少可访问 URL，跳过感知记忆: "
+                        "type=%s transfer_method=%s upload_file_id=%s",
+                        file_info.get("type"),
+                        file_info.get("transfer_method"),
+                        file_info.get("upload_file_id"),
+                    )
                     continue
 
                 try:
@@ -1136,6 +1150,40 @@ class WritePipeline:
                         f"[WritePipeline] 文件预处理失败: url={url}, err={e}",
                         exc_info=True,
                     )
+
+    async def _resolve_upload_file_url(self, file_info: dict) -> str:
+        """把 local_file 的 upload_file_id 解析为可访问 URL。
+
+        API 写入路径（/v1/memory/write）的 files 只带 upload_file_id，
+        与试运行路径 ``pilot_run_service._resolve_file_url`` 保持一致，这里补齐 URL。
+
+        Args:
+            file_info: memory_messages.files 中的单个文件 dict
+
+        Returns:
+            str: 可访问 URL；非 local_file 或解析失败时返回空串
+        """
+        upload_file_id = file_info.get("upload_file_id")
+        if not upload_file_id:
+            return ""
+
+        from app.db import get_db_read
+        from app.schemas.app_schema import FileInput
+        from app.services.multimodal_service import MultimodalService
+
+        try:
+            file_data = {k: v for k, v in file_info.items() if k != "url"}
+            file_input = FileInput(**file_data)
+            with get_db_read() as db:
+                url = await MultimodalService(db, api_config=None).get_file_url(file_input)
+            return url or ""
+        except Exception as e:
+            logger.warning(
+                "[WritePipeline] 文件 URL 解析失败: upload_file_id=%s err=%s",
+                upload_file_id,
+                e,
+            )
+            return ""
 
     # ──────────────────────────────────────────────
     # 辅助方法
