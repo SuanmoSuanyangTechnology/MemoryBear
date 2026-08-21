@@ -35,6 +35,7 @@ interface PaginatedMessages {
   page: number;
   pageSize: number;
   total: number;
+  has_more: boolean;
 }
 
 export const NOTIFICATION_PAGE_SIZE = 10;
@@ -80,9 +81,12 @@ export const emptyPagination = (
   pageSize: number = NOTIFICATION_PAGE_SIZE,
 ): PaginationState => ({
   page: 1,
+  pagesize: pageSize,
   pageSize,
   hasMore: true,
   loadingMore: false,
+  total: 0,
+  has_more: false,
 });
 
 export const extractPaginatedMessages = (
@@ -95,6 +99,7 @@ export const extractPaginatedMessages = (
     page: 1,
     pageSize: requestedPageSize,
     total: 0,
+    has_more: false,
   };
 
   if (Array.isArray(response)) {
@@ -109,7 +114,6 @@ export const extractPaginatedMessages = (
 
   if (!isRecord(response)) return empty;
   const root = response as NotificationListResponse & Record<string, unknown>;
-
   let payload: NotificationListResponse = root;
   if (isRecord(root.data)) {
     payload = root.data as NotificationListResponse;
@@ -118,7 +122,8 @@ export const extractPaginatedMessages = (
     return {
       ...empty,
       messages,
-      hasMore: messages.length >= requestedPageSize,
+      ...root.page,
+      hasMore: root.page?.hasnext ?? false,
       total: messages.length,
     };
   }
@@ -130,6 +135,7 @@ export const extractPaginatedMessages = (
     : []
   ) as NotificationMessage[];
 
+  const has_more = payload.has_more ?? false;
   const pageMeta = isRecord(payload.page) ? payload.page as PageMeta : undefined;
   const page = isFiniteNumber(pageMeta?.page) ? pageMeta.page : 1;
   const pageSize = isFiniteNumber(pageMeta?.pagesize)
@@ -157,7 +163,7 @@ export const extractPaginatedMessages = (
         ? payload.has_next
         : messages.length >= pageSize;
 
-  return { messages, hasMore, page, pageSize, total };
+  return { messages, hasMore, page, pageSize, total, has_more };
 };
 
 export const isNotificationGeneration = (

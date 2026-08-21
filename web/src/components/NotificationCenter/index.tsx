@@ -107,6 +107,7 @@ const NotificationPanel = ({ open }: NotificationPanelProps) => {
     snoozeModalMessage(selected.id, 1);
     setSelected(null);
   };
+  console.log('pagination', pagination)
 
   return (
     <div className={styles.panel}>
@@ -168,7 +169,7 @@ const NotificationPanel = ({ open }: NotificationPanelProps) => {
             endMessage={
               pagination.hasMore ? null : (
                 <div key="end" className="rb:py-2 rb:text-center rb:text-[11px] rb:text-[#B8BAC0]">
-                  — {t('notificationCenter.empty.noMore', { defaultValue: '没有更多了' })} —
+                  — {unreadOnly && pagination.has_more ? t('notificationCenter.empty.hasMore', { total: pagination.total }) : t('notificationCenter.empty.noMore')} —
                 </div>
               )
             }
