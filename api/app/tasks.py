@@ -26,7 +26,13 @@ from app.aioRedis import get_thread_safe_redis
 from app.celery_app import celery_app
 from app.core.config import settings
 from app.core.logging_config import get_logger
+from app.core.memory.exceptions import MemoryExtractionBusinessError
+from app.core.models import RedBearEmbeddings, RedBearLLM
 from app.core.memory.storage_services.reflection_engine import retry_registry as rr
+from app.core.memory.storage_services.forgetting_engine.constants import (
+    FORGET_CANDIDATES_KEY as _FORGET_CANDIDATES_KEY,
+    FORGET_INFLIGHT_KEY as _FORGET_INFLIGHT_KEY,
+)
 from app.core.memory.storage_services.reflection_engine.errors import (
     ReflectionBusinessError,
     ReflectionFailureReason,
@@ -2663,7 +2669,7 @@ def write_message_task(
     )
     start_time = time.time()
 
-    async def _run() -> dict:
+    async def _run():
         from app.core.memory.memory_service import MemoryService
 
         service = MemoryService(
@@ -2684,12 +2690,31 @@ def write_message_task(
             dispatch_at=dispatch_at,
             source=source,
         )
-        return {"status": result.status, "extraction": result.extraction}
+        return result
 
     try:
         task_start_time = int(time.time())
 
-        result = loop.run_until_complete(_run())
+        write_result = loop.run_until_complete(_run())
+        if write_result.degraded_error is not None:
+            from app.core.memory.alerts import enqueue_memory_extraction_alert_safely
+
+            loop.run_until_complete(
+                enqueue_memory_extraction_alert_safely(
+                    error=write_result.degraded_error,
+                    memory_message_id=str(
+                        (target_message or {}).get("memory_message_id") or ""
+                    ),
+                    workspace_id=workspace_id,
+                    end_user_id=resolved_end_user_id,
+                    source=source,
+                    task_id=str(self.request.id or ""),
+                )
+            )
+        result = {
+            "status": write_result.status,
+            "extraction": write_result.extraction,
+        }
         elapsed_time = time.time() - start_time
 
         logger.info(f"[CELERY WRITE] Task completed - elapsed_time={elapsed_time:.2f}s")
@@ -2759,7 +2784,25 @@ def write_message_task(
         logger.error(f"[CELERY WRITE] Task failed - elapsed_time={elapsed_time:.2f}s, error={detailed_error}",
                      exc_info=True)
 
-        # 配置类确定性错误：直接 raise，让 Celery 将任务标记为 FAILURE，不触发重试
+        # 只有主萃取链路的稳定业务异常会生成用户级告警。WritePipeline 的
+        # finally 已在异常到达此处前完成摘要任务取消和资源清理。
+        if isinstance(e, MemoryExtractionBusinessError):
+            from app.core.memory.alerts import enqueue_memory_extraction_alert_safely
+
+            loop.run_until_complete(
+                enqueue_memory_extraction_alert_safely(
+                    error=e,
+                    memory_message_id=str(
+                        (target_message or {}).get("memory_message_id") or ""
+                    ),
+                    workspace_id=workspace_id,
+                    end_user_id=resolved_end_user_id,
+                    source=source,
+                    task_id=str(self.request.id or ""),
+                )
+            )
+
+        # 配置类确定性错误：直接 raise，让 Celery 将任务标记为 FAILURE。
         if isinstance(e, (ModelNotFoundError, ModelInactiveError, InvalidConfigError)):
             logger.error(
                 f"[CELERY WRITE] Configuration error detected, task will not be retried - "
@@ -3756,12 +3799,16 @@ def sync_all_end_user_memory_counts(self) -> Dict[str, Any]:
         from app.core.memory.utils.memory_count_utils import (
             sync_end_user_memory_count_from_neo4j,
         )
-        from app.repositories.end_user_repository import EndUserRepository
         from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 
         # 只读短 session 枚举活跃用户 ID，随后立即关闭
         with get_db_read() as db:
-            user_ids = [str(u.id) for u in EndUserRepository(db).get_all_active()]
+            user_ids = [
+                str(u.id)
+                for u in db.query(EndUser)
+                .filter(EndUser.is_active == True, EndUser.memory_count >= 300)
+                .all()
+            ]
 
         connector = Neo4jConnector()
         succeeded = 0
@@ -4563,10 +4610,6 @@ def do_refresh_user_tags(
 #     return result
 
 
-_FORGET_CANDIDATES_KEY = "forget:candidates"
-_FORGET_INFLIGHT_KEY = "forget:inflight"
-
-
 @celery_app.task(
     name="app.tasks.scan_forget_candidates",
     bind=True,
@@ -4683,7 +4726,10 @@ def do_forget_for_user(self, end_user_id: str) -> Dict[str, Any]:
                 with write_lock:
                     result = await service.forget()
             except RuntimeError:
-                logger.warning(f"[ForgetDo] 获取写锁超时，跳过 user={end_user_id}")
+                logger.warning(
+                    f"[ForgetDo] 获取写锁超时，跳过 user={end_user_id} "
+                    "forget_lock_timeout_count=1"
+                )
                 if redis_client:
                     # 移回候选集，等下一轮 scan 重新派发（与 scan_forget_candidates 派发失败的处理一致）
                     await redis_client.smove(_FORGET_INFLIGHT_KEY, _FORGET_CANDIDATES_KEY, end_user_id)

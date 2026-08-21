@@ -4,6 +4,7 @@ import ReactMarkdown from 'react-markdown';
 import { useTranslation } from 'react-i18next';
 // import { useNavigate } from 'react-router-dom';
 import clsx from 'clsx';
+import InfiniteScroll from 'react-infinite-scroll-component';
 
 import {
   useNotification,
@@ -57,54 +58,21 @@ const NotificationPanel = ({ open }: NotificationPanelProps) => {
   const [selected, setSelected] = useState<NotificationMessage | null>(null);
 
   const listRef = useRef<HTMLDivElement | null>(null);
-  const sentinelRef = useRef<HTMLDivElement | null>(null);
-
-  // Refs hold latest values so IntersectionObserver (created once) avoids stale closures
-  // See experience 1255549 for the "observer callback sees old page/hasMore" class of bug.
-  const loadingRef = useRef(loading);
-  loadingRef.current = loading;
-  const loadingMoreRef = useRef(pagination.loadingMore);
-  loadingMoreRef.current = pagination.loadingMore;
-  const hasMoreRef = useRef(pagination.hasMore);
-  hasMoreRef.current = pagination.hasMore;
-  const loadMoreRef = useRef(loadMore);
-  loadMoreRef.current = loadMore;
+  const NOTIFICATION_SCROLL_ID = 'notification-list-scroll';
 
   useEffect(() => {
     if (!open) return;
-    console.log('open', open)
     const filter: { tab: NotificationMessageTab; is_read?: boolean } = { tab };
     if (unreadOnly) filter.is_read = false;
     void fetchMessages(filter);
   }, [open, tab, unreadOnly, fetchMessages, cursor, generation]);
 
-  // Single observer instance, bound to the sentinel, with cleanup on unmount.
-  useEffect(() => {
-    const root = listRef.current;
-    const sentinel = sentinelRef.current;
-    if (!sentinel) return;
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        entries.forEach((entry) => {
-          if (
-            entry.isIntersecting &&
-            hasMoreRef.current &&
-            !loadingMoreRef.current &&
-            !loadingRef.current
-          ) {
-            void loadMoreRef.current();
-          }
-        });
-      },
-      { root: root || null, rootMargin: '80px', threshold: 0 },
-    );
-    observer.observe(sentinel);
-    return () => {
-      observer.unobserve(sentinel);
-      observer.disconnect();
-    };
-  }, []);
+  // react-infinite-scroll-component invokes `next` as long as `hasMore=true`
+  // and no scrollbar is present. Guard so we never queue parallel loads.
+  const handleNext = () => {
+    if (loading || pagination.loadingMore || !pagination.hasMore) return;
+    void loadMore();
+  };
 
   const openDetail = (message: NotificationMessage) => {
     if (!message.is_read && !message.requires_confirmation) {
@@ -139,6 +107,7 @@ const NotificationPanel = ({ open }: NotificationPanelProps) => {
     snoozeModalMessage(selected.id, 1);
     setSelected(null);
   };
+  console.log('pagination', pagination)
 
   return (
     <div className={styles.panel}>
@@ -174,7 +143,11 @@ const NotificationPanel = ({ open }: NotificationPanelProps) => {
         </Checkbox>
         <span className="rb:text-[11px] rb:text-[#A8A9AA]">{messages.length}</span>
       </div>
-      <div className={styles.list} ref={listRef}>
+      <div
+        id={NOTIFICATION_SCROLL_ID}
+        ref={listRef}
+        className={styles.list}
+      >
         {messages.length === 0 ? (
           <Empty
             size={88}
@@ -182,77 +155,80 @@ const NotificationPanel = ({ open }: NotificationPanelProps) => {
             className="rb:py-10!"
           />
         ) : (
-          <>
-            {messages.map((message) => {
-              return (
-                <div
-                  key={message.id}
-                  className={clsx(styles.item, !message.is_read && styles.itemUnread)}
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => openDetail(message)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' || event.key === ' ') openDetail(message);
-                  }}
-                >
-                  <div className={styles.itemContent}>
-                    <div className={styles.itemTitleLine}>
-                      {!message.is_read && <span className={styles.unreadDot} />}
-                      {message.priority !== 'normal' && (
-                        <Tag
-                          color={message.priority === 'pinned' ? 'error' : 'warning'}
-                          className="rb:text-[10px]! rb:leading-4! rb:m-0!"
-                        >
-                          {t(`notificationCenter.priorities.${message.priority}`)}
-                        </Tag>
-                      )}
-                      {message.alert_severity &&
-                        <Tag color={severityColors[message.alert_severity]}>{message.alert_severity}</Tag>
-                      }
-                      {message.type !== 'announcement' &&
-                        <Tag
-                          color={message.type === 'activity' ? 'warning' : 'default'}
-                          className="rb:text-[10px]! rb:leading-4! rb:m-0!"
-                        >
-                          {t(`notificationCenter.types.${message.type}`)}
-                        </Tag>
-                      }
-                      <span className={styles.itemTitle}>{message.title}</span>
-                    </div>
-                    <div className={styles.itemSummary}>
-                      <RbMarkdown content={message.summary} />
-                    </div>
-                    <div className={styles.itemMeta}>
-                      <span>{formatDateTime(message.published_at)}</span>
-                      {message.requires_confirmation &&
-                        (message.is_confirmed ? (
-                          <span className="rb:text-[#12B76A]">
-                            {t('notificationCenter.actions.confirmed')}
-                          </span>
-                        ) : (
-                          <Button danger size="small" onClick={(event) => handleConfirm(event, message.id)}>
-                            {t('notificationCenter.actions.confirm')}
-                          </Button>
-                        ))}
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-
-            {/* Trigger for infinite scroll */}
-            <div ref={sentinelRef} className="rb:max-h-[calc(100vh-200px)]" aria-hidden />
-            {pagination.loadingMore && (
-              <div className="rb:py-5 rb:flex rb:justify-center">
+          <InfiniteScroll
+            dataLength={messages.length}
+            next={handleNext}
+            hasMore={pagination.hasMore}
+            scrollableTarget={NOTIFICATION_SCROLL_ID}
+            style={{ overflow: 'visible' }}
+            loader={
+              <div key="loader" className="rb:py-5 rb:flex rb:justify-center">
                 <Spin size="small" />
               </div>
-            )}
-            {!pagination.loadingMore && !pagination.hasMore && (
-              <div className="rb:py-2 rb:text-center rb:text-[11px] rb:text-[#B8BAC0]">
-                — {t('notificationCenter.empty.noMore', { defaultValue: '没有更多了' })} —
+            }
+            endMessage={
+              pagination.hasMore ? null : (
+                <div key="end" className="rb:py-2 rb:text-center rb:text-[11px] rb:text-[#B8BAC0]">
+                  — {unreadOnly && pagination.has_more ? t('notificationCenter.empty.hasMore', { total: pagination.total }) : t('notificationCenter.empty.noMore')} —
+                </div>
+              )
+            }
+          >
+            {messages.map((message) => (
+              <div
+                key={message.id}
+                className={clsx(styles.item, !message.is_read && styles.itemUnread)}
+                role="button"
+                tabIndex={0}
+                onClick={() => openDetail(message)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') openDetail(message);
+                }}
+              >
+                <div className={styles.itemContent}>
+                  <div className={styles.itemTitleLine}>
+                    {!message.is_read && <span className={styles.unreadDot} />}
+                    {message.priority !== 'normal' && (
+                      <Tag
+                        color={message.priority === 'pinned' ? 'error' : 'warning'}
+                        className="rb:text-[10px]! rb:leading-4! rb:m-0!"
+                      >
+                        {t(`notificationCenter.priorities.${message.priority}`)}
+                      </Tag>
+                    )}
+                    {message.alert_severity &&
+                      <Tag color={severityColors[message.alert_severity]}>{message.alert_severity}</Tag>
+                    }
+                    {message.type !== 'announcement' &&
+                      <Tag
+                        color={message.type === 'activity' ? 'warning' : 'default'}
+                        className="rb:text-[10px]! rb:leading-4! rb:m-0!"
+                      >
+                        {t(`notificationCenter.types.${message.type}`)}
+                      </Tag>
+                    }
+                    <span className={styles.itemTitle}>{message.title}</span>
+                  </div>
+                  <div className={styles.itemSummary}>
+                    <RbMarkdown content={message.summary} />
+                  </div>
+                  <div className={styles.itemMeta}>
+                    <span>{formatDateTime(message.published_at)}</span>
+                    {message.requires_confirmation &&
+                      (message.is_confirmed ? (
+                        <span className="rb:text-[#12B76A]">
+                          {t('notificationCenter.actions.confirmed')}
+                        </span>
+                      ) : (
+                        <Button danger size="small" onClick={(event) => handleConfirm(event, message.id)}>
+                          {t('notificationCenter.actions.confirm')}
+                        </Button>
+                      ))}
+                  </div>
+                </div>
               </div>
-            )}
-          </>
+            ))}
+          </InfiniteScroll>
         )}
       </div>
 

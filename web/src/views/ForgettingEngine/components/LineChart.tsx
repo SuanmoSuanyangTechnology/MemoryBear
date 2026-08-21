@@ -268,7 +268,7 @@ const LineChart: FC<LineCardProps> = ({ config }) => {
               ...initialData || []
             ]
           }}
-          style={{ height: '400px', width: '100%' }}
+          style={{ height: '100%', width: '100%' }}
           opts={{ renderer: 'canvas' }}
           notMerge={true}
           lazyUpdate={true}

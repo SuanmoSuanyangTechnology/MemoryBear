@@ -28,6 +28,10 @@ except ImportError:
 
 # 导入企业版消息通知中心任务（队列：notification_state_tasks）
 try:
+    from premium.platform_admin.notification_center.alert_emit_tasks import (  # noqa: F401
+        emit_alert_obligation_task,
+        scan_alert_emit_obligations_task,
+    )
     from premium.platform_admin.notification_center.tasks import (  # noqa: F401
         alert_fanout_task,
         notification_publish_task,
@@ -46,6 +50,16 @@ try:
             "Failed to register notification alert plugins; "
             "worker will continue without alert plugins"
         )
+except ImportError:
+    pass  # 社区版无 premium 模块，静默跳过
+
+# Web 进程由 platform_admin.plugin 注册；Celery 入口需独立注册同一门面。
+try:
+    from app.plugins import register_plugin
+    from premium.platform_admin.notification_center import alert_engine
+
+    register_plugin("alert_engine", alert_engine)
+    logger.info("Alert engine plugin registered for Celery worker")
 except ImportError:
     pass  # 社区版无 premium 模块，静默跳过
 

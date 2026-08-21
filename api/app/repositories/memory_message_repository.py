@@ -164,7 +164,9 @@ class MemoryMessageRepository:
             )
             self.db.add(memory_message)
             written.append({
+                "memory_message_id": str(memory_message.id),
                 "role": role,
+                "source": source.value,
                 "message_seq": next_seq,
                 "content": content,
                 "dialog_at": memory_message.dialog_at,
@@ -622,7 +624,9 @@ class MemoryMessageRepository:
 def message_to_dict(message: MemoryMessage) -> dict:
     """将 MemoryMessage ORM 对象转换为字典格式。"""
     return {
+        "memory_message_id": str(message.id),
         "role": message.role,
+        "source": message.source,
         "content": message.content,
         "message_seq": message.message_seq,
         "should_memorize": message.should_memorize,

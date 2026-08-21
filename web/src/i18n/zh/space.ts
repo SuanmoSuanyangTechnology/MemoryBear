@@ -27,6 +27,8 @@ export const space = {
       multimodalModelDesc: '按需启用，处理图像 / 音频 / 视频内容',
       optional: '（选填）',
       configAlert: '空间模型配置为空间的模型模型，保障空间运行时能正确的调用到相应的模型来处理业务数据。',
+      embeddingSwitchConfirmTitle: '切换 Embedding 模型确认',
+      embeddingSwitchConfirmContent: '切换 embedding 模型可能导致相关检索功能效果下降，确定要切换吗？',
 
       basic: '基础配置',
       models: '模型配置',
@@ -164,7 +166,7 @@ export const space = {
       custom_text: '调试文本',
       chatPlaceholder: '输入调试文本，发送后查看 AI 回复',
       chatEmpty: '发送一条消息，开始调试对话',
-      debugReply: '好的,已根据当前配置对该图文进行记忆萃取,点击右上角「调试」查看提取过程与结果。',
+      debugReply: '好的，已根据当前配置对该图文进行记忆萃取,点击右上角「调试」查看提取过程与结果。',
       ontologyCoverage: '本体类型',
       entity_total: '一共{{num}}个实体',
       scene_type_distribution: '场景类型',
@@ -356,6 +358,7 @@ export const space = {
       timeout_at: '此操作将在 {{timeout_at}} 过期',
       favorite: '收藏',
       unfavorite: '取消收藏',
+      MemorySkills: '记忆对话',
     },
     login: {
       title: '红熊记忆科学',

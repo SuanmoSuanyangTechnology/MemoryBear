@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-10 16:46:17 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-07-02 16:00:20
+ * @Last Modified time: 2026-08-13 11:50:53
  */
 import { type FC, useRef, useEffect, useState } from 'react'
 import clsx from 'clsx'
@@ -224,9 +224,9 @@ const ChatContent: FC<ChatContentProps> = ({
     messageApi.success(t('common.copySuccess'))
   }
   return (
-    <div ref={scrollContainerRef} className={clsx("rb:relative rb:overflow-y-auto", classNames)}>
-      {data.length === 0 
-        ? empty // Display empty state
+    <div ref={scrollContainerRef} className={clsx("rb:relative rb:h-full! rb:h-0! rb:min-h-0! rb:overflow-y-auto", classNames)}>
+      {data.length === 0
+        ? <div className="rb:h-full! rb:min-h-0! rb:overflow-y-auto">{empty}</div> // Display empty state, ensure it fills ChatContent height and stays scrollable on overflow
         : data.map((vo, index) => {
           const item: ChatItem | undefined = Array.isArray(vo) ? vo?.find(v => v.is_current) : vo;
           const isNotSupportRegenerate = typeof regenerateMaxCount === 'number' && regenerateMaxCount <= (Array.isArray(vo) ? vo.length : 1)
@@ -374,7 +374,7 @@ const ChatContent: FC<ChatContentProps> = ({
                       </div>
                       {/* Bottom label (such as timestamp, username, etc.) */}
                       {(labelPosition === 'bottom' || item.meta_data?.audio_url || isSupportTools || isAlwaysShowAssistantTools) &&
-                        <Flex gap={12} wrap align="center" justify={item.role === 'user' ? 'end' : 'start'}>
+                        <Flex gap={12} wrap align="center" justify={item.role === 'user' ? 'end' : 'start'} className={item.role === 'user' ? 'rb:mt-2!' : ''}>
                           {labelPosition === 'bottom' &&
                             <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4 rb:font-regular">
                               {labelFormat(item)}

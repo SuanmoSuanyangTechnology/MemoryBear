@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:26:44 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-21 16:29:40
+ * @Last Modified time: 2026-08-17 12:29:23
  */
 /**
  * AI Prompt Assistant Modal
@@ -215,9 +215,9 @@ const AiPromptModal = forwardRef<AiPromptModalRef, AiPromptModalProps>(({
         body: 'rb:p-0! rb:border-t rb:border-t-[#EBEBEB]'
       }}
     >
-      <Form form={form} className="rb:mx-4!">
-        <div className="rb:grid rb:grid-cols-2">
-          <div className="rb:border-r rb:border-r-[#EBEBEB] rb:pr-4 rb:pt-3 rb:pb-4">
+      <Form form={form} className="rb:mx-4! rb:h-[calc(100vh-202px)]! rb:overflow-hidden!">
+        <div className="rb:grid rb:grid-cols-2 rb:h-full! rb:overflow-hidden!">
+          <Flex vertical className="rb:border-r rb:border-r-[#EBEBEB] rb:pr-4! rb:pt-3! rb:pb-4! rb:h-full! rb:overflow-hidden!">
             <Form.Item
               name="model_id"
               rules={[{ required: true, message: t('common.pleaseSelect') }]}
@@ -229,7 +229,7 @@ const AiPromptModal = forwardRef<AiPromptModalRef, AiPromptModalProps>(({
             </Form.Item>
 
             <ChatContent
-              classNames="rb:h-[calc(100vh-330px)] rb:pb-[15px]!"
+              classNames="rb:flex-1! rb:pb-[15px]!"
               contentClassNames="rb:max-w-75!"
               empty={<Empty url={ConversationEmptyIcon} title={t(`${source}.promptChatEmpty`)} isNeedSubTitle={false} size={[140, 100]} className="rb:h-full" />}
               data={chatList || []}
@@ -269,10 +269,10 @@ const AiPromptModal = forwardRef<AiPromptModalRef, AiPromptModalProps>(({
                 })}></div>
               </Flex>
             </Flex>
-          </div>
+          </Flex>
 
-          <div className="rb:pl-4 rb:pt-3.5 rb:pb-4">
-            <Flex justify="space-between" className="rb:mb-3!">
+          <Flex vertical gap={12} className="rb:pl-4! rb:pt-3.5! rb:pb-4! rb:h-full! rb:overflow-hidden!">
+            <Flex justify="space-between">
               <div>
                 {t(`${source}.conversationOptimizationPrompt`)}
               </div>
@@ -296,21 +296,27 @@ const AiPromptModal = forwardRef<AiPromptModalRef, AiPromptModalProps>(({
               </Space>
             </Flex>
 
-            <Form.Item name="current_prompt" noStyle>
+            <Form.Item name="current_prompt" noStyle className="rb:flex-1! rb:m-0! rb:min-h-0!">
               {values?.current_prompt
                 ? <Editor 
                   ref={editorRef}
-                  className="rb:h-[calc(100vh-278px)] rb:bg-white! rb:border-none! rb:p-0!"
+                  wrapperClassName="rb:h-full! rb:h-0! rb:min-h-0! rb:overflow-y-auto!"
+                  className="rb:h-full! rb:bg-white! rb:border-none! rb:p-0! rb:text-[#212332] rb:leading-5 rb:min-h-0!"
                   disabled={loading}
                   onChange={(value) => {
                     if (loading) return
                     form.setFieldValue('current_prompt', value)
                   }}
                 />
-                : <Empty url={analysisEmptyIcon} title={t(`${source}.promptOptimizationEmpty`)} isNeedSubTitle={false} size={[270, 170]} className="rb:h-[calc(100vh-278px)] rb:w-70 rb:mx-auto! rb:text-center! rb:text-[12px]! rb:leading-4!" />
+                : <Empty url={analysisEmptyIcon}
+                    title={t(`application.promptOptimizationEmpty`)}
+                    isNeedSubTitle={false}
+                    size={[270, 170]}
+                    className="rb:h-full! rb:mx-auto! rb:text-center! rb:text-[12px]! rb:leading-4! rb:w-full! rb:overflow-auto!"
+                  />
               }
             </Form.Item>
-          </div>
+          </Flex>
         </div>
       </Form>
 

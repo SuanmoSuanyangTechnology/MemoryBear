@@ -106,7 +106,7 @@ const Detail: FC = () => {
 
   return (
     <>
-      <Flex vertical className="rb:h-screen!">
+      <Flex vertical className="rb:h-full!">
         <PageHeader
           title={<Space>
             {data.scene_name}

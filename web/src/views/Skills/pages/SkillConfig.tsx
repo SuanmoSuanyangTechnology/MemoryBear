@@ -2,12 +2,12 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-05 10:44:08 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-14 16:57:52
+ * @Last Modified time: 2026-08-14 17:46:28
  */
 import { type FC, useEffect, useRef, useState } from "react";
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Form, Input, Button, Space, Select, App, Flex } from 'antd'
+import { Form, Input, Button, Select, App, Flex } from 'antd'
 
 import Card from '@/views/ApplicationConfig/components/Card'
 import AiPromptModal from '@/views/ApplicationConfig/components/AiPromptModal'
@@ -139,7 +139,7 @@ const SkillConfig: FC = () => {
   }
 
   return (
-    <Flex vertical className="rb:h-screen!">
+    <Flex gap={12} vertical className="rb:h-full! rb:h-0! rb:min-h-0! rb:overflow-hidden!">
       <PageHeader
         title={data?.name}
         extra={
@@ -156,9 +156,9 @@ const SkillConfig: FC = () => {
           </Flex>
         }
       />
-      <div className="rb:w-250 rb:my-3 rb:mx-auto rb:flex-1 rb:overflow-y-auto">
-        <Form form={form} layout="vertical">
-          <Space size={16} direction="vertical" className="rb:w-full">
+      <div className="rb:flex-1! rb:h-0! rb:min-h-0! rb:overflow-hidden!">
+        <Form form={form} layout="vertical" className="rb:h-full! rb:min-h-0! rb:w-250 rb:mx-auto!">
+          <Flex vertical gap={16} className="rb:w-full rb:h-full! rb:h-0! rb:min-h-0! rb:overflow-y-auto! rb:pr-1!">
             {/* Manifest Section: Basic skill information */}
             <Card title={t('skills.mainfest')}>
               <Form.Item
@@ -223,17 +223,16 @@ const SkillConfig: FC = () => {
             >
               <ToolList />
             </Form.Item>
-
-          </Space>
+          </Flex>
         </Form>
-        
-        {/* AI Prompt Generation Modal */}
-        <AiPromptModal
-          ref={aiPromptModalRef}
-          refresh={updatePrompt}
-          source="skills"
-        />
       </div>
+      
+      {/* AI Prompt Generation Modal */}
+      <AiPromptModal
+        ref={aiPromptModalRef}
+        refresh={updatePrompt}
+        source="skills"
+      />
     </Flex>
   )
 }

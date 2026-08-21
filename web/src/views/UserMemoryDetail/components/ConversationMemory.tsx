@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 18:34:04 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-10 16:32:52
+ * @Last Modified time: 2026-08-14 16:32:28
  */
 import { type FC } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -26,10 +26,10 @@ const ConversationMemory: FC = () => {
 
   return (
     <RbCard
-      title={<span className="rb:font-[MiSans-Bold] rb:font-bold">{t('userMemory.conversationMemory')}</span>}
+      title={t('userMemory.conversationMemory')}
       headerType="borderless"
-      headerClassName="rb:min-h-[54px]! rb:pt-0! rb:mb-0!"
-      bodyClassName="rb:p-4! rb:pt-0! rb:pb-1! rb:h-[calc(100%-54px)]!"
+      headerClassName="rb:min-h-[54px]! rb:pt-0! rb:mb-0! rb:font-[MiSans-Bold] rb:font-bold"
+      bodyClassName="rb:p-4! rb:pt-0! rb:pb-1! rb:h-[calc(100%-54px)]! rb:overflow-hidden!"
       className="rb:h-full!"
     >
       <PageScrollList<DataItem>
@@ -59,7 +59,7 @@ const ConversationMemory: FC = () => {
             </Flex>
           </div>
         )}
-        className="rb:h-full!"
+        heightClass="rb:h-full!"
       />
     </RbCard>
   )

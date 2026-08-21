@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:35:41 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-05-08 17:36:40
+ * @Last Modified time: 2026-08-14 17:17:46
  */
 /**
  * Order History Page
@@ -188,11 +188,10 @@ const OrderHistory: React.FC = () => {
       ),
     },
   ];
-  
-  console.log('query', query, location.state)
+
   return (
-    <div className="rb:h-full rb:overflow-hidden rb:bg-white rb:rounded-lg rb:pt-3 rb:px-3">
-      <Flex className="rb:mb-3!" gap={10}>
+    <Flex vertical gap={12} className="rb:h-full! rb:overflow-hidden! rb:bg-white rb:rounded-lg rb:pt-3! rb:px-3!">
+      <Flex gap={10}>
         {/* 订单状态 pending/approved/rejected */}
         <Select
           value={query.status}
@@ -230,13 +229,13 @@ const OrderHistory: React.FC = () => {
         apiParams={query}
         columns={columns}
         rowKey="order_no"
-        isScroll={true}
+        fillHeight={true}
       />
 
       <OrderDetail ref={orderDetailRef}
         getProductName={getProductName}
       />
-    </div>
+    </Flex>
   );
 };
 

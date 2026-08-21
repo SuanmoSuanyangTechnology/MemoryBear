@@ -141,10 +141,10 @@ const AudioPlayer: FC<AudioPlayerProps> = ({ src, fileName, fileSize }) => {
   return (
     <div className="rb-border rb:rounded-xl rb:py-2 rb:px-2.5 rb:w-full">
       <audio ref={audioRef} src={src} preload="metadata" />
-      <Flex align="center" wrap={false} justify="space-between" className="rb:mb-2">
+      <Flex align="center" wrap={false} justify="space-between">
         <Flex align="center" wrap={false} gap={12} className="rb:flex-1!  rb:max-w-[calc(100%-60px)]!">
           <div className="rb:size-5 rb:bg-cover rb:bg-[url('@/assets/images/file/audio.svg')]" />
-          <div className="rb:max-w-[calc(100%-32px)]">
+          <div className="rb:flex-1 rb:text-left">
             <div className="rb:font-medium rb:leading-5 rb:text-[14px] rb:wrap-break-word rb:line-clamp-1">{fileName}</div>
             <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4.5">{fileSize || '-'}</div>
           </div>

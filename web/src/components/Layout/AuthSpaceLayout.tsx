@@ -19,7 +19,7 @@
 
 import { Outlet } from 'react-router-dom';
 import { useEffect, type FC } from 'react';
-import { Layout } from 'antd';
+import { Layout, Flex } from 'antd';
 
 import useRouteGuard from '@/hooks/useRouteGuard';
 import { useNavigationBreadcrumbs } from '@/hooks/useNavigationBreadcrumbs';
@@ -66,11 +66,15 @@ const AuthSpaceLayout: FC = () => {
         <AppHeader source="space" />
         {/* Main content area for knowledge base pages - renders child routes */}
         <Content className="rb:px-3! rb:pb-3! rb:z-0! rb:flex-1! rb:overflow-y-auto!">
-          <Banners />
-          {/* Keep sidebar/header visible when a lazy route chunk fails to load */}
-          <ErrorBoundary>
-            <Outlet />
-          </ErrorBoundary>
+          <Flex vertical gap={0} className="rb:h-full!">
+            <Banners />
+            <div className="rb:flex-1 rb:min-h-0! rb:overflow-hidden!">
+              {/* Keep sidebar/header visible when a lazy route chunk fails to load */}
+              <ErrorBoundary>
+                <Outlet />
+              </ErrorBoundary>
+            </div>
+          </Flex>
         </Content>
       </Layout>
     </Layout>

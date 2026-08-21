@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:21:14 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-04-22 12:03:08
+ * @Last Modified time: 2026-08-14 18:49:36
  */
 /**
  * RbCard Component
@@ -71,7 +71,6 @@ const RbCard: FC<RbCardProps> = ({
             {title}
           </div>
         }
-        
       </Flex>}
       classNames={{
         header: `rb:text-[16px] rb:p-[16px_16px_8px_16px]! rb:border-0! ${headerClassName}`,

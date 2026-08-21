@@ -13,10 +13,34 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any, Generic, Optional, TypeVar
 
+from app.core.memory.exceptions import MemoryExtractionBusinessError
+
 logger = logging.getLogger(__name__)
 
 InputT = TypeVar("InputT")
 OutputT = TypeVar("OutputT")
+
+
+def _is_structured_parse_error(error: Exception) -> bool:
+    """沿异常链识别结构化解析异常，不使用异常文案或日志关键字。"""
+    import json
+
+    from langchain_core.exceptions import OutputParserException
+    from pydantic import ValidationError
+
+    parse_types = (
+        json.JSONDecodeError,
+        OutputParserException,
+        ValidationError,
+    )
+    current: BaseException | None = error
+    seen: set[int] = set()
+    while current is not None and id(current) not in seen:
+        if isinstance(current, parse_types):
+            return True
+        seen.add(id(current))
+        current = current.__cause__ or current.__context__
+    return False
 
 
 async def call_structured(llm_client, messages: list[dict], response_model: type):
@@ -44,8 +68,8 @@ async def call_structured(llm_client, messages: list[dict], response_model: type
     except NotImplementedError:
         logger.warning("call_structured: 降级到 chat + StructResponse")
     except Exception as e:
-        if isinstance(e.__cause__, NotImplementedError) or "NotImplementedError" in str(e):
-            logger.warning(f"call_structured: 降级到 chat + StructResponse: {e}")
+        if isinstance(e.__cause__, NotImplementedError):
+            logger.warning("call_structured: provider 不支持结构化输出，使用降级路径")
         else:
             raise
 
@@ -188,9 +212,22 @@ class ExtractionStep(ABC, Generic[InputT, OutputT]):
         for attempt in range(attempts):
             try:
                 prompt = await self.render_prompt(input_data)
-                raw_response = await self.call_llm(prompt)
-                parsed = await self.parse_response(raw_response, input_data)
-                result = await self.post_process(parsed, input_data)
+                try:
+                    raw_response = await self.call_llm(prompt)
+                except Exception as exc:
+                    if isinstance(exc, MemoryExtractionBusinessError):
+                        raise
+                    if _is_structured_parse_error(exc):
+                        raise MemoryExtractionBusinessError.structured_result_parse_failed(exc) from exc
+                    raise MemoryExtractionBusinessError.model_call_failed(exc) from exc
+
+                try:
+                    parsed = await self.parse_response(raw_response, input_data)
+                    result = await self.post_process(parsed, input_data)
+                except Exception as exc:
+                    if isinstance(exc, MemoryExtractionBusinessError):
+                        raise
+                    raise MemoryExtractionBusinessError.structured_result_parse_failed(exc) from exc
                 return result
             except Exception as exc:
                 last_error = exc

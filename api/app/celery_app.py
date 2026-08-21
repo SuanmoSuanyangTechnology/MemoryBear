@@ -187,6 +187,7 @@ except ImportError:
 # 企业版消息通知中心任务路由（社区版无 premium 模块时不注册这些任务）
 try:
     import premium.platform_admin.notification_center.tasks  # noqa: F401
+    import premium.platform_admin.notification_center.alert_emit_tasks  # noqa: F401
 
     _HAS_NOTIFICATION_TASKS = True
     # 通知状态任务 → notification_state_tasks 队列（扫描 + 发布 + 到期下架）
@@ -210,6 +211,12 @@ try:
     }
     # 告警事件创建后立即扇出为用户端站内通知
     celery_app.conf.task_routes['notification.alert_fanout'] = {
+        'queue': 'notification_state_tasks'
+    }
+    celery_app.conf.task_routes['notification.emit_alert_obligation'] = {
+        'queue': 'notification_state_tasks'
+    }
+    celery_app.conf.task_routes['notification.scan_alert_emit_obligations'] = {
         'queue': 'notification_state_tasks'
     }
 except ImportError:
@@ -417,5 +424,12 @@ if _HAS_NOTIFICATION_TASKS:
             "task": "notification.scan_enterprise_balance",
             "schedule": NoCatchupSchedule(run_every=timedelta(minutes=10)),
             "options": {"queue": "notification_state_tasks", "expires": 600},
+        },
+        "notification-scan-alert-emit-obligations": {
+            "task": "notification.scan_alert_emit_obligations",
+            "schedule": NoCatchupSchedule(
+                run_every=timedelta(seconds=_NOTIFICATION_SCAN_INTERVAL_SECONDS)
+            ),
+            "options": {"queue": "notification_state_tasks", "expires": 120},
         },
     })

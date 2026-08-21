@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 18:34:23 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-27 11:09:52
+ * @Last Modified time: 2026-08-12 12:17:35
  */
 /**
  * About Me Component
@@ -67,9 +67,9 @@ const AboutMe = forwardRef<AboutMeRef, { className?: string; }>(({ className }, 
   return (
     <RbCard 
       title={t('userMemory.aboutMe')}
-      headerClassName="rb:min-h-[46px]!! rb:font-medium!"
-      className={clsx("rb:bg-[#FFFFFF]! rb:shadow-[0px_2px_6px_0px_rgba(33,35,50,0.13)]! rb:absolute! rb:w-100 rb:top-29 rb:left-26", className)}
-      bodyClassName="rb:px-5! rb:pb-5! rb:pt-3.75! rb:max-h-[calc(100vh-186px)]! rb:overflow-y-auto!"
+      headerClassName="rb:min-h-[46px]! rb:font-medium!"
+      className={clsx("rb:bg-[#FFFFFF]! rb:shadow-[0px_2px_6px_0px_rgba(33,35,50,0.13)]! rb:absolute! rb:w-100 rb:top-3 rb:left-0 rb:bottom-0 rb:z-100", className)}
+      bodyClassName="rb:px-5! rb:pb-5! rb:pt-3.75! rb:max-h-[calc(100%-46px)]! rb:overflow-y-auto!"
     >
       {loading
         ? <Skeleton className="rb:mt-4" />

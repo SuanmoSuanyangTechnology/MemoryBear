@@ -168,35 +168,6 @@ class MemoryService:
         )
 
     @staticmethod
-    async def ingest_agent_messages(
-        conversation_id: str,
-        messages: List[Any],
-        app_id: str,
-        config_id: str = "",
-        workspace_id: str = "",
-        end_user_id: str = "",
-        language: str = "zh",
-    ) -> bool:
-        """批量 Agent 消息摄入：一次事务写入 + 一次滑动窗口派发。
-
-        同一回合的 user + assistant 应通过此入口一次派发，避免两次
-        fire-and-forget 造成的 seq 分配竞态（顺序颠倒）。
-
-        每条 message 需带以下属性：
-            .id, .role, .content, .created_at, .meta_data, .should_memorize
-        """
-        from app.core.memory.pipelines.dispatcher import ingest_agent_messages
-        return await ingest_agent_messages(
-            conversation_id=conversation_id,
-            messages=messages,
-            app_id=app_id,
-            config_id=config_id,
-            workspace_id=workspace_id,
-            end_user_id=end_user_id,
-            language=language,
-        )
-
-    @staticmethod
     async def ingest_workflow_messages(
         messages: List[dict],
         conversation_id: str,
@@ -485,6 +456,7 @@ class MemoryService:
             history = []
         if self.ctx.memory_config is None:
             raise RuntimeError("MemoryService.read() 需要 memory_config，但当前实例未加载配置")
+        retrieval_operation_id = uuid.uuid4().hex
         return await ReadPipeLine(self.ctx).run(
             query,
             search_switch,
@@ -494,6 +466,7 @@ class MemoryService:
             skip_summary=skip_summary,
             enable_rerank=enable_rerank,
             record_display=record_display,
+            retrieval_operation_id=retrieval_operation_id,
         )
 
     async def forget(self) -> dict:

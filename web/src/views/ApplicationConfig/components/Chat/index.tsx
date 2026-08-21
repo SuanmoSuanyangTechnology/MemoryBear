@@ -2,7 +2,7 @@
  * @Author: ZhaoYing
  * @Date: 2026-02-03 16:27:39
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-07-02 16:02:29
+ * @Last Modified time: 2026-08-14 13:52:47
  */
 /**
  * Chat debugging component for application testing
@@ -367,21 +367,23 @@ const Chat: FC<ChatProps> = ({
   const isHasLabel = useMemo(() => chatList.some(item => item.label), [chatList])
   const isNeedVariableConfig = useMemo(() => chatVariables?.some(vo => vo.required && !vo.value), [chatVariables])
   return (
-    <Flex vertical className="rb:relative rb:h-full">
+    <Flex vertical className="rb:relative rb:h-full! rb:min-h-0! rb:overflow-hidden!">
       {chatList.length === 0
         ? <Empty
           url={DebuggingEmpty}
           size={[300, 200]}
           title={t('application.debuggingEmpty')}
           subTitle={t('application.debuggingEmptyDesc')}
-          className="rb:h-[calc(100vh-159px)]"
+          className="rb:h-full!"
         />
         : <>
-          <div className={clsx(`rb:relative rb:grid rb:grid-cols-${chatList.length} rb:overflow-hidden rb:w-full rb:flex-1 rb:min-h-0`)}>
+          <div className={clsx(`rb:relative rb:grid rb:grid-cols-${chatList.length} rb:w-full rb:flex-1! rb:min-h-0! rb:overflow-hidden!`)}>
             {chatList.map((chat, index) => (
-              <Flex key={index} vertical className={clsx({
-                "rb:border-r rb:border-[#DFE4ED]": index !== chatList.length - 1 && chatList.length > 1,
-              })}>
+              <Flex key={index} vertical
+                className={clsx('rb:h-full! rb:overflow-hidden', {
+                  "rb:border-r rb:border-[#DFE4ED]": index !== chatList.length - 1 && chatList.length > 1,
+                })}
+              >
                 {chat.label &&
                   <div className={clsx(
                     "rb:grid rb:bg-[#F6F6F6] rb:text-center rb:flex-[0_0_auto]"
@@ -396,16 +398,9 @@ const Chat: FC<ChatProps> = ({
                   </div>
                 }
                 <ChatContent
-                  classNames={{
-                    'rb:mb-3 rb:mt-5': isHasLabel,
-                    'rb:mb-0!': !isHasLabel,
-                    'rb:h-[calc(100vh-297px)]': isCluster && (!fileList || fileList.length === 0),
-                    'rb:h-[calc(100vh-365px)]': !isCluster && (!fileList || fileList.length === 0),
-                    'rb:h-[calc(100vh-362px)]': isCluster && fileList?.length > 0,
-                    'rb:h-[calc(100vh-433px)]': !isCluster && fileList?.length > 0,
-                    "rb:pr-4": index !== chatList.length - 1 && chatList.length > 1,
-                    "rb:pl-4": index !== 0 && chatList.length > 1,
-                  }}
+                  classNames={clsx('rb:flex-1! rb:min-h-0!',{
+                    'rb:mt-3': isHasLabel && (chat && chat.list && chat?.list?.length > 0),
+                  })}
                   contentClassNames={{
                     'rb:max-w-100!': chatList.length === 1,
                     'rb:max-w-70!': chatList.length === 2,
@@ -417,10 +412,7 @@ const Chat: FC<ChatProps> = ({
                     title={t('application.chatEmpty')}
                     isNeedSubTitle={false}
                     size={[240, 200]}
-                    className={clsx({
-                      "rb:h-[calc(100vh-353px)]": isHasLabel,
-                      "rb:h-[calc(100vh-292px)]": !isHasLabel,
-                    })}
+                    className="rb:h-full! rb:overflow-y-auto!"
                   />}
                   onSend={isCluster ? handleClusterSend : handleSend}
                   data={chat.list || []}

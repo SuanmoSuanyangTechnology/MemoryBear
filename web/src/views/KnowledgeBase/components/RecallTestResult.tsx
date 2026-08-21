@@ -301,7 +301,7 @@ const RecallTestResult = ({
   }
 
   const renderContent = () => (
-    <Flex vertical gap={16}>
+    <Flex vertical gap={16} className="rb:pb-3!">
       {data.map((item, index) => {
         const score = item.metadata?.score ?? 1;
         const scorePercentage = score * 100;

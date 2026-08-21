@@ -12,6 +12,8 @@ import asyncio
 import logging
 from typing import Any, Dict, List
 
+from app.core.memory.exceptions import MemoryExtractionBusinessError
+
 from .schema import EmbeddingStepInput, EmbeddingStepOutput
 
 logger = logging.getLogger(__name__)
@@ -37,6 +39,11 @@ class EmbeddingStep:
         self.embedder_client = embedder_client
         self.is_pilot_run = is_pilot_run
         self.batch_size = batch_size
+        self._degraded_error: MemoryExtractionBusinessError | None = None
+
+    @property
+    def degraded_error(self) -> MemoryExtractionBusinessError | None:
+        return self._degraded_error
 
     @property
     def name(self) -> str:
@@ -82,6 +89,13 @@ class EmbeddingStep:
                 entity_embeddings=entity_emb,
             )
         except Exception as exc:
+            error = (
+                exc
+                if isinstance(exc, MemoryExtractionBusinessError)
+                else MemoryExtractionBusinessError.embedding_generation_failed(exc)
+            )
+            if self._degraded_error is None:
+                self._degraded_error = error
             logger.warning("EmbeddingStep failed, returning empty output: %s", exc)
             return self.get_default_output()
 

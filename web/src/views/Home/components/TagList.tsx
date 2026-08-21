@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:15:04 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-02-26 11:15:15
+ * @Last Modified time: 2026-08-14 17:50:41
  */
 /**
  * Tag List Component
@@ -50,12 +50,11 @@ const TagList:FC = () => {
     <Card
       title={t('dashboard.popularMemoryTags')}
       bodyClassName='rb:overflow-hidden! rb:pt-0! rb:pb-4! rb:pl-4! rb:pr-3.25!'
-      className="rb:min-h-[calc(100vh-744px)]"
     >
       {loading
         ? <Skeleton />
         : !tagList || tagList.length === 0
-        ? <Empty url={tagEmpty} title={t('dashboard.activityEmpty')} size={120} className="rb:mt-9 rb:mb-20.25" />
+        ? <Empty url={tagEmpty} title={t('dashboard.activityEmpty')} size={120} />
         : <Flex wrap className="rb:gap-x-3! rb:gap-y-2.5!">
           {tagList.map((item, index) => (
             <div

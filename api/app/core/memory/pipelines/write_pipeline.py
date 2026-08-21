@@ -22,9 +22,10 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, Dict, List, Optional
 
+from app.core.memory.exceptions import MemoryExtractionBusinessError
 from app.core.memory.utils.log.bear_logger import BearLogger
 
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 if TYPE_CHECKING:
     from app.core.memory.models.message_models import DialogData
@@ -192,6 +193,11 @@ class WriteResult(BaseModel):
     extraction: Optional[Dict[str, int]] = None  # ExtractionResult.stats
     error: Optional[str] = None  # 失败时的错误信息
     elapsed_seconds: float = 0.0  # 总耗时（秒）
+    _degraded_error: MemoryExtractionBusinessError | None = PrivateAttr(default=None)
+
+    @property
+    def degraded_error(self) -> MemoryExtractionBusinessError | None:
+        return self._degraded_error
 
 
 # ──────────────────────────────────────────────
@@ -235,6 +241,7 @@ class WritePipeline:
         # 存储阶段锁（延迟初始化）
         self._store_lock = None
         self._redis_client = None
+        self._embedding_degraded_error: MemoryExtractionBusinessError | None = None
 
     # ──────────────────────────────────────────────
     # 执行写入
@@ -277,6 +284,7 @@ class WritePipeline:
             context_before = []
         if context_after is None:
             context_after = []
+        self._embedding_degraded_error = None
 
         if not ref_id:
             ref_id = uuid.uuid4().hex
@@ -582,11 +590,14 @@ class WritePipeline:
                         await self._cluster(extraction_result)
                         s.metadata(mode="async")
 
-                    return WriteResult(
+                    result = WriteResult(
                         status="success",
                         extraction=extraction_result.stats,
                         elapsed_seconds=0.0,
                     )
+                    if stored:
+                        result._degraded_error = self._embedding_degraded_error
+                    return result
 
                 finally:
                     if summary_gen_task is not None and not summary_gen_task.done():
@@ -686,6 +697,7 @@ class WritePipeline:
         )
         # step1: 执行知识提取
         dialog_data_list = await new_orchestrator.run(chunked_dialogs)
+        self._embedding_degraded_error = new_orchestrator.embedding_step.degraded_error
 
         # ── Snapshot: 各阶段萃取结果 ──
         recorder.record_stage_outputs(new_orchestrator.last_stage_outputs)

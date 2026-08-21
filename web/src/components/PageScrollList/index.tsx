@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:18:19 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-31 15:31:18
+ * @Last Modified time: 2026-08-17 10:32:44
  */
 /**
  * PageScrollList Component
@@ -16,7 +16,7 @@
  * @component
  */
 
-import React, { useEffect, useState, useRef, forwardRef, useImperativeHandle } from 'react';
+import React, { useEffect, useState, useRef, useId, forwardRef, useImperativeHandle } from 'react';
 import { Row, Col } from 'antd';
 import InfiniteScroll from 'react-infinite-scroll-component';
 
@@ -41,6 +41,7 @@ interface ApiResponse<T> {
 /** Ref methods exposed to parent component */
 export interface PageScrollListRef {
   refresh: () => void;
+  total: number;
 }
 
 /** Props interface for PageScrollList component */
@@ -80,15 +81,18 @@ const PageScrollList = forwardRef(<T, Q = Record<string, unknown>>({
   onTotalChange,
   empty,
 }: PageScrollListProps<T, Q>, ref: React.Ref<PageScrollListRef>) => {
+  const scrollableTargetId = `page-scroll-list-${useId().replace(/:/g, '')}`;
   /** Expose refresh method to parent component */
   useImperativeHandle(ref, () => ({
     refresh: () => {
       pageRef.current = 1;
       loadingRef.current = false;
+      hasMoreRef.current = true;
       setHasMore(true);
       setData([]);
       loadMoreData(true);
     },
+    total,
   }));
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<T[]>([]);
@@ -150,38 +154,37 @@ const PageScrollList = forwardRef(<T, Q = Record<string, unknown>>({
   }, [queryKey]);
 
   return (
-    <>
-      <div
-        ref={scrollRef}
-        id="scrollableDiv"
-        className={`rb:overflow-y-auto rb:overflow-x-hidden ${heightClass || defaultHeightClass} ${className}`}
+    <div
+      ref={scrollRef}
+      id={scrollableTargetId}
+      className={`rb:overflow-y-auto rb:overflow-x-hidden rb:min-h-0! ${heightClass || defaultHeightClass} ${className}`}
+    >
+      <InfiniteScroll
+        dataLength={data.length}
+        next={() => loadMoreData()}
+        hasMore={hasMore}
+        loader={loading && needLoading ? <PageLoading className={heightClass || defaultHeightClass} /> : false}
+        // endMessage={<Divider plain>It is all, nothing more 🤐</Divider>}
+        scrollThreshold={0.9}
+        scrollableTarget={scrollableTargetId}
+        style={{ overflow: 'visible', width: '100%' }}
       >
-        <InfiniteScroll
-          dataLength={data.length}
-          next={() => loadMoreData()}
-          hasMore={hasMore}
-          loader={loading && needLoading ? <PageLoading className={heightClass || defaultHeightClass} /> : false}
-          // endMessage={<Divider plain>It is all, nothing more 🤐</Divider>}
-          scrollableTarget="scrollableDiv"
-          className='rb:h-full!'
-        >
-          {/* Render grid list or empty state */}
-          {data.length > 0 ? (
-            renderItems
-            ? renderItems(data)
-            : (
-              <Row gutter={gutter}>
-                {data.map((item, index) => (
-                  <Col key={(item as any).id || index} span={24/column}>
-                    {renderItem(item, index)}
-                  </Col>
-                ))}
-              </Row>
-            )
-          ) : !loading ? empty || <PageEmpty className={heightClass || defaultHeightClass} /> : null}
-        </InfiniteScroll>
-      </div>
-    </>
+        {/* Render grid list or empty state */}
+        {data.length > 0 ? (
+          renderItems
+          ? renderItems(data)
+          : (
+            <Row gutter={gutter}>
+              {data.map((item, index) => (
+                <Col key={(item as any).id || index} span={24/column}>
+                  {renderItem(item, index)}
+                </Col>
+              ))}
+            </Row>
+          )
+        ) : !loading ? empty || <PageEmpty className={heightClass || defaultHeightClass} /> : null}
+      </InfiniteScroll>
+    </div>
   );
 }) as <T = Record<string, unknown>, Q = Record<string, unknown>>(props: PageScrollListProps<T, Q> & { ref?: React.Ref<PageScrollListRef> }) => React.ReactElement;
 

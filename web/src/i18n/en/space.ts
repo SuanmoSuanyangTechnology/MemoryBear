@@ -27,6 +27,8 @@ export const space = {
       multimodalModelDesc: 'Enable on demand to process image / audio / video content',
       optional: '(Optional)',
       configAlert: 'Space model configuration ensures that the space can correctly call the corresponding models to process business data during runtime.',
+      embeddingSwitchConfirmTitle: 'Switch Embedding Model',
+      embeddingSwitchConfirmContent: 'Switching the embedding model may degrade the performance of related retrieval features. Are you sure you want to continue?',
 
       basic: 'Basic Config',
       models: 'Model Configuration',
@@ -356,6 +358,7 @@ export const space = {
       timeout_at: 'Operation will expire {{timeout_at}} expires',
       favorite: 'Favorite',
       unfavorite: 'Unfavorite',
+      MemorySkills: 'Memory Chat',
     },
     login: {
       title: 'Red Bear Memory Science',

@@ -350,6 +350,10 @@ export const getMemoryExtractionConfig = (config_id: string | string) => {
 export const updateMemoryExtractionConfig = (values: ExtractionConfigForm) => {
   return request.post('/memory_config/update_config_extracted', values)
 }
+// Memory Extraction Engine - Chat debugging
+export const memoryExtractionChat = (values: { config_id: string; message: string; files: any[]; history: ChatItem[]; }, onMessage?: (data: SSEMessage[]) => void, onAbort?: (abort: () => void) => void) => {
+  return handleSSE('/memory-storage/chat', values, onMessage, undefined, onAbort)
+}
 // Memory Extraction Engine - Pilot run
 export const pilotRunMemoryExtractionConfig = (values: { config_id: string | string; messages: ChatItem[]; }, onMessage?: (data: SSEMessage[]) => void, onAbort?: (abort: () => void) => void) => {
   return handleSSE('/memory-storage/pilot_run', values, onMessage, undefined, onAbort)
