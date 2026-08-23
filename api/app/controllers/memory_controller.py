@@ -6,14 +6,15 @@
 路由前缀: /memory
 认证方式: JWT Token
 """
-import html
+import uuid
 
 from fastapi import APIRouter, Depends, Header
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import JSONResponse, StreamingResponse
 
-from app.core.error_codes import BizCode
+from app.core.error_codes import BizCode, HTTP_MAPPING
 from app.core.language_utils import get_language_from_header
 from app.core.logging_config import get_api_logger
-from app.core.memory.enums import Neo4jNodeType, SearchStrategy
 from app.core.memory.memory_service import MemoryService
 from app.core.response_utils import fail, success
 from app.db import get_async_db_context
@@ -24,7 +25,7 @@ from app.schemas.response_schema import ApiResponse
 from app.services import workspace_service
 from app.services.memory_agent_service import MemoryAgentService
 from app.services.memory_config_service import MemoryConfigService
-from app.utils.tmp_session import ChatSessionCache
+from app.services.memory_validation_service import MemoryValidationService
 
 DEFAULT_STORAGE_TYPE = "neo4j"
 USER_RAG_MEMORY_KNOWLEDGE_NAME = "USER_RAG_MERORY"  # 注：原拼写保留，历史遗留
@@ -118,121 +119,55 @@ async def write_server_async(
         return fail(BizCode.INTERNAL_ERROR, "写入失败", str(e))
 
 
-@router.post("/read/sync", response_model=ApiResponse)
+@router.post("/read/sync", response_model=None)
 @cur_workspace_access_guard_self_db()
 async def read_server(
         user_input: UserInput,
         current_user: CurrentUserSnapshot = Depends(get_current_user_async)
-):
+) -> StreamingResponse | JSONResponse:
     """
-    Read service endpoint - processes read operations synchronously
+    记忆验证读取接口：请求保持不变，响应改为 SSE。
 
     search_switch values:
-    - "0": Requires verification
-    - "1": No verification, direct split
-    - "2": Direct answer based on context
+    - "0": Deep
+    - "1": Normal
+    - "2": Quick
+    - "5": Express
     """
-    config_id = user_input.config_id
-    workspace_id = current_user.current_workspace_id
-
-    async with get_async_db_context() as db:
-        storage_type = await workspace_service.get_workspace_storage_type_async(
-            db=db, workspace_id=workspace_id, user=current_user
+    request_id = str(uuid.uuid4())
+    try:
+        # 开流前完成参数和服务初始化，失败时仍返回普通 JSON 错误。
+        validation_service = await MemoryValidationService.create(
+            user_input,
+            request_id=request_id,
         )
-        if storage_type is None:
-            storage_type = DEFAULT_STORAGE_TYPE
-        user_rag_memory_id = ''
-        memory_config_id = await MemoryConfigService(db).get_config_id_by_end_user_async(user_input.end_user_id)
-        if workspace_id:
-            knowledge = await knowledge_repository.get_knowledge_by_name_async(
-                db=db, name=USER_RAG_MEMORY_KNOWLEDGE_NAME, workspace_id=workspace_id,
-            )
-            if knowledge:
-                user_rag_memory_id = str(knowledge.id)
-
-    session_id = user_input.session_id.hex
+    except Exception as error:
+        api_logger.error(
+            "Unable to initialize memory read: request_id=%s, end_user=%s, error=%s",
+            request_id,
+            user_input.end_user_id,
+            str(error),
+            exc_info=True,
+        )
+        error_data = fail(BizCode.MEMORY_READ_FAILED, "回复对话消息失败")
+        return JSONResponse(
+            status_code=HTTP_MAPPING[BizCode.MEMORY_READ_FAILED],
+            content=jsonable_encoder(error_data),
+        )
 
     api_logger.info(
-        f"Read service: group={user_input.end_user_id}, storage_type={storage_type}, user_rag_memory_id={user_rag_memory_id}, workspace_id={workspace_id}, session_id={session_id}")
-    try:
-        service = await MemoryService.create(
-            memory_config_id,
-            end_user_id=user_input.end_user_id,
-            draft=True
-        )
-        session_cache = ChatSessionCache(session_id)
-        search_result = await service.read(
-            user_input.message,
-            SearchStrategy(user_input.search_switch),
-            history=await session_cache.get_history(),
-        )
-        intermediate_outputs = []
-        sub_queries = set()
-        for memory in search_result.memories:
-            sub_queries.add(str(memory.query))
-        idx = 0
-        if user_input.search_switch in [SearchStrategy.DEEP, SearchStrategy.NORMAL]:
-            intermediate_outputs.append({
-                "type": "problem_split",
-                "title": "问题拆分",
-                "data": [
-                    {
-                        "id": f"Q{(idx := idx + 1)}",
-                        "question": question
-                    }
-                    for question in sub_queries
-                    if question
-                ]
-            })
-        perceptual_data = [
-            memory.data
-            for memory in search_result.memories
-            if memory.source == Neo4jNodeType.PERCEPTUAL
-        ]
-
-        if len(perceptual_data):
-            intermediate_outputs.append({
-                "type": "perceptual_retrieve",
-                "title": "感知记忆检索",
-                "data": perceptual_data,
-                "total": len(perceptual_data),
-            })
-        intermediate_outputs.append({
-            "type": "search_result",
-            "title": f"合并检索结果 (共{len(sub_queries)}个查询,{len(search_result.memories)}条结果)",
-            "result": search_result.content,
-            "raw_result": search_result.memories,
-            "total": len(search_result.memories),
-        })
-        answer = await memory_agent_service.generate_summary_from_retrieve(
-            end_user_id=user_input.end_user_id,
-            retrieve_info=search_result.content,
-            history=[],
-            query=user_input.message,
-            config_id=config_id,
-        )
-        await session_cache.append_many(
-            [
-                {"role": "user", "content": user_input.message},
-                {"role": "assistant", "content": answer}
-            ]
-        )
-        for _ in intermediate_outputs:
-            if _["type"] == "search_result":
-                _["result"] = html.escape(_["result"])
-        result = {
-            'answer': answer,
-            "intermediate_outputs": intermediate_outputs,
-            "session_id": session_id,
-        }
-
-        return success(data=result, msg="回复对话消息成功")
-    except BaseException as e:
-        # Handle ExceptionGroup from TaskGroup (Python 3.11+) or BaseExceptionGroup
-        if hasattr(e, 'exceptions'):
-            error_messages = [f"{type(sub_e).__name__}: {str(sub_e)}" for sub_e in e.exceptions]
-            detailed_error = "; ".join(error_messages)
-            api_logger.error(f"Read operation error (TaskGroup): {detailed_error}", exc_info=True)
-            return fail(BizCode.INTERNAL_ERROR, "回复对话消息失败", detailed_error)
-        api_logger.error(f"Read operation error: {str(e)}", exc_info=True)
-        return fail(BizCode.INTERNAL_ERROR, "回复对话消息失败", str(e))
+        "Read service stream started: request_id=%s, group=%s, backend=%s, session_id=%s",
+        request_id,
+        user_input.end_user_id,
+        DEFAULT_STORAGE_TYPE,
+        validation_service.session_id,
+    )
+    return StreamingResponse(
+        validation_service.stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )

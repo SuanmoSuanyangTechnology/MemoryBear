@@ -18,9 +18,11 @@ _STAGE_SINK: ContextVar[MemoryStageSink | None] = ContextVar("memory_stage_sink"
 
 # Exact field sets form the public contract and prevent internal retrieval data from leaking.
 _STAGE_FIELDS = {
+    "query_preprocessed": {"original_query", "processed_query", "will_split"},
     "profile_loaded": {"has_profile", "profile"},
     "query_split": {"count", "questions"},
     "hybrid_searched": {"hit_count", "memory_count", "shown_count", "items"},
+    "keyword_searched": {"hit_count", "memory_count", "shown_count", "items"},
     "relation_searched": {"hit_count", "relation_count", "shown_count", "items"},
     "perceptual_processed": {"memory_count", "shown_count", "items"},
     "results_merged": {"memory_count", "relation_count"},
@@ -126,6 +128,14 @@ def _valid_relation_item(item: Any) -> bool:
 
 
 def _valid_stage_data(stage: str, data: dict[str, Any]) -> bool:
+    if stage == "query_preprocessed":
+        return (
+            isinstance(data["original_query"], str)
+            and len(data["original_query"]) <= 2000
+            and isinstance(data["processed_query"], str)
+            and len(data["processed_query"]) <= 2000
+            and isinstance(data["will_split"], bool)
+        )
     if stage == "profile_loaded":
         return isinstance(data["has_profile"], bool) and _valid_profile(data["profile"])
     if stage == "query_split":
@@ -137,9 +147,10 @@ def _valid_stage_data(stage: str, data: dict[str, Any]) -> bool:
             and all(len(question) <= 100 for question in data["questions"])
             and data["count"] >= len(data["questions"])
         )
-    if stage in {"hybrid_searched", "relation_searched", "result_ready"}:
+    if stage in {"hybrid_searched", "keyword_searched", "relation_searched", "result_ready"}:
         count_fields = {
             "hybrid_searched": ("hit_count", "memory_count", "shown_count"),
+            "keyword_searched": ("hit_count", "memory_count", "shown_count"),
             "relation_searched": ("hit_count", "relation_count", "shown_count"),
             "result_ready": ("total_count", "shown_count"),
         }[stage]
