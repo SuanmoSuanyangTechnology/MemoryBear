@@ -104,7 +104,7 @@ from app.models import App, AppRelease, Document, File, Knowledge, User, Workspa
 from app.models.end_user_model import EndUser
 from app.models.file_model import FILE_ROLE_SOURCE
 from app.models.models_model import ModelType
-from app.repositories.end_user_repository import get_end_users_by_workspace, get_all_active_workspaces
+from app.repositories.end_user_repository import get_active_end_users_by_workspace, get_end_users_by_workspace, get_all_active_workspaces
 from app.schemas import document_schema, file_schema
 from app.services.memory_config_service import MemoryConfigService
 from app.services.memory_forget_service import MemoryForgetService
@@ -2988,7 +2988,6 @@ def scan_layer2_reflection(self) -> Dict[str, Any]:
     """
     start_time = time.time()
     from app.models.workspace_model import Workspace
-    from app.services.memory_reflection_service import WorkspaceAppService
 
     redis_client = get_sync_redis_client()
     dispatched = 0
@@ -3001,10 +3000,10 @@ def scan_layer2_reflection(self) -> Dict[str, Any]:
     with get_db_read() as db:
         workspace_ids = [str(w.id) for w in db.query(Workspace.id).all()]
 
+    active_since = utcnow_naive() - timedelta(hours=settings.REFLECT_LAYER2_INACTIVE_HOURS)
     for ws_id in workspace_ids:
         ws_id_uuid = uuid.UUID(ws_id)
         with get_db_context() as db:
-            service = WorkspaceAppService(db)
             memory_config_service = MemoryConfigService(db)
             try:
                 config_id = memory_config_service.get_workspace_active_config_id(ws_id_uuid)
@@ -3014,14 +3013,16 @@ def scan_layer2_reflection(self) -> Dict[str, Any]:
                 logger.warning(f"高频反思scan 跳过配置异常的 workspace={ws_id}: {e}")
                 continue
             iteration_period = config.reflexion_iteration_period or 24
-            end_users = get_end_users_by_workspace(db, ws_id_uuid)
-            for user in end_users:
+            # 活跃性（write_time）已在 DB 层过滤，此处仅按 reflection_time 判周期
+            for user in get_active_end_users_by_workspace(db, ws_id_uuid, active_since):
                 uid = str(user.id)
                 try:
-                    rt = service.get_end_user_reflection_time(uid)
-                    if not _should_reflect_now(db, uid, rt, iteration_period):  # 频率+活跃+有新对话
-                        skip_period_or_new += 1
-                        continue
+                    rt = user.reflection_time
+                    if rt is not None:
+                        rt_naive = as_utc_aware(rt).replace(tzinfo=None)
+                        if (utcnow_naive() - rt_naive).total_seconds() / 3600 < iteration_period:
+                            skip_period_or_new += 1
+                            continue
                     # 在途锁：抢不到说明该用户已有反思任务在途，跳过（纯 SET NX EX 粗过滤）
                     if redis_client is not None:
                         ok = redis_client.set(
@@ -3672,7 +3673,6 @@ def scan_gds_topology_score(self) -> Dict[str, Any]:
 
     dispatched = 0
     dispatched_user_ids = []
-    skip_inactive = 0
     skip_inflight = 0
 
     with get_db_read() as db:
@@ -3680,12 +3680,10 @@ def scan_gds_topology_score(self) -> Dict[str, Any]:
 
     for ws_id_uuid in workspace_ids:
         with get_db_read() as db:
-            for user in get_end_users_by_workspace(db, ws_id_uuid):
+            active_since = utcnow_naive() - timedelta(hours=settings.GDS_TOPOLOGY_ACTIVE_HOURS)
+            for user in get_active_end_users_by_workspace(db, ws_id_uuid, active_since):
                 uid = str(user.id)
                 try:
-                    if not _is_active_recently(db, uid, settings.GDS_TOPOLOGY_ACTIVE_HOURS):
-                        skip_inactive += 1
-                        continue
                     inflight_token = uuid.uuid4().hex
                     ok = redis_client.set(
                         _GDS_TOPOLOGY_INFLIGHT_KEY_FMT.format(end_user_id=uid),
@@ -3714,12 +3712,12 @@ def scan_gds_topology_score(self) -> Dict[str, Any]:
 
     logger.info(
         f"scan_gds_topology_score 完成: 派发 {dispatched} {dispatched_user_ids}, "
-        f"跳过(不活跃) {skip_inactive}, 在途 {skip_inflight}, "
+        f"在途 {skip_inflight}, "
         f"耗时 {time.time() - start_time:.1f}s"
     )
     return {"status": "SUCCESS", "dispatched": dispatched,
             "dispatched_user_ids": dispatched_user_ids,
-            "skip_inactive": skip_inactive, "skip_inflight": skip_inflight}
+            "skip_inflight": skip_inflight}
 
 
 @celery_app.task(

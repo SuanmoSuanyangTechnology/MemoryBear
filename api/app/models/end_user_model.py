@@ -30,6 +30,12 @@ class EndUser(Base):
             "other_id",
             postgresql_where=text("is_active = TRUE"),
         ),
+        Index(
+            "ix_end_users_workspace_write_time",
+            "workspace_id",
+            "write_time",
+            postgresql_where=text("is_active = TRUE"),
+        ),
     )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, nullable=False, index=True)
