@@ -1050,6 +1050,10 @@ class WritePipeline:
         4. 将 file_object.summary 以 <input-file-summary> 标签注入到 message["content"]
         5. 将 (file_object, file_type) 挂载到 message["file_content"]
 
+        连接管理：查重用一个短读事务，查完立刻归还；生成阶段不传 db，由
+        MemoryPerceptualService 内部按需开短事务，避免 PG 连接被多模态推理
+        长时间占用（memory_tasks 并发 100 > 连接池 70）。
+
         Args:
             messages: 消息列表，每条消息含 files 字段（List[FileInput dict]）。
                       函数会原地修改 content 和 file_content。
@@ -1057,7 +1061,7 @@ class WritePipeline:
         if not messages:
             return
 
-        from app.db import get_db_context
+        from app.db import get_db_read
         from app.repositories.memory_perceptual_repository import MemoryPerceptualRepository
         from app.schemas.app_schema import FileInput
         from app.services.memory_perceptual_service import MemoryPerceptualService, _PerceptualSnapshot
@@ -1089,20 +1093,18 @@ class WritePipeline:
                     continue
 
                 try:
-                    with get_db_context() as db:
-                        # 先查找已有的 Perceptual 记录
-                        repo = MemoryPerceptualRepository(db)
-                        memories = repo.get_by_url(self.end_user_id, url)
-
+                    # 用 DB：查已有 Perceptual 记录，命中则复用，不再调多模态模型
+                    file_object = None
+                    with get_db_read() as db:
+                        memories = MemoryPerceptualRepository(db).get_by_url(self.end_user_id, url)
                         if memories:
                             # 已存在，复用最新的一条
                             memory = max(
                                 memories,
                                 key=lambda m: m.created_time if m.created_time else datetime.min,
                             )
-                            # 在 Session 内提取所有需要的属性到一个简单对象中，
-                            # 彻底避免 DetachedInstanceError（使用模块级 _PerceptualSnapshot）
-                            snap = _PerceptualSnapshot(
+                            # 在 Session 内取成普通值，出块后不会 DetachedInstanceError
+                            file_object = _PerceptualSnapshot(
                                 id=memory.id,
                                 end_user_id=self.end_user_id,  # 使用当前 pipeline 的 end_user_id，确保 Perceptual 节点归属当前用户
                                 perceptual_type=memory.perceptual_type,
@@ -1113,49 +1115,31 @@ class WritePipeline:
                                 meta_data=memory.meta_data,
                                 created_time=memory.created_time,
                             )
-                            file_object = snap
-                        else:
-                            # 不存在，创建 Perceptual 记录
-                            perceptual_service = MemoryPerceptualService(db)
-                            # 补充 transfer_method（memory_messages.files 中可能缺失此字段）
-                            file_data = dict(file_info)
-                            if "transfer_method" not in file_data:
-                                file_data["transfer_method"] = "remote_url" if file_data.get("url") else "local_file"
-                            file_input = FileInput(**file_data)
-                            memory = await perceptual_service.generate_perceptual_memory(
-                                end_user_id=self.end_user_id,
-                                memory_config=self.memory_config,
-                                file=file_input,
-                                content=msg.get("content") or None,
-                            )
-                            # 在 Session 内提取属性到快照，避免 DetachedInstanceError
-                            if memory is not None:
-                                file_object = _PerceptualSnapshot(
-                                    id=memory.id,
-                                    end_user_id=self.end_user_id,
-                                    perceptual_type=memory.perceptual_type,
-                                    file_path=memory.file_path,
-                                    file_name=memory.file_name,
-                                    file_ext=memory.file_ext,
-                                    summary=memory.summary,
-                                    meta_data=memory.meta_data,
-                                    created_time=memory.created_time,
-                                )
-                            else:
-                                file_object = None
+                    # 未命中：生成并落库。不传 db，服务内部自己开短事务。
+                    if file_object is None:
+                        # 补充 transfer_method（memory_messages.files 中可能缺失此字段）
+                        file_data = dict(file_info)
+                        if "transfer_method" not in file_data:
+                            file_data["transfer_method"] = "remote_url" if file_data.get("url") else "local_file"
+                        file_object = await MemoryPerceptualService().generate_perceptual_memory(
+                            end_user_id=self.end_user_id,
+                            memory_config=self.memory_config,
+                            file=FileInput(**file_data),
+                            content=msg.get("content") or None,
+                        )
 
-                        if file_object is None:
-                            continue
+                    if file_object is None:
+                        continue
 
-                        # 注入 summary 到 content
-                        # 跳过已包含 summary 的情况（API 路径在写入 memory_messages 前已注入）
-                        if file_object.summary:
-                            summary_tag = f"<input-file-summary>{file_object.summary}</input-file-summary>"
-                            current_content = msg.get("content") or ""
-                            if summary_tag not in current_content:
-                                msg["content"] = current_content + summary_tag
+                    # 注入 summary 到 content
+                    # 跳过已包含 summary 的情况（API 路径在写入 memory_messages 前已注入）
+                    if file_object.summary:
+                        summary_tag = f"<input-file-summary>{file_object.summary}</input-file-summary>"
+                        current_content = msg.get("content") or ""
+                        if summary_tag not in current_content:
+                            msg["content"] = current_content + summary_tag
 
-                        msg["file_content"].append((file_object, file_info.get("type", "")))
+                    msg["file_content"].append((file_object, file_info.get("type", "")))
 
                 except Exception as e:
                     logger.warning(

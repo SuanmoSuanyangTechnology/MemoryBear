@@ -13,7 +13,7 @@ from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
 from app.core.models import RedBearLLM, RedBearModelConfig
-from app.db import get_db_read
+from app.db import get_db_context, get_db_read
 from app.models import FileMetadata, ModelApiKey, ModelType
 from app.models.memory_perceptual_model import PerceptualType, FileStorageService
 from app.models.prompt_optimizer_model import RoleType
@@ -55,9 +55,16 @@ class _PerceptualSnapshot:
 
 
 class MemoryPerceptualService:
-    def __init__(self, db: Session):
+    def __init__(self, db: Optional[Session] = None):
+        """初始化感知记忆服务。
+
+        Args:
+            db: 查询类方法（get_memory_count / get_time_line / get_latest_* 等）必须传入。
+                若只调用 ``generate_perceptual_memory``，可以不传：该方法内部自行管理
+                短生命周期 Session，避免把 PG 连接持有到多模态推理结束。
+        """
         self.db = db
-        self.repository = MemoryPerceptualRepository(db)
+        self.repository = MemoryPerceptualRepository(db) if db is not None else None
 
     def get_memory_count(self, end_user_id: uuid.UUID) -> Dict[str, Any]:
         """Retrieve perceptual memory statistics for a user."""
@@ -223,32 +230,34 @@ class MemoryPerceptualService:
 
     def _get_mutlimodal_client(
             self,
+            db: Session,
             file_type: FileType,
             config: MemoryConfig,
             tenant_id: uuid.UUID,
     ) -> tuple[RedBearLLM | None, ModelApiKey | None]:
+        """取多模态模型客户端。db 由调用方在事务内传入。"""
         model_config = None
         if file_type == FileType.AUDIO:
             model_config = ModelApiKeyService.get_available_api_key(
-                self.db,
+                db,
                 config.audio_model_id,
                 tenant_id=tenant_id
             )
         elif file_type == FileType.VIDEO:
             model_config = ModelApiKeyService.get_available_api_key(
-                self.db,
+                db,
                 config.video_model_id,
                 tenant_id=tenant_id
             )
         elif file_type == FileType.DOCUMENT:
             model_config = ModelApiKeyService.get_available_api_key(
-                self.db,
+                db,
                 config.llm_model_id,
                 tenant_id=tenant_id
             )
         elif file_type == FileType.IMAGE:
             model_config = ModelApiKeyService.get_available_api_key(
-                self.db,
+                db,
                 config.vision_model_id,
                 tenant_id=tenant_id
             )
@@ -276,37 +285,48 @@ class MemoryPerceptualService:
     ):
         """生成感知记忆。
 
+        连接管理：每处用到 DB 都现开现还一个短 Session，绝不把 PG 连接持有到
+        LLM 推理结束（memory_tasks 并发 100 > 连接池 70，长持有会打满池）。
+        注意 ORM 对象出了 with 块就会 Detached，块内要先取成普通值。
+
         参数：
-            persist=True  — 默认，写入 memory_perceptual 表，返回 MemoryPerceptualModel。
-            persist=False — 试运行场景，不写库，返回 _PerceptualSnapshot 实例。
-                            同时绕开 end_user → workspace → tenant_id 的 DB 查询，
+            persist=True  — 默认，写入 memory_perceptual 表。
+            persist=False — 试运行场景，不写库。同时绕开
+                            end_user → workspace → tenant_id 的 DB 查询，
                             直接从 memory_config.tenant_id 取。
+
+        返回：
+            _PerceptualSnapshot | None（两种模式统一返回内存快照）
         """
-        if persist:
-            with get_db_read() as db:
+        # 用 DB：解析 tenant_id + 取模型配置。ModelApiKey 出块即废，块内固化成 ModelInfo。
+        with get_db_read() as db:
+            if persist:
                 end_user = get_end_user_by_id(db, end_user_id)
                 workspace_id = end_user.workspace_id
                 workspace = get_workspace_by_id(db, workspace_id)
                 tenant_id = workspace.tenant_id
-        else:
-            tenant_id = memory_config.tenant_id
-        llm, model_config = self._get_mutlimodal_client(file.type, memory_config, tenant_id)
-        if model_config is None or llm is None:
-            return None
-        multimodel_service = MultimodalService(self.db, ModelInfo(
-            model_name=model_config.model_name,
-            provider=model_config.provider,
-            api_key=model_config.api_key,
-            api_base=model_config.api_base,
-            is_omni=model_config.is_omni,
-            capability=model_config.capability,
-            model_type=ModelType.LLM
-        ))
-        file_message = await multimodel_service.process_files(
-            files=[file]
-        )
+            else:
+                tenant_id = memory_config.tenant_id
+            llm, model_config = self._get_mutlimodal_client(db, file.type, memory_config, tenant_id)
+            if model_config is None or llm is None:
+                return None
+            api_config = ModelInfo(
+                model_name=model_config.model_name,
+                provider=model_config.provider,
+                api_key=model_config.api_key,
+                api_base=model_config.api_base,
+                is_omni=model_config.is_omni,
+                capability=model_config.capability,
+                model_type=ModelType.LLM
+            )
+
+        # 用 DB：文件预处理（本地文件需查 FileMetadata 取文件名）
+        with get_db_read() as db:
+            file_message = await MultimodalService(db, api_config).process_files(
+                files=[file]
+            )
         if not file_message:
-            business_logger.warning(f"Unsupported file type {file}, model capability: {model_config.capability}")
+            business_logger.warning(f"Unsupported file type {file}, model capability: {api_config.capability}")
             return None
         file_message = file_message[0]
         try:
@@ -325,6 +345,7 @@ class MemoryPerceptualService:
                 {"type": "text", "text": "Generate a summary of the file's content"}
             ]}
         ]
+        # 不持有连接：多模态推理（最慢的一段）
         try:
             result = await llm.ainvoke(messages)
         except Exception as e:
@@ -354,11 +375,13 @@ class MemoryPerceptualService:
             stmt = select(FileMetadata).where(
                 FileMetadata.id == file_id
             )
-            file_obj = self.db.execute(stmt).scalar_one_or_none()
+            # 用 DB：回查本地文件真实名称（远程文件 filename 不是 UUID，走不到这）
+            with get_db_read() as db:
+                file_obj = db.execute(stmt).scalar_one_or_none()
 
-            if file_obj:
-                filename = file_obj.file_name
-                file_ext = file_obj.file_ext
+                if file_obj:
+                    filename = file_obj.file_name
+                    file_ext = file_obj.file_ext
         except ValueError:
             business_logger.debug(f"Remote file, file_id={filename}")
         if not file_ext:
@@ -406,17 +429,31 @@ class MemoryPerceptualService:
                 },
                 created_time=None,
             )
-        memory = self.repository.create_perceptual_memory(
-            end_user_id=uuid.UUID(end_user_id),
-            perceptual_type=PerceptualType.trans_from_file_type(file.type),
-            file_path=file.url,
-            file_name=filename,
-            file_ext=file_ext,
-            summary=content.get('summary', ""),
-            meta_data={
-                "content": file_content,
-                "modalities": file_modalities
-            }
-        )
-        self.db.commit()
-        return memory
+        # 用 DB：落库。返回快照而非 ORM 对象，否则调用方出块访问就 Detached。
+        with get_db_context() as db:
+            memory = MemoryPerceptualRepository(db).create_perceptual_memory(
+                end_user_id=uuid.UUID(end_user_id),
+                perceptual_type=PerceptualType.trans_from_file_type(file.type),
+                file_path=file.url,
+                file_name=filename,
+                file_ext=file_ext,
+                summary=content.get('summary', ""),
+                meta_data={
+                    "content": file_content,
+                    "modalities": file_modalities
+                }
+            )
+            # 在 commit 前取值：commit 会 expire 属性，之后访问需额外一次 SELECT
+            snapshot = _PerceptualSnapshot(
+                id=memory.id,
+                end_user_id=end_user_id,
+                perceptual_type=memory.perceptual_type,
+                file_path=memory.file_path,
+                file_name=memory.file_name,
+                file_ext=memory.file_ext,
+                summary=memory.summary,
+                meta_data=memory.meta_data,
+                created_time=memory.created_time,
+            )
+            db.commit()
+        return snapshot
