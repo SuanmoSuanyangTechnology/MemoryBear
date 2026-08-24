@@ -53,13 +53,16 @@ class IndexDefinition:
 
 
 def _index_definition(
-    name: str,
-    label: MemoryNodeLabel,
-    *,
-    schema_version: int,
-    generation: int,
+        name: str,
+        label: MemoryNodeLabel,
+        *,
+        schema_version: int,
+        generation: int,
+        prop: dict | None = None
 ) -> IndexDefinition:
     """Build one independently versioned schema with explicit search mappings."""
+    if prop is None:
+        prop = dict()
     properties: dict[str, Any] = {
         field: {"type": "text", "analyzer": "cjk"}
         for field in FULLTEXT_FIELDS.get(label, ())
@@ -90,7 +93,7 @@ def _index_definition(
                     }
                 }
             ],
-            "properties": properties,
+            "properties": properties | prop,
         },
     )
 
@@ -101,6 +104,12 @@ INDEX_DEFINITIONS: dict[MemoryNodeLabel, IndexDefinition] = {
         MemoryNodeType.ASSISTANT_ORIGINAL,
         schema_version=1,
         generation=1,
+        # demo
+        prop={
+            "access_count": {
+                "type": "long"
+            }
+        }
     ),
     MemoryNodeType.ASSISTANT_PRUNED: _index_definition(
         "assistant_pruned",
