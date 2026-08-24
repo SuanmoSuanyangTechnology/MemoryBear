@@ -33,6 +33,14 @@ def _normalize_jina_rerank_url(base_url: Optional[str]) -> str:
     return f"{url}/v1/rerank"
 
 
+def _normalize_dashscope_rerank_url(base_url: str) -> str:
+    """将 OpenAI-compatible base_url 规范化为 rerank 完整端点。"""
+    url = base_url.rstrip("/")
+    if url.endswith("/reranks"):
+        return url
+    return f"{url}/reranks"
+
+
 class _EndpointBoundSession:
     """Route a provider session to one immutable rerank endpoint."""
 
@@ -114,6 +122,45 @@ class RedBearRerank(BaseDocumentCompressor):
             report_model_gateway_failure(self._config, "rerank", exc, started)
             raise
 
+    def _dashscope_rerank_http(
+            self,
+            documents: Sequence[Union[str, Document, dict]],
+            query: str,
+            top_n: Optional[int],
+    ) -> List[Dict[str, Any]]:
+        """DashScope 配置了自定义 base_url 时，直接请求 OpenAI-compatible rerank 接口。
+
+        DashScopeRerank 底层只读取全局服务地址，无法按实例使用数据库中的
+        base_url，因此在这里显式传入真实 URL 和 API key。
+        """
+        import httpx
+
+        docs = [doc.page_content if isinstance(doc, Document) else doc for doc in documents]
+        effective_top_n = top_n if top_n is not None and top_n > 0 else 3
+        body = {
+            "model": self._config.model_name,
+            "query": query,
+            "documents": docs,
+            "top_n": effective_top_n,
+        }
+        headers = {
+            "Authorization": f"Bearer {self._config.api_key}",
+            "Content-Type": "application/json",
+        }
+        url = _normalize_dashscope_rerank_url(self._config.base_url)
+        with httpx.Client(timeout=self._config.timeout, follow_redirects=True) as client:
+            response = client.post(url, json=body, headers=headers)
+        response.raise_for_status()
+        payload = response.json()
+        results = payload.get("results") if isinstance(payload, dict) else None
+        if not isinstance(results, list) or not results:
+            detail = payload.get("message") if isinstance(payload, dict) else None
+            raise ValueError(detail or "DashScope rerank 响应中缺少有效的 results")
+        return [
+            {"index": int(item.get("index")), "relevance_score": item.get("relevance_score")}
+            for item in results
+        ]
+
     @network_retry
     def _rerank_with_retry(
             self,
@@ -127,6 +174,8 @@ class RedBearRerank(BaseDocumentCompressor):
             model_instance: JinaRerank = self._model
             return model_instance.rerank(documents=documents, query=query, top_n=top_n)
         if provider == ModelProvider.DASHSCOPE:
+            if self._config.base_url:
+                return self._dashscope_rerank_http(documents, query, top_n)
             from langchain_community.document_compressors.dashscope_rerank import DashScopeRerank
             model_instance: DashScopeRerank = self._model
             return model_instance.rerank(documents=documents, query=query, top_n=top_n)

@@ -63,8 +63,24 @@ class RedBearEmbeddings(Embeddings):
     @staticmethod
     def _create_model(config: RedBearModelConfig) -> Embeddings:
         """根据配置创建 LangChain 模型"""
-        embedding_class = get_provider_embedding_class(config.provider)
         provider = config.provider.lower()
+
+        # dashscope 配置了自定义 base_url 时，走 OpenAI 兼容模式，确保真实 URL 生效
+        if provider == ModelProvider.DASHSCOPE and config.base_url:
+            from langchain_openai import OpenAIEmbeddings
+            import httpx
+            timeout = httpx.Timeout(timeout=config.timeout, connect=60.0)
+            return OpenAIEmbeddings(
+                model=config.model_name,
+                base_url=config.base_url,
+                api_key=config.api_key,
+                timeout=timeout,
+                max_retries=config.max_retries,
+                chunk_size=settings.EMBEDDING_BATCH_SIZE,
+                check_embedding_ctx_length=False,
+            )
+
+        embedding_class = get_provider_embedding_class(config.provider)
         # Embedding models only need connection params, never LLM-specific ones
         # (e.g. enable_thinking, model_kwargs) — build params directly.
         if provider in [
