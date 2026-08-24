@@ -220,8 +220,8 @@ class RedBearModelFactory:
         if default_headers:
             logger.info(f"额外请求头已注入: {default_headers}")
 
-        # dashscope 的 omni 模型、以及配置了自定义 base_url 的 dashscope 模型，使用 OpenAI 兼容模式
-        if provider == ModelProvider.DASHSCOPE and (config.is_omni or config.base_url):
+        # dashscope 的 omni 模型使用 OpenAI 兼容模式
+        if provider == ModelProvider.DASHSCOPE and config.is_omni:
             if not config.base_url:
                 config.base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
             timeout_config = httpx.Timeout(
@@ -493,8 +493,8 @@ def get_provider_llm_class(config: RedBearModelConfig, type: ModelType = ModelTy
     """根据模型提供商获取对应的模型类"""
     provider = config.provider.lower()
 
-    # dashscope 的 omni 模型、以及配置了自定义 base_url 的 dashscope 模型，走 OpenAI 兼容模式
-    if provider == ModelProvider.DASHSCOPE and (config.is_omni or config.base_url):
+    # dashscope的omni模型 和 volcano模型使用
+    if provider == ModelProvider.DASHSCOPE and config.is_omni:
         return CompatibleChatOpenAI
     if provider == ModelProvider.VOLCANO:
         return CompatibleChatOpenAI

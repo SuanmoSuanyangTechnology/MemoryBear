@@ -33,17 +33,6 @@ def _normalize_jina_rerank_url(base_url: Optional[str]) -> str:
     return f"{url}/v1/rerank"
 
 
-_DASHSCOPE_RERANK_PATH = "services/rerank/text-rerank/text-rerank"
-
-
-def _normalize_dashscope_rerank_url(base_url: str) -> str:
-    """将 dashscope 原生 base_url（如 .../api/v1）规范化为 rerank 完整端点。"""
-    url = base_url.rstrip("/")
-    if url.endswith(f"/{_DASHSCOPE_RERANK_PATH}"):
-        return url
-    return f"{url}/{_DASHSCOPE_RERANK_PATH}"
-
-
 class _EndpointBoundSession:
     """Route a provider session to one immutable rerank endpoint."""
 
@@ -125,42 +114,6 @@ class RedBearRerank(BaseDocumentCompressor):
             report_model_gateway_failure(self._config, "rerank", exc, started)
             raise
 
-    def _dashscope_rerank_http(
-            self,
-            documents: Sequence[Union[str, Document, dict]],
-            query: str,
-            top_n: int,
-    ) -> List[Dict[str, Any]]:
-        """dashscope 配置了自定义 base_url 时，走原生 rerank 协议直接命中该 URL。
-
-        dashscope.TextReRank 底层只读全局 dashscope.base_http_api_url，无法按实例指定
-        base_url，因此这里用同样的原生协议（嵌套 input/parameters）直接请求配置的地址，
-        保证自定义 URL 真正生效。
-        """
-        import httpx
-
-        docs = [doc.page_content if isinstance(doc, Document) else doc for doc in documents]
-        effective_top_n = top_n if top_n > 0 else 3
-        body = {
-            "model": self._config.model_name,
-            "input": {"query": query, "documents": docs},
-            "parameters": {"top_n": effective_top_n, "return_documents": False},
-        }
-        headers = {
-            "Authorization": f"Bearer {self._config.api_key}",
-            "Content-Type": "application/json",
-        }
-        url = _normalize_dashscope_rerank_url(self._config.base_url)
-        with httpx.Client(timeout=self._config.timeout, follow_redirects=True) as client:
-            response = client.post(url, json=body, headers=headers)
-        response.raise_for_status()
-        payload = response.json()
-        results = ((payload.get("output") or {}).get("results")) or []
-        return [
-            {"index": int(item.get("index")), "relevance_score": item.get("relevance_score")}
-            for item in results
-        ]
-
     @network_retry
     def _rerank_with_retry(
             self,
@@ -174,8 +127,6 @@ class RedBearRerank(BaseDocumentCompressor):
             model_instance: JinaRerank = self._model
             return model_instance.rerank(documents=documents, query=query, top_n=top_n)
         if provider == ModelProvider.DASHSCOPE:
-            if self._config.base_url:
-                return self._dashscope_rerank_http(documents, query, top_n)
             from langchain_community.document_compressors.dashscope_rerank import DashScopeRerank
             model_instance: DashScopeRerank = self._model
             return model_instance.rerank(documents=documents, query=query, top_n=top_n)
