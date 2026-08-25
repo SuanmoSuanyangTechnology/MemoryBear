@@ -7,7 +7,7 @@ import logging
 from celery.signals import worker_process_init, worker_process_shutdown
 
 from ..runtime import reset_worker_runtime_after_fork, shutdown_worker_runtime_sync
-from . import legacy_compat
+from . import legacy_compat, qa_import
 from .celery_app import celery_app
 
 logger = logging.getLogger(__name__)
@@ -30,4 +30,4 @@ def shutdown_worker_process(**kwargs: object) -> None:
     logger.info("Knowledge worker process stopped")
 
 
-__all__ = ["celery_app", "legacy_compat"]
+__all__ = ["celery_app", "legacy_compat", "qa_import"]
