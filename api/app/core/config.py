@@ -83,6 +83,11 @@ class Settings:
 
     DB_AUTO_UPGRADE = os.getenv("DB_AUTO_UPGRADE", "false").lower() == "true"
 
+    # Health probe configuration
+    READINESS_CHECK_TIMEOUT_SECONDS: float = float(
+        os.getenv("READINESS_CHECK_TIMEOUT_SECONDS", "2.0")
+    )
+
     # Redis configuration
     REDIS_HOST: str = os.getenv("REDIS_HOST", "127.0.0.1")
     REDIS_PORT: int = int(os.getenv("REDIS_PORT", "6379"))
