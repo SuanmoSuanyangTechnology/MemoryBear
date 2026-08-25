@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from celery import Celery
-from kombu import Queue
+from kombu import Exchange, Queue
 
 from ..bootstrap import get_settings
 from ..config import KnowledgeSettings
@@ -63,7 +63,14 @@ def create_celery_app(settings: KnowledgeSettings) -> Celery:
         task_send_sent_event=True,
         task_default_queue="document_tasks",
         task_create_missing_queues=False,
-        task_queues=tuple(Queue(name) for name in KNOWLEDGE_QUEUES),
+        task_queues=tuple(
+            Queue(
+                name,
+                Exchange(name, type="direct"),
+                routing_key=name,
+            )
+            for name in KNOWLEDGE_QUEUES
+        ),
         task_routes={
             task_name: {"queue": queue_name}
             for task_name, queue_name in KNOWLEDGE_TASK_ROUTES.items()
