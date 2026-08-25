@@ -1,4 +1,4 @@
-"""Process-local infrastructure adapters for the knowledge service."""
+"""Process-local sync and async infrastructure adapters."""
 
 from .elasticsearch import ElasticsearchManager
 from .model_runtime import ModelRuntimeManager

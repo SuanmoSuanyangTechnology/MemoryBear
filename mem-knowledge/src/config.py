@@ -220,6 +220,11 @@ class KnowledgeSettings(BaseSettings):
         ge=1,
         validation_alias="KB_ES_CONNECTIONS_PER_NODE",
     )
+    kb_vision_max_workers: int = Field(
+        default=10,
+        ge=1,
+        validation_alias="KB_VISION_MAX_WORKERS",
+    )
     kb_health_probe_timeout_seconds: float = Field(
         default=3.0,
         gt=0,
