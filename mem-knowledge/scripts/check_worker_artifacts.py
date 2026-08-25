@@ -57,17 +57,18 @@ def _path_label(path: str | PurePosixPath) -> str:
 
 def _forbidden_path_marker(path: str | PurePosixPath) -> str | None:
     parts = [part.lower() for part in PurePosixPath(path).parts if part not in {"", "/"}]
-    normalized_parts = [_normalize_distribution(part) for part in parts]
-    for index, part in enumerate(parts):
-        if "deepdoc" in part:
+    for part in parts:
+        stem = PurePosixPath(part).stem
+        if "deepdoc" in stem:
             return "deepdoc"
-        if part in {"plain_pdf", "plainpdf"}:
-            return part
-        if part == "graphrag":
+        if stem in {"plain_pdf", "plainpdf"}:
+            return stem
+        if stem == "graphrag":
             return "graphrag"
-        normalized = normalized_parts[index]
-        if normalized in FORBIDDEN_DISTRIBUTIONS:
-            return normalized
+        if not PurePosixPath(part).suffix:
+            normalized = _normalize_distribution(part)
+            if normalized in FORBIDDEN_DISTRIBUTIONS:
+                return normalized
     for first, second in zip(parts, parts[1:], strict=False):
         if (first, second) in {("api", "app"), ("rag", "app")}:
             return f"{first}.{second}"
@@ -109,16 +110,59 @@ def _legacy_task_allowed(path: str | PurePosixPath) -> bool:
     return normalized in LEGACY_TASK_ALLOWED_PATHS
 
 
-def _assigned_names(target: ast.expr) -> set[str]:
+def _assignment_pairs(target: ast.expr, value: ast.expr) -> list[tuple[str, ast.expr]]:
     if isinstance(target, ast.Name):
-        return {target.id}
+        return [(target.id, value)]
+    if isinstance(target, ast.Starred):
+        return _assignment_pairs(target.value, value)
     if isinstance(target, (ast.Tuple, ast.List)):
-        return {name for item in target.elts for name in _assigned_names(item)}
-    return set()
+        if isinstance(value, (ast.Tuple, ast.List)) and len(target.elts) == len(value.elts):
+            return [
+                pair
+                for nested_target, nested_value in zip(target.elts, value.elts, strict=True)
+                for pair in _assignment_pairs(nested_target, nested_value)
+            ]
+        return [
+            pair
+            for nested_target in target.elts
+            for pair in _assignment_pairs(nested_target, value)
+        ]
+    return []
 
 
-def _dynamic_import_aliases(tree: ast.AST) -> tuple[set[str], set[str]]:
+def _all_assignment_pairs(tree: ast.AST) -> list[tuple[str, ast.expr]]:
+    pairs: list[tuple[str, ast.expr]] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                pairs.extend(_assignment_pairs(target, node.value))
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            pairs.extend(_assignment_pairs(node.target, node.value))
+    return pairs
+
+
+def _is_reflective_import_loader(
+    expression: ast.expr,
+    importlib_modules: set[str],
+) -> tuple[bool, bool]:
+    if not (
+        isinstance(expression, ast.Call)
+        and isinstance(expression.func, ast.Name)
+        and expression.func.id == "getattr"
+        and len(expression.args) >= 2
+        and isinstance(expression.args[0], ast.Name)
+        and expression.args[0].id in importlib_modules
+    ):
+        return False, False
+    attribute = expression.args[1]
+    if isinstance(attribute, ast.Constant) and isinstance(attribute.value, str):
+        return attribute.value == "import_module", False
+    return True, True
+
+
+def _dynamic_import_aliases(tree: ast.AST) -> tuple[set[str], set[str], set[str]]:
     loaders = {"__import__"}
+    uncertain_loaders: set[str] = set()
     importlib_modules: set[str] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
@@ -133,19 +177,10 @@ def _dynamic_import_aliases(tree: ast.AST) -> tuple[set[str], set[str]]:
     changed = True
     while changed:
         changed = False
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Assign):
-                targets = {name for target in node.targets for name in _assigned_names(target)}
-                value = node.value
-            elif isinstance(node, ast.AnnAssign):
-                targets = _assigned_names(node.target)
-                value = node.value
-            else:
-                continue
-            if value is None:
-                continue
+        for name, value in _all_assignment_pairs(tree):
             is_importlib_module = isinstance(value, ast.Name) and value.id in importlib_modules
             is_loader = isinstance(value, ast.Name) and value.id in loaders
+            is_uncertain_loader = isinstance(value, ast.Name) and value.id in uncertain_loaders
             if (
                 isinstance(value, ast.Attribute)
                 and value.attr == "import_module"
@@ -153,14 +188,22 @@ def _dynamic_import_aliases(tree: ast.AST) -> tuple[set[str], set[str]]:
                 and value.value.id in importlib_modules
             ):
                 is_loader = True
-            for name in targets:
-                if is_loader and name not in loaders:
-                    loaders.add(name)
-                    changed = True
-                if is_importlib_module and name not in importlib_modules:
-                    importlib_modules.add(name)
-                    changed = True
-    return loaders, importlib_modules
+            is_reflective_loader, is_uncertain_reflection = _is_reflective_import_loader(
+                value,
+                importlib_modules,
+            )
+            is_loader = is_loader or is_reflective_loader
+            is_uncertain_loader = is_uncertain_loader or is_uncertain_reflection
+            if is_loader and name not in loaders:
+                loaders.add(name)
+                changed = True
+            if is_uncertain_loader and name not in uncertain_loaders:
+                uncertain_loaders.add(name)
+                changed = True
+            if is_importlib_module and name not in importlib_modules:
+                importlib_modules.add(name)
+                changed = True
+    return loaders, importlib_modules, uncertain_loaders
 
 
 def _scan_python_text(path: str, source: str) -> list[str]:
@@ -174,12 +217,13 @@ def _scan_python_text(path: str, source: str) -> list[str]:
         marker = _forbidden_import_marker(module)
         if marker:
             errors.append(f"{label}: {marker}")
-    dynamic_loaders, importlib_modules = _dynamic_import_aliases(tree)
+    dynamic_loaders, importlib_modules, uncertain_loaders = _dynamic_import_aliases(tree)
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
         function = node.func
         is_dynamic_import = isinstance(function, ast.Name) and function.id in dynamic_loaders
+        is_uncertain_import = isinstance(function, ast.Name) and function.id in uncertain_loaders
         if (
             isinstance(function, ast.Attribute)
             and function.attr == "import_module"
@@ -187,6 +231,12 @@ def _scan_python_text(path: str, source: str) -> list[str]:
             and function.value.id in importlib_modules
         ):
             is_dynamic_import = True
+        is_reflective_loader, is_uncertain_reflection = _is_reflective_import_loader(
+            function,
+            importlib_modules,
+        )
+        is_dynamic_import = is_dynamic_import or is_reflective_loader
+        is_uncertain_import = is_uncertain_import or is_uncertain_reflection
         if not is_dynamic_import:
             continue
         first_argument: ast.expr | None = node.args[0] if node.args else None
@@ -195,7 +245,7 @@ def _scan_python_text(path: str, source: str) -> list[str]:
                 (keyword.value for keyword in node.keywords if keyword.arg == "name"),
                 None,
             )
-        if (
+        if is_uncertain_import or (
             first_argument is None
             or not isinstance(first_argument, ast.Constant)
             or not isinstance(first_argument.value, str)
@@ -278,7 +328,7 @@ def _scan_pth_files(root: Path) -> list[str]:
     return errors
 
 
-def _scan_source(root: Path) -> list[str]:
+def _scan_source(root: Path, *, reject_bytecode: bool = True) -> list[str]:
     errors: list[str] = []
     if not root.is_dir():
         return [f"{_path_label(root.name)}: missing-source"]
@@ -286,6 +336,10 @@ def _scan_source(root: Path) -> list[str]:
         relative = path.relative_to(root)
         if path.is_symlink():
             errors.append(f"{_path_label(relative)}: symlink")
+            continue
+        if "__pycache__" in relative.parts or path.suffix.lower() in {".pyc", ".pyo"}:
+            if reject_bytecode:
+                errors.append(f"{_path_label(relative)}: bytecode")
             continue
         marker = _forbidden_path_marker(relative)
         if marker:
@@ -365,27 +419,36 @@ def _scan_site_packages(root: Path) -> list[str]:
         return [f"{_path_label(root.name)}: missing-site-packages"]
     errors: list[str] = []
     errors.extend(_scan_pth_files(root))
-    for metadata in sorted(root.glob("*.dist-info/METADATA")):
+    for child in sorted(root.iterdir()):
+        if not child.is_dir() or not child.name.lower().endswith(".dist-info"):
+            continue
+        metadata = next(
+            (entry for entry in child.iterdir() if entry.name.lower() == "metadata"),
+            None,
+        )
+        if metadata is None or metadata.is_symlink():
+            continue
         distribution = _metadata_distribution_name(metadata)
         if distribution in FORBIDDEN_DISTRIBUTIONS:
             errors.append(distribution)
-    for child in sorted(root.iterdir()):
-        if child.is_symlink():
-            errors.append(f"{_path_label(child.name)}: symlink")
+    for path in sorted(root.rglob("*")):
+        relative = path.relative_to(root)
+        if path.is_symlink():
+            errors.append(f"{_path_label(relative)}: symlink")
             continue
-        marker = _forbidden_path_marker(child.name)
+        marker = _forbidden_path_marker(relative)
         if marker:
-            errors.append(f"{_path_label(child.name)}: {marker}")
+            errors.append(f"{_path_label(relative)}: {marker}")
     service_source = root / "src"
     if service_source.is_dir():
-        errors.extend(f"src/{error}" for error in _scan_source(service_source))
+        errors.extend(
+            f"src/{error}" for error in _scan_source(service_source, reject_bytecode=False)
+        )
     for bytecode in sorted(
         path for path in root.rglob("*") if path.suffix.lower() in {".pyc", ".pyo"}
     ):
         if not _bytecode_source(bytecode).is_file():
             errors.append(f"{_path_label(bytecode.relative_to(root))}: orphan-bytecode")
-    for symlink in sorted(path for path in root.rglob("*") if path.is_symlink()):
-        errors.append(f"{_path_label(symlink.relative_to(root))}: symlink")
     return errors
 
 

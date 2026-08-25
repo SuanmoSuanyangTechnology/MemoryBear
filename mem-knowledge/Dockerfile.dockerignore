@@ -11,3 +11,8 @@
 !packages/redbear-model/**
 !packages/storage-core/
 !packages/storage-core/**
+
+**/__pycache__/**
+**/__pycache__
+**/*.pyc
+**/*.pyo
