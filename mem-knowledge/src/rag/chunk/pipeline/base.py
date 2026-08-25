@@ -14,6 +14,7 @@ from ..context import (
     is_direct_image_vision_enabled,
     is_embedded_image_vision_enabled,
 )
+from ..preprocessor import safe_log_target
 
 LOGGER = logging.getLogger(__name__)
 
@@ -95,7 +96,11 @@ class ChunkPipeline(ABC):
             )
         )
         main_result = self.postprocessor.process(ctx, parse_result, merge_result)
-        LOGGER.info("naive_merge(%s): %s", ctx.filename, timer() - start)
+        LOGGER.info(
+            "naive_merge target=%s duration_seconds=%.6f",
+            safe_log_target(ctx.filename),
+            timer() - start,
+        )
         if isinstance(main_result, tuple):
             child_res, parent_res, parent_id_map = main_result
             return _append_external_parent_child_chunks(

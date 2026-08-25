@@ -20,20 +20,31 @@ _EMBED_PREFIXES = (
     "ppt/embeddings/",
 )
 _LOG_CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]+")
+_HTTP_PREFIX = re.compile(r"^[\x00-\x20]*https?://", re.IGNORECASE)
+_WINDOWS_PATH = re.compile(r"^[A-Za-z]:[\\/]")
 
 
 def safe_log_target(value: str) -> str:
-    """Return a log-safe host/path without URL credentials or request parameters."""
+    """Classify a target without logging user-controlled path or payload data."""
+    raw_value = str(value or "")
+    if _WINDOWS_PATH.match(raw_value):
+        return "local-file"
     try:
-        parsed = urlsplit(value)
+        parsed = urlsplit(raw_value)
     except ValueError:
-        return "invalid-target"
-    if parsed.scheme.lower() in {"http", "https"}:
-        host = parsed.hostname or "unknown-host"
-        target = f"{host}{parsed.path or '/'}"
-    else:
-        target = parsed.path or Path(value).name or "unknown-path"
-    return _LOG_CONTROL_CHARS.sub("?", target)
+        return "invalid-remote-target" if _HTTP_PREFIX.match(raw_value) else "other-scheme"
+
+    scheme = parsed.scheme.lower()
+    if scheme in {"http", "https"}:
+        if not parsed.netloc or not parsed.hostname:
+            return "invalid-remote-target"
+        hostname = _LOG_CONTROL_CHARS.sub("", parsed.hostname)
+        return hostname or "invalid-remote-target"
+    if scheme == "data":
+        return "embedded-data"
+    if scheme in {"", "file"}:
+        return "local-file"
+    return "other-scheme"
 
 
 def _embedded_files(binary: bytes) -> list[tuple[str, bytes]]:

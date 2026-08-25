@@ -25,7 +25,7 @@ class RagTokenizer:
         return str(("DD" + (line[::-1].lower())).encode("utf-8"))[2:-1]
 
     def loadDict_(self, fnm):
-        logging.info(f"[HUQIE]:Build trie from {fnm}")
+        logging.info("[HUQIE] Build trie resource=token-dictionary")
         with open(fnm, encoding="utf-8") as dictionary:
             for line in dictionary:
                 line = re.sub(r"[\r\n]+", "", line)
@@ -193,8 +193,15 @@ class RagTokenizer:
             tks.append(tk)
         # F /= len(tks)
         L /= len(tks)
-        logging.debug(f"[SC] {tks} {len(tks)} {L} {F} {B / len(tks) + L + F}")
-        return tks, B / len(tks) + L + F
+        score = B / len(tks) + L + F
+        logging.debug(
+            "[SC] token_count=%d multi_char_ratio=%.6f total_frequency=%d score=%.6f",
+            len(tks),
+            L,
+            F,
+            score,
+        )
+        return tks, score
 
     def sortTks_(self, tkslist):
         res = []
@@ -320,8 +327,8 @@ class RagTokenizer:
             tks, s = self.maxForward_(L)
             tks1, s1 = self.maxBackward_(L)
             if self.DEBUG:
-                logging.debug(f"[FW] {tks} {s}")
-                logging.debug(f"[BW] {tks1} {s1}")
+                logging.debug("[FW] token_count=%d score=%.6f", len(tks), s)
+                logging.debug("[BW] token_count=%d score=%.6f", len(tks1), s1)
 
             i, j, _i, _j = 0, 0, 0, 0
             same = 0
@@ -370,9 +377,9 @@ class RagTokenizer:
                 self.dfs_("".join(tks[_j:]), 0, [], tkslist)
                 res.append(" ".join(self.sortTks_(tkslist)[0][0]))
 
-        res = " ".join(res)
-        logging.debug(f"[TKS] {self.merge_(res)}")
-        return self.merge_(res)
+        res = self.merge_(" ".join(res))
+        logging.debug("[TKS] token_count=%d", len(res.split()))
+        return res
 
     def fine_grained_tokenize(self, tks):
         tks = tks.split()

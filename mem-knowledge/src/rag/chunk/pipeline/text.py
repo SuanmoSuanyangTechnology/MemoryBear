@@ -14,6 +14,7 @@ from ..parser.html import HtmlParser
 from ..parser.json import JsonParser
 from ..parser.structured_markdown import StructMarkdownParser
 from ..parser.txt import TxtParser
+from ..preprocessor import safe_log_target
 from .base import ChunkPipeline
 
 LOGGER = logging.getLogger(__name__)
@@ -115,9 +116,9 @@ class LegacyDocChunkPipeline(ChunkPipeline):
         except Exception as exc:  # noqa: BLE001 - Tika initialization can fail through optional dependencies
             ctx.callback(0.8, f"tika not available: {exc}. Unsupported .doc parsing.")
             LOGGER.warning(
-                "tika not available: %s. Unsupported .doc parsing for %s.",
-                exc,
-                ctx.filename,
+                "tika unavailable target=%s error_type=%s",
+                safe_log_target(ctx.filename),
+                type(exc).__name__,
             )
             return ParseResult(direct_result=[], append_embed=False)
 
@@ -144,5 +145,8 @@ class LegacyDocChunkPipeline(ChunkPipeline):
             return ParseResult(sections=sections)
 
         ctx.callback(0.8, f"tika.parser got empty content from {ctx.filename}.")
-        LOGGER.warning("tika.parser got empty content from %s.", ctx.filename)
+        LOGGER.warning(
+            "tika parser returned empty content target=%s",
+            safe_log_target(ctx.filename),
+        )
         return ParseResult(direct_result=[], append_embed=False)
