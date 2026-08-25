@@ -102,6 +102,30 @@ class EndUserRepository:
             db_logger.error(f"查询工作空间 {workspace_id} 下终端用户时出错: {str(e)}")
             raise
 
+    def get_active_end_users_by_workspace(
+        self, workspace_id: uuid.UUID, active_since: datetime
+    ) -> List[EndUser]:
+        """获取指定 workspace 下最近活跃的 end_user（write_time > active_since）。
+
+        活跃性过滤下沉到 SQL 层，避免应用层逐个用户再查一次 write_time（消除 N+1）。
+        """
+        try:
+            end_users = (
+                self.db.query(EndUser)
+                .filter(
+                    EndUser.workspace_id == workspace_id,
+                    EndUser.is_active == True,
+                    EndUser.write_time > active_since,
+                )
+                .all()
+            )
+            db_logger.info(f"成功查询工作空间 {workspace_id} 下的 {len(end_users)} 个活跃终端用户")
+            return end_users
+        except Exception as e:
+            self.db.rollback()
+            db_logger.error(f"查询工作空间 {workspace_id} 下活跃终端用户时出错: {str(e)}")
+            raise
+
     async def get_end_users_by_workspace_async(
         self, workspace_id: uuid.UUID
     ) -> List[EndUser]:
@@ -2442,6 +2466,15 @@ def get_end_users_by_workspace(db: Session, workspace_id: uuid.UUID) -> List[End
     """根据工作空间ID查询终端用户（返回 EndUser ORM 列表）"""
     repo = EndUserRepository(db)
     end_users = repo.get_end_users_by_workspace(workspace_id)
+    return end_users
+
+
+def get_active_end_users_by_workspace(
+    db: Session, workspace_id: uuid.UUID, active_since: datetime
+) -> List[EndUser]:
+    """根据工作空间ID查询最近活跃的终端用户（write_time > active_since）。"""
+    repo = EndUserRepository(db)
+    end_users = repo.get_active_end_users_by_workspace(workspace_id, active_since)
     return end_users
 
 
