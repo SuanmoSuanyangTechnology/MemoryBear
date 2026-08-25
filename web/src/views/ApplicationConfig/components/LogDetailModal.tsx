@@ -16,6 +16,7 @@ import { formatDateTime } from '@/utils/format'
 import type { ChatItem } from '@/components/Chat/types'
 import Runtime from '@/views/Workflow/components/Chat/Runtime'
 import { nodeLibrary } from '@/views/Workflow/constant'
+import type { Application } from '@/views/ApplicationManagement/types'
 
 const nodeIconMap = Object.fromEntries(
   nodeLibrary.flatMap(c => c.nodes.map(n => [n.type, n.icon]))
@@ -27,7 +28,7 @@ type Data = LogItem & {
 }
 
 /** Modal component for displaying conversation log details */
-const LogDetailModal = forwardRef<LogDetailModalRef, { source: string }>(({ source }, ref) => {
+const LogDetailModal = forwardRef<LogDetailModalRef, { source: string; appType: Application['type']; }>(({ source, appType }, ref) => {
   const { t } = useTranslation();
   const [visible, setVisible] = useState(false);
   const [loading, setLoading] = useState(false)
@@ -136,7 +137,7 @@ const LogDetailModal = forwardRef<LogDetailModalRef, { source: string }>(({ sour
     handleClose
   }));
 
-  console.log('data', data)
+  const isPureWorkflow = appType === 'pure_workflow'
 
   return (
     <RbModal
@@ -149,8 +150,8 @@ const LogDetailModal = forwardRef<LogDetailModalRef, { source: string }>(({ sour
       footer={null}
       width={1000}
     >
-      <Flex justify="space-between" align="center" className="rb:bg-[#F6F6F6] rb:rounded-lg rb:py-2.5! rb:pr-2.5! rb:pl-3.25!">
-        {t('workingDetail.conversationStream')}
+      <Flex justify={isPureWorkflow ? 'end' :"space-between"} align="center" className="rb:bg-[#F6F6F6] rb:rounded-lg rb:py-2.5! rb:pr-2.5! rb:pl-3.25!">
+        {isPureWorkflow ? null : t('workingDetail.conversationStream')}
         <Button className="rb:h-6!" onClick={getDetail}>{t('workingDetail.refresh')}</Button>
       </Flex>
       <div className="rb-border rb:p-3 rb:rounded-xl rb:mt-3 rb:h-[calc(100%-48px)] rb:overflow-y-auto">
