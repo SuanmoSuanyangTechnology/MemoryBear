@@ -138,11 +138,11 @@ def safe_log_target(value: object) -> str:
     if type(value) is not str:
         return "other-scheme"
     raw_value = value
-    if _WINDOWS_PATH.match(raw_value):
-        return "local-file"
     remote_candidate, raw_authority = _raw_remote_authority(raw_value)
     if remote_candidate and raw_authority is None:
         return "invalid-remote-target"
+    if _WINDOWS_PATH.match(raw_value):
+        return "local-file"
     try:
         parsed = urlsplit(raw_value)
     except ValueError:
