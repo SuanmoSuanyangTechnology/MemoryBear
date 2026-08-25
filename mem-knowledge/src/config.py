@@ -225,6 +225,76 @@ class KnowledgeSettings(BaseSettings):
         ge=1,
         validation_alias="KB_VISION_MAX_WORKERS",
     )
+    max_document_pages: int = Field(
+        default=200,
+        ge=1,
+        validation_alias="MAX_DOCUMENT_PAGES",
+    )
+    mineru_v3_apiserver: str = Field(
+        default="http://127.0.0.1:18000",
+        validation_alias="MINERU_V3_APISERVER",
+    )
+    mineru_v3_request_timeout_seconds: float = Field(
+        default=600.0,
+        gt=0,
+        validation_alias="MINERU_V3_REQUEST_TIMEOUT_SECONDS",
+    )
+    mineru_v3_poll_interval_seconds: float = Field(
+        default=2.0,
+        gt=0,
+        validation_alias="MINERU_V3_POLL_INTERVAL_SECONDS",
+    )
+    mineru_v3_poll_timeout_seconds: float = Field(
+        default=1800.0,
+        gt=0,
+        validation_alias="MINERU_V3_POLL_TIMEOUT_SECONDS",
+    )
+    textln_apiserver: str = Field(
+        default="https://api.textin.com/ai/service/v1/pdf_to_markdown",
+        validation_alias="TEXTLN_APISERVER",
+    )
+    textln_app_id: SecretStr = Field(
+        default=SecretStr(""),
+        validation_alias="TEXTLN_APP_ID",
+    )
+    textln_secret_code: SecretStr = Field(
+        default=SecretStr(""),
+        validation_alias="TEXTLN_SECRET_CODE",
+    )
+    textln_request_timeout_seconds: float = Field(
+        default=600.0,
+        gt=0,
+        validation_alias="TEXTLN_REQUEST_TIMEOUT_SECONDS",
+    )
+    tika_server_jar: str = Field(
+        default="file:///opt/tika/tika-server-standard-3.1.0.jar",
+        validation_alias="TIKA_SERVER_JAR",
+    )
+    libreoffice_path: Path = Field(
+        default=Path("/usr/bin/soffice"),
+        validation_alias="LIBREOFFICE_PATH",
+    )
+    libreoffice_timeout_seconds: float = Field(
+        default=120.0,
+        gt=0,
+        validation_alias="LIBREOFFICE_TIMEOUT_SECONDS",
+    )
+    file_local_server_url: str = Field(
+        default="",
+        validation_alias="FILE_LOCAL_SERVER_URL",
+    )
+    qwen3_omni_api_key: SecretStr = Field(
+        default=SecretStr(""),
+        validation_alias="QWEN3_OMNI_API_KEY",
+    )
+    qwen3_omni_model_name: str = Field(
+        default="qwen3-omni-flash",
+        validation_alias="QWEN3_OMNI_MODEL_NAME",
+    )
+    qwen3_omni_base_url: str = Field(
+        default="https://dashscope.aliyuncs.com/compatible-mode/v1",
+        validation_alias="QWEN3_OMNI_BASE_URL",
+    )
     kb_health_probe_timeout_seconds: float = Field(
         default=3.0,
         gt=0,
@@ -386,4 +456,5 @@ class KnowledgeSettings(BaseSettings):
             "elasticsearch_hosts": self.elasticsearch_hosts,
             "storage_type": self.storage_type,
             "db_pool_size": self.kb_db_pool_size,
+            "max_document_pages": self.max_document_pages,
         }

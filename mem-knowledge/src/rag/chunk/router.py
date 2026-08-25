@@ -4,7 +4,6 @@ from .pipeline.excel import ExcelChunkPipeline
 from .pipeline.text import (
     HtmlChunkPipeline,
     JsonChunkPipeline,
-    LegacyDocChunkPipeline,
     MarkdownChunkPipeline,
     TextChunkPipeline,
 )
@@ -60,6 +59,8 @@ class FileTypeRouter:
         if re.search(r"\.(json|jsonl|ldjson)$", filename, re.IGNORECASE):
             return JsonChunkPipeline()
         if re.search(r"\.doc$", filename, re.IGNORECASE):
+            from .pipeline.document import LegacyDocChunkPipeline
+
             return LegacyDocChunkPipeline()
         raise NotImplementedError(
             "file type not supported yet(pdf, ppt, pptx, xlsx, csv, doc, docx, "
