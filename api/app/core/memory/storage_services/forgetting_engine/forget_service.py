@@ -1,5 +1,4 @@
 import logging
-import math
 import uuid
 from collections import defaultdict
 from datetime import datetime
@@ -8,7 +7,6 @@ from typing import Any
 from app.core.memory.enums import Neo4jNodeType
 from app.core.memory.models.service_models import ForgetLog, MemoryContext
 from app.core.memory.storage_services.forgetting_engine.constants import (
-    AUXILIARY_MAX_PER_RUN,
     DIALOGUE_AUDIT_CONTENT_MAX_LENGTH,
     FORGET_CORE_BATCH_SIZE,
 )
@@ -30,10 +28,11 @@ logger = logging.getLogger(__name__)
 
 
 class ForgetService:
-    """执行一次基于记忆价值的双池遗忘。
+    """执行一次由辅助池驱动、核心池配额收敛的软删除遗忘。
 
-    核心池负责释放配额，辅助池按照核心池的实际释放比例清理
-    ``MemorySummary`` 和 ``Dialogue``。所有删除均为软删除并写入审计日志。
+    优先删除无有效关系的核心节点；配额不足时按创建时间清理辅助池，
+    再删除由此产生的离散核心节点；辅助池耗尽后按 G/T 公式兜底。
+    所有删除均为软删除并写入审计日志。
     """
 
     BATCH_SIZE = FORGET_CORE_BATCH_SIZE
@@ -60,6 +59,7 @@ class ForgetService:
 
         config = self.ctx.memory_config
         lambda_mem = float(getattr(config, "lambda_mem", 0.5))
+        # lambda_mem 表示遗忘比例，目标保留比例为 1 - lambda_mem。
         self.target_ratio = 1 - lambda_mem
         self.target_count = max(int(memory_limit * self.target_ratio), 50)
 
@@ -68,15 +68,17 @@ class ForgetService:
         self._released_count = 0
         self._node_type_counts: defaultdict[str, int] = defaultdict(int)
         self._core_candidate_query_empty = False
+        self._isolated_released_count = 0
+        self._fallback_released_count = 0
         self._auxiliary_released_count = 0
+        self._auxiliary_candidate_query_empty = False
         self._auxiliary_node_type_counts: defaultdict[str, int] = defaultdict(int)
 
     async def run(self) -> dict[str, Any]:
-        """执行核心池和辅助池遗忘并返回本轮删除摘要。
+        """执行离散优先、辅助驱动、时间价值兜底的遗忘。
 
-        核心池未超过配额时直接返回；超过配额时先按价值从低到高删除，
-        再根据核心池实际释放比例计算辅助池预算。核心池无候选时返回
-        ``no_candidate=True``，由上层写入冷却键。
+        核心池未超过配额时直接返回。超过配额时，核心池实际软删除数
+        始终受剩余预算约束，避免越过目标水位。
         """
         self._reset_run_state()
         async with Neo4jConnector() as connector:
@@ -106,25 +108,33 @@ class ForgetService:
                 self.BATCH_SIZE,
             )
 
-            budget = await self._mixed_clean(budget)
-
             auxiliary_active_count = await forget_count_auxiliary_active_nodes(
                 connector, self.ctx.end_user_id
             )
-            release_ratio = (
-                self._released_count / active_count
-                if active_count and self._released_count
-                else 0.0
+
+            # 第一优先级：先清理执行前已经完全没有有效关系的核心节点。
+            budget = await self._core_clean(
+                budget, isolated_only=True, phase="isolated"
             )
-            auxiliary_budget = min(
-                math.ceil(auxiliary_active_count * release_ratio),
-                self._released_count,
-                AUXILIARY_MAX_PER_RUN,
-            )
-            auxiliary_remaining_budget = auxiliary_budget
-            if auxiliary_budget > 0:
-                auxiliary_remaining_budget = await self._auxiliary_clean(
-                    auxiliary_budget
+
+            # 第二优先级：辅助池按 created_at 分批软删除；每批之后重新寻找
+            # 因辅助端点失效而变成离散状态的核心节点。
+            auxiliary_budget = auxiliary_active_count if budget > 0 else 0
+            while budget > 0:
+                auxiliary_deleted = await self._auxiliary_clean_batch(
+                    min(self.BATCH_SIZE, budget)
+                )
+                if auxiliary_deleted == 0:
+                    break
+                budget = await self._core_clean(
+                    budget, isolated_only=True, phase="isolated"
+                )
+
+            # 第三优先级：辅助候选耗尽后，按保留的 G/T 公式清理普通核心
+            # 候选直到配额或候选耗尽。目前权重为 0*G + 1*T。
+            if budget > 0:
+                budget = await self._core_clean(
+                    budget, isolated_only=False, phase="fallback"
                 )
 
             final_count = await forget_count_active_nodes(
@@ -134,8 +144,16 @@ class ForgetService:
                 connector, self.ctx.end_user_id
             )
             net_active_change = active_count - final_count
+            budget = max(0, final_count - self.target_count)
+            release_ratio = (
+                self._released_count / active_count
+                if active_count and self._released_count
+                else 0.0
+            )
             no_candidate = (
-                self._released_count == 0 and self._core_candidate_query_empty
+                budget > 0
+                and self._released_count == 0
+                and self._core_candidate_query_empty
             )
 
             summary.update(
@@ -143,6 +161,8 @@ class ForgetService:
                     "deleted": self._released_count,
                     "scanned_count": self._scanned_count,
                     "node_type_counts": dict(self._node_type_counts),
+                    "isolated_deleted": self._isolated_released_count,
+                    "fallback_deleted": self._fallback_released_count,
                     "net_active_change": net_active_change,
                     "budget": max(budget, 0),
                     "final_count": final_count,
@@ -152,9 +172,10 @@ class ForgetService:
                     "auxiliary_budget": auxiliary_budget,
                     "auxiliary_deleted": self._auxiliary_released_count,
                     "auxiliary_remaining_budget": max(
-                        auxiliary_remaining_budget, 0
+                        auxiliary_budget - self._auxiliary_released_count, 0
                     ),
                     "auxiliary_final_count": auxiliary_final_count,
+                    "auxiliary_exhausted": self._auxiliary_candidate_query_empty,
                     "auxiliary_node_type_counts": dict(
                         self._auxiliary_node_type_counts
                     ),
@@ -184,7 +205,10 @@ class ForgetService:
         self._released_count = 0
         self._node_type_counts = defaultdict(int)
         self._core_candidate_query_empty = False
+        self._isolated_released_count = 0
+        self._fallback_released_count = 0
         self._auxiliary_released_count = 0
+        self._auxiliary_candidate_query_empty = False
         self._auxiliary_node_type_counts = defaultdict(int)
 
     def _initial_summary(self, active_count: int) -> dict[str, Any]:
@@ -204,6 +228,8 @@ class ForgetService:
             "deleted": 0,
             "scanned_count": 0,
             "node_type_counts": {},
+            "isolated_deleted": 0,
+            "fallback_deleted": 0,
             "net_active_change": 0,
             "budget": 0,
             "final_count": active_count,
@@ -214,12 +240,19 @@ class ForgetService:
             "auxiliary_deleted": 0,
             "auxiliary_remaining_budget": 0,
             "auxiliary_final_count": 0,
+            "auxiliary_exhausted": False,
             "auxiliary_node_type_counts": {},
             "release_ratio": 0.0,
         }
 
-    async def _mixed_clean(self, budget: int) -> int:
-        """按记忆价值从低到高清理核心池。
+    async def _core_clean(
+        self,
+        budget: int,
+        *,
+        isolated_only: bool,
+        phase: str,
+    ) -> int:
+        """按阶段清理核心池，并严格限制实际软删除数不超过预算。
 
         Args:
             budget: 本轮最多释放的核心节点数。
@@ -243,9 +276,11 @@ class ForgetService:
                 batch_size,
                 self.ENTITY_PROTECTION_THRESHOLD,
                 self.evaluated_at_ms,
+                isolated_only=isolated_only,
             )
             if not candidates:
-                self._core_candidate_query_empty = True
+                if not isolated_only:
+                    self._core_candidate_query_empty = True
                 break
 
             element_ids = [row["element_id"] for row in candidates]
@@ -257,6 +292,8 @@ class ForgetService:
                 self.ctx.end_user_id,
                 element_ids,
                 to_iso_z(now),
+                protection_threshold=self.ENTITY_PROTECTION_THRESHOLD,
+                require_isolated=isolated_only,
             )
             deleted_id_set = set(deleted_element_ids)
             deleted_rows = [
@@ -265,6 +302,10 @@ class ForgetService:
             deleted_in_batch = len(deleted_rows)
             total_deleted += deleted_in_batch
             self._released_count += deleted_in_batch
+            if phase == "isolated":
+                self._isolated_released_count += deleted_in_batch
+            else:
+                self._fallback_released_count += deleted_in_batch
             budget -= deleted_in_batch
 
             for row in deleted_rows:
@@ -273,8 +314,9 @@ class ForgetService:
                 audit.append(self._build_audit(row, now))
 
             logger.info(
-                "ForgetService core: batch=%d deleted=%d/%d remaining_budget=%d "
-                "types=%s",
+                "ForgetService core: phase=%s batch=%d deleted=%d/%d "
+                "remaining_budget=%d types=%s",
+                phase,
                 len(element_ids),
                 deleted_in_batch,
                 total_deleted,
@@ -307,66 +349,63 @@ class ForgetService:
         )
         return new_budget
 
-    async def _auxiliary_clean(self, budget: int) -> int:
-        """按创建时间从旧到新清理辅助池。
+    async def _auxiliary_clean_batch(self, batch_size: int) -> int:
+        """按创建时间从旧到新软删除一批辅助节点。
 
         Args:
-            budget: 根据核心池实际释放比例计算出的辅助池预算。
+            batch_size: 本批最多软删除的辅助节点数。
 
         Returns:
-            尚未使用的辅助池预算。
+            本批实际软删除数；返回 0 表示辅助候选已耗尽或写入未生效。
         """
-        if budget <= 0:
-            return budget
+        if batch_size <= 0:
+            return 0
         connector = self._connector
         if connector is None:
             raise RuntimeError("ForgetService connector is not initialized")
 
+        candidates = await forget_get_auxiliary_candidates(
+            connector,
+            self.ctx.end_user_id,
+            batch_size,
+            DIALOGUE_AUDIT_CONTENT_MAX_LENGTH,
+        )
+        if not candidates:
+            self._auxiliary_candidate_query_empty = True
+            return 0
+
+        element_ids = [row["element_id"] for row in candidates]
+        now = utcnow()
+        deleted_element_ids = await forget_soft_delete_by_element_ids(
+            connector,
+            self.ctx.end_user_id,
+            element_ids,
+            to_iso_z(now),
+            protection_threshold=self.ENTITY_PROTECTION_THRESHOLD,
+            require_isolated=False,
+        )
+        deleted_id_set = set(deleted_element_ids)
+        deleted_rows = [
+            row for row in candidates if row["element_id"] in deleted_id_set
+        ]
+        deleted_in_batch = len(deleted_rows)
+        self._auxiliary_released_count += deleted_in_batch
+
         audit: list[ForgetLog] = []
-        while budget > 0:
-            batch_size = min(self.BATCH_SIZE, budget)
-            candidates = await forget_get_auxiliary_candidates(
-                connector,
-                self.ctx.end_user_id,
-                batch_size,
-                DIALOGUE_AUDIT_CONTENT_MAX_LENGTH,
-            )
-            if not candidates:
-                break
-
-            element_ids = [row["element_id"] for row in candidates]
-            now = utcnow()
-            deleted_element_ids = await forget_soft_delete_by_element_ids(
-                connector,
-                self.ctx.end_user_id,
-                element_ids,
-                to_iso_z(now),
-            )
-            deleted_id_set = set(deleted_element_ids)
-            deleted_rows = [
-                row for row in candidates if row["element_id"] in deleted_id_set
-            ]
-            deleted_in_batch = len(deleted_rows)
-            self._auxiliary_released_count += deleted_in_batch
-            budget -= deleted_in_batch
-
-            for row in deleted_rows:
-                node_type = row.get("node_type", "unknown")
-                self._auxiliary_node_type_counts[node_type] += 1
-                audit.append(self._build_audit(row, now))
-            logger.info(
-                "ForgetService auxiliary: batch=%d deleted=%d remaining_budget=%d "
-                "types=%s",
-                len(element_ids),
-                deleted_in_batch,
-                budget,
-                dict(self._auxiliary_node_type_counts),
-            )
-            if deleted_in_batch < len(element_ids):
-                break
-
+        for row in deleted_rows:
+            node_type = row.get("node_type", "unknown")
+            self._auxiliary_node_type_counts[node_type] += 1
+            audit.append(self._build_audit(row, now))
         self._sync_audit(audit)
-        return budget
+        logger.info(
+            "ForgetService auxiliary: batch=%d deleted=%d total_deleted=%d "
+            "types=%s",
+            len(element_ids),
+            deleted_in_batch,
+            self._auxiliary_released_count,
+            dict(self._auxiliary_node_type_counts),
+        )
+        return deleted_in_batch
 
     def _build_audit(self, row: dict[str, Any], now: datetime) -> ForgetLog:
         """把一个实际软删除的 Neo4j 节点转换为 PostgreSQL 审计记录。"""
