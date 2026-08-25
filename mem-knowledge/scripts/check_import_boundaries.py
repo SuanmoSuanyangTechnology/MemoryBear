@@ -44,247 +44,123 @@ def _top_level_imports(tree: ast.AST) -> set[str]:
     return imports
 
 
-def _assignment_pairs(target: ast.expr, value: ast.expr) -> list[tuple[str, ast.expr]]:
-    if isinstance(target, ast.Name):
-        return [(target.id, value)]
-    if isinstance(target, ast.Starred):
-        return _assignment_pairs(target.value, value)
-    if isinstance(target, (ast.Tuple, ast.List)):
-        if isinstance(value, (ast.Tuple, ast.List)) and len(target.elts) == len(value.elts):
-            return [
-                pair
-                for nested_target, nested_value in zip(target.elts, value.elts, strict=True)
-                for pair in _assignment_pairs(nested_target, nested_value)
-            ]
-        return [
-            pair
-            for nested_target in target.elts
-            for pair in _assignment_pairs(nested_target, value)
-        ]
-    return []
+def _parent_map(tree: ast.AST) -> dict[ast.AST, ast.AST]:
+    return {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
 
 
-def _all_assignment_pairs(tree: ast.AST) -> list[tuple[str, ast.expr]]:
-    pairs: list[tuple[str, ast.expr]] = []
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Assign):
-            for target in node.targets:
-                pairs.extend(_assignment_pairs(target, node.value))
-        elif isinstance(node, ast.AnnAssign) and node.value is not None:
-            pairs.extend(_assignment_pairs(node.target, node.value))
-    return pairs
-
-
-def _task_factory_aliases(
+def _direct_task_decorators(
     tree: ast.AST,
-) -> tuple[dict[str, tuple[str | None, bool]], set[str], set[str], set[str], set[str]]:
-    factories: dict[str, tuple[str | None, bool]] = {"shared_task": (None, False)}
-    celery_modules: set[str] = set()
-    task_owners = {"celery_app"}
-    partial_functions = {"partial"}
-    functools_modules: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                if alias.name == "celery":
-                    celery_modules.add(alias.asname or alias.name)
-                elif alias.name == "functools":
-                    functools_modules.add(alias.asname or alias.name)
-        elif isinstance(node, ast.ImportFrom):
-            for alias in node.names:
-                imported_name = alias.asname or alias.name
-                if node.module == "celery" and alias.name == "shared_task":
-                    factories[imported_name] = (None, False)
-                elif node.module == "functools" and alias.name == "partial":
-                    partial_functions.add(imported_name)
-                elif alias.name == "celery_app":
-                    task_owners.add(imported_name)
-
-    def is_partial(expression: ast.expr) -> bool:
-        return (
-            isinstance(expression, ast.Name)
-            and expression.id in partial_functions
-            or (
-                isinstance(expression, ast.Attribute)
-                and expression.attr == "partial"
-                and isinstance(expression.value, ast.Name)
-                and expression.value.id in functools_modules
-            )
-        )
-
-    def factory_info(expression: ast.expr) -> tuple[bool, str | None, bool]:
-        if isinstance(expression, ast.Name) and expression.id in factories:
-            bound_name, uncertain = factories[expression.id]
-            return True, bound_name, uncertain
-        if isinstance(expression, ast.Attribute):
-            if expression.attr == "task":
-                return True, None, False
-            if (
-                expression.attr == "shared_task"
-                and isinstance(expression.value, ast.Name)
-                and expression.value.id in celery_modules
-            ):
-                return True, None, False
-        if (
-            isinstance(expression, ast.Call)
-            and isinstance(expression.func, ast.Name)
-            and expression.func.id == "getattr"
-            and len(expression.args) >= 2
-            and isinstance(expression.args[0], ast.Name)
-        ):
-            owner = expression.args[0].id
-            attribute = expression.args[1]
-            attribute_name = (
-                attribute.value
-                if isinstance(attribute, ast.Constant) and isinstance(attribute.value, str)
-                else None
-            )
-            if owner in task_owners and attribute_name in {None, "task"}:
-                return True, None, attribute_name is None
-            if owner in celery_modules and attribute_name in {None, "shared_task"}:
-                return True, None, attribute_name is None
-        if isinstance(expression, ast.Call) and is_partial(expression.func) and expression.args:
-            is_factory, bound_name, uncertain = factory_info(expression.args[0])
-            if is_factory:
-                for keyword in expression.keywords:
-                    if keyword.arg != "name":
-                        continue
-                    if isinstance(keyword.value, ast.Constant) and isinstance(
-                        keyword.value.value, str
-                    ):
-                        bound_name = keyword.value.value
-                    else:
-                        bound_name = None
-                        uncertain = True
-                return True, bound_name, uncertain
-        return False, None, False
-
-    def merge_factory(name: str, bound_name: str | None, uncertain: bool) -> bool:
-        candidate = (bound_name, uncertain)
-        current = factories.get(name)
-        if current is None:
-            factories[name] = candidate
-            return True
-        if current == candidate or current == (None, True):
-            return False
-        factories[name] = (None, True)
-        return True
-
-    changed = True
-    while changed:
-        changed = False
-        for name, value in _all_assignment_pairs(tree):
-            is_celery_module = isinstance(value, ast.Name) and value.id in celery_modules
-            is_task_owner = isinstance(value, ast.Name) and value.id in task_owners
-            is_functools_module = isinstance(value, ast.Name) and value.id in functools_modules
-            is_factory, bound_name, uncertain = factory_info(value)
-            if is_factory and merge_factory(name, bound_name, uncertain):
-                changed = True
-            if is_celery_module and name not in celery_modules:
-                celery_modules.add(name)
-                changed = True
-            if is_task_owner and name not in task_owners:
-                task_owners.add(name)
-                changed = True
-            if is_partial(value) and name not in partial_functions:
-                partial_functions.add(name)
-                changed = True
-            if is_functools_module and name not in functools_modules:
-                functools_modules.add(name)
-                changed = True
-    return factories, celery_modules, task_owners, partial_functions, functools_modules
-
-
-def _task_decorators(tree: ast.AST) -> list[tuple[int, str | None]]:
+) -> tuple[list[tuple[int, str | None]], set[ast.Attribute], set[ast.expr]]:
     decorators: list[tuple[int, str | None]] = []
-    factories, celery_modules, task_owners, partial_functions, functools_modules = (
-        _task_factory_aliases(tree)
-    )
-
-    def is_partial(expression: ast.expr) -> bool:
-        return (
-            isinstance(expression, ast.Name)
-            and expression.id in partial_functions
-            or (
-                isinstance(expression, ast.Attribute)
-                and expression.attr == "partial"
-                and isinstance(expression.value, ast.Name)
-                and expression.value.id in functools_modules
-            )
-        )
-
-    def factory_info(expression: ast.expr) -> tuple[bool, str | None, bool]:
-        if isinstance(expression, ast.Name) and expression.id in factories:
-            bound_name, uncertain = factories[expression.id]
-            return True, bound_name, uncertain
-        if isinstance(expression, ast.Attribute) and expression.attr == "task":
-            return True, None, False
-        if (
-            isinstance(expression, ast.Attribute)
-            and expression.attr == "shared_task"
-            and isinstance(expression.value, ast.Name)
-            and expression.value.id in celery_modules
-        ):
-            return True, None, False
-        if (
-            isinstance(expression, ast.Call)
-            and isinstance(expression.func, ast.Name)
-            and expression.func.id == "getattr"
-            and len(expression.args) >= 2
-            and isinstance(expression.args[0], ast.Name)
-        ):
-            owner = expression.args[0].id
-            attribute = expression.args[1]
-            attribute_name = (
-                attribute.value
-                if isinstance(attribute, ast.Constant) and isinstance(attribute.value, str)
-                else None
-            )
-            if owner in task_owners and attribute_name in {None, "task"}:
-                return True, None, attribute_name is None
-            if owner in celery_modules and attribute_name in {None, "shared_task"}:
-                return True, None, attribute_name is None
-        if isinstance(expression, ast.Call) and is_partial(expression.func) and expression.args:
-            is_factory, bound_name, uncertain = factory_info(expression.args[0])
-            if is_factory:
-                for keyword in expression.keywords:
-                    if keyword.arg != "name":
-                        continue
-                    if isinstance(keyword.value, ast.Constant) and isinstance(
-                        keyword.value.value, str
-                    ):
-                        bound_name = keyword.value.value
-                    else:
-                        bound_name = None
-                        uncertain = True
-                return True, bound_name, uncertain
-        return False, None, False
-
+    task_attributes: set[ast.Attribute] = set()
+    decorator_nodes: set[ast.expr] = set()
     for node in ast.walk(tree):
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
         for decorator in node.decorator_list:
-            target = decorator.func if isinstance(decorator, ast.Call) else decorator
-            is_factory, task_name, uncertain = factory_info(target)
-            if not is_factory:
-                is_factory, task_name, uncertain = factory_info(decorator)
-            if not is_factory:
+            if not isinstance(decorator, ast.Call):
                 continue
-            if isinstance(decorator, ast.Call):
-                for keyword in decorator.keywords:
-                    if keyword.arg != "name":
-                        continue
-                    if isinstance(keyword.value, ast.Constant) and isinstance(
-                        keyword.value.value, str
-                    ):
-                        task_name = keyword.value.value
-                    else:
-                        task_name = None
-                        uncertain = True
-            if uncertain:
-                task_name = None
+            factory = decorator.func
+            if not (
+                isinstance(factory, ast.Attribute)
+                and factory.attr == "task"
+                and isinstance(factory.value, ast.Name)
+                and factory.value.id == "celery_app"
+            ):
+                continue
+            name_keywords = [keyword for keyword in decorator.keywords if keyword.arg == "name"]
+            task_name: str | None = None
+            if len(name_keywords) == 1:
+                value = name_keywords[0].value
+                if isinstance(value, ast.Constant) and isinstance(value.value, str):
+                    task_name = value.value
             decorators.append((decorator.lineno, task_name))
+            task_attributes.add(factory)
+            decorator_nodes.add(decorator)
+    return decorators, task_attributes, decorator_nodes
+
+
+def _task_syntax_violations(tree: ast.AST) -> set[int]:
+    _decorators, direct_task_attributes, direct_decorator_nodes = _direct_task_decorators(tree)
+    violations: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            for decorator in node.decorator_list:
+                if decorator in direct_decorator_nodes or not isinstance(decorator, ast.Call):
+                    continue
+                for keyword in decorator.keywords:
+                    value = keyword.value
+                    if (
+                        keyword.arg == "name"
+                        and isinstance(value, ast.Constant)
+                        and isinstance(value.value, str)
+                        and value.value.startswith("app.core.rag.tasks.")
+                    ):
+                        violations.add(decorator.lineno)
+        elif isinstance(node, ast.Attribute) and node.attr == "task":
+            if node not in direct_task_attributes:
+                violations.add(node.lineno)
+        elif isinstance(node, ast.Attribute) and node.attr == "shared_task":
+            violations.add(node.lineno)
+        elif isinstance(node, ast.Name) and node.id == "shared_task":
+            violations.add(node.lineno)
+        elif isinstance(node, ast.Import):
+            if any(alias.name.endswith(".shared_task") for alias in node.names):
+                violations.add(node.lineno)
+        elif isinstance(node, ast.ImportFrom):
+            if any(alias.name == "shared_task" for alias in node.names):
+                violations.add(node.lineno)
+        elif (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "getattr"
+            and node.args
+        ):
+            first_argument = node.args[0]
+            if isinstance(first_argument, ast.Name) and first_argument.id == "celery_app":
+                violations.add(node.lineno)
+            if len(node.args) >= 2:
+                attribute = node.args[1]
+                if isinstance(attribute, ast.Constant) and attribute.value == "shared_task":
+                    violations.add(node.lineno)
+    return violations
+
+
+def _task_decorators(tree: ast.AST) -> list[tuple[int, str | None]]:
+    decorators, _task_attributes, _decorator_nodes = _direct_task_decorators(tree)
+    decorated_lines = {line for line, _task_name in decorators}
+    decorators.extend(
+        (line, None) for line in sorted(_task_syntax_violations(tree) - decorated_lines)
+    )
     return decorators
+
+
+def _authorized_module_violations(tree: ast.AST) -> set[int]:
+    parents = _parent_map(tree)
+    _decorators, _task_attributes, direct_decorator_nodes = _direct_task_decorators(tree)
+    violations = _task_syntax_violations(tree)
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            violations.update(
+                decorator.lineno
+                for decorator in node.decorator_list
+                if decorator not in direct_decorator_nodes
+            )
+        elif isinstance(node, ast.Name) and node.id == "getattr":
+            parent = parents.get(node)
+            if not (isinstance(parent, ast.Call) and parent.func is node):
+                violations.add(node.lineno)
+        elif isinstance(node, ast.ImportFrom) and node.module == "builtins":
+            if any(alias.name == "getattr" for alias in node.names):
+                violations.add(node.lineno)
+        elif (
+            isinstance(node, ast.Attribute)
+            and node.attr == "getattr"
+            and isinstance(node.value, ast.Name)
+            and node.value.id == "builtins"
+        ):
+            violations.add(node.lineno)
+    return violations
 
 
 def _display_path(path: Path, root: Path) -> str:
@@ -308,7 +184,13 @@ def _scan_service_tree(root: Path, *, require_complete_registry: bool = False) -
         module_path = path.relative_to(root).as_posix()
         authorized_names = AUTHORIZED_TASKS_BY_MODULE.get(module_path, set())
         module_discovered = discovered.setdefault(module_path, set())
-        for line, task_name in _task_decorators(tree):
+        direct_decorators, _task_attributes, _decorator_nodes = _direct_task_decorators(tree)
+        invalid_lines = _task_syntax_violations(tree)
+        if module_path in AUTHORIZED_TASKS_BY_MODULE:
+            invalid_lines.update(_authorized_module_violations(tree))
+        for line in sorted(invalid_lines):
+            errors.append(f"{display_path}:{line} registers unauthorized Celery task: unnamed")
+        for line, task_name in direct_decorators:
             if task_name not in authorized_names:
                 label = task_name or "unnamed"
                 errors.append(f"{display_path}:{line} registers unauthorized Celery task: {label}")

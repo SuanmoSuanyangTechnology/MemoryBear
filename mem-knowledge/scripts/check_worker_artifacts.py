@@ -75,6 +75,25 @@ def _forbidden_path_marker(path: str | PurePosixPath) -> str | None:
     return None
 
 
+def _top_level_import_marker(path: Path) -> str | None:
+    lowered = path.name.lower()
+    if lowered.endswith(".dist-info"):
+        return None
+    if path.is_file():
+        if path.suffix.lower() not in {".py", ".pyc", ".pyo"}:
+            return None
+        import_root = path.stem.lower()
+    elif path.is_dir():
+        import_root = lowered
+    else:
+        return None
+    marker = FORBIDDEN_IMPORT_ROOTS.get(import_root)
+    if marker:
+        return marker
+    distribution = _normalize_distribution(import_root)
+    return distribution if distribution in FORBIDDEN_DISTRIBUTIONS else None
+
+
 def _import_names(tree: ast.AST) -> set[str]:
     imports: set[str] = set()
     for node in ast.walk(tree):
@@ -110,100 +129,22 @@ def _legacy_task_allowed(path: str | PurePosixPath) -> bool:
     return normalized in LEGACY_TASK_ALLOWED_PATHS
 
 
-def _assignment_pairs(target: ast.expr, value: ast.expr) -> list[tuple[str, ast.expr]]:
-    if isinstance(target, ast.Name):
-        return [(target.id, value)]
-    if isinstance(target, ast.Starred):
-        return _assignment_pairs(target.value, value)
-    if isinstance(target, (ast.Tuple, ast.List)):
-        if isinstance(value, (ast.Tuple, ast.List)) and len(target.elts) == len(value.elts):
-            return [
-                pair
-                for nested_target, nested_value in zip(target.elts, value.elts, strict=True)
-                for pair in _assignment_pairs(nested_target, nested_value)
-            ]
-        return [
-            pair
-            for nested_target in target.elts
-            for pair in _assignment_pairs(nested_target, value)
-        ]
-    return []
-
-
-def _all_assignment_pairs(tree: ast.AST) -> list[tuple[str, ast.expr]]:
-    pairs: list[tuple[str, ast.expr]] = []
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Assign):
-            for target in node.targets:
-                pairs.extend(_assignment_pairs(target, node.value))
-        elif isinstance(node, ast.AnnAssign) and node.value is not None:
-            pairs.extend(_assignment_pairs(node.target, node.value))
-    return pairs
-
-
-def _is_reflective_import_loader(
-    expression: ast.expr,
-    importlib_modules: set[str],
-) -> tuple[bool, bool]:
-    if not (
-        isinstance(expression, ast.Call)
-        and isinstance(expression.func, ast.Name)
-        and expression.func.id == "getattr"
-        and len(expression.args) >= 2
-        and isinstance(expression.args[0], ast.Name)
-        and expression.args[0].id in importlib_modules
-    ):
-        return False, False
-    attribute = expression.args[1]
-    if isinstance(attribute, ast.Constant) and isinstance(attribute.value, str):
-        return attribute.value == "import_module", False
-    return True, True
-
-
-def _dynamic_import_aliases(tree: ast.AST) -> tuple[set[str], set[str], set[str]]:
-    loaders = {"__import__"}
-    uncertain_loaders: set[str] = set()
-    importlib_modules: set[str] = set()
+def _has_dynamic_import_primitive(tree: ast.AST) -> bool:
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
-            for alias in node.names:
-                if alias.name == "importlib":
-                    importlib_modules.add(alias.asname or alias.name)
-        elif isinstance(node, ast.ImportFrom) and node.module == "importlib":
-            for alias in node.names:
-                if alias.name == "import_module":
-                    loaders.add(alias.asname or alias.name)
-
-    changed = True
-    while changed:
-        changed = False
-        for name, value in _all_assignment_pairs(tree):
-            is_importlib_module = isinstance(value, ast.Name) and value.id in importlib_modules
-            is_loader = isinstance(value, ast.Name) and value.id in loaders
-            is_uncertain_loader = isinstance(value, ast.Name) and value.id in uncertain_loaders
-            if (
-                isinstance(value, ast.Attribute)
-                and value.attr == "import_module"
-                and isinstance(value.value, ast.Name)
-                and value.value.id in importlib_modules
+            if any(
+                alias.name == "importlib" or alias.name.startswith("importlib.")
+                for alias in node.names
             ):
-                is_loader = True
-            is_reflective_loader, is_uncertain_reflection = _is_reflective_import_loader(
-                value,
-                importlib_modules,
-            )
-            is_loader = is_loader or is_reflective_loader
-            is_uncertain_loader = is_uncertain_loader or is_uncertain_reflection
-            if is_loader and name not in loaders:
-                loaders.add(name)
-                changed = True
-            if is_uncertain_loader and name not in uncertain_loaders:
-                uncertain_loaders.add(name)
-                changed = True
-            if is_importlib_module and name not in importlib_modules:
-                importlib_modules.add(name)
-                changed = True
-    return loaders, importlib_modules, uncertain_loaders
+                return True
+        elif isinstance(node, ast.ImportFrom):
+            if node.module == "importlib" or (node.module or "").startswith("importlib."):
+                return True
+        elif isinstance(node, ast.Name) and node.id == "__import__":
+            return True
+        elif isinstance(node, ast.Attribute) and node.attr == "import_module":
+            return True
+    return False
 
 
 def _scan_python_text(path: str, source: str) -> list[str]:
@@ -217,40 +158,23 @@ def _scan_python_text(path: str, source: str) -> list[str]:
         marker = _forbidden_import_marker(module)
         if marker:
             errors.append(f"{label}: {marker}")
-    dynamic_loaders, importlib_modules, uncertain_loaders = _dynamic_import_aliases(tree)
+    if _has_dynamic_import_primitive(tree):
+        errors.append(f"{label}: dynamic-import")
     for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
+        if not isinstance(node, ast.Call) or not node.args:
             continue
         function = node.func
-        is_dynamic_import = isinstance(function, ast.Name) and function.id in dynamic_loaders
-        is_uncertain_import = isinstance(function, ast.Name) and function.id in uncertain_loaders
-        if (
-            isinstance(function, ast.Attribute)
+        if not (
+            isinstance(function, ast.Name)
+            and function.id == "__import__"
+            or isinstance(function, ast.Attribute)
             and function.attr == "import_module"
-            and isinstance(function.value, ast.Name)
-            and function.value.id in importlib_modules
         ):
-            is_dynamic_import = True
-        is_reflective_loader, is_uncertain_reflection = _is_reflective_import_loader(
-            function,
-            importlib_modules,
-        )
-        is_dynamic_import = is_dynamic_import or is_reflective_loader
-        is_uncertain_import = is_uncertain_import or is_uncertain_reflection
-        if not is_dynamic_import:
             continue
-        first_argument: ast.expr | None = node.args[0] if node.args else None
-        if first_argument is None:
-            first_argument = next(
-                (keyword.value for keyword in node.keywords if keyword.arg == "name"),
-                None,
-            )
-        if is_uncertain_import or (
-            first_argument is None
-            or not isinstance(first_argument, ast.Constant)
-            or not isinstance(first_argument.value, str)
+        first_argument = node.args[0]
+        if not isinstance(first_argument, ast.Constant) or not isinstance(
+            first_argument.value, str
         ):
-            errors.append(f"{label}: dynamic-import")
             continue
         marker = _forbidden_import_marker(first_argument.value.strip())
         if marker:
@@ -386,6 +310,19 @@ def _scan_wheel(path: Path) -> list[str]:
                         path_marker = _forbidden_path_marker(stripped)
                         if path_marker:
                             errors.append(f"{_path_label(member)}: {path_marker}")
+                member_path = PurePosixPath(member)
+                if (
+                    member_path.name.lower() == "metadata"
+                    and member_path.parent.name.lower().endswith(".dist-info")
+                ):
+                    try:
+                        metadata_text = archive.read(member).decode("utf-8", errors="replace")
+                    except (KeyError, OSError):
+                        errors.append(f"{_path_label(member)}: unreadable-metadata")
+                    else:
+                        distribution = _metadata_distribution_name_from_text(metadata_text)
+                        if distribution in FORBIDDEN_DISTRIBUTIONS:
+                            errors.append(distribution)
                 marker = _forbidden_path_marker(member)
                 if marker:
                     errors.append(f"{_path_label(member)}: {marker}")
@@ -401,17 +338,23 @@ def _scan_wheel(path: Path) -> list[str]:
     return errors
 
 
+def _metadata_distribution_name_from_text(metadata: str) -> str | None:
+    for line in metadata.splitlines():
+        if not line.strip():
+            break
+        key, separator, value = line.partition(":")
+        if separator and key.strip().lower() == "name":
+            return _normalize_distribution(value.strip())
+    return None
+
+
 def _metadata_distribution_name(metadata: Path) -> str | None:
     try:
-        with metadata.open(encoding="utf-8", errors="replace") as stream:
-            for line in stream:
-                if not line.strip():
-                    break
-                if line.lower().startswith("name:"):
-                    return _normalize_distribution(line.split(":", 1)[1].strip())
+        return _metadata_distribution_name_from_text(
+            metadata.read_text(encoding="utf-8", errors="replace")
+        )
     except OSError:
         return None
-    return None
 
 
 def _scan_site_packages(root: Path) -> list[str]:
@@ -420,10 +363,20 @@ def _scan_site_packages(root: Path) -> list[str]:
     errors: list[str] = []
     errors.extend(_scan_pth_files(root))
     for child in sorted(root.iterdir()):
-        if not child.is_dir() or not child.name.lower().endswith(".dist-info"):
+        if child.is_symlink():
+            continue
+        top_level_marker = _top_level_import_marker(child)
+        if top_level_marker:
+            errors.append(f"{_path_label(child.name)}: {top_level_marker}")
+    for dist_info in sorted(
+        path
+        for path in root.rglob("*")
+        if path.is_dir() and path.name.lower().endswith(".dist-info")
+    ):
+        if dist_info.is_symlink():
             continue
         metadata = next(
-            (entry for entry in child.iterdir() if entry.name.lower() == "metadata"),
+            (entry for entry in dist_info.iterdir() if entry.name.lower() == "metadata"),
             None,
         )
         if metadata is None or metadata.is_symlink():
