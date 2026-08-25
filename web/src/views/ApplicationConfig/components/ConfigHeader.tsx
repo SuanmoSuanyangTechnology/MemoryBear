@@ -80,14 +80,13 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({
    * Format tab items for display
    */
   const formatTabItems = useMemo(() => {
-    const isHideAnnotations = ['multi_agent', 'pure_workflow'].includes(application?.type as string) || source === 'sharing'
+    const isHideAnnotations = !application?.type || ['multi_agent', 'pure_workflow'].includes(application?.type as string) || source === 'sharing'
 
     const items = (source === 'sharing' ? sharingTabKeys : tabKeys).map(key => ({
       key,
       label: key === 'log' && !isHideAnnotations ? t('application.logAnnotations') : t(`application.${key}`),
     }))
     return items
-    return 
   }, [source, sharingTabKeys, tabKeys, application?.type])
   /**
    * Handle menu item click

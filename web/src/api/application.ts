@@ -296,9 +296,13 @@ export const cancelSpaceShare = (target_workspace_id?: string) => {
 }
 // Application conversation logs
 export const getAppLogsUrl = (app_id: string) => `/apps/${app_id}/logs`
+export const getPureWorkflowAppLogsUrl = (app_id: string) => `/apps/${app_id}/workflow-executions`
 // Get full conversation message history
 export const getAppLogDetail = (app_id: string, conversation_id: string) => {
   return request.get(`/apps/${app_id}/logs/${conversation_id}`)
+}
+export const getPureWorkflowAppLogDetail = (app_id: string, execution_id: string) => {
+  return request.get(`/apps/${app_id}/workflow-executions/${execution_id}`)
 }
 // Reset agent model config to default
 export const resetAppModelConfig = (app_id: string) => {

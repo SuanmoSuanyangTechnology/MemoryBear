@@ -10,7 +10,7 @@ import { useParams } from 'react-router-dom';
 import { Flex, Button, Form, Switch, Space, Divider, App, Dropdown, DatePicker, type SegmentedProps } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 
-import { getAppLogsUrl, getAnnotationsListUrl, getAnnotationsSettings, updateAnnotationsSettings, deleteAnnotations, deleteAllAnnotations, exportAnnotation, } from '@/api/application';
+import { getAppLogsUrl, getPureWorkflowAppLogsUrl, getAnnotationsListUrl, getAnnotationsSettings, updateAnnotationsSettings, deleteAnnotations, deleteAllAnnotations, exportAnnotation, } from '@/api/application';
 import Table, { type TableRef } from '@/components/Table'
 import { formatDateTime } from '@/utils/format';
 import type { LogItem, LogDetailModalRef, AnnotationItem, AnnotationSettingForm, AnnotationSettingModalRef, AnnotationFormModalRef, HitHistoryDetailRef } from './types'
@@ -73,6 +73,35 @@ const Logs: FC<{ application: Application; }> = ({ application }) => {
       key: 'action',
       fixed: 'right',
       width: 80,
+      render: (_, record) => (
+        <Flex wrap>
+          <Button
+            type="link"
+            onClick={() => handleViewDetail(record as LogItem)}
+          >
+            {t('common.view')}
+          </Button>
+        </Flex>
+      ),
+    },
+  ];
+  const pureWorkflowColumns: ColumnsType<LogItem> = [
+    {
+      title: t('application.execution_id'),
+      dataIndex: 'execution_id',
+      key: 'execution_id',
+      className: 'rb:text-[#212332]',
+    },
+    {
+      title: t('application.created_at'),
+      dataIndex: 'created_at',
+      key: 'created_at',
+      render: (createdAt: string) => formatDateTime(createdAt, 'YYYY-MM-DD HH:mm:ss'),
+    },
+    {
+      title: t('common.operation'),
+      key: 'action',
+      fixed: 'right',
       render: (_, record) => (
         <Flex wrap>
           <Button
@@ -334,12 +363,12 @@ const Logs: FC<{ application: Application; }> = ({ application }) => {
         </Form>
       </Flex>
       <div className="rb:flex-1">
-        {activeTab === 'logs' && <>
+        {activeTab === 'logs' && id && application?.type && <>
           <Table<LogItem>
-            apiUrl={getAppLogsUrl(id || '')}
+            apiUrl={application.type === 'pure_workflow' ? getPureWorkflowAppLogsUrl(id) : getAppLogsUrl(id)}
             apiParams={logsQuery}
-            columns={columns}
-            rowKey="id"
+            columns={application.type === 'pure_workflow' ? pureWorkflowColumns : columns}
+            rowKey={application.type === 'pure_workflow' ? 'execution_id' : "id"}
             isScroll={true}
             fillHeight={true}
           />

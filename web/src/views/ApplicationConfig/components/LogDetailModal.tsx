@@ -10,7 +10,7 @@ import { useTranslation } from 'react-i18next';
 
 import type { LogDetailModalRef, LogItem } from '../types'
 import RbModal from '@/components/RbModal'
-import { getAppLogDetail } from '@/api/application'
+import { getAppLogDetail, getPureWorkflowAppLogDetail } from '@/api/application'
 import ChatContent from '@/components/Chat/ChatContent'
 import { formatDateTime } from '@/utils/format'
 import type { ChatItem } from '@/components/Chat/types'
@@ -54,13 +54,14 @@ const LogDetailModal = forwardRef<LogDetailModalRef, { source: string; appType: 
     if (visible && vo) {
       getDetail()
     }
-  }, [visible, vo])
+  }, [visible, vo, appType])
 
   /** Fetch conversation log detail from API */
   const getDetail = () => {
-    if (!vo) return
+    if (!vo || !appType) return
     setLoading(true)
-    getAppLogDetail(vo.app_id, vo.id).then(res => {
+    const request = appType === 'pure_workflow' ? getPureWorkflowAppLogDetail(vo.app_id, vo.execution_id) : getAppLogDetail(vo.app_id, vo.id)
+    request.then(res => {
       const { node_executions_map, messages, pending_intervention, ...rest } = res as Data;
       let hasSubContentMessages = messages.map((item: any) => ({ ...item, status: item.role === 'user' ? null : item.status  }))
       if (messages && messages.length > 0 && (node_executions_map && Object.keys(node_executions_map).length > 0 || pending_intervention && Object.keys(pending_intervention).length > 0)) {
