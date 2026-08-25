@@ -4,6 +4,8 @@ from app.core.memory.constants.graph_data_constants import (
     _DEFAULT_FIELDS,
 )
 from app.core.memory.constants.value_weight_constants import (
+    FORGET_CORE_G_WEIGHT,
+    FORGET_CORE_T_WEIGHT,
     G_WEIGHT,
     T_CYPHER_EXPR,
     T_WEIGHT,
@@ -3138,7 +3140,33 @@ FORGET_SOFT_DELETE_BY_ELEMENT_IDS = """
     MATCH (n {end_user_id: $end_user_id})
     WHERE n.delete_at IS NULL
       AND elementId(n) IN $element_ids
+      AND (n:Statement OR n:Chunk OR n:ExtractedEntity OR n:MemorySummary OR n:Dialogue)
       AND (NOT n:Statement OR coalesce(n.is_permanent, false) = false)
+      AND (NOT n:ExtractedEntity OR (
+          coalesce(n.extraction_count, 0) < $protection_threshold
+          AND n.name <> '用户'
+      ))
+      AND (
+          NOT (n:Statement OR n:Chunk OR n:ExtractedEntity) OR (
+              n.topology_score IS NOT NULL
+              AND (
+                  toFloat(n.topology_score) IS NULL
+                  OR isNaN(toFloat(n.topology_score))
+                  OR toFloat(n.topology_score) < 1.0
+              )
+          )
+      )
+      AND (
+          NOT $require_isolated OR (
+              (n:Statement OR n:Chunk OR n:ExtractedEntity)
+              AND NOT EXISTS {
+                  MATCH (n)--(related)
+                  WHERE related <> n
+                    AND related.end_user_id = $end_user_id
+                    AND related.delete_at IS NULL
+              }
+          )
+      )
     SET n.delete_at = datetime($now)
     RETURN collect(elementId(n)) AS deleted_element_ids
 """
@@ -3158,6 +3186,14 @@ CALL () {{
     MATCH (c:Chunk {{end_user_id: $end_user_id}})
     WHERE c.delete_at IS NULL
       AND c.topology_score IS NOT NULL
+      AND (
+          NOT $isolated_only OR NOT EXISTS {{
+              MATCH (c)--(related)
+              WHERE related <> c
+                AND related.end_user_id = $end_user_id
+                AND related.delete_at IS NULL
+          }}
+      )
     WITH c, elementId(c) AS element_id,
          CASE
            WHEN coalesce(toString(c.created_at) =~ $iso_datetime_pattern, false)
@@ -3172,9 +3208,11 @@ CALL () {{
            WHEN raw_g > 1.0 THEN 1.0
            ELSE raw_g
          END AS g
+    WITH c, element_id, created_epoch, g
+    WHERE g < 1.0
     WITH c, element_id, created_epoch, g, {T_CYPHER_EXPR} AS t
     WITH c, element_id, created_epoch,
-         {G_WEIGHT} * g + {T_WEIGHT} * t AS forgetting_activation
+         {FORGET_CORE_G_WEIGHT} * g + {FORGET_CORE_T_WEIGHT} * t AS forgetting_activation
     RETURN 'Chunk' AS node_type, element_id, coalesce(c.content, '') AS content,
            forgetting_activation, created_epoch
     ORDER BY forgetting_activation ASC, created_epoch ASC, element_id ASC
@@ -3186,6 +3224,14 @@ CALL () {{
     WHERE s.delete_at IS NULL
       AND coalesce(s.is_permanent, false) = false
       AND s.topology_score IS NOT NULL
+      AND (
+          NOT $isolated_only OR NOT EXISTS {{
+              MATCH (s)--(related)
+              WHERE related <> s
+                AND related.end_user_id = $end_user_id
+                AND related.delete_at IS NULL
+          }}
+      )
     WITH s, elementId(s) AS element_id,
          CASE
            WHEN coalesce(toString(s.created_at) =~ $iso_datetime_pattern, false)
@@ -3200,9 +3246,11 @@ CALL () {{
            WHEN raw_g > 1.0 THEN 1.0
            ELSE raw_g
          END AS g
+    WITH s, element_id, created_epoch, g
+    WHERE g < 1.0
     WITH s, element_id, created_epoch, g, {T_CYPHER_EXPR} AS t
     WITH s, element_id, created_epoch,
-         {G_WEIGHT} * g + {T_WEIGHT} * t AS forgetting_activation
+         {FORGET_CORE_G_WEIGHT} * g + {FORGET_CORE_T_WEIGHT} * t AS forgetting_activation
     RETURN 'Statement' AS node_type, element_id, coalesce(s.statement, '') AS content,
            forgetting_activation, created_epoch
     ORDER BY forgetting_activation ASC, created_epoch ASC, element_id ASC
@@ -3215,6 +3263,14 @@ CALL () {{
       AND coalesce(e.extraction_count, 0) < $protection_threshold
       AND e.name <> '用户'
       AND e.topology_score IS NOT NULL
+      AND (
+          NOT $isolated_only OR NOT EXISTS {{
+              MATCH (e)--(related)
+              WHERE related <> e
+                AND related.end_user_id = $end_user_id
+                AND related.delete_at IS NULL
+          }}
+      )
     WITH e, elementId(e) AS element_id,
          CASE
            WHEN coalesce(toString(e.created_at) =~ $iso_datetime_pattern, false)
@@ -3229,9 +3285,11 @@ CALL () {{
            WHEN raw_g > 1.0 THEN 1.0
            ELSE raw_g
          END AS g
+    WITH e, element_id, created_epoch, g
+    WHERE g < 1.0
     WITH e, element_id, created_epoch, g, {T_CYPHER_EXPR} AS t
     WITH e, element_id, created_epoch,
-         {G_WEIGHT} * g + {T_WEIGHT} * t AS forgetting_activation
+         {FORGET_CORE_G_WEIGHT} * g + {FORGET_CORE_T_WEIGHT} * t AS forgetting_activation
     RETURN 'ExtractedEntity' AS node_type, element_id, coalesce(e.name, '') AS content,
            forgetting_activation, created_epoch
     ORDER BY forgetting_activation ASC, created_epoch ASC, element_id ASC
