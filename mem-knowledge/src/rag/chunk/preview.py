@@ -11,12 +11,10 @@ from io import BytesIO
 from pathlib import Path
 from typing import Any
 
-import tiktoken
-
 from ...errors import KnowledgeError
 from ..models.chunk import ChildDocumentChunk, DocumentChunk
+from .token_utils import get_encoder
 
-_ENCODER = tiktoken.get_encoding("cl100k_base")
 _HTML_TAG = re.compile(r"<[^>]+>")
 
 
@@ -149,14 +147,16 @@ def _extract_spreadsheet(binary: bytes, suffix: str) -> str:
 
 
 def _split_tokens(text: str, limit: int) -> list[str]:
-    tokens = _ENCODER.encode(text)
+    encoder = get_encoder()
+    tokens = encoder.encode(text)
     chunks = []
     for start in range(0, len(tokens), max(limit, 1)):
-        chunks.append(_ENCODER.decode(tokens[start : start + max(limit, 1)]).strip())
+        chunks.append(encoder.decode(tokens[start : start + max(limit, 1)]).strip())
     return [chunk for chunk in chunks if chunk]
 
 
 def _split_normal(text: str, parser_config: dict[str, Any]) -> list[str]:
+    encoder = get_encoder()
     delimiter = parser_config.get("delimiter")
     limit = max(int(parser_config.get("chunk_token_num") or 128), 1)
     parts = text.split(delimiter) if delimiter else [text]
@@ -165,7 +165,7 @@ def _split_normal(text: str, parser_config: dict[str, Any]) -> list[str]:
         stripped = part.strip()
         if not stripped:
             continue
-        if len(_ENCODER.encode(stripped)) <= limit:
+        if len(encoder.encode(stripped)) <= limit:
             result.append(stripped)
         else:
             result.extend(_split_tokens(stripped, limit))
