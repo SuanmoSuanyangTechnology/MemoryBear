@@ -25,6 +25,7 @@ _WINDOWS_PATH = re.compile(r"^[A-Za-z]:[\\/]")
 _USERINFO = re.compile(r"[A-Za-z0-9._~!$&'()*+,;=:-]+")
 _DNS_LABEL = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?")
 _IPV4_CANDIDATE = re.compile(r"[0-9.]+")
+_LEGACY_IPV4_COMPONENT = re.compile(r"(?:[0-9]+|0[xX][0-9A-Fa-f]+)")
 
 
 def _without_control_or_separator(value: str) -> str:
@@ -35,15 +36,24 @@ def _has_unsafe_remote_char(value: str) -> bool:
     return any(char in {"%", "\\"} or unicodedata.category(char)[0] in {"C", "Z"} for char in value)
 
 
+def _ascii_scheme_letters(value: str) -> str:
+    return "".join(char for char in value if char.isascii() and char.isalpha()).lower()
+
+
 def _raw_remote_authority(value: str) -> tuple[bool, str | None]:
     raw_scheme, separator, remainder = value.partition("://")
     if not separator:
         normalized = _without_control_or_separator(value)
-        return normalized.lower().startswith(("http://", "https://")), None
+        normalized_scheme, normalized_separator, _ = normalized.partition("://")
+        return (
+            bool(normalized_separator)
+            and _ascii_scheme_letters(normalized_scheme) in {"http", "https"}
+        ), None
 
-    normalized_scheme = _without_control_or_separator(raw_scheme).lower()
-    if normalized_scheme not in {"http", "https"}:
+    if _ascii_scheme_letters(raw_scheme) not in {"http", "https"}:
         return False, None
+    if raw_scheme.lower() not in {"http", "https"}:
+        return True, None
 
     authority = re.split(r"[/#?]", remainder, maxsplit=1)[0]
     if _has_unsafe_remote_char(raw_scheme) or _has_unsafe_remote_char(authority):
@@ -88,6 +98,11 @@ def _valid_authority(parsed, authority: str) -> bool:
     return bool(hostname) and (port is None or 0 <= port <= 65535)
 
 
+def _is_legacy_ipv4_candidate(hostname: str) -> bool:
+    parts = hostname.split(".")
+    return 1 <= len(parts) <= 4 and all(_LEGACY_IPV4_COMPONENT.fullmatch(part) for part in parts)
+
+
 def _normalize_remote_host(hostname: str) -> str | None:
     try:
         return ipaddress.ip_address(hostname).compressed.lower()
@@ -105,7 +120,11 @@ def _normalize_remote_host(hostname: str) -> str | None:
     try:
         return ipaddress.ip_address(ascii_hostname).compressed.lower()
     except ValueError:
-        if ":" in ascii_hostname or _IPV4_CANDIDATE.fullmatch(ascii_hostname):
+        if (
+            ":" in ascii_hostname
+            or _IPV4_CANDIDATE.fullmatch(ascii_hostname)
+            or _is_legacy_ipv4_candidate(ascii_hostname)
+        ):
             return None
 
     labels = ascii_hostname.split(".")
