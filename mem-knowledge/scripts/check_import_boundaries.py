@@ -70,7 +70,11 @@ def _direct_task_decorators(
                 continue
             name_keywords = [keyword for keyword in decorator.keywords if keyword.arg == "name"]
             task_name: str | None = None
-            if len(name_keywords) == 1:
+            if (
+                not decorator.args
+                and all(keyword.arg is not None for keyword in decorator.keywords)
+                and len(name_keywords) == 1
+            ):
                 value = name_keywords[0].value
                 if isinstance(value, ast.Constant) and isinstance(value.value, str):
                     task_name = value.value
@@ -80,8 +84,113 @@ def _direct_task_decorators(
     return decorators, task_attributes, decorator_nodes
 
 
+def _assignment_pairs(target: ast.expr, value: ast.expr) -> list[tuple[ast.expr, ast.expr]]:
+    if isinstance(target, ast.Starred):
+        return [(target.value, value)]
+    if isinstance(target, (ast.Tuple, ast.List)) and isinstance(value, (ast.Tuple, ast.List)):
+        if len(target.elts) == len(value.elts):
+            return [
+                pair
+                for target_item, value_item in zip(target.elts, value.elts, strict=True)
+                for pair in _assignment_pairs(target_item, value_item)
+            ]
+    return [(target, value)]
+
+
+def _celery_app_aliases(tree: ast.AST) -> set[str]:
+    aliases = {"celery_app"}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ImportFrom):
+            continue
+        aliases.update(
+            alias.asname or alias.name for alias in node.names if alias.name == "celery_app"
+        )
+
+    assignments: list[tuple[ast.expr, ast.expr]] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            assignments.extend(
+                pair for target in node.targets for pair in _assignment_pairs(target, node.value)
+            )
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            assignments.extend(_assignment_pairs(node.target, node.value))
+        elif isinstance(node, ast.NamedExpr):
+            assignments.extend(_assignment_pairs(node.target, node.value))
+
+    changed = True
+    while changed:
+        changed = False
+        for target, value in assignments:
+            if not (
+                isinstance(target, ast.Name)
+                and (
+                    isinstance(value, ast.Name)
+                    and value.id in aliases
+                    or isinstance(value, ast.Attribute)
+                    and value.attr == "celery_app"
+                )
+                and target.id not in aliases
+            ):
+                continue
+            aliases.add(target.id)
+            changed = True
+    return aliases
+
+
+def _is_celery_app_reference(node: ast.AST, aliases: set[str]) -> bool:
+    return any(
+        isinstance(candidate, ast.Name)
+        and candidate.id in aliases
+        or isinstance(candidate, ast.Attribute)
+        and candidate.attr == "celery_app"
+        for candidate in ast.walk(node)
+    )
+
+
+def _is_task_attribute_request(node: ast.AST) -> bool:
+    return not (
+        isinstance(node, ast.Constant) and isinstance(node.value, str) and node.value != "task"
+    )
+
+
+def _reflects_celery_task(call: ast.Call, aliases: set[str]) -> bool:
+    attribute_keyword_names = {"attr", "attribute", "attribute_name", "name"}
+    if (
+        isinstance(call.func, ast.Attribute)
+        and call.func.attr in {"__getattr__", "__getattribute__"}
+        and _is_celery_app_reference(call.func.value, aliases)
+        and call.args
+    ):
+        return _is_task_attribute_request(call.args[0])
+
+    if len(call.args) >= 2 and _is_celery_app_reference(call.args[0], aliases):
+        return _is_task_attribute_request(call.args[1])
+
+    if call.args and _is_celery_app_reference(call.args[0], aliases):
+        return any(
+            keyword.arg in attribute_keyword_names and _is_task_attribute_request(keyword.value)
+            for keyword in call.keywords
+        )
+
+    app_keywords = [
+        keyword
+        for keyword in call.keywords
+        if keyword.arg is not None and _is_celery_app_reference(keyword.value, aliases)
+    ]
+    if not app_keywords:
+        return False
+    attribute_values = [
+        keyword.value
+        for keyword in call.keywords
+        if keyword not in app_keywords and keyword.arg in attribute_keyword_names
+    ]
+    attribute_values.extend(call.args)
+    return any(_is_task_attribute_request(value) for value in attribute_values)
+
+
 def _task_syntax_violations(tree: ast.AST) -> set[int]:
     _decorators, direct_task_attributes, direct_decorator_nodes = _direct_task_decorators(tree)
+    celery_app_aliases = _celery_app_aliases(tree)
     violations: set[int] = set()
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -110,14 +219,8 @@ def _task_syntax_violations(tree: ast.AST) -> set[int]:
         elif isinstance(node, ast.ImportFrom):
             if any(alias.name == "shared_task" for alias in node.names):
                 violations.add(node.lineno)
-        elif (
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Name)
-            and node.func.id == "getattr"
-            and node.args
-        ):
-            first_argument = node.args[0]
-            if isinstance(first_argument, ast.Name) and first_argument.id == "celery_app":
+        elif isinstance(node, ast.Call):
+            if _reflects_celery_task(node, celery_app_aliases):
                 violations.add(node.lineno)
             if len(node.args) >= 2:
                 attribute = node.args[1]
