@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
+import os
+import re
+import urllib.parse
 from collections.abc import Callable
 from datetime import datetime
 from typing import Any
@@ -120,6 +124,133 @@ class FeishuAPIClient:
             for folder in [item for item in result if item.type == "folder"]:
                 result.extend(await self.list_all_folder_files(folder.token, recursive=True))
         return result
+
+    async def download_document(self, document: FileInfo, save_dir: str) -> str:
+        """Download or export one reachable Feishu document."""
+
+        try:
+            token = await self.get_tenant_access_token()
+            if self._client is None:
+                raise FeishuAPIError("HTTP client not initialized")
+            if document.type in {"doc", "docx", "sheet", "bitable"}:
+                return await self._export_file(document, token, save_dir)
+            if document.type in {"file", "slides"}:
+                return await self._download_file(document, token, save_dir)
+            raise FeishuAPIError("Unsupported Feishu document type")
+        except (FeishuAPIError, FeishuAuthError):
+            raise
+        except Exception:
+            raise FeishuAPIError("Feishu document download failed") from None
+
+    async def _export_file(
+        self,
+        document: FileInfo,
+        access_token: str,
+        save_dir: str,
+    ) -> str:
+        extension = {
+            "doc": "doc",
+            "docx": "docx",
+            "sheet": "xlsx",
+            "bitable": "xlsx",
+        }.get(document.type, "pdf")
+        headers = {"Authorization": f"Bearer {access_token}"}
+        try:
+            response = await self._client.post(
+                "/drive/v1/export_tasks",
+                json={
+                    "file_extension": extension,
+                    "token": document.token,
+                    "type": document.type,
+                },
+                headers=headers,
+            )
+            body = response.json()
+            if body.get("code") != 0:
+                raise FeishuAPIError(
+                    "Feishu document export request failed",
+                    str(body.get("code")),
+                )
+            ticket = (body.get("data") or {}).get("ticket")
+            if not ticket:
+                raise FeishuAPIError("Feishu document export ticket is missing")
+
+            file_token = None
+            for _attempt in range(10):
+                response = await self._client.get(
+                    f"/drive/v1/export_tasks/{ticket}",
+                    params={"token": document.token},
+                    headers=headers,
+                )
+                body = response.json()
+                if body.get("code") != 0:
+                    raise FeishuAPIError(
+                        "Feishu document export status failed",
+                        str(body.get("code")),
+                    )
+                file_token = ((body.get("data") or {}).get("result") or {}).get(
+                    "file_token"
+                )
+                if file_token:
+                    break
+                await asyncio.sleep(2)
+            if not file_token:
+                raise FeishuAPIError("Feishu document export timed out")
+
+            response = await self._client.get(
+                f"/drive/v1/export_tasks/file/{file_token}/download",
+                headers=headers,
+            )
+            response.raise_for_status()
+            path = os.path.join(save_dir, f"{document.name}.{extension}")
+            await asyncio.to_thread(self._write_binary_file, path, response.content)
+            return path
+        except FeishuAPIError:
+            raise
+        except httpx.HTTPError:
+            raise FeishuAPIError("Feishu document export download failed") from None
+        except Exception:
+            raise FeishuAPIError("Feishu document export failed") from None
+
+    async def _download_file(
+        self,
+        document: FileInfo,
+        access_token: str,
+        save_dir: str,
+    ) -> str:
+        try:
+            response = await self._client.get(
+                f"/drive/v1/files/{document.token}/download",
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+            response.raise_for_status()
+            disposition = response.headers.get("Content-Disposition")
+            filename = None
+            if disposition:
+                match = re.search(r"filename\*=([^']*)''([^;]+)", disposition)
+                if match:
+                    filename = urllib.parse.unquote(match.group(2))
+                if not filename:
+                    match = re.search(r'filename="([^"]+)"', disposition)
+                    if match:
+                        filename = match.group(1)
+            if not filename:
+                filename = f"{document.name}.pdf"
+            filename = re.sub(r'[\\/:*?"<>|]', "_", filename)
+            path = os.path.join(save_dir, filename)
+            await asyncio.to_thread(self._write_binary_file, path, response.content)
+            return path
+        except httpx.HTTPError:
+            raise FeishuAPIError("Feishu file download failed") from None
+        except Exception:
+            raise FeishuAPIError("Feishu file download failed") from None
+
+    @staticmethod
+    def _write_binary_file(path: str, content: bytes) -> None:
+        if os.path.exists(path):
+            os.remove(path)
+        with open(path, "wb") as output:
+            output.write(content)
 
 
 __all__ = ["FeishuAPIClient"]
