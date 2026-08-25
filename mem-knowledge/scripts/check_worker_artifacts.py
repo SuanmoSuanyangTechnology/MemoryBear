@@ -45,6 +45,17 @@ LEGACY_TASK_ALLOWED_PATHS = {
     "tasks/celery_app.py",
     "tasks/legacy_compat.py",
 }
+DYNAMIC_NAMESPACE_NAMES = {
+    "__builtins__",
+    "__import__",
+    "compile",
+    "eval",
+    "exec",
+    "globals",
+    "locals",
+    "vars",
+}
+DYNAMIC_IMPORT_STRINGS = {"__import__", "import_module"}
 
 
 def _normalize_distribution(value: str) -> str:
@@ -130,88 +141,50 @@ def _legacy_task_allowed(path: str | PurePosixPath) -> bool:
 
 
 def _has_dynamic_import_primitive(tree: ast.AST) -> bool:
-    owner_aliases = _dynamic_import_owner_aliases(tree)
+    parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
+    sys_aliases = {"sys"} | {
+        alias.asname or alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Import)
+        for alias in node.names
+        if alias.name == "sys"
+    }
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             if any(
-                alias.name == "importlib" or alias.name.startswith("importlib.")
-                for alias in node.names
+                alias.name.split(".", 1)[0] in {"builtins", "importlib"} for alias in node.names
             ):
                 return True
         elif isinstance(node, ast.ImportFrom):
-            if node.module == "importlib" or (node.module or "").startswith("importlib."):
+            root = (node.module or "").split(".", 1)[0]
+            if root in {"builtins", "importlib"}:
                 return True
-            if node.module == "builtins" and any(
-                alias.name == "__import__" for alias in node.names
+            if root == "sys" and any(alias.name in {"modules", "__dict__"} for alias in node.names):
+                return True
+        elif isinstance(node, ast.Name) and node.id in (
+            DYNAMIC_NAMESPACE_NAMES | {"builtins", "importlib"}
+        ):
+            return True
+        elif isinstance(node, ast.Name) and node.id in sys_aliases:
+            parent = parents.get(node)
+            if not (
+                isinstance(parent, ast.Attribute)
+                and parent.value is node
+                and parent.attr not in {"__dict__", "__getattr__", "__getattribute__", "modules"}
             ):
                 return True
-        elif isinstance(node, ast.Name) and node.id == "__import__":
-            return True
         elif isinstance(node, ast.Attribute):
-            if node.attr in {"__import__", "import_module"}:
+            if node.attr in {"__builtins__", "__import__", "import_module"}:
                 return True
-            if node.attr == "__dict__" and _dynamic_import_owner(node.value, owner_aliases):
+            if (
+                node.attr in {"modules", "__dict__"}
+                and isinstance(node.value, ast.Name)
+                and node.value.id in sys_aliases
+            ):
                 return True
-        elif isinstance(node, ast.Subscript) and _dynamic_import_owner(node.value, owner_aliases):
-            return True
-        elif isinstance(node, ast.Call) and _call_exposes_dynamic_import(node, owner_aliases):
+        if _static_string(node) in DYNAMIC_IMPORT_STRINGS:
             return True
     return False
-
-
-def _dynamic_import_owner_aliases(tree: ast.AST) -> set[str]:
-    aliases = {"__builtins__", "builtins", "importlib"}
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            aliases.update(
-                alias.asname or alias.name
-                for alias in node.names
-                if alias.name in {"builtins", "importlib"}
-            )
-
-    assignments: list[tuple[ast.expr, ast.expr]] = []
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Assign):
-            assignments.extend((target, node.value) for target in node.targets)
-        elif isinstance(node, ast.AnnAssign) and node.value is not None:
-            assignments.append((node.target, node.value))
-        elif isinstance(node, ast.NamedExpr):
-            assignments.append((node.target, node.value))
-
-    changed = True
-    while changed:
-        changed = False
-        for target, value in assignments:
-            if not (
-                isinstance(target, ast.Name)
-                and target.id not in aliases
-                and _dynamic_import_owner(value, aliases)
-            ):
-                continue
-            aliases.add(target.id)
-            changed = True
-    return aliases
-
-
-def _dynamic_import_owner(node: ast.AST, aliases: set[str]) -> bool:
-    if isinstance(node, ast.Name):
-        return node.id in aliases
-    if (
-        isinstance(node, ast.Attribute)
-        and node.attr == "__dict__"
-        and _dynamic_import_owner(node.value, aliases)
-    ):
-        return True
-    if not isinstance(node, ast.Subscript):
-        return False
-    if not (
-        isinstance(node.value, ast.Attribute)
-        and node.value.attr == "modules"
-        and isinstance(node.value.value, ast.Name)
-        and node.value.value.id == "sys"
-    ):
-        return False
-    return _static_string(node.slice) in {"builtins", "importlib"}
 
 
 def _static_string(node: ast.AST) -> str | None:
@@ -224,29 +197,9 @@ def _static_string(node: ast.AST) -> str | None:
     if isinstance(node, ast.JoinedStr):
         values = [_static_string(value) for value in node.values]
         return "".join(values) if all(value is not None for value in values) else None
+    if isinstance(node, ast.FormattedValue):
+        return _static_string(node.value)
     return None
-
-
-def _contains_dynamic_import_literal(node: ast.AST) -> bool:
-    return any(
-        isinstance(candidate, ast.Constant)
-        and isinstance(candidate.value, str)
-        and candidate.value in {"__import__", "import_module"}
-        for candidate in ast.walk(node)
-    )
-
-
-def _call_exposes_dynamic_import(call: ast.Call, owner_aliases: set[str]) -> bool:
-    values = [*call.args, *(keyword.value for keyword in call.keywords)]
-    if any(_contains_dynamic_import_literal(value) for value in values):
-        return True
-    if (
-        isinstance(call.func, ast.Attribute)
-        and call.func.attr in {"__getattr__", "__getattribute__"}
-        and _dynamic_import_owner(call.func.value, owner_aliases)
-    ):
-        return True
-    return any(_dynamic_import_owner(value, owner_aliases) for value in values)
 
 
 def _scan_python_text(path: str, source: str) -> list[str]:
