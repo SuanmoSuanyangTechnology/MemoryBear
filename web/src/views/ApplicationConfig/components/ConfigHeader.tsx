@@ -81,15 +81,11 @@ const ConfigHeader: FC<ConfigHeaderProps> = ({
    */
   const formatTabItems = useMemo(() => {
     const isHideAnnotations = ['multi_agent', 'pure_workflow'].includes(application?.type as string) || source === 'sharing'
-    const isHideLog = ['pure_workflow'].includes(application?.type as string)
 
     const items = (source === 'sharing' ? sharingTabKeys : tabKeys).map(key => ({
       key,
       label: key === 'log' && !isHideAnnotations ? t('application.logAnnotations') : t(`application.${key}`),
     }))
-    if (isHideLog) {
-      return items.filter(vo => vo.key !== 'log')
-    }
     return items
     return 
   }, [source, sharingTabKeys, tabKeys, application?.type])

@@ -228,7 +228,7 @@ const Package: FC = () => {
         <ResourcePackage />
       ) : (
         <BodyWrapper empty={filteredData.length < 1}>
-          <div ref={scrollRef} className="rb:relative rb:mx-9 rb:flex-1 rb:min-h-0! rb:overflow-hidden!">
+          <div ref={scrollRef} className="rb:relative rb:mx-9 rb:flex-1 rb:min-h-0!">
             {showArrows && (
               <Flex
                 align="center"

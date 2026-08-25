@@ -343,7 +343,7 @@ const Logs: FC<{ application: Application; }> = ({ application }) => {
             isScroll={true}
             fillHeight={true}
           />
-          <LogDetailModal ref={logDetailRef} source={application?.type} />
+          <LogDetailModal ref={logDetailRef} source={application?.type} appType={application?.type} />
         </>}
         {!isHideAnnotations && activeTab === 'annotations' && <>
           <Table<AnnotationItem>

@@ -277,6 +277,7 @@ export const space = {
         memoryRetrievalEngineRunningDesc: '正在执行关键词与语义记忆检索',
         memoryRetrievalEngineCompletedDesc: '已完成关键词与语义记忆检索',
         memoryRetrievalEngineDisabledDesc: '本轮未启用记忆检索引擎',
+        memoryRetrievalEngineNoResultDesc: '已启用记忆检索引擎',
         multimodalMemoryRetrievalEngine: '跨模态记忆关联联想引擎',
         multimodalMemoryRetrievalEngineRunningDesc: '正在联合检索文本与图片记忆',
         multimodalMemoryRetrievalEngineCompletedDesc: '已完成文本与图片记忆的联合检索',
