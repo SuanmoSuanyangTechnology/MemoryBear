@@ -1,8 +1,26 @@
 """URL normalization and validation for web crawler."""
 
-from urllib.parse import parse_qs, urlencode, urljoin, urlparse, urlunparse
+from urllib.parse import parse_qs, urlencode, urljoin, urlparse, urlsplit, urlunparse, urlunsplit
 
 from bs4 import BeautifulSoup
+
+
+def safe_url_for_log(url: str) -> str:
+    """Return a URL label without credentials, query parameters, or fragments."""
+
+    try:
+        parsed = urlsplit(url)
+        host = parsed.hostname
+        if not host:
+            return "<invalid-url>"
+        display_host = f"[{host}]" if ":" in host else host
+        port = parsed.port
+        if port is not None:
+            display_host = f"{display_host}:{port}"
+        path = (parsed.path or "/").replace("\r", "").replace("\n", "")
+        return urlunsplit((parsed.scheme, display_host, path, "", ""))
+    except (TypeError, ValueError):
+        return "<invalid-url>"
 
 
 class URLNormalizer:

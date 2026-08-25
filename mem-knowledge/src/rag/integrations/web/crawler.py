@@ -12,7 +12,7 @@ from .http_fetcher import HTTPFetcher
 from .models import CrawledDocument, CrawlSummary
 from .rate_limiter import RateLimiter
 from .robots_parser import RobotsParser
-from .url_normalizer import URLNormalizer
+from .url_normalizer import URLNormalizer, safe_url_for_log
 
 logger = logging.getLogger(__name__)
 
@@ -86,7 +86,11 @@ class WebCrawler:
         Yields:
             CrawledDocument: Structured document with extracted content
         """
-        logger.info(f"Starting crawl from {self.entry_url} (max_pages: {self.max_pages})")
+        logger.info(
+            "Starting crawl from %s (max_pages: %s)",
+            safe_url_for_log(self.entry_url),
+            self.max_pages,
+        )
         self.start_time = utcnow_naive()
 
         # Add entry URL to queue
@@ -113,7 +117,10 @@ class WebCrawler:
 
             # Check robots.txt permission
             if not self.robots_parser.can_fetch(url):
-                logger.info(f"Skipping {url} (disallowed by robots.txt)")
+                logger.info(
+                    "Skipping %s (disallowed by robots.txt)",
+                    safe_url_for_log(url),
+                )
                 self.stats["skipped"] += 1
                 continue
 
@@ -121,7 +128,12 @@ class WebCrawler:
             self.rate_limiter.wait()
 
             # Fetch URL
-            logger.info(f"Fetching {url} ({self.pages_processed + 1}/{self.max_pages})")
+            logger.info(
+                "Fetching %s (%s/%s)",
+                safe_url_for_log(url),
+                self.pages_processed + 1,
+                self.max_pages,
+            )
             fetch_result = self.http_fetcher.fetch(url)
 
             # Handle fetch errors
@@ -134,7 +146,11 @@ class WebCrawler:
             if not any(
                 substring in content_type for substring in ["text/html", "application/xhtml+xml"]
             ):
-                logger.warning(f"Skipping {url} (Content-Type: {content_type})")
+                logger.warning(
+                    "Skipping %s (Content-Type: %s)",
+                    safe_url_for_log(url),
+                    content_type,
+                )
                 self.stats["skipped"] += 1
                 continue
 
@@ -144,7 +160,10 @@ class WebCrawler:
 
                 # Check if static content
                 if not extracted.is_static:
-                    logger.warning(f"Skipping {url} (JavaScript-rendered content)")
+                    logger.warning(
+                        "Skipping %s (JavaScript-rendered content)",
+                        safe_url_for_log(url),
+                    )
                     self.stats["skipped"] += 1
                     continue
 
@@ -178,7 +197,11 @@ class WebCrawler:
                 yield document
 
             except Exception as e:
-                logger.error(f"Error processing {url}: {e}")
+                logger.error(
+                    "Error processing %s error_type=%s",
+                    safe_url_for_log(url),
+                    type(e).__name__,
+                )
                 self._record_error(f"Processing error: {str(e)}")
                 continue
 

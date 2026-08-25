@@ -4,6 +4,8 @@ import logging
 from urllib.parse import urlparse
 from urllib.robotparser import RobotFileParser
 
+from .url_normalizer import safe_url_for_log
+
 logger = logging.getLogger(__name__)
 
 
@@ -59,11 +61,13 @@ class RobotsParser:
         try:
             # Fetch and parse robots.txt
             parser.read()
-            logger.info(f"Successfully fetched robots.txt from {robots_url}")
+            logger.info("Successfully fetched robots.txt from %s", safe_url_for_log(robots_url))
         except Exception as e:
             # If robots.txt cannot be fetched, assume all URLs are allowed
             logger.warning(
-                f"Could not fetch robots.txt from {robots_url}: {e}. Assuming all URLs allowed."
+                "Could not fetch robots.txt from %s error_type=%s; assuming all URLs allowed",
+                safe_url_for_log(robots_url),
+                type(e).__name__,
             )
             # Create a permissive parser
             parser = RobotFileParser()
@@ -88,11 +92,15 @@ class RobotsParser:
             allowed = parser.can_fetch(self.user_agent, url)
 
             if not allowed:
-                logger.info(f"URL disallowed by robots.txt: {url}")
+                logger.info("URL disallowed by robots.txt: %s", safe_url_for_log(url))
 
             return allowed
         except Exception as e:
-            logger.error(f"Error checking robots.txt for {url}: {e}")
+            logger.error(
+                "Error checking robots.txt for %s error_type=%s",
+                safe_url_for_log(url),
+                type(e).__name__,
+            )
             # On error, assume allowed
             return True
 
@@ -115,5 +123,9 @@ class RobotsParser:
 
             return delay
         except Exception as e:
-            logger.error(f"Error getting crawl delay for {url}: {e}")
+            logger.error(
+                "Error getting crawl delay for %s error_type=%s",
+                safe_url_for_log(url),
+                type(e).__name__,
+            )
             return None

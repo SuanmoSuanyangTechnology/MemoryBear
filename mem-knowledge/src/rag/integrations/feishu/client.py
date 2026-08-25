@@ -3,22 +3,23 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import re
 import urllib.parse
 from collections.abc import Callable
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 import httpx
 
+from ....utils.datetime_utils import parse_timestamp_to_utc_naive
 from .exceptions import FeishuAPIError, FeishuAuthError
 from .models import FileInfo
 
 
 def _timestamp(value: Any) -> datetime | None:
     try:
-        return datetime.fromtimestamp(int(value))
+        return parse_timestamp_to_utc_naive(int(value))
     except (TypeError, ValueError, OSError):
         return None
 
@@ -202,9 +203,12 @@ class FeishuAPIClient:
                 headers=headers,
             )
             response.raise_for_status()
-            path = os.path.join(save_dir, f"{document.name}.{extension}")
-            await asyncio.to_thread(self._write_binary_file, path, response.content)
-            return path
+            return await asyncio.to_thread(
+                self._write_binary_file,
+                save_dir,
+                f"{document.name}.{extension}",
+                response.content,
+            )
         except FeishuAPIError:
             raise
         except httpx.HTTPError:
@@ -236,21 +240,35 @@ class FeishuAPIClient:
                         filename = match.group(1)
             if not filename:
                 filename = f"{document.name}.pdf"
-            filename = re.sub(r'[\\/:*?"<>|]', "_", filename)
-            path = os.path.join(save_dir, filename)
-            await asyncio.to_thread(self._write_binary_file, path, response.content)
-            return path
+            return await asyncio.to_thread(
+                self._write_binary_file,
+                save_dir,
+                filename,
+                response.content,
+            )
         except httpx.HTTPError:
             raise FeishuAPIError("Feishu file download failed") from None
         except Exception:
             raise FeishuAPIError("Feishu file download failed") from None
 
     @staticmethod
-    def _write_binary_file(path: str, content: bytes) -> None:
-        if os.path.exists(path):
-            os.remove(path)
-        with open(path, "wb") as output:
-            output.write(content)
+    def _write_binary_file(save_dir: str, filename: str, content: bytes) -> str:
+        root = Path(save_dir).resolve()
+        basename = Path(filename.replace("\\", "/")).name
+        basename = re.sub(r'[\\/:*?"<>|]', "_", basename)
+        if basename in {"", ".", ".."}:
+            basename = "download"
+        path = (root / basename).resolve()
+        try:
+            path.relative_to(root)
+        except ValueError:
+            raise FeishuAPIError("Feishu download path is outside the save directory") from None
+        if path.parent != root:
+            raise FeishuAPIError("Feishu download path is outside the save directory")
+        if path.exists():
+            path.unlink()
+        path.write_bytes(content)
+        return str(path)
 
 
 __all__ = ["FeishuAPIClient"]

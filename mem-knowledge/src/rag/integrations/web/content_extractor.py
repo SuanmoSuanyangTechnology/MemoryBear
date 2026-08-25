@@ -6,6 +6,7 @@ import re
 from bs4 import BeautifulSoup
 
 from .models import ExtractedContent
+from .url_normalizer import safe_url_for_log
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +69,10 @@ class ContentExtractor:
             return True
 
         except Exception as e:
-            logger.error(f"Error checking if content is static: {e}")
+            logger.error(
+                "Error checking if content is static error_type=%s",
+                type(e).__name__,
+            )
             return True  # Assume static on error
 
     def extract(self, html: str, url: str) -> ExtractedContent:
@@ -105,7 +109,7 @@ class ContentExtractor:
             # Count words
             word_count = len(text.split())
 
-            logger.info(f"Extracted {word_count} words from {url}")
+            logger.info("Extracted %s words from %s", word_count, safe_url_for_log(url))
 
             return ExtractedContent(
                 title=title,
@@ -116,7 +120,11 @@ class ContentExtractor:
             )
 
         except Exception as e:
-            logger.error(f"Error extracting content from {url}: {e}")
+            logger.error(
+                "Error extracting content from %s error_type=%s",
+                safe_url_for_log(url),
+                type(e).__name__,
+            )
             return ExtractedContent(
                 title=url,
                 text="",

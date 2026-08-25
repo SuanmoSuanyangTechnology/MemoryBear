@@ -16,6 +16,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
+from ....utils.datetime_utils import parse_iso_to_utc_naive
 from .exceptions import YuqueAPIError, YuqueAuthError
 from .models import YuqueDocInfo, YuqueRepoInfo
 
@@ -24,7 +25,7 @@ def _parse_time(value: Any) -> datetime | None:
     if not isinstance(value, str) or not value:
         return None
     try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return parse_iso_to_utc_naive(value)
     except ValueError:
         return None
 

@@ -7,6 +7,7 @@ import time
 import requests
 
 from .models import FetchResult
+from .url_normalizer import safe_url_for_log
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +45,8 @@ class HTTPFetcher:
             FetchResult: Contains status_code, content, headers, error info
         """
         last_error = None
+        last_error_type = None
+        safe_url = safe_url_for_log(url)
 
         for attempt in range(self.max_retries):
             try:
@@ -51,8 +54,11 @@ class HTTPFetcher:
                 if attempt > 0:
                     backoff_delay = 2 ** (attempt - 1)  # 1s, 2s, 4s
                     logger.info(
-                        f"Retry attempt {attempt + 1}/{self.max_retries} "
-                        f"for {url} after {backoff_delay}s"
+                        "Retry attempt %s/%s for %s after %ss",
+                        attempt + 1,
+                        self.max_retries,
+                        safe_url,
+                        backoff_delay,
                     )
                     time.sleep(backoff_delay)
 
@@ -62,20 +68,24 @@ class HTTPFetcher:
                 # Handle different status codes
                 if response.status_code == 429:
                     # Too Many Requests - backoff and retry
-                    logger.warning(f"429 Too Many Requests for {url}, backing off")
+                    logger.warning("429 Too Many Requests for %s, backing off", safe_url)
                     if attempt < self.max_retries - 1:
                         continue
 
                 if response.status_code == 503:
                     # Service Unavailable - pause and retry
-                    logger.warning(f"503 Service Unavailable for {url}")
+                    logger.warning("503 Service Unavailable for %s", safe_url)
                     if attempt < self.max_retries - 1:
                         time.sleep(5)  # Longer pause for 503
                         continue
 
                 # Success or client error (don't retry 4xx except 429)
                 if 200 <= response.status_code < 300:
-                    logger.info(f"Successfully fetched {url} (status: {response.status_code})")
+                    logger.info(
+                        "Successfully fetched %s (status: %s)",
+                        safe_url,
+                        response.status_code,
+                    )
 
                     # Get correctly encoded content
                     content = self._get_decoded_content(response)
@@ -90,7 +100,7 @@ class HTTPFetcher:
                         success=True,
                     )
                 elif response.status_code == 404:
-                    logger.info(f"404 Not Found: {url}")
+                    logger.info("404 Not Found: %s", safe_url)
                     return FetchResult(
                         url=url,
                         final_url=response.url,
@@ -101,7 +111,7 @@ class HTTPFetcher:
                         success=False,
                     )
                 elif 400 <= response.status_code < 500:
-                    logger.warning(f"Client error {response.status_code} for {url}")
+                    logger.warning("Client error %s for %s", response.status_code, safe_url)
                     return FetchResult(
                         url=url,
                         final_url=response.url,
@@ -112,8 +122,9 @@ class HTTPFetcher:
                         success=False,
                     )
                 elif 500 <= response.status_code < 600:
-                    logger.error(f"Server error {response.status_code} for {url}")
+                    logger.error("Server error %s for %s", response.status_code, safe_url)
                     last_error = f"Server error: {response.status_code}"
+                    last_error_type = "ServerError"
                     if attempt < self.max_retries - 1:
                         continue
                     return FetchResult(
@@ -126,16 +137,24 @@ class HTTPFetcher:
                         success=False,
                     )
 
-            except requests.exceptions.Timeout:
+            except requests.exceptions.Timeout as exc:
                 last_error = "Request timeout"
-                logger.warning(f"Timeout fetching {url} (attempt {attempt + 1}/{self.max_retries})")
+                last_error_type = type(exc).__name__
+                logger.warning(
+                    "Timeout fetching %s (attempt %s/%s) error_type=%s",
+                    safe_url,
+                    attempt + 1,
+                    self.max_retries,
+                    last_error_type,
+                )
                 if attempt >= self.max_retries - 1:
                     break
                 continue
 
             except requests.exceptions.SSLError as e:
                 last_error = f"SSL/TLS error: {str(e)}"
-                logger.error(f"SSL/TLS error for {url}: {e}")
+                last_error_type = type(e).__name__
+                logger.error("SSL/TLS error for %s error_type=%s", safe_url, last_error_type)
                 return FetchResult(
                     url=url,
                     final_url=url,
@@ -148,8 +167,13 @@ class HTTPFetcher:
 
             except requests.exceptions.ConnectionError as e:
                 last_error = f"Connection error: {str(e)}"
+                last_error_type = type(e).__name__
                 logger.warning(
-                    f"Connection error for {url} (attempt {attempt + 1}/{self.max_retries}): {e}"
+                    "Connection error for %s (attempt %s/%s) error_type=%s",
+                    safe_url,
+                    attempt + 1,
+                    self.max_retries,
+                    last_error_type,
                 )
                 if attempt >= self.max_retries - 1:
                     break
@@ -157,13 +181,19 @@ class HTTPFetcher:
 
             except requests.exceptions.RequestException as e:
                 last_error = f"Request error: {str(e)}"
-                logger.error(f"Request error for {url}: {e}")
+                last_error_type = type(e).__name__
+                logger.error("Request error for %s error_type=%s", safe_url, last_error_type)
                 if attempt >= self.max_retries - 1:
                     break
                 continue
 
         # All retries exhausted
-        logger.error(f"Failed to fetch {url} after {self.max_retries} attempts: {last_error}")
+        logger.error(
+            "Failed to fetch %s after %s attempts error_type=%s",
+            safe_url,
+            self.max_retries,
+            last_error_type or "UnknownError",
+        )
         return FetchResult(
             url=url,
             final_url=url,
@@ -198,8 +228,12 @@ class HTTPFetcher:
                 content = response.content.decode(meta_encoding)
                 logger.info(f"Successfully decoded with meta tag encoding: {meta_encoding}")
                 return content
-            except (UnicodeDecodeError, LookupError) as e:
-                logger.warning(f"Failed to decode with meta encoding {meta_encoding}: {e}")
+            except (UnicodeDecodeError, LookupError) as exc:
+                logger.warning(
+                    "Failed to decode with meta encoding %s error_type=%s",
+                    meta_encoding,
+                    type(exc).__name__,
+                )
 
         # Try response.encoding (from Content-Type header or detected by requests)
         if response.encoding and response.encoding.lower() != "iso-8859-1":
@@ -207,8 +241,12 @@ class HTTPFetcher:
             # so we skip it here and try UTF-8 first
             try:
                 return response.text
-            except (UnicodeDecodeError, LookupError) as e:
-                logger.warning(f"Failed to decode with detected encoding {response.encoding}: {e}")
+            except (UnicodeDecodeError, LookupError) as exc:
+                logger.warning(
+                    "Failed to decode with detected encoding %s error_type=%s",
+                    response.encoding,
+                    type(exc).__name__,
+                )
 
         # Try UTF-8 first (most common)
         try:
@@ -289,7 +327,10 @@ class HTTPFetcher:
                     logger.debug(f"Found charset in Content-Type meta: {encoding}")
                     return encoding
 
-        except Exception as e:
-            logger.debug(f"Error detecting encoding from meta tags: {e}")
+        except Exception as exc:
+            logger.debug(
+                "Error detecting encoding from meta tags error_type=%s",
+                type(exc).__name__,
+            )
 
         return None
