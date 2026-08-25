@@ -20,6 +20,7 @@ dependencies = [
     "httpx>=0.28,<1",
     "html5lib==1.1",
     "hanziconv==0.3.2",
+    "jinja2>=3.1,<4",
     "kombu==5.5.4",
     "json-repair==0.53.0",
     "lxml>=6,<7",
@@ -43,6 +44,7 @@ dependencies = [
     "tiktoken>=0.12,<1",
     "uvicorn[standard]>=0.37,<1",
     "xlrd>=2.0,<3",
+    "xxhash>=3.5,<5",
 ]
 
 [dependency-groups]

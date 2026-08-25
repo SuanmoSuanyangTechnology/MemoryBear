@@ -145,6 +145,16 @@ class KnowledgeSettings(BaseSettings):
         ge=1,
         validation_alias="EMBEDDING_BATCH_SIZE",
     )
+    embedding_max_workers: int = Field(
+        default=3,
+        ge=1,
+        validation_alias="EMBEDDING_MAX_WORKERS",
+    )
+    auto_questions_max_workers: int = Field(
+        default=5,
+        ge=1,
+        validation_alias="AUTO_QUESTIONS_MAX_WORKERS",
+    )
     model_concurrency: int = Field(default=5, ge=1, validation_alias="MODEL_CONCURRENCY")
     model_http_max_connections: int = Field(
         default=300,

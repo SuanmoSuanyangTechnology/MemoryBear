@@ -282,13 +282,12 @@ async def dispatch_document_graph_sync(
         return None
     pipeline = resolve_graph_pipeline(parser_config)
     if pipeline is GraphPipeline.LEGACY:
-        if not dispatch_legacy:
-            return None
-        return await dispatcher.send(
-            "app.core.rag.tasks.build_graphrag_for_document",
-            args=[str(document_id), str(knowledge_id)],
-            queue="graphrag_tasks",
+        logger.warning(
+            "Legacy graph document sync removed; skipping: knowledge=%s document=%s",
+            knowledge_id,
+            document_id,
         )
+        return None
     args: list[Any] = [str(knowledge_id), str(document_id)]
     if document_deleted:
         args.append(True)
