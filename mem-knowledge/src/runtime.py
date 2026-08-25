@@ -161,6 +161,7 @@ class ProcessRuntime:
         self._active_runs = 0
         self._run_lock = threading.Lock()
         self._deferred_close_thread: threading.Thread | None = None
+        self._close_errors: list[Exception] = []
         self._vision_executor: ThreadPoolExecutor | None = None
         self._vision_executor_lock = threading.RLock()
         self._create_managers()
@@ -216,6 +217,7 @@ class ProcessRuntime:
                 self._lifecycle.notify_all()
             if deferred_close_thread is not None:
                 deferred_close_thread.join()
+                self._raise_close_error()
 
     def reset_after_fork(self, pid: int | None = None) -> None:
         self.database.reset_after_fork()
@@ -229,6 +231,7 @@ class ProcessRuntime:
         self._active_runs = 0
         self._run_lock = threading.Lock()
         self._deferred_close_thread = None
+        self._close_errors = []
         self._vision_executor = None
         self._vision_executor_lock = threading.RLock()
         self._pid = pid if pid is not None else os.getpid()
@@ -241,6 +244,7 @@ class ProcessRuntime:
             if self._lifecycle_state == "closing":
                 return "wait"
             self._lifecycle_state = "closing"
+            self._close_errors = []
             self._bridge.start_closing()
             return "owner"
 
@@ -299,6 +303,33 @@ class ProcessRuntime:
         if errors:
             raise errors[0]
 
+    def _raise_close_error(self) -> None:
+        self._raise_first_error(self._close_errors)
+
+    @staticmethod
+    async def _await_close_completion(close: Awaitable[None]) -> None:
+        close_task = asyncio.create_task(close)
+        cancellation_requested = False
+        current_task = asyncio.current_task()
+        while not close_task.done():
+            try:
+                await asyncio.shield(close_task)
+            except asyncio.CancelledError:
+                cancellation_requested = True
+                if current_task is not None:
+                    current_task.uncancel()
+
+        close_error: Exception | None = None
+        try:
+            close_task.result()
+        except Exception as exc:
+            close_error = exc
+
+        if cancellation_requested:
+            raise asyncio.CancelledError
+        if close_error is not None:
+            raise close_error
+
     def _finish_bridge_close(self, errors: list[Exception]) -> None:
         try:
             self._bridge.close()
@@ -308,7 +339,7 @@ class ProcessRuntime:
             self._finish_close()
 
     def _close_worker_external(self) -> None:
-        errors: list[Exception] = []
+        errors = self._close_errors
         self._wait_for_active_runs()
         try:
             self._bridge.run_closing(lambda: self._close_async_resources(errors))
@@ -340,7 +371,7 @@ class ProcessRuntime:
         close_thread.start()
 
     async def _close_from_bridge(self, *, surface_errors: bool) -> None:
-        errors: list[Exception] = []
+        errors = self._close_errors
         await self._close_async_resources(errors)
         await asyncio.to_thread(self._close_sync_resources, errors)
         await asyncio.to_thread(self._close_vision_executor, errors)
@@ -361,7 +392,7 @@ class ProcessRuntime:
             cleanup_finished.set()
 
     async def _close_api_runtime(self) -> None:
-        errors: list[Exception] = []
+        errors = self._close_errors
         await self._close_async_resources(errors)
         await asyncio.to_thread(self._close_sync_resources, errors)
         await asyncio.to_thread(self._close_vision_executor, errors)
@@ -371,33 +402,43 @@ class ProcessRuntime:
     async def aclose(self) -> None:
         close_state = self._start_close()
         if close_state == "done":
+            self._raise_close_error()
             return
         if close_state == "wait":
             if self._bridge.is_current_thread():
                 return
-            await asyncio.to_thread(self._wait_until_closed)
+            await self._await_close_completion(
+                asyncio.to_thread(self._wait_until_closed)
+            )
+            self._raise_close_error()
             return
         if self._bridge.is_current_thread():
-            await self._close_from_bridge(surface_errors=True)
+            await self._await_close_completion(
+                self._close_from_bridge(surface_errors=True)
+            )
             return
         with self._lifecycle:
             worker_bridge_owned = self._bridge.started or self._active_runs > 0
         if worker_bridge_owned:
-            await asyncio.to_thread(self._close_worker_external)
+            await self._await_close_completion(
+                asyncio.to_thread(self._close_worker_external)
+            )
             return
-        await self._close_api_runtime()
+        await self._await_close_completion(self._close_api_runtime())
 
     def close_sync(self) -> None:
         close_state = self._start_close()
         if close_state == "done":
+            self._raise_close_error()
             return
         if close_state == "wait":
             if self._bridge.is_current_thread():
                 return
             self._wait_until_closed()
+            self._raise_close_error()
             return
         if self._bridge.is_current_thread():
-            errors: list[Exception] = []
+            errors = self._close_errors
             cleanup_finished = threading.Event()
             self._defer_bridge_finish(errors, cleanup_finished)
             asyncio.get_running_loop().create_task(
