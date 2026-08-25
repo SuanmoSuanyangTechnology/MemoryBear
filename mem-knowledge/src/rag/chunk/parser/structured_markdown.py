@@ -8,6 +8,7 @@ from markdown import markdown
 from PIL import Image
 
 from ..context import ParsedBlock, ParsedBlockType
+from ..preprocessor import safe_log_target
 from ..tokenization import find_codec
 from .base import DocumentParser
 from .markdown_preprocessor import (
@@ -101,11 +102,18 @@ class StructMarkdownParser(DocumentParser):
 
             local_path = Path(src)
             if not local_path.exists():
-                logging.warning(f"Local image file not found: {src}")
+                logging.warning(
+                    "Local image file not found target=%s error_type=FileNotFoundError",
+                    safe_log_target(src),
+                )
                 return None
             return Image.open(local_path).convert("RGB")
         except Exception as exc:
-            logging.error(f"Failed to download/open image from {src}: {exc}")
+            logging.error(
+                "Failed to download/open image target=%s error_type=%s",
+                safe_log_target(src),
+                type(exc).__name__,
+            )
             return None
 
     def _read_text(self, filename: str, binary: bytes | None) -> str:

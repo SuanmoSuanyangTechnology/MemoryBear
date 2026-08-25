@@ -76,7 +76,7 @@ class MarkdownChunkPipeline(ChunkPipeline):
                 urls.update(hyperlink_urls)
 
         ctx.callback(0.8, "Finish parsing.")
-        LOGGER.debug("[Markdown Parsing Blocks]: %s", blocks)
+        LOGGER.debug("[Markdown Parsing Blocks]: count=%d", len(blocks))
         return ParseResult(
             blocks=blocks,
             urls=urls,

@@ -3,8 +3,10 @@ from __future__ import annotations
 import hashlib
 import io
 import logging
+import re
 import zipfile
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import requests
 
@@ -17,6 +19,21 @@ _EMBED_PREFIXES = (
     "xl/embeddings/",
     "ppt/embeddings/",
 )
+_LOG_CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]+")
+
+
+def safe_log_target(value: str) -> str:
+    """Return a log-safe host/path without URL credentials or request parameters."""
+    try:
+        parsed = urlsplit(value)
+    except ValueError:
+        return "invalid-target"
+    if parsed.scheme.lower() in {"http", "https"}:
+        host = parsed.hostname or "unknown-host"
+        target = f"{host}{parsed.path or '/'}"
+    else:
+        target = parsed.path or Path(value).name or "unknown-path"
+    return _LOG_CONTROL_CHARS.sub("?", target)
 
 
 def _embedded_files(binary: bytes) -> list[tuple[str, bytes]]:
@@ -40,13 +57,15 @@ def _embedded_files(binary: bytes) -> list[tuple[str, bytes]]:
     return result
 
 
-def _download_html(url: str) -> bytes | None:
-    response = requests.get(url, timeout=30)
-    response.raise_for_status()
-    content_type = response.headers.get("content-type", "").lower()
-    if "html" not in content_type:
-        return None
-    return response.content
+def _download_html(url: str, max_retries: int = 2) -> bytes | None:
+    for _attempt in range(max_retries):
+        try:
+            response = requests.get(url, timeout=30)
+            response.raise_for_status()
+            return response.content
+        except (requests.Timeout, requests.RequestException):
+            continue
+    return None
 
 
 class EmbedPreprocessor:
@@ -87,7 +106,11 @@ class HyperlinkPreprocessor:
             try:
                 child_result = run_child(url, binary=html_bytes, ctx=ctx, is_root=False)
             except Exception as exc:
-                logging.info("Failed to chunk registered URL %s: %s", url, type(exc).__name__)
+                logging.info(
+                    "Failed to chunk registered URL target=%s error_type=%s",
+                    safe_log_target(url),
+                    type(exc).__name__,
+                )
                 child_result = run_child(
                     f"{index}.html",
                     binary=html_bytes,
@@ -99,4 +122,4 @@ class HyperlinkPreprocessor:
         return result
 
 
-__all__ = ["EmbedPreprocessor", "HyperlinkPreprocessor"]
+__all__ = ["EmbedPreprocessor", "HyperlinkPreprocessor", "safe_log_target"]

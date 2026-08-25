@@ -121,6 +121,7 @@ def normalize_knowledge_parser_config_update(
 ) -> dict[str, Any]:
     if incoming is None:
         raise GraphPipelineConfigError("parser_config update must be a mapping")
+    current_copy = _copy_parser_config(current)
     incoming_copy = _copy_parser_config(incoming)
     if "layout_recognize" in incoming_copy:
         incoming_copy["layout_recognize"] = resolve_layout_recognize(incoming_copy)
@@ -131,7 +132,8 @@ def normalize_knowledge_parser_config_update(
         requested_pipeline = resolve_graph_pipeline({"graphrag": incoming_graph})
         if requested_pipeline is not current_pipeline:
             raise GraphPipelineConfigError("graph pipeline changes require managed migration")
-    normalized = {key: value for key, value in incoming_copy.items() if key != "graphrag"}
+    normalized = {key: value for key, value in current_copy.items() if key != "graphrag"}
+    normalized.update({key: value for key, value in incoming_copy.items() if key != "graphrag"})
     merged_graph = deepcopy(dict(current_graph))
     merged_graph.update(deepcopy(dict(incoming_graph)))
     merged_graph["pipeline"] = current_pipeline.value

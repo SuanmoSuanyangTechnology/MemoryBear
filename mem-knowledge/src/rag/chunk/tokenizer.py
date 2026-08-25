@@ -306,7 +306,10 @@ class RagTokenizer:
         for L, lang in arr:
             if not lang:
                 res.extend(
-                    [self.stemmer.stem(self.lemmatizer.lemmatize(t)) for t in word_tokenize(L)]
+                    [
+                        self.stemmer.stem(self.lemmatizer.lemmatize(t))
+                        for t in word_tokenize(L, preserve_line=True)
+                    ]
                 )
                 continue
             if len(L) < 2 or re.match(r"[a-z\.-]+$", L) or re.match(r"[0-9\.-]+$", L):
