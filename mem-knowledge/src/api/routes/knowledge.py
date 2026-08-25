@@ -22,6 +22,11 @@ from ...errors import KnowledgeError
 from ...models.owned import FILE_ROLE_SOURCE, File, KnowledgeType, ParserType, PermissionType
 from ...rag.integrations.feishu import FeishuAPIClient
 from ...rag.integrations.yuque import YuqueAPIClient
+from ...rag.knowledge_graph.config import (
+    GraphPipeline,
+    is_graph_enabled,
+    resolve_graph_pipeline,
+)
 from ...rag.knowledge_graph.elasticsearch_store import GraphElasticsearchStore
 from ...rag.retrieval.async_elasticsearch import collection_name_for_knowledge
 from ...repositories.model_registry import AsyncSQLModelRegistry
@@ -44,6 +49,10 @@ from ...services.qa_export import (
     write_knowledge_csv,
 )
 from ...tasks.dispatch import TaskDispatcher
+from ...tasks.state import (
+    claim_or_get_rebuild_job_async,
+    release_rebuild_job_async,
+)
 from ..dependencies import Principal, get_principal, get_runtime
 from ..schemas.common import SuccessEnvelope, fail, success
 from ..schemas.file import KBBatchDownloadRequest
@@ -297,6 +306,12 @@ async def update_knowledge(
             principal,
             runtime.redis,
         )
+        if plan.graph_enabled_before is False and is_graph_enabled(knowledge.parser_config):
+            knowledge = await graph_service.commit_evidence_pipeline(
+                db,
+                knowledge_id,
+                principal.workspace_id,
+            )
         data = await knowledge_service.knowledge_to_data(db, knowledge)
     dispatcher = TaskDispatcher()
     if plan.graph_enabled_before is not None:
@@ -368,8 +383,13 @@ async def get_knowledge_graph(
         knowledge = await knowledge_service.get_knowledge(db, knowledge_id, principal)
         if knowledge is None:
             raise knowledge_service._not_found()
-    store = GraphElasticsearchStore(await runtime.elasticsearch.client())
     try:
+        pipeline = resolve_graph_pipeline(knowledge.parser_config)
+        store = (
+            GraphElasticsearchStore(await runtime.elasticsearch.client())
+            if pipeline is GraphPipeline.EVIDENCE
+            else None
+        )
         data = await graph_service.get_graph(knowledge, store)
     except ValueError as exc:
         raise KnowledgeError.from_code("KB_VALIDATION_ERROR", str(exc)) from exc
@@ -416,15 +436,41 @@ async def rebuild_knowledge_graph(
         knowledge = await knowledge_service.get_knowledge(db, knowledge_id, principal)
         if knowledge is None:
             raise knowledge_service._not_found()
-    store = GraphElasticsearchStore(await runtime.elasticsearch.client())
-    try:
-        task_id = await graph_service.rebuild_graph(
-            knowledge,
-            store,
-            TaskDispatcher(),
-        )
-    except ValueError as exc:
-        raise KnowledgeError.from_code("KB_VALIDATION_ERROR", str(exc)) from exc
+        try:
+            await graph_service.commit_evidence_pipeline(
+                db,
+                knowledge_id,
+                principal.workspace_id,
+            )
+        except ValueError as exc:
+            raise KnowledgeError.from_code("KB_VALIDATION_ERROR", str(exc)) from exc
+
+    redis = await runtime.redis.client()
+    proposed_task_id = str(uuid.uuid4())
+    claim = await claim_or_get_rebuild_job_async(
+        redis,
+        knowledge_id,
+        proposed_task_id,
+    )
+    task_id = claim.task_id
+    if claim.claimed:
+        try:
+            task_id = await TaskDispatcher().send(
+                "app.core.rag.tasks.rebuild_evidence_graph_knowledge",
+                args=[str(knowledge_id)],
+                queue="graphrag_tasks",
+                task_id=claim.task_id,
+            )
+        except Exception:
+            try:
+                await release_rebuild_job_async(redis, knowledge_id, claim.task_id)
+            except Exception as release_exc:
+                logger.error(
+                    "Failed to release rebuild claim knowledge_id=%s error_type=%s",
+                    knowledge_id,
+                    type(release_exc).__name__,
+                )
+            raise
     return _success(
         request,
         {"task_id": task_id},

@@ -1,14 +1,15 @@
-"""Asynchronous graph retrieval bridge for the two legacy graph pipelines."""
+"""Asynchronous Evidence Graph retrieval with Legacy empty-result compatibility."""
 
 from __future__ import annotations
 
-import json
+import logging
 from typing import Any
 
 from ..knowledge_graph.config import GraphPipeline
-from ..knowledge_graph.elasticsearch_store import GraphElasticsearchStore
 from ..models.chunk import DocumentChunk
 from .models import GraphRetrievalSnapshot
+
+logger = logging.getLogger(__name__)
 
 
 class GraphRetrievalBridge:
@@ -19,31 +20,13 @@ class GraphRetrievalBridge:
         *,
         top_k: int,
     ) -> tuple[list[DocumentChunk], list[dict[str, Any]], list[dict[str, Any]]]:
+        if snapshot.pipeline is GraphPipeline.LEGACY:
+            logger.warning("Legacy graph retrieval is unavailable; returning an empty result")
+            return [], [], []
         chunks: list[DocumentChunk] = []
         entities: list[dict[str, Any]] = []
         relationships: list[dict[str, Any]] = []
-        store = GraphElasticsearchStore(client)
         for target in snapshot.targets:
-            if snapshot.pipeline is GraphPipeline.LEGACY:
-                data = await store.load_legacy_graph(
-                    target.graph_index_name,
-                    str(target.knowledge_id),
-                )
-                graph = data.get("graph") or {}
-                if graph:
-                    chunks.append(
-                        DocumentChunk(
-                            page_content=json.dumps(graph, ensure_ascii=False),
-                            metadata={
-                                "doc_id": f"graph:{target.knowledge_id}",
-                                "knowledge_id": str(target.knowledge_id),
-                                "chunk_type": "graph",
-                                "retrieval_source": "graph",
-                                "score": 1.0,
-                            },
-                        )
-                    )
-                continue
             result = await client.search(
                 index=target.graph_index_name,
                 size=max(top_k * 4, 20),

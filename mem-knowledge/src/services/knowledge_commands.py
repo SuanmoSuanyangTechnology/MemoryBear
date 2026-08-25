@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.owned import Document, File
-from ..rag.knowledge_graph.config import GraphPipeline, is_graph_enabled, resolve_graph_pipeline
+from ..rag.knowledge_graph.config import is_graph_enabled
 from .document import PARSE_TASK_KEY, PARSE_TASK_TTL, _release_parse_claim
 
 
@@ -118,14 +118,8 @@ async def dispatch_graph_transition(
             args=[str(knowledge_id)],
             queue="graphrag_tasks",
         )
-    pipeline = resolve_graph_pipeline(parser_config)
-    task_name = (
-        "app.core.rag.tasks.build_graphrag_for_kb"
-        if pipeline is GraphPipeline.LEGACY
-        else "app.core.rag.tasks.rebuild_evidence_graph_knowledge"
-    )
     return await dispatcher.send(
-        task_name,
+        "app.core.rag.tasks.rebuild_evidence_graph_knowledge",
         args=[str(knowledge_id)],
         queue="graphrag_tasks",
     )
