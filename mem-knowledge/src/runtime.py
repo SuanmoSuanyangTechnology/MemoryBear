@@ -26,68 +26,127 @@ class _WorkerAsyncBridge:
     """Own one lazy event loop thread for a prefork child process."""
 
     def __init__(self) -> None:
-        self._lock = threading.RLock()
+        self._condition = threading.Condition(threading.RLock())
         self._loop: asyncio.AbstractEventLoop | None = None
         self._thread: threading.Thread | None = None
-        self._ready: threading.Event | None = None
-        self._closed = False
+        self._state = "open"
+        self._active_submissions = 0
 
-    def _ensure_started(self) -> asyncio.AbstractEventLoop:
-        with self._lock:
-            if self._closed:
-                raise RuntimeError("worker async bridge is closed")
-            if self._loop is not None:
-                return self._loop
-
-            loop = asyncio.new_event_loop()
+    def _ensure_started_locked(
+        self,
+    ) -> tuple[asyncio.AbstractEventLoop, threading.Event]:
+        if self._loop is not None:
             ready = threading.Event()
+            ready.set()
+            return self._loop, ready
 
-            def run_loop() -> None:
-                asyncio.set_event_loop(loop)
-                ready.set()
-                try:
-                    loop.run_forever()
-                finally:
-                    loop.close()
+        loop = asyncio.new_event_loop()
+        ready = threading.Event()
 
-            thread = threading.Thread(
-                target=run_loop,
-                name="knowledge-async-loop",
-                daemon=True,
-            )
+        def run_loop() -> None:
+            asyncio.set_event_loop(loop)
+            ready.set()
+            try:
+                loop.run_forever()
+            finally:
+                loop.close()
+
+        thread = threading.Thread(
+            target=run_loop,
+            name="knowledge-async-loop",
+            daemon=True,
+        )
+        try:
             self._loop = loop
             self._thread = thread
-            self._ready = ready
             thread.start()
-
-        ready.wait()
-        return loop
-
-    def run(self, factory: Callable[[], Awaitable[T]]) -> T:
-        loop = self._ensure_started()
-        return asyncio.run_coroutine_threadsafe(factory(), loop).result()
-
-    def close(self) -> None:
-        with self._lock:
-            loop = self._loop
-            thread = self._thread
+        except Exception:
             self._loop = None
             self._thread = None
-            self._ready = None
-            self._closed = True
+            loop.close()
+            raise
+        return loop, ready
+
+    @property
+    def started(self) -> bool:
+        with self._condition:
+            return self._loop is not None
+
+    def is_current_thread(self) -> bool:
+        with self._condition:
+            return self._thread is threading.current_thread()
+
+    def start_closing(self) -> None:
+        with self._condition:
+            if self._state == "open":
+                self._state = "closing"
+            self._condition.notify_all()
+
+    def _submit(
+        self,
+        factory: Callable[[], Awaitable[T]],
+        *,
+        allow_closing: bool,
+    ) -> T:
+        with self._condition:
+            if self._state == "closed" or (
+                self._state == "closing" and not allow_closing
+            ):
+                raise RuntimeError("worker async bridge is closing or closed")
+            if allow_closing:
+                if self._thread is threading.current_thread():
+                    raise RuntimeError("cannot synchronously submit from bridge thread")
+                while self._active_submissions:
+                    self._condition.wait()
+            loop, ready = self._ensure_started_locked()
+            self._active_submissions += 1
+
+        ready.wait()
+        try:
+            return asyncio.run_coroutine_threadsafe(factory(), loop).result()
+        finally:
+            with self._condition:
+                self._active_submissions -= 1
+                self._condition.notify_all()
+
+    def run(self, factory: Callable[[], Awaitable[T]]) -> T:
+        return self._submit(factory, allow_closing=False)
+
+    def run_closing(self, factory: Callable[[], Awaitable[T]]) -> T:
+        return self._submit(factory, allow_closing=True)
+
+    def close(self) -> None:
+        with self._condition:
+            if self._thread is threading.current_thread():
+                raise RuntimeError("worker async bridge cannot join its own thread")
+            if self._state == "closed":
+                return
+            self._state = "closing"
+            while self._active_submissions:
+                self._condition.wait()
+            loop = self._loop
+            thread = self._thread
         if loop is None or thread is None:
+            with self._condition:
+                self._state = "closed"
+                self._condition.notify_all()
             return
         loop.call_soon_threadsafe(loop.stop)
         thread.join()
+        with self._condition:
+            self._loop = None
+            self._thread = None
+            self._state = "closed"
+            self._condition.notify_all()
 
     def reset_after_fork(self) -> None:
         """Discard inherited thread state without touching parent resources."""
 
-        self._lock = threading.RLock()
+        self._condition = threading.Condition(threading.RLock())
         self._loop = None
         self._thread = None
-        self._ready = None
-        self._closed = False
+        self._state = "open"
+        self._active_submissions = 0
 
 
 class ProcessRuntime:
@@ -96,8 +155,12 @@ class ProcessRuntime:
     def __init__(self, settings: KnowledgeSettings):
         self.settings = settings
         self._pid = os.getpid()
-        self._closed = False
         self._bridge = _WorkerAsyncBridge()
+        self._lifecycle = threading.Condition(threading.RLock())
+        self._lifecycle_state = "open"
+        self._active_runs = 0
+        self._run_lock = threading.Lock()
+        self._deferred_close_thread: threading.Thread | None = None
         self._vision_executor: ThreadPoolExecutor | None = None
         self._vision_executor_lock = threading.RLock()
         self._create_managers()
@@ -115,28 +178,44 @@ class ProcessRuntime:
 
     @property
     def closed(self) -> bool:
-        return self._closed
+        with self._lifecycle:
+            return self._lifecycle_state == "closed"
 
     @property
     def vision_executor_initialized(self) -> bool:
-        return self._vision_executor is not None
+        with self._vision_executor_lock:
+            return self._vision_executor is not None
 
     @property
     def vision_executor(self) -> ThreadPoolExecutor:
-        with self._vision_executor_lock:
-            if self._closed:
-                raise RuntimeError("process runtime is closed")
-            if self._vision_executor is None:
-                self._vision_executor = ThreadPoolExecutor(
-                    max_workers=self.settings.kb_vision_max_workers,
-                    thread_name_prefix="knowledge-vision-",
-                )
-            return self._vision_executor
+        with self._lifecycle:
+            if self._lifecycle_state != "open":
+                raise RuntimeError("process runtime is closing or closed")
+            with self._vision_executor_lock:
+                if self._vision_executor is None:
+                    self._vision_executor = ThreadPoolExecutor(
+                        max_workers=self.settings.kb_vision_max_workers,
+                        thread_name_prefix="knowledge-vision-",
+                    )
+                return self._vision_executor
 
     def run_async(self, factory: Callable[[], Awaitable[T]]) -> T:
-        if self._closed:
-            raise RuntimeError("process runtime is closed")
-        return self._bridge.run(factory)
+        with self._lifecycle:
+            if self._lifecycle_state != "open":
+                raise RuntimeError("process runtime is closing or closed")
+            self._active_runs += 1
+        try:
+            with self._run_lock:
+                return self._bridge.run(factory)
+        finally:
+            deferred_close_thread = None
+            with self._lifecycle:
+                self._active_runs -= 1
+                if self._active_runs == 0:
+                    deferred_close_thread = self._deferred_close_thread
+                self._lifecycle.notify_all()
+            if deferred_close_thread is not None:
+                deferred_close_thread.join()
 
     def reset_after_fork(self, pid: int | None = None) -> None:
         self.database.reset_after_fork()
@@ -145,11 +224,40 @@ class ProcessRuntime:
         self.storage.reset_after_fork()
         self.model_runtime.reset_after_fork()
         self._bridge.reset_after_fork()
+        self._lifecycle = threading.Condition(threading.RLock())
+        self._lifecycle_state = "open"
+        self._active_runs = 0
+        self._run_lock = threading.Lock()
+        self._deferred_close_thread = None
         self._vision_executor = None
         self._vision_executor_lock = threading.RLock()
         self._pid = pid if pid is not None else os.getpid()
-        self._closed = False
         self._create_managers()
+
+    def _start_close(self) -> str:
+        with self._lifecycle:
+            if self._lifecycle_state == "closed":
+                return "done"
+            if self._lifecycle_state == "closing":
+                return "wait"
+            self._lifecycle_state = "closing"
+            self._bridge.start_closing()
+            return "owner"
+
+    def _wait_until_closed(self) -> None:
+        with self._lifecycle:
+            while self._lifecycle_state != "closed":
+                self._lifecycle.wait()
+
+    def _wait_for_active_runs(self) -> None:
+        with self._lifecycle:
+            while self._active_runs:
+                self._lifecycle.wait()
+
+    def _finish_close(self) -> None:
+        with self._lifecycle:
+            self._lifecycle_state = "closed"
+            self._lifecycle.notify_all()
 
     async def _close_async_resources(self, errors: list[Exception]) -> None:
         for close in (
@@ -186,35 +294,117 @@ class ProcessRuntime:
         except Exception as exc:
             errors.append(exc)
 
-    async def aclose(self) -> None:
-        if self._closed:
-            return
-        errors: list[Exception] = []
-        await self._close_async_resources(errors)
-        await asyncio.to_thread(self._close_sync_resources, errors)
-        await asyncio.to_thread(self._close_vision_executor, errors)
-        await asyncio.to_thread(self._bridge.close)
-        self._closed = True
+    @staticmethod
+    def _raise_first_error(errors: list[Exception]) -> None:
         if errors:
             raise errors[0]
 
-    def close_sync(self) -> None:
-        if self._closed:
-            return
-        errors: list[Exception] = []
-        try:
-            self._bridge.run(lambda: self._close_async_resources(errors))
-        except Exception as exc:
-            errors.append(exc)
-        self._close_sync_resources(errors)
-        self._close_vision_executor(errors)
+    def _finish_bridge_close(self, errors: list[Exception]) -> None:
         try:
             self._bridge.close()
         except Exception as exc:
             errors.append(exc)
-        self._closed = True
-        if errors:
-            raise errors[0]
+        finally:
+            self._finish_close()
+
+    def _close_worker_external(self) -> None:
+        errors: list[Exception] = []
+        self._wait_for_active_runs()
+        try:
+            self._bridge.run_closing(lambda: self._close_async_resources(errors))
+        except Exception as exc:
+            errors.append(exc)
+        self._close_sync_resources(errors)
+        self._close_vision_executor(errors)
+        self._finish_bridge_close(errors)
+        self._raise_first_error(errors)
+
+    def _defer_bridge_finish(
+        self,
+        errors: list[Exception],
+        cleanup_finished: threading.Event | None = None,
+    ) -> None:
+        def finish_after_current_submission() -> None:
+            if cleanup_finished is not None:
+                cleanup_finished.wait()
+            self._wait_for_active_runs()
+            self._finish_bridge_close(errors)
+
+        close_thread = threading.Thread(
+            target=finish_after_current_submission,
+            name="knowledge-async-loop-shutdown",
+            daemon=True,
+        )
+        with self._lifecycle:
+            self._deferred_close_thread = close_thread
+        close_thread.start()
+
+    async def _close_from_bridge(self, *, surface_errors: bool) -> None:
+        errors: list[Exception] = []
+        await self._close_async_resources(errors)
+        await asyncio.to_thread(self._close_sync_resources, errors)
+        await asyncio.to_thread(self._close_vision_executor, errors)
+        self._defer_bridge_finish(errors)
+        if surface_errors:
+            self._raise_first_error(errors)
+
+    async def _close_from_bridge_background(
+        self,
+        errors: list[Exception],
+        cleanup_finished: threading.Event,
+    ) -> None:
+        try:
+            await self._close_async_resources(errors)
+            await asyncio.to_thread(self._close_sync_resources, errors)
+            await asyncio.to_thread(self._close_vision_executor, errors)
+        finally:
+            cleanup_finished.set()
+
+    async def _close_api_runtime(self) -> None:
+        errors: list[Exception] = []
+        await self._close_async_resources(errors)
+        await asyncio.to_thread(self._close_sync_resources, errors)
+        await asyncio.to_thread(self._close_vision_executor, errors)
+        await asyncio.to_thread(self._finish_bridge_close, errors)
+        self._raise_first_error(errors)
+
+    async def aclose(self) -> None:
+        close_state = self._start_close()
+        if close_state == "done":
+            return
+        if close_state == "wait":
+            if self._bridge.is_current_thread():
+                return
+            await asyncio.to_thread(self._wait_until_closed)
+            return
+        if self._bridge.is_current_thread():
+            await self._close_from_bridge(surface_errors=True)
+            return
+        with self._lifecycle:
+            worker_bridge_owned = self._bridge.started or self._active_runs > 0
+        if worker_bridge_owned:
+            await asyncio.to_thread(self._close_worker_external)
+            return
+        await self._close_api_runtime()
+
+    def close_sync(self) -> None:
+        close_state = self._start_close()
+        if close_state == "done":
+            return
+        if close_state == "wait":
+            if self._bridge.is_current_thread():
+                return
+            self._wait_until_closed()
+            return
+        if self._bridge.is_current_thread():
+            errors: list[Exception] = []
+            cleanup_finished = threading.Event()
+            self._defer_bridge_finish(errors, cleanup_finished)
+            asyncio.get_running_loop().create_task(
+                self._close_from_bridge_background(errors, cleanup_finished)
+            )
+            return
+        self._close_worker_external()
 
 
 _worker_runtime: ProcessRuntime | None = None
