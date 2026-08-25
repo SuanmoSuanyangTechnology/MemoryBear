@@ -20,6 +20,9 @@ from ..utils.datetime_utils import to_iso_z, to_timestamp_ms, utcnow, utcnow_nai
 from .knowledge_file_storage import KnowledgeFileStorage
 
 logger = logging.getLogger(__name__)
+QA_UNSUPPORTED_FORMAT_ERROR = (
+    "Only CSV (.csv) or Excel (.xlsx/.xls) files are supported"
+)
 
 
 class _SafeQAImportError(RuntimeError):
@@ -164,7 +167,7 @@ def _parse_qa_file(
         return _parse_csv(contents)
     if filename.endswith(".xlsx") or filename.endswith(".xls"):
         return _parse_excel(contents)
-    return [], []
+    raise _SafeQAImportError(QA_UNSUPPORTED_FORMAT_ERROR)
 
 
 def _build_chunks(
@@ -281,7 +284,12 @@ def process_qa_import(
             return snapshot
 
         loaded_contents = _load_contents(runtime, contents, file_key)
-        pairs, failed_rows = _parse_qa_file(filename, loaded_contents)
+        try:
+            pairs, failed_rows = _parse_qa_file(filename, loaded_contents)
+        except _SafeQAImportError:
+            raise
+        except Exception:
+            raise _SafeQAImportError("QA file parsing failed") from None
         if not pairs:
             logger.warning("No valid QA pairs found: document=%s", normalized_document_id)
             raise _SafeQAImportError("No valid QA pairs found")
@@ -302,12 +310,7 @@ def process_qa_import(
                 embeddings,
             )
             sort_id = 0
-            if clear_parse_task:
-                vector_store.delete_by_metadata_field(
-                    "document_id",
-                    str(normalized_document_id),
-                )
-            else:
+            if not clear_parse_task:
                 _, items = vector_store.search_by_segment(
                     document_id=str(normalized_document_id),
                     pagesize=1,
@@ -325,8 +328,19 @@ def process_qa_import(
                 sort_id=sort_id,
             )
             batch_size = min(runtime.settings.embedding_batch_size or 10, 20)
+            prepared_batches = []
             for start in range(0, len(chunks), batch_size):
-                vector_store.add_chunks(chunks[start : start + batch_size])
+                prepared_batches.append(
+                    vector_store.prepare_chunks(chunks[start : start + batch_size])
+                )
+            if sum(batch.chunk_count for batch in prepared_batches) != len(chunks):
+                raise RuntimeError("Prepared chunk count does not match input count")
+            if clear_parse_task:
+                vector_store.delete_by_metadata_field(
+                    "document_id",
+                    str(normalized_document_id),
+                )
+            vector_store.write_prepared_batches(prepared_batches)
         except Exception:
             raise _SafeQAImportError("QA vector processing failed") from None
 

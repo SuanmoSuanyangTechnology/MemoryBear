@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Any
 
 from elasticsearch import NotFoundError
@@ -13,6 +14,14 @@ from ..models.chunk import DocumentChunk, chunk_retrieval_content
 from .field import Field
 
 ES_DEFAULT_MAX_RESULT_WINDOW = 10000
+
+
+@dataclass(frozen=True)
+class PreparedChunkBatch:
+    """Fully embedded Elasticsearch actions that have not been written yet."""
+
+    actions: tuple[dict[str, Any], ...]
+    chunk_count: int
 
 
 def collection_name_for_knowledge(knowledge_id: uuid.UUID | str) -> str:
@@ -30,10 +39,14 @@ class TaskVectorStore:
     def add_chunks(self, chunks: list[DocumentChunk]) -> None:
         if not chunks:
             return
-        vectors = self._embed_chunks(chunks)
-        if not self._client.indices.exists(index=self._collection_name):
-            self._create_collection(vectors)
+        self.write_prepared_batches([self.prepare_chunks(chunks)])
 
+    def prepare_chunks(self, chunks: list[DocumentChunk]) -> PreparedChunkBatch:
+        """Embed and align one batch without performing Elasticsearch writes."""
+
+        if not chunks:
+            return PreparedChunkBatch(actions=(), chunk_count=0)
+        vectors = self._embed_chunks(chunks)
         actions = []
         for chunk, vector in zip(chunks, vectors, strict=True):
             metadata = dict(chunk.metadata or {})
@@ -52,7 +65,32 @@ class TaskVectorStore:
                 if metadata.get(field.value):
                     source[field.value] = metadata[field.value]
             actions.append({"_index": self._collection_name, "_source": source})
-        bulk(self._client, actions)
+        return PreparedChunkBatch(actions=tuple(actions), chunk_count=len(chunks))
+
+    def write_prepared_batches(self, batches: list[PreparedChunkBatch]) -> None:
+        """Validate every prepared batch before the first Elasticsearch write."""
+
+        if not batches:
+            return
+        for batch in batches:
+            if len(batch.actions) != batch.chunk_count:
+                raise RuntimeError("Prepared chunk count does not match action count")
+        if not any(batch.actions for batch in batches):
+            return
+        if not self._client.indices.exists(index=self._collection_name):
+            sample = next(
+                (
+                    action["_source"][Field.VECTOR.value]
+                    for batch in batches
+                    for action in batch.actions
+                    if action["_source"][Field.VECTOR.value] is not None
+                ),
+                None,
+            )
+            self._create_collection(sample)
+        for batch in batches:
+            if batch.actions:
+                bulk(self._client, list(batch.actions))
 
     def delete_by_metadata_field(
         self,
@@ -144,8 +182,7 @@ class TaskVectorStore:
         if len(embedded) != expected:
             raise RuntimeError("Embedding result count does not match input count")
 
-    def _create_collection(self, vectors: list[list[float] | None]) -> None:
-        sample = next((vector for vector in vectors if vector is not None), None)
+    def _create_collection(self, sample: list[float] | None) -> None:
         dimensions = len(sample) if sample is not None else 768
         self._client.indices.create(
             index=self._collection_name,
@@ -278,4 +315,8 @@ class TaskVectorStore:
             raise RuntimeError(f"Elasticsearch {operation} failed")
 
 
-__all__ = ["TaskVectorStore", "collection_name_for_knowledge"]
+__all__ = [
+    "PreparedChunkBatch",
+    "TaskVectorStore",
+    "collection_name_for_knowledge",
+]
