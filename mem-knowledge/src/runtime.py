@@ -21,7 +21,18 @@ from .infrastructure import (
 )
 
 T = TypeVar("T")
-_CURRENT_RUNTIME_RUN: ContextVar[object | None] = ContextVar(
+
+
+class _RuntimeRun:
+    """Identify one run accepted by a specific process runtime."""
+
+    __slots__ = ("runtime",)
+
+    def __init__(self, runtime: ProcessRuntime) -> None:
+        self.runtime = runtime
+
+
+_CURRENT_RUNTIME_RUN: ContextVar[_RuntimeRun | None] = ContextVar(
     "knowledge_current_runtime_run",
     default=None,
 )
@@ -167,10 +178,11 @@ class ProcessRuntime:
         self._lifecycle = threading.Condition(threading.RLock())
         self._lifecycle_state = "open"
         self._active_runs = 0
+        self._active_run_tokens: set[_RuntimeRun] = set()
         self._run_lock = threading.Lock()
         self._deferred_close_thread: threading.Thread | None = None
         self._close_errors: list[Exception] = []
-        self._close_initiator_token: object | None = None
+        self._close_initiator_token: _RuntimeRun | None = None
         self._vision_executor: ThreadPoolExecutor | None = None
         self._vision_executor_lock = threading.RLock()
         self._create_managers()
@@ -210,7 +222,7 @@ class ProcessRuntime:
                 return self._vision_executor
 
     def run_async(self, factory: Callable[[], Awaitable[T]]) -> T:
-        run_token = object()
+        run_token = _RuntimeRun(self)
 
         async def run_with_context() -> T:
             context_token = _CURRENT_RUNTIME_RUN.set(run_token)
@@ -223,6 +235,7 @@ class ProcessRuntime:
             if self._lifecycle_state != "open":
                 raise RuntimeError("process runtime is closing or closed")
             self._active_runs += 1
+            self._active_run_tokens.add(run_token)
         run_error: BaseException | None = None
         try:
             with self._run_lock:
@@ -232,6 +245,7 @@ class ProcessRuntime:
         finally:
             deferred_close_thread: threading.Thread | None = None
             with self._lifecycle:
+                self._active_run_tokens.discard(run_token)
                 self._active_runs -= 1
                 if self._close_initiator_token is run_token:
                     deferred_close_thread = self._deferred_close_thread
@@ -254,6 +268,7 @@ class ProcessRuntime:
         self._lifecycle = threading.Condition(threading.RLock())
         self._lifecycle_state = "open"
         self._active_runs = 0
+        self._active_run_tokens = set()
         self._run_lock = threading.Lock()
         self._deferred_close_thread = None
         self._close_errors = []
@@ -263,17 +278,28 @@ class ProcessRuntime:
         self._pid = pid if pid is not None else os.getpid()
         self._create_managers()
 
-    def _start_close(self) -> str:
+    def _current_active_run_locked(self) -> _RuntimeRun | None:
+        current_run = _CURRENT_RUNTIME_RUN.get()
+        if (
+            current_run is None
+            or current_run.runtime is not self
+            or current_run not in self._active_run_tokens
+        ):
+            return None
+        return current_run
+
+    def _start_close(self) -> tuple[str, _RuntimeRun | None]:
         with self._lifecycle:
+            current_run = self._current_active_run_locked()
             if self._lifecycle_state == "closed":
-                return "done"
+                return "done", current_run
             if self._lifecycle_state == "closing":
-                return "wait"
+                return "wait", current_run
             self._lifecycle_state = "closing"
             self._close_errors = []
-            self._close_initiator_token = _CURRENT_RUNTIME_RUN.get()
+            self._close_initiator_token = current_run
             self._bridge.start_closing()
-            return "owner"
+            return "owner", current_run
 
     def _wait_until_closed(self) -> None:
         with self._lifecycle:
@@ -336,17 +362,16 @@ class ProcessRuntime:
     @staticmethod
     async def _await_close_completion(close: Awaitable[None]) -> None:
         close_task = asyncio.create_task(close)
-        cancellation_requested = False
+        cancellation: asyncio.CancelledError | None = None
         current_task = asyncio.current_task()
         initial_cancels = current_task.cancelling() if current_task else 0
         close_error: Exception | None = None
         while not close_task.done():
             try:
                 await asyncio.shield(close_task)
-            except asyncio.CancelledError:
-                cancellation_requested = True
-                if current_task is not None:
-                    current_task.uncancel()
+            except asyncio.CancelledError as exc:
+                if cancellation is None:
+                    cancellation = exc
             except Exception as exc:
                 close_error = exc
 
@@ -356,12 +381,9 @@ class ProcessRuntime:
             except Exception as exc:
                 close_error = exc
 
+        if cancellation is not None:
+            raise cancellation
         if current_task is not None and current_task.cancelling() > initial_cancels:
-            cancellation_requested = True
-            while current_task.cancelling() > initial_cancels:
-                current_task.uncancel()
-
-        if cancellation_requested:
             raise asyncio.CancelledError
         if close_error is not None:
             raise close_error
@@ -436,12 +458,12 @@ class ProcessRuntime:
         self._raise_first_error(errors)
 
     async def aclose(self) -> None:
-        close_state = self._start_close()
+        close_state, current_run = self._start_close()
         if close_state == "done":
             self._raise_close_error()
             return
         if close_state == "wait":
-            if self._bridge.is_current_thread():
+            if current_run is not None or self._bridge.is_current_thread():
                 return
             await self._await_close_completion(
                 asyncio.to_thread(self._wait_until_closed)
@@ -463,12 +485,12 @@ class ProcessRuntime:
         await self._await_close_completion(self._close_api_runtime())
 
     def close_sync(self) -> None:
-        close_state = self._start_close()
+        close_state, current_run = self._start_close()
         if close_state == "done":
             self._raise_close_error()
             return
         if close_state == "wait":
-            if self._bridge.is_current_thread():
+            if current_run is not None or self._bridge.is_current_thread():
                 return
             self._wait_until_closed()
             self._raise_close_error()
