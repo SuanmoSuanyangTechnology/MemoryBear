@@ -1,10 +1,49 @@
 ARG PYTHON_BASE_IMAGE=python:3.12-slim
-FROM ${PYTHON_BASE_IMAGE}
+FROM ${PYTHON_BASE_IMAGE} AS builder
 
 ARG PYPI_INDEX_URL=https://pypi.org/simple
 ARG TIKA_VERSION=3.1.0
 ARG TIKA_SHA1=d32d863e77480fae2885d24973d04a07082c8f19
 
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    TIKTOKEN_CACHE_DIR=/opt/tiktoken-cache
+
+WORKDIR /code
+
+RUN apt-get update && \
+    apt-get install --yes --no-install-recommends \
+      build-essential \
+      ca-certificates \
+      curl \
+      gcc && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN pip install --no-cache-dir --index-url "${PYPI_INDEX_URL}" uv==0.10.11
+COPY packages/redbear-model /code/packages/redbear-model
+COPY packages/storage-core /code/packages/storage-core
+COPY mem-knowledge/pyproject.toml mem-knowledge/uv.lock /code/mem-knowledge/
+
+WORKDIR /code/mem-knowledge
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --locked --no-dev --no-install-project --no-editable
+
+COPY mem-knowledge/src /code/mem-knowledge/src
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --locked --no-dev --no-editable && \
+    rm -f \
+      .venv/lib/python3.12/site-packages/_virtualenv.pth \
+      .venv/lib/python3.12/site-packages/distutils-precedence.pth && \
+    mkdir -p "${TIKTOKEN_CACHE_DIR}" /opt/tika && \
+    .venv/bin/python -c 'import tiktoken; tiktoken.get_encoding("cl100k_base")' && \
+    curl -fsSL \
+      "https://repo1.maven.org/maven2/org/apache/tika/tika-server-standard/${TIKA_VERSION}/tika-server-standard-${TIKA_VERSION}.jar" \
+      -o "/opt/tika/tika-server-standard-${TIKA_VERSION}.jar" && \
+    echo "${TIKA_SHA1}  /opt/tika/tika-server-standard-${TIKA_VERSION}.jar" | sha1sum -c -
+
+FROM ${PYTHON_BASE_IMAGE} AS runtime
+
+ENV KB_PROCESS_ROLE=api
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     MEMORYBEAR_ROOT_DIR=/code \
@@ -13,7 +52,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     TIKTOKEN_CACHE_DIR=/opt/tiktoken-cache \
     PATH=/code/mem-knowledge/.venv/bin:$PATH
 
-WORKDIR /code
+WORKDIR /code/mem-knowledge
 
 RUN apt-get update && \
     apt-get install --yes --no-install-recommends \
@@ -25,35 +64,24 @@ RUN apt-get update && \
       libreoffice-impress \
       libreoffice-writer && \
     rm -rf /var/lib/apt/lists/* && \
-    mkdir -p /opt/tika && \
-    curl -fsSL \
-      "https://repo1.maven.org/maven2/org/apache/tika/tika-server-standard/${TIKA_VERSION}/tika-server-standard-${TIKA_VERSION}.jar" \
-      -o "/opt/tika/tika-server-standard-${TIKA_VERSION}.jar" && \
-    echo "${TIKA_SHA1}  /opt/tika/tika-server-standard-${TIKA_VERSION}.jar" | sha1sum -c -
-
-RUN pip install --no-cache-dir --index-url "${PYPI_INDEX_URL}" uv==0.10.11
-COPY packages/redbear-model /code/packages/redbear-model
-COPY packages/storage-core /code/packages/storage-core
-COPY mem-knowledge/pyproject.toml mem-knowledge/uv.lock /code/mem-knowledge/
-
-WORKDIR /code/mem-knowledge
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --locked --no-dev --no-install-project && \
-    mkdir -p "${TIKTOKEN_CACHE_DIR}" && \
-    .venv/bin/python -c 'import tiktoken; tiktoken.get_encoding("cl100k_base")'
-
-COPY mem-knowledge/src /code/mem-knowledge/src
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --locked --no-dev && \
     useradd --create-home --uid 10001 memknowledge && \
-    mkdir -p /files && \
-    chown -R memknowledge:memknowledge /code /files /opt/tiktoken-cache
+    mkdir -p /files
+
+COPY --from=builder --chown=memknowledge:memknowledge \
+    /code/mem-knowledge/.venv /code/mem-knowledge/.venv
+COPY --from=builder --chown=memknowledge:memknowledge \
+    /code/mem-knowledge/src /code/mem-knowledge/src
+COPY --from=builder --chown=memknowledge:memknowledge /opt/tika /opt/tika
+COPY --from=builder --chown=memknowledge:memknowledge \
+    /opt/tiktoken-cache /opt/tiktoken-cache
+
+RUN chown memknowledge:memknowledge /files
 
 USER memknowledge
 
 EXPOSE 8080
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD ["CMD-SHELL", "[ \"$KB_PROCESS_ROLE\" != \"api\" ] || python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/internal/v1/health/live', timeout=3).read()\""]
+    CMD test "${KB_PROCESS_ROLE:-api}" != "api" || python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/internal/v1/health/live', timeout=3).read()"
 
 CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8080"]

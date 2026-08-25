@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import ast
 import re
+import stat
 import sys
 import zipfile
 from pathlib import Path, PurePosixPath
@@ -38,7 +39,7 @@ LEGACY_TASK_NAMES = {
     "app.core.rag.tasks.migrate_evidence_graph_knowledge",
 }
 LEGACY_TASK_MARKERS = {task_name.rsplit(".", 1)[-1] for task_name in LEGACY_TASK_NAMES}
-LEGACY_TASK_ALLOWED_SUFFIXES = {
+LEGACY_TASK_ALLOWED_PATHS = {
     "src/tasks/celery_app.py",
     "src/tasks/legacy_compat.py",
     "tasks/celery_app.py",
@@ -105,7 +106,61 @@ def _forbidden_import_marker(module: str) -> str | None:
 
 def _legacy_task_allowed(path: str | PurePosixPath) -> bool:
     normalized = _path_label(path)
-    return any(normalized.endswith(suffix) for suffix in LEGACY_TASK_ALLOWED_SUFFIXES)
+    return normalized in LEGACY_TASK_ALLOWED_PATHS
+
+
+def _assigned_names(target: ast.expr) -> set[str]:
+    if isinstance(target, ast.Name):
+        return {target.id}
+    if isinstance(target, (ast.Tuple, ast.List)):
+        return {name for item in target.elts for name in _assigned_names(item)}
+    return set()
+
+
+def _dynamic_import_aliases(tree: ast.AST) -> tuple[set[str], set[str]]:
+    loaders = {"__import__"}
+    importlib_modules: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == "importlib":
+                    importlib_modules.add(alias.asname or alias.name)
+        elif isinstance(node, ast.ImportFrom) and node.module == "importlib":
+            for alias in node.names:
+                if alias.name == "import_module":
+                    loaders.add(alias.asname or alias.name)
+
+    changed = True
+    while changed:
+        changed = False
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Assign):
+                targets = {name for target in node.targets for name in _assigned_names(target)}
+                value = node.value
+            elif isinstance(node, ast.AnnAssign):
+                targets = _assigned_names(node.target)
+                value = node.value
+            else:
+                continue
+            if value is None:
+                continue
+            is_importlib_module = isinstance(value, ast.Name) and value.id in importlib_modules
+            is_loader = isinstance(value, ast.Name) and value.id in loaders
+            if (
+                isinstance(value, ast.Attribute)
+                and value.attr == "import_module"
+                and isinstance(value.value, ast.Name)
+                and value.value.id in importlib_modules
+            ):
+                is_loader = True
+            for name in targets:
+                if is_loader and name not in loaders:
+                    loaders.add(name)
+                    changed = True
+                if is_importlib_module and name not in importlib_modules:
+                    importlib_modules.add(name)
+                    changed = True
+    return loaders, importlib_modules
 
 
 def _scan_python_text(path: str, source: str) -> list[str]:
@@ -119,22 +174,33 @@ def _scan_python_text(path: str, source: str) -> list[str]:
         marker = _forbidden_import_marker(module)
         if marker:
             errors.append(f"{label}: {marker}")
+    dynamic_loaders, importlib_modules = _dynamic_import_aliases(tree)
     for node in ast.walk(tree):
-        if not isinstance(node, ast.Call) or not node.args:
+        if not isinstance(node, ast.Call):
             continue
         function = node.func
-        is_dynamic_import = (
-            isinstance(function, ast.Name)
-            and function.id == "__import__"
-            or isinstance(function, ast.Attribute)
-            and function.attr == "import_module"
-        )
-        first_argument = node.args[0]
+        is_dynamic_import = isinstance(function, ast.Name) and function.id in dynamic_loaders
         if (
-            not is_dynamic_import
+            isinstance(function, ast.Attribute)
+            and function.attr == "import_module"
+            and isinstance(function.value, ast.Name)
+            and function.value.id in importlib_modules
+        ):
+            is_dynamic_import = True
+        if not is_dynamic_import:
+            continue
+        first_argument: ast.expr | None = node.args[0] if node.args else None
+        if first_argument is None:
+            first_argument = next(
+                (keyword.value for keyword in node.keywords if keyword.arg == "name"),
+                None,
+            )
+        if (
+            first_argument is None
             or not isinstance(first_argument, ast.Constant)
             or not isinstance(first_argument.value, str)
         ):
+            errors.append(f"{label}: dynamic-import")
             continue
         marker = _forbidden_import_marker(first_argument.value.strip())
         if marker:
@@ -150,12 +216,77 @@ def _scan_python_text(path: str, source: str) -> list[str]:
     return errors
 
 
+def _bytecode_source(path: Path) -> Path:
+    if path.parent.name == "__pycache__":
+        module_name = path.name.split(".", 1)[0]
+        return path.parent.parent / f"{module_name}.py"
+    return path.with_suffix(".py")
+
+
+def _scan_static_pth_target(root: Path, pth: Path, raw_target: str) -> list[str]:
+    label = _path_label(pth.relative_to(root))
+    errors: list[str] = []
+    raw_marker = _forbidden_path_marker(raw_target)
+    if raw_marker:
+        errors.append(f"{label}: {raw_marker}")
+    target = Path(raw_target)
+    if not target.is_absolute():
+        target = pth.parent / target
+    if target.is_symlink():
+        errors.append(f"{label}: symlink")
+        return errors
+    try:
+        resolved = target.resolve()
+    except OSError:
+        return errors
+    resolved_marker = _forbidden_path_marker(resolved.as_posix())
+    if resolved_marker:
+        errors.append(f"{label}: {resolved_marker}")
+    if not resolved.exists():
+        return errors
+    if resolved.is_file() and resolved.suffix == ".py":
+        try:
+            errors.extend(_scan_python_text(label, resolved.read_text(encoding="utf-8")))
+        except (OSError, UnicodeError):
+            errors.append(f"{label}: unreadable-python")
+    elif resolved.is_dir():
+        source_root = resolved / "src" if (resolved / "src").is_dir() else resolved
+        errors.extend(f"{label}: {error}" for error in _scan_source(source_root))
+    return errors
+
+
+def _scan_pth_files(root: Path) -> list[str]:
+    errors: list[str] = []
+    for pth in sorted(root.glob("*.pth")):
+        label = _path_label(pth.relative_to(root))
+        if pth.is_symlink():
+            errors.append(f"{label}: symlink")
+            continue
+        try:
+            lines = pth.read_text(encoding="utf-8").splitlines()
+        except (OSError, UnicodeError):
+            errors.append(f"{label}: unreadable-pth")
+            continue
+        for line in lines:
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            if stripped == "import" or stripped.startswith(("import ", "import\t")):
+                errors.append(f"{label}: executable-pth")
+                continue
+            errors.extend(_scan_static_pth_target(root, pth, stripped))
+    return errors
+
+
 def _scan_source(root: Path) -> list[str]:
     errors: list[str] = []
     if not root.is_dir():
         return [f"{_path_label(root.name)}: missing-source"]
     for path in sorted(root.rglob("*")):
         relative = path.relative_to(root)
+        if path.is_symlink():
+            errors.append(f"{_path_label(relative)}: symlink")
+            continue
         marker = _forbidden_path_marker(relative)
         if marker:
             errors.append(f"{_path_label(relative)}: {marker}")
@@ -175,7 +306,32 @@ def _scan_wheel(path: Path) -> list[str]:
     errors: list[str] = []
     try:
         with zipfile.ZipFile(path) as archive:
-            for member in sorted(archive.namelist()):
+            for member_info in sorted(archive.infolist(), key=lambda item: item.filename):
+                member = member_info.filename
+                mode = member_info.external_attr >> 16
+                if stat.S_ISLNK(mode):
+                    errors.append(f"{_path_label(member)}: symlink")
+                    continue
+                suffix = PurePosixPath(member).suffix.lower()
+                if suffix in {".pyc", ".pyo"}:
+                    errors.append(f"{_path_label(member)}: bytecode")
+                    continue
+                if suffix == ".pth":
+                    try:
+                        lines = archive.read(member).decode("utf-8").splitlines()
+                    except (KeyError, UnicodeError, OSError):
+                        errors.append(f"{_path_label(member)}: unreadable-pth")
+                        continue
+                    for line in lines:
+                        stripped = line.strip()
+                        if not stripped or stripped.startswith("#"):
+                            continue
+                        if stripped == "import" or stripped.startswith(("import ", "import\t")):
+                            errors.append(f"{_path_label(member)}: executable-pth")
+                            continue
+                        path_marker = _forbidden_path_marker(stripped)
+                        if path_marker:
+                            errors.append(f"{_path_label(member)}: {path_marker}")
                 marker = _forbidden_path_marker(member)
                 if marker:
                     errors.append(f"{_path_label(member)}: {marker}")
@@ -208,17 +364,28 @@ def _scan_site_packages(root: Path) -> list[str]:
     if not root.is_dir():
         return [f"{_path_label(root.name)}: missing-site-packages"]
     errors: list[str] = []
+    errors.extend(_scan_pth_files(root))
     for metadata in sorted(root.glob("*.dist-info/METADATA")):
         distribution = _metadata_distribution_name(metadata)
         if distribution in FORBIDDEN_DISTRIBUTIONS:
             errors.append(distribution)
     for child in sorted(root.iterdir()):
+        if child.is_symlink():
+            errors.append(f"{_path_label(child.name)}: symlink")
+            continue
         marker = _forbidden_path_marker(child.name)
         if marker:
             errors.append(f"{_path_label(child.name)}: {marker}")
     service_source = root / "src"
     if service_source.is_dir():
         errors.extend(f"src/{error}" for error in _scan_source(service_source))
+    for bytecode in sorted(
+        path for path in root.rglob("*") if path.suffix.lower() in {".pyc", ".pyo"}
+    ):
+        if not _bytecode_source(bytecode).is_file():
+            errors.append(f"{_path_label(bytecode.relative_to(root))}: orphan-bytecode")
+    for symlink in sorted(path for path in root.rglob("*") if path.is_symlink()):
+        errors.append(f"{_path_label(symlink.relative_to(root))}: symlink")
     return errors
 
 
@@ -227,11 +394,20 @@ def _scan_rootfs(root: Path) -> list[str]:
         return [f"{_path_label(root.name)}: missing-rootfs"]
     errors: list[str] = []
     service_source = root / "code" / "mem-knowledge" / "src"
-    if service_source.is_dir():
+    if not service_source.is_dir():
+        errors.append("rootfs: missing-source")
+    elif service_source.is_symlink():
+        errors.append("code/mem-knowledge/src: symlink")
+    else:
         errors.extend(f"code/mem-knowledge/src/{error}" for error in _scan_source(service_source))
-    for site_packages in sorted(root.rglob("site-packages")):
-        if site_packages.is_dir():
-            prefix = _path_label(site_packages.relative_to(root))
+    site_package_roots = [path for path in sorted(root.rglob("site-packages")) if path.is_dir()]
+    if not site_package_roots:
+        errors.append("rootfs: missing-site-packages")
+    for site_packages in site_package_roots:
+        prefix = _path_label(site_packages.relative_to(root))
+        if site_packages.is_symlink():
+            errors.append(f"{prefix}: symlink")
+        else:
             errors.extend(f"{prefix}/{error}" for error in _scan_site_packages(site_packages))
     for path in sorted(root.rglob("*")):
         relative = path.relative_to(root)

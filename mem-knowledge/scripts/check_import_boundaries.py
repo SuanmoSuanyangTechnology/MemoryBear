@@ -44,15 +44,79 @@ def _top_level_imports(tree: ast.AST) -> set[str]:
     return imports
 
 
+def _assigned_names(target: ast.expr) -> set[str]:
+    if isinstance(target, ast.Name):
+        return {target.id}
+    if isinstance(target, (ast.Tuple, ast.List)):
+        return {name for item in target.elts for name in _assigned_names(item)}
+    return set()
+
+
+def _task_factory_aliases(tree: ast.AST) -> tuple[set[str], set[str]]:
+    factories = {"shared_task"}
+    celery_modules: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == "celery":
+                    celery_modules.add(alias.asname or alias.name)
+        elif isinstance(node, ast.ImportFrom) and node.module == "celery":
+            for alias in node.names:
+                if alias.name == "shared_task":
+                    factories.add(alias.asname or alias.name)
+
+    changed = True
+    while changed:
+        changed = False
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Assign):
+                targets = {name for target in node.targets for name in _assigned_names(target)}
+                value = node.value
+            elif isinstance(node, ast.AnnAssign):
+                targets = _assigned_names(node.target)
+                value = node.value
+            else:
+                continue
+            if value is None:
+                continue
+            is_celery_module = isinstance(value, ast.Name) and value.id in celery_modules
+            is_factory = isinstance(value, ast.Name) and value.id in factories
+            if isinstance(value, ast.Attribute):
+                if value.attr == "task":
+                    is_factory = True
+                elif (
+                    value.attr == "shared_task"
+                    and isinstance(value.value, ast.Name)
+                    and value.value.id in celery_modules
+                ):
+                    is_factory = True
+            for name in targets:
+                if is_factory and name not in factories:
+                    factories.add(name)
+                    changed = True
+                if is_celery_module and name not in celery_modules:
+                    celery_modules.add(name)
+                    changed = True
+    return factories, celery_modules
+
+
 def _task_decorators(tree: ast.AST) -> list[tuple[int, str | None]]:
     decorators: list[tuple[int, str | None]] = []
+    factories, celery_modules = _task_factory_aliases(tree)
     for node in ast.walk(tree):
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
         for decorator in node.decorator_list:
             target = decorator.func if isinstance(decorator, ast.Call) else decorator
             is_task = isinstance(target, ast.Attribute) and target.attr == "task"
-            is_shared_task = isinstance(target, ast.Name) and target.id == "shared_task"
+            is_shared_task = isinstance(target, ast.Name) and target.id in factories
+            if (
+                isinstance(target, ast.Attribute)
+                and target.attr == "shared_task"
+                and isinstance(target.value, ast.Name)
+                and target.value.id in celery_modules
+            ):
+                is_shared_task = True
             if is_task or is_shared_task:
                 task_name = None
                 if isinstance(decorator, ast.Call):
