@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import hashlib
 import io
+import ipaddress
 import logging
 import re
+import unicodedata
 import zipfile
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -19,26 +21,106 @@ _EMBED_PREFIXES = (
     "xl/embeddings/",
     "ppt/embeddings/",
 )
-_LOG_CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]+")
-_HTTP_PREFIX = re.compile(r"^[\x00-\x20]*https?://", re.IGNORECASE)
+_HTTP_PREFIX = re.compile(r"^https?://", re.IGNORECASE)
 _WINDOWS_PATH = re.compile(r"^[A-Za-z]:[\\/]")
+_USERINFO = re.compile(r"[A-Za-z0-9._~!$&'()*+,;=:-]+")
+_DNS_LABEL = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?")
+_IPV4_CANDIDATE = re.compile(r"[0-9.]+")
 
 
-def safe_log_target(value: str) -> str:
+def _looks_like_remote(value: str) -> bool:
+    index = 0
+    while index < len(value) and unicodedata.category(value[index])[0] in {"C", "Z"}:
+        index += 1
+    return bool(_HTTP_PREFIX.match(value[index:]))
+
+
+def _has_unsafe_remote_char(value: str) -> bool:
+    return any(char in {"%", "\\"} or unicodedata.category(char)[0] in {"C", "Z"} for char in value)
+
+
+def _valid_authority(parsed) -> bool:
+    authority = parsed.netloc
+    if not authority or authority.count("@") > 1:
+        return False
+
+    host_port = authority
+    if "@" in authority:
+        userinfo, host_port = authority.split("@", 1)
+        if not userinfo or not _USERINFO.fullmatch(userinfo):
+            return False
+
+    if host_port.startswith("["):
+        closing_bracket = host_port.find("]")
+        if closing_bracket <= 1 or host_port.count("[") != 1 or host_port.count("]") != 1:
+            return False
+        remainder = host_port[closing_bracket + 1 :]
+        if remainder and (not remainder.startswith(":") or not remainder[1:].isdigit()):
+            return False
+    else:
+        if "[" in host_port or "]" in host_port or host_port.count(":") > 1:
+            return False
+        if ":" in host_port:
+            raw_host, raw_port = host_port.rsplit(":", 1)
+            if not raw_host or not raw_port.isdigit():
+                return False
+
+    try:
+        hostname = parsed.hostname
+        port = parsed.port
+    except ValueError:
+        return False
+    return bool(hostname) and (port is None or 0 <= port <= 65535)
+
+
+def _normalize_remote_host(hostname: str) -> str | None:
+    try:
+        return ipaddress.ip_address(hostname).compressed.lower()
+    except ValueError:
+        if ":" in hostname or _IPV4_CANDIDATE.fullmatch(hostname):
+            return None
+
+    hostname = hostname.removesuffix(".")
+    if not hostname:
+        return None
+
+    ascii_labels = []
+    for label in hostname.split("."):
+        if not label:
+            return None
+        try:
+            ascii_label = label.encode("idna").decode("ascii").lower()
+        except UnicodeError:
+            return None
+        if "." in ascii_label or not _DNS_LABEL.fullmatch(ascii_label):
+            return None
+        ascii_labels.append(ascii_label)
+
+    normalized = ".".join(ascii_labels)
+    return normalized if len(normalized) <= 253 else None
+
+
+def safe_log_target(value: object) -> str:
     """Classify a target without logging user-controlled path or payload data."""
-    raw_value = str(value or "")
+    try:
+        raw_value = "" if value is None else str(value)
+    except Exception:  # noqa: BLE001 - logging helpers must not mask the original failure
+        return "other-scheme"
     if _WINDOWS_PATH.match(raw_value):
         return "local-file"
+    remote_candidate = _looks_like_remote(raw_value)
+    if remote_candidate and _has_unsafe_remote_char(raw_value):
+        return "invalid-remote-target"
     try:
         parsed = urlsplit(raw_value)
     except ValueError:
-        return "invalid-remote-target" if _HTTP_PREFIX.match(raw_value) else "other-scheme"
+        return "invalid-remote-target" if remote_candidate else "other-scheme"
 
     scheme = parsed.scheme.lower()
     if scheme in {"http", "https"}:
-        if not parsed.netloc or not parsed.hostname:
+        if not _valid_authority(parsed):
             return "invalid-remote-target"
-        hostname = _LOG_CONTROL_CHARS.sub("", parsed.hostname)
+        hostname = _normalize_remote_host(parsed.hostname)
         return hostname or "invalid-remote-target"
     if scheme == "data":
         return "embedded-data"
