@@ -20,7 +20,12 @@ from pypdf import PdfReader
 
 from ..models.owned import Document, Knowledge
 from ..models.references import Workspace
-from ..rag.chunk.context import ChunkOutputMode, build_chunk_context
+from ..rag.chunk.context import (
+    ChunkOutputMode,
+    build_chunk_context,
+    is_direct_image_vision_enabled,
+    is_embedded_image_vision_enabled,
+)
 from ..rag.chunk.hierarchy import GroupedChildChunks, validate_parent_child_result
 from ..rag.chunk.llm_cache import get_llm_cache, set_llm_cache
 from ..rag.chunk.metadata import merge_parser_metadata
@@ -50,6 +55,11 @@ _AUDIO_PATTERN = re.compile(
 )
 _VIDEO_PATTERN = re.compile(
     r"\.(mp4|mov|avi|flv|mpeg|mpg|webm|wmv|3gp|3gpp|mkv?)$",
+    re.IGNORECASE,
+)
+_DIRECT_IMAGE_PATTERN = re.compile(r"\.(png|jpeg|jpg|webp|gif)$", re.IGNORECASE)
+_EMBEDDED_IMAGE_PATTERN = re.compile(
+    r"\.(pdf|docx|pptx|ppt|md|markdown)$",
     re.IGNORECASE,
 )
 _THINK_PREFIX = re.compile(r"^.*</think>", re.DOTALL)
@@ -95,6 +105,14 @@ class ParseDocumentSnapshot:
     image2text_id: uuid.UUID | None
 
 
+@dataclass(frozen=True)
+class ParseDocumentPreflight:
+    vision_model: Any
+    vector_store: TaskVectorStore
+    chat_model: Any
+    auto_questions_topn: int
+
+
 class _ParseAborted(RuntimeError):
     pass
 
@@ -107,11 +125,10 @@ def _progress_message(lines: list[str]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _mark_running(
+def _load_snapshot(
     runtime: ProcessRuntime,
     document_id: uuid.UUID,
     file_name: str,
-    progress_lines: list[str],
 ) -> ParseDocumentSnapshot:
     with runtime.database.sync_session() as session:
         document = session.get(Document, document_id)
@@ -125,13 +142,6 @@ def _mark_running(
             raise ValueError(f"Workspace {knowledge.workspace_id} not found")
 
         effective_file_name = file_name or document.file_name
-        progress_lines.append(f"{_progress_ts()} Start to parse.")
-        document.progress = 0.0
-        document.progress_msg = _progress_message(progress_lines)
-        document.process_begin_at = utcnow_naive()
-        document.process_duration = 0.0
-        document.run = 1
-        session.commit()
         return ParseDocumentSnapshot(
             document_id=document.id,
             knowledge_id=knowledge.id,
@@ -147,6 +157,24 @@ def _mark_running(
             llm_id=knowledge.llm_id,
             image2text_id=knowledge.image2text_id,
         )
+
+
+def _mark_running(
+    runtime: ProcessRuntime,
+    document_id: uuid.UUID,
+    progress_lines: list[str],
+) -> None:
+    progress_lines.append(f"{_progress_ts()} Start to parse.")
+
+    def mark_running(document: Document) -> None:
+        document.progress = 0.0
+        document.progress_msg = _progress_message(progress_lines)
+        document.process_begin_at = utcnow_naive()
+        document.process_duration = 0.0
+        document.run = 1
+
+    if not _update_document(runtime, document_id, mark_running):
+        raise ValueError(f"Document {document_id} not found")
 
 
 def _update_document(
@@ -223,6 +251,19 @@ def _estimate_pages(file_name: str, file_binary: bytes) -> int | None:
 
 
 def _build_vision_model(runtime: ProcessRuntime, snapshot: ParseDocumentSnapshot):
+    if _AUDIO_PATTERN.search(snapshot.file_name):
+        return QWenSeq2txt(lang="Chinese")
+    if _VIDEO_PATTERN.search(snapshot.file_name):
+        return MediaQWenCV(lang="Chinese")
+    needs_image_model = (
+        bool(_DIRECT_IMAGE_PATTERN.search(snapshot.file_name))
+        and is_direct_image_vision_enabled(snapshot.parser_config)
+    ) or (
+        bool(_EMBEDDED_IMAGE_PATTERN.search(snapshot.file_name))
+        and is_embedded_image_vision_enabled(snapshot.parser_config)
+    )
+    if not needs_image_model:
+        return None
     if snapshot.image2text_id is None:
         raise RuntimeError("image2text model config is unavailable")
     config = TaskModelFactory(runtime).resolve_image(
@@ -234,11 +275,39 @@ def _build_vision_model(runtime: ProcessRuntime, snapshot: ParseDocumentSnapshot
         client_pool=runtime.model_runtime.pool,
         lang="Chinese",
     )
-    if _AUDIO_PATTERN.search(snapshot.file_name):
-        return QWenSeq2txt(lang="Chinese")
-    if _VIDEO_PATTERN.search(snapshot.file_name):
-        return MediaQWenCV(lang="Chinese")
     return image_model
+
+
+def _preflight_document(
+    runtime: ProcessRuntime,
+    snapshot: ParseDocumentSnapshot,
+) -> ParseDocumentPreflight:
+    factory = TaskModelFactory(runtime)
+    auto_questions_topn = int(snapshot.parser_config.get("auto_questions", 0) or 0)
+    chat_model = None
+    if auto_questions_topn:
+        if snapshot.llm_id is None:
+            raise RuntimeError("llm model config is unavailable")
+        chat_model = factory.create_llm(snapshot.llm_id, snapshot.tenant_id)
+
+    vision_model = _build_vision_model(runtime, snapshot)
+    if snapshot.embedding_id is None:
+        raise ValueError(f"embedding_id config error: {snapshot.knowledge_id}")
+    embeddings = factory.create_embeddings(
+        snapshot.embedding_id,
+        snapshot.tenant_id,
+    )
+    vector_store = TaskVectorStore(
+        runtime.elasticsearch.sync_client(),
+        snapshot.knowledge_id,
+        embeddings,
+    )
+    return ParseDocumentPreflight(
+        vision_model=vision_model,
+        vector_store=vector_store,
+        chat_model=chat_model,
+        auto_questions_topn=auto_questions_topn,
+    )
 
 
 def _parse_chunks(
@@ -482,13 +551,13 @@ def _generate_qa_map(
 def _auto_qa_chunks(
     runtime: ProcessRuntime,
     snapshot: ParseDocumentSnapshot,
+    model: Any,
     items: list[dict],
     topn: int,
     custom_prompt: str | None,
 ) -> list[DocumentChunk]:
-    if snapshot.llm_id is None:
-        raise RuntimeError("auto_questions is enabled but LLM config is unavailable")
-    model = TaskModelFactory(runtime).create_llm(snapshot.llm_id, snapshot.tenant_id)
+    if model is None:
+        raise RuntimeError("llm model config is unavailable")
     qa_map = _generate_qa_map(runtime, model, items, topn, custom_prompt)
     source_chunks: list[DocumentChunk] = []
     qa_chunks: list[DocumentChunk] = []
@@ -654,13 +723,14 @@ def process_document(
     normalized_document_id: uuid.UUID | None = None
     try:
         normalized_document_id = uuid.UUID(str(document_id))
-        snapshot = _mark_running(
+        snapshot = _load_snapshot(
             runtime,
             normalized_document_id,
             file_name,
-            progress_lines,
         )
         document_label = snapshot.file_name or str(normalized_document_id)
+        preflight = _preflight_document(runtime, snapshot)
+        _mark_running(runtime, normalized_document_id, progress_lines)
         if _should_abort(runtime, normalized_document_id):
             raise _ParseAborted
 
@@ -695,7 +765,7 @@ def process_document(
             snapshot,
             file_binary,
             progress_callback,
-            _build_vision_model(runtime, snapshot),
+            preflight.vision_model,
         )
         if snapshot.parent_child_mode:
             child_result, parent_result, parent_id_map = parsed
@@ -729,23 +799,11 @@ def process_document(
             )
             progress_lines.append(f"{_progress_ts()} No chunks generated, skipping vectorization.")
         else:
-            factory = TaskModelFactory(runtime)
-            if snapshot.embedding_id is None:
-                raise RuntimeError("embedding model is unavailable")
-            embeddings = factory.create_embeddings(
-                snapshot.embedding_id,
-                snapshot.tenant_id,
-            )
-            vector_store = TaskVectorStore(
-                runtime.elasticsearch.sync_client(),
-                snapshot.knowledge_id,
-                embeddings,
-            )
+            vector_store = preflight.vector_store
             vector_store.delete_by_metadata_field(
                 "document_id",
                 str(normalized_document_id),
             )
-            auto_questions_topn = int(snapshot.parser_config.get("auto_questions", 0) or 0)
             if snapshot.parent_child_mode:
                 all_chunks = _parent_child_chunks(
                     snapshot,
@@ -757,12 +815,13 @@ def process_document(
                     f"{_progress_ts()} Parent-child mode: {len(parent_result)} parent "
                     f"chunks + {len(child_result)} child chunks prepared."
                 )
-            elif auto_questions_topn:
+            elif preflight.auto_questions_topn:
                 all_chunks = _auto_qa_chunks(
                     runtime,
                     snapshot,
+                    preflight.chat_model,
                     child_result,
-                    auto_questions_topn,
+                    preflight.auto_questions_topn,
                     snapshot.parser_config.get("qa_prompt"),
                 )
                 qa_count = sum(chunk.metadata.get("chunk_type") == "qa" for chunk in all_chunks)
