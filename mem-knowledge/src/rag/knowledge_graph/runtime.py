@@ -9,9 +9,13 @@ from sqlalchemy import select
 from ...models.owned import Knowledge
 from ...models.references import Workspace
 from ..vdb.vector_store import collection_name_for_knowledge
-from .config import GraphPipelineConfigError, require_graph_mapping
+from .config import GraphPipelineConfigError, is_graph_enabled, require_graph_mapping
 from .elasticsearch_store import graph_index_name
 from .models import GraphIndexRuntime
+
+
+class GraphRuntimeDisabled(GraphPipelineConfigError):
+    """The graph was disabled between the task state and runtime snapshots."""
 
 
 def snapshot_graph_runtime(runtime: object, knowledge_id: str) -> GraphIndexRuntime:
@@ -26,6 +30,8 @@ def snapshot_graph_runtime(runtime: object, knowledge_id: str) -> GraphIndexRunt
         knowledge = session.get(Knowledge, knowledge_uuid)
         if knowledge is None:
             raise GraphPipelineConfigError("knowledge does not exist")
+        if not is_graph_enabled(knowledge.parser_config):
+            raise GraphRuntimeDisabled("knowledge graph is disabled")
         workspace = (
             session.execute(select(Workspace).where(Workspace.id == knowledge.workspace_id))
             .scalars()
@@ -59,4 +65,4 @@ def snapshot_graph_runtime(runtime: object, knowledge_id: str) -> GraphIndexRunt
     )
 
 
-__all__ = ["snapshot_graph_runtime"]
+__all__ = ["GraphRuntimeDisabled", "snapshot_graph_runtime"]

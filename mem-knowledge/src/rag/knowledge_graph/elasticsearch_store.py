@@ -647,9 +647,26 @@ class GraphElasticsearchStore:
                     size=max(1, node_limit),
                     query=self._graph_query(knowledge_id, ENTITY_PROJECTION),
                     sort=[
-                        {"pagerank_flt": {"order": "desc", "unmapped_type": "float"}},
+                        {
+                            "pagerank_flt": {
+                                "order": "desc",
+                                "unmapped_type": "float",
+                                "missing": "_last",
+                            }
+                        },
                         {"degree_int": {"order": "desc", "unmapped_type": "long"}},
-                        {"entity_key_kwd": {"order": "asc"}},
+                        {
+                            "evidence_count_int": {
+                                "order": "desc",
+                                "unmapped_type": "long",
+                            }
+                        },
+                        {
+                            "entity_key_kwd": {
+                                "order": "asc",
+                                "unmapped_type": "keyword",
+                            }
+                        },
                     ],
                 ),
                 self._client.search(
@@ -657,8 +674,18 @@ class GraphElasticsearchStore:
                     size=max(1, edge_limit * 4),
                     query=self._graph_query(knowledge_id, RELATION_PROJECTION),
                     sort=[
-                        {"evidence_count_int": {"order": "desc"}},
-                        {"relation_key_kwd": {"order": "asc"}},
+                        {
+                            "evidence_count_int": {
+                                "order": "desc",
+                                "unmapped_type": "long",
+                            }
+                        },
+                        {
+                            "relation_key_kwd": {
+                                "order": "asc",
+                                "unmapped_type": "keyword",
+                            }
+                        },
                     ],
                 ),
                 self.list_document_maps(index_name, knowledge_id),

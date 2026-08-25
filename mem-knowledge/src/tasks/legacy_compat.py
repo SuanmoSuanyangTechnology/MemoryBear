@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 def _safe_identifier(value: object) -> str:
     try:
         return str(uuid.UUID(str(value)))
-    except (AttributeError, TypeError, ValueError):
+    except Exception:
         return "invalid"
 
 

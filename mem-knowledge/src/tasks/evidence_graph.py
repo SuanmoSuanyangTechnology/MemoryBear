@@ -14,6 +14,7 @@ from celery.exceptions import Ignore, Retry
 from ..rag.knowledge_graph.config import GraphPipelineConfigError
 from ..runtime import get_worker_runtime
 from ..services.evidence_graph import (
+    GraphDocumentDeletionPending,
     process_clear_graph,
     process_evidence_document,
     process_evidence_rebuild,
@@ -77,6 +78,9 @@ def _run_observed(
         raise
     except Exception as exc:
         countdown = _retry_countdown(task)
+        retry_options = {}
+        if isinstance(exc, GraphDocumentDeletionPending):
+            retry_options["max_retries"] = 8
         logger.warning(
             "[EvidenceGraph] task_retry task=%s task_id=%s kb_id=%s "
             "document_id=%s error_type=%s retry=%d countdown=%d elapsed_ms=%d",
@@ -89,7 +93,11 @@ def _run_observed(
             countdown,
             int((time.perf_counter() - started_at) * 1000),
         )
-        raise task.retry(exc=_redacted_exception(exc), countdown=countdown) from None
+        raise task.retry(
+            exc=_redacted_exception(exc),
+            countdown=countdown,
+            **retry_options,
+        ) from None
     logger.info(
         "[EvidenceGraph] task_done task=%s task_id=%s kb_id=%s document_id=%s "
         "status=%s elapsed_ms=%d",

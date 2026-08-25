@@ -23,7 +23,7 @@ from ..rag.knowledge_graph.extractor import LLMEntityRelationExtractor
 from ..rag.knowledge_graph.index_pipeline import KnowledgeGraphIndexPipeline
 from ..rag.knowledge_graph.lock import create_knowledge_graph_lock
 from ..rag.knowledge_graph.models import GraphTaskState
-from ..rag.knowledge_graph.runtime import snapshot_graph_runtime
+from ..rag.knowledge_graph.runtime import GraphRuntimeDisabled, snapshot_graph_runtime
 
 
 class GraphDocumentDeletionPending(RuntimeError):
@@ -180,13 +180,16 @@ def process_evidence_document(
             return {"status": "skipped", "reason": "graph_disabled"}
         if document_deleted and state.document_active is not None:
             raise GraphDocumentDeletionPending("document deletion has not been committed")
-        execute_evidence_document(
-            runtime,
-            state,
-            document_id,
-            lock_guard,
-            document_active=(False if document_deleted else bool(state.document_active)),
-        )
+        try:
+            execute_evidence_document(
+                runtime,
+                state,
+                document_id,
+                lock_guard,
+                document_active=(False if document_deleted else bool(state.document_active)),
+            )
+        except GraphRuntimeDisabled:
+            return {"status": "skipped", "reason": "graph_disabled"}
         lock_guard.ensure_valid()
         return {
             "status": "completed",
@@ -208,7 +211,10 @@ def process_evidence_rebuild(runtime: Any, knowledge_id: str) -> dict[str, Any]:
             return {"status": "skipped", "reason": "pipeline_changed"}
         if not state.graph_enabled:
             return {"status": "skipped", "reason": "graph_disabled"}
-        execute_evidence_rebuild(runtime, state, lock_guard)
+        try:
+            execute_evidence_rebuild(runtime, state, lock_guard)
+        except GraphRuntimeDisabled:
+            return {"status": "skipped", "reason": "graph_disabled"}
         lock_guard.ensure_valid()
         return {"status": "completed", "knowledge_id": knowledge_id}
 

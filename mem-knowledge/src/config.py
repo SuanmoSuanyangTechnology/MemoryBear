@@ -155,6 +155,12 @@ class KnowledgeSettings(BaseSettings):
         ge=1,
         validation_alias="AUTO_QUESTIONS_MAX_WORKERS",
     )
+    knowledge_graph_extract_max_concurrency: int = Field(
+        default=4,
+        ge=1,
+        le=16,
+        validation_alias="KNOWLEDGE_GRAPH_EXTRACT_MAX_CONCURRENCY",
+    )
     model_concurrency: int = Field(default=5, ge=1, validation_alias="MODEL_CONCURRENCY")
     model_http_max_connections: int = Field(
         default=300,

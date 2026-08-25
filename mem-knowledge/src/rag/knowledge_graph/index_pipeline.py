@@ -10,6 +10,7 @@ from collections import Counter, defaultdict
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from ...bootstrap import get_settings
 from .batching import build_extraction_batches, select_source_chunks
 from .extraction_cache import GraphExtractionCache
 from .models import (
@@ -28,8 +29,6 @@ from .normalizer import (
 )
 
 logger = logging.getLogger(__name__)
-
-_EXTRACT_MAX_CONCURRENCY = 5
 
 
 def calculate_evidence_pageranks(
@@ -353,7 +352,7 @@ class KnowledgeGraphIndexPipeline:
     ) -> list[ExtractionResult]:
         if not batches:
             return []
-        semaphore = asyncio.Semaphore(_EXTRACT_MAX_CONCURRENCY)
+        semaphore = asyncio.Semaphore(get_settings().knowledge_graph_extract_max_concurrency)
 
         async def extract_one(batch: ExtractionBatch) -> ExtractionResult:
             async with semaphore:
@@ -422,7 +421,17 @@ class KnowledgeGraphIndexPipeline:
                 "source_id": sorted({item.document_id for item in items}),
             }
             projections.append(projection)
-            texts.append(f"{from_name} -> {predicate} -> {to_name}\n{description}")
+            texts.append(
+                "\n".join(
+                    part
+                    for part in (
+                        ", ".join(keywords),
+                        f"{from_name} -> {predicate} -> {to_name}",
+                        description,
+                    )
+                    if part
+                )
+            )
         await self._embed_projections(runtime, projections, texts)
         self._lock_guard.ensure_valid()
         await self._store.write_relation_projections(
