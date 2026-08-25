@@ -10,6 +10,7 @@ from typing import Any
 import requests
 
 from ...bootstrap import get_settings
+from ..chunk.prompts import audio_transcription_prompt, video_transcription_prompt
 
 
 def _response_text(payload: dict[str, Any]) -> str:
@@ -85,14 +86,9 @@ class QWenSeq2txt(_QwenOmniClient):
     def transcription(self, audio_path: str) -> tuple[str, int]:
         path = Path(audio_path)
         encoded = base64.b64encode(path.read_bytes()).decode("ascii")
-        instruction = (
-            "请准确转录音频，保留时间戳，并总结内容。"
-            if self.lang.lower() == "chinese"
-            else "Transcribe the audio accurately with timestamps and summarize it."
-        )
         return self._complete(
             [
-                {"type": "text", "text": instruction},
+                {"type": "text", "text": audio_transcription_prompt(self.lang)},
                 {
                     "type": "input_audio",
                     "input_audio": {
@@ -124,14 +120,9 @@ class QWenCV(_QwenOmniClient):
             raise RuntimeError("Video bytes are required")
         media_type = mimetypes.guess_type(filename)[0] or "video/mp4"
         encoded = base64.b64encode(video_bytes).decode("ascii")
-        instruction = (
-            "请准确转录并描述视频，保留时间戳，并总结内容。"
-            if self.lang.lower() == "chinese"
-            else "Transcribe and describe the video accurately with timestamps and a summary."
-        )
         return self._complete(
             [
-                {"type": "text", "text": instruction},
+                {"type": "text", "text": video_transcription_prompt(self.lang)},
                 {
                     "type": "video_url",
                     "video_url": {"url": f"data:{media_type};base64,{encoded}"},

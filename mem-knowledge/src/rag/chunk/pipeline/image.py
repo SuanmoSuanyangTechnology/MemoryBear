@@ -34,6 +34,7 @@ class ImageChunkPipeline(ChunkPipeline):
         if not is_direct_image_vision_enabled(ctx.parser_config):
             source_markdown, source_url = self._source_image_markdown(ctx, source_file_id)
             blocks, _source_block = self._parse_markdown_blocks(source_markdown, source_url)
+            self._callback(ctx, 0.8, "Finish parsing image.")
             return ParseResult(
                 blocks=blocks,
                 merge_strategy="blocks",

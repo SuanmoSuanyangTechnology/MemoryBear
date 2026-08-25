@@ -1,8 +1,9 @@
-"""Audio and video pipelines without any OCR or DeepDoc branch."""
+"""Audio and video transcription pipelines."""
 
 from __future__ import annotations
 
 import copy
+import logging
 import os
 import tempfile
 from pathlib import Path
@@ -11,6 +12,8 @@ from ...models.media import QWenCV, QWenSeq2txt
 from ..context import ChunkContext, ParseResult
 from ..tokenization import tokenize
 from .base import ChunkPipeline
+
+LOGGER = logging.getLogger(__name__)
 
 AUDIO_EXTS = {
     ".da",
@@ -64,6 +67,10 @@ class AudioChunkPipeline(ChunkPipeline):
             result = [document]
             self._callback(ctx, 0.8, "Finish audio transcription.")
         except Exception as exc:  # noqa: BLE001 - preserve legacy empty-result media behavior.
+            LOGGER.warning(
+                "Audio transcription failed; returning compatible empty result error_type=%s",
+                type(exc).__name__,
+            )
             self._callback(ctx, -1, f"Audio transcription failed: {type(exc).__name__}")
         finally:
             if temporary_path and os.path.exists(temporary_path):
@@ -98,6 +105,10 @@ class PictureVideoChunkPipeline(ChunkPipeline):
             result = [document]
             self._callback(ctx, 0.8, "Finish video transcription.")
         except Exception as exc:  # noqa: BLE001 - preserve legacy empty-result media behavior.
+            LOGGER.warning(
+                "Video transcription failed; returning compatible empty result error_type=%s",
+                type(exc).__name__,
+            )
             self._callback(ctx, -1, f"Video transcription failed: {type(exc).__name__}")
         return ParseResult(direct_result=result, append_embed=False)
 
