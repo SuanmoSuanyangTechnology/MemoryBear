@@ -14,16 +14,24 @@ KNOWLEDGE_QUEUES = (
     "qa_import",
 )
 
-KNOWLEDGE_TASK_ROUTES = {
+PUBLISHABLE_KNOWLEDGE_TASK_ROUTES = {
     "app.core.rag.tasks.parse_document": "document_tasks",
     "app.core.rag.tasks.sync_knowledge_for_kb": "document_tasks",
-    "app.core.rag.tasks.build_graphrag_for_kb": "graphrag_tasks",
-    "app.core.rag.tasks.build_graphrag_for_document": "graphrag_tasks",
+    "app.core.rag.tasks.import_qa_chunks": "qa_import",
     "app.core.rag.tasks.sync_evidence_graph_document": "graphrag_tasks",
     "app.core.rag.tasks.rebuild_evidence_graph_knowledge": "graphrag_tasks",
-    "app.core.rag.tasks.migrate_evidence_graph_knowledge": "graphrag_tasks",
     "app.core.rag.tasks.clear_all_knowledge_graph_data": "graphrag_tasks",
-    "app.core.rag.tasks.import_qa_chunks": "qa_import",
+}
+
+COMPATIBILITY_TASK_ROUTES = {
+    "app.core.rag.tasks.build_graphrag_for_kb": "graphrag_tasks",
+    "app.core.rag.tasks.build_graphrag_for_document": "graphrag_tasks",
+    "app.core.rag.tasks.migrate_evidence_graph_knowledge": "graphrag_tasks",
+}
+
+KNOWLEDGE_TASK_ROUTES = {
+    **PUBLISHABLE_KNOWLEDGE_TASK_ROUTES,
+    **COMPATIBILITY_TASK_ROUTES,
 }
 
 
@@ -67,8 +75,10 @@ def create_celery_app(settings: KnowledgeSettings) -> Celery:
 celery_app = create_celery_app(get_settings())
 
 __all__ = [
+    "COMPATIBILITY_TASK_ROUTES",
     "KNOWLEDGE_QUEUES",
     "KNOWLEDGE_TASK_ROUTES",
+    "PUBLISHABLE_KNOWLEDGE_TASK_ROUTES",
     "celery_app",
     "create_celery_app",
 ]
