@@ -22,6 +22,10 @@ from .knowledge_file_storage import KnowledgeFileStorage
 logger = logging.getLogger(__name__)
 
 
+class _SafeQAImportError(RuntimeError):
+    """An error whose stable message may cross the task result boundary."""
+
+
 @dataclass(frozen=True)
 class _QAImportSnapshot:
     file_id: str
@@ -59,9 +63,9 @@ def _mark_running(
             return {"error": "document or knowledge not found", "imported": 0}
         workspace = session.get(Workspace, knowledge.workspace_id)
         if workspace is None:
-            raise ValueError("knowledge workspace not found")
+            raise _SafeQAImportError("knowledge workspace not found")
         if knowledge.embedding_id is None:
-            raise ValueError(f"embedding_id config error: {knowledge.id}")
+            raise _SafeQAImportError(f"embedding_id config error: {knowledge.id}")
 
         snapshot = _QAImportSnapshot(
             file_id=str(document.file_id),
@@ -88,11 +92,14 @@ def _load_contents(
     if contents is not None:
         return contents
     if not file_key:
-        raise ValueError("contents or file_key is required for QA import")
+        raise _SafeQAImportError("contents or file_key is required for QA import")
     storage = KnowledgeFileStorage(runtime.storage)
-    downloaded = runtime.run_async(lambda: storage.download(file_key))
+    try:
+        downloaded = runtime.run_async(lambda: storage.download(file_key))
+    except Exception:
+        raise _SafeQAImportError("QA storage download failed") from None
     if not downloaded:
-        raise OSError("Downloaded empty QA file from storage")
+        raise _SafeQAImportError("Downloaded empty QA file from storage")
     return downloaded
 
 
@@ -144,8 +151,8 @@ def _parse_excel(contents: bytes) -> tuple[list[dict[str, str]], list[int]]:
                         failed_rows.append(index + 1)
         finally:
             workbook.close()
-    except Exception as exc:
-        raise RuntimeError(f"Excel parse failed: {exc}") from exc
+    except Exception:
+        raise _SafeQAImportError("Excel parse failed") from None
     return pairs, failed_rows
 
 
@@ -219,7 +226,7 @@ def _mark_complete(
 def _mark_failed(
     runtime: ProcessRuntime,
     document_id: uuid.UUID,
-    exc: Exception,
+    safe_error: _SafeQAImportError,
     start_time: float,
     progress_lines: list[str],
 ) -> None:
@@ -228,16 +235,19 @@ def _mark_failed(
             document = session.get(Document, document_id)
             if document is None:
                 return
-            progress_lines.append(f"{_progress_ts()} QA import failed: {str(exc)[:200]}")
+            progress_lines.append(
+                f"{_progress_ts()} QA import failed: {str(safe_error)[:200]}"
+            )
             document.progress = -1.0
             document.progress_msg = _progress_message(progress_lines)
             document.process_duration = time.time() - start_time
             document.run = 0
             session.commit()
-    except Exception:
+    except Exception as state_exc:
         logger.warning(
-            "Failed to persist QA import failure state: document=%s",
+            "Failed to persist QA import failure state: document=%s error_type=%s",
             document_id,
+            type(state_exc).__name__,
         )
 
 
@@ -256,8 +266,11 @@ def process_qa_import(
     progress_lines = [f"{_progress_ts()} QA import task has been received."]
     normalized_document_id: uuid.UUID | None = None
     try:
-        normalized_document_id = uuid.UUID(str(document_id))
-        normalized_kb_id = uuid.UUID(str(kb_id))
+        try:
+            normalized_document_id = uuid.UUID(str(document_id))
+            normalized_kb_id = uuid.UUID(str(kb_id))
+        except ValueError:
+            raise _SafeQAImportError("badly formed hexadecimal UUID string") from None
         snapshot = _mark_running(
             runtime,
             normalized_kb_id,
@@ -271,44 +284,51 @@ def process_qa_import(
         pairs, failed_rows = _parse_qa_file(filename, loaded_contents)
         if not pairs:
             logger.warning("No valid QA pairs found: document=%s", normalized_document_id)
-            raise ValueError("No valid QA pairs found")
+            raise _SafeQAImportError("No valid QA pairs found")
         progress_lines.append(f"{_progress_ts()} Parsed {len(pairs)} QA pairs.")
 
-        embeddings = TaskModelFactory(runtime).create_embeddings(
-            snapshot.embedding_id,
-            snapshot.tenant_id,
-        )
-        vector_store = TaskVectorStore(
-            runtime.elasticsearch.sync_client(),
-            normalized_kb_id,
-            embeddings,
-        )
-        sort_id = 0
-        if clear_parse_task:
-            vector_store.delete_by_metadata_field(
-                "document_id",
-                str(normalized_document_id),
+        try:
+            embeddings = TaskModelFactory(runtime).create_embeddings(
+                snapshot.embedding_id,
+                snapshot.tenant_id,
             )
-        else:
-            _, items = vector_store.search_by_segment(
-                document_id=str(normalized_document_id),
-                pagesize=1,
-                page=1,
-                asc=False,
-            )
-            if items:
-                sort_id = items[0].metadata["sort_id"]
+        except Exception:
+            raise _SafeQAImportError("QA model initialization failed") from None
 
-        chunks = _build_chunks(
-            pairs,
-            snapshot,
-            kb_id=str(normalized_kb_id),
-            document_id=str(normalized_document_id),
-            sort_id=sort_id,
-        )
-        batch_size = min(runtime.settings.embedding_batch_size or 10, 20)
-        for start in range(0, len(chunks), batch_size):
-            vector_store.add_chunks(chunks[start : start + batch_size])
+        try:
+            vector_store = TaskVectorStore(
+                runtime.elasticsearch.sync_client(),
+                normalized_kb_id,
+                embeddings,
+            )
+            sort_id = 0
+            if clear_parse_task:
+                vector_store.delete_by_metadata_field(
+                    "document_id",
+                    str(normalized_document_id),
+                )
+            else:
+                _, items = vector_store.search_by_segment(
+                    document_id=str(normalized_document_id),
+                    pagesize=1,
+                    page=1,
+                    asc=False,
+                )
+                if items:
+                    sort_id = items[0].metadata["sort_id"]
+
+            chunks = _build_chunks(
+                pairs,
+                snapshot,
+                kb_id=str(normalized_kb_id),
+                document_id=str(normalized_document_id),
+                sort_id=sort_id,
+            )
+            batch_size = min(runtime.settings.embedding_batch_size or 10, 20)
+            for start in range(0, len(chunks), batch_size):
+                vector_store.add_chunks(chunks[start : start + batch_size])
+        except Exception:
+            raise _SafeQAImportError("QA vector processing failed") from None
 
         completion_error = _mark_complete(
             runtime,
@@ -328,19 +348,25 @@ def process_qa_import(
         )
         return {"imported": len(chunks), "failed_rows": failed_rows}
     except Exception as exc:
+        safe_error = (
+            exc
+            if isinstance(exc, _SafeQAImportError)
+            else _SafeQAImportError("QA import failed")
+        )
         logger.error(
-            "QA import failed: document=%s",
+            "QA import failed: document=%s error_type=%s",
             normalized_document_id or document_id,
+            type(exc).__name__,
         )
         if normalized_document_id is not None:
             _mark_failed(
                 runtime,
                 normalized_document_id,
-                exc,
+                safe_error,
                 start_time,
                 progress_lines,
             )
-        return {"error": str(exc), "imported": 0}
+        return {"error": str(safe_error), "imported": 0}
     finally:
         if clear_parse_task:
             try:
@@ -349,10 +375,11 @@ def process_qa_import(
                         doc_id=normalized_document_id or document_id
                     )
                 )
-            except Exception:
+            except Exception as cleanup_exc:
                 logger.warning(
-                    "Failed to clear QA parse state: document=%s",
+                    "Failed to clear QA parse state: document=%s error_type=%s",
                     normalized_document_id,
+                    type(cleanup_exc).__name__,
                 )
 
 

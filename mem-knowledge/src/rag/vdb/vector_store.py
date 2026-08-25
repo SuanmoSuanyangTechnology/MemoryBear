@@ -127,12 +127,22 @@ class TaskVectorStore:
             lambda: False,
         )()
         if supports_multimodal:
-            embedded = self._embeddings.embed_batch(texts)
+            embedded = []
+            for text in texts:
+                result = list(self._embeddings.embed_batch([text]))
+                self._validate_embedding_count(result, 1)
+                embedded.append(result[0])
         else:
-            embedded = self._embeddings.embed_documents(texts)
+            embedded = list(self._embeddings.embed_documents(texts))
+            self._validate_embedding_count(embedded, len(texts))
         for position, vector in zip(positions, embedded, strict=True):
             vectors[position] = vector
         return vectors
+
+    @staticmethod
+    def _validate_embedding_count(embedded: list[Any], expected: int) -> None:
+        if len(embedded) != expected:
+            raise RuntimeError("Embedding result count does not match input count")
 
     def _create_collection(self, vectors: list[list[float] | None]) -> None:
         sample = next((vector for vector in vectors if vector is not None), None)
