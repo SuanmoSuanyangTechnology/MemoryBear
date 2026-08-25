@@ -21,26 +21,37 @@ _EMBED_PREFIXES = (
     "xl/embeddings/",
     "ppt/embeddings/",
 )
-_HTTP_PREFIX = re.compile(r"^https?://", re.IGNORECASE)
 _WINDOWS_PATH = re.compile(r"^[A-Za-z]:[\\/]")
 _USERINFO = re.compile(r"[A-Za-z0-9._~!$&'()*+,;=:-]+")
 _DNS_LABEL = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?")
 _IPV4_CANDIDATE = re.compile(r"[0-9.]+")
 
 
-def _looks_like_remote(value: str) -> bool:
-    index = 0
-    while index < len(value) and unicodedata.category(value[index])[0] in {"C", "Z"}:
-        index += 1
-    return bool(_HTTP_PREFIX.match(value[index:]))
+def _without_control_or_separator(value: str) -> str:
+    return "".join(char for char in value if unicodedata.category(char)[0] not in {"C", "Z"})
 
 
 def _has_unsafe_remote_char(value: str) -> bool:
     return any(char in {"%", "\\"} or unicodedata.category(char)[0] in {"C", "Z"} for char in value)
 
 
-def _valid_authority(parsed) -> bool:
-    authority = parsed.netloc
+def _raw_remote_authority(value: str) -> tuple[bool, str | None]:
+    raw_scheme, separator, remainder = value.partition("://")
+    if not separator:
+        normalized = _without_control_or_separator(value)
+        return normalized.lower().startswith(("http://", "https://")), None
+
+    normalized_scheme = _without_control_or_separator(raw_scheme).lower()
+    if normalized_scheme not in {"http", "https"}:
+        return False, None
+
+    authority = re.split(r"[/#?]", remainder, maxsplit=1)[0]
+    if _has_unsafe_remote_char(raw_scheme) or _has_unsafe_remote_char(authority):
+        return True, None
+    return True, authority
+
+
+def _valid_authority(parsed, authority: str) -> bool:
     if not authority or authority.count("@") > 1:
         return False
 
@@ -55,14 +66,18 @@ def _valid_authority(parsed) -> bool:
         if closing_bracket <= 1 or host_port.count("[") != 1 or host_port.count("]") != 1:
             return False
         remainder = host_port[closing_bracket + 1 :]
-        if remainder and (not remainder.startswith(":") or not remainder[1:].isdigit()):
+        if remainder and (
+            not remainder.startswith(":")
+            or not remainder[1:].isascii()
+            or not remainder[1:].isdigit()
+        ):
             return False
     else:
         if "[" in host_port or "]" in host_port or host_port.count(":") > 1:
             return False
         if ":" in host_port:
             raw_host, raw_port = host_port.rsplit(":", 1)
-            if not raw_host or not raw_port.isdigit():
+            if not raw_host or not raw_port.isascii() or not raw_port.isdigit():
                 return False
 
     try:
@@ -77,39 +92,37 @@ def _normalize_remote_host(hostname: str) -> str | None:
     try:
         return ipaddress.ip_address(hostname).compressed.lower()
     except ValueError:
-        if ":" in hostname or _IPV4_CANDIDATE.fullmatch(hostname):
+        if ":" in hostname:
             return None
 
-    hostname = hostname.removesuffix(".")
-    if not hostname:
+    try:
+        ascii_hostname = hostname.encode("idna").decode("ascii").lower().removesuffix(".")
+    except UnicodeError:
+        return None
+    if not ascii_hostname:
         return None
 
-    ascii_labels = []
-    for label in hostname.split("."):
-        if not label:
+    try:
+        return ipaddress.ip_address(ascii_hostname).compressed.lower()
+    except ValueError:
+        if ":" in ascii_hostname or _IPV4_CANDIDATE.fullmatch(ascii_hostname):
             return None
-        try:
-            ascii_label = label.encode("idna").decode("ascii").lower()
-        except UnicodeError:
-            return None
-        if "." in ascii_label or not _DNS_LABEL.fullmatch(ascii_label):
-            return None
-        ascii_labels.append(ascii_label)
 
-    normalized = ".".join(ascii_labels)
-    return normalized if len(normalized) <= 253 else None
+    labels = ascii_hostname.split(".")
+    if not all(label and _DNS_LABEL.fullmatch(label) for label in labels):
+        return None
+    return ascii_hostname if len(ascii_hostname) <= 253 else None
 
 
 def safe_log_target(value: object) -> str:
     """Classify a target without logging user-controlled path or payload data."""
-    try:
-        raw_value = "" if value is None else str(value)
-    except Exception:  # noqa: BLE001 - logging helpers must not mask the original failure
+    if type(value) is not str:
         return "other-scheme"
+    raw_value = value
     if _WINDOWS_PATH.match(raw_value):
         return "local-file"
-    remote_candidate = _looks_like_remote(raw_value)
-    if remote_candidate and _has_unsafe_remote_char(raw_value):
+    remote_candidate, raw_authority = _raw_remote_authority(raw_value)
+    if remote_candidate and raw_authority is None:
         return "invalid-remote-target"
     try:
         parsed = urlsplit(raw_value)
@@ -118,7 +131,11 @@ def safe_log_target(value: object) -> str:
 
     scheme = parsed.scheme.lower()
     if scheme in {"http", "https"}:
-        if not _valid_authority(parsed):
+        if (
+            not remote_candidate
+            or raw_authority is None
+            or not _valid_authority(parsed, raw_authority)
+        ):
             return "invalid-remote-target"
         hostname = _normalize_remote_host(parsed.hostname)
         return hostname or "invalid-remote-target"
