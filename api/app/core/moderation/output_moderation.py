@@ -47,6 +47,27 @@ class OutputModeration:
             return self._check()
         return False
 
+    def reset(self, committed_text: str = "") -> None:
+        """Discard provisional text while retaining the committed stream prefix."""
+        self._accumulated_text = committed_text
+        # The committed prefix was already checked before the provisional attempt.
+        self._last_checked_length = len(committed_text)
+        self._flagged = False
+        self._preset_response = ""
+
+    def replace_and_check(self, candidate_text: str) -> bool:
+        """Replace the buffer and check the complete canonical candidate.
+
+        Parallel output chunks may arrive interleaved even though the displayed
+        reply is grouped by output node. Rechecking the rebuilt candidate prevents the
+        arrival order from hiding a sensitive sequence that exists in display order.
+        """
+        self._accumulated_text = candidate_text
+        self._last_checked_length = 0
+        self._flagged = False
+        self._preset_response = ""
+        return self._check()
+
     def check_final(self) -> bool:
         """流结束时检查完整累积文本"""
         return self._check()

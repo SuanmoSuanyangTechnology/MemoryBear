@@ -7,6 +7,7 @@ LLM 节点实现
 import asyncio
 import logging
 import json
+import re
 import uuid
 from copy import deepcopy
 from typing import Any
@@ -132,6 +133,7 @@ class LLMNode(BaseNode):
         output_types = {
             "output": VariableType.STRING,
             "branch_signal": VariableType.STRING,
+            "error_message": VariableType.STRING,
             "reasoning_content": VariableType.STRING,
             "token_usage": VariableType.OBJECT,
             "param_warnings": VariableType.ARRAY_STRING,
@@ -973,6 +975,7 @@ class LLMNode(BaseNode):
                     "output": str(llm_result) if llm_result else "",
                     "branch_signal": business_result["branch_signal"],
                 }
+            result["error_message"] = business_result.get("error_message") or ""
             result["reasoning_content"] = business_result.get("reasoning_content") or ""
             result["history"] = business_result.get("history") or []
             if business_result.get("param_warnings"):
@@ -1006,6 +1009,20 @@ class LLMNode(BaseNode):
                     "total_tokens": usage.get('total_tokens', 0)
                 }
         return None
+
+    @staticmethod
+    def _format_error_message(error: Exception) -> str:
+        """Return a bounded user-facing error message without credential values."""
+        details = " ".join(str(error).split())
+        details = re.sub(
+            r"(?i)(api[_-]?key|authorization|bearer|token|password)\s*[:=]\s*[^\s,;]+",
+            r"\1=[REDACTED]",
+            details,
+        )
+        details = re.sub(r"\bsk-[A-Za-z0-9_-]+\b", "[REDACTED]", details)
+        if not details:
+            return "模型调用失败，请稍后重试。"
+        return f"模型调用失败：{details[:500]}"
 
     def _handle_llm_error(self, error: Exception) -> dict:
         """处理 LLM 调用异常，根据 error_handle 配置决定行为
@@ -1042,6 +1059,7 @@ class LLMNode(BaseNode):
                 return {
                     "llm_result": None,
                     "branch_signal": "ERROR",
+                    "error_message": self._format_error_message(error),
                 }
         raise error
 
@@ -1058,8 +1076,15 @@ class LLMNode(BaseNode):
         self.typed_config = LLMNodeConfig(**self.config)
         max_attempts = self.typed_config.retry.max_attempts + 1 if self.typed_config.retry.enable else 1
         last_error = None
+        # Branch-mode LLM chunks may be sent optimistically before SUCCESS/ERROR
+        # routing is resolved. BaseNode attaches this marker to node_chunk events;
+        # retries/final failures emit rollback controls below.
+        self._provisional_error_branch_stream = (
+            self.typed_config.error_handle.method == HttpErrorHandle.BRANCH
+        )
 
         for attempt in range(max_attempts):
+            self._stream_attempt = attempt + 1
             try:
                 attempt_started_at = asyncio.get_running_loop().time()
                 llm = await self._prepare_llm(state, variable_pool, True)
@@ -1071,8 +1096,11 @@ class LLMNode(BaseNode):
                 chunk_count = 0
                 full_reasoning_content = ""
                 stop_sequences = self.typed_config.stop.value[:4] if (self.typed_config.stop.enable and self.typed_config.stop.value) else None
+                # Stop-sequence handling changes visible text and therefore uses
+                # canonical buffering. Other modes keep true token streaming;
+                # reconcile remains the defensive correction for any provider-
+                # specific post-processing difference.
                 need_buffer = bool(stop_sequences)
-                buffered_chunks = [] if need_buffer else None
                 reasoning_done_sent = False
 
                 last_meta_data = {}
@@ -1123,30 +1151,13 @@ class LLMNode(BaseNode):
                         full_response += content
 
                         if stop_sequences:
-                            truncated = False
-                            truncated_pos = -1
-                            for seq in stop_sequences:
-                                idx = 0
-                                while True:
-                                    pos = full_response.find(seq, idx)
-                                    if pos == -1:
-                                        break
-                                    if not self._is_inside_reasoning_block(full_response, pos):
-                                        truncated_pos = pos
-                                        truncated = True
-                                        break
-                                    idx = pos + len(seq)
-                                if truncated:
-                                    break
+                            full_response, truncated = self._apply_stop_sequences(full_response)
                             if truncated:
-                                full_response = full_response[:truncated_pos]
                                 chunk_count += 1
                                 break
 
                         chunk_count += 1
-                        if need_buffer:
-                            buffered_chunks.append(content)
-                        else:
+                        if not need_buffer:
                             yield {"__final__": False, "chunk": content, "field": "output"}
 
                 # Emit reasoning_content done signal if it wasn't sent
@@ -1154,17 +1165,6 @@ class LLMNode(BaseNode):
                 # chunk contained reasoning_content).
                 if self.typed_config.enable_reasoning_content_extraction and not reasoning_done_sent:
                     yield {"__final__": False, "chunk": "", "done": True, "field": "reasoning_content"}
-
-                if need_buffer:
-                    for c in buffered_chunks:
-                        yield {"__final__": False, "chunk": c, "field": "output"}
-
-                yield {
-                    "__final__": False,
-                    "chunk": "",
-                    "done": True,
-                    "field": "output"
-                }
 
                 reasoning_content = ""
                 if self.typed_config.enable_reasoning_content_extraction:
@@ -1175,6 +1175,19 @@ class LLMNode(BaseNode):
                         full_response, reasoning_content = self._extract_reasoning_content(full_response)
 
                 full_response, _ = self._apply_stop_sequences(full_response)
+
+                # Buffered modes publish the normalized canonical value rather
+                # than replaying raw provider chunks. This keeps reconciliation
+                # exact for stop sequences spanning chunks and reasoning markup.
+                if need_buffer and full_response:
+                    yield {"__final__": False, "chunk": full_response, "field": "output"}
+
+                yield {
+                    "__final__": False,
+                    "chunk": "",
+                    "done": True,
+                    "field": "output"
+                }
 
                 logger.info(f"节点 {self.node_id} LLM 调用完成，输出长度: {len(full_response)}, 总 chunks: {chunk_count}")
                 stream_finished_at = asyncio.get_running_loop().time()
@@ -1235,10 +1248,27 @@ class LLMNode(BaseNode):
                 logger.error(f"节点 {self.node_id} LLM 流式调用失败（尝试 {attempt + 1}/{max_attempts}）: {e}")
 
                 if attempt < max_attempts - 1 and self.typed_config.retry.enable:
+                    # Remove chunks from the failed attempt before retrying. This
+                    # is an internal stream control; it never terminates the SSE.
+                    yield {
+                        "__stream_control__": "rollback",
+                        "attempt": attempt + 1,
+                        "reason": "retry",
+                        "final": False,
+                    }
                     await asyncio.sleep(self.typed_config.retry.retry_interval / 1000)
                 else:
                     break
 
         logger.error(f"节点 {self.node_id} LLM 流式调用最终失败，已重试 {max_attempts} 次")
+        # Roll back the final attempt before returning DEFAULT/ERROR routing or
+        # re-raising in NONE mode. The workflow itself remains responsible for
+        # selecting the configured error branch.
+        yield {
+            "__stream_control__": "rollback",
+            "attempt": max_attempts,
+            "reason": "final_error",
+            "final": True,
+        }
         error_result = self._handle_llm_error(last_error)
         yield {"__final__": True, "result": error_result}
