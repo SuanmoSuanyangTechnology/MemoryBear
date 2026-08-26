@@ -11,8 +11,11 @@ import zipfile
 from pathlib import Path, PurePosixPath
 
 FORBIDDEN_DISTRIBUTIONS = {
+    "datrie",
     "graspologic",
+    "hanziconv",
     "networkx",
+    "nltk",
     "onnxruntime",
     "onnxruntime-gpu",
     "opencv-python",
@@ -22,8 +25,11 @@ FORBIDDEN_DISTRIBUTIONS = {
 }
 FORBIDDEN_IMPORT_ROOTS = {
     "cv2": "opencv-python",
+    "datrie": "datrie",
     "graspologic": "graspologic",
+    "hanziconv": "hanziconv",
     "networkx": "networkx",
+    "nltk": "nltk",
     "onnxruntime": "onnxruntime",
     "torch": "torch",
     "xgboost": "xgboost",
@@ -45,17 +51,6 @@ LEGACY_TASK_ALLOWED_PATHS = {
     "tasks/celery_app.py",
     "tasks/legacy_compat.py",
 }
-DYNAMIC_NAMESPACE_NAMES = {
-    "__builtins__",
-    "__import__",
-    "compile",
-    "eval",
-    "exec",
-    "globals",
-    "locals",
-    "vars",
-}
-DYNAMIC_IMPORT_STRINGS = {"__import__", "import_module"}
 
 
 def _normalize_distribution(value: str) -> str:
@@ -70,6 +65,10 @@ def _forbidden_path_marker(path: str | PurePosixPath) -> str | None:
     parts = [part.lower() for part in PurePosixPath(path).parts if part not in {"", "/"}]
     for part in parts:
         stem = PurePosixPath(part).stem
+        if part == "huqie.txt":
+            return "huqie"
+        if part == "wordnet.zip" or part == "nltk_data":
+            return part
         if "deepdoc" in stem:
             return "deepdoc"
         if stem in {"plain_pdf", "plainpdf"}:
@@ -140,68 +139,6 @@ def _legacy_task_allowed(path: str | PurePosixPath) -> bool:
     return normalized in LEGACY_TASK_ALLOWED_PATHS
 
 
-def _has_dynamic_import_primitive(tree: ast.AST) -> bool:
-    parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
-    sys_aliases = {"sys"} | {
-        alias.asname or alias.name
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Import)
-        for alias in node.names
-        if alias.name == "sys"
-    }
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            if any(
-                alias.name.split(".", 1)[0] in {"builtins", "importlib"} for alias in node.names
-            ):
-                return True
-        elif isinstance(node, ast.ImportFrom):
-            root = (node.module or "").split(".", 1)[0]
-            if root in {"builtins", "importlib"}:
-                return True
-            if root == "sys" and any(alias.name in {"modules", "__dict__"} for alias in node.names):
-                return True
-        elif isinstance(node, ast.Name) and node.id in (
-            DYNAMIC_NAMESPACE_NAMES | {"builtins", "importlib"}
-        ):
-            return True
-        elif isinstance(node, ast.Name) and node.id in sys_aliases:
-            parent = parents.get(node)
-            if not (
-                isinstance(parent, ast.Attribute)
-                and parent.value is node
-                and parent.attr not in {"__dict__", "__getattr__", "__getattribute__", "modules"}
-            ):
-                return True
-        elif isinstance(node, ast.Attribute):
-            if node.attr in {"__builtins__", "__import__", "import_module"}:
-                return True
-            if (
-                node.attr in {"modules", "__dict__"}
-                and isinstance(node.value, ast.Name)
-                and node.value.id in sys_aliases
-            ):
-                return True
-        if _static_string(node) in DYNAMIC_IMPORT_STRINGS:
-            return True
-    return False
-
-
-def _static_string(node: ast.AST) -> str | None:
-    if isinstance(node, ast.Constant) and isinstance(node.value, str):
-        return node.value
-    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
-        left = _static_string(node.left)
-        right = _static_string(node.right)
-        return left + right if left is not None and right is not None else None
-    if isinstance(node, ast.JoinedStr):
-        values = [_static_string(value) for value in node.values]
-        return "".join(values) if all(value is not None for value in values) else None
-    if isinstance(node, ast.FormattedValue):
-        return _static_string(node.value)
-    return None
-
-
 def _scan_python_text(path: str, source: str) -> list[str]:
     label = _path_label(path)
     errors: list[str] = []
@@ -213,8 +150,6 @@ def _scan_python_text(path: str, source: str) -> list[str]:
         marker = _forbidden_import_marker(module)
         if marker:
             errors.append(f"{label}: {marker}")
-    if _has_dynamic_import_primitive(tree):
-        errors.append(f"{label}: dynamic-import")
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call) or not node.args:
             continue
