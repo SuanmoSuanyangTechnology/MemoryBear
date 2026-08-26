@@ -32,6 +32,15 @@ AUTHORIZED_TASKS_BY_MODULE = {
     },
     "tasks/qa_import.py": {"app.core.rag.tasks.import_qa_chunks"},
 }
+REQUIRED_RUNTIME_ROOT_MODULES = frozenset(
+    {
+        "main.py",
+        "api/router.py",
+        "rag/chunk/router.py",
+        "tasks/celery_worker.py",
+        *AUTHORIZED_TASKS_BY_MODULE,
+    }
+)
 RUNTIME_ROOT_MODULES = frozenset(
     {
         "main.py",
@@ -41,11 +50,54 @@ RUNTIME_ROOT_MODULES = frozenset(
         *AUTHORIZED_TASKS_BY_MODULE,
     }
 )
-REQUIRED_RUNTIME_ROOT_MODULES = RUNTIME_ROOT_MODULES
 # This finite source scan recognizes only declared protocol tombstones and
 # documented dynamic entries. It is an engineering guardrail, not a sandbox
 # proof against arbitrary Python reflection or runtime imports.
 RUNTIME_DYNAMIC_IMPORT_ALLOWLIST: dict[str, str] = {}
+DUPLICATE_PUBLIC_CLASS_ALLOWLIST: dict[tuple[str, tuple[str, ...]], str] = {
+    (
+        "Document",
+        ("api/schemas/document.py", "models/owned/document.py"),
+    ): "Internal API transport contract and owned ORM model intentionally share the legacy name.",
+    (
+        "File",
+        ("api/schemas/file.py", "models/owned/file.py"),
+    ): "Internal API transport contract and owned ORM model intentionally share the legacy name.",
+    (
+        "FilterCondition",
+        ("api/schemas/knowledge_metadata.py", "rag/metadata/filter_engine.py"),
+    ): (
+        "API metadata-filter contract and RAG filter-engine value object are separate "
+        "protocol layers."
+    ),
+    (
+        "FilterGroup",
+        ("api/schemas/knowledge_metadata.py", "rag/metadata/filter_engine.py"),
+    ): (
+        "API metadata-filter contract and RAG filter-engine value object are separate "
+        "protocol layers."
+    ),
+    (
+        "Knowledge",
+        ("api/schemas/knowledge.py", "models/owned/knowledge.py"),
+    ): "Internal API transport contract and owned ORM model intentionally share the legacy name.",
+    (
+        "KnowledgeBase",
+        ("api/schemas/knowledge.py", "db.py"),
+    ): "API request contract base and SQLAlchemy metadata base are separate protocol boundaries.",
+    (
+        "KnowledgeShare",
+        ("api/schemas/knowledge_share.py", "models/owned/knowledge_share.py"),
+    ): "Internal API transport contract and owned ORM model intentionally share the legacy name.",
+    (
+        "ParseDocumentSnapshot",
+        ("services/document.py", "services/document_processing.py"),
+    ): "API dispatch snapshot and Celery parsing snapshot are separate task-boundary payloads.",
+    (
+        "QWenCV",
+        ("rag/models/media.py", "rag/models/vision.py"),
+    ): "Media and image parser routes select distinct legacy-compatible model adapters.",
+}
 REMOVED_RUNTIME_MODULES = frozenset(
     {
         "rag/chunk/parser/markdown.py",
@@ -111,6 +163,33 @@ def _python_modules(root: Path) -> dict[tuple[str, ...], str]:
     return modules
 
 
+def _module_path_for_runtime_root(
+    root_path: str,
+    paths_to_modules: dict[str, tuple[str, ...]],
+) -> str | None:
+    """Resolve a configured module file or package root to its source path."""
+
+    normalized = root_path.rstrip("/")
+    if normalized in paths_to_modules:
+        return normalized
+    package_initializer = f"{normalized}/__init__.py"
+    return package_initializer if package_initializer in paths_to_modules else None
+
+
+def _module_and_package_initializers(
+    module_parts: tuple[str, ...],
+    modules: dict[tuple[str, ...], str],
+) -> set[str]:
+    paths = {
+        module_path
+        for depth in range(1, len(module_parts))
+        if (module_path := modules.get(module_parts[:depth]))
+    }
+    if module_path := modules.get(module_parts):
+        paths.add(module_path)
+    return paths
+
+
 def _module_imports(
     path: Path,
     module_parts: tuple[str, ...],
@@ -122,9 +201,7 @@ def _module_imports(
     imported: set[str] = set()
 
     def add_if_present(parts: tuple[str, ...]) -> None:
-        module_path = modules.get(parts)
-        if module_path:
-            imported.add(module_path)
+        imported.update(_module_and_package_initializers(parts, modules))
 
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
@@ -156,11 +233,13 @@ def _reachable_runtime_modules(
 
     modules = _python_modules(root)
     paths_to_modules = {path: module for module, path in modules.items()}
-    reachable = {
-        path
-        for path in runtime_roots | set(dynamic_import_allowlist or {})
-        if path in paths_to_modules
-    }
+    reachable: set[str] = set()
+    for root_path in runtime_roots | set(dynamic_import_allowlist or {}):
+        module_path = _module_path_for_runtime_root(root_path, paths_to_modules)
+        if module_path:
+            reachable.update(
+                _module_and_package_initializers(paths_to_modules[module_path], modules)
+            )
     pending = list(reachable)
     while pending:
         current = pending.pop()
@@ -198,6 +277,7 @@ def _scan_runtime_reachability(
     runtime_roots: set[str] | frozenset[str],
     required_roots: set[str] | frozenset[str],
     dynamic_import_allowlist: dict[str, str] | None = None,
+    duplicate_class_allowlist: dict[tuple[str, tuple[str, ...]], str] | None = None,
 ) -> list[str]:
     """Report dead modules and duplicate public classes in the finite graph.
 
@@ -208,10 +288,16 @@ def _scan_runtime_reachability(
 
     modules = _python_modules(root)
     known_paths = set(modules.values())
+    paths_to_modules = {path: module for module, path in modules.items()}
     errors = [
         f"required runtime root is not configured: {path}"
         for path in sorted(required_roots - runtime_roots)
     ]
+    errors.extend(
+        f"required runtime root module is missing: {path}"
+        for path in sorted(required_roots & runtime_roots)
+        if _module_path_for_runtime_root(path, paths_to_modules) is None
+    )
     for path, reason in sorted((dynamic_import_allowlist or {}).items()):
         if path not in known_paths:
             errors.append(f"dynamic import allowlist module is missing: {path}")
@@ -235,36 +321,32 @@ def _scan_runtime_reachability(
         if not module_path.endswith("/__init__.py") and module_path != "__init__.py":
             errors.append(f"unreachable runtime module: {module_path}")
 
-    classes: dict[tuple[str, str], list[str]] = {}
+    classes: dict[str, list[str]] = {}
     for module_path in sorted(known_paths):
         tree = ast.parse((root / module_path).read_text(encoding="utf-8"), filename=module_path)
-        imported_names = {
-            alias.asname or alias.name: f"{node.level}:{node.module}:{alias.name}"
-            for node in tree.body
-            if isinstance(node, ast.ImportFrom)
-            for alias in node.names
-        }
         for node in tree.body:
             if isinstance(node, ast.ClassDef) and not node.name.startswith("_"):
-                if any(
-                    isinstance(decorator, ast.Name) and decorator.id == "dataclass"
-                    or isinstance(decorator, ast.Call)
-                    and isinstance(decorator.func, ast.Name)
-                    and decorator.func.id == "dataclass"
-                    for decorator in node.decorator_list
-                ):
-                    continue
-                bases = ", ".join(
-                    imported_names.get(base.id, f"local:{base.id}")
-                    if isinstance(base, ast.Name)
-                    else ast.unparse(base)
-                    for base in node.bases
-                )
-                classes.setdefault((node.name, bases), []).append(module_path)
-    for (class_name, _bases), module_paths in sorted(classes.items()):
+                classes.setdefault(node.name, []).append(module_path)
+    allowed_duplicates = duplicate_class_allowlist or {}
+    observed_allowed_duplicates: set[tuple[str, tuple[str, ...]]] = set()
+    for class_name, module_paths in sorted(classes.items()):
         if len(module_paths) > 1:
+            key = (class_name, tuple(sorted(module_paths)))
+            reason = allowed_duplicates.get(key)
+            if reason and reason.strip():
+                observed_allowed_duplicates.add(key)
+                continue
             errors.append(
                 f"duplicate public class {class_name}: {', '.join(sorted(module_paths))}"
+            )
+    for key, reason in sorted(allowed_duplicates.items()):
+        class_name, module_paths = key
+        if not reason.strip():
+            errors.append(f"duplicate public class allowlist reason is missing: {class_name}")
+        elif key not in observed_allowed_duplicates:
+            errors.append(
+                "duplicate public class allowlist entry is stale: "
+                f"{class_name}: {', '.join(module_paths)}"
             )
     return errors
 
@@ -351,6 +433,7 @@ def main() -> int:
         runtime_roots=RUNTIME_ROOT_MODULES,
         required_roots=REQUIRED_RUNTIME_ROOT_MODULES,
         dynamic_import_allowlist=RUNTIME_DYNAMIC_IMPORT_ALLOWLIST,
+        duplicate_class_allowlist=DUPLICATE_PUBLIC_CLASS_ALLOWLIST,
     )
     errors.extend(
         report
