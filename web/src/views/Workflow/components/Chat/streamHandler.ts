@@ -14,7 +14,7 @@ export interface WorkflowStreamDeps {
   executionId: string | null;
   getNodeContext: (node_id: string) => NodeContext;
   appendStreamContent: (content: string) => void;
-  replaceStreamContent: (content: string) => void;
+  replaceStreamContent: (content: string, nodeId?: string) => void;
   setChatList: React.Dispatch<React.SetStateAction<Array<ChatItem | ChatItem[]>>>;
   setStreamLoading: (loading: boolean) => void;
   setLoading: (loading: boolean) => void;
@@ -51,7 +51,7 @@ export const createWorkflowStreamHandler = (deps: WorkflowStreamDeps) => {
       const payload = item.data as StreamEventData
       const { event } = item
       const { conversation_id, message_id, user_message_id } = payload
-      const ctx = getNodeContext(payload.node_id)
+      const ctx = payload.node_id ? getNodeContext(payload.node_id) : {}
 
       switch (event) {
         case 'workflow_start': {
@@ -82,7 +82,7 @@ export const createWorkflowStreamHandler = (deps: WorkflowStreamDeps) => {
           setChatList(prev => appendOutputByNodeId(prev, payload.node_id, payload.content))
           break
         case 'message_replace':
-          replaceStreamContent(payload.content)
+          replaceStreamContent(payload.content, payload.node_id)
           break
         case 'intervention_required': {
           const { name, icon, type } = ctx
