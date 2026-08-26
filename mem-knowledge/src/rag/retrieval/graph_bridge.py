@@ -45,9 +45,15 @@ class GraphRetrievalBridge:
         for target in snapshot.targets:
             if target.llm.resolved is None or target.embedding.resolved is None:
                 raise ValueError("graph retrieval model snapshot is unavailable")
+            llm_params = dict(target.llm.resolved.provider_params)
+            llm_params["temperature"] = 0
+            llm_config = target.llm.resolved.model_copy(
+                update={"provider_params": llm_params},
+                deep=True,
+            )
             pipeline = KnowledgeGraphRetrievalPipeline(
                 graph_store,
-                RedBearLLM(target.llm.resolved, client_pool=model_pool),
+                RedBearLLM(llm_config, client_pool=model_pool),
                 RedBearEmbeddings(target.embedding.resolved, client_pool=model_pool),
                 chunk_store.resolve_parent_chunks,
                 query_plan_cache,
@@ -63,7 +69,7 @@ class GraphRetrievalBridge:
                         chunk_index_name=target.chunk_index_name,
                         entity_types=(),
                         scene_name="",
-                        llm=target.llm.resolved,
+                        llm=llm_config,
                         embedding=target.embedding.resolved,
                     ),
                     allowed_document_ids=allowed_document_ids,

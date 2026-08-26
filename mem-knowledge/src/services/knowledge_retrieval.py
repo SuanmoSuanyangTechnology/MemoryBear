@@ -5,7 +5,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+import uuid
 from collections.abc import Sequence
+from contextvars import ContextVar
+from enum import Enum
 from typing import Any
 
 from langchain_core.documents import Document as LangChainDocument
@@ -40,6 +43,108 @@ from .knowledge_retrieval_preparation import KnowledgeRetrievalPreparation
 logger = logging.getLogger(__name__)
 _SOURCE_INDEX = "_retrieval_source_index"
 _MAX_RETRIEVAL_WORKERS = 3
+_ES_TIMING_FIELD: ContextVar[str | None] = ContextVar(
+    "knowledge_retrieval_es_timing_field",
+    default=None,
+)
+
+
+def _record_elapsed(
+    timings: RetrievalTimings | None,
+    field: str,
+    started_at: float,
+) -> None:
+    if timings is None:
+        return
+    elapsed_ms = max(0, int((time.perf_counter() - started_at) * 1000))
+    setattr(timings, field, getattr(timings, field) + elapsed_ms)
+
+
+class _TimedEmbeddingClient:
+    def __init__(self, client: Any, timings: RetrievalTimings | None) -> None:
+        self._client = client
+        self._timings = timings
+
+    async def aembed_query(self, text: str) -> list[float]:
+        started_at = time.perf_counter()
+        try:
+            return await self._client.aembed_query(text)
+        finally:
+            _record_elapsed(self._timings, "embedding_ms", started_at)
+
+
+class _TimedElasticsearchClient:
+    def __init__(self, client: Any, timings: RetrievalTimings | None) -> None:
+        self._client = client
+        self._timings = timings
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._client, name)
+
+    async def search(self, **kwargs: Any) -> Any:
+        field = _ES_TIMING_FIELD.get()
+        if field is None:
+            return await self._client.search(**kwargs)
+        started_at = time.perf_counter()
+        try:
+            return await self._client.search(**kwargs)
+        finally:
+            _record_elapsed(self._timings, field, started_at)
+
+
+class _TimedElasticSearchRetrieval(AsyncElasticSearchRetrieval):
+    """Record oracle-compatible phases without owning another ES client."""
+
+    def __init__(self, client: Any, timings: RetrievalTimings | None) -> None:
+        self._timings = timings
+        super().__init__(_TimedElasticsearchClient(client, timings))
+
+    async def search_by_vector(
+        self,
+        embedding: Any,
+        query: str,
+        options: RetrievalSearchOptions,
+    ) -> list[DocumentChunk]:
+        token = _ES_TIMING_FIELD.set("es_vector_ms")
+        try:
+            return await super().search_by_vector(
+                _TimedEmbeddingClient(embedding, self._timings),
+                query,
+                options,
+            )
+        finally:
+            _ES_TIMING_FIELD.reset(token)
+
+    async def search_by_full_text(
+        self,
+        query: str,
+        options: RetrievalSearchOptions,
+    ) -> list[DocumentChunk]:
+        token = _ES_TIMING_FIELD.set("es_fulltext_ms")
+        try:
+            return await super().search_by_full_text(query, options)
+        finally:
+            _ES_TIMING_FIELD.reset(token)
+
+    async def resolve_parent_chunks(
+        self,
+        chunks: list[DocumentChunk],
+        index: str,
+    ) -> list[DocumentChunk]:
+        has_parent = any(
+            (chunk.metadata or {}).get("chunk_type") == "child"
+            and (chunk.metadata or {}).get("parent_id")
+            for chunk in chunks
+        )
+        if not has_parent:
+            return chunks
+        token = _ES_TIMING_FIELD.set(None)
+        started_at = time.perf_counter()
+        try:
+            return await super().resolve_parent_chunks(chunks, index)
+        finally:
+            _ES_TIMING_FIELD.reset(token)
+            _record_elapsed(self._timings, "parent_resolution_ms", started_at)
 
 
 class KnowledgeRetrievalService:
@@ -50,7 +155,20 @@ class KnowledgeRetrievalService:
         request: KnowledgeRetrievalRequest,
         principal: Principal,
     ) -> KnowledgeRetrievalResult:
+        log_id = cls._new_retrieval_log_id()
+        started_at = time.perf_counter()
         timings = RetrievalTimings()
+        logger.info(
+            "[Retrieval] start %s",
+            cls._format_log_fields(
+                cls._build_retrieval_start_log_fields(
+                    log_id,
+                    request,
+                    principal,
+                    timings,
+                )
+            ),
+        )
         snapshot_started_at = time.perf_counter()
         async with runtime.database.async_session() as db:
             preparation = await KnowledgeRetrievalPreparation.prepare_with_db(
@@ -60,7 +178,7 @@ class KnowledgeRetrievalService:
             )
         cls._record_timing(timings, "db_snapshot_ms", snapshot_started_at)
         if not preparation.targets:
-            return KnowledgeRetrievalResult()
+            return cls._finish_empty(log_id, started_at, "no_targets", timings)
 
         metadata_started_at = time.perf_counter()
         filter_groups = await cls._build_metadata_filter_groups(
@@ -77,11 +195,23 @@ class KnowledgeRetrievalService:
                 filter_groups,
             )
         cls._record_timing(timings, "metadata_query_ms", metadata_query_started_at)
+        cls._log_metadata_filter(
+            log_id,
+            request,
+            preparation,
+            filter_groups,
+            document_ids,
+        )
         if document_ids == []:
-            return KnowledgeRetrievalResult()
+            return cls._finish_empty(
+                log_id,
+                started_at,
+                "metadata_filter_empty",
+                timings,
+            )
 
         client = await runtime.elasticsearch.client()
-        store = AsyncElasticSearchRetrieval(client)
+        store = _TimedElasticSearchRetrieval(client, timings)
         retrieval_result = await cls._retrieve_prepared(
             runtime,
             client,
@@ -90,13 +220,31 @@ class KnowledgeRetrievalService:
             preparation,
             document_ids,
             timings=timings,
+            log_id=log_id,
         )
         chunks = cls._include_document_ids(retrieval_result.chunks, document_ids)
         graph_context_chunks = cls._build_graph_context_chunks(
             retrieval_result.entities,
             retrieval_result.relationships,
         )
-        return KnowledgeRetrievalResult(chunks=graph_context_chunks + chunks)
+        chunks = graph_context_chunks + chunks
+        logger.info(
+            "[Retrieval] finish %s",
+            cls._format_log_fields(
+                {
+                    "id": log_id,
+                    "reason": "ok",
+                    "target_count": len(preparation.targets),
+                    "document_filter_count": len(document_ids or []),
+                    "graph_context_count": len(graph_context_chunks),
+                    "final_count": len(chunks),
+                    "elapsed_ms": cls._elapsed_ms(started_at),
+                    "async_mode": "native",
+                }
+                | timings.as_log_fields()
+            ),
+        )
+        return KnowledgeRetrievalResult(chunks=chunks)
 
     @classmethod
     async def _retrieve_prepared(
@@ -109,6 +257,7 @@ class KnowledgeRetrievalService:
         document_ids: list[str] | None,
         *,
         timings: RetrievalTimings | None = None,
+        log_id: str | None = None,
     ) -> KnowledgeRetrievalResult:
         targets = preparation.targets
         if not targets:
@@ -120,6 +269,21 @@ class KnowledgeRetrievalService:
             else {}
         )
         semaphore = asyncio.Semaphore(min(len(targets), _MAX_RETRIEVAL_WORKERS))
+        logger.info(
+            "[Retrieval] targets %s",
+            cls._format_log_fields(
+                {
+                    "id": log_id or "unknown",
+                    "target_count": len(targets),
+                    "max_workers": min(len(targets), _MAX_RETRIEVAL_WORKERS),
+                    "target_kbs": cls._compact_ids(
+                        [target.knowledge_id for target in targets]
+                    ),
+                    "async_mode": "native",
+                }
+                | cls._timing_log_fields(timings)
+            ),
+        )
 
         async def retrieve_one(
             index: int,
@@ -141,6 +305,7 @@ class KnowledgeRetrievalService:
                     ),
                     request_reranker=preparation.request_reranker,
                     timings=timings,
+                    log_id=log_id,
                 )
                 return index, result
 
@@ -180,6 +345,7 @@ class KnowledgeRetrievalService:
             preparation,
             candidates,
             timings=timings,
+            log_id=log_id,
         )
         entities = cls._deduplicate_graph_items(entities, "entity_key")
         relationships = cls._deduplicate_graph_items(relationships, "relation_key")
@@ -218,13 +384,24 @@ class KnowledgeRetrievalService:
         use_request_reranker: bool,
         request_reranker: ModelRuntimeSnapshot | None,
         timings: RetrievalTimings | None = None,
+        log_id: str | None = None,
     ) -> KnowledgeRetrievalResult:
+        started_at = time.perf_counter()
         params = target.params
         target_type = params.retrieve_type
         if target_type is RetrieveType.Graph:
             if graph_target is None:
+                cls._log_target_done(
+                    target,
+                    0,
+                    0,
+                    0,
+                    0,
+                    started_at,
+                    timings=timings,
+                )
                 return KnowledgeRetrievalResult()
-            return await cls._retrieve_evidence_graph_target(
+            result = await cls._retrieve_evidence_graph_target(
                 runtime,
                 client,
                 request,
@@ -232,7 +409,18 @@ class KnowledgeRetrievalService:
                 graph_target,
                 document_ids,
                 timings=timings,
+                log_id=log_id,
             )
+            cls._log_target_done(
+                target,
+                0,
+                0,
+                len(result.chunks),
+                len(result.chunks),
+                started_at,
+                timings=timings,
+            )
+            return result
 
         full_text_options = cls._search_options(
             request,
@@ -242,10 +430,15 @@ class KnowledgeRetrievalService:
             None if target_type is RetrieveType.PARTICIPLE else params.similarity_threshold,
         )
         if target_type is RetrieveType.PARTICIPLE:
-            chunks = await cls._timed_awaitable(
-                store.search_by_full_text(request.query, full_text_options),
-                timings,
-                "es_fulltext_ms",
+            chunks = await store.search_by_full_text(request.query, full_text_options)
+            cls._log_target_done(
+                target,
+                0,
+                len(chunks),
+                len(chunks),
+                len(chunks),
+                started_at,
+                timings=timings,
             )
             return KnowledgeRetrievalResult(chunks=chunks)
 
@@ -266,26 +459,23 @@ class KnowledgeRetrievalService:
             params.vector_similarity_weight,
         )
         if target_type is RetrieveType.SEMANTIC:
-            chunks = await cls._timed_awaitable(
-                store.search_by_vector(embedding, request.query, vector_options),
-                timings,
-                "es_vector_ms",
+            chunks = await store.search_by_vector(embedding, request.query, vector_options)
+            cls._log_target_done(
+                target,
+                len(chunks),
+                0,
+                len(chunks),
+                len(chunks),
+                started_at,
+                timings=timings,
             )
             return KnowledgeRetrievalResult(chunks=chunks)
 
         vector_task = asyncio.create_task(
-            cls._timed_awaitable(
-                store.search_by_vector(embedding, request.query, vector_options),
-                timings,
-                "es_vector_ms",
-            )
+            store.search_by_vector(embedding, request.query, vector_options)
         )
         text_task = asyncio.create_task(
-            cls._timed_awaitable(
-                store.search_by_full_text(request.query, full_text_options),
-                timings,
-                "es_fulltext_ms",
-            )
+            store.search_by_full_text(request.query, full_text_options)
         )
         graph_task = (
             asyncio.create_task(
@@ -297,6 +487,7 @@ class KnowledgeRetrievalService:
                     graph_target,
                     document_ids,
                     timings=timings,
+                    log_id=log_id,
                 )
             )
             if (
@@ -346,6 +537,16 @@ class KnowledgeRetrievalService:
             if float((chunk.metadata or {}).get("score") or 0)
             > params.rerank_score_threshold
         ]
+        cls._log_target_done(
+            target,
+            len(vector_chunks),
+            len(text_chunks),
+            len(candidates),
+            len(chunks),
+            started_at,
+            local_rerank=True,
+            timings=timings,
+        )
         return KnowledgeRetrievalResult(chunks=chunks)
 
     @classmethod
@@ -359,6 +560,7 @@ class KnowledgeRetrievalService:
         document_ids: list[str] | None,
         *,
         timings: RetrievalTimings | None = None,
+        log_id: str | None = None,
     ) -> KnowledgeRetrievalResult:
         return await cls._retrieve_evidence_graph_channel(
             runtime,
@@ -368,6 +570,7 @@ class KnowledgeRetrievalService:
             graph_target,
             document_ids,
             timings=timings,
+            log_id=log_id,
         )
 
     @classmethod
@@ -381,6 +584,7 @@ class KnowledgeRetrievalService:
         document_ids: list[str] | None,
         *,
         timings: RetrievalTimings | None = None,
+        log_id: str | None = None,
     ) -> KnowledgeRetrievalResult:
         if graph_target.knowledge_id != target.knowledge_id:
             raise ValueError("graph target does not match retrieval target")
@@ -406,7 +610,9 @@ class KnowledgeRetrievalService:
         except Exception as exc:
             stage = "timeout" if isinstance(exc, TimeoutError) else "pipeline"
             logger.warning(
-                "[Retrieval] graph_target_failed kb_id=%s stage=%s error_type=%s elapsed_ms=%d",
+                "[Retrieval] graph_target_failed id=%s kb_id=%s stage=%s "
+                "error_type=%s elapsed_ms=%d",
+                log_id or "unknown",
                 cls._compact_id(target.knowledge_id),
                 stage,
                 type(exc).__name__,
@@ -430,9 +636,20 @@ class KnowledgeRetrievalService:
         chunks: list[DocumentChunk],
         *,
         timings: RetrievalTimings | None = None,
+        log_id: str | None = None,
     ) -> list[DocumentChunk]:
+        candidates_count = len(chunks)
         unique_chunks = cls._deduplicate_chunks(chunks)
         if not unique_chunks:
+            cls._log_finalize(
+                log_id,
+                candidates_count,
+                0,
+                False,
+                None,
+                0,
+                timings,
+            )
             return []
 
         targets = preparation.targets
@@ -485,12 +702,23 @@ class KnowledgeRetrievalService:
                     global_rerank_started_at,
                 )
         else:
+            threshold = None
             filtered = sorted(
                 unique_chunks,
                 key=lambda chunk: float((chunk.metadata or {}).get("score") or 0),
                 reverse=True,
             )
-        return filtered[: request.top_k]
+        result = filtered[: request.top_k]
+        cls._log_finalize(
+            log_id,
+            candidates_count,
+            len(unique_chunks),
+            needs_global_rerank,
+            threshold,
+            len(result),
+            timings,
+        )
+        return result
 
     @staticmethod
     def _search_options(
@@ -875,25 +1103,182 @@ class KnowledgeRetrievalService:
         ]
 
     @staticmethod
+    def _new_retrieval_log_id() -> str:
+        return uuid.uuid4().hex[:8]
+
+    @classmethod
+    def _build_retrieval_start_log_fields(
+        cls,
+        log_id: str,
+        request: KnowledgeRetrievalRequest,
+        principal: Principal,
+        timings: RetrievalTimings,
+    ) -> dict[str, Any]:
+        return {
+            "id": log_id,
+            "actor": cls._compact_id(principal.actor_id),
+            "kb_count": len(request.kb_ids),
+            "ex_id_count": len(request.ex_ids),
+            "knowledge_base_count": len(request.knowledge_bases),
+            "query_len": len(request.query),
+            "type": request.retrieve_type,
+            "top_k": request.top_k,
+            "top_n": request.top_n,
+            "enable_graph_retrieval": request.enable_graph_retrieval,
+            "metadata_mode": request.metadata_filter_mode,
+            "async_mode": "native",
+        } | timings.as_log_fields()
+
+    @classmethod
+    def _finish_empty(
+        cls,
+        log_id: str,
+        started_at: float,
+        reason: str,
+        timings: RetrievalTimings,
+    ) -> KnowledgeRetrievalResult:
+        logger.info(
+            "[Retrieval] finish %s",
+            cls._format_log_fields(
+                {
+                    "id": log_id,
+                    "reason": reason,
+                    "target_count": 0,
+                    "final_count": 0,
+                    "elapsed_ms": cls._elapsed_ms(started_at),
+                    "async_mode": "native",
+                }
+                | timings.as_log_fields()
+            ),
+        )
+        return KnowledgeRetrievalResult()
+
+    @classmethod
+    def _log_target_done(
+        cls,
+        target: RetrievalTarget,
+        vector_count: int,
+        full_text_count: int,
+        merged_count: int,
+        result_count: int,
+        started_at: float,
+        *,
+        local_rerank: bool = False,
+        timings: RetrievalTimings | None = None,
+    ) -> None:
+        logger.info(
+            "[Retrieval] target_done %s",
+            cls._format_log_fields(
+                {
+                    "kb_id": cls._compact_id(target.knowledge_id),
+                    "index": target.index_name,
+                    "type": target.params.retrieve_type,
+                    "vector_kept": vector_count,
+                    "fulltext_kept": full_text_count,
+                    "merged": merged_count,
+                    "local_rerank": local_rerank,
+                    "result_count": result_count,
+                    "elapsed_ms": cls._elapsed_ms(started_at),
+                    "async_mode": "native",
+                }
+                | cls._timing_log_fields(timings)
+            ),
+        )
+
+    @classmethod
+    def _log_finalize(
+        cls,
+        log_id: str | None,
+        candidates_count: int,
+        unique_count: int,
+        global_rerank: bool,
+        threshold: float | None,
+        result_count: int,
+        timings: RetrievalTimings | None,
+    ) -> None:
+        logger.info(
+            "[Retrieval] finalize %s",
+            cls._format_log_fields(
+                {
+                    "id": log_id or "unknown",
+                    "candidates": candidates_count,
+                    "deduped": unique_count,
+                    "global_rerank": global_rerank,
+                    "threshold": threshold if threshold is not None else "none",
+                    "result_count": result_count,
+                    "async_mode": "native",
+                }
+                | cls._timing_log_fields(timings)
+            ),
+        )
+
+    @classmethod
+    def _log_metadata_filter(
+        cls,
+        log_id: str,
+        request: KnowledgeRetrievalRequest,
+        preparation: RetrievalPreparation,
+        filter_groups: list[FilterGroup],
+        document_ids: list[str] | None,
+    ) -> None:
+        logger.info(
+            "[Retrieval] metadata_filter %s",
+            cls._format_log_fields(
+                {
+                    "id": log_id,
+                    "mode": request.metadata_filter_mode,
+                    "effective": bool(filter_groups),
+                    "common_fields": len(preparation.common_metadata_defs),
+                    "effective_groups": len(filter_groups),
+                    "matched_documents": (
+                        len(document_ids) if document_ids is not None else "none"
+                    ),
+                    "async_mode": "native",
+                }
+            ),
+        )
+
+    @staticmethod
+    def _timing_log_fields(timings: RetrievalTimings | None) -> dict[str, int]:
+        return (
+            timings.as_log_fields()
+            if timings is not None
+            else RetrievalTimings().as_log_fields()
+        )
+
+    @classmethod
+    def _format_log_fields(cls, fields: dict[str, Any]) -> str:
+        return " ".join(
+            f"{key}={cls._format_log_value(value)}" for key, value in fields.items()
+        )
+
+    @classmethod
+    def _format_log_value(cls, value: Any) -> str:
+        if value is None:
+            return "none"
+        if isinstance(value, bool):
+            return str(value).lower()
+        if isinstance(value, Enum):
+            return str(value.value)
+        if isinstance(value, (list, tuple, set)):
+            return "[" + ",".join(cls._format_log_value(item) for item in value) + "]"
+        return str(value)
+
+    @classmethod
+    def _compact_ids(cls, values: Sequence[Any], limit: int = 10) -> list[str]:
+        compacted = [cls._compact_id(value) for value in values[:limit]]
+        if len(values) > limit:
+            compacted.append(f"+{len(values) - limit}")
+        return compacted
+
+    @staticmethod
     def _compact_id(value: Any) -> str:
-        return str(value)[:8]
+        text = str(value)
+        return text[:8] if len(text) > 8 else text
 
     @staticmethod
     def _elapsed_ms(started_at: float) -> int:
         return max(0, int((time.perf_counter() - started_at) * 1000))
-
-    @classmethod
-    async def _timed_awaitable(
-        cls,
-        awaitable: Any,
-        timings: RetrievalTimings | None,
-        field: str,
-    ) -> Any:
-        started_at = time.perf_counter()
-        try:
-            return await awaitable
-        finally:
-            cls._record_timing(timings, field, started_at)
 
     @classmethod
     def _record_timing(
@@ -902,8 +1287,8 @@ class KnowledgeRetrievalService:
         field: str,
         started_at: float,
     ) -> None:
-        if timings is not None:
-            setattr(timings, field, getattr(timings, field) + cls._elapsed_ms(started_at))
+        del cls
+        _record_elapsed(timings, field, started_at)
 
 
 __all__ = ["KnowledgeRetrievalService"]
