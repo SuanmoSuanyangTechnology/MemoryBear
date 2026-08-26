@@ -10,6 +10,7 @@ from typing import Any
 
 from sqlalchemy import or_
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import flag_modified
 
 from ..api.dependencies import Principal
 from ..api.schemas.knowledge import (
@@ -21,8 +22,11 @@ from ..api.schemas.knowledge import (
 from ..errors import KnowledgeError
 from ..models.owned import Knowledge, KnowledgeType, PermissionType
 from ..models.references import ModelBase, ModelConfig, User
-from ..rag.knowledge_graph.config import is_graph_enabled
-from ..rag.parser_config import normalize_knowledge_parser_config_update
+from ..rag.knowledge_graph.config import GraphPipeline, is_graph_enabled
+from ..rag.parser_config import (
+    normalize_knowledge_parser_config_update,
+    set_graph_pipeline_for_migration,
+)
 from ..repositories import knowledge as knowledge_repository
 from ..repositories.knowledge_share import get_knowledgeshare_by_id_async
 from ..repositories.reference import ReferenceRepository
@@ -536,6 +540,12 @@ async def apply_knowledge_update(
     for field, value in plan.update_fields.items():
         if hasattr(knowledge, field):
             setattr(knowledge, field, value)
+    if plan.graph_enabled_before is False and is_graph_enabled(knowledge.parser_config):
+        knowledge.parser_config = set_graph_pipeline_for_migration(
+            knowledge.parser_config,
+            GraphPipeline.EVIDENCE,
+        )
+        flag_modified(knowledge, "parser_config")
     knowledge.updated_at = utcnow_naive()
     await db.flush()
     await db.refresh(knowledge)

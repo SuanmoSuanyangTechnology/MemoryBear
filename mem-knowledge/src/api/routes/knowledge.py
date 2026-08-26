@@ -24,7 +24,6 @@ from ...rag.integrations.feishu import FeishuAPIClient
 from ...rag.integrations.yuque import YuqueAPIClient
 from ...rag.knowledge_graph.config import (
     GraphPipeline,
-    is_graph_enabled,
     resolve_graph_pipeline,
 )
 from ...rag.knowledge_graph.elasticsearch_store import GraphElasticsearchStore
@@ -306,17 +305,6 @@ async def update_knowledge(
             plan,
             principal,
         )
-        if plan.graph_enabled_before is False and is_graph_enabled(outcome.parser_config):
-            knowledge = await graph_service.commit_evidence_pipeline(
-                db,
-                knowledge_id,
-                principal.workspace_id,
-            )
-            outcome = await knowledge_service.build_knowledge_mutation_outcome(
-                db,
-                knowledge,
-                invalidate_workspace_id=outcome.invalidate_workspace_id,
-            )
     if outcome.invalidate_workspace_id is not None:
         await knowledge_service.invalidate_storage_type_cache(
             runtime.redis,
