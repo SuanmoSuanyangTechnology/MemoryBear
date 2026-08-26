@@ -14,6 +14,7 @@ from fastapi.responses import JSONResponse
 
 # 管理端 API (JWT 认证)
 from app.controllers import manager_router
+from app.controllers.health_controller import health_router
 # 服务端 API (API Key 认证)
 from app.controllers.service import service_router
 # MCP
@@ -192,6 +193,8 @@ def read_root():
 
 
 # 注册路由
+app.include_router(health_router)
+
 # 管理端 API (JWT 认证)
 app.include_router(manager_router, prefix="/api")
 
