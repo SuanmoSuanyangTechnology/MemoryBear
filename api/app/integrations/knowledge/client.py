@@ -135,7 +135,7 @@ class KnowledgeServiceClient:
     ) -> KnowledgeRetrievalResult:
         normalized = request.model_copy(update={"source": context.source})
         payload = json.dumps(
-            normalized.model_dump(mode="json", exclude_none=True),
+            normalized.model_dump(mode="json", exclude_unset=True),
             ensure_ascii=False,
             separators=(",", ":"),
         ).encode()
