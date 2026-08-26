@@ -24,7 +24,8 @@ from app.core.config import settings
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
-from app.schemas.chunk_schema import KnowledgeRetrievalCaller, RetrieveType
+from app.integrations.knowledge.contracts import KnowledgeRetrievalSource
+from app.schemas.chunk_schema import RetrieveType
 from app.schemas.knowledge_retrieval_schema import KnowledgeRetrievalRequest
 from app.services.knowledge_retrieval_service import KnowledgeRetrievalService
 from app.db import get_async_db_context
@@ -214,7 +215,7 @@ async def _retrieve_chunks_via_standard(query: str, kb_config: Dict[str, Any]) -
 
     request = KnowledgeRetrievalRequest(
         query=query,
-        caller=KnowledgeRetrievalCaller.AGENT,
+        source=KnowledgeRetrievalSource.AGENT,
         kb_ids=[uuid.UUID(kid) for kid in kb_ids],
         knowledge_bases=valid_kbs,
         top_k=request_top_k,

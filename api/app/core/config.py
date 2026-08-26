@@ -118,6 +118,34 @@ class Settings:
         min(30000, int(os.getenv("KNOWLEDGE_GRAPH_RETRIEVAL_TIMEOUT_MS", "15000"))),
     )
 
+    # Independent knowledge service routing
+    ENABLE_MEM_KNOWLEDGE: bool = os.getenv("ENABLE_MEM_KNOWLEDGE", "false").lower() == "true"
+    MEM_KNOWLEDGE_BASE_URL: str = os.getenv("MEM_KNOWLEDGE_BASE_URL", "")
+    MEM_KNOWLEDGE_CONNECT_TIMEOUT_SECONDS: float = float(
+        os.getenv("MEM_KNOWLEDGE_CONNECT_TIMEOUT_SECONDS", "5")
+    )
+    MEM_KNOWLEDGE_POOL_TIMEOUT_SECONDS: float = float(
+        os.getenv("MEM_KNOWLEDGE_POOL_TIMEOUT_SECONDS", "5")
+    )
+    MEM_KNOWLEDGE_READ_TIMEOUT_SECONDS: float = float(
+        os.getenv("MEM_KNOWLEDGE_READ_TIMEOUT_SECONDS", "120")
+    )
+    MEM_KNOWLEDGE_WRITE_TIMEOUT_SECONDS: float = float(
+        os.getenv("MEM_KNOWLEDGE_WRITE_TIMEOUT_SECONDS", "600")
+    )
+    MEM_KNOWLEDGE_STREAM_READ_TIMEOUT_SECONDS: float = float(
+        os.getenv("MEM_KNOWLEDGE_STREAM_READ_TIMEOUT_SECONDS", "600")
+    )
+    MEM_KNOWLEDGE_MAX_CONNECTIONS: int = int(
+        os.getenv("MEM_KNOWLEDGE_MAX_CONNECTIONS", "100")
+    )
+    MEM_KNOWLEDGE_MAX_KEEPALIVE_CONNECTIONS: int = int(
+        os.getenv("MEM_KNOWLEDGE_MAX_KEEPALIVE_CONNECTIONS", "20")
+    )
+    MEM_KNOWLEDGE_HEALTH_TIMEOUT_SECONDS: float = float(
+        os.getenv("MEM_KNOWLEDGE_HEALTH_TIMEOUT_SECONDS", "3")
+    )
+
     # Xinference configuration
     XINFERENCE_URL: str = os.getenv("XINFERENCE_URL", "http://127.0.0.1")
 

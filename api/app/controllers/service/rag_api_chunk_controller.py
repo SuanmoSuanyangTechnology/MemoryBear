@@ -241,10 +241,10 @@ async def retrieve_chunks(
     retrieve_data = chunk_schema.ChunkRetrieve(**body)
     try:
         principal = await get_api_key_retrieval_principal_async(api_key_auth)
-        return await chunk_controller.retrieve_chunks_with_caller(
+        return await chunk_controller.retrieve_chunks_with_source(
             retrieve_data=retrieve_data,
             principal=principal,
-            caller=chunk_schema.KnowledgeRetrievalCaller.EX_API,
+            source=chunk_schema.KnowledgeRetrievalSource.EXTERNAL_API,
         )
     except KnowledgeRetrievalAccessDenied as exc:
         raise HTTPException(

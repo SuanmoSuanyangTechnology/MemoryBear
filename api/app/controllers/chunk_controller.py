@@ -1147,20 +1147,20 @@ def get_retrieve_types():
     return success(msg="Successfully obtained the retrieval type", data=list(chunk_schema.RetrieveType))
 
 
-async def retrieve_chunks_with_caller(
+async def retrieve_chunks_with_source(
         retrieve_data: chunk_schema.ChunkRetrieve,
         principal: RetrievalPrincipal | None,
-        caller: chunk_schema.KnowledgeRetrievalCaller,
+        source: chunk_schema.KnowledgeRetrievalSource,
 ):
     """
     retrieve chunk
     """
     api_logger.info(
-        "retrieve chunk request received: username=%s, caller=%s, query_len=%s, kb_count=%s, "
+        "retrieve chunk request received: username=%s, source=%s, query_len=%s, kb_count=%s, "
         "ex_id_count=%s, retrieve_type=%s, top_k=%s, "
         "metadata_mode=%s, metadata_filter_groups=%s",
         principal.username if principal and principal.username else "anonymous",
-        caller,
+        source,
         len(retrieve_data.query or ""),
         len(retrieve_data.kb_ids or []),
         len(retrieve_data.ex_ids or []),
@@ -1172,7 +1172,7 @@ async def retrieve_chunks_with_caller(
 
     try:
         retrieval_payload = retrieve_data.model_dump(exclude_none=True)
-        retrieval_payload["caller"] = caller
+        retrieval_payload["source"] = source
         request = KnowledgeRetrievalRequest(**retrieval_payload)
         result = await KnowledgeRetrievalService.retrieve_async(
             request=request,
@@ -1198,8 +1198,8 @@ async def retrieve_chunks(
         retrieve_data: chunk_schema.ChunkRetrieve,
         current_user: User = Depends(get_current_user_async)
 ):
-    return await retrieve_chunks_with_caller(
+    return await retrieve_chunks_with_source(
         retrieve_data=retrieve_data,
         principal=RetrievalPrincipal.from_user(current_user),
-        caller=chunk_schema.KnowledgeRetrievalCaller.IN_API,
+        source=chunk_schema.KnowledgeRetrievalSource.MANAGER_API,
     )

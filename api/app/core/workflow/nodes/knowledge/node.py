@@ -14,7 +14,8 @@ from app.core.workflow.nodes.knowledge import KnowledgeRetrievalNodeConfig
 from app.core.workflow.nodes.llm.config import strip_unsupported_llm_params
 from app.core.workflow.variable.base_variable import VariableType
 from app.db import get_async_db_context
-from app.schemas.chunk_schema import KnowledgeRetrievalCaller, RetrieveType
+from app.integrations.knowledge.contracts import KnowledgeRetrievalSource
+from app.schemas.chunk_schema import RetrieveType
 from app.models.models_model import ModelCapability, ModelType
 from app.schemas.knowledge_metadata_schema import FilterCondition, FilterGroup, MetadataFilterMode
 from app.schemas.knowledge_retrieval_schema import KnowledgeRetrievalRequest
@@ -382,7 +383,7 @@ class KnowledgeRetrievalNode(BaseNode):
 
         request = KnowledgeRetrievalRequest(
             query=query,
-            caller=KnowledgeRetrievalCaller.WORKFLOW,
+            source=KnowledgeRetrievalSource.WORKFLOW,
             kb_ids=kb_ids,
             knowledge_bases=self.typed_config.knowledge_bases,
             similarity_threshold=first_kb.similarity_threshold,
@@ -399,7 +400,7 @@ class KnowledgeRetrievalNode(BaseNode):
             ),
         )
         if self.typed_config.metadata_filter_mode == MetadataFilterMode.AUTO:
-            request.mark_metadata_filters_prepared()
+            request.mark_metadata_filters_resolved()
 
         # 4. Call unified retrieval service
         result = await KnowledgeRetrievalService.retrieve_async(
