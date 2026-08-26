@@ -32,6 +32,22 @@ from .transport import KnowledgeHttpTransport
 logger = logging.getLogger(__name__)
 
 
+def _retrieval_wire_payload(
+    request: KnowledgeRetrievalRequest,
+    context: KnowledgeCallContext,
+) -> dict[str, Any]:
+    normalized = request.model_copy(update={"source": context.source})
+    payload = normalized.model_dump(mode="json")
+    payload["knowledge_bases"] = [
+        config.model_dump(
+            mode="json",
+            include=config.model_fields_set | {"kb_id"},
+        )
+        for config in normalized.knowledge_bases
+    ]
+    return payload
+
+
 class KnowledgeServiceClient:
     """HTTP adapter used by both route forwarding and semantic retrieval."""
 
@@ -126,6 +142,7 @@ class KnowledgeServiceClient:
             bytes_forwarded = 0
             first_byte_at: float | None = None
             completion = "closed_early"
+            error_type = "none"
             try:
                 async for chunk in upstream.aiter_raw():
                     if first_byte_at is None:
@@ -135,9 +152,11 @@ class KnowledgeServiceClient:
                 completion = "complete"
             except asyncio.CancelledError:
                 completion = "cancelled"
+                error_type = "CancelledError"
                 raise
-            except Exception:
+            except Exception as exc:
                 completion = "error"
+                error_type = type(exc).__name__
                 raise
             finally:
                 await upstream.aclose()
@@ -145,7 +164,7 @@ class KnowledgeServiceClient:
                 logger.info(
                     "knowledge_proxy_stream_finished method=%s path=%s status=%s "
                     "profile=%s source=%s completion=%s bytes=%s header_ms=%.2f "
-                    "ttfb_ms=%.2f elapsed_ms=%.2f trace_id=%s",
+                    "ttfb_ms=%.2f elapsed_ms=%.2f error=%s trace_id=%s",
                     request.method,
                     path,
                     upstream.status_code,
@@ -160,6 +179,7 @@ class KnowledgeServiceClient:
                         else -1.0
                     ),
                     (finished_at - started_at) * 1000,
+                    error_type,
                     context.trace_id,
                 )
 
@@ -175,9 +195,8 @@ class KnowledgeServiceClient:
         context: KnowledgeCallContext,
     ) -> KnowledgeRetrievalResult:
         started_at = time.perf_counter()
-        normalized = request.model_copy(update={"source": context.source})
         payload = json.dumps(
-            normalized.model_dump(mode="json", exclude_unset=True),
+            _retrieval_wire_payload(request, context),
             ensure_ascii=False,
             separators=(",", ":"),
         ).encode()
@@ -222,19 +241,19 @@ class KnowledgeServiceClient:
                 message = str(envelope.get("msg") or envelope.get("error") or "Knowledge error")
                 raise KnowledgeServiceError(upstream.status_code, code, message, trace_id)
             data = envelope.get("data")
-            if isinstance(data, list):
-                result = KnowledgeRetrievalResult(chunks=data)
-            elif isinstance(data, dict):
-                try:
+            try:
+                if isinstance(data, list):
+                    result = KnowledgeRetrievalResult(chunks=data)
+                elif isinstance(data, dict):
                     result = KnowledgeRetrievalResult.model_validate(data)
-                except ValueError as exc:
+                else:
                     raise KnowledgeProtocolError(
-                        "Knowledge retrieval data is incompatible"
-                    ) from exc
-            else:
+                        "Knowledge retrieval data must be a list or object"
+                    )
+            except ValueError as exc:
                 raise KnowledgeProtocolError(
-                    "Knowledge retrieval data must be a list or object"
-                )
+                    "Knowledge retrieval data is incompatible"
+                ) from exc
             logger.info(
                 "knowledge_retrieval_completed status=%s code=%s source=%s "
                 "bytes=%s chunks=%s entities=%s relationships=%s header_ms=%.2f "

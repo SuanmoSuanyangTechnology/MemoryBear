@@ -136,6 +136,8 @@ class KnowledgeHttpTransport:
         files: Any = None,
     ) -> httpx.Response:
         started_at = time.perf_counter()
+        source = headers.get("X-KB-Source", "unknown")
+        trace_id = headers.get("X-Trace-Id", "")
         timeout = (
             self._stream_timeout
             if profile in {CallProfile.MULTIPART_UPLOAD, CallProfile.STREAM_DOWNLOAD}
@@ -156,35 +158,41 @@ class KnowledgeHttpTransport:
             response = await self._client.send(request, stream=True)
             logger.info(
                 "knowledge_http_response_started method=%s path=%s status=%s "
-                "profile=%s elapsed_ms=%.2f",
+                "profile=%s source=%s elapsed_ms=%.2f trace_id=%s",
                 method,
                 url.path,
                 response.status_code,
                 profile.value,
+                source,
                 (time.perf_counter() - started_at) * 1000,
+                trace_id,
             )
             return response
         except httpx.TimeoutException as exc:
             logger.warning(
                 "knowledge_http_failed method=%s path=%s profile=%s error=%s "
-                "pool_timeout=%s elapsed_ms=%.2f",
+                "source=%s pool_timeout=%s elapsed_ms=%.2f trace_id=%s",
                 method,
                 url.path,
                 profile.value,
                 type(exc).__name__,
+                source,
                 isinstance(exc, httpx.PoolTimeout),
                 (time.perf_counter() - started_at) * 1000,
+                trace_id,
             )
             raise KnowledgeTimeoutError("Knowledge service request timed out") from exc
         except httpx.RequestError as exc:
             logger.warning(
                 "knowledge_http_failed method=%s path=%s profile=%s error=%s "
-                "pool_timeout=false elapsed_ms=%.2f",
+                "source=%s pool_timeout=false elapsed_ms=%.2f trace_id=%s",
                 method,
                 url.path,
                 profile.value,
                 type(exc).__name__,
+                source,
                 (time.perf_counter() - started_at) * 1000,
+                trace_id,
             )
             raise KnowledgeUnavailableError("Knowledge service is unavailable") from exc
 
