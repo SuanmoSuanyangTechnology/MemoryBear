@@ -56,6 +56,21 @@ HTTP_METHODS = {"get", "post", "put", "patch", "delete"}
 LEGACY_RESPONSE_FIELDS = {"code", "msg", "data", "error", "time"}
 LEGACY_ERROR_STATUSES = ("400", "404", "409", "500")
 LEGACY_ORACLE_REF = "fbd5da5604a114f9861986b19ea7ff481eaffaba"
+EXPECTED_STREAM_OPERATIONS = frozenset(
+    {
+        ("GET", "/internal/v1/files/{file_id}"),
+        ("GET", "/internal/v1/knowledges/{kb_id}/qa/export"),
+        ("POST", "/internal/v1/files/batch-download"),
+        ("POST", "/internal/v1/knowledges/{kb_id}/batch-download"),
+    }
+)
+EXPECTED_MULTIPART_OPERATIONS = frozenset(
+    {
+        ("POST", "/internal/v1/chunks/{kb_id}/import_qa"),
+        ("POST", "/internal/v1/chunks/{kb_id}/{document_id}/import_qa"),
+        ("POST", "/internal/v1/files/file"),
+    }
+)
 
 
 def normalize_internal_operation(method: str, legacy_path: str) -> tuple[str, str]:
@@ -291,7 +306,41 @@ def _validate_legacy_inventory(
     operation_keys = {(item.method, item.path) for item in operations}
     if len(operation_keys) != len(operations):
         raise ValueError("Legacy knowledge controllers contain duplicate operations")
+    streams = stream_operation_keys(operations)
+    if streams != EXPECTED_STREAM_OPERATIONS:
+        raise ValueError(
+            "Legacy stream operations changed: "
+            f"expected={sorted(EXPECTED_STREAM_OPERATIONS)} actual={sorted(streams)}"
+        )
+    multipart = multipart_operation_keys(operations)
+    if multipart != EXPECTED_MULTIPART_OPERATIONS:
+        raise ValueError(
+            "Legacy multipart operations changed: "
+            f"expected={sorted(EXPECTED_MULTIPART_OPERATIONS)} actual={sorted(multipart)}"
+        )
     return tuple(sorted(operations)), dict(sorted(counts.items()))
+
+
+def stream_operation_keys(
+    operations: Sequence[OperationContract],
+) -> frozenset[tuple[str, str]]:
+    """Return the fixed legacy streaming operation keys."""
+
+    return frozenset(
+        (operation.method, operation.path) for operation in operations if operation.streaming
+    )
+
+
+def multipart_operation_keys(
+    operations: Sequence[OperationContract],
+) -> frozenset[tuple[str, str]]:
+    """Return operations whose request body is multipart form data."""
+
+    return frozenset(
+        (operation.method, operation.path)
+        for operation in operations
+        if "multipart/form-data" in operation.request_content_types
+    )
 
 
 def collect_legacy_operations(
