@@ -282,7 +282,7 @@ const EpisodicDetail: FC = () => {
                     <div className="rb:font-medium rb:leading-5 rb:mb-2 rb:pl-1">{t('episodicDetail.emotion')}</div>
                     <div className="rb-border rb:rounded-xl rb:px-4 rb:py-3">
                       {detail.emotion
-                        ? t(`episodicDetail.${detail.emotion || 'none'}`)
+                        ? t(`statementDetail.${detail.emotion || 'none'}`)
                         : <Empty size={96} className="rb:pt-1! rb:pb-3.5!" />
                       }
                     </div>
