@@ -7,7 +7,6 @@ import logging
 import time
 import uuid
 from collections.abc import Sequence
-from contextvars import ContextVar
 from enum import Enum
 from typing import Any
 
@@ -27,6 +26,14 @@ from ..rag.metadata.auto_filter import generate_filter_groups
 from ..rag.metadata.filter_engine import FilterCondition, FilterGroup
 from ..rag.models.chunk import DocumentChunk, chunk_retrieval_content
 from ..rag.retrieval.async_elasticsearch import AsyncElasticSearchRetrieval
+from ..rag.retrieval.elasticsearch_queries import (
+    build_filter_clauses,
+    build_full_text_query,
+    build_vector_script_query,
+    full_text_hits_to_chunks,
+    normalize_vector,
+    vector_hits_to_chunks,
+)
 from ..rag.retrieval.graph_bridge import GraphRetrievalBridge
 from ..rag.retrieval.models import (
     GraphRetrievalSnapshot,
@@ -43,10 +50,6 @@ from .knowledge_retrieval_preparation import KnowledgeRetrievalPreparation
 logger = logging.getLogger(__name__)
 _SOURCE_INDEX = "_retrieval_source_index"
 _MAX_RETRIEVAL_WORKERS = 3
-_ES_TIMING_FIELD: ContextVar[str | None] = ContextVar(
-    "knowledge_retrieval_es_timing_field",
-    default=None,
-)
 
 
 def _record_elapsed(
@@ -60,44 +63,12 @@ def _record_elapsed(
     setattr(timings, field, getattr(timings, field) + elapsed_ms)
 
 
-class _TimedEmbeddingClient:
-    def __init__(self, client: Any, timings: RetrievalTimings | None) -> None:
-        self._client = client
-        self._timings = timings
-
-    async def aembed_query(self, text: str) -> list[float]:
-        started_at = time.perf_counter()
-        try:
-            return await self._client.aembed_query(text)
-        finally:
-            _record_elapsed(self._timings, "embedding_ms", started_at)
-
-
-class _TimedElasticsearchClient:
-    def __init__(self, client: Any, timings: RetrievalTimings | None) -> None:
-        self._client = client
-        self._timings = timings
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._client, name)
-
-    async def search(self, **kwargs: Any) -> Any:
-        field = _ES_TIMING_FIELD.get()
-        if field is None:
-            return await self._client.search(**kwargs)
-        started_at = time.perf_counter()
-        try:
-            return await self._client.search(**kwargs)
-        finally:
-            _record_elapsed(self._timings, field, started_at)
-
-
 class _TimedElasticSearchRetrieval(AsyncElasticSearchRetrieval):
     """Record oracle-compatible phases without owning another ES client."""
 
     def __init__(self, client: Any, timings: RetrievalTimings | None) -> None:
         self._timings = timings
-        super().__init__(_TimedElasticsearchClient(client, timings))
+        super().__init__(client)
 
     async def search_by_vector(
         self,
@@ -105,26 +76,58 @@ class _TimedElasticSearchRetrieval(AsyncElasticSearchRetrieval):
         query: str,
         options: RetrievalSearchOptions,
     ) -> list[DocumentChunk]:
-        token = _ES_TIMING_FIELD.set("es_vector_ms")
+        embedding_started_at = time.perf_counter()
         try:
-            return await super().search_by_vector(
-                _TimedEmbeddingClient(embedding, self._timings),
-                query,
-                options,
+            vector = normalize_vector(await embedding.aembed_query(query))
+        finally:
+            _record_elapsed(self._timings, "embedding_ms", embedding_started_at)
+        search_started_at = time.perf_counter()
+        try:
+            response = await self.client.search(
+                index=options.indices,
+                from_=0,
+                size=options.top_k,
+                query=build_vector_script_query(
+                    vector,
+                    build_filter_clauses(
+                        options.file_names_filter,
+                        options.document_ids_include,
+                        require_vector=True,
+                    ),
+                ),
+                allow_partial_search_results=False,
             )
         finally:
-            _ES_TIMING_FIELD.reset(token)
+            _record_elapsed(self._timings, "es_vector_ms", search_started_at)
+        return await self.resolve_parent_chunks(
+            vector_hits_to_chunks(response, options.score_threshold),
+            options.indices,
+        )
 
     async def search_by_full_text(
         self,
         query: str,
         options: RetrievalSearchOptions,
     ) -> list[DocumentChunk]:
-        token = _ES_TIMING_FIELD.set("es_fulltext_ms")
+        search_started_at = time.perf_counter()
         try:
-            return await super().search_by_full_text(query, options)
+            response = await self.client.search(
+                index=options.indices,
+                from_=0,
+                size=options.top_k,
+                query=build_full_text_query(
+                    query,
+                    options.file_names_filter,
+                    options.document_ids_include,
+                ),
+                allow_partial_search_results=False,
+            )
         finally:
-            _ES_TIMING_FIELD.reset(token)
+            _record_elapsed(self._timings, "es_fulltext_ms", search_started_at)
+        return await self.resolve_parent_chunks(
+            full_text_hits_to_chunks(response, options.score_threshold),
+            options.indices,
+        )
 
     async def resolve_parent_chunks(
         self,
@@ -138,12 +141,10 @@ class _TimedElasticSearchRetrieval(AsyncElasticSearchRetrieval):
         )
         if not has_parent:
             return chunks
-        token = _ES_TIMING_FIELD.set(None)
         started_at = time.perf_counter()
         try:
             return await super().resolve_parent_chunks(chunks, index)
         finally:
-            _ES_TIMING_FIELD.reset(token)
             _record_elapsed(self._timings, "parent_resolution_ms", started_at)
 
 
@@ -598,6 +599,7 @@ class KnowledgeRetrievalService:
                     query=request.query,
                     pipeline=graph_target.pipeline,
                     targets=(graph_target,),
+                    timings=timings,
                 ),
                 top_k=target.params.top_k,
                 allowed_document_ids=(

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 from redbear_model.runtime import RedBearEmbeddings, RedBearLLM
@@ -42,6 +43,29 @@ class GraphRetrievalBridge:
         chunk_store = AsyncElasticSearchRetrieval(client)
         query_plan_cache = GraphQueryPlanCache(runtime.redis.client)
         model_pool = runtime.model_runtime.pool
+
+        async def resolve_parent_chunks(
+            chunks: list[DocumentChunk],
+            index: str,
+        ) -> list[DocumentChunk]:
+            has_parent = any(
+                (chunk.metadata or {}).get("chunk_type") == "child"
+                and (chunk.metadata or {}).get("parent_id")
+                for chunk in chunks
+            )
+            if not has_parent:
+                return chunks
+            started_at = time.perf_counter()
+            try:
+                return await chunk_store.resolve_parent_chunks(chunks, index)
+            finally:
+                if snapshot.timings is not None:
+                    elapsed_ms = max(
+                        0,
+                        int((time.perf_counter() - started_at) * 1000),
+                    )
+                    snapshot.timings.parent_resolution_ms += elapsed_ms
+
         for target in snapshot.targets:
             if target.llm.resolved is None or target.embedding.resolved is None:
                 raise ValueError("graph retrieval model snapshot is unavailable")
@@ -55,7 +79,7 @@ class GraphRetrievalBridge:
                 graph_store,
                 RedBearLLM(llm_config, client_pool=model_pool),
                 RedBearEmbeddings(target.embedding.resolved, client_pool=model_pool),
-                chunk_store.resolve_parent_chunks,
+                resolve_parent_chunks,
                 query_plan_cache,
                 timeout_ms=runtime.settings.knowledge_graph_retrieval_timeout_ms,
             )

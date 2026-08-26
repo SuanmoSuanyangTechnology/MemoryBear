@@ -101,6 +101,7 @@ class GraphRetrievalSnapshot:
     query: str
     pipeline: GraphPipeline
     targets: tuple[GraphTargetSnapshot, ...]
+    timings: RetrievalTimings | None = field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if not self.targets:
