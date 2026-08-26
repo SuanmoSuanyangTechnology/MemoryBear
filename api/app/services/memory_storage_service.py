@@ -12,7 +12,9 @@ import time
 import uuid
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
+import httpx
 from dotenv import load_dotenv
+from openai import APIConnectionError, APITimeoutError, AuthenticationError, BadRequestError, PermissionDeniedError, RateLimitError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
@@ -47,6 +49,70 @@ from app.utils.sse_utils import format_sse_message
 
 logger = get_logger(__name__)
 config_logger = get_config_logger()
+
+
+def classify_llm_error(e: Exception, prefix: str = "llm") -> tuple[str, str]:
+    """
+    渐进式判断错误类型，兼容多个供应商。
+    判断顺序：异常类型 → HTTP 状态码 → 关键词匹配 → 兜底
+    """
+    # 优先级 1：异常类型（最可靠）
+    if isinstance(e, AuthenticationError):
+        return (f"{prefix}_key_invalid", f"{prefix} 解析失败：API Key 无效，请检查配置")
+    if isinstance(e, PermissionDeniedError):
+        return (f"{prefix}_key_locked", f"{prefix} 解析失败：API Key 已被锁定或权限不足")
+    if isinstance(e, RateLimitError):
+        return (f"{prefix}_rate_limited", f"{prefix} 解析失败：请求过于频繁，请稍后重试")
+    if isinstance(e, APITimeoutError):
+        return (f"{prefix}_connection_failed", f"{prefix} 解析失败：模型服务连接超时，请检查网络或 URL 配置")
+    if isinstance(e, APIConnectionError):
+        return (f"{prefix}_connection_failed", f"{prefix} 解析失败：模型服务连接失败，请检查 URL 配置")
+    if isinstance(e, BadRequestError):
+        return (f"{prefix}_bad_request", f"{prefix} 解析失败：请求参数错误，请检查文件格式或 URL 是否可访问")
+
+    # 优先级 2：HTTP 状态码
+    if isinstance(e, httpx.HTTPStatusError):
+        status = e.response.status_code
+        if status == 400:
+            return (f"{prefix}_bad_request", f"{prefix} 解析失败：请求参数错误，请检查文件格式或 URL 是否可访问")
+        if status == 401:
+            return (f"{prefix}_key_invalid", f"{prefix} 解析失败：API Key 无效，请检查配置")
+        if status == 403:
+            return (f"{prefix}_key_locked", f"{prefix} 解析失败：API Key 已被锁定或过期")
+        if status in (408, 504):
+            return (f"{prefix}_connection_failed", f"{prefix} 解析失败：模型服务连接超时，请检查网络或 URL 配置")
+        if status == 429:
+            return (f"{prefix}_rate_limited", f"{prefix} 解析失败：请求过于频繁，请稍后重试")
+        if status == 404:
+            return (f"{prefix}_connection_failed", f"{prefix} 解析失败：模型服务地址不存在，请检查 URL 配置")
+        if status >= 500:
+            return (f"{prefix}_server_error", f"{prefix} 解析失败：模型服务异常，请稍后重试")
+
+    # 优先级 3：关键词匹配（兜底）
+    error_msg = str(e).lower()
+    if any(kw in error_msg for kw in ["auth", "unauthorized", "invalid_api_key", "incorrect_api_key", "401"]):
+        return (f"{prefix}_key_invalid", f"{prefix} 解析失败：API Key 无效，请检查配置")
+    if any(kw in error_msg for kw in ["expired", "disabled", "locked", "forbidden", "403"]):
+        return (f"{prefix}_key_locked", f"{prefix} 解析失败：API Key 已被锁定或过期")
+    if any(kw in error_msg for kw in ["arrearage", "欠费", "insufficient", "balance", "quota"]):
+        return (f"{prefix}_key_arrearage", f"{prefix} 解析失败：账户欠费或额度不足，请充值")
+    if any(kw in error_msg for kw in ["content-length", "content_length", "missing", "invalid_parameter", "400"]):
+        return (f"{prefix}_bad_request", f"{prefix} 解析失败：请求参数错误，请检查文件格式或 URL 是否可访问")
+    if any(kw in error_msg for kw in ["timeout", "timed out"]):
+        return (f"{prefix}_connection_failed", f"{prefix} 解析失败：模型服务连接超时，请检查网络或 URL 配置")
+    if any(kw in error_msg for kw in ["connect", "connection", "unreachable", "name resolution", "not found", "404"]):
+        return (f"{prefix}_connection_failed", f"{prefix} 解析失败：模型服务连接失败，请检查 URL 配置")
+    if any(kw in error_msg for kw in ["rate limit", "too many request", "429"]):
+        return (f"{prefix}_rate_limited", f"{prefix} 解析失败：请求过于频繁，请稍后重试")
+    if any(kw in error_msg for kw in ["not support", "unsupported", "capability", "modality"]):
+        return (f"{prefix}_capability_mismatch", f"{prefix} 解析失败：模型不支持该能力，请检查配置")
+    if any(kw in error_msg for kw in ["internal", "server error", "500", "502", "503"]):
+        return (f"{prefix}_server_error", f"{prefix} 解析失败：模型服务异常，请稍后重试")
+
+    # 优先级 4：无法识别，返回友好的默认提示（不暴露原始异常内容）
+    if prefix == "llm":
+        return (f"{prefix}_unknown_error", "模型调用失败，请稍后重试或联系管理员")
+    return (f"{prefix}_unknown_error", f"{prefix} 解析失败，请稍后重试或联系管理员")
 
 # Load environment variables for Neo4j connector
 load_dotenv()
@@ -774,12 +840,13 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
                 refs = attachment_groups[file_type]
                 runtime = media_runtimes.get(file_type)
                 if runtime is None:
-                    reason = (
-                        "[No configured model can process this attachment type.]"
-                        if language == "en"
-                        else "[当前配置中没有能够处理该附件类型的模型。]"
-                    )
-                    return {"text": group_failure_text(refs, reason), "tokens": 0, "api_key_id": None}
+                    # 返回错误标记
+                    return {
+                        "error": True,
+                        "type": file_type.value.upper(),
+                        "error_field": f"{file_type.value.upper()}_model_unavailable",
+                        "message": f"{file_type.value.upper()} 附件：没有可用的处理模型",
+                    }
 
                 model_info, api_key_id = runtime
                 try:
@@ -812,8 +879,13 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
                         self._stream_content_to_texts(getattr(response, "content", None))
                     ).strip()
                     if not response_text:
-                        reason = "[Attachment analysis returned no text.]" if language == "en" else "[附件解析未返回文本。]"
-                        response_text = group_failure_text(refs, reason)
+                        # 返回空文本也视为错误
+                        return {
+                            "error": True,
+                            "type": file_type.value,
+                            "error_field": f"{file_type.value}_empty_response",
+                            "message": f"{file_type.value} 附件解析未返回文本",
+                        }
                     return {
                         "text": response_text,
                         "tokens": self._extract_total_tokens(response),
@@ -821,14 +893,20 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
                     }
                 except asyncio.CancelledError:
                     raise
-                except Exception:
+                except Exception as e:
                     logger.error(
                         "[TRIAL_RUN_CHAT_STREAM] %s attachment analysis failed",
                         file_type.value,
                         exc_info=True,
                     )
-                    reason = "[Attachment analysis failed.]" if language == "en" else "[附件解析失败。]"
-                    return {"text": group_failure_text(refs, reason), "tokens": 0, "api_key_id": None}
+                    # 使用错误分类，前缀使用大写
+                    error_field, message = classify_llm_error(e, prefix=file_type.value.upper())
+                    return {
+                        "error": True,
+                        "type": file_type.value.upper(),
+                        "error_field": error_field,
+                        "message": message,
+                    }
 
             async def extract_document_group() -> dict[str, Any]:
                 refs = attachment_groups[FileType.DOCUMENT]
@@ -848,13 +926,19 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
                         documents.append(f"{attachment_label(ref)}\n{text}")
                     except asyncio.CancelledError:
                         raise
-                    except Exception:
+                    except Exception as e:
                         logger.error(
                             "[TRIAL_RUN_CHAT_STREAM] Document extraction failed",
                             exc_info=True,
                         )
-                        reason = "[Document extraction failed.]" if language == "en" else "[文档解析失败。]"
-                        documents.append(f"{attachment_label(ref)}\n{reason}")
+                        # 使用错误分类
+                        error_field, message = classify_llm_error(e, prefix="DOCUMENT")
+                        return {
+                            "error": True,
+                            "type": "DOCUMENT",
+                            "error_field": error_field,
+                            "message": message,
+                        }
                 return {"text": "\n\n".join(documents), "tokens": 0, "api_key_id": None}
 
             analysis_tasks = [
@@ -866,6 +950,27 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
                 analysis_tasks.append(extract_document_group())
 
             analysis_results = await asyncio.gather(*analysis_tasks) if analysis_tasks else []
+
+            # 收集所有错误
+            error_messages = []
+            first_error_field = "attachment_parse_failed"
+            for result in analysis_results:
+                if isinstance(result, dict) and result.get("error"):
+                    error_messages.append(result["message"])
+                    if first_error_field == "attachment_parse_failed":
+                        first_error_field = result["error_field"]
+
+            # 如果有错误，一次性返回，所有信息合并到 message 中
+            if error_messages:
+                combined_message = "附件解析失败：" + "；".join(error_messages)
+                yield format_sse_message("error", {
+                    "code": 5000,
+                    "error": first_error_field,
+                    "message": combined_message,
+                })
+                return
+
+            # 继续原有逻辑
             attachment_context = "\n\n".join(
                 result["text"] for result in analysis_results if result.get("text")
             )
@@ -961,9 +1066,24 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
         except asyncio.CancelledError:
             logger.info("[TRIAL_RUN_CHAT_STREAM] Client disconnected during streaming")
             raise
-        except Exception:
+        except Exception as e:
             logger.error("[TRIAL_RUN_CHAT_STREAM] Error during streaming", exc_info=True)
-            yield format_sse_message("error", self._trial_run_chat_error_data(language))
+            error_msg = str(e).lower()
+            # 区分配置错误和 LLM 错误
+            if "configuration not found" in error_msg or "config" in error_msg and "not found" in error_msg:
+                yield format_sse_message("error", {
+                    "code": 5000,
+                    "error": "config_error",
+                    "message": "配置读取失败",
+                })
+            else:
+                # 使用错误分类
+                error_field, message = classify_llm_error(e, prefix="llm")
+                yield format_sse_message("error", {
+                    "code": 5000,
+                    "error": error_field,
+                    "message": message,
+                })
 
     async def pilot_run_stream(self, payload: PilotRunInput, language: str = "zh") -> AsyncGenerator[str, None]:
         """
