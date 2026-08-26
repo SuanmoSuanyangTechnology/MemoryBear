@@ -318,58 +318,114 @@ def _invalidate_default_config_memory_caches(db: Session) -> None:
             )
 
 
-async def _validate_workspace_model_runtime(
-    db: Session,
+async def validate_model_bindings_runtime_async(
     values: dict[str, str | None],
     tenant_id: uuid.UUID,
-    workspace_id: uuid.UUID,
+    workspace_id: uuid.UUID | None,
     *,
     locale: str,
     slots_to_validate: tuple[str, ...],
 ) -> list[dict]:
+    """校验最终绑定的模型可被当前租户实际调用。
+
+    校验在独立异步会话中完成，避免在创建事务持有期间执行外部模型请求。
+    除了 API Key 与连通性验证外，还统一收紧模型可见性、启用状态及槽位类型/能力。
+    """
     from app.db import get_async_db_context
 
     async with get_async_db_context() as async_db:
         service = MemoryConfigService(async_db)
         warnings: list[dict] = []
-        validate_as_llm = {"vision", "video", "audio"}
+        validate_as_llm = {"vision", "video", "audio", "image2text"}
 
-        async def _validate_one(model_type: str, model_id: str) -> dict | None:
-            validate_type = "llm" if model_type in validate_as_llm else model_type
+        def _warning(model_type: str, model_id: str | None, message: str) -> dict:
+            return {
+                "model_type": model_type,
+                "model_id": str(model_id) if model_id else None,
+                "message": message,
+            }
+
+        def _matches_slot(slot: str, model: ModelConfig) -> bool:
+            if slot == "image2text":
+                return (
+                    str(model.type) in {ModelType.LLM.value, ModelType.CHAT.value}
+                    and ModelCapability.VISION.value in set(model.capability or [])
+                )
+            return _slot_matches_model(slot, model)
+
+        for slot in slots_to_validate:
+            model_id = values.get(slot)
+            if not model_id:
+                warnings.append(_warning(
+                    slot,
+                    None,
+                    t("memory_config.model.not_configured", locale=locale, model_type=slot),
+                ))
+                continue
+
+            try:
+                parsed_model_id = uuid.UUID(str(model_id))
+            except (ValueError, AttributeError, TypeError):
+                warnings.append(_warning(slot, model_id, f"{slot} 模型 ID 格式无效"))
+                continue
+
+            model = await async_db.get(ModelConfig, parsed_model_id)
+            if not model:
+                warnings.append(_warning(slot, model_id, f"{slot} 模型不存在"))
+                continue
+
+            is_accessible = (
+                model.tenant_id == tenant_id
+                or (
+                    str(model.provider) == ModelProvider.SPEEDBEAR.value
+                    and bool(model.is_public)
+                )
+            )
+            if not is_accessible:
+                warnings.append(_warning(slot, model_id, f"{slot} 模型不可被当前租户使用"))
+                continue
+            if not model.is_active:
+                warnings.append(_warning(slot, model_id, f"{slot} 模型已禁用"))
+                continue
+            if not _matches_slot(slot, model):
+                warnings.append(_warning(slot, model_id, f"{slot} 模型类型或能力不匹配"))
+                continue
+
+            validate_type = "llm" if slot in validate_as_llm else slot
             try:
                 await service._validate_model_connectivity(
-                    model_id,
+                    str(model.id),
                     validate_type,
                     tenant_id,
                     None,
                     workspace_id,
                     locale=locale,
                 )
-                return None
             except ConfigurationError as exc:
-                return {
-                    "model_type": model_type,
-                    "model_id": str(model_id),
-                    "message": exc.err_message,
-                }
-
-        for slot in slots_to_validate:
-            if not values.get(slot):
-                warnings.append({
-                    "model_type": slot,
-                    "model_id": None,
-                    "message": t("memory_config.model.not_configured", locale=locale, model_type=slot),
-                })
-
-        for slot in slots_to_validate:
-            model_id = values.get(slot)
-            if not model_id:
-                continue
-            result = await _validate_one(slot, model_id)
-            if result is not None:
-                warnings.append(result)
+                warnings.append(_warning(slot, model_id, exc.err_message))
+            except BusinessException as exc:
+                warnings.append(_warning(slot, model_id, exc.message))
 
     return warnings
+
+
+async def _validate_workspace_model_runtime(
+    db: Session,
+    values: dict[str, str | None],
+    tenant_id: uuid.UUID,
+    workspace_id: uuid.UUID | None,
+    *,
+    locale: str,
+    slots_to_validate: tuple[str, ...],
+) -> list[dict]:
+    _ = db
+    return await validate_model_bindings_runtime_async(
+        values,
+        tenant_id,
+        workspace_id,
+        locale=locale,
+        slots_to_validate=slots_to_validate,
+    )
 
 
 def _resolve_workspace_create_payload(db: Session, workspace: WorkspaceCreate, tenant_id: uuid.UUID) -> WorkspaceCreate:
