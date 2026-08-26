@@ -106,8 +106,6 @@ class KnowledgeHttpTransport:
         principal = context.principal
         if principal is not None:
             headers["X-KB-Actor-ID"] = str(principal.actor_id)
-            if principal.actor_name:
-                headers["X-KB-Actor-Name"] = principal.actor_name
             headers["X-KB-Tenant-ID"] = str(principal.tenant_id)
             headers["X-KB-Workspace-ID"] = str(principal.workspace_id)
         headers["X-KB-Source"] = context.source.value
