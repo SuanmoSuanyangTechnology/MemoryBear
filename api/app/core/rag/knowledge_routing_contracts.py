@@ -23,6 +23,7 @@ class RouteOperation:
     filename: str
     handler: str
     decorators: tuple[str, ...]
+    authenticated: bool
     streaming: bool
     multipart: bool
 
@@ -33,6 +34,7 @@ class KnowledgeRoutingInventory:
     service_count: int
     manager_counts: dict[str, int]
     service_counts: dict[str, int]
+    public_manager_operations: frozenset[tuple[str, str]]
     public_service_operations: frozenset[tuple[str, str]]
     stream_operations: frozenset[tuple[str, str]]
     multipart_operations: frozenset[tuple[str, str]]
@@ -107,8 +109,39 @@ def _accepts_multipart(node: ast.AsyncFunctionDef | ast.FunctionDef) -> bool:
     return any(_call_name(default) == "File" for default in defaults)
 
 
+def _depends_on_current_user(node: ast.AsyncFunctionDef | ast.FunctionDef) -> bool:
+    defaults: list[ast.expr | None] = [None] * (
+        len(node.args.args) - len(node.args.defaults)
+    ) + list(node.args.defaults)
+    defaults.extend(node.args.kw_defaults)
+    for default in defaults:
+        if not isinstance(default, ast.Call) or _call_name(default) != "Depends":
+            continue
+        dependency = _call_name(default.args[0]) if default.args else None
+        if dependency in {"get_current_user", "get_current_user_async"}:
+            return True
+    return False
+
+
+def _router_depends_on_current_user(tree: ast.Module) -> bool:
+    for node in tree.body:
+        if not isinstance(node, (ast.Assign, ast.AnnAssign)):
+            continue
+        value = node.value
+        if not isinstance(value, ast.Call) or _call_name(value) != "APIRouter":
+            continue
+        for keyword in value.keywords:
+            if keyword.arg != "dependencies":
+                continue
+            names = {_call_name(child) for child in ast.walk(keyword.value)}
+            if {"get_current_user", "get_current_user_async"}.intersection(names):
+                return True
+    return False
+
+
 def _parse_controller(path: Path, prefix: str, mount: str) -> tuple[RouteOperation, ...]:
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    router_authenticated = _router_depends_on_current_user(tree)
     operations: list[RouteOperation] = []
     for node in tree.body:
         if not isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef)):
@@ -128,6 +161,11 @@ def _parse_controller(path: Path, prefix: str, mount: str) -> tuple[RouteOperati
                     filename=path.name,
                     handler=node.name,
                     decorators=decorators,
+                    authenticated=(
+                        router_authenticated
+                        or _depends_on_current_user(node)
+                        or any(name.startswith("require_api_key") for name in decorators)
+                    ),
                     streaming=_returns_stream(node),
                     multipart=_accepts_multipart(node),
                 )
@@ -186,6 +224,11 @@ def collect_inventory(repo_root: Path) -> KnowledgeRoutingInventory:
         for operation in service
         if not any(name.startswith("require_api_key") for name in operation.decorators)
     )
+    public_manager = frozenset(
+        (operation.method, operation.path)
+        for operation in manager
+        if not operation.authenticated
+    )
     stream_operations = frozenset(
         (operation.method, operation.path.replace("/api", "/internal/v1", 1))
         for operation in manager
@@ -202,6 +245,7 @@ def collect_inventory(repo_root: Path) -> KnowledgeRoutingInventory:
         service_count=len(service),
         manager_counts=dict(sorted(manager_counts.items())),
         service_counts=dict(sorted(service_counts.items())),
+        public_manager_operations=public_manager,
         public_service_operations=public_service,
         stream_operations=stream_operations,
         multipart_operations=multipart_operations,
@@ -247,6 +291,7 @@ def _payload(inventory: KnowledgeRoutingInventory) -> dict[str, object]:
     payload = asdict(inventory)
     for key in (
         "public_service_operations",
+        "public_manager_operations",
         "stream_operations",
         "multipart_operations",
         "direct_retrieval_callers",
@@ -284,6 +329,7 @@ def main() -> int:
         print(f"manager knowledge operations: {inventory.manager_count}")
         print(f"service knowledge operations: {inventory.service_count}")
         print(f"public service operations: {len(inventory.public_service_operations)}")
+        print(f"public manager operations: {len(inventory.public_manager_operations)}")
         print(f"stream operations: {len(inventory.stream_operations)}")
         print(f"multipart operations: {len(inventory.multipart_operations)}")
     return 0

@@ -242,7 +242,10 @@ async def get_file(
 ) -> StreamingResponse:
     async with runtime.database.async_session() as db:
         if principal is None:
-            if source is not KnowledgeRetrievalSource.EXTERNAL_API:
+            if source not in {
+                KnowledgeRetrievalSource.EXTERNAL_API,
+                KnowledgeRetrievalSource.MANAGER_API,
+            }:
                 raise KnowledgeError.from_code(
                     "KB_PRINCIPAL_INVALID",
                     "Knowledge principal is required",
