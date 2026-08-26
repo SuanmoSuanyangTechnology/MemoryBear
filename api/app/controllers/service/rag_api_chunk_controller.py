@@ -260,6 +260,7 @@ async def retrieve_chunks(
             retrieve_data=retrieve_data,
             principal=principal,
             source=chunk_schema.KnowledgeRetrievalSource.EXTERNAL_API,
+            trace_id=getattr(request.state, "trace_id", None),
         )
     except KnowledgeRetrievalAccessDenied as exc:
         raise HTTPException(

@@ -1,6 +1,7 @@
 import json
 import logging
 import re
+import uuid
 from typing import Any
 
 from app.core.error_codes import BizCode
@@ -14,14 +15,15 @@ from app.core.workflow.nodes.knowledge import KnowledgeRetrievalNodeConfig
 from app.core.workflow.nodes.llm.config import strip_unsupported_llm_params
 from app.core.workflow.variable.base_variable import VariableType
 from app.db import get_async_db_context
+from app.integrations.knowledge.context_factory import build_app_knowledge_context
 from app.integrations.knowledge.contracts import KnowledgeRetrievalSource
+from app.integrations.knowledge.runtime import get_knowledge_retriever
 from app.schemas.chunk_schema import RetrieveType
 from app.models.models_model import ModelCapability, ModelType
 from app.schemas.knowledge_metadata_schema import FilterCondition, FilterGroup, MetadataFilterMode
 from app.schemas.knowledge_retrieval_schema import KnowledgeRetrievalRequest
 from app.services.knowledge_metadata_service import KnowledgeMetadataService
 from app.services.knowledge_retrieval_preparation import KnowledgeRetrievalPreparation
-from app.services.knowledge_retrieval_service import KnowledgeRetrievalService
 from app.services.metadata_auto_filter_service import MetadataAutoFilterService
 from app.services.model_service import ModelConfigService
 
@@ -331,9 +333,8 @@ class KnowledgeRetrievalNode(BaseNode):
         """
         Execute the knowledge retrieval workflow node.
 
-        Delegates all retrieval and metadata filtering to the unified
-        KnowledgeRetrievalService.retrieve_async entry point, as specified in
-        the knowledge retrieval API convention document.
+        Delegates retrieval through the configured knowledge adapter while
+        preserving the unified retrieval request contract.
 
         Args:
             state (WorkflowState): Current workflow execution state.
@@ -402,10 +403,15 @@ class KnowledgeRetrievalNode(BaseNode):
         if self.typed_config.metadata_filter_mode == MetadataFilterMode.AUTO:
             request.mark_metadata_filters_resolved()
 
-        # 4. Call unified retrieval service
-        result = await KnowledgeRetrievalService.retrieve_async(
-            request=request,
-            principal=None,
+        # 4. Resolve the application owner before calling the selected adapter.
+        context = await build_app_knowledge_context(
+            self.workflow_config.get("app_id"),
+            source=KnowledgeRetrievalSource.WORKFLOW,
+            trace_id=uuid.uuid4().hex,
+        )
+        result = await get_knowledge_retriever().retrieve(
+            request,
+            context,
         )
 
         # 5. Assemble return format

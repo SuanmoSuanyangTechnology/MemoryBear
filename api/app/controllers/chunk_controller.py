@@ -33,13 +33,18 @@ from app.schemas.knowledge_retrieval_schema import KnowledgeRetrievalRequest
 from app.schemas.response_schema import ApiResponse
 from app.services import knowledge_service, document_service
 from app.services.file_storage_service import FileStorageService, get_file_storage_service, generate_kb_file_key
-from app.services.knowledge_retrieval_service import KnowledgeRetrievalAccessDenied, KnowledgeRetrievalService
+from app.services.knowledge_retrieval_service import KnowledgeRetrievalAccessDenied
 from app.services.model_service import ModelApiKeyService
 from app.core.rag.utils.preview_utils import _build_preview_hierarchy
 from app.core.utils.datetime_utils import to_timestamp_ms
 from app.integrations.knowledge.call_profile import CallProfile
-from app.integrations.knowledge.contracts import KnowledgeRetrievalSource
+from app.integrations.knowledge.contracts import (
+    KnowledgeCallContext,
+    KnowledgePrincipal,
+    KnowledgeRetrievalSource,
+)
 from app.integrations.knowledge.route_proxy import route_through_knowledge_service
+from app.integrations.knowledge.runtime import get_knowledge_retriever
 
 # Obtain a dedicated API logger
 api_logger = get_api_logger()
@@ -1182,6 +1187,7 @@ async def retrieve_chunks_with_source(
         retrieve_data: chunk_schema.ChunkRetrieve,
         principal: RetrievalPrincipal | None,
         source: chunk_schema.KnowledgeRetrievalSource,
+        trace_id: str | None = None,
 ):
     """
     retrieve chunk
@@ -1205,9 +1211,28 @@ async def retrieve_chunks_with_source(
         retrieval_payload = retrieve_data.model_dump(exclude_none=True)
         retrieval_payload["source"] = source
         request = KnowledgeRetrievalRequest(**retrieval_payload)
-        result = await KnowledgeRetrievalService.retrieve_async(
-            request=request,
-            principal=principal,
+        if (
+            principal is None
+            or principal.id is None
+            or principal.tenant_id is None
+            or principal.current_workspace_id is None
+        ):
+            raise KnowledgeRetrievalAccessDenied(
+                "Knowledge retrieval principal is unavailable"
+            )
+        context = KnowledgeCallContext(
+            principal=KnowledgePrincipal(
+                actor_id=uuid.UUID(str(principal.id)),
+                actor_name=principal.username,
+                tenant_id=uuid.UUID(str(principal.tenant_id)),
+                workspace_id=uuid.UUID(str(principal.current_workspace_id)),
+            ),
+            source=source,
+            trace_id=trace_id or uuid.uuid4().hex,
+        )
+        result = await get_knowledge_retriever().retrieve(
+            request,
+            context,
         )
     except KnowledgeRetrievalAccessDenied as exc:
         raise HTTPException(
@@ -1235,4 +1260,5 @@ async def retrieve_chunks(
         retrieve_data=retrieve_data,
         principal=RetrievalPrincipal.from_user(current_user),
         source=chunk_schema.KnowledgeRetrievalSource.MANAGER_API,
+        trace_id=getattr(getattr(request, "state", None), "trace_id", None),
     )
