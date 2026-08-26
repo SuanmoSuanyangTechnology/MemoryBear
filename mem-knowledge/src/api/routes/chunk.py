@@ -10,11 +10,13 @@ from fastapi import APIRouter, Depends, File, Query, Request, UploadFile
 from ...errors import KnowledgeError
 from ...runtime import ProcessRuntime
 from ...services import chunk as chunk_service
+from ...services import file as file_service
 from ...services.knowledge_file_storage import KnowledgeFileStorage
 from ...services.knowledge_retrieval import KnowledgeRetrievalService
 from ...services.qa_import import (
     create_qa_import_resources,
     dispatch_qa_import,
+    prepare_qa_import_resources,
     validate_qa_upload,
 )
 from ...tasks.dispatch import TaskDispatcher
@@ -400,10 +402,11 @@ async def import_qa_new_doc(
     filename = file.filename or ""
     content = await file.read()
     validate_qa_upload(filename, content)
+    storage = KnowledgeFileStorage(runtime.storage)
     async with runtime.database.async_session() as db:
-        resources = await create_qa_import_resources(
+        plan = await prepare_qa_import_resources(
             db,
-            KnowledgeFileStorage(runtime.storage),
+            storage,
             kb_id=kb_id,
             parent_id=parent_id,
             filename=filename,
@@ -411,10 +414,17 @@ async def import_qa_new_doc(
             content_type=file.content_type,
             principal=principal,
         )
+    await storage.upload(plan.file_key, content, file.content_type)
+    try:
+        async with runtime.database.async_session() as db:
+            resources = await create_qa_import_resources(db, plan, principal)
+    except Exception:
+        await file_service.compensate_storage_upload(storage, plan.file_key)
+        raise
     task_id = await dispatch_qa_import(
         TaskDispatcher(),
         kb_id,
-        resources.document.id,
+        resources.document_id,
         filename,
         content,
     )
@@ -422,8 +432,8 @@ async def import_qa_new_doc(
         request,
         {
             "task_id": task_id,
-            "document_id": str(resources.document.id),
-            "file_id": str(resources.file.id),
+            "document_id": str(resources.document_id),
+            "file_id": str(resources.file_id),
         },
         "QA 导入任务已提交，后台处理中",
     )

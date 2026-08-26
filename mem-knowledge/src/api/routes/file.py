@@ -59,6 +59,41 @@ async def _qa_export(
     return file_service.QAExportFile(path, spec.file_name, media_type)
 
 
+async def _persist_upload(
+    runtime: ProcessRuntime,
+    principal: Principal,
+    *,
+    kb_id: uuid.UUID,
+    parent_id: uuid.UUID,
+    file_name: str,
+    file_ext: str,
+    content: bytes,
+    content_type: str | None,
+    inherit_parser_config: bool,
+) -> file_service.UploadOutcome:
+    storage = KnowledgeFileStorage(runtime.storage)
+    async with runtime.database.async_session() as db:
+        plan = await file_service.upload_content(
+            db,
+            storage,
+            kb_id=kb_id,
+            parent_id=parent_id,
+            file_name=file_name,
+            file_ext=file_ext,
+            content=content,
+            content_type=content_type,
+            principal=principal,
+            inherit_parser_config=inherit_parser_config,
+        )
+    await storage.upload(plan.file_key, content, content_type)
+    try:
+        async with runtime.database.async_session() as db:
+            return await file_service.persist_uploaded_content(db, plan, principal)
+    except Exception:
+        await file_service.compensate_storage_upload(storage, plan.file_key)
+        raise
+
+
 @router.get("/{kb_id}/{parent_id}/files", response_model=SuccessEnvelope[dict[str, Any]])
 async def get_files(
     request: Request,
@@ -116,9 +151,10 @@ async def create_folder(
             folder_name,
             principal,
         )
+        data = file_service.file_to_data(folder)
     return _success(
         request,
-        file_service.file_to_data(folder),
+        data,
         "Folder creation successful",
     )
 
@@ -139,22 +175,20 @@ async def upload_file(
         raise KnowledgeError.from_code("KB_VALIDATION_ERROR", "File size exceeds limit")
     file_name = file.filename or ""
     file_ext = os.path.splitext(file_name)[1].lower()
-    async with runtime.database.async_session() as db:
-        document = await file_service.upload_content(
-            db,
-            KnowledgeFileStorage(runtime.storage),
-            kb_id=kb_id,
-            parent_id=parent_id,
-            file_name=file_name,
-            file_ext=file_ext,
-            content=contents,
-            content_type=file.content_type,
-            principal=principal,
-            inherit_parser_config=True,
-        )
+    outcome = await _persist_upload(
+        runtime,
+        principal,
+        kb_id=kb_id,
+        parent_id=parent_id,
+        file_name=file_name,
+        file_ext=file_ext,
+        content=contents,
+        content_type=file.content_type,
+        inherit_parser_config=True,
+    )
     return _success(
         request,
-        file_service.document_to_data(document),
+        outcome.document_data,
         "File upload successful",
     )
 
@@ -173,22 +207,20 @@ async def custom_text(
         raise KnowledgeError.from_code("KB_VALIDATION_ERROR", "The content is empty")
     if len(content) > runtime.settings.max_file_size:
         raise KnowledgeError.from_code("KB_VALIDATION_ERROR", "Content size exceeds limit")
-    async with runtime.database.async_session() as db:
-        document = await file_service.upload_content(
-            db,
-            KnowledgeFileStorage(runtime.storage),
-            kb_id=kb_id,
-            parent_id=parent_id,
-            file_name=f"{create_data.title}.txt",
-            file_ext=".txt",
-            content=content,
-            content_type="text/plain",
-            principal=principal,
-            inherit_parser_config=False,
-        )
+    outcome = await _persist_upload(
+        runtime,
+        principal,
+        kb_id=kb_id,
+        parent_id=parent_id,
+        file_name=f"{create_data.title}.txt",
+        file_ext=".txt",
+        content=content,
+        content_type="text/plain",
+        inherit_parser_config=False,
+    )
     return _success(
         request,
-        file_service.document_to_data(document),
+        outcome.document_data,
         "custom text upload successful",
     )
 
@@ -255,12 +287,13 @@ async def batch_download_files(
         if not files:
             raise file_service._not_found("Selected files have no storage key")
         specs = [await file_service.get_qa_export_spec(db, file) for file in files]
+        snapshots = [file_service.stored_file_snapshot(file) for file in files]
     qa_exports = {}
-    for file, spec in zip(files, specs, strict=True):
+    for file, spec in zip(snapshots, specs, strict=True):
         if spec and (export := await _qa_export(runtime, spec)):
             qa_exports[file.file_key] = export
-    entries = file_service.build_zip_arcnames(files)
-    zip_name = file_service.make_zip_filename(files, request_body.zip_filename)
+    entries = file_service.build_zip_arcnames(snapshots)
+    zip_name = file_service.make_zip_filename(snapshots, request_body.zip_filename)
     return StreamingResponse(
         file_service.stream_zip_files(
             entries,
@@ -270,7 +303,7 @@ async def batch_download_files(
         media_type="application/zip",
         headers={
             "Content-Disposition": f"attachment; filename*=UTF-8''{quote(zip_name)}",
-            "X-Total-Files": str(len(files)),
+            "X-Total-Files": str(len(snapshots)),
         },
     )
 
@@ -285,9 +318,10 @@ async def update_file(
 ) -> SuccessEnvelope[dict[str, Any]]:
     async with runtime.database.async_session() as db:
         file = await file_service.update_file(db, file_id, update_data, principal)
+        data = file_service.file_to_data(file)
     return _success(
         request,
-        file_service.file_to_data(file),
+        data,
         "File information updated successfully",
     )
 
@@ -299,11 +333,10 @@ async def delete_file(
     principal: Annotated[Principal, Depends(get_principal)],
     runtime: Annotated[ProcessRuntime, Depends(get_runtime)],
 ) -> SuccessEnvelope[None]:
+    storage = KnowledgeFileStorage(runtime.storage)
     async with runtime.database.async_session() as db:
-        await file_service.delete_file(
-            db,
-            KnowledgeFileStorage(runtime.storage),
-            file_id,
-            principal,
-        )
+        plan = await file_service.prepare_file_deletion(db, file_id, principal)
+    await file_service.delete_file_storage(storage, plan)
+    async with runtime.database.async_session() as db:
+        await file_service.persist_file_deletion(db, plan)
     return _success(request, msg="File deleted successfully")

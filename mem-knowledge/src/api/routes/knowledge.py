@@ -272,9 +272,10 @@ async def get_knowledge_chunk_policy(
         knowledge = await knowledge_service.get_knowledge(db, knowledge_id, principal)
         if knowledge is None:
             raise knowledge_service._not_found()
+        parent_child_mode = {0: None, 1: False, 2: True}[knowledge.chunk_mode]
     return _success(
         request,
-        {"parent_child_mode": {0: None, 1: False, 2: True}[knowledge.chunk_mode]},
+        {"parent_child_mode": parent_child_mode},
         "Successfully obtained knowledge base chunk policy",
     )
 
@@ -300,19 +301,27 @@ async def update_knowledge(
             ignore_unavailable=True,
         )
     async with runtime.database.async_session() as db:
-        knowledge = await knowledge_service.apply_knowledge_update(
+        outcome = await knowledge_service.apply_knowledge_update(
             db,
             plan,
             principal,
-            runtime.redis,
         )
-        if plan.graph_enabled_before is False and is_graph_enabled(knowledge.parser_config):
+        if plan.graph_enabled_before is False and is_graph_enabled(outcome.parser_config):
             knowledge = await graph_service.commit_evidence_pipeline(
                 db,
                 knowledge_id,
                 principal.workspace_id,
             )
-        data = await knowledge_service.knowledge_to_data(db, knowledge)
+            outcome = await knowledge_service.build_knowledge_mutation_outcome(
+                db,
+                knowledge,
+                invalidate_workspace_id=outcome.invalidate_workspace_id,
+            )
+    if outcome.invalidate_workspace_id is not None:
+        await knowledge_service.invalidate_storage_type_cache(
+            runtime.redis,
+            outcome.invalidate_workspace_id,
+        )
     dispatcher = TaskDispatcher()
     if plan.graph_enabled_before is not None:
         try:
@@ -320,7 +329,7 @@ async def update_knowledge(
                 dispatcher,
                 knowledge_id,
                 plan.graph_enabled_before,
-                knowledge.parser_config,
+                outcome.parser_config,
             )
         except Exception:
             logger.error(
@@ -344,7 +353,7 @@ async def update_knowledge(
             )
     return _success(
         request,
-        data,
+        outcome.response_data,
         "The knowledge base information has been successfully updated",
     )
 
@@ -357,11 +366,15 @@ async def delete_knowledge(
     runtime: Annotated[ProcessRuntime, Depends(get_runtime)],
 ) -> SuccessEnvelope[None]:
     async with runtime.database.async_session() as db:
-        await knowledge_service.soft_delete_knowledge(
+        outcome = await knowledge_service.soft_delete_knowledge(
             db,
             knowledge_id,
             principal,
+        )
+    if outcome.invalidate_workspace_id is not None:
+        await knowledge_service.invalidate_storage_type_cache(
             runtime.redis,
+            outcome.invalidate_workspace_id,
         )
     return _success(
         request,
@@ -383,14 +396,15 @@ async def get_knowledge_graph(
         knowledge = await knowledge_service.get_knowledge(db, knowledge_id, principal)
         if knowledge is None:
             raise knowledge_service._not_found()
+        snapshot = knowledge_service.knowledge_snapshot(knowledge)
     try:
-        pipeline = resolve_graph_pipeline(knowledge.parser_config)
+        pipeline = resolve_graph_pipeline(snapshot.parser_config)
         store = (
             GraphElasticsearchStore(await runtime.elasticsearch.client())
             if pipeline is GraphPipeline.EVIDENCE
             else None
         )
-        data = await graph_service.get_graph(knowledge, store)
+        data = await graph_service.get_graph(snapshot, store)
     except ValueError as exc:
         raise KnowledgeError.from_code("KB_VALIDATION_ERROR", str(exc)) from exc
     return _success(
@@ -414,7 +428,8 @@ async def delete_knowledge_graph(
         knowledge = await knowledge_service.get_knowledge(db, knowledge_id, principal)
         if knowledge is None:
             raise knowledge_service._not_found()
-    task_id = await graph_service.delete_graph(knowledge, TaskDispatcher())
+        snapshot = knowledge_service.knowledge_snapshot(knowledge)
+    task_id = await graph_service.delete_graph(snapshot, TaskDispatcher())
     return _success(
         request,
         {"task_id": task_id},
@@ -540,10 +555,11 @@ async def kb_batch_download(
         if not files:
             raise file_service._not_found("Knowledge has no downloadable files")
         specs = [await file_service.get_qa_export_spec(db, file) for file in files]
+        snapshots = [file_service.stored_file_snapshot(file) for file in files]
         knowledge_name = knowledge.name
     client = await runtime.elasticsearch.client()
     qa_exports = {}
-    for file, spec in zip(files, specs, strict=True):
+    for file, spec in zip(snapshots, specs, strict=True):
         if spec is None:
             continue
         result = await write_document_export(
@@ -559,9 +575,9 @@ async def kb_batch_download(
                 spec.file_name,
                 media_type,
             )
-    entries = file_service.build_zip_arcnames(files)
+    entries = file_service.build_zip_arcnames(snapshots)
     zip_name = file_service.make_zip_filename(
-        files,
+        snapshots,
         request_body.zip_filename,
         base_name=knowledge_name,
     )
@@ -574,6 +590,6 @@ async def kb_batch_download(
         media_type="application/zip",
         headers={
             "Content-Disposition": f"attachment; filename*=UTF-8''{quote(zip_name)}",
-            "X-Total-Files": str(len(files)),
+            "X-Total-Files": str(len(snapshots)),
         },
     )

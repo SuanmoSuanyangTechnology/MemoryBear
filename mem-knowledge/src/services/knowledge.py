@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
 
@@ -35,6 +36,21 @@ _SHARE_MIRRORED_MODEL_FIELDS = (
     ("llm_id", "llm"),
     ("image2text_id", "image2text"),
 )
+
+
+@dataclass(frozen=True)
+class KnowledgeSnapshot:
+    id: uuid.UUID
+    workspace_id: uuid.UUID
+    parser_config: dict[str, Any]
+
+
+def knowledge_snapshot(knowledge: Knowledge) -> KnowledgeSnapshot:
+    return KnowledgeSnapshot(
+        id=knowledge.id,
+        workspace_id=knowledge.workspace_id,
+        parser_config=deepcopy(knowledge.parser_config or {}),
+    )
 
 
 def _not_found(message: str = "Knowledge resource not found") -> KnowledgeError:
@@ -427,15 +443,14 @@ async def update_knowledge(
     knowledge_id: uuid.UUID,
     update_data: KnowledgeUpdate,
     principal: Principal,
-    redis_manager: Any | None = None,
-) -> Knowledge:
+) -> KnowledgeMutationOutcome:
     plan = await prepare_knowledge_update(
         db,
         knowledge_id,
         update_data,
         principal,
     )
-    return await apply_knowledge_update(db, plan, principal, redis_manager)
+    return await apply_knowledge_update(db, plan, principal)
 
 
 @dataclass(frozen=True)
@@ -445,6 +460,14 @@ class KnowledgeUpdatePlan:
     embedding_changed: bool
     delete_vector_index: bool
     graph_enabled_before: bool | None
+
+
+@dataclass(frozen=True)
+class KnowledgeMutationOutcome:
+    response_data: dict[str, Any] | None
+    knowledge_id: uuid.UUID
+    parser_config: dict[str, Any]
+    invalidate_workspace_id: uuid.UUID | None
 
 
 async def prepare_knowledge_update(
@@ -501,18 +524,14 @@ async def apply_knowledge_update(
     db: AsyncSession,
     plan: KnowledgeUpdatePlan,
     principal: Principal,
-    redis_manager: Any | None = None,
-) -> Knowledge:
+) -> KnowledgeMutationOutcome:
     knowledge = await get_knowledge(db, plan.knowledge_id, principal)
     if knowledge is None:
         raise _not_found()
     if plan.embedding_changed:
-        from ..repositories.document import reset_documents_progress_by_kb_id_async
+        from ..repositories.document import stage_reset_documents_progress_by_kb_id_async
 
-        await reset_documents_progress_by_kb_id_async(db, knowledge.id)
-        knowledge = await get_knowledge(db, plan.knowledge_id, principal)
-        if knowledge is None:
-            raise _not_found()
+        await stage_reset_documents_progress_by_kb_id_async(db, knowledge.id)
         knowledge.chunk_num = 0
     for field, value in plan.update_fields.items():
         if hasattr(knowledge, field):
@@ -520,12 +539,29 @@ async def apply_knowledge_update(
     knowledge.updated_at = utcnow_naive()
     await db.commit()
     await db.refresh(knowledge)
-    if knowledge.name == "USER_RAG_MERORY" and redis_manager is not None:
-        await _invalidate_storage_type_cache(redis_manager, knowledge.workspace_id)
-    return knowledge
+    return await build_knowledge_mutation_outcome(db, knowledge)
 
 
-async def _invalidate_storage_type_cache(
+async def build_knowledge_mutation_outcome(
+    db: AsyncSession,
+    knowledge: Knowledge,
+    *,
+    invalidate_workspace_id: uuid.UUID | None = None,
+) -> KnowledgeMutationOutcome:
+    workspace_id = (
+        knowledge.workspace_id
+        if knowledge.name == "USER_RAG_MERORY"
+        else invalidate_workspace_id
+    )
+    return KnowledgeMutationOutcome(
+        response_data=await knowledge_to_data(db, knowledge),
+        knowledge_id=knowledge.id,
+        parser_config=deepcopy(knowledge.parser_config or {}),
+        invalidate_workspace_id=workspace_id,
+    )
+
+
+async def invalidate_storage_type_cache(
     redis_manager: Any,
     workspace_id: uuid.UUID,
 ) -> None:
@@ -534,22 +570,29 @@ async def _invalidate_storage_type_cache(
         pattern = f"cache:storage_type:{workspace_id}:*"
         async for key in client.scan_iter(match=pattern, count=500):
             await client.unlink(key)
-    except Exception:
-        logger.warning("Failed to invalidate storage type cache", exc_info=True)
+    except Exception as exc:
+        logger.warning(
+            "Failed to invalidate storage type cache error_type=%s",
+            type(exc).__name__,
+        )
 
 
 async def soft_delete_knowledge(
     db: AsyncSession,
     knowledge_id: uuid.UUID,
     principal: Principal,
-    redis_manager: Any | None = None,
-) -> Knowledge:
+) -> KnowledgeMutationOutcome:
     knowledge = await get_knowledge(db, knowledge_id, principal)
     if knowledge is None:
         raise _not_found()
     knowledge.status = 2
     knowledge.updated_at = utcnow_naive()
     await db.commit()
-    if knowledge.name == "USER_RAG_MERORY" and redis_manager is not None:
-        await _invalidate_storage_type_cache(redis_manager, knowledge.workspace_id)
-    return knowledge
+    return KnowledgeMutationOutcome(
+        response_data=None,
+        knowledge_id=knowledge.id,
+        parser_config=deepcopy(knowledge.parser_config or {}),
+        invalidate_workspace_id=(
+            knowledge.workspace_id if knowledge.name == "USER_RAG_MERORY" else None
+        ),
+    )
