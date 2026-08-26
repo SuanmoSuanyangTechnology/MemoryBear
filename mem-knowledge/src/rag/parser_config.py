@@ -89,6 +89,17 @@ def _copy_parser_config(
     return deepcopy(dict(parser_config))
 
 
+def normalize_document_parser_config(
+    parser_config: Mapping[str, Any],
+    *,
+    preserve_missing: bool = True,
+) -> dict[str, Any]:
+    normalized = _copy_parser_config(parser_config)
+    if "layout_recognize" in normalized or not preserve_missing:
+        normalized["layout_recognize"] = resolve_layout_recognize(normalized)
+    return normalized
+
+
 def normalize_new_knowledge_parser_config(
     parser_config: Mapping[str, Any] | None,
 ) -> dict[str, Any]:

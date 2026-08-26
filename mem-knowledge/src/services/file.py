@@ -27,6 +27,8 @@ from ..models.owned import (
     File,
     Knowledge,
 )
+from ..rag.knowledge_graph import GraphPipelineConfigError
+from ..rag.parser_config import normalize_document_parser_config
 from ..repositories import document as document_repository
 from ..repositories import file as file_repository
 from . import knowledge as knowledge_service
@@ -175,6 +177,12 @@ async def upload_content(
     knowledge = await knowledge_service.get_knowledge(db, kb_id, principal)
     if knowledge is None:
         raise _not_found("Knowledge resource not found")
+    try:
+        parser_config = normalize_document_parser_config(
+            _document_parser_config(knowledge, inherit=inherit_parser_config)
+        )
+    except (ValueError, GraphPipelineConfigError) as exc:
+        raise KnowledgeError.from_code("KB_VALIDATION_ERROR", str(exc)) from exc
     await require_parent_folder(db, kb_id, parent_id, principal)
     db_file = await file_repository.create_file_async(
         db,
@@ -204,10 +212,7 @@ async def upload_content(
                 file_size=db_file.file_size,
                 file_meta={},
                 parser_id="naive",
-                parser_config=_document_parser_config(
-                    knowledge,
-                    inherit=inherit_parser_config,
-                ),
+                parser_config=parser_config,
             ),
         )
     except Exception:

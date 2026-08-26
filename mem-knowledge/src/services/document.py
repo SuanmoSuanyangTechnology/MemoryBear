@@ -22,7 +22,13 @@ from ..models.owned import (
     File,
     KnowledgeMetadataBinding,
 )
-from ..rag.knowledge_graph import GraphPipeline, is_graph_enabled, resolve_graph_pipeline
+from ..rag.knowledge_graph import (
+    GraphPipeline,
+    GraphPipelineConfigError,
+    is_graph_enabled,
+    resolve_graph_pipeline,
+)
+from ..rag.parser_config import normalize_document_parser_config
 from ..repositories import document as document_repository
 from ..tasks.dispatch import TaskDispatcher
 from ..utils.datetime_utils import utcnow_naive
@@ -125,7 +131,13 @@ async def create_document(
         is None
     ):
         raise _not_found("File resource not found")
-    payload = create_data.model_copy(update={"created_by": principal.actor_id})
+    try:
+        parser_config = normalize_document_parser_config(create_data.parser_config)
+    except (ValueError, GraphPipelineConfigError) as exc:
+        raise KnowledgeError.from_code("KB_VALIDATION_ERROR", str(exc)) from exc
+    payload = create_data.model_copy(
+        update={"created_by": principal.actor_id, "parser_config": parser_config}
+    )
     return await document_repository.create_document_async(db, payload)
 
 
@@ -171,6 +183,11 @@ async def prepare_document_update(
                 "KB_VALIDATION_ERROR",
                 "parser_config must be an object",
             )
+        try:
+            parser_config = normalize_document_parser_config(parser_config)
+        except (ValueError, GraphPipelineConfigError) as exc:
+            raise KnowledgeError.from_code("KB_VALIDATION_ERROR", str(exc)) from exc
+        update_fields["parser_config"] = parser_config
         parent_child_mode = _uses_parent_child_mode(parser_config)
         chunk_mode = knowledge.chunk_mode
         if (chunk_mode == 1 and parent_child_mode) or (
