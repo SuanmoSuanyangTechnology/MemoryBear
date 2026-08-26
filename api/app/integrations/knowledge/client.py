@@ -18,7 +18,12 @@ from app.schemas.knowledge_retrieval_schema import (
 
 from .call_profile import CallProfile
 from .contracts import KnowledgeCallContext
-from .errors import KnowledgeProtocolError, KnowledgeServiceError
+from .errors import (
+    KnowledgeProtocolError,
+    KnowledgeServiceError,
+    KnowledgeTimeoutError,
+    KnowledgeUnavailableError,
+)
 from .transport import KnowledgeHttpTransport
 
 
@@ -148,7 +153,16 @@ class KnowledgeServiceClient:
             content=payload,
         )
         try:
-            raw = await upstream.aread()
+            try:
+                raw = await upstream.aread()
+            except httpx.TimeoutException as exc:
+                raise KnowledgeTimeoutError(
+                    "Knowledge service request timed out"
+                ) from exc
+            except httpx.RequestError as exc:
+                raise KnowledgeUnavailableError(
+                    "Knowledge service is unavailable"
+                ) from exc
             trace_id = upstream.headers.get("X-Trace-Id", context.trace_id)
             try:
                 envelope = json.loads(raw)
