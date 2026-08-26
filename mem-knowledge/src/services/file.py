@@ -119,6 +119,12 @@ async def get_file(
     )
 
 
+async def get_public_file(db: AsyncSession, file_id: uuid.UUID) -> File | None:
+    """Load the legacy public download record without workspace authorization."""
+
+    return await file_repository.get_file_by_id_async(db, file_id)
+
+
 async def require_parent_folder(
     db: AsyncSession,
     kb_id: uuid.UUID,

@@ -3,16 +3,9 @@
 from typing import Any
 from uuid import UUID
 
-from pydantic import (
-    BaseModel,
-    ConfigDict,
-    Field,
-    PrivateAttr,
-    field_validator,
-    model_validator,
-)
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from .chunk import KnowledgeBaseConfig, KnowledgeRetrievalCaller, RetrieveType
+from .chunk import KnowledgeBaseConfig, KnowledgeRetrievalSource, RetrieveType
 from .knowledge_metadata import FilterGroup, MetadataFilterMode
 
 
@@ -26,21 +19,17 @@ class KnowledgeRetrievalRequest(BaseModel):
     vector_similarity_weight: float | None = Field(default=0.3, ge=0, le=1)
     top_k: int = Field(default=100, ge=1, le=100)
     top_n: int | None = Field(default=None, ge=1, le=100)
-    caller: KnowledgeRetrievalCaller = KnowledgeRetrievalCaller.GENERAL
+    source: KnowledgeRetrievalSource = KnowledgeRetrievalSource.GENERAL
     retrieve_type: RetrieveType = RetrieveType.HYBRID
     enable_graph_retrieval: int = Field(default=0, ge=0, le=1)
     rerank_id: UUID | None = None
     rerank_score_threshold: float | None = Field(default=None, ge=0, le=1)
     metadata_filters: list[FilterGroup] = Field(default_factory=list)
     metadata_filter_mode: MetadataFilterMode = MetadataFilterMode.MANUAL
-    _metadata_filters_prepared: bool = PrivateAttr(default=False)
+    metadata_filters_resolved: bool = False
 
-    def mark_metadata_filters_prepared(self) -> None:
-        self._metadata_filters_prepared = True
-
-    @property
-    def metadata_filters_prepared(self) -> bool:
-        return self._metadata_filters_prepared
+    def mark_metadata_filters_resolved(self) -> None:
+        self.metadata_filters_resolved = True
 
     @property
     def graph_retrieval_mix_enabled(self) -> bool:

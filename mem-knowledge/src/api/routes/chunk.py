@@ -20,23 +20,19 @@ from ...services.qa_import import (
     validate_qa_upload,
 )
 from ...tasks.dispatch import TaskDispatcher
-from ..dependencies import Principal, get_principal, get_runtime
+from ..dependencies import Principal, get_principal, get_runtime, get_source
 from ..schemas.chunk import (
     ChunkBatchCreate,
     ChunkCreate,
     ChunkRetrieve,
     ChunkUpdate,
-    KnowledgeRetrievalCaller,
+    KnowledgeRetrievalSource,
     RetrieveType,
 )
 from ..schemas.common import SuccessEnvelope, success
 from ..schemas.knowledge_retrieval import KnowledgeRetrievalRequest
 
-router = APIRouter(
-    prefix="/chunks",
-    tags=["chunks"],
-    dependencies=[Depends(get_principal)],
-)
+router = APIRouter(prefix="/chunks", tags=["chunks"])
 
 
 def _success(
@@ -376,11 +372,14 @@ async def retrieve_chunks(
     request: Request,
     retrieve_data: ChunkRetrieve,
     principal: Annotated[Principal, Depends(get_principal)],
+    source: Annotated[KnowledgeRetrievalSource, Depends(get_source)],
     runtime: Annotated[ProcessRuntime, Depends(get_runtime)],
 ) -> SuccessEnvelope[Any]:
     payload = retrieve_data.model_dump(exclude_none=True)
-    payload["caller"] = KnowledgeRetrievalCaller.IN_API
+    payload["source"] = source
     retrieval_request = KnowledgeRetrievalRequest(**payload)
+    if retrieve_data.metadata_filters_resolved:
+        retrieval_request.mark_metadata_filters_resolved()
     result = await KnowledgeRetrievalService.retrieve_async(
         runtime,
         retrieval_request,

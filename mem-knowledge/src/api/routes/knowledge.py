@@ -57,11 +57,7 @@ from ..schemas.common import SuccessEnvelope, fail, success
 from ..schemas.file import KBBatchDownloadRequest
 from ..schemas.knowledge import KnowledgeCreate, KnowledgeUpdate
 
-router = APIRouter(
-    prefix="/knowledges",
-    tags=["knowledges"],
-    dependencies=[Depends(get_principal)],
-)
+router = APIRouter(prefix="/knowledges", tags=["knowledges"])
 
 logger = logging.getLogger(__name__)
 
@@ -148,6 +144,7 @@ async def check_yuque_auth(
     request: Request,
     yuque_user_id: str,
     yuque_token: str,
+    _principal: Annotated[Principal, Depends(get_principal)],
 ) -> SuccessEnvelope[None]:
     async with YuqueAPIClient(yuque_user_id, yuque_token) as client:
         repositories = await client.get_user_repos()
@@ -166,6 +163,7 @@ async def check_feishu_auth(
     feishu_app_id: str,
     feishu_app_secret: str,
     feishu_folder_token: str,
+    _principal: Annotated[Principal, Depends(get_principal)],
 ) -> SuccessEnvelope[None]:
     async with FeishuAPIClient(feishu_app_id, feishu_app_secret) as client:
         files = await client.list_all_folder_files(

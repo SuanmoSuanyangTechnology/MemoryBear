@@ -73,7 +73,7 @@ class KnowledgeRetrievalPreparation:
             refs
             and request.metadata_filter_mode is MetadataFilterMode.AUTO
             and not request.metadata_filters
-            and not request.metadata_filters_prepared
+            and not request.metadata_filters_resolved
             and common_metadata_defs
         ):
             metadata_llm = await cls._snapshot_model(

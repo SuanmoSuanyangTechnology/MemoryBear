@@ -821,7 +821,7 @@ class KnowledgeRetrievalService:
             groups
             or bool(request.metadata_filters)
             or request.metadata_filter_mode is MetadataFilterMode.MANUAL
-            or request.metadata_filters_prepared
+            or request.metadata_filters_resolved
         ):
             return groups
         if preparation.metadata_llm is None or preparation.metadata_llm.resolved is None:

@@ -20,7 +20,14 @@ from ...runtime import ProcessRuntime
 from ...services import file as file_service
 from ...services.knowledge_file_storage import KnowledgeFileStorage
 from ...services.qa_export import cleanup_export_file, iter_export_file, write_document_export
-from ..dependencies import Principal, get_principal, get_runtime
+from ..dependencies import (
+    Principal,
+    get_optional_principal,
+    get_principal,
+    get_runtime,
+    get_source,
+)
+from ..schemas.chunk import KnowledgeRetrievalSource
 from ..schemas.common import SuccessEnvelope, success
 from ..schemas.file import (
     BatchDownloadRequest,
@@ -28,11 +35,7 @@ from ..schemas.file import (
     FileUpdate,
 )
 
-router = APIRouter(
-    prefix="/files",
-    tags=["files"],
-    dependencies=[Depends(get_principal)],
-)
+router = APIRouter(prefix="/files", tags=["files"])
 
 
 def _success(
@@ -232,12 +235,21 @@ async def custom_text(
 @router.get("/{file_id}")
 async def get_file(
     file_id: uuid.UUID,
-    principal: Annotated[Principal, Depends(get_principal)],
+    principal: Annotated[Principal | None, Depends(get_optional_principal)],
+    source: Annotated[KnowledgeRetrievalSource, Depends(get_source)],
     runtime: Annotated[ProcessRuntime, Depends(get_runtime)],
     original: Annotated[bool, Query()] = False,
 ) -> StreamingResponse:
     async with runtime.database.async_session() as db:
-        file = await file_service.get_file(db, file_id, principal)
+        if principal is None:
+            if source is not KnowledgeRetrievalSource.EXTERNAL_API:
+                raise KnowledgeError.from_code(
+                    "KB_PRINCIPAL_INVALID",
+                    "Knowledge principal is required",
+                )
+            file = await file_service.get_public_file(db, file_id)
+        else:
+            file = await file_service.get_file(db, file_id, principal)
         if file is None:
             raise file_service._not_found()
         snapshot = (file.file_key, file.file_name)
