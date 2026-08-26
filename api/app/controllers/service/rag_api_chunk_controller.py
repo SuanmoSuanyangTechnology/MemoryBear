@@ -12,6 +12,9 @@ from app.core.logging_config import get_business_logger
 from app.core.rag.models.chunk import QAChunk
 from app.core.response_utils import success
 from app.db import get_async_db
+from app.integrations.knowledge.call_profile import CallProfile
+from app.integrations.knowledge.contracts import KnowledgeRetrievalSource
+from app.integrations.knowledge.route_proxy import route_through_knowledge_service
 from app.schemas import chunk_schema
 from app.schemas.api_key_schema import ApiKeyAuth
 from app.schemas.response_schema import ApiResponse
@@ -32,6 +35,7 @@ chunk_controller = unwrap_current_workspace_guard(chunk_controller)
 
 @router.get("/{kb_id}/{document_id}/previewchunks", response_model=ApiResponse)
 @require_api_key_self_db(scopes=["rag"])
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.EXTERNAL_API)
 async def get_preview_chunks(
     kb_id: uuid.UUID,
     document_id: uuid.UUID,
@@ -63,6 +67,7 @@ async def get_preview_chunks(
 
 @router.get("/{kb_id}/{document_id}/chunks", response_model=ApiResponse)
 @require_api_key_self_db(scopes=["rag"])
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.EXTERNAL_API)
 async def get_chunks(
     kb_id: uuid.UUID,
     document_id: uuid.UUID,
@@ -94,6 +99,7 @@ async def get_chunks(
 
 @router.post("/{kb_id}/{document_id}/chunk", response_model=ApiResponse)
 @require_api_key_self_db(scopes=["rag"])
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.EXTERNAL_API)
 async def create_chunk(
     kb_id: uuid.UUID,
     document_id: uuid.UUID,
@@ -120,6 +126,7 @@ async def create_chunk(
 
 @router.post("/{kb_id}/{document_id}/chunk/batch", response_model=ApiResponse)
 @require_api_key_self_db(scopes=["rag"])
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.EXTERNAL_API)
 async def create_chunks_batch(
     kb_id: uuid.UUID,
     document_id: uuid.UUID,
@@ -146,6 +153,7 @@ async def create_chunks_batch(
 
 @router.get("/{kb_id}/{document_id}/{doc_id}", response_model=ApiResponse)
 @require_api_key_self_db(scopes=["rag"])
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.EXTERNAL_API)
 async def get_chunk(
     kb_id: uuid.UUID,
     document_id: uuid.UUID,
@@ -170,6 +178,7 @@ async def get_chunk(
 
 @router.put("/{kb_id}/{document_id}/{doc_id}", response_model=ApiResponse)
 @require_api_key_self_db(scopes=["rag"])
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.EXTERNAL_API)
 async def update_chunk(
     kb_id: uuid.UUID,
     document_id: uuid.UUID,
@@ -198,6 +207,7 @@ async def update_chunk(
 
 @router.delete("/{kb_id}/{document_id}/{doc_id}", response_model=ApiResponse)
 @require_api_key_self_db(scopes=["rag"])
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.EXTERNAL_API)
 async def delete_chunk(
     kb_id: uuid.UUID,
     document_id: uuid.UUID,
@@ -223,12 +233,17 @@ async def delete_chunk(
 
 
 @router.get("/retrieve_type", response_model=ApiResponse)
-def get_retrieve_types():
+@route_through_knowledge_service(
+    source=KnowledgeRetrievalSource.EXTERNAL_API,
+    public=True,
+)
+def get_retrieve_types(request: Request = None):
     return success(msg="Successfully obtained the retrieval type", data=list(chunk_schema.RetrieveType))
 
 
 @router.post("/retrieval", response_model=Any, status_code=status.HTTP_200_OK)
 @require_api_key_self_db(scopes=["rag"])
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.EXTERNAL_API)
 async def retrieve_chunks(
     request: Request,
     api_key_auth: ApiKeyAuth = None,
@@ -255,6 +270,10 @@ async def retrieve_chunks(
 
 @router.post("/{kb_id}/import_qa", response_model=ApiResponse)
 @require_api_key_self_db(scopes=["rag"])
+@route_through_knowledge_service(
+    source=KnowledgeRetrievalSource.EXTERNAL_API,
+    profile=CallProfile.MULTIPART_UPLOAD,
+)
 async def import_qa_new_doc(
     kb_id: uuid.UUID,
     request: Request,

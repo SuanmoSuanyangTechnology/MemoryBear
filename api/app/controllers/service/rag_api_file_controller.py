@@ -10,6 +10,9 @@ from app.controllers import file_controller
 from app.core.api_key_auth import require_api_key
 from app.core.logging_config import get_business_logger
 from app.db import get_db
+from app.integrations.knowledge.call_profile import CallProfile
+from app.integrations.knowledge.contracts import KnowledgeRetrievalSource
+from app.integrations.knowledge.route_proxy import route_through_knowledge_service
 from app.schemas import file_schema
 from app.schemas.api_key_schema import ApiKeyAuth
 from app.schemas.response_schema import ApiResponse
@@ -28,6 +31,7 @@ file_controller = unwrap_current_workspace_guard(file_controller)
 
 @router.get("/{kb_id}/{parent_id}/files", response_model=ApiResponse)
 @require_api_key(scopes=["rag"])
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.EXTERNAL_API)
 async def get_files(
     kb_id: uuid.UUID,
     parent_id: uuid.UUID,
@@ -64,6 +68,7 @@ async def get_files(
 
 @router.post("/folder", response_model=ApiResponse)
 @require_api_key(scopes=["rag"])
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.EXTERNAL_API)
 async def create_folder(
     kb_id: uuid.UUID,
     parent_id: uuid.UUID,
@@ -88,6 +93,10 @@ async def create_folder(
 
 @router.post("/file", response_model=ApiResponse)
 @require_api_key(scopes=["rag"])
+@route_through_knowledge_service(
+    source=KnowledgeRetrievalSource.EXTERNAL_API,
+    profile=CallProfile.MULTIPART_UPLOAD,
+)
 async def upload_file(
     kb_id: uuid.UUID,
     parent_id: uuid.UUID,
@@ -114,6 +123,7 @@ async def upload_file(
 
 @router.post("/customtext", response_model=ApiResponse)
 @require_api_key(scopes=["rag"])
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.EXTERNAL_API)
 async def custom_text(
     kb_id: uuid.UUID,
     parent_id: uuid.UUID,
@@ -142,10 +152,16 @@ async def custom_text(
 
 
 @router.get("/{file_id}", response_model=Any)
+@route_through_knowledge_service(
+    source=KnowledgeRetrievalSource.EXTERNAL_API,
+    profile=CallProfile.STREAM_DOWNLOAD,
+    public=True,
+)
 async def get_file(
     file_id: uuid.UUID,
     db: Session = Depends(get_db),
     storage_service: FileStorageService = Depends(get_file_storage_service),
+    request: Request = None,
 ) -> Any:
     """
     Download the file based on the file_id
@@ -162,6 +178,7 @@ async def get_file(
 
 @router.put("/{file_id}", response_model=ApiResponse)
 @require_api_key(scopes=["rag"])
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.EXTERNAL_API)
 async def update_file(
     file_id: uuid.UUID,
     request: Request,
@@ -187,6 +204,7 @@ async def update_file(
 
 @router.delete("/{file_id}", response_model=ApiResponse)
 @require_api_key(scopes=["rag"])
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.EXTERNAL_API)
 async def delete_file(
     file_id: uuid.UUID,
     request: Request,
