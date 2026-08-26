@@ -3,6 +3,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from app.core.rag.models.chunk import DocumentChunk
 from app.integrations.knowledge.contracts import KnowledgeRetrievalSource
 from app.schemas.chunk_schema import KnowledgeBaseConfig, RetrieveType
 from app.schemas.knowledge_metadata_schema import FilterGroup, MetadataFilterMode
@@ -76,7 +77,7 @@ class KnowledgeRetrievalRequest(BaseModel):
 
 
 class KnowledgeRetrievalResult(BaseModel):
-    chunks: list[Any] = Field(default_factory=list)
+    chunks: list[DocumentChunk] = Field(default_factory=list)
     entities: list[Any] = Field(default_factory=list)
     relationships: list[Any] = Field(default_factory=list)
 
