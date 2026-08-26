@@ -55,12 +55,6 @@ EXPECTED_COUNTS = {
 HTTP_METHODS = {"get", "post", "put", "patch", "delete"}
 LEGACY_RESPONSE_FIELDS = {"code", "msg", "data", "error", "time"}
 LEGACY_ERROR_STATUSES = ("400", "404", "409", "500")
-STREAM_OPERATIONS = {
-    ("GET", "/internal/v1/knowledges/{kb_id}/qa/export"),
-    ("POST", "/internal/v1/knowledges/{kb_id}/batch-download"),
-    ("GET", "/internal/v1/files/{file_id}"),
-    ("POST", "/internal/v1/files/batch-download"),
-}
 LEGACY_ORACLE_REF = "fbd5da5604a114f9861986b19ea7ff481eaffaba"
 
 
@@ -150,6 +144,28 @@ def _is_implicit_json_body(
     return not _is_scalar_annotation(argument.annotation)
 
 
+def _returns_dynamic_response(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+    """Return whether a route directly returns a dynamic response object."""
+
+    class DynamicResponseReturnVisitor(ast.NodeVisitor):
+        found = False
+
+        def visit_Return(self, return_node: ast.Return) -> None:
+            if _call_name(return_node.value) in {"Response", "StreamingResponse"}:
+                self.found = True
+
+        def visit_FunctionDef(self, child: ast.FunctionDef) -> None:
+            del child
+
+        def visit_AsyncFunctionDef(self, child: ast.AsyncFunctionDef) -> None:
+            del child
+
+    visitor = DynamicResponseReturnVisitor()
+    for statement in node.body:
+        visitor.visit(statement)
+    return visitor.found
+
+
 def _function_contract(
     node: ast.FunctionDef | ast.AsyncFunctionDef,
     *,
@@ -204,8 +220,7 @@ def _function_contract(
     else:
         request_content_types = ()
 
-    operation_key = (method.upper(), internal_path)
-    streaming = operation_key in STREAM_OPERATIONS
+    streaming = _returns_dynamic_response(node)
     response_content_types = () if streaming else ("application/json",)
     return (
         tuple(parameters),
@@ -304,6 +319,11 @@ def collect_legacy_operations_from_git(
     legacy_ref: str = LEGACY_ORACLE_REF,
 ) -> tuple[tuple[OperationContract, ...], dict[str, int]]:
     """Load the behavior oracle from immutable Git objects."""
+
+    if legacy_ref != LEGACY_ORACLE_REF:
+        raise ValueError(
+            f"The fixed legacy oracle must use {LEGACY_ORACLE_REF}, got {legacy_ref}"
+        )
 
     root_in_repo = (
         legacy_root.relative_to(repo_root) if legacy_root.is_absolute() else legacy_root
@@ -477,8 +497,7 @@ def compare_openapi_responses(
                     f"{operation.method} {operation.path} status={status_code} "
                     f"fields={sorted(error_properties)}"
                 )
-        key = (operation.method, operation.path)
-        if key in STREAM_OPERATIONS:
+        if operation.streaming:
             continue
         resolved = _operation_response_schema(schema, operation, "200")
         properties = resolved.get("properties", {})
@@ -512,7 +531,6 @@ def _inventory_payload(
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--legacy-root", required=True, type=Path)
-    parser.add_argument("--legacy-ref", default=LEGACY_ORACLE_REF)
     parser.add_argument("--repo-root", default=Path.cwd(), type=Path)
     parser.add_argument("--inventory-only", action="store_true")
     parser.add_argument("--json", action="store_true")
@@ -525,7 +543,6 @@ def main() -> int:
         operations, counts = collect_legacy_operations_from_git(
             args.repo_root,
             args.legacy_root,
-            args.legacy_ref,
         )
     except (FileNotFoundError, SyntaxError, ValueError) as exc:
         print(str(exc), file=sys.stderr)
@@ -553,7 +570,9 @@ def main() -> int:
         payload["openapi_operation_count"] = len(operations)
         payload["openapi_json_envelope_count"] = 54
         payload["openapi_error_envelope_operation_count"] = 58
-        payload["openapi_stream_operation_count"] = len(STREAM_OPERATIONS)
+        payload["openapi_stream_operation_count"] = sum(
+            operation.streaming for operation in operations
+        )
         payload["openapi_transport_contract_count"] = len(operations)
         payload["openapi_parity"] = True
     if args.json:
