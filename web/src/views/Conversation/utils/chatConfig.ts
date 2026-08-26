@@ -47,6 +47,7 @@ export const buildSharedChatProps = (ctx: ConversationCtx) => {
     deleteMsg: isSupportTools ? deleteMessage : undefined,
     reportMsg: isSupportTools ? reportMsg : undefined,
     regenerateMessages: isSupportTools ? regenerateMessages : undefined,
+    regenerateMaxCount: 5,
     handleVersionChange: isSupportTools ? handleVersionChange : undefined,
     handleInterventionActionClick,
   } satisfies Partial<ChatProps>
