@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+import time
 from collections.abc import AsyncIterator, Mapping
 from typing import Any
 
@@ -11,6 +13,8 @@ import httpx
 from .call_profile import CallProfile
 from .contracts import KnowledgeCallContext
 from .errors import KnowledgeTimeoutError, KnowledgeUnavailableError
+
+logger = logging.getLogger(__name__)
 
 _REQUEST_HEADER_ALLOWLIST = frozenset({"accept", "accept-language", "content-type", "range"})
 _RESPONSE_HEADER_ALLOWLIST = frozenset(
@@ -131,6 +135,7 @@ class KnowledgeHttpTransport:
         data: Any = None,
         files: Any = None,
     ) -> httpx.Response:
+        started_at = time.perf_counter()
         timeout = (
             self._stream_timeout
             if profile in {CallProfile.MULTIPART_UPLOAD, CallProfile.STREAM_DOWNLOAD}
@@ -148,10 +153,39 @@ class KnowledgeHttpTransport:
         if files is not None and isinstance(request.stream, httpx.SyncByteStream):
             request.stream = _AsyncMultipartStream(request.stream)
         try:
-            return await self._client.send(request, stream=True)
+            response = await self._client.send(request, stream=True)
+            logger.info(
+                "knowledge_http_response_started method=%s path=%s status=%s "
+                "profile=%s elapsed_ms=%.2f",
+                method,
+                url.path,
+                response.status_code,
+                profile.value,
+                (time.perf_counter() - started_at) * 1000,
+            )
+            return response
         except httpx.TimeoutException as exc:
+            logger.warning(
+                "knowledge_http_failed method=%s path=%s profile=%s error=%s "
+                "pool_timeout=%s elapsed_ms=%.2f",
+                method,
+                url.path,
+                profile.value,
+                type(exc).__name__,
+                isinstance(exc, httpx.PoolTimeout),
+                (time.perf_counter() - started_at) * 1000,
+            )
             raise KnowledgeTimeoutError("Knowledge service request timed out") from exc
         except httpx.RequestError as exc:
+            logger.warning(
+                "knowledge_http_failed method=%s path=%s profile=%s error=%s "
+                "pool_timeout=false elapsed_ms=%.2f",
+                method,
+                url.path,
+                profile.value,
+                type(exc).__name__,
+                (time.perf_counter() - started_at) * 1000,
+            )
             raise KnowledgeUnavailableError("Knowledge service is unavailable") from exc
 
     async def ready(self) -> bool:

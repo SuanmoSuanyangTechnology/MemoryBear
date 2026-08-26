@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
+import time
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -25,6 +28,8 @@ from .errors import (
     KnowledgeUnavailableError,
 )
 from .transport import KnowledgeHttpTransport
+
+logger = logging.getLogger(__name__)
 
 
 class KnowledgeServiceClient:
@@ -86,6 +91,7 @@ class KnowledgeServiceClient:
         *,
         profile: CallProfile = CallProfile.JSON,
     ) -> StreamingResponse:
+        started_at = time.perf_counter()
         path = self._transport.internal_path(request.url.path)
         url = self._transport.internal_url(path, request.scope.get("query_string", b""))
         headers = self._transport.request_headers(request.headers, context, profile)
@@ -114,13 +120,48 @@ class KnowledgeServiceClient:
             profile=profile,
             **send_kwargs,
         )
+        headers_at = time.perf_counter()
 
         async def body_iterator() -> AsyncIterator[bytes]:
+            bytes_forwarded = 0
+            first_byte_at: float | None = None
+            completion = "closed_early"
             try:
                 async for chunk in upstream.aiter_raw():
+                    if first_byte_at is None:
+                        first_byte_at = time.perf_counter()
+                    bytes_forwarded += len(chunk)
                     yield chunk
+                completion = "complete"
+            except asyncio.CancelledError:
+                completion = "cancelled"
+                raise
+            except Exception:
+                completion = "error"
+                raise
             finally:
                 await upstream.aclose()
+                finished_at = time.perf_counter()
+                logger.info(
+                    "knowledge_proxy_stream_finished method=%s path=%s status=%s "
+                    "profile=%s source=%s completion=%s bytes=%s header_ms=%.2f "
+                    "ttfb_ms=%.2f elapsed_ms=%.2f trace_id=%s",
+                    request.method,
+                    path,
+                    upstream.status_code,
+                    profile.value,
+                    context.source.value,
+                    completion,
+                    bytes_forwarded,
+                    (headers_at - started_at) * 1000,
+                    (
+                        (first_byte_at - started_at) * 1000
+                        if first_byte_at is not None
+                        else -1.0
+                    ),
+                    (finished_at - started_at) * 1000,
+                    context.trace_id,
+                )
 
         return StreamingResponse(
             body_iterator(),
@@ -133,6 +174,7 @@ class KnowledgeServiceClient:
         request: KnowledgeRetrievalRequest,
         context: KnowledgeCallContext,
     ) -> KnowledgeRetrievalResult:
+        started_at = time.perf_counter()
         normalized = request.model_copy(update={"source": context.source})
         payload = json.dumps(
             normalized.model_dump(mode="json", exclude_unset=True),
@@ -152,6 +194,7 @@ class KnowledgeServiceClient:
             profile=CallProfile.JSON,
             content=payload,
         )
+        headers_at = time.perf_counter()
         try:
             try:
                 raw = await upstream.aread()
@@ -180,15 +223,45 @@ class KnowledgeServiceClient:
                 raise KnowledgeServiceError(upstream.status_code, code, message, trace_id)
             data = envelope.get("data")
             if isinstance(data, list):
-                return KnowledgeRetrievalResult(chunks=data)
-            if isinstance(data, dict):
+                result = KnowledgeRetrievalResult(chunks=data)
+            elif isinstance(data, dict):
                 try:
-                    return KnowledgeRetrievalResult.model_validate(data)
+                    result = KnowledgeRetrievalResult.model_validate(data)
                 except ValueError as exc:
                     raise KnowledgeProtocolError(
                         "Knowledge retrieval data is incompatible"
                     ) from exc
-            raise KnowledgeProtocolError("Knowledge retrieval data must be a list or object")
+            else:
+                raise KnowledgeProtocolError(
+                    "Knowledge retrieval data must be a list or object"
+                )
+            logger.info(
+                "knowledge_retrieval_completed status=%s code=%s source=%s "
+                "bytes=%s chunks=%s entities=%s relationships=%s header_ms=%.2f "
+                "elapsed_ms=%.2f trace_id=%s",
+                upstream.status_code,
+                code,
+                context.source.value,
+                len(raw),
+                len(result.chunks),
+                len(result.entities),
+                len(result.relationships),
+                (headers_at - started_at) * 1000,
+                (time.perf_counter() - started_at) * 1000,
+                trace_id,
+            )
+            return result
+        except Exception as exc:
+            logger.warning(
+                "knowledge_retrieval_failed status=%s source=%s error=%s "
+                "elapsed_ms=%.2f trace_id=%s",
+                upstream.status_code,
+                context.source.value,
+                type(exc).__name__,
+                (time.perf_counter() - started_at) * 1000,
+                upstream.headers.get("X-Trace-Id", context.trace_id),
+            )
+            raise
         finally:
             await upstream.aclose()
 
