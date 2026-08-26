@@ -415,11 +415,14 @@ async def import_qa_new_doc(
             principal=principal,
         )
     await storage.upload(plan.file_key, content, file.content_type)
+    persistence_succeeded = False
     try:
         async with runtime.database.async_session() as db:
             resources = await create_qa_import_resources(db, plan, principal)
+            persistence_succeeded = True
     except Exception:
-        await file_service.compensate_storage_upload(storage, plan.file_key)
+        if not persistence_succeeded:
+            await file_service.compensate_storage_upload(storage, plan.file_key)
         raise
     task_id = await dispatch_qa_import(
         TaskDispatcher(),

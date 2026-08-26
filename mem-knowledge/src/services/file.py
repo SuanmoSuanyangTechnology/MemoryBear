@@ -285,16 +285,17 @@ async def persist_uploaded_content(
                 parser_config=deepcopy(plan.parser_config),
             ),
         )
-        await db.commit()
         await db.refresh(document)
+        outcome = UploadOutcome(
+            file_id=db_file.id,
+            document_id=document.id,
+            document_data=document_to_data(document),
+        )
+        await db.commit()
+        return outcome
     except Exception:
         await db.rollback()
         raise
-    return UploadOutcome(
-        file_id=db_file.id,
-        document_id=document.id,
-        document_data=document_to_data(document),
-    )
 
 
 async def compensate_storage_upload(

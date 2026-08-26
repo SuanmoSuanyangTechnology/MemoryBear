@@ -86,12 +86,16 @@ async def _persist_upload(
             inherit_parser_config=inherit_parser_config,
         )
     await storage.upload(plan.file_key, content, content_type)
+    persistence_succeeded = False
     try:
         async with runtime.database.async_session() as db:
-            return await file_service.persist_uploaded_content(db, plan, principal)
+            outcome = await file_service.persist_uploaded_content(db, plan, principal)
+            persistence_succeeded = True
     except Exception:
-        await file_service.compensate_storage_upload(storage, plan.file_key)
+        if not persistence_succeeded:
+            await file_service.compensate_storage_upload(storage, plan.file_key)
         raise
+    return outcome
 
 
 @router.get("/{kb_id}/{parent_id}/files", response_model=SuccessEnvelope[dict[str, Any]])

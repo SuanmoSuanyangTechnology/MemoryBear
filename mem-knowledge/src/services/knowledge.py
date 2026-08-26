@@ -537,9 +537,11 @@ async def apply_knowledge_update(
         if hasattr(knowledge, field):
             setattr(knowledge, field, value)
     knowledge.updated_at = utcnow_naive()
-    await db.commit()
+    await db.flush()
     await db.refresh(knowledge)
-    return await build_knowledge_mutation_outcome(db, knowledge)
+    outcome = await build_knowledge_mutation_outcome(db, knowledge)
+    await db.commit()
+    return outcome
 
 
 async def build_knowledge_mutation_outcome(
@@ -587,8 +589,8 @@ async def soft_delete_knowledge(
         raise _not_found()
     knowledge.status = 2
     knowledge.updated_at = utcnow_naive()
-    await db.commit()
-    return KnowledgeMutationOutcome(
+    await db.flush()
+    outcome = KnowledgeMutationOutcome(
         response_data=None,
         knowledge_id=knowledge.id,
         parser_config=deepcopy(knowledge.parser_config or {}),
@@ -596,3 +598,5 @@ async def soft_delete_knowledge(
             knowledge.workspace_id if knowledge.name == "USER_RAG_MERORY" else None
         ),
     )
+    await db.commit()
+    return outcome
