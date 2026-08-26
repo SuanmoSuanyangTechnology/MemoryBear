@@ -25,6 +25,7 @@ from app.core.error_codes import BizCode, HTTP_MAPPING
 from app.core.exceptions import BusinessException
 from app.core.logging_config import LoggingConfig, get_logger
 from app.core.response_utils import fail
+from app.integrations.knowledge.errors import KnowledgeClientError, KnowledgeServiceError
 from app.core.models.scripts.loader import load_models
 from app.db import get_db_context
 
@@ -590,6 +591,44 @@ async def business_exception_handler(request: Request, exc: BusinessException):
         status_code=status_code,
         content=fail(code=biz_code.value, msg=filtered_message, error=filtered_message)
     )
+
+
+@app.exception_handler(KnowledgeClientError)
+async def knowledge_client_exception_handler(
+    request: Request,
+    exc: KnowledgeClientError,
+):
+    """Preserve upstream business errors and normalize transport failures."""
+
+    if isinstance(exc, KnowledgeServiceError):
+        status_code = exc.status_code if 400 <= exc.status_code <= 599 else 503
+        code = exc.code
+        message = SensitiveDataFilter.filter_string(str(exc))
+        trace_id = exc.trace_id
+    else:
+        status_code = 503
+        code = BizCode.SERVICE_UNAVAILABLE.value
+        message = "Knowledge service unavailable"
+        trace_id = None
+
+    logger.error(
+        "Knowledge client error: %s",
+        type(exc).__name__,
+        extra={
+            "path": request.url.path,
+            "method": request.method,
+            "status_code": status_code,
+            "error_code": code,
+            "trace_id": trace_id,
+        },
+    )
+    response = JSONResponse(
+        status_code=status_code,
+        content=fail(code=code, msg=message, error=message),
+    )
+    if trace_id:
+        response.headers["X-Trace-Id"] = trace_id
+    return response
 
 
 # 统一异常处理：将HTTPException转换为统一响应结构（支持国际化）
