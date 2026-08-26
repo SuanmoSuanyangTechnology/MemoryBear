@@ -87,7 +87,7 @@ class KnowledgeServiceClient:
         send_kwargs: dict[str, Any] = {}
         if profile is CallProfile.MULTIPART_UPLOAD:
             form = await request.form()
-            data: list[tuple[str, str]] = []
+            data: dict[str, str] = {}
             files: list[tuple[str, tuple[str, Any, str | None]]] = []
             for key, value in form.multi_items():
                 if isinstance(value, UploadFile):
@@ -96,7 +96,7 @@ class KnowledgeServiceClient:
                         (key, (value.filename or "", value.file, value.content_type))
                     )
                 else:
-                    data.append((key, str(value)))
+                    data[key] = str(value)
             send_kwargs = {"data": data, "files": files}
         else:
             body = await request.body()

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator, Mapping
 from typing import Any
 
@@ -26,6 +27,25 @@ _RESPONSE_HEADER_ALLOWLIST = frozenset(
         "x-trace-id",
     }
 )
+_END_OF_STREAM = object()
+
+
+class _AsyncMultipartStream(httpx.AsyncByteStream):
+    """Bridge httpx's multipart encoder without blocking the event loop."""
+
+    def __init__(self, stream: httpx.SyncByteStream):
+        self._stream = stream
+        self._iterator = iter(stream)
+
+    async def __aiter__(self) -> AsyncIterator[bytes]:
+        while True:
+            chunk = await asyncio.to_thread(next, self._iterator, _END_OF_STREAM)
+            if chunk is _END_OF_STREAM:
+                return
+            yield chunk
+
+    async def aclose(self) -> None:
+        await asyncio.to_thread(self._stream.close)
 
 
 class KnowledgeHttpTransport:
@@ -127,6 +147,8 @@ class KnowledgeHttpTransport:
             files=files,
             timeout=timeout,
         )
+        if files is not None and isinstance(request.stream, httpx.SyncByteStream):
+            request.stream = _AsyncMultipartStream(request.stream)
         try:
             return await self._client.send(request, stream=True)
         except httpx.TimeoutException as exc:
