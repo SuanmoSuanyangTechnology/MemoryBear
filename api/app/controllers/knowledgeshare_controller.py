@@ -1,6 +1,6 @@
 from typing import Optional
 import uuid
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_async_db
@@ -13,6 +13,8 @@ from app.schemas.response_schema import ApiResponse
 from app.core.response_utils import success
 from app.services import knowledgeshare_service, knowledge_service
 from app.core.logging_config import get_api_logger
+from app.integrations.knowledge.contracts import KnowledgeRetrievalSource
+from app.integrations.knowledge.route_proxy import route_through_knowledge_service
 
 # Obtain a dedicated API logger
 api_logger = get_api_logger()
@@ -26,6 +28,7 @@ router = APIRouter(
 
 @router.get("/{kb_id}/knowledgeshares", response_model=ApiResponse)
 @cur_workspace_access_guard_async()
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.MANAGER_API)
 async def get_knowledgeshares(
         kb_id: uuid.UUID,
         page: int = Query(1, gt=0),  # Default: 1, which must be greater than 0
@@ -33,7 +36,8 @@ async def get_knowledgeshares(
         orderby: Optional[str] = Query(None, description="Sort fields, such as: created_at,updated_at"),
         desc: Optional[bool] = Query(False, description="Is it descending order"),
         db: AsyncSession = Depends(get_async_db),
-        current_user: User = Depends(get_current_user_async)
+        current_user: User = Depends(get_current_user_async),
+        request: Request = None,
 ):
     """
     Paged query knowledge base sharing list
@@ -104,10 +108,12 @@ async def get_knowledgeshares(
 
 @router.post("/knowledgeshare", response_model=ApiResponse)
 @cur_workspace_access_guard_async()
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.MANAGER_API)
 async def create_knowledgeshare(
         create_data: knowledgeshare_schema.KnowledgeShareCreate,
         db: AsyncSession = Depends(get_async_db),
-        current_user: User = Depends(get_current_user_async)
+        current_user: User = Depends(get_current_user_async),
+        request: Request = None,
 ):
     """
     create knowledgeshare
@@ -167,10 +173,12 @@ async def create_knowledgeshare(
 
 @router.get("/{knowledgeshare_id}", response_model=ApiResponse)
 @cur_workspace_access_guard_async()
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.MANAGER_API)
 async def get_knowledgeshare(
         knowledgeshare_id: uuid.UUID,
         db: AsyncSession = Depends(get_async_db),
-        current_user: User = Depends(get_current_user_async)
+        current_user: User = Depends(get_current_user_async),
+        request: Request = None,
 ):
     """
     Retrieve knowledge base sharing information based on knowledgeshare_id
@@ -199,10 +207,12 @@ async def get_knowledgeshare(
 
 @router.delete("/{knowledgeshare_id}", response_model=ApiResponse)
 @cur_workspace_access_guard_async()
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.MANAGER_API)
 async def delete_knowledgeshare(
         knowledgeshare_id: uuid.UUID,
         db: AsyncSession = Depends(get_async_db),
-        current_user: User = Depends(get_current_user_async)
+        current_user: User = Depends(get_current_user_async),
+        request: Request = None,
 ):
     """
     Delete knowledge base sharing

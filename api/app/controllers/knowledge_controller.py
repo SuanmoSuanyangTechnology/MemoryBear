@@ -4,7 +4,7 @@ import json
 from typing import Optional
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse
 from sqlalchemy import or_, select
@@ -64,6 +64,9 @@ from app.services.qa_export_service import (
     write_qa_csv_export_file,
 )
 from app.core.quota_stub import check_knowledge_capacity_quota
+from app.integrations.knowledge.call_profile import CallProfile
+from app.integrations.knowledge.contracts import KnowledgeRetrievalSource
+from app.integrations.knowledge.route_proxy import route_through_knowledge_service
 
 # Obtain a dedicated API logger
 api_logger = get_api_logger()
@@ -207,26 +210,40 @@ async def _build_knowledge_detail_data_async(
 
 
 @router.get("/knowledgetype", response_model=ApiResponse)
-def get_knowledge_types():
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.MANAGER_API)
+def get_knowledge_types(
+        current_user: User = Depends(get_current_user_async),
+        request: Request = None,
+):
     return success(msg="Successfully obtained the knowledge type", data=list(knowledge_model.KnowledgeType))
 
 
 @router.get("/permissiontype", response_model=ApiResponse)
-def get_permission_types():
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.MANAGER_API)
+def get_permission_types(
+        current_user: User = Depends(get_current_user_async),
+        request: Request = None,
+):
     return success(msg="Successfully obtained the knowledge permission type", data=list(knowledge_model.PermissionType))
 
 
 @router.get("/parsertype", response_model=ApiResponse)
-def get_parser_types():
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.MANAGER_API)
+def get_parser_types(
+        current_user: User = Depends(get_current_user_async),
+        request: Request = None,
+):
     return success(msg="Successfully obtained the knowledge parser type", data=list(knowledge_model.ParserType))
 
 
 @router.get("/knowledge_graph_entity_types", response_model=ApiResponse)
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.MANAGER_API)
 async def get_knowledge_graph_entity_types(
         llm_id: uuid.UUID,
         scenario: str,
         db: AsyncSession = Depends(get_async_db),
-        current_user: User = Depends(get_current_user_async)
+        current_user: User = Depends(get_current_user_async),
+        request: Request = None,
 ):
     """
     get knowledge graph entity types based on llm_id
@@ -276,6 +293,7 @@ async def get_knowledge_graph_entity_types(
 
 @router.get("/knowledges", response_model=ApiResponse)
 @cur_workspace_access_guard_async()
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.MANAGER_API)
 async def get_knowledges(
         parent_id: Optional[uuid.UUID] = Query(None, description="parent folder id"),
         page: int = Query(1, gt=0),  # Default: 1, which must be greater than 0
@@ -285,7 +303,8 @@ async def get_knowledges(
         keywords: Optional[str] = Query(None, description="Search keywords (knowledge base name)"),
         kb_ids: Optional[str] = Query(None, description="Knowledge base ids, separated by commas"),
         db: AsyncSession = Depends(get_async_db),
-        current_user: User = Depends(get_current_user_async)
+        current_user: User = Depends(get_current_user_async),
+        request: Request = None,
 ):
     """
     Query the knowledge base list in pages
@@ -364,10 +383,12 @@ async def get_knowledges(
 @router.post("/knowledge", response_model=ApiResponse)
 @cur_workspace_access_guard_async()
 @check_knowledge_capacity_quota
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.MANAGER_API)
 async def create_knowledge(
         create_data: knowledge_schema.KnowledgeCreate,
         db: AsyncSession = Depends(get_async_db),
-        current_user: User = Depends(get_current_user_async)
+        current_user: User = Depends(get_current_user_async),
+        request: Request = None,
 ):
     """
     create knowledge
@@ -419,10 +440,12 @@ async def create_knowledge(
 
 @router.get("/{knowledge_id}", response_model=ApiResponse)
 @cur_workspace_access_guard_async()
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.MANAGER_API)
 async def get_knowledge(
         knowledge_id: uuid.UUID,
         db: AsyncSession = Depends(get_async_db),
-        current_user: User = Depends(get_current_user_async)
+        current_user: User = Depends(get_current_user_async),
+        request: Request = None,
 ):
     """
     Retrieve knowledge base information based on knowledge_id
@@ -451,10 +474,12 @@ async def get_knowledge(
 
 @router.get("/{knowledge_id}/chunk-policy", response_model=ApiResponse)
 @cur_workspace_access_guard_async()
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.MANAGER_API)
 async def get_knowledge_chunk_policy(
         knowledge_id: uuid.UUID,
         db: AsyncSession = Depends(get_async_db),
-        current_user: User = Depends(get_current_user_async)
+        current_user: User = Depends(get_current_user_async),
+        request: Request = None,
 ):
     """
     查询知识库的分块策略锁定状态
@@ -487,11 +512,13 @@ async def get_knowledge_chunk_policy(
 
 @router.put("/{knowledge_id}", response_model=ApiResponse)
 @cur_workspace_access_guard_async()
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.MANAGER_API)
 async def update_knowledge(
         knowledge_id: uuid.UUID,
         update_data: knowledge_schema.KnowledgeUpdate,
         db: AsyncSession = Depends(get_async_db),
-        current_user: User = Depends(get_current_user_async)
+        current_user: User = Depends(get_current_user_async),
+        request: Request = None,
 ):
     api_logger.info(f"Update knowledge base request: knowledge_id={knowledge_id}, username: {current_user.username}")
     db_knowledge = await _update_knowledge(knowledge_id=knowledge_id, update_data=update_data, db=db, current_user=current_user)
@@ -500,9 +527,14 @@ async def update_knowledge(
 
 @router.get("/{kb_id}/qa/export")
 @cur_workspace_access_guard_async()
+@route_through_knowledge_service(
+        source=KnowledgeRetrievalSource.MANAGER_API,
+        profile=CallProfile.STREAM_DOWNLOAD,
+)
 async def export_knowledge_qa_csv(
         kb_id: uuid.UUID,
         current_user: User = Depends(get_current_user_async),
+        request: Request = None,
 ):
     """Export all active QA pairs in a knowledge base as a two-column CSV."""
     api_logger.info(f"KB QA CSV export: kb_id={kb_id}, username={current_user.username}")
@@ -534,11 +566,16 @@ async def export_knowledge_qa_csv(
 
 @router.post("/{kb_id}/batch-download")
 @cur_workspace_access_guard_async()
+@route_through_knowledge_service(
+        source=KnowledgeRetrievalSource.MANAGER_API,
+        profile=CallProfile.STREAM_DOWNLOAD,
+)
 async def kb_batch_download(
         kb_id: uuid.UUID,
         current_user: User = Depends(get_current_user_async),
         storage_service: FileStorageService = Depends(get_file_storage_service),
         request_body: file_schema.KBBatchDownloadRequest = file_schema.KBBatchDownloadRequest(),
+        request: Request = None,
 ):
     """知识库文件一键下载 — 将该知识库下所有文件打包为 ZIP 流式下载"""
     api_logger.info(f"KB batch download: kb_id={kb_id}, username={current_user.username}")
@@ -769,10 +806,12 @@ async def _update_knowledge(
 
 @router.delete("/{knowledge_id}", response_model=ApiResponse)
 @cur_workspace_access_guard_async()
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.MANAGER_API)
 async def delete_knowledge(
         knowledge_id: uuid.UUID,
         db: AsyncSession = Depends(get_async_db),
-        current_user: User = Depends(get_current_user_async)
+        current_user: User = Depends(get_current_user_async),
+        request: Request = None,
 ):
     """
     Soft-delete knowledge base
@@ -812,10 +851,12 @@ async def delete_knowledge(
 
 @router.get("/{knowledge_id}/knowledge_graph", response_model=ApiResponse)
 @cur_workspace_access_guard_async()
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.MANAGER_API)
 async def get_knowledge_graph(
         knowledge_id: uuid.UUID,
         db: AsyncSession = Depends(get_async_db),
-        current_user: User = Depends(get_current_user_async)
+        current_user: User = Depends(get_current_user_async),
+        request: Request = None,
 ):
     """
     Retrieve knowledge_graph base information based on knowledge_id
@@ -902,10 +943,12 @@ async def get_knowledge_graph(
 
 @router.delete("/{knowledge_id}/knowledge_graph", response_model=ApiResponse)
 @cur_workspace_access_guard_async()
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.MANAGER_API)
 async def delete_knowledge_graph(
         knowledge_id: uuid.UUID,
         db: AsyncSession = Depends(get_async_db),
-        current_user: User = Depends(get_current_user_async)
+        current_user: User = Depends(get_current_user_async),
+        request: Request = None,
 ):
     """
     delete knowledge graph
@@ -946,10 +989,12 @@ async def delete_knowledge_graph(
 
 @router.post("/{knowledge_id}/knowledge_graph", response_model=ApiResponse)
 @cur_workspace_access_guard_async()
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.MANAGER_API)
 async def rebuild_knowledge_graph(
         knowledge_id: uuid.UUID,
         db: AsyncSession = Depends(get_async_db),
-        current_user: User = Depends(get_current_user_async)
+        current_user: User = Depends(get_current_user_async),
+        request: Request = None,
 ):
     """
     rebuild knowledge graph
@@ -1019,11 +1064,13 @@ async def rebuild_knowledge_graph(
 
 
 @router.get("/check/yuque/auth", response_model=ApiResponse)
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.MANAGER_API)
 async def check_yuque_auth(
         yuque_user_id: str,
         yuque_token: str,
         db: AsyncSession = Depends(get_async_db),
-        current_user: User = Depends(get_current_user_async)
+        current_user: User = Depends(get_current_user_async),
+        request: Request = None,
 ):
     """
     check yuque auth info
@@ -1048,12 +1095,14 @@ async def check_yuque_auth(
 
 
 @router.get("/check/feishu/auth", response_model=ApiResponse)
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.MANAGER_API)
 async def check_feishu_auth(
         feishu_app_id: str,
         feishu_app_secret: str,
         feishu_folder_token: str,
         db: AsyncSession = Depends(get_async_db),
-        current_user: User = Depends(get_current_user_async)
+        current_user: User = Depends(get_current_user_async),
+        request: Request = None,
 ):
     """
     check feishu auth info
@@ -1079,10 +1128,12 @@ async def check_feishu_auth(
 
 @router.post("/{knowledge_id}/sync", response_model=ApiResponse)
 @cur_workspace_access_guard_async()
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.MANAGER_API)
 async def sync_knowledge(
         knowledge_id: uuid.UUID,
         db: AsyncSession = Depends(get_async_db),
-        current_user: User = Depends(get_current_user_async)
+        current_user: User = Depends(get_current_user_async),
+        request: Request = None,
 ):
     """
     sync knowledge base information based on knowledge_id
