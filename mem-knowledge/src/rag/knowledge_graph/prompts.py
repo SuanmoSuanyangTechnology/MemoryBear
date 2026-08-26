@@ -16,6 +16,22 @@ return markdown, code fences, comments, or explanatory text.
 
 EXTRACTION_PROMPT_VERSION = "2026-07-27-v1"
 
+QUERY_PLAN_PROMPT_VERSION = "2026-07-23-v2"
+
+
+QUERY_ANALYSIS_SYSTEM_PROMPT = """
+Build a retrieval plan from the user's query. Return only two JSON arrays:
+low_level_keywords for concrete entities, proper names, attributes, and details;
+high_level_keywords for themes, concepts, and relation intent.
+
+Every keyword must be explicitly derived only from the query. Preserve meaningful phrases and
+never invent unsupported entities, products, organizations, dates, or technical
+terms. Prefer concise, meaningful phrases over isolated fragments. Keep both
+lists short and high-signal, without duplicates. For simple, vague, or
+nonsensical queries, return two empty arrays. Do not force both arrays to be
+non-empty and do not answer the query.
+""".strip()
+
 
 def build_extraction_prompt(
     source_text: str,
@@ -28,6 +44,13 @@ def build_extraction_prompt(
         f"{scene_instruction}Allowed entity types: {allowed_types}\n"
         "Extract only direct evidence from the following source chunk.\n\n"
         f"{source_text}"
+    )
+
+
+def build_query_analysis_prompt(query: str) -> str:
+    return (
+        "Return a source-grounded low/high keyword plan for this query.\n"
+        f"Query:\n{query.strip()}"
     )
 
 

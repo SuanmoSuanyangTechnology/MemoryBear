@@ -161,6 +161,17 @@ class KnowledgeSettings(BaseSettings):
         le=16,
         validation_alias="KNOWLEDGE_GRAPH_EXTRACT_MAX_CONCURRENCY",
     )
+    knowledge_graph_retrieval_timeout_ms: int = Field(
+        default=15000,
+        ge=1000,
+        le=30000,
+        validation_alias="KNOWLEDGE_GRAPH_RETRIEVAL_TIMEOUT_MS",
+    )
+
+    @field_validator("knowledge_graph_retrieval_timeout_ms", mode="before")
+    @classmethod
+    def _clamp_graph_retrieval_timeout(cls, value: Any) -> int:
+        return max(1000, min(30000, int(value)))
     model_concurrency: int = Field(default=5, ge=1, validation_alias="MODEL_CONCURRENCY")
     model_http_max_connections: int = Field(
         default=300,

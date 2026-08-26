@@ -49,6 +49,11 @@ class ExtractionResult(BaseModel):
     relations: list[ExtractedRelation] = Field(default_factory=list)
 
 
+class GraphQueryPlan(BaseModel):
+    low_level_keywords: list[str] = Field(default_factory=list)
+    high_level_keywords: list[str] = Field(default_factory=list)
+
+
 class EntityEvidence(BaseModel):
     id: str
     kb_id: str
@@ -84,6 +89,63 @@ class AffectedProjectionKeys(BaseModel):
     relation_keys: tuple[str, ...]
 
 
+class EntityProjectionHit(BaseModel):
+    entity_key: str
+    entity_name: str
+    entity_type: str = ""
+    description: str = ""
+    aliases: tuple[str, ...] = ()
+    score: float
+    degree: int = 0
+    evidence_count: int = 0
+    document_count: int = 0
+
+
+class RelationProjectionHit(BaseModel):
+    relation_key: str
+    from_entity_key: str
+    from_entity_name: str = ""
+    to_entity_key: str
+    to_entity_name: str = ""
+    predicate: str = ""
+    label: str
+    description: str = ""
+    keywords: tuple[str, ...] = ()
+    directed: bool = True
+    score: float
+    evidence_count: int = 0
+    document_count: int = 0
+    endpoint_degree: int = 0
+
+
+class GraphEvidenceHit(BaseModel):
+    evidence_id: str = ""
+    source_chunk_id: str
+    document_id: str
+    score: float
+    entity_key: str | None = None
+    relation_key: str | None = None
+    entity_name: str | None = None
+    relation_label: str | None = None
+
+
+class SourceChunkVectorHit(BaseModel):
+    source_chunk_id: str
+    score: float
+
+
+class GraphRetrievalResult(BaseModel):
+    chunks: list[Any] = Field(default_factory=list)
+    entities: list[dict[str, Any]] = Field(default_factory=list)
+    relationships: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class ProjectionEvidenceGroup(BaseModel):
+    projection_type: str
+    projection_key: str
+    evidence: tuple[GraphEvidenceHit, ...] = ()
+
+
 @dataclass(frozen=True)
 class GraphIndexRuntime:
     knowledge_id: str
@@ -94,6 +156,22 @@ class GraphIndexRuntime:
     scene_name: str
     llm: ResolvedModelConfig
     embedding: ResolvedModelConfig
+
+
+@dataclass(frozen=True)
+class GraphRetrievalRequest:
+    query: str
+    runtime: GraphIndexRuntime
+    allowed_document_ids: tuple[str, ...] | None
+    file_names: tuple[str, ...]
+    max_candidates: int
+    entity_top_n: int = 40
+    relation_top_n: int = 40
+    neighbor_top_n: int = 24
+    entity_similarity_threshold: float = 0.20
+    relation_similarity_threshold: float = 0.20
+    related_chunk_number: int = 5
+    max_paths_per_chunk: int = 6
 
 
 @dataclass(frozen=True)
@@ -108,13 +186,21 @@ class GraphTaskState:
 
 __all__ = [
     "AffectedProjectionKeys",
+    "EntityProjectionHit",
     "EntityEvidence",
     "ExtractedEntity",
     "ExtractedRelation",
     "ExtractionBatch",
     "ExtractionResult",
     "GraphIndexRuntime",
+    "GraphEvidenceHit",
+    "GraphQueryPlan",
+    "GraphRetrievalRequest",
+    "GraphRetrievalResult",
     "GraphTaskState",
+    "ProjectionEvidenceGroup",
+    "RelationProjectionHit",
     "RelationEvidence",
     "SourceChunk",
+    "SourceChunkVectorHit",
 ]
