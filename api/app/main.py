@@ -97,6 +97,9 @@ async def lifespan(app: FastAPI):
     from app.core.workflow.nodes.http_client import init_http_client
     await init_http_client()
 
+    from app.integrations.knowledge.runtime import initialize_knowledge_integration
+    await initialize_knowledge_integration()
+
     # Start background intervention timeout scanner
     from app.services.intervention_timeout_scheduler import start as start_timeout_scanner
     start_timeout_scanner()
@@ -124,6 +127,8 @@ async def lifespan(app: FastAPI):
     stop_timeout_scanner()
     from app.core.workflow.nodes.http_client import close_http_client
     await close_http_client()
+    from app.integrations.knowledge.runtime import close_knowledge_integration
+    await close_knowledge_integration()
     from app.services.batch_persist_queue import BatchPersistQueue
     await BatchPersistQueue.flush()
     await BatchPersistQueue.stop()
@@ -187,6 +192,19 @@ def read_root():
     """
     logger.debug("健康检查端点被访问")
     return {"message": "FastAPI is running"}
+
+
+@app.get("/ready", include_in_schema=False)
+async def readiness():
+    """Return process readiness, including remote Knowledge when enabled."""
+
+    if not settings.ENABLE_MEM_KNOWLEDGE:
+        return {"status": "ready", "knowledge_mode": "legacy"}
+    from app.integrations.knowledge.runtime import is_remote_knowledge_ready
+
+    if await is_remote_knowledge_ready():
+        return {"status": "ready", "knowledge_mode": "remote"}
+    raise HTTPException(status_code=503, detail="Knowledge service unavailable")
 
 
 # 生命周期事件由 lifespan 管理，无需 on_event
