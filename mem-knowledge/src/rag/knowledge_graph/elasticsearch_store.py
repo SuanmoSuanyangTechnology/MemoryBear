@@ -158,7 +158,6 @@ class GraphElasticsearchStore:
                 index=index_name,
                 query=query,
                 sort=sort,
-                context=context,
                 source_includes=source_includes,
                 batch_size=batch_size,
             )
