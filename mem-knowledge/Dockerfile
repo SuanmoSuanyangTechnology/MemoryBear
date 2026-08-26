@@ -13,10 +13,8 @@ WORKDIR /code
 
 RUN apt-get update && \
     apt-get install --yes --no-install-recommends \
-      build-essential \
       ca-certificates \
-      curl \
-      gcc && \
+      curl && \
     rm -rf /var/lib/apt/lists/*
 
 RUN pip install --no-cache-dir --index-url "${PYPI_INDEX_URL}" uv==0.10.11

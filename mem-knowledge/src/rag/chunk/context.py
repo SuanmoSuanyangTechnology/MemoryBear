@@ -1,10 +1,7 @@
-import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
-
-from .tokenizer import get_tokenizer
 
 DEFAULT_PARSER_CONFIG = {
     "layout_recognize": "mineru",
@@ -139,13 +136,7 @@ class MergeResult:
 
 
 def build_chunk_doc(filename: str) -> dict:
-    tokenizer = get_tokenizer()
-    doc = {
-        "docnm_kwd": filename,
-        "title_tks": tokenizer.tokenize(re.sub(r"\.[a-zA-Z]+$", "", filename)),
-    }
-    doc["title_sm_tks"] = tokenizer.fine_grained_tokenize(doc["title_tks"])
-    return doc
+    return {"docnm_kwd": filename}
 
 
 def build_chunk_context(

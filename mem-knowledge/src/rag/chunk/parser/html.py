@@ -4,8 +4,8 @@ import uuid
 import chardet
 from bs4 import BeautifulSoup, Comment, NavigableString, Tag
 
+from ..token_utils import num_tokens_from_string, split_by_token_limit
 from ..tokenization import find_codec
-from ..tokenizer import get_tokenizer
 from .base import DocumentParser
 
 
@@ -109,10 +109,10 @@ class HtmlParser(DocumentParser):
         current_count = 0
         table_str_list = []
         for row in rows:
-            tks_str = get_tokenizer().tokenize(str(row))
-            token_count = len(tks_str.split(" ")) if tks_str else 0
+            token_count = num_tokens_from_string(str(row))
             if current_count + token_count > chunk_token_num:
-                tables.append(current_table)
+                if current_table:
+                    tables.append(current_table)
                 current_table = []
                 current_count = 0
             current_table.append(row)
@@ -222,18 +222,11 @@ class HtmlParser(DocumentParser):
         current_token_count = 0
 
         for block in block_txt_list:
-            tks_str = get_tokenizer().tokenize(block)
-            block_token_count = len(tks_str.split(" ")) if tks_str else 0
+            block_token_count = num_tokens_from_string(block)
             if block_token_count > chunk_token_num:
                 if current_block:
                     chunks.append(current_block)
-                start = 0
-                tokens = tks_str.split(" ")
-                while start < len(tokens):
-                    end = start + chunk_token_num
-                    split_tokens = tokens[start:end]
-                    chunks.append(" ".join(split_tokens))
-                    start = end
+                chunks.extend(split_by_token_limit(block, chunk_token_num))
                 current_block = ""
                 current_token_count = 0
             else:

@@ -9,7 +9,7 @@ from .context import (
     ParseResult,
 )
 from .hierarchy import GroupedChildChunks, validate_parent_child_result
-from .tokenization import add_positions, tokenize
+from .tokenization import add_positions, set_chunk_content
 
 ZERO_WIDTH_TRANSLATION = str.maketrans("", "", "\u200b\u200c\u200d\ufeff")
 ZERO_WIDTH_HTML_ENTITIES = (
@@ -174,7 +174,7 @@ class ChunkPostProcessor:
         metadata = self._chunk_metadata(chunk)
         if metadata:
             doc["metadata"] = metadata
-        tokenize(doc, content, ctx.is_english)
+        set_chunk_content(doc, content)
         return doc
 
     def _serialize_table_chunk(self, ctx: ChunkContext, chunk: LogicalChunk) -> dict | None:
@@ -198,7 +198,7 @@ class ChunkPostProcessor:
         metadata = self._chunk_metadata(chunk)
         if metadata:
             doc["metadata"] = metadata
-        tokenize(doc, content, ctx.is_english)
+        set_chunk_content(doc, content)
         doc["content_with_weight"] = content
         return doc
 

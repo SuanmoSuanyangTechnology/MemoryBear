@@ -11,7 +11,7 @@ import xlrd
 from openpyxl import Workbook, load_workbook
 from openpyxl.utils import get_column_letter
 
-from ..tokenization import add_positions, find_codec, tokenize
+from ..tokenization import add_positions, find_codec, set_chunk_content
 from .base import DocumentParser
 
 EMPTY_MARKERS = {"", "/", "none", "null", "nan", "-"}
@@ -282,7 +282,7 @@ class StructuredExcelParser(DocumentParser):
             add_positions(
                 doc, [[row_index - 1, table.start_col, table.end_col, row_index, row_index]]
             )
-            tokenize(doc, content, ctx.is_english)
+            set_chunk_content(doc, content)
             doc["metadata"] = {
                 "source_type": "excel",
                 "source": {

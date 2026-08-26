@@ -24,4 +24,31 @@ def truncate(value: str, max_len: int) -> str:
     return encoder.decode(encoder.encode(value)[:max_len])
 
 
-__all__ = ["get_encoder", "num_tokens_from_string", "truncate"]
+def split_by_token_limit(value: str, max_tokens: int) -> list[str]:
+    """Split text without losing characters while keeping each part within a token limit."""
+
+    if max_tokens < 1:
+        raise ValueError("max_tokens must be at least 1")
+    encoder = get_encoder()
+    if len(encoder.encode(value)) <= max_tokens:
+        return [value] if value else []
+
+    chunks: list[str] = []
+    start = 0
+    while start < len(value):
+        low = start + 1
+        high = len(value)
+        end = low
+        while low <= high:
+            middle = (low + high) // 2
+            if len(encoder.encode(value[start:middle])) <= max_tokens:
+                end = middle
+                low = middle + 1
+            else:
+                high = middle - 1
+        chunks.append(value[start:end])
+        start = end
+    return chunks
+
+
+__all__ = ["get_encoder", "num_tokens_from_string", "split_by_token_limit", "truncate"]

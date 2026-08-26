@@ -10,7 +10,7 @@ from pathlib import Path
 
 from ...models.media import QWenCV, QWenSeq2txt
 from ..context import ChunkContext, ParseResult
-from ..tokenization import tokenize
+from ..tokenization import set_chunk_content
 from .base import ChunkPipeline
 
 LOGGER = logging.getLogger(__name__)
@@ -63,7 +63,7 @@ class AudioChunkPipeline(ChunkPipeline):
             self._callback(ctx, 0.1, "Use media model to transcribe audio.")
             transcription, _tokens = model.transcription(temporary_path)
             document = copy.deepcopy(ctx.doc)
-            tokenize(document, transcription, ctx.is_english)
+            set_chunk_content(document, transcription)
             result = [document]
             self._callback(ctx, 0.8, "Finish audio transcription.")
         except Exception as exc:  # noqa: BLE001 - preserve legacy empty-result media behavior.
@@ -101,7 +101,7 @@ class PictureVideoChunkPipeline(ChunkPipeline):
             )
             document = copy.deepcopy(ctx.doc)
             document["doc_type_kwd"] = "video"
-            tokenize(document, answer, ctx.is_english)
+            set_chunk_content(document, answer)
             result = [document]
             self._callback(ctx, 0.8, "Finish video transcription.")
         except Exception as exc:  # noqa: BLE001 - preserve legacy empty-result media behavior.

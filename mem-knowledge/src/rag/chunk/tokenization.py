@@ -7,7 +7,6 @@ from typing import Any
 from PIL import Image
 
 from .token_utils import num_tokens_from_string
-from .tokenizer import get_tokenizer
 
 ALL_CODECS = (
     "utf-8",
@@ -145,17 +144,8 @@ def find_codec(blob: bytes) -> str:
     return "utf-8"
 
 
-def tokenize(document: dict[str, Any], text: str, is_english: bool) -> None:
-    del is_english
+def set_chunk_content(document: dict[str, Any], text: str) -> None:
     document["content_with_weight"] = text
-    normalized = re.sub(
-        r"</?(table|td|caption|tr|th)( [^<>]{0,12})?>",
-        " ",
-        text,
-    )
-    tokenizer = get_tokenizer()
-    document["content_ltks"] = tokenizer.tokenize(normalized)
-    document["content_sm_ltks"] = tokenizer.fine_grained_tokenize(document["content_ltks"])
 
 
 def add_positions(document: dict[str, Any], positions: list | None) -> None:
@@ -201,7 +191,7 @@ def tokenize_chunks(
                 pass
         else:
             add_positions(item, [[index] * 5])
-        tokenize(item, chunk, is_english)
+        set_chunk_content(item, chunk)
         result.append(item)
     return result
 
@@ -399,6 +389,6 @@ __all__ = [
     "naive_merge",
     "naive_merge_docx",
     "naive_merge_with_images",
-    "tokenize",
+    "set_chunk_content",
     "tokenize_chunks",
 ]
