@@ -6351,6 +6351,8 @@ class WorkflowService:
                 "trigger_id": trigger_id,
                 "trigger_meta": trigger_meta or {},
                 "external_event_id": None,
+                # 记录运行来源；WorkflowAsTool 传入 "tool"，应用日志据此排除内部子调用。
+                "source": str(source or "workflow"),
             },
         )
 
@@ -7639,16 +7641,18 @@ class WorkflowService:
                             payload.from_message_id,
                             conversation_id_uuid,
                         )
-                        _hitl_user_msg = None
+                        # _add_message_async 在独立短生命周期 Session 中提交后返回 ORM 实体。
+                        # 只传递稳定 UUID，不能在此访问其属性，避免 detached-instance 错误。
+                        hitl_user_message_id = user_message_id or uuid.uuid4()
                         # regenerate_mode 下占位消息同样由 regenerate_stream 末尾统一落库
                         if conversation_id_uuid and not skip_save and not regenerate_mode:
-                            _hitl_user_msg = await self._add_message_async(
+                            await self._add_message_async(
                                 conversation_id=conversation_id_uuid,
                                 role="user",
                                 content=human_message,
                                 meta_data=human_meta,
                                 parent_message_id=_from_msg_id,
-                                message_id=user_message_id,
+                                message_id=hitl_user_message_id,
                             )
                             await self._add_message_async(
                                 message_id=message_id,
@@ -7656,7 +7660,7 @@ class WorkflowService:
                                 role="assistant",
                                 content="",
                                 meta_data={"waiting_human": True, "execution_id": execution.execution_id},
-                                parent_message_id=_hitl_user_msg.id if _hitl_user_msg else None,
+                                parent_message_id=hitl_user_message_id,
                             )
 
                         # message_id is already saved in execution.context["human_intervention"]["message_id"]
@@ -9218,16 +9222,25 @@ class WorkflowService:
         from app.core.workflow.engine.runtime_schema import ExecutionContext
         from app.core.workflow.engine.variable_pool import VariablePoolInitializer
 
-        execution = self.get_execution(execution_id)
+        # 流式入口以 WorkflowService()（无同步 db/repository）运行；恢复路径必须
+        # 使用独立异步 Session 查询，不能调用 get_execution/get_workflow_config。
+        execution = await self._get_execution_async(execution_id)
         if not execution:
             raise BusinessException("执行记录不存在", BizCode.NOT_FOUND)
 
         intervention_ctx = (execution.context or {}).get("human_intervention", {})
         thread_id_str = intervention_ctx.get("checkpoint_thread_id")
 
-        config = self.get_workflow_config(app_id)
+        config = await self.get_workflow_config_snapshot_async(app_id)
         if not config:
             raise BusinessException("工作流配置不存在", BizCode.CONFIG_MISSING)
+
+        async with get_async_db_context() as db:
+            workspace_id = await db.scalar(
+                select(App.workspace_id).where(App.id == app_id).limit(1)
+            )
+        if not workspace_id:
+            raise BusinessException("应用不存在", BizCode.NOT_FOUND)
 
         workflow_config_dict = {
             "nodes": config.nodes,
@@ -9239,7 +9252,7 @@ class WorkflowService:
 
         execution_context = ExecutionContext(
             execution_id=execution_id,
-            workspace_id=str(execution.app.workspace_id) if execution.app else "",
+            workspace_id=str(workspace_id),
             user_id=str(execution.triggered_by) if execution.triggered_by else "",
             conversation_id=intervention_ctx.get("conversation_id", ""),
             memory_storage_type="neo4j",
