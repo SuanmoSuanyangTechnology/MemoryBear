@@ -30,6 +30,23 @@ class EndUser(Base):
             "other_id",
             postgresql_where=text("is_active = TRUE"),
         ),
+        Index(
+            "idx_end_users_ws_identity",
+            "workspace_id",
+            "identity_features",
+            postgresql_where=text("is_active = TRUE"),
+        ),
+        Index(
+            "idx_end_users_expiration_scan",
+            "workspace_id",
+            "write_time",
+            "id",
+            postgresql_where=text(
+                "is_active = TRUE "
+                "AND identity_status = 'temporary' "
+                "AND write_time IS NOT NULL"
+            ),
+        ),
     )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, nullable=False, index=True)
@@ -39,12 +56,29 @@ class EndUser(Base):
     other_id = Column(String, nullable=True)  # Store original user_id
     other_name = Column(String, default="", nullable=False)
     other_address = Column(String, default="", nullable=False)
+    channel_source = Column(
+        String,
+        nullable=True,
+        comment="渠道来源（如 api / mcp / workflow / web 等）",
+    )
+    identity_features = Column(
+        String,
+        nullable=True,
+        comment="跨渠道身份标识（单个标识，带标识=长时，不带=临时）",
+    )
+    identity_status = Column(
+        String,
+        nullable=False,
+        default="temporary",
+        server_default="temporary",
+        comment="身份状态: temporary / confirmed / expired",
+    )
     is_active = Column(Boolean, default=True, server_default="true", nullable=False, comment="是否有效，False 表示已删除")
     reflection_time = Column(DateTime, nullable=True)
     write_time = Column(DateTime, nullable=True, comment="最后一次记忆写入时间")
     created_at = Column(DateTime, default=utcnow_naive)
     updated_at = Column(DateTime, default=utcnow_naive, onupdate=utcnow_naive)
-    
+
     # 用户档案字段 - User Profile Fields
     position = Column(String, nullable=True, comment="职位")
     department = Column(String, nullable=True, comment="部门")
@@ -52,15 +86,15 @@ class EndUser(Base):
     phone = Column(String, nullable=True, comment="电话")
     hire_date = Column(DateTime, nullable=True, comment="入职日期")
     updatetime_profile = Column(DateTime, nullable=True, comment="核心档案信息最后更新时间")
-    
+
     memory_config_id = Column(
-        UUID(as_uuid=True), 
-        ForeignKey("memory_config.config_id"), 
-        nullable=True, 
-        index=True, 
+        UUID(as_uuid=True),
+        ForeignKey("memory_config.config_id"),
+        nullable=True,
+        index=True,
         comment="关联的记忆配置ID"
     )
-    
+
     memory_count = Column(
         Integer,
         nullable=False,
@@ -87,7 +121,7 @@ class EndUser(Base):
         nullable=True,
         comment="用户名片Tag清洗后源数据SHA-256指纹",
     )
-    
+
     # 记忆洞察四个维度 - Memory Insight Four Dimensions
     memory_insight = Column(Text, nullable=True, comment="缓存的记忆洞察报告（总体概述）")
     behavior_pattern = Column(Text, nullable=True, comment="行为模式")
@@ -109,7 +143,7 @@ class EndUser(Base):
 
     # 与 WorkSpace 的反向关系
     workspace = relationship("Workspace", back_populates="end_users")
-    
+
     # 与 EndUserInfo 的反向关系
     info = relationship("EndUserInfo", back_populates="end_user", cascade="all, delete-orphan")
 
