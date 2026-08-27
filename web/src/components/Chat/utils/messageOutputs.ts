@@ -40,6 +40,40 @@ export const appendOutputByNodeId = (
   })
 }
 
+/**
+ * message_replace event: replaces one node output when node_id is present.
+ * Without node_id, replaces the complete response and clears segmented outputs.
+ */
+export const replaceOutputByNodeId = (
+  prev: ChatList,
+  node_id?: string,
+  content: string = '',
+): ChatList =>
+  mapLastVersion(prev, (current) => {
+    if (current?.role !== 'assistant') return current
+    if (!node_id) {
+      return {
+        ...current,
+        content,
+        meta_data: { ...(current.meta_data || {}), outputs: undefined },
+      }
+    }
+
+    const outputs = [...(current.meta_data?.outputs || [])]
+    const outputIndex = outputs.findIndex(output => output.node_id === node_id)
+    if (outputIndex < 0) {
+      outputs.push({ node_id, content, status: 'running' })
+    } else {
+      outputs[outputIndex] = { ...outputs[outputIndex], content }
+    }
+
+    return {
+      ...current,
+      content: outputs.length === 1 ? outputs[0].content : current.content,
+      meta_data: { ...(current.meta_data || {}), outputs },
+    }
+  })
+
 /** On stream end, marks any still-running outputs segments of the last assistant message as success. */
 export const finalizeOutputs = (prev: ChatList): ChatList =>
   mapLastVersion(prev, (current) => {

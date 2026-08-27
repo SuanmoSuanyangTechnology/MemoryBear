@@ -11,6 +11,8 @@ from app.core.api_key_auth import require_api_key_self_db
 from app.core.logging_config import get_business_logger
 from app.core.response_utils import success
 from app.db import get_async_db
+from app.integrations.knowledge.contracts import KnowledgeRetrievalSource
+from app.integrations.knowledge.route_proxy import route_through_knowledge_service
 from app.models import knowledge_model
 from app.schemas import knowledge_schema
 from app.schemas.api_key_schema import ApiKeyAuth
@@ -28,22 +30,35 @@ knowledge_controller = unwrap_current_workspace_guard(knowledge_controller)
 
 
 @router.get("/knowledgetype", response_model=ApiResponse)
-def get_knowledge_types():
+@route_through_knowledge_service(
+    source=KnowledgeRetrievalSource.EXTERNAL_API,
+    public=True,
+)
+def get_knowledge_types(request: Request = None):
     return success(msg="Successfully obtained the knowledge type", data=list(knowledge_model.KnowledgeType))
 
 
 @router.get("/permissiontype", response_model=ApiResponse)
-def get_permission_types():
+@route_through_knowledge_service(
+    source=KnowledgeRetrievalSource.EXTERNAL_API,
+    public=True,
+)
+def get_permission_types(request: Request = None):
     return success(msg="Successfully obtained the knowledge permission type", data=list(knowledge_model.PermissionType))
 
 
 @router.get("/parsertype", response_model=ApiResponse)
-def get_parser_types():
+@route_through_knowledge_service(
+    source=KnowledgeRetrievalSource.EXTERNAL_API,
+    public=True,
+)
+def get_parser_types(request: Request = None):
     return success(msg="Successfully obtained the knowledge parser type", data=list(knowledge_model.ParserType))
 
 
 @router.get("/knowledge_graph_entity_types", response_model=ApiResponse)
 @require_api_key_self_db(scopes=["rag"])
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.EXTERNAL_API)
 async def get_knowledge_graph_entity_types(
     llm_id: uuid.UUID,
     scenario: str,
@@ -66,6 +81,7 @@ async def get_knowledge_graph_entity_types(
 
 @router.get("/knowledges", response_model=ApiResponse)
 @require_api_key_self_db(scopes=["rag"])
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.EXTERNAL_API)
 async def get_knowledges(
     request: Request,
     api_key_auth: ApiKeyAuth = None,
@@ -102,6 +118,7 @@ async def get_knowledges(
 
 @router.post("/knowledge", response_model=ApiResponse)
 @require_api_key_self_db(scopes=["rag"])
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.EXTERNAL_API)
 async def create_knowledge(
     request: Request,
     api_key_auth: ApiKeyAuth = None,
@@ -124,6 +141,7 @@ async def create_knowledge(
 
 @router.get("/{knowledge_id}", response_model=ApiResponse)
 @require_api_key_self_db(scopes=["rag"])
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.EXTERNAL_API)
 async def get_knowledge(
     knowledge_id: uuid.UUID,
     request: Request,
@@ -144,6 +162,7 @@ async def get_knowledge(
 
 @router.put("/{knowledge_id}", response_model=ApiResponse)
 @require_api_key_self_db(scopes=["rag"])
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.EXTERNAL_API)
 async def update_knowledge(
     knowledge_id: uuid.UUID,
     request: Request,
@@ -165,6 +184,7 @@ async def update_knowledge(
 
 @router.delete("/{knowledge_id}", response_model=ApiResponse)
 @require_api_key_self_db(scopes=["rag"])
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.EXTERNAL_API)
 async def delete_knowledge(
     knowledge_id: uuid.UUID,
     request: Request,
@@ -185,6 +205,7 @@ async def delete_knowledge(
 
 @router.get("/{knowledge_id}/knowledge_graph", response_model=ApiResponse)
 @require_api_key_self_db(scopes=["rag"])
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.EXTERNAL_API)
 async def get_knowledge_graph(
     knowledge_id: uuid.UUID,
     request: Request,
@@ -205,6 +226,7 @@ async def get_knowledge_graph(
 
 @router.delete("/{knowledge_id}/knowledge_graph", response_model=ApiResponse)
 @require_api_key_self_db(scopes=["rag"])
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.EXTERNAL_API)
 async def delete_knowledge_graph(
     knowledge_id: uuid.UUID,
     request: Request,
@@ -225,6 +247,7 @@ async def delete_knowledge_graph(
 
 @router.post("/{knowledge_id}/knowledge_graph", response_model=ApiResponse)
 @require_api_key_self_db(scopes=["rag"])
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.EXTERNAL_API)
 async def rebuild_knowledge_graph(
     knowledge_id: uuid.UUID,
     request: Request,
@@ -245,6 +268,7 @@ async def rebuild_knowledge_graph(
 
 @router.get("/check/yuque/auth", response_model=ApiResponse)
 @require_api_key_self_db(scopes=["rag"])
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.EXTERNAL_API)
 async def check_yuque_auth(
     yuque_user_id: str,
     yuque_token: str,
@@ -268,6 +292,7 @@ async def check_yuque_auth(
 
 @router.get("/check/feishu/auth", response_model=ApiResponse)
 @require_api_key_self_db(scopes=["rag"])
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.EXTERNAL_API)
 async def check_feishu_auth(
     feishu_app_id: str,
     feishu_app_secret: str,
@@ -293,6 +318,7 @@ async def check_feishu_auth(
 
 @router.post("/{knowledge_id}/sync", response_model=ApiResponse)
 @require_api_key_self_db(scopes=["rag"])
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.EXTERNAL_API)
 async def sync_knowledge(
     knowledge_id: uuid.UUID,
     request: Request,

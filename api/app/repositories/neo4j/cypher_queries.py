@@ -1285,7 +1285,7 @@ MATCH (n)
 WHERE elementId(n) = $id
   AND n.delete_at IS NULL
 
-CALL () {
+CALL (n) {
   WITH n
   MATCH (n)-[]-(m:ExtractedEntity)
   WHERE NOT m:MemorySummary AND NOT m:Chunk
@@ -1299,7 +1299,7 @@ CALL () {
   ) AS ExtractedEntity
 }
 
-CALL () {
+CALL (n) {
   WITH n
   MATCH (n)-[]-(m:MemorySummary)
   WHERE NOT m:Chunk
@@ -3157,6 +3157,7 @@ FORGET_CORE_CANDIDATES = f"""
 CALL () {{
     MATCH (c:Chunk {{end_user_id: $end_user_id}})
     WHERE c.delete_at IS NULL
+      AND c.topology_score IS NOT NULL
     WITH c, elementId(c) AS element_id,
          CASE
            WHEN coalesce(toString(c.created_at) =~ $iso_datetime_pattern, false)
@@ -3184,6 +3185,7 @@ CALL () {{
     MATCH (s:Statement {{end_user_id: $end_user_id}})
     WHERE s.delete_at IS NULL
       AND coalesce(s.is_permanent, false) = false
+      AND s.topology_score IS NOT NULL
     WITH s, elementId(s) AS element_id,
          CASE
            WHEN coalesce(toString(s.created_at) =~ $iso_datetime_pattern, false)
@@ -3212,6 +3214,7 @@ CALL () {{
     WHERE e.delete_at IS NULL
       AND coalesce(e.extraction_count, 0) < $protection_threshold
       AND e.name <> '用户'
+      AND e.topology_score IS NOT NULL
     WITH e, elementId(e) AS element_id,
          CASE
            WHEN coalesce(toString(e.created_at) =~ $iso_datetime_pattern, false)

@@ -5,7 +5,11 @@
  */
 import { type SSEMessage } from '@/utils/stream'
 import type { ChatItem, MemoryTraceEvent, MemoryTraceEventData } from '@/components/Chat/types'
-import { appendOutputByNodeId, finalizeOutputs } from '@/components/Chat/utils/messageOutputs'
+import {
+  appendOutputByNodeId,
+  finalizeOutputs,
+  replaceOutputByNodeId,
+} from '@/components/Chat/utils/messageOutputs'
 import type { StreamData } from '../types';
 
 /** start/node_start event: backfills the most recent user message's id with the real user_message_id */
@@ -236,7 +240,11 @@ export const createSendStreamHandler = (deps: StreamHandlerDeps) => {
           if (curId) currentConversationId = curId;
           break
         case 'message_replace':
-          updateAssistantMessage(content, audio_url, audio_url ? 'pending' : undefined, undefined, undefined, undefined, undefined, true)
+          if (streamLoadingRef.current) streamLoadingRef.current = false
+          setChatList(prev => replaceOutputByNodeId(prev, node_id, content))
+          if (audio_url) {
+            updateAssistantMessage('', audio_url, 'pending')
+          }
           if (curId) currentConversationId = curId;
           break
         case 'intervention_required': {
@@ -340,7 +348,11 @@ export const createRegenerateStreamHandler = (deps: StreamHandlerDeps & { messag
           if (curId) currentConversationId = curId;
           break
         case 'message_replace':
-          updateAssistantMessage(content, audio_url, audio_url ? 'pending' : undefined, undefined, undefined, undefined, messageId, true)
+          if (streamLoadingRef.current) streamLoadingRef.current = false
+          setChatList(prev => replaceOutputByNodeId(prev, node_id, content))
+          if (audio_url) {
+            updateAssistantMessage('', audio_url, 'pending', undefined, undefined, undefined, messageId)
+          }
           if (curId) currentConversationId = curId;
           break
         case 'intervention_required': {

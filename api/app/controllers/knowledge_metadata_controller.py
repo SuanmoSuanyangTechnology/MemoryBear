@@ -1,5 +1,5 @@
 import uuid
-from fastapi import APIRouter, Depends, Body
+from fastapi import APIRouter, Depends, Body, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.response_utils import success
 from app.core.logging_config import get_api_logger
@@ -11,6 +11,8 @@ from app.models.user_model import User
 from app.schemas import knowledge_metadata_schema as schemas
 from app.schemas.response_schema import ApiResponse
 from app.services.knowledge_metadata_service import KnowledgeMetadataService
+from app.integrations.knowledge.contracts import KnowledgeRetrievalSource
+from app.integrations.knowledge.route_proxy import route_through_knowledge_service
 
 api_logger = get_api_logger()
 
@@ -75,10 +77,12 @@ def _format_common_metadata_fields_result(result: dict) -> dict:
 
 @router.post("/metadata/fields", response_model=ApiResponse)
 @cur_workspace_access_guard_async()
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.MANAGER_API)
 async def list_common_metadata_fields(
     data: schemas.KnowledgeMetadataFieldsRequest,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
+    request: Request = None,
 ):
     """List common metadata fields across knowledge bases."""
     kb_ids = list(dict.fromkeys(data.kb_ids))
@@ -104,10 +108,12 @@ async def list_common_metadata_fields(
 
 @router.get("/{kb_id}/metadata", response_model=ApiResponse)
 @cur_workspace_access_guard_async()
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.MANAGER_API)
 async def list_metadata_fields(
     kb_id: uuid.UUID,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
+    request: Request = None,
 ):
     """获取元数据字段列表（自定义 + 内置）"""
     api_logger.info(f"List metadata fields: kb_id={kb_id}, user={current_user.username}")
@@ -128,11 +134,13 @@ async def list_metadata_fields(
 
 @router.post("/{kb_id}/metadata", response_model=ApiResponse)
 @cur_workspace_access_guard_async()
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.MANAGER_API)
 async def create_metadata_field(
     kb_id: uuid.UUID,
     data: schemas.KnowledgeMetadataCreate,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
+    request: Request = None,
 ):
     """创建自定义元数据字段"""
     api_logger.info(f"Create metadata field: kb_id={kb_id}, name={data.name}, type={data.type}")
@@ -162,12 +170,14 @@ async def create_metadata_field(
 
 @router.put("/{kb_id}/metadata/{metadata_id}", response_model=ApiResponse)
 @cur_workspace_access_guard_async()
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.MANAGER_API)
 async def update_metadata_field(
     kb_id: uuid.UUID,
     metadata_id: uuid.UUID,
     data: schemas.KnowledgeMetadataUpdate,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
+    request: Request = None,
 ):
     """更新自定义元数据字段"""
     api_logger.info(f"Update metadata field: kb_id={kb_id}, metadata_id={metadata_id}")
@@ -196,11 +206,13 @@ async def update_metadata_field(
 
 @router.delete("/{kb_id}/metadata/{metadata_id}", response_model=ApiResponse)
 @cur_workspace_access_guard_async()
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.MANAGER_API)
 async def delete_metadata_field(
     kb_id: uuid.UUID,
     metadata_id: uuid.UUID,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
+    request: Request = None,
 ):
     """删除自定义元数据字段"""
     api_logger.info(f"Delete metadata field: kb_id={kb_id}, metadata_id={metadata_id}")
@@ -220,10 +232,12 @@ async def delete_metadata_field(
 
 @router.get("/{kb_id}/metadata/builtin", response_model=ApiResponse)
 @cur_workspace_access_guard_async()
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.MANAGER_API)
 async def get_builtin_metadata_fields(
     kb_id: uuid.UUID,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
+    request: Request = None,
 ):
     """获取内置元数据字段列表"""
     api_logger.info(f"Get builtin metadata fields: kb_id={kb_id}")
@@ -246,11 +260,13 @@ async def get_builtin_metadata_fields(
 
 @router.post("/{kb_id}/metadata/builtin/enable", response_model=ApiResponse)
 @cur_workspace_access_guard_async()
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.MANAGER_API)
 async def toggle_builtin_metadata(
     kb_id: uuid.UUID,
     data: schemas.BuiltinMetadataEnableRequest,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
+    request: Request = None,
 ):
     """更新内置元数据开关"""
     api_logger.info(f"Toggle builtin metadata: kb_id={kb_id}, enabled={data.enabled}")

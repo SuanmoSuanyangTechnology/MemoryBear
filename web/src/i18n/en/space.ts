@@ -32,6 +32,7 @@ export const space = {
 
       basic: 'Basic Config',
       models: 'Model Configuration',
+      memoryConfig: 'Memory Lifecycle',
     },
     memoryExtractionEngine: {
       title: 'Memory Engine Module Configuration Center',
@@ -277,6 +278,7 @@ export const space = {
         memoryRetrievalEngineRunningDesc: 'Running keyword and semantic memory retrieval',
         memoryRetrievalEngineCompletedDesc: 'Completed keyword and semantic memory retrieval',
         memoryRetrievalEngineDisabledDesc: 'Memory retrieval engine was not enabled for this turn',
+        memoryRetrievalEngineNoResultDesc: 'Memory retrieval engine enabled',
         multimodalMemoryRetrievalEngine: 'Cross-modal Memory Association Engine',
         multimodalMemoryRetrievalEngineRunningDesc: 'Jointly retrieving text and image memories',
         multimodalMemoryRetrievalEngineCompletedDesc: 'Completed joint retrieval of text and image memories',

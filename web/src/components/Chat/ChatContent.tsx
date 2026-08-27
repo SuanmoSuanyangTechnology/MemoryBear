@@ -235,6 +235,7 @@ const ChatContent: FC<ChatContentProps> = ({
           const shouldShowMemoryRecall = hasMemoryRecall && (!isActiveStream || showMemoryRecall)
           const shouldShowStreamSpinner = isActiveStream && item?.content === '' && !renderRuntime && !shouldShowMemoryRecall
           if (!item) return null
+          const outputs = item.meta_data?.outputs?.filter(output => output.content && output.content.trim() !== '')
           return (
             <div key={index} className={clsx("rb:relative", {
               'rb:mt-6': index !== 0, // Add top margin for non-first messages
@@ -331,9 +332,9 @@ const ChatContent: FC<ChatContentProps> = ({
                         )}
                         {/* Render message content using Markdown component */}
                         {/* 一问多答区分展示 */}
-                        {item.meta_data?.outputs && item.meta_data?.outputs?.length > 1
+                        {outputs && outputs?.length > 1
                           ? <Flex vertical gap={8} align="start">
-                            {item.meta_data?.outputs?.map((output, idx: number) => (
+                            {outputs?.map((output, idx: number) => (
                               <div key={idx} className="rb:bg-[#F6F6F6] rb:rounded-xl rb:px-3 rb:pt-2.5 rb:pb-0.5">
                                 <div className="rb:text-[#5B6167] rb:text-[12px] rb:mb-3">{t('application.reply')} {idx + 1}</div>
                                 <Markdown

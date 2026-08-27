@@ -27,6 +27,13 @@ from app.core.memory.exceptions import (
     MemoryRetrievalStage,
 )
 from app.core.memory.prompt import prompt_manager
+from app.core.memory.retrieval_trace.models import (
+    RetrievalExecutionTrace,
+    build_score_trace,
+    diagnostic_fusion_score,
+    finite_or_none,
+    normalized_keyword_score,
+)
 from app.core.memory.read_services.search_engine.result_builder import MetadataBuilder
 from app.core.memory.read_services.search_engine.result_builder import data_builder_factory
 from app.core.memory.read_services.search_engine.tools import make_entity_search_tool, make_relation_search_tool, \
@@ -98,6 +105,38 @@ class Neo4jSearchService:
         self.entity_search_tool = make_entity_search_tool(self.ctx)
         self.user_source_lookup_tool = make_user_source_lookup_tool(self.ctx)
         self._user_source_looked_up_ids = set()
+
+    def _build_score_sidecar(
+            self,
+            keyword_results: dict,
+            embedding_results: dict,
+    ) -> dict[tuple[Neo4jNodeType, str], dict]:
+        """旁路保留关键词、语义分数，不修改原始召回记录和排序。"""
+        sidecar: dict[tuple[Neo4jNodeType, str], dict] = {}
+        for node_type in self.includes:
+            for record in keyword_results.get(node_type, []):
+                node_id = str(record.get("id") or "")
+                if not node_id:
+                    continue
+                item = sidecar.setdefault((node_type, node_id), {})
+                item["keyword_hit"] = True
+                item["keyword_score"] = normalized_keyword_score(
+                    record.get("score"), self.fulltext_score_threshold
+                )
+            for record in embedding_results.get(node_type, []):
+                node_id = str(record.get("id") or "")
+                if not node_id:
+                    continue
+                item = sidecar.setdefault((node_type, node_id), {})
+                item["semantic_hit"] = True
+                item["semantic_score"] = finite_or_none(record.get("score")) or 0.0
+        for item in sidecar.values():
+            item["fusion_score"] = diagnostic_fusion_score(
+                item.get("keyword_score", 0.0),
+                item.get("semantic_score", 0.0),
+                self.alpha,
+            )
+        return sidecar
 
     async def _keyword_search(
             self,
@@ -181,7 +220,8 @@ class Neo4jSearchService:
             emb_results: dict,
             query: str,
             limit: int,
-    ) -> list[Memory]:
+            score_sidecar: dict[tuple[Neo4jNodeType, str], dict],
+    ) -> tuple[list[Memory], str, list[str]]:
         seen: dict[str, dict] = {}
         for node_type in self.includes:
             for record in kw_results.get(node_type, []):
@@ -198,20 +238,34 @@ class Neo4jSearchService:
                     seen[rid] = record
 
         if not seen:
-            return []
+            return [], "skipped", []
 
         memories: list[Memory] = []
         for record in seen.values():
             node_type = record.pop("_node_type")
             memory = data_builder_factory(node_type, record)
-            memories.append(Memory(
+            score_info = score_sidecar.get((node_type, str(memory.id)), {})
+            result_memory = Memory(
                 score=memory.score,
                 content=memory.content,
                 data=memory.data,
                 source=node_type,
                 query=query,
                 id=memory.id,
-            ))
+            )
+            result_memory.retrieval_trace = build_score_trace(
+                node_id=result_memory.id,
+                node_type=node_type.value,
+                final_score=result_memory.score,
+                rank_basis="input_order",
+                keyword_hit=bool(score_info.get("keyword_hit")),
+                semantic_hit=bool(score_info.get("semantic_hit")),
+                keyword_score=score_info.get("keyword_score"),
+                semantic_score=score_info.get("semantic_score"),
+                fusion_score=score_info.get("fusion_score"),
+                matched_queries=[query],
+            )
+            memories.append(result_memory)
 
         rerank_applied = False
         try:
@@ -251,6 +305,10 @@ class Neo4jSearchService:
                 for i, mem in enumerate(memories):
                     if i in index_to_score:
                         mem.score = index_to_score[i]
+                        if mem.retrieval_trace is not None:
+                            mem.retrieval_trace.rerank_score = finite_or_none(index_to_score[i])
+                            mem.retrieval_trace.final_score = float(mem.score)
+                            mem.retrieval_trace.rank_basis = "rerank_score"
             except Exception as e:
                 if self.on_error is not None:
                     self.on_error(
@@ -270,14 +328,28 @@ class Neo4jSearchService:
                 exc_info=True,
             )
 
+        degraded_reasons: list[str] = []
+        rerank_status = "completed" if rerank_applied else "degraded"
+        if not rerank_applied:
+            degraded_reasons.append("rerank_failed")
+        elif len(index_to_score) < len(memories):
+            rerank_status = "degraded"
+            degraded_reasons.append("rerank_partial_result")
+
+        for memory in memories:
+            if memory.retrieval_trace is not None:
+                memory.retrieval_trace.final_score = float(memory.score)
         memories.sort(key=lambda x: x.score, reverse=True)
         memories = memories[:limit]
         if rerank_applied:
             logger.info(
                 f"[Neo4jSearch] Model rerank applied: {len(documents)} → {len(memories)} memories"
             )
-        return memories
+        return memories, rerank_status, degraded_reasons
 
+    # WARNING: 下方 sigmoid 归一化公式与 retrieval_trace/models.py 的
+    # normalized_keyword_score 互为副本（此处是公式源头，驱动真实排序），
+    # _rerank 中的融合公式同理对应 diagnostic_fusion_score。改动任一侧前先同步另一侧。
     def _normalize_kw_scores(self, items: list[dict]) -> list[dict]:
         if not items:
             return items
@@ -303,7 +375,14 @@ class Neo4jSearchService:
                 all_records.append(record)
 
         if not all_records:
-            return MemorySearchResult(memories=[])
+            return MemorySearchResult(
+                memories=[],
+                execution_trace=RetrievalExecutionTrace(
+                    keyword_status="completed",
+                    semantic_status="skipped",
+                    rerank_status="skipped",
+                ),
+            )
 
         all_records = self._normalize_kw_scores(all_records)
 
@@ -318,15 +397,35 @@ class Neo4jSearchService:
         for record in all_records[:limit]:
             node_type = record.pop("_node_type")
             memory = data_builder_factory(node_type, record)
-            memories.append(Memory(
+            result_memory = Memory(
                 score=memory.score,
                 content=memory.content,
                 data=memory.data,
                 source=node_type,
                 query=query,
                 id=memory.id
-            ))
-        return MemorySearchResult(memories=memories)
+            )
+            result_memory.retrieval_trace = build_score_trace(
+                node_id=result_memory.id,
+                node_type=node_type.value,
+                final_score=result_memory.score,
+                rank_basis="keyword_score",
+                keyword_hit=True,
+                keyword_score=record.get("normalized_kw_score"),
+                matched_queries=[query],
+            )
+            memories.append(result_memory)
+        return MemorySearchResult(
+            memories=memories,
+            execution_trace=RetrievalExecutionTrace(
+                keyword_status="completed",
+                semantic_status="skipped",
+                rerank_status="skipped",
+                keyword_hit_count=len(all_records),
+                raw_hit_count=len(all_records),
+                merged_count=len(memories),
+            ),
+        )
 
     async def hybrid_search(
             self,
@@ -339,10 +438,12 @@ class Neo4jSearchService:
             emb_task = self._embedding_search(query, limit)
             kw_results, emb_results = await asyncio.gather(kw_task, emb_task, return_exceptions=True)
 
-        if isinstance(kw_results, Exception):
+        keyword_failed = isinstance(kw_results, Exception)
+        semantic_failed = isinstance(emb_results, Exception)
+        if keyword_failed:
             logger.warning(f"[MemorySearch] keyword search error: {kw_results}")
             kw_results = {}
-        if isinstance(emb_results, Exception):
+        if semantic_failed:
             logger.warning(f"[MemorySearch] embedding search error: {emb_results}")
             if self.on_error is not None:
                 self.on_error(
@@ -354,10 +455,19 @@ class Neo4jSearchService:
                 )
             emb_results = {}
 
+        score_sidecar = self._build_score_sidecar(kw_results, emb_results)
+        rerank_status = "skipped"
+        degraded_reasons: list[str] = []
+        if keyword_failed:
+            degraded_reasons.append("keyword_search_failed")
+        if semantic_failed:
+            degraded_reasons.append("semantic_search_failed")
+
         if self.reranker is not None:
-            memories = await self._hybrid_search_with_model_rerank(
-                kw_results, emb_results, query, limit
+            memories, rerank_status, rerank_reasons = await self._hybrid_search_with_model_rerank(
+                kw_results, emb_results, query, limit, score_sidecar
             )
+            degraded_reasons.extend(rerank_reasons)
         else:
             memories = []
             for node_type in self.includes:
@@ -368,18 +478,51 @@ class Neo4jSearchService:
                 )
                 for record in reranked:
                     memory = data_builder_factory(node_type, record)
-                    memories.append(Memory(
+                    result_memory = Memory(
                         score=memory.score,
                         content=memory.content,
                         data=memory.data,
                         source=node_type,
                         query=query,
                         id=memory.id
-                    ))
+                    )
+                    score_info = score_sidecar.get((node_type, str(memory.id)), {})
+                    fusion_score = finite_or_none(record.get("content_score"))
+                    rank_basis = (
+                        "source_adjusted_score"
+                        if fusion_score is not None and result_memory.score != fusion_score
+                        else "fusion_score"
+                    )
+                    result_memory.retrieval_trace = build_score_trace(
+                        node_id=result_memory.id,
+                        node_type=node_type.value,
+                        final_score=result_memory.score,
+                        rank_basis=rank_basis,
+                        keyword_hit=bool(score_info.get("keyword_hit")),
+                        semantic_hit=bool(score_info.get("semantic_hit")),
+                        keyword_score=record.get("kw_score"),
+                        semantic_score=record.get("embedding_score"),
+                        fusion_score=fusion_score,
+                        matched_queries=[query],
+                    )
+                    memories.append(result_memory)
             memories.sort(key=lambda x: x.score, reverse=True)
             memories = memories[:limit]
 
-        return MemorySearchResult(memories=memories)
+        return MemorySearchResult(
+            memories=memories,
+            execution_trace=RetrievalExecutionTrace(
+                keyword_status="failed" if keyword_failed else "completed",
+                semantic_status="failed" if semantic_failed else "completed",
+                rerank_status=rerank_status,
+                keyword_hit_count=sum(len(items) for items in kw_results.values()),
+                semantic_hit_count=sum(len(items) for items in emb_results.values()),
+                raw_hit_count=sum(len(items) for items in kw_results.values())
+                              + sum(len(items) for items in emb_results.values()),
+                merged_count=len(memories),
+                degraded_reasons=degraded_reasons,
+            ),
+        )
 
     async def _run_relation_agent(self, query: str) -> RelationSearchResult:
         system_prompt = prompt_manager.render(
@@ -840,17 +983,37 @@ class RAGSearchService:
         res = []
         try:
             for chunk in retrieve_chunks_result:
-                res.append(Memory(
+                memory = Memory(
                     content=chunk.page_content,
                     query=query,
                     score=chunk.metadata.get("score", 0.0),
                     source=Neo4jNodeType.RAG,
                     id=chunk.metadata.get("document_id"),
                     data=chunk.metadata,
-                ))
+                )
+                memory.retrieval_trace = build_score_trace(
+                    node_id=memory.id,
+                    node_type=Neo4jNodeType.RAG.value,
+                    final_score=memory.score,
+                    rank_basis="provider_score",
+                    backend="rag",
+                    matched_queries=[query],
+                )
+                res.append(memory)
             res.sort(key=lambda x: x.score, reverse=True)
             res = res[:limit]
-            return MemorySearchResult(memories=res)
+            return MemorySearchResult(
+                memories=res,
+                execution_trace=RetrievalExecutionTrace(
+                    backend="rag",
+                    keyword_status="skipped",
+                    semantic_status="completed",
+                    rerank_status="skipped",
+                    semantic_hit_count=len(res),
+                    raw_hit_count=len(res),
+                    merged_count=len(res),
+                ),
+            )
         except RuntimeError as e:
             logger.error(f"[MemorySearch] rag search error: {e}")
             return MemorySearchResult(memories=[])

@@ -11,6 +11,42 @@ the user, build communities, summarize a whole graph, or infer missing facts.
 Return a valid JSON object only. The JSON object must contain "entities" and
 "relations" arrays. Use empty arrays when no direct evidence is present. Do not
 return markdown, code fences, comments, or explanatory text.
+Use exactly the field names below; never substitute alternatives such as
+"type", "source", or "target".
+Each entity: "ref" (string, unique within this response, e.g. "e1"), "name"
+(string), "entity_type" (string, one of the allowed types), "description"
+(string, one or two sentences grounded in the source). Optional: "aliases"
+(string array), "confidence" (number 0-1).
+Each relation: "from_ref" (string entity ref), "to_ref" (string entity ref),
+"predicate" (string, short verb phrase), "description" (string, one sentence
+grounded in the source). Optional: "keywords" (string array), "directed"
+(boolean), "confidence" (number 0-1).
+Example:
+{
+  "entities": [
+    {
+      "ref": "e1",
+      "name": "Acme Corp",
+      "entity_type": "organization",
+      "description": "Semiconductor company headquartered in Hsinchu."
+    },
+    {
+      "ref": "e2",
+      "name": "Zeta",
+      "entity_type": "product",
+      "description": "AI accelerator chip launched by Acme Corp in 2025."
+    }
+  ],
+  "relations": [
+    {
+      "from_ref": "e1",
+      "to_ref": "e2",
+      "predicate": "launched",
+      "description": "Acme Corp launched the Zeta chip in 2025.",
+      "keywords": ["product launch"]
+    }
+  ]
+}
 """.strip()
 
 EXTRACTION_PROMPT_VERSION = "2026-07-27-v1"

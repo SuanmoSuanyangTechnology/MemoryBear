@@ -9,6 +9,12 @@ from sqlalchemy.orm import Session
 from app.core.rag.retrieval.models import RetrievalPrincipal
 from app.db import get_async_db_context
 from app.dependencies import CurrentUserSnapshot, make_snapshot
+from app.integrations.knowledge.contracts import (
+    KnowledgeCallContext,
+    KnowledgeContextError,
+    KnowledgePrincipal,
+    KnowledgeRetrievalSource,
+)
 from app.models.api_key_model import ApiKey
 from app.models import document_model, knowledge_model
 from app.models.user_model import User
@@ -65,6 +71,40 @@ async def get_api_key_retrieval_principal_async(
         tenant_id=creator.tenant_id,
         current_workspace_id=api_key_auth.workspace_id,
         is_superuser=bool(creator.is_superuser),
+    )
+
+
+async def get_api_key_knowledge_context(
+    api_key_auth: ApiKeyAuth,
+    *,
+    source: KnowledgeRetrievalSource,
+    trace_id: str,
+) -> KnowledgeCallContext:
+    """Load an API Key creator snapshot without holding DB during remote I/O."""
+
+    async with get_async_db_context() as db:
+        result = await db.execute(
+            select(User.id, User.username, User.tenant_id)
+            .join(ApiKey, ApiKey.created_by == User.id)
+            .where(
+                ApiKey.id == api_key_auth.api_key_id,
+                ApiKey.workspace_id == api_key_auth.workspace_id,
+            )
+        )
+        creator = result.one_or_none()
+
+    if creator is None:
+        raise KnowledgeContextError("API Key creator is unavailable")
+
+    return KnowledgeCallContext(
+        principal=KnowledgePrincipal(
+            actor_id=creator.id,
+            actor_name=creator.username,
+            tenant_id=creator.tenant_id,
+            workspace_id=api_key_auth.workspace_id,
+        ),
+        source=source,
+        trace_id=trace_id,
     )
 
 
