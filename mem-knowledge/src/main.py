@@ -8,6 +8,8 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI, Request
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
@@ -102,6 +104,34 @@ def create_app(settings: KnowledgeSettings | None = None) -> FastAPI:
     application.state.runtime = runtime
     application.add_middleware(TraceIdMiddleware)
     application.include_router(internal_v1_router)
+
+    @application.exception_handler(RequestValidationError)
+    async def request_validation_error_handler(
+        request: Request,
+        exc: RequestValidationError,
+    ) -> JSONResponse:
+        trace_id = getattr(request.state, "trace_id", get_trace_id())
+        validation_errors = [
+            {
+                "loc": ".".join(str(part) for part in error.get("loc", ())),
+                "type": str(error.get("type", "")),
+                "msg": str(error.get("msg", "")),
+            }
+            for error in exc.errors()
+        ]
+        logger.warning(
+            "Knowledge request validation failed trace_id=%s method=%s path=%s "
+            "actor_id=%s tenant_id=%s workspace_id=%s source=%s errors=%s",
+            trace_id,
+            request.method,
+            request.url.path,
+            request.headers.get("X-KB-Actor-ID"),
+            request.headers.get("X-KB-Tenant-ID"),
+            request.headers.get("X-KB-Workspace-ID"),
+            request.headers.get("X-KB-Source"),
+            validation_errors,
+        )
+        return await request_validation_exception_handler(request, exc)
 
     @application.exception_handler(KnowledgeError)
     async def knowledge_error_handler(
