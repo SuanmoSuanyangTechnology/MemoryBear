@@ -1,6 +1,6 @@
 import uuid
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, NamedTuple, Optional, Set, TypedDict
 
 import sqlalchemy as sa
@@ -69,7 +69,7 @@ class EndUserRepository:
         """
         expires_at = EndUser.write_time + Workspace.retention_days * sa.text("INTERVAL '1 day'")
         return (
-            EndUser.is_active.is_(True),
+            EndUser.is_active == sa.true(),
             EndUser.identity_status == "temporary",
             EndUser.write_time.is_not(None),
             Workspace.retention_days > 0,
@@ -80,17 +80,37 @@ class EndUserRepository:
             self,
             limit: int = EXPIRED_END_USER_BATCH_SIZE,
     ) -> List[uuid.UUID]:
-        """按最后写入时间稳定查询一批过期临时身份 ID。"""
+        """按空间有效期和最后写入时间稳定查询一批过期临时身份 ID。"""
         safe_limit = max(1, min(int(limit), EXPIRED_END_USER_BATCH_SIZE))
-        rows = (
-            self.db.query(EndUser.id)
-            .join(Workspace, Workspace.id == EndUser.workspace_id)
-            .filter(*self._expired_temporary_filter())
-            .order_by(EndUser.write_time.asc(), EndUser.id.asc())
-            .limit(safe_limit)
+        retention_workspaces = (
+            self.db.query(Workspace.id, Workspace.retention_days)
+            .filter(Workspace.retention_days > 0)
             .all()
         )
-        return [row[0] for row in rows]
+        if not retention_workspaces:
+            return []
+
+        scan_time = utcnow_naive()
+        candidates: list[tuple[uuid.UUID, datetime]] = []
+        for workspace_id, retention_days in retention_workspaces:
+            cutoff_time = scan_time - timedelta(days=retention_days)
+            rows = (
+                self.db.query(EndUser.id, EndUser.write_time)
+                .filter(
+                    EndUser.workspace_id == workspace_id,
+                    EndUser.is_active == sa.true(),
+                    EndUser.identity_status == "temporary",
+                    EndUser.write_time.is_not(None),
+                    EndUser.write_time < cutoff_time,
+                )
+                .order_by(EndUser.write_time.asc(), EndUser.id.asc())
+                .limit(safe_limit)
+                .all()
+            )
+            candidates.extend((row.id, row.write_time) for row in rows)
+
+        candidates.sort(key=lambda candidate: (candidate[1], candidate[0].int))
+        return [end_user_id for end_user_id, _ in candidates[:safe_limit]]
 
     def is_expired_temporary_end_user(self, end_user_id: uuid.UUID) -> bool:
         """删除前重新确认身份仍为临时、活跃且已超过当前空间保留期。"""
