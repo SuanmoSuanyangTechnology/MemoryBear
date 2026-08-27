@@ -21,7 +21,7 @@ import type {
 import type {
   ConfigForm as SelfReflectionEngineConfig
 } from '@/views/SelfReflectionEngine/types'
-import type { TestParams } from '@/views/MemoryConversation'
+import type { TestParams } from '@/views/MemoryConversation/types'
 import type { EndUser } from '@/views/UserMemoryDetail/types'
 import { handleSSE, type SSEMessage } from '@/utils/stream'
 import type { ChatItem } from '@/components/Chat/types'
@@ -29,10 +29,12 @@ import type { Query } from '@/views/UserMemory/types';
 import type { Query as ExtractedEntityQuery } from '@/views/UserMemoryDetail/pages/ExtractedEntityGraphDetail'
 import type { EmotionOverviewQuery, EmotionTimelineQuery } from '@/views/UserMemoryDetail/components/EmotionTimeAnalysis/types'
 
-// Memory conversation
-export const readService = (query: TestParams) => {
-  return request.post('/memory/read/sync', query)
-}
+/** Memory verification streaming conversation. */
+export const readServiceStream = (
+  query: TestParams,
+  onMessage?: (data: SSEMessage[]) => void,
+  onAbort?: (abort: () => void) => void,
+) => handleSSE('/memory/read/sync', query, onMessage, undefined, onAbort)
 /****************** Memory Dashboard APIs *******************************/
 // Memory Dashboard - Total memory count
 export const getTotalMemoryCount = () => {

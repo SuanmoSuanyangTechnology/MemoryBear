@@ -59,6 +59,7 @@ interface PageScrollListProps<T, Q = Record<string, unknown>> {
   /** Additional CSS classes */
   className?: string;
   needLoading?: boolean;
+  pageLoading?: React.ReactNode;
   heightClass?: string;
   gutter?: [number, number] | number;
   onTotalChange?: (total: number) => void;
@@ -75,6 +76,7 @@ const PageScrollList = forwardRef(<T, Q = Record<string, unknown>>({
   url,
   column = 4,
   className = '',
+  pageLoading,
   needLoading = true,
   heightClass,
   gutter = [12, 12],
@@ -163,7 +165,7 @@ const PageScrollList = forwardRef(<T, Q = Record<string, unknown>>({
         dataLength={data.length}
         next={() => loadMoreData()}
         hasMore={hasMore}
-        loader={loading && needLoading ? <PageLoading className={heightClass || defaultHeightClass} /> : false}
+        loader={loading && needLoading ? pageLoading || <PageLoading className={heightClass || defaultHeightClass} /> : false}
         // endMessage={<Divider plain>It is all, nothing more 🤐</Divider>}
         scrollThreshold={0.9}
         scrollableTarget={scrollableTargetId}
