@@ -26,6 +26,14 @@ try:
 except ImportError:
     pass  # 社区版无 premium 模块，静默跳过
 
+# SSO 新租户 SpeedBear key 补偿任务（复用 subscription_state_tasks 队列）
+try:
+    from premium.platform_admin.speedbear_tasks import (  # noqa: F401
+        repair_recent_sso_tenant_bindings_task,
+    )
+except ImportError:
+    pass  # 社区版无 premium 模块，静默跳过
+
 # 导入企业版消息通知中心任务（队列：notification_state_tasks）
 try:
     from premium.platform_admin.notification_center.alert_emit_tasks import (  # noqa: F401
