@@ -410,6 +410,35 @@ class Settings:
     DRAFT_DATA_CLEAN_HOUR: int = TypeAdapter(
         Annotated[int, Field(ge=0, le=23, description="Draft data clean hour (UTC), 0-23. 16=Beijing 00:00")]
     ).validate_python(int(os.getenv("DRAFT_DATA_CLEAN_HOUR", "16")))
+    # Storage Outbox：恰好三次原地重试，无延迟重试相关配置。
+    # 扫描调度间隔（秒）：Celery beat 每隔该周期派发一轮投影任务，也用作任务过期时间。
+    OUTBOX_SCAN_INTERVAL_SECONDS: int = TypeAdapter(
+        Annotated[int, Field(ge=1, le=3600)]
+    ).validate_python(int(os.getenv("OUTBOX_SCAN_INTERVAL_SECONDS", "5")))
+    # 每轮投影任务最多认领并处理的事件数，单次消费容量上限。
+    OUTBOX_BATCH_SIZE: int = TypeAdapter(
+        Annotated[int, Field(ge=1, le=1000)]
+    ).validate_python(int(os.getenv("OUTBOX_BATCH_SIZE", "100")))
+    # 事件租约存活时长（秒）：认领后允许的最大处理窗口，超时则判定租约丢失并回收重投。
+    OUTBOX_PROCESSING_TIMEOUT_SECONDS: int = TypeAdapter(
+        Annotated[int, Field(ge=30, le=3600)]
+    ).validate_python(int(os.getenv("OUTBOX_PROCESSING_TIMEOUT_SECONDS", "300")))
+    # 已处理事件的保留天数：超过后由清理任务删除，用于历史回溯窗口。
+    OUTBOX_RETENTION_DAYS: int = TypeAdapter(
+        Annotated[int, Field(ge=1, le=3650)]
+    ).validate_python(int(os.getenv("OUTBOX_RETENTION_DAYS", "30")))
+    # 终态失败事件的保留天数：超过后由清理任务删除，给运维介入排查留出时间。
+    OUTBOX_FAILED_RETENTION_DAYS: int = TypeAdapter(
+        Annotated[int, Field(ge=1, le=3650)]
+    ).validate_python(int(os.getenv("OUTBOX_FAILED_RETENTION_DAYS", "60")))
+    # 每日清理任务触发的 UTC 小时（0-23）；18 UTC = 北京时间次日 02:00。
+    OUTBOX_CLEANUP_HOUR: int = TypeAdapter(
+        Annotated[int, Field(ge=0, le=23)]
+    ).validate_python(int(os.getenv("OUTBOX_CLEANUP_HOUR", "18")))
+    # 落库错误信息最大字符长度：超出截断，避免大异常文本撑爆事件行与日志。
+    OUTBOX_ERROR_MAX_LENGTH: int = TypeAdapter(
+        Annotated[int, Field(ge=64, le=16384)]
+    ).validate_python(int(os.getenv("OUTBOX_ERROR_MAX_LENGTH", "4096")))
     # Memory Module Configuration (internal)
     
     MEMORY_OUTPUT_DIR: str = os.getenv("MEMORY_OUTPUT_DIR", "logs/memory-output")

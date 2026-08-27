@@ -98,6 +98,8 @@ celery_app.conf.update(
 
     # task routing
     task_routes={
+        'app.tasks.scan_outbox_projection': {'queue': 'memory_projection'},
+        'app.tasks.cleanup_outbox': {'queue': 'memory_projection'},
         # Memory tasks → memory_tasks queue (threads worker)
         'app.core.memory.agent.write_message': {'queue': 'memory_tasks'},
 
@@ -243,6 +245,16 @@ draft_data_clean_schedule = crontab(hour=settings.DRAFT_DATA_CLEAN_HOUR, minute=
 forget_scan_schedule = timedelta(minutes=settings.FORGET_SCAN_INTERVAL_MINUTES)
 # 构建定时任务配置
 beat_schedule_config = {
+    "scan-outbox-projection": {
+        "task": "app.tasks.scan_outbox_projection",
+        "schedule": timedelta(seconds=settings.OUTBOX_SCAN_INTERVAL_SECONDS),
+        "options": {"queue": "memory_projection", "expires": settings.OUTBOX_SCAN_INTERVAL_SECONDS},
+    },
+    "cleanup-outbox": {
+        "task": "app.tasks.cleanup_outbox",
+        "schedule": crontab(hour=settings.OUTBOX_CLEANUP_HOUR, minute=0),
+        "options": {"queue": "memory_projection"},
+    },
     # "run-workspace-reflection": {
     #     "task": "app.tasks.workspace_reflection_task",
     #     "schedule": workspace_reflection_schedule,

@@ -1,5 +1,6 @@
 import asyncio
 from dataclasses import replace
+from datetime import datetime, timedelta, timezone
 from typing import Any, cast
 
 import pytest
@@ -13,6 +14,9 @@ from app.core.memory.storage.provider.elasticsearch.client import (
     PIT_KEEP_ALIVE,
     SEARCH_BATCH_SIZE,
     ElasticClient,
+)
+from app.core.memory.storage.provider.elasticsearch.serialization import (
+    normalize_elasticsearch_value,
 )
 from app.core.memory.storage.provider.elasticsearch.config import (
     build_elasticsearch_client_config,
@@ -257,6 +261,7 @@ class _FakeElasticsearch:
         self.open_point_in_time_result: dict[str, Any] = {"id": "pit-1"}
         self.search_result: dict[str, Any] = {"hits": {"hits": []}}
         self.search_results: list[dict[str, Any]] = []
+        self.index_result: dict[str, Any] = {"result": "created"}
         self.update_result: dict[str, Any] | None = None
         self.delete_result: dict[str, Any] | None = None
         self.updated = 2
@@ -269,9 +274,9 @@ class _FakeElasticsearch:
     async def close(self) -> None:
         self.closed = True
 
-    async def index(self, **kwargs: Any) -> dict[str, str]:
+    async def index(self, **kwargs: Any) -> dict[str, Any]:
         self.index_calls.append(kwargs)
-        return {"result": "created"}
+        return self.index_result
 
     async def open_point_in_time(self, **kwargs: Any) -> dict[str, Any]:
         self.open_point_in_time_calls.append(kwargs)
@@ -290,11 +295,15 @@ class _FakeElasticsearch:
 
     async def update_by_query(self, **kwargs: Any) -> dict[str, Any]:
         self.update_by_query_calls.append(kwargs)
-        return self.update_result or {"updated": self.updated}
+        if self.update_result is not None:
+            return self.update_result
+        return {"updated": self.updated}
 
     async def delete_by_query(self, **kwargs: Any) -> dict[str, Any]:
         self.delete_by_query_calls.append(kwargs)
-        return self.delete_result or {"deleted": self.deleted}
+        if self.delete_result is not None:
+            return self.delete_result
+        return {"deleted": self.deleted}
 
 
 
@@ -673,6 +682,27 @@ async def test_elastic_client_health_and_close() -> None:
     assert client.client is None
 
 
+def test_elasticsearch_document_normalization() -> None:
+    value = {
+        "created_at": datetime(
+            2026,
+            1,
+            1,
+            8,
+            tzinfo=timezone(timedelta(hours=8)),
+        ),
+        "embedding": (1, 2.5),
+    }
+
+    assert normalize_elasticsearch_value(value) == {
+        "created_at": "2026-01-01T00:00:00Z",
+        "embedding": [1, 2.5],
+    }
+    for invalid in (float("nan"), float("inf"), object(), {1: "value"}):
+        with pytest.raises(ValueError):
+            normalize_elasticsearch_value(invalid)
+
+
 async def test_elastic_client_save_and_update_node() -> None:
     fake = _FakeElasticsearch()
     client = ElasticClient()
@@ -709,6 +739,44 @@ async def test_elastic_client_save_and_update_node() -> None:
     assert update_call["conflicts"] == "abort"
     assert update_call["refresh"] is True
     assert update_result == [{"updated": 2}]
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        {},
+        {"timed_out": True},
+        {"version_conflicts": 1},
+        {"_shards": {"failed": 1}},
+        {"failures": [{"status": 503}]},
+    ],
+)
+async def test_elastic_client_rejects_incomplete_index_response(
+    response: dict[str, Any],
+) -> None:
+    fake = _FakeElasticsearch()
+    fake.index_result = response
+    client = ElasticClient()
+    client.client = _as_elasticsearch(fake)
+
+    with pytest.raises(RuntimeError):
+        await client.save_node(
+            MemoryNodeType.STATEMENT,
+            {"id": "node-1"},
+        )
+
+
+async def test_elastic_client_rejects_missing_delete_acknowledgement() -> None:
+    fake = _FakeElasticsearch()
+    fake.delete_result = {}
+    client = ElasticClient()
+    client.client = _as_elasticsearch(fake)
+
+    with pytest.raises(RuntimeError, match="acknowledgement missing"):
+        await client.delete_node(
+            MemoryNodeType.STATEMENT,
+            NodeFilter.eq("id", "node-1"),
+        )
 
 
 async def test_elastic_client_get_node_uses_filter_projection_and_sort() -> None:
