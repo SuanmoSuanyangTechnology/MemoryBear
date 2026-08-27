@@ -32,7 +32,8 @@ interface RbAlertProps {
 const colors = {
   blue: 'rb:text-[rgba(21,94,239,1)] rb:bg-[rgba(21,94,239,0.08)] rb:border-[rgba(21,94,239,0.30)]',
   green: 'rb:text-[rgba(54,159,33,1)] rb:bg-[rgba(54,159,33,0.08)] rb:border-[rgba(54,159,33,0.30)]',
-  orange: 'rb:text-[rgba(255,93,52,1)] rb:bg-[rgba(255,138,76,0.06)] rb:border-[rgba(255,138,76,0.30)]',
+  orange: 'rb:text-[#FFA940] rb:bg-[#FFF8F0] rb:border-[#FFDBAF]',
+  red: 'rb:text-[#FF5D34] rb:bg-[#FFF5F3] rb:border-[#FFCCC7]',
   purple: 'rb:text-[rgba(156,111,255,1)] rb:bg-[rgba(156,111,255,0.08)] rb:border-[rgba(156,111,255,0.30)]',
 }
 
