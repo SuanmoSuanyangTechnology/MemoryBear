@@ -27,7 +27,7 @@ const OverflowTags = ({ items = [], gap = 8, numTagColor = 'default', numTag, po
     const widths = children.slice(0, -1).map(c => c.offsetWidth)
 
     // check if all items fit
-    let total = widths.reduce((sum, w, i) => sum + (i > 0 ? gap : 0) + w, 0)
+    const total = widths.reduce((sum, w, i) => sum + (i > 0 ? gap : 0) + w, 0)
     if (total <= containerWidth) {
       setVisibleCount(widths.length)
       return
@@ -46,7 +46,7 @@ const OverflowTags = ({ items = [], gap = 8, numTagColor = 'default', numTag, po
       }
     }
     setVisibleCount(count || 1)
-  }, [items, gap])
+  }, [gap])
 
   useLayoutEffect(() => {
     const ro = new ResizeObserver(entries => {
@@ -61,11 +61,23 @@ const OverflowTags = ({ items = [], gap = 8, numTagColor = 'default', numTag, po
   const hidden = items.length - visibleCount
 
   return (
-    <div ref={containerRef} className="rb:w-full rb:min-w-0">
+    <div ref={containerRef} className="rb:w-full rb:min-w-0 rb:overflow-hidden">
       {/* off-screen measure layer */}
-      <Flex ref={measureRef} gap={gap} className="rb:fixed rb:-top-9999 rb:-left-9999 rb:hidden rb:pointer-events-none">
-        {items.map((item, i) => <span key={i}>{item}</span>)}
-        <Tag>+{hidden}</Tag>
+      <Flex
+        ref={measureRef}
+        gap={gap}
+        wrap={false}
+        className="rb:fixed rb:-top-9999 rb:-left-9999 rb:invisible rb:w-max rb:pointer-events-none"
+      >
+        {items.map((item, i) => (
+          <span key={i} className="rb:shrink-0 rb:whitespace-nowrap">{item}</span>
+        ))}
+        <span className="rb:shrink-0 rb:whitespace-nowrap">
+          {numTag
+            ? numTag(items.length)
+            : <Tag color={numTagColor}>+{items.length}</Tag>
+          }
+        </span>
       </Flex>
       <Popover
         content={
@@ -77,12 +89,18 @@ const OverflowTags = ({ items = [], gap = 8, numTagColor = 'default', numTag, po
         {...(popoverProps || {})}
         open={popoverProps === false ? false : undefined}
       >
-        <Flex gap={gap} align="center" wrap>
-          {items.slice(0, visibleCount).map((item, i) => <span key={i}>{item}</span>)}
-          {hidden > 0 && numTag
-            ? numTag(hidden)
-            : hidden > 0 && <Tag color={numTagColor}>+{hidden}</Tag>
-          }
+        <Flex gap={gap} align="center" wrap={false}>
+          {items.slice(0, visibleCount).map((item, i) => (
+            <span key={i} className="rb:shrink-0 rb:whitespace-nowrap">{item}</span>
+          ))}
+          {hidden > 0 && (
+            <span className="rb:shrink-0 rb:whitespace-nowrap">
+              {numTag
+                ? numTag(hidden)
+                : <Tag color={numTagColor}>+{hidden}</Tag>
+              }
+            </span>
+          )}
         </Flex>
       </Popover>
     </div>
