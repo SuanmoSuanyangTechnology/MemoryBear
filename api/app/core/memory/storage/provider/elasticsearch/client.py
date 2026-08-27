@@ -15,6 +15,8 @@ from app.core.memory.storage.models import (
     NodeProjection,
     NodeSort,
     ProjectionField,
+    StorageReadResult,
+    StorageWriteResult,
 )
 from app.core.memory.storage.provider.base import BaseClient
 from app.core.memory.storage.provider.elasticsearch.compiler.filter_compiler import (
@@ -221,7 +223,11 @@ class ElasticClient(BaseClient):
             await self.client.close()
             self.client = None
 
-    async def save_node(self, label: MemoryNodeLabel, data: dict) -> None:
+    async def save_node(
+            self,
+            label: MemoryNodeLabel,
+            data: dict,
+    ) -> StorageWriteResult:
         document = normalize_elasticsearch_value(data)
         if not isinstance(document, dict):
             raise ValueError("Elasticsearch document must be a mapping")
@@ -237,13 +243,19 @@ class ElasticClient(BaseClient):
             raise RuntimeError(
                 "Elasticsearch index acknowledgement missing"
             )
+        return StorageWriteResult(
+            backend=self.name,
+            affected_count=1,
+            ids=[str(node_id)],
+            data=[document],
+        )
 
     async def update_node(
             self,
             label: MemoryNodeLabel,
             data: dict,
             node_filter: NodeFilter,
-    ) -> list[dict[str, int]]:
+    ) -> StorageWriteResult:
         self.verify_label(label)
         properties = normalize_elasticsearch_value(data)
         if not isinstance(properties, dict):
@@ -260,14 +272,17 @@ class ElasticClient(BaseClient):
             refresh=True,
         )
         _raise_on_response_failures(result, "update_by_query")
-        return [{"updated": int(result.get("updated", 0))}]
+        return StorageWriteResult(
+            backend=self.name,
+            affected_count=int(result.get("updated", 0)),
+        )
 
     async def delete_node(
             self,
             label: MemoryNodeLabel,
             node_filter: NodeFilter,
             draft: bool = False,
-    ) -> list[dict[str, int]]:
+    ) -> StorageWriteResult:
         self.verify_label(label)
         client = self._require_client()
         index_name = get_index_name(label)
@@ -312,7 +327,10 @@ class ElasticClient(BaseClient):
             raise RuntimeError(
                 "Elasticsearch delete acknowledgement missing"
             )
-        return [{"deleted": deleted}]
+        return StorageWriteResult(
+            backend=self.name,
+            affected_count=deleted,
+        )
 
     async def get_node(
             self,
@@ -320,7 +338,7 @@ class ElasticClient(BaseClient):
             node_filter: NodeFilter,
             projection: NodeProjection | None = None,
             node_sort: NodeSort | None = None,
-    ) -> list[dict[str, Any]]:
+    ) -> StorageReadResult:
         self.verify_label(label)
         source_includes = compile_elasticsearch_projection(projection)
         sort = [
@@ -389,7 +407,7 @@ class ElasticClient(BaseClient):
                 search_options["search_after"] = list(search_after)
         finally:
             await client.close_point_in_time(id=pit_id)
-        return nodes
+        return StorageReadResult.from_items(nodes, backend=self.name)
 
     async def search_by_embedding(
             self,
@@ -398,7 +416,7 @@ class ElasticClient(BaseClient):
             embed: list,
             limit: int,
             projection: NodeProjection | None = None,
-    ) -> list[dict[str, Any]]:
+    ) -> StorageReadResult:
         self.verify_label(label)
         embedding_field = EMBEDDING_FIELDS.get(label)
         if embedding_field is None:
@@ -409,7 +427,7 @@ class ElasticClient(BaseClient):
         if not math.isfinite(vector_norm):
             raise ValueError("embedding query vector norm must be finite")
         if vector_norm == 0:
-            return []
+            return StorageReadResult(backend=self.name)
 
         source_options, source_required = _compile_search_source_options(
             projection
@@ -435,13 +453,14 @@ class ElasticClient(BaseClient):
             allow_partial_search_results=False,
             **source_options,
         )
-        return _parse_search_hits(
+        items = _parse_search_hits(
             result,
             projection,
             "embedding search",
             source_required=source_required,
             score_transform=lambda score: (2.0 * score) - 1.0,
         )
+        return StorageReadResult.from_items(items, backend=self.name)
 
     async def search_by_fulltext(
             self,
@@ -450,7 +469,7 @@ class ElasticClient(BaseClient):
             text: str,
             limit: int,
             projection: NodeProjection | None = None,
-    ) -> list[dict[str, Any]]:
+    ) -> StorageReadResult:
         self.verify_label(label)
         fulltext_fields = FULLTEXT_FIELDS.get(label)
         if fulltext_fields is None:
@@ -460,7 +479,7 @@ class ElasticClient(BaseClient):
             raise ValueError("fulltext query must be a string")
         normalized_text = text.strip()
         if not normalized_text:
-            return []
+            return StorageReadResult(backend=self.name)
 
         source_options, source_required = _compile_search_source_options(
             projection
@@ -484,12 +503,13 @@ class ElasticClient(BaseClient):
             allow_partial_search_results=False,
             **source_options,
         )
-        return _parse_search_hits(
+        items = _parse_search_hits(
             result,
             projection,
             "fulltext search",
             source_required=source_required,
         )
+        return StorageReadResult.from_items(items, backend=self.name)
 
 
 # async def dev():

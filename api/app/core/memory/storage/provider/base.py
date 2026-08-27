@@ -3,7 +3,13 @@ from abc import ABC, abstractmethod
 from typing import Self
 
 from app.core.memory.storage.enums import MemoryNodeLabel
-from app.core.memory.storage.models import NodeFilter, NodeProjection, NodeSort
+from app.core.memory.storage.models import (
+    NodeFilter,
+    NodeProjection,
+    NodeSort,
+    StorageReadResult,
+    StorageWriteResult,
+)
 
 
 class BaseClient(ABC):
@@ -40,11 +46,20 @@ class BaseClient(ABC):
         pass
 
     @abstractmethod
-    async def save_node(self, label: MemoryNodeLabel, data: dict):
+    async def save_node(
+            self,
+            label: MemoryNodeLabel,
+            data: dict,
+    ) -> StorageWriteResult:
         pass
 
     @abstractmethod
-    async def update_node(self, label: MemoryNodeLabel, data: dict, node_filter: NodeFilter):
+    async def update_node(
+            self,
+            label: MemoryNodeLabel,
+            data: dict,
+            node_filter: NodeFilter,
+    ) -> StorageWriteResult:
         pass
 
     @abstractmethod
@@ -53,7 +68,7 @@ class BaseClient(ABC):
         label: MemoryNodeLabel,
         node_filter: NodeFilter,
         draft: bool = False,
-    ):
+    ) -> StorageWriteResult:
         pass
 
     @abstractmethod
@@ -63,7 +78,7 @@ class BaseClient(ABC):
         node_filter: NodeFilter,
         projection: NodeProjection | None = None,
         node_sort: NodeSort | None = None,
-    ):
+    ) -> StorageReadResult:
         pass
 
     @abstractmethod
@@ -74,7 +89,7 @@ class BaseClient(ABC):
             text: str,
             limit: int,
             projection: NodeProjection | None = None,
-    ):
+    ) -> StorageReadResult:
         pass
 
     @abstractmethod
@@ -85,5 +100,5 @@ class BaseClient(ABC):
             embed: list,
             limit: int,
             projection: NodeProjection | None = None,
-    ):
+    ) -> StorageReadResult:
         pass

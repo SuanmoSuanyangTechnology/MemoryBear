@@ -189,7 +189,7 @@ async def test_elastic_client_crud_and_indices_against_real_elasticsearch(
             projection=NodeProjection.of("id", "status"),
             node_sort=NodeSort.desc("rank"),
         )
-        assert sorted_nodes == [
+        assert sorted_nodes.items == [
             {"id": node_ids[1], "status": "pending"},
             {"id": node_ids[2], "status": "pending"},
             {"id": node_ids[0], "status": "pending"},
@@ -201,7 +201,7 @@ async def test_elastic_client_crud_and_indices_against_real_elasticsearch(
             {"status": "completed"},
             NodeFilter.eq("id", node_ids[0]),
         )
-        assert update_result == [{"updated": 1}]
+        assert update_result.affected_count == 1
 
         draft_result = await client.delete_node(
             TEST_INDEX_LABEL,
@@ -219,27 +219,27 @@ async def test_elastic_client_crud_and_indices_against_real_elasticsearch(
             projection=NodeProjection.of("id", "status", "delete_at"),
         )
 
-        assert draft_result == [{"deleted": 1}]
-        assert repeated_draft_result == [{"deleted": 0}]
-        assert drafted[0]["status"] == "completed"
-        assert drafted[0]["delete_at"]
+        assert draft_result.affected_count == 1
+        assert repeated_draft_result.affected_count == 0
+        assert drafted.items[0]["status"] == "completed"
+        assert drafted.items[0]["delete_at"]
 
         delete_result = await client.delete_node(
             TEST_INDEX_LABEL,
             NodeFilter.eq("id", node_ids[1]),
         )
-        assert delete_result == [{"deleted": 1}]
-        assert await client.get_node(
+        assert delete_result.affected_count == 1
+        assert (await client.get_node(
             TEST_INDEX_LABEL,
             NodeFilter.eq("id", node_ids[1]),
-        ) == []
+        )).items == []
 
         retained_nodes = await client.get_node(
             TEST_INDEX_LABEL,
             nodes_filter,
             projection=NodeProjection.of("id"),
         )
-        assert {node["id"] for node in retained_nodes} == {
+        assert {node["id"] for node in retained_nodes.items} == {
             node_ids[0],
             node_ids[2],
             node_ids[3],
@@ -309,9 +309,9 @@ async def test_elastic_client_search_against_real_elasticsearch(
             2,
             projection=NodeProjection.of("id", "score"),
         )
-        assert embedding_results[0]["id"] == nodes[0]["id"]
-        assert embedding_results[0]["score"] == pytest.approx(1.0)
-        assert {item["id"] for item in embedding_results}.isdisjoint(
+        assert embedding_results.items[0]["id"] == nodes[0]["id"]
+        assert embedding_results.items[0]["score"] == pytest.approx(1.0)
+        assert {item["id"] for item in embedding_results.items}.isdisjoint(
             {nodes[2]["id"]}
         )
 
@@ -325,8 +325,10 @@ async def test_elastic_client_search_against_real_elasticsearch(
                 ProjectionField(field="score", alias="rank"),
             ),
         )
-        assert [item["id"] for item in fulltext_results] == [nodes[0]["id"]]
-        assert fulltext_results[0]["rank"] > 0
+        assert [item["id"] for item in fulltext_results.items] == [
+            nodes[0]["id"]
+        ]
+        assert fulltext_results.items[0]["rank"] > 0
     finally:
         if client.client is not None:
             await client.delete_node(

@@ -3,7 +3,11 @@ from __future__ import annotations
 from typing import Self
 
 from app.core.memory.storage.enums import MemoryNodeLabel
-from app.core.memory.storage.models import NodeFilter, NodeProjection
+from app.core.memory.storage.models import (
+    NodeFilter,
+    NodeProjection,
+    StorageReadResult,
+)
 from app.core.memory.storage.provider.factory import BackendFactory
 from app.core.memory.storage.router.read_router import ReadRouter
 
@@ -25,7 +29,7 @@ class MemoryStorageService:
         embed: list,
         limit: int,
         projection: NodeProjection | None = None,
-    ) -> list[dict]:
+    ) -> StorageReadResult:
         return await self._read_router.search_by_embedding(
             labels,
             node_filter,
@@ -41,7 +45,7 @@ class MemoryStorageService:
         text: str,
         limit: int,
         projection: NodeProjection | None = None,
-    ) -> list[dict]:
+    ) -> StorageReadResult:
         return await self._read_router.search_by_fulltext(
             labels,
             node_filter,
