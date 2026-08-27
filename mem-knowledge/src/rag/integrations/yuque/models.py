@@ -18,4 +18,27 @@ class YuqueRepoInfo:
     updated_at: datetime | None
 
 
-__all__ = ["YuqueRepoInfo"]
+@dataclass(frozen=True)
+class YuqueDocInfo:
+    """Document metadata returned by the Yuque repository APIs."""
+
+    id: int
+    type: str
+    slug: str
+    title: str
+    book_id: int
+    format: str
+    body: str | None
+    body_draft: str | None
+    body_html: str | None
+    public: int
+    status: int
+    created_at: datetime
+    updated_at: datetime
+    published_at: datetime | None
+    word_count: int
+    cover: str | None
+    description: str | None
+
+
+__all__ = ["YuqueDocInfo", "YuqueRepoInfo"]

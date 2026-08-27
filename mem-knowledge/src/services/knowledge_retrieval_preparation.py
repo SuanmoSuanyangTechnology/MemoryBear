@@ -19,6 +19,7 @@ from ..errors import KnowledgeError
 from ..models.owned import Knowledge, KnowledgeShare, PermissionType
 from ..rag.knowledge_graph.config import (
     GraphPipeline,
+    GraphPipelineConfigError,
     is_graph_enabled,
     resolve_graph_pipeline,
 )
@@ -72,6 +73,7 @@ class KnowledgeRetrievalPreparation:
             refs
             and request.metadata_filter_mode is MetadataFilterMode.AUTO
             and not request.metadata_filters
+            and not request.metadata_filters_resolved
             and common_metadata_defs
         ):
             metadata_llm = await cls._snapshot_model(
@@ -80,11 +82,19 @@ class KnowledgeRetrievalPreparation:
                 principal.tenant_id,
             )
         graph = await cls._build_graph_snapshot(db, request, principal, refs, targets)
-        request_reranker = await cls._snapshot_model(
-            db,
-            request.rerank_id,
-            principal.tenant_id,
+        single_evidence_graph_target = (
+            graph is not None
+            and graph.pipeline is GraphPipeline.EVIDENCE
+            and len(targets) == 1
+            and targets[0].params.retrieve_type is RetrieveType.Graph
         )
+        request_reranker = None
+        if not single_evidence_graph_target:
+            request_reranker = await cls._snapshot_model(
+                db,
+                request.rerank_id,
+                principal.tenant_id,
+            )
         return RetrievalPreparation(
             targets=tuple(targets),
             tenant_id=principal.tenant_id,
@@ -109,10 +119,13 @@ class KnowledgeRetrievalPreparation:
         document_ids: set[uuid.UUID] = set()
         engine = MetadataFilterEngine(db)
         for target in preparation.targets:
+            metadata_defs = preparation.metadata_defs_by_kb.get(target.knowledge_id)
+            if metadata_defs is None:
+                continue
             matched = await engine.execute_async(
                 target.knowledge_id,
                 filter_groups,
-                preparation.metadata_defs_by_kb[target.knowledge_id],
+                metadata_defs,
             )
             document_ids.update(matched)
         return [str(document_id) for document_id in document_ids]
@@ -266,10 +279,16 @@ class KnowledgeRetrievalPreparation:
                         f"knowledge graph is disabled: {knowledge.id}",
                     )
                 continue
-            pipeline = resolve_graph_pipeline(knowledge.parser_config)
+            try:
+                pipeline = resolve_graph_pipeline(knowledge.parser_config)
+            except GraphPipelineConfigError as exc:
+                raise KnowledgeError.from_code(
+                    "KB_VALIDATION_ERROR",
+                    str(exc),
+                ) from exc
             if (
                 target.params.retrieve_type is RetrieveType.HYBRID
-                and pipeline is GraphPipeline.LEGACY
+                and pipeline is not GraphPipeline.EVIDENCE
             ):
                 continue
             llm = await cls._snapshot_model(db, knowledge.llm_id, principal.tenant_id)
@@ -347,7 +366,11 @@ class KnowledgeRetrievalPreparation:
             top_n=max(top_k, int(request.top_n or 20)),
             retrieve_type=value("retrieve_type", request.retrieve_type),
             rerank_score_threshold=float(rerank_threshold),
-            enable_graph_retrieval=request.graph_retrieval_mix_enabled_for(config),
+            enable_graph_retrieval=(
+                request.graph_retrieval_mix_enabled_for(config)
+                if value("retrieve_type", request.retrieve_type) is RetrieveType.HYBRID
+                else False
+            ),
         )
 
     @staticmethod

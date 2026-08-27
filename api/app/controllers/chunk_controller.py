@@ -6,7 +6,7 @@ import io
 from typing import Any, Optional
 import uuid
 
-from fastapi import APIRouter, Body, Depends, HTTPException, status, Query, UploadFile, File
+from fastapi import APIRouter, Body, Depends, HTTPException, status, Query, UploadFile, File, Request
 from fastapi.encoders import jsonable_encoder
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -33,10 +33,18 @@ from app.schemas.knowledge_retrieval_schema import KnowledgeRetrievalRequest
 from app.schemas.response_schema import ApiResponse
 from app.services import knowledge_service, document_service
 from app.services.file_storage_service import FileStorageService, get_file_storage_service, generate_kb_file_key
-from app.services.knowledge_retrieval_service import KnowledgeRetrievalAccessDenied, KnowledgeRetrievalService
+from app.services.knowledge_retrieval_service import KnowledgeRetrievalAccessDenied
 from app.services.model_service import ModelApiKeyService
 from app.core.rag.utils.preview_utils import _build_preview_hierarchy
 from app.core.utils.datetime_utils import to_timestamp_ms
+from app.integrations.knowledge.call_profile import CallProfile
+from app.integrations.knowledge.contracts import (
+    KnowledgeCallContext,
+    KnowledgePrincipal,
+    KnowledgeRetrievalSource,
+)
+from app.integrations.knowledge.route_proxy import route_through_knowledge_service
+from app.integrations.knowledge.runtime import get_knowledge_retriever
 
 # Obtain a dedicated API logger
 api_logger = get_api_logger()
@@ -122,6 +130,7 @@ def _chunk_belongs_to_document(chunk: DocumentChunk, document_id: uuid.UUID) -> 
 
 @router.get("/{kb_id}/{document_id}/previewchunks", response_model=ApiResponse)
 @cur_workspace_access_guard_async()
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.MANAGER_API)
 async def get_preview_chunks(
         kb_id: uuid.UUID,
         document_id: uuid.UUID,
@@ -129,7 +138,8 @@ async def get_preview_chunks(
         pagesize: int = Query(20, gt=0, le=100),  # Default: 20 items per page, maximum: 100 items
         keywords: Optional[str] = Query(None, description="The keywords used to match chunk content"),
         db: AsyncSession = Depends(get_async_db),
-        current_user: User = Depends(get_current_user_async)
+        current_user: User = Depends(get_current_user_async),
+        request: Request = None,
 ):
     """
     Paged query document block preview list
@@ -502,6 +512,7 @@ async def get_preview_chunks_hierarchy(
 
 @router.get("/{kb_id}/{document_id}/chunks", response_model=ApiResponse)
 @cur_workspace_access_guard_async()
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.MANAGER_API)
 async def get_chunks(
         kb_id: uuid.UUID,
         document_id: uuid.UUID,
@@ -509,7 +520,8 @@ async def get_chunks(
         pagesize: int = Query(20, gt=0, le=100),  # Default: 20 items per page, maximum: 100 items
         keywords: Optional[str] = Query(None, description="The keywords used to match chunk content"),
         db: AsyncSession = Depends(get_async_db),
-        current_user: User = Depends(get_current_user_async)
+        current_user: User = Depends(get_current_user_async),
+        request: Request = None,
 ):
     """
     Paged query document chunk list
@@ -670,12 +682,14 @@ async def get_chunks(
 
 @router.post("/{kb_id}/{document_id}/chunk", response_model=ApiResponse)
 @cur_workspace_access_guard_async()
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.MANAGER_API)
 async def create_chunk(
         kb_id: uuid.UUID,
         document_id: uuid.UUID,
         create_data: chunk_schema.ChunkCreate,
         db: AsyncSession = Depends(get_async_db),
-        current_user: User = Depends(get_current_user_async)
+        current_user: User = Depends(get_current_user_async),
+        request: Request = None,
 ):
     """
     create chunk
@@ -760,12 +774,14 @@ async def create_chunk(
 
 @router.post("/{kb_id}/{document_id}/chunk/batch", response_model=ApiResponse)
 @cur_workspace_access_guard_async()
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.MANAGER_API)
 async def create_chunks_batch(
         kb_id: uuid.UUID,
         document_id: uuid.UUID,
         batch_data: chunk_schema.ChunkBatchCreate,
         db: AsyncSession = Depends(get_async_db),
-        current_user: User = Depends(get_current_user_async)
+        current_user: User = Depends(get_current_user_async),
+        request: Request = None,
 ):
     """
     Batch create chunks (max 8)
@@ -852,6 +868,10 @@ async def create_chunks_batch(
 
 @router.post("/{kb_id}/import_qa", response_model=ApiResponse)
 @cur_workspace_access_guard_async()
+@route_through_knowledge_service(
+        source=KnowledgeRetrievalSource.MANAGER_API,
+        profile=CallProfile.MULTIPART_UPLOAD,
+)
 async def import_qa_new_doc(
         kb_id: uuid.UUID,
         file: UploadFile = File(..., description="CSV 或 Excel 文件（第一行标题跳过，第一列问题，第二列答案）"),
@@ -859,6 +879,7 @@ async def import_qa_new_doc(
         db: AsyncSession = Depends(get_async_db),
         current_user: User = Depends(get_current_user_async),
         storage_service: FileStorageService = Depends(get_file_storage_service),
+        request: Request = None,
 ):
     """
     导入 QA 问答对并新建文档（CSV/Excel），异步处理
@@ -958,12 +979,17 @@ async def import_qa_new_doc(
 
 @router.post("/{kb_id}/{document_id}/import_qa", response_model=ApiResponse)
 @cur_workspace_access_guard_async()
+@route_through_knowledge_service(
+        source=KnowledgeRetrievalSource.MANAGER_API,
+        profile=CallProfile.MULTIPART_UPLOAD,
+)
 async def import_qa_chunks(
         kb_id: uuid.UUID,
         document_id: uuid.UUID,
         file: UploadFile = File(..., description="CSV 或 Excel 文件（第一行标题跳过，第一列问题，第二列答案）"),
         db: AsyncSession = Depends(get_async_db),
-        current_user: User = Depends(get_current_user_async)
+        current_user: User = Depends(get_current_user_async),
+        request: Request = None,
 ):
     """
     导入 QA 问答对（CSV/Excel），异步处理
@@ -1002,12 +1028,14 @@ async def import_qa_chunks(
 
 @router.get("/{kb_id}/{document_id}/{doc_id}", response_model=ApiResponse)
 @cur_workspace_access_guard_async()
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.MANAGER_API)
 async def get_chunk(
         kb_id: uuid.UUID,
         document_id: uuid.UUID,
         doc_id: str,
         db: AsyncSession = Depends(get_async_db),
-        current_user: User = Depends(get_current_user_async)
+        current_user: User = Depends(get_current_user_async),
+        request: Request = None,
 ):
     """
     Retrieve document chunk information based on doc_id
@@ -1042,13 +1070,15 @@ async def get_chunk(
 
 @router.put("/{kb_id}/{document_id}/{doc_id}", response_model=ApiResponse)
 @cur_workspace_access_guard_async()
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.MANAGER_API)
 async def update_chunk(
         kb_id: uuid.UUID,
         document_id: uuid.UUID,
         doc_id: str,
         update_data: chunk_schema.ChunkUpdate,
         db: AsyncSession = Depends(get_async_db),
-        current_user: User = Depends(get_current_user_async)
+        current_user: User = Depends(get_current_user_async),
+        request: Request = None,
 ):
     """
     Update document chunk content
@@ -1095,13 +1125,15 @@ async def update_chunk(
 
 @router.delete("/{kb_id}/{document_id}/{doc_id}", response_model=ApiResponse)
 @cur_workspace_access_guard_async()
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.MANAGER_API)
 async def delete_chunk(
         kb_id: uuid.UUID,
         document_id: uuid.UUID,
         doc_id: str,
         force_refresh: bool = Query(False, description="Force Elasticsearch refresh after deletion"),
         db: AsyncSession = Depends(get_async_db),
-        current_user: User = Depends(get_current_user_async)
+        current_user: User = Depends(get_current_user_async),
+        request: Request = None,
 ):
     """
     delete document chunk
@@ -1143,24 +1175,29 @@ async def delete_chunk(
 
 
 @router.get("/retrieve_type", response_model=ApiResponse)
-def get_retrieve_types():
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.MANAGER_API)
+def get_retrieve_types(
+        current_user: User = Depends(get_current_user_async),
+        request: Request = None,
+):
     return success(msg="Successfully obtained the retrieval type", data=list(chunk_schema.RetrieveType))
 
 
-async def retrieve_chunks_with_caller(
+async def retrieve_chunks_with_source(
         retrieve_data: chunk_schema.ChunkRetrieve,
         principal: RetrievalPrincipal | None,
-        caller: chunk_schema.KnowledgeRetrievalCaller,
+        source: chunk_schema.KnowledgeRetrievalSource,
+        trace_id: str | None = None,
 ):
     """
     retrieve chunk
     """
     api_logger.info(
-        "retrieve chunk request received: username=%s, caller=%s, query_len=%s, kb_count=%s, "
+        "retrieve chunk request received: username=%s, source=%s, query_len=%s, kb_count=%s, "
         "ex_id_count=%s, retrieve_type=%s, top_k=%s, "
         "metadata_mode=%s, metadata_filter_groups=%s",
         principal.username if principal and principal.username else "anonymous",
-        caller,
+        source,
         len(retrieve_data.query or ""),
         len(retrieve_data.kb_ids or []),
         len(retrieve_data.ex_ids or []),
@@ -1172,11 +1209,30 @@ async def retrieve_chunks_with_caller(
 
     try:
         retrieval_payload = retrieve_data.model_dump(exclude_none=True)
-        retrieval_payload["caller"] = caller
+        retrieval_payload["source"] = source
         request = KnowledgeRetrievalRequest(**retrieval_payload)
-        result = await KnowledgeRetrievalService.retrieve_async(
-            request=request,
-            principal=principal,
+        if (
+            principal is None
+            or principal.id is None
+            or principal.tenant_id is None
+            or principal.current_workspace_id is None
+        ):
+            raise KnowledgeRetrievalAccessDenied(
+                "Knowledge retrieval principal is unavailable"
+            )
+        context = KnowledgeCallContext(
+            principal=KnowledgePrincipal(
+                actor_id=uuid.UUID(str(principal.id)),
+                actor_name=principal.username,
+                tenant_id=uuid.UUID(str(principal.tenant_id)),
+                workspace_id=uuid.UUID(str(principal.current_workspace_id)),
+            ),
+            source=source,
+            trace_id=trace_id or uuid.uuid4().hex,
+        )
+        result = await get_knowledge_retriever().retrieve(
+            request,
+            context,
         )
     except KnowledgeRetrievalAccessDenied as exc:
         raise HTTPException(
@@ -1194,12 +1250,15 @@ async def retrieve_chunks_with_caller(
 
 @router.post("/retrieval", response_model=Any, status_code=status.HTTP_200_OK)
 @cur_workspace_access_guard_async()
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.MANAGER_API)
 async def retrieve_chunks(
         retrieve_data: chunk_schema.ChunkRetrieve,
-        current_user: User = Depends(get_current_user_async)
+        current_user: User = Depends(get_current_user_async),
+        request: Request = None,
 ):
-    return await retrieve_chunks_with_caller(
+    return await retrieve_chunks_with_source(
         retrieve_data=retrieve_data,
         principal=RetrievalPrincipal.from_user(current_user),
-        caller=chunk_schema.KnowledgeRetrievalCaller.IN_API,
+        source=chunk_schema.KnowledgeRetrievalSource.MANAGER_API,
+        trace_id=getattr(getattr(request, "state", None), "trace_id", None),
     )

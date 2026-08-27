@@ -7,11 +7,12 @@ import struct
 import uuid
 import zlib
 from collections.abc import AsyncIterator
+from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import delete, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..api.dependencies import Principal
@@ -27,6 +28,8 @@ from ..models.owned import (
     File,
     Knowledge,
 )
+from ..rag.knowledge_graph import GraphPipelineConfigError
+from ..rag.parser_config import normalize_document_parser_config
 from ..repositories import document as document_repository
 from ..repositories import file as file_repository
 from . import knowledge as knowledge_service
@@ -50,6 +53,44 @@ class QAExportFile:
     path: str
     filename: str
     media_type: str
+
+
+@dataclass(frozen=True)
+class UploadPlan:
+    file_id: uuid.UUID
+    file_key: str
+    kb_id: uuid.UUID
+    parent_id: uuid.UUID
+    created_by: uuid.UUID
+    file_name: str
+    file_ext: str
+    file_size: int
+    parser_id: str
+    parser_config: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class UploadOutcome:
+    file_id: uuid.UUID
+    document_id: uuid.UUID
+    document_data: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class StoredFileSnapshot:
+    file_id: uuid.UUID
+    kb_id: uuid.UUID
+    file_key: str
+    file_name: str
+    file_ext: str
+
+
+@dataclass(frozen=True)
+class FileDeletionPlan:
+    file_ids: tuple[uuid.UUID, ...]
+    storage_keys: tuple[str, ...]
+    derived_file_ids: tuple[uuid.UUID, ...]
+    derived_storage_keys: tuple[str, ...]
 
 
 def _not_found(message: str = "File resource not found") -> KnowledgeError:
@@ -76,6 +117,12 @@ async def get_file(
         principal.workspace_id,
         kb_id,
     )
+
+
+async def get_public_file(db: AsyncSession, file_id: uuid.UUID) -> File | None:
+    """Load the legacy public download record without workspace authorization."""
+
+    return await file_repository.get_file_by_id_async(db, file_id)
 
 
 async def require_parent_folder(
@@ -147,7 +194,7 @@ async def create_folder(
 
 def _document_parser_config(knowledge: Knowledge, *, inherit: bool) -> dict[str, Any]:
     config = {
-        "layout_recognize": "DeepDOC",
+        "layout_recognize": "mineru",
         "chunk_token_num": 128,
         "delimiter": "\n",
         "auto_keywords": 0,
@@ -161,7 +208,7 @@ def _document_parser_config(knowledge: Knowledge, *, inherit: bool) -> dict[str,
 
 async def upload_content(
     db: AsyncSession,
-    storage: KnowledgeFileStorage,
+    _storage: KnowledgeFileStorage,
     *,
     kb_id: uuid.UUID,
     parent_id: uuid.UUID,
@@ -171,52 +218,182 @@ async def upload_content(
     content_type: str | None,
     principal: Principal,
     inherit_parser_config: bool,
-) -> Document:
+    parser_id: str = "naive",
+    parser_config: dict[str, Any] | None = None,
+) -> UploadPlan:
+    """Validate an upload and return a scalar plan without writing rows."""
+
+    del content_type
     knowledge = await knowledge_service.get_knowledge(db, kb_id, principal)
     if knowledge is None:
         raise _not_found("Knowledge resource not found")
-    await require_parent_folder(db, kb_id, parent_id, principal)
-    db_file = await file_repository.create_file_async(
-        db,
-        FileCreate(
-            kb_id=kb_id,
-            created_by=principal.actor_id,
-            parent_id=parent_id,
-            file_name=file_name,
-            file_ext=file_ext,
-            file_size=len(content),
-        ),
-    )
-    file_key = generate_kb_file_key(kb_id, db_file.id, file_ext)
     try:
-        await storage.upload(file_key, content, content_type)
-        db_file.file_key = file_key
-        await db.commit()
-        await db.refresh(db_file)
-        return await document_repository.create_document_async(
+        normalized_parser_config = normalize_document_parser_config(
+            parser_config
+            if parser_config is not None
+            else _document_parser_config(knowledge, inherit=inherit_parser_config)
+        )
+    except (ValueError, GraphPipelineConfigError) as exc:
+        raise KnowledgeError.from_code("KB_VALIDATION_ERROR", str(exc)) from exc
+    await require_parent_folder(db, kb_id, parent_id, principal)
+    file_id = uuid.uuid4()
+    return UploadPlan(
+        file_id=file_id,
+        file_key=generate_kb_file_key(kb_id, file_id, file_ext),
+        kb_id=kb_id,
+        parent_id=parent_id,
+        created_by=principal.actor_id,
+        file_name=file_name,
+        file_ext=file_ext,
+        file_size=len(content),
+        parser_id=parser_id,
+        parser_config=deepcopy(normalized_parser_config),
+    )
+
+
+async def persist_uploaded_content(
+    db: AsyncSession,
+    plan: UploadPlan,
+    principal: Principal,
+) -> UploadOutcome:
+    """Revalidate ownership and atomically persist a planned upload."""
+
+    if plan.created_by != principal.actor_id:
+        raise _not_found("Knowledge resource not found")
+    if await knowledge_service.get_knowledge(db, plan.kb_id, principal) is None:
+        raise _not_found("Knowledge resource not found")
+    await require_parent_folder(db, plan.kb_id, plan.parent_id, principal)
+    try:
+        db_file = await file_repository.add_file_async(
+            db,
+            FileCreate(
+                kb_id=plan.kb_id,
+                created_by=plan.created_by,
+                parent_id=plan.parent_id,
+                file_name=plan.file_name,
+                file_ext=plan.file_ext,
+                file_size=plan.file_size,
+                file_key=plan.file_key,
+            ),
+            file_id=plan.file_id,
+        )
+        document = await document_repository.add_document_async(
             db,
             DocumentCreate(
-                kb_id=kb_id,
-                created_by=principal.actor_id,
+                kb_id=plan.kb_id,
+                created_by=plan.created_by,
                 file_id=db_file.id,
-                file_name=db_file.file_name,
-                file_ext=db_file.file_ext,
-                file_size=db_file.file_size,
+                file_name=plan.file_name,
+                file_ext=plan.file_ext,
+                file_size=plan.file_size,
                 file_meta={},
-                parser_id="naive",
-                parser_config=_document_parser_config(
-                    knowledge,
-                    inherit=inherit_parser_config,
-                ),
+                parser_id=plan.parser_id,
+                parser_config=deepcopy(plan.parser_config),
             ),
         )
+        await db.refresh(document)
+        outcome = UploadOutcome(
+            file_id=db_file.id,
+            document_id=document.id,
+            document_data=document_to_data(document),
+        )
+        await db.commit()
+        return outcome
     except Exception:
-        if db_file.file_key:
-            try:
-                await storage.delete(file_key)
-            except Exception:
-                logger.warning("Failed to compensate storage upload", exc_info=True)
-        await file_repository.delete_file_by_id_async(db, db_file.id)
+        await db.rollback()
+        raise
+
+
+async def compensate_storage_upload(
+    storage: KnowledgeFileStorage,
+    file_key: str,
+) -> None:
+    try:
+        await storage.delete(file_key)
+    except Exception as exc:
+        logger.warning(
+            "Failed to compensate storage upload error_type=%s",
+            type(exc).__name__,
+        )
+
+
+def stored_file_snapshot(file: Any) -> StoredFileSnapshot:
+    return StoredFileSnapshot(
+        file_id=file.id,
+        kb_id=file.kb_id,
+        file_key=file.file_key,
+        file_name=file.file_name,
+        file_ext=file.file_ext,
+    )
+
+
+async def prepare_file_deletion(
+    db: AsyncSession,
+    file_id: uuid.UUID,
+    principal: Principal,
+) -> FileDeletionPlan:
+    target = await get_file(db, file_id, principal)
+    if target is None:
+        raise _not_found()
+    files = [target]
+    if target.file_ext == "folder":
+        result = await db.execute(
+            select(File).where(File.parent_id == target.id, File.kb_id == target.kb_id)
+        )
+        files.extend(result.scalars().all())
+
+    source_ids = tuple(
+        file.id for file in files if file.file_role == FILE_ROLE_SOURCE
+    )
+    document_ids: tuple[uuid.UUID, ...] = ()
+    if source_ids:
+        result = await db.execute(select(Document.id).where(Document.file_id.in_(source_ids)))
+        document_ids = tuple(result.scalars().all())
+    derived_files: list[File] = []
+    if document_ids:
+        result = await db.execute(
+            select(File).where(
+                File.source_document_id.in_(document_ids),
+                File.file_role == FILE_ROLE_DERIVED_IMAGE,
+            )
+        )
+        derived_files = list(result.scalars().all())
+    return FileDeletionPlan(
+        file_ids=tuple(file.id for file in files),
+        storage_keys=tuple(file.file_key for file in files if file.file_key),
+        derived_file_ids=tuple(file.id for file in derived_files),
+        derived_storage_keys=tuple(
+            file.file_key for file in derived_files if file.file_key
+        ),
+    )
+
+
+async def delete_file_storage(
+    storage: KnowledgeFileStorage,
+    plan: FileDeletionPlan,
+) -> None:
+    for file_key in plan.storage_keys:
+        try:
+            await storage.delete(file_key)
+        except Exception:
+            logger.warning("Failed to delete file from storage: %s", file_key)
+    for file_key in plan.derived_storage_keys:
+        try:
+            await storage.delete(file_key)
+        except Exception:
+            logger.warning("Failed to delete derived image: %s", file_key)
+
+
+async def persist_file_deletion(
+    db: AsyncSession,
+    plan: FileDeletionPlan,
+) -> None:
+    try:
+        await file_repository.delete_files_by_ids_async(db, plan.derived_file_ids)
+        await file_repository.delete_files_by_ids_async(db, plan.file_ids)
+        await db.commit()
+    except Exception:
+        await db.rollback()
         raise
 
 
@@ -258,53 +435,6 @@ async def get_qa_export_spec(
         file_ext=file.file_ext,
         file_name=file.file_name,
     )
-
-
-async def delete_file(
-    db: AsyncSession,
-    storage: KnowledgeFileStorage,
-    file_id: uuid.UUID,
-    principal: Principal,
-) -> None:
-    target = await get_file(db, file_id, principal)
-    if target is None:
-        raise _not_found()
-    files = [target]
-    if target.file_ext == "folder":
-        result = await db.execute(
-            select(File).where(File.parent_id == target.id, File.kb_id == target.kb_id)
-        )
-        files.extend(result.scalars().all())
-    for file in files:
-        if file.file_key:
-            try:
-                await storage.delete(file.file_key)
-            except Exception:
-                logger.warning("Failed to delete file from storage: %s", file.file_key)
-
-    source_ids = [file.id for file in files if file.file_role == FILE_ROLE_SOURCE]
-    document_ids: list[uuid.UUID] = []
-    if source_ids:
-        result = await db.execute(select(Document.id).where(Document.file_id.in_(source_ids)))
-        document_ids = list(result.scalars().all())
-    if document_ids:
-        result = await db.execute(
-            select(File).where(
-                File.source_document_id.in_(document_ids),
-                File.file_role == FILE_ROLE_DERIVED_IMAGE,
-            )
-        )
-        derived_files = list(result.scalars().all())
-        for derived in derived_files:
-            if derived.file_key:
-                try:
-                    await storage.delete(derived.file_key)
-                except Exception:
-                    logger.warning("Failed to delete derived image: %s", derived.file_key)
-        if derived_files:
-            await db.execute(delete(File).where(File.id.in_([file.id for file in derived_files])))
-    await db.execute(delete(File).where(File.id.in_([file.id for file in files])))
-    await db.commit()
 
 
 def build_zip_arcnames(files: list[Any]) -> list[tuple[str, str, str]]:

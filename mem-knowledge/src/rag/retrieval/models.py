@@ -53,6 +53,38 @@ class RetrievalSearchOptions:
     knn_num_candidates: int | None = None
 
 
+@dataclass
+class RetrievalTimings:
+    """Mutable request-local phase timings for retrieval observability."""
+
+    db_snapshot_ms: int = 0
+    metadata_llm_ms: int = 0
+    metadata_query_ms: int = 0
+    embedding_ms: int = 0
+    es_vector_ms: int = 0
+    es_fulltext_ms: int = 0
+    parent_resolution_ms: int = 0
+    local_rerank_ms: int = 0
+    global_rerank_ms: int = 0
+    graph_wait_ms: int = 0
+    graph_ms: int = 0
+
+    def as_log_fields(self) -> dict[str, int]:
+        return {
+            "db_snapshot_ms": self.db_snapshot_ms,
+            "metadata_llm_ms": self.metadata_llm_ms,
+            "metadata_query_ms": self.metadata_query_ms,
+            "embedding_ms": self.embedding_ms,
+            "es_vector_ms": self.es_vector_ms,
+            "es_fulltext_ms": self.es_fulltext_ms,
+            "parent_resolution_ms": self.parent_resolution_ms,
+            "local_rerank_ms": self.local_rerank_ms,
+            "global_rerank_ms": self.global_rerank_ms,
+            "graph_wait_ms": self.graph_wait_ms,
+            "graph_ms": self.graph_ms,
+        }
+
+
 @dataclass(frozen=True)
 class GraphTargetSnapshot:
     knowledge_id: uuid.UUID
@@ -69,12 +101,29 @@ class GraphRetrievalSnapshot:
     query: str
     pipeline: GraphPipeline
     targets: tuple[GraphTargetSnapshot, ...]
+    timings: RetrievalTimings | None = field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if not self.targets:
             raise ValueError("graph retrieval snapshot requires at least one target")
         if any(target.pipeline is not self.pipeline for target in self.targets):
             raise ValueError("graph retrieval targets must use the selected pipeline")
+
+    @property
+    def workspace_ids(self) -> tuple[str, ...]:
+        return tuple(str(target.workspace_id) for target in self.targets)
+
+    @property
+    def knowledge_ids(self) -> tuple[str, ...]:
+        return tuple(str(target.knowledge_id) for target in self.targets)
+
+    @property
+    def llm(self) -> ModelRuntimeSnapshot:
+        return self.targets[0].llm
+
+    @property
+    def embedding(self) -> ModelRuntimeSnapshot:
+        return self.targets[0].embedding
 
 
 @dataclass(frozen=True)
@@ -96,4 +145,5 @@ __all__ = [
     "RetrievalPreparation",
     "RetrievalSearchOptions",
     "RetrievalTarget",
+    "RetrievalTimings",
 ]

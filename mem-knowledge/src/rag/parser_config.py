@@ -2,7 +2,7 @@
 
 from collections.abc import Mapping
 from copy import deepcopy
-from typing import Any
+from typing import Any, Literal
 
 from .knowledge_graph.config import (
     GraphPipeline,
@@ -24,6 +24,20 @@ def _default_graph_config() -> dict[str, Any]:
     }
 
 
+def resolve_layout_recognize(
+    parser_config: Mapping[str, Any] | None,
+) -> Literal["mineru", "textln"]:
+    if parser_config is None or "layout_recognize" not in parser_config:
+        return "mineru"
+    raw_value = parser_config["layout_recognize"]
+    if not isinstance(raw_value, str):
+        raise GraphPipelineConfigError(f"unsupported layout_recognize: {raw_value!r}")
+    normalized = raw_value.strip().lower()
+    if normalized not in {"mineru", "textln"}:
+        raise GraphPipelineConfigError(f"unsupported layout_recognize: {raw_value}")
+    return "mineru" if normalized == "mineru" else "textln"
+
+
 def build_default_knowledge_parser_config() -> dict[str, Any]:
     return {
         "entry_url": "https://ai.redbearai.com",
@@ -37,7 +51,7 @@ def build_default_knowledge_parser_config() -> dict[str, Any]:
         "feishu_app_secret": "App Secret",
         "feishu_folder_token": "Folder Token",
         "sync_cron": "30 7 * * 1-5",
-        "layout_recognize": "DeepDOC",
+        "layout_recognize": "mineru",
         "chunk_token_num": 128,
         "delimiter": "\n",
         "auto_keywords": 0,
@@ -52,7 +66,7 @@ def build_default_knowledge_parser_config() -> dict[str, Any]:
 
 def build_default_document_parser_config() -> dict[str, Any]:
     return {
-        "layout_recognize": "DeepDOC",
+        "layout_recognize": "mineru",
         "chunk_token_num": 130,
         "delimiter": "\n",
         "auto_keywords": 0,
@@ -75,26 +89,34 @@ def _copy_parser_config(
     return deepcopy(dict(parser_config))
 
 
+def normalize_document_parser_config(
+    parser_config: Mapping[str, Any],
+    *,
+    preserve_missing: bool = True,
+) -> dict[str, Any]:
+    normalized = _copy_parser_config(parser_config)
+    if "layout_recognize" in normalized or not preserve_missing:
+        normalized["layout_recognize"] = resolve_layout_recognize(normalized)
+    return normalized
+
+
 def normalize_new_knowledge_parser_config(
     parser_config: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
     requested = _copy_parser_config(parser_config)
+    if "layout_recognize" in requested:
+        requested["layout_recognize"] = resolve_layout_recognize(requested)
     chunk_mode_requested = any(
-        key in requested
-        for key in ("auto_questions", "parent_child_mode", "parent_chunk_mode")
+        key in requested for key in ("auto_questions", "parent_child_mode", "parent_chunk_mode")
     )
     requested_graph = require_graph_mapping(requested)
     if "pipeline" in requested_graph:
         requested_pipeline = resolve_graph_pipeline({"graphrag": requested_graph})
         if requested_pipeline is not GraphPipeline.EVIDENCE:
-            raise GraphPipelineConfigError(
-                "new knowledge must use the evidence graph pipeline"
-            )
+            raise GraphPipelineConfigError("new knowledge must use the evidence graph pipeline")
 
     normalized = build_default_knowledge_parser_config()
-    normalized.update(
-        {key: value for key, value in requested.items() if key != "graphrag"}
-    )
+    normalized.update({key: value for key, value in requested.items() if key != "graphrag"})
     graph_config = normalized["graphrag"]
     graph_config.update(deepcopy(dict(requested_graph)))
     graph_config["pipeline"] = GraphPipeline.EVIDENCE.value
@@ -110,19 +132,19 @@ def normalize_knowledge_parser_config_update(
 ) -> dict[str, Any]:
     if incoming is None:
         raise GraphPipelineConfigError("parser_config update must be a mapping")
+    current_copy = _copy_parser_config(current)
     incoming_copy = _copy_parser_config(incoming)
+    if "layout_recognize" in incoming_copy:
+        incoming_copy["layout_recognize"] = resolve_layout_recognize(incoming_copy)
     current_graph = require_graph_mapping(current)
     incoming_graph = require_graph_mapping(incoming_copy)
     current_pipeline = resolve_graph_pipeline(current)
     if "pipeline" in incoming_graph:
         requested_pipeline = resolve_graph_pipeline({"graphrag": incoming_graph})
         if requested_pipeline is not current_pipeline:
-            raise GraphPipelineConfigError(
-                "graph pipeline changes require managed migration"
-            )
-    normalized = {
-        key: value for key, value in incoming_copy.items() if key != "graphrag"
-    }
+            raise GraphPipelineConfigError("graph pipeline changes require managed migration")
+    normalized = {key: value for key, value in current_copy.items() if key != "graphrag"}
+    normalized.update({key: value for key, value in incoming_copy.items() if key != "graphrag"})
     merged_graph = deepcopy(dict(current_graph))
     merged_graph.update(deepcopy(dict(incoming_graph)))
     merged_graph["pipeline"] = current_pipeline.value

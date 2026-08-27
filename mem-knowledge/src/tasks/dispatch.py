@@ -8,7 +8,7 @@ from collections.abc import Sequence
 from typing import Any
 
 from ..errors import KnowledgeError
-from .celery_app import KNOWLEDGE_TASK_ROUTES, celery_app
+from .celery_app import PUBLISHABLE_KNOWLEDGE_TASK_ROUTES, celery_app
 
 logger = logging.getLogger(__name__)
 
@@ -26,8 +26,29 @@ class TaskDispatcher:
         args: Sequence[Any] | None = None,
         kwargs: dict[str, Any] | None = None,
         queue: str | None = None,
+        task_id: str | None = None,
     ) -> str:
-        expected_queue = KNOWLEDGE_TASK_ROUTES.get(name)
+        return await asyncio.to_thread(
+            self.send_sync,
+            name,
+            args=args,
+            kwargs=kwargs,
+            queue=queue,
+            task_id=task_id,
+        )
+
+    def send_sync(
+        self,
+        name: str,
+        *,
+        args: Sequence[Any] | None = None,
+        kwargs: dict[str, Any] | None = None,
+        queue: str | None = None,
+        task_id: str | None = None,
+    ) -> str:
+        """Validate and publish a task from a synchronous execution context."""
+
+        expected_queue = PUBLISHABLE_KNOWLEDGE_TASK_ROUTES.get(name)
         if expected_queue is None:
             raise KnowledgeError.from_code(
                 "KB_VALIDATION_ERROR",
@@ -39,12 +60,16 @@ class TaskDispatcher:
                 f"Invalid queue for knowledge task: {name}",
             )
         try:
-            result = await asyncio.to_thread(
-                self._application.send_task,
+            send_task_kwargs: dict[str, Any] = {
+                "args": list(args or ()),
+                "kwargs": dict(kwargs or {}),
+                "queue": expected_queue,
+            }
+            if task_id:
+                send_task_kwargs["task_id"] = task_id
+            result = self._application.send_task(
                 name,
-                args=list(args or ()),
-                kwargs=dict(kwargs or {}),
-                queue=expected_queue,
+                **send_task_kwargs,
             )
         except KnowledgeError:
             raise

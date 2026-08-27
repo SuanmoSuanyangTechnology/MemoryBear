@@ -6,9 +6,8 @@ import logging
 
 from celery.signals import worker_process_init, worker_process_shutdown
 
-from ..bootstrap import get_settings
-from ..logging import setup_logging
 from ..runtime import reset_worker_runtime_after_fork, shutdown_worker_runtime_sync
+from . import document, evidence_graph, legacy_compat, qa_import
 from .celery_app import celery_app
 
 logger = logging.getLogger(__name__)
@@ -19,14 +18,7 @@ def initialize_worker_process(**kwargs: object) -> None:
     """Create fresh lazy resource owners after prefork."""
 
     del kwargs
-    settings = get_settings()
-    setup_logging(settings)
-    runtime = reset_worker_runtime_after_fork()
-    logger.info(
-        "Knowledge worker process initialized pid=%s role=%s",
-        runtime.pid,
-        settings.kb_process_role,
-    )
+    reset_worker_runtime_after_fork()
 
 
 @worker_process_shutdown.connect
@@ -38,4 +30,10 @@ def shutdown_worker_process(**kwargs: object) -> None:
     logger.info("Knowledge worker process stopped")
 
 
-__all__ = ["celery_app"]
+__all__ = [
+    "celery_app",
+    "document",
+    "evidence_graph",
+    "legacy_compat",
+    "qa_import",
+]

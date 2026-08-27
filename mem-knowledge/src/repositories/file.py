@@ -37,8 +37,7 @@ async def get_files_paginated_async(
 
 async def create_file_async(db: AsyncSession, file: FileCreate) -> File:
     try:
-        db_file = File(**file.model_dump())
-        db.add(db_file)
+        db_file = await add_file_async(db, file)
         await db.commit()
         await db.refresh(db_file)
         return db_file
@@ -46,6 +45,23 @@ async def create_file_async(db: AsyncSession, file: FileCreate) -> File:
         await db.rollback()
         logger.exception("Failed to create file: file_name=%s", file.file_name)
         raise
+
+
+async def add_file_async(
+    db: AsyncSession,
+    file: FileCreate,
+    *,
+    file_id: uuid.UUID | None = None,
+) -> File:
+    """Add a file row without taking ownership of the transaction."""
+
+    values = file.model_dump()
+    if file_id is not None:
+        values["id"] = file_id
+    db_file = File(**values)
+    db.add(db_file)
+    await db.flush()
+    return db_file
 
 
 async def get_file_by_id_async(db: AsyncSession, file_id: uuid.UUID) -> File | None:
@@ -93,3 +109,15 @@ async def delete_file_by_id_async(db: AsyncSession, file_id: uuid.UUID) -> int:
         await db.rollback()
         logger.exception("Failed to delete file: file_id=%s", file_id)
         raise
+
+
+async def delete_files_by_ids_async(
+    db: AsyncSession,
+    file_ids: tuple[uuid.UUID, ...],
+) -> int:
+    """Delete exactly the supplied file rows without committing."""
+
+    if not file_ids:
+        return 0
+    result = await db.execute(delete(File).where(File.id.in_(file_ids)))
+    return result.rowcount or 0
