@@ -6,7 +6,7 @@ import pytest
 from elasticsearch import AsyncElasticsearch
 
 from app.core.config import settings
-from app.core.memory.storage.enums import MemoryNodeType
+from app.core.memory.storage.enums import BackendType, MemoryNodeType
 from app.core.memory.storage.models import NodeFilter, NodeProjection, NodeSort
 from app.core.memory.storage.provider.elasticsearch import index as elasticsearch_index
 from app.core.memory.storage.provider.elasticsearch.client import (
@@ -495,17 +495,17 @@ def test_elasticsearch_index_definitions_are_explicit_and_unique() -> None:
     )
 
     expected_versions = {
-        MemoryNodeType.ASSISTANT_ORIGINAL: (1, 1),
-        MemoryNodeType.ASSISTANT_PRUNED: (1, 1),
-        MemoryNodeType.CHUNK: (1, 1),
-        MemoryNodeType.COMMUNITY: (1, 1),
-        MemoryNodeType.CONVERSATION: (1, 1),
-        MemoryNodeType.DIALOGUE: (1, 1),
-        MemoryNodeType.EXTRACTED_ENTITY: (1, 1),
-        MemoryNodeType.MEMORY_SUMMARY: (1, 1),
-        MemoryNodeType.PERCEPTUAL: (1, 1),
-        MemoryNodeType.STATEMENT: (1, 1),
-        MemoryNodeType.USER_SOURCE: (1, 1),
+        MemoryNodeType.ASSISTANT_ORIGINAL: (2, 1),
+        MemoryNodeType.ASSISTANT_PRUNED: (2, 1),
+        MemoryNodeType.CHUNK: (2, 1),
+        MemoryNodeType.COMMUNITY: (2, 1),
+        MemoryNodeType.CONVERSATION: (2, 1),
+        MemoryNodeType.DIALOGUE: (2, 1),
+        MemoryNodeType.EXTRACTED_ENTITY: (2, 1),
+        MemoryNodeType.MEMORY_SUMMARY: (2, 1),
+        MemoryNodeType.PERCEPTUAL: (2, 1),
+        MemoryNodeType.STATEMENT: (2, 1),
+        MemoryNodeType.USER_SOURCE: (2, 1),
     }
     production_labels = tuple(MemoryNodeType)
     production_definitions = [
@@ -546,7 +546,7 @@ def test_elasticsearch_index_definitions_are_explicit_and_unique() -> None:
         }
 
         properties = definition.mappings["properties"]
-        assert set(properties) == {
+        search_fields = {
             *FULLTEXT_FIELDS.get(label, ()),
             *(
                 (EMBEDDING_FIELDS[label],)
@@ -554,6 +554,8 @@ def test_elasticsearch_index_definitions_are_explicit_and_unique() -> None:
                 else ()
             ),
         }
+        assert search_fields.issubset(properties)
+        assert "id" in properties
         for field in FULLTEXT_FIELDS.get(label, ()):
             assert properties[field] == {
                 "type": "text",
@@ -678,7 +680,7 @@ async def test_elastic_client_save_and_update_node() -> None:
     client = ElasticClient()
     client.client = _as_elasticsearch(fake)
 
-    await client.save_node(
+    save_result = await client.save_node(
         MemoryNodeType.STATEMENT,
         {"id": 123, "status": "pending"},
     )
@@ -708,7 +710,12 @@ async def test_elastic_client_save_and_update_node() -> None:
     }
     assert update_call["conflicts"] == "abort"
     assert update_call["refresh"] is True
-    assert update_result == [{"updated": 2}]
+    assert save_result.backend == BackendType.ELASTIC
+    assert save_result.affected_count == 1
+    assert save_result.ids == ["123"]
+    assert save_result.data == [{"id": 123, "status": "pending"}]
+    assert update_result.backend == BackendType.ELASTIC
+    assert update_result.affected_count == 2
 
 
 async def test_elastic_client_get_node_uses_filter_projection_and_sort() -> None:
@@ -750,7 +757,7 @@ async def test_elastic_client_get_node_uses_filter_projection_and_sort() -> None
         }
     ]
     assert fake.close_point_in_time_calls == [{"id": "pit-1"}]
-    assert result == [
+    assert result.items == [
         {"id": "node-2", "status": "active"},
         {"id": "node-1", "status": "active"},
     ]
@@ -809,8 +816,10 @@ async def test_elastic_client_delete_node_supports_physical_and_draft_modes() ->
     assert draft_call["script"]["params"]["delete_at"].endswith("Z")
     assert draft_call["conflicts"] == "abort"
     assert draft_call["refresh"] is True
-    assert physical_result == [{"deleted": 3}]
-    assert draft_result == [{"deleted": 2}]
+    assert physical_result.backend == BackendType.ELASTIC
+    assert physical_result.affected_count == 3
+    assert draft_result.backend == BackendType.ELASTIC
+    assert draft_result.affected_count == 2
 
 
 def test_elastic_client_requires_connection() -> None:
@@ -1333,8 +1342,9 @@ async def test_elastic_client_get_node_reads_all_pit_pages() -> None:
         NodeFilter.eq("category", "pit-test"),
     )
 
-    assert len(result) == SEARCH_BATCH_SIZE + 1
-    assert result[-1] == {"id": "last-node"}
+    assert result.total == SEARCH_BATCH_SIZE + 1
+    assert len(result.items) == result.total
+    assert result.items[-1] == {"id": "last-node"}
     assert len(fake.search_calls) == 2
     assert fake.search_calls[0]["sort"] == [{"_shard_doc": "asc"}]
     assert fake.search_calls[0]["pit"] == {
@@ -1432,7 +1442,7 @@ async def test_elastic_client_get_node_applies_projection_aliases() -> None:
     )
 
     assert fake.search_calls[0]["source_includes"] == ["id", "name"]
-    assert result == [{"id": "node-1", "display_name": "Alice"}]
+    assert result.items == [{"id": "node-1", "display_name": "Alice"}]
 
 
 
@@ -1476,7 +1486,7 @@ async def test_elastic_client_get_node_evaluates_coalesce_projection() -> None:
         "nickname",
         "name",
     ]
-    assert result == [
+    assert result.items == [
         {"id": "node-1", "display_name": "Alice"},
         {"id": "node-2", "display_name": "Unknown"},
     ]
@@ -1530,8 +1540,8 @@ async def test_elastic_client_embedding_search_uses_knn_prefilter_and_score() ->
             "source_includes": ["id"],
         }
     ]
-    assert result[0]["id"] == "node-1"
-    assert result[0]["similarity"] == pytest.approx(0.8)
+    assert result.items[0]["id"] == "node-1"
+    assert result.items[0]["similarity"] == pytest.approx(0.8)
 
 
 async def test_elastic_client_embedding_search_does_not_add_unrequested_score() -> None:
@@ -1553,7 +1563,7 @@ async def test_elastic_client_embedding_search_does_not_add_unrequested_score() 
         1,
     )
 
-    assert result == [{"id": "node-1"}]
+    assert result.items == [{"id": "node-1"}]
 
 
 async def test_elastic_client_fulltext_search_uses_multi_match_filter_and_score() -> None:
@@ -1611,7 +1621,7 @@ async def test_elastic_client_fulltext_search_uses_multi_match_filter_and_score(
             "source_includes": ["id"],
         }
     ]
-    assert result == [{"id": "entity-1", "score": 3.25}]
+    assert result.items == [{"id": "entity-1", "score": 3.25}]
 
 
 async def test_elastic_client_search_supports_score_only_projection() -> None:
@@ -1634,7 +1644,7 @@ async def test_elastic_client_search_supports_score_only_projection() -> None:
 
     assert fake.search_calls[0]["source"] is False
     assert "source_includes" not in fake.search_calls[0]
-    assert result == [{"rank": 2.5}]
+    assert result.items == [{"rank": 2.5}]
 
 
 @pytest.mark.parametrize("limit", [0, -1, True, 10_001])
@@ -1688,12 +1698,16 @@ async def test_elastic_client_embedding_search_skips_zero_vector() -> None:
     client = ElasticClient()
     client.client = _as_elasticsearch(fake)
 
-    assert await client.search_by_embedding(
+    result = await client.search_by_embedding(
         MemoryNodeType.STATEMENT,
         NodeFilter.eq("id", "node-1"),
         [0.0, 0.0],
         1,
-    ) == []
+    )
+
+    assert result.backend == BackendType.ELASTIC
+    assert result.items == []
+    assert result.total == 0
     assert fake.search_calls == []
 
 
@@ -1702,12 +1716,16 @@ async def test_elastic_client_fulltext_search_skips_blank_text() -> None:
     client = ElasticClient()
     client.client = _as_elasticsearch(fake)
 
-    assert await client.search_by_fulltext(
+    result = await client.search_by_fulltext(
         MemoryNodeType.STATEMENT,
         NodeFilter.eq("id", "node-1"),
         "   ",
         1,
-    ) == []
+    )
+
+    assert result.backend == BackendType.ELASTIC
+    assert result.items == []
+    assert result.total == 0
     assert fake.search_calls == []
 
 

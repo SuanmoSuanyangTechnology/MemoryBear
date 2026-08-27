@@ -7,12 +7,19 @@ import numpy as np
 from neo4j import AsyncGraphDatabase, AsyncDriver
 from neo4j.graph import Node, Relationship
 
-from app.core.memory.storage.enums import MemoryNodeLabel, BackendType
+from app.core.memory.storage.enums import (
+    BackendType,
+    MemoryNodeLabel,
+    MemoryRelationshipType,
+)
 from app.core.memory.storage.exceptions import UnsupportedQueryError
 from app.core.memory.storage.models import (
     NodeFilter,
     NodeProjection,
-    NodeSort, )
+    NodeSort,
+    StorageReadResult,
+    StorageWriteResult,
+)
 from app.core.memory.storage.provider.base import BaseClient
 from app.core.memory.storage.provider.neo4j.compiler.filter_compiler import compile_neo4j_filter
 from app.core.memory.storage.provider.neo4j.compiler.projection_compiler import (
@@ -52,7 +59,8 @@ class Neo4jClient(BaseClient):
 
     async def health(self):
         async with self.client.session() as session:
-            await session.run("return 1")
+            stmt = await session.run("return 1")
+            await stmt.consume()
 
     async def connect(self) -> AsyncDriver:
         return AsyncGraphDatabase.driver(**build_neo4j_driver_config())
@@ -61,7 +69,11 @@ class Neo4jClient(BaseClient):
         if self.client:
             await self.client.close()
 
-    async def save_node(self, label: MemoryNodeLabel, data: dict):
+    async def save_node(
+            self,
+            label: MemoryNodeLabel,
+            data: dict,
+    ) -> StorageWriteResult:
         node_id = self.verify_input(label, data)
         async with self.client.session() as session:
             query = f"""
@@ -69,14 +81,74 @@ class Neo4jClient(BaseClient):
             SET n = $properties
             RETURN n
             """
-            return await session.run(query, id=node_id, properties=data)
+            stmt = await session.run(query, id=node_id, properties=data)
+            records = await stmt.data()
+
+        items = [
+            _to_native(record["n"])
+            for record in records
+            if "n" in record
+        ]
+        return StorageWriteResult(
+            backend=self.name,
+            affected_count=len(items),
+            ids=[str(node_id)] if items else [],
+            data=items,
+        )
+
+    async def save_relationship(
+            self,
+            relationship_type: MemoryRelationshipType,
+            source: str,
+            target: str,
+            data: dict,
+    ) -> StorageWriteResult:
+        if not isinstance(relationship_type, MemoryRelationshipType):
+            raise KeyError(
+                f"relationship type - {relationship_type} not supported"
+            )
+
+        relationship_id = data.get("id")
+        if relationship_id is None:
+            raise ValueError("Relationship id field is required")
+
+        escaped_type = relationship_type.value.replace("`", "``")
+        query = f"""
+        MATCH (source {{id: $source}})
+        MATCH (target {{id: $target}})
+        MERGE (source)-[r:`{escaped_type}` {{id: $id}}]->(target)
+        SET r = $properties
+        RETURN r
+        """
+
+        async with self.client.session() as session:
+            stmt = await session.run(
+                query,
+                id=relationship_id,
+                source=source,
+                target=target,
+                properties=data,
+            )
+            records = await stmt.data()
+
+        items = [
+            _to_native(record["r"])
+            for record in records
+            if "r" in record
+        ]
+        return StorageWriteResult(
+            backend=self.name,
+            affected_count=len(items),
+            ids=[str(relationship_id)] if items else [],
+            data=items,
+        )
 
     async def update_node(
             self,
             label: MemoryNodeLabel,
             data: dict,
             node_filter: NodeFilter,
-    ):
+    ) -> StorageWriteResult:
         self.verify_label(label)
         predicate, filter_parameters = compile_neo4j_filter(node_filter)
         query = f"""
@@ -89,7 +161,19 @@ class Neo4jClient(BaseClient):
 
         async with self.client.session() as session:
             stmt = await session.run(query, **parameters)
-            return await stmt.data()
+            records = await stmt.data()
+
+        items = [
+            _to_native(record["n"])
+            for record in records
+            if "n" in record
+        ]
+        return StorageWriteResult(
+            backend=self.name,
+            affected_count=len(items),
+            ids=[str(item["id"]) for item in items if "id" in item],
+            data=items,
+        )
 
     async def get_node(
             self,
@@ -97,7 +181,7 @@ class Neo4jClient(BaseClient):
             node_filter: NodeFilter,
             projection: NodeProjection | None = None,
             node_sort: NodeSort | None = None,
-    ) -> list[dict]:
+    ) -> StorageReadResult:
         self.verify_label(label)
         predicate, filter_parameters = compile_neo4j_filter(node_filter)
         return_expression, projection_parameters = compile_neo4j_projection(
@@ -119,14 +203,15 @@ class Neo4jClient(BaseClient):
         async with self.client.session() as session:
             stmt = await session.run(query, **parameters)
             records = await stmt.data()
-            return [_to_native(record["n"]) for record in records]
+            items = [_to_native(record["n"]) for record in records]
+        return StorageReadResult.from_items(items, backend=self.name)
 
     async def delete_node(
             self,
             label: MemoryNodeLabel,
             node_filter: NodeFilter,
             draft: bool = False,
-    ):
+    ) -> StorageWriteResult:
         self.verify_label(label)
         predicate, filter_parameters = compile_neo4j_filter(node_filter)
         if draft:
@@ -146,7 +231,17 @@ class Neo4jClient(BaseClient):
 
         async with self.client.session() as session:
             stmt = await session.run(query, **filter_parameters)
-            return await stmt.data()
+            records = await stmt.data()
+
+        affected_count = (
+            int(records[0].get("deleted", 0))
+            if records
+            else 0
+        )
+        return StorageWriteResult(
+            backend=self.name,
+            affected_count=affected_count,
+        )
 
     async def search_by_embedding(
             self,
@@ -155,7 +250,7 @@ class Neo4jClient(BaseClient):
             embed: list[float],
             limit: int,
             projection: NodeProjection | None = None,
-    ):
+    ) -> StorageReadResult:
         self.verify_label(label)
         embeding_field = EMBEDDING_FIELDS.get(label)
         if embeding_field is None:
@@ -163,7 +258,7 @@ class Neo4jClient(BaseClient):
         query_vec = np.array(embed, dtype=np.float64)
         query_norm = np.linalg.norm(query_vec)
         if query_norm == 0:
-            return []
+            return StorageReadResult(backend=self.name)
         predicate, filter_parameters = compile_neo4j_filter(node_filter)
         query_vec = query_vec / query_norm
         batch_query = f"""
@@ -217,7 +312,7 @@ class Neo4jClient(BaseClient):
                 last_id = batch[-1]["id"]
 
         if not top_heap:
-            return []
+            return StorageReadResult(backend=self.name)
 
         top_heap.sort(key=lambda x: x[0], reverse=True)
         top_ids = [node_id for _, node_id in top_heap]
@@ -270,7 +365,7 @@ class Neo4jClient(BaseClient):
                     res.append(node)
         except Exception:
             res = []
-        return res
+        return StorageReadResult.from_items(res, backend=self.name)
 
     async def search_by_fulltext(
             self,
@@ -279,11 +374,16 @@ class Neo4jClient(BaseClient):
             text: str,
             limit: int,
             projection: NodeProjection | None = None,
-    ):
+    ) -> StorageReadResult:
         self.verify_label(label)
         fulltext_idx = FULLTEXT_ANNC.get(label)
         if fulltext_idx is None:
             raise UnsupportedQueryError(self.name, label, 'fulltext')
+        if not isinstance(text, str):
+            raise ValueError("fulltext query must be a string")
+        normalized_text = text.strip()
+        if not normalized_text:
+            return StorageReadResult(backend=self.name)
         predicate, filter_parameters = compile_neo4j_filter(node_filter)
         return_expression, projection_parameters = compile_neo4j_projection(
             projection,
@@ -301,12 +401,13 @@ class Neo4jClient(BaseClient):
                 query,
                 idx=fulltext_idx,
                 limit=limit,
-                text=text,
+                text=normalized_text,
                 **filter_parameters,
                 **projection_parameters,
             )
             records = await stmt.data()
-            return [_to_native(record["n"]) for record in records]
+            items = [_to_native(record["n"]) for record in records]
+        return StorageReadResult.from_items(items, backend=self.name)
 
 
 # async def dev():

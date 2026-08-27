@@ -202,14 +202,16 @@ async def test_all_filters_against_real_neo4j() -> None:
                 {"change": True, f"test_{case_name}": True},
                 node_filter,
             )
-            assert result, f"Filter case did not match the test node: {case_name}"
+            assert result.affected_count, (
+                f"Filter case did not match the test node: {case_name}"
+            )
 
         projected_result = await client.get_node(
             TestMemoryNodeType.TEST,
             NodeFilter.eq("id", node_id),
             projection=NodeProjection.of("id", "name"),
         )
-        assert projected_result == [{"id": node_id, "name": "test"}]
+        assert projected_result.items == [{"id": node_id, "name": "test"}]
     finally:
         try:
             await _cleanup_test_node(client, node_id)
@@ -252,7 +254,7 @@ async def test_get_node_sorts_by_unprojected_property_in_real_neo4j() -> None:
             ),
         )
 
-        assert result == [
+        assert result.items == [
             {"id": test_node_ids[0]},
             {"id": test_node_ids[2]},
             {"id": test_node_ids[1]},
@@ -298,8 +300,11 @@ async def test_delete_node_physically_deletes_from_real_neo4j() -> None:
             node_filter=node_filter,
         )
 
-        assert result == [{"deleted": 1}]
-        assert await client.get_node(TestMemoryNodeType.TEST, node_filter) == []
+        assert result.affected_count == 1
+        assert (await client.get_node(
+            TestMemoryNodeType.TEST,
+            node_filter,
+        )).items == []
     finally:
         try:
             await _cleanup_test_node(client, node_id)
@@ -334,18 +339,21 @@ async def test_delete_node_draft_soft_deletes_in_real_neo4j() -> None:
             draft=True,
         )
 
-        assert first_result == [{"deleted": 1}]
-        assert len(projected) == 1
-        assert projected[0]["id"] == node_id
-        assert projected[0]["delete_at"] is not None
-        assert second_result == [{"deleted": 0}]
+        assert first_result.affected_count == 1
+        assert projected.total == 1
+        assert projected.items[0]["id"] == node_id
+        assert projected.items[0]["delete_at"] is not None
+        assert second_result.affected_count == 0
 
         physical_result = await client.delete_node(
             TestMemoryNodeType.TEST,
             node_filter=node_filter,
         )
-        assert physical_result == [{"deleted": 1}]
-        assert await client.get_node(TestMemoryNodeType.TEST, node_filter) == []
+        assert physical_result.affected_count == 1
+        assert (await client.get_node(
+            TestMemoryNodeType.TEST,
+            node_filter,
+        )).items == []
     finally:
         try:
             await _cleanup_test_node(client, node_id)

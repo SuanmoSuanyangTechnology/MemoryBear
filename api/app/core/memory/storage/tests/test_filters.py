@@ -3,6 +3,11 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
+from app.core.memory.storage.enums import (
+    BackendType,
+    MemoryNodeType,
+    MemoryRelationshipType,
+)
 from app.core.memory.storage.models import (
     FilterCondition,
     FilterLogic,
@@ -130,14 +135,23 @@ def test_elasticsearch_filter_uses_the_same_model() -> None:
 class _FakeResult:
     def __init__(self, data: list[dict[str, Any]]) -> None:
         self._data = data
+        self.consumed = False
 
     async def data(self) -> list[dict[str, Any]]:
         return self._data
 
+    async def consume(self) -> None:
+        self.consumed = True
+
 
 class _FakeSession:
-    def __init__(self, calls: list[tuple[str, dict[str, Any]]]) -> None:
+    def __init__(
+            self,
+            calls: list[tuple[str, dict[str, Any]]],
+            results: list[_FakeResult],
+    ) -> None:
         self.calls = calls
+        self.results = results
 
     async def __aenter__(self) -> "_FakeSession":
         return self
@@ -149,19 +163,73 @@ class _FakeSession:
         self.calls.append((query, parameters))
         if "RETURN count(n) AS deleted" in query:
             data = [{"deleted": 2}]
+        elif "RETURN r" in query:
+            data = [{"r": parameters["properties"]}]
+        elif "$properties" in query and "RETURN n" in query:
+            data = [{"n": parameters["properties"]}]
         elif " AS n" in query:
             data = [{"n": {"id": 1}}]
         else:
-            data = [{"n.change": True}]
-        return _FakeResult(data)
+            data = []
+        result = _FakeResult(data)
+        self.results.append(result)
+        return result
 
 
 class _FakeDriver:
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict[str, Any]]] = []
+        self.results: list[_FakeResult] = []
 
     def session(self) -> _FakeSession:
-        return _FakeSession(self.calls)
+        return _FakeSession(self.calls, self.results)
+
+
+async def test_neo4j_health_consumes_result() -> None:
+    driver = _FakeDriver()
+    client = Neo4jClient()
+    client.client = driver  # type: ignore[assignment]
+
+    await client.health()
+
+    assert driver.calls == [("return 1", {})]
+    assert driver.results[0].consumed is True
+
+
+async def test_neo4j_embedding_search_zero_vector_returns_empty_dto() -> None:
+    driver = _FakeDriver()
+    client = Neo4jClient()
+    client.client = driver  # type: ignore[assignment]
+
+    result = await client.search_by_embedding(
+        MemoryNodeType.STATEMENT,
+        NodeFilter.eq("id", "node-1"),
+        [0.0, 0.0],
+        1,
+    )
+
+    assert result.backend == BackendType.NEO4J
+    assert result.items == []
+    assert result.total == 0
+    assert driver.calls == []
+
+
+async def test_neo4j_fulltext_search_blank_text_returns_empty_dto() -> None:
+    driver = _FakeDriver()
+    client = Neo4jClient()
+    client.client = driver  # type: ignore[assignment]
+
+    result = await client.search_by_fulltext(
+        MemoryNodeType.STATEMENT,
+        NodeFilter.eq("id", "node-1"),
+        "   ",
+        1,
+    )
+
+    assert result.backend == BackendType.NEO4J
+    assert result.items == []
+    assert result.total == 0
+    assert driver.calls == []
 
 
 def test_neo4j_to_native_converts_neo4j_values_to_python() -> None:
@@ -202,6 +270,83 @@ def test_neo4j_to_native_passes_through_plain_python_values() -> None:
     assert _to_native([1, "a", None]) == [1, "a", None]
 
 
+async def test_neo4j_save_relationship_merges_by_id_and_sets_properties() -> None:
+    driver = _FakeDriver()
+    client = Neo4jClient()
+    client.client = driver  # type: ignore[assignment]
+    data = {"id": "edge-1", "weight": 0.8}
+
+    result = await client.save_relationship(
+        relationship_type=MemoryRelationshipType.RELATES_TO,
+        source="node-1",
+        target="node-2",
+        data=data,
+    )
+
+    query, parameters = driver.calls[0]
+    assert "MATCH (source {id: $source})" in query
+    assert "MATCH (target {id: $target})" in query
+    assert "MERGE (source)-[r:`RELATES_TO` {id: $id}]->(target)" in query
+    assert "SET r = $properties" in query
+    assert parameters == {
+        "id": "edge-1",
+        "source": "node-1",
+        "target": "node-2",
+        "properties": {"id": "edge-1", "weight": 0.8},
+    }
+    assert data == {"id": "edge-1", "weight": 0.8}
+    assert result.backend == BackendType.NEO4J
+    assert result.affected_count == 1
+    assert result.ids == ["edge-1"]
+    assert result.data == [data]
+
+
+def test_memory_relationship_type_covers_physical_graph_relationships() -> None:
+    assert {item.value for item in MemoryRelationshipType} == {
+        "BELONGS_TO_COMMUNITY",
+        "BELONGS_TO_CONVERSATION",
+        "BELONGS_TO_DIALOG",
+        "CONTAINS",
+        "DERIVED_FROM",
+        "DERIVED_FROM_STATEMENT",
+        "EXTRACTED_RELATIONSHIP",
+        "HAS_ORIGINAL_CONTENT",
+        "HAS_PERCEPTUAL",
+        "MENTIONS",
+        "PRUNED_TO",
+        "REFERENCES_ENTITY",
+        "RELATES_TO",
+        "STATEMENT_ENTITY",
+    }
+
+
+async def test_neo4j_save_relationship_requires_relationship_id() -> None:
+    client = Neo4jClient()
+
+    with pytest.raises(ValueError, match="Relationship id field is required"):
+        await client.save_relationship(
+            MemoryRelationshipType.RELATES_TO,
+            "node-1",
+            "node-2",
+            {},
+        )
+
+
+@pytest.mark.parametrize("relationship_type", ["RELATES_TO", "", None, 1])
+async def test_neo4j_save_relationship_requires_relationship_type_enum(
+    relationship_type: Any,
+) -> None:
+    client = Neo4jClient()
+
+    with pytest.raises(KeyError, match="relationship type.*not supported"):
+        await client.save_relationship(
+            relationship_type,
+            "node-1",
+            "node-2",
+            {"id": "edge-1"},
+        )
+
+
 async def test_neo4j_update_node_uses_custom_filter_without_data_id() -> None:
     driver = _FakeDriver()
     client = Neo4jClient()
@@ -223,7 +368,10 @@ async def test_neo4j_update_node_uses_custom_filter_without_data_id() -> None:
         "filter_0_field": "external_id",
         "filter_0_value": "node-1",
     }
-    assert result == [{"n.change": True}]
+    assert result.backend == BackendType.NEO4J
+    assert result.affected_count == 1
+    assert result.ids == []
+    assert result.data == [{"change": True}]
 
 
 
@@ -495,7 +643,8 @@ async def test_neo4j_delete_node_uses_parameterized_filter_and_returns_count() -
         "filter_1_field": "tenant_id",
         "filter_1_value": "tenant-1",
     }
-    assert result == [{"deleted": 2}]
+    assert result.backend == BackendType.NEO4J
+    assert result.affected_count == 2
 
 
 async def test_neo4j_delete_node_draft_sets_delete_at_without_detaching() -> None:
@@ -529,7 +678,8 @@ async def test_neo4j_delete_node_draft_sets_delete_at_without_detaching() -> Non
         "filter_1_field": "external_id",
         "filter_1_value": "node-2",
     }
-    assert result == [{"deleted": 2}]
+    assert result.backend == BackendType.NEO4J
+    assert result.affected_count == 2
 
 
 def test_node_projection_accepts_structured_fields_and_keeps_strings() -> None:
