@@ -35,7 +35,7 @@ from .knowledge_file_storage import KnowledgeFileStorage, generate_kb_file_key
 logger = logging.getLogger(__name__)
 
 DEFAULT_SYNC_PARSER_CONFIG = {
-    "layout_recognize": "mineru",
+    "layout_recognize": "plain",
     "chunk_token_num": 130,
     "delimiter": "\n",
     "auto_keywords": 0,

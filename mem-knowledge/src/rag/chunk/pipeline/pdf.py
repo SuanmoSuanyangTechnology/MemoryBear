@@ -1,4 +1,4 @@
-"""Explicit MinerU/TextLn PDF pipeline with no fallback."""
+"""Explicit Plain/MinerU/TextLn PDF pipeline with no fallback."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from ...parser_config import resolve_layout_recognize
 from ..context import ChunkContext, ParseResult
 from ..file_utils import extract_links_from_pdf
 from ..parser.mineru_v3 import MinerUV3Parser
+from ..parser.pdf.plain import PlainPdfParser
 from ..parser.pdf.textln import TextLnPdfParser
 from .base import ChunkPipeline
 
@@ -20,7 +21,9 @@ class PdfChunkPipeline(ChunkPipeline):
             urls = extract_links_from_pdf(binary)
         self._callback(ctx, 0.1, "Start to parse.")
         layout = resolve_layout_recognize(ctx.parser_config)
-        if layout == "mineru":
+        if layout == "plain":
+            result = PlainPdfParser().parse(ctx)
+        elif layout == "mineru":
             result = MinerUV3Parser().parse(ctx)
         else:
             result = TextLnPdfParser().parse(ctx)

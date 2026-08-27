@@ -26,16 +26,24 @@ def _default_graph_config() -> dict[str, Any]:
 
 def resolve_layout_recognize(
     parser_config: Mapping[str, Any] | None,
-) -> Literal["mineru", "textln"]:
+) -> Literal["plain", "mineru", "textln"]:
     if parser_config is None or "layout_recognize" not in parser_config:
-        return "mineru"
+        return "plain"
     raw_value = parser_config["layout_recognize"]
     if not isinstance(raw_value, str):
         raise GraphPipelineConfigError(f"unsupported layout_recognize: {raw_value!r}")
     normalized = raw_value.strip().lower()
-    if normalized not in {"mineru", "textln"}:
-        raise GraphPipelineConfigError(f"unsupported layout_recognize: {raw_value}")
-    return "mineru" if normalized == "mineru" else "textln"
+    aliases = {
+        "plain": "plain",
+        "plaintext": "plain",
+        "plain text": "plain",
+        "mineru": "mineru",
+        "textln": "textln",
+    }
+    try:
+        return aliases[normalized]
+    except KeyError:
+        raise GraphPipelineConfigError(f"unsupported layout_recognize: {raw_value}") from None
 
 
 def build_default_knowledge_parser_config() -> dict[str, Any]:
@@ -51,7 +59,7 @@ def build_default_knowledge_parser_config() -> dict[str, Any]:
         "feishu_app_secret": "App Secret",
         "feishu_folder_token": "Folder Token",
         "sync_cron": "30 7 * * 1-5",
-        "layout_recognize": "mineru",
+        "layout_recognize": "plain",
         "chunk_token_num": 128,
         "delimiter": "\n",
         "auto_keywords": 0,
@@ -66,7 +74,7 @@ def build_default_knowledge_parser_config() -> dict[str, Any]:
 
 def build_default_document_parser_config() -> dict[str, Any]:
     return {
-        "layout_recognize": "mineru",
+        "layout_recognize": "plain",
         "chunk_token_num": 130,
         "delimiter": "\n",
         "auto_keywords": 0,
