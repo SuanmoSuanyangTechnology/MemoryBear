@@ -32,6 +32,7 @@ export const space = {
 
       basic: 'Basic Config',
       models: 'Model Configuration',
+      memoryConfig: 'Memory Lifecycle',
     },
     memoryExtractionEngine: {
       title: 'Memory Engine Module Configuration Center',
