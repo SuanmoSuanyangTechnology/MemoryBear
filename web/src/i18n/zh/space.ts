@@ -32,6 +32,7 @@ export const space = {
 
       basic: '基础配置',
       models: '模型配置',
+      memoryConfig: '记忆生命周期',
     },
     memoryExtractionEngine: {
       title: '记忆引擎模块配置中心',
