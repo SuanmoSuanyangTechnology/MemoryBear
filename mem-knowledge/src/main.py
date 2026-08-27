@@ -111,11 +111,16 @@ def create_app(settings: KnowledgeSettings | None = None) -> FastAPI:
         exc: RequestValidationError,
     ) -> JSONResponse:
         trace_id = getattr(request.state, "trace_id", get_trace_id())
+        route_path = getattr(request.scope.get("route"), "path", "<unresolved>")
+        if request.url.path.startswith("/internal/v1/") and not route_path.startswith(
+            "/internal/v1/"
+        ):
+            route_path = f"/internal/v1{route_path}"
         validation_errors = [
             {
-                "loc": ".".join(str(part) for part in error.get("loc", ())),
+                "loc": ".".join(str(part) for part in tuple(error.get("loc", ()))[:2]),
                 "type": str(error.get("type", "")),
-                "msg": str(error.get("msg", "")),
+                "msg": "Request validation failed",
             }
             for error in exc.errors()
         ]
@@ -124,7 +129,7 @@ def create_app(settings: KnowledgeSettings | None = None) -> FastAPI:
             "actor_id=%s tenant_id=%s workspace_id=%s source=%s errors=%s",
             trace_id,
             request.method,
-            request.url.path,
+            route_path,
             request.headers.get("X-KB-Actor-ID"),
             request.headers.get("X-KB-Tenant-ID"),
             request.headers.get("X-KB-Workspace-ID"),
