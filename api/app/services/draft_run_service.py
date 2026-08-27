@@ -2907,14 +2907,14 @@ class AgentRunService:
                             )
                         )
                         rows = result.scalars().all()
-                        meta_map = {str(r.id): r for r in rows}
+                        meta_map = {str(r.id): (r.file_name, r.file_size) for r in rows}
                 for f in files:
                     name, size = f.name, f.size
                     if f.transfer_method.value == "local_file" and f.upload_file_id and (not name or not size):
                         meta = meta_map.get(str(f.upload_file_id))
                         if meta:
-                            name = name or meta.file_name
-                            size = size or meta.file_size
+                            name = name or meta[0]
+                            size = size or meta[1]
                     human_meta["files"].append({
                         "type": f.type,
                         "url": f.url,
