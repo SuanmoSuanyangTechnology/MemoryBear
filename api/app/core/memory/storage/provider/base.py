@@ -1,10 +1,18 @@
 from abc import ABC, abstractmethod
 
+from typing import Self
+
 from app.core.memory.storage.enums import MemoryNodeLabel
 from app.core.memory.storage.models import NodeFilter, NodeProjection, NodeSort
 
 
 class BaseClient(ABC):
+
+    @classmethod
+    @abstractmethod
+    async def create(cls) -> Self:
+        """Create and connect a client instance."""
+        pass
 
     @staticmethod
     def verify_label(label: MemoryNodeLabel) -> None:
