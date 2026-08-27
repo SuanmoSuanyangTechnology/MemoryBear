@@ -1052,7 +1052,7 @@ def get_workspace_retention_policy(
         db: Session,
         workspace_id: uuid.UUID,
         user: User,
-) -> tuple[int, int]:
+) -> tuple[int | None, int]:
     """获取临时身份保留天数和至少有一条记忆的有效临时 EndUser 数量。"""
     db_workspace = _check_workspace_member_permission(db, workspace_id, user)
     end_user_count = (

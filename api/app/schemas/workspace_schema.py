@@ -45,10 +45,11 @@ class WorkspaceUpdate(BaseModel):
 
 
 class WorkspaceRetentionPolicyResponse(BaseModel):
-    retention_days: int = Field(
+    retention_days: int | None = Field(
+        default=None,
         ge=0,
         le=3650,
-        description="临时身份保留天数，0 表示永不过期",
+        description="临时身份保留天数，null 表示尚未配置，0 表示永不过期",
     )
     end_user_count: int | None = Field(
         default=None,
