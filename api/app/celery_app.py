@@ -273,7 +273,10 @@ beat_schedule_config = {
     },
     "scan-expired-end-users": {
         "task": "app.tasks.scan_expired_end_users",
-        "schedule": crontab(hour=2, minute=0),
+        "schedule": crontab(
+            hour=settings.EXPIRED_END_USER_SCAN_HOUR,
+            minute=settings.EXPIRED_END_USER_SCAN_MINUTE,
+        ),
     },
     # "run-forgetting-cycle": {
     #     "task": "app.tasks.run_forgetting_cycle_task",
