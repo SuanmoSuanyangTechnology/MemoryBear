@@ -24,20 +24,25 @@ class EndUserService:
     async def merge_end_users(self, source: set[uuid.UUID], target: uuid.UUID):
         """将 source 中的用户合并到 target 用户。
 
-        合并操作涵盖：
-        1. PG EndUserInfo：aliases / meta_data 合并到 target
-        2. Neo4j：所有节点的 end_user_id 改为 target；User 实体节点合并全部属性
-        3. Neo4j：关系属性 end_user_id 改为 target（保留原始关系类型）
-        4. PG 引用表：conversations / memory_messages / memory_short_term /
+        合并操作涵盖（顺序即执行顺序，其中第 2 步是「归并意图先行落库」）：
+        1. 校验：收集 source EndUser 行与双方 EndUserInfo，target 无 info 记录则中止
+        2. PG EndUser + end_user_merge：source 软删（is_active = False）并写入合并
+           映射，**同一次提交**。此后老 end_user_id 即经映射路由到 target，迁移
+           期间的新写入直接落到 target，不会产生孤儿数据
+        3. PG EndUserInfo：aliases / meta_data 合并到 target
+        4. Neo4j：所有节点的 end_user_id 改为 target；User 实体节点合并全部属性
+        5. Neo4j：关系属性 end_user_id 改为 target（保留原始关系类型）
+        6. PG 引用表：conversations / memory_messages / memory_short_term /
            memory_long_term / memory_forget_log / memory_perceptual /
            memory_reflection_log / forgetting_cycle_history /
            memory_display_record / memory_engine_display_event
            的 end_user_id 从 source 迁移到 target
-        5. PG EndUser：source 用户 is_active = False（软删除）
-        6. PG end_user_merge：记录每条合并映射（并摊平历史合并链）
         7. 同步 target 的 memory_count
         8. 触发 target 的 Layer2 反思（实体去重 + 描述合并，from_retry=True 跳过频率检查）
-        9. 后续通过 EndUserMerge 表 + is_active 过滤，API 请求自动路由到 target
+
+        失败语义：第 2 步之后若中断（Neo4j 不可用、迁移报错等），source 已软删且
+        映射已在，老 ID 仍能正确路由到 target，只是 source 名下尚未迁移的数据暂时
+        不可见。Neo4j reassign 与引用表迁移均幂等，重跑本方法或补偿任务可补齐。
         """
         # ── 0. 提前收集 source EndUser 行（软删除前需要 other_id） ──
         source_users: dict[uuid.UUID, EndUser] = {}
@@ -55,7 +60,42 @@ class EndUserService:
 
         target_user_info = await self.info_repo.get_end_user_info_async(target)
         if not target_user_info:
-            raise BusinessException(message=f"Target user not found.")
+            raise BusinessException(message="Target user not found.")
+
+        # ── 1.5 归并意图先行落库：软删 source + 写 end_user_merge 映射，同一次提交 ──
+        # 位置刻意放在「所有前置校验之后、任何数据迁移之前」：
+        # ① 必须晚于校验：上面的 target_user_info 校验若失败，source 不能已被软删；
+        # ② 必须早于迁移：迁移期间落到 source 的新写入会经 get_end_user_by_id_async
+        #    路由到 target，不会变成挂在死账号上的孤儿数据（引用表迁移与 Neo4j
+        #    reassign 都是一次性的，迁移窗口之后写到 source 的数据永远迁不过去）；
+        # ③ 必须原子：软删与映射缺一都会留下坏状态，详见
+        #    EndUserRepository.soft_delete_many_pending_async 的 docstring。
+        # 副作用：source 立刻从活跃集合消失，配额、Dashboard 列表、反思/遗忘/聚类
+        # 扫描（均按 is_active == True 过滤）同步生效，这是归并后的正确语义提前生效。
+        first_src_user = next((u for u in source_users.values() if u), None)
+        if not first_src_user:
+            raise BusinessException(message="No valid source user found.")
+        workspace_id = first_src_user.workspace_id
+
+        await self.user_repo.soft_delete_many_pending_async(source)
+        await self.user_repo.flatten_merge_chain_async(source, target, workspace_id)
+        for src_id in source:
+            src_user = source_users.get(src_id)
+            # EndUserMerge.origin_other_id 是 NOT NULL，而 EndUser.other_id 允许为空
+            # （agent chat 等入口可不传 user_id）。这里必须兜底为 id 字符串，
+            # 否则归并会因非空约束直接失败。
+            origin_other_id = (src_user.other_id if src_user else None) or str(src_id)
+            self.user_repo.create_merge_record(
+                origin_id=src_id,
+                origin_other_id=origin_other_id,
+                target_id=target,
+                workspace_id=workspace_id,
+            )
+        await self.db.commit()
+        logger.info(
+            f"[merge_end_users] 归并意图已落库（软删 + 映射原子生效）: "
+            f"source={source} → target={target}"
+        )
 
         # ── 2. 合并 aliases 与 meta_data 到 target EndUserInfo ──
         final_aliases: list[str] = list(target_user_info.aliases or [])
@@ -132,37 +172,7 @@ class EndUserService:
                 f"[merge_end_users] PG 引用表迁移完成: {pg_stats}"
             )
 
-        # ── 4. 软删除 source 用户 (PG is_active = False) ──
-        for src_id in source:
-            await self.user_repo.soft_delete_by_end_user_id_async(src_id)
-        logger.info(
-            f"[merge_end_users] 软删除完成: source_ids={source}"
-        )
-
-        # ── 5. 收集 workspace_id + 摊平历史合并链 + 写入新 EndUserMerge 记录 ──
-        # 所有 source 用户必须在同一 workspace（取第一个 source 的 workspace_id）
-        first_src_user = next((u for u in source_users.values() if u), None)
-        if not first_src_user:
-            raise BusinessException(message="No valid source user found.")
-        workspace_id = first_src_user.workspace_id
-
-        await self.user_repo.flatten_merge_chain_async(source, target, workspace_id)
-        if source:
-            logger.info(
-                f"[merge_end_users] 历史合并链已摊平: "
-                f"source={source} → target={target}"
-            )
-
-        for src_id in source:
-            src_user = source_users.get(src_id)
-            origin_other_id = src_user.other_id if src_user else str(src_id)
-            self.user_repo.create_merge_record(
-                origin_id=src_id,
-                origin_other_id=origin_other_id,
-                target_id=target,
-                workspace_id=workspace_id,
-            )
-
+        # ── 4. 提交引用表迁移（软删与映射已在 1.5 提交） ──
         await self.db.commit()
         logger.info(
             f"[merge_end_users] 全部完成: source={source}, target={target}"
@@ -207,6 +217,58 @@ class EndUserService:
                 f"[merge_end_users] 派发反思任务失败（不影响合并结果）: {e}",
                 exc_info=True,
             )
+
+    async def confirm_identity(
+        self,
+        workspace_id: uuid.UUID,
+        current_end_user: EndUser,
+        identity_features: str | None = None,
+    ) -> tuple[uuid.UUID, str, bool]:
+        """根据是否携带身份标识，确定临时/长时身份并执行跨渠道归并。
+
+        - 带标识 → confirmed（长时）；不带 → temporary（临时）。
+        - 存在相同 identity_features 的活跃用户时，把当前用户合并到该用户。
+        返回 (最终 end_user_id, identity_status, 是否发生合并)。
+
+        并发安全：带标识时先按 (workspace_id, identity_features) 取事务级排他锁，
+        使「查找 → 判定 → 落标识」整体串行化。否则并发相同标识会各自判定无匹配，
+        双双置 confirmed，产生两条同标识活跃记录，令归并永久失效。
+        """
+        has_id = bool(identity_features and identity_features.strip())
+        clean_features = identity_features.strip() if has_id else None
+        identity_status = "confirmed" if has_id else "temporary"
+
+        if has_id:
+            await self.user_repo.acquire_identity_lock_async(
+                workspace_id, clean_features
+            )
+            existing = await self.user_repo.find_active_by_identity_features(
+                workspace_id, clean_features
+            )
+            if existing and existing.id != current_end_user.id:
+                # 先落标识再归并：source 行被软删后仍带 identity_features，
+                # 便于事后排查「这条记录当时按哪个标识被并走」。
+                current_end_user.identity_features = clean_features
+                current_end_user.identity_status = identity_status
+                await self.db.flush()
+                await self.merge_end_users(
+                    source={current_end_user.id}, target=existing.id
+                )
+                logger.info(
+                    f"[confirm_identity] 跨渠道归并: source={current_end_user.id} "
+                    f"→ target={existing.id}, identity_features={clean_features}"
+                )
+                return existing.id, "confirmed", True
+
+        current_end_user.identity_features = clean_features
+        current_end_user.identity_status = identity_status
+        await self.db.commit()
+        await self.db.refresh(current_end_user)
+        logger.info(
+            f"[confirm_identity] 身份确认: end_user={current_end_user.id}, "
+            f"status={identity_status}, identity_features={clean_features}"
+        )
+        return current_end_user.id, identity_status, False
 
     # ── helpers ────────────────────────────────────────────────
 

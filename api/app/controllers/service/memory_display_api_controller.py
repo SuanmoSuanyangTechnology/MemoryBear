@@ -19,9 +19,7 @@ from app.core.api_key_utils import (
     get_current_user_snapshot_from_api_key_async,
     validate_end_user_in_workspace_async,
 )
-from app.core.error_codes import BizCode
 from app.core.logging_config import get_business_logger
-from app.core.response_utils import fail
 from app.db import get_async_db_context
 from app.schemas.api_key_schema import ApiKeyAuth
 
@@ -34,23 +32,6 @@ def _encode_result(result):
     if isinstance(result, Response):
         return result
     return jsonable_encoder(result)
-
-
-async def _validate_display_end_user(
-    db,
-    end_user_id: str,
-    workspace_id,
-) -> dict | None:
-    """Validate the end user shared by all V1 memory display endpoints."""
-    if not end_user_id or not end_user_id.strip():
-        return fail(
-            BizCode.MISSING_PARAMETER,
-            "end_user_id 不能为空",
-            "end_user_id is required",
-        )
-
-    await validate_end_user_in_workspace_async(db, end_user_id, workspace_id)
-    return None
 
 
 # ==================== 写入展示记录 ====================
@@ -74,11 +55,10 @@ async def get_written_memories(
     """
     async with get_async_db_context() as db:
         current_user = await get_current_user_snapshot_from_api_key_async(db, api_key_auth)
-        error = await _validate_display_end_user(
-            db, end_user_id, api_key_auth.workspace_id
-        )
-        if error is not None:
-            return _encode_result(error)
+        end_user = await validate_end_user_in_workspace_async(db, end_user_id, api_key_auth.workspace_id)
+        # 合并路由：end_user 可能是合并目标（原 ID 已被合并且 is_active=False），
+        # 必须改用 end_user.id，否则下游会按已被合并掉的旧 ID 查询而拿到空数据。
+        end_user_id = str(end_user.id)
 
     logger.info(f"V1 get written memories - workspace: {api_key_auth.workspace_id}")
 
@@ -108,11 +88,10 @@ async def get_retrieved_memories(
     """获取读取展示记录列表。"""
     async with get_async_db_context() as db:
         current_user = await get_current_user_snapshot_from_api_key_async(db, api_key_auth)
-        error = await _validate_display_end_user(
-            db, end_user_id, api_key_auth.workspace_id
-        )
-        if error is not None:
-            return _encode_result(error)
+        end_user = await validate_end_user_in_workspace_async(db, end_user_id, api_key_auth.workspace_id)
+        # 合并路由：end_user 可能是合并目标（原 ID 已被合并且 is_active=False），
+        # 必须改用 end_user.id，否则下游会按已被合并掉的旧 ID 查询而拿到空数据。
+        end_user_id = str(end_user.id)
 
     logger.info(f"V1 get retrieved memories - workspace: {api_key_auth.workspace_id}")
 
@@ -158,11 +137,10 @@ async def get_engine_display_cards(
     """
     async with get_async_db_context() as db:
         current_user = await get_current_user_snapshot_from_api_key_async(db, api_key_auth)
-        error = await _validate_display_end_user(
-            db, end_user_id, api_key_auth.workspace_id
-        )
-        if error is not None:
-            return _encode_result(error)
+        end_user = await validate_end_user_in_workspace_async(db, end_user_id, api_key_auth.workspace_id)
+        # 合并路由：end_user 可能是合并目标（原 ID 已被合并且 is_active=False），
+        # 必须改用 end_user.id，否则下游会按已被合并掉的旧 ID 查询而拿到空数据。
+        end_user_id = str(end_user.id)
 
     logger.info(f"V1 get engine display cards - workspace: {api_key_auth.workspace_id}")
 
@@ -201,11 +179,10 @@ async def get_all_memory_display(
     """获取写入、读取和引擎动态的统一时间线。"""
     async with get_async_db_context() as db:
         current_user = await get_current_user_snapshot_from_api_key_async(db, api_key_auth)
-        error = await _validate_display_end_user(
-            db, end_user_id, api_key_auth.workspace_id
-        )
-        if error is not None:
-            return _encode_result(error)
+        end_user = await validate_end_user_in_workspace_async(db, end_user_id, api_key_auth.workspace_id)
+        # 合并路由：end_user 可能是合并目标（原 ID 已被合并且 is_active=False），
+        # 必须改用 end_user.id，否则下游会按已被合并掉的旧 ID 查询而拿到空数据。
+        end_user_id = str(end_user.id)
 
     logger.info(f"V1 get all memory display - workspace: {api_key_auth.workspace_id}")
 

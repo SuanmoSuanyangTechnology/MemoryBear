@@ -20,9 +20,11 @@ from app.core.response_utils import fail, success
 from app.db import get_async_db_context
 from app.dependencies import cur_workspace_access_guard, cur_workspace_access_guard_self_db, get_current_user_async, CurrentUserSnapshot
 from app.repositories import knowledge_repository
+from app.repositories.end_user_repository import EndUserRepository
 from app.schemas.memory_agent_schema import StorageType, UserInput, Write_UserInput
 from app.schemas.response_schema import ApiResponse
 from app.services import workspace_service
+from app.services.end_user_service import EndUserService
 from app.services.memory_agent_service import MemoryAgentService
 from app.services.memory_config_service import MemoryConfigService
 from app.services.memory_validation_service import MemoryValidationService
@@ -63,8 +65,46 @@ async def write_server_async(
     storage_type = None
     user_rag_memory_id = ''
     workspace_id = current_user.current_workspace_id
+    # 跨渠道身份确认后的最终写入落点，默认与请求一致；命中归并时被覆盖为 target
+    effective_end_user_id = user_input.end_user_id
+    identity_data = None
     async with get_async_db_context() as db:
-        config_id = await MemoryConfigService(db).get_config_id_by_end_user_async(user_input.end_user_id)
+        # ── 跨渠道身份确认（仅在带标识时执行；不带/空串/纯空白则完全不碰身份字段）──
+        if user_input.identity_features and user_input.identity_features.strip():
+            clean_features = user_input.identity_features.strip()
+            end_user = await EndUserRepository(db).get_end_user_by_id_async(
+                uuid.UUID(user_input.end_user_id)
+            )
+            if end_user is None:
+                return fail(BizCode.USER_NOT_FOUND, "终端用户不存在", "end_user not found")
+            if str(end_user.workspace_id) != str(workspace_id):
+                return fail(BizCode.PERMISSION_DENIED, "该终端用户不属于当前工作空间", "workspace mismatch")
+            # 快路径条件同时校验 status：只比标识时，若标识已落库而 status 不是
+            # confirmed（历史数据、S4 写入的 expired、或上一次归并中途失败留下的
+            # 脏状态），身份确认会被永久跳过、无法自愈。
+            if (end_user.identity_features or "") != clean_features \
+                    or end_user.identity_status != "confirmed":
+                # 标识与库中现值不同（或状态未确认）：进入身份确认（可能加锁 + 归并）
+                final_id, identity_status, merged = await EndUserService(db).confirm_identity(
+                    workspace_id=workspace_id,
+                    current_end_user=end_user,
+                    identity_features=user_input.identity_features,
+                )
+                effective_end_user_id = str(final_id)
+                identity_data = {
+                    "end_user_id": effective_end_user_id,
+                    "identity_status": identity_status,
+                    "merged": merged,
+                }
+            else:
+                # 幂等快路径：标识没变且已是 confirmed，不加锁、不归并，仅回传当前身份状态
+                identity_data = {
+                    "end_user_id": str(end_user.id),
+                    "identity_status": end_user.identity_status,
+                    "merged": False,
+                }
+
+        config_id = await MemoryConfigService(db).get_config_id_by_end_user_async(effective_end_user_id)
         api_logger.info(
             f"Async write service: workspace_id={workspace_id}, config_id={config_id}, language_type={language}")
 
@@ -91,11 +131,11 @@ async def write_server_async(
             messages_list = memory_agent_service.get_messages_list(user_input)
             await MemoryService.write_messages_to_rag(
                 messages=messages_list,
-                end_user_id=user_input.end_user_id,
+                end_user_id=effective_end_user_id,
                 user_rag_memory_id=user_rag_memory_id,
             )
-            api_logger.info(f"RAG write completed for end_user={user_input.end_user_id}")
-            return success(data={}, msg="RAG 写入完成")
+            api_logger.info(f"RAG write completed for end_user={effective_end_user_id}")
+            return success(data=dict(identity_data) if identity_data else {}, msg="RAG 写入完成")
 
         # ── Neo4j 路径：通过 dispatcher 写入 ──
         workspace_id_str = str(current_user.current_workspace_id) if current_user.current_workspace_id else ""
@@ -103,17 +143,20 @@ async def write_server_async(
 
         task_ids = await MemoryService.dispatch_api_service_async(
             messages=messages_list,
-            end_user_id=user_input.end_user_id,
+            end_user_id=effective_end_user_id,
             config_id=config_id,
             workspace_id=workspace_id_str,
             language=language,
         )
 
         api_logger.info(
-            f"Write tasks queued: {len(task_ids)} tasks, end_user={user_input.end_user_id}"
+            f"Write tasks queued: {len(task_ids)} tasks, end_user={effective_end_user_id}"
         )
 
-        return success(data={"task_ids": task_ids}, msg=f"已提交 {len(task_ids)} 个写入任务")
+        data = {"task_ids": task_ids}
+        if identity_data:
+            data.update(identity_data)
+        return success(data=data, msg=f"已提交 {len(task_ids)} 个写入任务")
     except Exception as e:
         api_logger.error(f"Async write operation failed: {str(e)}")
         return fail(BizCode.INTERNAL_ERROR, "写入失败", str(e))

@@ -555,6 +555,53 @@ class EndUserRepository:
         # 未找到活跃用户 → 检查是否已被合并到其它用户
         return await self.resolve_merge_by_other_id_async(workspace_id, other_id)
 
+    async def acquire_identity_lock_async(
+        self, workspace_id: uuid.UUID, identity_features: str
+    ) -> None:
+        """按 (workspace_id, identity_features) 获取事务级排他锁，串行化身份确认。
+
+        不加锁时，两个携带相同标识的并发请求会各自查到「无匹配」，
+        双双置 identity_status=confirmed，产生两条同标识活跃记录，
+        使跨渠道归并永久失效（后续匹配只会命中其中一条）。
+
+        使用 pg_advisory_xact_lock，锁在事务提交/回滚时自动释放，无需显式 unlock。
+        """
+        await self.db.execute(
+            sa.text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+            {"key": f"eu_identity:{workspace_id}|{identity_features}"},
+        )
+
+    async def find_active_by_identity_features(
+        self, workspace_id: uuid.UUID, identity_features: str
+    ) -> Optional["EndUser"]:
+        """按 workspace_id + identity_features 查询相同标识的活跃记录（用于跨渠道归并）。
+
+        FOR UPDATE 是 advisory 锁之外的第二道保险：advisory 锁是事务级的，
+        而 merge_end_users 内部会提交多次，第一次提交就会把 advisory 锁释放掉，
+        此时 source 行尚未软删、仍带着标识。窗口期内并发的同标识请求会命中
+        这条正在被归并的记录（created_at ASC 优先取更早的 source），把自己
+        并到一个即将软删的主体上。行锁让这类请求阻塞到归并事务结束为止。
+
+        出错时只记日志并向上抛，不在此处 rollback：rollback 会连带释放调用方刚
+        获取的 advisory 锁并回滚其 pending 状态，事务边界应由调用方决定。
+        """
+        try:
+            result = await self.db.execute(
+                select(EndUser)
+                .where(
+                    EndUser.workspace_id == workspace_id,
+                    EndUser.identity_features == identity_features,
+                    EndUser.is_active.is_(True),
+                )
+                .order_by(EndUser.created_at.asc())
+                .limit(1)
+                .with_for_update()
+            )
+            return result.scalars().first()
+        except Exception as e:
+            db_logger.error(f"按身份标识查询终端用户时出错: {str(e)}")
+            raise
+
     async def resolve_merge_by_other_id_async(
         self, workspace_id: uuid.UUID, other_id: str
     ) -> Optional["EndUser"]:
@@ -2108,6 +2155,36 @@ class EndUserRepository:
             self.db.rollback()
             db_logger.error(f"软删除终端用户失败: end_user_id={end_user_id}, error={str(e)}")
             raise
+
+    async def soft_delete_many_pending_async(self, end_user_ids: set[uuid.UUID]) -> int:
+        """批量软删 EndUser，但**不提交** —— 提交权交给调用方。
+
+        与 soft_delete_by_end_user_id_async 的区别：后者内部自带 commit，会让软删
+        单独成为一个事务。归并流程要求「软删 source + 写 end_user_merge 映射」原子
+        生效，二者缺一都会留下坏状态：
+        - 只软删不写映射 → 老 end_user_id 既查不到活跃行也查不到映射，
+          get_end_user_by_id_async 返回 None，接口报「终端用户不存在」；
+        - 只写映射不软删 → 老 ID 仍被当成独立活跃主体，新数据继续写到 source，
+          而引用表迁移与 Neo4j reassign 都是一次性的，这批数据永远迁不过去。
+
+        Args:
+            end_user_ids: 待软删的 end_user id 集合，空集合直接返回 0
+
+        Returns:
+            int: 实际被软删的行数（已是 is_active=False 的行不计入）
+        """
+        if not end_user_ids:
+            return 0
+        result = await self.db.execute(
+            update(EndUser)
+            .where(EndUser.id.in_(end_user_ids), EndUser.is_active == True)
+            .values(is_active=False)
+        )
+        affected = result.rowcount or 0
+        db_logger.info(
+            f"批量软删终端用户(pending, 未提交): ids={end_user_ids}, affected={affected}"
+        )
+        return affected
 
     async def soft_delete_by_end_user_id_async(self, end_user_id: uuid.UUID) -> bool:
         """软删除指定 EndUser（异步版本）"""
