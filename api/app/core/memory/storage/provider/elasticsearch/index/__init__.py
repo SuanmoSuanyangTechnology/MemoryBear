@@ -48,6 +48,10 @@ class IndexUpdateAction(StrEnum):
     REINDEX = "reindex"
 
 
+def _display_value(value: Any) -> str:
+    return str(value)
+
+
 def _contains_definition(actual: Any, expected: Any) -> bool:
     if isinstance(expected, Mapping):
         if not isinstance(actual, Mapping):
@@ -227,10 +231,10 @@ async def validate_index(
         else None
     )
     expected_shards = definition.settings.get("number_of_shards")
-    if str(shard_count) != str(expected_shards):
+    if _display_value(shard_count) != _display_value(expected_shards):
         raise RuntimeError(
             f"Elasticsearch index '{physical_name}' must have "
-            f"{str(expected_shards)} primary shards, found {str(shard_count)}; "
+            f"{_display_value(expected_shards)} primary shards, found {_display_value(shard_count)}; "
             "increment generation to rebuild it"
         )
     if not _settings_contain_definition(index_settings, definition.settings):
@@ -254,7 +258,7 @@ async def validate_index(
     if actual_identity != expected_identity:
         raise RuntimeError(
             f"Elasticsearch index '{physical_name}' has schema identity "
-            f"{str(actual_identity)}, expected {str(expected_identity)}"
+            f"{_display_value(actual_identity)}, expected {str(expected_identity)}"
         )
     if not _contains_definition(mappings, definition.mappings):
         raise RuntimeError(
@@ -491,15 +495,18 @@ def _additive_properties_patch(
     for field, desired_mapping in desired_properties.items():
         if not isinstance(desired_mapping, Mapping):
             raise RuntimeError(
-                f"Elasticsearch mapping for field '{field}' must be a mapping"
+                f"Elasticsearch index '{definition.name}' field '{field}' "
+                "mapping must be a mapping"
             )
         current_mapping = current_properties.get(field)
         if current_mapping is None:
             patch[str(field)] = desired_mapping
         elif not _contains_definition(current_mapping, desired_mapping):
             raise RuntimeError(
-                f"Elasticsearch field '{field}' has an incompatible mapping "
-                "change; increment generation to reindex"
+                f"Elasticsearch index '{definition.name}' field '{field}' "
+                "has an incompatible mapping change "
+                f"(current={_display_value(current_mapping)}, desired={_display_value(desired_mapping)}); "
+                "increment generation to reindex"
             )
     return patch
 
@@ -524,7 +531,7 @@ async def _apply_additive_mapping(
         else None
     )
     expected_shards = definition.settings.get("number_of_shards")
-    if str(shard_count) != str(expected_shards):
+    if _display_value(shard_count) != _display_value(expected_shards):
         raise RuntimeError(
             f"Elasticsearch index '{physical_name}' has incompatible settings; "
             "increment generation to reindex"
@@ -612,7 +619,7 @@ async def _run_migration(
         if latest_index != current_index:
             raise RuntimeError(
                 f"Elasticsearch alias '{definition.alias}' changed from "
-                f"{current_index!r} to {latest_index!r} during migration; "
+                f"{_display_value(current_index)} to {_display_value(latest_index)} during migration; "
                 "refusing stale alias switch"
             )
 
