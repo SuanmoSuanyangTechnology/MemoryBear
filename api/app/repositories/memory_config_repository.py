@@ -51,7 +51,7 @@ class MemoryConfigRepository:
 
     # Dialogue count by group
     SEARCH_FOR_DIALOGUE = """
-    MATCH (n:Dialogue) WHERE n.end_user_id = $end_user_id RETURN COUNT(n) AS num
+    MATCH (n:Dialogue) WHERE n.end_user_id = $end_user_id AND n.delete_at IS NULL RETURN COUNT(n) AS num
     """
 
     # Chunk count by group
@@ -71,7 +71,7 @@ class MemoryConfigRepository:
 
     # All counts by label and total
     SEARCH_FOR_ALL = """
-    OPTIONAL MATCH (n:Dialogue) WHERE n.end_user_id = $end_user_id RETURN 'Dialogue' AS Label, COUNT(n) AS Count
+    OPTIONAL MATCH (n:Dialogue) WHERE n.end_user_id = $end_user_id AND n.delete_at IS NULL RETURN 'Dialogue' AS Label, COUNT(n) AS Count
     UNION ALL
     OPTIONAL MATCH (n:Chunk) WHERE n.end_user_id = $end_user_id AND n.delete_at is NULL RETURN 'Chunk' AS Label, COUNT(n) AS Count
     UNION ALL

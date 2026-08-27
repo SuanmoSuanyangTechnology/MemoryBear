@@ -29,6 +29,10 @@ from app.core.logging_config import get_logger
 from app.core.memory.exceptions import MemoryExtractionBusinessError
 from app.core.models import RedBearEmbeddings, RedBearLLM
 from app.core.memory.storage_services.reflection_engine import retry_registry as rr
+from app.core.memory.storage_services.forgetting_engine.constants import (
+    FORGET_CANDIDATES_KEY as _FORGET_CANDIDATES_KEY,
+    FORGET_INFLIGHT_KEY as _FORGET_INFLIGHT_KEY,
+)
 from app.core.memory.storage_services.reflection_engine.errors import (
     ReflectionBusinessError,
     ReflectionFailureReason,
@@ -4602,10 +4606,6 @@ def do_refresh_user_tags(
 #     return result
 
 
-_FORGET_CANDIDATES_KEY = "forget:candidates"
-_FORGET_INFLIGHT_KEY = "forget:inflight"
-
-
 @celery_app.task(
     name="app.tasks.scan_forget_candidates",
     bind=True,
@@ -4722,7 +4722,10 @@ def do_forget_for_user(self, end_user_id: str) -> Dict[str, Any]:
                 with write_lock:
                     result = await service.forget()
             except RuntimeError:
-                logger.warning(f"[ForgetDo] 获取写锁超时，跳过 user={end_user_id}")
+                logger.warning(
+                    f"[ForgetDo] 获取写锁超时，跳过 user={end_user_id} "
+                    "forget_lock_timeout_count=1"
+                )
                 if redis_client:
                     # 移回候选集，等下一轮 scan 重新派发（与 scan_forget_candidates 派发失败的处理一致）
                     await redis_client.smove(_FORGET_INFLIGHT_KEY, _FORGET_CANDIDATES_KEY, end_user_id)

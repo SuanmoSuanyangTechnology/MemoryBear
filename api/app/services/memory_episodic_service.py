@@ -45,6 +45,7 @@ class MemoryEpisodicService(MemoryBaseService):
             query = """
             MATCH (s:MemorySummary)
             WHERE elementId(s) = $summary_id AND s.end_user_id = $end_user_id
+              AND s.delete_at IS NULL
             RETURN s.name AS title, s.memory_type AS type
             """
             
@@ -89,6 +90,7 @@ class MemoryEpisodicService(MemoryBaseService):
             query = """
             MATCH (s:MemorySummary)
             WHERE elementId(s) = $summary_id AND s.end_user_id = $end_user_id
+              AND s.delete_at IS NULL
             MATCH (s)-[:DERIVED_FROM_STATEMENT]->(stmt:Statement)
             MATCH (stmt)-[:REFERENCES_ENTITY]->(entity:ExtractedEntity)
             WHERE entity.activation_value IS NOT NULL
@@ -134,6 +136,7 @@ class MemoryEpisodicService(MemoryBaseService):
             query = """
             MATCH (s:MemorySummary)
             WHERE elementId(s) = $summary_id AND s.end_user_id = $end_user_id
+              AND s.delete_at IS NULL
             MATCH (s)-[:DERIVED_FROM_STATEMENT]->(stmt:Statement)
             WHERE stmt.statement IS NOT NULL AND stmt.statement <> ''
             RETURN stmt.statement AS statement
@@ -216,6 +219,7 @@ class MemoryEpisodicService(MemoryBaseService):
             total_all_query = """
             MATCH (s:MemorySummary)
             WHERE s.end_user_id = $end_user_id
+              AND s.delete_at IS NULL
             RETURN count(s) AS total_all
             """
             total_all_result = await self.neo4j_connector.execute_query(
@@ -231,6 +235,7 @@ class MemoryEpisodicService(MemoryBaseService):
             query = """
             MATCH (s:MemorySummary)
             WHERE s.end_user_id = $end_user_id
+              AND s.delete_at IS NULL
             """
             
             # 添加时间范围过滤
@@ -335,6 +340,7 @@ class MemoryEpisodicService(MemoryBaseService):
             query = """
             MATCH (s:MemorySummary)
             WHERE elementId(s) = $summary_id AND s.end_user_id = $end_user_id
+              AND s.delete_at IS NULL
             RETURN elementId(s) AS id, s.created_at AS created_at
             """
             

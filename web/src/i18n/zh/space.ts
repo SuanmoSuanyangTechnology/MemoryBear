@@ -166,7 +166,7 @@ export const space = {
       custom_text: '调试文本',
       chatPlaceholder: '输入调试文本，发送后查看 AI 回复',
       chatEmpty: '发送一条消息，开始调试对话',
-      debugReply: '好的,已根据当前配置对该图文进行记忆萃取,点击右上角「调试」查看提取过程与结果。',
+      debugReply: '好的，已根据当前配置对该图文进行记忆萃取,点击右上角「调试」查看提取过程与结果。',
       ontologyCoverage: '本体类型',
       entity_total: '一共{{num}}个实体',
       scene_type_distribution: '场景类型',
