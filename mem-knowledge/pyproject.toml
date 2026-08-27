@@ -36,7 +36,7 @@ dependencies = [
     "redbear-model[all]",
     "redis>=6.4,<7",
     "requests>=2.32,<3",
-    "sqlalchemy>=2.0.44,<3",
+    "sqlalchemy[asyncio]>=2.0.44,<3",
     "tika==3.1.0",
     "tiktoken>=0.12,<1",
     "uvicorn[standard]>=0.37,<1",
