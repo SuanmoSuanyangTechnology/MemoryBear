@@ -146,7 +146,7 @@ const SpaceConfig: FC = () => {
         console.log('err', err)
       });
   }
-  const [activeTab, setActiveTab] = useState<'models' | 'memoryConfig'>('memoryConfig')
+  const [activeTab, setActiveTab] = useState<'models' | 'memoryConfig'>('models')
   /** Handle tab change */
   const handleChangeTab: TabsProps['onChange'] = (value) => {
     setActiveTab(value as ('models' | 'memoryConfig'))
