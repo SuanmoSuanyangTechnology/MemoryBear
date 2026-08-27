@@ -57,7 +57,10 @@ async def get_graph_data(
     """Get knowledge graph data (nodes + edges) for an end user."""
     async with get_async_db_context() as auth_db:
         current_user = await get_current_user_snapshot_from_api_key_async(auth_db, api_key_auth)
-        await validate_end_user_in_workspace_async(auth_db, end_user_id, api_key_auth.workspace_id)
+        end_user = await validate_end_user_in_workspace_async(auth_db, end_user_id, api_key_auth.workspace_id)
+        # 合并路由：end_user 可能是合并目标（原 ID 已被合并且 is_active=False），
+        # 必须改用 end_user.id，否则下游会按已被合并掉的旧 ID 查询而拿到空数据。
+        end_user_id = str(end_user.id)
 
 
     return await memory_analytics_controller.get_graph_data_api(
@@ -80,7 +83,10 @@ async def get_community_graph(
     """Get community clustering graph for an end user."""
     async with get_async_db_context() as auth_db:
         current_user = await get_current_user_snapshot_from_api_key_async(auth_db, api_key_auth)
-        await validate_end_user_in_workspace_async(auth_db, end_user_id, api_key_auth.workspace_id)
+        end_user = await validate_end_user_in_workspace_async(auth_db, end_user_id, api_key_auth.workspace_id)
+        # 合并路由：end_user 可能是合并目标（原 ID 已被合并且 is_active=False），
+        # 必须改用 end_user.id，否则下游会按已被合并掉的旧 ID 查询而拿到空数据。
+        end_user_id = str(end_user.id)
 
 
     return await memory_analytics_controller.get_community_graph_data_api(
@@ -102,7 +108,10 @@ async def get_node_statistics(
     """Get memory node type statistics for an end user."""
     async with get_async_db_context() as auth_db:
         current_user = await get_current_user_snapshot_from_api_key_async(auth_db, api_key_auth)
-        await validate_end_user_in_workspace_async(auth_db, end_user_id, api_key_auth.workspace_id)
+        end_user = await validate_end_user_in_workspace_async(auth_db, end_user_id, api_key_auth.workspace_id)
+        # 合并路由：end_user 可能是合并目标（原 ID 已被合并且 is_active=False），
+        # 必须改用 end_user.id，否则下游会按已被合并掉的旧 ID 查询而拿到空数据。
+        end_user_id = str(end_user.id)
 
 
     return await memory_analytics_controller.get_node_statistics_api(
@@ -125,7 +134,10 @@ async def get_user_summary(
     """Get cached user summary for an end user."""
     async with get_async_db_context() as auth_db:
         current_user = await get_current_user_snapshot_from_api_key_async(auth_db, api_key_auth)
-        await validate_end_user_in_workspace_async(auth_db, end_user_id, api_key_auth.workspace_id)
+        end_user = await validate_end_user_in_workspace_async(auth_db, end_user_id, api_key_auth.workspace_id)
+        # 合并路由：end_user 可能是合并目标（原 ID 已被合并且 is_active=False），
+        # 必须改用 end_user.id，否则下游会按已被合并掉的旧 ID 查询而拿到空数据。
+        end_user_id = str(end_user.id)
 
 
     return await memory_analytics_controller.get_user_summary_api(
@@ -145,7 +157,10 @@ async def get_memory_insight(
     """Get cached memory insight report for an end user."""
     async with get_async_db_context() as auth_db:
         current_user = await get_current_user_snapshot_from_api_key_async(auth_db, api_key_auth)
-        await validate_end_user_in_workspace_async(auth_db, end_user_id, api_key_auth.workspace_id)
+        end_user = await validate_end_user_in_workspace_async(auth_db, end_user_id, api_key_auth.workspace_id)
+        # 合并路由：end_user 可能是合并目标（原 ID 已被合并且 is_active=False），
+        # 必须改用 end_user.id，否则下游会按已被合并掉的旧 ID 查询而拿到空数据。
+        end_user_id = str(end_user.id)
 
 
     return await memory_analytics_controller.get_memory_insight_report_api(
@@ -169,7 +184,10 @@ async def get_interest_distribution(
     """Get interest distribution tags for an end user."""
     async with get_async_db_context() as auth_db:
         current_user = await get_current_user_snapshot_from_api_key_async(auth_db, api_key_auth)
-        await validate_end_user_in_workspace_async(auth_db, end_user_id, api_key_auth.workspace_id)
+        end_user = await validate_end_user_in_workspace_async(auth_db, end_user_id, api_key_auth.workspace_id)
+        # 合并路由：end_user 可能是合并目标（原 ID 已被合并且 is_active=False），
+        # 必须改用 end_user.id，否则下游会按已被合并掉的旧 ID 查询而拿到空数据。
+        end_user_id = str(end_user.id)
 
 
     return await memory_analytics_controller.get_interest_distribution_by_user_api(
@@ -193,7 +211,10 @@ async def get_end_user_info(
     """Get end user basic information (name, aliases, metadata)."""
     async with get_async_db_context() as auth_db:
         current_user = await get_current_user_snapshot_from_api_key_async(auth_db, api_key_auth)
-        await validate_end_user_in_workspace_async(auth_db, end_user_id, api_key_auth.workspace_id)
+        end_user = await validate_end_user_in_workspace_async(auth_db, end_user_id, api_key_auth.workspace_id)
+        # 合并路由：end_user 可能是合并目标（原 ID 已被合并且 is_active=False），
+        # 必须改用 end_user.id，否则下游会按已被合并掉的旧 ID 查询而拿到空数据。
+        end_user_id = str(end_user.id)
 
 
     return await end_user_controller.get_end_user_info(
@@ -229,7 +250,11 @@ async def generate_cache(
     async with get_async_db_context() as auth_db:
         current_user = await get_current_user_snapshot_from_api_key_async(auth_db, api_key_auth)
         if cache_request.end_user_id:
-            await validate_end_user_in_workspace_async(auth_db, cache_request.end_user_id, api_key_auth.workspace_id)
+            end_user = await validate_end_user_in_workspace_async(
+                auth_db, cache_request.end_user_id, api_key_auth.workspace_id
+            )
+            # 合并路由：改写请求体字段，下游 generate_cache_api 自动继承合并目标 ID
+            cache_request.end_user_id = str(end_user.id)
 
 
     return await memory_analytics_controller.generate_cache_api(

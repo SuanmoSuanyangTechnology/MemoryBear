@@ -333,8 +333,7 @@ class MemoryMessageRepository:
 
         分页语义（service_api / mcp 两种来源完全一致）：
         - 使用 page / pagesize 分页，page 从 1 开始
-        - 按 message_seq ASC 排序：message_seq 从小到大表示消息从旧到新，
-          且在该来源分组内单调递增，保证翻页无重复、无遗漏
+        - 仅按 created_at ASC 排序：入库时间从早到晚，即消息从旧到新
         - total 通过窗口函数 count(*) OVER () 与数据同一条 SQL 返回，
           避免独立的 COUNT 往返；页码越界时回退一次 COUNT 保证 total 准确
         """
@@ -351,7 +350,7 @@ class MemoryMessageRepository:
                 func.count().over().label("total"),
             )
             .where(*base_filter)
-            .order_by(MemoryMessage.message_seq.asc())
+            .order_by(MemoryMessage.created_at.asc())
             .offset(offset)
             .limit(pagesize)
         )

@@ -5,6 +5,10 @@ from typing import Self
 from pydantic import BaseModel, Field, field_serializer, ConfigDict, computed_field
 
 from app.core.memory.enums import Neo4jNodeType, StorageType
+from app.core.memory.retrieval_trace.models import (
+    RetrievalExecutionTrace,
+    RetrievalScoreTrace,
+)
 from app.schemas.memory_config_schema import MemoryConfig
 
 
@@ -43,6 +47,7 @@ class Memory(BaseModel):
     data: dict = Field(default_factory=dict)
     query: str = Field(...)
     id: str = Field(...)
+    retrieval_trace: RetrievalScoreTrace | None = Field(default=None, exclude=True)
 
     @field_serializer("source")
     def serialize_source(self, v) -> str:
@@ -78,6 +83,7 @@ class MemorySearchResult(BaseModel):
     memories: list[Memory]
     relations: list[RelationMemory] = Field(default_factory=list)
     content_str: str = Field(default="")
+    execution_trace: RetrievalExecutionTrace | None = Field(default=None, exclude=True)
 
     @property
     def content(self) -> str:

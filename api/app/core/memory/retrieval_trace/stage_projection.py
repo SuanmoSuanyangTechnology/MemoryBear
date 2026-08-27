@@ -17,6 +17,11 @@ from app.core.memory.models.service_models import (
     MemorySearchResult,
     RelationMemory,
 )
+from app.core.memory.retrieval_trace.models import (
+    RetrievalExecutionTrace,
+    build_score_trace,
+    finite_or_none,
+)
 
 _PROFILE_FIELDS = (
     "aliases_name",
@@ -232,3 +237,111 @@ def project_result_items(
     for index, item in enumerate(items, start=1):
         item["rank"] = index
     return items
+
+
+def project_retrieval_candidate(memory: Memory, rank: int) -> dict[str, Any]:
+    """将单条候选安全投影为记忆验证页 retrieval_trace 事件使用的带分数轨迹的
+    候选结构（区别于 project_memory_items 产出的仅含 rank/id/type/content 的
+    简化结构）。"""
+    source = memory.source.value if isinstance(memory.source, Neo4jNodeType) else str(memory.source)
+    trace = memory.retrieval_trace
+    if trace is None:
+        backend = "rag" if memory.source == Neo4jNodeType.RAG else "neo4j"
+        trace = build_score_trace(
+            node_id=memory.id,
+            node_type=source,
+            final_score=memory.score,
+            rank_basis="provider_score" if backend == "rag" else "input_order",
+            backend=backend,
+            matched_queries=[memory.query],
+        )
+    final_score = finite_or_none(trace.final_score)
+    if final_score is None:
+        final_score = 0.0
+    item: dict[str, Any] = {
+        "rank": rank,
+        "memory_id": str(memory.id),
+        "memory_type": memory_type(memory.source),
+        "source": source,
+        "content": _memory_content(memory, memory_type(memory.source), prefer_perceptual_display=True),
+        "retrieval_type": trace.retrieval_type,
+        "keyword_score": finite_or_none(trace.keyword_score),
+        "semantic_score": finite_or_none(trace.semantic_score),
+        "fusion_score": finite_or_none(trace.fusion_score),
+        "rerank_score": finite_or_none(trace.rerank_score),
+        "final_score": final_score,
+        "rank_basis": trace.rank_basis,
+        "hit_source": {
+            "backend": trace.backend,
+            "node_type": trace.node_type,
+            "node_id": trace.node_id,
+            "matched_queries": list(trace.matched_queries),
+        },
+    }
+    if memory.source == Neo4jNodeType.PERCEPTUAL:
+        data = memory.data if isinstance(memory.data, dict) else {}
+        file_data = {
+            "file_name": display_text(data.get("file_name"), 1000),
+            "file_path": display_text(data.get("file_path"), 2000),
+            "file_type": display_text(data.get("file_type"), 200),
+            "perceptual_type": _perceptual_type(data.get("perceptual_type")),
+        }
+        if any(value not in (None, "") for value in file_data.values()):
+            item["file"] = file_data
+    return item
+
+
+def _find_stage(stages: Iterable[dict[str, Any]], name: str) -> dict[str, Any] | None:
+    return next((stage for stage in stages if stage.get("stage") == name), None)
+
+
+def _search_status(trace: RetrievalExecutionTrace) -> str:
+    active = [trace.keyword_status]
+    if trace.semantic_status != "skipped":
+        active.append(trace.semantic_status)
+    if active and all(status == "failed" for status in active):
+        return "failed"
+    if any(status in {"failed", "degraded"} for status in active):
+        return "degraded"
+    if trace.rerank_status == "degraded":
+        return "degraded"
+    if trace.degraded_reasons:
+        return "degraded"
+    return "completed"
+
+
+def build_validation_trace(
+    *,
+    request_id: str,
+    query: str,
+    search_switch: str,
+    end_user_id: str,
+    result: MemorySearchResult,
+    collected_stages: Iterable[dict[str, Any]] = (),
+    backend: str = "neo4j",
+    limit: int = 10,
+) -> dict[str, Any]:
+    """构造验证页最终轨迹，不修改 Agent 共用的阶段事件协议。"""
+    stages = list(collected_stages)
+    execution = result.execution_trace or RetrievalExecutionTrace(
+        original_query=query,
+        processed_query=query,
+        search_switch=search_switch,
+        backend=backend,
+        limit=limit,
+    )
+    ranked_memories = [memory for memory in result.memories if memory.id != end_user_id]
+    limited_memories = ranked_memories[:max(execution.limit, 0)]
+    candidates = [
+        project_retrieval_candidate(memory, rank)
+        for rank, memory in enumerate(limited_memories, start=1)
+    ]
+    search_status = _search_status(execution)
+    result_stage = _find_stage(stages, "result_ready")
+    duration = int(result_stage.get("data", {}).get("duration_ms", 0)) if result_stage else 0
+    return {
+        "request_id": request_id,
+        "status": search_status,
+        "duration_ms": duration,
+        "items": candidates,
+    }

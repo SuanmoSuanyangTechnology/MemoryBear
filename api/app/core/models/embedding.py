@@ -12,6 +12,7 @@ from app.core.alert_metric_bridge import (
 )
 from app.core.config import settings
 from app.core.models.base import RedBearModelConfig, get_provider_embedding_class, RedBearModelFactory
+from app.core.models.network_retry import network_retry
 from app.models.models_model import ModelProvider
 
 
@@ -34,7 +35,10 @@ class RedBearEmbeddings(Embeddings):
     def _observed_call(self, operation: str, call):
         started = time.perf_counter()
         try:
-            result = call()
+            @network_retry
+            def _call():
+                return call()
+            return _call()
         except Exception as exc:
             report_model_gateway_failure(self._config, operation, exc, started)
             raise
@@ -44,7 +48,10 @@ class RedBearEmbeddings(Embeddings):
     async def _observed_async_call(self, operation: str, call):
         started = time.perf_counter()
         try:
-            result = await call()
+            @network_retry
+            async def _call():
+                return await call()
+            return await _call()
         except Exception as exc:
             await report_model_gateway_failure_async(
                 self._config, operation, exc, started

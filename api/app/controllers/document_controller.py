@@ -5,7 +5,7 @@ import os
 from typing import Optional
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status, Query, Body
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Body, Request
 from fastapi.encoders import jsonable_encoder
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -40,6 +40,8 @@ from app.services.rag_access_service import require_current_workspace_document_a
 from app.services.file_storage_service import FileStorageService, get_file_storage_service
 from app.schemas import knowledge_metadata_schema as metadata_schema
 from app.services.knowledge_metadata_service import KnowledgeMetadataService
+from app.integrations.knowledge.contracts import KnowledgeRetrievalSource
+from app.integrations.knowledge.route_proxy import route_through_knowledge_service
 
 
 # Obtain a dedicated API logger
@@ -106,6 +108,7 @@ async def _delete_file_record_async(
 
 @router.get("/{kb_id}/documents", response_model=ApiResponse)
 @cur_workspace_access_guard_async()
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.MANAGER_API)
 async def get_documents(
         kb_id: uuid.UUID,
         parent_id: Optional[uuid.UUID] = Query(None, description="parent folder id when type is Folder"),
@@ -116,7 +119,8 @@ async def get_documents(
         keywords: Optional[str] = Query(None, description="Search keywords (file name)"),
         document_ids: Optional[str] = Query(None, description="document ids, separated by commas"),
         db: AsyncSession = Depends(get_async_db),
-        current_user: User = Depends(get_current_user_async)
+        current_user: User = Depends(get_current_user_async),
+        request: Request = None,
 ):
     """
     Paged query document list
@@ -217,10 +221,12 @@ async def get_documents(
 
 @router.post("/document", response_model=ApiResponse)
 @cur_workspace_access_guard_async()
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.MANAGER_API)
 async def create_document(
         create_data: document_schema.DocumentCreate,
         db: AsyncSession = Depends(get_async_db),
-        current_user: User = Depends(get_current_user_async)
+        current_user: User = Depends(get_current_user_async),
+        request: Request = None,
 ):
     """
     create document
@@ -260,10 +266,12 @@ async def create_document(
 
 @router.get("/{document_id}", response_model=ApiResponse)
 @cur_workspace_access_guard_async()
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.MANAGER_API)
 async def get_document(
         document_id: uuid.UUID,
         db: AsyncSession = Depends(get_async_db),
-        current_user: User = Depends(get_current_user_async)
+        current_user: User = Depends(get_current_user_async),
+        request: Request = None,
 ):
     """
     Retrieve document information based on document_id
@@ -292,11 +300,13 @@ async def get_document(
 
 @router.put("/{document_id}", response_model=ApiResponse)
 @cur_workspace_access_guard_async()
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.MANAGER_API)
 async def update_document(
         document_id: uuid.UUID,
         update_data: document_schema.DocumentUpdate,
         db: AsyncSession = Depends(get_async_db),
-        current_user: User = Depends(get_current_user_async)
+        current_user: User = Depends(get_current_user_async),
+        request: Request = None,
 ):
     """
     Update document information
@@ -415,11 +425,13 @@ async def update_document(
 
 @router.delete("/{document_id}", response_model=ApiResponse)
 @cur_workspace_access_guard_async()
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.MANAGER_API)
 async def delete_document(
         document_id: uuid.UUID,
         db: AsyncSession = Depends(get_async_db),
         current_user: User = Depends(get_current_user_async),
         storage_service: FileStorageService = Depends(get_file_storage_service),
+        request: Request = None,
 ):
     """
     Delete document
@@ -520,10 +532,12 @@ async def delete_document(
 
 @router.post("/{document_id}/chunks", response_model=ApiResponse)
 @cur_workspace_access_guard_async()
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.MANAGER_API)
 async def parse_documents(
         document_id: uuid.UUID,
         db: AsyncSession = Depends(get_async_db),
-        current_user: User = Depends(get_current_user_async)
+        current_user: User = Depends(get_current_user_async),
+        request: Request = None,
 ):
     """
     parse document
@@ -603,10 +617,12 @@ async def parse_documents(
 
 @router.post("/metadata/batch", response_model=ApiResponse)
 @cur_workspace_access_guard_async()
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.MANAGER_API)
 async def batch_update_document_metadata(
     data: metadata_schema.BatchUpdateMetadataRequest,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
+    request: Request = None,
 ):
     """
     批量更新文档元数据
@@ -650,11 +666,13 @@ async def batch_update_document_metadata(
 
 @router.put("/{document_id}/metadata", response_model=ApiResponse)
 @cur_workspace_access_guard_async()
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.MANAGER_API)
 async def update_document_metadata(
     document_id: uuid.UUID,
     data: metadata_schema.DocumentMetadataUpdateRequest,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
+    request: Request = None,
 ):
     """
     更新单个文档的元数据
@@ -694,10 +712,12 @@ async def update_document_metadata(
 
 @router.get("/{document_id}/metadata", response_model=ApiResponse)
 @cur_workspace_access_guard_async()
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.MANAGER_API)
 async def get_document_metadata(
     document_id: uuid.UUID,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
+    request: Request = None,
 ):
     """获取单个文档的元数据"""
     api_logger.info(
@@ -729,11 +749,13 @@ async def get_document_metadata(
 
 @router.post("/{document_id}/metadata", response_model=ApiResponse)
 @cur_workspace_access_guard_async()
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.MANAGER_API)
 async def delete_document_metadata(
     document_id: uuid.UUID,
     data: metadata_schema.DocumentMetadataDeleteRequest | None = Body(None),
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
+    request: Request = None,
 ):
     """
     删除单个文档的元数据

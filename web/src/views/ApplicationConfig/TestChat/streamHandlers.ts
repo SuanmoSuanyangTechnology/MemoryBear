@@ -13,7 +13,6 @@ import {
   applyMessageId,
   applyUserMessageId,
   appendWorkflowContent,
-  replaceWorkflowContent,
   appendWorkflowIntervention,
   markWorkflowInterventionTimeout,
   mergeWorkflowAgentLog,
@@ -26,6 +25,7 @@ import {
 import {
   appendOutputByNodeId as appendWorkflowOutputByNodeId,
   finalizeOutputs as finalizeWorkflowOutputs,
+  replaceOutputByNodeId as replaceWorkflowOutputByNodeId,
 } from '@/components/Chat/utils/messageOutputs'
 
 type SetChatList = Dispatch<SetStateAction<Array<ChatItem | ChatItem[]>>>
@@ -183,9 +183,9 @@ export const createWorkflowStreamHandler = (deps: WorkflowStreamDeps) => {
           setChatList(prev => appendWorkflowContent(prev, content))
           setChatList(prev => appendWorkflowOutputByNodeId(prev, node_id, content))
           break
-        // Replace the assistant message content wholesale and drop the segmented outputs
+        // Replace one node output, or replace the complete response when node_id is absent
         case 'message_replace':
-          setChatList(prev => replaceWorkflowContent(prev, content))
+          setChatList(prev => replaceWorkflowOutputByNodeId(prev, node_id, content))
           break
         case 'intervention_required':
           setChatList(prev => appendWorkflowIntervention(prev, {

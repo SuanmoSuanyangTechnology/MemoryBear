@@ -19,6 +19,7 @@ from app.models.workspace_model import Workspace
 from app.repositories.end_user_repository import EndUserRepository
 from app.schemas.api_key_schema import ApiKeyAuth
 from app.schemas.end_user_info_schema import EndUserInfoUpdate
+from app.schemas.end_user_schema import EndUserIdentityUpdate
 from app.schemas.memory_api_schema import CreateEndUserRequest, CreateEndUserResponse
 from app.services.memory_config_service import MemoryConfigService
 
@@ -242,5 +243,31 @@ async def update_end_user_info(
 
     return await end_user_controller.update_end_user_info(
         info_update=payload,
+        current_user=current_user,
+    )
+
+
+@router.post("/identity/update")
+@require_api_key_self_db(scopes=["memory"])
+async def update_end_user_identity(
+    request: Request,
+    api_key_auth: ApiKeyAuth = None,
+    message: str = Body(None, description="Request body"),
+):
+    """
+    Update end user cross-channel identity features.
+
+    Sets / clears the identity_features of the specified end user and runs
+    identity confirmation & cross-channel merge. Delegates to the manager-side
+    controller for shared logic (no double implementation).
+    """
+    body = await request.json()
+    payload = EndUserIdentityUpdate(**body)
+
+    async with get_async_db_context() as auth_db:
+        current_user = await get_current_user_snapshot_from_api_key_async(auth_db, api_key_auth)
+
+    return await end_user_controller.update_end_user_identity(
+        identity_update=payload,
         current_user=current_user,
     )

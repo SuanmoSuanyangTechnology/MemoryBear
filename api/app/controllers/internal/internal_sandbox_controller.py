@@ -26,6 +26,14 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.db import get_db
+from app.integrations.knowledge.contracts import (
+    KnowledgeCallContext,
+    KnowledgeContextError,
+    KnowledgePrincipal,
+    KnowledgeRetrievalSource,
+)
+from app.integrations.knowledge.runtime import get_knowledge_retriever
+from app.schemas.knowledge_retrieval_schema import KnowledgeRetrievalRequest
 
 logger = logging.getLogger(__name__)
 
@@ -201,31 +209,39 @@ async def retrieve_knowledge(
         if not body.knowledge_base_ids:
             return {"results": []}
 
-        w_id = uuid.UUID(workspace_id) if workspace_id else None
+        if not workspace_id or not user_id:
+            raise KnowledgeContextError("Sandbox knowledge identity is incomplete")
+        w_id = uuid.UUID(workspace_id)
         kb_ids = [uuid.UUID(kid) for kid in body.knowledge_base_ids]
 
         from app.models.workspace_model import Workspace
         workspace = db.get(Workspace, w_id) if w_id else None
         tenant_id = workspace.tenant_id if workspace else None
 
-        from app.schemas.knowledge_retrieval_schema import KnowledgeRetrievalRequest
-        from app.core.rag.retrieval.models import RetrievalPrincipal
-        from app.services.knowledge_retrieval_service import KnowledgeRetrievalService
-
         request = KnowledgeRetrievalRequest(
             query=body.query,
             kb_ids=kb_ids,
             top_k=min(body.top_k, 100),
             similarity_threshold=body.score_threshold,
+            source=KnowledgeRetrievalSource.SANDBOX,
         )
-        principal = RetrievalPrincipal(
-            id=uuid.UUID(user_id) if user_id else None,
-            username=None,
-            tenant_id=tenant_id,
-            current_workspace_id=w_id,
-            is_superuser=False,
+        if tenant_id is None:
+            raise KnowledgeContextError("Sandbox knowledge tenant is unavailable")
+        context = KnowledgeCallContext(
+            principal=KnowledgePrincipal(
+                actor_id=uuid.UUID(user_id),
+                actor_name=None,
+                tenant_id=tenant_id,
+                workspace_id=w_id,
+            ),
+            source=KnowledgeRetrievalSource.SANDBOX,
+            trace_id=auth.get("execution_id") or uuid.uuid4().hex,
         )
-        result = await KnowledgeRetrievalService.retrieve_async(request, principal=principal)
+        db.close()
+        result = await get_knowledge_retriever().retrieve(
+            request,
+            context,
+        )
 
         results = []
         citations = []

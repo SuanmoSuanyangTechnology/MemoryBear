@@ -89,6 +89,11 @@ class Settings:
 
     DB_AUTO_UPGRADE = os.getenv("DB_AUTO_UPGRADE", "false").lower() == "true"
 
+    # Health probe configuration
+    READINESS_CHECK_TIMEOUT_SECONDS: float = float(
+        os.getenv("READINESS_CHECK_TIMEOUT_SECONDS", "2.0")
+    )
+
     # Redis configuration
     REDIS_HOST: str = os.getenv("REDIS_HOST", "127.0.0.1")
     REDIS_PORT: int = int(os.getenv("REDIS_PORT", "6379"))
@@ -119,6 +124,34 @@ class Settings:
         min(30000, int(os.getenv("KNOWLEDGE_GRAPH_RETRIEVAL_TIMEOUT_MS", "15000"))),
     )
 
+    # Independent knowledge service routing
+    ENABLE_MEM_KNOWLEDGE: bool = os.getenv("ENABLE_MEM_KNOWLEDGE", "false").lower() == "true"
+    MEM_KNOWLEDGE_BASE_URL: str = os.getenv("MEM_KNOWLEDGE_BASE_URL", "")
+    MEM_KNOWLEDGE_CONNECT_TIMEOUT_SECONDS: float = float(
+        os.getenv("MEM_KNOWLEDGE_CONNECT_TIMEOUT_SECONDS", "5")
+    )
+    MEM_KNOWLEDGE_POOL_TIMEOUT_SECONDS: float = float(
+        os.getenv("MEM_KNOWLEDGE_POOL_TIMEOUT_SECONDS", "5")
+    )
+    MEM_KNOWLEDGE_READ_TIMEOUT_SECONDS: float = float(
+        os.getenv("MEM_KNOWLEDGE_READ_TIMEOUT_SECONDS", "120")
+    )
+    MEM_KNOWLEDGE_WRITE_TIMEOUT_SECONDS: float = float(
+        os.getenv("MEM_KNOWLEDGE_WRITE_TIMEOUT_SECONDS", "600")
+    )
+    MEM_KNOWLEDGE_STREAM_READ_TIMEOUT_SECONDS: float = float(
+        os.getenv("MEM_KNOWLEDGE_STREAM_READ_TIMEOUT_SECONDS", "600")
+    )
+    MEM_KNOWLEDGE_MAX_CONNECTIONS: int = int(
+        os.getenv("MEM_KNOWLEDGE_MAX_CONNECTIONS", "100")
+    )
+    MEM_KNOWLEDGE_MAX_KEEPALIVE_CONNECTIONS: int = int(
+        os.getenv("MEM_KNOWLEDGE_MAX_KEEPALIVE_CONNECTIONS", "20")
+    )
+    MEM_KNOWLEDGE_HEALTH_TIMEOUT_SECONDS: float = float(
+        os.getenv("MEM_KNOWLEDGE_HEALTH_TIMEOUT_SECONDS", "3")
+    )
+
     # Xinference configuration
     XINFERENCE_URL: str = os.getenv("XINFERENCE_URL", "http://127.0.0.1")
 
@@ -131,6 +164,7 @@ class Settings:
     # LLM Request Configuration
     LLM_TIMEOUT: float = float(os.getenv("LLM_TIMEOUT", "120.0"))
     LLM_MAX_RETRIES: int = int(os.getenv("LLM_MAX_RETRIES", "2"))
+    LLM_NETWORK_RETRY_ATTEMPTS: int = int(os.getenv("LLM_NETWORK_RETRY_ATTEMPTS", "3"))
     EMBEDDING_BATCH_SIZE: int = int(os.getenv("EMBEDDING_BATCH_SIZE", "10"))
 
     # Fast Write BERT 
@@ -409,6 +443,12 @@ class Settings:
     GDS_TOPOLOGY_SCAN_INTERVAL_MINUTES: int = TypeAdapter(
         Annotated[int, Field(ge=1, description="GDS topology score scan interval in minutes, must be >= 1")]
     ).validate_python(int(os.getenv("GDS_TOPOLOGY_SCAN_INTERVAL_MINUTES", "60")))
+    GDS_TOPOLOGY_INFLIGHT_TTL_SEC: int = TypeAdapter(
+        Annotated[int, Field(ge=1, description="GDS topology in-flight lock TTL in seconds, must be >= 1")]
+    ).validate_python(int(os.getenv("GDS_TOPOLOGY_INFLIGHT_TTL_SEC", "86400")))
+    GDS_TOPOLOGY_ACTIVE_HOURS: int = TypeAdapter(
+        Annotated[int, Field(ge=1, description="GDS topology active window in hours, must be >= 1")]
+    ).validate_python(int(os.getenv("GDS_TOPOLOGY_ACTIVE_HOURS", "2")))
     # 热门记忆标签缓存预热时间（UTC 小时，0-23）。19 = 北京时间 03:00
     HOT_MEMORY_TAGS_REFRESH_HOUR: int = TypeAdapter(
         Annotated[int, Field(ge=0, le=23, description="Hot memory tags cache refresh hour (UTC), 0-23. 19=Beijing 03:00")]
@@ -436,6 +476,16 @@ class Settings:
     # workflow config
     WORKFLOW_IMPORT_CACHE_TIMEOUT: int = int(os.getenv("WORKFLOW_IMPORT_CACHE_TIMEOUT", 1800))
     WORKFLOW_NODE_TIMEOUT: int = int(os.getenv("WORKFLOW_NODE_TIMEOUT", 600))
+
+    # workflow_node_executions 保留策略开关。
+    # 开启后该表只保留「最近一次」记录：
+    #   - 完整工作流：同 app_id + workflow_config_id 下按执行开始时间最近 1 次的全部节点行
+    #     （包括 waiting_human；较旧人工介入执行恢复时也不会覆盖更新执行）
+    #   - 单节点调试：同 app_id + workflow_config_id + node_id 下最近 1 条
+    # 历史明细的权威数据源是 workflow_executions.output_data["node_outputs"]，不受影响。
+    WORKFLOW_NODE_EXECUTION_RETENTION_ENABLED: bool = os.getenv(
+        "WORKFLOW_NODE_EXECUTION_RETENTION_ENABLED", "true"
+    ).lower() == "true"
 
     # ========================================================================
     # General Ontology Type Configuration

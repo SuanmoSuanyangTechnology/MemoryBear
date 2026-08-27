@@ -10,6 +10,8 @@ from app.controllers import document_controller
 from app.core.api_key_auth import require_api_key_self_db
 from app.core.logging_config import get_business_logger
 from app.db import get_async_db
+from app.integrations.knowledge.contracts import KnowledgeRetrievalSource
+from app.integrations.knowledge.route_proxy import route_through_knowledge_service
 from app.schemas import document_schema
 from app.schemas.api_key_schema import ApiKeyAuth
 from app.schemas.response_schema import ApiResponse
@@ -27,6 +29,7 @@ document_controller = unwrap_current_workspace_guard(document_controller)
 
 @router.get("/{kb_id}/documents", response_model=ApiResponse)
 @require_api_key_self_db(scopes=["rag"])
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.EXTERNAL_API)
 async def get_documents(
     kb_id: uuid.UUID,
     request: Request,
@@ -65,6 +68,7 @@ async def get_documents(
 
 @router.post("/document", response_model=ApiResponse)
 @require_api_key_self_db(scopes=["rag"])
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.EXTERNAL_API)
 async def create_document(
     request: Request,
     api_key_auth: ApiKeyAuth = None,
@@ -88,6 +92,7 @@ async def create_document(
 
 @router.get("/{document_id}", response_model=ApiResponse)
 @require_api_key_self_db(scopes=["rag"])
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.EXTERNAL_API)
 async def get_document(
     document_id: uuid.UUID,
     request: Request,
@@ -108,6 +113,7 @@ async def get_document(
 
 @router.put("/{document_id}", response_model=ApiResponse)
 @require_api_key_self_db(scopes=["rag"])
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.EXTERNAL_API)
 async def update_document(
     document_id: uuid.UUID,
     request: Request,
@@ -132,6 +138,7 @@ async def update_document(
 
 @router.delete("/{document_id}", response_model=ApiResponse)
 @require_api_key_self_db(scopes=["rag"])
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.EXTERNAL_API)
 async def delete_document(
     document_id: uuid.UUID,
     request: Request,
@@ -152,6 +159,7 @@ async def delete_document(
 
 @router.post("/{document_id}/chunks", response_model=ApiResponse)
 @require_api_key_self_db(scopes=["rag"])
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.EXTERNAL_API)
 async def parse_documents(
     document_id: uuid.UUID,
     request: Request,

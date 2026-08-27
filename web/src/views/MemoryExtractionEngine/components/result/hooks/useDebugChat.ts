@@ -71,13 +71,13 @@ export const useDebugChat = (
 
     const handleStreamMessage = (list: SSEMessage[]) => {
       list.forEach((item: AnyObject) => {
-        const { content, error } = (item.data || {}) as AnyObject
+        const { content, error, message } = (item.data || {}) as AnyObject
         switch (item.event) {
           case 'message':
             updateAssistantContent(typeof content === 'string' ? content : '')
             break
           case 'error':
-            updateAssistantContent(t('memoryExtractionEngine.debugReply'))
+            updateAssistantContent(message)
             break;
           case 'end':
             if (error) {
@@ -121,8 +121,9 @@ export const useDebugChat = (
       })),
       message: content,
     }, handleStreamMessage, (abort) => { abortRef.current = abort })
-      .catch(() => {
-        updateAssistantContent(t('memoryExtractionEngine.debugReply'))
+      .catch((error) => {
+        const err = error.message ? JSON.parse(error.message) : {};
+        updateAssistantContent(err.msg || t('memoryExtractionEngine.debugReply'))
       })
       .finally(() => {
         streamLoadingRef.current = false

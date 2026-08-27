@@ -7,6 +7,8 @@ user_memory_controllers），使对内 /api/end_user/* 与对外 /v1/end_user/* 
 路由前缀: /end_user
 认证方式: JWT Token
 """
+import uuid
+
 from fastapi import APIRouter, Depends
 
 from app.core.error_codes import BizCode
@@ -16,7 +18,9 @@ from app.db import get_async_db_context
 from app.dependencies import get_current_user_async, CurrentUserSnapshot
 from app.repositories.end_user_repository import EndUserRepository
 from app.schemas.end_user_info_schema import EndUserInfoUpdate
+from app.schemas.end_user_schema import EndUserIdentityUpdate
 from app.schemas.response_schema import ApiResponse
+from app.services.end_user_service import EndUserService
 from app.services.user_memory_service import UserMemoryService
 
 api_logger = get_api_logger()
@@ -66,6 +70,10 @@ async def get_end_user_info(
             return fail(BizCode.USER_NOT_FOUND, "终端用户不存在", "end_user not found")
         if str(end_user.workspace_id) != str(workspace_id):
             return fail(BizCode.PERMISSION_DENIED, "该终端用户不属于当前工作空间", "end_user workspace mismatch")
+
+        # 合并路由：end_user.id 可能是合并目标（原 ID 已被合并且 is_active=False），
+        # 必须用它查询 info 记录，否则旧 ID 的 info 已随合并迁移而查不到。
+        end_user_uuid = end_user.id
 
         # 通过 repository 异步方法查询 EndUserInfo 记录
         from app.repositories.end_user_info_repository import EndUserInfoRepository
@@ -146,6 +154,10 @@ async def update_end_user_info(
             )
             return fail(BizCode.PERMISSION_DENIED, "该终端用户不属于当前工作空间", "end_user workspace mismatch")
 
+        # 合并路由：end_user.id 可能是合并目标（原 ID 已被合并且 is_active=False），
+        # 必须用它更新 info 记录，否则会写到已被合并掉的旧用户上。
+        end_user_id = str(end_user.id)
+
         # 获取更新数据（排除 end_user_id）
         update_data = info_update.model_dump(exclude_unset=True, exclude={'end_user_id'})
 
@@ -164,3 +176,73 @@ async def update_end_user_info(
             return fail(BizCode.INVALID_USER_ID, "无效的终端用户ID格式", error_msg)
         else:
             return fail(BizCode.INTERNAL_ERROR, "终端用户信息更新失败", error_msg)
+
+
+@router.post("/identity/update", response_model=ApiResponse)
+async def update_end_user_identity(
+    identity_update: EndUserIdentityUpdate,
+    current_user: CurrentUserSnapshot = Depends(get_current_user_async),
+) -> dict:
+    """
+    修改终端用户的跨渠道身份标识并执行身份确认 / 归并。
+
+    - 传入标识 → 确认为长时身份(confirmed)，命中同 workspace 内其他活跃主体时归并到目标；
+    - 传 null / 空串 / 纯空白 → 清空标识并降级为临时身份(temporary)。
+
+    业务逻辑全部复用 EndUserService.confirm_identity，本函数只做参数校验与归属校验。
+    """
+    workspace_id = current_user.current_workspace_id
+    source_end_user_id = identity_update.end_user_id
+
+    if workspace_id is None:
+        api_logger.warning(f"用户 {current_user.username} 尝试修改身份标识但未选择工作空间")
+        return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
+
+    # 校验 end_user_id 格式（用 str 入参，格式错误在此返回 HTTP 200 + 9601）
+    try:
+        end_user_uuid = uuid.UUID(source_end_user_id)
+    except (ValueError, AttributeError, TypeError):
+        return fail(BizCode.INVALID_USER_ID, "无效的终端用户ID格式", "invalid uuid")
+
+    api_logger.info(
+        f"修改终端用户身份标识请求: end_user_id={source_end_user_id}, user={current_user.username}, "
+        f"workspace={workspace_id}"
+    )
+
+    try:
+        async with get_async_db_context() as db:
+            # 校验 end_user 是否存在且属于当前工作空间
+            end_user = await EndUserRepository(db).get_end_user_by_id_async(end_user_uuid)
+            if end_user is None:
+                return fail(BizCode.USER_NOT_FOUND, "终端用户不存在", "end_user not found")
+            if str(end_user.workspace_id) != str(workspace_id):
+                api_logger.warning(
+                    f"用户 {current_user.username} 尝试修改不属于工作空间 {workspace_id} 的终端用户 {source_end_user_id}"
+                )
+                return fail(BizCode.PERMISSION_DENIED, "该终端用户不属于当前工作空间", "end_user workspace mismatch")
+
+            final_id, identity_status, merged = await EndUserService(db).confirm_identity(
+                workspace_id=workspace_id,
+                current_end_user=end_user,
+                identity_features=identity_update.identity_features,
+            )
+
+        # 规范化后的标识：空串 / 纯空白 / null 一律回传 null
+        raw_features = identity_update.identity_features
+        clean_features = raw_features.strip() if raw_features and raw_features.strip() else None
+
+        response_data = {
+            "end_user_id": str(final_id),
+            "source_end_user_id": source_end_user_id,
+            "identity_features": clean_features,
+            "identity_status": identity_status,
+            "merged": merged,
+        }
+        api_logger.info(
+            f"成功更新终端用户身份标识: source={source_end_user_id}, "
+            f"final={final_id}, status={identity_status}, merged={merged}"
+        )
+        return success(data=response_data, msg="身份标识更新成功")
+    except Exception as e:
+        api_logger.error(f"终端用户身份标识更新失败: end_user_id={source_end_user_id}, error={str(e)}")
+        return fail(BizCode.INTERNAL_ERROR, "身份标识更新失败", str(e))

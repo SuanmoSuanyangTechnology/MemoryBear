@@ -262,7 +262,7 @@ class MemoryAgentService:
             if msg.dialog_at:
                 msg_dict["dialog_at"] = msg.dialog_at
             if msg.files:
-                msg_dict["files"] = [f.model_dump(exclude_none=True) for f in msg.files]
+                msg_dict["files"] = [f.model_dump(mode="json", exclude_none=True) for f in msg.files]
             result.append(msg_dict)
 
         logger.info(f"Validation successful: Structured message list, count: {len(result)}")
