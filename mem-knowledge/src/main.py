@@ -19,6 +19,7 @@ from .bootstrap import get_settings
 from .config import KnowledgeSettings
 from .errors import KnowledgeError
 from .logging import setup_logging
+from .request_logging import RequestLoggingFastAPI, request_route_template
 from .runtime import ProcessRuntime
 from .trace import TRACE_ID_HEADER, TraceIdMiddleware, get_trace_id
 
@@ -92,7 +93,7 @@ def create_app(settings: KnowledgeSettings | None = None) -> FastAPI:
             await application.state.runtime.aclose()
             logger.info("Knowledge service stopped")
 
-    application = FastAPI(
+    application = RequestLoggingFastAPI(
         title="MemoryBear Knowledge Service",
         description="Internal MemoryBear knowledge service API",
         version="0.1.0",
@@ -111,11 +112,7 @@ def create_app(settings: KnowledgeSettings | None = None) -> FastAPI:
         exc: RequestValidationError,
     ) -> JSONResponse:
         trace_id = getattr(request.state, "trace_id", get_trace_id())
-        route_path = getattr(request.scope.get("route"), "path", "<unresolved>")
-        if request.url.path.startswith("/internal/v1/") and not route_path.startswith(
-            "/internal/v1/"
-        ):
-            route_path = f"/internal/v1{route_path}"
+        route_path = request_route_template(request.scope)
         validation_errors = [
             {
                 "loc": str((tuple(error.get("loc", ())) or ("unknown",))[0]),
@@ -124,7 +121,7 @@ def create_app(settings: KnowledgeSettings | None = None) -> FastAPI:
             }
             for error in exc.errors()
         ]
-        logger.warning(
+        logger.error(
             "Knowledge request validation failed trace_id=%s method=%s path=%s "
             "actor_id=%s tenant_id=%s workspace_id=%s source=%s errors=%s",
             trace_id,
