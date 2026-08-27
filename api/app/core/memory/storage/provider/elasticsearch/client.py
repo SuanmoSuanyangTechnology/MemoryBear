@@ -38,6 +38,9 @@ from app.core.memory.storage.provider.elasticsearch.index.definitions import (
     EMBEDDING_FIELDS,
     FULLTEXT_FIELDS,
 )
+from app.core.memory.storage.provider.elasticsearch.serialization import (
+    normalize_elasticsearch_value,
+)
 from app.core.utils.datetime_utils import to_iso_z, utcnow
 
 SEARCH_BATCH_SIZE = 1_000
@@ -219,13 +222,21 @@ class ElasticClient(BaseClient):
             self.client = None
 
     async def save_node(self, label: MemoryNodeLabel, data: dict) -> None:
-        node_id = self.verify_input(label, data)
-        await self._require_client().index(
+        document = normalize_elasticsearch_value(data)
+        if not isinstance(document, dict):
+            raise ValueError("Elasticsearch document must be a mapping")
+        node_id = self.verify_input(label, document)
+        result = await self._require_client().index(
             index=get_index_name(label),
             id=str(node_id),
-            document=data,
+            document=document,
             refresh="wait_for",
         )
+        _raise_on_response_failures(result, "index")
+        if result.get("result") not in {"created", "updated"}:
+            raise RuntimeError(
+                "Elasticsearch index acknowledgement missing"
+            )
 
     async def update_node(
             self,
@@ -234,13 +245,16 @@ class ElasticClient(BaseClient):
             node_filter: NodeFilter,
     ) -> list[dict[str, int]]:
         self.verify_label(label)
+        properties = normalize_elasticsearch_value(data)
+        if not isinstance(properties, dict):
+            raise ValueError("Elasticsearch update properties must be a mapping")
         result = await self._require_client().update_by_query(
             index=get_index_name(label),
             query=compile_elasticsearch_filter(node_filter),
             script={
                 "lang": "painless",
                 "source": "ctx._source.putAll(params.properties)",
-                "params": {"properties": data},
+                "params": {"properties": properties},
             },
             conflicts="abort",
             refresh=True,
@@ -279,7 +293,7 @@ class ElasticClient(BaseClient):
                 refresh=True,
             )
             _raise_on_response_failures(result, "draft delete update_by_query")
-            deleted = result.get("updated", 0)
+            deleted = result.get("updated")
         else:
             result = await client.delete_by_query(
                 index=index_name,
@@ -288,9 +302,17 @@ class ElasticClient(BaseClient):
                 refresh=True,
             )
             _raise_on_response_failures(result, "delete_by_query")
-            deleted = result.get("deleted", 0)
+            deleted = result.get("deleted")
 
-        return [{"deleted": int(deleted)}]
+        if (
+                not isinstance(deleted, int)
+                or isinstance(deleted, bool)
+                or deleted < 0
+        ):
+            raise RuntimeError(
+                "Elasticsearch delete acknowledgement missing"
+            )
+        return [{"deleted": deleted}]
 
     async def get_node(
             self,
