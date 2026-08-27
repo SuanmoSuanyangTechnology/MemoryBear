@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import List, NamedTuple, Optional, Set, TypedDict
 
 import sqlalchemy as sa
-from sqlalchemy import or_, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
@@ -18,6 +18,8 @@ from app.utils.redis_cache import redis_cache
 
 # 获取数据库专用日志器
 db_logger = get_db_logger()
+
+EXPIRED_END_USER_BATCH_SIZE = 100
 
 
 class UserTagRefreshCandidate(NamedTuple):
@@ -58,6 +60,50 @@ def is_uuid(value: str) -> bool:
 class EndUserRepository:
     def __init__(self, db: Session | AsyncSession):
         self.db = db
+
+    @staticmethod
+    def _expired_temporary_filter():
+        """构造临时身份过期条件。
+
+        PostgreSQL 使用 retention_days 乘以固定的一天 interval，避免拼接动态 SQL。
+        """
+        expires_at = EndUser.write_time + Workspace.retention_days * sa.text("INTERVAL '1 day'")
+        return (
+            EndUser.is_active.is_(True),
+            EndUser.identity_status == "temporary",
+            EndUser.write_time.is_not(None),
+            Workspace.retention_days > 0,
+            expires_at < func.now(),
+        )
+
+    def get_expired_temporary_end_user_ids(
+            self,
+            limit: int = EXPIRED_END_USER_BATCH_SIZE,
+    ) -> List[uuid.UUID]:
+        """按最后写入时间稳定查询一批过期临时身份 ID。"""
+        safe_limit = max(1, min(int(limit), EXPIRED_END_USER_BATCH_SIZE))
+        rows = (
+            self.db.query(EndUser.id)
+            .join(Workspace, Workspace.id == EndUser.workspace_id)
+            .filter(*self._expired_temporary_filter())
+            .order_by(EndUser.write_time.asc(), EndUser.id.asc())
+            .limit(safe_limit)
+            .all()
+        )
+        return [row[0] for row in rows]
+
+    def is_expired_temporary_end_user(self, end_user_id: uuid.UUID) -> bool:
+        """删除前重新确认身份仍为临时、活跃且已超过当前空间保留期。"""
+        return (
+            self.db.query(EndUser.id)
+            .join(Workspace, Workspace.id == EndUser.workspace_id)
+            .filter(
+                EndUser.id == end_user_id,
+                *self._expired_temporary_filter(),
+            )
+            .first()
+            is not None
+        )
 
     @contextmanager
     def _acquire_eu_lock(self, workspace_id, other_id):
@@ -163,6 +209,34 @@ class EndUserRepository:
         except Exception as e:
             self.db.rollback()
             db_logger.error(f"查询工作空间 {workspace_id} 下终端用户时出错: {str(e)}")
+            raise
+
+    def get_temporary_end_users_count_by_workspace(
+            self,
+            workspace_id: uuid.UUID,
+    ) -> int:
+        """获取指定 workspace 下至少有一条记忆的有效临时 EndUser 数量。"""
+        try:
+            end_users_count = (
+                self.db.query(EndUser)
+                .filter(
+                    EndUser.workspace_id == workspace_id,
+                    EndUser.is_active.is_(True),
+                    EndUser.identity_status == "temporary",
+                    EndUser.memory_count >= 1,
+                )
+                .count()
+            )
+            db_logger.info(
+                f"成功查询工作空间 {workspace_id} 下的 "
+                f"{end_users_count} 个至少有一条记忆的有效临时终端用户"
+            )
+            return end_users_count
+        except Exception as e:
+            self.db.rollback()
+            db_logger.error(
+                f"查询工作空间 {workspace_id} 下有记忆的有效临时终端用户时出错: {str(e)}"
+            )
             raise
 
     def get_end_user_by_id(self, end_user_id: uuid.UUID) -> Optional[EndUser]:

@@ -42,6 +42,17 @@ class EndUser(Base):
             "identity_features",
             postgresql_where=text("is_active = TRUE"),
         ),
+        Index(
+            "idx_end_users_expiration_scan",
+            "workspace_id",
+            "write_time",
+            "id",
+            postgresql_where=text(
+                "is_active = TRUE "
+                "AND identity_status = 'temporary' "
+                "AND write_time IS NOT NULL"
+            ),
+        ),
     )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, nullable=False, index=True)

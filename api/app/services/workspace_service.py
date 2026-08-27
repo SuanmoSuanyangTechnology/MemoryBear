@@ -24,6 +24,7 @@ from app.models.workspace_model import (
     WorkspaceRole,
 )
 from app.repositories import workspace_repository
+from app.repositories.end_user_repository import EndUserRepository
 from app.repositories.workspace_invite_repository import WorkspaceInviteRepository
 from app.schemas.workspace_schema import (
     InviteAcceptRequest,
@@ -1043,6 +1044,51 @@ def update_workspace(
         return db_workspace
     except Exception as e:
         business_logger.error(f"工作空间更新失败: workspace_id={workspace_id} - {str(e)}")
+        db.rollback()
+        raise
+
+
+def get_workspace_retention_policy(
+        db: Session,
+        workspace_id: uuid.UUID,
+        user: User,
+) -> tuple[int, int]:
+    """获取临时身份保留天数和至少有一条记忆的有效临时 EndUser 数量。"""
+    db_workspace = _check_workspace_member_permission(db, workspace_id, user)
+    end_user_count = (
+        EndUserRepository(db).get_temporary_end_users_count_by_workspace(
+            workspace_id
+        )
+    )
+    return db_workspace.retention_days, end_user_count
+
+
+def update_workspace_retention_policy(
+        db: Session,
+        workspace_id: uuid.UUID,
+        retention_days: int,
+        user: User,
+) -> int:
+    """以空间成员权限更新指定工作空间的临时身份保留天数。"""
+    business_logger.info(
+        f"更新工作空间保留策略: workspace_id={workspace_id}, "
+        f"retention_days={retention_days}, 操作者={user.username}"
+    )
+    db_workspace = _check_workspace_member_permission(db, workspace_id, user)
+    try:
+        db_workspace.retention_days = retention_days
+        db.add(db_workspace)
+        db.commit()
+        db.refresh(db_workspace)
+        business_logger.info(
+            f"工作空间保留策略更新成功: workspace_id={workspace_id}, "
+            f"retention_days={db_workspace.retention_days}"
+        )
+        return db_workspace.retention_days
+    except Exception as e:
+        business_logger.error(
+            f"工作空间保留策略更新失败: workspace_id={workspace_id} - {str(e)}"
+        )
         db.rollback()
         raise
 
