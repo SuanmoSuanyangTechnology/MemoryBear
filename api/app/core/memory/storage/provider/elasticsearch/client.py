@@ -1,12 +1,12 @@
 import math
 from collections.abc import Mapping
 from numbers import Real
-from typing import Any, Callable
+from typing import Any, Callable, Self
 
 from elastic_transport import ObjectApiResponse
-from elasticsearch import AsyncElasticsearch
+from elasticsearch import AsyncElasticsearch, Elasticsearch
 
-from app.core.memory.storage.enums import BackendType, MemoryNodeLabel
+from app.core.memory.storage.enums import BackendType, MemoryNodeLabel, MemoryNodeType
 from app.core.memory.storage.exceptions import UnsupportedQueryError
 from app.core.memory.storage.models import (
     FilterCondition,
@@ -104,8 +104,8 @@ def _projection_requests_score(projection: NodeProjection | None) -> bool:
         item == VIRTUAL_SCORE_FIELD
         if isinstance(item, str)
         else (
-            isinstance(item, ProjectionField)
-            and item.field == VIRTUAL_SCORE_FIELD
+                isinstance(item, ProjectionField)
+                and item.field == VIRTUAL_SCORE_FIELD
         )
         for item in projection.fields
     )
@@ -192,7 +192,7 @@ class ElasticClient(BaseClient):
         self.client: AsyncElasticsearch | None = None
 
     @classmethod
-    async def create(cls) -> "ElasticClient":
+    async def create(cls) -> Self:
         self = cls()
         self.client = await self.connect()
         try:
@@ -468,3 +468,41 @@ class ElasticClient(BaseClient):
             "fulltext search",
             source_required=source_required,
         )
+
+
+# async def dev():
+#     client = await ElasticClient.create()
+#     await client.save_node(
+#         MemoryNodeType.EXTRACTED_ENTITY,
+#         {
+#             "access_count": 0,
+#             "id": "844773314c314275bd23c4bc54230e29",
+#             "access_history": [],
+#             "aliases": [],
+#             "description": "[2026-05-29T18:07:04.150123] 表达对小米yu7这台车有喜好的说话者；[2026-08-04T08:16:58.936996+00:00] 计划买车的说话者；[2026-08-04T08:16:59.343820+00:00] 喜欢小米SU7这台车的说话者",
+#             "beliefs_or_stances": [],
+#             "connect_strength": "Strong",
+#             "core_facts": ["位于杭州红熊智能科技有限公司（城北万象城）,名字为AAA"],
+#             "created_at": 1787550740,
+#             "name_embedding": []  # embedding demo
+#         }
+#     )
+#     cost = time.perf_counter()
+#     res = await client.search_by_fulltext(
+#         MemoryNodeType.EXTRACTED_ENTITY,
+#         NodeFilter.eq("id", "844773314c314275bd23c4bc54230e29"),
+#
+#         text="小米yu7",
+#         projection=NodeProjection(fields=("id", 'core_facts', 'score')),
+#         limit=10
+#     )
+#     cost = time.perf_counter() - cost
+#     print(cost, res)
+#     await client.close()
+#
+#
+# if __name__ == '__main__':
+#     import asyncio
+#     import time
+#
+#     asyncio.run(dev())

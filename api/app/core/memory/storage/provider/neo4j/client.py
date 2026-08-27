@@ -1,7 +1,7 @@
 import asyncio
 import heapq
 import traceback
-from typing import Any
+from typing import Any, Self
 
 import numpy as np
 from neo4j import AsyncGraphDatabase, AsyncDriver
@@ -45,7 +45,7 @@ class Neo4jClient(BaseClient):
         self.client: AsyncDriver | None = None
 
     @classmethod
-    async def create(cls) -> "Neo4jClient":
+    async def create(cls) -> Self:
         self = cls()
         self.client = await self.connect()
         return self
