@@ -184,17 +184,6 @@ try:
 except ImportError:
     _HAS_SUBSCRIPTION_TASKS = False
 
-# SSO 租户 SpeedBear key 补偿任务复用订阅状态队列和轻量 worker。
-try:
-    import premium.platform_admin.speedbear_tasks  # noqa: F401
-
-    _HAS_SPEEDBEAR_REPAIR_TASKS = True
-    celery_app.conf.task_routes['speedbear.repair_recent_sso_tenant_bindings'] = {
-        'queue': 'subscription_state_tasks'
-    }
-except ImportError:
-    _HAS_SPEEDBEAR_REPAIR_TASKS = False
-
 # 企业版消息通知中心任务路由（社区版无 premium 模块时不注册这些任务）
 try:
     import premium.platform_admin.notification_center.tasks  # noqa: F401
@@ -371,17 +360,6 @@ if _HAS_SUBSCRIPTION_TASKS:
             "task": "subscription.process_expired_subscriptions",
             "schedule": crontab(hour=18, minute=0),  # UTC 18:00 = CST 02:00
             "options": {"queue": "subscription_state_tasks"},
-        },
-    })
-
-# SSO 新租户 SpeedBear key 补偿：每 10 分钟扫描最近半小时的未绑定租户。
-if _HAS_SPEEDBEAR_REPAIR_TASKS:
-    celery_app.conf.beat_schedule.update({
-        "repair-recent-sso-tenant-speedbear-bindings": {
-            "task": "speedbear.repair_recent_sso_tenant_bindings",
-            "schedule": crontab(minute="*/10"),
-            "kwargs": {"lookback_minutes": 30},
-            "options": {"queue": "subscription_state_tasks", "expires": 600},
         },
     })
 
