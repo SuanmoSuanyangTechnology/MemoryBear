@@ -118,7 +118,7 @@ def create_app(settings: KnowledgeSettings | None = None) -> FastAPI:
             route_path = f"/internal/v1{route_path}"
         validation_errors = [
             {
-                "loc": ".".join(str(part) for part in tuple(error.get("loc", ()))[:2]),
+                "loc": str((tuple(error.get("loc", ())) or ("unknown",))[0]),
                 "type": str(error.get("type", "")),
                 "msg": "Request validation failed",
             }
