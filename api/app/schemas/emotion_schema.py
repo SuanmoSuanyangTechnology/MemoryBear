@@ -1,8 +1,24 @@
 """情绪分析相关的请求和响应模型"""
 
-from typing import Optional
+from datetime import date
+from typing import Literal, Optional
 from uuid import UUID
 from pydantic import BaseModel, Field
+
+
+class EmotionDailyOverviewRequest(BaseModel):
+    """获取情绪数据概览请求（最近2个活跃日）"""
+    end_user_id: str = Field(..., description="终端用户ID")
+
+
+class EmotionDailyTimelineRequest(BaseModel):
+    """获取情绪时间轴请求（分页返回全部活跃日）"""
+    end_user_id: str = Field(..., description="终端用户ID")
+    start_date: Optional[date] = Field(None, description="开始日期过滤（ISO格式，如：2026-08-01，含）")
+    end_date: Optional[date] = Field(None, description="结束日期过滤（ISO格式，如：2026-08-31，含）")
+    sort: Literal["asc", "desc"] = Field("asc", description="排序方向：asc=时间正序（默认），desc=时间倒序")
+    page: int = Field(1, ge=1, description="页码，默认 1")
+    pagesize: int = Field(5, ge=1, le=10000, description="每页条数，默认 5")
 
 class EmotionTagsRequest(BaseModel):
     """获取情绪标签统计请求"""

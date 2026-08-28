@@ -153,6 +153,8 @@ celery_app.conf.update(
         'app.tasks.write_total_memory_task': {'queue': 'memory_heavy_tasks'},  # NOTE：单 workspace 记忆增量统计
         'app.tasks.scan_implicit_emotions_storage': {'queue': 'periodic_tasks'},  # NOTE：扫描器，枚举+派发
         'app.tasks.do_implicit_emotions_for_user': {'queue': 'memory_heavy_tasks'},  # NOTE：单用户隐性记忆+情绪建议
+        'app.tasks.scan_emotion_stats': {'queue': 'periodic_tasks'},  # NOTE：情绪日统计扫描器，write_time 过滤+派发
+        'app.tasks.sync_emotion_stats_for_user': {'queue': 'memory_heavy_tasks'},  # NOTE：单用户情绪明细增量同步（按 PG 判断 24h/48h 窗口）
         # 'app.tasks.update_implicit_emotions_storage': {'queue': 'memory_heavy_tasks'},  # NOTE：已废弃，保留路由防 unregistered
         'app.tasks.init_implicit_emotions_for_users': {'queue': 'memory_heavy_tasks'},
         'app.tasks.init_interest_distribution_for_users': {'queue': 'memory_heavy_tasks'},
@@ -332,6 +334,12 @@ beat_schedule_config = {
     "draft-data-clean": {
         "task": "app.tasks.draft_data_clean",
         "schedule": draft_data_clean_schedule,
+        "args": (),
+    },
+    "scan-emotion-stats": {
+        # 每天北京时间凌晨 1:00（UTC 17:00）增量同步昨日情绪明细（用户任务按 PG 判断 24h/48h 窗口）
+        "task": "app.tasks.scan_emotion_stats",
+        "schedule": crontab(hour=17, minute=0),
         "args": (),
     },
 }

@@ -4966,6 +4966,224 @@ def do_implicit_emotions_for_user(self, end_user_id: str) -> Dict[str, Any]:
 
 
 # =============================================================================
+# 情绪统计明细：扫描-派发模式（Neo4j Dialogue.emotion → PG dialogue_emotion_raw）
+# =============================================================================
+
+_EMOTION_STATS_INFLIGHT_KEY_FMT = "emotion_stats:inflight:{end_user_id}"
+_EMOTION_STATS_INFLIGHT_TTL_SEC = 1800
+
+
+# 需要在work-periodic执行扫描任务
+@celery_app.task(
+    name="app.tasks.scan_emotion_stats",
+    bind=True,
+    ignore_result=False,
+    max_retries=0,
+    acks_late=False,
+    time_limit=300,
+    soft_time_limit=270,
+)
+def scan_emotion_stats(self) -> Dict[str, Any]:
+    """扫描器：write_time 过滤活跃用户，逐用户派发 sync_emotion_stats_for_user。
+
+    每天北京时间凌晨 1:00（UTC 17:00）由 Beat 触发，增量同步昨日（北京时间）数据。
+    活跃过滤只是粗过滤：精确判断（窗口选择 24h/48h）由用户级任务查 PG
+    dialogue_emotion_raw「北京前天」是否有数据完成，Neo4j 仅负责拉取窗口内原始对话。
+    """
+    from app.repositories.dialogue_emotion_raw_repository import (
+        DialogueEmotionRawRepository,
+    )
+
+    start_time = time.time()
+    redis_client = get_sync_redis_client()
+    if redis_client is None:
+        logger.error("scan_emotion_stats 终止：Redis 不可用，拒绝无锁派发")
+        raise RuntimeError("Redis unavailable: emotion stats scan requires inflight locks")
+
+    dispatched = 0
+    skip_inflight = 0
+    failed = 0
+
+    # --- 短 session：49 小时内活跃（write_time）的用户 ID 列表后立即关闭 ---
+    # 49h（而非 25h）：write_time 延迟写入的用户（前天活跃、昨天才写上）也能捞回，
+    # 配合用户任务按 PG 判断的 24h/48h 窗口补齐漏掉的日子
+    with get_db_context() as db:
+        repo = DialogueEmotionRawRepository(db)
+        active_ids = repo.get_active_end_user_ids(active_within_hours=49)
+    # --- session 已关闭 ---
+
+    logger.info(
+        f"scan_emotion_stats: 49h 内活跃用户 {len(active_ids)} 个，开始派发增量同步"
+    )
+
+    import uuid
+    for end_user_id in active_ids:
+        # inflight 锁：防止重复派发，生成随机 token 避免误删新锁
+        inflight_key = _EMOTION_STATS_INFLIGHT_KEY_FMT.format(end_user_id=end_user_id)
+        inflight_token = uuid.uuid4().hex
+        try:
+            ok = redis_client.set(
+                inflight_key, inflight_token, nx=True, ex=_EMOTION_STATS_INFLIGHT_TTL_SEC
+            )
+        except Exception as e:
+            logger.warning(f"scan_emotion_stats 设置在途锁失败: {end_user_id}, {e}")
+            failed += 1
+            continue
+        if not ok:
+            skip_inflight += 1
+            continue
+
+        try:
+            sync_emotion_stats_for_user.apply_async(
+                kwargs={"end_user_id": end_user_id, "inflight_token": inflight_token},
+                queue="memory_heavy_tasks",
+            )
+            dispatched += 1
+        except Exception as e:
+            # 派发失败回滚锁，允许下次扫描重试
+            logger.error(f"scan_emotion_stats 派发失败: {end_user_id}, {e}")
+            try:
+                # 只有 value matches 才删除，避免误删其他 worker 的锁
+                redis_client.eval(UNLOCK_SCRIPT, 1, inflight_key, inflight_token)
+            except Exception:
+                pass
+            failed += 1
+
+    elapsed = time.time() - start_time
+    logger.info(
+        f"scan_emotion_stats 完成: 派发 {dispatched}, 跳过(在途) {skip_inflight}, "
+        f"失败 {failed}, 活跃候选 {len(active_ids)}, 耗时 {elapsed:.1f}s"
+    )
+    return {
+        "status": "SUCCESS",
+        "dispatched": dispatched,
+        "skip_inflight": skip_inflight,
+        "failed": failed,
+        "total_candidates": len(active_ids),
+        "elapsed_time": elapsed,
+        "task_id": self.request.id,
+    }
+
+
+@celery_app.task(
+    name="app.tasks.sync_emotion_stats_for_user",
+    bind=True,
+    ignore_result=False,
+    max_retries=3,
+    acks_late=False,
+    time_limit=300,
+    soft_time_limit=270,
+)
+def sync_emotion_stats_for_user(
+    self, end_user_id: str, inflight_token: str | None = None
+) -> Dict[str, Any]:
+    """对【单个用户】同步情绪明细：按 PG 入库情况选窗口（北京时间基准）。
+
+    由 scan_emotion_stats 派发，每个用户一个独立 Celery 任务。
+    窗口选择（查 PG dialogue_emotion_raw，与扫描器的 write_time 分工互补）：
+    - PG「北京前天」已有明细 → 只扫北京昨天 24h（平时路径，减少 Neo4j 扫描量）；
+    - PG「北京前天」无明细   → 补扫前天+昨天 48h（漏扫兜底：write_time 延迟/
+      单次漏派导致的 1~2 天缺口在下一轮补齐，Upsert 幂等重扫安全）。
+    某天无带情绪对话时不写行（不产生假记录）。失败自动重试（max_retries=3）。
+
+    Args:
+        end_user_id: 目标用户 ID
+        inflight_token: 在途锁 token，用于校验锁归属（避免误删新锁）
+    """
+    from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+    from app.services.emotion_stats_service import EmotionStatsService
+
+    start_time = time.time()
+    inflight_key = _EMOTION_STATS_INFLIGHT_KEY_FMT.format(end_user_id=end_user_id)
+
+    # 在途锁校验：锁已过期或被新一轮 scan 重设时跳过（token 不匹配）
+    _rc = get_sync_redis_client()
+    if _rc is not None and inflight_token:
+        if _rc.get(inflight_key) != inflight_token:
+            logger.warning(
+                f"sync_emotion_stats_for_user 跳过 user={end_user_id} "
+                f"在途锁已失效（过期或被新 scan 重设）"
+            )
+            result = {"status": "SKIPPED_STALE_INFLIGHT"}
+            result["elapsed_time"] = time.time() - start_time
+            result["task_id"] = self.request.id
+            result["end_user_id"] = end_user_id
+            return result
+
+    def _compute_window():
+        """按 PG 入库情况选窗口（北京时间基准，短 session 查询后立即关闭）
+
+        PG「北京前天」有明细 → 24h（只扫昨天）；
+        无明细（可能漏扫）   → 48h（补扫前天+昨天）。
+        判断与 write_time 无关：write_time 管派发名单（源侧活跃），
+        PG 明细管窗口选择（入库进度），二者不可互换。
+        """
+        from app.repositories.dialogue_emotion_raw_repository import (
+            DialogueEmotionRawRepository,
+        )
+
+        _, end_dt = EmotionStatsService.get_yesterday_beijing_window()
+        with get_db_context() as db:
+            repo = DialogueEmotionRawRepository(db)
+            has_prev = repo.has_dialogue_in_utc_range(
+                end_user_id, end_dt - timedelta(days=2), end_dt - timedelta(days=1)
+            )
+        # 前天已有数据说明上一轮已扫过前天 → 只扫昨天；否则补扫两天
+        start_dt = end_dt - timedelta(days=1) if has_prev else end_dt - timedelta(days=2)
+        return start_dt, end_dt
+
+    async def _run() -> Dict[str, Any]:
+        start_dt, end_dt = _compute_window()
+        # shared_driver=True：连接池绑定 worker 进程内复用的 loop，不关闭
+        connector = Neo4jConnector(shared_driver=True)
+        return await EmotionStatsService.sync_range_for_user(
+            end_user_id=end_user_id,
+            start_dt=start_dt,
+            end_dt=end_dt,
+            connector=connector,
+            close_connector=False,
+        )
+
+    loop = set_asyncio_event_loop()
+    retrying = False
+    try:
+        result = loop.run_until_complete(_run())
+        result["status"] = "SUCCESS"
+        logger.info(
+            f"sync_emotion_stats_for_user 完成 user={end_user_id} "
+            f"rows={result.get('total_dialogues', 0)} "
+            f"耗时={time.time() - start_time:.1f}s"
+        )
+    except Exception as exc:
+        logger.error(f"sync_emotion_stats_for_user 失败 user={end_user_id}: {exc}")
+        # 失败自动重试（60s 间隔），Upsert 幂等保证重试安全
+        retrying = True
+        raise self.retry(exc=exc, countdown=60)
+    finally:
+        # 清理 pending tasks + asyncgens，但不关闭 loop（shared driver 绑定）
+        _shutdown_loop_gracefully(loop)
+        # 解锁时机：
+        # 1. 成功（retrying=False）：主动删除在途锁，下轮扫描可重新派发；
+        # 2. 重试排队期间（retrying=True）：保留锁，TTL(1800s) > 重试间隔(60s)，
+        #    避免扫描器本轮重复派发同一用户导致并发执行；
+        # 3. 最终失败（max_retries 用尽，retrying=True）：仍保留锁，
+        #    靠 TTL 1800s 过期兜底，30 分钟后消失，次日扫描可重新派发。
+        if not retrying:
+            try:
+                _rc = get_sync_redis_client()
+                if _rc is not None and inflight_token:
+                    # 原子检查：只有 value matches 才删除，避免误删新锁
+                    _rc.eval(UNLOCK_SCRIPT, 1, inflight_key, inflight_token)
+            except Exception:
+                pass
+
+    result["elapsed_time"] = time.time() - start_time
+    result["task_id"] = self.request.id
+    result["end_user_id"] = end_user_id
+    return result
+
+
+# =============================================================================
 # 隐性记忆和情绪数据更新定时任务（已废弃，由 scan_implicit_emotions_storage + do_implicit_emotions_for_user 替代）
 # =============================================================================
 
