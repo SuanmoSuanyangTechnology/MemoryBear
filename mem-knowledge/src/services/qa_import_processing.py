@@ -15,6 +15,7 @@ from ..rag.models.chunk import DocumentChunk
 from ..rag.models.task_runtime import TaskModelFactory
 from ..rag.vdb.vector_store import TaskVectorStore
 from ..runtime import ProcessRuntime
+from ..tasks.observability import BusinessOutcome, TaskRun
 from ..tasks.state import PARSE_TASK_KEY
 from ..utils.datetime_utils import to_iso_z, to_timestamp_ms, utcnow, utcnow_naive
 from .knowledge_file_storage import KnowledgeFileStorage
@@ -262,30 +263,41 @@ def process_qa_import(
     contents: bytes | None = None,
     file_key: str | None = None,
     clear_parse_task: bool = False,
+    *,
+    run: TaskRun,
 ) -> dict[str, object]:
     """Import QA rows while preserving the legacy task result and document state."""
 
     start_time = time.time()
     progress_lines = [f"{_progress_ts()} QA import task has been received."]
     normalized_document_id: uuid.UUID | None = None
+    error_code = "KB_QA_PROCESSING_FAILED"
     try:
         try:
             normalized_document_id = uuid.UUID(str(document_id))
             normalized_kb_id = uuid.UUID(str(kb_id))
         except ValueError:
             raise _SafeQAImportError("badly formed hexadecimal UUID string") from None
-        snapshot = _mark_running(
-            runtime,
-            normalized_kb_id,
-            normalized_document_id,
-            progress_lines,
-        )
+        with run.stage("load_document"):
+            snapshot = _mark_running(
+                runtime,
+                normalized_kb_id,
+                normalized_document_id,
+                progress_lines,
+            )
         if isinstance(snapshot, dict):
+            run.finish(
+                BusinessOutcome.FAILURE,
+                error_code="KB_QA_DOCUMENT_NOT_FOUND",
+            )
             return snapshot
 
-        loaded_contents = _load_contents(runtime, contents, file_key)
+        with run.stage("load_contents"):
+            loaded_contents = _load_contents(runtime, contents, file_key)
+        error_code = "KB_QA_FILE_PARSE_FAILED"
         try:
-            pairs, failed_rows = _parse_qa_file(filename, loaded_contents)
+            with run.stage("parse_file"):
+                pairs, failed_rows = _parse_qa_file(filename, loaded_contents)
         except _SafeQAImportError:
             raise
         except Exception:
@@ -294,29 +306,42 @@ def process_qa_import(
             logger.warning("No valid QA pairs found: document=%s", normalized_document_id)
             raise _SafeQAImportError("No valid QA pairs found")
         progress_lines.append(f"{_progress_ts()} Parsed {len(pairs)} QA pairs.")
+        run.progress(
+            stage="parse_file",
+            fraction=0.3,
+            detail="qa_pairs_parsed",
+            display_message=progress_lines[-1],
+            counts={"chunks": len(pairs), "failed": len(failed_rows)},
+            force=True,
+        )
 
+        error_code = "KB_QA_MODEL_INIT_FAILED"
         try:
-            embeddings = TaskModelFactory(runtime).create_embeddings(
-                snapshot.embedding_id,
-                snapshot.tenant_id,
-            )
+            with run.stage("resolve_embedding"):
+                embeddings = TaskModelFactory(runtime).create_embeddings(
+                    snapshot.embedding_id,
+                    snapshot.tenant_id,
+                )
         except Exception:
             raise _SafeQAImportError("QA model initialization failed") from None
 
+        error_code = "KB_QA_VECTOR_WRITE_FAILED"
         try:
-            vector_store = TaskVectorStore(
-                runtime.elasticsearch.sync_client(),
-                normalized_kb_id,
-                embeddings,
-            )
+            with run.stage("prepare_batches"):
+                vector_store = TaskVectorStore(
+                    runtime.elasticsearch.sync_client(),
+                    normalized_kb_id,
+                    embeddings,
+                )
             sort_id = 0
             if not clear_parse_task:
-                _, items = vector_store.search_by_segment(
-                    document_id=str(normalized_document_id),
-                    pagesize=1,
-                    page=1,
-                    asc=False,
-                )
+                with run.stage("read_existing_sort"):
+                    _, items = vector_store.search_by_segment(
+                        document_id=str(normalized_document_id),
+                        pagesize=1,
+                        page=1,
+                        asc=False,
+                    )
                 if items:
                     sort_id = items[0].metadata["sort_id"]
 
@@ -336,29 +361,41 @@ def process_qa_import(
             if sum(batch.chunk_count for batch in prepared_batches) != len(chunks):
                 raise RuntimeError("Prepared chunk count does not match input count")
             if clear_parse_task:
-                vector_store.delete_by_metadata_field(
-                    "document_id",
-                    str(normalized_document_id),
-                )
-            vector_store.write_prepared_batches(prepared_batches)
+                with run.stage("delete_old_chunks"):
+                    vector_store.delete_by_metadata_field(
+                        "document_id",
+                        str(normalized_document_id),
+                    )
+            with run.stage("write_elasticsearch"):
+                vector_store.write_prepared_batches(prepared_batches)
         except Exception:
             raise _SafeQAImportError("QA vector processing failed") from None
 
-        completion_error = _mark_complete(
-            runtime,
-            normalized_document_id,
-            len(chunks),
-            clear_parse_task,
-            start_time,
-            progress_lines,
-        )
+        error_code = "KB_TASK_STATE_PERSIST_FAILED"
+        with run.stage("persist_document"):
+            completion_error = _mark_complete(
+                runtime,
+                normalized_document_id,
+                len(chunks),
+                clear_parse_task,
+                start_time,
+                progress_lines,
+            )
         if completion_error is not None:
+            run.finish(
+                BusinessOutcome.FAILURE,
+                error_code=error_code,
+            )
             return completion_error
         logger.info(
             "QA import completed: document=%s imported=%s failed=%s",
             normalized_document_id,
             len(chunks),
             len(failed_rows),
+        )
+        run.finish(
+            BusinessOutcome.SUCCESS,
+            counts={"chunks": len(chunks), "failed": len(failed_rows)},
         )
         return {"imported": len(chunks), "failed_rows": failed_rows}
     except Exception as exc:
@@ -380,6 +417,11 @@ def process_qa_import(
                 start_time,
                 progress_lines,
             )
+        run.finish(
+            BusinessOutcome.FAILURE,
+            error_code=error_code,
+            exc=exc,
+        )
         return {"error": str(safe_error), "imported": 0}
     finally:
         if clear_parse_task:

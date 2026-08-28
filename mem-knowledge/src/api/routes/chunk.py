@@ -440,6 +440,7 @@ async def import_qa_new_doc(
             await file_service.compensate_storage_upload(storage, plan.file_key)
         raise
     task_id = await dispatch_qa_import(
+        runtime,
         TaskDispatcher(),
         kb_id,
         resources.document_id,
@@ -480,6 +481,7 @@ async def import_qa_chunks(
             principal,
         )
     task_id = await dispatch_qa_import(
+        runtime,
         TaskDispatcher(),
         snapshot.knowledge_id,
         snapshot.document_id,
