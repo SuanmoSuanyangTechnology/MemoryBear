@@ -7,7 +7,7 @@ import os
 import shutil
 import tempfile
 import uuid
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -29,6 +29,7 @@ from ..rag.integrations.yuque.models import YuqueDocInfo
 from ..rag.vdb.vector_store import TaskVectorStore
 from ..runtime import ProcessRuntime
 from ..tasks.dispatch import TaskDispatcher
+from ..tasks.observability import BusinessOutcome, TaskRun
 from ..utils.datetime_utils import utcnow_naive
 from .knowledge_file_storage import KnowledgeFileStorage, generate_kb_file_key
 
@@ -81,6 +82,22 @@ class _StaleFileSnapshot:
     file: _FileSnapshot
     document_id: uuid.UUID | None
     derived_files: tuple[_FileSnapshot, ...]
+
+
+@dataclass
+class KnowledgeSyncCounters:
+    """Safe aggregate counts for one synchronization task."""
+
+    discovered: int = 0
+    created: int = 0
+    updated: int = 0
+    unchanged: int = 0
+    deleted: int = 0
+    parse_dispatched: int = 0
+    failed: int = 0
+
+    def as_dict(self) -> dict[str, int]:
+        return asdict(self)
 
 
 def _snapshot_file(record: File) -> _FileSnapshot:
@@ -349,12 +366,13 @@ def _dispatch_parse(
     runtime: ProcessRuntime,
     file_record: _FileSnapshot | None,
     document: _DocumentSnapshot | None,
-) -> None:
+) -> bool:
     if file_record is not None and document is not None and file_record.file_key:
         _dispatcher(runtime).send_sync(
             "app.core.rag.tasks.parse_document",
             args=[file_record.file_key, str(document.id), file_record.file_name],
         )
+        return True
     elif file_record is not None and document is not None:
         logger.warning(
             "Skipping parse because synchronized file key is empty: document=%s",
@@ -365,6 +383,7 @@ def _dispatch_parse(
             "Skipping parse because synchronized document is missing: file=%s",
             file_record.id,
         )
+    return False
 
 
 def _snapshot_stale_files(
@@ -425,10 +444,10 @@ def _delete_stale_files(
     runtime: ProcessRuntime,
     kb_id: uuid.UUID,
     current_urls: set[str],
-) -> None:
+) -> int:
     stale_files = _snapshot_stale_files(runtime, kb_id, current_urls)
     if not stale_files:
-        return
+        return 0
     storage = KnowledgeFileStorage(runtime.storage)
     vector_store = TaskVectorStore(runtime.elasticsearch.sync_client(), kb_id, None)
     for stale in stale_files:
@@ -459,9 +478,15 @@ def _delete_stale_files(
         if legacy_path.exists():
             legacy_path.unlink()
     _delete_stale_records(runtime, stale_files)
+    return len(stale_files)
 
 
-def _sync_web(runtime: ProcessRuntime, knowledge: _KnowledgeSnapshot) -> None:
+def _sync_web(
+    runtime: ProcessRuntime,
+    knowledge: _KnowledgeSnapshot,
+    run: TaskRun,
+    counters: KnowledgeSyncCounters,
+) -> None:
     config = knowledge.parser_config
     crawler = WebCrawler(
         entry_url=config.get("entry_url", ""),
@@ -472,11 +497,14 @@ def _sync_web(runtime: ProcessRuntime, knowledge: _KnowledgeSnapshot) -> None:
     )
     current_urls: set[str] = set()
     for crawled in crawler.crawl():
+        counters.discovered += 1
         current_urls.add(crawled.url)
         if not crawled.content_length:
+            counters.unchanged += 1
             continue
         file_record = _find_source_file(runtime, knowledge.id, crawled.url)
         if file_record is not None and file_record.file_size == crawled.content_length:
+            counters.unchanged += 1
             continue
         is_new = file_record is None
         if is_new:
@@ -488,6 +516,9 @@ def _sync_web(runtime: ProcessRuntime, knowledge: _KnowledgeSnapshot) -> None:
                 file_size=crawled.content_length,
                 file_url=crawled.url,
             )
+            counters.created += 1
+        else:
+            counters.updated += 1
         assert file_record is not None
         content = crawled.content.encode("utf-8")
         _write_legacy_file(runtime, file_record, content, file_ext=".txt")
@@ -508,8 +539,15 @@ def _sync_web(runtime: ProcessRuntime, knowledge: _KnowledgeSnapshot) -> None:
             if is_new
             else existing_document
         )
-        _dispatch_parse(runtime, file_record, document)
-    _delete_stale_files(runtime, knowledge.id, current_urls)
+        if _dispatch_parse(runtime, file_record, document):
+            counters.parse_dispatched += 1
+        run.progress(
+            stage="sync_web",
+            fraction=None,
+            detail="source_item_processed",
+            counts=counters.as_dict(),
+        )
+    counters.deleted += _delete_stale_files(runtime, knowledge.id, current_urls)
 
 
 async def _list_yuque_documents(client: YuqueAPIClient) -> list[YuqueDocInfo]:
@@ -529,18 +567,26 @@ async def _download_yuque_document(
         return await opened.download_document(document, save_dir)
 
 
-def _sync_yuque(runtime: ProcessRuntime, knowledge: _KnowledgeSnapshot) -> None:
+def _sync_yuque(
+    runtime: ProcessRuntime,
+    knowledge: _KnowledgeSnapshot,
+    run: TaskRun,
+    counters: KnowledgeSyncCounters,
+) -> None:
     config = knowledge.parser_config
     client = YuqueAPIClient(
         user_id=config.get("yuque_user_id", ""),
         token=config.get("yuque_token", ""),
     )
-    documents = runtime.run_async(lambda: _list_yuque_documents(client))
+    with run.stage("list_remote_documents"):
+        documents = runtime.run_async(lambda: _list_yuque_documents(client))
+    counters.discovered += len(documents)
     current_urls: set[str] = set()
     for document in documents:
         current_urls.add(document.slug)
         file_record = _find_source_file(runtime, knowledge.id, document.slug)
         if file_record is not None and file_record.created_at == document.updated_at:
+            counters.unchanged += 1
             continue
         save_dir = os.path.join(
             str(runtime.settings.file_path),
@@ -548,13 +594,14 @@ def _sync_yuque(runtime: ProcessRuntime, knowledge: _KnowledgeSnapshot) -> None:
             str(knowledge.id),
         )
         Path(save_dir).mkdir(parents=True, exist_ok=True)
-        file_path = runtime.run_async(
-            lambda doc=document, directory=save_dir: _download_yuque_document(
-                client,
-                doc,
-                directory,
+        with run.stage("download_remote_document"):
+            file_path = runtime.run_async(
+                lambda doc=document, directory=save_dir: _download_yuque_document(
+                    client,
+                    doc,
+                    directory,
+                )
             )
-        )
         file_name = os.path.basename(file_path)
         file_ext = os.path.splitext(file_name)[1].lower()
         file_size = os.path.getsize(file_path)
@@ -569,6 +616,9 @@ def _sync_yuque(runtime: ProcessRuntime, knowledge: _KnowledgeSnapshot) -> None:
                 file_url=document.slug,
                 created_at=document.updated_at,
             )
+            counters.created += 1
+        else:
+            counters.updated += 1
         assert file_record is not None
         legacy_path = _copy_legacy_file(
             runtime,
@@ -596,8 +646,15 @@ def _sync_yuque(runtime: ProcessRuntime, knowledge: _KnowledgeSnapshot) -> None:
             if is_new
             else existing_document
         )
-        _dispatch_parse(runtime, file_record, synced_document)
-    _delete_stale_files(runtime, knowledge.id, current_urls)
+        if _dispatch_parse(runtime, file_record, synced_document):
+            counters.parse_dispatched += 1
+        run.progress(
+            stage="sync_yuque",
+            fraction=None,
+            detail="source_item_processed",
+            counts=counters.as_dict(),
+        )
+    counters.deleted += _delete_stale_files(runtime, knowledge.id, current_urls)
 
 
 async def _list_feishu_documents(
@@ -617,37 +674,46 @@ async def _download_feishu_document(
         return await opened.download_document(document, save_dir)
 
 
-def _sync_feishu(runtime: ProcessRuntime, knowledge: _KnowledgeSnapshot) -> None:
+def _sync_feishu(
+    runtime: ProcessRuntime,
+    knowledge: _KnowledgeSnapshot,
+    run: TaskRun,
+    counters: KnowledgeSyncCounters,
+) -> None:
     config = knowledge.parser_config
     client = FeishuAPIClient(
         app_id=config.get("feishu_app_id", ""),
         app_secret=config.get("feishu_app_secret", ""),
     )
-    files = runtime.run_async(
-        lambda: _list_feishu_documents(
-            client,
-            config.get("feishu_folder_token", ""),
+    with run.stage("list_remote_documents"):
+        files = runtime.run_async(
+            lambda: _list_feishu_documents(
+                client,
+                config.get("feishu_folder_token", ""),
+            )
         )
-    )
     documents = [
         record
         for record in files
         if record.type in {"doc", "docx", "sheet", "bitable", "file"}
     ]
+    counters.discovered += len(documents)
     current_urls: set[str] = set()
     for document in documents:
         current_urls.add(document.url)
         file_record = _find_source_file(runtime, knowledge.id, document.url)
         if file_record is not None and file_record.created_at == document.modified_time:
+            counters.unchanged += 1
             continue
         save_dir = tempfile.mkdtemp()
-        file_path = runtime.run_async(
-            lambda doc=document, directory=save_dir: _download_feishu_document(
-                client,
-                doc,
-                directory,
+        with run.stage("download_remote_document"):
+            file_path = runtime.run_async(
+                lambda doc=document, directory=save_dir: _download_feishu_document(
+                    client,
+                    doc,
+                    directory,
+                )
             )
-        )
         file_name = os.path.basename(file_path)
         file_ext = os.path.splitext(file_name)[1].lower()
         file_size = os.path.getsize(file_path)
@@ -662,6 +728,9 @@ def _sync_feishu(runtime: ProcessRuntime, knowledge: _KnowledgeSnapshot) -> None
                 file_url=document.url,
                 created_at=document.modified_time,
             )
+            counters.created += 1
+        else:
+            counters.updated += 1
         assert file_record is not None
         content = Path(file_path).read_bytes()
         file_key = _upload_content(runtime, file_record, content, file_ext=file_ext)
@@ -688,11 +757,23 @@ def _sync_feishu(runtime: ProcessRuntime, knowledge: _KnowledgeSnapshot) -> None
             if is_new
             else existing_document
         )
-        _dispatch_parse(runtime, file_record, synced_document)
-    _delete_stale_files(runtime, knowledge.id, current_urls)
+        if _dispatch_parse(runtime, file_record, synced_document):
+            counters.parse_dispatched += 1
+        run.progress(
+            stage="sync_feishu",
+            fraction=None,
+            detail="source_item_processed",
+            counts=counters.as_dict(),
+        )
+    counters.deleted += _delete_stale_files(runtime, knowledge.id, current_urls)
 
 
-def _sync_third_party(runtime: ProcessRuntime, knowledge: _KnowledgeSnapshot) -> None:
+def _sync_third_party(
+    runtime: ProcessRuntime,
+    knowledge: _KnowledgeSnapshot,
+    run: TaskRun,
+    counters: KnowledgeSyncCounters,
+) -> int:
     config = knowledge.parser_config
     yuque_user_id = config.get("yuque_user_id", "")
     feishu_app_id = config.get("feishu_app_id", "")
@@ -703,14 +784,16 @@ def _sync_third_party(runtime: ProcessRuntime, knowledge: _KnowledgeSnapshot) ->
     has_feishu = any(
         record.file_url and "feishu.cn" in record.file_url for record in existing_files
     )
+    failures = 0
     if (
         yuque_user_id
         and yuque_user_id not in {"User ID", ""}
         and (not existing_files or has_yuque)
     ):
         try:
-            _sync_yuque(runtime, knowledge)
+            _sync_yuque(runtime, knowledge, run, counters)
         except Exception as exc:
+            failures += 1
             logger.error(
                 "Yuque knowledge synchronization failed: error_type=%s",
                 type(exc).__name__,
@@ -721,41 +804,80 @@ def _sync_third_party(runtime: ProcessRuntime, knowledge: _KnowledgeSnapshot) ->
         and (not existing_files or has_feishu)
     ):
         try:
-            _sync_feishu(runtime, knowledge)
+            _sync_feishu(runtime, knowledge, run, counters)
         except Exception as exc:
+            failures += 1
             logger.error(
                 "Feishu knowledge synchronization failed: error_type=%s",
                 type(exc).__name__,
             )
+    return failures
 
 
-def process_knowledge_sync(runtime: ProcessRuntime, kb_id: uuid.UUID | str) -> str:
+def process_knowledge_sync(
+    runtime: ProcessRuntime,
+    kb_id: uuid.UUID | str,
+    *,
+    run: TaskRun,
+) -> str:
     """Synchronize one knowledge base while keeping slow work outside DB sessions."""
 
     knowledge: _KnowledgeSnapshot | None = None
+    counters = KnowledgeSyncCounters()
     try:
         knowledge_id = kb_id if isinstance(kb_id, uuid.UUID) else uuid.UUID(str(kb_id))
-        knowledge = _load_knowledge(runtime, knowledge_id)
+        with run.stage("load_knowledge"):
+            knowledge = _load_knowledge(runtime, knowledge_id)
         if knowledge is None:
             logger.error("Knowledge synchronization target not found: knowledge=%s", knowledge_id)
+            counters.failed += 1
+            run.finish(
+                BusinessOutcome.FAILURE,
+                error_code="KB_SYNC_KNOWLEDGE_NOT_FOUND",
+                counts=counters.as_dict(),
+            )
             return "sync knowledge failed: knowledge not found"
         match knowledge.type:
             case "Web":
                 try:
-                    _sync_web(runtime, knowledge)
+                    with run.stage("sync_web"):
+                        _sync_web(runtime, knowledge, run, counters)
                 except Exception as exc:
+                    counters.failed += 1
                     logger.error(
                         "Web knowledge synchronization failed: error_type=%s",
                         type(exc).__name__,
                     )
             case "Third-party":
-                _sync_third_party(runtime, knowledge)
+                with run.stage("sync_third_party"):
+                    counters.failed += _sync_third_party(runtime, knowledge, run, counters)
             case _:
                 logger.info(
                     "Knowledge type requires no synchronization: knowledge=%s type=%s",
                     knowledge_id,
                     knowledge.type,
                 )
+                run.finish(
+                    BusinessOutcome.SKIPPED,
+                    detail="source_type_no_sync",
+                    counts=counters.as_dict(),
+                )
+                return f"sync knowledge '{knowledge.name}' processed successfully."
+        run.progress(
+            stage="complete",
+            fraction=None,
+            detail="sync_summary",
+            counts=counters.as_dict(),
+            force=True,
+        )
+        if counters.failed:
+            run.finish(
+                BusinessOutcome.PARTIAL_FAILURE,
+                error_code="KB_SYNC_SOURCE_PARTIAL_FAILURE",
+                counts=counters.as_dict(),
+            )
+        else:
+            run.finish(BusinessOutcome.SUCCESS, counts=counters.as_dict())
         return f"sync knowledge '{knowledge.name}' processed successfully."
     except Exception as exc:
         logger.error(
@@ -764,6 +886,13 @@ def process_knowledge_sync(runtime: ProcessRuntime, kb_id: uuid.UUID | str) -> s
             type(exc).__name__,
         )
         name = knowledge.name if knowledge is not None else kb_id
+        counters.failed += 1
+        run.finish(
+            BusinessOutcome.FAILURE,
+            error_code="KB_SYNC_PROCESSING_FAILED",
+            exc=exc,
+            counts=counters.as_dict(),
+        )
         return f"sync knowledge '{name}' failed: {exc}"
 
 
