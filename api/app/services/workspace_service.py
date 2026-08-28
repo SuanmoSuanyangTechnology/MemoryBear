@@ -1054,13 +1054,17 @@ def get_workspace_retention_policy(
         user: User,
 ) -> tuple[int | None, int]:
     """获取临时身份保留天数和至少有一条记忆的有效临时 EndUser 数量。"""
-    db_workspace = _check_workspace_member_permission(db, workspace_id, user)
+    _check_workspace_member_permission(db, workspace_id, user)
+    retention_days = workspace_repository.get_workspace_retention_days(
+        db=db,
+        workspace_id=workspace_id,
+    )
     end_user_count = (
         EndUserRepository(db).get_temporary_end_users_count_by_workspace(
             workspace_id
         )
     )
-    return db_workspace.retention_days, end_user_count
+    return retention_days, end_user_count
 
 
 def update_workspace_retention_policy(
@@ -1074,22 +1078,22 @@ def update_workspace_retention_policy(
         f"更新工作空间保留策略: workspace_id={workspace_id}, "
         f"retention_days={retention_days}, 操作者={user.username}"
     )
-    db_workspace = _check_workspace_member_permission(db, workspace_id, user)
+    _check_workspace_member_permission(db, workspace_id, user)
     try:
-        db_workspace.retention_days = retention_days
-        db.add(db_workspace)
-        db.commit()
-        db.refresh(db_workspace)
+        updated_retention_days = workspace_repository.update_workspace_retention_days(
+            db=db,
+            workspace_id=workspace_id,
+            retention_days=retention_days,
+        )
         business_logger.info(
             f"工作空间保留策略更新成功: workspace_id={workspace_id}, "
-            f"retention_days={db_workspace.retention_days}"
+            f"retention_days={updated_retention_days}"
         )
-        return db_workspace.retention_days
+        return updated_retention_days
     except Exception as e:
         business_logger.error(
             f"工作空间保留策略更新失败: workspace_id={workspace_id} - {str(e)}"
         )
-        db.rollback()
         raise
 
 
