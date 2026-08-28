@@ -7,8 +7,8 @@ import logging
 import time
 import unicodedata
 from collections import Counter, defaultdict
-from collections.abc import Mapping, Sequence
-from typing import Any
+from collections.abc import Awaitable, Callable, Mapping, Sequence
+from typing import Any, TypeVar
 
 from ...bootstrap import get_settings
 from .batching import build_extraction_batches, select_source_chunks
@@ -29,6 +29,8 @@ from .normalizer import (
 )
 
 logger = logging.getLogger(__name__)
+T = TypeVar("T")
+GraphStageCallback = Callable[[str, str, int, Mapping[str, int]], None]
 
 
 def calculate_evidence_pageranks(
@@ -225,12 +227,66 @@ class KnowledgeGraphIndexPipeline:
         embedding: Any,
         lock_guard: Any,
         extraction_cache: GraphExtractionCache,
+        stage_callback: GraphStageCallback | None = None,
+        clock: Callable[[], float] = time.perf_counter,
     ) -> None:
         self._store = store
         self._extractor = extractor
         self._embedding = embedding
         self._lock_guard = lock_guard
         self._extraction_cache = extraction_cache
+        self._stage_callback = stage_callback
+        self._clock = clock
+
+    def _notify_stage(
+        self,
+        event: str,
+        stage: str,
+        duration_ms: int,
+        counts: Mapping[str, int] | None = None,
+    ) -> None:
+        if self._stage_callback is None:
+            return
+        try:
+            self._stage_callback(event, stage, duration_ms, counts or {})
+        except Exception as exc:  # noqa: BLE001 - observability must not alter graph work.
+            logger.error(
+                "[EvidenceGraph] stage_callback_failed stage=%s error_type=%s",
+                stage,
+                type(exc).__name__,
+            )
+
+    async def _run_async_stage(
+        self,
+        stage: str,
+        operation: Callable[[], Awaitable[T]],
+    ) -> T:
+        started_at = self._clock()
+        self._notify_stage("started", stage, 0)
+        try:
+            return await operation()
+        finally:
+            self._notify_stage(
+                "finished",
+                stage,
+                max(0, int(round((self._clock() - started_at) * 1000))),
+            )
+
+    def _run_sync_stage(
+        self,
+        stage: str,
+        operation: Callable[[], T],
+    ) -> T:
+        started_at = self._clock()
+        self._notify_stage("started", stage, 0)
+        try:
+            return operation()
+        finally:
+            self._notify_stage(
+                "finished",
+                stage,
+                max(0, int(round((self._clock() - started_at) * 1000))),
+            )
 
     async def sync_document(
         self,
@@ -244,60 +300,97 @@ class KnowledgeGraphIndexPipeline:
         stage = "ensure_graph_index"
         try:
             self._lock_guard.ensure_valid()
-            await self._store.ensure_graph_index(runtime.graph_index_name)
+            await self._run_async_stage(
+                stage,
+                lambda: self._store.ensure_graph_index(runtime.graph_index_name),
+            )
             stage = "refresh_sources"
             self._lock_guard.ensure_valid()
-            await self._store.refresh_sources(
-                runtime.chunk_index_name,
-                runtime.graph_index_name,
+            await self._run_async_stage(
+                stage,
+                lambda: self._store.refresh_sources(
+                    runtime.chunk_index_name,
+                    runtime.graph_index_name,
+                ),
             )
             stage = "load_document_chunks"
-            hits = (
-                await self._store.load_document_chunks(
-                    runtime.chunk_index_name,
-                    runtime.knowledge_id,
-                    document_id,
+            hits = []
+            if document_active:
+                hits = await self._run_async_stage(
+                    stage,
+                    lambda: self._store.load_document_chunks(
+                        runtime.chunk_index_name,
+                        runtime.knowledge_id,
+                        document_id,
+                    ),
                 )
-                if document_active
-                else []
-            )
             batches = build_extraction_batches(select_source_chunks(hits))
             stage = "extract_batches"
-            results = await self._extract_batches(batches, runtime)
+            results = await self._run_async_stage(
+                stage,
+                lambda: self._extract_batches(batches, runtime),
+            )
             stage = "materialize_evidence"
-            entity_evidence, relation_evidence = materialize_evidence(
-                runtime.knowledge_id,
-                document_id,
-                results,
+            entity_evidence, relation_evidence = self._run_sync_stage(
+                stage,
+                lambda: materialize_evidence(
+                    runtime.knowledge_id,
+                    document_id,
+                    results,
+                ),
             )
             stage = "replace_document_evidence"
             self._lock_guard.ensure_valid()
-            affected = await self._store.replace_document_evidence(
-                runtime.graph_index_name,
-                runtime.knowledge_id,
-                document_id,
-                entity_evidence,
-                relation_evidence,
-                ensure_valid=self._lock_guard.ensure_valid,
+            affected = await self._run_async_stage(
+                stage,
+                lambda: self._store.replace_document_evidence(
+                    runtime.graph_index_name,
+                    runtime.knowledge_id,
+                    document_id,
+                    entity_evidence,
+                    relation_evidence,
+                    ensure_valid=self._lock_guard.ensure_valid,
+                ),
             )
             stage = "rebuild_relation_projections"
-            await self._rebuild_relation_projections(runtime, affected.relation_keys)
+            await self._run_async_stage(
+                stage,
+                lambda: self._rebuild_relation_projections(
+                    runtime,
+                    affected.relation_keys,
+                ),
+            )
             stage = "rebuild_entity_projections"
-            await self._rebuild_entity_projections(runtime, affected.entity_keys)
+            await self._run_async_stage(
+                stage,
+                lambda: self._rebuild_entity_projections(
+                    runtime,
+                    affected.entity_keys,
+                ),
+            )
             stage = "finish_document_map"
-            await self._store.finish_document_map(
-                runtime.graph_index_name,
-                runtime.knowledge_id,
-                document_id,
-                entity_evidence,
-                relation_evidence,
-                ensure_valid=self._lock_guard.ensure_valid,
+            await self._run_async_stage(
+                stage,
+                lambda: self._store.finish_document_map(
+                    runtime.graph_index_name,
+                    runtime.knowledge_id,
+                    document_id,
+                    entity_evidence,
+                    relation_evidence,
+                    ensure_valid=self._lock_guard.ensure_valid,
+                ),
             )
             stage = "refresh_graph"
-            await self._store.refresh_graph(runtime.graph_index_name)
+            await self._run_async_stage(
+                stage,
+                lambda: self._store.refresh_graph(runtime.graph_index_name),
+            )
             if refresh_pageranks:
                 stage = "rebuild_graph_pageranks"
-                await self._rebuild_graph_pageranks(runtime)
+                await self._run_async_stage(
+                    stage,
+                    lambda: self._rebuild_graph_pageranks(runtime),
+                )
             logger.info(
                 "[EvidenceGraph] index_done kb_id=%s document_id=%s elapsed_ms=%d",
                 runtime.knowledge_id,
@@ -326,12 +419,18 @@ class KnowledgeGraphIndexPipeline:
         """Replace all Legacy and Evidence documents before rebuilding active inputs."""
 
         self._lock_guard.ensure_valid()
-        await self._store.ensure_graph_index(runtime.graph_index_name)
+        await self._run_async_stage(
+            "ensure_graph_index",
+            lambda: self._store.ensure_graph_index(runtime.graph_index_name),
+        )
         self._lock_guard.ensure_valid()
-        await self._store.clear_all_graph_documents(
-            runtime.graph_index_name,
-            runtime.knowledge_id,
-            ensure_valid=self._lock_guard.ensure_valid,
+        await self._run_async_stage(
+            "clear_graph_documents",
+            lambda: self._store.clear_all_graph_documents(
+                runtime.graph_index_name,
+                runtime.knowledge_id,
+                ensure_valid=self._lock_guard.ensure_valid,
+            ),
         )
         active_ids = tuple(dict.fromkeys(active_document_ids))
         for document_id in active_ids:
@@ -342,8 +441,14 @@ class KnowledgeGraphIndexPipeline:
                 refresh_pageranks=False,
             )
         self._lock_guard.ensure_valid()
-        await self._store.refresh_graph(runtime.graph_index_name)
-        await self._rebuild_graph_pageranks(runtime)
+        await self._run_async_stage(
+            "refresh_graph",
+            lambda: self._store.refresh_graph(runtime.graph_index_name),
+        )
+        await self._run_async_stage(
+            "rebuild_graph_pageranks",
+            lambda: self._rebuild_graph_pageranks(runtime),
+        )
 
     async def _extract_batches(
         self,

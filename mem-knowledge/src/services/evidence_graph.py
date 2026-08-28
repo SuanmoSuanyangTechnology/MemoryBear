@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import time
 import uuid
+from collections.abc import Callable
 from typing import Any
 
 from sqlalchemy import select
@@ -20,7 +22,7 @@ from ..rag.knowledge_graph.elasticsearch_store import (
 )
 from ..rag.knowledge_graph.extraction_cache import GraphExtractionCache
 from ..rag.knowledge_graph.extractor import LLMEntityRelationExtractor
-from ..rag.knowledge_graph.index_pipeline import KnowledgeGraphIndexPipeline
+from ..rag.knowledge_graph.index_pipeline import GraphStageCallback, KnowledgeGraphIndexPipeline
 from ..rag.knowledge_graph.lock import create_knowledge_graph_lock
 from ..rag.knowledge_graph.models import GraphTaskState
 from ..rag.knowledge_graph.runtime import GraphRuntimeDisabled, snapshot_graph_runtime
@@ -91,7 +93,12 @@ def load_graph_task_state(
         )
 
 
-async def _build_pipeline(runtime: Any, graph_runtime: Any, lock_guard: Any):
+async def _build_pipeline(
+    runtime: Any,
+    graph_runtime: Any,
+    lock_guard: Any,
+    stage_callback: GraphStageCallback | None = None,
+):
     from redbear_model.runtime import RedBearEmbeddings, RedBearLLM
 
     client = await runtime.elasticsearch.client()
@@ -112,6 +119,7 @@ async def _build_pipeline(runtime: Any, graph_runtime: Any, lock_guard: Any):
         embedding=embedding,
         lock_guard=lock_guard,
         extraction_cache=GraphExtractionCache(redis),
+        stage_callback=stage_callback,
     )
 
 
@@ -122,11 +130,17 @@ def execute_evidence_document(
     lock_guard: Any,
     *,
     document_active: bool,
+    stage_callback: GraphStageCallback | None = None,
 ) -> None:
     graph_runtime = snapshot_graph_runtime(runtime, state.knowledge_id)
 
     async def run() -> None:
-        pipeline = await _build_pipeline(runtime, graph_runtime, lock_guard)
+        pipeline = await _build_pipeline(
+            runtime,
+            graph_runtime,
+            lock_guard,
+            stage_callback,
+        )
         await pipeline.sync_document(graph_runtime, document_id, document_active)
 
     runtime.run_async(run)
@@ -136,11 +150,17 @@ def execute_evidence_rebuild(
     runtime: Any,
     state: GraphTaskState,
     lock_guard: Any,
+    stage_callback: GraphStageCallback | None = None,
 ) -> None:
     graph_runtime = snapshot_graph_runtime(runtime, state.knowledge_id)
 
     async def run() -> None:
-        pipeline = await _build_pipeline(runtime, graph_runtime, lock_guard)
+        pipeline = await _build_pipeline(
+            runtime,
+            graph_runtime,
+            lock_guard,
+            stage_callback,
+        )
         await pipeline.rebuild_knowledge(graph_runtime, state.active_document_ids)
 
     runtime.run_async(run)
@@ -168,10 +188,16 @@ def process_evidence_document(
     document_id: str,
     *,
     document_deleted: bool = False,
+    on_lock_wait: Callable[[str, int], None] | None = None,
+    on_stage: GraphStageCallback | None = None,
 ) -> dict[str, Any]:
     knowledge_id = _canonical_uuid(knowledge_id, "knowledge id")
     document_id = _canonical_uuid(document_id, "document id")
-    with create_knowledge_graph_lock(runtime, knowledge_id) as lock_guard:
+    with create_knowledge_graph_lock(
+        runtime,
+        knowledge_id,
+        on_wait=on_lock_wait,
+    ) as lock_guard:
         lock_guard.ensure_valid()
         state = load_graph_task_state(runtime, knowledge_id, document_id)
         if state.pipeline is not GraphPipeline.EVIDENCE:
@@ -187,6 +213,7 @@ def process_evidence_document(
                 document_id,
                 lock_guard,
                 document_active=(False if document_deleted else bool(state.document_active)),
+                stage_callback=on_stage,
             )
         except GraphRuntimeDisabled:
             return {"status": "skipped", "reason": "graph_disabled"}
@@ -198,9 +225,19 @@ def process_evidence_document(
         }
 
 
-def process_evidence_rebuild(runtime: Any, knowledge_id: str) -> dict[str, Any]:
+def process_evidence_rebuild(
+    runtime: Any,
+    knowledge_id: str,
+    *,
+    on_lock_wait: Callable[[str, int], None] | None = None,
+    on_stage: GraphStageCallback | None = None,
+) -> dict[str, Any]:
     knowledge_id = _canonical_uuid(knowledge_id, "knowledge id")
-    with create_knowledge_graph_lock(runtime, knowledge_id) as lock_guard:
+    with create_knowledge_graph_lock(
+        runtime,
+        knowledge_id,
+        on_wait=on_lock_wait,
+    ) as lock_guard:
         lock_guard.ensure_valid()
         state = load_graph_task_state(
             runtime,
@@ -212,7 +249,12 @@ def process_evidence_rebuild(runtime: Any, knowledge_id: str) -> dict[str, Any]:
         if not state.graph_enabled:
             return {"status": "skipped", "reason": "graph_disabled"}
         try:
-            execute_evidence_rebuild(runtime, state, lock_guard)
+            execute_evidence_rebuild(
+                runtime,
+                state,
+                lock_guard,
+                stage_callback=on_stage,
+            )
         except GraphRuntimeDisabled:
             return {"status": "skipped", "reason": "graph_disabled"}
         lock_guard.ensure_valid()
@@ -224,14 +266,32 @@ def process_clear_graph(
     knowledge_id: str,
     *,
     force: bool = False,
+    on_lock_wait: Callable[[str, int], None] | None = None,
+    on_stage: GraphStageCallback | None = None,
 ) -> dict[str, Any]:
     knowledge_id = _canonical_uuid(knowledge_id, "knowledge id")
-    with create_knowledge_graph_lock(runtime, knowledge_id) as lock_guard:
+    with create_knowledge_graph_lock(
+        runtime,
+        knowledge_id,
+        on_wait=on_lock_wait,
+    ) as lock_guard:
         lock_guard.ensure_valid()
         state = load_graph_task_state(runtime, knowledge_id)
         if state.graph_enabled and not force:
             return {"status": "skipped", "reason": "graph_reenabled"}
-        execute_evidence_clear(runtime, state, lock_guard)
+        started_at = time.perf_counter()
+        if on_stage is not None:
+            on_stage("started", "clear_graph_documents", 0, {})
+        try:
+            execute_evidence_clear(runtime, state, lock_guard)
+        finally:
+            if on_stage is not None:
+                on_stage(
+                    "finished",
+                    "clear_graph_documents",
+                    int((time.perf_counter() - started_at) * 1000),
+                    {},
+                )
         lock_guard.ensure_valid()
         return {"status": "cleared", "knowledge_id": knowledge_id}
 

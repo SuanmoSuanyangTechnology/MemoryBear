@@ -492,6 +492,8 @@ class TaskRun(AbstractContextManager["TaskRun"]):
         detail: str,
         display_message: str | None = None,
         counts: Mapping[str, int] | None = None,
+        duration_ms: int | None = None,
+        wait_duration_ms: int | None = None,
         force: bool = False,
     ) -> None:
         if (
@@ -503,6 +505,18 @@ class TaskRun(AbstractContextManager["TaskRun"]):
             )
         ):
             raise ValueError("progress fraction must be between 0 and 1")
+        if wait_duration_ms is not None and (
+            not isinstance(wait_duration_ms, int)
+            or isinstance(wait_duration_ms, bool)
+            or wait_duration_ms < 0
+        ):
+            raise ValueError("wait duration must be a non-negative integer")
+        if duration_ms is not None and (
+            not isinstance(duration_ms, int)
+            or isinstance(duration_ms, bool)
+            or duration_ms < 0
+        ):
+            raise ValueError("stage duration must be a non-negative integer")
         self._emit(
             TaskEvent(
                 event="kb_task_progress",
@@ -510,6 +524,8 @@ class TaskRun(AbstractContextManager["TaskRun"]):
                 stage=stage,
                 detail=detail,
                 progress=fraction,
+                duration_ms=duration_ms,
+                wait_duration_ms=wait_duration_ms,
                 counts=self._validated_counts(counts),
                 display_message=display_message,
                 force_flush=force,
