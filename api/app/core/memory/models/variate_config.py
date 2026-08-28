@@ -24,12 +24,12 @@ class StatementExtractionConfig(BaseModel):
             - 1: Split sentences into different statements
             - 2: Sentence-level statements
             - 3: Combine sentences, shorten long statements
-        temperature: LLM temperature for statement extraction (0-2, default: 0.1)
+        temperature: LLM temperature for statement extraction (0-2, default: 0)
         include_dialogue_context: Whether to include full dialogue context
         max_dialogue_context_chars: Maximum characters from dialogue context (default: 2000)
     """
     statement_granularity: Optional[int] = Field(None, ge=1, le=3, description="Granularity of statements to extract, level 1 to 3")
-    temperature: Optional[float] = Field(0.1, ge=0, le=2, description="LLM temperature for statement extraction")
+    temperature: Optional[float] = Field(0.0, ge=0, le=2, description="LLM temperature for statement extraction")
     include_dialogue_context: bool = Field(True, description="Whether to include full dialogue context in extraction")
     max_dialogue_context_chars: Optional[int] = Field(2000, ge=100, description="Maximum number of characters to include from dialogue context")
 
