@@ -23,6 +23,10 @@ export interface StatusTagProps {
   status: 'success' | 'error' | 'warning' | 'default' | 'lightBlue' | 'purple',
   /** Text to display in the tag */
   text: string;
+  circle?: boolean;
+  size?: 'small' | 'default';
+  strokeColor?: string;
+  className?: string;
 }
 
 /** Color mappings for different status types */
@@ -38,12 +42,20 @@ const Colors = {
 /** Status tag component with colored indicator dot */
 const StatusTag: FC<StatusTagProps> = ({
   status,
-  text
+  text,
+  circle = false,
+  size = 'default',
+  strokeColor,
+  className,
 }) => {
   return (
-    <Tag className="rb:bg-white! rb:border-[#EBEBEB]! rb:rounded-md!">
+    <Tag className={clsx("rb:bg-white! rb:border-[#EBEBEB]!", className, {
+      'rb:rounded-md!': !circle,
+      'rb:rounded-full!': circle,
+      'rb:text-[12px]!': size === 'small' && !className?.includes('rb:text-['),
+    })}>
       <Flex align="center" gap={4} className='rb:text-[#5B6167] rb:py-px rb:px-2'>
-        <span className={clsx('rb:size-1.25 rb:rounded-full', Colors[status])}></span>
+        <span className={clsx('rb:size-1.25 rb:rounded-full', strokeColor || Colors[status])}></span>
         { text }
       </Flex>
     </Tag>
