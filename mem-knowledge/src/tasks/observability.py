@@ -247,6 +247,13 @@ class DocumentProgressSink:
     def emit(self, event: TaskEvent) -> None:
         if self._document_id is None:
             return
+        if (
+            event.event not in self._TERMINAL_EVENTS
+            and event.event != "kb_task_started"
+            and event.progress is None
+            and not event.display_message
+        ):
+            return
         now = self._clock()
         with self._lock:
             if event.display_message:
@@ -359,6 +366,7 @@ class TaskRun(AbstractContextManager["TaskRun"]):
         self._terminal = False
         self._current_stage: str | None = None
         self._current_stage_started_at: float | None = None
+        self._failed_stage: str | None = None
         self._heartbeat_stop = threading.Event()
         self._heartbeat_thread: threading.Thread | None = None
 
@@ -458,6 +466,10 @@ class TaskRun(AbstractContextManager["TaskRun"]):
         self._emit(TaskEvent(event="kb_task_stage_started", context=self.context, stage=name))
         try:
             yield
+        except BaseException:
+            with self._lock:
+                self._failed_stage = name
+            raise
         finally:
             with self._lock:
                 self._current_stage = previous_stage
@@ -530,6 +542,11 @@ class TaskRun(AbstractContextManager["TaskRun"]):
             TaskEvent(
                 event=event_name,
                 context=self.context,
+                stage=(
+                    self._failed_stage
+                    if outcome in {BusinessOutcome.FAILURE, BusinessOutcome.RETRY}
+                    else None
+                ),
                 detail=detail,
                 business_outcome=outcome,
                 duration_ms=max(0, int(round((self._clock() - self._started_at) * 1000))),
