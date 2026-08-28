@@ -36,6 +36,7 @@ from app.schemas.workspace_schema import (
     WorkspaceUpdate,
 )
 from app.i18n import t
+from app.invalidation_notify import notify_user_async, notify_user_sync
 from app.services.memory_config_service import MemoryConfigService
 from app.services.session_service import SessionService
 from app.utils.redis_cache import (
@@ -836,6 +837,9 @@ async def delete_workspace_member(
 
         # 使被删除成员的所有 token 立即失效
         await SessionService.invalidate_all_user_tokens(str(workspace_member.user_id))
+
+        # 决策 #11 修订：workspace 成员变更发通知，identity 重建快照（workspace_id/roles 变化）
+        await notify_user_async(str(workspace_member.user_id))
     except Exception as e:
         db.rollback()
         business_logger.error(f"删除工作空间成员失败 - 工作空间: {workspace_id}, 成员: {member_id}, 错误: {str(e)}")
@@ -1502,6 +1506,9 @@ def accept_workspace_invite(
         business_logger.info(
             f"用户成功加入工作空间: user={user.username}, workspace={workspace.name}, role={workspace_role}")
 
+        # 决策 #11 修订：workspace 成员变更发通知，identity 重建快照（workspace_id/roles 变化）
+        notify_user_sync(str(user.id))
+
         return {
             "message": "Successfully joined the workspace",
             "workspace": workspace,
@@ -1617,6 +1624,10 @@ def update_workspace_member_roles(
         # 重新获取更新后的成员列表
         updated_members = workspace_repository.get_members_by_workspace(db=db, workspace_id=workspace_id)
         business_logger.info(f"成员角色更新完成: workspace_id={workspace_id}, 更新数量={len(updates)}")
+
+        # 决策 #11 修订：workspace 成员变更发通知，identity 重建快照（workspace_id/roles 变化）
+        for upd in updates:
+            notify_user_sync(str(member_map[upd.id].user_id))
 
         return updated_members
 
