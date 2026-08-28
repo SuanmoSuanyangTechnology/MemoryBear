@@ -60,12 +60,20 @@ class EndUserRepository:
         self.db = db
 
     @staticmethod
+    def _temporary_expires_at_expr():
+        """临时身份过期时间表达式：write_time + retention_days 天。
+
+        write_time 或 retention_days 任一为 NULL 时结果为 NULL。
+        """
+        return EndUser.write_time + Workspace.retention_days * sa.text("INTERVAL '1 day'")
+
+    @staticmethod
     def _expired_temporary_filter():
         """构造临时身份过期条件。
 
         PostgreSQL 使用 retention_days 乘以固定的一天 interval，避免拼接动态 SQL。
         """
-        expires_at = EndUser.write_time + Workspace.retention_days * sa.text("INTERVAL '1 day'")
+        expires_at = EndUserRepository._temporary_expires_at_expr()
         return (
             EndUser.is_active == sa.true(),
             EndUser.identity_status == "temporary",
@@ -2399,8 +2407,13 @@ class EndUserRepository:
             pagesize: int,
             keyword: Optional[str] = None,
             label: Optional[str] = None,
-    ) -> tuple[List[EndUser], int]:
+    ) -> tuple[list, int]:
         """Dashboard 专用：分页查询有记忆的宿主（memory_count > 0）
+
+        长时/短时记忆以 identity_status 为准：
+        - confirmed：长时记忆
+        - temporary：短时记忆（返回 write_time + retention_days 计算的过期时间，
+          write_time 或 retention_days 任一为 NULL 时过期时间为 NULL）
 
         返回结果按 created_at 从新到旧排序（NULL 值排在最后），
         只加载接口所需列以避免加载大 Text 字段。
@@ -2410,14 +2423,16 @@ class EndUserRepository:
             page: 页码（从1开始）
             pagesize: 每页数量
             keyword: 搜索关键词（可选，同时模糊匹配 other_name 和 id）
-            label: 标签过滤（可选，"long" 表示有 other_name，"short" 表示无 other_name）
+            label: 标签过滤（可选，"long" 表示长时记忆(confirmed)，"short" 表示短时记忆(temporary)）
 
         Returns:
-            tuple[List[EndUser], int]: (当前页宿主列表, 符合条件的总数)
+            tuple[list, int]: (items列表[{"end_user": ORM, "expire_time": datetime|None}], 总数)
         """
         from sqlalchemy import desc, String, cast
         from sqlalchemy.orm import load_only
         from sqlalchemy.sql.expression import nullslast
+
+        expires_at = self._temporary_expires_at_expr()
 
         columns = load_only(
             EndUser.id,
@@ -2428,25 +2443,28 @@ class EndUserRepository:
             EndUser.memory_config_id,
             EndUser.created_at,
             EndUser.workspace_id,
+            EndUser.identity_features,
+            EndUser.identity_status,
+            EndUser.write_time,
         )
-        query = self.db.query(EndUser).options(columns).filter(
-            EndUser.workspace_id == workspace_id,
-            EndUser.memory_count > 0,
-            EndUser.is_active == True,
+        query = (
+            self.db.query(
+                EndUser,
+                expires_at.label("expire_time"),
+            )
+            .options(columns)
+            .outerjoin(Workspace, Workspace.id == EndUser.workspace_id)
+            .filter(
+                EndUser.workspace_id == workspace_id,
+                EndUser.memory_count > 0,
+                EndUser.is_active == True,
+            )
         )
 
         if label == "long":
-            query = query.filter(
-                EndUser.other_name.isnot(None),
-                EndUser.other_name != "",
-            )
+            query = query.filter(EndUser.identity_status == "confirmed")
         elif label == "short":
-            query = query.filter(
-                or_(
-                    EndUser.other_name.is_(None),
-                    EndUser.other_name == "",
-                )
-            )
+            query = query.filter(EndUser.identity_status == "temporary")
 
         if keyword:
             keyword = keyword.strip()
@@ -2463,12 +2481,20 @@ class EndUserRepository:
         if total == 0:
             return [], 0
 
-        items = (
+        rows = (
             query.order_by(nullslast(desc(EndUser.created_at)), desc(EndUser.id))
             .offset((page - 1) * pagesize)
             .limit(pagesize)
             .all()
         )
+
+        items = [
+            {
+                "end_user": end_user_orm,
+                "expire_time": expire_time,
+            }
+            for end_user_orm, expire_time in rows
+        ]
         return items, total
 
     def get_paginated_with_memory_rag(
@@ -2486,21 +2512,28 @@ class EndUserRepository:
         - 只统计当前 workspace 下 permission_id="Memory" 的用户记忆知识库
         - 在 SQL 层过滤 chunk 总数为 0 的宿主
 
+        长时/短时记忆以 identity_status 为准：
+        - confirmed：长时记忆
+        - temporary：短时记忆（返回 write_time + retention_days 计算的过期时间，
+          write_time 或 retention_days 任一为 NULL 时过期时间为 NULL）
+
         Args:
             workspace_id: 工作空间ID
             page: 页码（从1开始）
             pagesize: 每页数量
             keyword: 搜索关键词（可选，同时模糊匹配 other_name 和 id）
-            label: 标签过滤（可选，"long" 表示有 other_name，"short" 表示无 other_name）
+            label: 标签过滤（可选，"long" 表示长时记忆(confirmed)，"short" 表示短时记忆(temporary)）
 
         Returns:
-            tuple[list, int]: (items列表[{"end_user": ORM, "memory_count": int}], 总数)
+            tuple[list, int]: (items列表[{"end_user": ORM, "memory_count": int, "expire_time": datetime|None}], 总数)
         """
         from sqlalchemy import desc, String, cast, func
         from sqlalchemy.orm import load_only
         from sqlalchemy.sql.expression import nullslast
         from app.models.document_model import Document
         from app.models.knowledge_model import Knowledge
+
+        expires_at = self._temporary_expires_at_expr()
 
         chunk_subquery = (
             self.db.query(
@@ -2527,14 +2560,19 @@ class EndUserRepository:
             EndUser.memory_config_id,
             EndUser.created_at,
             EndUser.workspace_id,
+            EndUser.identity_features,
+            EndUser.identity_status,
+            EndUser.write_time,
         )
 
         base_query = (
             self.db.query(
                 EndUser,
                 chunk_subquery.c.memory_count.label("memory_count"),
+                expires_at.label("expire_time"),
             )
             .options(columns)
+            .outerjoin(Workspace, Workspace.id == EndUser.workspace_id)
             .join(
                 chunk_subquery,
                 chunk_subquery.c.file_name == func.concat(cast(EndUser.id, String), ".txt"),
@@ -2547,17 +2585,9 @@ class EndUserRepository:
         )
 
         if label == "long":
-            base_query = base_query.filter(
-                EndUser.other_name.isnot(None),
-                EndUser.other_name != "",
-            )
+            base_query = base_query.filter(EndUser.identity_status == "confirmed")
         elif label == "short":
-            base_query = base_query.filter(
-                or_(
-                    EndUser.other_name.is_(None),
-                    EndUser.other_name == "",
-                )
-            )
+            base_query = base_query.filter(EndUser.identity_status == "temporary")
 
         if keyword:
             keyword = keyword.strip()
@@ -2582,10 +2612,11 @@ class EndUserRepository:
         )
 
         items = []
-        for end_user_orm, memory_count in rows:
+        for end_user_orm, memory_count, expire_time in rows:
             items.append({
                 "end_user": end_user_orm,
                 "memory_count": int(memory_count or 0),
+                "expire_time": expire_time,
             })
         return items, total
 
