@@ -10,7 +10,6 @@
 所有业务逻辑从控制器层分离到此服务层。
 """
 
-import math
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any, Tuple
 from uuid import UUID
@@ -21,7 +20,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.logging_config import get_api_logger
 from app.core.memory.storage_services.forgetting_engine.actr_calculator import ACTRCalculator
 from app.core.memory.storage_services.forgetting_engine.constants import (
-    AUXILIARY_MAX_PER_RUN,
     DIALOGUE_AUDIT_CONTENT_MAX_LENGTH,
 )
 from app.core.memory.storage_services.forgetting_engine.config_utils import (
@@ -1025,25 +1023,21 @@ async def compute_forgetting_candidates(end_user_id: str) -> list[dict]:
             return []
 
         evaluated_at_ms = to_timestamp_ms(utcnow_naive())
-        core_items = await forget_get_core_candidates(
+        isolated_items = await forget_get_core_candidates(
             conn,
             end_user_id,
             budget,
             protection_threshold=10,
             evaluated_at_ms=evaluated_at_ms,
+            isolated_only=True,
         )
-        planned_core_deleted = min(len(core_items), budget)
+        remaining_budget = max(0, budget - len(isolated_items))
         auxiliary_active_count = await forget_count_auxiliary_active_nodes(
             conn, end_user_id
         )
-        release_ratio = (
-            planned_core_deleted / active_count if planned_core_deleted else 0.0
-        )
-        auxiliary_budget = min(
-            math.ceil(auxiliary_active_count * release_ratio),
-            planned_core_deleted,
-            AUXILIARY_MAX_PER_RUN,
-        )
+        # 预览无法模拟辅助节点软删除后的图断开结果，只展示下一阶段将按
+        # created_at 处理的辅助候选；辅助池为空时再展示时间价值兜底候选。
+        auxiliary_budget = min(auxiliary_active_count, remaining_budget)
         auxiliary_items = (
             await forget_get_auxiliary_candidates(
                 conn,
@@ -1052,6 +1046,18 @@ async def compute_forgetting_candidates(end_user_id: str) -> list[dict]:
                 content_max_len=DIALOGUE_AUDIT_CONTENT_MAX_LENGTH,
             )
             if auxiliary_budget > 0
+            else []
+        )
+        fallback_items = (
+            await forget_get_core_candidates(
+                conn,
+                end_user_id,
+                remaining_budget,
+                protection_threshold=10,
+                evaluated_at_ms=evaluated_at_ms,
+                isolated_only=False,
+            )
+            if remaining_budget > 0 and not auxiliary_items
             else []
         )
 
@@ -1063,7 +1069,7 @@ async def compute_forgetting_candidates(end_user_id: str) -> list[dict]:
             "content": item.get("content") or "",
             "forgetting_activation": item.get("forgetting_activation"),
         }
-        for item in core_items[:budget]
+        for item in (isolated_items + fallback_items)[:budget]
     ]
     auxiliary_preview = [
         {

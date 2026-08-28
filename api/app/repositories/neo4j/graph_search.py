@@ -1159,8 +1159,10 @@ async def forget_get_core_candidates(
         batch_size: int,
         protection_threshold: int,
         evaluated_at_ms: int,
+        *,
+        isolated_only: bool = False,
 ) -> list[dict[str, Any]]:
-    """Return active core candidates ordered by low memory value."""
+    """Return protected core candidates ordered by the configured G/T formula."""
     from app.repositories.neo4j.cypher_queries import FORGET_CORE_CANDIDATES
     return await connector.execute_query(
         FORGET_CORE_CANDIDATES,
@@ -1168,6 +1170,7 @@ async def forget_get_core_candidates(
         batch_size=batch_size,
         protection_threshold=protection_threshold,
         evaluated_at_ms=evaluated_at_ms,
+        isolated_only=isolated_only,
         iso_datetime_pattern=FORGET_ISO_DATETIME_PATTERN,
     )
 
@@ -1207,14 +1210,19 @@ async def forget_soft_delete_by_element_ids(
         end_user_id: str,
         element_ids: list[str],
         now: str,
+        *,
+        protection_threshold: int,
+        require_isolated: bool = False,
 ) -> list[str]:
-    """软删除指定节点并返回实际被删除的 element ID。"""
+    """复检节点类型及保护规则后软删除，并返回实际删除的 element ID。"""
     from app.repositories.neo4j.cypher_queries import FORGET_SOFT_DELETE_BY_ELEMENT_IDS
     result = await connector.execute_query(
         FORGET_SOFT_DELETE_BY_ELEMENT_IDS,
         end_user_id=end_user_id,
         element_ids=element_ids,
         now=now,
+        protection_threshold=protection_threshold,
+        require_isolated=require_isolated,
     )
     if not result:
         return []
