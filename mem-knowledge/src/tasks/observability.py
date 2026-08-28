@@ -5,6 +5,9 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
+import re
+import socket
 import threading
 import time
 import traceback
@@ -17,6 +20,11 @@ from types import TracebackType
 from typing import Protocol, Self
 
 _OBSERVABILITY_LOGGER = logging.getLogger("knowledge.tasks.observability")
+_MAIN_PID = os.getpid()
+_TASK_TIMING_LOCK = threading.Lock()
+_TASK_PRERUN_TIMING: dict[str, tuple[int, int]] = {}
+_CHILD_TASK_INDEX = 0
+_SAFE_HEADER_TEXT = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 
 
 class BusinessOutcome(StrEnum):
@@ -375,7 +383,16 @@ class TaskRun(AbstractContextManager["TaskRun"]):
         return values
 
     def __enter__(self) -> Self:
-        self._emit(TaskEvent(event="kb_task_started", context=self.context))
+        queue_wait_ms = None
+        if self.context.published_at_ms is not None and self.context.started_at_ms is not None:
+            queue_wait_ms = max(0, self.context.started_at_ms - self.context.published_at_ms)
+        self._emit(
+            TaskEvent(
+                event="kb_task_started",
+                context=self.context,
+                queue_wait_ms=queue_wait_ms,
+            )
+        )
         if self._heartbeat_seconds > 0:
             self._heartbeat_thread = threading.Thread(
                 target=self._heartbeat_loop,
@@ -542,6 +559,111 @@ def observe_task(
     )
 
 
+def current_parent_task_id() -> str | None:
+    """Return the current Celery task ID when dispatching a child task."""
+
+    try:
+        from celery import current_task
+    except ImportError:
+        return None
+    request = getattr(current_task, "request", None)
+    task_id = getattr(request, "id", None)
+    return str(task_id) if task_id else None
+
+
+def reset_observability_after_fork() -> None:
+    """Reset child-local timing without changing the inherited main PID."""
+
+    global _CHILD_TASK_INDEX
+    with _TASK_TIMING_LOCK:
+        _CHILD_TASK_INDEX = 0
+        _TASK_PRERUN_TIMING.clear()
+
+
+def record_task_prerun(task_id: str, *, started_at_ms: int | None = None) -> None:
+    """Capture task start before the task envelope imports business modules."""
+
+    global _CHILD_TASK_INDEX
+    if not task_id:
+        return
+    with _TASK_TIMING_LOCK:
+        _CHILD_TASK_INDEX += 1
+        _TASK_PRERUN_TIMING[str(task_id)] = (
+            started_at_ms if started_at_ms is not None else int(time.time() * 1000),
+            _CHILD_TASK_INDEX,
+        )
+
+
+def _consume_task_prerun(task_id: str) -> tuple[int, int]:
+    global _CHILD_TASK_INDEX
+    with _TASK_TIMING_LOCK:
+        timing = _TASK_PRERUN_TIMING.pop(task_id, None)
+        if timing is not None:
+            return timing
+        _CHILD_TASK_INDEX += 1
+        return int(time.time() * 1000), _CHILD_TASK_INDEX
+
+
+def _safe_uuid(value: object | None) -> str | None:
+    if value is None:
+        return None
+    try:
+        return str(uuid.UUID(str(value)))
+    except (AttributeError, TypeError, ValueError):
+        return None
+
+
+def _safe_header_text(value: object | None) -> str | None:
+    if value is None:
+        return None
+    text = str(value)
+    return text if _SAFE_HEADER_TEXT.fullmatch(text) else None
+
+
+def task_context_from_current_task(
+    *,
+    role: str,
+    knowledge_id: object | None = None,
+    document_id: object | None = None,
+) -> TaskContext:
+    """Build a safe task context from Celery's current task proxy."""
+
+    from celery import current_task
+
+    request = getattr(current_task, "request", None)
+    task_id = str(getattr(request, "id", None) or "unknown")
+    started_at_ms, child_task_index = _consume_task_prerun(task_id)
+    headers = getattr(request, "headers", None)
+    headers = headers if isinstance(headers, Mapping) else {}
+    delivery_info = getattr(request, "delivery_info", None)
+    delivery_info = delivery_info if isinstance(delivery_info, Mapping) else {}
+    raw_published_at = headers.get("kb_published_at_ms")
+    published_at_ms = (
+        int(raw_published_at)
+        if isinstance(raw_published_at, (int, float)) and not isinstance(raw_published_at, bool)
+        else None
+    )
+    return TaskContext(
+        service="mem-knowledge",
+        role=role,
+        hostname=str(getattr(request, "hostname", None) or socket.gethostname()),
+        main_pid=_MAIN_PID,
+        pid=os.getpid(),
+        task_name=str(getattr(current_task, "name", None) or "unknown"),
+        task_id=task_id,
+        queue=_safe_header_text(delivery_info.get("routing_key")),
+        attempt=int(getattr(request, "retries", 0) or 0),
+        knowledge_id=_safe_uuid(knowledge_id),
+        document_id=_safe_uuid(document_id),
+        trace_id=_safe_header_text(headers.get("kb_trace_id")),
+        parent_task_id=_safe_uuid(headers.get("kb_parent_task_id")),
+        published_at_ms=published_at_ms,
+        started_at_ms=started_at_ms,
+        cold_start=child_task_index == 1,
+        child_task_index=child_task_index,
+    )
+
+
 __all__ = [
     "BusinessOutcome",
     "CeleryStateSink",
@@ -553,6 +675,10 @@ __all__ = [
     "TaskEvent",
     "TaskEventSink",
     "TaskRun",
+    "current_parent_task_id",
     "error_fingerprint",
     "observe_task",
+    "record_task_prerun",
+    "reset_observability_after_fork",
+    "task_context_from_current_task",
 ]
