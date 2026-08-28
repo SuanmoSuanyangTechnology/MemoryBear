@@ -53,6 +53,12 @@ def validate_worker_role_queues(role: str, queues: set[str]) -> None:
         )
 
 
+def _active_queue_names(app: object) -> set[str]:
+    queues = getattr(getattr(app, "amqp", None), "queues", {})
+    consume_from = getattr(queues, "consume_from", queues)
+    return set(consume_from)
+
+
 @celeryd_after_setup.connect
 def validate_worker_configuration(
     *,
@@ -63,7 +69,7 @@ def validate_worker_configuration(
     """Fail before consumption when the declared role and queues differ."""
 
     del kwargs
-    queues = set(instance.app.amqp.queues)
+    queues = _active_queue_names(instance.app)
     role = get_settings().kb_process_role
     try:
         validate_worker_role_queues(role, queues)
@@ -91,7 +97,7 @@ def handle_worker_ready(sender: object, **kwargs: object) -> None:
 
     del kwargs
     app = getattr(sender, "app", celery_app)
-    queue_names = sorted(getattr(getattr(app, "amqp", None), "queues", {}))
+    queue_names = sorted(_active_queue_names(app))
     controller = getattr(sender, "controller", None)
     pool = getattr(controller, "pool", None)
     logger.info(
