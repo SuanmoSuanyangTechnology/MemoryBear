@@ -1,0 +1,558 @@
+"""Lightweight task observability primitives for knowledge workers."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import logging
+import threading
+import time
+import traceback
+import uuid
+from collections.abc import Callable, Mapping, Sequence
+from contextlib import AbstractContextManager, contextmanager
+from dataclasses import dataclass, field
+from enum import StrEnum
+from types import TracebackType
+from typing import Protocol, Self
+
+_OBSERVABILITY_LOGGER = logging.getLogger("knowledge.tasks.observability")
+
+
+class BusinessOutcome(StrEnum):
+    """Business terminal states independent from Celery task states."""
+
+    SUCCESS = "success"
+    FAILURE = "failure"
+    PARTIAL_FAILURE = "partial_failure"
+    RETRY = "retry"
+    SKIPPED = "skipped"
+    COALESCED = "coalesced"
+    ABORTED = "aborted"
+    REVOKED = "revoked"
+
+
+@dataclass(frozen=True)
+class TaskContext:
+    """Safe task identity propagated to all observability events."""
+
+    service: str
+    role: str
+    hostname: str
+    main_pid: int
+    pid: int
+    task_name: str
+    task_id: str
+    queue: str | None
+    attempt: int
+    knowledge_id: str | None = None
+    document_id: str | None = None
+    trace_id: str | None = None
+    parent_task_id: str | None = None
+    published_at_ms: int | None = None
+    received_at_ms: int | None = None
+    started_at_ms: int | None = None
+    cold_start: bool = False
+    child_task_index: int = 0
+
+
+@dataclass(frozen=True)
+class TaskEvent:
+    """One immutable worker or task event."""
+
+    event: str
+    context: TaskContext
+    stage: str | None = None
+    detail: str | None = None
+    business_outcome: BusinessOutcome | None = None
+    celery_outcome: str | None = None
+    duration_ms: int | None = None
+    queue_wait_ms: int | None = None
+    wait_duration_ms: int | None = None
+    retry_in_ms: int | None = None
+    progress: float | None = None
+    error_code: str | None = None
+    error_type: str | None = None
+    error_fingerprint: str | None = None
+    counts: Mapping[str, int] = field(default_factory=dict)
+    display_message: str | None = None
+    force_flush: bool = False
+    exception: BaseException | None = field(default=None, repr=False, compare=False)
+
+
+class TaskEventSink(Protocol):
+    """Consume task events without changing task behavior."""
+
+    def emit(self, event: TaskEvent) -> None: ...
+
+
+TASK_LOG_FIELDS = (
+    "event",
+    "service",
+    "role",
+    "hostname",
+    "main_pid",
+    "pid",
+    "task_name",
+    "task_id",
+    "queue",
+    "attempt",
+    "trace_id",
+    "parent_task_id",
+    "knowledge_id",
+    "document_id",
+    "stage",
+    "detail",
+    "business_outcome",
+    "celery_outcome",
+    "duration_ms",
+    "queue_wait_ms",
+    "wait_duration_ms",
+    "retry_in_ms",
+    "progress",
+    "error_code",
+    "error_type",
+    "error_fingerprint",
+)
+
+TASK_COUNT_FIELDS = (
+    "discovered",
+    "created",
+    "updated",
+    "unchanged",
+    "deleted",
+    "parse_dispatched",
+    "failed",
+    "documents",
+    "chunks",
+    "batches",
+)
+
+
+class StructuredLogSink:
+    """Emit one allowlisted key-value log line per task event."""
+
+    def __init__(self, logger: logging.Logger | None = None) -> None:
+        self._logger = logger or logging.getLogger("knowledge.tasks")
+
+    @staticmethod
+    def _encoded(value: object) -> str:
+        if isinstance(value, StrEnum):
+            value = value.value
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return str(value)
+        return json.dumps(str(value), ensure_ascii=False)
+
+    @staticmethod
+    def _fields(event: TaskEvent) -> dict[str, object]:
+        context = event.context
+        fields: dict[str, object] = {
+            "event": event.event,
+            "service": context.service,
+            "role": context.role,
+            "hostname": context.hostname,
+            "main_pid": context.main_pid,
+            "pid": context.pid,
+            "task_name": context.task_name,
+            "task_id": context.task_id,
+            "queue": context.queue,
+            "attempt": context.attempt,
+            "trace_id": context.trace_id,
+            "parent_task_id": context.parent_task_id,
+            "knowledge_id": context.knowledge_id,
+            "document_id": context.document_id,
+            "stage": event.stage,
+            "detail": event.detail,
+            "business_outcome": event.business_outcome,
+            "celery_outcome": event.celery_outcome,
+            "duration_ms": event.duration_ms,
+            "queue_wait_ms": event.queue_wait_ms,
+            "wait_duration_ms": event.wait_duration_ms,
+            "retry_in_ms": event.retry_in_ms,
+            "progress": event.progress,
+            "error_code": event.error_code,
+            "error_type": event.error_type,
+            "error_fingerprint": event.error_fingerprint,
+        }
+        for key in TASK_COUNT_FIELDS:
+            value = event.counts.get(key)
+            if isinstance(value, int) and not isinstance(value, bool):
+                fields[f"count_{key}"] = value
+        return {key: value for key, value in fields.items() if value is not None}
+
+    def emit(self, event: TaskEvent) -> None:
+        fields = self._fields(event)
+        message = " ".join(
+            f"{key}={self._encoded(value)}"
+            for key, value in fields.items()
+        )
+        level = logging.ERROR if event.event in {
+            "kb_task_failed",
+            "kb_task_implementation_error",
+        } else logging.INFO
+        exc_info = (
+            (type(event.exception), event.exception, event.exception.__traceback__)
+            if event.exception is not None
+            else None
+        )
+        self._logger.log(level, message, exc_info=exc_info)
+
+
+class DocumentProgressSink:
+    """Persist throttled task progress through short database sessions."""
+
+    _TERMINAL_EVENTS = {"kb_task_finished", "kb_task_failed"}
+
+    def __init__(
+        self,
+        *,
+        runtime: object,
+        document_id: str,
+        flush_interval_seconds: float,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self._runtime = runtime
+        try:
+            self._document_id = uuid.UUID(str(document_id))
+        except (TypeError, ValueError):
+            self._document_id = None
+        self._flush_interval_seconds = flush_interval_seconds
+        self._clock = clock
+        self._lock = threading.RLock()
+        self._last_flush_at: float | None = None
+        self._pending_messages: list[str] = []
+
+    @staticmethod
+    def _append_message(current: str | None, messages: Sequence[str]) -> str:
+        lines = [current.rstrip("\n")] if current else []
+        lines.extend(message.rstrip("\n") for message in messages if message)
+        return "\n".join(line for line in lines if line) + ("\n" if lines else "")
+
+    def _should_flush(self, event: TaskEvent, now: float) -> bool:
+        return (
+            event.force_flush
+            or event.event in self._TERMINAL_EVENTS
+            or self._last_flush_at is None
+            or now - self._last_flush_at >= self._flush_interval_seconds
+        )
+
+    def emit(self, event: TaskEvent) -> None:
+        if self._document_id is None:
+            return
+        now = self._clock()
+        with self._lock:
+            if event.display_message:
+                self._pending_messages.append(event.display_message)
+            if not self._should_flush(event, now):
+                return
+            pending_messages = tuple(self._pending_messages)
+            self._persist(event, pending_messages)
+            self._pending_messages.clear()
+            self._last_flush_at = now
+
+    def _persist(self, event: TaskEvent, messages: Sequence[str]) -> None:
+        from ..models.owned import Document
+        from ..utils.datetime_utils import utcnow_naive
+
+        database = self._runtime.database
+        with database.sync_session() as session:
+            document = session.get(Document, self._document_id)
+            if document is None:
+                return
+            if event.event == "kb_task_started":
+                document.run = 1
+                document.progress = 0.0
+                document.process_begin_at = utcnow_naive()
+            elif event.event == "kb_task_failed":
+                document.run = 0
+                document.progress = -1.0
+            elif event.event == "kb_task_finished":
+                document.run = 0
+                if event.business_outcome is BusinessOutcome.SUCCESS:
+                    document.progress = 1.0
+            else:
+                document.run = 1
+                if event.progress is not None:
+                    document.progress = float(event.progress)
+            if messages:
+                document.progress_msg = self._append_message(
+                    document.progress_msg,
+                    messages,
+                )
+            session.commit()
+
+
+class CeleryStateSink:
+    """Expose active task stages without replacing Celery terminal states."""
+
+    _ACTIVE_EVENTS = {
+        "kb_task_started",
+        "kb_task_stage_started",
+        "kb_task_stage_finished",
+        "kb_task_progress",
+    }
+
+    def __init__(self, update_state: Callable[..., None]) -> None:
+        self._update_state = update_state
+
+    def emit(self, event: TaskEvent) -> None:
+        if event.event not in self._ACTIVE_EVENTS:
+            return
+        meta: dict[str, object] = {}
+        for key in (
+            "stage",
+            "detail",
+            "duration_ms",
+            "wait_duration_ms",
+            "progress",
+        ):
+            value = getattr(event, key)
+            if value is not None:
+                meta[key] = value
+        for key in TASK_COUNT_FIELDS:
+            value = event.counts.get(key)
+            if isinstance(value, int) and not isinstance(value, bool):
+                meta[f"count_{key}"] = value
+        if not meta:
+            return
+        self._update_state(state="STARTED", meta=meta)
+
+
+def error_fingerprint(exc: BaseException) -> str:
+    """Group failures by exception type and stable Knowledge source frames."""
+
+    frames = traceback.extract_tb(exc.__traceback__)
+    normalized_frames = [
+        f"{frame.filename.rsplit('/mem-knowledge/src/', 1)[-1]}:{frame.lineno}:{frame.name}"
+        for frame in frames
+        if "/mem-knowledge/src/" in frame.filename
+    ]
+    source = "|".join([type(exc).__name__, *normalized_frames[-5:]])
+    return hashlib.sha256(source.encode()).hexdigest()[:16]
+
+
+class TaskRun(AbstractContextManager["TaskRun"]):
+    """Track one task's stages and exactly one business terminal state."""
+
+    def __init__(
+        self,
+        context: TaskContext,
+        *,
+        sinks: Sequence[TaskEventSink],
+        heartbeat_seconds: float,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self.context = context
+        self._sinks = tuple(sinks)
+        self._heartbeat_seconds = heartbeat_seconds
+        self._clock = clock
+        self._lock = threading.RLock()
+        self._started_at = clock()
+        self._terminal = False
+        self._current_stage: str | None = None
+        self._current_stage_started_at: float | None = None
+        self._heartbeat_stop = threading.Event()
+        self._heartbeat_thread: threading.Thread | None = None
+
+    def _emit(self, event: TaskEvent) -> None:
+        for sink in self._sinks:
+            try:
+                sink.emit(event)
+            except Exception as exc:  # noqa: BLE001 - observability must not alter task behavior.
+                _OBSERVABILITY_LOGGER.error(
+                    "event=kb_task_observability_sink_failed sink_type=%s "
+                    "error_type=%s source_event=%s",
+                    type(sink).__name__,
+                    type(exc).__name__,
+                    event.event,
+                )
+
+    @staticmethod
+    def _validated_counts(counts: Mapping[str, int] | None) -> dict[str, int]:
+        values = dict(counts or {})
+        if any(not isinstance(value, int) or isinstance(value, bool) for value in values.values()):
+            raise ValueError("progress counts must contain integer values")
+        return values
+
+    def __enter__(self) -> Self:
+        self._emit(TaskEvent(event="kb_task_started", context=self.context))
+        if self._heartbeat_seconds > 0:
+            self._heartbeat_thread = threading.Thread(
+                target=self._heartbeat_loop,
+                name=f"kb-task-heartbeat-{self.context.task_id[-8:]}",
+                daemon=True,
+            )
+            self._heartbeat_thread.start()
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> bool:
+        del exc_type, traceback
+        try:
+            if exc is not None and not self._terminal:
+                self.finish(BusinessOutcome.FAILURE, exc=exc)
+            elif exc is None and not self._terminal:
+                self.finish(
+                    BusinessOutcome.FAILURE,
+                    error_code="KB_TASK_TERMINAL_MISSING",
+                    detail="task_returned_without_business_terminal",
+                )
+        finally:
+            self._heartbeat_stop.set()
+            heartbeat_thread = self._heartbeat_thread
+            if heartbeat_thread is not None:
+                heartbeat_thread.join(timeout=max(1.0, self._heartbeat_seconds * 2))
+        return False
+
+    def _heartbeat_loop(self) -> None:
+        while not self._heartbeat_stop.wait(self._heartbeat_seconds):
+            with self._lock:
+                if self._terminal:
+                    continue
+                stage = self._current_stage
+                stage_started_at = self._current_stage_started_at
+            if stage is None or stage_started_at is None:
+                continue
+            self._emit(
+                TaskEvent(
+                    event="kb_task_progress",
+                    context=self.context,
+                    stage=stage,
+                    detail="heartbeat",
+                    wait_duration_ms=max(
+                        0,
+                        int(round((self._clock() - stage_started_at) * 1000)),
+                    ),
+                )
+            )
+
+    @contextmanager
+    def stage(self, name: str):
+        started_at = self._clock()
+        with self._lock:
+            previous_stage = self._current_stage
+            previous_stage_started_at = self._current_stage_started_at
+            self._current_stage = name
+            self._current_stage_started_at = started_at
+        self._emit(TaskEvent(event="kb_task_stage_started", context=self.context, stage=name))
+        try:
+            yield
+        finally:
+            with self._lock:
+                self._current_stage = previous_stage
+                self._current_stage_started_at = previous_stage_started_at
+            duration_ms = max(0, int(round((self._clock() - started_at) * 1000)))
+            self._emit(
+                TaskEvent(
+                    event="kb_task_stage_finished",
+                    context=self.context,
+                    stage=name,
+                    duration_ms=duration_ms,
+                )
+            )
+
+    def progress(
+        self,
+        *,
+        stage: str,
+        fraction: float | None,
+        detail: str,
+        display_message: str | None = None,
+        counts: Mapping[str, int] | None = None,
+        force: bool = False,
+    ) -> None:
+        if (
+            fraction is not None
+            and (
+                isinstance(fraction, bool)
+                or not isinstance(fraction, (int, float))
+                or not 0.0 <= fraction <= 1.0
+            )
+        ):
+            raise ValueError("progress fraction must be between 0 and 1")
+        self._emit(
+            TaskEvent(
+                event="kb_task_progress",
+                context=self.context,
+                stage=stage,
+                detail=detail,
+                progress=fraction,
+                counts=self._validated_counts(counts),
+                display_message=display_message,
+                force_flush=force,
+            )
+        )
+
+    def finish(
+        self,
+        outcome: BusinessOutcome,
+        *,
+        error_code: str | None = None,
+        exc: BaseException | None = None,
+        detail: str | None = None,
+        counts: Mapping[str, int] | None = None,
+    ) -> None:
+        with self._lock:
+            if self._terminal:
+                self._emit(
+                    TaskEvent(
+                        event="kb_task_implementation_error",
+                        context=self.context,
+                        detail="duplicate_business_terminal",
+                        error_code=error_code,
+                    )
+                )
+                return
+            self._terminal = True
+        event_name = "kb_task_failed" if outcome is BusinessOutcome.FAILURE else "kb_task_finished"
+        self._emit(
+            TaskEvent(
+                event=event_name,
+                context=self.context,
+                detail=detail,
+                business_outcome=outcome,
+                duration_ms=max(0, int(round((self._clock() - self._started_at) * 1000))),
+                error_code=error_code,
+                error_type=type(exc).__name__ if exc is not None else None,
+                error_fingerprint=error_fingerprint(exc) if exc is not None else None,
+                counts=self._validated_counts(counts),
+                exception=exc,
+            )
+        )
+
+
+def observe_task(
+    context: TaskContext,
+    *,
+    sinks: Sequence[TaskEventSink],
+    heartbeat_seconds: float,
+    clock: Callable[[], float] = time.monotonic,
+) -> TaskRun:
+    """Create one task run without initializing external resources."""
+
+    return TaskRun(
+        context,
+        sinks=sinks,
+        heartbeat_seconds=heartbeat_seconds,
+        clock=clock,
+    )
+
+
+__all__ = [
+    "BusinessOutcome",
+    "CeleryStateSink",
+    "DocumentProgressSink",
+    "StructuredLogSink",
+    "TASK_COUNT_FIELDS",
+    "TASK_LOG_FIELDS",
+    "TaskContext",
+    "TaskEvent",
+    "TaskEventSink",
+    "TaskRun",
+    "error_fingerprint",
+    "observe_task",
+]
