@@ -74,7 +74,7 @@ const KnowledgeGraphCard: React.FC<KnowledgeGraphCardProps> = ({ knowledgeBase, 
         {knowledgeBase?.parser_config?.graphrag?.use_graphrag ? 
           (<KnowledgeGraph title={knowledgeBase?.parser_config?.graphrag?.scene_name} data={data} loading={loading} />) 
           : 
-          <Empty title={t('knowledgeBase.graphEmpty')}/>}
+          <Empty title={t('knowledgeBase.graphEmpty')} size={88} />}
       </div>
     </Flex>
   )

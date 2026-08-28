@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:33:15 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-07-09 14:57:28
+ * @Last Modified time: 2026-08-14 18:35:33
  */
 /**
  * Memory Management Page
@@ -151,7 +151,7 @@ const MemoryManagement: React.FC = () => {
   const activeConfig = data.find((item) => item.is_active) || data[0]
 
   return (
-    <>
+    <Flex vertical className="rb:h-full!">
       {!loading && (
         hasUserConfig
           ? activeConfig && <ActiveConfigBanner config={activeConfig} />
@@ -172,7 +172,7 @@ const MemoryManagement: React.FC = () => {
       </Flex>
 
       {loading
-        ? <PageLoading className="rb:max-h-[calc(100%-48px)]!" />
+        ? <PageLoading className="rb:flex-1!" />
         : data.length === 0
           ? <Empty
               url={pageEmptyIcon}
@@ -183,7 +183,7 @@ const MemoryManagement: React.FC = () => {
             />
           : <Row
               gutter={[12, 12]}
-              className="rb:max-h-[calc(100%-48px)] rb:overflow-y-auto"
+              className="rb:flex-1! rb:overflow-x-hidden! rb:overflow-y-auto!"
             >
               {data.map((item) => (
                 <Col key={item.config_id} span={12}>
@@ -271,7 +271,7 @@ const MemoryManagement: React.FC = () => {
         ref={memoryFormRef}
         refresh={loadMoreData}
       />
-    </>
+    </Flex>
   );
 };
 

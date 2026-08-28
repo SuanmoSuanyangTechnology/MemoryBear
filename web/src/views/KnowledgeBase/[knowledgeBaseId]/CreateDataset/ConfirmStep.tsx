@@ -50,7 +50,7 @@ const ConfirmStep = ({ tableRef, knowledgeBaseId, fileIds, onDelete }: ConfirmSt
   ];
 
   return (
-    <div className="rb:text-sm rb:text-gray-500 rb:mt-4 rb:h-[calc(100%-160px)] rb:overflow-y-auto rb:px-6 rb:py-6">
+    <div className="rb:text-sm rb:text-gray-500 rb:h-full! rb:overflow-y-auto rb:px-6 rb:pt-6">
       {knowledgeBaseId && fileIds.length > 0 ? (
         <Table<KnowledgeBaseDocumentData>
           ref={tableRef}
@@ -58,13 +58,16 @@ const ConfirmStep = ({ tableRef, knowledgeBaseId, fileIds, onDelete }: ConfirmSt
           apiParams={{ document_ids: fileIds.join(',') }}
           columns={columns}
           rowKey="id"
+          fillHeight={true}
         />
       ) : (
         <Table<KnowledgeBaseDocumentData>
           ref={tableRef}
           columns={columns}
           rowKey="id"
-          initialData={[]} />
+          initialData={[]}
+          fillHeight={true}
+        />
       )}
     </div>
   );

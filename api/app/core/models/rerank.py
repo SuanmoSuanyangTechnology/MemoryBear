@@ -3,7 +3,10 @@ from typing import Any, Dict, List, Optional, Sequence, Union
 from copy import deepcopy
 from langchain_core.documents import BaseDocumentCompressor, Document
 from langchain_core.callbacks import Callbacks
-from app.core.alert_metric_bridge import report_model_gateway_failure
+from app.core.alert_metric_bridge import (
+    report_model_gateway_failure,
+    report_model_gateway_success,
+)
 from app.core.models.base import RedBearModelConfig, get_provider_rerank_class, RedBearModelFactory
 from app.core.models.network_retry import network_retry
 from app.models import ModelProvider

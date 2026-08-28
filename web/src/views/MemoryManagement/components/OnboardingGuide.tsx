@@ -1,17 +1,20 @@
 /**
  * OnboardingGuide Component
- * 新手引导：当不存在用户自建配置（is_system_default = false）时展示，
- * 引导用户完成「创建配置 -> 配置引擎策略 -> 设为线上生效」三步。
+ * Shown when no user-created configuration exists (is_system_default = false)
+ * and walks the user through the 3-step onboarding flow:
+ *   Create Config → Tune Engine Policies → Activate Online.
  */
 import { type FC } from 'react'
 import { Flex } from 'antd'
 import { useTranslation } from 'react-i18next'
 import clsx from 'clsx'
 
+import Tag from '@/components/Tag'
+
 interface OnboardingGuideProps {
-  /** 完成步骤数（0-3） */
+  /** Number of completed steps (0-3) */
   completed?: number;
-  /** 点击「创建配置」回调 */
+  /** Callback fired when the "Create configuration" CTA is clicked */
   onCreate: () => void;
 }
 
@@ -37,22 +40,23 @@ const OnboardingGuide: FC<OnboardingGuideProps> = ({ completed = 0, onCreate }) 
   ]
 
   return (
-    <div className="rb:rb-border rb:rounded-xl rb:bg-white rb:p-5! rb:mb-4">
-      <Flex align="center" justify="space-between" className="rb:mb-4!">
+    <div className="rb:rb-border rb:rounded-xl rb:bg-white rb:px-5! rb:py-3! rb:mb-4">
+      <Flex align="center" justify="space-between" className="rb:mb-3!">
         <Flex align="center" gap={12}>
           <span className="rb:text-[16px] rb:font-medium rb:leading-5.5 rb:text-[#212332]">
             {t('memory.onboardingTitle')}
           </span>
-          <span className="rb:text-[12px] rb:leading-4 rb:text-[#5B6167] rb:bg-[#F6F6F6] rb:rounded-full rb:px-2 rb:py-0.5">
+          <Tag color="default" circle={true}>
             {t('memory.onboardingInProgress')}
-          </span>
+          </Tag>
         </Flex>
         <span className="rb:text-[12px] rb:leading-4 rb:text-[#5B6167]">{completed} / {steps.length}</span>
       </Flex>
 
       <div className="rb:grid rb:grid-cols-3 rb:gap-0">
         {steps.map((step, index) => {
-          // 第一步在无配置时可操作，其余步骤待创建配置后开启
+          // Step 1 is actionable when no config exists; the remaining steps
+          // unlock after a configuration has been created.
           const isActive = index === 0
           return (
             <Flex

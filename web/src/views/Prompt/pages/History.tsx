@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:44:04 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-27 15:52:44
+ * @Last Modified time: 2026-08-17 10:38:13
  */
 /**
  * Prompt History Component
@@ -66,7 +66,6 @@ const History: React.FC = () => {
   }
 
   const handleClick = (key: string, item: HistoryItem) => {
-    console.log('handleClick key', key)
     switch(key) {
       case 'detail':
         handleView(item)
@@ -81,8 +80,8 @@ const History: React.FC = () => {
   }
 
   return (
-    <>
-      <Flex justify="space-between" align="center" className="rb:mb-3!">
+    <Flex vertical gap={12} className="rb:h-full!">
+      <Flex justify="space-between" align="center">
         <Header title={t('prompt.history')} desc={t('prompt.historyDesc')} />
 
         <Form form={form}>
@@ -102,7 +101,7 @@ const History: React.FC = () => {
         needLoading={false}
         renderItem={(item) => (
           <RbCard
-            className="rb:cursor-pointer rb:relative"
+            className="rb:relative"
             title={item.title}
             headerClassName='rb:min-h-[46px]!'
             headerType="borderless"
@@ -129,7 +128,7 @@ const History: React.FC = () => {
             </Flex>
           </RbCard>
         )}
-        heightClass="rb:h-[calc(100vh-126px)]!"
+        heightClass="rb:flex-1!"
       />
 
       <PromptDetail
@@ -137,7 +136,7 @@ const History: React.FC = () => {
         handleEdit={handleEdit}
         handleDelete={handleDelete}
       />
-    </>
+    </Flex>
   );
 };
 

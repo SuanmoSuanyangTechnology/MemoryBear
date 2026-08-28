@@ -1,7 +1,8 @@
 /**
  * ActiveConfigBanner Component
- * 线上生效配置信息：当存在用户自建配置（is_system_default = false）时，
- * 在顶部展示当前线上生效配置的名称、场景、更新时间与描述。
+ * Displays the currently active online configuration at the top of the page.
+ * Shown when a user-created configuration (is_system_default = false) exists,
+ * including its name, scenario, last updated timestamp and description.
  */
 import { type FC, useState } from 'react'
 import { Flex, Button, App } from 'antd'
@@ -10,6 +11,7 @@ import { useTranslation } from 'react-i18next'
 import type { Memory } from '../types'
 import { formatDateTime } from '@/utils/format'
 import { validateMemoryConfig } from '@/api/memory'
+import Tag from '@/components/Tag'
 
 interface ActiveConfigBannerProps {
   config: Memory;
@@ -51,19 +53,20 @@ const ActiveConfigBanner: FC<ActiveConfigBannerProps> = ({ config }) => {
   }
 
   return (
-    <div className="rb:rb-border rb:rounded-xl rb:bg-white rb:p-5! rb:mb-4">
-      <Flex align="center" gap={12} className="rb:mb-4!">
+    <div className="rb:rb-border rb:rounded-xl rb:bg-white rb:px-5! rb:py-3! rb:mb-4">
+      <Flex align="center" gap={12} className="rb:mb-3!">
         <Flex align="center" gap={8}>
-          <span className="rb:size-1.5 rb:rounded-full rb:bg-[#12B76A]"></span>
+          <span className="rb:size-1.5 rb:rounded-full rb:bg-[#369F21]"></span>
           <span className="rb:text-[14px] rb:font-medium rb:leading-5 rb:text-[#212332]">
             {t('memory.onlineActiveConfig')}
           </span>
         </Flex>
-        <Flex align="center" gap={4}>
-          <span className="rb:text-[12px] rb:leading-4 rb:text-[#12B76A] rb:bg-[rgba(18,183,106,0.1)] rb:rounded-full rb:px-2 rb:py-0.5">
+        <Flex align="center" gap={8}>
+          <Tag color="success" circle={true}>
             {t('memory.activeStatus')}
-          </span>
+          </Tag>
           <Button type="primary" size="small"
+            className="rb:text-[12px]!"
             loading={loading}
             onClick={handleValidateClick}
           >
@@ -72,7 +75,7 @@ const ActiveConfigBanner: FC<ActiveConfigBannerProps> = ({ config }) => {
         </Flex>
       </Flex>
 
-      <div className="rb:grid rb:grid-cols-3 rb:gap-x-6 rb:gap-y-4">
+      <div className="rb:grid rb:grid-cols-3 rb:gap-x-6 rb:gap-y-3">
         <div>
           <div className="rb:text-[12px] rb:leading-4 rb:text-[#9A9A9A] rb:mb-1">{t('memory.configurationName')}</div>
           <div className="rb:text-[14px] rb:leading-5 rb:text-[#212332]">{config.config_name || '-'}</div>

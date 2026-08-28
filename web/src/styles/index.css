@@ -135,3 +135,6 @@ input:-webkit-autofill:active {
   -webkit-text-fill-color: #FFFFFF !important;
   transition: background-color 5000s ease-in-out 0s !important;
 }
+.infinite-scroll-component__outerdiv {
+  height: 100%;
+}

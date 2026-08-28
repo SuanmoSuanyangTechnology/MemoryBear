@@ -11,7 +11,7 @@ import Table, { type TableRef } from '@/components/Table'
 import type { ColumnsType } from 'antd/es/table';
 import type { AnyObject } from 'antd/es/_util/type';
 import { MoreOutlined } from '@ant-design/icons';
-import StatusTag, { type StatusTagProps } from '@/components/StatusTag';
+import StatusTag from '@/components/StatusTag';
 import { getKnowledgeBaseDetail, deleteDocument, downloadFile, updateKnowledgeBase, createSync, batchDownloadFilesByKb, exportQaByKb } from '@/api/knowledgeBase';
 import { 
   type CreateModalRef, 
@@ -814,23 +814,24 @@ const Private: FC = () => {
   return (
     <Flex className="rb:h-full! rb:bg-white rb:rounded-xl">
       {folder && (
-        <div className="rb:w-64 rb:py-4 rb:shrink-0 rb:h-[calc(100%+40px)] rb:border-r rb:border-[#EAECEE] rb:p-4 rb:bg-transparent">
-            <FolderTree
-              multiple
-              className="customTree"
-              style={{ background: 'transparent' }}
-              onSelect={onSelect}
-              onExpand={onExpand}
-              knowledgeBaseId={knowledgeBaseId ?? ''}
-              refreshKey={folderTreeRefreshKey}
-              onRootLoad={handleRootTreeLoad}
-              onFolderPathChange={handleFolderPathChange}
-              selectedKeys={selectedKeys}
-              autoExpandPath={autoExpandPath}
-            />
-        </div>
+        <FolderTree
+          multiple
+          className="customTree"
+          style={{ background: 'transparent' }}
+          onSelect={onSelect}
+          onExpand={onExpand}
+          knowledgeBaseId={knowledgeBaseId ?? ''}
+          refreshKey={folderTreeRefreshKey}
+          onRootLoad={handleRootTreeLoad}
+          onFolderPathChange={handleFolderPathChange}
+          selectedKeys={selectedKeys}
+          autoExpandPath={autoExpandPath}
+        />
       )}
-      <div className='rb:flex-1 rb:min-w-0 rb:p-4'>
+      <Flex vertical className={clsx('rb:flex-1 rb:min-w-0 rb:px-4! rb:pt-4!', {
+        'rb:pb-0': !isGraph,
+        'rb:pt-4':isGraph,
+      })}>
         <Flex justify="space-between" className="rb:mb-6!">
           <div>
             <Flex align="center" gap={6} onClick={handleEditFolder}>
@@ -919,7 +920,10 @@ const Private: FC = () => {
             
           </Flex>
         </Flex>
-        <div className="rb:rounded rb:max-h-[calc(100%-112px)] rb:overflow-y-auto">
+        <div className={clsx("rb:rounded", {
+          'rb:flex-1 rb:overflow-y-auto': isGraph,
+          'rb:flex-1 rb:overflow-hidden': !isGraph,
+        })}>
           {isGraph ? (
             <KnowledgeGraphCard 
               knowledgeBase={knowledgeBase} 
@@ -933,10 +937,11 @@ const Private: FC = () => {
               columns={columns}
               rowKey="id"
               scrollX={1500}
+              fillHeight={true}
             />
           )}
         </div>
-      </div>
+      </Flex>
       <RecallTestDrawer 
         ref={recallTestDrawerRef}
       />

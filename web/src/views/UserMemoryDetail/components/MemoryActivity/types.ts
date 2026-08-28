@@ -11,6 +11,7 @@ export type EngineType = 'EXTRACTION' | 'CROSS_MODAL' | 'EMOTION';
 export type SearchMode = 'deep' | 'normal' | 'quick' | 'express'
 export interface MemoryActivityProps {
   className?: string
+  id: string;
 }
 
 export interface ActivityRecord {

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:42:12 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-30 11:38:42
+ * @Last Modified time: 2026-08-14 14:01:26
  */
 /**
  * Member Management Page
@@ -108,7 +108,7 @@ const MemberManagement: React.FC = () => {
         columns={columns}
         rowKey="id"
         pagination={false}
-        scrollY="calc(100vh - 248px)"
+        fillHeight={true}
       />
 
       <MemberModal

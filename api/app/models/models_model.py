@@ -48,6 +48,7 @@ class ModelProvider(StrEnum):
     """模型提供商枚举"""
     OPENAI = "openai"
     SPEEDBEAR = "speedbear"
+    MINIMAX = "minimax"
     # ANTHROPIC = "anthropic"
     # GOOGLE = "google"
     # BAIDU = "baidu"

@@ -534,8 +534,8 @@ const KnowledgeBaseManagement: FC = () => {
   }
 
   return (
-    <>
-      <Flex justify="space-between" className="rb:mb-4!">
+    <Flex vertical gap={16} className="rb:h-full! rb:min-h-0! rb:overflow-hidden!">
+      <Flex justify="space-between">
         <SearchInput
           placeholder={t('knowledgeBase.searchPlaceholder')}
           onSearch={handleSearch}
@@ -546,129 +546,128 @@ const KnowledgeBaseManagement: FC = () => {
           <Button type="primary">+ {t('knowledgeBase.createKnowledgeBase')}</Button>
         </Dropdown>
       </Flex>
-      <div id="scrollableDiv" className="rb:h-[calc(100vh-116px)] rb:overflow-y-auto rb:overflow-x-hidden">
-      <InfiniteScroll
-        dataLength={data.length}
-        next={loadMore}
-        hasMore={hasMore}
-        loader={loading && data.length > 0 ? <div className="rb:text-center rb:py-4">{t('common.loading')}</div> : null}
-        endMessage={
-          data.length > 0 && !hasMore ? (
-            <div className="rb:text-center rb:py-4 rb:text-gray-400">
-              {t('common.noMoreData')}
-            </div>
-          ) : null
-        }
-        
-        scrollThreshold={0.9}
-        scrollableTarget="scrollableDiv"
-        style={{ overflow: 'visible', width: '100%' }}
-      >
-        {data.length === 0 && !loading ? (
-          <Empty size={200} />
-        ) : (
-          <Flex align="flex-start" gap={12} className="rb:mb-2!">
-            {[0, 1, 2].map(colIdx => (
-              <div key={colIdx} style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 12 }}>
-                {data.filter((_, i) => i % 3 === colIdx).map((item) => {
-                  const modelInfo = modelMenus[item.id];
-                  const hasModelInfo = modelInfo && modelInfo.menu.length > 1;
-                  return (
-                    <div key={item.id}>
-                      <RbCard
-                        title={item.name}
-                        headerType="borderless"
-                        bodyClassName="rb:px-4! rb:pt-0! rb:pb-4!"
-                        headerClassName="rb:py-3!"
-                        className="rb:cursor-pointer"
-                        onClick={() => handleToDetail(item)}
-                        extra={
-                          <div onClick={(e) => e.stopPropagation()}>
-                            <Dropdown
-                              menu={{ items: getOptMenuItems(item) }}
-                              placement="bottomRight"
-                            >
-                              <div onClick={(e) => e.stopPropagation()} className="rb:cursor-pointer rb:size-5.5 rb:bg-[url('@/assets/images/common/more.svg')] rb:hover:bg-[url('@/assets/images/common/more_hover.svg')]"></div>
-                            </Dropdown>
-                          </div>
-                        }
-                      >
-                        <div>
-                          <Flex className="rb:text-[#5B6167] rb:h-5 rb:line-clamp-1 rb:text-sm rb:leading-5 rb:mb-3!">
-                              {/* <div className="rb:font-medium rb:w-20">{t('knowledgeBase.description')} </div> */}
-                              <Tooltip title={item.description}>
-                                  <div className='rb:flex-1 rb:text-left rb:leading-5 rb:text-gray-800 rb:wrap-break-word rb:line-clamp-2'>{(item.description && item.description != '') ? item.description : t('knowledgeBase.noDescription')}</div>
-                              </Tooltip>
-                          </Flex>
-                          <Flex vertical gap={4} className='rb:min-h-15 rb:py-2.5! rb:px-3! rb:bg-[#F6F6F6] rb:rounded-lg rb:mb-3!'>
-                            <div className="rb:cursor-pointer rb:mb-3 rb:w-full" onClick={() => handleCopy(item.id)}>
-                              <div className="rb:text-gray-800 rb:font-medium">ID:</div>
-                              <Flex align="center" className="rb:text-[#5B6167]">
-                                {item.id}
-                                <span className="rb:ml-1 rb:inline-block rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/copy_dark.svg')]"></span>
-                              </Flex>
-                            </div>
-                            {item.descriptionItems?.map((description: Record<string, unknown>) => (
-                              <div 
-                                key={description.key as string}
-                                className="rb:grid rb:grid-cols-2 rb:text-[#5B6167] rb:text-[14px] rb:leading-5"
-                              >
-                                <div className={clsx('rb:whitespace-nowrap rb:w-20', {"rb:text-gray-800 rb:font-medium" : (description.key as string) === 'permission_id'})}>{(description.label as string)}</div>
-                                <div className={clsx('rb:flex-inline rb:text-left rb:py-px rb:rounded',{
-                                    "rb:text-[#155eef] rb:font-medium": (description.key as string) === 'permission_id' && (description.children as string) === t('knowledgeBase.private'),
-                                    "rb:text-[#FF8A4C] rb:font-medium": (description.key as string) === 'permission_id' && (description.children as string) === t('knowledgeBase.share'),
-                                })}>{(description.children as string)}</div>
-                              </div>
-                            ))}
-                          </Flex>
-                          {hasModelInfo && (
-                            <div onClick={(e) => e.stopPropagation()}>
-                              <Flex
-                                align="center"
-                                justify="space-between"
-                                className="rb:pt-2! rb:pr-1! rb:text-[12px] rb:leading-5 rb:cursor-pointer rb:rounded rb:transition-colors"
-                                onClick={() => {
-                                  setData(prev => prev.map(d => d.id === item.id ? { ...d, _expanded: !d._expanded } : d));
-                                }}
-                              >
-                                <span className="rb:truncate rb:flex-1 rb:text-gray-500">
-                                  {modelInfo.summary[0].split(':')[0]}:<span className="rb:text-gray-900">{modelInfo.summary[0].split(':').slice(1).join(':')}</span>
-                                </span>
-                                <span className="rb:text-gray-400 rb:text-[10px]">
-                                  {item._expanded ? <DownOutlined /> : <RightOutlined />}
-                                </span>
-                              </Flex>
-                              {item._expanded && (
-                                <Flex vertical gap={8} className="rb:text-[12px] rb:mt-2!">
-                                  {modelInfo.summary.slice(1).map((text, idx) => {
-                                    const [label, value] = text.split(':');
-                                    return (
-                                      <div key={idx} className="rb:text-gray-500">
-                                        {label}:<span className="rb:text-gray-900">{value}</span>
-                                      </div>
-                                    );
-                                  })}
-                                </Flex>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      </RbCard>
-                    </div>
-                  )
-                })}
+      <div id="scrollableDiv" className="rb:flex-1 rb:overflow-y-auto rb:overflow-x-hidden">
+        <InfiniteScroll
+          dataLength={data.length}
+          next={loadMore}
+          hasMore={hasMore}
+          loader={loading && data.length > 0 ? <div className="rb:text-center rb:py-4">{t('common.loading')}</div> : null}
+          endMessage={
+            data.length > 0 && !hasMore ? (
+              <div className="rb:text-center rb:py-4 rb:text-gray-400">
+                {t('common.noMoreData')}
               </div>
-            ))}
-          </Flex>
-        )}
-      </InfiniteScroll>
+            ) : null
+          }
+          scrollThreshold={0.9}
+          scrollableTarget="scrollableDiv"
+          style={{ overflow: 'visible', width: '100%' }}
+        >
+          {data.length === 0 && !loading ? (
+            <Empty size={200} />
+          ) : (
+            <Flex align="flex-start" gap={12} className="rb:mb-2!">
+              {[0, 1, 2].map(colIdx => (
+                <div key={colIdx} style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  {data.filter((_, i) => i % 3 === colIdx).map((item) => {
+                    const modelInfo = modelMenus[item.id];
+                    const hasModelInfo = modelInfo && modelInfo.menu.length > 1;
+                    return (
+                      <div key={item.id}>
+                        <RbCard
+                          title={item.name}
+                          headerType="borderless"
+                          bodyClassName="rb:px-4! rb:pt-0! rb:pb-4!"
+                          headerClassName="rb:py-3!"
+                          className="rb:cursor-pointer"
+                          onClick={() => handleToDetail(item)}
+                          extra={
+                            <div onClick={(e) => e.stopPropagation()}>
+                              <Dropdown
+                                menu={{ items: getOptMenuItems(item) }}
+                                placement="bottomRight"
+                              >
+                                <div onClick={(e) => e.stopPropagation()} className="rb:cursor-pointer rb:size-5.5 rb:bg-[url('@/assets/images/common/more.svg')] rb:hover:bg-[url('@/assets/images/common/more_hover.svg')]"></div>
+                              </Dropdown>
+                            </div>
+                          }
+                        >
+                          <div>
+                            <Flex className="rb:text-[#5B6167] rb:h-5 rb:line-clamp-1 rb:text-sm rb:leading-5 rb:mb-3!">
+                                {/* <div className="rb:font-medium rb:w-20">{t('knowledgeBase.description')} </div> */}
+                                <Tooltip title={item.description}>
+                                    <div className='rb:flex-1 rb:text-left rb:leading-5 rb:text-gray-800 rb:wrap-break-word rb:line-clamp-2'>{(item.description && item.description != '') ? item.description : t('knowledgeBase.noDescription')}</div>
+                                </Tooltip>
+                            </Flex>
+                            <Flex vertical gap={4} className='rb:min-h-15 rb:py-2.5! rb:px-3! rb:bg-[#F6F6F6] rb:rounded-lg rb:mb-3!'>
+                              <div className="rb:cursor-pointer rb:mb-3 rb:w-full" onClick={() => handleCopy(item.id)}>
+                                <div className="rb:text-gray-800 rb:font-medium">ID:</div>
+                                <Flex align="center" className="rb:text-[#5B6167]">
+                                  {item.id}
+                                  <span className="rb:ml-1 rb:inline-block rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/copy_dark.svg')]"></span>
+                                </Flex>
+                              </div>
+                              {item.descriptionItems?.map((description: Record<string, unknown>) => (
+                                <div 
+                                  key={description.key as string}
+                                  className="rb:grid rb:grid-cols-2 rb:text-[#5B6167] rb:text-[14px] rb:leading-5"
+                                >
+                                  <div className={clsx('rb:whitespace-nowrap rb:w-20', {"rb:text-gray-800 rb:font-medium" : (description.key as string) === 'permission_id'})}>{(description.label as string)}</div>
+                                  <div className={clsx('rb:flex-inline rb:text-left rb:py-px rb:rounded',{
+                                      "rb:text-[#155eef] rb:font-medium": (description.key as string) === 'permission_id' && (description.children as string) === t('knowledgeBase.private'),
+                                      "rb:text-[#FF8A4C] rb:font-medium": (description.key as string) === 'permission_id' && (description.children as string) === t('knowledgeBase.share'),
+                                  })}>{(description.children as string)}</div>
+                                </div>
+                              ))}
+                            </Flex>
+                            {hasModelInfo && (
+                              <div onClick={(e) => e.stopPropagation()}>
+                                <Flex
+                                  align="center"
+                                  justify="space-between"
+                                  className="rb:pt-2! rb:pr-1! rb:text-[12px] rb:leading-5 rb:cursor-pointer rb:rounded rb:transition-colors"
+                                  onClick={() => {
+                                    setData(prev => prev.map(d => d.id === item.id ? { ...d, _expanded: !d._expanded } : d));
+                                  }}
+                                >
+                                  <span className="rb:truncate rb:flex-1 rb:text-gray-500">
+                                    {modelInfo.summary[0].split(':')[0]}:<span className="rb:text-gray-900">{modelInfo.summary[0].split(':').slice(1).join(':')}</span>
+                                  </span>
+                                  <span className="rb:text-gray-400 rb:text-[10px]">
+                                    {item._expanded ? <DownOutlined /> : <RightOutlined />}
+                                  </span>
+                                </Flex>
+                                {item._expanded && (
+                                  <Flex vertical gap={8} className="rb:text-[12px] rb:mt-2!">
+                                    {modelInfo.summary.slice(1).map((text, idx) => {
+                                      const [label, value] = text.split(':');
+                                      return (
+                                        <div key={idx} className="rb:text-gray-500">
+                                          {label}:<span className="rb:text-gray-900">{value}</span>
+                                        </div>
+                                      );
+                                    })}
+                                  </Flex>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        </RbCard>
+                      </div>
+                    )
+                  })}
+                </div>
+              ))}
+            </Flex>
+          )}
+        </InfiniteScroll>
 
-      <CreateModal
-        ref={modalRef}
-        refreshTable={handleRefresh}
-      />
+        <CreateModal
+          ref={modalRef}
+          refreshTable={handleRefresh}
+        />
       </div>
-    </>
+    </Flex>
   )
 }
 

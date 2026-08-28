@@ -2,9 +2,11 @@
  * @Author: ZhaoYing 
  * @Date: 2025-12-10 16:46:09 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-07-16 17:18:50
+ * @Last Modified time: 2026-08-14 14:29:46
  */
 import { type FC } from 'react'
+import { Flex } from 'antd'
+
 import ChatInput from './ChatInput'
 import type { ChatProps } from './types'
 import ChatContent from './ChatContent'
@@ -19,7 +21,7 @@ const Chat: FC<ChatProps> = ({
   onSend,
   loading,
   message,
-  contentClassName = '',
+  contentClassName = 'rb:mx-[16px] rb:pt-3! rb:flex-1! rb:min-h-0!',
   children,
   fileList,
   fileChange,
@@ -29,7 +31,7 @@ const Chat: FC<ChatProps> = ({
   ...restProps
 }) => {
   return (
-    <div className={`rb:h-full rb:relative rb:pt-2 ${className}`}>
+    <Flex vertical className={`rb:h-full! rb:relative rb:pt-2 rb:overflow-hidden! ${className}`}>
       {/* Chat content display area */}
       <ChatContent
         key={conversationId ?? 'new'}
@@ -41,18 +43,21 @@ const Chat: FC<ChatProps> = ({
 
       {/* Chat input area */}
       {!readOnly &&
-        <ChatInput
-          fileList={fileList}
-          message={message}
-          onChange={onChange}
-          onSend={onSend}
-          loading={loading}
-          fileChange={fileChange}
-        >
-          {children}
-        </ChatInput>
+        <Flex className="rb:relative rb:mx-4! rb:mt-3! rb:mb-0!">
+          <ChatInput
+            fileList={fileList}
+            message={message}
+            onChange={onChange}
+            onSend={onSend}
+            loading={loading}
+            fileChange={fileChange}
+            className="rb:relative! rb:mt-4!"
+          >
+            {children}
+          </ChatInput>
+        </Flex>
       }
-    </div>
+    </Flex>
   )
 }
 export default Chat

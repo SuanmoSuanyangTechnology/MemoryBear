@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 17:35:01 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-02-03 17:35:01 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-08-14 14:07:33
  */
 /**
  * Not Found Page (404)
@@ -23,7 +23,7 @@ const NotFound = () => {
       size={[328, 146]}
       title={t('empty.notFound')}
       subTitle={t('empty.notFoundDesc')}
-      className="rb:h-[calc(100vh-84px)]"
+      className="rb:h-full!"
     />
   )
 }

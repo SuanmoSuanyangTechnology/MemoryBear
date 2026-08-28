@@ -16,6 +16,7 @@ from app.core.quota_manager import (
 from app.core.utils.datetime_utils import (
     convert_neo4j_datetime_to_python,
     to_timestamp_ms,
+    utcnow,
 )
 from app.db import get_async_db_context, get_db_context
 from app.repositories.end_user_repository import (
@@ -238,6 +239,7 @@ class MemoryValueRankingService:
                 PERMANENT_MEMORY_LIST,
                 json_format=True,
                 end_user_id=str(end_user.id),
+                evaluated_at_ms=to_timestamp_ms(utcnow()),
                 skip=(page - 1) * page_size,
                 limit=page_size,
             )

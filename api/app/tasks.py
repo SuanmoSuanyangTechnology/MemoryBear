@@ -11,10 +11,12 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
+import logging
 
 import redis
-from celery import states
+from celery import states, current_task
 from celery.exceptions import Ignore, Retry
+from celery.signals import after_setup_logger
 from elasticsearch import AsyncElasticsearch
 from fastapi.encoders import jsonable_encoder
 from redis.exceptions import RedisError
@@ -24,7 +26,13 @@ from app.aioRedis import get_thread_safe_redis
 from app.celery_app import celery_app
 from app.core.config import settings
 from app.core.logging_config import get_logger
+from app.core.memory.exceptions import MemoryExtractionBusinessError
+from app.core.models import RedBearEmbeddings, RedBearLLM
 from app.core.memory.storage_services.reflection_engine import retry_registry as rr
+from app.core.memory.storage_services.forgetting_engine.constants import (
+    FORGET_CANDIDATES_KEY as _FORGET_CANDIDATES_KEY,
+    FORGET_INFLIGHT_KEY as _FORGET_INFLIGHT_KEY,
+)
 from app.core.memory.storage_services.reflection_engine.errors import (
     ReflectionBusinessError,
     ReflectionFailureReason,
@@ -101,7 +109,29 @@ from app.schemas import document_schema, file_schema
 from app.services.memory_config_service import MemoryConfigService
 from app.services.memory_forget_service import MemoryForgetService
 from app.services.model_service import ModelApiKeyService
-from app.utils.redis_lock import RedisFairLock
+from app.utils.redis_lock import UNLOCK_SCRIPT, RedisFairLock
+
+
+class CeleryTaskIdFilter(logging.Filter):
+    def filter(self, record):
+        try:
+            record.task_id = current_task.request.id
+        except Exception:
+            record.task_id = "-"
+        return True
+
+
+@after_setup_logger.connect
+def setup_logger(logger, *args, **kwargs):
+    formatter = logging.Formatter(
+        "[%(asctime)s: %(levelname)s/%(processName)s] "
+        "[task_id=%(task_id)s] %(message)s"
+    )
+
+    for handler in logger.handlers:
+        handler.setFormatter(formatter)
+        handler.addFilter(CeleryTaskIdFilter())
+
 
 logger = get_logger(__name__)
 
@@ -125,11 +155,7 @@ AUTO_QUESTIONS_MAX_WORKERS = int(os.getenv("AUTO_QUESTIONS_MAX_WORKERS", "5"))
 MAX_DOCUMENT_PAGES = int(os.getenv("MAX_DOCUMENT_PAGES", "200"))
 
 # ── GDS 拓扑分数（eigenvector 中心性）扫描/计算常量 ──────────────
-# 在途锁 key：避免相邻两轮 scan 重复派发同一用户
 _GDS_TOPOLOGY_INFLIGHT_KEY_FMT = "gds_topology:inflight:{end_user_id}"
-_GDS_TOPOLOGY_INFLIGHT_TTL_SEC = 1500
-# 活跃口径：write_time 距今 < 24 小时才参与 GDS 拓扑分数计算
-_GDS_TOPOLOGY_ACTIVE_HOURS = 24
 
 
 @dataclass(frozen=True)
@@ -2639,7 +2665,7 @@ def write_message_task(
     )
     start_time = time.time()
 
-    async def _run() -> dict:
+    async def _run():
         from app.core.memory.memory_service import MemoryService
 
         service = MemoryService(
@@ -2660,12 +2686,31 @@ def write_message_task(
             dispatch_at=dispatch_at,
             source=source,
         )
-        return {"status": result.status, "extraction": result.extraction}
+        return result
 
     try:
         task_start_time = int(time.time())
 
-        result = loop.run_until_complete(_run())
+        write_result = loop.run_until_complete(_run())
+        if write_result.degraded_error is not None:
+            from app.core.memory.alerts import enqueue_memory_extraction_alert_safely
+
+            loop.run_until_complete(
+                enqueue_memory_extraction_alert_safely(
+                    error=write_result.degraded_error,
+                    memory_message_id=str(
+                        (target_message or {}).get("memory_message_id") or ""
+                    ),
+                    workspace_id=workspace_id,
+                    end_user_id=resolved_end_user_id,
+                    source=source,
+                    task_id=str(self.request.id or ""),
+                )
+            )
+        result = {
+            "status": write_result.status,
+            "extraction": write_result.extraction,
+        }
         elapsed_time = time.time() - start_time
 
         logger.info(f"[CELERY WRITE] Task completed - elapsed_time={elapsed_time:.2f}s")
@@ -2735,7 +2780,25 @@ def write_message_task(
         logger.error(f"[CELERY WRITE] Task failed - elapsed_time={elapsed_time:.2f}s, error={detailed_error}",
                      exc_info=True)
 
-        # 配置类确定性错误：直接 raise，让 Celery 将任务标记为 FAILURE，不触发重试
+        # 只有主萃取链路的稳定业务异常会生成用户级告警。WritePipeline 的
+        # finally 已在异常到达此处前完成摘要任务取消和资源清理。
+        if isinstance(e, MemoryExtractionBusinessError):
+            from app.core.memory.alerts import enqueue_memory_extraction_alert_safely
+
+            loop.run_until_complete(
+                enqueue_memory_extraction_alert_safely(
+                    error=e,
+                    memory_message_id=str(
+                        (target_message or {}).get("memory_message_id") or ""
+                    ),
+                    workspace_id=workspace_id,
+                    end_user_id=resolved_end_user_id,
+                    source=source,
+                    task_id=str(self.request.id or ""),
+                )
+            )
+
+        # 配置类确定性错误：直接 raise，让 Celery 将任务标记为 FAILURE。
         if isinstance(e, (ModelNotFoundError, ModelInactiveError, InvalidConfigError)):
             logger.error(
                 f"[CELERY WRITE] Configuration error detected, task will not be retried - "
@@ -3002,14 +3065,14 @@ def scan_layer2_reflection(self) -> Dict[str, Any]:
 
 
 def _report_reflection_failure(
-    *,
-    task_type: str,
-    end_user_id: str,
-    workspace_id: str,
-    reason_code: str | None,
-    model_type: str | None,
-    failed_operations: List[str],
-    last_failed_at_ms: int | None,
+        *,
+        task_type: str,
+        end_user_id: str,
+        workspace_id: str,
+        reason_code: str | None,
+        model_type: str | None,
+        failed_operations: List[str],
+        last_failed_at_ms: int | None,
 ) -> None:
     """把重试耗尽事件交给可选插件；社区版未注册时静默跳过。"""
     if reason_code is None or last_failed_at_ms is None:
@@ -3561,7 +3624,7 @@ def scan_reflection_retry(self) -> Dict[str, Any]:
                     continue
                 if meta.get("completion") == "exhausted":
                     continue
-                if meta.get("completion") == "in_progress":   # 租约到期 = 上次开工后进程死亡
+                if meta.get("completion") == "in_progress":  # 租约到期 = 上次开工后进程死亡
                     if not rr.mark_dead(rc, task_type, uid):
                         continue
                 # 仍走 inflight 锁，避免与正常 scan 派的同一用户撞车
@@ -3603,6 +3666,10 @@ def scan_gds_topology_score(self) -> Dict[str, Any]:
     start_time = time.time()
 
     redis_client = get_sync_redis_client()
+    if redis_client is None:
+        logger.error("scan_gds_topology_score 终止：Redis 不可用，拒绝无锁派发")
+        raise RuntimeError("Redis unavailable: gds topology scan requires inflight locks")
+
     dispatched = 0
     dispatched_user_ids = []
     skip_inactive = 0
@@ -3616,20 +3683,19 @@ def scan_gds_topology_score(self) -> Dict[str, Any]:
             for user in get_end_users_by_workspace(db, ws_id_uuid):
                 uid = str(user.id)
                 try:
-                    if not _is_active_recently(db, uid, _GDS_TOPOLOGY_ACTIVE_HOURS):
+                    if not _is_active_recently(db, uid, settings.GDS_TOPOLOGY_ACTIVE_HOURS):
                         skip_inactive += 1
                         continue
-                    # 在途锁：抢不到说明该用户已有 GDS 任务在途，跳过（纯 SET NX EX 粗过滤）
-                    if redis_client is not None:
-                        ok = redis_client.set(
-                            _GDS_TOPOLOGY_INFLIGHT_KEY_FMT.format(end_user_id=uid),
-                            "1", nx=True, ex=_GDS_TOPOLOGY_INFLIGHT_TTL_SEC,
-                        )
-                        if not ok:
-                            skip_inflight += 1
-                            continue
+                    inflight_token = uuid.uuid4().hex
+                    ok = redis_client.set(
+                        _GDS_TOPOLOGY_INFLIGHT_KEY_FMT.format(end_user_id=uid),
+                        inflight_token, nx=True, ex=settings.GDS_TOPOLOGY_INFLIGHT_TTL_SEC,
+                    )
+                    if not ok:
+                        skip_inflight += 1
+                        continue
                     do_gds_topology_score.apply_async(
-                        kwargs={"end_user_id": uid},
+                        kwargs={"end_user_id": uid, "inflight_token": inflight_token},
                         queue="memory_heavy_tasks",
                     )
                     dispatched += 1
@@ -3665,33 +3731,39 @@ def scan_gds_topology_score(self) -> Dict[str, Any]:
     time_limit=600,
     soft_time_limit=540,
 )
-def do_gds_topology_score(self, end_user_id: str) -> Dict[str, Any]:
+def do_gds_topology_score(self, end_user_id: str, inflight_token: Optional[str] = None) -> Dict[str, Any]:
     if not end_user_id:
         raise ValueError("end_user_id is required")
 
     inflight_key = _GDS_TOPOLOGY_INFLIGHT_KEY_FMT.format(end_user_id=end_user_id)
     start_time = time.time()
 
+    redis_client = get_sync_redis_client()
+    if redis_client is None:
+        logger.warning(f"GDS拓扑do 跳过：Redis 不可用 user={end_user_id}")
+        return {"status": "skipped_no_redis", "end_user_id": end_user_id}
+    if not inflight_token:
+        logger.warning(f"GDS拓扑do 跳过：缺少在途锁 token user={end_user_id}")
+        return {"status": "skipped_no_token", "end_user_id": end_user_id}
+    if redis_client.get(inflight_key) != inflight_token:
+        logger.warning(f"GDS拓扑do 跳过：在途锁已失效（过期或被新一轮 scan 重设）user={end_user_id}")
+        return {"status": "skipped_stale_inflight", "end_user_id": end_user_id}
+
     async def _run() -> Dict[str, Any]:
         from app.repositories.neo4j.gds_topology_repository import compute_topology_score
 
-        # 抢该用户的写锁，避免 eigenvector.write 写回与并发写入冲突。
-        write_lock = None
-        redis_client = get_sync_redis_client()
-        if redis_client is not None:
-            write_lock = RedisFairLock(
-                key=f"memory_write:{end_user_id}",
-                redis_client=redis_client,
-                expire=600, timeout=30, auto_renewal=True,
-            )
-            if not await asyncio.to_thread(write_lock.acquire):
-                logger.warning(f"GDS拓扑do 获取写锁超时，跳过 user={end_user_id}")
-                return {"status": "lock_timeout"}
+        write_lock = RedisFairLock(
+            key=f"memory_write:{end_user_id}",
+            redis_client=redis_client,
+            expire=600, timeout=30, auto_renewal=True,
+        )
+        if not await asyncio.to_thread(write_lock.acquire):
+            logger.warning(f"GDS拓扑do 获取写锁超时，跳过 user={end_user_id}")
+            return {"status": "lock_timeout"}
         try:
             return await compute_topology_score(end_user_id)
         finally:
-            if write_lock is not None:
-                await asyncio.to_thread(write_lock.release)
+            await asyncio.to_thread(write_lock.release)
 
     loop = set_asyncio_event_loop()
     try:
@@ -3706,13 +3778,10 @@ def do_gds_topology_score(self, end_user_id: str) -> Dict[str, Any]:
         raise
     finally:
         _shutdown_loop_gracefully(loop)
-        # 释放在途标记：放行下一轮 scan 对该用户的派发（成功/失败/跳过都删）
         try:
-            redis_client = get_sync_redis_client()
-            if redis_client is not None:
-                redis_client.delete(inflight_key)
-        except Exception:
-            pass
+            redis_client.eval(UNLOCK_SCRIPT, 1, inflight_key, inflight_token)
+        except Exception as e:
+            logger.warning(f"GDS拓扑do 释放在途锁失败 user={end_user_id}: {e}")
 
 
 @celery_app.task(
@@ -4543,10 +4612,6 @@ def do_refresh_user_tags(
 #     return result
 
 
-_FORGET_CANDIDATES_KEY = "forget:candidates"
-_FORGET_INFLIGHT_KEY = "forget:inflight"
-
-
 @celery_app.task(
     name="app.tasks.scan_forget_candidates",
     bind=True,
@@ -4663,7 +4728,10 @@ def do_forget_for_user(self, end_user_id: str) -> Dict[str, Any]:
                 with write_lock:
                     result = await service.forget()
             except RuntimeError:
-                logger.warning(f"[ForgetDo] 获取写锁超时，跳过 user={end_user_id}")
+                logger.warning(
+                    f"[ForgetDo] 获取写锁超时，跳过 user={end_user_id} "
+                    "forget_lock_timeout_count=1"
+                )
                 if redis_client:
                     # 移回候选集，等下一轮 scan 重新派发（与 scan_forget_candidates 派发失败的处理一致）
                     await redis_client.smove(_FORGET_INFLIGHT_KEY, _FORGET_CANDIDATES_KEY, end_user_id)

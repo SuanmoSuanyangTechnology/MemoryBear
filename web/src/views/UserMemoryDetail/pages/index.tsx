@@ -90,7 +90,7 @@ const Detail: FC = () => {
   }
 
   return (
-    <div className="rb:h-full rb:w-full">
+    <Flex vertical className="rb:h-full rb:w-full">
       <PageHeader
         title={
           <Dropdown menu={{ items, onClick, selectedKeys: type ? [type] : [] }}>
@@ -124,7 +124,7 @@ const Detail: FC = () => {
           </Space>
         }
       />
-      <div className="rb:h-[calc(100vh-64px)] rb:overflow-y-auto rb:p-3">
+      <div className="rb:flex-1 rb:overflow-y-auto rb:p-3">
         {type === 'EMOTIONAL_MEMORY' && <StatementDetail ref={statementDetailRef} refresh={handleRefresh} />}
         {type === 'FORGET_MEMORY' && <ForgetDetail ref={forgetDetailRef} />}
         {type === 'IMPLICIT_MEMORY' && <ImplicitDetail ref={implicitDetailRef} refresh={handleRefresh} />}
@@ -134,7 +134,7 @@ const Detail: FC = () => {
         {type === 'WORKING_MEMORY' && <WorkingDetail />}
         {type === 'EXPLICIT_MEMORY' && <ExplicitDetail />}
       </div>
-    </div>
+    </Flex>
   )
 }
 

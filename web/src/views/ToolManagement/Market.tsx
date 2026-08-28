@@ -289,7 +289,7 @@ const Market: React.FC<{ getStatusTag?: (status: string) => ReactNode }> = () =>
             url={pageEmptyIcon}
             title={t('tool.marketSelectTitle')}
             subTitle={t('tool.marketSelectDesc')}
-            size={200}
+            size={[240, 210]}
             className="rb:h-full"
           />
 
@@ -303,7 +303,7 @@ const Market: React.FC<{ getStatusTag?: (status: string) => ReactNode }> = () =>
     const mcpList = mcpCache[selectedSource] || [];
 
     return (
-      <>
+      <Flex vertical gap={16} className="rb:h-full!">
         <Flex justify="space-between" align="center">
           <Flex gap={12} align="center" className="rb:pl-1!">
             <Flex align="center" justify="center" className="rb:size-12">
@@ -346,82 +346,80 @@ const Market: React.FC<{ getStatusTag?: (status: string) => ReactNode }> = () =>
           </Space>
         </Flex>
 
-        <div className="rb:mt-4">
-          <div id="mcpScrollableDiv" className="rb:overflow-y-auto rb:h-[calc(100vh-180px)]">
-            {!loading && mcpList.length === 0 ? (
-              <Empty
-                url={pageEmptyIcon}
-                title={searchKeyword ? t('tool.marketNoSearchResult') : t('tool.marketNoData')}
-                subTitle={searchKeyword ? t('tool.marketNoSearchResultDesc') : t('tool.marketNoDataDesc')}
-                size={200}
-                className="rb:h-full"
-              />
-            ) : (
-            <InfiniteScroll
-              dataLength={mcpList.length}
-              next={loadMore}
-              hasMore={hasMore}
-              loader={null}
-              scrollableTarget="mcpScrollableDiv"
-            >
-              <Row gutter={[12,12]}>
-                {mcpList.map(mcp => (
-                  <Col
-                    key={mcp.id}
-                    span={12}
-                  >
-                    <RbCard
-                      avatarUrl={mcp.logo_url || marketIcon}
-                      title={
-                        <Flex justify="space-between" gap={16}>
-                          <Flex vertical gap={6}>
-                            <Tooltip title={getLocaleField(mcp, 'name')}>
-                              <div className="rb:wrap-break-word rb:line-clamp-1">{getLocaleField(mcp, 'name')}</div>
-                            </Tooltip>
-                            <Flex gap={8} wrap className='rb:wrap-break-word rb:line-clamp-1'>
-                              {mcp.categories?.[0] && (
-                                <Tag>{mcp.categories[0]}</Tag>
-                              )}
-                              {mcp.activated && <Tag color="success">{t('tool.marketActivated')}</Tag>}
-                              {mcp.inDatabase && <Tag>{t('tool.marketInDatabase')}</Tag>}
-                            </Flex>
+        <div id="mcpScrollableDiv" className="rb:overflow-y-auto rb:flex-1!">
+          {!loading && mcpList.length === 0 ? (
+            <Empty
+              url={pageEmptyIcon}
+              title={searchKeyword ? t('tool.marketNoSearchResult') : t('tool.marketNoData')}
+              subTitle={searchKeyword ? t('tool.marketNoSearchResultDesc') : t('tool.marketNoDataDesc')}
+              size={[240, 210]}
+              className="rb:h-full"
+            />
+          ) : (
+          <InfiniteScroll
+            dataLength={mcpList.length}
+            next={loadMore}
+            hasMore={hasMore}
+            loader={null}
+            scrollableTarget="mcpScrollableDiv"
+          >
+            <Row gutter={[12,12]}>
+              {mcpList.map(mcp => (
+                <Col
+                  key={mcp.id}
+                  span={12}
+                >
+                  <RbCard
+                    avatarUrl={mcp.logo_url || marketIcon}
+                    title={
+                      <Flex justify="space-between" gap={16}>
+                        <Flex vertical gap={6}>
+                          <Tooltip title={getLocaleField(mcp, 'name')}>
+                            <div className="rb:wrap-break-word rb:line-clamp-1">{getLocaleField(mcp, 'name')}</div>
+                          </Tooltip>
+                          <Flex gap={8} wrap className='rb:wrap-break-word rb:line-clamp-1'>
+                            {mcp.categories?.[0] && (
+                              <Tag>{mcp.categories[0]}</Tag>
+                            )}
+                            {mcp.activated && <Tag color="success">{t('tool.marketActivated')}</Tag>}
+                            {mcp.inDatabase && <Tag>{t('tool.marketInDatabase')}</Tag>}
                           </Flex>
-                          <Button
-                            disabled={mcp.inDatabase}
-                            size="small"
-                            onClick={() => handleOpenMcpServiceModal(mcp)}
-                          >+</Button>
                         </Flex>
-                      }
-                      isNeedTooltip={false}
-                      footer={<Flex justify={mcp.publisher && mcp.view_count ? 'space-between' : mcp.view_count ? 'flex-end' : 'flex-start'} align="center" className="rb:text-[#5B6167] rb:text-[12px]">
-                        {mcp.publisher && <span>{mcp.publisher.startsWith('@') ? mcp.publisher : `@${mcp.publisher}`}</span>}
-                        {mcp.view_count && <Space size={4}>
-                          <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/global_outline.svg')]"></div>
-                          {mcp.view_count.toLocaleString()}
-                        </Space>}
-                      </Flex>}
-                    >
-                      {getLocaleField(mcp, 'description') ?
-                        <Tooltip title={getLocaleField(mcp, 'description')}>
-                          <div className="rb:h-10 rb:leading-5 rb:wrap-break-word rb:line-clamp-2 rb:mt-2">{getLocaleField(mcp, 'description')}</div>
-                        </Tooltip>
-                        : <div className="rb:h-10 rb:leading-5 rb:text-[#A8A9AA] rb:mt-2">{t('tool.descEmpty')}</div>  
-                      }
-                    </RbCard>
-                  </Col>
-                ))}
-              </Row>
-            </InfiniteScroll>
-            )}
-          </div>
+                        <Button
+                          disabled={mcp.inDatabase}
+                          size="small"
+                          onClick={() => handleOpenMcpServiceModal(mcp)}
+                        >+</Button>
+                      </Flex>
+                    }
+                    isNeedTooltip={false}
+                    footer={<Flex justify={mcp.publisher && mcp.view_count ? 'space-between' : mcp.view_count ? 'flex-end' : 'flex-start'} align="center" className="rb:text-[#5B6167] rb:text-[12px]">
+                      {mcp.publisher && <span>{mcp.publisher.startsWith('@') ? mcp.publisher : `@${mcp.publisher}`}</span>}
+                      {mcp.view_count && <Space size={4}>
+                        <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/global_outline.svg')]"></div>
+                        {mcp.view_count.toLocaleString()}
+                      </Space>}
+                    </Flex>}
+                  >
+                    {getLocaleField(mcp, 'description') ?
+                      <Tooltip title={getLocaleField(mcp, 'description')}>
+                        <div className="rb:h-10 rb:leading-5 rb:wrap-break-word rb:line-clamp-2 rb:mt-2">{getLocaleField(mcp, 'description')}</div>
+                      </Tooltip>
+                      : <div className="rb:h-10 rb:leading-5 rb:text-[#A8A9AA] rb:mt-2">{t('tool.descEmpty')}</div>  
+                    }
+                  </RbCard>
+                </Col>
+              ))}
+            </Row>
+          </InfiniteScroll>
+          )}
         </div>
-      </>
+      </Flex>
     );
   };
 
   return (
-    <Row gutter={16} wrap={false}>
+    <Row gutter={16} wrap={false} className="rb:h-full!">
       <Col flex="380px">
         <Flex vertical gap={16}>
           <div className="rb:font-[MiSans-Bold] rb:font-bold rb:text-[16px] rb:leading-5.5">{t('tool.mcpMarket')}</div>

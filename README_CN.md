@@ -473,6 +473,6 @@ Step 8  使用管理员账号登录前端页面
 
 - **Star 历史**：
 
-[![Star History Chart](https://api.star-history.com/svg?repos=SuanmoSuanyangTechnology/MemoryBear&type=Date)](https://star-history.com/#SuanmoSuanyangTechnology/MemoryBear&Date)
+[![Star History Chart](https://star-history.dera.page/svg?repos=SuanmoSuanyangTechnology/MemoryBear&type=Date)](https://star-history.dera.page/#SuanmoSuanyangTechnology/MemoryBear&type=Date)
 
 - **联系我们**：jiezhimin@redbearai.com

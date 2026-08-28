@@ -22,7 +22,7 @@ const SourceStep = ({ source, uploadRef, onUpload, onRemove, onFileListChange, f
   const { t } = useTranslation();
 
   return (
-    <>
+    <div className="rb:w-full rb:pb-6!">
       <Flex className="rb:w-full rb:p-6!">
         {(source === 'local' || source === 'csv') && (
           <UploadFiles
@@ -48,7 +48,7 @@ const SourceStep = ({ source, uploadRef, onUpload, onRemove, onFileListChange, f
           </Flex>
         )}
         {source === 'text' && (
-          <Flex vertical className="rb:w-full rb:mt-10! rb:px-20!">
+          <Flex vertical className="rb:w-full rb:px-20!">
             <Form.Item name="title" label={t('knowledgeBase.title')} rules={[{ required: true, whitespace: true, message: t('knowledgeBase.pleaseEnterTitle') }]}>
               <Input placeholder={t('knowledgeBase.pleaseEnterTitle')} />
             </Form.Item>
@@ -63,7 +63,7 @@ const SourceStep = ({ source, uploadRef, onUpload, onRemove, onFileListChange, f
           {t('knowledgeBase.csvTemplate')}
         </a>
       )}
-    </>
+    </div>
   );
 };
 

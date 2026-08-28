@@ -13,6 +13,8 @@ from langchain_core.runnables import Runnable
 from app.core.alert_metric_bridge import (
     report_model_gateway_failure,
     report_model_gateway_failure_async,
+    report_model_gateway_success,
+    report_model_gateway_success_async,
 )
 from app.core.models import RedBearModelConfig, RedBearModelFactory, get_provider_llm_class
 from app.core.models.network_retry import (
@@ -100,22 +102,26 @@ class _ObservedRunnable(Runnable):
     def invoke(self, input: Any, config: Optional[dict] = None, **kwargs: Any) -> Any:
         started = time.perf_counter()
         try:
-            return self._runnable.invoke(input, config=config, **kwargs)
+            result = self._runnable.invoke(input, config=config, **kwargs)
         except Exception as exc:
             report_model_gateway_failure(
                 self._model_config, self._operation, exc, started
             )
             raise
+        report_model_gateway_success(self._model_config, self._operation, started)
+        return result
 
     async def ainvoke(self, input: Any, config: Optional[dict] = None, **kwargs: Any) -> Any:
         started = time.perf_counter()
         try:
-            return await self._runnable.ainvoke(input, config=config, **kwargs)
+            result = await self._runnable.ainvoke(input, config=config, **kwargs)
         except Exception as exc:
             await report_model_gateway_failure_async(
                 self._model_config, self._operation, exc, started
             )
             raise
+        await report_model_gateway_success_async(self._model_config, self._operation, started)
+        return result
 
     def stream(self, input: Any, config: Optional[dict] = None, **kwargs: Any):
         started = time.perf_counter()
@@ -126,6 +132,8 @@ class _ObservedRunnable(Runnable):
                 self._model_config, f"{self._operation}.stream", exc, started
             )
             raise
+        # 流被完整消费后才算调用成功；中途被放弃（GeneratorExit）不会走到这里。
+        report_model_gateway_success(self._model_config, f"{self._operation}.stream", started)
 
     async def astream(self, input: Any, config: Optional[dict] = None, **kwargs: Any):
         started = time.perf_counter()
@@ -137,6 +145,9 @@ class _ObservedRunnable(Runnable):
                 self._model_config, f"{self._operation}.astream", exc, started
             )
             raise
+        await report_model_gateway_success_async(
+            self._model_config, f"{self._operation}.astream", started
+        )
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._runnable, name)
@@ -184,10 +195,12 @@ class RedBearLLM(BaseLLM):
         """Synchronous text generation (required by BaseLLM)"""
         started = time.perf_counter()
         try:
-            return self._model._generate(prompts, stop=stop, run_manager=run_manager, **kwargs)
+            result = self._model._generate(prompts, stop=stop, run_manager=run_manager, **kwargs)
         except Exception as exc:
             report_model_gateway_failure(self._config, "generate", exc, started)
             raise
+        report_model_gateway_success(self._config, "generate", started)
+        return result
 
     async def _agenerate(
             self,
@@ -199,10 +212,12 @@ class RedBearLLM(BaseLLM):
         """Asynchronous text generation (required by BaseLLM)"""
         started = time.perf_counter()
         try:
-            return await self._model._agenerate(prompts, stop=stop, run_manager=run_manager, **kwargs)
+            result = await self._model._agenerate(prompts, stop=stop, run_manager=run_manager, **kwargs)
         except Exception as exc:
             await report_model_gateway_failure_async(self._config, "agenerate", exc, started)
             raise
+        await report_model_gateway_success_async(self._config, "agenerate", started)
+        return result
 
     # ==================== Advanced Methods (Support Message Lists) ====================
 
@@ -256,11 +271,15 @@ class RedBearLLM(BaseLLM):
         except AttributeError as e:
             if 'ainvoke' in str(e):
                 # Underlying model doesn't support ainvoke, fallback to parent implementation
-                return await super().ainvoke(input, config=config, **kwargs)
+                result = await super().ainvoke(input, config=config, **kwargs)
+                await report_model_gateway_success_async(self._config, "ainvoke", started)
+                return result
             raise
         except Exception as exc:
             await report_model_gateway_failure_async(self._config, "ainvoke", exc, started)
             raise
+        await report_model_gateway_success_async(self._config, "ainvoke", started)
+        return result
 
     @network_retry
     async def _ainvoke_with_retry(self, input: Any, config: Optional[dict], kwargs: dict) -> Any:
@@ -305,6 +324,8 @@ class RedBearLLM(BaseLLM):
         except Exception as exc:
             report_model_gateway_failure(self._config, "stream", exc, started)
             raise
+        # 流被完整消费后才算调用成功（含回退路径）。
+        report_model_gateway_success(self._config, "stream", started)
 
     def _stream_with_retry(
             self,
@@ -374,6 +395,7 @@ class RedBearLLM(BaseLLM):
         except Exception as exc:
             await report_model_gateway_failure_async(self._config, "astream", exc, started)
             raise
+        await report_model_gateway_success_async(self._config, "astream", started)
 
     async def _astream_with_retry(
             self,

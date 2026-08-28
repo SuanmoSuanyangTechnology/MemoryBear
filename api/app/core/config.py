@@ -263,7 +263,7 @@ class Settings:
 
     # Logging settings
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
-    LOG_FORMAT: str = os.getenv("LOG_FORMAT", "%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    LOG_FORMAT: str = os.getenv("LOG_FORMAT", "%(asctime)s - [%(trace_id)s] -%(name)s - %(levelname)s - %(message)s")
     LOG_FILE_PATH: str = os.getenv("LOG_FILE_PATH", "logs/app.log")
     LOG_MAX_SIZE: int = int(os.getenv("LOG_MAX_SIZE", "10485760"))  # 10MB
     LOG_BACKUP_COUNT: int = int(os.getenv("LOG_BACKUP_COUNT", "5"))
@@ -404,6 +404,12 @@ class Settings:
     GDS_TOPOLOGY_SCAN_INTERVAL_MINUTES: int = TypeAdapter(
         Annotated[int, Field(ge=1, description="GDS topology score scan interval in minutes, must be >= 1")]
     ).validate_python(int(os.getenv("GDS_TOPOLOGY_SCAN_INTERVAL_MINUTES", "60")))
+    GDS_TOPOLOGY_INFLIGHT_TTL_SEC: int = TypeAdapter(
+        Annotated[int, Field(ge=1, description="GDS topology in-flight lock TTL in seconds, must be >= 1")]
+    ).validate_python(int(os.getenv("GDS_TOPOLOGY_INFLIGHT_TTL_SEC", "86400")))
+    GDS_TOPOLOGY_ACTIVE_HOURS: int = TypeAdapter(
+        Annotated[int, Field(ge=1, description="GDS topology active window in hours, must be >= 1")]
+    ).validate_python(int(os.getenv("GDS_TOPOLOGY_ACTIVE_HOURS", "2")))
     # 热门记忆标签缓存预热时间（UTC 小时，0-23）。19 = 北京时间 03:00
     HOT_MEMORY_TAGS_REFRESH_HOUR: int = TypeAdapter(
         Annotated[int, Field(ge=0, le=23, description="Hot memory tags cache refresh hour (UTC), 0-23. 19=Beijing 03:00")]
@@ -431,6 +437,16 @@ class Settings:
     # workflow config
     WORKFLOW_IMPORT_CACHE_TIMEOUT: int = int(os.getenv("WORKFLOW_IMPORT_CACHE_TIMEOUT", 1800))
     WORKFLOW_NODE_TIMEOUT: int = int(os.getenv("WORKFLOW_NODE_TIMEOUT", 600))
+
+    # workflow_node_executions 保留策略开关。
+    # 开启后该表只保留「最近一次」记录：
+    #   - 完整工作流：同 app_id + workflow_config_id 下按执行开始时间最近 1 次的全部节点行
+    #     （包括 waiting_human；较旧人工介入执行恢复时也不会覆盖更新执行）
+    #   - 单节点调试：同 app_id + workflow_config_id + node_id 下最近 1 条
+    # 历史明细的权威数据源是 workflow_executions.output_data["node_outputs"]，不受影响。
+    WORKFLOW_NODE_EXECUTION_RETENTION_ENABLED: bool = os.getenv(
+        "WORKFLOW_NODE_EXECUTION_RETENTION_ENABLED", "true"
+    ).lower() == "true"
 
     # ========================================================================
     # General Ontology Type Configuration

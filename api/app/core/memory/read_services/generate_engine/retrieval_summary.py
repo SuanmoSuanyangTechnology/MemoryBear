@@ -1,6 +1,12 @@
 import logging
+from typing import Callable
 
 from app.core.models import RedBearLLM
+from app.core.memory.exceptions import (
+    MemoryModelType,
+    MemoryRetrievalBusinessError,
+    MemoryRetrievalStage,
+)
 from app.core.memory.prompt import prompt_manager
 from app.core.models.llm import StructResponse
 
@@ -9,7 +15,13 @@ logger = logging.getLogger(__name__)
 
 class RetrievalSummaryProcessor:
     @staticmethod
-    async def summary(query, content: str, memory_l0_str: str, llm_client: RedBearLLM):
+    async def summary(
+        query,
+        content: str,
+        memory_l0_str: str,
+        llm_client: RedBearLLM,
+        on_error: Callable[[MemoryRetrievalBusinessError], None] | None = None,
+    ):
         system_prompt = prompt_manager.render(
             name="retrieval_summary"
         )
@@ -19,15 +31,37 @@ class RetrievalSummaryProcessor:
              "content": f"<query>{query}</query>"
                         f"<content>{content}{memory_l0_str}</content>"},
         ]
+
         try:
             response = await llm_client.ainvoke(
                 messages,
                 config={"callbacks": []}
             )
+        except Exception as e:
+            logger.error("Failed to generate reply summary, returning original content", exc_info=True)
+            if on_error is not None:
+                on_error(
+                    MemoryRetrievalBusinessError.model_call_failed(
+                        MemoryRetrievalStage.SUMMARY,
+                        e,
+                        model_type=MemoryModelType.LLM,
+                    )
+                )
+            return content
+
+        try:
             summary = StructResponse.extract_text(response)
             return summary
-        except:
+        except Exception as e:
             logger.error("Failed to generate reply summary, returning original content", exc_info=True)
+            if on_error is not None:
+                on_error(
+                    MemoryRetrievalBusinessError.structured_result_parse_failed(
+                        MemoryRetrievalStage.SUMMARY,
+                        e,
+                        model_type=MemoryModelType.LLM,
+                    )
+                )
             return content
 
     @staticmethod

@@ -404,22 +404,28 @@ const FolderTree: FC<FolderTreeProps> = ({
       onSelect(selectedKeys, info);
     }
   };
-
   const treeNodes = useMemo(() => transformTreeData(treeData), [treeData]);
 
+
+  if (!treeNodes.length) {
+    return null;
+  }
+
   return (
-    <DirectoryTree
-      key={refreshKey} // Add key to ensure component re-renders when refreshKey changes
-      multiple={multiple}
-      className={className}
-      style={style}
-      onSelect={handleSelect}
-      onExpand={handleExpand}
-      expandedKeys={expandedKeys}
-      loadData={onLoadData}
-      treeData={treeNodes}
-      selectedKeys={selectedKeys}
-    />
+    <div className="rb:w-64 rb:py-4 rb:shrink-0 rb:h-[calc(100%+40px)] rb:border-r rb:border-[#EAECEE] rb:p-4 rb:bg-transparent">
+      <DirectoryTree
+        key={refreshKey} // Add key to ensure component re-renders when refreshKey changes
+        multiple={multiple}
+        className={className}
+        style={style}
+        onSelect={handleSelect}
+        onExpand={handleExpand}
+        expandedKeys={expandedKeys}
+        loadData={onLoadData}
+        treeData={treeNodes}
+        selectedKeys={selectedKeys}
+      />
+    </div>
   );
 };
 

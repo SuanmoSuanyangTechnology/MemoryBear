@@ -1,0 +1,31 @@
+provider: minimax
+models:
+- name: MiniMax-M3
+  type: llm
+  provider: minimax
+  description: MiniMax-M3 multimodal large language model with a 1,000,000 token context window, image input, video input, and adaptive thinking.
+  is_deprecated: false
+  is_official: true
+  capability:
+  - vision
+  - video
+  - thinking
+  is_omni: false
+  tags:
+  - large-language-model
+  - multimodal
+  - vision
+  - video
+  - thinking
+- name: MiniMax-M2.7
+  type: llm
+  provider: minimax
+  description: MiniMax-M2.7 large language model with a 204,800 token context window and always-on thinking.
+  is_deprecated: false
+  is_official: true
+  capability:
+  - thinking_only
+  is_omni: false
+  tags:
+  - large-language-model
+  - thinking

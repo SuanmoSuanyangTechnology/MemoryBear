@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-03-24 15:41:20 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-08-14 13:37:24
+ * @Last Modified time: 2026-08-14 17:02:49
  */
 import { type FC, useRef, useState, useMemo, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -231,7 +231,7 @@ const Logs: FC<{ application: Application; }> = ({ application }) => {
     }
   }, [values])
   return (
-    <div className="rb:bg-white rb:rounded-lg rb:pt-3 rb:px-3">
+    <Flex vertical className="rb:bg-white rb:rounded-lg rb:pt-3! rb:px-3! rb:h-full! rb:overflow-hidden!">
       <Flex justify={!isHideAnnotations ? "space-between" : 'flex-end'} className="rb:mb-3!">
         {!isHideAnnotations &&
           <PageTabs
@@ -333,46 +333,48 @@ const Logs: FC<{ application: Application; }> = ({ application }) => {
           </Space>
         </Form>
       </Flex>
-      {activeTab === 'logs' && <>
-        <Table<LogItem>
-          apiUrl={getAppLogsUrl(id || '')}
-          apiParams={logsQuery}
-          columns={columns}
-          rowKey="id"
-          isScroll={true}
-          scrollY="calc(100vh - 242px)"
-        />
-        <LogDetailModal ref={logDetailRef} source={application?.type} />
-      </>}
-      {!isHideAnnotations && activeTab === 'annotations' && <>
-        <Table<AnnotationItem>
-          ref={annotationsTableRef}
-          apiUrl={getAnnotationsListUrl(id || '')}
-          apiParams={{
-            ...(values ?? {})
-          }}
-          columns={annotationsColumns}
-          rowKey="id"
-          isScroll={true}
-          scrollY="calc(100vh - 242px)"
-        />
-        <AnnotationsSettingsModal
-          ref={annotationsSettingsRef}
-          refresh={getSetting}
-        />
-        <AnnotationFormModal
-          ref={annotationFormRef}
-          refresh={refreshAnnotations}
-        />
-        <BatchImportModal
-          ref={batchImportRef}
-          refresh={refreshAnnotations}
-        />
-        <HitHistoryDetail
-          ref={hitHistoryDetailRef}
-        />
-      </>}
-    </div>
+      <div className="rb:flex-1">
+        {activeTab === 'logs' && <>
+          <Table<LogItem>
+            apiUrl={getAppLogsUrl(id || '')}
+            apiParams={logsQuery}
+            columns={columns}
+            rowKey="id"
+            isScroll={true}
+            fillHeight={true}
+          />
+          <LogDetailModal ref={logDetailRef} source={application?.type} />
+        </>}
+        {!isHideAnnotations && activeTab === 'annotations' && <>
+          <Table<AnnotationItem>
+            ref={annotationsTableRef}
+            apiUrl={getAnnotationsListUrl(id || '')}
+            apiParams={{
+              ...(values ?? {})
+            }}
+            columns={annotationsColumns}
+            rowKey="id"
+            isScroll={true}
+            fillHeight={true}
+          />
+          <AnnotationsSettingsModal
+            ref={annotationsSettingsRef}
+            refresh={getSetting}
+          />
+          <AnnotationFormModal
+            ref={annotationFormRef}
+            refresh={refreshAnnotations}
+          />
+          <BatchImportModal
+            ref={batchImportRef}
+            refresh={refreshAnnotations}
+          />
+          <HitHistoryDetail
+            ref={hitHistoryDetailRef}
+          />
+        </>}
+      </div>
+    </Flex>
   );
 }
 export default Logs;

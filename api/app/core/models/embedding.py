@@ -7,6 +7,8 @@ from langchain_core.embeddings import Embeddings
 from app.core.alert_metric_bridge import (
     report_model_gateway_failure,
     report_model_gateway_failure_async,
+    report_model_gateway_success,
+    report_model_gateway_success_async,
 )
 from app.core.config import settings
 from app.core.models.base import RedBearModelConfig, get_provider_embedding_class, RedBearModelFactory
@@ -40,6 +42,8 @@ class RedBearEmbeddings(Embeddings):
         except Exception as exc:
             report_model_gateway_failure(self._config, operation, exc, started)
             raise
+        report_model_gateway_success(self._config, operation, started)
+        return result
 
     async def _observed_async_call(self, operation: str, call):
         started = time.perf_counter()
@@ -53,6 +57,8 @@ class RedBearEmbeddings(Embeddings):
                 self._config, operation, exc, started
             )
             raise
+        await report_model_gateway_success_async(self._config, operation, started)
+        return result
 
     @staticmethod
     def _create_model(config: RedBearModelConfig) -> Embeddings:
