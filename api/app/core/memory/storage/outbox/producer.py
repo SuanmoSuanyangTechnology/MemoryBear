@@ -1,8 +1,8 @@
 from uuid import UUID
 
-from .exceptions import OutboxEnqueueError, safe_error
-from .repository import OutboxRepository, create_repository
-from .types import OutboxEventInput
+from app.core.memory.storage.outbox.exceptions import OutboxEnqueueError, safe_error
+from app.core.memory.storage.outbox.repository import OutboxRepository, create_repository
+from app.core.memory.storage.outbox.types import OutboxEventInput
 
 
 async def enqueue_events(events: list[OutboxEventInput], *,

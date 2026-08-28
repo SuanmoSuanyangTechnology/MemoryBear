@@ -10,11 +10,14 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import settings
+from app.core.memory.storage.outbox.exceptions import OutboxConflictError
+from app.core.memory.storage.outbox.types import (
+    MAX_ATTEMPTS,
+    ClaimedEvent,
+    OutboxEventInput,
+)
 from app.db import SessionLocal
 from app.models.outbox_model import OutboxEvent
-
-from .exceptions import OutboxConflictError
-from .types import MAX_ATTEMPTS, ClaimedEvent, OutboxEventInput
 
 events = OutboxEvent.__table__
 

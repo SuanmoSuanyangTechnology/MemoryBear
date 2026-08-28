@@ -4,10 +4,10 @@ import asyncio
 import logging
 from contextlib import AsyncExitStack, suppress
 
-from .clients import ProjectionClients
-from .exceptions import ClaimLostError, safe_error
-from .repository import create_repository
-from .types import MAX_ATTEMPTS
+from app.core.memory.storage.outbox.clients import ProjectionClients
+from app.core.memory.storage.outbox.exceptions import ClaimLostError, safe_error
+from app.core.memory.storage.outbox.repository import create_repository
+from app.core.memory.storage.outbox.types import MAX_ATTEMPTS
 
 logger = logging.getLogger(__name__)
 

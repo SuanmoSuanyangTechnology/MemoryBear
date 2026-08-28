@@ -12,6 +12,7 @@ from redis.backoff import NoBackoff
 from app.core.config import settings
 from app.core.memory.storage.enums import MemoryNodeType
 from app.core.memory.storage.models import NodeFilter
+from app.core.memory.storage.outbox.types import ClaimedEvent
 from app.core.memory.storage.provider.elasticsearch.client import ElasticClient
 from app.core.memory.storage.provider.elasticsearch.config import (
     build_elasticsearch_client_config,
@@ -19,8 +20,6 @@ from app.core.memory.storage.provider.elasticsearch.config import (
 from app.core.memory.storage.provider.elasticsearch.index import ensure_indices
 from app.core.memory.storage.provider.neo4j.client import Neo4jClient
 from app.core.memory.storage.provider.neo4j.config import build_neo4j_driver_config
-
-from .types import ClaimedEvent
 
 
 async def project_event(
