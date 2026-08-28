@@ -71,8 +71,8 @@ def classify_llm_error(e: Exception, prefix: str = "llm") -> tuple[str, str]:
         return (f"{prefix}_bad_request", f"{prefix} 解析失败：请求参数错误，请检查文件格式或 URL 是否可访问")
 
     # 优先级 2：HTTP 状态码
-    if isinstance(e, httpx.HTTPStatusError):
-        status = e.response.status_code
+    status = e.response.status_code if isinstance(e, httpx.HTTPStatusError) else getattr(e, "status_code", None)
+    if status is not None:
         if status == 400:
             return (f"{prefix}_bad_request", f"{prefix} 解析失败：请求参数错误，请检查文件格式或 URL 是否可访问")
         if status == 401:
