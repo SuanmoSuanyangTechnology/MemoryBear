@@ -29,6 +29,7 @@ import Tag from '@/components/Tag'
 import { formatQuotaStatus, StatusProgress } from './components/StatusProgress'
 import OverflowTags from '@/components/OverflowTags'
 import PageTabs from '@/components/PageTabs';
+import { formatDateTime } from '@/utils/format'
 
 export default function UserMemory() {
   const { t } = useTranslation();
@@ -122,6 +123,7 @@ export default function UserMemory() {
           const { end_user, memory_num, memory_config, tags = [] } = item as Data;
           const name = getUserName(item)
           const quotaStatus = formatQuotaStatus(memory_num?.active_count || 0, memory_num?.memory_limit || 0)
+          const isShort = end_user?.label === 'short'
           return (
             <RbCard
               key={item.end_user?.id}
@@ -156,7 +158,7 @@ export default function UserMemory() {
               headerType="border"
               headerClassName="rb:h-[48px]! rb:mx-4!"
               bodyClassName="rb:py-3! rb:px-4!"
-              className="rb:cursor-pointer"
+              className="rb:cursor-pointer rb:h-full!"
               onClick={() => handleViewDetail(end_user?.id)}
             >
               <Flex align="center" gap={8} className="rb:mb-3! rb:w-full rb:cursor-pointer" onClick={(e) => handleCopy(e, end_user?.id || '')}>
@@ -173,13 +175,18 @@ export default function UserMemory() {
                 />
                 : <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-[22.5px]">{t('userMemory.noTags')}</div>
               }
-              <Row className="rb:mt-2!">
+              <Row className="rb:mt-2!" gutter={[12, 12]}>
                 <Col span={12}>
                   <RbStatistic title={t('userMemory.capacity')} value={memory_num?.total || 0} suffix={t('userMemory.memoryNum')} />
                 </Col>
                 <Col span={12}>
                   <RbStatistic title={t('userMemory.memoryType')} value={end_user.label ? t(`userMemory.${end_user.label}TermMemory`) : '-'} />
                 </Col>
+                {isShort &&
+                  <Col span={24}>
+                    <RbStatistic title={t('userMemory.expireTime')} value={end_user.expire_time ? formatDateTime(end_user.expire_time) : t('userMemory.neverExpires')} />
+                  </Col>
+                }
               </Row>
 
               <Flex align="center" justify="space-between" className="rb:text-[#5B6167] rb:text-[12px] rb:mt-3!">
