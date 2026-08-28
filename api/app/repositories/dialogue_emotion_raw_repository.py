@@ -124,7 +124,7 @@ class DialogueEmotionRawRepository:
             return 0
         values = [
             {
-                "id": r["id"],
+                "id": _as_uuid(r["id"]),
                 "end_user_id": _as_uuid(r["end_user_id"]),
                 "created_at": r["created_at"],
                 "emotion": r["emotion"],
