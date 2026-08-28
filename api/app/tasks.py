@@ -4973,44 +4973,6 @@ _EMOTION_STATS_INFLIGHT_KEY_FMT = "emotion_stats:inflight:{end_user_id}"
 _EMOTION_STATS_INFLIGHT_TTL_SEC = 1800
 
 
-def _report_emotion_stats_failure(
-        *,
-        scene: str,
-        end_user_id: str | None = None,
-        detail: str = "",
-) -> None:
-    """情绪日统计同步最终失败告警（轻量，零维护）。
-
-    两条通道，互为兜底：
-    1. CRITICAL 结构化日志，带稳定标记 [EmotionStatsAlert]，
-       供日志采集（如 Loki/ELK 的关键字告警规则）直接消费；
-    2. 可选插件 emotion_stats_failure_reporter（仿 reflection_failure_reporter 模式），
-       社区版未注册时静默跳过，不产生任何维护成本。
-
-    Args:
-        scene: 失败场景（user_sync_final_failure=用户任务重试耗尽 / scan_aborted=扫描器终止）
-        end_user_id: 相关用户ID（扫描器级失败时为 None）
-        detail: 失败原因摘要
-    """
-    try:
-        logger.critical(
-            "[EmotionStatsAlert] scene=%s end_user_id=%s detail=%s",
-            scene, end_user_id, detail,
-        )
-    except Exception:
-        pass
-
-    try:
-        from app.plugins import get_plugin
-
-        reporter = get_plugin("emotion_stats_failure_reporter")
-        if reporter is None:
-            return
-        reporter.report(scene=scene, end_user_id=end_user_id, detail=detail)
-    except Exception:
-        logger.error("情绪统计失败上报插件执行失败", exc_info=True)
-
-
 # 需要在work-periodic执行扫描任务
 @celery_app.task(
     name="app.tasks.scan_emotion_stats",
@@ -5036,10 +4998,6 @@ def scan_emotion_stats(self) -> Dict[str, Any]:
     redis_client = get_sync_redis_client()
     if redis_client is None:
         logger.error("scan_emotion_stats 终止：Redis 不可用，拒绝无锁派发")
-        # 当日全部用户漏跑：告警，次日扫描恢复（各用户窗口自动补昨日+前天）
-        _report_emotion_stats_failure(
-            scene="scan_aborted", detail="Redis unavailable: inflight locks disabled"
-        )
         raise RuntimeError("Redis unavailable: emotion stats scan requires inflight locks")
 
     dispatched = 0
@@ -5198,14 +5156,6 @@ def sync_emotion_stats_for_user(
         )
     except Exception as exc:
         logger.error(f"sync_emotion_stats_for_user 失败 user={end_user_id}: {exc}")
-        # 重试耗尽 = 最终失败：窗口已过且下一轮窗口不再覆盖的日期无法自动补回，
-        # 需告警提示人工介入（init_emotion_stats.py 全量补或实时补数兜底）
-        if self.request.retries >= self.max_retries:
-            _report_emotion_stats_failure(
-                scene="user_sync_final_failure",
-                end_user_id=end_user_id,
-                detail=f"retries exhausted: {exc}",
-            )
         # 失败自动重试（60s 间隔），Upsert 幂等保证重试安全
         retrying = True
         raise self.retry(exc=exc, countdown=60)

@@ -12,8 +12,8 @@
 """
 
 from sqlalchemy import Column, DateTime, Index, String
+from sqlalchemy.dialects.postgresql import UUID
 
-from app.core.utils.datetime_utils import utcnow_naive
 from app.db import Base
 
 
@@ -23,10 +23,9 @@ class DialogueEmotionRaw(Base):
     __tablename__ = "dialogue_emotion_raw"
 
     id = Column(String(255), primary_key=True, comment="主键（Neo4j Dialogue.id，幂等 Upsert 依据）")
-    end_user_id = Column(String(255), nullable=False, comment="终端用户ID（uuid字符串）")
+    end_user_id = Column(UUID(as_uuid=True), nullable=False, comment="终端用户ID")
     created_at = Column(DateTime, nullable=False, comment="对话原始时刻（naive UTC，不预切日）")
     emotion = Column(String(50), nullable=False, comment="情绪枚举（BERT 十分类英文 code）")
-    created_at_row = Column(DateTime, nullable=False, default=utcnow_naive, comment="落库时间")
 
     __table_args__ = (
         Index("idx_dialogue_emotion_raw_user_time", "end_user_id", "created_at"),

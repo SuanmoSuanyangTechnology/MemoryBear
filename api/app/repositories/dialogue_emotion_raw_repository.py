@@ -6,39 +6,38 @@ Dialogue Emotion Raw Repository
 Upsert、时区切日聚合与覆盖边界查询。
 
 存储口径：created_at 为 naive UTC；聚合查询传入规范化 IANA 时区名（tz），
-切日聚合在 PG 内用 (created_at AT TIME ZONE 'UTC' AT TIME ZONE :tz)::date
-实时完成；「逐活跃日索引跳跃」的日期归类在 Python 侧用 zoneinfo 换算
-（与 PG 同一 IANA 口径），UTC 边界比较一律走 (end_user_id, created_at)
-复合索引。
+切日聚合在 PG 内用 timezone(:tz, timezone('UTC', created_at))::date 实时
+完成（与 AT TIME ZONE 双重写法等价）；「逐活跃日索引跳跃」的日期归类在
+Python 侧用 zoneinfo 换算（与 PG 同一 IANA 口径），UTC 边界比较一律走
+(end_user_id, created_at) 复合索引。
 
+全部查询用 SQLAlchemy Core/ORM 表达式构建（不写裸 SQL 字符串）；
 事务由调用方控制，仓储层只使用 flush/refresh。
 """
 
 import logging
+import uuid as uuid_lib
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import select, text
+from sqlalchemy import DateTime, cast, exists, func, literal, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
-from app.core.utils.datetime_utils import utcnow_naive
 from app.models.dialogue_emotion_raw_model import DialogueEmotionRaw
 from app.models.end_user_model import EndUser
 
 logger = logging.getLogger(__name__)
 
-# 本地日期切日表达式（naive UTC 声明为 UTC 后转目标时区取日期），
-# 仅用于聚合查询的 GROUP BY / SELECT；范围过滤一律走 UTC 边界比较（保索引）
-_LOCAL_DATE_EXPR = "(created_at AT TIME ZONE 'UTC' AT TIME ZONE :tz)::date"
 
-# ct 所在本地日的 UTC 起始边界（本地日 00:00 的 naive UTC），与
-# _LOCAL_DATE_EXPR 同一 IANA 口径，用于「逐活跃日索引跳跃」的上界比较
-_CT_DAY_SPAN_START = (
-    "(date_trunc('day', {ct} AT TIME ZONE 'UTC' AT TIME ZONE :tz)"
-    " AT TIME ZONE :tz AT TIME ZONE 'UTC')"
-)
+def _as_uuid(value: Any) -> Optional[uuid_lib.UUID]:
+    """把 str/UUID 统一归一为 uuid.UUID（列为 UUID 类型）"""
+    if value is None:
+        return None
+    if isinstance(value, uuid_lib.UUID):
+        return value
+    return uuid_lib.UUID(str(value))
 
 
 class DialogueEmotionRawRepository:
@@ -52,6 +51,59 @@ class DialogueEmotionRawRepository:
         self.db = db
 
     # ------------------------------------------------------------------
+    # 内部工具：时区表达式（全部在 PG 内换算，与 IANA 同口径）
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _local_date(col: Any, tz: str) -> Any:
+        """naive UTC 时间列 → 目标时区本地日期
+
+        等价于 (col AT TIME ZONE 'UTC' AT TIME ZONE :tz)::date，
+        用于聚合查询的 GROUP BY / SELECT。
+        """
+        local_ts = func.timezone(literal(tz), func.timezone(literal("UTC"), col))
+        return func.date(local_ts)
+
+    @staticmethod
+    def _day_span_start_utc(ct_expr: Any, tz: str) -> Any:
+        """naive UTC 时间表达式 → 其所在本地日 00:00 的 naive UTC
+
+        等价于 date_trunc('day', ct AT TIME ZONE 'UTC' AT TIME ZONE :tz)
+        AT TIME ZONE :tz AT TIME ZONE 'UTC'，用于「逐活跃日索引跳跃」
+        的上界比较。
+        """
+        local_ts = func.timezone(literal(tz), func.timezone(literal("UTC"), ct_expr))
+        local_day_start = func.date_trunc("day", local_ts)
+        return func.timezone(
+            literal("UTC"), func.timezone(literal(tz), local_day_start)
+        )
+
+    @classmethod
+    def _local_day_start_utc(cls, day: date, tz: str) -> Any:
+        """本地日期 day 的 00:00 → naive UTC 边界（PG 内换算）
+
+        等价于 CAST(:day AS timestamp) AT TIME ZONE :tz AT TIME ZONE 'UTC'
+        （单次转换链：先把 day 解释为 tz 本地时间，再转为 UTC naive）。
+        注意不能复用 _day_span_start_utc（双次转换，语义是"naive UTC
+        时间戳 → 所在本地日 00:00 的 UTC"），对西半球时区会整体偏移
+        一个日历日。
+        """
+        return func.timezone(
+            literal("UTC"),
+            func.timezone(literal(tz), cast(literal(day), DateTime)),
+        )
+
+    @classmethod
+    def _local_day_end_utc(cls, day: date, tz: str) -> Any:
+        """本地日期 day 次日 00:00 → naive UTC 边界（PG 内换算）"""
+        return func.timezone(
+            literal("UTC"),
+            func.timezone(
+                literal(tz), cast(literal(day), DateTime) + timedelta(days=1)
+            ),
+        )
+
+    # ------------------------------------------------------------------
     # 写入：Upsert（Celery 任务 / 全量脚本 / 实时补数共用）
     # ------------------------------------------------------------------
 
@@ -63,21 +115,19 @@ class DialogueEmotionRawRepository:
 
         Args:
             rows: [{id, end_user_id, created_at, emotion}] 列表，
-                  created_at 为 naive UTC，end_user_id 为 uuid 字符串
+                  created_at 为 naive UTC，end_user_id 为 uuid 或其字符串
 
         Returns:
             int: 写入行数
         """
         if not rows:
             return 0
-        now = utcnow_naive()
         values = [
             {
                 "id": r["id"],
-                "end_user_id": str(r["end_user_id"]),
+                "end_user_id": _as_uuid(r["end_user_id"]),
                 "created_at": r["created_at"],
                 "emotion": r["emotion"],
-                "created_at_row": now,
             }
             for r in rows
         ]
@@ -91,7 +141,6 @@ class DialogueEmotionRawRepository:
                     "end_user_id": stmt.excluded.end_user_id,
                     "created_at": stmt.excluded.created_at,
                     "emotion": stmt.excluded.emotion,
-                    "created_at_row": stmt.excluded.created_at_row,
                 },
             )
             self.db.execute(stmt)
@@ -116,7 +165,7 @@ class DialogueEmotionRawRepository:
         行数成正比，与用户历史总行数无关。
 
         Args:
-            end_user_id: 终端用户ID（uuid字符串，直接字符串等值比较）
+            end_user_id: 终端用户ID（uuid 或其字符串）
             tz: 规范化 IANA 时区名（如 Asia/Shanghai）
             limit: 返回的活跃日数量，默认 2
 
@@ -128,12 +177,7 @@ class DialogueEmotionRawRepository:
         """
         if limit <= 0:
             return []
-        hop_sql = text(f"""
-            SELECT max(created_at)
-            FROM dialogue_emotion_raw
-            WHERE end_user_id = :uid
-              AND created_at < {_CT_DAY_SPAN_START.format(ct=':ct')}
-        """)
+        uid = _as_uuid(end_user_id)
         tzinfo = ZoneInfo(tz)
         picked: List[date] = []
         seen: Set[date] = set()
@@ -144,9 +188,12 @@ class DialogueEmotionRawRepository:
                 seen.add(day)
                 picked.append(day)
             # 跳到该本地日 00:00（UTC）之前，即更早活跃日的最大行
-            ct = self.db.execute(
-                hop_sql, {"uid": end_user_id, "tz": tz, "ct": ct}
-            ).scalar()
+            hop = select(func.max(DialogueEmotionRaw.created_at)).where(
+                DialogueEmotionRaw.end_user_id == uid,
+                DialogueEmotionRaw.created_at
+                < self._day_span_start_utc(literal(ct), tz),
+            )
+            ct = self.db.execute(hop).scalar()
         if not picked:
             return []
         return self._aggregate_days(end_user_id, tz, sorted(picked))
@@ -179,63 +226,62 @@ class DialogueEmotionRawRepository:
         Returns:
             Tuple[List[Dict], int]: (当页活跃日列表(固定按日期升序组装，desc 由 service 倒序), 总活跃日数)
         """
-        range_conditions = []
-        params: Dict[str, Any] = {"uid": end_user_id, "tz": tz}
+        uid = _as_uuid(end_user_id)
+        range_conditions = [DialogueEmotionRaw.end_user_id == uid]
         if start_utc is not None:
-            range_conditions.append("created_at >= :start_utc")
-            params["start_utc"] = start_utc
+            range_conditions.append(DialogueEmotionRaw.created_at >= start_utc)
         if end_utc is not None:
-            range_conditions.append("created_at < :end_utc")
-            params["end_utc"] = end_utc
-        range_sql = (" AND " + " AND ".join(range_conditions)) if range_conditions else ""
+            range_conditions.append(DialogueEmotionRaw.created_at < end_utc)
 
         # 1) 递归索引跳跃枚举范围内的全部活跃日：每活跃日一次
         #    max(created_at)（走复合索引），替代 COUNT(DISTINCT 切日
         #    表达式) + DISTINCT 分页对该用户全量行的逐行表达式计算
-        active_days_cte = f"""
-            WITH RECURSIVE active_days AS (
-                SELECT max(created_at) AS ct
-                FROM dialogue_emotion_raw
-                WHERE end_user_id = :uid{range_sql}
-                UNION ALL
-                SELECT (
-                    SELECT max(created_at)
-                    FROM dialogue_emotion_raw
-                    WHERE end_user_id = :uid
-                      AND created_at < {_CT_DAY_SPAN_START.format(ct='h.ct')}{range_sql}
-                )
-                FROM active_days h
-                WHERE h.ct IS NOT NULL
+        base = (
+            select(func.max(DialogueEmotionRaw.created_at).label("ct"))
+            .where(*range_conditions)
+        )
+        active_days = base.cte(name="active_days", recursive=True)
+        hop = select(
+            select(func.max(DialogueEmotionRaw.created_at))
+            .where(
+                *range_conditions,
+                DialogueEmotionRaw.created_at
+                < self._day_span_start_utc(active_days.c.ct, tz),
             )
-        """
-        rn_col = "rn_desc" if sort == "desc" else "rn_asc"
+            .scalar_subquery()
+        ).where(active_days.c.ct.isnot(None))
+        active_days = active_days.union_all(hop)
+
+        ranked = (
+            select(
+                active_days.c.ct,
+                func.row_number()
+                .over(order_by=active_days.c.ct.desc())
+                .label("rn_desc"),
+                func.row_number()
+                .over(order_by=active_days.c.ct.asc())
+                .label("rn_asc"),
+                func.count().over().label("total"),
+            )
+            .where(active_days.c.ct.isnot(None))
+            .subquery()
+        )
+        rn_col = ranked.c.rn_desc if sort == "desc" else ranked.c.rn_asc
         rn_lo = (page - 1) * pagesize + 1
         rn_hi = page * pagesize
-        page_sql = text(f"""
-            {active_days_cte}
-            SELECT ct, total FROM (
-                SELECT ct,
-                       row_number() OVER (ORDER BY ct DESC) AS rn_desc,
-                       row_number() OVER (ORDER BY ct ASC) AS rn_asc,
-                       count(*) OVER () AS total
-                FROM active_days
-                WHERE ct IS NOT NULL
-            ) ranked
-            WHERE {rn_col} BETWEEN :rn_lo AND :rn_hi
-        """)
-        fetched = self.db.execute(
-            page_sql, dict(params, rn_lo=rn_lo, rn_hi=rn_hi)
-        ).fetchall()
+        page_stmt = select(ranked.c.ct, ranked.c.total).where(
+            rn_col.between(rn_lo, rn_hi)
+        )
+        fetched = self.db.execute(page_stmt).fetchall()
 
         if not fetched:
             # 页码超出范围：单独取 total（同一递归枚举）
-            count_sql = text(f"""
-                {active_days_cte}
-                SELECT count(*) AS total
-                FROM active_days
-                WHERE ct IS NOT NULL
-            """)
-            total = int(self.db.execute(count_sql, params).scalar() or 0)
+            count_stmt = (
+                select(func.count())
+                .select_from(active_days)
+                .where(active_days.c.ct.isnot(None))
+            )
+            total = int(self.db.execute(count_stmt).scalar() or 0)
             return [], total
 
         total = int(fetched[0][1])
@@ -264,29 +310,27 @@ class DialogueEmotionRawRepository:
         用户级任务窗口选择用：查「北京前天」是否有数据。
         走 end_user_id + created_at 复合索引，勿改写成聚合列表达式。
         """
-        query = text("""
-            SELECT EXISTS(
-                SELECT 1 FROM dialogue_emotion_raw
-                WHERE end_user_id = :uid
-                  AND created_at >= :start_dt
-                  AND created_at < :end_dt
+        stmt = select(
+            exists().where(
+                DialogueEmotionRaw.end_user_id == _as_uuid(end_user_id),
+                DialogueEmotionRaw.created_at >= start_dt,
+                DialogueEmotionRaw.created_at < end_dt,
             )
-        """)
-        return bool(self.db.execute(
-            query, {"uid": end_user_id, "start_dt": start_dt, "end_dt": end_dt}
-        ).scalar())
+        )
+        return bool(self.db.execute(stmt).scalar())
 
     def get_max_created_at(self, end_user_id: str) -> Optional[datetime]:
         """用户已入库的最大 created_at（naive UTC）——实时补数的覆盖边界
 
         走 end_user_id + created_at 索引（索引有序，max 直取末条），毫秒级。
         """
-        query = text("""
-            SELECT created_at FROM dialogue_emotion_raw
-            WHERE end_user_id = :uid
-            ORDER BY created_at DESC LIMIT 1
-        """)
-        return self.db.execute(query, {"uid": end_user_id}).scalar()
+        stmt = (
+            select(DialogueEmotionRaw.created_at)
+            .where(DialogueEmotionRaw.end_user_id == _as_uuid(end_user_id))
+            .order_by(DialogueEmotionRaw.created_at.desc())
+            .limit(1)
+        )
+        return self.db.execute(stmt).scalar()
 
     def get_active_end_user_ids(self, active_within_hours: int = 49) -> List[str]:
         """获取近期有写入行为的用户ID（扫描器派发候选，从旧仓储迁入）
@@ -301,7 +345,7 @@ class DialogueEmotionRawRepository:
         Returns:
             List[str]: end_user_id 字符串列表（uuid 已转 str）
         """
-        threshold = utcnow_naive() - timedelta(hours=active_within_hours)
+        threshold = datetime.utcnow() - timedelta(hours=active_within_hours)
         stmt = (
             select(EndUser.id)
             .where(EndUser.write_time.isnot(None), EndUser.write_time >= threshold)
@@ -321,25 +365,28 @@ class DialogueEmotionRawRepository:
         相邻活跃日之间不存在任何行（活跃日 = 有明细行的日期），故
         [最早活跃日 00:00, 最晚活跃日次日 00:00) 的 UTC 范围扫描只会
         命中 days 内日期的行；日期边界换算全部在 PG 内完成
-        （CAST ... AT TIME ZONE），与切日表达式同一 IANA 口径。
+        （timezone 双重转换），与切日表达式同一 IANA 口径。
 
         Returns:
             List[Dict]: 按日期升序，每项 {stat_date, dialogue_count, emotions}
         """
         lo_day, hi_day = min(days), max(days)
-        agg_sql = text(f"""
-            SELECT {_LOCAL_DATE_EXPR} AS stat_date,
-                   emotion,
-                   count(*) AS cnt
-            FROM dialogue_emotion_raw
-            WHERE end_user_id = :uid
-              AND created_at >= (CAST(:lo_day AS timestamp) AT TIME ZONE :tz AT TIME ZONE 'UTC')
-              AND created_at < (CAST(CAST(:hi_day AS date) + 1 AS timestamp) AT TIME ZONE :tz AT TIME ZONE 'UTC')
-            GROUP BY 1, 2
-        """)
-        result = self.db.execute(
-            agg_sql, {"uid": end_user_id, "tz": tz, "lo_day": lo_day, "hi_day": hi_day}
+        stat_date_expr = self._local_date(DialogueEmotionRaw.created_at, tz)
+        stmt = (
+            select(
+                stat_date_expr.label("stat_date"),
+                DialogueEmotionRaw.emotion,
+                func.count().label("cnt"),
+            )
+            .where(
+                DialogueEmotionRaw.end_user_id == _as_uuid(end_user_id),
+                DialogueEmotionRaw.created_at
+                >= self._local_day_start_utc(lo_day, tz),
+                DialogueEmotionRaw.created_at < self._local_day_end_utc(hi_day, tz),
+            )
+            .group_by(stat_date_expr, DialogueEmotionRaw.emotion)
         )
+        result = self.db.execute(stmt)
         rows = self._assemble_daily_rows(result.fetchall())
         wanted = set(days)
         return [r for r in rows if r["stat_date"] in wanted]

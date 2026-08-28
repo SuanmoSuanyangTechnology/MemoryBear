@@ -385,7 +385,8 @@ class EndUserRepository:
         覆盖 conversations、memory_messages、memory_short_term、
         memory_long_term、memory_forget_log、memory_perceptual、
         memory_reflection_log、forgetting_cycle_history、
-        memory_display_record、memory_engine_display_event。
+        memory_display_record、memory_engine_display_event、
+        dialogue_emotion_raw。
 
         跳过 implicit_emotions_storage（UNIQUE 约束，需特殊处理）和
         memory_config（end_user_id 为配置自身标识，非用户引用）。
@@ -400,6 +401,7 @@ class EndUserRepository:
 
         # ── 所有表定义：(model, col_name, src_value, tgt_value) ──
         from app.models.conversation_model import Conversation
+        from app.models.dialogue_emotion_raw_model import DialogueEmotionRaw
         from app.models.memory_message_model import MemoryMessage
         from app.models.memory_short_model import ShortTermMemory, LongTermMemory
         from app.models.forgetting_cycle_history_model import ForgettingCycleHistory
@@ -422,6 +424,7 @@ class EndUserRepository:
             (ForgetAuditModel, "end_user_id", src_id, target_id),
             (MemoryPerceptualModel, "end_user_id", src_id, target_id),
             (MemoryReflectionLog, "end_user_id", src_id, target_id),
+            (DialogueEmotionRaw, "end_user_id", src_id, target_id),
         ]
 
         for model, col_name, src_val, tgt_val in all_tables:
