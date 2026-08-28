@@ -210,6 +210,7 @@ class DocumentProgressSink:
     """Persist throttled task progress through short database sessions."""
 
     _TERMINAL_EVENTS = {"kb_task_finished", "kb_task_failed"}
+    _ABORTED_MESSAGE = "Task aborted (deleted or cancelled)."
 
     def __init__(
         self,
@@ -258,6 +259,11 @@ class DocumentProgressSink:
         with self._lock:
             if event.display_message:
                 self._pending_messages.append(event.display_message)
+            elif (
+                event.event == "kb_task_finished"
+                and event.business_outcome is BusinessOutcome.ABORTED
+            ):
+                self._pending_messages.append(self._ABORTED_MESSAGE)
             if not self._should_flush(event, now):
                 return
             pending_messages = tuple(self._pending_messages)
