@@ -40,6 +40,17 @@ def _as_uuid(value: Any) -> Optional[uuid_lib.UUID]:
     return uuid_lib.UUID(str(value))
 
 
+def dialogue_row_uuid(dialogue_id: Any) -> uuid_lib.UUID:
+    """Neo4j Dialogue.id → 确定性 uuid 主键（uuid5，同一对话恒同一主键）
+
+    Neo4j Dialogue.id 为 Dialog_<uuid>_<n> 格式的非纯 uuid 字符串，
+    不能直接存 uuid 列；用 uuid5 由其确定性生成主键，幂等 Upsert
+    仍按主键冲突判断。独立脚本 scripts/init_emotion_stats.py 内
+    使用完全相同的算法，保证两条写入链路主键一致。
+    """
+    return uuid_lib.uuid5(uuid_lib.NAMESPACE_URL, str(dialogue_id))
+
+
 class DialogueEmotionRawRepository:
     """对话情绪原始明细仓储类"""
 
@@ -115,6 +126,8 @@ class DialogueEmotionRawRepository:
 
         Args:
             rows: [{id, end_user_id, created_at, emotion}] 列表，
+                  id 为 Neo4j Dialogue.id 原始字符串（内部经 uuid5
+                  确定性转换为 uuid 主键，原样存 dialogue_id 列），
                   created_at 为 naive UTC，end_user_id 为 uuid 或其字符串
 
         Returns:
@@ -124,7 +137,8 @@ class DialogueEmotionRawRepository:
             return 0
         values = [
             {
-                "id": r["id"],
+                "id": dialogue_row_uuid(r["id"]),
+                "dialogue_id": str(r["id"]),
                 "end_user_id": _as_uuid(r["end_user_id"]),
                 "created_at": r["created_at"],
                 "emotion": r["emotion"],
