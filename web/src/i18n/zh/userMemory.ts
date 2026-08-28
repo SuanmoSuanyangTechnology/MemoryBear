@@ -66,6 +66,9 @@ export const userMemory = {
       allTermMemory: '全部',
       shortTermMemory: '短时记忆',
       longTermMemory: '长时记忆',
+      lastMemoryActivityTime: '最后记忆活动时间',
+      expireTime: '过期时间',
+      neverExpires: '永不过期',
 
       endUserProfile: '永久记忆',
       editEndUserProfile: '编辑',
@@ -305,6 +308,7 @@ export const userMemory = {
       basicInfo: '基础信息',
       subjectId: '主体 ID',
       identity: '身份标识',
+      unboundIdentity: '未绑定（因此判定为临时记忆）',
       userName: '用户名称',
       tags: '标签',
       memoryStatistics: '记忆统计',
