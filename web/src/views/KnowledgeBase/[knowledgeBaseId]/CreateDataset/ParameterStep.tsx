@@ -147,7 +147,6 @@ const ParameterStep = ({ form, fileIds, isParentChildMode }: ParameterStepProps)
         {pdfEnhancementEnabled && (
           <Form.Item name="pdfEnhancementMethod" noStyle>
             <Select className="rb:w-75!" options={[
-              { value: 'deepdoc', label: 'DeepDoc' },
               { value: 'mineru', label: 'MinerU' },
               { value: 'textln', label: 'TextLN' },
             ]} />
