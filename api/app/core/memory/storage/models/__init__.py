@@ -8,6 +8,9 @@ from app.core.memory.storage.models.filter import (
     FilterLogic,
     FilterOperator,
     NodeFilter,
+    RelationshipFilter,
+    RelationshipFilterScope,
+    ScopedNodeFilter,
 )
 from app.core.memory.storage.models.projection import (
     CoalesceProjectionField,
@@ -29,6 +32,9 @@ __all__ = [
     "FilterLogic",
     "FilterOperator",
     "NodeFilter",
+    "RelationshipFilter",
+    "RelationshipFilterScope",
+    "ScopedNodeFilter",
 
     "CoalesceProjectionField",
     "NodeProjection",
