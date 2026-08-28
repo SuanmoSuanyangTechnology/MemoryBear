@@ -40,6 +40,7 @@ from ..rag.models.vision import QWenCV as ImageQWenCV
 from ..rag.vdb.vector_store import TaskVectorStore
 from ..runtime import ProcessRuntime
 from ..tasks.dispatch import TaskDispatcher
+from ..tasks.observability import BusinessOutcome, TaskRun
 from ..tasks.state import PARSE_CANCEL_KEY, PARSE_TASK_KEY
 from ..utils.datetime_utils import to_iso_z, to_timestamp_ms, utcnow, utcnow_naive
 from .knowledge_file_storage import KnowledgeFileStorage
@@ -714,6 +715,8 @@ def process_document(
     file_key: str,
     document_id: str | uuid.UUID,
     file_name: str = "",
+    *,
+    run: TaskRun,
 ) -> str:
     """Parse, vectorize, and persist one document with legacy task semantics."""
 
@@ -723,21 +726,25 @@ def process_document(
     normalized_document_id: uuid.UUID | None = None
     try:
         normalized_document_id = uuid.UUID(str(document_id))
-        snapshot = _load_snapshot(
-            runtime,
-            normalized_document_id,
-            file_name,
-        )
+        with run.stage("load_snapshot"):
+            snapshot = _load_snapshot(
+                runtime,
+                normalized_document_id,
+                file_name,
+            )
         document_label = snapshot.file_name or str(normalized_document_id)
-        preflight = _preflight_document(runtime, snapshot)
         _mark_running(runtime, normalized_document_id, progress_lines)
+        with run.stage("preflight"):
+            preflight = _preflight_document(runtime, snapshot)
         if _should_abort(runtime, normalized_document_id):
             raise _ParseAborted
 
-        file_binary = _download_file(runtime, file_key)
+        with run.stage("download_file"):
+            file_binary = _download_file(runtime, file_key)
         if not file_binary:
             raise OSError(f"Downloaded empty file from storage: {file_key}")
-        estimated_pages = _estimate_pages(snapshot.file_name, file_binary)
+        with run.stage("estimate_pages"):
+            estimated_pages = _estimate_pages(snapshot.file_name, file_binary)
         if estimated_pages is None:
             progress_lines.append(
                 f"{_progress_ts()} parse document '{document_label}' page number unavailable."
@@ -753,20 +760,41 @@ def process_document(
                 document.progress_msg = _progress_message(progress_lines)
 
             _update_document(runtime, normalized_document_id, mark_page_limit_failed)
+            run.finish(
+                BusinessOutcome.FAILURE,
+                error_code="KB_DOC_PAGE_LIMIT_EXCEEDED",
+                detail="page_limit_exceeded",
+            )
             return f"parse document '{document_label}' failed: page limit exceeded"
 
         def progress_callback(prog=None, msg=None):
-            progress_lines.append(f"{_progress_ts()} parse progress: {prog} msg: {msg}.")
+            display_message = f"{_progress_ts()} parse progress: {prog} msg: {msg}."
+            progress_lines.append(display_message)
+            fraction = (
+                float(prog)
+                if isinstance(prog, (int, float))
+                and not isinstance(prog, bool)
+                and 0.0 <= float(prog) <= 1.0
+                else None
+            )
+            run.progress(
+                stage="parse",
+                fraction=fraction,
+                detail="parser_progress",
+                display_message=display_message,
+                force=fraction in {0.8, 1.0},
+            )
 
         if _should_abort(runtime, normalized_document_id):
             raise _ParseAborted
-        parsed = _parse_chunks(
-            runtime,
-            snapshot,
-            file_binary,
-            progress_callback,
-            preflight.vision_model,
-        )
+        with run.stage("parse"):
+            parsed = _parse_chunks(
+                runtime,
+                snapshot,
+                file_binary,
+                progress_callback,
+                preflight.vision_model,
+            )
         if snapshot.parent_child_mode:
             child_result, parent_result, parent_id_map = parsed
             if isinstance(child_result, GroupedChildChunks):
@@ -786,7 +814,8 @@ def process_document(
             document.progress = 0.8
             document.progress_msg = _progress_message(progress_lines)
 
-        _update_document(runtime, normalized_document_id, mark_parsed)
+        with run.stage("persist_document"):
+            _update_document(runtime, normalized_document_id, mark_parsed)
         if _should_abort(runtime, normalized_document_id):
             raise _ParseAborted
 
@@ -800,48 +829,54 @@ def process_document(
             progress_lines.append(f"{_progress_ts()} No chunks generated, skipping vectorization.")
         else:
             vector_store = preflight.vector_store
-            vector_store.delete_by_metadata_field(
-                "document_id",
-                str(normalized_document_id),
-            )
-            if snapshot.parent_child_mode:
-                all_chunks = _parent_child_chunks(
-                    snapshot,
-                    child_result,
-                    parent_result,
-                    parent_id_map,
+            with run.stage("delete_old_vectors"):
+                vector_store.delete_by_metadata_field(
+                    "document_id",
+                    str(normalized_document_id),
                 )
-                progress_lines.append(
-                    f"{_progress_ts()} Parent-child mode: {len(parent_result)} parent "
-                    f"chunks + {len(child_result)} child chunks prepared."
-                )
-            elif preflight.auto_questions_topn:
-                all_chunks = _auto_qa_chunks(
-                    runtime,
-                    snapshot,
-                    preflight.chat_model,
-                    child_result,
-                    preflight.auto_questions_topn,
-                    snapshot.parser_config.get("qa_prompt"),
-                )
-                qa_count = sum(chunk.metadata.get("chunk_type") == "qa" for chunk in all_chunks)
-                progress_lines.append(
-                    f"{_progress_ts()} QA pairs generated for {total_chunks} chunks "
-                    f"(workers={runtime.settings.auto_questions_max_workers})."
-                )
-                progress_lines.append(
-                    f"{_progress_ts()} QA mode: {total_chunks} source chunks + "
-                    f"{qa_count} QA chunks prepared."
-                )
-            else:
-                all_chunks = _normal_chunks(snapshot, child_result)
+            with run.stage("prepare_chunks"):
+                if snapshot.parent_child_mode:
+                    all_chunks = _parent_child_chunks(
+                        snapshot,
+                        child_result,
+                        parent_result,
+                        parent_id_map,
+                    )
+                    progress_lines.append(
+                        f"{_progress_ts()} Parent-child mode: {len(parent_result)} parent "
+                        f"chunks + {len(child_result)} child chunks prepared."
+                    )
+                elif preflight.auto_questions_topn:
+                    with run.stage("generate_qa"):
+                        all_chunks = _auto_qa_chunks(
+                            runtime,
+                            snapshot,
+                            preflight.chat_model,
+                            child_result,
+                            preflight.auto_questions_topn,
+                            snapshot.parser_config.get("qa_prompt"),
+                        )
+                    qa_count = sum(
+                        chunk.metadata.get("chunk_type") == "qa" for chunk in all_chunks
+                    )
+                    progress_lines.append(
+                        f"{_progress_ts()} QA pairs generated for {total_chunks} chunks "
+                        f"(workers={runtime.settings.auto_questions_max_workers})."
+                    )
+                    progress_lines.append(
+                        f"{_progress_ts()} QA mode: {total_chunks} source chunks + "
+                        f"{qa_count} QA chunks prepared."
+                    )
+                else:
+                    all_chunks = _normal_chunks(snapshot, child_result)
             batch_size = runtime.settings.embedding_batch_size
             batches = [
                 all_chunks[start : start + batch_size]
                 for start in range(0, len(all_chunks), batch_size)
             ]
             total_batches = len(batches)
-            _write_chunks_with_retry(runtime, vector_store, batches)
+            with run.stage("embedding"):
+                _write_chunks_with_retry(runtime, vector_store, batches)
             progress_lines.append(
                 f"{_progress_ts()} All {total_batches} batches embedded "
                 f"(workers={runtime.settings.embedding_max_workers})."
@@ -853,7 +888,8 @@ def process_document(
                 document.process_duration = time.time() - started_at
                 document.run = 0
 
-            _update_document(runtime, normalized_document_id, mark_vectorized)
+            with run.stage("persist_document"):
+                _update_document(runtime, normalized_document_id, mark_vectorized)
 
         progress_lines.append(f"{_progress_ts()} Indexing done.")
         process_duration = time.time() - started_at
@@ -866,17 +902,28 @@ def process_document(
             document.progress_msg = _progress_message(progress_lines)
             document.run = 0
 
-        _update_document(runtime, normalized_document_id, mark_done)
-        _dispatch_graph(runtime, snapshot, progress_lines)
+        with run.stage("persist_document"):
+            _update_document(runtime, normalized_document_id, mark_done)
+        with run.stage("dispatch_graph"):
+            _dispatch_graph(runtime, snapshot, progress_lines)
         logger.info(
             "Document parsing completed: document=%s duration=%.1f chunks=%s",
             normalized_document_id,
             process_duration,
             total_chunks,
         )
+        run.finish(
+            BusinessOutcome.SUCCESS,
+            counts={"chunks": total_chunks},
+        )
         return f"parse document '{snapshot.source_file_name}' processed successfully."
     except _ParseAborted:
         logger.info("Document parsing aborted: document=%s", normalized_document_id)
+        run.finish(
+            BusinessOutcome.ABORTED,
+            error_code="KB_DOC_PARSE_ABORTED",
+            detail="document_deleted_or_cancelled",
+        )
         return f"parse document '{document_label}' aborted (deleted or cancelled)."
     except Exception as exc:  # noqa: BLE001 - task returns a legacy failure string.
         logger.error(
@@ -902,9 +949,15 @@ def process_document(
                     normalized_document_id,
                     type(state_exc).__name__,
                 )
+        run.finish(
+            BusinessOutcome.FAILURE,
+            error_code="KB_DOC_PROCESSING_FAILED",
+            exc=exc,
+        )
         return f"parse document '{document_label}' failed."
     finally:
-        _clear_parse_state(runtime, normalized_document_id or document_id)
+        with run.stage("cleanup"):
+            _clear_parse_state(runtime, normalized_document_id or document_id)
 
 
 __all__ = ["ParseDocumentSnapshot", "process_document"]

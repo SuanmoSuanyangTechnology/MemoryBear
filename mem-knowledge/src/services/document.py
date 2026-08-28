@@ -6,7 +6,7 @@ import logging
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,13 +31,16 @@ from ..rag.knowledge_graph import (
 from ..rag.parser_config import normalize_document_parser_config
 from ..repositories import document as document_repository
 from ..tasks.dispatch import TaskDispatcher
-from ..utils.datetime_utils import utcnow_naive
+from ..utils.datetime_utils import to_iso_z, utcnow, utcnow_naive
 from . import file as file_service
 from . import knowledge as knowledge_service
 from .knowledge_file_storage import KnowledgeFileStorage
 from .qa_export import collection_name_for_knowledge
 
 logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from ..runtime import ProcessRuntime
 
 PARSE_TASK_KEY = "doc:{doc_id}:parse_task"
 PARSE_CANCEL_KEY = "doc:{doc_id}:parse_cancel"
@@ -336,17 +339,48 @@ async def _release_parse_claim(redis: Any, task_key: str) -> None:
         await redis.delete(task_key)
 
 
+async def _persist_parse_dispatch_state(
+    runtime: ProcessRuntime,
+    document_id: uuid.UUID,
+    *,
+    state: str,
+) -> None:
+    async with runtime.database.async_session() as db:
+        document = await db.get(Document, document_id)
+        if document is None:
+            raise ValueError(f"Document {document_id} not found while updating dispatch state")
+        timestamp = to_iso_z(utcnow())
+        if state == "queued":
+            document.progress = 0.0
+            document.progress_msg = f"{timestamp} Queued.\n"
+            document.process_duration = 0.0
+            document.run = 0
+        elif state == "failed":
+            document.progress = -1.0
+            document.progress_msg = f"{timestamp} Task dispatch failed.\n"
+            document.run = 0
+        else:
+            raise ValueError(f"Unsupported parse dispatch state: {state}")
+        await db.commit()
+
+
 async def claim_and_dispatch_parse(
-    redis: Any,
+    runtime: ProcessRuntime,
     dispatcher: TaskDispatcher,
     snapshot: ParseDocumentSnapshot,
 ) -> ParseDispatchResult:
+    redis = await runtime.redis.client()
     task_key = PARSE_TASK_KEY.format(doc_id=snapshot.document_id)
     claimed = await redis.set(task_key, "CLAIMED", ex=PARSE_TASK_TTL, nx=True)
     if not claimed:
         existing_task_id = await redis.get(task_key)
         return ParseDispatchResult(str(existing_task_id or "unknown"), False)
     try:
+        await _persist_parse_dispatch_state(
+            runtime,
+            snapshot.document_id,
+            state="queued",
+        )
         task_id = await dispatcher.send(
             PARSE_TASK_NAME,
             args=[snapshot.file_key, snapshot.document_id, snapshot.file_name],
@@ -354,6 +388,18 @@ async def claim_and_dispatch_parse(
         )
     except Exception:
         await _release_parse_claim(redis, task_key)
+        try:
+            await _persist_parse_dispatch_state(
+                runtime,
+                snapshot.document_id,
+                state="failed",
+            )
+        except Exception as state_exc:  # noqa: BLE001 - preserve dispatch failure.
+            logger.warning(
+                "Failed to persist parse dispatch failure: document=%s error_type=%s",
+                snapshot.document_id,
+                type(state_exc).__name__,
+            )
         raise
     await redis.set(task_key, task_id, ex=PARSE_TASK_TTL)
     return ParseDispatchResult(task_id, True)
