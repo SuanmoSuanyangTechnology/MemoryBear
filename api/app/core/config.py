@@ -40,6 +40,12 @@ class Settings:
     SPEEDBEAR_SYSTEM_TENANT_ID: str = os.getenv(
         "SPEEDBEAR_SYSTEM_TENANT_ID", "00000000-0000-0000-0000-000000000000"
     )
+    # SSO 新租户绑定 SpeedBear 失败时的策略（轮询重试后仍失败时生效）：
+    #   true  = 严格模式：物理回滚本次新建的租户及其临时数据，本次登录失败
+    #   false = 宽松模式：保留租户，返回「未绑定成功，请联系管理员」提示
+    SSO_REQUIRE_SPEEDBEAR_BINDING: bool = (
+        os.getenv("SSO_REQUIRE_SPEEDBEAR_BINDING", "true").lower() == "true"
+    )
 
     # Neo4j Configuration (记忆系统数据库)
     NEO4J_URI: str = os.getenv("NEO4J_URI", "bolt://1.94.111.67:7687")
