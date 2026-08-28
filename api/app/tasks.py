@@ -4653,7 +4653,7 @@ def _release_soft_delete_inflight(
     time_limit=600,
 )
 def scan_expired_end_users(self) -> Dict[str, Any]:
-    """扫描一批已超过空间保留期的临时身份并派发批量清理。"""
+    """扫描全部过期临时身份，并按每批最多 100 个派发清理任务。"""
     from app.repositories.end_user_repository import EndUserRepository
 
     started_at = time.time()
@@ -4661,9 +4661,7 @@ def scan_expired_end_users(self) -> Dict[str, Any]:
 
     try:
         with get_db_context() as db:
-            candidates = EndUserRepository(db).get_expired_temporary_end_user_ids(
-                limit=_SOFT_DELETE_BATCH_SIZE,
-            )
+            candidates = EndUserRepository(db).get_expired_temporary_end_user_ids()
     except Exception as e:
         logger.error(f"[ExpiredEndUserScan] 查询失败: {e}", exc_info=True)
         return {"status": "FAILED", "reason": "query_failed", "error": str(e)}
@@ -4689,35 +4687,48 @@ def scan_expired_end_users(self) -> Dict[str, Any]:
             "dispatched": 0,
         }
 
-    locked_ids: List[str] = []
+    locked_count = 0
     lock_conflicts = 0
-    try:
-        for candidate_id in candidates:
-            end_user_id = str(candidate_id)
-            acquired = redis_client.set(
-                _soft_delete_inflight_key(end_user_id),
-                batch_id,
-                nx=True,
-                ex=_SOFT_DELETE_INFLIGHT_TTL_SECONDS,
-            )
-            if acquired:
-                locked_ids.append(end_user_id)
-            else:
-                lock_conflicts += 1
-    except RedisError as e:
-        for end_user_id in locked_ids:
-            _release_soft_delete_inflight(redis_client, end_user_id, batch_id)
-        logger.error(f"[ExpiredEndUserScan] Redis 加锁失败: {e}", exc_info=True)
-        return {
-            "status": "FAILED",
-            "reason": "redis_lock_failed",
-            "batch_id": batch_id,
-            "candidates": len(candidates),
-            "locked": len(locked_ids),
-            "dispatched": 0,
-        }
+    dispatched_count = 0
+    dispatched_batches = 0
+    for batch_start in range(0, len(candidates), _SOFT_DELETE_BATCH_SIZE):
+        candidate_batch = candidates[
+            batch_start:batch_start + _SOFT_DELETE_BATCH_SIZE
+        ]
+        locked_ids: List[str] = []
+        try:
+            for candidate_id in candidate_batch:
+                end_user_id = str(candidate_id)
+                acquired = redis_client.set(
+                    _soft_delete_inflight_key(end_user_id),
+                    batch_id,
+                    nx=True,
+                    ex=_SOFT_DELETE_INFLIGHT_TTL_SECONDS,
+                )
+                if acquired:
+                    locked_ids.append(end_user_id)
+                    locked_count += 1
+                else:
+                    lock_conflicts += 1
+        except RedisError as e:
+            for end_user_id in locked_ids:
+                _release_soft_delete_inflight(redis_client, end_user_id, batch_id)
+            locked_count -= len(locked_ids)
+            logger.error(f"[ExpiredEndUserScan] Redis 加锁失败: {e}", exc_info=True)
+            return {
+                "status": "PARTIAL_FAILURE" if dispatched_count else "FAILED",
+                "reason": "redis_lock_failed",
+                "batch_id": batch_id,
+                "candidates": len(candidates),
+                "locked": locked_count,
+                "lock_conflicts": lock_conflicts,
+                "dispatched": dispatched_count,
+                "dispatched_batches": dispatched_batches,
+            }
 
-    if locked_ids:
+        if not locked_ids:
+            continue
+
         try:
             do_soft_delete_end_users.apply_async(
                 kwargs={"end_user_ids": locked_ids, "batch_id": batch_id},
@@ -4726,29 +4737,36 @@ def scan_expired_end_users(self) -> Dict[str, Any]:
         except Exception as e:
             for end_user_id in locked_ids:
                 _release_soft_delete_inflight(redis_client, end_user_id, batch_id)
+            locked_count -= len(locked_ids)
             logger.error(f"[ExpiredEndUserScan] 派发失败: {e}", exc_info=True)
             return {
-                "status": "FAILED",
+                "status": "PARTIAL_FAILURE" if dispatched_count else "FAILED",
                 "reason": "dispatch_failed",
                 "batch_id": batch_id,
                 "candidates": len(candidates),
-                "locked": len(locked_ids),
-                "dispatched": 0,
+                "locked": locked_count,
+                "lock_conflicts": lock_conflicts,
+                "dispatched": dispatched_count,
+                "dispatched_batches": dispatched_batches,
             }
+        dispatched_count += len(locked_ids)
+        dispatched_batches += 1
 
     elapsed = time.time() - started_at
     logger.info(
         f"[ExpiredEndUserScan] 完成: batch_id={batch_id}, "
-        f"candidates={len(candidates)}, locked={len(locked_ids)}, "
-        f"lock_conflicts={lock_conflicts}, elapsed={elapsed:.1f}s"
+        f"candidates={len(candidates)}, locked={locked_count}, "
+        f"lock_conflicts={lock_conflicts}, dispatched={dispatched_count}, "
+        f"batches={dispatched_batches}, elapsed={elapsed:.1f}s"
     )
     return {
         "status": "SUCCESS",
         "batch_id": batch_id,
         "candidates": len(candidates),
-        "locked": len(locked_ids),
+        "locked": locked_count,
         "lock_conflicts": lock_conflicts,
-        "dispatched": len(locked_ids),
+        "dispatched": dispatched_count,
+        "dispatched_batches": dispatched_batches,
         "elapsed_time": elapsed,
     }
 

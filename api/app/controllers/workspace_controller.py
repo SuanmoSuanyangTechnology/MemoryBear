@@ -228,7 +228,7 @@ def update_workspace_retention_policy(
     return success(
         data=WorkspaceRetentionPolicyResponse(
             retention_days=retention_days,
-        ).model_dump(exclude_none=True),
+        ).model_dump(exclude_unset=True),
         msg=t("workspace.retention_policy.updated"),
     )
 
