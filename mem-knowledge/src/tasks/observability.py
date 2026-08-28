@@ -553,7 +553,10 @@ class TaskRun(AbstractContextManager["TaskRun"]):
                 )
                 return
             self._terminal = True
-        event_name = "kb_task_failed" if outcome is BusinessOutcome.FAILURE else "kb_task_finished"
+        event_name = {
+            BusinessOutcome.FAILURE: "kb_task_failed",
+            BusinessOutcome.RETRY: "kb_task_retry",
+        }.get(outcome, "kb_task_finished")
         self._emit(
             TaskEvent(
                 event=event_name,
