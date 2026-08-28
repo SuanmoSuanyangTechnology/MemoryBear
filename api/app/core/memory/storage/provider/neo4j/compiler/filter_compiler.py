@@ -11,6 +11,7 @@ from app.core.memory.storage.models import (
 def compile_neo4j_filter(
     node_filter: NodeFilter,
     variable: str = "n",
+    parameter_prefix: str = "filter",
 ) -> tuple[str, dict[str, Any]]:
     parameters: dict[str, Any] = {}
     predicate = _compile_group(
@@ -18,6 +19,7 @@ def compile_neo4j_filter(
         variable=variable,
         parameters=parameters,
         path=(),
+        parameter_prefix=parameter_prefix,
     )
     return predicate, parameters
 
@@ -28,6 +30,7 @@ def _compile_group(
     variable: str,
     parameters: dict[str, Any],
     path: tuple[int, ...],
+    parameter_prefix: str,
 ) -> str:
     predicates: list[str] = []
 
@@ -39,11 +42,14 @@ def _compile_group(
                 variable=variable,
                 parameters=parameters,
                 path=expression_path,
+                parameter_prefix=parameter_prefix,
             )
         else:
-            parameter_prefix = "filter_" + "_".join(map(str, expression_path))
-            field_parameter = f"{parameter_prefix}_field"
-            value_parameter = f"{parameter_prefix}_value"
+            condition_prefix = (
+                f"{parameter_prefix}_" + "_".join(map(str, expression_path))
+            )
+            field_parameter = f"{condition_prefix}_field"
+            value_parameter = f"{condition_prefix}_value"
             property_expression = f"{variable}[${field_parameter}]"
             parameters[field_parameter] = expression.field
             predicate = _compile_condition(

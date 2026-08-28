@@ -106,9 +106,12 @@ class BaseClient(ABC):
     async def get_relationship(
         self,
         relationship_type: MemoryRelationshipType,
-        rel_filter: NodeFilter,
+        rel_filter: NodeFilter | None = None,
         projection: NodeProjection | None = None,
         sort: NodeSort | None = None,
+        *,
+        source_filter: NodeFilter | None = None,
+        target_filter: NodeFilter | None = None,
     ) -> StorageReadResult:
         raise NotImplementedError(
             f"{type(self).__name__} does not support relationship queries"

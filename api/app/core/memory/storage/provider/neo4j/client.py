@@ -146,33 +146,53 @@ class Neo4jClient(BaseClient):
     async def get_relationship(
             self,
             relationship_type: MemoryRelationshipType,
-            rel_filter: NodeFilter,
+            rel_filter: NodeFilter | None = None,
             projection: NodeProjection | None = None,
             sort: NodeSort | None = None,
+            *,
+            source_filter: NodeFilter | None = None,
+            target_filter: NodeFilter | None = None,
     ) -> StorageReadResult:
+        """Query relationships, optionally constrained by either endpoint."""
         if not isinstance(relationship_type, MemoryRelationshipType):
             raise KeyError(
                 f"relationship type - {relationship_type} not supported"
             )
 
         escaped_type = relationship_type.value.replace("`", "``")
-        predicate, filter_parameters = compile_neo4j_filter(rel_filter, variable="r")
+        predicates: list[str] = []
+        parameters: dict[str, Any] = {}
+
+        filters = (
+            (rel_filter, "r", "filter"),
+            (source_filter, "source", "source_filter"),
+            (target_filter, "target", "target_filter"),
+        )
+        for query_filter, variable, parameter_prefix in filters:
+            if query_filter is None:
+                continue
+            predicate, filter_parameters = compile_neo4j_filter(
+                query_filter,
+                variable=variable,
+                parameter_prefix=parameter_prefix,
+            )
+            predicates.append(f"({predicate})")
+            parameters.update(filter_parameters)
+
         return_expression, projection_parameters = compile_neo4j_projection(
             projection, variable="r"
         )
         order_by, sort_parameters = compile_neo4j_sort(sort, variable="r")
         sort_clause = f"WITH r\n        {order_by}" if order_by else ""
+        where_clause = f"WHERE {' AND '.join(predicates)}" if predicates else ""
         query = f"""
-        MATCH ()-[r:`{escaped_type}`]->()
-        WHERE {predicate}
+        MATCH (source)-[r:`{escaped_type}`]->(target)
+        {where_clause}
         {sort_clause}
         RETURN {return_expression}
         """
-        parameters = {
-            **filter_parameters,
-            **sort_parameters,
-            **projection_parameters,
-        }
+        parameters.update(sort_parameters)
+        parameters.update(projection_parameters)
 
         async with self.client.session() as session:
             stmt = await session.run(query, **parameters)
