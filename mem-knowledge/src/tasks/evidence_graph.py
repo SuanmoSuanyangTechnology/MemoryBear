@@ -67,6 +67,11 @@ def _retry_countdown(task: Any) -> int:
     return min(300, 2 ** int(task.request.retries or 0))
 
 
+def _retry_available(task: Any, *, max_retries: int | None = None) -> bool:
+    retry_limit = task.max_retries if max_retries is None else max_retries
+    return retry_limit is None or int(task.request.retries or 0) < retry_limit
+
+
 def _redacted_exception(exc: Exception) -> RuntimeError:
     return RuntimeError(f"{type(exc).__name__}: message redacted")
 
@@ -113,23 +118,45 @@ def _run_observed(
         retry_options = {}
         if isinstance(exc, GraphDocumentDeletionPending):
             retry_options["max_retries"] = 8
-        logger.warning(
-            "[EvidenceGraph] task_retry task=%s task_id=%s kb_id=%s "
-            "document_id=%s error_type=%s retry=%d countdown=%d elapsed_ms=%d",
-            task_name,
-            safe_task_id,
-            safe_knowledge_id,
-            safe_document_id,
-            type(exc).__name__,
-            retry,
-            countdown,
-            int((time.perf_counter() - started_at) * 1000),
+        will_retry = _retry_available(
+            task,
+            max_retries=retry_options.get("max_retries"),
         )
+        if will_retry:
+            logger.warning(
+                "[EvidenceGraph] task_retry task=%s task_id=%s kb_id=%s "
+                "document_id=%s error_type=%s retry=%d countdown=%d elapsed_ms=%d",
+                task_name,
+                safe_task_id,
+                safe_knowledge_id,
+                safe_document_id,
+                type(exc).__name__,
+                retry,
+                countdown,
+                int((time.perf_counter() - started_at) * 1000),
+            )
+        else:
+            logger.error(
+                "[EvidenceGraph] task_failed task=%s task_id=%s kb_id=%s "
+                "document_id=%s status=failure reason=retries_exhausted "
+                "error_type=%s retry=%d elapsed_ms=%d",
+                task_name,
+                safe_task_id,
+                safe_knowledge_id,
+                safe_document_id,
+                type(exc).__name__,
+                retry,
+                int((time.perf_counter() - started_at) * 1000),
+            )
         run.finish(
-            BusinessOutcome.RETRY,
-            error_code="KB_GRAPH_TASK_RETRY",
+            BusinessOutcome.RETRY if will_retry else BusinessOutcome.FAILURE,
+            error_code=(
+                "KB_GRAPH_TASK_RETRY"
+                if will_retry
+                else "KB_GRAPH_TASK_RETRIES_EXHAUSTED"
+            ),
             exc=exc,
-            detail=f"retry_countdown_{countdown}s",
+            detail=f"retry_countdown_{countdown}s" if will_retry else "retries_exhausted",
         )
         raise task.retry(
             exc=_redacted_exception(exc),
@@ -162,18 +189,31 @@ def _retry_guard(
     run: TaskRun,
 ) -> None:
     countdown = _retry_countdown(task)
-    logger.warning(
-        "[EvidenceGraph] task_guard_retry task=rebuild_knowledge kb_id=%s "
-        "error_type=%s countdown=%d",
-        _safe_identifier(knowledge_id),
-        type(exc).__name__,
-        countdown,
-    )
+    will_retry = _retry_available(task)
+    if will_retry:
+        logger.warning(
+            "[EvidenceGraph] task_guard_retry task=rebuild_knowledge kb_id=%s "
+            "error_type=%s countdown=%d",
+            _safe_identifier(knowledge_id),
+            type(exc).__name__,
+            countdown,
+        )
+    else:
+        logger.error(
+            "[EvidenceGraph] task_guard_failed task=rebuild_knowledge kb_id=%s "
+            "status=failure reason=retries_exhausted error_type=%s",
+            _safe_identifier(knowledge_id),
+            type(exc).__name__,
+        )
     run.finish(
-        BusinessOutcome.RETRY,
-        error_code="KB_GRAPH_GUARD_RETRY",
+        BusinessOutcome.RETRY if will_retry else BusinessOutcome.FAILURE,
+        error_code=(
+            "KB_GRAPH_GUARD_RETRY"
+            if will_retry
+            else "KB_GRAPH_GUARD_RETRIES_EXHAUSTED"
+        ),
         exc=exc,
-        detail=f"retry_countdown_{countdown}s",
+        detail=f"retry_countdown_{countdown}s" if will_retry else "retries_exhausted",
     )
     raise task.retry(exc=_redacted_exception(exc), countdown=countdown) from None
 
