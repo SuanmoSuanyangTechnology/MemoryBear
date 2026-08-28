@@ -47,9 +47,9 @@ class WorkspaceUpdate(BaseModel):
 class WorkspaceRetentionPolicyResponse(BaseModel):
     retention_days: int | None = Field(
         default=None,
-        ge=1,
+        ge=0,
         le=3650,
-        description="临时身份保留天数，null 表示永不过期",
+        description="临时身份保留天数，null 表示未设置（不计算过期时间）",
     )
     end_user_count: int | None = Field(
         default=None,
@@ -60,9 +60,10 @@ class WorkspaceRetentionPolicyResponse(BaseModel):
 
 class WorkspaceRetentionPolicyUpdate(BaseModel):
     retention_days: int | None = Field(
-        ge=1,
+        default=None,
+        ge=0,
         le=3650,
-        description="临时身份保留天数，null 表示永不过期",
+        description="临时身份保留天数，null 表示清除策略（不计算过期时间）",
     )
 
 
