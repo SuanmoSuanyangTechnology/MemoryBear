@@ -4783,8 +4783,7 @@ def do_soft_delete_end_users(
         end_user_ids: List[str],
         batch_id: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """批量清理过期临时身份，逐用户隔离错误并兜底释放 inflight 锁。"""
-    from app.core.memory.memory_service import MemoryService
+    """批量软删过期临时身份，逐用户隔离错误并兜底释放 inflight 锁。"""
     from app.repositories.end_user_repository import EndUserRepository
 
     started_at = time.time()
@@ -4810,9 +4809,8 @@ def do_soft_delete_end_users(
     fail_count = 0
     skipped_count = 0
     failed_ids: List[str] = []
-    loop = set_asyncio_event_loop()
 
-    async def _delete_one(end_user_id: str) -> str:
+    def _delete_one(end_user_id: str) -> str:
         if redis_client is None:
             raise RuntimeError("Redis unavailable; memory write lock cannot be acquired")
 
@@ -4826,14 +4824,9 @@ def do_soft_delete_end_users(
         )
         with write_lock:
             with get_db_context() as db:
-                if not EndUserRepository(db).is_expired_temporary_end_user(parsed_id):
-                    return "skipped"
-
-            await MemoryService.delete_all_nodes_by_end_user_id(end_user_id)
-
-            with get_db_context() as db:
                 repository = EndUserRepository(db)
-                repository.update_memory_count(parsed_id, 0)
+                if not repository.is_expired_temporary_end_user(parsed_id):
+                    return "skipped"
                 if not repository.soft_delete_by_end_user_id(parsed_id):
                     raise RuntimeError("EndUser was no longer active during soft delete")
         return "success"
@@ -4841,7 +4834,7 @@ def do_soft_delete_end_users(
     try:
         for end_user_id in unique_ids:
             try:
-                outcome = loop.run_until_complete(_delete_one(end_user_id))
+                outcome = _delete_one(end_user_id)
                 if outcome == "success":
                     success_count += 1
                 else:
@@ -4866,7 +4859,6 @@ def do_soft_delete_end_users(
                     effective_batch_id,
                 )
     finally:
-        _shutdown_loop_gracefully(loop)
         for end_user_id in unique_ids:
             _release_soft_delete_inflight(
                 redis_client,
