@@ -22,7 +22,7 @@ class DialogueEmotionRaw(Base):
 
     __tablename__ = "dialogue_emotion_raw"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, comment="主键（Neo4j Dialogue.id 的 uuid，幂等 Upsert 依据）")
+    id = Column(String(255), primary_key=True, comment="主键（Neo4j Dialogue.id 原始字符串，如 Dialog_<uuid>_<n>，幂等 Upsert 依据）")
     end_user_id = Column(UUID(as_uuid=True), nullable=False, comment="终端用户ID")
     created_at = Column(DateTime, nullable=False, comment="对话原始时刻（naive UTC，不预切日）")
     emotion = Column(String(50), nullable=False, comment="情绪枚举（BERT 十分类英文 code）")
