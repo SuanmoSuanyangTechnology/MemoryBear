@@ -411,10 +411,10 @@ class Settings:
         Annotated[int, Field(ge=1, description="forget candidates scan interval in minutes, must be >= 1")]
     ).validate_python(int(os.getenv("FORGET_SCAN_INTERVAL_MINUTES", "5")))
 
-    # 过期临时用户扫描时间（UTC，默认 18:00 = 北京时间次日 02:00）
+    # 过期临时用户扫描时间（UTC，默认 17:00 = 北京时间次日 01:00）
     EXPIRED_END_USER_SCAN_HOUR: int = TypeAdapter(
         Annotated[int, Field(ge=0, le=23, description="expired end user scan cron hour (UTC) [0, 23]")]
-    ).validate_python(int(os.getenv("EXPIRED_END_USER_SCAN_HOUR", "18")))
+    ).validate_python(int(os.getenv("EXPIRED_END_USER_SCAN_HOUR", "17")))
     EXPIRED_END_USER_SCAN_MINUTE: int = TypeAdapter(
         Annotated[int, Field(ge=0, le=59, description="expired end user scan cron minute [0, 59]")]
     ).validate_python(int(os.getenv("EXPIRED_END_USER_SCAN_MINUTE", "0")))
