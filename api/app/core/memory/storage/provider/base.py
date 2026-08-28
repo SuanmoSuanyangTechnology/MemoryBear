@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 
 from typing import Self
 
-from app.core.memory.storage.enums import MemoryNodeLabel
+from app.core.memory.storage.enums import MemoryNodeLabel, MemoryRelationshipType
 from app.core.memory.storage.models import (
     NodeFilter,
     NodeProjection,
@@ -102,3 +102,14 @@ class BaseClient(ABC):
             projection: NodeProjection | None = None,
     ) -> StorageReadResult:
         pass
+
+    async def get_relationship(
+        self,
+        relationship_type: MemoryRelationshipType,
+        rel_filter: NodeFilter,
+        projection: NodeProjection | None = None,
+        sort: NodeSort | None = None,
+    ) -> StorageReadResult:
+        raise NotImplementedError(
+            f"{type(self).__name__} does not support relationship queries"
+        )

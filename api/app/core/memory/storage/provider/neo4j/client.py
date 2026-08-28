@@ -143,6 +143,48 @@ class Neo4jClient(BaseClient):
             data=items,
         )
 
+    async def get_relationship(
+            self,
+            relationship_type: MemoryRelationshipType,
+            rel_filter: NodeFilter,
+            projection: NodeProjection | None = None,
+            sort: NodeSort | None = None,
+    ) -> StorageReadResult:
+        if not isinstance(relationship_type, MemoryRelationshipType):
+            raise KeyError(
+                f"relationship type - {relationship_type} not supported"
+            )
+
+        escaped_type = relationship_type.value.replace("`", "``")
+        predicate, filter_parameters = compile_neo4j_filter(rel_filter, variable="r")
+        return_expression, projection_parameters = compile_neo4j_projection(
+            projection, variable="r"
+        )
+        order_by, sort_parameters = compile_neo4j_sort(sort, variable="r")
+        sort_clause = f"WITH r\n        {order_by}" if order_by else ""
+        query = f"""
+        MATCH ()-[r:`{escaped_type}`]->()
+        WHERE {predicate}
+        {sort_clause}
+        RETURN {return_expression}
+        """
+        parameters = {
+            **filter_parameters,
+            **sort_parameters,
+            **projection_parameters,
+        }
+
+        async with self.client.session() as session:
+            stmt = await session.run(query, **parameters)
+            records = await stmt.data()
+
+        items = [
+            _to_native(record["r"])
+            for record in records
+            if "r" in record
+        ]
+        return StorageReadResult.from_items(items, backend=self.name)
+
     async def update_node(
             self,
             label: MemoryNodeLabel,
