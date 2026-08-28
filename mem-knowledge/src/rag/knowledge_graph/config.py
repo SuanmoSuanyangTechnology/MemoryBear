@@ -9,6 +9,10 @@ class GraphPipelineConfigError(ValueError):
     """Raised when a managed graph pipeline configuration is invalid."""
 
 
+class GraphDocumentDeletionPending(RuntimeError):
+    """Graph cleanup must wait until document deletion is committed."""
+
+
 class GraphPipeline(StrEnum):
     LEGACY = "legacy"
     EVIDENCE = "evidence"

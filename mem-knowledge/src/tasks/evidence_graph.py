@@ -12,14 +12,11 @@ from celery import states
 from celery.exceptions import Ignore, Retry
 
 from ..bootstrap import get_settings
-from ..rag.knowledge_graph.config import GraphPipelineConfigError
-from ..runtime import get_worker_runtime
-from ..services.evidence_graph import (
+from ..rag.knowledge_graph.config import (
     GraphDocumentDeletionPending,
-    process_clear_graph,
-    process_evidence_document,
-    process_evidence_rebuild,
+    GraphPipelineConfigError,
 )
+from ..runtime import get_worker_runtime
 from .celery_app import celery_app
 from .observability import (
     BusinessOutcome,
@@ -39,6 +36,24 @@ from .state import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def process_evidence_document(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    from ..services.evidence_graph import process_evidence_document as process
+
+    return process(*args, **kwargs)
+
+
+def process_evidence_rebuild(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    from ..services.evidence_graph import process_evidence_rebuild as process
+
+    return process(*args, **kwargs)
+
+
+def process_clear_graph(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    from ..services.evidence_graph import process_clear_graph as process
+
+    return process(*args, **kwargs)
 
 
 def _safe_identifier(value: object) -> str:

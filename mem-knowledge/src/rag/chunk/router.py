@@ -1,13 +1,5 @@
 import re
 
-from .pipeline.excel import ExcelChunkPipeline
-from .pipeline.text import (
-    HtmlChunkPipeline,
-    JsonChunkPipeline,
-    MarkdownChunkPipeline,
-    TextChunkPipeline,
-)
-
 
 class FileTypeRouter:
     def route(self, filename: str):
@@ -45,18 +37,28 @@ class FileTypeRouter:
 
             return PictureVideoChunkPipeline()
         if re.search(r"\.(csv|xlsx?)$", filename, re.IGNORECASE):
+            from .pipeline.excel import ExcelChunkPipeline
+
             return ExcelChunkPipeline()
         if re.search(
             r"\.(txt|py|js|java|c|cpp|h|php|go|ts|sh|cs|kt|sql)$",
             filename,
             re.IGNORECASE,
         ):
+            from .pipeline.text import TextChunkPipeline
+
             return TextChunkPipeline()
         if re.search(r"\.(md|markdown)$", filename, re.IGNORECASE):
+            from .pipeline.text import MarkdownChunkPipeline
+
             return MarkdownChunkPipeline()
         if re.search(r"\.(htm|html)$", filename, re.IGNORECASE):
+            from .pipeline.text import HtmlChunkPipeline
+
             return HtmlChunkPipeline()
         if re.search(r"\.(json|jsonl|ldjson)$", filename, re.IGNORECASE):
+            from .pipeline.text import JsonChunkPipeline
+
             return JsonChunkPipeline()
         if re.search(r"\.doc$", filename, re.IGNORECASE):
             from .pipeline.document import LegacyDocChunkPipeline

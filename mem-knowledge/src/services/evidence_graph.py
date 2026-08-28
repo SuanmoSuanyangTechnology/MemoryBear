@@ -11,6 +11,7 @@ from sqlalchemy import select
 
 from ..models.owned import Document, Knowledge
 from ..rag.knowledge_graph.config import (
+    GraphDocumentDeletionPending,
     GraphPipeline,
     GraphPipelineConfigError,
     is_graph_enabled,
@@ -26,10 +27,6 @@ from ..rag.knowledge_graph.index_pipeline import GraphStageCallback, KnowledgeGr
 from ..rag.knowledge_graph.lock import create_knowledge_graph_lock
 from ..rag.knowledge_graph.models import GraphTaskState
 from ..rag.knowledge_graph.runtime import GraphRuntimeDisabled, snapshot_graph_runtime
-
-
-class GraphDocumentDeletionPending(RuntimeError):
-    """The graph cleanup must wait until document deletion is committed."""
 
 
 def _canonical_uuid(value: object, field_name: str) -> str:
