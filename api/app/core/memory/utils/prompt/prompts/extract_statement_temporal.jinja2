@@ -5,37 +5,9 @@
 === Tasks ===
 
 {% if language == "zh" %}
-你的任务是从提供的目标文本中识别并提取陈述句，并为每条陈述句标注以下信息：
-
-- statement_id
-- statement_text
-- statement_type
-- temporal_type
-- speaker
-- has_emotional_state
-- has_unsolved_reference
-- is_permanent
-- dialog_at
-- valid_at
-- invalid_at
-
-每条输出都应是一个结构化的候选记忆陈述句。
+你的任务是从目标文本中提取候选记忆陈述句，并按文末 schema 标注每条陈述句。
 {% else %}
-Your task is to identify and extract declarative statements from the provided target text, and annotate each extracted statement with:
-
-- statement_id
-- statement_text
-- statement_type
-- temporal_type
-- speaker
-- has_emotional_state
-- has_unsolved_reference
-- is_permanent
-- dialog_at
-- valid_at
-- invalid_at
-
-Each output item should be a structured candidate memory statement.
+Your task is to extract candidate memory statements from the target text and annotate each statement under the schema at the end.
 {% endif %}
 
 === Inputs ===
@@ -50,10 +22,6 @@ Each output item should be a structured candidate memory statement.
 - supporting_context.after_msgs: 发生在 target_content **之后**的上下文消息列表（按时间升序），可包含 User 和 Assistant
 - `role` 的大小写不改变语义：`user` / `User` 都表示用户消息，`assistant` / `Assistant` 都表示 Assistant 消息。
 - 注意：target_content 在结构上夹在 before_msgs 与 after_msgs 之间，但与两侧消息**不一定直接相邻**，中间可能存在被剪枝或省略的消息
-- supporting_context 可用于解析 target_content 中已经出现的指代、省略和槽位；例如 target_content 中的“他俩”“另一个人”“她/他”“这件事”等可引用同一对话链路里可唯一确定的人物或事件。
-- `supporting_context.before_msgs` 可以提供 target 之前已经确认的事实、人物、事件和时间锚点，用于理解 target_content。
-- 对 `statement_text` 而言，`supporting_context.after_msgs` 只能用于指代消融：把 target_content 里已经存在的人物指代、集合指代、角色槽位或事件指代映射到具体对象；不能提供新的事实、人物属性、任务、动作、计划、日期或事件锚点，也不能反向覆盖 target_content / before_msgs 中已有的时间锚点。
-- supporting_context 只能补全 target_content 已有的指代与允许使用的锚点，不能单独产生新 statement。唯一的字段级例外是：能明确指向当前 statement 的 User 上下文消息可以影响 `is_permanent`，但不能因此改变 `statement_text` 或增加 statement。
   {% else %}
 - chunk_id: unique chunk identifier
 - end_user_id: end-user identifier
@@ -64,68 +32,136 @@ Each output item should be a structured candidate memory statement.
 - supporting_context.after_msgs: ordered list of messages that occurred **after** target_content (chronological), may include User and Assistant
 - Role matching is case-insensitive: `user` / `User` both denote a User message, and `assistant` / `Assistant` both denote an Assistant message.
 - Note: target_content sits structurally between before_msgs and after_msgs, but is **not necessarily directly adjacent** to either side — pruned or omitted messages may exist in between
-- supporting_context may be used to resolve references, ellipsis, and slots already present in target_content; for example, "the two of them," "the other person," "she/he," or "this matter" may refer to uniquely identifiable people or events in the same dialogue chain.
-- `supporting_context.before_msgs` may provide already-confirmed facts, people, events, and temporal anchors that existed before the target and can be used to understand target_content.
-- For `statement_text`, `supporting_context.after_msgs` is only for reference resolution: it may map person references, group references, role slots, or event references already present in target_content to concrete objects. It must not provide new facts, person attributes, tasks, actions, plans, dates, or event anchors, and it must not retroactively overwrite temporal anchors already available from target_content / before_msgs.
-- supporting_context may only fill references and allowed anchors already present in target_content; it must not independently produce new statements. The only field-level exception is that a User context message that unambiguously points to the current statement may affect `is_permanent`, but it must not change `statement_text` or add a statement.
   {% endif %}
 
-=== Scope ===
+=== Authoritative Extraction Decision Flow ===
 {% if language == "zh" %}
 
-- 只从 `target_content` 中提取陈述句。
-- `supporting_context.before_msgs` 与 `supporting_context.after_msgs` 只用于解释 `target_content` 中已有的代词、省略、主体和允许解析的锚点；以及在明确指向当前 statement 时提供 User 的永久记忆意图。它们不是待抽取文本。
-- 不要从 `before_msgs` 或 `after_msgs` 中单独提取任何陈述句。
-- 如果某条信息没有出现在 `target_content` 中，即使它出现在 `before_msgs` 或 `after_msgs` 中，也不能把它作为独立 statement 输出。
-- 如果 Assistant 在 `before_msgs` 或 `after_msgs` 中提供了总结、猜测、解释或改写，这些内容只能作为理解辅助，不能被当作事实直接提取。
-- 当 User 原始消息与 Assistant 总结、猜测或改写冲突时，优先相信 User 原始消息；Assistant 的错误总结不能覆盖 User 提供的人物、关系、职业、计划或时间信息。
-- 边界：`target_content` 必须提供 statement 的核心谓词、动作、关系或态度；supporting_context 只能补全其中被省略或指代的主语、宾语、人物、事件锚点和时间锚点，不能提供新的核心谓词。
-- 对 `after_msgs` 的额外限制：`after_msgs` 不能提供新的实体属性、职业、经历、能力、任务、动作、计划、日期或事件时间；它只能把 target_content 中已经存在的指代或槽位映射到具体对象。
-- 每条输出的 statement 都必须能够在 `target_content` 中找到直接对应的表达依据。
-  {% else %}
-- Extract statements only from `target_content`.
-- `supporting_context.before_msgs` and `supporting_context.after_msgs` are used only to interpret references, ellipsis, subjects, and allowed anchors already present in `target_content`, plus a User's permanent-memory intent when it unambiguously points to the current statement. They are not extraction text.
-- Do not extract any standalone statement from `before_msgs` or `after_msgs`.
-- If a piece of information does not appear in `target_content`, it must not be output as an independent statement even if it appears in `before_msgs` or `after_msgs`.
-- If the Assistant in `before_msgs` or `after_msgs` provides a summary, guess, interpretation, or rephrasing, treat it only as interpretive support and never as a direct factual source for extraction.
-- When original User messages conflict with Assistant summaries, guesses, or rephrasings, prefer the original User messages. Incorrect Assistant summaries must not override people, relationships, occupations, plans, or temporal information provided by the User.
-- Boundary: `target_content` must provide the statement's core predicate, action, relationship, or attitude. supporting_context may only fill omitted or referenced subjects, objects, people, event anchors, and temporal anchors; it must not provide a new core predicate.
-- Additional restriction for `after_msgs`: it must not provide new entity attributes, occupations, experiences, abilities, tasks, actions, plans, dates, or event times. It may only map references or slots already present in target_content to concrete objects.
-- Every output statement must be directly grounded in wording from `target_content`.
-  {% endif %}
+严格按以下顺序处理；这是来源、过滤和补全的唯一权威流程：
 
-=== Statement Source Gate ===
-{% if language == "zh" %}
+1. **选择路径**：去掉 speaker 前缀后，若 `target_content` 已包含事实值、谓词、动作、关系、态度或计划，即使主语或事件依赖上文省略，也走普通路径；只有仅含短值或明确肯定/否定短答时才尝试下方短回答路径。短回答路径的否决条件不得作用于普通路径。路径消歧硬规则：如果 target 由裸号码、标识符、日期、金额等一个或多个短值组成，且除短值外不含有任何谓词、动作、关系、态度或计划，那么无论这些短值能否被称为“事实值”，都必须走短回答路径并按下方规则补全；不得先按“包含事实值”归入普通路径，再用普通过滤规则以“无谓词/无独立命题”为由清空输出。
+2. **生成候选**：普通路径中，先锁定每个分句在原文中的语法主语和话语行为，再遍历全部并列、转折、因果和条件分句，为每个独立谓词生成候选，最后处理拆分或合并。第三方主语的已发生动作不能改成用户发起的委托；“提醒我/记得提醒我”不能改成用户已经执行被提醒的动作。属性、联系方式或标识分句只有在 target 含具体字面值时才生成候选，纯“这/这个/它”不生成候选。不能因某个态度、情绪或主句更显著而漏掉同句中的事实、状态、消息来源或背景谓词。每个候选的事实值、核心谓词、动作、关系、态度、属性、任务、计划和源时间表达都必须在 `target_content` 中有直接文字依据。短回答路径只允许按下方规则从最近的前序 Assistant 问题取得唯一槽位或已绑定命题。
+3. **过滤候选**：按后文 Extraction Rules 过滤问题、问候、对话填充、纯操作指令、无值字段及其他不成立的候选。先区分两类缺口：人物/事件引用未解时保留最小必要引用并标记 unresolved；属性、联系方式或标识的语法值只有“这/这个/它”且没有具体字面值时，该候选在生成 statement 前直接删除，不能用 unresolved 保留。表达用户计划、委托、分工或安排的祈使式说法不是纯操作指令。`<input-file-summary>` 按其专门规则处理。
+4. **受限使用上下文**：候选确定后，context 只能消解 target 已有的代词、省略、人物/角色/事件槽位，解析 target 已有的时间表达，或按永久记忆规则修改现有候选的 `is_permanent`。除合法短回答外，context 不能增加候选数量，也不能增加 target 中没有的事实值、谓词、动作、属性、任务、计划或源时间表达。执行指代消解时，应把它视为对 target 占位表达的局部替换；不得把用于推理的整句 context 拼接、复述或合并进 statement。
+5. **处理冲突与下文**：User 原始消息与 Assistant 总结冲突时，以 User 原始消息为准。`after_msgs` 只能消解 target 已有的指代或槽位，不能提供新事实、日期或事件锚点，也不能反向修正短回答。成员身份只有在下文明示“谁对应哪个槽位”时才能绑定职责；仅列出成员姓名不能按顺序分配角色。
+6. **生成最终对象**：完成条件保留、指代消解和时间改写后，再逐条判断类型、时间字段、引用字段、情感字段和 `is_permanent`。可解析的相对时间必须在 `statement_text` 中替换为解析结果，并与 `valid_at` / `invalid_at` 一致；最后按输出 schema 生成 JSON。
 
-严格按以下两个阶段处理，不能颠倒，也不能把两个阶段合并：
+前序 Assistant 简短回答补全（普通来源规则的唯一例外）：
 
-1. **仅从 target 生成候选**：先只根据 `target_content` 确定完整的候选 statement 集合。每个候选的核心谓词、动作、关系、态度、属性、任务、计划和源时间表达都必须在 `target_content` 中有直接文字依据。
-2. **再用 context 受限补全**：候选集合确定后，才可使用 supporting_context。context 只能把候选中已经存在的代词、集合指代、人物槽位、角色槽位或事件指代替换成唯一可确定的对象；按既有时间规则解析 target 已有的时间表达；或者仅修改该候选的 `is_permanent`。
+只有以下前置条件全部满足时，才能使用本例外：
 
-来源硬约束：
+1. 去掉 `user:` 等 speaker 前缀后，`target_content` 只是一个或多个短值，或明确的肯定/否定短答，本身没有可独立抽取的完整命题。
+2. `before_msgs` 中存在最近的、明确的 Assistant 问题或字段请求，或存在保留了完整槽位/已绑定命题的该问题剪枝摘要，且 target 能被唯一判断为对它的回答；如果可能在回答多个不同问题，则不补全。
+3. 重建后的命题本身必须符合普通 statement 的提取和过滤标准。不得为“是否还需要帮助”“是否继续”“是否收到”“是否理解”“是否确认提交”等服务流程、会话管理、操作确认或系统状态问题生成记忆。
+4. `after_msgs` 不参与本路径。
 
-- supporting_context 绝不能增加候选 statement 的数量。候选数量只能因为 `target_content` 自身包含多个可独立抽取的完整意思而变化。
-- context 补全可以替换名词性指代，但不能从 context 增加 target 没有的谓词、动作、关系、态度、属性、职业、经历、能力、任务名、子任务、计划或源时间表达。
-- 对每条最终 statement 做来源检查：忽略仅用于替换指代的具体实体名后，如果无法在 `target_content` 中指出支撑其核心命题的原始表达，必须删除该 statement。
-- 快速反事实检查：如果移除 `before_msgs` 和 `after_msgs` 后，某条候选的核心谓词或动作也随之消失，那么该候选来自 context，禁止输出。
-- User 上下文中明确要求永久、永远或长期保留，或明确要求不要遗忘的指令，只能改变已存在候选的 `is_permanent`；不能改变候选的 `statement_text`，也不能创建新候选。
-- Assistant 上下文中的“重要”“记住”“保存”等措辞不代表用户的永久记忆意图，不能影响 `is_permanent`。
+兼容原始问题与剪枝上下文：before_msgs 中的 Assistant `msg` 可能是直接问句、祈使式字段请求，也可能是剪枝后的规范化摘要。识别依据是它是否仍然保留了可直接回答的完整槽位或已绑定命题，而不是句末是否有问号，也不是句首是否恰好为“询问用户”。例如“请提供字段A和字段B”“请用户提供字段A和字段B”“询问用户字段A和字段B”都可归为 `OPEN_SLOTS`；“字段A是值X，对吗”“确认用户的字段A是否为值X”“询问用户登记的字段A是否为值X”都可归为 `CLOSED_CONFIRMATION`。若消息只说“询问了用户”“核对信息”“确认信息”“请求补充资料”等而没有保留可回答内容，则不构成本例外。
+
+剪枝摘要规范化硬约束：当该 Assistant `msg` 使用第三人称或流程摘要句法，而不是原始直接问句时，先剥离摘要中的言语行为和流程包装，再识别槽位或命题。“询问、请求、提供、填写、核对、确认、登记、保存、记录”等包装动作本身不是用户事实，不得进入 `statement_text`。封闭确认摘要只恢复最小命题“主体 + 原始字段/谓词 + 具体值”；不得把包装动作改写成字段限定语或缺失谓词。剥离后主体、字段/谓词或具体值不完整时拒绝该摘要。
+
+生成任何 statement 之前，必须先执行以下决策，不得先输出再检查：
+
+1. 将 target 只归入一种类型：`OPEN_VALUE`（一个或多个具体短值）、`AFFIRMATIVE`（明确肯定）或 `NEGATIVE`（明确否定）。不得混用分支。
+2. 根据语义功能，将最近的 Assistant 原始问题、祈使式字段请求或语义完整问题摘要只归入一种类型：`OPEN_SLOTS`（请求填写字段）或 `CLOSED_CONFIRMATION`（确认已绑定命题）。语法是问句、祈使句还是第三人称陈述式摘要不影响分类；只有可回答内容不完整或语义功能确实无法唯一分类时才拒绝。
+3. 只允许以下组合：`OPEN_VALUE + OPEN_SLOTS`、`AFFIRMATIVE + CLOSED_CONFIRMATION`、`NEGATIVE + CLOSED_CONFIRMATION`。其他组合输出空数组。
+4. `OPEN_VALUE` 不得在槽位兼容性分析之前按“请求中共有几个槽位”提前否决。必须先执行下方完整映射算法，再按每个值过滤后的 `candidate_slots` 判断唯一性。`NEGATIVE` 仍要求原子命题数恰好为 1，最终最多输出 1 条，绝不能把一个否定分摊成多条否定 statement。
+
+A. 开放式槽位回答：
+
+- Assistant 明确请求一个或多个字段，target 提供对应的事实值。必须先执行以下分层映射算法，再生成 statement：
+  1. 按 Assistant 原始顺序列出全部仍待回答槽位；仅按 target 中明确的标签、分隔符、换行或枚举边界拆分一个或多个值，不得臆造值边界。
+  2. 先绑定 target 明确写出的字段标签，例如“字段A是值X”。显式标签优先级最高。
+  3. 对其余值建立 `candidate_slots`。可以依据排他格式或强语义标记排除不兼容槽位。强语义标记必须是稳定的类别证据，例如标准手机号/邮箱/网址/日期格式、带“先生/女士/老师”等明确称谓结构的人物称呼、带“公司/集团/科技/机构”等明显组织命名结构的企业值；仅仅“不常见”“通常不像”或主观上“更可能”不能排除槽位。
+  4. 对未绑定值与未绑定槽位计算全局一对一匹配。如果所有兼容约束只剩一个完整匹配，按该唯一匹配输出；target 中的值顺序可以与问题中的槽位顺序不同。
+  5. 如果仍有多个完整匹配，但 target 恰好提供了与剩余槽位数量相同、边界清晰的值，允许按 Assistant 请求顺序进行位置回退；前提是每个位置上的值与对应槽位兼容，并且没有任何排他格式或强语义标记明确指向另一个槽位。只要存在明确类型冲突，就禁止按顺序硬配。
+  6. 若不能形成唯一全局匹配，也不满足位置回退，则只输出 `candidate_slots` 严格等于 1 的独立值；候选为 0 或大于 1 的值不得生成 statement。
+- 多槽位只答其一时禁止整体否决：未回答的剩余槽位既不是输出空数组的理由，也不是为它们编造 statement 的理由，只有成功绑定的槽位值对进入输出。例：before_msgs 中 Assistant 请求“请提供称呼、企业名称和手机号”，target 仅含 `17320000558`，则该值凭标准手机号格式这一强语义标记唯一绑定“手机号”槽位，恰好转出一条 statement“用户的手机号是17320000558。”；把“其余槽位未答”当作否决理由而输出 `{"statements": []}` 属于错误。
+- 映射完成后，每个已经唯一绑定的“槽位 + target 原值”必须分别输出一条 statement，输出数量必须等于成功绑定的槽位值对数量。该要求覆盖下方通用拆分规则；不能只输出其中一个槽位，也不能把多个槽位值合并成一条原始值列表。
+- 前序 Assistant 用问句或祈使句请求字段，不会因此失去提供槽位的资格；最终重建文本必须改写为陈述句。
+- statement 只能表达“主体 + 唯一槽位 + target 原值”；必须逐字符保留号码、标识或名称，不得加入其他字段、评价、用途、确认状态或 context 中的新事实。
+- `statement_text` 必须是包含主体、字段关系和原值的自然语言完整命题。禁止把 `statement_id`、`stmt_001` 一类占位符、字段标签本身或未经关系改写的原始值列表用作 `statement_text`。
+- 必须保持 Assistant 请求的字段语义，不得把字段改写成另一种关系。例如“企业/企业名称/company name”只能写成“用户的企业名称/公司是X”，不能写成“用户就职于X”“用户在X工作”或“用户拥有X”；“称呼/preferred name”只能写成用户的称呼或姓名，不能扩写成其他身份关系。
+
+B. 肯定确认回答：
+
+- target 是明确肯定短答，例如“是”“是的”“对”“没错”“正确”。Assistant 的最近问题必须是封闭式确认问题，并且其中每个原子命题都已明确绑定主体、谓词或槽位、以及具体值；不能含未绑定槽位、二选一或其他备选值。
+- 问题只有一个合格原子命题时，输出一条肯定命题。问题含多个合格原子命题且每个槽位和值都已逐一明确绑定时，分别输出全部被确认的命题。
+- 具体命题和值可以来自该 Assistant 问题，因为 target 的肯定回答构成用户对它们的明确确认；最终 `speaker` 仍为 `"user"`。直接输出确认后的事实，不要输出“用户说是的”或“用户确认了上述信息”等元陈述。
+- 确认后的 statement 只能保留最近 Assistant 问题中已经绑定的命题和 target 提供的肯定立场；除了解析问题内部的指代，不得从更早或更晚的 context 增加“之前登记的”“已保存的”等问题中没有的修饰语或关系。
+- 如果命题来自第三人称剪枝摘要，先按“剪枝摘要规范化硬约束”删除“登记、保存、记录、核对、确认”等流程包装；即使这些词紧邻字段，也不能把它们改写为字段限定语。
+
+C. 否定确认回答：
+
+- target 是明确否定短答，例如“不是”“不对”“否”。先扫描最近问题中的独立字段值绑定：每个“字段/谓词 + 是/为/等于 + 具体值”结构都算一个原子命题；扫描到第二个绑定就停止并输出空数组。只有恰好一个绑定时，才将该命题按语义改写为否定 statement；不要机械地在原句中插入“不”。
+- 如果问题包含两个及以上原子命题，单一否定短答无法确定否定范围，必须在生成 statement 前直接输出空数组。二选一问题、含备选值的问题或否定作用域不清的问题同样输出空数组。禁止把一个“不是/不对/否”同时改写成两条或更多否定事实。
+- 否定 statement 只能保留最近 Assistant 问题中的单一绑定命题和 target 提供的否定立场；除了解析问题内部的指代，不得从其他 before_msgs 或 after_msgs 增加限定语、状态或新事实。
+- 如果命题来自第三人称剪枝摘要，先按“剪枝摘要规范化硬约束”恢复最小字段命题，不能把“登记、保存、核对”等流程动作保留为字段限定语。
+
+所有分支都必须遵守：问题必须来自 `before_msgs` 中的 Assistant 原始问题，或来自该问题语义完整的剪枝摘要；普通 Assistant 陈述、与提问无关的总结、猜测、建议或改写不构成本例外。问题摘要只能提供其明确保留的槽位或已绑定命题，不能作为普通事实来源。最终 statement 的类型、时态、时间字段、指代字段和 `is_permanent` 按其他规则判断，Assistant 的措辞本身不能触发永久记忆。简短回答的发生时间不等于重建事实的生效时间；若重建的是不含明确起始时间的静态属性、身份、关系或联系方式，`valid_at` 和 `invalid_at` 都填 `"NULL"`，不能把 `dialog_at` 当作起始时间。
 
 {% else %}
 
-Process the input in exactly these two ordered stages. Do not reverse or merge them:
+Follow this sequence exactly. It is the single authoritative flow for source control, filtering, and context completion:
 
-1. **Generate candidates from the target only**: first determine the complete candidate statement set using only `target_content`. Every candidate's core predicate, action, relationship, attitude, attribute, task, plan, and source temporal expression must have direct textual support in `target_content`.
-2. **Then enrich candidates from context under strict limits**: only after the candidate set is fixed may supporting_context be used. Context may replace a pronoun, group reference, person slot, role slot, or event reference already present in a candidate with a uniquely resolved object; resolve a temporal expression already present in the target under the existing temporal rules; or change only that candidate's `is_permanent`.
+1. **Choose a path**: after stripping the speaker prefix, use the ordinary path when `target_content` contains a factual value, predicate, action, relationship, attitude, or plan, even if its subject or event is omitted and depends on prior context. Try the short-answer path only when the target contains short values or an explicit affirmative/negative answer alone. Short-answer vetoes never apply to an ordinary target. Path-disambiguation hard rule: if the target consists only of one or more bare short values such as a number, identifier, date, or amount, with no predicate, action, relationship, attitude, or plan of its own, then regardless of whether such values could be called a "factual value", it MUST take the short-answer path and be completed under the rules below; never classify it into the ordinary path first and then empty the output via ordinary filtering on the grounds of "no predicate / no standalone proposition".
+2. **Generate candidates**: on the ordinary path, first lock each clause's grammatical subject and speech act as expressed in the source, then traverse every coordinated, contrastive, causal, and conditional clause and generate a candidate for each independent predicate before deciding whether to split or merge them. A completed action with a third-party subject must not become a delegation initiated by the user; “remind me/remember to remind me” must not become an assertion that the user already performs the reminded action. Generate an attribute, contact-detail, or identifier candidate only when the target contains a concrete literal value; bare `this/that/it` creates no candidate. A salient attitude, emotion, or main clause must not suppress a factual, state, source-attribution, or background predicate in the same target. Every factual value, core predicate, action, relationship, attitude, attribute, task, plan, and source temporal expression must have direct support in `target_content`. On the short-answer path, only the unique slot or explicitly bound proposition from the most recent preceding Assistant question may be inherited under the rules below.
+3. **Filter candidates**: apply the Extraction Rules below to remove questions, greetings, conversational filler, pure operational instructions, valueless fields, and other invalid candidates. Distinguish two gaps before output: an unresolved person/event reference keeps the minimal reference and is marked unresolved; an attribute, contact detail, or identifier whose grammatical value is only `this/that/it` with no concrete literal value is deleted before statement generation and cannot be rescued as unresolved. Imperative wording that expresses the user's plan, delegation, assignment, or arrangement is not a pure operational instruction. Handle `<input-file-summary>` under its dedicated rule.
+4. **Use context under strict limits**: after candidates are fixed, context may only resolve references, ellipsis, person/role/event slots already present in the target; resolve temporal expressions already present in the target; or change `is_permanent` under its dedicated rule. Except for a valid short answer, context cannot increase candidate count or add any factual value, predicate, action, attribute, task, plan, or source temporal expression absent from the target. Treat reference resolution as a local substitution for a placeholder in the target; never concatenate, restate, or merge the contextual sentence used as reasoning evidence into the statement.
+5. **Resolve conflicts and later context**: prefer original User messages over conflicting Assistant summaries. `after_msgs` may only resolve a reference or slot already present in the target; it cannot supply a new fact, date, or event anchor, and cannot repair a short answer. Bind members to responsibilities only when later context explicitly states who maps to which slot; a list of member names alone never authorizes assignment by order.
+6. **Build final objects**: after preserving conditions and completing reference and temporal rewriting, determine types, time fields, reference fields, emotion fields, and `is_permanent` for each statement. Replace every resolvable relative time inside `statement_text` with its resolved expression and keep it consistent with `valid_at` / `invalid_at`; then generate JSON under the output schema.
 
-Hard source constraints:
+Short-answer completion from a preceding Assistant question (the only exception to the ordinary source rule):
 
-- supporting_context must never increase the number of candidate statements. Candidate count may change only because `target_content` itself contains multiple independently extractable complete thoughts.
-- Context enrichment may replace nominal references, but it must not add a predicate, action, relationship, attitude, attribute, occupation, experience, ability, task name, subtask, plan, or source temporal expression absent from the target.
-- Apply a provenance check to every final statement: after ignoring concrete entity names used only to replace references, drop the statement unless its core proposition can be traced to a specific expression in `target_content`.
-- Use this counterfactual check: if removing `before_msgs` and `after_msgs` would also remove a candidate's core predicate or action, that candidate came from context and must not be output.
-- A User-context instruction explicitly requiring permanent, forever, or long-term retention, or requiring the system never to forget the information, may change only `is_permanent` on an existing candidate. It must not change `statement_text` or create a candidate.
-- Wording such as "important", "remember", or "save" in Assistant context is not the user's permanent-memory intent and must not affect `is_permanent`.
+Use this exception only when all prerequisites hold:
+
+1. After stripping a `user:`-style speaker prefix, `target_content` contains only one or more short values, or an explicit affirmative/negative short answer, and has no independently extractable complete proposition.
+2. `before_msgs` contains a most recent explicit Assistant question or field request, or its pruned summary that preserves every slot or bound proposition, and the target can be identified uniquely as its answer. If the target may answer multiple different questions, do not complete it.
+3. The reconstructed proposition itself must pass the normal statement extraction and filtering rules. Never create memory from service-flow, conversation-management, operation-confirmation, or system-status questions such as “Do you need more help?”, “Continue?”, “Did you receive it?”, “Do you understand?”, or “Confirm submission?”.
+4. `after_msgs` does not participate in this path.
+
+Original-question and pruned-context compatibility: an Assistant `msg` in before_msgs may be a direct question, an imperative field request, or a normalized pruned summary. Classify it by whether it still preserves directly answerable slots or bound propositions, not by a question mark or an exact introductory phrase. “Please provide field A and field B,” “Requested that the user provide field A and field B,” and equivalent third-person request summaries may all be `OPEN_SLOTS`. “Is field A value X?”, “Confirmed whether the user's field A is value X,” and equivalent confirmation summaries may all be `CLOSED_CONFIRMATION`. A topic-only message such as “asked the user,” “checked the information,” “confirmed the information,” or “requested more details” without answerable content does not qualify.
+
+Hard normalization rule for pruned summaries: when an Assistant `msg` uses third-person or workflow-summary syntax instead of the original direct question, strip its speech-act and workflow wrapper before identifying slots or propositions. Wrapper actions such as ask, request, provide, fill in, check, confirm, register, save, or record are not user facts and must never appear in `statement_text`. A closed-confirmation summary may recover only the minimal proposition `subject + original field/predicate + concrete value`; never turn a wrapper action into a field qualifier or missing predicate. Reject the summary when stripping the wrapper leaves an incomplete subject, field/predicate, or value.
+
+Before generating any statement, apply this decision procedure in order; never generate first and check later:
+
+1. Classify the target into exactly one type: `OPEN_VALUE` (one or more concrete short values), `AFFIRMATIVE` (explicit affirmation), or `NEGATIVE` (explicit denial). Never mix branches.
+2. By semantic function, classify the most recent original Assistant question, imperative field request, or semantically complete question summary into exactly one type: `OPEN_SLOTS` (requests field values) or `CLOSED_CONFIRMATION` (confirms already bound propositions). Interrogative, imperative, or third-person declarative-summary syntax does not change this classification; reject only when answerable content is incomplete or semantic function is genuinely non-unique.
+3. Allow only `OPEN_VALUE + OPEN_SLOTS`, `AFFIRMATIVE + CLOSED_CONFIRMATION`, or `NEGATIVE + CLOSED_CONFIRMATION`. Any other pair returns an empty array.
+4. Never veto `OPEN_VALUE` by counting all requested slots before compatibility analysis. First run the complete mapping algorithm below, then test uniqueness using each value's filtered `candidate_slots`. `NEGATIVE` still requires exactly one atomic proposition and may output at most one statement; never distribute one denial into multiple negative statements.
+
+A. Open-slot answer:
+
+- The Assistant explicitly requests one or more fields, and the target provides their factual value or values. Apply this layered mapping algorithm before generating statements:
+  1. List every still-unanswered slot in the Assistant's original order. Split one or more target values only at explicit labels, delimiters, line breaks, or enumeration boundaries; never invent value boundaries.
+  2. First bind values with explicit target-side field labels, such as "field A is value X". Explicit labels have highest priority.
+  3. Build `candidate_slots` for every remaining value. Eliminate incompatible slots using exclusive format evidence or strong semantic markers. Strong semantic markers must be stable category evidence, such as a standard phone/email/URL/date format, a person-title structure such as "Mr./Ms./Professor + name", or an organization-shaped name with markers such as "Company", "Group", "Technology", or "Institute". “Unusual”, “typically not”, or a subjective “more likely” judgment is not enough.
+  4. Compute global one-to-one assignments between unmatched values and slots. If the compatibility constraints leave exactly one complete assignment, output that assignment even when target value order differs from slot order.
+  5. If multiple complete assignments remain but the target supplies exactly as many clearly separated values as remaining slots, allow a positional fallback using the Assistant's request order only when every positional pair is compatible and no exclusive format or strong semantic marker points to a different slot. Any clear type conflict forbids positional matching.
+  6. If neither a unique global assignment nor positional fallback is available, output only independent values whose `candidate_slots` count is exactly 1. A candidate count of 0 or greater than 1 produces no statement for that value.
+- Never apply a global veto when only some requested slots were answered: unfilled remaining slots neither justify an empty array nor fabricated statements for those slots; only successfully bound slot-value pairs enter the output. Example: the Assistant requests “name/company name and phone number”, the target contains only `17320000558`; this value uniquely binds the phone-number slot via the strong semantic marker of a standard phone format, producing exactly one statement: “用户的手机号是17320000558。”; outputting `{"statements": []}` on the grounds that other slots went unanswered is wrong.
+- After mapping, output exactly one separate statement for every uniquely bound `slot + original target value` pair. Output count must equal the number of successfully bound pairs. This requirement overrides the general splitting rule below: never emit only one bound slot, and never combine multiple slot values into one raw-value-list statement.
+- A preceding Assistant question or imperative field request remains eligible to supply slots; the reconstructed final text must be declarative.
+- Each statement may express only `subject + unique slot + original target value`. Preserve every character of a number, identifier, or name; do not add another field, evaluation, purpose, confirmation status, or context-only fact.
+- `statement_text` must be a complete natural-language proposition containing the subject, field relationship, and original value. Never use a `statement_id`, a placeholder such as `stmt_001`, a bare field label, or an unreconstructed raw value list as `statement_text`.
+- Preserve the requested field semantics exactly instead of rewriting the field into a different relationship. For example, `company` / `company name` may become only “the user's company/company name is X”; never rewrite it as “the user works at X”, “is employed by X”, or “owns X”. `preferred name` may become only the user's preferred name or name, not another identity relationship.
+
+B. Affirmative confirmation answer:
+
+- The target is an explicit affirmation such as “yes”, “correct”, or “that's right”. The most recent Assistant question must be a closed confirmation question in which every atomic proposition already has an explicit subject, predicate or slot, and concrete value; it must contain no unbound slot, either-or choice, or alternative value.
+- If the question has one eligible atomic proposition, output that affirmed proposition. If it has multiple eligible atomic propositions and every slot-value pair is explicitly bound, output every confirmed proposition separately.
+- The concrete propositions and values may come from that Assistant question because the target supplies the user's explicit affirmation. Final `speaker` remains `"user"`. Output the affirmed facts themselves, never a meta-statement such as “the user said yes” or “the user confirmed the information”.
+- An affirmed statement may retain only the proposition already bound in the most recent Assistant question plus the target's affirmative polarity. Except for resolving a reference inside that question, do not add modifiers or relationships such as “previously registered” or “saved” from earlier or later context when they are absent from the question.
+- When the proposition comes from a third-person pruned summary, first apply the hard pruned-summary normalization rule and remove workflow wrappers such as registered, saved, recorded, checked, or confirmed. Even when adjacent to the field, these words must not become field qualifiers.
+
+C. Negative confirmation answer:
+
+- The target is an explicit denial such as “no”, “not so”, or “incorrect”. Scan the most recent question for independent field-value bindings: each `field/predicate + is/equals + concrete value` structure is one atomic proposition. Stop at the second binding and return an empty array. Only with exactly one binding may you rewrite it as a semantic negative statement; do not mechanically insert a negation token.
+- If the question contains two or more atomic propositions, a single denial has ambiguous scope, so return an empty array before generating any statement. Also return an empty array for either-or questions, alternative values, or any unclear negation scope. Never rewrite one “no/incorrect” into two or more negative facts.
+- A negative statement may retain only the single bound proposition in the most recent Assistant question plus the target's negative polarity. Except for resolving a reference inside that question, do not add qualifiers, states, or new facts from other before_msgs or after_msgs.
+- When the proposition comes from a third-person pruned summary, first recover the minimal field proposition under the hard normalization rule. Never retain workflow actions such as registered, saved, or checked as field qualifiers.
+
+All branches must obey these limits: the question must come from an original Assistant question in `before_msgs` or its semantically complete pruned summary. Ordinary Assistant statements, summaries unrelated to a question, guesses, suggestions, or rephrasings do not qualify. A question summary may supply only the slots or bound propositions it explicitly preserves and is never an ordinary factual source. Determine statement type, temporality, time fields, reference fields, and `is_permanent` under the other rules, and Assistant wording alone never triggers permanent memory. The time of the short answer is not the start time of the reconstructed fact. For a static attribute, identity, relationship, or contact detail with no explicit start time in the question or target, set both `valid_at` and `invalid_at` to `"NULL"`; never use `dialog_at` as its start time.
 
 {% endif %}
 
@@ -134,13 +170,14 @@ Hard source constraints:
 拆分规则：
 
 - 以“一个完整意思”为单位提取陈述句，通常对应一个完整句子或一个自然语义片段。
-- 默认保留句子级结构；只有当一个句子内部包含两个及以上彼此独立、拆开后明显更清晰的重要信息时，才拆成多条。
-- 宁可多提取，也不要漏掉 `target_content` 中能独立成立、且语义稳定的 statement。
-- 但不要为了提高覆盖率而引入原文没有的信息，或输出语义不成立的 statement。
+- 默认保留一个完整语义单元。不同谓词表达彼此独立的事实、事件、状态或态度时应分别输出；但原因或背景与其直接引出的状态、同一关系及其持续时间或程度、以及拆开后会丢失语义依赖的分句应保留在同一 statement 中。“听同事说/报告显示/群里通知”等消息来源属于命题作用域，必须保留原消息来源，不能改写成无来源事实或泛化为“用户得知/用户听说”。若“如果/要是/除非”“想/希望/打算/计划”“请/让/交给/委托”等条件、意愿或委托作用于多个谓词，要么保留为一条，要么在每条拆分结果中重复其作用域；拆分“用户想请/让/委托X做Y”时仍须写成“用户想请/让/委托X做Y”，不能降成“X做Y”或“用户已邀请X”。
+- 合法 `OPEN_VALUE + OPEN_SLOTS` 不适用上一条默认规则：每个唯一绑定的槽位值对都是一条独立事实，必须分别输出。
+- 输出所有通过来源和语义成立性检查的独立 statement。唯一性只约束槽位补全和具体实体回填；普通路径中引用无法唯一消解时，按共指规则保留 unresolved statement，而不是丢弃整个候选。
 
 用户主语归一化：
 
 - 如果陈述句的主语是用户本人，无论上下文中给出的用户名称、昵称、别名或真实姓名是什么，都必须使用与输出语言一致的用户锚点，不要使用用户的具体名字或别名。
+- 如果 `target_content` 的语法主语是明确第三方，保留第三方作为 statement 主语；不得把“小周帮我订票”改成“用户让小周订票”，也不得添加“用户提到/用户说”这类顶层转述包装。`speaker` 字段已经表达当前消息来源。
 - 中文输出使用“用户”作为主语。
 - 英文输出使用 `the user` 作为主语。
 - 这是硬规则；如果用户主语没有按输出语言统一成对应锚点，则该 statement 视为不合格。
@@ -152,55 +189,44 @@ Hard source constraints:
 - `has_unsolved_reference` 必须基于最终输出的 `statement_text` 判断，而不是基于原始 `target_content` 里是否出现过代词来判断。
 - 如果最终 `statement_text` 已经把引用改写成具体实体名，例如“助理恭喜用户”“小李点了一杯美式咖啡”，则 `has_unsolved_reference` 必须是 `false`。
 - 如果最终 `statement_text` 已经把“他/她/他们/他俩/两位同事/另一位”等指代表达改写成当前输入中真实出现过的具体实体名，`has_unsolved_reference` 必须是 `false`；不能因为原句含有代词或集合表达而继续标为 `true`。
-- 如果可以解析到具体实体名，优先输出具体实体名，并将 `has_unsolved_reference` 设为 `false`。
-- 如果不能解析到具体实体名，但可以解析到最小必要描述，则输出该最小必要描述，并将 `has_unsolved_reference` 设为 `true`。
-- 如果既不能解析到具体实体名，也不能稳定解析到最小必要描述，则保留最小必要原始表达，并将 `has_unsolved_reference` 设为 `true`。
+- 人物或事件引用能解析到具体实体名时，输出该实体名并设 `has_unsolved_reference=false`；不能唯一解析时，保留最小必要描述或原始引用并设为 `true`。只要 target 已明确给出核心谓词或关系，这类 unresolved 仍须输出，不能变成空数组。
+- 属性、联系方式或标识值不走上述保留路径：如果删除“这/这个/它”后没有任何具体字面值，整个字段候选必须丢弃，不能输出“字段是这个”，也不能用 `has_unsolved_reference=true` 保留。
 - 但对任何命名表达（如“X 叫 Z / X 的名字是 Z / 大家叫 X 为 Z”），只允许为了解析 `X` 做必要改写；`Z` 是新出现的名字、称呼或别名，必须保留原文表面形式，不得被共指消解、翻译、转写或归一化成 `X`。
 - 只有当 `target_content` 明确表达命名关系时，才允许输出“用户叫 X / 用户的名字是 X / the user is named X”这类命名 statement。明确命名证据包括：“我叫 X”“我的名字是 X”“大家叫我 X”“你可以叫我 X”“I am X”“my name is X”“call me X”“people call me X”等。
 - 呼语、问候对象、感谢对象、邮件/消息开头称呼、@mention、句首称呼对象，都不是命名证据，不能被改写成用户的名字或别名。
-- 对涉及用户与其他人的共同活动，优先写成“用户和谁……”的形式，而不是保留“我们”“他们”这类未展开表达。
+- 只有当 `target_content` 本身以“我和X”“我们”等形式明确表达用户共同参与时，才把共同活动改写为“用户和X……”。target 只说“她也来”“他一起参加”时，“也/一起”不是用户参与证据，不得补出“用户和X”。
 
 人物、集合与排除式指代消解：
 
 - 对集合指代如“他俩”“她俩”“他们两个”“两位朋友”“那几个人”，如果 `supporting_context` 中可以唯一确定集合成员，应展开为具体姓名列表。
-- 对“另一个人”“另一个朋友”“剩下那位”等排除式指代，可以结合前文已确定的人物集合和已分配属性进行解析。
-- 如果上下文中已知两个成员是 `人物A` 和 `人物B`，且已知 `人物A` 已被分配某个身份或属性，那么“另一个人是某身份”应解析为 `人物B` 具有该身份。
-- 后续“她负责任务甲，他负责任务乙”可以根据性别代词、职业线索、前文属性和任务语义解析为“人物A负责任务甲，人物B负责任务乙”。实际输出时必须使用当前输入中真实出现过的姓名，不能输出这里的占位名。
-- 对 `target_content` 中已有的角色槽位或任务槽位，如“一个负责技术演示，另一个负责现场组织”，如果 `supporting_context.after_msgs` 后续唯一绑定了集合成员与这些槽位的对应关系，应允许用下文回填到当前 statement 中，直接输出“具体人物A负责技术演示，具体人物B负责现场组织”，并将 `has_unsolved_reference` 设为 `false`。
-- 槽位回填只允许把 `target_content` 中**已有**的槽位文字（如“技术演示”“现场组织”）替换为具体姓名，**不允许**把 after_msgs 里出现的更细任务名（如“演示环境”“会场和签到”）作为新槽位写入 statement，即使语义看起来近似或更精确。任何 after_msgs 中新出现的任务名、子任务、动作或时间表达都不能进入 statement_text。
-- 如果后文只唯一确定了集合成员，但没有唯一确定每个成员与任务槽位的对应关系，应至少展开集合成员；若 statement_text 仍保留“一位/另一位”等未绑定槽位，则 `has_unsolved_reference` 才可以为 `true`。
+- 对“另一个人”“另一个朋友”“剩下那位”等排除式指代，执行集合差：先从 before_msgs 建立当前任务的有限人物集合 `C`，再找出已被明确分配当前任务另一职责的成员集合 `A`，计算 `R = C - A`。仅当 `R` 恰好剩一个具体人物时，必须用该人物替换 target 的排除式指代并设 `has_unsolved_reference=false`；否则保留最小指代并设为 `true`。结构演算：若 `C={人物甲, 人物乙}`、`A={人物甲}`，target 为“另一个人负责事项Z”，则 `R={人物乙}`，最终只能输出“人物乙负责事项Z”；输出“另一个人负责事项Z”或把建立 C、A 的前文一起输出都属于错误。
+- 排除式消解中，`C` 和 `A` 只作为推理证据。最终 statement 只保留 target 的主体占位和新谓词，将占位替换为 `R`；不得输出用来建立 `C` 或 `A` 的旧邀请、成员列表、身份、职责或事件。
+- 对 `target_content` 中已有的角色槽位或任务槽位，如“一个负责技术演示，另一个负责现场组织”，只有 `supporting_context.after_msgs` 明确且唯一地说明了每个成员与每个槽位的对应关系时，才允许回填具体姓名并将 `has_unsolved_reference` 设为 `false`。下文仅列出集合成员姓名、仅说明其中一人的其他属性，或姓名出现顺序与槽位数量一致，都不构成职责绑定。此时先把对全组成立的邀请/参与谓词单独输出并可展开成员姓名；再把逐个职责分别保留为“一人负责技术演示”“另一人负责现场组织”并标记 unresolved。禁止把成员姓名和未绑定职责合并进同一 statement 后按姓名顺序猜测分工。
+- 槽位回填只允许把 `target_content` 中**已有**的槽位文字（如“技术演示”“现场组织”）替换为具体姓名，**不允许**把 after_msgs 里出现的更细任务名（如“演示环境”“会场和签到”）作为新槽位写入 statement，即使语义看起来近似或更精确。任何 after_msgs 中新出现的任务名、子任务、动作或时间表达都不能进入 statement_text。分工 target 的输出只保留 target 自己提出的职责谓词；前文的邀请、活动、参与意图或其他安排只用于确定人物集合，不得被复制或合并进分工 statement。
+- “也”“一起”“到时候她也来”等添加性表达只表明目标人物加入某个上下文活动，不自动表明用户本人或其他未在 target 中点明的人也参加。只有 target 本身明确出现“我/我们/用户和她”等共同参与证据时，才能把用户写成共同参与者。
 - 如果 User 原始消息与 Assistant 总结冲突，优先相信 User 原始消息；例如 Assistant 错误地把“另一个人是厨师”总结成“用户是厨师”时，不能据此把厨师身份归给用户。
 
 事件与计划指代消解：
 
 - `这件事`、`这个安排`、`活动安排`、`提前一周`、`当天`、`到时候` 等表达可能指向上下文中的同一个计划事件。
-- 当 `target_content` 中的动作、分工或准备安排明显依附于上下文中的某个计划事件时，应把该事件的关键人物和时间锚点带入 `statement_text`。
+- 当 `target_content` 中的动作、分工或准备安排明显依附于上下文中的某个计划事件时，只把完成 target 指代或相对时间解析所需的最小事件名称、人物或日期锚点带入 `statement_text`。事件日期只作为计算参数时，最终只写计算后的 target 动作日期；除非 target 自己重复事件谓词，否则不得表面复述“用户要举办/出差/开会”等上下文事件，也不得与提醒、分工或准备合成同一 statement。
 - 这条规则只在下面情况下生效：事件相对时间表达（"提前一周"、"当天"、"那天"、"到时候"等）以及新的核心动作（如"准备"、"负责"、"参加"、"提交"）必须本身出现在 `target_content` 中；如果它们只出现在 `supporting_context.before_msgs` 或 `supporting_context.after_msgs` 中，而 `target_content` 没有，则不允许把它们改写成独立 statement 输出，也不允许把它们补进现有 statement。
-- 即使 `target_content` 与某段 after_msgs 拼接起来在结构上与下面的示例非常相似，也不能反向从 after_msgs 抽取新动作、新分工、新任务名或新事件相对时间。after_msgs 只允许在 `target_content` 已经存在槽位、指代或时间锚点时，提供唯一的指代/槽位/已确认事件锚点映射。
-- 正确示例（方向一：target_content 自身就是分工与准备）：上下文中用户说"我打算在事件日期D举办活动E，邀请人物A和人物B帮忙"，target_content 是"我让他俩提前一周准备吧，她负责任务甲，他负责任务乙"，应改写为：
-  - `用户计划让人物A和人物B从事件日期D前一周开始为活动E做准备。`
-  - `人物A负责活动E的任务甲。`
-  - `人物B负责活动E的任务乙。`
-    不要把"提前一周"解析为当前对话时间 `dialog_at` 的前一周。
-- 反向反例（方向二：target_content 自身只是事件与邀请，分工与准备只出现在 after_msgs）：target_content 是"我打算在事件日期D举办活动E，邀请人物A和人物B帮忙，一个负责任务甲，一个负责任务乙"，after_msgs 中后续才有"我让他俩提前一周开始准备吧，他负责任务甲细节X，她负责任务乙细节Y"。这种情况下只能从 target_content 抽取核心 statement，例如：
-  - `用户计划在事件日期D举办活动E。`
-  - `用户邀请人物A和人物B协助活动E。`
-    以及（在 after_msgs 唯一指认两人姓名后）允许把 target_content 已有的"一个负责任务甲，一个负责任务乙"两个槽位回填为：
-  - `人物A负责活动E的任务甲。`
-  - `人物B负责活动E的任务乙。`
-    但禁止再输出诸如 `用户计划让人物A和人物B从事件日期D前一周开始为活动E做准备`、`人物A负责活动E的任务甲细节X`、`人物B负责活动E的任务乙细节Y`，因为"提前一周开始准备"、"任务甲细节X"、"任务乙细节Y"都是只在 after_msgs 中出现的新核心谓词或新任务名，必须丢弃。
+- `after_msgs` 只允许映射 target 已有的引用或槽位；其中新出现的动作、分工、任务名、子任务和时间表达全部忽略。对“提前N天/周”只使用 target 自己的相对时间和 `before_msgs` 已确认的事件日期计算，绝不使用 after_msgs 的新日期反向改写。
 
 清晰指代与模糊指代：
 
 - 只有当当前 `supporting_context` 足以将引用稳定映射到具体实体名时，才算 fully resolved。
 - `张三`、`老张`（且上下文中明确就是张三）、`李教授`、`王老师` 属于清晰指代。
+- 具体姓名、稳定称呼或职务是第三方实体时，直接保留该实体；不得为统一用户锚点而擅自加成“用户的张三/用户的小周/用户的李教授”等所有关系。
 - `用户的朋友`、`用户的同事`、`某位老师`、`一位面试官` 这类最小必要描述允许输出，但仍然算 unresolved。
 - `朋友`、`前天那个人`、`那个`、`这个`、`那些`、`那两个`、`对方`、`他/她`（且无唯一可解对象）属于模糊指代。
 
 过滤：
 
-- 仅提取陈述句。
-- 不要提取问题、命令、问候语或对话填充词。
+- 最终 `statement_text` 必须是陈述句，但 `target_content` 的表面句式不必是完整陈述句。含有事实值、谓词、动作、关系、态度或计划的省略句，以及语法上确为请求或祈使的“请/让/帮我”表达，都应在补全必要主语后改写为陈述句；第三方作主语的已发生事件，如“X帮我做了Y”，不是用户发出的委托，必须保留为“X为用户做了Y”。在“提醒我/记得提醒我在某时做X”中，用户是被提醒者，陈述核心是“用户希望届时被提醒做X”；绝不能改写成“用户提醒自己做X”，也不能改写成用户已经或确定会做X。提醒请求及其模态必须保留。
+- 满足“前序 Assistant 简短回答补全”全部条件的 target 虽然表面上不是完整陈述句，但重建后构成陈述句，不得仅因 target 缺少显式谓词而过滤；不满足全部条件时仍按普通过滤规则处理。
+- 不要把 `target_content` 中的问题、问候语或对话填充词作为普通 statement 提取。纯粹要求 Assistant 立即执行操作且不表达可记忆事实、计划或安排的命令也应过滤。该规则不取消前序 Assistant 字段请求在合法简短回答分支中提供槽位/命题的资格。
+- 每条属性、联系方式或标识候选都必须有明确值。若一个分句只声明字段、属性或关系但没有给出对应值，不为该分句生成 statement，也不得从相邻分句借用名称、数字或其他值，除非 target 明确建立了该绑定。没有可唯一解析对象的“这/这个/它”等指示词不算字段值，`has_unsolved_reference=true` 也不能把无值字段变成可输出 statement；但人物或事件引用未解且核心谓词已明确时，仍按上一节输出 unresolved statement。
 - 完全过滤纯呼语或问候称呼，不输出 statement。例如：`Hey, Jack`、`Hi Caroline`、`Dear 李教授`、`Jack，早上好`。
 - 如果名字只是在句首或句尾作为称呼对象出现，也不要把它改写成命名 statement。例如：`Jack, can you help me?`、`Thanks, Caroline`、`@Jack 看一下这个` 都不能输出“用户叫 Jack/Caroline”。
 
@@ -230,7 +256,8 @@ statement_type：
 
 - 仅使用目标文本中明确陈述、可由 `dialog_at` 直接解析，或可由 `target_content` 中的事件日期 / `supporting_context.before_msgs` 中已确认事件锚点解析的时间信息；不要使用外部知识补时间。
 - 解析时间表达前，先判断它的时间锚点类型，不要把所有相对时间都默认锚定到 `dialog_at`。
-- 对“昨天”“上周五”“下个月”“最近”“接下来”这类相对当前会话时间的表达，必须使用 `dialog_at` 作为“现在”；不要使用抽取时间、写入时间或任何非对话时间作为锚点。
+- 对“昨天/明天/前天/后天”“这周/上周/下周”“本周X/上周X/下周X”“上个月/下个月”这类封闭式相对时间，只要 `dialog_at` 可解析，就视为可稳定落地，必须替换进 `statement_text`；不得以不确定为由保留原词。开放或文化边界确实不稳的表达才允许保留粗粒度。
+- 解析上述时间时必须使用 `dialog_at` 作为“现在”；不要使用抽取时间、写入时间或任何非对话时间作为锚点。先求出 `dialog_at` 所在自然周的周一至周日，再做偏移：“这周/本周X”取当前自然周的X，“上周X”取前一自然周的X，“下周X”取后一自然周的X；“昨天/明天/前天/后天”分别按日历日偏移 -1/+1/-2/+2。源文本含星期时，改写文本中保留“周X”并确认日期的实际星期与其一致；不一致时重新计算，不能退回原相对词或输出星期错位日期。
 - 对“提前一周”“提前三天”“后一周”“当天”“那天”“到时候”“活动前”“考试后”“生日前一晚”这类事件相对时间表达，必须先寻找其所依附的事件锚点。
 - 如果事件锚点在 `target_content` 中明确出现，使用该事件的已解析日期作为锚点。
 - 如果事件锚点在 `target_content` 中被省略，优先从 `supporting_context.before_msgs` 中寻找当前 target 之前已经确认的事件锚点。
@@ -323,18 +350,20 @@ temporal_type：
 改写边界：
 
 - 允许为解决代词、省略和时间歧义做最小必要改写。
+- `今年/去年/目前/依然/已经N年` 等显式时间或持续性限定属于原命题内容；即使 statement 被判断为 `STATIC`，也必须保留或做等价时间改写，不能因类型标注而删除。
 - 不要引入原文未明确表达的新事实、额外推断或风格化概括。
 - 不要伪造无法从正确参考锚点可靠落地的时间精度；正确参考锚点可能是 `dialog_at`、`target_content` 中的事件日期，或 `supporting_context.before_msgs` 中已确认事件锚点。
   {% else %}
   Splitting rules:
 - Extract statements at the level of one complete thought, usually one full sentence or one natural semantic unit.
-- Preserve sentence-level structure by default; split only when a sentence contains two or more independent and important pieces of information that become clearly easier to understand when separated.
-- Prefer higher recall: do not miss independently valid and semantically stable statements in `target_content`.
-- But do not increase recall by inventing unsupported facts or emitting semantically unstable statements.
+- Preserve one complete semantic unit by default. Split distinct predicates that express independent facts, events, states, or attitudes. Keep clauses together when one supplies the cause or background for the resulting state, when they express one relationship plus its duration or degree, or when splitting would lose a semantic dependency. A source attribution such as “a coworker said,” “the report shows,” or “the group announced” belongs to the proposition's scope; preserve the stated source instead of rewriting it as an unsourced fact or generic “the user learned/heard.” When a condition (`if`, `unless`), intention (`want`, `hope`, `plan`), or delegation (`ask`, `assign`, `entrust`) scopes over multiple predicates, either keep them together or repeat that scope in every split statement. A split of “the user wants to ask/assign X to do Y” must still say that the user wants to ask/assign X to do Y; never reduce it to “X does Y” or “the user invited X.”
+- The previous default does not apply to a valid `OPEN_VALUE + OPEN_SLOTS` answer: every uniquely bound slot-value pair is an independent fact and must be output separately.
+- Output every independent statement that passes source and semantic-validity checks. Uniqueness constrains slot completion and concrete-entity backfilling only; on the ordinary path, preserve an unresolved statement under the coreference rules instead of dropping the candidate.
 
 User-subject normalization:
 
 - If the subject of a statement is the user, always use “the user” as the subject in the extracted statement, regardless of whether the context provides the user’s real name, nickname, alias, or other identifier.
+- If the grammatical subject in `target_content` is a concrete third party, keep that third party as the statement subject. Do not rewrite “Xiao Zhou booked a ticket for me” as “the user asked Xiao Zhou to book a ticket,” and do not add a top-level wrapper such as “the user mentioned/said”; `speaker` already records the message source.
 - This is a hard rule. If a user-subject statement does not use “the user,” treat it as invalid.
 - Keep “the user” as the main retrieval anchor in English rewrites, including object position when possible.
 - For English reflexive self-expressions, preserve retrieval consistency without creating unnatural strings. Use these preferred rewrites:
@@ -352,55 +381,44 @@ Coreference resolution:
 - `has_unsolved_reference` must be judged from the final `statement_text`, not from whether the original `target_content` once contained a pronoun.
 - If the final `statement_text` already resolves the reference to a concrete named entity, such as “The assistant congratulates the user” or “Xiao Li ordered an Americano,” then `has_unsolved_reference` must be `false`.
 - If the final `statement_text` has rewritten expressions such as “he,” “she,” “they,” “the two of them,” “the two colleagues,” or “the other one” into concrete entity names that actually occur in the current input, `has_unsolved_reference` must be `false`; do not keep it `true` merely because the source text contained pronouns or group references.
-- If you can resolve to a concrete named entity, output that name and set `has_unsolved_reference` to `false`.
-- If you cannot resolve to a concrete named entity but can resolve to a minimal grounded description, output that description and set `has_unsolved_reference` to `true`.
-- If you cannot even resolve to a stable minimal grounded description, keep the minimal original expression and set `has_unsolved_reference` to `true`.
+- If a person or event reference resolves to a concrete named entity, output that entity and set `has_unsolved_reference=false`; otherwise preserve the minimal grounded description or original reference and set it to `true`. When the target supplies the core predicate or relationship, such an unresolved candidate must still be output rather than becoming an empty array.
+- Attribute, contact-detail, and identifier values do not use that preservation path. If removing `this/that/it` leaves no concrete literal value, drop the entire field candidate; never output “the field is this” or retain it via `has_unsolved_reference=true`.
 - However, for any naming expression such as "X is called Z", "X's name is Z", or "people call X Z", only `X` may be minimally rewritten for reference resolution; `Z` is a newly introduced name, form of address, or alias and must keep its original surface form. Do not coreference-resolve, translate, transcribe, or normalize `Z` into `X`.
 - Output naming statements such as “the user is named X” only when `target_content` explicitly expresses a naming relation. Explicit naming evidence includes “I am X,” “my name is X,” “call me X,” “people call me X,” “我的名字是 X,” or “大家叫我 X.”
 - Vocatives, greeting addressees, thanked addressees, email/message salutations, @mentions, and names used as sentence-initial address terms are not naming evidence and must not be rewritten as the user's name or alias.
-- For shared activities involving the user and others, prefer forms like “the user and X...” rather than unresolved expressions like “we” or “they”.
+- Rewrite a shared activity as “the user and X...” only when `target_content` itself explicitly includes the user through wording such as “X and I” or “we.” When the target only says “she will also come” or “he will join too,” “also/together” is not evidence that the user participates; never add “the user and X.”
 
 People, group, and exclusion-based reference resolution:
 
 - For group references such as “the two of them,” “both of them,” “the two friends,” or “those people,” if `supporting_context` can uniquely identify the members, expand them into the concrete name list.
-- For exclusion-based references such as “the other person,” “the other friend,” or “the remaining one,” use the already known person set and already assigned attributes to resolve the referent.
-- If the context establishes that two members are `Person A` and `Person B`, and `Person A` has already been assigned one identity or attribute, then “the other person has another identity” should be resolved as `Person B` having that identity.
-- A later sentence such as “she handles task X, and he handles task Y” may be resolved as “Person A handles task X, and Person B handles task Y” using gender pronouns, occupation clues, previous attributes, and task semantics. In actual output, use only names that really occur in the current input, not these placeholder names.
-- For role or task slots already present in `target_content`, such as “one handles the technical demo, and the other handles onsite organization,” if `supporting_context.after_msgs` later uniquely binds the group members to those slots, you may backfill the later binding into the current statement. Output “Concrete Person A handles the technical demo, and Concrete Person B handles onsite organization,” and set `has_unsolved_reference` to `false`.
-- Slot backfilling may only replace the slot wording **already present** in `target_content` (such as “the technical demo” or “onsite organization”) with concrete names. It must NOT introduce a more specific task name from after_msgs (such as “the demo environment” or “the venue and check-in”) as a new slot in the statement, even when the wording sounds semantically close or more precise. Any task name, sub-task, action, or temporal expression that appears only in after_msgs must not enter statement_text.
-- If later context uniquely identifies only the group members but not each member's slot assignment, at least expand the member list; only keep `has_unsolved_reference` as `true` when `statement_text` still contains unresolved slot expressions such as “one” or “the other.”
+- For “the other person,” “the other friend,” or “the remaining one,” perform set subtraction. Build the finite person set `C` for the current task from before_msgs, identify the members `A` already explicitly assigned another responsibility in that task, and compute `R = C - A`. If and only if `R` contains exactly one concrete person, replace the target's exclusion reference with that person and set `has_unsolved_reference=false`; otherwise preserve the minimal reference and set it to `true`. Structural calculation: if `C={Person A, Person B}`, `A={Person A}`, and the target is “the other person handles task Z,” then `R={Person B}` and the only valid output is “Person B handles task Z.” Keeping “the other person” or copying the contextual sentences used to build C and A is incorrect.
+- In exclusion-based resolution, `C` and `A` are reasoning evidence only. The final statement retains only the target's subject placeholder and new predicate, replacing the placeholder with `R`; never output the old invitation, member list, identity, responsibility, or event used to construct `C` or `A`.
+- For role or task slots already present in `target_content`, such as “one handles the technical demo, and the other handles onsite organization,” backfill concrete names and set `has_unsolved_reference` to `false` only when `supporting_context.after_msgs` explicitly and uniquely states each member-to-slot correspondence. A later list of member names alone, an unrelated attribute for only one member, or matching name and slot counts/order does not establish responsibility. In that case, first output any invitation/participation predicate that applies to the whole group separately and may expand the member names; then preserve each role as `one handles...` / `the other handles...` and mark it unresolved. Never combine member names with unbound role slots in one statement and then guess assignments by name order.
+- Slot backfilling may only replace the slot wording **already present** in `target_content` (such as “the technical demo” or “onsite organization”) with concrete names. It must NOT introduce a more specific task name from after_msgs (such as “the demo environment” or “the venue and check-in”) as a new slot in the statement, even when the wording sounds semantically close or more precise. Any task name, sub-task, action, or temporal expression that appears only in after_msgs must not enter statement_text. For a division-of-work target, output only the responsibility predicates stated by the target. An earlier invitation, event, participation intention, or arrangement may identify the person set but must not be copied or merged into the responsibility statement.
+- Additive wording such as “also,” “together,” or “she will come too” only adds the target person to a contextual activity. It does not by itself establish that the user or any other person absent from the target also participates. Include the user as a co-participant only when the target itself explicitly says “I/we/the user and her” or provides equivalent joint-participation evidence.
 - If original User messages conflict with Assistant summaries, prefer the User messages. For example, if the Assistant incorrectly summarizes “the other person is a chef” as “the user is a chef,” do not assign the chef identity to the user.
 
 Event and plan reference resolution:
 
 - Expressions such as “this matter,” “this arrangement,” “the activity plan,” “one week in advance,” “that day,” and “then” may refer to the same planned event in the context.
-- When actions, division of work, or preparation arrangements in `target_content` clearly depend on a planned event in the context, bring the event's key participants and temporal anchor into `statement_text`.
+- When actions, division of work, or preparation arrangements in `target_content` clearly depend on a planned event in the context, bring into `statement_text` only the minimal event name, participant, or date anchor needed to resolve the target's reference or relative time. When an event date is only a calculation parameter, write only the resolved date of the target action. Unless the target itself repeats the event predicate, never surface contextual facts such as the user holding an event, traveling, or attending a meeting, and never coordinate them with the reminder, assignment, or preparation statement.
 - This rule applies only when the event-relative time expression (“one week in advance,” “that day,” “then,” etc.) and the new core action (“prepare,” “be responsible for,” “attend,” “submit,” etc.) themselves appear in `target_content`. If they appear only in `supporting_context.before_msgs` or `supporting_context.after_msgs` but not in `target_content`, they must not be turned into a standalone statement and must not be added into any other statement.
-- Even when `target_content` and a segment of after_msgs together happen to look very similar to the example below, you must not extract from after_msgs new actions, new divisions of work, new task names, or new event-relative times. after_msgs may only provide unique reference / slot / already-confirmed event anchor mappings for placeholders that already exist in `target_content`.
-- Correct example (direction one: target_content itself describes the division of work and preparation): if context says “I plan to hold event E on date D and invite Person A and Person B to help,” and target_content says “I'll ask the two of them to prepare one week in advance; she handles task X, and he handles task Y,” the output should rewrite to:
-  - `The user plans to ask Person A and Person B to start preparing for event E one week before date D.`
-  - `Person A is responsible for task X for event E.`
-  - `Person B is responsible for task Y for event E.`
-    Do not resolve “one week in advance” as one week before the current conversation `dialog_at`.
-- Mirror counterexample (direction two: target_content itself describes only the event and invitations; division of work and preparation appear only in after_msgs): if target_content says “I plan to hold event E on date D and invite Person A and Person B, one handles task X and the other handles task Y,” and after_msgs later says “I'll ask the two of them to start preparing one week in advance; he handles task X detail X1, and she handles task Y detail Y1,” you may extract only the core statements from target_content, such as:
-  - `The user plans to hold event E on date D.`
-  - `The user invites Person A and Person B to help with event E.`
-    And, after after_msgs uniquely identifies the two members, you may backfill the two slots already present in target_content (`one handles task X, the other handles task Y`) into:
-  - `Person A is responsible for task X for event E.`
-  - `Person B is responsible for task Y for event E.`
-    But do NOT output statements such as `The user plans to ask Person A and Person B to start preparing for event E one week before date D.`, `Person A is responsible for task X detail X1 of event E.`, or `Person B is responsible for task Y detail Y1 of event E.` Their core predicates (“start preparing one week in advance,” “task X detail X1,” “task Y detail Y1”) appear only in after_msgs and must be dropped.
+- `after_msgs` may only map a reference or slot already present in the target; ignore every new action, assignment, task, subtask, and temporal expression found there. Resolve `N days/weeks in advance` only from the relative expression in the target and an event date already confirmed in `before_msgs`; never use a new after_msgs date retroactively.
 
 Clear vs unresolved reference:
 
 - A reference is fully resolved only if the current `supporting_context` can map it to a concrete named entity.
 - `Zhang San`, `Old Zhang` when clearly resolved to Zhang San, `Professor Li`, and `Teacher Wang` are clear references.
+- When a concrete name, stable form of address, or title denotes a third party, preserve that entity directly; user-subject normalization must not invent ownership forms such as “the user's Zhang San/Xiao Zhou/Professor Li.”
 - `the user's friend`, `the user's coworker`, `a teacher`, and `an interviewer` are allowed outputs but still count as unresolved.
 - `friend`, `that person from the other day`, `that one`, `this one`, `those`, `the two of them`, `the other party`, and `he/she` without a unique referent are unresolved.
 
 Filtering:
 
-- Extract only declarative statements.
-- Do not extract questions, commands, greetings, or conversational filler.
+- Final `statement_text` must be declarative, but the surface form of `target_content` need not already be a complete declarative sentence. An elliptical clause that contains a factual value, predicate, action, relationship, attitude, or plan, and wording such as “please,” “have,” or “help me” only when it is grammatically a request or imperative, must be rewritten as a declarative statement after supplying only the necessary subject. A completed event with a third-party subject, such as “X helped me do Y,” is not a user delegation and must remain “X did Y for the user.” In “remind me/remember to remind me to do X at time T,” the user is the reminder recipient, and the core proposition is that the user wants to be reminded to do X at T. Never rewrite it as the user reminding themself or as the user having done or certainly doing X; preserve the request and reminder modality.
+- A target satisfying every condition of "Short-answer completion from a preceding Assistant question" becomes declarative after reconstruction. Do not filter it merely because the raw target lacks an explicit predicate; when any condition fails, apply the ordinary filtering rules.
+- Do not ordinarily extract questions, greetings, or conversational filler from `target_content`. Also filter a pure command that only asks the Assistant to perform an immediate operation and expresses no memorable fact, plan, or arrangement. This rule does not disqualify a preceding Assistant field request from supplying slots/propositions in a valid short-answer branch.
+- Every attribute, contact-detail, or identifier candidate must have an explicit value. If a clause names a field, attribute, or relationship without supplying its value, emit no statement for that clause and never borrow a name, number, or other value from an adjacent clause unless the target explicitly binds them. A demonstrative such as "this", "that", or "it" with no uniquely resolvable referent does not count as a field value, and `has_unsolved_reference=true` cannot rescue a valueless field. A person or event reference may still remain unresolved when its core predicate is explicit, as specified above.
 - Completely filter pure vocatives and greeting addressees; output no statement for them. Examples: `Hey, Jack`, `Hi Caroline`, `Dear Professor Li`, `Good morning, Jack`.
 - If a name appears only as an address term at the beginning or end of a question, command, thanks, mention, or message salutation, do not rewrite it into a naming statement. Examples: `Jack, can you help me?`, `Thanks, Caroline`, and `@Jack please check this` must not produce “the user is named Jack/Caroline.”
 
@@ -430,7 +448,8 @@ Temporal rules:
 
 - Use only temporal information explicitly stated in the target text, directly resolvable from `dialog_at`, or resolvable from an event date in `target_content` / an already-confirmed event anchor in `supporting_context.before_msgs`; do not add dates from external knowledge.
 - Before resolving a temporal expression, first determine its temporal anchor type. Do not default every relative expression to `dialog_at`.
-- For expressions relative to the current conversation time, such as “yesterday,” “last Friday,” “next month,” “recently,” or “coming up,” use `dialog_at` as “now”; do not use extraction time, write time, or any non-dialogue timestamp as the anchor.
+- Treat closed relative expressions such as yesterday/tomorrow/the day before yesterday/the day after tomorrow, this/last/next week, this/last/next weekday, and last/next month as stably resolvable whenever `dialog_at` is parseable. They must be replaced inside `statement_text`; uncertainty is not a reason to retain the source phrase. Only genuinely open or culturally uncertain boundaries may remain coarse.
+- Resolve those expressions from `dialog_at`, never extraction time, write time, or another timestamp. First derive the Monday-through-Sunday calendar week containing `dialog_at`, then offset from it: `this weekday` uses that weekday in the current week, `last weekday` uses it in the previous week, and `next weekday` uses it in the following week; day words use calendar offsets -1/+1/-2/+2. When the source names a weekday, retain that weekday label in the rewritten text and verify the numeric date actually matches it. If not, recompute; never fall back to the source relative phrase or emit a weekday-shifted date.
 - For event-relative expressions such as “one week in advance,” “three days before,” “the following week,” “that day,” “then,” “before the event,” “after the exam,” or “the night before the birthday,” first identify the event anchor they depend on.
 - If the event anchor appears explicitly in `target_content`, use the resolved date of that event as the anchor.
 - If the event anchor is omitted from `target_content`, first look for an event anchor that was already confirmed in `supporting_context.before_msgs` before the current target.
@@ -523,6 +542,7 @@ temporal_type:
 Rewrite boundary:
 
 - Minimal rewriting is allowed only to resolve reference, ellipsis, and temporal ambiguity.
+- Explicit temporal or continuity qualifiers such as this year, last year, currently, still, or for N years belong to the proposition. Preserve them or rewrite them equivalently even when `temporal_type` is `STATIC`; never delete them merely because of the type label.
 - For resolvable relative time expressions, rewrite them into grounded time expressions directly inside `statement_text`, using the output language.
 - Do not keep both the vague source phrase and the grounded phrase together; output only the rewritten concrete form.
 - Do not fake precision for time expressions that cannot be grounded reliably from the correct reference anchor. The correct anchor may be `dialog_at`, an event date in `target_content`, or an already-confirmed event anchor in `supporting_context.before_msgs`.
@@ -530,6 +550,7 @@ Rewrite boundary:
 - Do not introduce unsupported facts, extra inference, or stylistic summarization.
   {% endif %}
 
+{% if include_examples | default(false) %}
 === Examples ===
 {% if language == "zh" %}
 边界示例 A：`Hey, Jack` 是纯呼语或问候称呼，不是命名陈述，输出 `{"statements": []}`。
@@ -540,6 +561,8 @@ Rewrite boundary:
 边界示例 F（非永久提示不触发）：`明天记得去买蛋糕`、`别忘了，我明天下午三点开会`、`记住，我明天下午三点开会`、`我明天一定要去医院`都应在完成时间改写后设置 `is_permanent=false`。
 边界示例 G（明确永久意图触发）：`请永久记住，我明天下午三点开会，永远不要忘记`应先根据 `dialog_at` 将时间改写为具体日期和时间，再设置 `is_permanent=true`。
 边界示例 H（多候选歧义）：target_content 同时表达普通事项甲和普通事项乙，后文只说“请永久记住这个”且没有复述甲或乙的任何内容，则甲、乙两条 statement 的 `is_permanent` 都必须为 `false`；不能把单数“这个”扩散为“全部永久保留”。
+
+边界示例 I（多槽位只答其一）：`dialog_at=2026-07-15T02:03:32+00:00`，before_msgs 中最近的 Assistant 消息为“请提供称呼、企业名称和手机号，以便商务精准对接。”，target_content 为 `user: 17320000558`，after_msgs 为流程总结类消息。判定：target 属于 `OPEN_VALUE`，Assistant 请求属于 `OPEN_SLOTS`；“17320000558”凭标准手机号格式唯一绑定“手机号”槽位，“称呼”“企业名称”两个槽位保持未绑定。正确输出有且仅有一条：“用户的手机号是17320000558。”（`statement_type=FACT`、`temporal_type=STATIC`、`valid_at="NULL"`、`invalid_at="NULL"`）。错误输出包括：因两个槽位未答而返回 `{"statements": []}`；为空槽位编造 statement；把请求句或总结句中的“登记/对接”等流程动作写入 statement。
 
 示例 1:
 示例输入: {
@@ -750,6 +773,8 @@ Boundary Example F (non-permanent signals do not trigger): “Remember to buy a 
 Boundary Example G (explicit permanent intent triggers): for “Retain this permanently: I have a meeting tomorrow at 3 p.m. Never forget it,” first rewrite the time to a concrete date and time using `dialog_at`, then set `is_permanent=true`.
 Boundary Example H (ambiguous scope over multiple candidates): target_content contains ordinary item A and ordinary item B, and a later message says only “retain this permanently” without repeating any content from A or B. Both statements must keep `is_permanent=false`; do not expand singular “this” into “retain everything permanently”.
 
+Boundary Example I (one answered slot out of several): `dialog_at=2026-07-15T02:03:32+00:00`, the nearest Assistant message in before_msgs reads “请提供称呼、企业名称和手机号，以便商务精准对接。” (Please provide name, company name, and phone number for business contact.), and target_content is `user: 17320000558`. Classify as `OPEN_VALUE + OPEN_SLOTS`; `17320000558` uniquely binds the phone-number slot via its standard phone format, while the name and company slots stay unbound. Correct output is exactly one statement: “用户的手机号是17320000558。” (`statement_type=FACT`, `temporal_type=STATIC`, `valid_at="NULL"`, `invalid_at="NULL"`). Wrong outputs include returning `{"statements": []}` because two slots went unanswered, fabricating statements for unfilled slots, or writing workflow actions such as “registered/contacted” from the request or summary into the statement.
+
 Example 1:
 Example Input: {
   "chunk_id": "chunk_a1b2c3d4",
@@ -952,73 +977,7 @@ Example Output: {
 
 {% endif %}
 === End of Examples ===
-
-{% if language == "zh" %}
-最终输出前检查：
-
-- 是否只保留 `target_content` 中可直接支持的陈述句
-- 是否先只根据 `target_content` 固定候选集合，再用 context 做受限补全；context 是否完全没有增加候选数量
-- 忽略仅用于替换指代的具体实体名后，每条 statement 的核心命题是否仍能指向 `target_content` 中的直接文字依据；不能指向则删除
-- `statement_text` 中的人物名、事件名、地点名和日期是否都来自当前 input 或由当前 input 可解析，且没有混入 prompt 示例里的实体或占位名
-- 如果主语是用户，是否统一写“用户”
-- 非用户主体是否尽量写成具体名称；若无法做到，是否已正确标记 `has_unsolved_reference = true`
-- 如果最终 `statement_text` 已经落到具体实体名，`has_unsolved_reference` 是否已经改为 `false`
-- 是否已优先用 User 原始消息消解人物、职业、关系和计划，避免被 Assistant 错误总结带偏
-- 如果 `statement_text` 中出现可由 `dialog_at`、target_content 事件日期或 before_msgs 中已确认事件锚点解析的相对时间，是否已经改写成更具体的日期、月份或日期区间表达
-- 如果 `statement_text` 中已经写出具体执行日期、开始日期或日期区间，`valid_at` 是否已经对齐该执行/开始时间，而不是误用 `dialog_at`
-- 如果上下文中同一事件已有无条件确认的新日期，后续“提前N天/提前N周”“那周”“到时候”等是否使用该新日期作为锚点
-- 如果新日期只出现在“如果/要是……就改到……”这类条件或备选方案中，是否没有反向覆盖当前 target 的时间锚点
-- 是否没有使用 `after_msgs` 中的新日期、新任务、新属性来补当前 target；after_msgs 只允许做指代/槽位映射
-- 是否每条 statement 的核心谓词（动作 / 责任 / 时间表达 / 任务名）都能在 `target_content` 中找到对应来源；只在 after_msgs 中出现的核心谓词、子任务名（如把"技术演示"细化为"演示环境"，把"现场组织"细化为"会场和签到"）、新动作（如"开始准备"）或新事件相对时间（如"提前一周"）必须全部丢弃
-- 槽位回填是否只把 target 已有槽位文字替换为具体姓名，没有把 after_msgs 里更细的任务名当作新槽位写入 statement_text
-- 如果“那周”出现在“如果那周排不开，就改到新日期”结构中，是否没有错误锚定到后文新日期
-- 如果 statement 表达“用户计划/安排/决定/让某人在某日执行某任务”，`valid_at` / `invalid_at` 是否对齐执行日
-- 如果一句话被拆成多条 statement，是否已经逐条独立检查时间归属，避免把前一分句的大时间范围错误继承到后一分句
-- 如果 `statement_text` 中出现“最近”“近来”“即将”“接下来”“很快”这类开放区间时间词，是否已经改写为带参考锚点的开放区间表达
-- 是否把呼语、问候称呼、感谢对象、@mention 或消息开头称呼错误改写成用户名字或别名；如果只是称呼对象，应完全过滤
-- 如果包含 `<input-file-summary>`，是否已改写成“用户上传/分享了...”而不是独立客观描述
-- statement_type 是否合法，且没有把一般事实机械标成 `OPINION`
-- `has_emotional_state` 是否仅用于判断是否存在情感状态，而没有被当作情绪分类字段
-- 是否在完成 `statement_text` 的指代与时间改写后，才逐条独立判断 `is_permanent`
-- `is_permanent=true` 是否仅来自唯一指向当前 statement 的明确永久/永远/长期保留或不要遗忘指令；普通记住/保存、内容重要性和内容自身价值是否均保持 `false`
-- 如果 target 产生多条 statement，而 context 的永久保留指令没有复述可唯一匹配的内容、也没有明确覆盖全部候选，是否已完全忽略该指令并将各候选保持为 `false`
-- 来自 supporting_context 的永久记忆意图是否只取自 `role="user"` 消息，且只改变已有候选的 `is_permanent`，没有改变 `statement_text` 或创建新 statement
-- 每条 statement 是否都包含 JSON 布尔值 `is_permanent`，没有省略、`null` 或字符串值
-- temporal_type 是否与 valid_at / invalid_at 一致
-- 输出是否严格符合 JSON schema
-  {% else %}
-  Final checks before output:
-- Keep only statements directly supported by `target_content`
-- First fix the candidate set using only `target_content`, then enrich it under strict context limits; make sure context has not increased the candidate count
-- After ignoring concrete entity names used only for reference replacement, ensure every statement's core proposition still points to direct wording in `target_content`; otherwise drop it
-- Ensure every person name, event name, place name, and date in `statement_text` comes from the current input or can be resolved from the current input; do not include entities or placeholders from prompt examples
-- If the subject is the user, render it as “the user”
-- Render non-user subjects as concrete names when possible; otherwise mark `has_unsolved_reference = true`
-- If the final `statement_text` already resolves the reference to a concrete named entity, ensure `has_unsolved_reference = false`
-- Prefer original User messages when resolving people, occupations, relationships, and plans; do not let incorrect Assistant summaries override them
-- If `statement_text` contains relative time expressions that can be stably resolved from `dialog_at`, an event date in target_content, or an already-confirmed event anchor in before_msgs, rewrite them into more concrete date, month, or date-range expressions
-- If `statement_text` contains a concrete execution date, start date, or date range, ensure `valid_at` aligns to that execution/start time rather than incorrectly using `dialog_at`
-- If context has an unconditionally confirmed latest date for the same event, ensure later expressions such as “N days/weeks in advance,” “that week,” or “then” use that latest date as the anchor
-- If a new date appears only inside a conditional or alternative plan such as “if ... then move it to ...,” ensure it does not retroactively overwrite the current target's temporal anchor
-- Ensure no new date, task, or attribute from `after_msgs` is used to fill the current target; after_msgs may only map references or slots
-- Verify that every statement's core predicate (action / responsibility / temporal expression / task name) can be sourced from `target_content`. Drop any core predicate, sub-task name (such as refining "the technical demo" into "the demo environment", or "onsite organization" into "the venue and check-in"), new action (such as "start preparing"), or new event-relative time (such as "one week in advance") that appears only in after_msgs.
-- Make sure slot backfilling only replaces wording already present in target_content with concrete names, and does not write any finer task name from after_msgs into statement_text as a new slot
-- If “that week” appears in a structure like “if that week is unavailable, move it to NEW_DATE,” make sure it is not incorrectly anchored to the later replacement date
-- If the statement says the user plans/arranges/decides/asks someone to perform a task on a concrete date, ensure `valid_at` / `invalid_at` align to the execution date
-- If one sentence is split into multiple statements, verify temporal grounding statement by statement and make sure a later clause does not wrongly inherit a larger time range from an earlier clause
-- If `statement_text` contains open-interval temporal words such as `recently`, `lately`, `upcoming`, `coming up`, or `soon`, rewrite them into open interval expressions anchored on the correct reference anchor
-- Make sure vocatives, greeting addressees, thanked addressees, @mentions, or message salutations were not wrongly rewritten as the user's name or alias; if the text is only an address term, filter it completely
-- If `<input-file-summary>` appears, rewrite it as "the user uploaded/shared..." rather than an independent objective description
-- Ensure statement_type is valid and do not mechanically label ordinary facts as `OPINION`
-- Ensure `has_emotional_state` is used only for emotional-state presence detection, not emotion classification
-- Judge `is_permanent` independently for each statement only after finishing reference and temporal rewriting in `statement_text`
-- Ensure `is_permanent=true` comes only from an explicit permanently/forever/long-term/never-forget instruction uniquely scoped to the current statement; ordinary remember/save wording, importance, and inherent content value must remain `false`
-- If the target produces multiple statements and a permanent-retention instruction contains neither content uniquely matching one candidate nor an explicit scope covering all candidates, ignore it completely and keep every candidate `false`
-- Accept permanent-memory intent from supporting_context only in messages with `role="user"`, and use it only to change `is_permanent` on an existing candidate, never to change `statement_text` or create a statement
-- Ensure every statement contains JSON Boolean `is_permanent`, never an omitted, `null`, or string value
-- Ensure temporal_type is consistent with valid_at and invalid_at
-- Ensure the output strictly matches the JSON schema
-  {% endif %}
+{% endif %}
 
 **Output format**
 **CRITICAL JSON FORMATTING REQUIREMENTS:**
@@ -1029,70 +988,12 @@ Example Output: {
 4. Do not include line breaks within JSON string values.
 5. Return only the JSON object. Do not add explanations before or after it.
 
-**STATEMENT_TEXT TEMPORAL NORMALIZATION HARD CONSTRAINT:**
-{% if language == "zh" %}
-
-- `statement_text` 是最终记忆文本，必须在文本本身包含已解析后的时间表达，不能只依赖 `valid_at` / `invalid_at` 表示时间。
-- 如果相对时间或开放区间时间可以根据 `dialog_at`、`target_content` 中的事件日期，或 `supporting_context.before_msgs` 中已确认事件锚点解析，必须直接改写进 `statement_text`。
-- 不要在 `statement_text` 中保留可解析的原始模糊时间表达。
-- 不要同时保留原始模糊时间表达和解析后的时间表达。
-- `statement_text` 中禁止残留未锚定、未解析的相对时间词，例如：`今天`、`昨天`、`前天`、`明天`、`后天`、`本周`、`这周`、`上周`、`下周`、`本月`、`这个月`、`上个月`、`下个月`、`去年`、`明年`、`最近`、`近来`、`这段时间`、`这些天`、`即将`、`接下来`、`很快`。
-- 如果开放区间词已经被明确锚定到参考时间，则允许保留在锚定表达中，例如 `截至2026年4月1日之前的最近一段时间`。
-- 如果 `statement_text` 已经包含具体执行日期、开始日期或日期区间，`valid_at` 必须对齐该执行/开始时间；不要在这种情况下回退到 `dialog_at`。
-- 如果 `valid_at` / `invalid_at` 已经体现了某个相对时间的解析结果，`statement_text` 也必须体现同一个解析结果，不能仍保留原始相对时间词。
-- 正确示例：`用户2026年3月28日和小李一起去了咖啡馆。`
-- 错误示例：`用户上周六和小李一起去了咖啡馆。`
-- 正确示例：`用户截至2026年4月1日之前的最近一段时间拿到了腾讯公司的offer。`
-- 错误示例：`用户最近拿到了腾讯公司的offer。`
-  {% else %}
-- `statement_text` is the final memory text, so it must contain the resolved temporal expression itself, not only rely on `valid_at` / `invalid_at`.
-- If a relative or open-interval temporal expression can be resolved from `dialog_at`, an event date in `target_content`, or an already-confirmed event anchor in `supporting_context.before_msgs`, rewrite it inside `statement_text`.
-- Do not leave a resolvable source temporal phrase in `statement_text`.
-- Do not keep both the vague phrase and the resolved phrase together.
-- `statement_text` must not contain unanchored, unresolved relative temporal words such as: `today`, `yesterday`, `the day before yesterday`, `tomorrow`, `the day after tomorrow`, `this week`, `last week`, `next week`, `this month`, `last month`, `next month`, `last year`, `next year`, `recently`, `lately`, `these days`, `upcoming`, `coming up`, or `soon`.
-- Open-interval words are allowed only when explicitly anchored to the reference time, such as `recently before April 1, 2026`.
-- If `statement_text` contains a concrete execution date, start date, or date range, `valid_at` must align to that execution/start time; do not fall back to `dialog_at` in that case.
-- If `valid_at` / `invalid_at` already reflect the resolved result of a relative time, `statement_text` must reflect the same resolved result and must not retain the original relative phrase.
-- Correct example: `The user went to the cafe with Xiao Li on March 28, 2026.`
-- Wrong example: `The user went to the cafe with Xiao Li last Saturday.`
-- Correct example: `The user received Tencent's offer recently before April 1, 2026.`
-- Wrong example: `The user recently received Tencent's offer.`
-  {% endif %}
-  {% if language == "zh" %}
-- 例外：如果时间表达确实无法可靠落地，保留最小可信粗粒度表达，但仍应尽量锚定到参考时间，例如写成 `2025年冬天`，而不是保留 `去年冬天`。
-  {% else %}
-- Exception: if the temporal phrase truly cannot be grounded reliably, keep the smallest trustworthy coarse-grained expression, but still anchor it when possible, for example `winter 2025` instead of `last winter`.
-  {% endif %}
-
 **ISO 8601 HARD CONSTRAINT:**
 
 - `dialog_at` must be ISO 8601.
 - `valid_at` and `invalid_at` must be ISO 8601 UTC datetimes ending with `Z`, or `"NULL"` when no time is available.
 - Do not output non-ISO values such as `2026/04/01`, `2026-04-01 00:00:00`, `yesterday evening`, or `下周三`.
 - When only a date is known, still output an ISO 8601 UTC datetime boundary ending with `Z`.
-
-**IS_PERMANENT HARD CONSTRAINT:**
-{% if language == "zh" %}
-
-- 每条最终 statement 都必须包含 JSON 布尔值 `is_permanent`。
-- 先确定最终 `statement_text`，再判断 `is_permanent`；不能为了永久记忆判断从 context 新增 statement 或改写其核心命题。
-- 只有用户明确要求该信息被永久、永远或长期保留，或明确要求系统不要遗忘时，才能设置为 `true`；普通“记住/保存”、内容重要性或内容自身价值一律不能触发 `true`。
-- supporting_context 中只有 `role="user"` 且明确指向当前候选的上述永久保留指令可以设置该字段；Assistant 消息不能设置该字段。
-- 如果不存在上述明确永久保留意图，或存在任何歧义，必须输出 `false`。
-- 不判断存储容量、永久记忆配额或后端分配结果。
-- 多候选场景中，若永久保留指令没有复述可唯一绑定的内容，也没有明确覆盖全部候选，则不绑定任何候选，全部输出 `false`。
-
-{% else %}
-
-- Every final statement must contain JSON Boolean `is_permanent`.
-- Determine the final `statement_text` before judging `is_permanent`; permanence detection must not create a statement from context or alter its core proposition.
-- Set this field to `true` only when the user explicitly asks for the information to be retained permanently, forever, or long-term, or explicitly asks the system never to forget it. Ordinary “remember/save” wording, importance, or inherent content value cannot trigger `true`.
-- In supporting_context, only such a permanent-retention instruction in a `role="user"` message that unambiguously points to the current candidate may set this field. Assistant messages cannot set it.
-- If that explicit permanent-retention intent is absent or any ambiguity remains, output `false`.
-- Never infer or evaluate storage capacity, permanent-memory quota, or backend allocation results.
-- With multiple candidates, if the permanent-retention instruction contains neither uniquely repeated content nor explicit scope covering all candidates, bind none and output `false` for every candidate.
-
-{% endif %}
 
 **SCHEMA HARD CONSTRAINT:**
 
@@ -1121,21 +1022,4 @@ Example Output: {
 
 现在处理下面这个输入：{{ render_input() }}
 
-Return only a JSON object with this top-level shape:
-{
-  "statements": []
-}
-
-Each item in `statements` must be a JSON object with exactly these fields and value types:
-
-- `statement_id`: string
-- `statement_text`: string
-- `statement_type`: one of `"FACT"`, `"OPINION"`, `"OTHER"`
-- `temporal_type`: one of `"STATIC"`, `"DYNAMIC"`, `"ATEMPORAL"`
-- `speaker`: one of `"user"`, `"assistant"`
-- `has_emotional_state`: boolean, choose `true` or `false` according to the rules above
-- `has_unsolved_reference`: boolean, choose `true` or `false` according to the rules above
-- `is_permanent`: boolean, choose `true` or `false` independently for each final statement according to the rules above
-- `dialog_at`: ISO 8601 datetime string
-- `valid_at`: ISO 8601 UTC datetime string ending with `Z` or `"NULL"`
-- `invalid_at`: ISO 8601 UTC datetime string ending with `Z` or `"NULL"`
+Return only one JSON object with a top-level `statements` array. Use `"statements": []` only when no candidate survives the authoritative flow above.
