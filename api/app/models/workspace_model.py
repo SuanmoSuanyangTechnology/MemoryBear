@@ -25,14 +25,15 @@ class Workspace(Base):
     __tablename__ = "workspaces"
     __table_args__ = (
         CheckConstraint(
-            "retention_days >= 0 AND retention_days <= 3650",
+            "retention_days IS NULL OR "
+            "(retention_days >= 1 AND retention_days <= 3650)",
             name="ck_workspaces_retention_days_range",
         ),
         Index(
             "idx_workspaces_retention_enabled",
             "id",
             postgresql_include=["retention_days"],
-            postgresql_where=text("retention_days > 0"),
+            postgresql_where=text("retention_days IS NOT NULL"),
         ),
     )
 

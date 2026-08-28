@@ -19,8 +19,6 @@ from app.utils.redis_cache import redis_cache
 # 获取数据库专用日志器
 db_logger = get_db_logger()
 
-EXPIRED_END_USER_BATCH_SIZE = 100
-
 
 class UserTagRefreshCandidate(NamedTuple):
     """扫描阶段使用的轻量候选记录，避免批量加载完整 metadata。"""
@@ -72,19 +70,15 @@ class EndUserRepository:
             EndUser.is_active == sa.true(),
             EndUser.identity_status == "temporary",
             EndUser.write_time.is_not(None),
-            Workspace.retention_days > 0,
+            Workspace.retention_days.is_not(None),
             expires_at < func.now(),
         )
 
-    def get_expired_temporary_end_user_ids(
-            self,
-            limit: int = EXPIRED_END_USER_BATCH_SIZE,
-    ) -> List[uuid.UUID]:
-        """按空间有效期和最后写入时间稳定查询一批过期临时身份 ID。"""
-        safe_limit = max(1, min(int(limit), EXPIRED_END_USER_BATCH_SIZE))
+    def get_expired_temporary_end_user_ids(self) -> List[uuid.UUID]:
+        """按空间有效期和最后写入时间稳定查询全部过期临时身份 ID。"""
         retention_workspaces = (
             self.db.query(Workspace.id, Workspace.retention_days)
-            .filter(Workspace.retention_days > 0)
+            .filter(Workspace.retention_days.is_not(None))
             .all()
         )
         if not retention_workspaces:
@@ -104,13 +98,12 @@ class EndUserRepository:
                     EndUser.write_time < cutoff_time,
                 )
                 .order_by(EndUser.write_time.asc(), EndUser.id.asc())
-                .limit(safe_limit)
                 .all()
             )
             candidates.extend((row.id, row.write_time) for row in rows)
 
         candidates.sort(key=lambda candidate: (candidate[1], candidate[0].int))
-        return [end_user_id for end_user_id, _ in candidates[:safe_limit]]
+        return [end_user_id for end_user_id, _ in candidates]
 
     def is_expired_temporary_end_user(self, end_user_id: uuid.UUID) -> bool:
         """删除前重新确认身份仍为临时、活跃且已超过当前空间保留期。"""

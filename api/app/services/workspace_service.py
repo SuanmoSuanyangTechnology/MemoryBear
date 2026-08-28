@@ -1066,9 +1066,9 @@ def get_workspace_retention_policy(
 def update_workspace_retention_policy(
         db: Session,
         workspace_id: uuid.UUID,
-        retention_days: int,
+        retention_days: int | None,
         user: User,
-) -> int:
+) -> int | None:
     """以空间成员权限更新指定工作空间的临时身份保留天数。"""
     business_logger.info(
         f"更新工作空间保留策略: workspace_id={workspace_id}, "
