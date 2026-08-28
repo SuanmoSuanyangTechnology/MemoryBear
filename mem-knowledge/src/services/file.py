@@ -194,7 +194,7 @@ async def create_folder(
 
 def _document_parser_config(knowledge: Knowledge, *, inherit: bool) -> dict[str, Any]:
     config = {
-        "layout_recognize": "mineru",
+        "layout_recognize": "plain",
         "chunk_token_num": 128,
         "delimiter": "\n",
         "auto_keywords": 0,
