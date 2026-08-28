@@ -148,6 +148,8 @@ celery_app.conf.update(
         'app.tasks.do_refresh_user_tags': {'queue': 'memory_heavy_tasks'},
         'app.tasks.scan_forget_candidates': {'queue': 'periodic_tasks'},
         'app.tasks.do_forget_for_user': {'queue': 'memory_heavy_tasks'},
+        'app.tasks.scan_expired_end_users': {'queue': 'periodic_tasks'},
+        'app.tasks.do_soft_delete_end_users': {'queue': 'memory_heavy_tasks'},
         # 'app.tasks.run_forgetting_cycle_task': {'queue': 'memory_heavy_tasks'},# NOTE：已废弃，保留路由防 unregistered
         'app.tasks.write_all_workspaces_memory_task': {'queue': 'memory_heavy_tasks'}, #NOTE：定时任务，记忆增量统计
         'app.tasks.write_total_memory_task': {'queue': 'memory_heavy_tasks'},  # NOTE：单 workspace 记忆增量统计
@@ -270,6 +272,13 @@ beat_schedule_config = {
     "scan-forget-candidates": {
         "task": "app.tasks.scan_forget_candidates",
         "schedule": forget_scan_schedule,
+    },
+    "scan-expired-end-users": {
+        "task": "app.tasks.scan_expired_end_users",
+        "schedule": crontab(
+            hour=settings.EXPIRED_END_USER_SCAN_HOUR,
+            minute=settings.EXPIRED_END_USER_SCAN_MINUTE,
+        ),
     },
     # "run-forgetting-cycle": {
     #     "task": "app.tasks.run_forgetting_cycle_task",

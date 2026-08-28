@@ -24,6 +24,7 @@ from app.models.workspace_model import (
     WorkspaceRole,
 )
 from app.repositories import workspace_repository
+from app.repositories.end_user_repository import EndUserRepository
 from app.repositories.workspace_invite_repository import WorkspaceInviteRepository
 from app.schemas.workspace_schema import (
     InviteAcceptRequest,
@@ -1094,6 +1095,55 @@ def update_workspace(
     except Exception as e:
         business_logger.error(f"工作空间更新失败: workspace_id={workspace_id} - {str(e)}")
         db.rollback()
+        raise
+
+
+def get_workspace_retention_policy(
+        db: Session,
+        workspace_id: uuid.UUID,
+        user: User,
+) -> tuple[int | None, int]:
+    """获取临时身份保留天数和至少有一条记忆的有效临时 EndUser 数量。"""
+    _check_workspace_member_permission(db, workspace_id, user)
+    retention_days = workspace_repository.get_workspace_retention_days(
+        db=db,
+        workspace_id=workspace_id,
+    )
+    end_user_count = (
+        EndUserRepository(db).get_temporary_end_users_count_by_workspace(
+            workspace_id
+        )
+    )
+    return retention_days, end_user_count
+
+
+def update_workspace_retention_policy(
+        db: Session,
+        workspace_id: uuid.UUID,
+        retention_days: int | None,
+        user: User,
+) -> int | None:
+    """以空间成员权限更新指定工作空间的临时身份保留天数。"""
+    business_logger.info(
+        f"更新工作空间保留策略: workspace_id={workspace_id}, "
+        f"retention_days={retention_days}, 操作者={user.username}"
+    )
+    _check_workspace_member_permission(db, workspace_id, user)
+    try:
+        updated_retention_days = workspace_repository.update_workspace_retention_days(
+            db=db,
+            workspace_id=workspace_id,
+            retention_days=retention_days,
+        )
+        business_logger.info(
+            f"工作空间保留策略更新成功: workspace_id={workspace_id}, "
+            f"retention_days={updated_retention_days}"
+        )
+        return updated_retention_days
+    except Exception as e:
+        business_logger.error(
+            f"工作空间保留策略更新失败: workspace_id={workspace_id} - {str(e)}"
+        )
         raise
 
 

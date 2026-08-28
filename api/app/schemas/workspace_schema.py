@@ -44,6 +44,29 @@ class WorkspaceUpdate(BaseModel):
     rerank: str | None = Field(None)
 
 
+class WorkspaceRetentionPolicyResponse(BaseModel):
+    retention_days: int | None = Field(
+        default=None,
+        ge=1,
+        le=3650,
+        description="临时身份保留天数，null 表示永不过期",
+    )
+    end_user_count: int | None = Field(
+        default=None,
+        ge=0,
+        description="当前工作空间中至少有一条记忆的有效临时 EndUser 数量",
+    )
+
+
+class WorkspaceRetentionPolicyUpdate(BaseModel):
+    retention_days: int | None = Field(
+        default=None,
+        ge=1,
+        le=3650,
+        description="临时身份保留天数，null 表示永不过期",
+    )
+
+
 class Workspace(WorkspaceBase):
     model_config = ConfigDict(from_attributes=True)
 

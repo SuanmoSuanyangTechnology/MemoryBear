@@ -14,6 +14,7 @@ from typing import Any, Callable, Dict, List, Optional
 import logging
 
 import redis
+from billiard.exceptions import SoftTimeLimitExceeded
 from celery import states, current_task
 from celery.exceptions import Ignore, Retry
 from celery.signals import after_setup_logger
@@ -4608,6 +4609,278 @@ def do_refresh_user_tags(
 #     result["elapsed_time"] = time.time() - start_time
 #     result["task_id"] = self.request.id
 #     return result
+
+
+_SOFT_DELETE_INFLIGHT_PREFIX = "soft_delete:inflight:"
+_SOFT_DELETE_INFLIGHT_TTL_SECONDS = 86400
+_SOFT_DELETE_BATCH_SIZE = 100
+
+
+def _soft_delete_inflight_key(end_user_id: str) -> str:
+    return f"{_SOFT_DELETE_INFLIGHT_PREFIX}{end_user_id}"
+
+
+def _release_soft_delete_inflight(
+        redis_client: Optional[redis.StrictRedis],
+        end_user_id: str,
+        batch_id: str,
+) -> None:
+    """仅在锁仍属于当前批次时释放，避免误删后续批次的锁。"""
+    if redis_client is None:
+        return
+    try:
+        redis_client.eval(
+            UNLOCK_SCRIPT,
+            1,
+            _soft_delete_inflight_key(end_user_id),
+            batch_id,
+        )
+    except RedisError as e:
+        logger.warning(
+            f"[ExpiredEndUser] 释放 inflight 锁失败: end_user_id={end_user_id}, error={e}"
+        )
+
+
+@celery_app.task(
+    name="app.tasks.scan_expired_end_users",
+    bind=True,
+    ignore_result=False,
+    max_retries=0,
+    acks_late=False,
+    soft_time_limit=540,
+    time_limit=600,
+)
+def scan_expired_end_users(self) -> Dict[str, Any]:
+    """扫描全部过期临时身份，并按每批最多 100 个派发清理任务。"""
+    from app.repositories.end_user_repository import EndUserRepository
+
+    started_at = time.time()
+    batch_id = self.request.id or uuid.uuid4().hex
+
+    try:
+        with get_db_context() as db:
+            candidates = EndUserRepository(db).get_expired_temporary_end_user_ids()
+    except Exception as e:
+        logger.error(f"[ExpiredEndUserScan] 查询失败: {e}", exc_info=True)
+        return {"status": "FAILED", "reason": "query_failed", "error": str(e)}
+
+    if not candidates:
+        return {
+            "status": "SUCCESS",
+            "batch_id": batch_id,
+            "candidates": 0,
+            "locked": 0,
+            "lock_conflicts": 0,
+            "dispatched": 0,
+        }
+
+    redis_client = get_sync_redis_client()
+    if redis_client is None:
+        logger.error("[ExpiredEndUserScan] Redis 不可用，取消派发")
+        return {
+            "status": "FAILED",
+            "reason": "redis_unavailable",
+            "batch_id": batch_id,
+            "candidates": len(candidates),
+            "dispatched": 0,
+        }
+
+    locked_count = 0
+    lock_conflicts = 0
+    dispatched_count = 0
+    dispatched_batches = 0
+    for batch_start in range(0, len(candidates), _SOFT_DELETE_BATCH_SIZE):
+        candidate_batch = candidates[
+            batch_start:batch_start + _SOFT_DELETE_BATCH_SIZE
+        ]
+        locked_ids: List[str] = []
+        try:
+            for candidate_id in candidate_batch:
+                end_user_id = str(candidate_id)
+                acquired = redis_client.set(
+                    _soft_delete_inflight_key(end_user_id),
+                    batch_id,
+                    nx=True,
+                    ex=_SOFT_DELETE_INFLIGHT_TTL_SECONDS,
+                )
+                if acquired:
+                    locked_ids.append(end_user_id)
+                    locked_count += 1
+                else:
+                    lock_conflicts += 1
+        except RedisError as e:
+            for end_user_id in locked_ids:
+                _release_soft_delete_inflight(redis_client, end_user_id, batch_id)
+            locked_count -= len(locked_ids)
+            logger.error(f"[ExpiredEndUserScan] Redis 加锁失败: {e}", exc_info=True)
+            return {
+                "status": "PARTIAL_FAILURE" if dispatched_count else "FAILED",
+                "reason": "redis_lock_failed",
+                "batch_id": batch_id,
+                "candidates": len(candidates),
+                "locked": locked_count,
+                "lock_conflicts": lock_conflicts,
+                "dispatched": dispatched_count,
+                "dispatched_batches": dispatched_batches,
+            }
+
+        if not locked_ids:
+            continue
+
+        try:
+            do_soft_delete_end_users.apply_async(
+                kwargs={"end_user_ids": locked_ids, "batch_id": batch_id},
+                queue="memory_heavy_tasks",
+            )
+        except Exception as e:
+            for end_user_id in locked_ids:
+                _release_soft_delete_inflight(redis_client, end_user_id, batch_id)
+            locked_count -= len(locked_ids)
+            logger.error(f"[ExpiredEndUserScan] 派发失败: {e}", exc_info=True)
+            return {
+                "status": "PARTIAL_FAILURE" if dispatched_count else "FAILED",
+                "reason": "dispatch_failed",
+                "batch_id": batch_id,
+                "candidates": len(candidates),
+                "locked": locked_count,
+                "lock_conflicts": lock_conflicts,
+                "dispatched": dispatched_count,
+                "dispatched_batches": dispatched_batches,
+            }
+        dispatched_count += len(locked_ids)
+        dispatched_batches += 1
+
+    elapsed = time.time() - started_at
+    logger.info(
+        f"[ExpiredEndUserScan] 完成: batch_id={batch_id}, "
+        f"candidates={len(candidates)}, locked={locked_count}, "
+        f"lock_conflicts={lock_conflicts}, dispatched={dispatched_count}, "
+        f"batches={dispatched_batches}, elapsed={elapsed:.1f}s"
+    )
+    return {
+        "status": "SUCCESS",
+        "batch_id": batch_id,
+        "candidates": len(candidates),
+        "locked": locked_count,
+        "lock_conflicts": lock_conflicts,
+        "dispatched": dispatched_count,
+        "dispatched_batches": dispatched_batches,
+        "elapsed_time": elapsed,
+    }
+
+
+@celery_app.task(
+    name="app.tasks.do_soft_delete_end_users",
+    bind=True,
+    ignore_result=False,
+    max_retries=0,
+    acks_late=False,
+    soft_time_limit=1080,
+    time_limit=1200,
+)
+def do_soft_delete_end_users(
+        self,
+        end_user_ids: List[str],
+        batch_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """批量软删过期临时身份，逐用户隔离错误并兜底释放 inflight 锁。"""
+    from app.repositories.end_user_repository import EndUserRepository
+
+    started_at = time.time()
+    effective_batch_id = batch_id or self.request.id or uuid.uuid4().hex
+    unique_ids = list(dict.fromkeys(str(item) for item in (end_user_ids or [])))
+    redis_client = get_sync_redis_client()
+    if len(unique_ids) > _SOFT_DELETE_BATCH_SIZE:
+        for end_user_id in unique_ids:
+            _release_soft_delete_inflight(
+                redis_client,
+                end_user_id,
+                effective_batch_id,
+            )
+        return {
+            "status": "FAILED",
+            "reason": "batch_too_large",
+            "batch_id": effective_batch_id,
+            "received": len(unique_ids),
+            "limit": _SOFT_DELETE_BATCH_SIZE,
+        }
+
+    success_count = 0
+    fail_count = 0
+    skipped_count = 0
+    failed_ids: List[str] = []
+
+    def _delete_one(end_user_id: str) -> str:
+        if redis_client is None:
+            raise RuntimeError("Redis unavailable; memory write lock cannot be acquired")
+
+        parsed_id = uuid.UUID(end_user_id)
+        write_lock = RedisFairLock(
+            key=f"memory_write:{end_user_id}",
+            redis_client=redis_client,
+            expire=1200,
+            timeout=60,
+            auto_renewal=True,
+        )
+        with write_lock:
+            with get_db_context() as db:
+                repository = EndUserRepository(db)
+                if not repository.is_expired_temporary_end_user(parsed_id):
+                    return "skipped"
+                if not repository.soft_delete_by_end_user_id(parsed_id):
+                    raise RuntimeError("EndUser was no longer active during soft delete")
+        return "success"
+
+    try:
+        for end_user_id in unique_ids:
+            try:
+                outcome = _delete_one(end_user_id)
+                if outcome == "success":
+                    success_count += 1
+                else:
+                    skipped_count += 1
+            except SoftTimeLimitExceeded:
+                logger.error(
+                    f"[ExpiredEndUserDelete] 达到软超时: batch_id={effective_batch_id}, "
+                    f"end_user_id={end_user_id}"
+                )
+                raise
+            except Exception as e:
+                fail_count += 1
+                failed_ids.append(end_user_id)
+                logger.error(
+                    f"[ExpiredEndUserDelete] 清理失败: end_user_id={end_user_id}, error={e}",
+                    exc_info=True,
+                )
+            finally:
+                _release_soft_delete_inflight(
+                    redis_client,
+                    end_user_id,
+                    effective_batch_id,
+                )
+    finally:
+        for end_user_id in unique_ids:
+            _release_soft_delete_inflight(
+                redis_client,
+                end_user_id,
+                effective_batch_id,
+            )
+
+    elapsed = time.time() - started_at
+    logger.info(
+        f"[ExpiredEndUserDelete] 批次完成: batch_id={effective_batch_id}, "
+        f"success={success_count}, failed={fail_count}, skipped={skipped_count}, "
+        f"elapsed={elapsed:.1f}s"
+    )
+    return {
+        "status": "SUCCESS" if fail_count == 0 else "PARTIAL_FAILURE",
+        "batch_id": effective_batch_id,
+        "success": success_count,
+        "failed": fail_count,
+        "skipped": skipped_count,
+        "failed_ids": failed_ids,
+        "elapsed_time": elapsed,
+    }
 
 
 @celery_app.task(
