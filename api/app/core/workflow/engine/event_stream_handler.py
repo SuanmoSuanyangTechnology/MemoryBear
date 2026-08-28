@@ -19,19 +19,98 @@ class EventStreamHandler:
             output_coordinator: StreamOutputCoordinator,
             variable_pool: VariablePool,
             execution_id: str,
-            multi_answer_mode_enabled: bool = False,
     ):
         self.coordinator = output_coordinator
         self.variable_pool = variable_pool
         self.execution_id = execution_id
-        self.multi_answer_mode_enabled = multi_answer_mode_enabled
-        # 普通模式下，如果某个上游节点开始流式输出时还没有轮到它对应的
-        # 回复节点，则整条流都延后到节点完成后从变量池一次性输出。
-        # 不能在中途切换为实时输出，否则切换前的 chunk 会丢失。
-        self._deferred_serial_streams: set[tuple[str, str]] = set()
+        # Transactions are isolated by source node and generation attempt so a
+        # delayed/duplicated rollback can never remove a newer retry attempt.
+        self._optimistic_streams: dict[tuple[str, int | None], dict] = {}
 
     def _mask(self, value):
         return value
+
+    @staticmethod
+    def _stream_key(node_id: str, attempt: int | None) -> tuple[str, int | None]:
+        return node_id, attempt
+
+    def _find_optimistic_target(self, node_id: str, field: str, attempt: int | None):
+        """Return the unique direct SUCCESS output target for provisional chunks."""
+        if field != "output":
+            return None
+
+        key = self._stream_key(node_id, attempt)
+        owner = self._optimistic_streams.get(key)
+        if owner:
+            end_info = self.coordinator.end_outputs.get(owner["end_id"])
+            if not end_info:
+                return None
+            return owner["end_id"], end_info, owner["target_segment_idx"]
+
+        dependent_ends = self.coordinator.find_ends_dependent_on_scope(node_id)
+        if len(dependent_ends) != 1:
+            return None
+
+        end_id, end_info = dependent_ends[0]
+        if any(
+                stream["end_id"] == end_id
+                for stream in self._optimistic_streams.values()
+        ):
+            return None
+        expected_labels = end_info.control_nodes.get(node_id)
+        if (
+                end_info.activate
+                or set(end_info.control_nodes) != {node_id}
+                or set(expected_labels or []) != {"SUCCESS"}
+                or not end_info.output_resolved
+        ):
+            return None
+
+        target_segment_idx = None
+        for idx in range(end_info.cursor, len(end_info.outputs)):
+            segment = end_info.outputs[idx]
+            if segment.is_variable and segment.depends_on_scope(node_id):
+                if (segment.get_field() or "output") == field:
+                    target_segment_idx = idx
+                break
+        if target_segment_idx is None:
+            return None
+        # A preceding variable would require a transactional template evaluator;
+        # literal prefixes are safe because they share this End's rollback scope.
+        if any(segment.is_variable for segment in end_info.outputs[end_info.cursor:target_segment_idx]):
+            return None
+
+        return end_id, end_info, target_segment_idx
+
+    async def handle_node_stream_control_event(self, data: dict):
+        """Translate one source node's attempt rollback into an output-scoped control."""
+        if data.get("action") != "rollback":
+            return
+        source_node_id = data.get("node_id")
+        attempt = data.get("attempt")
+        key = self._stream_key(source_node_id, attempt)
+        if attempt is None:
+            matching_keys = [
+                candidate for candidate in self._optimistic_streams
+                if candidate[0] == source_node_id
+            ]
+            if len(matching_keys) == 1:
+                key = matching_keys[0]
+        optimistic = self._optimistic_streams.pop(key, None)
+        if not optimistic:
+            return
+
+        yield {
+            "event": "stream_rollback",
+            "data": {
+                "source_node_id": source_node_id,
+                "output_node_id": optimistic["end_id"],
+                "attempt": optimistic.get("attempt"),
+                "reason": data.get("reason"),
+            },
+        }
+        # End cursors are untouched until SUCCESS reconciliation, so every retry
+        # can claim a fresh optimistic transaction from the same template span.
 
     def update_stream_output_status(self, activate: dict, data: dict):
         """
@@ -60,7 +139,21 @@ class EventStreamHandler:
                         f"type={type(node_data).__name__}, value={node_data!r}"
                     )
                     continue
-                node_output_status = self.variable_pool.get_value(f"{node_id}.output", default=None, strict=False)
+                # Internal route fields must take precedence over visible output.
+                # Branch-mode LLMs have both `output` and `branch_signal`; using
+                # the text output as status would leave SUCCESS End nodes gated.
+                node_output_status = None
+                for route_field in ("__route", "branch_signal"):
+                    route_value = self.variable_pool.get_value(
+                        f"{node_id}.{route_field}", default=None, strict=False
+                    )
+                    if route_value is not None:
+                        node_output_status = route_value
+                        break
+                if node_output_status is None:
+                    node_output_status = self.variable_pool.get_value(
+                        f"{node_id}.output", default=None, strict=False
+                    )
                 if node_output_status is None:
                     node_outputs = node_data.get("node_outputs", {}) or {}
                     node_output_info = node_outputs.get(node_id, {}) or {}
@@ -76,19 +169,6 @@ class EventStreamHandler:
                     act_dict = node_data_raw.get("activate")
                     if isinstance(act_dict, dict) and act_dict:
                         node_output_status = str(list(act_dict.values())[0])
-                # Branch nodes that use internal routing fields (e.g. human_intervention
-                # uses __route, LLM uses branch_signal) strip these from the visible
-                # output via _extract_output, so they won't appear in node_outputs.
-                # The variable pool still has them (injected by _inject_route_variable),
-                # so look there as a fallback.
-                if node_output_status is None:
-                    for route_field in ("__route", "branch_signal"):
-                        route_value = self.variable_pool.get_value(
-                            f"{node_id}.{route_field}", default=None, strict=False
-                        )
-                        if route_value is not None:
-                            node_output_status = route_value
-                            break
                 self.coordinator.update_scope_activation(node_id, status=node_output_status)
 
     async def handle_updates_event(
@@ -121,22 +201,54 @@ class EventStreamHandler:
         state = await graph.aget_state(config=checkpoint_config)
         activate = state.values.get("activate", {}) if state.values else {}
 
-        self.update_stream_output_status(activate, data)
-        if self.multi_answer_mode_enabled:
-            # 一问多答模式下，每个回复节点独立推进，允许兄弟分支的消息事件交错输出。
-            async for msg_event in self.coordinator.emit_all_active_chunks(self.variable_pool):
-                yield msg_event
-        else:
-            # 普通模式保持原有串行语义：当前回复节点没有完成前，不推进队列中的下一个节点。
-            wait = False
-            while self.coordinator.activate_end and not wait:
-                async for msg_event in self.coordinator.emit_activate_chunk(self.variable_pool):
-                    yield msg_event
+        # Reconcile each completed provisional stream from its canonical variable
+        # value. Independent attempts and parallel LLMs complete in any order.
+        for stream_key, optimistic in list(self._optimistic_streams.items()):
+            source_node_id, attempt = stream_key
+            if source_node_id not in data:
+                continue
+            branch_signal = self.variable_pool.get_value(
+                f"{source_node_id}.branch_signal",
+                default=None,
+                strict=False,
+            )
+            if branch_signal == "SUCCESS":
+                reconciled_content = ""
+                end_info = self.coordinator.end_outputs.get(optimistic["end_id"])
+                target_idx = optimistic["target_segment_idx"]
+                if end_info:
+                    for segment in end_info.outputs[end_info.cursor:target_idx]:
+                        if not segment.is_variable:
+                            reconciled_content += segment.literal
+                    try:
+                        reconciled_content += self.variable_pool.get_literal(
+                            end_info.outputs[target_idx].literal
+                        )
+                    except Exception as exc:
+                        logger.warning(
+                            "[STREAM] Failed to reconcile provisional output for %s: %s",
+                            source_node_id, exc,
+                        )
+                # Yield before committing the cursor. Generator backpressure makes
+                # the service apply a possible scoped correction first.
+                yield {
+                    "event": "stream_reconcile",
+                    "data": {
+                        "source_node_id": source_node_id,
+                        "output_node_id": optimistic["end_id"],
+                        "attempt": attempt,
+                        "content": self._mask(reconciled_content),
+                    },
+                }
+                if end_info:
+                    end_info.cursor = max(end_info.cursor, target_idx + 1)
+                self._optimistic_streams.pop(stream_key, None)
 
-                if self.coordinator.activate_end:
-                    wait = True
-                else:
-                    self.update_stream_output_status(activate, data)
+        self.update_stream_output_status(activate, data)
+        # Every active reply advances independently. This is the baseline output
+        # model, so parallel LLMs never fall back to buffered serial replay.
+        async for msg_event in self.coordinator.emit_all_active_chunks(self.variable_pool):
+            yield msg_event
 
         logger.debug(f"[UPDATES] Received state update from nodes: {list(data.keys())} "
                      f"- execution_id: {self.execution_id}")
@@ -169,30 +281,57 @@ class EventStreamHandler:
         chunk = data.get("chunk")
         done = data.get("done")
         chunk_field = data.get("field", "output")
+        attempt = data.get("attempt")
 
-        if not self.multi_answer_mode_enabled:
-            stream_key = (node_id, chunk_field)
-            dependent_ends = self.coordinator.find_ends_dependent_on_scope(node_id)
-            belongs_to_current_end = any(
-                end_id == self.coordinator.activate_end
-                for end_id, _ in dependent_ends
-            )
-
-            # 一旦该流在尚未轮到时被抑制，后续 chunk（包括轮到之后到达的）
-            # 也必须全部抑制。done 事件不能 mark_scope_streamed，确保 updates
-            # 最终会从变量池读取并发送完整结果。
-            if stream_key in self._deferred_serial_streams:
+        # Branch-mode LLMs can optimistically stream only when ownership can be
+        # resolved unambiguously. Internal attempt metadata is removed before
+        # public SSE emission.
+        if data.get("provisional"):
+            optimistic_target = self._find_optimistic_target(node_id, chunk_field, attempt)
+            if optimistic_target:
+                end_id, end_info, target_segment_idx = optimistic_target
+                if done:
+                    # Do not create/commit a transaction for an empty stream.
+                    # Normal End activation will emit its canonical prefix/value.
+                    return
+                stream_key = self._stream_key(node_id, attempt)
+                optimistic = self._optimistic_streams.get(stream_key)
+                if optimistic is None:
+                    optimistic = {
+                        "node_id": node_id,
+                        "attempt": attempt,
+                        "field": chunk_field,
+                        "end_id": end_id,
+                        "target_segment_idx": target_segment_idx,
+                        "prefix_emitted": False,
+                    }
+                    self._optimistic_streams[stream_key] = optimistic
+                if chunk:
+                    if not optimistic["prefix_emitted"]:
+                        for segment in end_info.outputs[end_info.cursor:target_segment_idx]:
+                            if segment.literal:
+                                yield {
+                                    "event": "message",
+                                    "data": {
+                                        "content": self._mask(segment.literal),
+                                        "node_id": end_id,
+                                        "provisional_node_id": node_id,
+                                        "attempt": attempt,
+                                    },
+                                }
+                        optimistic["prefix_emitted"] = True
+                    yield {
+                        "event": "message",
+                        "data": {
+                            "content": self._mask(chunk),
+                            "node_id": end_id,
+                            "provisional_node_id": node_id,
+                            "attempt": attempt,
+                        },
+                    }
                 return
 
-            if dependent_ends and not belongs_to_current_end:
-                self._deferred_serial_streams.add(stream_key)
-                return
-
-        active_end_ids = (
-            self.coordinator.active_end_ids()
-            if self.multi_answer_mode_enabled
-            else ([self.coordinator.activate_end] if self.coordinator.activate_end else [])
-        )
+        active_end_ids = self.coordinator.active_end_ids()
         if active_end_ids:
             for end_id in active_end_ids:
                 if end_id not in self.coordinator.end_outputs:
@@ -219,9 +358,10 @@ class EventStreamHandler:
                         seg = end_info.outputs[i]
                         try:
                             value = seg.literal if not seg.is_variable else self.variable_pool.get_literal(seg.literal)
-                            msg_data = {"content": self._mask(value)}
-                            if self.multi_answer_mode_enabled:
-                                msg_data["node_id"] = end_id
+                            msg_data = {
+                                "content": self._mask(value),
+                                "node_id": end_id,
+                            }
                             yield {"event": "message", "data": msg_data}
                         except Exception:
                             pass
@@ -239,25 +379,17 @@ class EventStreamHandler:
                     if end_info.cursor >= len(end_info.outputs):
                         self.coordinator.pop_current_activate_end()
                 elif chunk:
-                    msg_data = {"content": self._mask(chunk)}
-                    if self.multi_answer_mode_enabled:
-                        msg_data["node_id"] = end_id
                     yield {
                         "event": "message",
-                        "data": msg_data,
+                        "data": {
+                            "content": self._mask(chunk),
+                            "node_id": end_id,
+                        },
                     }
-            if self.multi_answer_mode_enabled:
-                self.coordinator.activate_end = None
+            self.coordinator.activate_end = None
         else:
-            # Fallback: No active End node, but chunks are arriving.
-            # Only emit directly for End nodes that are already activated (no branch control).
-            # End nodes still waiting for branch routing must NOT receive chunks here.
-            # 普通模式下不能走该直通路径，否则多个并行 LLM 在回复节点进入串行队列前，
-            # chunk 会被直接交错发送。此时等待 updates 事件，再按 output_queue 顺序
-            # 从变量池发出完整结果即可；只有一问多答模式允许 fallback 并行输出。
-            if not self.multi_answer_mode_enabled:
-                return
-
+            # No End is active yet. If this source belongs to an already-resolved
+            # reply, stream it directly while branch-gated replies remain protected.
             dependent_ends = self.coordinator.find_ends_dependent_on_scope(node_id)
             active_dependent_ends = [(eid, einfo) for eid, einfo in dependent_ends if einfo.activate]
             if active_dependent_ends:
@@ -274,12 +406,12 @@ class EventStreamHandler:
                 if done:
                     self.coordinator.mark_scope_streamed(node_id, chunk_field)
                 elif chunk:
-                    msg_data = {"content": self._mask(chunk)}
-                    if self.multi_answer_mode_enabled:
-                        msg_data["node_id"] = active_dependent_ends[0][0]
                     yield {
                         "event": "message",
-                        "data": msg_data
+                        "data": {
+                            "content": self._mask(chunk),
+                            "node_id": active_dependent_ends[0][0],
+                        },
                     }
 
     async def handle_node_error_event(self, data: dict):

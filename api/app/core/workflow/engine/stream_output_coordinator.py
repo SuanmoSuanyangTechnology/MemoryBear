@@ -3,7 +3,6 @@
 # @Email: 1533512157@qq.com
 # @Time : 2026/2/9 15:11
 import re
-from collections import deque
 from typing import AsyncGenerator
 
 from pydantic import BaseModel, Field, PrivateAttr
@@ -268,28 +267,22 @@ class StreamOutputConfig(BaseModel):
 
 
 class StreamOutputCoordinator:
-    def __init__(self, multi_answer_mode_enabled: bool = False):
+    def __init__(self):
         self.end_outputs: dict[str, StreamOutputConfig] = {}
         self.activate_end: str | None = None
-        self.output_queue: deque[str] = deque()
-        self.processed_outputs = []
         # Track node scopes whose output was fully streamed via node_chunk events.
         # Used to prevent duplicate emission in emit_activate_chunk().
         # Streaming is tracked per output node.  The same upstream LLM can be
         # referenced by multiple Answer nodes, and completing one must not
         # suppress the sibling's final value.
         self._streamed_scopes: set[tuple[str, str, str]] = set()
-        # 一问多答模式开关
-        self.multi_answer_mode_enabled = multi_answer_mode_enabled
 
     def initialize_end_outputs(
             self,
             end_node_map: dict[str, StreamOutputConfig]
     ):
         self.end_outputs = end_node_map
-        self.processed_outputs = []
         self.activate_end = None
-        self.output_queue = deque()
         self._streamed_scopes = set()
 
     @property
@@ -387,8 +380,8 @@ class StreamOutputCoordinator:
           - Activate variable segments that depend on the completed node/scope.
           - Activate the entire End node output if any control conditions are met.
 
-        If any End node becomes active and `self.activate_end` is not yet set,
-        this node will be marked as the currently active End node.
+        Active End nodes are discovered independently by `active_end_ids()`;
+        no serial output queue is maintained.
 
         Args:
             scope (str): The node ID or scope that has completed execution.
@@ -396,11 +389,6 @@ class StreamOutputCoordinator:
         """
         for node in self.end_outputs:
             self.end_outputs[node].update_activate(scope, status)
-            if self.end_outputs[node].activate and node not in self.processed_outputs:
-                self.output_queue.append(node)
-                self.processed_outputs.append(node)
-        if self.activate_end is None and self.output_queue:
-            self.activate_end = self.output_queue.popleft()
 
     async def emit_activate_chunk(
             self,
@@ -489,12 +477,13 @@ class StreamOutputCoordinator:
 
             if final_chunk:
                 logger.info(f"[STREAM] StreamOutput Node:{self.activate_end}, chunk_length:{len(final_chunk)}")
-                msg_data = {"content": final_chunk}
-                if self.multi_answer_mode_enabled:
-                    msg_data["node_id"] = self.activate_end
                 yield {
                     "event": "message",
-                    "data": msg_data
+                    "data": {
+                        "content": final_chunk,
+                        # Preserve the identity of the End/Answer that owns this content.
+                        "node_id": self.activate_end,
+                    },
                 }
 
             # Advance cursor after processing
@@ -537,14 +526,11 @@ class StreamOutputCoordinator:
             if node_info.activate and node_info.cursor < len(node_info.outputs)
         }
 
-        if self.end_outputs or self.activate_end:
-            while self.activate_end:
-                # Force emit all remaining chunks of the active End node
-                async for msg_event in self.emit_activate_chunk(variable_pool, force=True):
-                    yield msg_event
-
-                if self.output_queue:
-                    self.activate_end = self.output_queue.popleft()
-                # Move to next active End node if current one is done
-                if not self.activate_end and self.end_outputs:
-                    self.activate_end = list(self.end_outputs.keys())[0]
+        # Flush every still-active output in stable configuration order. The
+        # coordinator no longer has a serial queue, so each End is selected
+        # directly from the remaining ordered mapping.
+        while self.end_outputs:
+            self.activate_end = next(iter(self.end_outputs))
+            async for msg_event in self.emit_activate_chunk(variable_pool, force=True):
+                yield msg_event
+        self.activate_end = None

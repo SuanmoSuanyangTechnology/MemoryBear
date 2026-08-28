@@ -11,6 +11,7 @@ from typing import Optional, Callable, Dict, Any
 from uuid import UUID
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
@@ -133,6 +134,11 @@ def _free_quota_config() -> Optional[Dict[str, Any]]:
         return None
 
 
+def _is_missing_premium_quota_schema(error: ProgrammingError) -> bool:
+    """Return whether a premium quota query failed because its schema is absent."""
+    return getattr(error.orig, "pgcode", None) == "42P01"
+
+
 def _get_quota_breakdown(
         db: Session, tenant_id: UUID,
 ) -> tuple[Optional[Dict[str, Any]], Dict[str, Any]]:
@@ -148,6 +154,12 @@ def _get_quota_breakdown(
         return base, ResourcePackService(db).get_overlay(tenant_id)
     except (ModuleNotFoundError, ImportError):
         logger.debug("premium 模块不存在，使用社区版免费套餐配额")
+        return _free_quota_config(), {}
+    except ProgrammingError as error:
+        if not _is_missing_premium_quota_schema(error):
+            raise
+        db.rollback()
+        logger.warning("premium 配额表不存在，回滚失败事务并使用社区版免费套餐配额")
         return _free_quota_config(), {}
 
 
@@ -166,6 +178,12 @@ async def _get_quota_breakdown_async(
         return base, await ResourcePackService.get_overlay_async(db, tenant_id)
     except (ModuleNotFoundError, ImportError):
         logger.debug("premium 模块不存在，使用社区版免费套餐配额")
+        return _free_quota_config(), {}
+    except ProgrammingError as error:
+        if not _is_missing_premium_quota_schema(error):
+            raise
+        await db.rollback()
+        logger.warning("premium 配额表不存在，回滚失败事务并使用社区版免费套餐配额")
         return _free_quota_config(), {}
 
 
