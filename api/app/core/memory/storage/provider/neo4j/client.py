@@ -150,73 +150,20 @@ class Neo4jClient(BaseClient):
     async def get_relationship(
             self,
             relationship_type: MemoryRelationshipType,
-            rel_filter: NodeFilter | None = None,
+            rel_filter: RelationshipFilter,
             projection: NodeProjection | None = None,
             sort: NodeSort | None = None,
-            *,
-            source_filter: NodeFilter | None = None,
-            target_filter: NodeFilter | None = None,
-            relationship_filter: RelationshipFilter | None = None,
     ) -> StorageReadResult:
-        """Query relationships with legacy filters or a relationship filter tree."""
+        """Query relationships using relationship and endpoint filters."""
         if not isinstance(relationship_type, MemoryRelationshipType):
             raise KeyError(
                 f"relationship type - {relationship_type} not supported"
             )
-        if relationship_filter is not None and any(
-                query_filter is not None
-                for query_filter in (rel_filter, source_filter, target_filter)
-        ):
-            raise ValueError(
-                "relationship_filter cannot be combined with rel_filter, "
-                "source_filter, or target_filter"
-            )
 
         escaped_type = relationship_type.value.replace("`", "``")
-        use_named_endpoints = (
-            relationship_filter is not None
-            or source_filter is not None
-            or target_filter is not None
+        predicate, parameters = compile_neo4j_relationship_filter(
+            rel_filter
         )
-        match_pattern = (
-            f"(source)-[r:`{escaped_type}`]->(target)"
-            if use_named_endpoints
-            else f"()-[r:`{escaped_type}`]->()"
-        )
-
-        if relationship_filter is not None:
-            predicate, parameters = compile_neo4j_relationship_filter(
-                relationship_filter
-            )
-            where_clause = f"WHERE {predicate}"
-        else:
-            predicates: list[str] = []
-            parameters: dict[str, Any] = {}
-            filters = (
-                (rel_filter, "r", "filter"),
-                (source_filter, "source", "source_filter"),
-                (target_filter, "target", "target_filter"),
-            )
-            for query_filter, variable, parameter_prefix in filters:
-                if query_filter is None:
-                    continue
-                predicate, filter_parameters = compile_neo4j_filter(
-                    query_filter,
-                    variable=variable,
-                    parameter_prefix=parameter_prefix,
-                )
-                predicates.append(predicate)
-                parameters.update(filter_parameters)
-
-            if len(predicates) == 1:
-                where_clause = f"WHERE {predicates[0]}"
-            elif predicates:
-                grouped_predicates = (
-                    f"({predicate})" for predicate in predicates
-                )
-                where_clause = f"WHERE {' AND '.join(grouped_predicates)}"
-            else:
-                where_clause = ""
 
         return_expression, projection_parameters = compile_neo4j_projection(
             projection, variable="r"
@@ -224,8 +171,8 @@ class Neo4jClient(BaseClient):
         order_by, sort_parameters = compile_neo4j_sort(sort, variable="r")
         sort_clause = f"WITH r\n        {order_by}" if order_by else ""
         query = f"""
-        MATCH {match_pattern}
-        {where_clause}
+        MATCH (source)-[r:`{escaped_type}`]->(target)
+        WHERE {predicate}
         {sort_clause}
         RETURN {return_expression}
         """
