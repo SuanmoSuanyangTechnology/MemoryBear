@@ -114,3 +114,22 @@ class BaseClient(ABC):
         raise NotImplementedError(
             f"{type(self).__name__} does not support relationship queries"
         )
+
+    async def update_relationship(
+        self,
+        relationship_type: MemoryRelationshipType,
+        data: dict,
+        rel_filter: RelationshipFilter,
+    ) -> StorageWriteResult:
+        raise NotImplementedError(
+            f"{type(self).__name__} does not support relationship updates"
+        )
+
+    async def delete_relationship(
+        self,
+        relationship_type: MemoryRelationshipType,
+        rel_filter: RelationshipFilter,
+    ) -> StorageWriteResult:
+        raise NotImplementedError(
+            f"{type(self).__name__} does not support relationship deletes"
+        )
