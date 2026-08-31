@@ -12,13 +12,12 @@ import time
 import uuid
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
-import httpx
 from dotenv import load_dotenv
-from openai import APIConnectionError, APITimeoutError, AuthenticationError, BadRequestError, PermissionDeniedError, RateLimitError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
+from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_config_logger, get_logger
 from app.i18n.service import t
@@ -45,74 +44,12 @@ from app.schemas.memory_storage_schema import (
     ConfigUpdateExtracted,
 )
 from app.services.memory_config_service import MemoryConfigService
+from app.utils.llm_error_utils import ClassifiedLLMError, classify_llm_error
 from app.utils.sse_utils import format_sse_message
 
 logger = get_logger(__name__)
 config_logger = get_config_logger()
 
-
-def classify_llm_error(e: Exception, prefix: str = "llm") -> tuple[str, str]:
-    """
-    渐进式判断错误类型，兼容多个供应商。
-    判断顺序：异常类型 → HTTP 状态码 → 关键词匹配 → 兜底
-    """
-    # 优先级 1：异常类型（最可靠）
-    if isinstance(e, AuthenticationError):
-        return (f"{prefix}_key_invalid", f"{prefix} 解析失败：API Key 无效，请检查配置")
-    if isinstance(e, PermissionDeniedError):
-        return (f"{prefix}_key_locked", f"{prefix} 解析失败：API Key 已被锁定或权限不足")
-    if isinstance(e, RateLimitError):
-        return (f"{prefix}_rate_limited", f"{prefix} 解析失败：请求过于频繁，请稍后重试")
-    if isinstance(e, APITimeoutError):
-        return (f"{prefix}_connection_failed", f"{prefix} 解析失败：模型服务连接超时，请检查网络或 URL 配置")
-    if isinstance(e, APIConnectionError):
-        return (f"{prefix}_connection_failed", f"{prefix} 解析失败：模型服务连接失败，请检查 URL 配置")
-    if isinstance(e, BadRequestError):
-        return (f"{prefix}_bad_request", f"{prefix} 解析失败：请求参数错误，请检查文件格式或 URL 是否可访问")
-
-    # 优先级 2：HTTP 状态码
-    status = e.response.status_code if isinstance(e, httpx.HTTPStatusError) else getattr(e, "status_code", None)
-    if status is not None:
-        if status == 400:
-            return (f"{prefix}_bad_request", f"{prefix} 解析失败：请求参数错误，请检查文件格式或 URL 是否可访问")
-        if status == 401:
-            return (f"{prefix}_key_invalid", f"{prefix} 解析失败：API Key 无效，请检查配置")
-        if status == 403:
-            return (f"{prefix}_key_locked", f"{prefix} 解析失败：API Key 已被锁定或过期")
-        if status in (408, 504):
-            return (f"{prefix}_connection_failed", f"{prefix} 解析失败：模型服务连接超时，请检查网络或 URL 配置")
-        if status == 429:
-            return (f"{prefix}_rate_limited", f"{prefix} 解析失败：请求过于频繁，请稍后重试")
-        if status == 404:
-            return (f"{prefix}_connection_failed", f"{prefix} 解析失败：模型服务地址不存在，请检查 URL 配置")
-        if status >= 500:
-            return (f"{prefix}_server_error", f"{prefix} 解析失败：模型服务异常，请稍后重试")
-
-    # 优先级 3：关键词匹配（兜底）
-    error_msg = str(e).lower()
-    if any(kw in error_msg for kw in ["auth", "unauthorized", "invalid_api_key", "incorrect_api_key", "401"]):
-        return (f"{prefix}_key_invalid", f"{prefix} 解析失败：API Key 无效，请检查配置")
-    if any(kw in error_msg for kw in ["expired", "disabled", "locked", "forbidden", "403"]):
-        return (f"{prefix}_key_locked", f"{prefix} 解析失败：API Key 已被锁定或过期")
-    if any(kw in error_msg for kw in ["arrearage", "欠费", "insufficient", "balance", "quota"]):
-        return (f"{prefix}_key_arrearage", f"{prefix} 解析失败：账户欠费或额度不足，请充值")
-    if any(kw in error_msg for kw in ["content-length", "content_length", "missing", "invalid_parameter", "400"]):
-        return (f"{prefix}_bad_request", f"{prefix} 解析失败：请求参数错误，请检查文件格式或 URL 是否可访问")
-    if any(kw in error_msg for kw in ["timeout", "timed out"]):
-        return (f"{prefix}_connection_failed", f"{prefix} 解析失败：模型服务连接超时，请检查网络或 URL 配置")
-    if any(kw in error_msg for kw in ["connect", "connection", "unreachable", "name resolution", "not found", "404"]):
-        return (f"{prefix}_connection_failed", f"{prefix} 解析失败：模型服务连接失败，请检查 URL 配置")
-    if any(kw in error_msg for kw in ["rate limit", "too many request", "429"]):
-        return (f"{prefix}_rate_limited", f"{prefix} 解析失败：请求过于频繁，请稍后重试")
-    if any(kw in error_msg for kw in ["not support", "unsupported", "capability", "modality"]):
-        return (f"{prefix}_capability_mismatch", f"{prefix} 解析失败：模型不支持该能力，请检查配置")
-    if any(kw in error_msg for kw in ["internal", "server error", "500", "502", "503"]):
-        return (f"{prefix}_server_error", f"{prefix} 解析失败：模型服务异常，请稍后重试")
-
-    # 优先级 4：无法识别，返回友好的默认提示（不暴露原始异常内容）
-    if prefix == "llm":
-        return (f"{prefix}_unknown_error", "模型调用失败，请稍后重试或联系管理员")
-    return (f"{prefix}_unknown_error", f"{prefix} 解析失败，请稍后重试或联系管理员")
 
 # Load environment variables for Neo4j connector
 load_dotenv()
@@ -670,18 +607,24 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
         return int(getattr(usage_metadata, "total_tokens", 0) or 0)
 
     @staticmethod
-    def _trial_run_chat_error_data(language: str, kind: str = "generation") -> dict[str, Any]:
-        english = language == "en"
-        if kind == "model":
-            message = "Model unavailable" if english else "模型不可用"
-            error = "no available api key"
-        elif kind == "access":
-            message = "Configuration access denied" if english else "无权访问该配置"
-            error = "configuration access denied"
-        else:
-            message = "Chat generation failed" if english else "对话生成失败"
-            error = "trial run chat generation failed"
-        return {"code": 5000, "message": message, "error": error}
+    def _classified_llm_error_data(
+            classified: ClassifiedLLMError,
+            language: str,
+            message: str | None = None,
+    ) -> dict[str, Any]:
+        return {
+            "code": int(classified.biz_code),
+            "error": classified.error,
+            "message": message or t(classified.i18n_key, locale=language),
+        }
+
+    @staticmethod
+    def _trial_run_chat_error_data(language: str) -> dict[str, Any]:
+        return {
+            "code": int(BizCode.API_KEY_MISSING),
+            "error": "api_key_missing",
+            "message": t("errors.llm.api_key_missing", locale=language),
+        }
 
     async def trial_run_chat_stream(
             self,
@@ -771,21 +714,6 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
         try:
             async with get_async_db_context() as db:
                 memory_config = await MemoryConfigService(db).load_memory_config_async(payload.config_id)
-                if (
-                        workspace_id is None
-                        or tenant_id is None
-                        or memory_config.workspace_id != workspace_id
-                        or memory_config.tenant_id != tenant_id
-                ):
-                    logger.warning(
-                        "Trial-run chat configuration access denied: config_id=%s, config_workspace=%s, request_workspace=%s",
-                        payload.config_id,
-                        memory_config.workspace_id,
-                        workspace_id,
-                    )
-                    yield format_sse_message("error", self._trial_run_chat_error_data(language, "access"))
-                    return
-
                 runtime_cache: dict[uuid.UUID, tuple[ModelInfo, uuid.UUID] | None] = {}
 
                 async def get_runtime(model_config_id: uuid.UUID):
@@ -802,7 +730,7 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
 
                 final_runtime = await get_runtime(memory_config.llm_model_id)
                 if final_runtime is None:
-                    yield format_sse_message("error", self._trial_run_chat_error_data(language, "model"))
+                    yield format_sse_message("error", self._trial_run_chat_error_data(language))
                     return
 
                 media_runtimes: dict[FileType, tuple[ModelInfo, uuid.UUID] | None] = {}
@@ -840,57 +768,44 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
                 refs = attachment_groups[file_type]
                 runtime = media_runtimes.get(file_type)
                 if runtime is None:
-                    # 返回错误标记
+                    classified = ClassifiedLLMError(
+                        "model_not_found",
+                        BizCode.MODEL_NOT_FOUND,
+                        "errors.llm.model_not_found",
+                    )
                     return {
                         "error": True,
-                        "type": file_type.value.upper(),
-                        "error_field": f"{file_type.value.upper()}_model_unavailable",
-                        "message": f"{file_type.value.upper()} 附件：没有可用的处理模型",
+                        "subject": file_type.value.lower(),
+                        "classified": classified,
                     }
 
                 model_info, api_key_id = runtime
-                try:
-                    # 本地文件已由短会话加载，远程文件已有 URL；后续格式化不需要数据库。
-                    multimodal_service = MultimodalService(None, model_info)
-                    parts = await self._process_trial_run_files(
-                        [ref["file"] for ref in refs],
-                        multimodal_service,
-                        config_workspace_id,
-                        config_tenant_id,
-                        model_info.capability,
-                        language,
-                    )
+                # 附件在进入试运行前已经完成输入校验，加载与格式化异常不在这里转换为 LLM 错误。
+                multimodal_service = MultimodalService(None, model_info)
+                parts = await self._process_trial_run_files(
+                    [ref["file"] for ref in refs],
+                    multimodal_service,
+                    config_workspace_id,
+                    config_tenant_id,
+                    model_info.capability,
+                    language,
+                )
 
-                    mapping = "\n".join(
-                        f"Attachment {index} = {attachment_label(ref)}"
-                        for index, ref in enumerate(refs, start=1)
-                    )
-                    requested_language = "English" if language == "en" else "Chinese"
-                    parser_prompt = (
-                        f"{TRIAL_RUN_ATTACHMENT_ANALYSIS_PROMPT}\n"
-                        f"Reply in {requested_language}.\n{mapping}"
-                    )
-                    parser_llm = build_llm(model_info, streaming=False, max_tokens=2000)
+                mapping = "\n".join(
+                    f"Attachment {index} = {attachment_label(ref)}"
+                    for index, ref in enumerate(refs, start=1)
+                )
+                requested_language = "English" if language == "en" else "Chinese"
+                parser_prompt = (
+                    f"{TRIAL_RUN_ATTACHMENT_ANALYSIS_PROMPT}\n"
+                    f"Reply in {requested_language}.\n{mapping}"
+                )
+                parser_llm = build_llm(model_info, streaming=False, max_tokens=2000)
+                try:
                     response = await parser_llm.ainvoke([
                         SystemMessage(content=parser_prompt),
                         HumanMessage(content=parts),
                     ])
-                    response_text = "".join(
-                        self._stream_content_to_texts(getattr(response, "content", None))
-                    ).strip()
-                    if not response_text:
-                        # 返回空文本也视为错误
-                        return {
-                            "error": True,
-                            "type": file_type.value,
-                            "error_field": f"{file_type.value}_empty_response",
-                            "message": f"{file_type.value} 附件解析未返回文本",
-                        }
-                    return {
-                        "text": response_text,
-                        "tokens": self._extract_total_tokens(response),
-                        "api_key_id": api_key_id,
-                    }
                 except asyncio.CancelledError:
                     raise
                 except Exception as e:
@@ -899,14 +814,30 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
                         file_type.value,
                         exc_info=True,
                     )
-                    # 使用错误分类，前缀使用大写
-                    error_field, message = classify_llm_error(e, prefix=file_type.value.upper())
                     return {
                         "error": True,
-                        "type": file_type.value.upper(),
-                        "error_field": error_field,
-                        "message": message,
+                        "subject": file_type.value.lower(),
+                        "classified": classify_llm_error(e, provider=model_info.provider),
                     }
+                response_text = "".join(
+                    self._stream_content_to_texts(getattr(response, "content", None))
+                ).strip()
+                if not response_text:
+                    classified = ClassifiedLLMError(
+                        "empty_response",
+                        BizCode.LLM_ERROR,
+                        "errors.llm.empty_response",
+                    )
+                    return {
+                        "error": True,
+                        "subject": file_type.value.lower(),
+                        "classified": classified,
+                    }
+                return {
+                    "text": response_text,
+                    "tokens": self._extract_total_tokens(response),
+                    "api_key_id": api_key_id,
+                }
 
             async def extract_document_group() -> dict[str, Any]:
                 refs = attachment_groups[FileType.DOCUMENT]
@@ -915,30 +846,14 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
                 multimodal_service = MultimodalService(None, final_model_info)
                 for ref in refs:
                     file = ref["file"]
-                    try:
-                        if file.transfer_method == TransferMethod.LOCAL_FILE:
-                            await self._load_trial_run_local_file(
-                                file,
-                                config_workspace_id,
-                                config_tenant_id,
-                            )
-                        text = await multimodal_service.extract_document_text(file)
-                        documents.append(f"{attachment_label(ref)}\n{text}")
-                    except asyncio.CancelledError:
-                        raise
-                    except Exception as e:
-                        logger.error(
-                            "[TRIAL_RUN_CHAT_STREAM] Document extraction failed",
-                            exc_info=True,
+                    if file.transfer_method == TransferMethod.LOCAL_FILE:
+                        await self._load_trial_run_local_file(
+                            file,
+                            config_workspace_id,
+                            config_tenant_id,
                         )
-                        # 使用错误分类
-                        error_field, message = classify_llm_error(e, prefix="DOCUMENT")
-                        return {
-                            "error": True,
-                            "type": "DOCUMENT",
-                            "error_field": error_field,
-                            "message": message,
-                        }
+                    text = await multimodal_service.extract_document_text(file)
+                    documents.append(f"{attachment_label(ref)}\n{text}")
                 return {"text": "\n\n".join(documents), "tokens": 0, "api_key_id": None}
 
             analysis_tasks = [
@@ -951,23 +866,32 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
 
             analysis_results = await asyncio.gather(*analysis_tasks) if analysis_tasks else []
 
-            # 收集所有错误
-            error_messages = []
-            first_error_field = "attachment_parse_failed"
+            attachment_errors: list[tuple[str, ClassifiedLLMError]] = []
             for result in analysis_results:
                 if isinstance(result, dict) and result.get("error"):
-                    error_messages.append(result["message"])
-                    if first_error_field == "attachment_parse_failed":
-                        first_error_field = result["error_field"]
+                    attachment_errors.append((result["subject"], result["classified"]))
 
-            # 如果有错误，一次性返回，所有信息合并到 message 中
-            if error_messages:
-                combined_message = "附件解析失败：" + "；".join(error_messages)
-                yield format_sse_message("error", {
-                    "code": 5000,
-                    "error": first_error_field,
-                    "message": combined_message,
-                })
+            if attachment_errors:
+                parts = [
+                    f"{t(f'errors.llm.subjects.{subject}', locale=language)} "
+                    f"{t(classified.i18n_key, locale=language)}"
+                    for subject, classified in attachment_errors
+                ]
+                combined_message = parts[0]
+                if len(parts) > 1:
+                    combined_message = (
+                        t("errors.llm.attachment_prefix", locale=language)
+                        + "；".join(parts)
+                    )
+                first_classified = attachment_errors[0][1]
+                yield format_sse_message(
+                    "error",
+                    self._classified_llm_error_data(
+                        first_classified,
+                        language,
+                        message=combined_message,
+                    ),
+                )
                 return
 
             # 继续原有逻辑
@@ -1017,17 +941,28 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
 
             full_content = ""
             final_tokens = 0
-            async for event in agent.astream_events({"messages": messages}, version="v2"):
-                event_type = event.get("event")
-                if event_type == "on_chat_model_stream":
-                    chunk = event.get("data", {}).get("chunk")
-                    for text_chunk in self._stream_content_to_texts(getattr(chunk, "content", None)):
-                        full_content += text_chunk
-                        yield format_sse_message("message", {"content": text_chunk})
-                elif event_type == "on_chat_model_end":
-                    output = event.get("data", {}).get("output")
-                    message = self._extract_message_from_event_output(output)
-                    final_tokens = max(final_tokens, self._extract_total_tokens(message))
+            try:
+                async for event in agent.astream_events({"messages": messages}, version="v2"):
+                    event_type = event.get("event")
+                    if event_type == "on_chat_model_stream":
+                        chunk = event.get("data", {}).get("chunk")
+                        for text_chunk in self._stream_content_to_texts(getattr(chunk, "content", None)):
+                            full_content += text_chunk
+                            yield format_sse_message("message", {"content": text_chunk})
+                    elif event_type == "on_chat_model_end":
+                        output = event.get("data", {}).get("output")
+                        message = self._extract_message_from_event_output(output)
+                        final_tokens = max(final_tokens, self._extract_total_tokens(message))
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                logger.error("[TRIAL_RUN_CHAT_STREAM] Final LLM generation failed", exc_info=True)
+                classified = classify_llm_error(e, provider=final_model_info.provider)
+                yield format_sse_message(
+                    "error",
+                    self._classified_llm_error_data(classified, language),
+                )
+                return
 
             if attachment_context:
                 details_title = (
@@ -1066,24 +1001,13 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
         except asyncio.CancelledError:
             logger.info("[TRIAL_RUN_CHAT_STREAM] Client disconnected during streaming")
             raise
-        except Exception as e:
-            logger.error("[TRIAL_RUN_CHAT_STREAM] Error during streaming", exc_info=True)
-            error_msg = str(e).lower()
-            # 区分配置错误和 LLM 错误
-            if "configuration not found" in error_msg or "config" in error_msg and "not found" in error_msg:
-                yield format_sse_message("error", {
-                    "code": 5000,
-                    "error": "config_error",
-                    "message": "配置读取失败",
-                })
-            else:
-                # 使用错误分类
-                error_field, message = classify_llm_error(e, prefix="llm")
-                yield format_sse_message("error", {
-                    "code": 5000,
-                    "error": error_field,
-                    "message": message,
-                })
+        except ConfigurationError:
+            logger.error("[TRIAL_RUN_CHAT_STREAM] Configuration loading failed", exc_info=True)
+            yield format_sse_message("error", {
+                "code": int(BizCode.MEMORY_CONFIG_NOT_FOUND),
+                "error": "config_error",
+                "message": "Configuration loading failed" if language == "en" else "配置读取失败",
+            })
 
     async def pilot_run_stream(self, payload: PilotRunInput, language: str = "zh") -> AsyncGenerator[str, None]:
         """
