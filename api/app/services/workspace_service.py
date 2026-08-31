@@ -5,7 +5,7 @@ from typing import List, Optional
 
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.config.default_ontology_initializer import DefaultOntologyInitializer
 from app.core.config import settings
@@ -66,12 +66,18 @@ def _serialize_model_option(model: ModelConfig) -> dict:
         "capability": [getattr(item, "value", item) for item in (model.capability or [])],
         "logo": model.logo,
         "is_public": bool(model.is_public),
+        # 弃用标记存放在基础模型（model_bases）上，与 ModelConfig schema 的派生方式保持一致
+        "is_deprecated": bool(
+            getattr(model, "model_base", None) is not None
+            and getattr(model.model_base, "is_deprecated", False)
+        ),
     }
 
 
 def _get_accessible_workspace_models(db: Session, tenant_id: uuid.UUID) -> list[ModelConfig]:
     return (
         db.query(ModelConfig)
+        .options(joinedload(ModelConfig.model_base))
         .filter(ModelConfig.is_active.is_(True))
         .filter(
             or_(
@@ -89,6 +95,7 @@ def _get_accessible_workspace_models(db: Session, tenant_id: uuid.UUID) -> list[
 def _get_public_speedbear_models(db: Session) -> list[ModelConfig]:
     return (
         db.query(ModelConfig)
+        .options(joinedload(ModelConfig.model_base))
         .filter(ModelConfig.is_active.is_(True))
         .filter(ModelConfig.provider == ModelProvider.SPEEDBEAR)
         .filter(ModelConfig.is_public.is_(True))
@@ -155,6 +162,7 @@ def _build_workspace_preset_response(db: Session, preset: WorkspaceDefaultModelP
     model_ids = [model_id for model_id in slot_to_model_id.values() if model_id]
     models = (
         db.query(ModelConfig)
+        .options(joinedload(ModelConfig.model_base))
         .filter(ModelConfig.id.in_(model_ids))
         .all()
     )
