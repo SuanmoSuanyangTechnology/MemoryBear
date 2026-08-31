@@ -134,7 +134,7 @@ class MemoryRetrievalBusinessError(Exception):
     def model_call_failed(
         cls,
         stage: MemoryRetrievalStage,
-        cause: Exception,
+        cause: BaseException,
         *,
         model_type: MemoryModelType,
         impact: MemoryRetrievalImpact = MemoryRetrievalImpact.INCOMPLETE,

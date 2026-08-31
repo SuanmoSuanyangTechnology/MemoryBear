@@ -4,9 +4,9 @@ from numbers import Real
 from typing import Any, Callable, Self
 
 from elastic_transport import ObjectApiResponse
-from elasticsearch import AsyncElasticsearch, Elasticsearch
+from elasticsearch import AsyncElasticsearch
 
-from app.core.memory.storage.enums import BackendType, MemoryNodeLabel, MemoryNodeType
+from app.core.memory.storage.enums import BackendType, MemoryNodeLabel
 from app.core.memory.storage.exceptions import UnsupportedQueryError
 from app.core.memory.storage.models import (
     FilterCondition,
@@ -16,8 +16,7 @@ from app.core.memory.storage.models import (
     NodeSort,
     ProjectionField,
     StorageReadResult,
-    StorageWriteResult,
-)
+    StorageWriteResult, )
 from app.core.memory.storage.provider.base import BaseClient
 from app.core.memory.storage.provider.elasticsearch.compiler.filter_compiler import (
     compile_elasticsearch_filter,
@@ -407,7 +406,7 @@ class ElasticClient(BaseClient):
                 search_options["search_after"] = list(search_after)
         finally:
             await client.close_point_in_time(id=pit_id)
-        return StorageReadResult.from_items(nodes, backend=self.name)
+        return StorageReadResult.from_items(nodes, label=label, backend=self.name)
 
     async def search_by_embedding(
             self,
@@ -460,7 +459,7 @@ class ElasticClient(BaseClient):
             source_required=source_required,
             score_transform=lambda score: (2.0 * score) - 1.0,
         )
-        return StorageReadResult.from_items(items, backend=self.name)
+        return StorageReadResult.from_items(items, label=label, backend=self.name)
 
     async def search_by_fulltext(
             self,
@@ -509,33 +508,35 @@ class ElasticClient(BaseClient):
             "fulltext search",
             source_required=source_required,
         )
-        return StorageReadResult.from_items(items, backend=self.name)
+        return StorageReadResult.from_items(items, label=label, backend=self.name)
 
 
 # async def dev():
 #     client = await ElasticClient.create()
 #     await client.save_node(
-#         MemoryNodeType.EXTRACTED_ENTITY,
+#         MemoryNodeType.STATEMENT,
 #         {
 #             "access_count": 0,
-#             "id": "844773314c314275bd23c4bc54230e29",
-#             "access_history": [],
-#             "aliases": [],
-#             "description": "[2026-05-29T18:07:04.150123] 表达对小米yu7这台车有喜好的说话者；[2026-08-04T08:16:58.936996+00:00] 计划买车的说话者；[2026-08-04T08:16:59.343820+00:00] 喜欢小米SU7这台车的说话者",
-#             "beliefs_or_stances": [],
-#             "connect_strength": "Strong",
-#             "core_facts": ["位于杭州红熊智能科技有限公司（城北万象城）,名字为AAA"],
-#             "created_at": 1787550740,
-#             "name_embedding": []  # embedding demo
+#             "id": "df1e7ddf705c4ba1ae81f3b6ed069b80",
+#             "end_user_id": "b237ec06-44a4-4d56-944f-cfbab605b577",
+#             "statement": "[2026-05-29T18:07:04.150123] 表达对小米yu7这台车有喜好的说话者；[2026-08-04T08:16:58.936996+00:00] 计划买车的说话者；[2026-08-04T08:16:59.343820+00:00] 喜欢小米SU7这台车的说话者",
+#             "created_at": 1787550740
 #         }
 #     )
 #     cost = time.perf_counter()
 #     res = await client.search_by_fulltext(
-#         MemoryNodeType.EXTRACTED_ENTITY,
-#         NodeFilter.eq("id", "844773314c314275bd23c4bc54230e29"),
+#         MemoryNodeType.STATEMENT,
+#         NodeFilter(
+#             logic=FilterLogic.AND,
+#             conditions=(
+#                 FilterCondition(field="end_user_id", operator=FilterOperator.EQ, value="b237ec06-44a4-4d56-944f-cfbab605b577"),
+#                 FilterCondition(field="delete_at", operator=FilterOperator.EXISTS, value=False)
+#             )
+#         ),
+#         # NodeFilter.eq("end_user_id", "b237ec06-44a4-4d56-944f-cfbab605b577"),
 #
-#         text="小米yu7",
-#         projection=NodeProjection(fields=("id", 'core_facts', 'score')),
+#         text="表达对小米yu7这台车有喜好的说话者",
+#         projection=NodeProjection(fields=("id", 'statement', 'score')),
 #         limit=10
 #     )
 #     cost = time.perf_counter() - cost

@@ -4,13 +4,18 @@ from typing import Any, Iterable, Self
 
 from pydantic import BaseModel, Field
 
-from app.core.memory.storage.enums import BackendType
+from app.core.memory.storage.enums import BackendType, MemoryNodeLabel
 
 
 class StorageResult(BaseModel):
     """Base result returned by storage providers and routers."""
 
     backend: BackendType | None = None
+
+
+class StorageItem(BaseModel):
+    label: MemoryNodeLabel | None = None
+    data: dict[str, Any] = Field(default_factory=dict)
 
 
 class StorageWriteResult(StorageResult):
@@ -24,16 +29,17 @@ class StorageWriteResult(StorageResult):
 class StorageReadResult(StorageResult):
     """Normalized result for get and search operations."""
 
-    items: list[dict[str, Any]] = Field(default_factory=list)
+    items: list[StorageItem] = Field(default_factory=list)
     total: int = Field(default=0, ge=0)
 
     @classmethod
     def from_items(
             cls,
             items: Iterable[dict[str, Any]],
+            label: MemoryNodeLabel | None = None,
             backend: BackendType | None = None,
     ) -> Self:
-        materialized = list(items)
+        materialized = [StorageItem(label=label, data=it) for it in items]
         return cls(
             backend=backend,
             items=materialized,

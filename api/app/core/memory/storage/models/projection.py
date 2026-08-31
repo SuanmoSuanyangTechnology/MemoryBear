@@ -2,6 +2,8 @@ from typing import Any, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from app.core.memory.storage.enums import MemoryNodeType
+
 
 class ProjectionField(BaseModel):
     model_config = ConfigDict(frozen=True)
@@ -67,8 +69,8 @@ class NodeProjection(BaseModel):
     @field_validator("fields")
     @classmethod
     def validate_string_fields(
-        cls,
-        fields: tuple[ProjectionItem, ...],
+            cls,
+            fields: tuple[ProjectionItem, ...],
     ) -> tuple[ProjectionItem, ...]:
         if any(isinstance(field, str) and not field.strip() for field in fields):
             raise ValueError("projection fields cannot be blank")
@@ -96,3 +98,37 @@ class NodeProjection(BaseModel):
     @classmethod
     def of(cls, *fields: ProjectionItem) -> Self:
         return cls(fields=fields)
+
+
+DEFAULT_PROJECTION = {
+    MemoryNodeType.EXTRACTED_ENTITY: NodeProjection(
+        fields=(
+            "id", "name", CoalesceProjectionField(fields=("aliases",), default=[], alias="aliases"),
+            "description", "description_summary", "event_timeline", "created_at", "score"
+        )
+    ),
+    MemoryNodeType.CHUNK: NodeProjection(
+        fields=("id", "content", "created_at", "score")
+    ),
+    MemoryNodeType.STATEMENT: NodeProjection(
+        fields=("id", "statement", "created_at", "score")
+    ),
+    MemoryNodeType.MEMORY_SUMMARY: NodeProjection(
+        fields=("id", "name", " content", "created_at", "score")
+    ),
+    MemoryNodeType.PERCEPTUAL: NodeProjection(
+        fields=(
+            "id", "perceptual_type", "file_path", "file_name", "file_ext", "summary",
+            "keywords", "topic", "domain", "created_at", "file_type", "score"
+        )
+    ),
+    MemoryNodeType.COMMUNITY: NodeProjection(
+        fields=(
+            ProjectionField(field="community_id", alias="id"), "name",
+            ProjectionField(field="summary"), "core_entities", "updated_at", "score"
+        )
+    ),
+    MemoryNodeType.DIALOGUE: NodeProjection(
+        fields=("id", "content", "created_at", "score")
+    )
+}
