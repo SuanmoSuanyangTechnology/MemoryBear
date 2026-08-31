@@ -38,4 +38,5 @@ export const applicationPart2 = {
       review_output_content: '审查输出内容',
       moderation_input_output_required: '审查输入输出内容必填',
       moderation_input_output_required_desc: '审查输入内容和审查输出内容至少启用一项',
+      execution_id: '执行ID',
 }
