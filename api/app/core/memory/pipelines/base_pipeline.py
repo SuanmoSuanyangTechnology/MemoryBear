@@ -1,6 +1,6 @@
 import uuid
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, Dict, Optional
 
 from sqlalchemy.orm import Session
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,7 +12,12 @@ from app.services.model_service import ModelApiKeyService
 
 class ModelClientMixin(ABC):
     @staticmethod
-    def get_llm_client(db: Session, model_id: uuid.UUID, tenant_id: uuid.UUID) -> RedBearLLM:
+    def get_llm_client(
+        db: Session,
+        model_id: uuid.UUID,
+        tenant_id: uuid.UUID,
+        extra_params: Optional[Dict[str, Any]] = None,
+    ) -> RedBearLLM:
         api_config = ModelApiKeyService.get_available_api_key(db, model_id, tenant_id=tenant_id)
         return RedBearLLM(
             RedBearModelConfig(
@@ -21,7 +26,8 @@ class ModelClientMixin(ABC):
                 capability=api_config.capability,
                 api_key=api_config.api_key,
                 base_url=api_config.api_base,
-                is_omni=api_config.is_omni
+                is_omni=api_config.is_omni,
+                extra_params=extra_params or {},
             )
         )
 

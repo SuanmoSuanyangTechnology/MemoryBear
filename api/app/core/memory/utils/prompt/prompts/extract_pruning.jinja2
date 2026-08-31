@@ -46,7 +46,9 @@
   `comfort | suggestion | recommendation | warning | instruction | question | agreement | repetition | other`
 - 如果 `Assistant.msg` 同时包含多个动作，`assistant_memory_hint` 可以保留多个动作，但 `assistant_memory_type` 只标记其中最主要、最值得检索的主动作。
 - 当 `Assistant.msg` 非空时，不再输出 `NULL`。即使内容价值较低，也要尽量压成一条最短的辅助摘要。只有 `Assistant.msg` 为空时，assistant 侧两个字段才输出 `null`。
-- 如果 `Assistant.msg` 含有提问、追问或反问，`assistant_memory_hint` 必须保留提问的具体内容，不能只写“询问了用户”。
+- 如果 `Assistant.msg` 含有提问、追问、反问或字段请求，`assistant_memory_hint` 必须保留可直接回答的具体问题或请求，不能只写“询问了用户”。
+- 当主动作是 `question` 时，优先保留直接问句或直接请求形式，例如“请提供称呼、企业名称和手机号。”或“用户的手机号是某个具体值吗？”。不要改写成“询问用户提供了哪些信息”“询问用户手机号是否正确”这类关于提问行为的第三人称摘要。
+- 开放字段请求必须逐项保留全部待回答槽位；封闭确认问题必须保留主体、字段或谓词、具体值以及肯定/否定范围。不得把可回答问题压缩成只有主题而没有槽位或值的概括。
 - 如果提问里给出了明确选项、候选分支或对比项，`assistant_memory_hint` 应尽量保留这些选项，而不是只保留上位概括。
 - `question` 只在“提问/追问/反问”是这条消息的主推进动作时使用；如果消息里同时有建议和提问，但建议明显更核心，则类型标为 `suggestion`，并在 hint 里按需保留提问内容。
 - 对 `question` 类型，优先保留：
@@ -64,12 +66,11 @@
 - 如果原文里的对象已经明确且自然，就直接保留该对象，不要改写成更绕或更长的表达。
 - 如果问题中存在“是 A、B 还是 C”这类显式选项，优先保留 A、B、C，而不是只写成“询问用户偏好”。
 - 如果原文既有建议又有提问，允许在 hint 里同时保留；但 type 只标主动作。若提问是核心推进动作，则 type 标为 `question`；若建议更核心，则 type 标为 `suggestion`。
-- 优先使用显式主语来写结果，例如：
+- 非问题类摘要优先使用显式主语来写结果，例如：
   - `安慰了用户……`
   - `建议用户……`
   - `推荐用户……`
   - `提醒用户……`
-  - `询问用户……`
   - `附和了用户……`
   - `重复了用户……`
 
@@ -282,7 +283,9 @@ Hard constraints:
   `comfort | suggestion | recommendation | warning | instruction | question | agreement | repetition | other`
 - If `Assistant.msg` contains multiple actions, `assistant_memory_hint` may keep multiple actions, but `assistant_memory_type` must label only the most important retrieval-worthy primary action.
 - When `Assistant.msg` is non-empty, do not output `NULL`. Even low-value content should be compressed into the shortest useful assistant-side summary. Only output `null` for the two assistant-side fields when `Assistant.msg` is empty.
-- If `Assistant.msg` contains a question, follow-up question, or counter-question, `assistant_memory_hint` must preserve the actual question content and must not reduce it to "asked the user".
+- If `Assistant.msg` contains a question, follow-up question, counter-question, or field request, `assistant_memory_hint` must preserve the concrete answerable question or request and must not reduce it to "asked the user".
+- When the primary action is `question`, prefer a direct question or direct request, such as "Please provide your preferred name, company name, and phone number." or "Is the user's phone number a specific value?" Do not rewrite it as a third-person description of the asking action such as "Asked what information the user could provide" or "Asked whether the user's phone number was correct."
+- An open field request must retain every requested slot. A closed confirmation question must retain the subject, field or predicate, concrete value, and affirmative/negative scope. Never compress an answerable question into a topic-only summary that loses its slots or values.
 - If the question contains explicit options, candidate branches, or comparisons, `assistant_memory_hint` should preserve those options instead of collapsing them into a generic abstraction.
 - Use `question` only when asking is the main forward-driving action. If the message contains both advice and a question, but advice is clearly more central, use `suggestion` and keep the question content in the hint when needed.
 - For `question`, prioritize:
@@ -300,12 +303,11 @@ Compression principles:
 - If the original object is already clear and natural, keep it directly.
 - If the question contains explicit choices such as "A, B, or C", preserve A, B, and C rather than reducing it to "asked about the user's preference".
 - If the original message contains both advice and a question, both may remain in the hint, but the type should mark only the primary action.
-- Prefer explicit leading verbs, such as:
+- For non-question summaries, prefer explicit leading verbs, such as:
   - `Comforted the user...`
   - `Suggested that the user...`
   - `Recommended that the user...`
   - `Warned the user...`
-  - `Asked the user...`
   - `Agreed with the user...`
   - `Repeated the user's point...`
 

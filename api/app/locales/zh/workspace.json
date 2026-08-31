@@ -9,6 +9,10 @@
   "permission_denied": "没有权限访问此工作空间",
   "name_required": "工作空间名称不能为空",
   "invalid_name": "工作空间名称格式不正确",
+  "retention_policy": {
+    "retrieved": "工作空间保留策略获取成功",
+    "updated": "工作空间保留策略更新成功"
+  },
   "members": {
     "list_retrieved": "工作空间成员列表获取成功",
     "role_updated": "成员角色更新成功",

@@ -97,7 +97,7 @@ async def get_workspace_end_users(
     background_tasks: BackgroundTasks,
     workspace_id: Optional[uuid.UUID] = Query(None, description="工作空间ID（可选，默认当前用户工作空间）"),
     keyword: Optional[str] = Query(None, description="搜索关键词（同时模糊匹配 other_name 和 id）"),
-    label: Optional[str] = Query(None, description="标签过滤（long=有名称, short=无名称）"),
+    label: Optional[str] = Query(None, description="标签过滤（long=长时记忆(confirmed), short=短时记忆(temporary)）"),
     page: int = Query(1, ge=1, description="页码，从1开始"),
     pagesize: int = Query(10, ge=1, description="每页数量"),
     db: Session = Depends(get_db),
@@ -106,6 +106,12 @@ async def get_workspace_end_users(
     """
     获取工作空间的宿主列表（分页查询，支持模糊搜索）
     
+    新增：长时/短时记忆判断（以 end_users.identity_status 为准）：
+        - confirmed：长时记忆（label="long"），返回 identity_features
+        - temporary：短时记忆（label="short"），返回 write_time（最后写入时间）和 expire_time
+          （expire_time = write_time + workspace.retention_days 天，
+            retention_days 或 write_time 为 NULL 时 expire_time 也为 NULL）
+
     新增：记忆数量过滤：
         Neo4j 模式：
         - 使用 end_users.memory_count 过滤 memory_count > 0 的宿主
@@ -148,8 +154,6 @@ async def get_workspace_end_users(
             keyword=keyword,
             label=label,
         )
-        raw_items = end_users_result.get("items", [])
-        end_users = [item["end_user"] for item in raw_items]
     else:
         end_users_result = memory_dashboard_service.get_workspace_end_users_paginated(
             db=db,
@@ -160,8 +164,10 @@ async def get_workspace_end_users(
             keyword=keyword,
             label=label,
         )
-        raw_items = end_users_result.get("items", [])
-        end_users = raw_items
+
+    # 两种模式统一返回 [{"end_user": ORM, "memory_count"(仅RAG): int, "expire_time": datetime|None}]
+    raw_items = end_users_result.get("items", [])
+    end_users = [item["end_user"] for item in raw_items]
 
     total = end_users_result.get("total", 0)
 
@@ -216,13 +222,23 @@ async def get_workspace_end_users(
             memory_total = int(getattr(end_user, "memory_count", 0) or 0)
 
         other_name = end_user.other_name
+        identity_status = getattr(end_user, "identity_status", None)
         end_user_info = {
             "id": user_id,
             "other_name": other_name,
-            "label": "long" if other_name else "short",
+            # 长时(confirmed)/短时(temporary)记忆以 identity_status 为准
+            "label": "long" if identity_status == "confirmed" else "short",
         }
         if other_name:
             end_user_info["other_id"] = end_user.other_id
+
+        if identity_status == "temporary":
+            # 短时记忆：最后写入时间 + 过期时间（毫秒级 UTC 时间戳；retention_days 或 write_time 为 NULL 时过期时间为 NULL）
+            end_user_info["write_time"] = to_timestamp_ms(end_user.write_time)
+            end_user_info["expire_time"] = to_timestamp_ms(raw_items[index].get("expire_time"))
+        elif identity_status == "confirmed":
+            # 长时记忆：跨渠道身份标识
+            end_user_info["identity_features"] = end_user.identity_features
 
         items.append({
             "end_user_id": user_id,

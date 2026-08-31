@@ -1,10 +1,10 @@
 import uuid
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, NamedTuple, Optional, Set, TypedDict
 
 import sqlalchemy as sa
-from sqlalchemy import or_, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
@@ -58,6 +58,73 @@ def is_uuid(value: str) -> bool:
 class EndUserRepository:
     def __init__(self, db: Session | AsyncSession):
         self.db = db
+
+    @staticmethod
+    def _temporary_expires_at_expr():
+        """临时身份过期时间表达式：write_time + retention_days 天。
+
+        write_time 或 retention_days 任一为 NULL 时结果为 NULL。
+        """
+        return EndUser.write_time + Workspace.retention_days * sa.text("INTERVAL '1 day'")
+
+    @staticmethod
+    def _expired_temporary_filter():
+        """构造临时身份过期条件。
+
+        PostgreSQL 使用 retention_days 乘以固定的一天 interval，避免拼接动态 SQL。
+        """
+        expires_at = EndUserRepository._temporary_expires_at_expr()
+        return (
+            EndUser.is_active == sa.true(),
+            EndUser.identity_status == "temporary",
+            EndUser.write_time.is_not(None),
+            Workspace.retention_days.is_not(None),
+            expires_at < func.now(),
+        )
+
+    def get_expired_temporary_end_user_ids(self) -> List[uuid.UUID]:
+        """按空间有效期和最后写入时间稳定查询全部过期临时身份 ID。"""
+        retention_workspaces = (
+            self.db.query(Workspace.id, Workspace.retention_days)
+            .filter(Workspace.retention_days.is_not(None))
+            .all()
+        )
+        if not retention_workspaces:
+            return []
+
+        scan_time = utcnow_naive()
+        candidates: list[tuple[uuid.UUID, datetime]] = []
+        for workspace_id, retention_days in retention_workspaces:
+            cutoff_time = scan_time - timedelta(days=retention_days)
+            rows = (
+                self.db.query(EndUser.id, EndUser.write_time)
+                .filter(
+                    EndUser.workspace_id == workspace_id,
+                    EndUser.is_active == sa.true(),
+                    EndUser.identity_status == "temporary",
+                    EndUser.write_time.is_not(None),
+                    EndUser.write_time < cutoff_time,
+                )
+                .order_by(EndUser.write_time.asc(), EndUser.id.asc())
+                .all()
+            )
+            candidates.extend((row.id, row.write_time) for row in rows)
+
+        candidates.sort(key=lambda candidate: (candidate[1], candidate[0].int))
+        return [end_user_id for end_user_id, _ in candidates]
+
+    def is_expired_temporary_end_user(self, end_user_id: uuid.UUID) -> bool:
+        """删除前重新确认身份仍为临时、活跃且已超过当前空间保留期。"""
+        return (
+            self.db.query(EndUser.id)
+            .join(Workspace, Workspace.id == EndUser.workspace_id)
+            .filter(
+                EndUser.id == end_user_id,
+                *self._expired_temporary_filter(),
+            )
+            .first()
+            is not None
+        )
 
     @contextmanager
     def _acquire_eu_lock(self, workspace_id, other_id):
@@ -163,6 +230,34 @@ class EndUserRepository:
         except Exception as e:
             self.db.rollback()
             db_logger.error(f"查询工作空间 {workspace_id} 下终端用户时出错: {str(e)}")
+            raise
+
+    def get_temporary_end_users_count_by_workspace(
+            self,
+            workspace_id: uuid.UUID,
+    ) -> int:
+        """获取指定 workspace 下至少有一条记忆的有效临时 EndUser 数量。"""
+        try:
+            end_users_count = (
+                self.db.query(EndUser)
+                .filter(
+                    EndUser.workspace_id == workspace_id,
+                    EndUser.is_active.is_(True),
+                    EndUser.identity_status == "temporary",
+                    EndUser.memory_count >= 1,
+                )
+                .count()
+            )
+            db_logger.info(
+                f"成功查询工作空间 {workspace_id} 下的 "
+                f"{end_users_count} 个至少有一条记忆的有效临时终端用户"
+            )
+            return end_users_count
+        except Exception as e:
+            self.db.rollback()
+            db_logger.error(
+                f"查询工作空间 {workspace_id} 下有记忆的有效临时终端用户时出错: {str(e)}"
+            )
             raise
 
     def get_end_user_by_id(self, end_user_id: uuid.UUID) -> Optional[EndUser]:
@@ -385,7 +480,8 @@ class EndUserRepository:
         覆盖 conversations、memory_messages、memory_short_term、
         memory_long_term、memory_forget_log、memory_perceptual、
         memory_reflection_log、forgetting_cycle_history、
-        memory_display_record、memory_engine_display_event。
+        memory_display_record、memory_engine_display_event、
+        dialogue_emotion_raw。
 
         跳过 implicit_emotions_storage（UNIQUE 约束，需特殊处理）和
         memory_config（end_user_id 为配置自身标识，非用户引用）。
@@ -400,6 +496,7 @@ class EndUserRepository:
 
         # ── 所有表定义：(model, col_name, src_value, tgt_value) ──
         from app.models.conversation_model import Conversation
+        from app.models.dialogue_emotion_raw_model import DialogueEmotionRaw
         from app.models.memory_message_model import MemoryMessage
         from app.models.memory_short_model import ShortTermMemory, LongTermMemory
         from app.models.forgetting_cycle_history_model import ForgettingCycleHistory
@@ -422,6 +519,7 @@ class EndUserRepository:
             (ForgetAuditModel, "end_user_id", src_id, target_id),
             (MemoryPerceptualModel, "end_user_id", src_id, target_id),
             (MemoryReflectionLog, "end_user_id", src_id, target_id),
+            (DialogueEmotionRaw, "end_user_id", src_id, target_id),
         ]
 
         for model, col_name, src_val, tgt_val in all_tables:
@@ -2312,8 +2410,13 @@ class EndUserRepository:
             pagesize: int,
             keyword: Optional[str] = None,
             label: Optional[str] = None,
-    ) -> tuple[List[EndUser], int]:
+    ) -> tuple[list, int]:
         """Dashboard 专用：分页查询有记忆的宿主（memory_count > 0）
+
+        长时/短时记忆以 identity_status 为准：
+        - confirmed：长时记忆
+        - temporary：短时记忆（返回 write_time + retention_days 计算的过期时间，
+          write_time 或 retention_days 任一为 NULL 时过期时间为 NULL）
 
         返回结果按 created_at 从新到旧排序（NULL 值排在最后），
         只加载接口所需列以避免加载大 Text 字段。
@@ -2323,14 +2426,16 @@ class EndUserRepository:
             page: 页码（从1开始）
             pagesize: 每页数量
             keyword: 搜索关键词（可选，同时模糊匹配 other_name 和 id）
-            label: 标签过滤（可选，"long" 表示有 other_name，"short" 表示无 other_name）
+            label: 标签过滤（可选，"long" 表示长时记忆(confirmed)，"short" 表示短时记忆(temporary)）
 
         Returns:
-            tuple[List[EndUser], int]: (当前页宿主列表, 符合条件的总数)
+            tuple[list, int]: (items列表[{"end_user": ORM, "expire_time": datetime|None}], 总数)
         """
         from sqlalchemy import desc, String, cast
         from sqlalchemy.orm import load_only
         from sqlalchemy.sql.expression import nullslast
+
+        expires_at = self._temporary_expires_at_expr()
 
         columns = load_only(
             EndUser.id,
@@ -2341,25 +2446,28 @@ class EndUserRepository:
             EndUser.memory_config_id,
             EndUser.created_at,
             EndUser.workspace_id,
+            EndUser.identity_features,
+            EndUser.identity_status,
+            EndUser.write_time,
         )
-        query = self.db.query(EndUser).options(columns).filter(
-            EndUser.workspace_id == workspace_id,
-            EndUser.memory_count > 0,
-            EndUser.is_active == True,
+        query = (
+            self.db.query(
+                EndUser,
+                expires_at.label("expire_time"),
+            )
+            .options(columns)
+            .outerjoin(Workspace, Workspace.id == EndUser.workspace_id)
+            .filter(
+                EndUser.workspace_id == workspace_id,
+                EndUser.memory_count > 0,
+                EndUser.is_active == True,
+            )
         )
 
         if label == "long":
-            query = query.filter(
-                EndUser.other_name.isnot(None),
-                EndUser.other_name != "",
-            )
+            query = query.filter(EndUser.identity_status == "confirmed")
         elif label == "short":
-            query = query.filter(
-                or_(
-                    EndUser.other_name.is_(None),
-                    EndUser.other_name == "",
-                )
-            )
+            query = query.filter(EndUser.identity_status == "temporary")
 
         if keyword:
             keyword = keyword.strip()
@@ -2376,12 +2484,20 @@ class EndUserRepository:
         if total == 0:
             return [], 0
 
-        items = (
+        rows = (
             query.order_by(nullslast(desc(EndUser.created_at)), desc(EndUser.id))
             .offset((page - 1) * pagesize)
             .limit(pagesize)
             .all()
         )
+
+        items = [
+            {
+                "end_user": end_user_orm,
+                "expire_time": expire_time,
+            }
+            for end_user_orm, expire_time in rows
+        ]
         return items, total
 
     def get_paginated_with_memory_rag(
@@ -2399,21 +2515,28 @@ class EndUserRepository:
         - 只统计当前 workspace 下 permission_id="Memory" 的用户记忆知识库
         - 在 SQL 层过滤 chunk 总数为 0 的宿主
 
+        长时/短时记忆以 identity_status 为准：
+        - confirmed：长时记忆
+        - temporary：短时记忆（返回 write_time + retention_days 计算的过期时间，
+          write_time 或 retention_days 任一为 NULL 时过期时间为 NULL）
+
         Args:
             workspace_id: 工作空间ID
             page: 页码（从1开始）
             pagesize: 每页数量
             keyword: 搜索关键词（可选，同时模糊匹配 other_name 和 id）
-            label: 标签过滤（可选，"long" 表示有 other_name，"short" 表示无 other_name）
+            label: 标签过滤（可选，"long" 表示长时记忆(confirmed)，"short" 表示短时记忆(temporary)）
 
         Returns:
-            tuple[list, int]: (items列表[{"end_user": ORM, "memory_count": int}], 总数)
+            tuple[list, int]: (items列表[{"end_user": ORM, "memory_count": int, "expire_time": datetime|None}], 总数)
         """
         from sqlalchemy import desc, String, cast, func
         from sqlalchemy.orm import load_only
         from sqlalchemy.sql.expression import nullslast
         from app.models.document_model import Document
         from app.models.knowledge_model import Knowledge
+
+        expires_at = self._temporary_expires_at_expr()
 
         chunk_subquery = (
             self.db.query(
@@ -2440,14 +2563,19 @@ class EndUserRepository:
             EndUser.memory_config_id,
             EndUser.created_at,
             EndUser.workspace_id,
+            EndUser.identity_features,
+            EndUser.identity_status,
+            EndUser.write_time,
         )
 
         base_query = (
             self.db.query(
                 EndUser,
                 chunk_subquery.c.memory_count.label("memory_count"),
+                expires_at.label("expire_time"),
             )
             .options(columns)
+            .outerjoin(Workspace, Workspace.id == EndUser.workspace_id)
             .join(
                 chunk_subquery,
                 chunk_subquery.c.file_name == func.concat(cast(EndUser.id, String), ".txt"),
@@ -2460,17 +2588,9 @@ class EndUserRepository:
         )
 
         if label == "long":
-            base_query = base_query.filter(
-                EndUser.other_name.isnot(None),
-                EndUser.other_name != "",
-            )
+            base_query = base_query.filter(EndUser.identity_status == "confirmed")
         elif label == "short":
-            base_query = base_query.filter(
-                or_(
-                    EndUser.other_name.is_(None),
-                    EndUser.other_name == "",
-                )
-            )
+            base_query = base_query.filter(EndUser.identity_status == "temporary")
 
         if keyword:
             keyword = keyword.strip()
@@ -2495,10 +2615,11 @@ class EndUserRepository:
         )
 
         items = []
-        for end_user_orm, memory_count in rows:
+        for end_user_orm, memory_count, expire_time in rows:
             items.append({
                 "end_user": end_user_orm,
                 "memory_count": int(memory_count or 0),
+                "expire_time": expire_time,
             })
         return items, total
 
