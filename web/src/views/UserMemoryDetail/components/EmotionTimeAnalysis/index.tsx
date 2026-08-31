@@ -218,7 +218,6 @@ const EmotionTimeAnalysis: FC = () => {
                     labelRender={(props) => <span className="rb:text-[12px]">{props.label}</span>}
                     className="rb:w-27"
                     onChange={value => handleSortChange({ ascending: value })}
-                    disabled={!displayGroups.length}
                   />
                 </Form.Item>
                 <Form.Item name="dateRange" noStyle>
@@ -226,7 +225,6 @@ const EmotionTimeAnalysis: FC = () => {
                     size="small"
                     onChange={handleDateChange}
                     className="rb:w-52"
-                    disabled={!displayGroups.length}
                   />
                 </Form.Item>
               </Flex>

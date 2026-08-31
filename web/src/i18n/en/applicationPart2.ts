@@ -40,4 +40,5 @@ export const applicationPart2 = {
       review_output_content: 'Review Output Content',
       moderation_input_output_required: 'Review Input and Output Content Required',
       moderation_input_output_required_desc: 'At least one of review input and review output must be enabled',
+      execution_id: 'Execution ID',
 }

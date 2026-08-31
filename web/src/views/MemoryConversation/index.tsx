@@ -65,8 +65,10 @@ const MemoryConversation: FC = () => {
   const [expanded, setExpanded] = useState<Record<number, boolean>>({})
   const [loading, setLoading] = useState(false)
   const [sessionId, setSessionId] = useState<string>()
+  const [layoutMode, setLayoutMode] = useState<'vertical' | 'mixed' | 'horizontal'>('horizontal')
   const abortRef = useRef<(() => void)>()
   const requestGenerationRef = useRef(0)
+  console.log('layoutMode', layoutMode)
 
   const selectedId = selected?.end_user?.id || selected?.end_user_id
   const currentName = selected?.end_user?.other_name || selectedId || ''
@@ -89,6 +91,20 @@ const MemoryConversation: FC = () => {
     setLoading(false)
   }
 
+  useEffect(() => {
+    const computeLayoutMode = () => {
+      const width = window.innerWidth
+      if (width >= 1280) return 'horizontal'
+      if (width >= 1024) return 'mixed'
+      return 'vertical'
+    }
+    const handleResize = () => setLayoutMode(computeLayoutMode())
+    handleResize()
+    window.addEventListener('resize', handleResize)
+    return () => {
+      window.removeEventListener('resize', handleResize)
+    }
+  }, [])
   useEffect(() => () => {
     requestGenerationRef.current += 1
     abortRef.current?.()
@@ -246,7 +262,12 @@ const MemoryConversation: FC = () => {
   }
 
   return (
-    <Flex gap={16} className="rb:h-full! rb:w-full! rb:gap-4 rb:overflow-hidden">
+    <Flex gap={16} vertical={layoutMode === 'vertical'}
+      className={clsx("rb:h-full! rb:w-full!", {
+        'rb:overflow-hidden!': layoutMode !== 'vertical',
+        'rb:overflow-y-auto!': layoutMode === 'vertical',
+      })}
+    >
       <RbCard
         avatar={
           <Flex align="center" justify="center" className="rb:bg-[#171719] rb:size-8 rb:rounded-lg">
@@ -257,7 +278,10 @@ const MemoryConversation: FC = () => {
         subTitle={t('memoryConversation.switchReset')}
         headerType="borderless"
         headerClassName="rb:py-2! rb:px-3! rb:min-h-[64px]!"
-        className="rb:h-full! rb:w-72! rb:shrink-0! rb:overflow-hidden!"
+        className={clsx("rb:h-full! rb:shrink-0! rb:overflow-hidden!", {
+          'rb:w-72!': layoutMode !== 'vertical',
+          'rb:w-full!': layoutMode === 'vertical'
+        })}
         bodyClassName="rb:h-[calc(100%-64px)]! rb:overflow-hidden! rb:px-3! rb:pt-1! rb:pb-3!"
       >
         <Flex vertical justify="space-between" gap={8} className="rb:h-full! rb:overflow-hidden">
@@ -350,156 +374,177 @@ const MemoryConversation: FC = () => {
           </div>
         </Flex>
       </RbCard>
-
-      <RbCard
-        title={t('memoryConversation.conversationContent')}
-        subTitle={t('memoryConversation.sendQuery')}
-        extra={
-          <Tag color="default" className="rb:text-[10px] rb:w-[150px]!">
-            {selectedId || t('memoryConversation.selectMemoryFirst')}
-          </Tag>
-        }
-        headerType="borderless"
-        headerClassName="rb:py-2! rb:min-h-[64px]!"
-        className="rb:h-full! rb:flex-1! rb:overflow-hidden!"
-        bodyClassName="rb:h-[calc(100%-64px)]! rb:overflow-hidden! rb:px-0! rb:pt-1! rb:pb-0!"
+      
+      <Flex vertical={layoutMode !== 'horizontal'}
+        className={clsx({
+          'rb:h-full! rb:min-h-0! rb:overflow-y-auto! rb:flex-1!': layoutMode === 'mixed',
+          'rb:gap-x-4!': layoutMode === 'horizontal',
+          'rb:gap-y-4!': layoutMode !== 'horizontal',
+        })}
       >
-        <Chat
-          empty={
-            <Empty url={ConversationEmptyIcon} className="rb:h-full" size={[140, 100]} title={t('memoryConversation.conversationContentEmpty')} isNeedSubTitle={false} />
+        <RbCard
+          title={t('memoryConversation.conversationContent')}
+          subTitle={t('memoryConversation.sendQuery')}
+          extra={
+            <Tag color="default" className="rb:text-[10px] rb:w-[150px]!">
+              {selectedId || t('memoryConversation.selectMemoryFirst')}
+            </Tag>
           }
-          className="rb:pt-0!"
-          contentClassName='rb:h-[calc(100%-144px)] rb:px-4!'
-          data={chatData}
-          message={input}
-          onChange={setInput}
-          onSend={handleSend}
-          loading={loading}
-          streamLoading={loading}
-          labelFormat={(item) => formatDateTime(item.created_at, 'MMMM D, YYYY [at] h:mm A')}
+          headerType="borderless"
+          headerClassName="rb:py-2! rb:min-h-[64px]!"
+          className={clsx("rb:overflow-hidden!", {
+            'rb:h-full! rb:flex-1!': layoutMode === 'horizontal',
+            'rb:shrink-0!': layoutMode === 'mixed',
+            'rb:h-[500px]! rb:w-full! ': layoutMode === 'vertical',
+          })}
+          bodyClassName="rb:h-[calc(100%-64px)]! rb:overflow-hidden! rb:px-0! rb:pt-1! rb:pb-0!"
         >
-          <Segmented
-            options={searchSwitchList.map(item => ({
-              ...item,
-              icon: <Tooltip title={t(`memoryConversation.${item.key}`)}>{item.icon}</Tooltip>
-            }))}
-            value={search_switch}
-            shape="round"
-            className={styles.segmented}
-            onChange={handleChange}
-          />
-        </Chat>
-      </RbCard>
+          <Chat
+            empty={
+              <Empty url={ConversationEmptyIcon} className="rb:h-full" size={[140, 100]} title={t('memoryConversation.conversationContentEmpty')} isNeedSubTitle={false} />
+            }
+            className="rb:pt-0!"
+            contentClassName='rb:h-[calc(100%-144px)] rb:px-4!'
+            data={chatData}
+            message={input}
+            onChange={setInput}
+            onSend={handleSend}
+            loading={loading}
+            streamLoading={loading}
+            labelFormat={(item) => formatDateTime(item.created_at, 'MMMM D, YYYY [at] h:mm A')}
+          >
+            <Segmented
+              options={searchSwitchList.map(item => ({
+                ...item,
+                icon: <Tooltip title={t(`memoryConversation.${item.key}`)}>{item.icon}</Tooltip>
+              }))}
+              value={search_switch}
+              shape="round"
+              className={styles.segmented}
+              onChange={handleChange}
+            />
+          </Chat>
+        </RbCard>
 
-      <RbCard
-        title={t('memoryConversation.analysis')}
-        subTitle={selectedId || t('memoryConversation.waitingValidation')}
-        headerType="borderless"
-        headerClassName="rb:py-2! rb:min-h-[64px]!"
-        className="rb:h-full! rb:w-100! rb:shrink-0! rb:overflow-hidden!"
-        bodyClassName="rb:h-[calc(100%-64px)]! rb:overflow-hidden! rb:px-3! rb:pt-1! rb:pb-3!"
-      >
-        {selected
-          ? (
-            <Flex vertical gap={12} className="rb:h-full! rb:overflow-auto!">
-              {currentQuery &&
-                <RequestSummaryCard
-                  log={logs[0]}
-                  query={currentQuery}
-                  searchSwitch={search_switch}
-                />
-              }
-              <Flex vertical gap={8}>
-                {stageKeys.map((stageKey, index) => {
-                  const stage = t(`memoryConversation.stages.${stageKey}`)
-                  const log = logs[index]
-                  const canExpand = stageKey !== 'hybridRetrieval'
-                  const isOpen = canExpand && (expanded[index] ?? Boolean(log))
-                  const statusKey = !log
-                    ? loading
-                      ? 'running'
-                      : 'waiting'
-                    : log.status === 'failed'
-                      ? 'failed'
-                      : log.status === 'completed'
-                        ? 'completed'
-                        : 'running'
-                  const stageBadge = t(`memoryConversation.${statusKey}`)
-                  return (
-                    <Flex key={stageKey} gap={10}
-                      className="rb:relative rb:after:absolute rb:after:top-8 rb:after:-bottom-2 rb:after:left-[11.5px] rb:after:content-[''] rb:after:w-px rb:after:bg-[#EBEBEB] rb:last:after:hidden"
-                    >
-                      <Flex
-                        align="center"
-                        justify="center"
-                        className="rb:size-6 rb-border rb:rounded-full rb:mt-1! rb:relative rb:z-1"
+        <RbCard
+          title={t('memoryConversation.analysis')}
+          subTitle={selectedId || t('memoryConversation.waitingValidation')}
+          headerType="borderless"
+          headerClassName="rb:py-2! rb:min-h-[64px]!"
+          className={clsx("rb:shrink-0! rb:overflow-hidden!", {
+            'rb:w-100! rb:h-full!': layoutMode === 'horizontal',
+            'rb:shrink-0! rb:h-[500px]! rb:w-full!': layoutMode === 'mixed',
+            'rb:h-[500px]! rb:w-full!': layoutMode === 'vertical',
+          })}
+          bodyClassName="rb:h-[calc(100%-64px)]! rb:overflow-hidden! rb:px-3! rb:pt-1! rb:pb-3!"
+        >
+          {selected
+            ? (
+              <Flex vertical gap={12} className="rb:h-full! rb:overflow-auto!">
+                {currentQuery &&
+                  <RequestSummaryCard
+                    log={logs[0]}
+                    query={currentQuery}
+                    searchSwitch={search_switch}
+                  />
+                }
+                <Flex vertical gap={8}>
+                  {stageKeys.map((stageKey, index) => {
+                    const stage = t(`memoryConversation.stages.${stageKey}`)
+                    const log = stageKey === 'problemSplit' && index > 0 ? {
+                      ...logs[index],
+                      data: {
+                        ...(logs[index]?.data || {}),
+                        original_query: (logs[index-1]?.data as {original_query?: string})?.original_query,
+                      }
+                    } : logs[index]
+                    const canExpand = stageKey !== 'hybridRetrieval'
+                    const isOpen = canExpand && (expanded[index] ?? Boolean(log))
+                    const statusKey = !log
+                      ? loading
+                        ? 'running'
+                        : 'waiting'
+                      : log.status === 'failed'
+                        ? 'failed'
+                        : log.status === 'completed'
+                          ? 'completed'
+                          : 'running'
+                    const stageBadge = t(`memoryConversation.${statusKey}`)
+                    return (
+                      <Flex key={stageKey} gap={10}
+                        className="rb:relative rb:after:absolute rb:after:top-8 rb:after:-bottom-2 rb:after:left-[11.5px] rb:after:content-[''] rb:after:w-px rb:after:bg-[#EBEBEB] rb:last:after:hidden"
                       >
                         <Flex
                           align="center"
                           justify="center"
-                          className={clsx("rb:size-4 rb:rounded-full rb:text-[10px] rb:text-white", {
-                            'rb:bg-[#B9BEC6]': statusKey === 'waiting',
-                            'rb:bg-[#171719]': statusKey === 'running',
-                            'rb:bg-[rgba(54,159,33)]': statusKey === 'completed',
-                            'rb:bg-[rgba(255,138,76)]': statusKey === 'failed',
-                          })}
+                          className="rb:size-6 rb-border rb:rounded-full rb:mt-1! rb:relative rb:z-1"
                         >
-                          {index + 1}
-                        </Flex>
-                      </Flex>
-                      <div className="rb:flex-1 rb:overflow-hidden rb:rounded-lg rb-border rb:bg-[#F6F6F6]">
-                        <button
-                          className={clsx('rb:flex rb:min-h-10.5 rb:w-full rb:items-center rb:gap-2 rb:border-0 rb:bg-transparent rb:px-2.75 rb:text-left', {
-                            'rb:cursor-pointer': canExpand,
-                            'rb:cursor-default': !canExpand,
-                          })}
-                          disabled={!canExpand}
-                          onClick={() => {
-                            if (canExpand) {
-                              setExpanded(previous => ({ ...previous, [index]: !isOpen }))
-                            }
-                          }}
-                        >
-                          <b className="rb:flex-1 rb:text-xs rb:font-semibold">{log?.title || stage}</b>
-                          <Tag
-                            color={
-                              statusKey === 'completed'
-                                ? 'success'
-                                : statusKey === 'failed'
-                                  ? 'error'
-                                  : statusKey === 'waiting'
-                                    ? 'default'
-                                    : 'processing'
-                            }
-                            size="small"
-                            className="rb:shrink-0"
+                          <Flex
+                            align="center"
+                            justify="center"
+                            className={clsx("rb:size-4 rb:rounded-full rb:text-[10px] rb:text-white", {
+                              'rb:bg-[#B9BEC6]': statusKey === 'waiting',
+                              'rb:bg-[#171719]': statusKey === 'running',
+                              'rb:bg-[rgba(54,159,33)]': statusKey === 'completed',
+                              'rb:bg-[rgba(255,138,76)]': statusKey === 'failed',
+                            })}
                           >
-                            {stageBadge}
-                          </Tag>
-                          {canExpand && (
-                            <div
-                              className={clsx("rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/arrow_up.svg')] rb:transition-transform", {
-                                'rb:rotate-180': !isOpen,
-                                'rb:rotate-0': isOpen,
-                              })}
-                            />
-                          )}
-                        </button>
-                        {canExpand && isOpen && log &&
-                          <ContentWrapper>
-                            <StageContent stage={stageKey} log={log} />
-                          </ContentWrapper>
-                        }
-                      </div>
-                    </Flex>
-                  )
-                })}
+                            {index + 1}
+                          </Flex>
+                        </Flex>
+                        <div className="rb:flex-1 rb:overflow-hidden rb:rounded-lg rb-border rb:bg-[#F6F6F6]">
+                          <Flex align="center" gap={8}
+                            className={clsx('rb:min-h-10.5 rb:w-full rb:border-0 rb:bg-transparent rb:px-2.75! rb:text-left', {
+                              'rb:cursor-pointer': canExpand,
+                              'rb:cursor-default': !canExpand,
+                            })}
+                            onClick={() => {
+                              if (canExpand) {
+                                setExpanded(previous => ({ ...previous, [index]: !isOpen }))
+                              }
+                            }}
+                          >
+                            <b className="rb:flex-1 rb:text-xs rb:font-semibold">{log?.title || stage}</b>
+                            <Tag
+                              color={
+                                statusKey === 'completed'
+                                  ? 'success'
+                                  : statusKey === 'failed'
+                                    ? 'error'
+                                    : statusKey === 'waiting'
+                                      ? 'default'
+                                      : 'processing'
+                              }
+                              size="small"
+                              className="rb:shrink-0"
+                            >
+                              {stageBadge}
+                            </Tag>
+                            {canExpand && (
+                              <div
+                                className={clsx("rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/common/arrow_up.svg')] rb:transition-transform", {
+                                  'rb:rotate-180': !isOpen,
+                                  'rb:rotate-0': isOpen,
+                                })}
+                              />
+                            )}
+                          </Flex>
+                          {canExpand && isOpen && log &&
+                            <ContentWrapper>
+                              <StageContent stage={stageKey} log={log} />
+                            </ContentWrapper>
+                          }
+                        </div>
+                      </Flex>
+                    )
+                  })}
+                </Flex>
               </Flex>
-            </Flex>
-          )
-          : <Empty url={AnalysisEmptyIcon} className="rb:h-full!" />
-        }
-      </RbCard>
+            )
+            : <Empty url={AnalysisEmptyIcon} className="rb:h-full!" />
+          }
+        </RbCard>
+      </Flex>
     </Flex>
   )
 }
