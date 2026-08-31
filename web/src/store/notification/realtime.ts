@@ -8,6 +8,7 @@ import {
   isNotificationGeneration,
   isNotificationSyncPayload,
 } from './utils';
+import { createSSESyncScheduler } from './sseSyncScheduler';
 
 interface RealtimeBridge {
   applySync: (payload: NotificationSyncPayload) => void;
@@ -34,6 +35,8 @@ const MAX_CURSOR_LENGTH = 4_096;
 const SSE_RECONNECT_DELAY_MS = 30_000;
 /** Interval for the notification sync polling fallback (SSE disconnected). */
 const SYNC_POLL_INTERVAL_MS = 30_000;
+/** Window used to coalesce bursts of SSE events into one sync request. */
+const SSE_SYNC_BATCH_WINDOW_MS = 3_000;
 /**
  * SSE heartbeat watchdog window.
  *
@@ -77,6 +80,7 @@ let pollCursor: string | null = null;
 let pollGeneration: NotificationGeneration | null = null;
 let syncInFlight: Promise<void> | null = null;
 let pendingSyncRequest: PendingSyncRequest | null = null;
+let syncRetryBlockedUntil = 0;
 let heartbeatWatchdogTimer: ReturnType<typeof setTimeout> | null = null;
 
 /* -------------------------------------------------------------------------- */
@@ -203,21 +207,30 @@ const extractEventGeneration = (
 /*                          notificationSync orchestration                    */
 /* -------------------------------------------------------------------------- */
 
+const isNotificationSyncRetryBlocked = () => Date.now() < syncRetryBlockedUntil;
+
 const performNotificationSync = async (
   targetCursor: string | null,
   allowResponseCursor: boolean,
-) => {
+): Promise<boolean> => {
   try {
     const response: unknown = await notificationSync();
-    if (!isNotificationSyncPayload(response)) return;
+    if (!isNotificationSyncPayload(response)) {
+      syncRetryBlockedUntil = Date.now() + SYNC_POLL_INTERVAL_MS;
+      return false;
+    }
 
     const cursor = targetCursor
       ?? (allowResponseCursor && !sseConnected ? response.cursor : pollCursor ?? '');
     const payload = { ...response, cursor };
     bridge?.applySync(payload);
     broadcastSyncPayload(payload);
+    syncRetryBlockedUntil = 0;
+    return true;
   } catch {
-    // A later poll, SSE event, or reconnect will retry synchronization.
+    syncRetryBlockedUntil = Date.now() + SYNC_POLL_INTERVAL_MS;
+    // Wait for the next polling window instead of retrying immediately.
+    return false;
   }
 };
 
@@ -225,6 +238,10 @@ const requestNotificationSync = (
   targetCursor: string | null = null,
   allowResponseCursor = false,
 ) => {
+  if (!allowResponseCursor && isNotificationSyncRetryBlocked()) {
+    return syncInFlight ?? Promise.resolve();
+  }
+
   if (!allowResponseCursor && targetCursor && targetCursor === pollCursor) {
     return syncInFlight ?? Promise.resolve();
   }
@@ -245,10 +262,14 @@ const requestNotificationSync = (
   syncInFlight = (async () => {
     let request: PendingSyncRequest | null = { targetCursor, allowResponseCursor };
     while (request) {
-      await performNotificationSync(
+      const synchronized = await performNotificationSync(
         request.targetCursor,
         request.allowResponseCursor,
       );
+      if (!synchronized) {
+        pendingSyncRequest = null;
+        break;
+      }
       request = pendingSyncRequest;
       pendingSyncRequest = null;
     }
@@ -258,6 +279,14 @@ const requestNotificationSync = (
 
   return syncInFlight;
 };
+
+const sseSyncScheduler = createSSESyncScheduler(
+  SSE_SYNC_BATCH_WINDOW_MS,
+  (targetCursor) => {
+    if (!realtimeEnabled || !isSSELeader || isNotificationSyncRetryBlocked()) return;
+    void requestNotificationSync(targetCursor);
+  },
+);
 
 const GENERATION_EVENTS = new Set([
   'notification.published',
@@ -292,7 +321,9 @@ const handleSSEMessages = (items: SSEMessage[]) => {
     }
   });
 
-  if (shouldSync) void requestNotificationSync(targetCursor);
+  if (shouldSync && !isNotificationSyncRetryBlocked()) {
+    sseSyncScheduler.schedule(targetCursor);
+  }
 };
 
 /* -------------------------------------------------------------------------- */
@@ -366,6 +397,7 @@ const teardownSSERuntime = () => {
   sseStarted = false;
   clearSSEReconnectTimer();
   clearHeartbeatWatchdog();
+  sseSyncScheduler.clear();
 
   const abort = sseAbort;
   sseAbort = null;

@@ -35,6 +35,11 @@ from app.utils.redis_cache import redis_cache
 
 logger = logging.getLogger(__name__)
 
+FORGET_ISO_DATETIME_PATTERN = (
+    r"^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}"
+    r"(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?$"
+)
+
 
 # async def _update_activation_values_batch(
 #         nodes: List[Dict[str, Any]],
@@ -1148,24 +1153,56 @@ async def forget_count_active_nodes_batch(
     return {r["end_user_id"]: r["cnt"] for r in result}
 
 
-async def forget_get_mixed_candidates(
+async def forget_get_core_candidates(
         connector: Neo4jConnector,
         end_user_id: str,
         batch_size: int,
         protection_threshold: int,
+        evaluated_at_ms: int,
+        *,
+        isolated_only: bool = False,
 ) -> list[dict[str, Any]]:
-    """Return up to *batch_size* oldest candidates across all three types.
-
-    Entity nodes with ``extraction_count >= protection_threshold`` are skipped.
-    Results are sorted by ``sort_time ASC NULLS FIRST, extraction_count ASC``.
-    """
-    from app.repositories.neo4j.cypher_queries import FORGET_MIXED_CANDIDATES
+    """Return protected core candidates ordered by the configured G/T formula."""
+    from app.repositories.neo4j.cypher_queries import FORGET_CORE_CANDIDATES
     return await connector.execute_query(
-        FORGET_MIXED_CANDIDATES,
+        FORGET_CORE_CANDIDATES,
         end_user_id=end_user_id,
         batch_size=batch_size,
         protection_threshold=protection_threshold,
+        evaluated_at_ms=evaluated_at_ms,
+        isolated_only=isolated_only,
+        iso_datetime_pattern=FORGET_ISO_DATETIME_PATTERN,
     )
+
+
+async def forget_get_auxiliary_candidates(
+        connector: Neo4jConnector,
+        end_user_id: str,
+        batch_size: int,
+        content_max_len: int,
+) -> list[dict[str, Any]]:
+    """Return oldest active MemorySummary and Dialogue candidates."""
+    from app.repositories.neo4j.cypher_queries import FORGET_AUXILIARY_CANDIDATES
+    return await connector.execute_query(
+        FORGET_AUXILIARY_CANDIDATES,
+        end_user_id=end_user_id,
+        batch_size=batch_size,
+        content_max_len=content_max_len,
+        iso_datetime_pattern=FORGET_ISO_DATETIME_PATTERN,
+    )
+
+
+async def forget_count_auxiliary_active_nodes(
+        connector: Neo4jConnector,
+        end_user_id: str,
+) -> int:
+    """Count active MemorySummary and Dialogue nodes without affecting quota."""
+    from app.repositories.neo4j.cypher_queries import FORGET_COUNT_AUXILIARY_ACTIVE_NODES
+    rows = await connector.execute_query(
+        FORGET_COUNT_AUXILIARY_ACTIVE_NODES,
+        end_user_id=end_user_id,
+    )
+    return int(rows[0]["cnt"]) if rows else 0
 
 
 async def forget_soft_delete_by_element_ids(
@@ -1173,38 +1210,45 @@ async def forget_soft_delete_by_element_ids(
         end_user_id: str,
         element_ids: list[str],
         now: str,
-) -> int:
-    """Mark nodes as soft-deleted (``SET delete_at = datetime($now)``).
-
-    Returns the number of nodes actually deleted.
-    """
+        *,
+        protection_threshold: int,
+        require_isolated: bool = False,
+) -> list[str]:
+    """复检节点类型及保护规则后软删除，并返回实际删除的 element ID。"""
     from app.repositories.neo4j.cypher_queries import FORGET_SOFT_DELETE_BY_ELEMENT_IDS
     result = await connector.execute_query(
         FORGET_SOFT_DELETE_BY_ELEMENT_IDS,
         end_user_id=end_user_id,
         element_ids=element_ids,
         now=now,
+        protection_threshold=protection_threshold,
+        require_isolated=require_isolated,
     )
-    return result[0]["deleted"] if result else 0
+    if not result:
+        return []
+    return [str(element_id) for element_id in result[0]["deleted_element_ids"]]
 
 
 async def forget_recover_by_element_id(
         connector: Neo4jConnector,
         element_id: str,
-        now: str,
+        end_user_id: str,
 ) -> dict | None:
-    """Remove the soft-delete marker from a node, restoring it.
+    """幂等恢复节点，并返回本次是否实际清除了软删除标记。
 
-    ``elementId()`` is globally unique within a Neo4j database, so no
-    additional scoping is required.
+    查询按审计记录中的终端用户和支持的记忆类型限定节点。节点已处于可见状态时
+    仍返回结果，供调用方补齐 PostgreSQL 审计状态，但不会再次刷新访问时间。
 
-    Returns a dict with ``node_id`` and ``labels`` on success, or ``None``
-    if no matching soft-deleted node was found.
+    Returns:
+        包含 ``node_id``、``labels`` 和 ``recovered_now`` 的结果；节点不存在时
+        返回 ``None``。
     """
-    from app.repositories.neo4j.cypher_queries import FORGET_RECOVER_BY_ELEMENT_ID
+    from app.repositories.neo4j.cypher_queries import (
+        FORGET_RECOVER_IDEMPOTENT_BY_ELEMENT_ID,
+    )
     result = await connector.execute_query(
-        FORGET_RECOVER_BY_ELEMENT_ID,
+        FORGET_RECOVER_IDEMPOTENT_BY_ELEMENT_ID,
         element_id=element_id,
-        now=now,
+        end_user_id=end_user_id,
     )
     return result[0] if result else None

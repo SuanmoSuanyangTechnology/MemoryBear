@@ -24,9 +24,11 @@ from app.core.config import settings
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
-from app.schemas.chunk_schema import KnowledgeRetrievalCaller, RetrieveType
+from app.integrations.knowledge.context_factory import build_app_knowledge_context
+from app.integrations.knowledge.contracts import KnowledgeRetrievalSource
+from app.integrations.knowledge.runtime import get_knowledge_retriever
+from app.schemas.chunk_schema import RetrieveType
 from app.schemas.knowledge_retrieval_schema import KnowledgeRetrievalRequest
-from app.services.knowledge_retrieval_service import KnowledgeRetrievalService
 from app.db import get_async_db_context
 from app.models import App, AgentConfig, ModelConfig, Message, Conversation, Knowledge
 from app.models.agent_execution_model import AgentExecution
@@ -144,8 +146,15 @@ def create_web_search_tool(web_search_config: Dict[str, Any]):
     return web_search_tool
 
 
-async def _retrieve_chunks_via_standard(query: str, kb_config: Dict[str, Any]) -> list:
-    """标准化知识库检索：走 KnowledgeRetrievalService + KnowledgeRetrievalRequest。
+async def _retrieve_chunks_via_standard(
+        query: str,
+        kb_config: Dict[str, Any],
+        *,
+        app_id: uuid.UUID | str | None,
+        workspace_id: uuid.UUID | str | None,
+        source: KnowledgeRetrievalSource,
+) -> list:
+    """标准化知识库检索：走 KnowledgeRetriever + KnowledgeRetrievalRequest。
 
     读取 agent 的 ``knowledge_retrieval`` 配置（top_k / similarity_threshold /
     retrieve_type / reranker_id）。由于
@@ -214,7 +223,7 @@ async def _retrieve_chunks_via_standard(query: str, kb_config: Dict[str, Any]) -
 
     request = KnowledgeRetrievalRequest(
         query=query,
-        caller=KnowledgeRetrievalCaller.AGENT,
+        source=source,
         kb_ids=[uuid.UUID(kid) for kid in kb_ids],
         knowledge_bases=valid_kbs,
         top_k=request_top_k,
@@ -225,18 +234,37 @@ async def _retrieve_chunks_via_standard(query: str, kb_config: Dict[str, Any]) -
         enable_graph_retrieval=enable_graph_retrieval,
     )
 
-    result = await KnowledgeRetrievalService.retrieve_async(request=request, principal=None)
+    context = await build_app_knowledge_context(
+        app_id,
+        source=source,
+        trace_id=uuid.uuid4().hex,
+        expected_workspace_id=workspace_id,
+    )
+    result = await get_knowledge_retriever().retrieve(request, context)
 
     return result.chunks
 
 
-def create_knowledge_retrieval_tool(kb_config, kb_ids, user_id, citations_collector: Optional[List[Citation]] = None, kb_names: Optional[List[Dict]] = None):
+def create_knowledge_retrieval_tool(
+        kb_config,
+        kb_ids,
+        user_id,
+        *,
+        app_id: uuid.UUID | str | None,
+        workspace_id: uuid.UUID | str | None,
+        source: KnowledgeRetrievalSource,
+        citations_collector: Optional[List[Citation]] = None,
+        kb_names: Optional[List[Dict]] = None,
+):
     """从知识库中检索相关信息。当用户的问题需要参考知识库、文档或历史记录时，使用此工具进行检索。
 
     Args:
         kb_config: 知识库配置
         kb_ids: 知识库ID列表
         user_id: 用户ID
+        app_id: Application that owns the knowledge configuration.
+        workspace_id: Workspace that owns the application configuration.
+        source: Business source of the knowledge call.
         citations_collector: 用于收集引用信息的列表（由外部传入，tool 执行时填充）
         kb_names: 知识库名称列表 [{"id": "...", "name": "..."}]
 
@@ -258,7 +286,13 @@ def create_knowledge_retrieval_tool(kb_config, kb_ids, user_id, citations_collec
 
         try:
 
-            retrieve_chunks_result = await _retrieve_chunks_via_standard(query, kb_config)
+            retrieve_chunks_result = await _retrieve_chunks_via_standard(
+                query,
+                kb_config,
+                app_id=app_id,
+                workspace_id=workspace_id,
+                source=source,
+            )
             if retrieve_chunks_result:
                 retrieval_knowledge = [i.page_content for i in retrieve_chunks_result]
                 context = '\n\n'.join(retrieval_knowledge)
@@ -952,7 +986,11 @@ class AgentRunService:
     async def load_knowledge_retrieval_config(
             self,
             knowledge_retrieval_config: dict | None,
-            user_id
+            user_id,
+            *,
+            app_id: uuid.UUID,
+            workspace_id: uuid.UUID,
+            source: KnowledgeRetrievalSource,
     ) -> tuple[list, list]:
         """返回 (tools, citations_collector)"""
         if not knowledge_retrieval_config:
@@ -994,6 +1032,9 @@ class AgentRunService:
 
             kb_tool = create_knowledge_retrieval_tool(
                 knowledge_retrieval_config, kb_ids, user_id,
+                app_id=app_id,
+                workspace_id=workspace_id,
+                source=source,
                 citations_collector=citations_collector,
                 kb_names=kb_names
             )
@@ -1229,7 +1270,13 @@ class AgentRunService:
             parallel_results = await asyncio.gather(
                 self.load_tools_config(tools_config, web_search, tenant_id, user_id, workspace_id),
                 self.load_skill_config(skills_config, message, tenant_id, user_id, workspace_id),
-                self.load_knowledge_retrieval_config(knowledge_retrieval_config, user_id),
+                self.load_knowledge_retrieval_config(
+                    knowledge_retrieval_config,
+                    user_id,
+                    app_id=agent_config.app_id,
+                    workspace_id=workspace_id,
+                    source=KnowledgeRetrievalSource.DRAFT,
+                ),
                 self.load_memory_config(memory_config, user_id, workspace_id, storage_type, user_rag_memory_id)
                 if memory else None,
                 return_exceptions=True,
@@ -1685,7 +1732,13 @@ class AgentRunService:
             parallel_results = await asyncio.gather(
                 self.load_tools_config(tools_config, web_search, tenant_id, user_id, workspace_id),
                 self.load_skill_config(skills_config, message, tenant_id, user_id, workspace_id),
-                self.load_knowledge_retrieval_config(knowledge_retrieval_config, user_id),
+                self.load_knowledge_retrieval_config(
+                    knowledge_retrieval_config,
+                    user_id,
+                    app_id=agent_config.app_id,
+                    workspace_id=workspace_id,
+                    source=KnowledgeRetrievalSource.DRAFT,
+                ),
                 self.load_memory_config(memory_config, user_id, workspace_id, storage_type, user_rag_memory_id)
                 if memory else None,
                 return_exceptions=True,
@@ -2854,14 +2907,14 @@ class AgentRunService:
                             )
                         )
                         rows = result.scalars().all()
-                        meta_map = {str(r.id): r for r in rows}
+                        meta_map = {str(r.id): (r.file_name, r.file_size) for r in rows}
                 for f in files:
                     name, size = f.name, f.size
                     if f.transfer_method.value == "local_file" and f.upload_file_id and (not name or not size):
                         meta = meta_map.get(str(f.upload_file_id))
                         if meta:
-                            name = name or meta.file_name
-                            size = size or meta.file_size
+                            name = name or meta[0]
+                            size = size or meta[1]
                     human_meta["files"].append({
                         "type": f.type,
                         "url": f.url,

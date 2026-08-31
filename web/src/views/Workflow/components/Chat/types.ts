@@ -18,7 +18,7 @@ export type StreamEventData = {
   conversation_id: string | null;
   cycle_id: string;
   cycle_idx: number;
-  node_id: string;
+  node_id?: string;
   node_name?: string;
   node_type?: string;
   process?: any;

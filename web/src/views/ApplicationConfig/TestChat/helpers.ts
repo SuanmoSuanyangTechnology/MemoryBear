@@ -283,12 +283,6 @@ export const addRunEndMessage = (prev: ChatList, data: any): ChatList => {
 export const appendWorkflowContent = (prev: ChatList, content: string): ChatList =>
   mapLastVersion(prev, (current) => ({ ...current, content: current.content + content }))
 
-/**
- * message_replace event: replaces the last assistant message content wholesale.
- */
-export const replaceWorkflowContent = (prev: ChatList, content: string): ChatList =>
-  mapLastVersion(prev, (current) => ({ ...current, content, meta_data: { ...(current.meta_data || {}), outputs: undefined } }))
-
 export const appendWorkflowIntervention = (
   prev: ChatList,
   data: Pick<NodeData, 'execution_id' | 'node_id' | 'node_name' | 'rendered_content' | 'form_fields' | 'actions' | 'timeout_at'>,

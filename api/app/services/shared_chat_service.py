@@ -17,6 +17,7 @@ from app.core.logging_config import get_business_logger
 from app.models import MultiAgentConfig
 from app.models import ReleaseShare, AppRelease, Conversation
 from app.repositories import knowledge_repository
+from app.integrations.knowledge.contracts import KnowledgeRetrievalSource
 from app.repositories.tool_repository import ToolRepository
 from app.services.conversation_service import ConversationService
 from app.services.draft_run_service import create_web_search_tool
@@ -195,7 +196,7 @@ class SharedChatService:
             try:
                 conversation = await self.conversation_service.create_or_get_conversation_async(
                     app_id=release.app_id,
-                    workspace_id=release.app.workspace_id,
+                    workspace_id=release.app.workspace_id if release.app else None,
                     is_draft=False,
                     conversation_id=conversation_id,
                     user_id=user_id,
@@ -314,7 +315,15 @@ class SharedChatService:
             kb_ids = [kb.get("kb_id") for kb in knowledge_bases if kb.get("kb_id")]
             if kb_ids:
                 kb_names = self._build_kb_names(kb_ids)
-                kb_tool = create_knowledge_retrieval_tool(knowledge_retrieval, kb_ids, user_id, kb_names=kb_names)
+                kb_tool = create_knowledge_retrieval_tool(
+                    knowledge_retrieval,
+                    kb_ids,
+                    user_id,
+                    app_id=release.app_id,
+                    workspace_id=release.app.workspace_id,
+                    source=KnowledgeRetrievalSource.SHARED_CHAT,
+                    kb_names=kb_names,
+                )
                 tools.append(kb_tool)
 
         # 添加长期记忆工具
@@ -523,7 +532,15 @@ class SharedChatService:
                 kb_ids = [kb.get("kb_id") for kb in knowledge_bases if kb.get("kb_id")]
                 if kb_ids:
                     kb_names = self._build_kb_names(kb_ids)
-                    kb_tool = create_knowledge_retrieval_tool(knowledge_retrieval, kb_ids, user_id, kb_names=kb_names)
+                    kb_tool = create_knowledge_retrieval_tool(
+                        knowledge_retrieval,
+                        kb_ids,
+                        user_id,
+                        app_id=release.app_id,
+                        workspace_id=release.app.workspace_id if release.app else None,
+                        source=KnowledgeRetrievalSource.SHARED_CHAT,
+                        kb_names=kb_names,
+                    )
                     tools.append(kb_tool)
 
             # 添加长期记忆工具

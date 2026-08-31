@@ -1,10 +1,10 @@
 import uuid
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, NamedTuple, Optional, Set, TypedDict
 
 import sqlalchemy as sa
-from sqlalchemy import or_, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
@@ -59,6 +59,73 @@ class EndUserRepository:
     def __init__(self, db: Session | AsyncSession):
         self.db = db
 
+    @staticmethod
+    def _temporary_expires_at_expr():
+        """临时身份过期时间表达式：write_time + retention_days 天。
+
+        write_time 或 retention_days 任一为 NULL 时结果为 NULL。
+        """
+        return EndUser.write_time + Workspace.retention_days * sa.text("INTERVAL '1 day'")
+
+    @staticmethod
+    def _expired_temporary_filter():
+        """构造临时身份过期条件。
+
+        PostgreSQL 使用 retention_days 乘以固定的一天 interval，避免拼接动态 SQL。
+        """
+        expires_at = EndUserRepository._temporary_expires_at_expr()
+        return (
+            EndUser.is_active == sa.true(),
+            EndUser.identity_status == "temporary",
+            EndUser.write_time.is_not(None),
+            Workspace.retention_days.is_not(None),
+            expires_at < func.now(),
+        )
+
+    def get_expired_temporary_end_user_ids(self) -> List[uuid.UUID]:
+        """按空间有效期和最后写入时间稳定查询全部过期临时身份 ID。"""
+        retention_workspaces = (
+            self.db.query(Workspace.id, Workspace.retention_days)
+            .filter(Workspace.retention_days.is_not(None))
+            .all()
+        )
+        if not retention_workspaces:
+            return []
+
+        scan_time = utcnow_naive()
+        candidates: list[tuple[uuid.UUID, datetime]] = []
+        for workspace_id, retention_days in retention_workspaces:
+            cutoff_time = scan_time - timedelta(days=retention_days)
+            rows = (
+                self.db.query(EndUser.id, EndUser.write_time)
+                .filter(
+                    EndUser.workspace_id == workspace_id,
+                    EndUser.is_active == sa.true(),
+                    EndUser.identity_status == "temporary",
+                    EndUser.write_time.is_not(None),
+                    EndUser.write_time < cutoff_time,
+                )
+                .order_by(EndUser.write_time.asc(), EndUser.id.asc())
+                .all()
+            )
+            candidates.extend((row.id, row.write_time) for row in rows)
+
+        candidates.sort(key=lambda candidate: (candidate[1], candidate[0].int))
+        return [end_user_id for end_user_id, _ in candidates]
+
+    def is_expired_temporary_end_user(self, end_user_id: uuid.UUID) -> bool:
+        """删除前重新确认身份仍为临时、活跃且已超过当前空间保留期。"""
+        return (
+            self.db.query(EndUser.id)
+            .join(Workspace, Workspace.id == EndUser.workspace_id)
+            .filter(
+                EndUser.id == end_user_id,
+                *self._expired_temporary_filter(),
+            )
+            .first()
+            is not None
+        )
+
     @contextmanager
     def _acquire_eu_lock(self, workspace_id, other_id):
         """获取 EndUser 创建/查找的排他锁，防止并发重复创建。
@@ -102,6 +169,30 @@ class EndUserRepository:
             db_logger.error(f"查询工作空间 {workspace_id} 下终端用户时出错: {str(e)}")
             raise
 
+    def get_active_end_users_by_workspace(
+        self, workspace_id: uuid.UUID, active_since: datetime
+    ) -> List[EndUser]:
+        """获取指定 workspace 下最近活跃的 end_user（write_time > active_since）。
+
+        活跃性过滤下沉到 SQL 层，避免应用层逐个用户再查一次 write_time（消除 N+1）。
+        """
+        try:
+            end_users = (
+                self.db.query(EndUser)
+                .filter(
+                    EndUser.workspace_id == workspace_id,
+                    EndUser.is_active == True,
+                    EndUser.write_time > active_since,
+                )
+                .all()
+            )
+            db_logger.info(f"成功查询工作空间 {workspace_id} 下的 {len(end_users)} 个活跃终端用户")
+            return end_users
+        except Exception as e:
+            self.db.rollback()
+            db_logger.error(f"查询工作空间 {workspace_id} 下活跃终端用户时出错: {str(e)}")
+            raise
+
     async def get_end_users_by_workspace_async(
         self, workspace_id: uuid.UUID
     ) -> List[EndUser]:
@@ -139,6 +230,34 @@ class EndUserRepository:
         except Exception as e:
             self.db.rollback()
             db_logger.error(f"查询工作空间 {workspace_id} 下终端用户时出错: {str(e)}")
+            raise
+
+    def get_temporary_end_users_count_by_workspace(
+            self,
+            workspace_id: uuid.UUID,
+    ) -> int:
+        """获取指定 workspace 下至少有一条记忆的有效临时 EndUser 数量。"""
+        try:
+            end_users_count = (
+                self.db.query(EndUser)
+                .filter(
+                    EndUser.workspace_id == workspace_id,
+                    EndUser.is_active.is_(True),
+                    EndUser.identity_status == "temporary",
+                    EndUser.memory_count >= 1,
+                )
+                .count()
+            )
+            db_logger.info(
+                f"成功查询工作空间 {workspace_id} 下的 "
+                f"{end_users_count} 个至少有一条记忆的有效临时终端用户"
+            )
+            return end_users_count
+        except Exception as e:
+            self.db.rollback()
+            db_logger.error(
+                f"查询工作空间 {workspace_id} 下有记忆的有效临时终端用户时出错: {str(e)}"
+            )
             raise
 
     def get_end_user_by_id(self, end_user_id: uuid.UUID) -> Optional[EndUser]:
@@ -361,7 +480,8 @@ class EndUserRepository:
         覆盖 conversations、memory_messages、memory_short_term、
         memory_long_term、memory_forget_log、memory_perceptual、
         memory_reflection_log、forgetting_cycle_history、
-        memory_display_record、memory_engine_display_event。
+        memory_display_record、memory_engine_display_event、
+        dialogue_emotion_raw。
 
         跳过 implicit_emotions_storage（UNIQUE 约束，需特殊处理）和
         memory_config（end_user_id 为配置自身标识，非用户引用）。
@@ -376,6 +496,7 @@ class EndUserRepository:
 
         # ── 所有表定义：(model, col_name, src_value, tgt_value) ──
         from app.models.conversation_model import Conversation
+        from app.models.dialogue_emotion_raw_model import DialogueEmotionRaw
         from app.models.memory_message_model import MemoryMessage
         from app.models.memory_short_model import ShortTermMemory, LongTermMemory
         from app.models.forgetting_cycle_history_model import ForgettingCycleHistory
@@ -398,6 +519,7 @@ class EndUserRepository:
             (ForgetAuditModel, "end_user_id", src_id, target_id),
             (MemoryPerceptualModel, "end_user_id", src_id, target_id),
             (MemoryReflectionLog, "end_user_id", src_id, target_id),
+            (DialogueEmotionRaw, "end_user_id", src_id, target_id),
         ]
 
         for model, col_name, src_val, tgt_val in all_tables:
@@ -530,6 +652,53 @@ class EndUserRepository:
 
         # 未找到活跃用户 → 检查是否已被合并到其它用户
         return await self.resolve_merge_by_other_id_async(workspace_id, other_id)
+
+    async def acquire_identity_lock_async(
+        self, workspace_id: uuid.UUID, identity_features: str
+    ) -> None:
+        """按 (workspace_id, identity_features) 获取事务级排他锁，串行化身份确认。
+
+        不加锁时，两个携带相同标识的并发请求会各自查到「无匹配」，
+        双双置 identity_status=confirmed，产生两条同标识活跃记录，
+        使跨渠道归并永久失效（后续匹配只会命中其中一条）。
+
+        使用 pg_advisory_xact_lock，锁在事务提交/回滚时自动释放，无需显式 unlock。
+        """
+        await self.db.execute(
+            sa.text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+            {"key": f"eu_identity:{workspace_id}|{identity_features}"},
+        )
+
+    async def find_active_by_identity_features(
+        self, workspace_id: uuid.UUID, identity_features: str
+    ) -> Optional["EndUser"]:
+        """按 workspace_id + identity_features 查询相同标识的活跃记录（用于跨渠道归并）。
+
+        FOR UPDATE 是 advisory 锁之外的第二道保险：advisory 锁是事务级的，
+        而 merge_end_users 内部会提交多次，第一次提交就会把 advisory 锁释放掉，
+        此时 source 行尚未软删、仍带着标识。窗口期内并发的同标识请求会命中
+        这条正在被归并的记录（created_at ASC 优先取更早的 source），把自己
+        并到一个即将软删的主体上。行锁让这类请求阻塞到归并事务结束为止。
+
+        出错时只记日志并向上抛，不在此处 rollback：rollback 会连带释放调用方刚
+        获取的 advisory 锁并回滚其 pending 状态，事务边界应由调用方决定。
+        """
+        try:
+            result = await self.db.execute(
+                select(EndUser)
+                .where(
+                    EndUser.workspace_id == workspace_id,
+                    EndUser.identity_features == identity_features,
+                    EndUser.is_active.is_(True),
+                )
+                .order_by(EndUser.created_at.asc())
+                .limit(1)
+                .with_for_update()
+            )
+            return result.scalars().first()
+        except Exception as e:
+            db_logger.error(f"按身份标识查询终端用户时出错: {str(e)}")
+            raise
 
     async def resolve_merge_by_other_id_async(
         self, workspace_id: uuid.UUID, other_id: str
@@ -2085,6 +2254,36 @@ class EndUserRepository:
             db_logger.error(f"软删除终端用户失败: end_user_id={end_user_id}, error={str(e)}")
             raise
 
+    async def soft_delete_many_pending_async(self, end_user_ids: set[uuid.UUID]) -> int:
+        """批量软删 EndUser，但**不提交** —— 提交权交给调用方。
+
+        与 soft_delete_by_end_user_id_async 的区别：后者内部自带 commit，会让软删
+        单独成为一个事务。归并流程要求「软删 source + 写 end_user_merge 映射」原子
+        生效，二者缺一都会留下坏状态：
+        - 只软删不写映射 → 老 end_user_id 既查不到活跃行也查不到映射，
+          get_end_user_by_id_async 返回 None，接口报「终端用户不存在」；
+        - 只写映射不软删 → 老 ID 仍被当成独立活跃主体，新数据继续写到 source，
+          而引用表迁移与 Neo4j reassign 都是一次性的，这批数据永远迁不过去。
+
+        Args:
+            end_user_ids: 待软删的 end_user id 集合，空集合直接返回 0
+
+        Returns:
+            int: 实际被软删的行数（已是 is_active=False 的行不计入）
+        """
+        if not end_user_ids:
+            return 0
+        result = await self.db.execute(
+            update(EndUser)
+            .where(EndUser.id.in_(end_user_ids), EndUser.is_active == True)
+            .values(is_active=False)
+        )
+        affected = result.rowcount or 0
+        db_logger.info(
+            f"批量软删终端用户(pending, 未提交): ids={end_user_ids}, affected={affected}"
+        )
+        return affected
+
     async def soft_delete_by_end_user_id_async(self, end_user_id: uuid.UUID) -> bool:
         """软删除指定 EndUser（异步版本）"""
         try:
@@ -2211,8 +2410,13 @@ class EndUserRepository:
             pagesize: int,
             keyword: Optional[str] = None,
             label: Optional[str] = None,
-    ) -> tuple[List[EndUser], int]:
+    ) -> tuple[list, int]:
         """Dashboard 专用：分页查询有记忆的宿主（memory_count > 0）
+
+        长时/短时记忆以 identity_status 为准：
+        - confirmed：长时记忆
+        - temporary：短时记忆（返回 write_time + retention_days 计算的过期时间，
+          write_time 或 retention_days 任一为 NULL 时过期时间为 NULL）
 
         返回结果按 created_at 从新到旧排序（NULL 值排在最后），
         只加载接口所需列以避免加载大 Text 字段。
@@ -2222,14 +2426,16 @@ class EndUserRepository:
             page: 页码（从1开始）
             pagesize: 每页数量
             keyword: 搜索关键词（可选，同时模糊匹配 other_name 和 id）
-            label: 标签过滤（可选，"long" 表示有 other_name，"short" 表示无 other_name）
+            label: 标签过滤（可选，"long" 表示长时记忆(confirmed)，"short" 表示短时记忆(temporary)）
 
         Returns:
-            tuple[List[EndUser], int]: (当前页宿主列表, 符合条件的总数)
+            tuple[list, int]: (items列表[{"end_user": ORM, "expire_time": datetime|None}], 总数)
         """
         from sqlalchemy import desc, String, cast
         from sqlalchemy.orm import load_only
         from sqlalchemy.sql.expression import nullslast
+
+        expires_at = self._temporary_expires_at_expr()
 
         columns = load_only(
             EndUser.id,
@@ -2240,25 +2446,28 @@ class EndUserRepository:
             EndUser.memory_config_id,
             EndUser.created_at,
             EndUser.workspace_id,
+            EndUser.identity_features,
+            EndUser.identity_status,
+            EndUser.write_time,
         )
-        query = self.db.query(EndUser).options(columns).filter(
-            EndUser.workspace_id == workspace_id,
-            EndUser.memory_count > 0,
-            EndUser.is_active == True,
+        query = (
+            self.db.query(
+                EndUser,
+                expires_at.label("expire_time"),
+            )
+            .options(columns)
+            .outerjoin(Workspace, Workspace.id == EndUser.workspace_id)
+            .filter(
+                EndUser.workspace_id == workspace_id,
+                EndUser.memory_count > 0,
+                EndUser.is_active == True,
+            )
         )
 
         if label == "long":
-            query = query.filter(
-                EndUser.other_name.isnot(None),
-                EndUser.other_name != "",
-            )
+            query = query.filter(EndUser.identity_status == "confirmed")
         elif label == "short":
-            query = query.filter(
-                or_(
-                    EndUser.other_name.is_(None),
-                    EndUser.other_name == "",
-                )
-            )
+            query = query.filter(EndUser.identity_status == "temporary")
 
         if keyword:
             keyword = keyword.strip()
@@ -2275,12 +2484,20 @@ class EndUserRepository:
         if total == 0:
             return [], 0
 
-        items = (
+        rows = (
             query.order_by(nullslast(desc(EndUser.created_at)), desc(EndUser.id))
             .offset((page - 1) * pagesize)
             .limit(pagesize)
             .all()
         )
+
+        items = [
+            {
+                "end_user": end_user_orm,
+                "expire_time": expire_time,
+            }
+            for end_user_orm, expire_time in rows
+        ]
         return items, total
 
     def get_paginated_with_memory_rag(
@@ -2298,21 +2515,28 @@ class EndUserRepository:
         - 只统计当前 workspace 下 permission_id="Memory" 的用户记忆知识库
         - 在 SQL 层过滤 chunk 总数为 0 的宿主
 
+        长时/短时记忆以 identity_status 为准：
+        - confirmed：长时记忆
+        - temporary：短时记忆（返回 write_time + retention_days 计算的过期时间，
+          write_time 或 retention_days 任一为 NULL 时过期时间为 NULL）
+
         Args:
             workspace_id: 工作空间ID
             page: 页码（从1开始）
             pagesize: 每页数量
             keyword: 搜索关键词（可选，同时模糊匹配 other_name 和 id）
-            label: 标签过滤（可选，"long" 表示有 other_name，"short" 表示无 other_name）
+            label: 标签过滤（可选，"long" 表示长时记忆(confirmed)，"short" 表示短时记忆(temporary)）
 
         Returns:
-            tuple[list, int]: (items列表[{"end_user": ORM, "memory_count": int}], 总数)
+            tuple[list, int]: (items列表[{"end_user": ORM, "memory_count": int, "expire_time": datetime|None}], 总数)
         """
         from sqlalchemy import desc, String, cast, func
         from sqlalchemy.orm import load_only
         from sqlalchemy.sql.expression import nullslast
         from app.models.document_model import Document
         from app.models.knowledge_model import Knowledge
+
+        expires_at = self._temporary_expires_at_expr()
 
         chunk_subquery = (
             self.db.query(
@@ -2339,14 +2563,19 @@ class EndUserRepository:
             EndUser.memory_config_id,
             EndUser.created_at,
             EndUser.workspace_id,
+            EndUser.identity_features,
+            EndUser.identity_status,
+            EndUser.write_time,
         )
 
         base_query = (
             self.db.query(
                 EndUser,
                 chunk_subquery.c.memory_count.label("memory_count"),
+                expires_at.label("expire_time"),
             )
             .options(columns)
+            .outerjoin(Workspace, Workspace.id == EndUser.workspace_id)
             .join(
                 chunk_subquery,
                 chunk_subquery.c.file_name == func.concat(cast(EndUser.id, String), ".txt"),
@@ -2359,17 +2588,9 @@ class EndUserRepository:
         )
 
         if label == "long":
-            base_query = base_query.filter(
-                EndUser.other_name.isnot(None),
-                EndUser.other_name != "",
-            )
+            base_query = base_query.filter(EndUser.identity_status == "confirmed")
         elif label == "short":
-            base_query = base_query.filter(
-                or_(
-                    EndUser.other_name.is_(None),
-                    EndUser.other_name == "",
-                )
-            )
+            base_query = base_query.filter(EndUser.identity_status == "temporary")
 
         if keyword:
             keyword = keyword.strip()
@@ -2394,10 +2615,11 @@ class EndUserRepository:
         )
 
         items = []
-        for end_user_orm, memory_count in rows:
+        for end_user_orm, memory_count, expire_time in rows:
             items.append({
                 "end_user": end_user_orm,
                 "memory_count": int(memory_count or 0),
+                "expire_time": expire_time,
             })
         return items, total
 
@@ -2442,6 +2664,15 @@ def get_end_users_by_workspace(db: Session, workspace_id: uuid.UUID) -> List[End
     """根据工作空间ID查询终端用户（返回 EndUser ORM 列表）"""
     repo = EndUserRepository(db)
     end_users = repo.get_end_users_by_workspace(workspace_id)
+    return end_users
+
+
+def get_active_end_users_by_workspace(
+    db: Session, workspace_id: uuid.UUID, active_since: datetime
+) -> List[EndUser]:
+    """根据工作空间ID查询最近活跃的终端用户（write_time > active_since）。"""
+    repo = EndUserRepository(db)
+    end_users = repo.get_active_end_users_by_workspace(workspace_id, active_since)
     return end_users
 
 

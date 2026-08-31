@@ -363,6 +363,7 @@ class ForgettingScheduler:
         query = """
         MATCH (n)
         WHERE (n:Statement OR n:ExtractedEntity OR n:MemorySummary)
+          AND n.delete_at IS NULL
         """
         
         if end_user_id:

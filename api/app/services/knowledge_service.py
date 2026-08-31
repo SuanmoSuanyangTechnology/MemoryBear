@@ -499,6 +499,26 @@ async def create_knowledge_async(
             knowledge.image2text_id = model.id
             business_logger.debug(f"Auto-bind image2text model: {model.id}")
 
+        from app.services.workspace_service import validate_model_bindings_runtime_async
+
+        model_warnings = await validate_model_bindings_runtime_async(
+            {
+                "llm": str(knowledge.llm_id),
+                "embedding": str(knowledge.embedding_id),
+                "rerank": str(knowledge.reranker_id),
+                "image2text": str(knowledge.image2text_id),
+            },
+            tenant_id,
+            workspace.id,
+            locale="zh",
+            slots_to_validate=("llm", "embedding", "rerank", "image2text"),
+        )
+        if model_warnings:
+            raise BusinessException(
+                model_warnings[0]["message"],
+                BizCode.INVALID_PARAMETER,
+            )
+
         db_knowledge = await knowledge_repository.create_knowledge_async(
             db=db,
             knowledge=knowledge,

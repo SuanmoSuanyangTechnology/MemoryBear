@@ -571,8 +571,14 @@ async def _handle_save_node_executions(
     items: list[dict[str, Any]],
     **kwargs: Any,
 ) -> None:
-    """Batch persist workflow node execution records."""
+    """Batch persist workflow node execution records.
+
+    Retention policy: this table only keeps the most recent execution per
+    ``app_id + workflow_config_id``. Historical node detail stays available via
+    ``workflow_executions.output_data["node_outputs"]``.
+    """
     from app.models.workflow_model import WorkflowNodeExecution
+    from app.repositories.workflow_repository import NODE_EXECUTION_RETENTION_SQL
 
     if not items:
         return
@@ -581,6 +587,21 @@ async def _handle_save_node_executions(
         {"eid": execution_id},
     )
     await db.execute(sa_insert(WorkflowNodeExecution).values(items))
+
+    if not settings.WORKFLOW_NODE_EXECUTION_RETENTION_ENABLED:
+        return
+    # Runs after the INSERT above, inside the same batch transaction: if the
+    # write fails we must not lose the previous execution's records either.
+    result = await db.execute(
+        sa_text(NODE_EXECUTION_RETENTION_SQL),
+        {"eid": str(execution_id)},
+    )
+    if result.rowcount:
+        logger.debug(
+            "node execution retention removed %s stale rows (execution_id=%s)",
+            result.rowcount,
+            execution_id,
+        )
 
 
 _TASK_HANDLERS: dict[str, Any] = {

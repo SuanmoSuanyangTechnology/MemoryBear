@@ -9,6 +9,10 @@
   "permission_denied": "没有权限访问此工作空间",
   "name_required": "工作空间名称不能为空",
   "invalid_name": "工作空间名称格式不正确",
+  "retention_policy": {
+    "retrieved": "工作空间保留策略获取成功",
+    "updated": "工作空间保留策略更新成功"
+  },
   "members": {
     "list_retrieved": "工作空间成员列表获取成功",
     "role_updated": "成员角色更新成功",
@@ -41,6 +45,26 @@
     "config_updated": "模型配置更新成功",
     "invalid_config": "无效的模型配置",
     "config_verified": "模型配置已校验",
-    "default_config_updated_notice": "空间默认配置模型有更新。"
+    "default_config_updated_notice": "空间默认配置模型有更新。",
+    "slots": {
+      "llm": "对话模型",
+      "embedding": "嵌入模型",
+      "rerank": "重排序模型",
+      "vision": "视觉模型",
+      "audio": "音频模型",
+      "video": "视频模型"
+    },
+    "errors": {
+      "save_failed": "模型配置保存失败（{count} 项）：{reasons}",
+      "not_configured": "{slot}未配置，请选择一个可用模型",
+      "not_found": "{slot}选择的模型不存在（模型ID: {model_id}）",
+      "inactive": "{slot}「{model_name}」已被禁用，请先在模型管理中启用",
+      "not_accessible": "{slot}「{model_name}」不在当前租户可用范围内，请重新选择",
+      "deprecated": "{slot}「{model_name}」已弃用，请更换为其他模型",
+      "capability_mismatch": "{slot}与所选模型「{model_name}」不匹配（模型类型: {model_type}），请重新选择",
+      "no_api_key": "{slot}「{model_name}」没有可用的 API 密钥，请先在模型管理中配置密钥",
+      "api_verify_failed": "{slot}「{model_name}」连通性校验失败：{error}",
+      "verify_failed": "{slot}「{model_name}」校验异常：{error}"
+    }
   }
 }

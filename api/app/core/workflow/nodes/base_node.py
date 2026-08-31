@@ -471,6 +471,19 @@ class BaseNode(ABC):
             return
 
         timeout = self.get_timeout()
+        writer = None
+
+        def rollback_provisional(reason: str) -> None:
+            if writer is None or not getattr(self, "_provisional_error_branch_stream", False):
+                return
+            writer({
+                "type": "node_stream_control",
+                "action": "rollback",
+                "node_id": self.node_id,
+                "attempt": getattr(self, "_stream_attempt", None),
+                "reason": reason,
+                "final": True,
+            })
 
         try:
             # Get LangGraph's stream writer for sending custom data
@@ -481,13 +494,34 @@ class BaseNode(ABC):
             final_result = None
             chunk_count = 0
 
-            # Stream chunks in real-time
-            loop_start = asyncio.get_event_loop().time()
+            # Apply the timeout while awaiting every next chunk. Checking only
+            # after a chunk arrives cannot interrupt a stalled provider stream.
+            loop = asyncio.get_running_loop()
+            deadline = loop.time() + timeout
+            stream_iterator = self.execute_stream(state, variable_pool).__aiter__()
 
-            async for item in self.execute_stream(state, variable_pool):
-                # Check timeout
-                if asyncio.get_event_loop().time() - loop_start > timeout:
+            while True:
+                remaining = deadline - loop.time()
+                if remaining <= 0:
                     raise TimeoutError()
+                try:
+                    item = await asyncio.wait_for(anext(stream_iterator), timeout=remaining)
+                except StopAsyncIteration:
+                    break
+
+                # Stream-control items coordinate optimistic output rollback and
+                # are not model chunks or graph state updates.
+                stream_control = item.get("__stream_control__")
+                if stream_control:
+                    writer({
+                        "type": "node_stream_control",
+                        "action": stream_control,
+                        "node_id": self.node_id,
+                        "attempt": item.get("attempt"),
+                        "reason": item.get("reason"),
+                        "final": item.get("final", False),
+                    })
+                    continue
 
                 # Check if it's a completion marker
                 if item.get("__final__"):
@@ -508,7 +542,11 @@ class BaseNode(ABC):
                         "node_id": self.node_id,
                         "chunk": content,
                         "done": done,
-                        "field": field
+                        "field": field,
+                        "attempt": getattr(self, "_stream_attempt", None),
+                        "provisional": bool(
+                            getattr(self, "_provisional_error_branch_stream", False)
+                        ),
                     })
 
             elapsed_time = (time.time() - start_time) * 1000
@@ -542,18 +580,53 @@ class BaseNode(ABC):
             yield state_update | self.trans_activate(state)
 
         except TimeoutError:
+            rollback_provisional("timeout")
             elapsed_time = (time.time() - start_time) * 1000
+            timeout_error = TimeoutError(f"Node execution timed out ({timeout}s)")
             logger.error(f"Node {self.node_id} execution timed out ({timeout}s)")
+
+            # A branch-mode LLM timeout is a model failure, not a workflow-level
+            # crash. Convert it to the same final ERROR routing result used by
+            # exhausted provider retries.
+            stream_error_handler = getattr(self, "_handle_llm_error", None)
+            if (
+                    getattr(self, "_provisional_error_branch_stream", False)
+                    and callable(stream_error_handler)
+            ):
+                business_result = stream_error_handler(timeout_error)
+                extracted_output = self._extract_output(business_result)
+                final_output = self._wrap_output(
+                    business_result,
+                    elapsed_time,
+                    state,
+                    variable_pool,
+                )
+                if extracted_output is not None:
+                    await self._store_runtime_variables(extracted_output, variable_pool)
+                yield {
+                    **final_output,
+                    "looping": state["looping"],
+                } | self.trans_activate(state)
+                return
+
             error_output = self._wrap_error(
-                f"Node execution timed out ({timeout}s)",
+                str(timeout_error),
                 elapsed_time,
                 state,
                 variable_pool
             )
             yield error_output
         except GraphInterrupt:
+            rollback_provisional("interrupt")
+            raise
+        except asyncio.CancelledError:
+            rollback_provisional("cancelled")
+            raise
+        except GeneratorExit:
+            rollback_provisional("generator_exit")
             raise
         except Exception as e:
+            rollback_provisional("node_error")
             elapsed_time = (time.time() - start_time) * 1000
             logger.error(f"Node {self.node_id} execution failed: {e}", exc_info=True)
             error_output = self._wrap_error(str(e), elapsed_time, state, variable_pool)

@@ -50,6 +50,7 @@ import ReportModal from '@/components/Chat/ReportModal'
 import type { ReportModalRef } from '@/views/Conversation/types'
 import { createWorkflowStreamHandler } from './streamHandler'
 import type { Data } from './types'
+import { replaceOutputByNodeId } from '@/components/Chat/utils/messageOutputs'
 import {
   flattenChatList,
   mapLastVersion,
@@ -204,17 +205,10 @@ const Chat = forwardRef<ChatRef, ChatProps>(({
   }, [])
 
   /**
-   * Replaces the last assistant message content
+   * Replaces the complete response or the response produced by a specific node.
    */
-  const replaceStreamContent = useCallback((content: string) => {
-    setChatList(prev => mapLastVersion(prev, (current) => ({
-      ...current,
-      content,
-      meta_data: {
-        ...(current.meta_data || {}),
-        outputs: undefined
-      }
-    })))
+  const replaceStreamContent = useCallback((content: string, nodeId?: string) => {
+    setChatList(prev => replaceOutputByNodeId(prev, nodeId, content))
   }, [])
 
   /**

@@ -15,7 +15,10 @@ from starlette.responses import Response
 
 from app.controllers import memory_display_controller
 from app.core.api_key_auth import require_api_key_self_db
-from app.core.api_key_utils import get_current_user_snapshot_from_api_key_async
+from app.core.api_key_utils import (
+    get_current_user_snapshot_from_api_key_async,
+    validate_end_user_in_workspace_async,
+)
 from app.core.logging_config import get_business_logger
 from app.db import get_async_db_context
 from app.schemas.api_key_schema import ApiKeyAuth
@@ -52,11 +55,48 @@ async def get_written_memories(
     """
     async with get_async_db_context() as db:
         current_user = await get_current_user_snapshot_from_api_key_async(db, api_key_auth)
+        end_user = await validate_end_user_in_workspace_async(db, end_user_id, api_key_auth.workspace_id)
+        # 合并路由：end_user 可能是合并目标（原 ID 已被合并且 is_active=False），
+        # 必须改用 end_user.id，否则下游会按已被合并掉的旧 ID 查询而拿到空数据。
+        end_user_id = str(end_user.id)
 
     logger.info(f"V1 get written memories - workspace: {api_key_auth.workspace_id}")
 
     async with get_async_db_context() as db:
         result = await memory_display_controller.get_written_memories(
+            end_user_id=end_user_id,
+            page=page,
+            pagesize=pagesize,
+            current_user=current_user,
+            db=db,
+        )
+    return _encode_result(result)
+
+
+# ==================== 读取展示记录 ====================
+
+
+@router.get("/retrieved")
+@require_api_key_self_db(scopes=["memory"])
+async def get_retrieved_memories(
+    request: Request,
+    end_user_id: str = Query(..., description="终端用户 ID"),
+    page: int = Query(1, ge=1, description="页码，从 1 开始"),
+    pagesize: int = Query(10, ge=1, le=100, description="每页数量"),
+    api_key_auth: ApiKeyAuth = None,
+):
+    """获取读取展示记录列表。"""
+    async with get_async_db_context() as db:
+        current_user = await get_current_user_snapshot_from_api_key_async(db, api_key_auth)
+        end_user = await validate_end_user_in_workspace_async(db, end_user_id, api_key_auth.workspace_id)
+        # 合并路由：end_user 可能是合并目标（原 ID 已被合并且 is_active=False），
+        # 必须改用 end_user.id，否则下游会按已被合并掉的旧 ID 查询而拿到空数据。
+        end_user_id = str(end_user.id)
+
+    logger.info(f"V1 get retrieved memories - workspace: {api_key_auth.workspace_id}")
+
+    async with get_async_db_context() as db:
+        result = await memory_display_controller.get_retrieved_memories(
             end_user_id=end_user_id,
             page=page,
             pagesize=pagesize,
@@ -97,6 +137,10 @@ async def get_engine_display_cards(
     """
     async with get_async_db_context() as db:
         current_user = await get_current_user_snapshot_from_api_key_async(db, api_key_auth)
+        end_user = await validate_end_user_in_workspace_async(db, end_user_id, api_key_auth.workspace_id)
+        # 合并路由：end_user 可能是合并目标（原 ID 已被合并且 is_active=False），
+        # 必须改用 end_user.id，否则下游会按已被合并掉的旧 ID 查询而拿到空数据。
+        end_user_id = str(end_user.id)
 
     logger.info(f"V1 get engine display cards - workspace: {api_key_auth.workspace_id}")
 
@@ -106,6 +150,49 @@ async def get_engine_display_cards(
             timezone=timezone,
             page=page,
             pagesize=pagesize,
+            language_type=language_type,
+            current_user=current_user,
+            db=db,
+        )
+    return _encode_result(result)
+
+
+# ==================== 全部展示记录 ====================
+
+
+@router.get("/all")
+@require_api_key_self_db(scopes=["memory"])
+async def get_all_memory_display(
+    request: Request,
+    end_user_id: str = Query(..., description="终端用户 ID"),
+    timezone: str = Header(
+        ...,
+        alias="X-Timezone",
+        description="IANA 时区名称，即使 include_engines=false 也必传",
+    ),
+    page: int = Query(1, ge=1, description="页码，从 1 开始"),
+    pagesize: int = Query(10, ge=1, le=100, description="每页数量"),
+    include_engines: bool = Query(True, description="是否包含引擎动态卡片"),
+    language_type: Optional[str] = Header(None, alias="X-Language-Type"),
+    api_key_auth: ApiKeyAuth = None,
+):
+    """获取写入、读取和引擎动态的统一时间线。"""
+    async with get_async_db_context() as db:
+        current_user = await get_current_user_snapshot_from_api_key_async(db, api_key_auth)
+        end_user = await validate_end_user_in_workspace_async(db, end_user_id, api_key_auth.workspace_id)
+        # 合并路由：end_user 可能是合并目标（原 ID 已被合并且 is_active=False），
+        # 必须改用 end_user.id，否则下游会按已被合并掉的旧 ID 查询而拿到空数据。
+        end_user_id = str(end_user.id)
+
+    logger.info(f"V1 get all memory display - workspace: {api_key_auth.workspace_id}")
+
+    async with get_async_db_context() as db:
+        result = await memory_display_controller.get_all_memory_display(
+            end_user_id=end_user_id,
+            timezone=timezone,
+            page=page,
+            pagesize=pagesize,
+            include_engines=include_engines,
             language_type=language_type,
             current_user=current_user,
             db=db,

@@ -48,6 +48,7 @@ from .conversation_share_model import ConversationShare
 from .memory_message_model import MemoryMessage
 from .memory_display_record_model import MemoryDisplayRecord
 from .memory_engine_display_event_model import MemoryEngineDisplayEvent
+from .dialogue_emotion_raw_model import DialogueEmotionRaw
 from .outbox_model import OutboxEvent
 
 __all__ = [
@@ -122,5 +123,6 @@ __all__ = [
     "MemoryReflectionLog",
     "MemoryDisplayRecord",
     "MemoryEngineDisplayEvent",
+    "DialogueEmotionRaw",
     "OutboxEvent",
 ]

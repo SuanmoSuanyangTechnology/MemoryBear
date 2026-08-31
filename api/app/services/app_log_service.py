@@ -1,5 +1,6 @@
 """应用日志服务层"""
 import uuid
+import json
 import datetime as dt
 from typing import Optional, Tuple, Dict, Any
 
@@ -13,7 +14,14 @@ from app.models.conversation_model import Conversation, Message
 from app.models.workflow_model import WorkflowExecution
 from app.repositories.agent_execution_repository import AgentExecutionRepository
 from app.repositories.conversation_repository import ConversationRepository, MessageRepository
-from app.schemas.app_log_schema import AppLogMessage, AppLogNodeExecution, LogFileInfo
+from app.repositories.workflow_repository import WorkflowExecutionRepository
+from app.schemas.app_log_schema import (
+    AppLogConversation,
+    AppLogConversationDetail,
+    AppLogMessage,
+    AppLogNodeExecution,
+    LogFileInfo,
+)
 
 logger = get_business_logger()
 
@@ -41,6 +49,7 @@ class AppLogService:
         self.db = db
         self.conversation_repository = ConversationRepository(db)
         self.message_repository = MessageRepository(db)
+        self.workflow_execution_repository = WorkflowExecutionRepository(db)
 
     def list_conversations(
         self,
@@ -105,6 +114,86 @@ class AppLogService:
         )
 
         return conversations, total
+
+    def list_workflow_executions(
+        self,
+        app_id: uuid.UUID,
+        page: int = 1,
+        pagesize: int = 20,
+        is_draft: Optional[bool] = None,
+        start_date: Optional[dt.datetime] = None,
+        end_date: Optional[dt.datetime] = None,
+    ) -> tuple[list[WorkflowExecution], int]:
+        """分页获取工作流执行记录；以 release_id 区分试运行与已发布调用。"""
+        return self.workflow_execution_repository.list_for_app_log(
+            app_id=app_id,
+            page=page,
+            pagesize=pagesize,
+            is_draft=is_draft,
+            start_date=start_date,
+            end_date=end_date,
+        )
+
+    def get_workflow_execution_log_detail(
+        self,
+        app_id: uuid.UUID,
+        execution_id: str,
+    ) -> AppLogConversationDetail | None:
+        """将一次无会话工作流执行转换为与对话日志一致的详情结构。"""
+        execution = self.workflow_execution_repository.get_for_app_log(app_id, execution_id)
+        if not execution:
+            return None
+
+        # 不创建 Conversation 数据库记录，仅使用 execution.id 构造稳定的虚拟会话/消息 ID，
+        # 供现有日志前端和 node_executions_map 复用同一套契约。
+        virtual_conversation_id = execution.id
+        input_message_id = uuid.uuid5(execution.id, "input")
+        output_message_id = uuid.uuid5(execution.id, "output")
+        input_content = _format_log_json(execution.input_data)
+        output_content = execution.error_message or _extract_execution_output(execution.output_data)
+        node_executions = _build_nodes_from_output_data(execution.output_data)
+
+        messages = [
+            AppLogMessage(
+                id=input_message_id,
+                conversation_id=virtual_conversation_id,
+                role="user",
+                content=input_content,
+                status=None,
+                meta_data={"execution_id": execution.execution_id},
+                created_at=execution.started_at,
+            ),
+            AppLogMessage(
+                id=output_message_id,
+                conversation_id=virtual_conversation_id,
+                role="assistant",
+                content=output_content,
+                status=execution.status,
+                meta_data={
+                    "execution_id": execution.execution_id,
+                    "trigger_type": execution.trigger_type,
+                    "release_id": str(execution.release_id) if execution.release_id else None,
+                    "usage": execution.token_usage,
+                    "elapsed_time": execution.elapsed_time,
+                    "error_node_id": execution.error_node_id,
+                },
+                created_at=execution.completed_at or execution.started_at,
+            ),
+        ]
+
+        return AppLogConversationDetail(
+            id=virtual_conversation_id,
+            app_id=execution.app_id,
+            user_id=str(execution.triggered_by) if execution.triggered_by else None,
+            title=execution.execution_id,
+            message_count=len(messages),
+            is_draft=execution.release_id is None,
+            created_at=execution.started_at,
+            updated_at=execution.completed_at or execution.started_at,
+            messages=messages,
+            node_executions_map={str(output_message_id): node_executions} if node_executions else {},
+            pending_intervention={},
+        )
 
     def get_conversation_detail(
         self,
@@ -665,6 +754,32 @@ class AppLogService:
             return []
 
         return [n.model_dump() for n in _steps_to_node_executions(execution.steps)]
+
+
+def _format_log_json(data: Any) -> str:
+    """将任意工作流输入/输出以可读 JSON 呈现在日志消息中。"""
+    try:
+        return json.dumps(data if data is not None else {}, ensure_ascii=False, indent=2, default=str)
+    except (TypeError, ValueError):
+        return str(data or "")
+
+
+def _extract_execution_output(data: Any) -> str:
+    """提取纯工作流最终输出；复杂结构保留为格式化 JSON。"""
+    if not isinstance(data, dict):
+        return _format_log_json(data)
+
+    value = data.get("output")
+    if isinstance(value, dict):
+        for key in ("result", "text", "content", "output", "answer"):
+            if value.get(key) is not None:
+                candidate = value[key]
+                return candidate if isinstance(candidate, str) else _format_log_json(candidate)
+    elif value is not None:
+        return value if isinstance(value, str) else _format_log_json(value)
+
+    text = _extract_text(data)
+    return text or _format_log_json(data)
 
 
 def _extract_text(data: Optional[dict]) -> str:

@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import threading
 import time
 from typing import Any
 
@@ -11,6 +13,15 @@ from app.core.logging_config import get_logger
 from app.plugins import get_plugin
 
 logger = get_logger(__name__)
+
+#: 成功调用恢复探测节流（秒）：模型调用是热路径，同一模型配置在每个进程内
+#: 最多探测一次恢复，避免每次成功调用都触发完整告警评估。
+_GATEWAY_SUCCESS_PROBE_INTERVAL_SECONDS = 60.0
+
+#: 进程内节流表：键为配置身份，值为上次探测的单调时钟。
+#: 多 worker 进程各自节流，最坏每进程多一次探测，成本有界。
+_gateway_success_probe_at: dict[str, float] = {}
+_gateway_success_probe_lock = threading.Lock()
 _GATEWAY_ERROR_NAMES = (
     "authentication",
     "apiconnection",
@@ -151,6 +162,77 @@ async def report_model_gateway_failure_async(
         return
     await asyncio.to_thread(
         report_model_gateway_failure, config, operation, exc, started_at
+    )
+
+
+def _gateway_success_probe_allowed(config: Any) -> bool:
+    """进程内节流：同一模型配置每 60 秒最多允许一次成功恢复探测。"""
+    api_key = str(getattr(config, "api_key", "") or "")
+    identity = "{}:{}:{}".format(
+        getattr(config, "provider", ""),
+        getattr(config, "model_name", ""),
+        hashlib.sha1(api_key.encode("utf-8")).hexdigest()[:16],
+    )
+    now = time.monotonic()
+    with _gateway_success_probe_lock:
+        last = _gateway_success_probe_at.get(identity)
+        if last is not None and now - last < _GATEWAY_SUCCESS_PROBE_INTERVAL_SECONDS:
+            return False
+        _gateway_success_probe_at[identity] = now
+        # 顺带清理长期未探测的条目，防止节流表随历史配置无限增长。
+        if len(_gateway_success_probe_at) > 4096:
+            stale = [k for k, v in _gateway_success_probe_at.items() if now - v > 300]
+            for key in stale:
+                _gateway_success_probe_at.pop(key, None)
+    return True
+
+
+def _do_report_model_gateway_success(
+    config: Any, operation: str, started_at: float
+) -> None:
+    """恢复探测的实际执行；绝不传播告警侧异常。"""
+    try:
+        reporter = get_plugin("model_gateway_health_reporter")
+        if reporter is not None:
+            reporter.evaluate_success(
+                model_name=config.model_name,
+                provider=config.provider,
+                api_key=config.api_key,
+                operation=operation,
+                latency_ms=round((time.perf_counter() - started_at) * 1000, 2),
+            )
+    except Exception as exc:
+        logger.error(
+            "模型网关恢复上报失败: provider=%s model=%s operation=%s error=%s",
+            getattr(config, "provider", None),
+            getattr(config, "model_name", None),
+            operation,
+            type(exc).__name__,
+            exc_info=True,
+        )
+
+
+def report_model_gateway_success(
+    config: Any, operation: str, started_at: float
+) -> None:
+    """真实模型调用成功后上报 healthy=1，驱动网关告警自动恢复。
+
+    失败告警只有失败观测，事件会永远停留在 firing；成功观测让评估器
+    判定条件未命中并自动 resolve。经进程内节流，同一配置每分钟最多探测一次。
+    """
+    if not _gateway_success_probe_allowed(config):
+        return
+    _do_report_model_gateway_success(config, operation, started_at)
+
+
+async def report_model_gateway_success_async(
+    config: Any, operation: str, started_at: float
+) -> None:
+    """异步模型路径：通过节流后才在线程中执行恢复探测。"""
+    if not _gateway_success_probe_allowed(config):
+        return
+    await asyncio.to_thread(
+        _do_report_model_gateway_success, config, operation, started_at
     )
 
 

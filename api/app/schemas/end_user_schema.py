@@ -31,6 +31,19 @@ class EndUser(BaseModel):
 
 
 
+class EndUserIdentityUpdate(BaseModel):
+    """修改终端用户身份标识请求模型。
+
+    end_user_id 用 str（与 EndUserInfoUpdate 对齐）：格式错误在函数体内返回
+    HTTP 200 + code 9601，而非被 Pydantic 拦成 400。
+    """
+    end_user_id: str = Field(description="要修改的终端用户 ID（UUID 字符串）")
+    identity_features: Optional[str] = Field(
+        None,
+        description="身份标识。传值=确认为长时身份(confirmed)并尝试归并；"
+                    "传 null/空串/纯空白=清空标识并降级为临时身份(temporary)。",
+    )
+
 
 class EndUserMappingItem(BaseModel):
     """终端用户 ID 映射项"""

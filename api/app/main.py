@@ -14,6 +14,7 @@ from fastapi.responses import JSONResponse
 
 # 管理端 API (JWT 认证)
 from app.controllers import manager_router
+from app.controllers.health_controller import health_router
 # 服务端 API (API Key 认证)
 from app.controllers.service import service_router
 # MCP
@@ -24,6 +25,7 @@ from app.core.error_codes import BizCode, HTTP_MAPPING
 from app.core.exceptions import BusinessException
 from app.core.logging_config import LoggingConfig, get_logger
 from app.core.response_utils import fail
+from app.integrations.knowledge.errors import KnowledgeClientError, KnowledgeServiceError
 from app.core.models.scripts.loader import load_models
 from app.db import get_db_context
 
@@ -96,6 +98,9 @@ async def lifespan(app: FastAPI):
     from app.core.workflow.nodes.http_client import init_http_client
     await init_http_client()
 
+    from app.integrations.knowledge.runtime import initialize_knowledge_integration
+    await initialize_knowledge_integration()
+
     # Start background intervention timeout scanner
     from app.services.intervention_timeout_scheduler import start as start_timeout_scanner
     start_timeout_scanner()
@@ -123,6 +128,8 @@ async def lifespan(app: FastAPI):
     stop_timeout_scanner()
     from app.core.workflow.nodes.http_client import close_http_client
     await close_http_client()
+    from app.integrations.knowledge.runtime import close_knowledge_integration
+    await close_knowledge_integration()
     from app.services.batch_persist_queue import BatchPersistQueue
     await BatchPersistQueue.flush()
     await BatchPersistQueue.stop()
@@ -188,10 +195,25 @@ def read_root():
     return {"message": "FastAPI is running"}
 
 
+@app.get("/ready", include_in_schema=False)
+async def readiness():
+    """Return process readiness, including remote Knowledge when enabled."""
+
+    if not settings.ENABLE_MEM_KNOWLEDGE:
+        return {"status": "ready", "knowledge_mode": "legacy"}
+    from app.integrations.knowledge.runtime import is_remote_knowledge_ready
+
+    if await is_remote_knowledge_ready():
+        return {"status": "ready", "knowledge_mode": "remote"}
+    raise HTTPException(status_code=503, detail="Knowledge service unavailable")
+
+
 # 生命周期事件由 lifespan 管理，无需 on_event
 
 
 # 注册路由
+app.include_router(health_router)
+
 # 管理端 API (JWT 认证)
 app.include_router(manager_router, prefix="/api")
 
@@ -569,6 +591,44 @@ async def business_exception_handler(request: Request, exc: BusinessException):
         status_code=status_code,
         content=fail(code=biz_code.value, msg=filtered_message, error=filtered_message)
     )
+
+
+@app.exception_handler(KnowledgeClientError)
+async def knowledge_client_exception_handler(
+    request: Request,
+    exc: KnowledgeClientError,
+):
+    """Preserve upstream business errors and normalize transport failures."""
+
+    if isinstance(exc, KnowledgeServiceError):
+        status_code = exc.status_code if 400 <= exc.status_code <= 599 else 503
+        code = exc.code
+        message = SensitiveDataFilter.filter_string(str(exc))
+        trace_id = exc.trace_id
+    else:
+        status_code = 503
+        code = BizCode.SERVICE_UNAVAILABLE.value
+        message = "Knowledge service unavailable"
+        trace_id = None
+
+    logger.error(
+        "Knowledge client error: %s",
+        type(exc).__name__,
+        extra={
+            "path": request.url.path,
+            "method": request.method,
+            "status_code": status_code,
+            "error_code": code,
+            "trace_id": trace_id,
+        },
+    )
+    response = JSONResponse(
+        status_code=status_code,
+        content=fail(code=code, msg=message, error=message),
+    )
+    if trace_id:
+        response.headers["X-Trace-Id"] = trace_id
+    return response
 
 
 # 统一异常处理：将HTTPException转换为统一响应结构（支持国际化）

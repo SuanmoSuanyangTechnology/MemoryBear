@@ -365,6 +365,11 @@ class LLMNodeConfig(BaseNodeConfig):
                 description="推理内容（启用推理标签分离后，从 think 标签提取的内容）"
             ),
             VariableDefinition(
+                name="error_message",
+                type=VariableType.STRING,
+                description="LLM 调用最终失败时可安全展示的错误原因；正常完成时为空"
+            ),
+            VariableDefinition(
                 name="token_usage",
                 type=VariableType.OBJECT,
                 description="Token 使用情况"

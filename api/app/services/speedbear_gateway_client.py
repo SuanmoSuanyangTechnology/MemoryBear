@@ -73,6 +73,21 @@ class SpeedBearGatewayClient:
         )
         return self._unwrap_dict(data)
 
+    def get_tenant_account_stats_batch(
+        self,
+        *,
+        gateway_api_key_ids: list[str],
+    ) -> list[dict[str, Any]]:
+        """查询最多 100 个 API Key 的账户摘要。"""
+        if not 1 <= len(gateway_api_key_ids) <= 100:
+            raise ValueError("gateway_api_key_ids 长度必须在 1 到 100 之间")
+        data = self._request(
+            "POST",
+            "/api/openapi/v1/api-keys/account-summaries",
+            json={"api_key_ids": gateway_api_key_ids},
+        )
+        return self._unwrap_list(data)
+
     def update_tenant_api_key_quota_limit(
         self,
         *,

@@ -9,6 +9,10 @@
   "permission_denied": "No permission to access this workspace",
   "name_required": "Workspace name is required",
   "invalid_name": "Invalid workspace name format",
+  "retention_policy": {
+    "retrieved": "Workspace retention policy retrieved successfully",
+    "updated": "Workspace retention policy updated successfully"
+  },
   "members": {
     "list_retrieved": "Workspace members list retrieved successfully",
     "role_updated": "Member role updated successfully",
@@ -41,6 +45,26 @@
     "config_updated": "Model configuration updated successfully",
     "invalid_config": "Invalid model configuration",
     "config_verified": "Model configuration verified",
-    "default_config_updated_notice": "The workspace default model configuration has been updated."
+    "default_config_updated_notice": "The workspace default model configuration has been updated.",
+    "slots": {
+      "llm": "LLM model",
+      "embedding": "Embedding model",
+      "rerank": "Rerank model",
+      "vision": "Vision model",
+      "audio": "Audio model",
+      "video": "Video model"
+    },
+    "errors": {
+      "save_failed": "Failed to save model configuration ({count} issue(s)): {reasons}",
+      "not_configured": "{slot} is not configured, please select an available model",
+      "not_found": "{slot}: the selected model does not exist (model id: {model_id})",
+      "inactive": "{slot}: the selected model \"{model_name}\" is disabled, please enable it in Model Management first",
+      "not_accessible": "{slot}: the selected model \"{model_name}\" is not available for the current tenant, please choose another one",
+      "deprecated": "{slot}: the selected model \"{model_name}\" is deprecated, please choose another one",
+      "capability_mismatch": "{slot} does not support the selected model \"{model_name}\" (model type: {model_type}), please choose a matching model",
+      "no_api_key": "{slot} \"{model_name}\" has no available API key, please configure one in Model Management",
+      "api_verify_failed": "{slot} \"{model_name}\" connectivity check failed: {error}",
+      "verify_failed": "{slot} \"{model_name}\" validation error: {error}"
+    }
   }
 }

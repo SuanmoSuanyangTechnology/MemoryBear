@@ -37,6 +37,8 @@ from app.schemas.workspace_schema import (
     WorkspaceModelsConfig,
     WorkspaceModelsValidationResponse,
     WorkspaceModelsUpdate,
+    WorkspaceRetentionPolicyResponse,
+    WorkspaceRetentionPolicyUpdate,
     WorkspaceResponse,
     WorkspaceUpdate,
 )
@@ -176,6 +178,60 @@ def update_workspace(
     result_i18n = serializer.serialize(result_data, language)
     
     return success(data=result_i18n, msg=t("workspace.updated"))
+
+
+@router.get("/temporary-memory-retention", response_model=ApiResponse)
+@cur_workspace_access_guard()
+def get_workspace_retention_policy(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    t: callable = Depends(get_translator),
+):
+    """获取当前工作空间的临时身份保留策略。"""
+    workspace_id = current_user.current_workspace_id
+    api_logger.info(
+        f"用户 {current_user.username} 请求获取工作空间 {workspace_id} 的保留策略"
+    )
+    retention_days, end_user_count = workspace_service.get_workspace_retention_policy(
+        db=db,
+        workspace_id=workspace_id,
+        user=current_user,
+    )
+    return success(
+        data=WorkspaceRetentionPolicyResponse(
+            retention_days=retention_days,
+            end_user_count=end_user_count,
+        ).model_dump(),
+        msg=t("workspace.retention_policy.retrieved"),
+    )
+
+
+@router.put("/temporary-memory-retention", response_model=ApiResponse)
+@cur_workspace_access_guard()
+def update_workspace_retention_policy(
+    policy: WorkspaceRetentionPolicyUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    t: callable = Depends(get_translator),
+):
+    """更新当前工作空间的临时身份保留策略。"""
+    workspace_id = current_user.current_workspace_id
+    api_logger.info(
+        f"用户 {current_user.username} 请求更新工作空间 {workspace_id} 的保留策略"
+    )
+    retention_days = workspace_service.update_workspace_retention_policy(
+        db=db,
+        workspace_id=workspace_id,
+        retention_days=policy.retention_days,
+        user=current_user,
+    )
+    return success(
+        data=WorkspaceRetentionPolicyResponse(
+            retention_days=retention_days,
+        ).model_dump(exclude_unset=True),
+        msg=t("workspace.retention_policy.updated"),
+    )
+
 
 @router.get("/members", response_model=ApiResponse)
 @cur_workspace_access_guard()

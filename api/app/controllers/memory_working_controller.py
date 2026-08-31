@@ -184,13 +184,12 @@ async def get_source_messages(
         pagesize: int = Query(default=20, ge=1, le=100, description="每页数量，最大 100"),
         current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ):
-    """按来源分页获取工作记忆消息，按 message_seq 从旧到新排列，形成连贯对话流。
+    """按来源分页获取工作记忆消息，按 created_at 从旧到新排列，形成连贯对话流。
 
     分页语义（service_api / mcp 两种来源完全一致）：
     - page 从 1 开始；pagesize 默认 20、最大 100
     - 返回 page 元数据 {page, pagesize, total, hasnext}
-    - 按 message_seq ASC 排序：message_seq 从小到大表示消息从旧到新，
-      该来源分组内单调递增，翻页无重复无遗漏
+    - 仅按 created_at ASC 排序：入库时间从早到晚，即消息从旧到新
 
     Args:
         end_user_id: 终端用户 UUID

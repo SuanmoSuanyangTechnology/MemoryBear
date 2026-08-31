@@ -153,6 +153,9 @@ async def push_write_task(
     # 记录任务派发时刻，作为 pipeline 内 dialog_at 的第二级兜底
     dispatch_at = datetime.now(timezone.utc).isoformat()
 
+    # target_message 来自 memory_messages，优先使用其中的真实来源。
+    source = str(target_message.get("source") or source)
+
     msg_id = await celery_scheduler.push_task(
         "app.core.memory.agent.write_message",
         end_user_id,

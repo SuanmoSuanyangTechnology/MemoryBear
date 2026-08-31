@@ -51,7 +51,7 @@ class MemoryConfigRepository:
 
     # Dialogue count by group
     SEARCH_FOR_DIALOGUE = """
-    MATCH (n:Dialogue) WHERE n.end_user_id = $end_user_id RETURN COUNT(n) AS num
+    MATCH (n:Dialogue) WHERE n.end_user_id = $end_user_id AND n.delete_at IS NULL RETURN COUNT(n) AS num
     """
 
     # Chunk count by group
@@ -71,7 +71,7 @@ class MemoryConfigRepository:
 
     # All counts by label and total
     SEARCH_FOR_ALL = """
-    OPTIONAL MATCH (n:Dialogue) WHERE n.end_user_id = $end_user_id RETURN 'Dialogue' AS Label, COUNT(n) AS Count
+    OPTIONAL MATCH (n:Dialogue) WHERE n.end_user_id = $end_user_id AND n.delete_at IS NULL RETURN 'Dialogue' AS Label, COUNT(n) AS Count
     UNION ALL
     OPTIONAL MATCH (n:Chunk) WHERE n.end_user_id = $end_user_id AND n.delete_at is NULL RETURN 'Chunk' AS Label, COUNT(n) AS Count
     UNION ALL
@@ -458,57 +458,6 @@ class MemoryConfigRepository:
         except Exception as e:
             self.db.rollback()
             db_logger.error(f"更新遗忘配置失败: config_id={update.config_id} - {str(e)}")
-            raise
-
-    def get_extracted_config(self, config_id: UUID | int) -> Optional[Dict]:
-        """获取萃取配置，通过主键查询某条配置
-
-        Args:
-            config_id: 配置ID
-
-        Returns:
-            Optional[Dict]: 萃取配置字典，不存在则返回None
-        """
-        config_id = resolve_config_id(config_id, self.db)
-        db_logger.debug(f"查询萃取配置: config_id={config_id}")
-        try:
-            db_config = self.db.query(MemoryConfig).filter(MemoryConfig.config_id == config_id).first()
-            if not db_config:
-                db_logger.debug(f"萃取配置不存在: config_id={config_id}")
-                return None
-
-            result = {
-                "llm_id": db_config.llm_id,
-                "embedding_id": db_config.embedding_id,
-                "rerank_id": db_config.rerank_id,
-                "vision_id": db_config.vision_id,
-                "audio_id": db_config.audio_id,
-                "video_id": db_config.video_id,
-                "enable_llm_dedup_blockwise": db_config.enable_llm_dedup_blockwise,
-                "enable_llm_disambiguation": db_config.enable_llm_disambiguation,
-                "deep_retrieval": db_config.deep_retrieval,
-                "t_type_strict": db_config.t_type_strict,
-                "t_name_strict": db_config.t_name_strict,
-                "t_overall": db_config.t_overall,
-                "chunker_strategy": db_config.chunker_strategy,
-                "statement_granularity": db_config.statement_granularity,
-                "include_dialogue_context": db_config.include_dialogue_context,
-                "max_context": db_config.max_context,
-                "pruning_enabled": db_config.pruning_enabled,
-                "pruning_scene": db_config.pruning_scene,
-                "pruning_threshold": db_config.pruning_threshold,
-                "enable_self_reflexion": db_config.enable_self_reflexion,
-                "iteration_period": db_config.iteration_period,
-                "reflexion_range": db_config.reflexion_range,
-                "baseline": db_config.baseline,
-                "is_default": bool(db_config.is_default),
-            }
-
-            db_logger.debug(f"萃取配置查询成功: config_id={config_id}")
-            return result
-
-        except Exception as e:
-            db_logger.error(f"查询萃取配置失败: config_id={config_id} - {str(e)}")
             raise
 
     async def get_extracted_config_async(self, config_id: UUID | int) -> Optional[Dict]:

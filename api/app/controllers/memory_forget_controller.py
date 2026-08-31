@@ -394,6 +394,9 @@ async def get_end_user_memory_quota(
         "trigger_count": memory_limit,
         "target_count": target_count,
         "breakdown": stats["breakdown"],
+        "active_count": stats["active_count"],
+        "auxiliary_active_count": stats["auxiliary_active_count"],
+        "auxiliary_breakdown": stats["auxiliary_breakdown"],
     })
 
 

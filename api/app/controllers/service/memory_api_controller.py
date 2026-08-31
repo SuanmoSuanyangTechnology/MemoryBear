@@ -8,7 +8,7 @@
 """
 import asyncio
 
-from fastapi import APIRouter, Body, Header, Request, Depends
+from fastapi import APIRouter, Body, Depends, File, Header, Request, UploadFile
 from fastapi.encoders import jsonable_encoder
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
@@ -18,6 +18,7 @@ from app.controllers import memory_controller
 from app.core.api_key_auth import require_api_key, require_api_key_self_db, get_current_api_key_auth
 from app.core.api_key_utils import get_current_user_snapshot_from_api_key_async, validate_end_user_in_workspace_async
 from app.core.error_codes import BizCode
+from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
 from app.core.memory.enums import Neo4jNodeType, SearchStrategy
 from app.core.memory.memory_service import MemoryService
@@ -28,6 +29,7 @@ from app.repositories.end_user_repository import EndUserRepository
 from app.schemas.api_key_schema import ApiKeyAuth
 from app.schemas.memory_agent_schema import Write_UserInput, InternalReadInput, ReadSyncInput, MergeEndUserInput
 from app.services.end_user_service import EndUserService
+from app.services.file_storage_service import FileStorageService, get_file_storage_service, upload_workspace_file
 from app.services.memory_config_service import MemoryConfigService
 
 router = APIRouter(prefix="/memory", tags=["V1 - Memory API"])
@@ -105,11 +107,13 @@ async def read_memory_sync(
                 pass
             res[data[0]] = data[1]
 
-        return success(data={euid: data for data in results})
+        return success(data=res)
 
     # ── Single-user mode (backward-compatible) ──
     async with get_async_db_context() as db:
-        await validate_end_user_in_workspace_async(db, payload.end_user_id, api_key_auth.workspace_id)
+        end_user = await validate_end_user_in_workspace_async(db, payload.end_user_id, api_key_auth.workspace_id)
+        # 合并路由：必须先改写 payload 再查 config，否则已合并用户会取到旧用户的记忆配置
+        payload.end_user_id = str(end_user.id)
         config_id = await MemoryConfigService(db).get_config_id_by_end_user_async(payload.end_user_id)
     logger.info(f"V1 memory read (sync) - end_user_id: {payload.end_user_id}, workspace: {api_key_auth.workspace_id}")
     service = await MemoryService.create(
@@ -143,7 +147,9 @@ async def read_memory_internal(
     body = await request.json()
     payload = InternalReadInput(**body)
     async with get_async_db_context() as db:
-        await validate_end_user_in_workspace_async(db, payload.end_user_id, api_key_auth.workspace_id)
+        end_user = await validate_end_user_in_workspace_async(db, payload.end_user_id, api_key_auth.workspace_id)
+        # 合并路由：必须先改写 payload 再查 config，否则已合并用户会取到旧用户的记忆配置
+        payload.end_user_id = str(end_user.id)
         config_id = await MemoryConfigService(db).get_config_id_by_end_user_async(payload.end_user_id)
     logger.info(
         f"V1 memory read (internal) - end_user_id: {payload.end_user_id}, workspace: {api_key_auth.workspace_id}")
@@ -191,7 +197,9 @@ async def write_memory_async(
 
     async with get_async_db_context() as auth_db:
         current_user = await get_current_user_snapshot_from_api_key_async(auth_db, api_key_auth)
-        await validate_end_user_in_workspace_async(auth_db, payload.end_user_id, api_key_auth.workspace_id)
+        end_user = await validate_end_user_in_workspace_async(auth_db, payload.end_user_id, api_key_auth.workspace_id)
+        # 合并路由：改写 payload，Celery 写入任务将落到合并目标用户
+        payload.end_user_id = str(end_user.id)
 
     logger.info(f"V1 memory write (async) - end_user_id: {payload.end_user_id}, workspace: {api_key_auth.workspace_id}")
 
@@ -226,3 +234,34 @@ async def merge_memory(
     await EndUserService(db).merge_end_users(payload.end_user_ids, payload.target)
 
     return success(data={"end_user_id": payload.target.hex})
+
+
+@router.post("/files/upload")
+@require_api_key(scopes=["memory"])
+async def upload_memory_file(
+        request: Request,
+        file: UploadFile = File(...),
+        api_key_auth: ApiKeyAuth = None,
+        db: Session = Depends(get_db),
+        storage_service: FileStorageService = Depends(get_file_storage_service),
+):
+    """
+    上传文件到存储后端，供 /write 接口以 local_file 方式引用。
+
+    - 入参: multipart/form-data，字段 file
+    - 出参: {"file_id": "...", "file_key": "..."}
+    - 在 /write 的 files 字段中引用，例如:
+      {"type": "image", "transfer_method": "local_file", "upload_file_id": "<file_id>"}
+    """
+    tenant_id = api_key_auth.tenant_id
+    if not tenant_id:
+        raise BusinessException("Workspace not found", BizCode.NOT_FOUND)
+
+    upload_result = await upload_workspace_file(
+        db=db,
+        tenant_id=tenant_id,
+        workspace_id=api_key_auth.workspace_id,
+        file=file,
+        storage_service=storage_service,
+    )
+    return success(data=upload_result, msg="File upload successful")

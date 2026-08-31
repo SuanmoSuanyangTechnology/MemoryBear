@@ -1,4 +1,6 @@
 from __future__ import annotations
+import asyncio
+import logging
 import time
 from typing import Any, Iterator, AsyncIterator, List, Optional, Literal, Type
 
@@ -8,10 +10,17 @@ from langchain_core.language_models import BaseLLM
 from langchain_core.messages import AIMessage
 from langchain_core.outputs import LLMResult, GenerationChunk
 from langchain_core.runnables import Runnable
-from app.core.models import RedBearModelConfig, RedBearModelFactory, get_provider_llm_class
 from app.core.alert_metric_bridge import (
     report_model_gateway_failure,
     report_model_gateway_failure_async,
+    report_model_gateway_success,
+    report_model_gateway_success_async,
+)
+from app.core.models import RedBearModelConfig, RedBearModelFactory, get_provider_llm_class
+from app.core.models.network_retry import (
+    NETWORK_RETRYABLE,
+    NETWORK_RETRY_ATTEMPTS,
+    network_retry,
 )
 from app.models.models_model import ModelType
 
@@ -93,22 +102,26 @@ class _ObservedRunnable(Runnable):
     def invoke(self, input: Any, config: Optional[dict] = None, **kwargs: Any) -> Any:
         started = time.perf_counter()
         try:
-            return self._runnable.invoke(input, config=config, **kwargs)
+            result = self._runnable.invoke(input, config=config, **kwargs)
         except Exception as exc:
             report_model_gateway_failure(
                 self._model_config, self._operation, exc, started
             )
             raise
+        report_model_gateway_success(self._model_config, self._operation, started)
+        return result
 
     async def ainvoke(self, input: Any, config: Optional[dict] = None, **kwargs: Any) -> Any:
         started = time.perf_counter()
         try:
-            return await self._runnable.ainvoke(input, config=config, **kwargs)
+            result = await self._runnable.ainvoke(input, config=config, **kwargs)
         except Exception as exc:
             await report_model_gateway_failure_async(
                 self._model_config, self._operation, exc, started
             )
             raise
+        await report_model_gateway_success_async(self._model_config, self._operation, started)
+        return result
 
     def stream(self, input: Any, config: Optional[dict] = None, **kwargs: Any):
         started = time.perf_counter()
@@ -119,6 +132,8 @@ class _ObservedRunnable(Runnable):
                 self._model_config, f"{self._operation}.stream", exc, started
             )
             raise
+        # 流被完整消费后才算调用成功；中途被放弃（GeneratorExit）不会走到这里。
+        report_model_gateway_success(self._model_config, f"{self._operation}.stream", started)
 
     async def astream(self, input: Any, config: Optional[dict] = None, **kwargs: Any):
         started = time.perf_counter()
@@ -130,6 +145,9 @@ class _ObservedRunnable(Runnable):
                 self._model_config, f"{self._operation}.astream", exc, started
             )
             raise
+        await report_model_gateway_success_async(
+            self._model_config, f"{self._operation}.astream", started
+        )
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._runnable, name)
@@ -177,10 +195,12 @@ class RedBearLLM(BaseLLM):
         """Synchronous text generation (required by BaseLLM)"""
         started = time.perf_counter()
         try:
-            return self._model._generate(prompts, stop=stop, run_manager=run_manager, **kwargs)
+            result = self._model._generate(prompts, stop=stop, run_manager=run_manager, **kwargs)
         except Exception as exc:
             report_model_gateway_failure(self._config, "generate", exc, started)
             raise
+        report_model_gateway_success(self._config, "generate", started)
+        return result
 
     async def _agenerate(
             self,
@@ -192,10 +212,12 @@ class RedBearLLM(BaseLLM):
         """Asynchronous text generation (required by BaseLLM)"""
         started = time.perf_counter()
         try:
-            return await self._model._agenerate(prompts, stop=stop, run_manager=run_manager, **kwargs)
+            result = await self._model._agenerate(prompts, stop=stop, run_manager=run_manager, **kwargs)
         except Exception as exc:
             await report_model_gateway_failure_async(self._config, "agenerate", exc, started)
             raise
+        await report_model_gateway_success_async(self._config, "agenerate", started)
+        return result
 
     # ==================== Advanced Methods (Support Message Lists) ====================
 
@@ -215,7 +237,7 @@ class RedBearLLM(BaseLLM):
         """
         started = time.perf_counter()
         try:
-            return self._model.invoke(input, config=config, **kwargs)
+            return self._invoke_with_retry(input, config, kwargs)
         except AttributeError as e:
             if 'invoke' in str(e):
                 # Underlying model doesn't support invoke, fallback to parent implementation
@@ -224,6 +246,10 @@ class RedBearLLM(BaseLLM):
         except Exception as exc:
             report_model_gateway_failure(self._config, "invoke", exc, started)
             raise
+
+    @network_retry
+    def _invoke_with_retry(self, input: Any, config: Optional[dict], kwargs: dict) -> Any:
+        return self._model.invoke(input, config=config, **kwargs)
 
     async def ainvoke(self, input: Any, config: Optional[dict] = None, **kwargs: Any) -> Any:
         """Asynchronous model invocation
@@ -241,15 +267,23 @@ class RedBearLLM(BaseLLM):
         """
         started = time.perf_counter()
         try:
-            return await self._model.ainvoke(input, config=config, **kwargs)
+            return await self._ainvoke_with_retry(input, config, kwargs)
         except AttributeError as e:
             if 'ainvoke' in str(e):
                 # Underlying model doesn't support ainvoke, fallback to parent implementation
-                return await super().ainvoke(input, config=config, **kwargs)
+                result = await super().ainvoke(input, config=config, **kwargs)
+                await report_model_gateway_success_async(self._config, "ainvoke", started)
+                return result
             raise
         except Exception as exc:
             await report_model_gateway_failure_async(self._config, "ainvoke", exc, started)
             raise
+        await report_model_gateway_success_async(self._config, "ainvoke", started)
+        return result
+
+    @network_retry
+    async def _ainvoke_with_retry(self, input: Any, config: Optional[dict], kwargs: dict) -> Any:
+        return await self._model.ainvoke(input, config=config, **kwargs)
 
     # ==================== Streaming Methods (Critical) ====================
 
@@ -274,7 +308,7 @@ class RedBearLLM(BaseLLM):
         """
         started = time.perf_counter()
         try:
-            yield from self._model.stream(input, config=config, stop=stop, **kwargs)
+            yield from self._stream_with_retry(input, config, stop, kwargs)
         except AttributeError as e:
             if 'stream' in str(e):
                 # Underlying model doesn't support stream, fallback to parent implementation
@@ -290,6 +324,33 @@ class RedBearLLM(BaseLLM):
         except Exception as exc:
             report_model_gateway_failure(self._config, "stream", exc, started)
             raise
+        # 流被完整消费后才算调用成功（含回退路径）。
+        report_model_gateway_success(self._config, "stream", started)
+
+    def _stream_with_retry(
+            self,
+            input: Any,
+            config: Optional[dict],
+            stop: Optional[List[str]],
+            kwargs: dict,
+    ) -> Iterator[GenerationChunk]:
+        """流式前置重试：仅在未产出任何 chunk 前失败时重试整个流，避免重复输出。"""
+        attempt = 0
+        while True:
+            yielded = False
+            try:
+                for chunk in self._model.stream(input, config=config, stop=stop, **kwargs):
+                    yielded = True
+                    yield chunk
+                return
+            except NETWORK_RETRYABLE as exc:
+                if yielded or attempt >= NETWORK_RETRY_ATTEMPTS:
+                    raise
+                attempt += 1
+                logging.getLogger("business").warning(
+                    "stream 网络错误，第 %d 次重试: %s", attempt, exc
+                )
+                time.sleep(min(2 ** (attempt - 1), 8))
 
     async def astream(
             self,
@@ -316,7 +377,7 @@ class RedBearLLM(BaseLLM):
         """
         started = time.perf_counter()
         try:
-            async for chunk in self._model.astream(input, config=config, stop=stop, **kwargs):
+            async for chunk in self._astream_with_retry(input, config, stop, kwargs):
                 yield chunk
         except AttributeError as e:
             if 'astream' in str(e):
@@ -334,6 +395,32 @@ class RedBearLLM(BaseLLM):
         except Exception as exc:
             await report_model_gateway_failure_async(self._config, "astream", exc, started)
             raise
+        await report_model_gateway_success_async(self._config, "astream", started)
+
+    async def _astream_with_retry(
+            self,
+            input: Any,
+            config: Optional[dict],
+            stop: Optional[List[str]],
+            kwargs: dict,
+    ) -> AsyncIterator[GenerationChunk]:
+        """流式前置重试：仅在未产出任何 chunk 前失败时重试整个流，避免重复输出。"""
+        attempt = 0
+        while True:
+            yielded = False
+            try:
+                async for chunk in self._model.astream(input, config=config, stop=stop, **kwargs):
+                    yielded = True
+                    yield chunk
+                return
+            except NETWORK_RETRYABLE as exc:
+                if yielded or attempt >= NETWORK_RETRY_ATTEMPTS:
+                    raise
+                attempt += 1
+                logging.getLogger("business").warning(
+                    "astream 网络错误，第 %d 次重试: %s", attempt, exc
+                )
+                await asyncio.sleep(min(2 ** (attempt - 1), 8))
 
     # ==================== Structured Output ====================
 

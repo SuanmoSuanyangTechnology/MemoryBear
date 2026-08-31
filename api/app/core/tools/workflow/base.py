@@ -126,7 +126,8 @@ class WorkflowAsTool(BaseTool):
             )
             try:
                 # 工作流作为工具调用时是纯函数式执行：不创建会话、不落任何
-                # user/assistant 消息，只保留 execution 记录用于日志。
+                # user/assistant 消息；仅保留带 source="tool" 的内部技术执行记录，
+                # 应用级工作流日志会排除该记录。
                 result = await self.workflow_service.run(
                     app_id=self.workflow_app_id,
                     payload=payload,

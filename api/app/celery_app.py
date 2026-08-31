@@ -150,11 +150,15 @@ celery_app.conf.update(
         'app.tasks.do_refresh_user_tags': {'queue': 'memory_heavy_tasks'},
         'app.tasks.scan_forget_candidates': {'queue': 'periodic_tasks'},
         'app.tasks.do_forget_for_user': {'queue': 'memory_heavy_tasks'},
+        'app.tasks.scan_expired_end_users': {'queue': 'periodic_tasks'},
+        'app.tasks.do_soft_delete_end_users': {'queue': 'memory_heavy_tasks'},
         # 'app.tasks.run_forgetting_cycle_task': {'queue': 'memory_heavy_tasks'},# NOTE：已废弃，保留路由防 unregistered
         'app.tasks.write_all_workspaces_memory_task': {'queue': 'memory_heavy_tasks'}, #NOTE：定时任务，记忆增量统计
         'app.tasks.write_total_memory_task': {'queue': 'memory_heavy_tasks'},  # NOTE：单 workspace 记忆增量统计
         'app.tasks.scan_implicit_emotions_storage': {'queue': 'periodic_tasks'},  # NOTE：扫描器，枚举+派发
         'app.tasks.do_implicit_emotions_for_user': {'queue': 'memory_heavy_tasks'},  # NOTE：单用户隐性记忆+情绪建议
+        'app.tasks.scan_emotion_stats': {'queue': 'periodic_tasks'},  # NOTE：情绪日统计扫描器，write_time 过滤+派发
+        'app.tasks.sync_emotion_stats_for_user': {'queue': 'memory_heavy_tasks'},  # NOTE：单用户情绪明细增量同步（按 PG 判断 24h/48h 窗口）
         # 'app.tasks.update_implicit_emotions_storage': {'queue': 'memory_heavy_tasks'},  # NOTE：已废弃，保留路由防 unregistered
         'app.tasks.init_implicit_emotions_for_users': {'queue': 'memory_heavy_tasks'},
         'app.tasks.init_interest_distribution_for_users': {'queue': 'memory_heavy_tasks'},
@@ -189,6 +193,7 @@ except ImportError:
 # 企业版消息通知中心任务路由（社区版无 premium 模块时不注册这些任务）
 try:
     import premium.platform_admin.notification_center.tasks  # noqa: F401
+    import premium.platform_admin.notification_center.alert_emit_tasks  # noqa: F401
 
     _HAS_NOTIFICATION_TASKS = True
     # 通知状态任务 → notification_state_tasks 队列（扫描 + 发布 + 到期下架）
@@ -212,6 +217,12 @@ try:
     }
     # 告警事件创建后立即扇出为用户端站内通知
     celery_app.conf.task_routes['notification.alert_fanout'] = {
+        'queue': 'notification_state_tasks'
+    }
+    celery_app.conf.task_routes['notification.emit_alert_obligation'] = {
+        'queue': 'notification_state_tasks'
+    }
+    celery_app.conf.task_routes['notification.scan_alert_emit_obligations'] = {
         'queue': 'notification_state_tasks'
     }
 except ImportError:
@@ -273,6 +284,13 @@ beat_schedule_config = {
     "scan-forget-candidates": {
         "task": "app.tasks.scan_forget_candidates",
         "schedule": forget_scan_schedule,
+    },
+    "scan-expired-end-users": {
+        "task": "app.tasks.scan_expired_end_users",
+        "schedule": crontab(
+            hour=settings.EXPIRED_END_USER_SCAN_HOUR,
+            minute=settings.EXPIRED_END_USER_SCAN_MINUTE,
+        ),
     },
     # "run-forgetting-cycle": {
     #     "task": "app.tasks.run_forgetting_cycle_task",
@@ -337,6 +355,12 @@ beat_schedule_config = {
     "draft-data-clean": {
         "task": "app.tasks.draft_data_clean",
         "schedule": draft_data_clean_schedule,
+        "args": (),
+    },
+    "scan-emotion-stats": {
+        # 每天北京时间凌晨 1:00（UTC 17:00）增量同步昨日情绪明细（用户任务按 PG 判断 24h/48h 窗口）
+        "task": "app.tasks.scan_emotion_stats",
+        "schedule": crontab(hour=17, minute=0),
         "args": (),
     },
 }
@@ -429,5 +453,12 @@ if _HAS_NOTIFICATION_TASKS:
             "task": "notification.scan_enterprise_balance",
             "schedule": NoCatchupSchedule(run_every=timedelta(minutes=10)),
             "options": {"queue": "notification_state_tasks", "expires": 600},
+        },
+        "notification-scan-alert-emit-obligations": {
+            "task": "notification.scan_alert_emit_obligations",
+            "schedule": NoCatchupSchedule(
+                run_every=timedelta(seconds=_NOTIFICATION_SCAN_INTERVAL_SECONDS)
+            ),
+            "options": {"queue": "notification_state_tasks", "expires": 120},
         },
     })

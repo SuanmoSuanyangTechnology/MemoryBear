@@ -361,6 +361,8 @@ const ToolCallRecall: FC<{
       ? 'memoryConversation.memoryRecall.memoryRetrievalEngineRunningDesc'
       : hasMemoryEngineStages
         ? 'memoryConversation.memoryRecall.memoryRetrievalEngineCompletedDesc'
+        : mode && ['quick', 'express', 'metadata'].includes(mode?.toLocaleLowerCase())
+        ? 'memoryConversation.memoryRecall.memoryRetrievalEngineNoResultDesc'
         : 'memoryConversation.memoryRecall.memoryRetrievalEngineDisabledDesc',
   )
   const multimodalMemoryEngineDescription = t(

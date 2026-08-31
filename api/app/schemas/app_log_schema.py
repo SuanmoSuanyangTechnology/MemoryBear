@@ -86,3 +86,24 @@ class AppLogConversationDetail(AppLogConversation):
         description="人工介入信息：key=message_id，value={execution_id, status, interventions: [...]}，"
                     "结构与 /public/share/conversations/{conversation_id} 接口的 pending_intervention 一致",
     )
+
+
+class WorkflowExecutionLog(BaseModel):
+    """无会话工作流调用的日志摘要。"""
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    execution_id: str
+    app_id: uuid.UUID
+    release_id: Optional[uuid.UUID] = None
+    trigger_type: str
+    status: str
+    elapsed_time: Optional[float] = None
+    error_message: Optional[str] = None
+    started_at: datetime.datetime
+    completed_at: Optional[datetime.datetime] = None
+    created_at: datetime.datetime
+
+    @field_serializer("started_at", "completed_at", "created_at", when_used="json")
+    def _serialize_dates(self, value: Optional[datetime.datetime]):
+        return to_timestamp_ms(value) if value else None
