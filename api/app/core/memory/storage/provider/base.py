@@ -104,6 +104,17 @@ class BaseClient(ABC):
     ) -> StorageReadResult:
         pass
 
+    async def save_relationship(
+        self,
+        relationship_type: MemoryRelationshipType,
+        source: str,
+        target: str,
+        data: dict,
+    ) -> StorageWriteResult:
+        raise NotImplementedError(
+            f"{type(self).__name__} does not support relationship writes"
+        )
+
     async def get_relationship(
         self,
         relationship_type: MemoryRelationshipType,

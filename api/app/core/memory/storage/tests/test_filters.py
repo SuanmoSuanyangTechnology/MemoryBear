@@ -15,6 +15,7 @@ from app.core.memory.storage.models import (
     NodeFilter,
     NodeProjection,
     NodeSort,
+    RelationshipFilter,
     SortDirection,
     SortField,
 )
@@ -161,12 +162,19 @@ class _FakeSession:
 
     async def run(self, query: str, **parameters: Any) -> _FakeResult:
         self.calls.append((query, parameters))
-        if "RETURN count(n) AS deleted" in query:
-            data = [{"deleted": 2}]
+        if "DELETE r" in query and "RETURN relationship_id, properties" in query:
+            data = [{
+                "relationship_id": "edge-1",
+                "properties": {"id": "edge-1", "weight": 0.8},
+            }]
+        elif "DETACH DELETE n" in query and "RETURN id" in query:
+            data = [{"id": "node-1"}, {"id": "node-2"}]
+        elif "SET n.delete_at" in query and "RETURN n.id AS id" in query:
+            data = [{"id": "node-1"}, {"id": "node-2"}]
         elif "RETURN r" in query:
             data = [{"r": parameters["properties"]}]
         elif "$properties" in query and "RETURN n" in query:
-            data = [{"n": parameters["properties"]}]
+            data = [{"n": {"id": "node-1", **parameters["properties"]}}]
         elif " AS n" in query:
             data = [{"n": {"id": 1}}]
         else:
@@ -301,6 +309,54 @@ async def test_neo4j_save_relationship_merges_by_id_and_sets_properties() -> Non
     assert result.data == [data]
 
 
+async def test_neo4j_delete_relationship_uses_scoped_filter() -> None:
+    driver = _FakeDriver()
+    client = Neo4jClient()
+    client.client = driver  # type: ignore[assignment]
+    rel_filter = RelationshipFilter(
+        relationship=NodeFilter.eq("id", "edge-1"),
+        source=NodeFilter.eq("tenant_id", "tenant-1"),
+    )
+
+    result = await client.delete_relationship(
+        MemoryRelationshipType.RELATES_TO,
+        rel_filter,
+    )
+
+    query, parameters = driver.calls[0]
+    assert "[r:`RELATES_TO`]" in query
+    assert "r[$relationship_filter_relationship_0_field]" in query
+    assert "source[$relationship_filter_source_0_field]" in query
+    assert "DELETE r" in query
+    assert "RETURN relationship_id, properties" in query
+    assert parameters == {
+        "relationship_filter_relationship_0_field": "id",
+        "relationship_filter_relationship_0_value": "edge-1",
+        "relationship_filter_source_0_field": "tenant_id",
+        "relationship_filter_source_0_value": "tenant-1",
+    }
+    assert result.backend == BackendType.NEO4J
+    assert result.affected_count == 1
+    assert result.ids == ["edge-1"]
+    assert result.data == [{"id": "edge-1", "weight": 0.8}]
+
+
+@pytest.mark.parametrize("relationship_type", ["RELATES_TO", "", None, 1])
+async def test_neo4j_delete_relationship_requires_relationship_type_enum(
+    relationship_type: Any,
+) -> None:
+    client = Neo4jClient()
+    rel_filter = RelationshipFilter(
+        relationship=NodeFilter.eq("id", "edge-1")
+    )
+
+    with pytest.raises(KeyError, match="relationship type.*not supported"):
+        await client.delete_relationship(
+            relationship_type,
+            rel_filter,
+        )
+
+
 def test_memory_relationship_type_covers_physical_graph_relationships() -> None:
     assert {item.value for item in MemoryRelationshipType} == {
         "BELONGS_TO_COMMUNITY",
@@ -370,8 +426,8 @@ async def test_neo4j_update_node_uses_custom_filter_without_data_id() -> None:
     }
     assert result.backend == BackendType.NEO4J
     assert result.affected_count == 1
-    assert result.ids == []
-    assert result.data == [{"change": True}]
+    assert result.ids == ["node-1"]
+    assert result.data == [{"id": "node-1", "change": True}]
 
 
 
@@ -613,7 +669,7 @@ def test_elasticsearch_sort_preserves_field_order_and_maps_direction() -> None:
     ]
 
 
-async def test_neo4j_delete_node_uses_parameterized_filter_and_returns_count() -> None:
+async def test_neo4j_delete_node_uses_parameterized_filter_and_returns_ids() -> None:
     driver = _FakeDriver()
     client = Neo4jClient()
     client.client = driver  # type: ignore[assignment]
@@ -634,8 +690,9 @@ async def test_neo4j_delete_node_uses_parameterized_filter_and_returns_count() -
         "WHERE (n[$filter_0_field] = $filter_0_value) AND "
         "(n[$filter_1_field] = $filter_1_value)"
     ) in query
+    assert "WITH n, n.id AS id" in query
     assert "DETACH DELETE n" in query
-    assert "RETURN count(n) AS deleted" in query
+    assert "RETURN id" in query
     assert unsafe_field not in query
     assert parameters == {
         "filter_0_field": unsafe_field,
@@ -645,6 +702,7 @@ async def test_neo4j_delete_node_uses_parameterized_filter_and_returns_count() -
     }
     assert result.backend == BackendType.NEO4J
     assert result.affected_count == 2
+    assert result.ids == ["node-1", "node-2"]
 
 
 async def test_neo4j_delete_node_draft_sets_delete_at_without_detaching() -> None:
@@ -671,7 +729,7 @@ async def test_neo4j_delete_node_draft_sets_delete_at_without_detaching() -> Non
     ) in query
     assert "SET n.delete_at = datetime()" in query
     assert "DETACH DELETE" not in query
-    assert "RETURN count(n) AS deleted" in query
+    assert "RETURN n.id AS id" in query
     assert parameters == {
         "filter_0_field": "external_id",
         "filter_0_value": "node-1",
@@ -680,6 +738,7 @@ async def test_neo4j_delete_node_draft_sets_delete_at_without_detaching() -> Non
     }
     assert result.backend == BackendType.NEO4J
     assert result.affected_count == 2
+    assert result.ids == ["node-1", "node-2"]
 
 
 def test_node_projection_accepts_structured_fields_and_keeps_strings() -> None:

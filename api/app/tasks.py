@@ -3,6 +3,7 @@ import json
 import os
 import re
 import shutil
+import socket
 import tempfile
 import time
 import uuid
@@ -26,6 +27,11 @@ from app.aioRedis import get_thread_safe_redis
 from app.celery_app import celery_app
 from app.core.config import settings
 from app.core.logging_config import get_logger
+from app.core.memory.storage.outbox.consumer import (
+    cleanup_outbox_events,
+    consume_outbox_batch,
+)
+from app.core.memory.storage.outbox.exceptions import safe_error
 from app.core.memory.storage_services.reflection_engine import retry_registry as rr
 from app.core.memory.storage_services.reflection_engine.errors import (
     ReflectionBusinessError,
@@ -1036,6 +1042,45 @@ def _shutdown_loop_gracefully(loop: asyncio.AbstractEventLoop):
         loop.run_until_complete(loop.shutdown_asyncgens())
     except Exception:
         pass
+
+
+@celery_app.task(
+    name="app.tasks.scan_outbox_projection",
+    queue="memory_projection",
+    max_retries=0,
+)
+def scan_outbox_projection():
+    worker_id = f"{socket.gethostname()[:60]}:{os.getpid()}:{uuid.uuid4()}"
+    try:
+        result = asyncio.run(
+            consume_outbox_batch(settings.OUTBOX_BATCH_SIZE, worker_id)
+        )
+    except Exception as exc:
+        # Celery 会记录抛出的异常；剥离驱动 SQL、凭据与负载。
+        error = safe_error(exc, settings.OUTBOX_ERROR_MAX_LENGTH)
+        logger.error("Outbox task failed: %s", error)
+        raise RuntimeError(f"Outbox task failed: {error}") from None
+    logger.info("Outbox task completed: %s", result)
+    return result
+
+
+@celery_app.task(
+    name="app.tasks.cleanup_outbox",
+    queue="memory_projection",
+    max_retries=0,
+)
+def cleanup_outbox():
+    try:
+        result = asyncio.run(
+            cleanup_outbox_events(settings.OUTBOX_BATCH_SIZE)
+        )
+    except Exception as exc:
+        # Celery 会记录抛出的异常；剥离驱动 SQL、凭据与负载。
+        error = safe_error(exc, settings.OUTBOX_ERROR_MAX_LENGTH)
+        logger.error("Outbox task failed: %s", error)
+        raise RuntimeError(f"Outbox task failed: {error}") from None
+    logger.info("Outbox task completed: %s", result)
+    return result
 
 
 @celery_app.task(name="tasks.process_item")
