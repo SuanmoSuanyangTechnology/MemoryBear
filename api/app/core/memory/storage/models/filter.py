@@ -79,3 +79,21 @@ class NodeFilter(BaseModel):
     @classmethod
     def any_of(cls, *conditions: FilterCondition | NodeFilter) -> Self:
         return cls(logic=FilterLogic.OR, conditions=conditions)
+
+
+class RelationshipFilter(BaseModel):
+
+    model_config = ConfigDict(frozen=True)
+
+    relationship: NodeFilter | None = None
+    source: NodeFilter | None = None
+    target: NodeFilter | None = None
+    logic: FilterLogic = FilterLogic.AND
+
+    @model_validator(mode="after")
+    def validate_scope_filter(self) -> Self:
+        if not any((self.relationship, self.source, self.target)):
+            raise ValueError(
+                "relationship filter requires at least one scoped node filter"
+            )
+        return self

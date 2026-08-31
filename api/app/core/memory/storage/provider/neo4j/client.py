@@ -17,11 +17,15 @@ from app.core.memory.storage.models import (
     NodeFilter,
     NodeProjection,
     NodeSort,
+    RelationshipFilter,
     StorageReadResult,
     StorageWriteResult,
 )
 from app.core.memory.storage.provider.base import BaseClient
-from app.core.memory.storage.provider.neo4j.compiler.filter_compiler import compile_neo4j_filter
+from app.core.memory.storage.provider.neo4j.compiler.filter_compiler import (
+    compile_neo4j_filter,
+    compile_neo4j_relationship_filter,
+)
 from app.core.memory.storage.provider.neo4j.compiler.projection_compiler import (
     compile_neo4j_projection,
 )
@@ -140,6 +144,130 @@ class Neo4jClient(BaseClient):
             backend=self.name,
             affected_count=len(items),
             ids=[str(relationship_id)] if items else [],
+            data=items,
+        )
+
+    async def get_relationship(
+            self,
+            relationship_type: MemoryRelationshipType,
+            rel_filter: RelationshipFilter,
+            projection: NodeProjection | None = None,
+            sort: NodeSort | None = None,
+    ) -> StorageReadResult:
+        """Query relationships using relationship and endpoint filters."""
+        if not isinstance(relationship_type, MemoryRelationshipType):
+            raise KeyError(
+                f"relationship type - {relationship_type} not supported"
+            )
+
+        escaped_type = relationship_type.value.replace("`", "``")
+        predicate, parameters = compile_neo4j_relationship_filter(
+            rel_filter
+        )
+
+        return_expression, projection_parameters = compile_neo4j_projection(
+            projection, variable="r"
+        )
+        order_by, sort_parameters = compile_neo4j_sort(sort, variable="r")
+        sort_clause = f"WITH r\n        {order_by}" if order_by else ""
+        query = f"""
+        MATCH (source)-[r:`{escaped_type}`]->(target)
+        WHERE {predicate}
+        {sort_clause}
+        RETURN {return_expression}
+        """
+        parameters.update(sort_parameters)
+        parameters.update(projection_parameters)
+
+        async with self.client.session() as session:
+            stmt = await session.run(query, **parameters)
+            records = await stmt.data()
+
+        items = [
+            _to_native(record["r"])
+            for record in records
+            if "r" in record
+        ]
+        return StorageReadResult.from_items(items, backend=self.name)
+
+    async def update_relationship(
+            self,
+            relationship_type: MemoryRelationshipType,
+            data: dict,
+            rel_filter: RelationshipFilter,
+    ) -> StorageWriteResult:
+        if not isinstance(relationship_type, MemoryRelationshipType):
+            raise KeyError(
+                f"relationship type - {relationship_type} not supported"
+            )
+        if "id" in data:
+            raise ValueError("Relationship id cannot be updated")
+
+        escaped_type = relationship_type.value.replace("`", "``")
+        predicate, filter_parameters = compile_neo4j_relationship_filter(
+            rel_filter
+        )
+        query = f"""
+        MATCH (source)-[r:`{escaped_type}`]->(target)
+        WHERE {predicate}
+        SET r += $properties
+        RETURN r
+        """
+        parameters = {"properties": data, **filter_parameters}
+
+        async with self.client.session() as session:
+            stmt = await session.run(query, **parameters)
+            records = await stmt.data()
+
+        items = [
+            _to_native(record["r"])
+            for record in records
+            if "r" in record
+        ]
+        return StorageWriteResult(
+            backend=self.name,
+            affected_count=len(items),
+            ids=[str(item["id"]) for item in items if "id" in item],
+            data=items,
+        )
+
+    async def delete_relationship(
+            self,
+            relationship_type: MemoryRelationshipType,
+            rel_filter: RelationshipFilter,
+    ) -> StorageWriteResult:
+        if not isinstance(relationship_type, MemoryRelationshipType):
+            raise KeyError(
+                f"relationship type - {relationship_type} not supported"
+            )
+
+        escaped_type = relationship_type.value.replace("`", "``")
+        predicate, parameters = compile_neo4j_relationship_filter(rel_filter)
+        query = f"""
+        MATCH (source)-[r:`{escaped_type}`]->(target)
+        WHERE {predicate}
+        WITH r, r.id AS relationship_id, properties(r) AS properties
+        DELETE r
+        RETURN relationship_id, properties
+        """
+
+        async with self.client.session() as session:
+            stmt = await session.run(query, **parameters)
+            records = await stmt.data()
+
+        items = [
+            _to_native(record["properties"])
+            for record in records
+            if "properties" in record
+        ]
+        return StorageWriteResult(
+            backend=self.name,
+            affected_count=len(records),
+            ids=[
+                str(record["relationship_id"])
+                for record in records
+                if record.get("relationship_id") is not None
+            ],
             data=items,
         )
 
