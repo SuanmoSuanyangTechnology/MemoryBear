@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from typing import Self
 
-from app.core.memory.storage.enums import MemoryNodeLabel
+from app.core.memory.storage.enums import MemoryNodeLabel, MemoryRelationshipType
 from app.core.memory.storage.models import (
     NodeFilter,
     NodeProjection,
+    NodeSort,
+    RelationshipFilter,
     StorageReadResult,
 )
 from app.core.memory.storage.provider.factory import BackendFactory
@@ -52,6 +54,20 @@ class MemoryStorageService:
             text,
             limit,
             projection,
+        )
+
+    async def search_relationships_by_graph(
+        self,
+        relationship_type: MemoryRelationshipType,
+        rel_filter: RelationshipFilter,
+        projection: NodeProjection | None = None,
+        sort: NodeSort | None = None,
+    ) -> StorageReadResult:
+        return await self._read_router.search_relationships_by_graph(
+            relationship_type,
+            rel_filter,
+            projection,
+            sort,
         )
 
     async def close(self) -> None:

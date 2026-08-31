@@ -1,16 +1,22 @@
 import asyncio
 
-from app.core.memory.storage.enums import MemoryNodeLabel, StorageBackendType
+from app.core.memory.storage.enums import (
+    MemoryNodeLabel,
+    MemoryRelationshipType,
+    StorageBackendType,
+)
 from app.core.memory.storage.models import (
     NodeFilter,
     NodeProjection,
+    NodeSort,
+    RelationshipFilter,
     StorageReadResult,
 )
 from app.core.memory.storage.provider.factory import BackendFactory
 
 
 def _merge_read_results(
-        results: list[StorageReadResult],
+    results: list[StorageReadResult],
 ) -> StorageReadResult:
     items = [item for result in results for item in result.items]
     backend = (
@@ -79,6 +85,17 @@ class ReadRouter:
         results = await asyncio.gather(*tasks)
         return _merge_read_results(results)
 
-    async def search_by_graph(self):
-        pass
-
+    async def search_relationships_by_graph(
+        self,
+        relationship_type: MemoryRelationshipType,
+        rel_filter: RelationshipFilter,
+        projection: NodeProjection | None = None,
+        sort: NodeSort | None = None,
+    ) -> StorageReadResult:
+        client = self.backend_factory.get_relationship_client()
+        return await client.get_relationship(
+            relationship_type,
+            rel_filter,
+            projection,
+            sort,
+        )
