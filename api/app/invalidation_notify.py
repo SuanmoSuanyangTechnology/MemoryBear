@@ -45,6 +45,12 @@ async def notify_api_key_async(api_key_hash_: str) -> None:
     await _publish_async({"kind": "api_key", "hash": api_key_hash_})
 
 
+async def notify_api_key_created_async(plain: str) -> None:
+    """API key 创建/重建通知：必须带明文，identity 才能删旧 + 直连 DB 组装新快照写回
+    （网关快照 miss 即 401 无回源，不带明文的新 key 首次访问必然失败）。"""
+    await _publish_async({"kind": "api_key", "hash": api_key_hash(plain), "key": plain})
+
+
 async def notify_tenant_async(tenant_id: str) -> None:
     await _publish_async({"kind": "tenant", "id": str(tenant_id)})
 
@@ -55,6 +61,11 @@ def notify_user_sync(user_id: str) -> None:
 
 def notify_api_key_sync(api_key_hash_: str) -> None:
     _publish_sync({"kind": "api_key", "hash": api_key_hash_})
+
+
+def notify_api_key_created_sync(plain: str) -> None:
+    """API key 创建/重建通知（见 notify_api_key_created_async：必须带明文）。"""
+    _publish_sync({"kind": "api_key", "hash": api_key_hash(plain), "key": plain})
 
 
 def notify_tenant_sync(tenant_id: str) -> None:
