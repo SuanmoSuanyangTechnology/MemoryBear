@@ -28,12 +28,12 @@ class MemoryStorageService:
         return cls(await BackendFactory.create())
 
     async def search_by_embedding(
-        self,
-        labels: list[MemoryNodeLabel],
-        node_filter: NodeFilter,
-        embed: list,
-        limit: int,
-        projection: NodeProjection | None = None,
+            self,
+            labels: list[MemoryNodeLabel],
+            node_filter: NodeFilter,
+            embed: list,
+            limit: int,
+            projection: NodeProjection | None = None,
     ) -> StorageReadResult:
         return await self._read_router.search_by_embedding(
             labels,
@@ -44,12 +44,12 @@ class MemoryStorageService:
         )
 
     async def search_by_fulltext(
-        self,
-        labels: list[MemoryNodeLabel],
-        node_filter: NodeFilter,
-        text: str,
-        limit: int,
-        projection: NodeProjection | None = None,
+            self,
+            labels: list[MemoryNodeLabel],
+            node_filter: NodeFilter,
+            text: str,
+            limit: int,
+            projection: NodeProjection | None = None,
     ) -> StorageReadResult:
         return await self._read_router.search_by_fulltext(
             labels,
@@ -60,46 +60,48 @@ class MemoryStorageService:
         )
 
     async def search_relationships_by_graph(
-        self,
-        relationship_type: MemoryRelationshipType,
-        rel_filter: RelationshipFilter,
-        projection: NodeProjection | None = None,
-        sort: NodeSort | None = None,
+            self,
+            relationship_type: MemoryRelationshipType,
+            rel_filter: RelationshipFilter,
+            projection: NodeProjection | None = None,
+            sort: NodeSort | None = None,
     ) -> StorageReadResult:
         return await self._read_router.search_relationships_by_graph(
             relationship_type,
             rel_filter,
             projection,
             sort,
+        )
+
     async def save_node(
-        self,
-        label: MemoryNodeLabel,
-        data: dict,
+            self,
+            label: MemoryNodeLabel,
+            data: dict,
     ) -> StorageWriteResult:
         return await self._write_router.save_node(label, data)
 
     async def update_node(
-        self,
-        label: MemoryNodeLabel,
-        data: dict,
-        node_filter: NodeFilter,
+            self,
+            label: MemoryNodeLabel,
+            data: dict,
+            node_filter: NodeFilter,
     ) -> StorageWriteResult:
         return await self._write_router.update_node(label, data, node_filter)
 
     async def delete_node(
-        self,
-        label: MemoryNodeLabel,
-        node_filter: NodeFilter,
-        draft: bool = False,
+            self,
+            label: MemoryNodeLabel,
+            node_filter: NodeFilter,
+            draft: bool = False,
     ) -> StorageWriteResult:
         return await self._write_router.delete_node(label, node_filter, draft)
 
     async def save_relationship(
-        self,
-        relationship_type: MemoryRelationshipType,
-        source: str,
-        target: str,
-        data: dict,
+            self,
+            relationship_type: MemoryRelationshipType,
+            source: str,
+            target: str,
+            data: dict,
     ) -> StorageWriteResult:
         return await self._write_router.save_relationship(
             relationship_type,
@@ -109,10 +111,10 @@ class MemoryStorageService:
         )
 
     async def update_relationship(
-        self,
-        relationship_type: MemoryRelationshipType,
-        data: dict,
-        rel_filter: RelationshipFilter,
+            self,
+            relationship_type: MemoryRelationshipType,
+            data: dict,
+            rel_filter: RelationshipFilter,
     ) -> StorageWriteResult:
         return await self._write_router.update_relationship(
             relationship_type,
@@ -121,9 +123,9 @@ class MemoryStorageService:
         )
 
     async def delete_relationship(
-        self,
-        relationship_type: MemoryRelationshipType,
-        rel_filter: RelationshipFilter,
+            self,
+            relationship_type: MemoryRelationshipType,
+            rel_filter: RelationshipFilter,
     ) -> StorageWriteResult:
         return await self._write_router.delete_relationship(
             relationship_type,
