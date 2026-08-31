@@ -17,6 +17,7 @@ from app.core.exceptions import (
 )
 from app.core.logging_config import get_business_logger
 from app.core.utils.datetime_utils import as_utc_aware, utcnow_naive
+from app.invalidation_notify import api_key_hash, notify_api_key_sync
 from app.models.api_key_model import ApiKey, ApiKeyType
 from app.models.app_model import App
 from app.repositories.api_key_repository import ApiKeyRepository, ApiKeyLogRepository
@@ -246,11 +247,14 @@ class ApiKeyService:
     ) -> bool:
         """删除 API Key"""
         api_key = ApiKeyService.get_api_key(db, api_key_id, workspace_id)
+        old_plain = api_key.api_key  # commit 前捕获明文（expire_on_commit 会触发 reload）
 
         ApiKeyRepository.delete(db, api_key_id)
         db.commit()
 
         logger.info("API Key 删除成功", extra={"api_key_id": str(api_key_id)})
+        # 决策 #11 修订：API key 吊销发通知（hash 与 auth_sdk 一致），identity 删除 api_key:{hash} 快照
+        notify_api_key_sync(api_key_hash(old_plain))
         return True
 
     @staticmethod
@@ -268,6 +272,9 @@ class ApiKeyService:
 
         # 生成新的 API Key
         new_api_key = generate_api_key(api_key.type)
+
+        # 决策 #11 修订：API key 吊销发通知（hash 与 auth_sdk 一致），identity 删除 api_key:{hash} 快照
+        notify_api_key_sync(api_key_hash(api_key.api_key))
 
         # 更新
         ApiKeyRepository.update(db, api_key_id, {

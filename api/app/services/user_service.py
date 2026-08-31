@@ -9,6 +9,7 @@ import uuid
 
 from app.core.utils.datetime_utils import utcnow_naive
 from app.aioRedis import aio_redis_set, aio_redis_get, aio_redis_delete
+from app.invalidation_notify import notify_user_sync, notify_user_async
 from app.models import Workspace
 from app.models.user_model import User
 from app.repositories import user_repository
@@ -103,6 +104,8 @@ def create_user(db: Session, user: UserCreate, workspace: Workspace) -> User:
         db.commit()
         db.refresh(new_user)
         business_logger.info(f"用户创建成功: {new_user.username} (ID: {new_user.id})")
+        # 决策 #11 修订：用户状态变更发通知，identity 重建快照（快照失效分级：user 级）
+        notify_user_sync(str(new_user.id))
         return new_user
     except Exception as e:
         business_logger.error(f"用户创建失败: {user.username} - {str(e)}")
@@ -258,6 +261,8 @@ def deactivate_user(db: Session, user_id_to_deactivate: uuid.UUID, current_user:
         db.commit()
         db.refresh(db_user)
         business_logger.info(f"用户停用成功: {db_user.username} (ID: {user_id_to_deactivate})")
+        # 决策 #11 修订：用户状态变更发通知，identity 重建快照（快照失效分级：user 级）
+        notify_user_sync(str(user_id_to_deactivate))
         return db_user
     except Exception as e:
         business_logger.error(f"用户停用失败: user_id={user_id_to_deactivate} - {str(e)}")
@@ -301,6 +306,8 @@ def activate_user(db: Session, user_id_to_activate: uuid.UUID, current_user: Use
         db.commit()
         db.refresh(db_user)
         business_logger.info(f"用户激活成功: {db_user.username} (ID: {user_id_to_activate})")
+        # 决策 #11 修订：用户状态变更发通知，identity 重建快照（快照失效分级：user 级）
+        notify_user_sync(str(user_id_to_activate))
         return db_user
     except Exception as e:
         business_logger.error(f"用户激活失败: user_id={user_id_to_activate} - {str(e)}")
@@ -443,6 +450,8 @@ async def change_password(db: Session, user_id: uuid.UUID, old_password: str, ne
         await SessionService.invalidate_all_user_tokens(str(user_id))
         
         business_logger.info(f"用户密码修改成功: {db_user.username} (ID: {user_id})")
+        # 决策 #11 修订：用户状态变更发通知，identity 重建快照（快照失效分级：user 级）
+        await notify_user_async(str(user_id))
         return db_user
         
     except Exception as e:
@@ -506,6 +515,8 @@ async def admin_change_password(db: Session, target_user_id: uuid.UUID, new_pass
         
         password_type = "指定密码" if new_password else "随机生成密码"
         business_logger.info(f"管理员修改用户密码成功: admin={current_user.username}, target={target_user.username} (ID: {target_user_id}), 类型={password_type}")
+        # 决策 #11 修订：用户状态变更发通知，identity 重建快照（快照失效分级：user 级）
+        await notify_user_async(str(target_user_id))
         return target_user, actual_password
         
     except Exception as e:
@@ -623,6 +634,8 @@ async def verify_and_change_email(db: Session, user_id: uuid.UUID, new_email: Em
     # await SessionService.invalidate_all_user_tokens(str(user_id))
 
     business_logger.info(f"用户邮箱修改成功: {db_user.username}, new_email={new_email}")
+    # 决策 #11 修订：用户状态变更发通知，identity 重建快照（快照失效分级：user 级）
+    await notify_user_async(str(user_id))
     return db_user
 
 
