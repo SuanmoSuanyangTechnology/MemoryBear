@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:25:31 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-07-21 17:55:31
+ * @Last Modified time: 2026-08-31 10:29:24
  */
 /**
  * SiderMenu Component
@@ -148,7 +148,7 @@ const Menu: FC<{
   const handleMenuClick: MenuProps['onClick'] = (e) => {
     const path = e.key;
     if (path) {
-      navigate(path);
+      navigate(path, path === '/knowledge-base' ? { state: { resetToRoot: true } } : undefined);
       setSelectedKeys([path]);
     }
   };
@@ -260,10 +260,10 @@ const Menu: FC<{
 
   const { subscription, fetchSubscription } = useSubscription()
   useEffect(() => {
-    if (source === 'manage') {
+    if (source === 'manage' && fetchSubscription) {
       fetchSubscription()
     }
-  }, [source])
+  }, [source, fetchSubscription])
 
   const getKeyWithLanguage = (key: string) => {
     return (language === 'en' ? `${key}_en` : key) as keyof Subscription['package_plan']
