@@ -332,7 +332,7 @@ class Neo4jClient(BaseClient):
             stmt = await session.run(query, **parameters)
             records = await stmt.data()
             items = [_to_native(record["n"]) for record in records]
-        return StorageReadResult.from_items(items, backend=self.name)
+        return StorageReadResult.from_items(items, label=label, backend=self.name)
 
     async def delete_node(
             self,
@@ -461,11 +461,11 @@ class Neo4jClient(BaseClient):
                 if not isinstance(field, str) and field.field == "score"
             } if projection is not None else set()
             include_score = (
-                projection is not None
-                and any(
-                    field == "score" if isinstance(field, str) else field.field == "score"
-                    for field in projection.fields
-                )
+                    projection is not None
+                    and any(
+                field == "score" if isinstance(field, str) else field.field == "score"
+                for field in projection.fields
+            )
             )
             if projection is not None and "score" in {
                 field for field in projection.fields if isinstance(field, str)
@@ -497,7 +497,7 @@ class Neo4jClient(BaseClient):
                     res.append(node)
         except Exception:
             res = []
-        return StorageReadResult.from_items(res, backend=self.name)
+        return StorageReadResult.from_items(res, label=label, backend=self.name)
 
     async def search_by_fulltext(
             self,
@@ -539,8 +539,7 @@ class Neo4jClient(BaseClient):
             )
             records = await stmt.data()
             items = [_to_native(record["n"]) for record in records]
-        return StorageReadResult.from_items(items, backend=self.name)
-
+        return StorageReadResult.from_items(items, label=label, backend=self.name)
 
 # async def dev():
 #     from app.core.memory.storage.models import FilterCondition

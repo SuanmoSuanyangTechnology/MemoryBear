@@ -30,6 +30,7 @@ from app.core.memory.retrieval_trace.stage_projection import (
     project_relation_items,
     project_result_items,
 )
+from app.core.memory.storage.enums import MemoryNodeType
 from app.core.models import RedBearLLM
 from app.core.utils.datetime_utils import utcnow, utcnow_naive
 from app.db import get_async_db_context
@@ -720,10 +721,10 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
         """仅全文检索模式：不做 embedding、关系检索、query 拆分、摘要生成。"""
         if includes is None:
             includes = [
-                Neo4jNodeType.CHUNK,
-                Neo4jNodeType.STATEMENT,
-                Neo4jNodeType.EXTRACTEDENTITY,
-                Neo4jNodeType.DIALOGUE,
+                MemoryNodeType.CHUNK,
+                MemoryNodeType.STATEMENT,
+                MemoryNodeType.EXTRACTED_ENTITY,
+                MemoryNodeType.DIALOGUE,
             ]
         meta_task = asyncio.ensure_future(self._user_meta())
         search_service = await self._get_search_service(includes, need_embedder=False, need_llm=False)

@@ -9,6 +9,7 @@ from elasticsearch import AsyncElasticsearch
 from app.core.config import settings
 from app.core.memory.storage.enums import BackendType, MemoryNodeType
 from app.core.memory.storage.models import NodeFilter, NodeProjection, NodeSort
+from app.core.memory.storage.models.dto import StorageItem
 from app.core.memory.storage.provider.elasticsearch import index as elasticsearch_index
 from app.core.memory.storage.provider.elasticsearch.client import (
     PIT_KEEP_ALIVE,
@@ -826,8 +827,14 @@ async def test_elastic_client_get_node_uses_filter_projection_and_sort() -> None
     ]
     assert fake.close_point_in_time_calls == [{"id": "pit-1"}]
     assert result.items == [
-        {"id": "node-2", "status": "active"},
-        {"id": "node-1", "status": "active"},
+        StorageItem(
+            label=MemoryNodeType.EXTRACTED_ENTITY,
+            data={"id": "node-2", "status": "active"},
+        ),
+        StorageItem(
+            label=MemoryNodeType.EXTRACTED_ENTITY,
+            data={"id": "node-1", "status": "active"},
+        ),
     ]
 
 
@@ -1412,7 +1419,10 @@ async def test_elastic_client_get_node_reads_all_pit_pages() -> None:
 
     assert result.total == SEARCH_BATCH_SIZE + 1
     assert len(result.items) == result.total
-    assert result.items[-1] == {"id": "last-node"}
+    assert result.items[-1] == StorageItem(
+        label=TEST_INDEX_LABEL,
+        data={"id": "last-node"},
+    )
     assert len(fake.search_calls) == 2
     assert fake.search_calls[0]["sort"] == [{"_shard_doc": "asc"}]
     assert fake.search_calls[0]["pit"] == {
@@ -1510,7 +1520,12 @@ async def test_elastic_client_get_node_applies_projection_aliases() -> None:
     )
 
     assert fake.search_calls[0]["source_includes"] == ["id", "name"]
-    assert result.items == [{"id": "node-1", "display_name": "Alice"}]
+    assert result.items == [
+        StorageItem(
+            label=MemoryNodeType.EXTRACTED_ENTITY,
+            data={"id": "node-1", "display_name": "Alice"},
+        ),
+    ]
 
 
 
@@ -1555,8 +1570,14 @@ async def test_elastic_client_get_node_evaluates_coalesce_projection() -> None:
         "name",
     ]
     assert result.items == [
-        {"id": "node-1", "display_name": "Alice"},
-        {"id": "node-2", "display_name": "Unknown"},
+        StorageItem(
+            label=MemoryNodeType.EXTRACTED_ENTITY,
+            data={"id": "node-1", "display_name": "Alice"},
+        ),
+        StorageItem(
+            label=MemoryNodeType.EXTRACTED_ENTITY,
+            data={"id": "node-2", "display_name": "Unknown"},
+        ),
     ]
 
 
@@ -1608,8 +1629,8 @@ async def test_elastic_client_embedding_search_uses_knn_prefilter_and_score() ->
             "source_includes": ["id"],
         }
     ]
-    assert result.items[0]["id"] == "node-1"
-    assert result.items[0]["similarity"] == pytest.approx(0.8)
+    assert result.items[0].data["id"] == "node-1"
+    assert result.items[0].data["similarity"] == pytest.approx(0.8)
 
 
 async def test_elastic_client_embedding_search_does_not_add_unrequested_score() -> None:
@@ -1631,7 +1652,9 @@ async def test_elastic_client_embedding_search_does_not_add_unrequested_score() 
         1,
     )
 
-    assert result.items == [{"id": "node-1"}]
+    assert result.items == [
+        StorageItem(label=MemoryNodeType.CHUNK, data={"id": "node-1"}),
+    ]
 
 
 async def test_elastic_client_fulltext_search_uses_multi_match_filter_and_score() -> None:
@@ -1689,7 +1712,12 @@ async def test_elastic_client_fulltext_search_uses_multi_match_filter_and_score(
             "source_includes": ["id"],
         }
     ]
-    assert result.items == [{"id": "entity-1", "score": 3.25}]
+    assert result.items == [
+        StorageItem(
+            label=MemoryNodeType.EXTRACTED_ENTITY,
+            data={"id": "entity-1", "score": 3.25},
+        ),
+    ]
 
 
 async def test_elastic_client_search_supports_score_only_projection() -> None:
@@ -1712,7 +1740,9 @@ async def test_elastic_client_search_supports_score_only_projection() -> None:
 
     assert fake.search_calls[0]["source"] is False
     assert "source_includes" not in fake.search_calls[0]
-    assert result.items == [{"rank": 2.5}]
+    assert result.items == [
+        StorageItem(label=MemoryNodeType.STATEMENT, data={"rank": 2.5}),
+    ]
 
 
 @pytest.mark.parametrize("limit", [0, -1, True, 10_001])

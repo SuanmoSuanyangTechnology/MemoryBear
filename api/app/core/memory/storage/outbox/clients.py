@@ -51,12 +51,13 @@ async def project_event(
     document = None
     if result.items:
         candidate = result.items[0]
+        data = candidate.data if candidate is not None else None
         if (
-            not isinstance(candidate, Mapping)
-            or candidate.get("id") != event.node_id
+            not isinstance(data, Mapping)
+            or data.get("id") != event.node_id
         ):
             raise ValueError("Authoritative node identity mismatch")
-        document = candidate
+        document = data
     # 读错误绝不转化为 ES 删除。慢读后需重新校验租约归属。
     await check_claim()
     if document is not None:
