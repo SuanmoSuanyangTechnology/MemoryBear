@@ -7,6 +7,7 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
+from app.core.memory.storage.models import NodeFilter, StorageReadResult
 from app.core.memory.storage.outbox.clients import (
     ProjectionClients, project_event,
 )
@@ -21,6 +22,10 @@ from app.core.memory.storage.provider.elasticsearch.client import ElasticClient
 
 def event():
     return ClaimedEvent(uuid4(), 1, "Statement", "node-1", "upsert", 0, uuid4())
+
+
+def read_result(items):
+    return StorageReadResult.from_items(items)
 
 
 def repository():
@@ -165,12 +170,12 @@ async def test_cleanup_small_batches_and_bound():
     assert repo.cleanup.await_count == 100
 
 
-@pytest.mark.parametrize("operation", ["upsert", "delete", "draft_delete"])
-async def test_current_source_wins_over_event_operation(operation):
+@pytest.mark.parametrize("operation", ["upsert", "draft_delete"])
+async def test_current_source_wins_for_upsert_and_draft_delete(operation):
     item = replace(event(), operation=operation)
     source = {"id": item.node_id, "text": "current", "embedding": [1.0, 2.0],
               "delete_at": datetime(2026, 1, 1)}
-    neo = Mock(get_node=AsyncMock(return_value=[source]))
+    neo = Mock(get_node=AsyncMock(return_value=read_result([source])))
     es = Mock(save_node=AsyncMock(), delete_node=AsyncMock())
     check = AsyncMock()
     await project_event(item, neo, es, check_claim=check)
@@ -181,17 +186,57 @@ async def test_current_source_wins_over_event_operation(operation):
     check.assert_awaited_once()
 
 
+async def test_delete_event_removes_document_without_rereading_source():
+    item = replace(event(), operation="delete")
+    neo = Mock(get_node=AsyncMock())
+    es = Mock(save_node=AsyncMock(), delete_node=AsyncMock())
+    check = AsyncMock()
+    await project_event(item, neo, es, check_claim=check)
+    neo.get_node.assert_not_awaited()
+    es.save_node.assert_not_awaited()
+    assert es.delete_node.await_args.kwargs == {"draft": False}
+    assert es.delete_node.await_args.args[1] == NodeFilter.eq("id", item.node_id)
+    check.assert_awaited_once()
+
+
+async def test_delete_event_skips_es_when_lease_is_lost():
+    item = replace(event(), operation="delete")
+    es = Mock(save_node=AsyncMock(), delete_node=AsyncMock())
+    with pytest.raises(ClaimLostError):
+        await project_event(
+            item,
+            Mock(get_node=AsyncMock()),
+            es,
+            check_claim=AsyncMock(side_effect=ClaimLostError()),
+        )
+    es.delete_node.assert_not_awaited()
+
+
 async def test_missing_source_physically_deletes():
-    neo = Mock(get_node=AsyncMock(return_value=[]))
+    neo = Mock(get_node=AsyncMock(return_value=read_result([])))
     es = Mock(save_node=AsyncMock(), delete_node=AsyncMock())
     await project_event(event(), neo, es, check_claim=AsyncMock())
     assert es.delete_node.await_args.kwargs == {"draft": False}
     es.save_node.assert_not_awaited()
 
 
-@pytest.mark.parametrize("nodes", [None, [{"id": "wrong"}], [{"id": "node-1"}] * 2, [None]])
-async def test_incomplete_or_ambiguous_read_never_deletes(nodes):
-    neo = Mock(get_node=AsyncMock(return_value=nodes))
+@pytest.mark.parametrize(
+    "result",
+    [
+        None,
+        [{"id": "node-1"}],
+        read_result([{"id": "wrong"}]),
+        read_result([{"id": "node-1"}] * 2),
+        StorageReadResult.model_construct(
+            backend=None,
+            items=[None],
+            total=1,
+        ),
+        StorageReadResult(items=[], total=1),
+    ],
+)
+async def test_incomplete_or_ambiguous_read_never_deletes(result):
+    neo = Mock(get_node=AsyncMock(return_value=result))
     es = Mock(save_node=AsyncMock(), delete_node=AsyncMock())
     with pytest.raises(ValueError):
         await project_event(event(), neo, es, check_claim=AsyncMock())
@@ -205,7 +250,7 @@ async def test_read_failure_and_lease_loss_never_write_es():
     with pytest.raises(TimeoutError):
         await project_event(event(), neo, es, check_claim=AsyncMock())
     neo.get_node.side_effect = None
-    neo.get_node.return_value = []
+    neo.get_node.return_value = read_result([])
     with pytest.raises(ClaimLostError):
         await project_event(event(), neo, es, check_claim=AsyncMock(side_effect=ClaimLostError()))
     es.save_node.assert_not_awaited()
@@ -219,7 +264,8 @@ def test_diagnostics_do_not_leak_error_details():
 async def test_each_retry_rereads_source_instead_of_reusing_document():
     repo, item = repository(), event()
     neo = Mock(get_node=AsyncMock(side_effect=[
-        [{"id": item.node_id, "text": "old"}], [{"id": item.node_id, "text": "new"}],
+        read_result([{"id": item.node_id, "text": "old"}]),
+        read_result([{"id": item.node_id, "text": "new"}]),
     ]))
     es = Mock(save_node=AsyncMock(side_effect=[TimeoutError(), None]))
 
@@ -244,7 +290,10 @@ async def test_client_cleanup_closes_both_even_on_error():
 
 async def test_clients_reuse_index_initialization_and_own_redis_pool(monkeypatch):
     clients = ProjectionClients(30)
-    clients.neo4j = Mock(get_node=AsyncMock(return_value=[]), close=AsyncMock())
+    clients.neo4j = Mock(
+        get_node=AsyncMock(return_value=read_result([])),
+        close=AsyncMock(),
+    )
     clients.elastic = Mock(delete_node=AsyncMock(), close=AsyncMock())
     ensure = AsyncMock()
     redis = Mock(return_value=Mock(aclose=AsyncMock()))
@@ -261,10 +310,10 @@ async def test_clients_reuse_index_initialization_and_own_redis_pool(monkeypatch
 async def test_clients_use_provider_elastic_client_without_sdk_retries(monkeypatch):
     clients = ProjectionClients(7)
     clients.neo4j = Mock(
-        get_node=AsyncMock(return_value=[{
+        get_node=AsyncMock(return_value=read_result([{
             "id": "node-1",
             "delete_at": datetime(2026, 1, 1),
-        }]),
+        }])),
         close=AsyncMock(),
     )
     transport = Mock(

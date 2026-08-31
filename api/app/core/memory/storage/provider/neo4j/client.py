@@ -347,28 +347,32 @@ class Neo4jClient(BaseClient):
             MATCH (n:{label.value})
             WHERE ({predicate}) AND n.delete_at IS NULL
             SET n.delete_at = datetime()
-            RETURN count(n) AS deleted
+            RETURN n.id AS id
             """
         else:
             query = f"""
             MATCH (n:{label.value})
             WHERE {predicate}
+            WITH n, n.id AS id
             DETACH DELETE n
-            RETURN count(n) AS deleted
+            RETURN id
             """
 
         async with self.client.session() as session:
             stmt = await session.run(query, **filter_parameters)
             records = await stmt.data()
 
-        affected_count = (
-            int(records[0].get("deleted", 0))
-            if records
-            else 0
-        )
+        ids = [
+            str(record["id"])
+            for record in records
+            if record.get("id") is not None
+        ]
+        if len(ids) != len(records):
+            raise ValueError("Affected node is missing an id")
         return StorageWriteResult(
             backend=self.name,
-            affected_count=affected_count,
+            affected_count=len(records),
+            ids=ids,
         )
 
     async def search_by_embedding(

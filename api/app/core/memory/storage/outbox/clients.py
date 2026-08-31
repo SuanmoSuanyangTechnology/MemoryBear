@@ -11,8 +11,8 @@ from redis.backoff import NoBackoff
 
 from app.core.config import settings
 from app.core.memory.storage.enums import MemoryNodeType
-from app.core.memory.storage.models import NodeFilter
-from app.core.memory.storage.outbox.types import ClaimedEvent
+from app.core.memory.storage.models import NodeFilter, StorageReadResult
+from app.core.memory.storage.outbox.types import ClaimedEvent, OutboxOperation
 from app.core.memory.storage.provider.elasticsearch.client import ElasticClient
 from app.core.memory.storage.provider.elasticsearch.config import (
     build_elasticsearch_client_config,
@@ -30,23 +30,39 @@ async def project_event(
     check_claim,
 ) -> None:
     label = MemoryNodeType(event.label)
+    operation = OutboxOperation(event.operation)
     node_filter = NodeFilter.eq("id", event.node_id)
-    nodes = await neo4j.get_node(label=label, node_filter=node_filter)
-    if not isinstance(nodes, list) or len(nodes) > 1:
+
+    if operation is OutboxOperation.DELETE:
+        # 物理删除事件不回读 Neo4j：节点已不存在，直接删除 ES 文档。
+        await check_claim()
+        await elastic.delete_node(label, node_filter, draft=False)
+        return
+
+    # upsert 与 draft_delete 都以 Neo4j 当前态为准；软删除节点仍然存在，
+    # 回读后会把 delete_at 一并覆盖写入 ES。
+    result = await neo4j.get_node(label=label, node_filter=node_filter)
+    if (
+        not isinstance(result, StorageReadResult)
+        or result.total != len(result.items)
+        or result.total > 1
+    ):
         raise ValueError("Invalid or ambiguous authoritative node result")
     document = None
-    if nodes:
+    if result.items:
+        candidate = result.items[0]
         if (
-            not isinstance(nodes[0], Mapping)
-            or nodes[0].get("id") != event.node_id
+            not isinstance(candidate, Mapping)
+            or candidate.get("id") != event.node_id
         ):
             raise ValueError("Authoritative node identity mismatch")
-        document = nodes[0]
+        document = candidate
     # 读错误绝不转化为 ES 删除。慢读后需重新校验租约归属。
     await check_claim()
     if document is not None:
         await elastic.save_node(label, document)
     else:
+        # 节点已被物理删除，投影收敛为删除 ES 文档。
         await elastic.delete_node(label, node_filter, draft=False)
 
 
