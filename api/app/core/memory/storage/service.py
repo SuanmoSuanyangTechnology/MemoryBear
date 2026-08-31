@@ -6,6 +6,7 @@ from app.core.memory.storage.enums import MemoryNodeLabel, MemoryRelationshipTyp
 from app.core.memory.storage.models import (
     NodeFilter,
     NodeProjection,
+    NodeSort,
     RelationshipFilter,
     StorageReadResult,
     StorageWriteResult,
@@ -58,6 +59,18 @@ class MemoryStorageService:
             projection,
         )
 
+    async def search_relationships_by_graph(
+        self,
+        relationship_type: MemoryRelationshipType,
+        rel_filter: RelationshipFilter,
+        projection: NodeProjection | None = None,
+        sort: NodeSort | None = None,
+    ) -> StorageReadResult:
+        return await self._read_router.search_relationships_by_graph(
+            relationship_type,
+            rel_filter,
+            projection,
+            sort,
     async def save_node(
         self,
         label: MemoryNodeLabel,
