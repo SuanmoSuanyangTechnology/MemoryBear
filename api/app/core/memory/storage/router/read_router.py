@@ -4,6 +4,7 @@ from app.core.memory.storage.enums import MemoryNodeLabel, StorageBackendType
 from app.core.memory.storage.models import (
     NodeFilter,
     NodeProjection,
+    NodeSort,
     StorageReadResult,
 )
 from app.core.memory.storage.provider.factory import BackendFactory
@@ -31,6 +32,19 @@ class ReadRouter:
     def __init__(self, backend_factory: BackendFactory) -> None:
         self.backend_factory = backend_factory
 
+    async def get_node(
+        self,
+        label: MemoryNodeLabel,
+        node_filter: NodeFilter,
+        projection: NodeProjection | None = None,
+        node_sort: NodeSort | None = None,
+    ) -> StorageReadResult:
+        client = self.backend_factory.get_read_client(
+            label,
+            StorageBackendType.GRAPH_MAIN_READ,
+        )
+        return await client.get_node(label, node_filter, projection, node_sort)
+
     async def search_by_embedding(
         self,
         labels: list[MemoryNodeLabel],
@@ -52,7 +66,7 @@ class ReadRouter:
             )
             for label in labels
         ]
-        results = await asyncio.gather(*tasks)
+        results: list[StorageReadResult] = list(await asyncio.gather(*tasks))
         return _merge_read_results(results)
 
     async def search_by_fulltext(
@@ -76,9 +90,8 @@ class ReadRouter:
             )
             for label in labels
         ]
-        results = await asyncio.gather(*tasks)
+        results: list[StorageReadResult] = list(await asyncio.gather(*tasks))
         return _merge_read_results(results)
 
     async def search_by_graph(self):
         pass
-
