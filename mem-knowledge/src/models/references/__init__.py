@@ -8,6 +8,7 @@ from .model_registry import (
     ModelConfig,
     ModelProvider,
     ModelType,
+    TenantSpeedBearBinding,
     model_config_api_key_association,
 )
 from .user import User
@@ -21,6 +22,7 @@ __all__ = [
     "ModelProvider",
     "ModelType",
     "ReferenceBase",
+    "TenantSpeedBearBinding",
     "User",
     "Workspace",
     "model_config_api_key_association",
