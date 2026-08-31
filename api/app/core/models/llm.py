@@ -79,6 +79,8 @@ class StructResponse:
                 for block in content:
                     if isinstance(block, dict) and block.get("type") == "text":
                         text += block.get("text", "")
+                    elif isinstance(block, dict) and block.get("text"):
+                        text += block.get("text")
                 return text
             return str(content) if content else ""
         raise RuntimeError(f"Unsupported struct type {type(other)}")
