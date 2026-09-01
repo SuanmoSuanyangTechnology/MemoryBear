@@ -225,7 +225,7 @@ const KnowledgeBaseManagement: FC = () => {
   };
   const fetchKnowledgeBaseTypes = async () => {
     try {
-      let types = await getKnowledgeBaseTypeList();
+      const types = await getKnowledgeBaseTypeList();
       setKnowledgeBaseTypes(types);
     } catch (error) {
       console.error('Failed to fetch knowledge base types:', error);

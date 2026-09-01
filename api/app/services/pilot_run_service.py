@@ -217,7 +217,7 @@ async def _generate_perceptual_snapshots(
     if not resolved_files:
         return []
 
-    # ── Phase 2: 并发生成感知记忆（每个协程独占一次 read session）──
+    # ── Phase 2: 并发生成感知记忆（不持有连接跨越多模态推理）──
     async def _snapshot_one(
         msg_idx: int,
         msg: WriteMessageItem,
@@ -226,14 +226,14 @@ async def _generate_perceptual_snapshots(
     ) -> Optional[PerceptualEntry]:
         try:
             file_for_perceptual = file.model_copy(update={"url": url})
-            with get_db_read() as db:
-                snapshot = await MemoryPerceptualService(db).generate_perceptual_memory(
-                    end_user_id=str(memory_config.workspace_id),
-                    memory_config=memory_config,
-                    file=file_for_perceptual,
-                    content=msg.content,
-                    persist=False,
-                )
+            # 不传 db：服务内部自己开短事务，避免每个协程各持一条连接直到推理结束
+            snapshot = await MemoryPerceptualService().generate_perceptual_memory(
+                end_user_id=str(memory_config.workspace_id),
+                memory_config=memory_config,
+                file=file_for_perceptual,
+                content=msg.content,
+                persist=False,
+            )
         except Exception as e:
             logger.warning(
                 f"[PILOT_RUN] 文件处理失败，跳过: msg_idx={msg_idx}, err={e}",

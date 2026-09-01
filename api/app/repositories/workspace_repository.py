@@ -65,6 +65,51 @@ class WorkspaceRepository:
             db_logger.error(f"根据ID查询工作空间失败: workspace_id={workspace_id} - {str(e)}")
             raise
 
+    def get_workspace_retention_days(
+            self,
+            workspace_id: uuid.UUID,
+    ) -> int | None:
+        """获取工作空间的临时身份保留天数。"""
+        try:
+            return self.db.scalar(
+                select(Workspace.retention_days).where(
+                    Workspace.id == workspace_id
+                )
+            )
+        except Exception as e:
+            db_logger.error(
+                f"查询工作空间保留天数失败: workspace_id={workspace_id} - {str(e)}"
+            )
+            raise
+
+    def update_workspace_retention_days(
+            self,
+            workspace_id: uuid.UUID,
+            retention_days: int | None,
+    ) -> int | None:
+        """更新工作空间的临时身份保留天数并提交事务。"""
+        try:
+            workspace = (
+                self.db.query(Workspace)
+                .filter(Workspace.id == workspace_id)
+                .first()
+            )
+            if workspace is None:
+                raise ValueError(f"Workspace not found: {workspace_id}")
+
+            workspace.retention_days = retention_days
+            self.db.add(workspace)
+            self.db.commit()
+            self.db.refresh(workspace)
+            return workspace.retention_days
+        except Exception as e:
+            self.db.rollback()
+            db_logger.error(
+                f"更新工作空间保留天数失败: workspace_id={workspace_id}, "
+                f"retention_days={retention_days} - {str(e)}"
+            )
+            raise
+
     async def get_workspace_by_id_async(
             self,
             workspace_id: uuid.UUID,
@@ -404,6 +449,23 @@ class WorkspaceRepository:
 def get_workspace_by_id(db: Session, workspace_id: uuid.UUID) -> Workspace | None:
     repo = WorkspaceRepository(db)
     return repo.get_workspace_by_id(workspace_id)
+
+
+def get_workspace_retention_days(
+        db: Session,
+        workspace_id: uuid.UUID,
+) -> int | None:
+    repo = WorkspaceRepository(db)
+    return repo.get_workspace_retention_days(workspace_id)
+
+
+def update_workspace_retention_days(
+        db: Session,
+        workspace_id: uuid.UUID,
+        retention_days: int | None,
+) -> int | None:
+    repo = WorkspaceRepository(db)
+    return repo.update_workspace_retention_days(workspace_id, retention_days)
 
 
 def get_workspaces_by_name(db: Session, tenant_id: uuid.UUID, name: str) -> List[Workspace]:

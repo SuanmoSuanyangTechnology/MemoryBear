@@ -16,6 +16,9 @@ export interface Data {
     other_name: string;
     label: MemoryType;
     other_id: string;
+    write_time: number;
+    expire_time: number;
+    identity_features: string;
   },
   memory_num: {
     total: number;

@@ -71,8 +71,6 @@ def _forbidden_path_marker(path: str | PurePosixPath) -> str | None:
             return part
         if "deepdoc" in stem:
             return "deepdoc"
-        if stem in {"plain_pdf", "plainpdf"}:
-            return stem
         if stem == "graphrag":
             return "graphrag"
         if not PurePosixPath(part).suffix:
@@ -127,8 +125,6 @@ def _forbidden_import_marker(module: str) -> str | None:
         first == "rag" and second == "app" for first, second in zip(parts, parts[1:], strict=False)
     ):
         return "rag.app"
-    if any(part in {"plain_pdf", "plainpdf"} for part in parts):
-        return "plain_pdf"
     if "graphrag" in parts:
         return "graphrag"
     return FORBIDDEN_IMPORT_ROOTS.get(parts[0])

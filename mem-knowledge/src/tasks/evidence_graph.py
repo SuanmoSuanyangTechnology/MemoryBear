@@ -5,21 +5,27 @@ from __future__ import annotations
 import logging
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from celery import states
 from celery.exceptions import Ignore, Retry
 
-from ..rag.knowledge_graph.config import GraphPipelineConfigError
-from ..runtime import get_worker_runtime
-from ..services.evidence_graph import (
+from ..bootstrap import get_settings
+from ..rag.knowledge_graph.config import (
     GraphDocumentDeletionPending,
-    process_clear_graph,
-    process_evidence_document,
-    process_evidence_rebuild,
+    GraphPipelineConfigError,
 )
+from ..runtime import get_worker_runtime
 from .celery_app import celery_app
+from .observability import (
+    BusinessOutcome,
+    CeleryStateSink,
+    StructuredLogSink,
+    TaskRun,
+    observe_task,
+    task_context_from_current_task,
+)
 from .state import (
     acquire_rebuild_execution,
     has_rebuild_terminal,
@@ -30,6 +36,24 @@ from .state import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def process_evidence_document(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    from ..services.evidence_graph import process_evidence_document as process
+
+    return process(*args, **kwargs)
+
+
+def process_evidence_rebuild(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    from ..services.evidence_graph import process_evidence_rebuild as process
+
+    return process(*args, **kwargs)
+
+
+def process_clear_graph(*args: Any, **kwargs: Any) -> dict[str, Any]:
+    from ..services.evidence_graph import process_clear_graph as process
+
+    return process(*args, **kwargs)
 
 
 def _safe_identifier(value: object) -> str:
@@ -43,6 +67,11 @@ def _retry_countdown(task: Any) -> int:
     return min(300, 2 ** int(task.request.retries or 0))
 
 
+def _retry_available(task: Any, *, max_retries: int | None = None) -> bool:
+    retry_limit = task.max_retries if max_retries is None else max_retries
+    return retry_limit is None or int(task.request.retries or 0) < retry_limit
+
+
 def _redacted_exception(exc: Exception) -> RuntimeError:
     return RuntimeError(f"{type(exc).__name__}: message redacted")
 
@@ -50,10 +79,12 @@ def _redacted_exception(exc: Exception) -> RuntimeError:
 def _run_observed(
     task: Any,
     *,
+    run: TaskRun,
     task_name: str,
     knowledge_id: str,
     operation: Callable[[], dict[str, Any]],
     document_id: str | None = None,
+    finish_success: bool = True,
 ) -> dict[str, Any]:
     started_at = time.perf_counter()
     task_id = str(getattr(task.request, "id", None) or "unknown")
@@ -62,7 +93,8 @@ def _run_observed(
     safe_document_id = _safe_identifier(document_id) if document_id is not None else "none"
     retry = int(getattr(task.request, "retries", 0) or 0)
     try:
-        result = operation()
+        with run.stage(task_name):
+            result = operation()
     except GraphPipelineConfigError as exc:
         logger.error(
             "[EvidenceGraph] task_failed task=%s task_id=%s kb_id=%s "
@@ -75,23 +107,56 @@ def _run_observed(
             retry,
             int((time.perf_counter() - started_at) * 1000),
         )
+        run.finish(
+            BusinessOutcome.FAILURE,
+            error_code="KB_GRAPH_CONFIG_INVALID",
+            exc=exc,
+        )
         raise
     except Exception as exc:
         countdown = _retry_countdown(task)
         retry_options = {}
         if isinstance(exc, GraphDocumentDeletionPending):
             retry_options["max_retries"] = 8
-        logger.warning(
-            "[EvidenceGraph] task_retry task=%s task_id=%s kb_id=%s "
-            "document_id=%s error_type=%s retry=%d countdown=%d elapsed_ms=%d",
-            task_name,
-            safe_task_id,
-            safe_knowledge_id,
-            safe_document_id,
-            type(exc).__name__,
-            retry,
-            countdown,
-            int((time.perf_counter() - started_at) * 1000),
+        will_retry = _retry_available(
+            task,
+            max_retries=retry_options.get("max_retries"),
+        )
+        if will_retry:
+            logger.warning(
+                "[EvidenceGraph] task_retry task=%s task_id=%s kb_id=%s "
+                "document_id=%s error_type=%s retry=%d countdown=%d elapsed_ms=%d",
+                task_name,
+                safe_task_id,
+                safe_knowledge_id,
+                safe_document_id,
+                type(exc).__name__,
+                retry,
+                countdown,
+                int((time.perf_counter() - started_at) * 1000),
+            )
+        else:
+            logger.error(
+                "[EvidenceGraph] task_failed task=%s task_id=%s kb_id=%s "
+                "document_id=%s status=failure reason=retries_exhausted "
+                "error_type=%s retry=%d elapsed_ms=%d",
+                task_name,
+                safe_task_id,
+                safe_knowledge_id,
+                safe_document_id,
+                type(exc).__name__,
+                retry,
+                int((time.perf_counter() - started_at) * 1000),
+            )
+        run.finish(
+            BusinessOutcome.RETRY if will_retry else BusinessOutcome.FAILURE,
+            error_code=(
+                "KB_GRAPH_TASK_RETRY"
+                if will_retry
+                else "KB_GRAPH_TASK_RETRIES_EXHAUSTED"
+            ),
+            exc=exc,
+            detail=f"retry_countdown_{countdown}s" if will_retry else "retries_exhausted",
         )
         raise task.retry(
             exc=_redacted_exception(exc),
@@ -108,17 +173,47 @@ def _run_observed(
         str(result.get("status") or "completed"),
         int((time.perf_counter() - started_at) * 1000),
     )
+    status = str(result.get("status") or "completed")
+    if finish_success:
+        run.finish(
+            BusinessOutcome.SKIPPED if status == "skipped" else BusinessOutcome.SUCCESS,
+            detail=str(result.get("reason") or status),
+        )
     return result
 
 
-def _retry_guard(task: Any, knowledge_id: str, exc: Exception) -> None:
+def _retry_guard(
+    task: Any,
+    knowledge_id: str,
+    exc: Exception,
+    run: TaskRun,
+) -> None:
     countdown = _retry_countdown(task)
-    logger.warning(
-        "[EvidenceGraph] task_guard_retry task=rebuild_knowledge kb_id=%s "
-        "error_type=%s countdown=%d",
-        _safe_identifier(knowledge_id),
-        type(exc).__name__,
-        countdown,
+    will_retry = _retry_available(task)
+    if will_retry:
+        logger.warning(
+            "[EvidenceGraph] task_guard_retry task=rebuild_knowledge kb_id=%s "
+            "error_type=%s countdown=%d",
+            _safe_identifier(knowledge_id),
+            type(exc).__name__,
+            countdown,
+        )
+    else:
+        logger.error(
+            "[EvidenceGraph] task_guard_failed task=rebuild_knowledge kb_id=%s "
+            "status=failure reason=retries_exhausted error_type=%s",
+            _safe_identifier(knowledge_id),
+            type(exc).__name__,
+        )
+    run.finish(
+        BusinessOutcome.RETRY if will_retry else BusinessOutcome.FAILURE,
+        error_code=(
+            "KB_GRAPH_GUARD_RETRY"
+            if will_retry
+            else "KB_GRAPH_GUARD_RETRIES_EXHAUSTED"
+        ),
+        exc=exc,
+        detail=f"retry_countdown_{countdown}s" if will_retry else "retries_exhausted",
     )
     raise task.retry(exc=_redacted_exception(exc), countdown=countdown) from None
 
@@ -172,7 +267,11 @@ def _finish_guard(
         )
 
 
-def _run_guarded_rebuild(task: Any, knowledge_id: str) -> dict[str, Any]:
+def _run_guarded_rebuild(
+    task: Any,
+    knowledge_id: str,
+    run: TaskRun,
+) -> dict[str, Any]:
     runtime = get_worker_runtime()
     redis = runtime.redis.sync_client()
     task_id = str(getattr(task.request, "id", None) or "unknown")
@@ -190,9 +289,13 @@ def _run_guarded_rebuild(task: Any, knowledge_id: str) -> dict[str, Any]:
             _safe_identifier(task_id),
             _safe_identifier(knowledge_id),
         )
+        run.finish(
+            BusinessOutcome.COALESCED,
+            detail="rebuild_job_coalesced",
+        )
         raise
     except Exception as exc:
-        _retry_guard(task, knowledge_id, exc)
+        _retry_guard(task, knowledge_id, exc, run)
 
     try:
         task.update_state(
@@ -204,14 +307,21 @@ def _run_guarded_rebuild(task: Any, knowledge_id: str) -> dict[str, Any]:
         )
     except Exception as exc:
         _release_execution(redis, knowledge_id, owner_token)
-        _retry_guard(task, knowledge_id, exc)
+        _retry_guard(task, knowledge_id, exc, run)
 
     try:
         result = _run_observed(
             task,
+            run=run,
             task_name="rebuild_knowledge",
             knowledge_id=knowledge_id,
-            operation=lambda: process_evidence_rebuild(runtime, knowledge_id),
+            operation=lambda: process_evidence_rebuild(
+                runtime,
+                knowledge_id,
+                on_lock_wait=_lock_wait_callback(run),
+                on_stage=_graph_stage_callback(run),
+            ),
+            finish_success=False,
         )
     except Retry:
         _release_execution(redis, knowledge_id, owner_token)
@@ -234,8 +344,64 @@ def _run_guarded_rebuild(task: Any, knowledge_id: str) -> dict[str, Any]:
             terminal="success",
         )
     except Exception as exc:
-        _retry_guard(task, knowledge_id, exc)
+        _retry_guard(task, knowledge_id, exc, run)
+    status = str(result.get("status") or "completed")
+    run.finish(
+        BusinessOutcome.SKIPPED if status == "skipped" else BusinessOutcome.SUCCESS,
+        detail=str(result.get("reason") or status),
+    )
     return result
+
+
+def _observe_graph_task(
+    task: Any,
+    *,
+    knowledge_id: object,
+    document_id: object | None = None,
+) -> TaskRun:
+    context = task_context_from_current_task(
+        role="graphrag_worker",
+        knowledge_id=knowledge_id,
+        document_id=document_id,
+    )
+    return observe_task(
+        context,
+        sinks=[StructuredLogSink(), CeleryStateSink(task.update_state)],
+        heartbeat_seconds=get_settings().kb_task_heartbeat_seconds,
+    )
+
+
+def _lock_wait_callback(run: TaskRun) -> Callable[[str, int], None]:
+    def report(detail: str, wait_duration_ms: int) -> None:
+        run.progress(
+            stage="lock_wait",
+            fraction=None,
+            detail=detail,
+            wait_duration_ms=wait_duration_ms,
+            force=True,
+        )
+
+    return report
+
+
+def _graph_stage_callback(
+    run: TaskRun,
+) -> Callable[[str, str, int, Mapping[str, int]], None]:
+    def report(
+        event: str,
+        stage: str,
+        duration_ms: int,
+        counts: Mapping[str, int],
+    ) -> None:
+        run.progress(
+            stage=stage,
+            fraction=None,
+            detail=f"stage_{event}",
+            duration_ms=duration_ms,
+            counts=counts,
+        )
+
+    return report
 
 
 @celery_app.task(
@@ -249,19 +415,27 @@ def sync_evidence_graph_document(
     document_id: str,
     document_deleted: bool = False,
 ) -> dict[str, Any]:
-    runtime = get_worker_runtime()
-    return _run_observed(
+    with _observe_graph_task(
         self,
-        task_name="sync_document",
-        knowledge_id=str(knowledge_id),
-        document_id=str(document_id),
-        operation=lambda: process_evidence_document(
-            runtime,
-            knowledge_id,
-            document_id,
-            document_deleted=document_deleted,
-        ),
-    )
+        knowledge_id=knowledge_id,
+        document_id=document_id,
+    ) as run:
+        runtime = get_worker_runtime()
+        return _run_observed(
+            self,
+            run=run,
+            task_name="sync_document",
+            knowledge_id=str(knowledge_id),
+            document_id=str(document_id),
+            operation=lambda: process_evidence_document(
+                runtime,
+                knowledge_id,
+                document_id,
+                document_deleted=document_deleted,
+                on_lock_wait=_lock_wait_callback(run),
+                on_stage=_graph_stage_callback(run),
+            ),
+        )
 
 
 @celery_app.task(
@@ -276,7 +450,8 @@ def rebuild_evidence_graph_knowledge(
     self: Any,
     knowledge_id: str,
 ) -> dict[str, Any]:
-    return _run_guarded_rebuild(self, str(knowledge_id))
+    with _observe_graph_task(self, knowledge_id=knowledge_id) as run:
+        return _run_guarded_rebuild(self, str(knowledge_id), run)
 
 
 @celery_app.task(
@@ -289,13 +464,21 @@ def clear_all_knowledge_graph_data(
     knowledge_id: str,
     force: bool = False,
 ) -> dict[str, Any]:
-    runtime = get_worker_runtime()
-    return _run_observed(
-        self,
-        task_name="clear_knowledge",
-        knowledge_id=str(knowledge_id),
-        operation=lambda: process_clear_graph(runtime, knowledge_id, force=force),
-    )
+    with _observe_graph_task(self, knowledge_id=knowledge_id) as run:
+        runtime = get_worker_runtime()
+        return _run_observed(
+            self,
+            run=run,
+            task_name="clear_knowledge",
+            knowledge_id=str(knowledge_id),
+            operation=lambda: process_clear_graph(
+                runtime,
+                knowledge_id,
+                force=force,
+                on_lock_wait=_lock_wait_callback(run),
+                on_stage=_graph_stage_callback(run),
+            ),
+        )
 
 
 __all__ = [

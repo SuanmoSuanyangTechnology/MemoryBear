@@ -332,6 +332,16 @@ class KnowledgeSettings(BaseSettings):
         ge=1,
         validation_alias="KB_WORKER_PREFETCH_MULTIPLIER",
     )
+    kb_task_heartbeat_seconds: float = Field(
+        default=30.0,
+        ge=10.0,
+        validation_alias="KB_TASK_HEARTBEAT_SECONDS",
+    )
+    kb_progress_flush_interval_seconds: float = Field(
+        default=3.0,
+        ge=1.0,
+        validation_alias="KB_PROGRESS_FLUSH_INTERVAL_SECONDS",
+    )
     kb_task_time_limit_seconds: int = Field(
         default=3600,
         ge=1,
@@ -484,4 +494,6 @@ class KnowledgeSettings(BaseSettings):
             "storage_type": self.storage_type,
             "db_pool_size": self.kb_db_pool_size,
             "max_document_pages": self.max_document_pages,
+            "task_heartbeat_seconds": self.kb_task_heartbeat_seconds,
+            "progress_flush_interval_seconds": self.kb_progress_flush_interval_seconds,
         }

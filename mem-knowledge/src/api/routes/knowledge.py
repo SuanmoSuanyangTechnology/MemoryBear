@@ -7,7 +7,7 @@ import uuid
 from typing import Annotated, Any
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Body, Depends, Query, Request
 from fastapi.responses import StreamingResponse
 from redbear_model import (
     ModelConfigNotFoundError,
@@ -521,9 +521,12 @@ async def export_knowledge_qa_csv(
 @router.post("/{kb_id}/batch-download")
 async def kb_batch_download(
     kb_id: uuid.UUID,
-    request_body: KBBatchDownloadRequest,
     principal: Annotated[Principal, Depends(get_principal)],
     runtime: Annotated[ProcessRuntime, Depends(get_runtime)],
+    request_body: Annotated[
+        KBBatchDownloadRequest,
+        Body(default_factory=KBBatchDownloadRequest),
+    ],
 ) -> StreamingResponse:
     async with runtime.database.async_session() as db:
         knowledge = await knowledge_service.get_knowledge(db, kb_id, principal)

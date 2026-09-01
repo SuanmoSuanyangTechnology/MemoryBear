@@ -11,7 +11,7 @@
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.12+-green?logo=python&logoColor=white)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-teal?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
-[![Neo4j](https://img.shields.io/badge/Neo4j-4.4+-blue?logo=neo4j&logoColor=white)](https://neo4j.com/)
+[![Neo4j](https://img.shields.io/badge/Neo4j-5.13+-blue?logo=neo4j&logoColor=white)](https://neo4j.com/)
 [![Gitee Sync](https://img.shields.io/github/actions/workflow/status/SuanmoSuanyangTechnology/MemoryBear/sync-to-gitee.yml?label=Gitee%20Sync&logo=gitee&logoColor=white)](https://github.com/SuanmoSuanyangTechnology/MemoryBear/actions/workflows/sync-to-gitee.yml)
 
 [中文](./README_CN.md) | English
@@ -123,15 +123,21 @@ Unified service architecture exposing two API surfaces:
 
 ## Architecture
 
-<img src="https://github.com/user-attachments/assets/650e3d02-a8a1-4550-9fce-dceb38e9542d" alt="MemoryBear System Architecture" width="100%"/>
+<img src="https://github.com/user-attachments/assets/61a442b8-19d6-423b-918f-9932f3d26447" alt="MemoryBear System Architecture" width="100%"/>
 
-**Celery Three-Queue Async Architecture:**
+**Celery Multi-Queue Async Architecture (7 worker types in docker-compose):**
 
 | Queue | Worker Type | Concurrency | Purpose |
 |-------|-------------|-------------|---------|
 | `memory_tasks` | threads | 100 | Memory read/write (asyncio-friendly) |
+| `memory_fast_tasks` | threads | 32 | High-frequency fast writes (dedicated queue to avoid mutual blocking) |
 | `document_tasks` | prefork | 4 | Document parsing (CPU-bound) |
-| `periodic_tasks` | prefork | 2 | Scheduled tasks, reflection engine |
+| `periodic_tasks` | prefork | 2 | Scheduled tasks, reflection engine, various scanners |
+| `workflow_trigger_tasks` | prefork | 2 | Workflow scheduled triggers |
+| `subscription_state_tasks` | prefork | 4 | Subscription state transitions (Enterprise) |
+| `subscription_email_tasks` | prefork | 4 | Subscription expiry reminder emails (Enterprise) |
+
+Additional task queues such as `graphrag_tasks`, `reflection_tasks`, and `memory_heavy_tasks` (GraphRAG construction, second-layer reflection/deduplication, forgetting and insight generation, and other heavy-compute tasks) work together with the standalone task scheduler `celery_task_scheduler` and Celery Beat.
 
 ---
 
@@ -182,13 +188,13 @@ docker-compose up -d
 curl -X POST http://127.0.0.1:8002/api/setup
 ```
 
-> **Note**: `docker-compose.yml` includes the API service and Celery Workers only. Base services (PostgreSQL, Neo4j, Redis, Elasticsearch) must be started separately.
+> **Note**: `docker-compose.yml` includes the API service, Celery Workers, the standalone task scheduler (`celery_task_scheduler`), and the sandbox service. Base services (PostgreSQL, Neo4j, Redis, Elasticsearch) must be started separately.
 >
 > **Port info**: Docker Compose defaults to port `8002`; manual startup defaults to port `8000`. The installation guide below uses manual startup (`8000`) as the example.
 
 After startup:
 - API docs: http://localhost:8002/docs
-- Frontend: http://localhost:3000 (after starting the web app)
+- Frontend: http://localhost:5175 (after starting the web app)
 
 **Default admin credentials:**
 - Account: `admin@example.com`
@@ -218,7 +224,7 @@ npm install && npm run dev
 
 | Component | Version | Purpose |
 |-----------|---------|---------|
-| Python | 3.12+ | Backend runtime |
+| Python | 3.12 (3.13+ not supported) | Backend runtime |
 | Node.js | 20.19+ or 22.12+ | Frontend runtime |
 | PostgreSQL | 13+ | Primary database |
 | Neo4j | 4.4+ | Knowledge graph storage |
@@ -272,6 +278,16 @@ Download [Docker Desktop](https://www.docker.com/products/docker-desktop/) and p
 - `7474`: Neo4j Browser
 - `7687`: Bolt protocol
 
+> **Important**: You must also add the environment variable `NEO4J_PLUGINS=["apoc"]` to install the APOC plugin (a hard dependency of the backend graph engine; not included in the official image by default). If configuring this via the Docker Desktop GUI is inconvenient, create the container from the command line instead:
+>
+> ```bash
+> docker run -d --name memorybear-neo4j \
+>   -p 7474:7474 -p 7687:7687 \
+>   -e NEO4J_AUTH=neo4j/<initial password, at least 8 chars> \
+>   -e NEO4J_PLUGINS='["apoc"]' \
+>   neo4j:5
+> ```
+
 <img width="1280" height="731" alt="Neo4j Container" src="https://github.com/user-attachments/assets/881dca96-aec0-4d43-82d0-bb0402eadaf8" />
 
 <img width="1280" height="731" alt="Neo4j Running" src="https://github.com/user-attachments/assets/87423c90-22e8-44a9-a00a-df5d4dce4909" />
@@ -318,6 +334,7 @@ DB_AUTO_UPGRADE=true
 REDIS_HOST=127.0.0.1
 REDIS_PORT=6379
 REDIS_DB=1
+REDIS_PASSWORD=
 
 # Celery
 REDIS_DB_CELERY_BROKER=1
@@ -333,17 +350,16 @@ SECRET_KEY=your-secret-key-here
 
 #### 3.4 Initialize the PostgreSQL Database
 
-Verify the database connection in `alembic.ini`:
-
-```ini
-sqlalchemy.url = postgresql://<username>:<password>@<host>:<port>/<database_name>
-```
+The database connection is read automatically from the `DB_*` environment variables in `.env` (`migrations/env.py` builds the connection string dynamically) — no need to modify `alembic.ini`.
 
 Apply all migrations to create the full schema:
 
 ```bash
 alembic upgrade head
 ```
+
+> **Tip**: When `DB_AUTO_UPGRADE=true` is set in `.env`, the API service automatically runs `alembic upgrade head` on startup.
+> Migration scripts are located in `api/migrations/versions/` — make sure that directory contains migration files before running the command.
 
 <img width="1076" height="341" alt="Alembic Migration" src="https://github.com/user-attachments/assets/6970a8e6-712b-4f49-937a-f5870a2d1a2a" />
 
@@ -363,17 +379,28 @@ Access API documentation at http://localhost:8000/docs
 
 ```bash
 # Memory worker (thread pool, asyncio-friendly, high concurrency)
-celery -A app.celery_worker.celery_app worker --loglevel=info --pool=threads --concurrency=100 --queues=memory_tasks
+celery -A app.celery_worker.celery_app worker -E --loglevel=info --pool=threads --concurrency=100 --queues=memory_tasks -n memory_worker@%h
 
-# Document worker (prefork, CPU-bound parsing)
-celery -A app.celery_worker.celery_app worker --loglevel=info --pool=prefork --concurrency=4 --queues=document_tasks
+# Fast-write worker (thread pool, dedicated queue to avoid blocking normal writes)
+celery -A app.celery_worker.celery_app worker -E --loglevel=info --pool=threads --concurrency=32 --queues=memory_fast_tasks -n memory_fast_worker@%h
 
-# Periodic worker (reflection engine, scheduled tasks)
-celery -A app.celery_worker.celery_app worker --loglevel=info --pool=prefork --concurrency=2 --queues=periodic_tasks
+# Document parsing worker (prefork, CPU-bound)
+celery -A app.celery_worker.celery_app worker -E --loglevel=info --pool=prefork --concurrency=4 --queues=document_tasks --max-tasks-per-child=100 -n document_worker@%h
+
+# Periodic tasks worker (reflection engine, various scanners)
+celery -A app.celery_worker.celery_app worker -E --loglevel=info --pool=prefork --concurrency=2 --queues=periodic_tasks --max-tasks-per-child=50 -n periodic_worker@%h
+
+# Workflow trigger worker
+celery -A app.celery_worker.celery_app worker -E --loglevel=info --pool=prefork --concurrency=2 --queues=workflow_trigger_tasks --max-tasks-per-child=50 -n workflow_trigger_worker@%h
 
 # Beat scheduler
 celery -A app.celery_worker.celery_app beat --loglevel=info
+
+# Task scheduler service (enqueue rate limiting and admission control)
+python -m app.celery_task_scheduler
 ```
+
+> **Tip**: The above are the core workers. For a full deployment (including GraphRAG, subscription/notification, and other Enterprise-edition queue workers), `docker-compose up -d` is recommended.
 
 ### 4. Frontend Web Application
 
@@ -384,14 +411,16 @@ cd web
 npm install
 ```
 
+> **Note**: In a corporate intranet, run `npm run install:private` to install the private component `@redbear/memory-brick` (use `npm run install:private:dev` in development). On the public internet, the script auto-detects the environment and skips silently, without affecting startup.
+
 #### 4.2 Update API Proxy Configuration
 
-Edit `web/vite.config.ts`:
+Edit `web/vite.config.ts` and point the `/api` proxy `target` to the backend API service (the frontend dev server runs on port `5175` by default):
 
 ```typescript
 proxy: {
   '/api': {
-    target: 'http://127.0.0.1:8000',  // Windows: 127.0.0.1 | macOS: 0.0.0.0
+    target: 'http://127.0.0.1:8000',  // Backend API address — change to your actual deployment address
     changeOrigin: true,
   },
 }
@@ -403,7 +432,7 @@ proxy: {
 npm run dev
 ```
 
-<img width="935" height="311" alt="Frontend Start" src="https://github.com/user-attachments/assets/8b08fc46-01d0-458b-ab4d-f5ac04bc2510" />
+<img width="935" height="311" alt="Frontend Start" src="https://github.com/user-attachments/assets/9f339423-19e5-4ba6-bfb5-c03e0953fded" />
 
 <img width="1280" height="652" alt="Frontend UI" src="https://github.com/user-attachments/assets/542dbee3-8cd4-4b16-a8e5-36f8d6153820" />
 
@@ -438,15 +467,15 @@ Step 8  Log in to the frontend with the admin account
 | Layer | Technology |
 |-------|------------|
 | Backend Framework | FastAPI + Uvicorn |
-| Async Tasks | Celery (3 queues: memory / document / periodic) |
+| Async Tasks | Celery (multi-queue: memory / document / periodic / graphrag, etc.) |
 | Primary Database | PostgreSQL 13+ |
-| Graph Database | Neo4j 4.4+ |
+| Graph Database | Neo4j 5.13+ (5.26 LTS recommended, APOC plugin required) |
 | Search Engine | Elasticsearch 8.x (keyword + semantic vector hybrid) |
 | Cache / Queue | Redis 6.0+ |
 | ORM | SQLAlchemy 2.0 + Alembic |
 | LLM Integration | LangChain / OpenAI / DashScope / AWS Bedrock |
 | MCP Integration | fastmcp + langchain-mcp-adapters |
-| Frontend Framework | React 18 + TypeScript + Vite |
+| Frontend Framework | React 18 + TypeScript + Vite (rolldown-vite) |
 | UI Components | Ant Design 5.x |
 | Graph Visualization | AntV X6 + ECharts + D3.js |
 | Package Manager | uv (backend) / npm (frontend) |

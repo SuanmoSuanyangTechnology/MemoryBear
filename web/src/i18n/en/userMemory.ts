@@ -65,6 +65,9 @@ export const userMemory = {
       allTermMemory: 'All Memory',
       shortTermMemory: 'Short-Term Memory',
       longTermMemory: 'Long-Term Memory',
+      lastMemoryActivityTime: 'Last Memory Activity Time',
+      expireTime: 'Expire Time',
+      neverExpires: 'Never Expires',
 
       endUserProfile: 'Permanent Memory',
       editEndUserProfile: 'Edit',
@@ -304,6 +307,7 @@ export const userMemory = {
       basicInfo: 'Basic Information',
       subjectId: 'Subject ID',
       identity: 'Identity',
+      unboundIdentity: 'Unbound (therefore classified as a temporary memory)',
       userName: 'User Name',
       tags: 'Tags',
       memoryStatistics: 'Memory Statistics',

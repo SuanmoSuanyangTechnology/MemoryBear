@@ -226,7 +226,7 @@ async def parse_documents(
             file_name=file.file_name,
         )
     result = await document_service.claim_and_dispatch_parse(
-        await runtime.redis.client(),
+        runtime,
         TaskDispatcher(),
         snapshot,
     )

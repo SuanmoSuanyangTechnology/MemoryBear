@@ -102,12 +102,8 @@ class ModelKeySnapshot(ContractModel):
 class PublicModelBindingSnapshot(ContractModel):
     tenant_id: UUID
     provider: ModelProvider
-    model_name: str = Field(min_length=1)
     api_key: SecretStr
     base_url: str | None = None
-    capabilities: tuple[ModelCapability, ...] = ()
-    is_omni: bool = False
-    config: dict[str, JsonValue] = Field(default_factory=dict)
 
 
 class ResolvedModelConfig(ContractModel):

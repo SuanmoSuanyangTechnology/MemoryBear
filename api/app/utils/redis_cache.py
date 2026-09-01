@@ -471,6 +471,20 @@ def invalidate_cache_sync(
     return deleted
 
 
+def invalidate_runtime_model_info(model_id: Any) -> int:
+    """同步清除指定模型配置的运行时模型信息缓存（所有租户）。
+
+    运行时缓存 key 形如 ``runtime_model_info:{model_id}:{tenant_id or '_'}``，
+    模型被禁用/删除/更新或 API Key 变更后调用，确保禁用即时生效。
+    """
+    return invalidate_cache_sync(pattern=f"runtime_model_info:{model_id}:*")
+
+
+async def invalidate_runtime_model_info_async(model_id: Any) -> int:
+    """异步清除指定模型配置的运行时模型信息缓存（所有租户）。"""
+    return await invalidate_cache(pattern=f"runtime_model_info:{model_id}:*")
+
+
 # Explicit-key cache-aside helpers used by database read caches.
 CACHE_MISS = object()
 WORKSPACE_MODEL_PUBLIC_VERSION_KEY = "cache:workspace-model-options:public-version:v1"

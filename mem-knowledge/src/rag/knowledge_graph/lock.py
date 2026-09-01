@@ -6,6 +6,7 @@ import logging
 import threading
 import time
 import uuid
+from collections.abc import Callable
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -30,7 +31,15 @@ return 0
 
 
 class KnowledgeGraphLock:
-    def __init__(self, redis: Any, knowledge_id: str) -> None:
+    def __init__(
+        self,
+        redis: Any,
+        knowledge_id: str,
+        *,
+        on_wait: Callable[[str, int], None] | None = None,
+        clock: Callable[[], float] = time.monotonic,
+        sleep: Callable[[float], None] = time.sleep,
+    ) -> None:
         self._redis = redis
         self._knowledge_id = knowledge_id
         self._key = f"graphrag_task_{knowledge_id}"
@@ -38,10 +47,16 @@ class KnowledgeGraphLock:
         self._stop = threading.Event()
         self._renew_thread: threading.Thread | None = None
         self._valid = False
+        self._on_wait = on_wait
+        self._clock = clock
+        self._sleep = sleep
 
     def __enter__(self) -> KnowledgeGraphLock:
-        deadline = time.monotonic() + _LOCK_WAIT_SECONDS
-        while time.monotonic() < deadline:
+        started_at = self._clock()
+        deadline = started_at + _LOCK_WAIT_SECONDS
+        waiting_reported = False
+        last_wait_report_seconds = 0.0
+        while self._clock() < deadline:
             if self._redis.set(
                 self._key,
                 self._token,
@@ -59,8 +74,28 @@ class KnowledgeGraphLock:
                     "[EvidenceGraph] lock_acquired kb_id=%s",
                     self._knowledge_id,
                 )
+                if waiting_reported and self._on_wait is not None:
+                    self._on_wait(
+                        "lock_acquired",
+                        int((self._clock() - started_at) * 1000),
+                    )
                 return self
-            time.sleep(1)
+            waited_seconds = self._clock() - started_at
+            if not waiting_reported:
+                waiting_reported = True
+                if self._on_wait is not None:
+                    self._on_wait("lock_wait_started", 0)
+            elif (
+                self._on_wait is not None
+                and waited_seconds >= 10
+                and (
+                    last_wait_report_seconds == 0
+                    or waited_seconds - last_wait_report_seconds >= 30
+                )
+            ):
+                self._on_wait("lock_waiting", int(waited_seconds * 1000))
+                last_wait_report_seconds = waited_seconds
+            self._sleep(1)
         raise TimeoutError("knowledge graph lock acquisition timed out")
 
     def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
@@ -117,8 +152,17 @@ class KnowledgeGraphLock:
                 return
 
 
-def create_knowledge_graph_lock(runtime: Any, knowledge_id: str) -> KnowledgeGraphLock:
-    return KnowledgeGraphLock(runtime.redis.sync_client(), knowledge_id)
+def create_knowledge_graph_lock(
+    runtime: Any,
+    knowledge_id: str,
+    *,
+    on_wait: Callable[[str, int], None] | None = None,
+) -> KnowledgeGraphLock:
+    return KnowledgeGraphLock(
+        runtime.redis.sync_client(),
+        knowledge_id,
+        on_wait=on_wait,
+    )
 
 
 __all__ = ["KnowledgeGraphLock", "create_knowledge_graph_lock"]

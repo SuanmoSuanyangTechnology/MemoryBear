@@ -6,11 +6,12 @@ import uuid
 from typing import TYPE_CHECKING
 
 from redbear_model import ResolvedModelConfig, resolve_model
-from redbear_model.runtime import RedBearEmbeddings, RedBearLLM
 
 from ...repositories.model_registry import SyncSQLModelRegistry
 
 if TYPE_CHECKING:
+    from redbear_model.runtime import RedBearEmbeddings, RedBearLLM
+
     from ...runtime import ProcessRuntime
 
 
@@ -58,6 +59,8 @@ class TaskModelFactory:
         model_config_id: uuid.UUID,
         tenant_id: uuid.UUID,
     ) -> RedBearEmbeddings:
+        from redbear_model.runtime import RedBearEmbeddings
+
         config = self.resolve_embedding(model_config_id, tenant_id)
         try:
             return RedBearEmbeddings(
@@ -72,6 +75,8 @@ class TaskModelFactory:
         model_config_id: uuid.UUID,
         tenant_id: uuid.UUID,
     ) -> RedBearLLM:
+        from redbear_model.runtime import RedBearLLM
+
         config = self.resolve_chat(model_config_id, tenant_id)
         try:
             return RedBearLLM(config, client_pool=self._runtime.model_runtime.pool)

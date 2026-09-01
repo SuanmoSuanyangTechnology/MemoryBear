@@ -8,6 +8,8 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI, Request
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
@@ -17,6 +19,7 @@ from .bootstrap import get_settings
 from .config import KnowledgeSettings
 from .errors import KnowledgeError
 from .logging import setup_logging
+from .request_logging import RequestLoggingFastAPI, request_route_template
 from .runtime import ProcessRuntime
 from .trace import TRACE_ID_HEADER, TraceIdMiddleware, get_trace_id
 
@@ -90,7 +93,7 @@ def create_app(settings: KnowledgeSettings | None = None) -> FastAPI:
             await application.state.runtime.aclose()
             logger.info("Knowledge service stopped")
 
-    application = FastAPI(
+    application = RequestLoggingFastAPI(
         title="MemoryBear Knowledge Service",
         description="Internal MemoryBear knowledge service API",
         version="0.1.0",
@@ -102,6 +105,35 @@ def create_app(settings: KnowledgeSettings | None = None) -> FastAPI:
     application.state.runtime = runtime
     application.add_middleware(TraceIdMiddleware)
     application.include_router(internal_v1_router)
+
+    @application.exception_handler(RequestValidationError)
+    async def request_validation_error_handler(
+        request: Request,
+        exc: RequestValidationError,
+    ) -> JSONResponse:
+        trace_id = getattr(request.state, "trace_id", get_trace_id())
+        route_path = request_route_template(request.scope)
+        validation_errors = [
+            {
+                "loc": str((tuple(error.get("loc", ())) or ("unknown",))[0]),
+                "type": str(error.get("type", "")),
+                "msg": "Request validation failed",
+            }
+            for error in exc.errors()
+        ]
+        logger.error(
+            "Knowledge request validation failed trace_id=%s method=%s path=%s "
+            "actor_id=%s tenant_id=%s workspace_id=%s source=%s errors=%s",
+            trace_id,
+            request.method,
+            route_path,
+            request.headers.get("X-KB-Actor-ID"),
+            request.headers.get("X-KB-Tenant-ID"),
+            request.headers.get("X-KB-Workspace-ID"),
+            request.headers.get("X-KB-Source"),
+            validation_errors,
+        )
+        return await request_validation_exception_handler(request, exc)
 
     @application.exception_handler(KnowledgeError)
     async def knowledge_error_handler(

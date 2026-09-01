@@ -56,11 +56,6 @@ class WorkflowExecutor:
         self.execution_context = execution_context
         self.execution_config = workflow_config.get("execution_config", {})
 
-        # 读取一问多答模式配置
-        features = workflow_config.get("features", {}) or {}
-        multi_answer_mode = features.get("multi_answer_mode", {}) or {}
-        self.multi_answer_mode_enabled = multi_answer_mode.get("enabled", False)
-
         self.start_node_id: str | None = None
         self.variable_pool: VariablePool | None = None
         self.graph: CompiledStateGraph | None = None
@@ -68,9 +63,7 @@ class WorkflowExecutor:
         self.variable_initializer = VariablePoolInitializer(workflow_config)
         self.state_manager = WorkflowStateManager()
         self.result_builder = WorkflowResultBuilder()
-        self.stream_coordinator = StreamOutputCoordinator(
-            multi_answer_mode_enabled=self.multi_answer_mode_enabled
-        )
+        self.stream_coordinator = StreamOutputCoordinator()
         self.event_handler: EventStreamHandler | None = None
 
     def build_graph(self, stream=False, checkpointer=None) -> CompiledStateGraph:
@@ -117,7 +110,6 @@ class WorkflowExecutor:
             output_coordinator=self.stream_coordinator,
             variable_pool=self.variable_pool,
             execution_id=self.execution_context.execution_id,
-            multi_answer_mode_enabled=self.multi_answer_mode_enabled
         )
         logger.info(f"Workflow graph build completed: execution_id={self.execution_context.execution_id}, "
                     f"cost: {time.time() - start_time:.4f}s")
@@ -203,6 +195,97 @@ class WorkflowExecutor:
         }
         result = None
         full_content = ''
+        optimistic_content_checkpoints: dict[tuple[str, int | None], dict[str, Any]] = {}
+        output_contents: dict[str, str] = {}
+        output_order: list[str] = []
+        unscoped_content = ''
+
+        def ensure_output_order(node_id: str) -> None:
+            if node_id not in output_order:
+                output_order.append(node_id)
+
+        def stream_key(source_node_id: str, attempt: int | None) -> tuple[str, int | None]:
+            return source_node_id, attempt
+
+        def pop_checkpoint(source_node_id: str, attempt: int | None) -> dict[str, Any] | None:
+            key = stream_key(source_node_id, attempt)
+            checkpoint = optimistic_content_checkpoints.pop(key, None)
+            if checkpoint is None and attempt is None:
+                matching = [
+                    candidate for candidate in optimistic_content_checkpoints
+                    if candidate[0] == source_node_id
+                ]
+                if len(matching) == 1:
+                    checkpoint = optimistic_content_checkpoints.pop(matching[0], None)
+            return checkpoint
+
+        def append_message_content(current: str, message_data: dict) -> str:
+            nonlocal unscoped_content
+            content = message_data.get("content", "") or ""
+            output_node_id = message_data.get("node_id")
+            if output_node_id:
+                ensure_output_order(output_node_id)
+                output_contents.setdefault(output_node_id, "")
+                output_contents[output_node_id] += content
+                return unscoped_content + "\n".join(
+                    output_contents[node_id]
+                    for node_id in output_order
+                    if output_contents.get(node_id)
+                )
+            unscoped_content += content
+            return unscoped_content + "\n".join(
+                output_contents[node_id]
+                for node_id in output_order
+                if output_contents.get(node_id)
+            )
+
+        def rebuild_multi_content() -> str:
+            return unscoped_content + "\n".join(
+                output_contents[node_id]
+                for node_id in output_order
+                if output_contents.get(node_id)
+            )
+
+        def ordered_outputs() -> list[dict[str, Any]]:
+            return [
+                {
+                    "node_id": node_id,
+                    "content": output_contents[node_id],
+                    "status": "completed",
+                }
+                for node_id in output_order
+                if output_contents.get(node_id)
+            ]
+
+        def restore_pending_checkpoints(reason: str | None = None) -> list[dict[str, Any]]:
+            nonlocal full_content
+            restored_global = False
+            rollback_events: list[dict[str, Any]] = []
+            for checkpoint in list(optimistic_content_checkpoints.values()):
+                output_node_id = checkpoint.get("output_node_id")
+                if output_node_id:
+                    if checkpoint.get("existed"):
+                        output_contents[output_node_id] = checkpoint.get("content", "") or ""
+                    else:
+                        output_contents.pop(output_node_id, None)
+                else:
+                    full_content = checkpoint.get("content", "") or ""
+                    restored_global = True
+                if reason:
+                    rollback_events.append({
+                        "event": "stream_rollback",
+                        "data": {
+                            "source_node_id": checkpoint.get("source_node_id"),
+                            "output_node_id": output_node_id,
+                            "attempt": checkpoint.get("attempt"),
+                            "reason": reason,
+                        },
+                    })
+            optimistic_content_checkpoints.clear()
+            if not restored_global:
+                full_content = rebuild_multi_content()
+            return rollback_events
+
         try:
             # Build the workflow graph in streaming mode
             graph = self.build_graph(stream=True)
@@ -245,8 +328,56 @@ class WorkflowExecutor:
                         if event_type == "node_chunk":
                             async for msg_event in self.event_handler.handle_node_chunk_event(data):
                                 if msg_event.get("event") == "message":
-                                    full_content += msg_event["data"].get("content", "")
+                                    msg_data = msg_event.get("data", {})
+                                    provisional_node_id = msg_data.get("provisional_node_id")
+                                    output_node_id = msg_data.get("node_id")
+                                    if provisional_node_id:
+                                        attempt = msg_data.get("attempt")
+                                        checkpoint_key = stream_key(provisional_node_id, attempt)
+                                        if output_node_id:
+                                            optimistic_content_checkpoints.setdefault(
+                                                checkpoint_key,
+                                                {
+                                                    "source_node_id": provisional_node_id,
+                                                    "attempt": attempt,
+                                                    "output_node_id": output_node_id,
+                                                    "content": output_contents.get(output_node_id, ""),
+                                                    "existed": output_node_id in output_contents,
+                                                },
+                                            )
+                                        else:
+                                            optimistic_content_checkpoints.setdefault(
+                                                checkpoint_key,
+                                                {
+                                                    "source_node_id": provisional_node_id,
+                                                    "attempt": attempt,
+                                                    "output_node_id": None,
+                                                    "content": full_content,
+                                                },
+                                            )
+                                    full_content = append_message_content(full_content, msg_data)
                                 yield msg_event
+
+                        elif event_type == "node_stream_control":
+                            async for control_event in self.event_handler.handle_node_stream_control_event(data):
+                                control_data = control_event.get("data", {})
+                                source_node_id = control_data.get("source_node_id")
+                                if control_event.get("event") == "stream_rollback" and source_node_id:
+                                    checkpoint = pop_checkpoint(
+                                        source_node_id,
+                                        control_data.get("attempt"),
+                                    )
+                                    if checkpoint is not None:
+                                        output_node_id = checkpoint.get("output_node_id")
+                                        if output_node_id:
+                                            if checkpoint.get("existed"):
+                                                output_contents[output_node_id] = checkpoint.get("content", "") or ""
+                                            else:
+                                                output_contents.pop(output_node_id, None)
+                                            full_content = rebuild_multi_content()
+                                        else:
+                                            full_content = checkpoint.get("content", "") or ""
+                                yield control_event
 
                         elif event_type == "node_error":
                             async for error_event in self.event_handler.handle_node_error_event(data):
@@ -295,8 +426,31 @@ class WorkflowExecutor:
                                 self.graph,
                                 self.execution_context.checkpoint_config
                         ):
-                            if msg_event.get("event") == "message":
-                                full_content += msg_event["data"].get("content", "")
+                            event_name = msg_event.get("event")
+                            if event_name == "message":
+                                full_content = append_message_content(full_content, msg_event["data"])
+                            elif event_name == "stream_reconcile":
+                                reconcile_data = msg_event.get("data", {})
+                                source_node_id = reconcile_data.get("source_node_id")
+                                if source_node_id:
+                                    checkpoint = pop_checkpoint(
+                                        source_node_id,
+                                        reconcile_data.get("attempt"),
+                                    )
+                                    if checkpoint is not None:
+                                        output_node_id = checkpoint.get("output_node_id")
+                                        canonical_content = reconcile_data.get("content", "") or ""
+                                        if output_node_id:
+                                            output_contents[output_node_id] = (
+                                                (checkpoint.get("content", "") or "")
+                                                + canonical_content
+                                            )
+                                            full_content = rebuild_multi_content()
+                                        else:
+                                            full_content = (
+                                                (checkpoint.get("content", "") or "")
+                                                + canonical_content
+                                            )
                             yield msg_event
                     except Exception as updates_err:
                         logger.error(f"[STREAM] Error handling updates event: {updates_err} "
@@ -359,6 +513,9 @@ class WorkflowExecutor:
                     f"from_langgraph={len(collected_node_ids)}, "
                     f"from_registry={len(interventions) - len(collected_node_ids)}"
                 )
+
+                for rollback_event in restore_pending_checkpoints("interrupt"):
+                    yield rollback_event
                 
                 yield {
                     "event": "workflow_end",
@@ -389,7 +546,7 @@ class WorkflowExecutor:
             # Flush any remaining chunks
             async for msg_event in self.stream_coordinator.flush_remaining_chunk(self.variable_pool):
                 if msg_event.get("event") == "message":
-                    full_content += msg_event["data"].get("content", "")
+                    full_content = append_message_content(full_content, msg_event["data"])
                 yield msg_event
 
             result = (await graph.aget_state(self.execution_context.checkpoint_config)).values
@@ -447,15 +604,22 @@ class WorkflowExecutor:
                 f"elapsed: {elapsed_time:.2f}ms, execution_id: {self.execution_context.execution_id}"
             )
 
+            final_data = self.result_builder.build_final_output(
+                result,
+                self.execution_context,
+                self.variable_pool,
+                elapsed_time,
+                final_output,
+                success=True,
+            )
+            canonical_outputs = ordered_outputs()
+            # Always include the canonical collection, including an empty list,
+            # so outer persistence layers can clear rolled-back placeholders.
+            final_data["outputs"] = canonical_outputs
+
             yield {
                 "event": "workflow_end",
-                "data": self.result_builder.build_final_output(
-                    result,
-                    self.execution_context,
-                    self.variable_pool,
-                    elapsed_time,
-                    final_output,
-                    success=True)
+                "data": final_data,
             }
 
         except Exception as e:
@@ -501,6 +665,8 @@ class WorkflowExecutor:
             if failed_node_id:
                 result["error_node"] = failed_node_id
 
+            for rollback_event in restore_pending_checkpoints("workflow_error"):
+                yield rollback_event
             yield {
                 "event": "workflow_end",
                 "data": self.result_builder.build_final_output(
@@ -512,6 +678,10 @@ class WorkflowExecutor:
                     success=False
                 )
             }
+        finally:
+            # Generator cancellation/closure may bypass custom rollback events.
+            # Never retain provisional content in internal aggregation state.
+            restore_pending_checkpoints()
 
 
 async def execute_workflow(

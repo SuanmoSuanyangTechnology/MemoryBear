@@ -104,6 +104,34 @@ REMOVED_RUNTIME_MODULES = frozenset(
         "rag/knowledge_graph/rebuild_task_guard.py",
     }
 )
+OBSERVED_TASK_MODULES = frozenset(AUTHORIZED_TASKS_BY_MODULE)
+REQUIRED_WORKER_SIGNAL_NAMES = frozenset(
+    {
+        "celeryd_after_setup",
+        "celery_setup_logging",
+        "task_failure",
+        "task_postrun",
+        "task_prerun",
+        "task_received",
+        "task_retry",
+        "worker_process_init",
+        "worker_process_shutdown",
+        "worker_ready",
+        "worker_shutting_down",
+    }
+)
+FORBIDDEN_TASK_LOG_FIELDS = frozenset(
+    {
+        "args",
+        "kwargs",
+        "payload",
+        "contents",
+        "token",
+        "api_key",
+        "password",
+        "authorization",
+    }
+)
 
 
 def _top_level_imports(tree: ast.AST) -> set[str]:
@@ -382,6 +410,85 @@ def _scan_service_tree(root: Path, *, require_complete_registry: bool = False) -
     return errors
 
 
+def _literal_string_collection(tree: ast.Module, name: str) -> set[str] | None:
+    for node in tree.body:
+        if not isinstance(node, (ast.Assign, ast.AnnAssign)):
+            continue
+        targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+        if not any(isinstance(target, ast.Name) and target.id == name for target in targets):
+            continue
+        value = node.value
+        if value is None:
+            return None
+        try:
+            raw = ast.literal_eval(value)
+        except (ValueError, TypeError):
+            return None
+        if isinstance(raw, (tuple, list, set, frozenset)):
+            return {str(item) for item in raw}
+        if isinstance(raw, dict):
+            return {str(item) for item in raw}
+        return None
+    return None
+
+
+def _scan_worker_observability(root: Path) -> list[str]:
+    """Check finite source markers for the worker observability contract."""
+
+    errors: list[str] = []
+    for module_path in sorted(OBSERVED_TASK_MODULES):
+        path = root / module_path
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        names = {
+            node.id
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Name)
+        }
+        if "observe_task" not in names:
+            errors.append(f"{module_path}: task module does not use observe_task")
+        for node in tree.body:
+            if (
+                isinstance(node, ast.ImportFrom)
+                and node.module
+                and node.module.startswith("services")
+            ):
+                errors.append(
+                    f"{module_path}:{node.lineno}: task module imports service at module scope"
+                )
+
+    worker_path = root / "tasks/celery_worker.py"
+    worker_source = worker_path.read_text(encoding="utf-8")
+    for signal_name in sorted(REQUIRED_WORKER_SIGNAL_NAMES):
+        if signal_name not in worker_source:
+            errors.append(f"tasks/celery_worker.py: missing worker signal: {signal_name}")
+    for role, queue in (
+        ("document_worker", "document_tasks"),
+        ("graphrag_worker", "graphrag_tasks"),
+        ("qa_import_worker", "qa_import"),
+    ):
+        if role not in worker_source or queue not in worker_source:
+            errors.append(
+                f"tasks/celery_worker.py: missing role/queue mapping: {role} -> {queue}"
+            )
+
+    observability_path = root / "tasks/observability.py"
+    observability_tree = ast.parse(
+        observability_path.read_text(encoding="utf-8"),
+        filename=str(observability_path),
+    )
+    task_log_fields = _literal_string_collection(observability_tree, "TASK_LOG_FIELDS")
+    if task_log_fields is None:
+        errors.append("tasks/observability.py: TASK_LOG_FIELDS must be a literal collection")
+    else:
+        forbidden = task_log_fields & FORBIDDEN_TASK_LOG_FIELDS
+        if forbidden:
+            errors.append(
+                "tasks/observability.py: forbidden task log fields: "
+                + ", ".join(sorted(forbidden))
+            )
+    return errors
+
+
 def _scan_python_tree(root: Path, forbidden_imports: set[str]) -> list[str]:
     errors: list[str] = []
     for path in sorted(root.rglob("*.py")):
@@ -428,6 +535,7 @@ def _scan_dockerfile() -> list[str]:
 
 def main() -> int:
     errors = _scan_service_tree(SOURCE_ROOT, require_complete_registry=True)
+    errors.extend(_scan_worker_observability(SOURCE_ROOT))
     runtime_reports = _scan_runtime_reachability(
         SOURCE_ROOT,
         runtime_roots=RUNTIME_ROOT_MODULES,

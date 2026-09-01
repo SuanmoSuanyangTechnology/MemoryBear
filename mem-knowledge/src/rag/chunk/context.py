@@ -4,7 +4,7 @@ from enum import Enum
 from typing import Any
 
 DEFAULT_PARSER_CONFIG = {
-    "layout_recognize": "mineru",
+    "layout_recognize": "plain",
     "chunk_token_num": 512,
     "delimiter": "\n!?。；！？",
     "analyze_hyperlink": True,

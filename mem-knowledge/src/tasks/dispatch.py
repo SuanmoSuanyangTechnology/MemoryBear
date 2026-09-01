@@ -4,11 +4,15 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from collections.abc import Sequence
 from typing import Any
 
+from ..bootstrap import get_settings
 from ..errors import KnowledgeError
+from ..trace import get_trace_id
 from .celery_app import PUBLISHABLE_KNOWLEDGE_TASK_ROUTES, celery_app
+from .observability import current_parent_task_id
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +68,16 @@ class TaskDispatcher:
                 "args": list(args or ()),
                 "kwargs": dict(kwargs or {}),
                 "queue": expected_queue,
+                "headers": {
+                    key: value
+                    for key, value in {
+                        "kb_published_at_ms": int(time.time() * 1000),
+                        "kb_trace_id": get_trace_id() or None,
+                        "kb_parent_task_id": current_parent_task_id(),
+                        "kb_source_role": get_settings().kb_process_role,
+                    }.items()
+                    if value is not None
+                },
             }
             if task_id:
                 send_task_kwargs["task_id"] = task_id
