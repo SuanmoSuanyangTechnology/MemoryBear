@@ -1,3 +1,4 @@
+from enum import StrEnum
 from typing import Any, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -100,6 +101,67 @@ class NodeProjection(BaseModel):
         return cls(fields=fields)
 
 
+class RelationshipProjectionScope(StrEnum):
+    """Graph element a relationship-projection field is read from."""
+
+    SOURCE = "source"
+    RELATIONSHIP = "relationship"
+    TARGET = "target"
+
+
+class RelationshipProjectionField(BaseModel):
+    """A single output field read from one endpoint or the relationship."""
+
+    model_config = ConfigDict(frozen=True)
+
+    scope: RelationshipProjectionScope = RelationshipProjectionScope.TARGET
+    field: str = Field(min_length=1)
+    alias: str | None = None
+
+    @field_validator("field")
+    @classmethod
+    def validate_field(cls, field: str) -> str:
+        if not field.strip():
+            raise ValueError("relationship projection field cannot be blank")
+        return field
+
+    @field_validator("alias")
+    @classmethod
+    def validate_alias(cls, alias: str | None) -> str | None:
+        if alias is not None and not alias.strip():
+            raise ValueError("relationship projection field alias cannot be blank")
+        return alias
+
+    @property
+    def output_name(self) -> str:
+        return self.alias or self.field
+
+
+class RelationshipProjection(BaseModel):
+    """Flat projection over a relationship traversal.
+
+    Each field is read from the source node, the relationship itself, or
+    the target node, and all selected fields are merged into one result item.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    fields: tuple[RelationshipProjectionField, ...] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_unique_output_names(self) -> Self:
+        output_names = [field.output_name for field in self.fields]
+        if len(output_names) != len(set(output_names)):
+            raise ValueError(
+                "relationship projection output names cannot contain duplicates"
+            )
+        return self
+
+    @classmethod
+    def of(cls, *fields: RelationshipProjectionField) -> Self:
+        return cls(fields=fields)
+
+
 DEFAULT_PROJECTION = {
     MemoryNodeType.EXTRACTED_ENTITY: NodeProjection(
         fields=(
@@ -114,7 +176,7 @@ DEFAULT_PROJECTION = {
         fields=("id", "statement", "created_at", "score")
     ),
     MemoryNodeType.MEMORY_SUMMARY: NodeProjection(
-        fields=("id", "name", " content", "created_at", "score")
+        fields=("id", "name", "content", "created_at", "score")
     ),
     MemoryNodeType.PERCEPTUAL: NodeProjection(
         fields=(

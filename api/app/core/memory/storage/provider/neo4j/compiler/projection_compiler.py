@@ -4,6 +4,8 @@ from typing import Any
 from app.core.memory.storage.models import (
     CoalesceProjectionField,
     NodeProjection,
+    RelationshipProjection,
+    RelationshipProjectionScope,
 )
 from app.core.memory.storage.models.projection import ProjectionItem
 
@@ -62,3 +64,31 @@ def _compile_field(
 
 def _escape_identifier(identifier: str) -> str:
     return identifier.replace("`", "``")
+
+
+_RELATIONSHIP_SCOPE_VARIABLES: Mapping[RelationshipProjectionScope, str] = {
+    RelationshipProjectionScope.SOURCE: "source",
+    RelationshipProjectionScope.RELATIONSHIP: "r",
+    RelationshipProjectionScope.TARGET: "target",
+}
+
+
+def compile_neo4j_relationship_projection(
+    projection: RelationshipProjection | None,
+) -> tuple[str, dict[str, Any]]:
+    """Compile a relationship traversal projection into a flat map expression.
+
+    Without a projection the full target node is returned. With a projection,
+    each field is read from the source node, the relationship, or the target
+    node and merged into a single map item.
+    """
+    if projection is None:
+        return "target", {}
+
+    selectors = ", ".join(
+        f"`{_escape_identifier(field.output_name)}`: "
+        f"{_RELATIONSHIP_SCOPE_VARIABLES[field.scope]}"
+        f".`{_escape_identifier(field.field)}`"
+        for field in projection.fields
+    )
+    return f"{{ {selectors} }} AS item", {}

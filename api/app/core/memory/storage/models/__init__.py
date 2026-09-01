@@ -14,7 +14,11 @@ from app.core.memory.storage.models.projection import (
     CoalesceProjectionField,
     NodeProjection,
     ProjectionField,
+    RelationshipProjection,
+    RelationshipProjectionField,
+    RelationshipProjectionScope,
 )
+from app.core.memory.storage.models.pattern import RelationshipPattern
 from app.core.memory.storage.models.sort import (
     NodeSort,
     SortDirection,
@@ -35,6 +39,10 @@ __all__ = [
     "CoalesceProjectionField",
     "NodeProjection",
     "ProjectionField",
+    "RelationshipProjection",
+    "RelationshipProjectionField",
+    "RelationshipProjectionScope",
+    "RelationshipPattern",
 
     "NodeSort",
     "SortDirection",

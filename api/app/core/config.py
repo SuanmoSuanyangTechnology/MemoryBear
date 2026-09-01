@@ -111,6 +111,11 @@ class Settings:
     ELASTICSEARCH_REQUEST_TIMEOUT: int = int(os.getenv("ELASTICSEARCH_REQUEST_TIMEOUT", "100000"))
     ELASTICSEARCH_RETRY_ON_TIMEOUT: bool = os.getenv("ELASTICSEARCH_RETRY_ON_TIMEOUT", "True").lower() == "true"
     ELASTICSEARCH_MAX_RETRIES: int = int(os.getenv("ELASTICSEARCH_MAX_RETRIES", "10"))
+
+    # Memory storage read backend（记忆存储读取后端，BackendFactory.get_read_client 使用）
+    # 可选值: ELASTIC / NEO4J；加载时统一去除空白并转为大写，非法值在工厂初始化时快速失败
+    MEMORY_READ_BACKEND: str = os.getenv("MEMORY_READ_BACKEND", "ELASTIC").strip().upper()
+
     KNOWLEDGE_RETRIEVAL_MAX_WORKERS: int = int(os.getenv("KNOWLEDGE_RETRIEVAL_MAX_WORKERS", "3"))
     KNOWLEDGE_RETRIEVAL_GRAPH_MAX_CONCURRENCY: int = int(
         os.getenv("KNOWLEDGE_RETRIEVAL_GRAPH_MAX_CONCURRENCY", "2")

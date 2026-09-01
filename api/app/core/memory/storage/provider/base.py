@@ -8,6 +8,8 @@ from app.core.memory.storage.models import (
     NodeProjection,
     NodeSort,
     RelationshipFilter,
+    RelationshipPattern,
+    RelationshipProjection,
     StorageReadResult,
     StorageWriteResult,
 )
@@ -117,9 +119,9 @@ class BaseClient(ABC):
 
     async def get_relationship(
         self,
-        relationship_type: MemoryRelationshipType,
+        pattern: RelationshipPattern,
         rel_filter: RelationshipFilter,
-        projection: NodeProjection | None = None,
+        projection: RelationshipProjection | None = None,
         sort: NodeSort | None = None,
     ) -> StorageReadResult:
         raise NotImplementedError(

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from typing import ClassVar, Self
 
+from app.core.config import settings
 from app.core.memory.storage.enums import (
     BackendType,
     MemoryNodeLabel,
@@ -45,6 +46,28 @@ class BackendFactory:
     def __init__(self) -> None:
         self._clients: dict[BackendType, BaseClient] = {}
         self._lock = asyncio.Lock()
+        self._read_backend: BackendType = BackendType.ELASTIC
+
+    @staticmethod
+    def _resolve_read_backend() -> BackendType:
+        """Resolve the read backend from the ``MEMORY_READ_BACKEND`` setting.
+
+        The setting is normalized (stripped and upper-cased) at load time in
+        :class:`~app.core.config.Settings`, so the value is matched directly
+        against :class:`BackendType` here.
+
+        :return: the backend used by :meth:`get_read_client`.
+        :raises ValueError: if the configured value is not a known backend.
+        """
+        raw = settings.MEMORY_READ_BACKEND
+        try:
+            return BackendType(raw)
+        except ValueError:
+            valid = ", ".join(member.value for member in BackendType)
+            raise ValueError(
+                f"Invalid MEMORY_READ_BACKEND {raw!r}; "
+                f"expected one of: {valid}"
+            ) from None
 
     @classmethod
     async def create(cls) -> Self:
@@ -73,6 +96,8 @@ class BackendFactory:
 
     async def initialize(self) -> None:
         self._ensure_builtin_backends_registered()
+        # Fail fast on a misconfigured read backend before opening any connection.
+        self._read_backend = self._resolve_read_backend()
 
         async with self._lock:
             missing = [kind for kind in BackendType if kind not in self._clients]
@@ -125,7 +150,7 @@ class BackendFactory:
         del label  # FEATURE: Reserved for future per-node overrides.
         if dim not in self._READ_DIMENSIONS:
             raise ValueError(f"Unsupported read storage dimension: {dim}")
-        return self.get_client(BackendType.ELASTIC)
+        return self.get_client(self._read_backend)
 
     def get_node_clients(
         self,

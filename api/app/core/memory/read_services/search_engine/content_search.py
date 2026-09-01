@@ -31,6 +31,9 @@ from app.core.memory.read_services.search_engine.result_builder import MetadataB
 from app.core.memory.read_services.search_engine.result_builder import data_builder_factory
 from app.core.memory.read_services.search_engine.tools import make_entity_search_tool, make_relation_search_tool, \
     make_user_source_lookup_tool
+from app.core.memory.read_services.search_engine.search_policy import (
+    build_content_search_filters,
+)
 from app.core.memory.retrieval_trace.models import (
     RetrievalExecutionTrace,
     build_score_trace,
@@ -38,8 +41,15 @@ from app.core.memory.retrieval_trace.models import (
     finite_or_none,
     normalized_keyword_score,
 )
+from app.core.memory.storage.custom import (
+    get_active_entities_by_ids,
+    get_entity_pair_relations,
+    get_user_entity_id,
+    get_user_metadata,
+    get_user_sources_for_entities,
+)
 from app.core.memory.storage.enums import MemoryNodeType, MemoryNodeLabel
-from app.core.memory.storage.models import NodeFilter, StorageReadResult, FilterLogic, FilterCondition, FilterOperator
+from app.core.memory.storage.models import StorageReadResult
 from app.core.memory.storage.models.dto import StorageItem
 from app.core.memory.storage.service import get_storage_service
 from app.core.models import RedBearEmbeddings, RedBearLLM, RedBearRerank
@@ -48,11 +58,6 @@ from app.core.rag.nlp.search import knowledge_retrieval
 from app.db import get_async_db_context
 from app.models import Conversation, MemoryMessage
 from app.repositories import knowledge_repository
-from app.repositories.neo4j.cypher_queries import FETCH_USER_SOURCES_FOR_ENTITIES
-from app.repositories.neo4j.graph_search import get_nodes_by_ids, get_relations_between_entity_pairs, search_graph, \
-    search_graph_by_embedding
-from app.repositories.neo4j.graph_search import search_user_metadata
-from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.schemas.app_schema import FileInput, FileType, TransferMethod
 
 logger = logging.getLogger(__name__)
@@ -74,7 +79,7 @@ class Neo4jSearchService:
             embedder: RedBearEmbeddings | None = None,
             llm: RedBearLLM | None = None,
             reranker: RedBearRerank | None = None,
-            includes: list[Neo4jNodeType] | None = None,
+            includes: list[MemoryNodeLabel] | None = None,
             on_error: Callable[[MemoryRetrievalBusinessError], None] | None = None,
             alpha: float = DEFAULT_ALPHA,
             fulltext_score_threshold: float = DEFAULT_FULLTEXT_SCORE_THRESHOLD,
@@ -91,7 +96,6 @@ class Neo4jSearchService:
         self.llm: RedBearLLM | None = llm
         self.reranker: RedBearRerank | None = reranker
         self.on_error = on_error
-        self.connector: Neo4jConnector | None = None
 
         self.includes = includes
         if includes is None:
@@ -148,23 +152,12 @@ class Neo4jSearchService:
             limit: int
     ) -> StorageReadResult:
         return await self.service.search_by_fulltext(
-            labels=self.includes,
-            node_filter=NodeFilter(
-                logic=FilterLogic.AND,
-                conditions=(
-                    FilterCondition(field="end_user_id", operator=FilterOperator.EQ, value=self.ctx.end_user_id),
-                    FilterCondition(field="delete_at", operator=FilterOperator.EXISTS, value=False)
-                )
+            node_filters=build_content_search_filters(
+                self.includes,
+                self.ctx.end_user_id,
             ),
             text=query,
-            pre_limit=limit
-        )
-        return await search_graph(
-            connector=self.connector,
-            query=query,
-            end_user_id=self.ctx.end_user_id,
-            limit=limit,
-            include=self.includes
+            pre_limit=limit,
         )
 
     async def _embedding_search(
@@ -174,24 +167,12 @@ class Neo4jSearchService:
     ) -> StorageReadResult:
         query_embed = await self.embedder.aembed_query(query)
         return await self.service.search_by_embedding(
-            labels=self.includes,
-            node_filter=NodeFilter(
-                logic=FilterLogic.AND,
-                conditions=(
-                    FilterCondition(field="end_user_id", operator=FilterOperator.EQ, value=self.ctx.end_user_id),
-                    FilterCondition(field="delete_at", operator=FilterOperator.EXISTS, value=False)
-                )
+            node_filters=build_content_search_filters(
+                self.includes,
+                self.ctx.end_user_id,
             ),
             embed=query_embed,
-            pre_limit=limit
-        )
-        return await search_graph_by_embedding(
-            connector=self.connector,
-            embedder_client=self.embedder,
-            query_text=query,
-            end_user_id=self.ctx.end_user_id,
-            limit=limit,
-            include=self.includes
+            pre_limit=limit,
         )
 
     def _rerank(
@@ -255,7 +236,13 @@ class Neo4jSearchService:
             f"[MemorySearch] rerank: merged={len(combined)}, after_threshold={len(items)} "
             f"(alpha={self.alpha})"
         )
-        return StorageReadResult(items=items, total=len(items))
+        backend = (
+            keyword_results.backend
+            if keyword_results.backend is not None
+            and keyword_results.backend == embedding_results.backend
+            else None
+        )
+        return StorageReadResult(backend=backend, items=items, total=len(items))
 
     async def _hybrid_search_with_model_rerank(
             self,
@@ -271,7 +258,7 @@ class Neo4jSearchService:
             if rid and rid not in seen:
                 seen[rid] = record
         for record in emb_results.items:
-            rid = record.data.get("id", "id")
+            rid = record.data.get("id", "")
             if rid and rid not in seen:
                 seen[rid] = record
 
@@ -400,9 +387,7 @@ class Neo4jSearchService:
             limit: int = 10,
     ) -> MemorySearchResult:
         """仅全文检索，不做 embedding / rerank / 关系检索。"""
-        async with Neo4jConnector(shared_driver=True) as connector:
-            self.connector = connector
-            kw_results = await self._keyword_search(query, limit)
+        kw_results = await self._keyword_search(query, limit)
 
         if kw_results.total == 0:
             return MemorySearchResult(
@@ -461,11 +446,9 @@ class Neo4jSearchService:
             query: str,
             limit: int = 10,
     ) -> MemorySearchResult:
-        async with Neo4jConnector(shared_driver=True) as connector:
-            self.connector = connector
-            kw_task = self._keyword_search(query, limit)
-            emb_task = self._embedding_search(query, limit)
-            kw_results, emb_results = await asyncio.gather(kw_task, emb_task, return_exceptions=True)
+        kw_task = self._keyword_search(query, limit)
+        emb_task = self._embedding_search(query, limit)
+        kw_results, emb_results = await asyncio.gather(kw_task, emb_task, return_exceptions=True)
 
         keyword_failed = isinstance(kw_results, BaseException)
         semantic_failed = isinstance(emb_results, BaseException)
@@ -693,37 +676,40 @@ class Neo4jSearchService:
             self,
             pairs: list[EntityPair]
     ) -> tuple[list[dict], list[dict]]:
-        async with Neo4jConnector(shared_driver=True) as connector:
-            user_meta = await search_user_metadata(connector, self.ctx.end_user_id)
-            user_entity_id = user_meta.get("id", "")
+        user_entity_id = await get_user_entity_id(self.ctx.end_user_id) or ""
+        batch_pairs = [
+            {
+                "source_id": (
+                    user_entity_id
+                    if pair.source_id == "__user__"
+                    else pair.source_id
+                ),
+                "target_id": pair.target_id,
+            }
+            for pair in pairs
+        ]
+        relation_records = await get_entity_pair_relations(
+            self.ctx.end_user_id,
+            batch_pairs,
+        )
 
-            batch_pairs = [
-                {"source_id": user_entity_id if p.source_id == "__user__" else p.source_id,
-                 "target_id": p.target_id}
-                for p in pairs
-            ]
-            relation_records = await get_relations_between_entity_pairs(
-                connector,
-                self.ctx.end_user_id,
-                batch_pairs,
+        all_entity_ids = {user_entity_id}
+        for record in relation_records:
+            all_entity_ids.add(record.get("source_id", ""))
+            all_entity_ids.add(record.get("target_id", ""))
+        for pair in pairs:
+            source_id = (
+                user_entity_id
+                if pair.source_id == "__user__"
+                else pair.source_id
             )
+            all_entity_ids.add(source_id)
+            all_entity_ids.add(pair.target_id)
+        all_entity_ids.discard("")
 
-            all_entity_ids = {user_entity_id}
-            for rec in relation_records:
-                all_entity_ids.add(rec.get("source_id", ""))
-                all_entity_ids.add(rec.get("target_id", ""))
-            for pair in pairs:
-                sid = user_entity_id if pair.source_id == "__user__" else pair.source_id
-                all_entity_ids.add(sid)
-                all_entity_ids.add(pair.target_id)
-            all_entity_ids.discard("")
-
-            entity_records = await get_nodes_by_ids(
-                connector,
-                Neo4jNodeType.EXTRACTEDENTITY,
-                list(all_entity_ids)
-            )
-
+        entity_records = await get_active_entities_by_ids(
+            list(all_entity_ids)
+        )
         return relation_records, entity_records
 
     @staticmethod
@@ -785,20 +771,17 @@ class Neo4jSearchService:
         return MemorySearchResult(memories=[], relations=relations)
 
     async def memory_l0(self) -> Memory:
-        async with Neo4jConnector(shared_driver=True) as connector:
-            end_user_id = self.ctx.end_user_id
-            user_meta = await search_user_metadata(connector, end_user_id)
-            metadata = MetadataBuilder(user_meta)
-            memory = Memory(
-                score=1,
-                source=Neo4jNodeType.EXTRACTEDENTITY,
-                query='',
-                id=end_user_id,
-                content=metadata.content,
-                data=metadata.data,
-            )
-
-        return memory
+        end_user_id = self.ctx.end_user_id
+        user_meta = await get_user_metadata(end_user_id)
+        metadata = MetadataBuilder(user_meta)
+        return Memory(
+            score=1,
+            source=Neo4jNodeType.EXTRACTEDENTITY,
+            query='',
+            id=end_user_id,
+            content=metadata.content,
+            data=metadata.data,
+        )
 
     async def fetch_user_sources_for_entities(
             self,
@@ -812,12 +795,10 @@ class Neo4jSearchService:
         if not entity_ids:
             return {}
 
-        async with Neo4jConnector(shared_driver=True) as connector:
-            records = await connector.execute_query(
-                FETCH_USER_SOURCES_FOR_ENTITIES,
-                entity_ids=list(entity_ids),
-                end_user_id=self.ctx.end_user_id,
-            )
+        records = await get_user_sources_for_entities(
+            self.ctx.end_user_id,
+            list(entity_ids),
+        )
 
         result: dict[str, list[str]] = {}
         for rec in records:
@@ -1112,17 +1093,15 @@ class MetaSearchService:
         if self.ctx.storage_type == StorageType.RAG:
             return MemorySearchResult(memories=[])
         else:
-            async with Neo4jConnector(shared_driver=True) as connector:
-                end_user_id = self.ctx.end_user_id
-                user_meta = await search_user_metadata(connector, end_user_id)
-                metadata = MetadataBuilder(user_meta)
-                memory = Memory(
-                    score=1,
-                    source=Neo4jNodeType.EXTRACTEDENTITY,
-                    query='',
-                    id=end_user_id,
-                    content=metadata.content,
-                    data=metadata.data,
-                )
-
+            end_user_id = self.ctx.end_user_id
+            user_meta = await get_user_metadata(end_user_id)
+            metadata = MetadataBuilder(user_meta)
+            memory = Memory(
+                score=1,
+                source=Neo4jNodeType.EXTRACTEDENTITY,
+                query='',
+                id=end_user_id,
+                content=metadata.content,
+                data=metadata.data,
+            )
             return MemorySearchResult(memories=[memory])

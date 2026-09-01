@@ -18,6 +18,8 @@ from app.core.memory.storage.models import (
     NodeProjection,
     NodeSort,
     RelationshipFilter,
+    RelationshipPattern,
+    RelationshipProjection,
     StorageReadResult,
     StorageWriteResult,
 )
@@ -28,6 +30,7 @@ from app.core.memory.storage.provider.neo4j.compiler.filter_compiler import (
 )
 from app.core.memory.storage.provider.neo4j.compiler.projection_compiler import (
     compile_neo4j_projection,
+    compile_neo4j_relationship_projection,
 )
 from app.core.memory.storage.provider.neo4j.compiler.sort_compiler import compile_neo4j_sort
 from app.core.memory.storage.provider.neo4j.config import build_neo4j_driver_config
@@ -148,30 +151,57 @@ class Neo4jClient(BaseClient):
         )
 
     async def get_relationship(
-            self,
-            relationship_type: MemoryRelationshipType,
-            rel_filter: RelationshipFilter,
-            projection: NodeProjection | None = None,
-            sort: NodeSort | None = None,
+        self,
+        pattern: RelationshipPattern,
+        rel_filter: RelationshipFilter,
+        projection: RelationshipProjection | None = None,
+        sort: NodeSort | None = None,
     ) -> StorageReadResult:
-        """Query relationships using relationship and endpoint filters."""
-        if not isinstance(relationship_type, MemoryRelationshipType):
+        """Traverse relationships and return the connected (target) nodes."""
+        relationship_type = pattern.relationship_type
+        if relationship_type is not None and not isinstance(
+                relationship_type, MemoryRelationshipType
+        ):
             raise KeyError(
                 f"relationship type - {relationship_type} not supported"
             )
+        if pattern.source_label is not None:
+            self.verify_label(pattern.source_label)
+        if pattern.target_label is not None:
+            self.verify_label(pattern.target_label)
 
-        escaped_type = relationship_type.value.replace("`", "``")
-        predicate, parameters = compile_neo4j_relationship_filter(
-            rel_filter
+        if relationship_type is not None:
+            escaped_type = relationship_type.value.replace("`", "``")
+            relationship_pattern = f"[r:`{escaped_type}`]"
+        else:
+            relationship_pattern = "[r]"
+        edge = (
+            f"-{relationship_pattern}->"
+            if pattern.directed
+            else f"-{relationship_pattern}-"
+        )
+        source_pattern = (
+            f"(source:{pattern.source_label.value})"
+            if pattern.source_label is not None
+            else "(source)"
+        )
+        target_pattern = (
+            f"(target:{pattern.target_label.value})"
+            if pattern.target_label is not None
+            else "(target)"
         )
 
-        return_expression, projection_parameters = compile_neo4j_projection(
-            projection, variable="r"
+        predicate, parameters = compile_neo4j_relationship_filter(rel_filter)
+        return_expression, projection_parameters = (
+            compile_neo4j_relationship_projection(projection)
         )
-        order_by, sort_parameters = compile_neo4j_sort(sort, variable="r")
-        sort_clause = f"WITH r\n        {order_by}" if order_by else ""
-        query = f"""
-        MATCH (source)-[r:`{escaped_type}`]->(target)
+        order_by, sort_parameters = compile_neo4j_sort(
+            sort,
+            variable="target",
+        )
+        sort_clause = f"WITH target\n        {order_by}" if order_by else ""
+        cypher = f"""
+        MATCH {source_pattern}{edge}{target_pattern}
         WHERE {predicate}
         {sort_clause}
         RETURN {return_expression}
@@ -179,16 +209,21 @@ class Neo4jClient(BaseClient):
         parameters.update(sort_parameters)
         parameters.update(projection_parameters)
 
+        result_key = "item" if projection is not None else "target"
         async with self.client.session() as session:
-            stmt = await session.run(query, **parameters)
+            stmt = await session.run(cypher, **parameters)
             records = await stmt.data()
 
         items = [
-            _to_native(record["r"])
+            _to_native(record[result_key])
             for record in records
-            if "r" in record
+            if result_key in record
         ]
-        return StorageReadResult.from_items(items, backend=self.name)
+        return StorageReadResult.from_items(
+            items,
+            label=pattern.target_label,
+            backend=self.name,
+        )
 
     async def update_relationship(
             self,
