@@ -1,6 +1,7 @@
 import hashlib
 import secrets
 import uuid
+from datetime import timedelta
 from typing import List, Optional
 
 from sqlalchemy import or_, select
@@ -55,6 +56,7 @@ business_logger = get_business_logger()
 DEFAULT_PRESET_KEY = "default"
 _WORKSPACE_MODEL_SLOTS = ("llm", "embedding", "rerank", "vision", "audio", "video")
 _REQUIRED_WORKSPACE_MODEL_SLOTS = ("llm", "embedding", "rerank")
+_RETENTION_GRACE_PERIOD_DAYS = 3
 
 
 def _serialize_model_option(model: ModelConfig) -> dict:
@@ -1123,24 +1125,59 @@ def update_workspace_retention_policy(
         retention_days: int | None,
         user: User,
 ) -> int | None:
-    """以空间成员权限更新指定工作空间的临时身份保留天数。"""
+    """Update temporary-memory retention and protect newly expired identities.
+
+    Args:
+        db: Active synchronous database session.
+        workspace_id: Workspace whose retention policy is updated.
+        retention_days: New retention duration, or ``None`` for no expiration.
+        user: User requesting the policy update.
+    """
     business_logger.info(
         f"更新工作空间保留策略: workspace_id={workspace_id}, "
         f"retention_days={retention_days}, 操作者={user.username}"
     )
     _check_workspace_member_permission(db, workspace_id, user)
     try:
-        updated_retention_days = workspace_repository.update_workspace_retention_days(
-            db=db,
-            workspace_id=workspace_id,
-            retention_days=retention_days,
+        workspace = (
+            db.query(Workspace)
+            .filter(Workspace.id == workspace_id)
+            .with_for_update()
+            .first()
         )
+        if workspace is None:
+            raise ValueError(f"Workspace not found: {workspace_id}")
+
+        old_retention_days = workspace.retention_days
+        grace_period_affected_count = 0
+        if retention_days is not None and (
+                old_retention_days is None
+                or retention_days < old_retention_days
+        ):
+            reference_time = utcnow_naive()
+            grace_period_affected_count = EndUserRepository(
+                db
+            ).mark_grace_period_for_expired_users(
+                workspace_id=workspace_id,
+                retention_days=retention_days,
+                grace_period_until=(
+                    reference_time + timedelta(days=_RETENTION_GRACE_PERIOD_DAYS)
+                ),
+                reference_time=reference_time,
+            )
+
+        workspace.retention_days = retention_days
+        db.add(workspace)
+        db.commit()
+        db.refresh(workspace)
         business_logger.info(
             f"工作空间保留策略更新成功: workspace_id={workspace_id}, "
-            f"retention_days={updated_retention_days}"
+            f"retention_days={workspace.retention_days}, "
+            f"grace_period_affected_count={grace_period_affected_count}"
         )
-        return updated_retention_days
+        return workspace.retention_days
     except Exception as e:
+        db.rollback()
         business_logger.error(
             f"工作空间保留策略更新失败: workspace_id={workspace_id} - {str(e)}"
         )
