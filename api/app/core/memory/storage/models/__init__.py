@@ -21,6 +21,8 @@ from app.core.memory.storage.models.projection import (
 from app.core.memory.storage.models.pattern import RelationshipPattern
 from app.core.memory.storage.models.sort import (
     NodeSort,
+    RelationshipSort,
+    RelationshipSortField,
     SortDirection,
     SortField,
 )
@@ -45,6 +47,8 @@ __all__ = [
     "RelationshipPattern",
 
     "NodeSort",
+    "RelationshipSort",
+    "RelationshipSortField",
     "SortDirection",
     "SortField"
 ]

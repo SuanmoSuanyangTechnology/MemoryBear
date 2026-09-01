@@ -210,6 +210,10 @@ async def get_entity_pair_relations(
                     ),
                     target=NodeFilter.all_of(
                         FilterCondition(
+                            field="end_user_id",
+                            value=end_user_id,
+                        ),
+                        FilterCondition(
                             field="id",
                             value=pair["target_id"],
                         ),

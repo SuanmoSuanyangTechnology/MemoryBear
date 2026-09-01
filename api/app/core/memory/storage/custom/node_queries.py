@@ -98,8 +98,11 @@ async def get_user_metadata(end_user_id: str) -> dict:
     return result.items[0].data if result.items else {}
 
 
-async def get_active_entities_by_ids(entity_ids: list[str]) -> list[dict]:
-    """Return active entities needed when building relationship memories."""
+async def get_active_entities_by_ids(
+        end_user_id: str,
+        entity_ids: list[str],
+) -> list[dict]:
+    """Return active tenant entities needed when building relationship memories."""
     if not entity_ids:
         return []
 
@@ -107,6 +110,7 @@ async def get_active_entities_by_ids(entity_ids: list[str]) -> list[dict]:
     result = await service.get_node(
         MemoryNodeType.EXTRACTED_ENTITY,
         NodeFilter.all_of(
+            FilterCondition(field="end_user_id", value=end_user_id),
             FilterCondition(
                 field="id",
                 operator=FilterOperator.IN,

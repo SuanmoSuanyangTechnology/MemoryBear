@@ -16,6 +16,11 @@ from app.core.memory.storage.models import (
     NodeProjection,
     NodeSort,
     RelationshipFilter,
+    RelationshipProjection,
+    RelationshipProjectionField,
+    RelationshipProjectionScope,
+    RelationshipSort,
+    RelationshipSortField,
     SortDirection,
     SortField,
 )
@@ -33,7 +38,10 @@ from app.core.memory.storage.provider.neo4j.compiler.filter_compiler import comp
 from app.core.memory.storage.provider.neo4j.compiler.projection_compiler import (
     compile_neo4j_projection,
 )
-from app.core.memory.storage.provider.neo4j.compiler.sort_compiler import compile_neo4j_sort
+from app.core.memory.storage.provider.neo4j.compiler.sort_compiler import (
+    compile_neo4j_relationship_sort,
+    compile_neo4j_sort,
+)
 from app.core.memory.storage.tests.enums import TestMemoryNodeType
 
 
@@ -581,6 +589,80 @@ def test_node_sort_convenience_constructors_set_direction() -> None:
     assert descending.fields[0].direction == SortDirection.DESC
 
 
+def test_relationship_sort_supports_scoped_fields() -> None:
+    source_sort = RelationshipSort.desc(
+        RelationshipProjectionScope.SOURCE,
+        "created_at",
+    )
+    same_name_different_scopes = RelationshipSort(
+        fields=(
+            RelationshipSortField(
+                scope=RelationshipProjectionScope.SOURCE,
+                field="name",
+            ),
+            RelationshipSortField(
+                scope=RelationshipProjectionScope.TARGET,
+                field="name",
+            ),
+        )
+    )
+
+    assert source_sort.fields[0].scope == RelationshipProjectionScope.SOURCE
+    assert source_sort.fields[0].direction == SortDirection.DESC
+    assert len(same_name_different_scopes.fields) == 2
+
+    with pytest.raises(ValidationError):
+        RelationshipSort.asc(RelationshipProjectionScope.RELATIONSHIP)
+    with pytest.raises(ValidationError):
+        RelationshipSort(
+            fields=(
+                RelationshipSortField(
+                    scope=RelationshipProjectionScope.TARGET,
+                    field="name",
+                ),
+                RelationshipSortField(
+                    scope=RelationshipProjectionScope.TARGET,
+                    field="name",
+                    direction=SortDirection.DESC,
+                ),
+            )
+        )
+
+
+def test_neo4j_relationship_sort_compiles_each_scope() -> None:
+    relationship_sort = RelationshipSort(
+        fields=(
+            RelationshipSortField(
+                scope=RelationshipProjectionScope.SOURCE,
+                field="created_at",
+                direction=SortDirection.DESC,
+            ),
+            RelationshipSortField(
+                scope=RelationshipProjectionScope.RELATIONSHIP,
+                field="weight",
+                direction=SortDirection.ASC,
+            ),
+            RelationshipSortField(
+                scope=RelationshipProjectionScope.TARGET,
+                field="name",
+                direction=SortDirection.ASC,
+            ),
+        )
+    )
+
+    order_by, parameters = compile_neo4j_relationship_sort(relationship_sort)
+
+    assert order_by == (
+        "ORDER BY source[$sort_0_field] DESC, "
+        "r[$sort_1_field] ASC, target[$sort_2_field] ASC"
+    )
+    assert parameters == {
+        "sort_0_field": "created_at",
+        "sort_1_field": "weight",
+        "sort_2_field": "name",
+    }
+
+
 def test_neo4j_sort_defaults_to_no_ordering() -> None:
     assert compile_neo4j_sort(None) == ("", {})
 
@@ -1010,7 +1092,10 @@ async def test_neo4j_get_relationship_uses_pattern() -> None:
             target_label=MemoryNodeType.EXTRACTED_ENTITY,
         ),
         rel_filter,
-        sort=NodeSort.desc("created_at"),
+        sort=RelationshipSort.desc(
+            RelationshipProjectionScope.TARGET,
+            "created_at",
+        ),
     )
 
     cypher, parameters = driver.calls[0]
@@ -1026,3 +1111,79 @@ async def test_neo4j_get_relationship_uses_pattern() -> None:
     }
     assert result.backend == BackendType.NEO4J
     assert result.items == []
+
+
+async def test_neo4j_relationship_projection_and_sort_keep_all_variables() -> None:
+    from app.core.memory.storage.models import RelationshipPattern
+
+    driver = _FakeDriver()
+    client = Neo4jClient()
+    client.client = driver  # type: ignore[assignment]
+    projection = RelationshipProjection.of(
+        RelationshipProjectionField(
+            scope=RelationshipProjectionScope.SOURCE,
+            field="name",
+            alias="source_name",
+        ),
+        RelationshipProjectionField(
+            scope=RelationshipProjectionScope.RELATIONSHIP,
+            field="predicate",
+            alias="relation_predicate",
+        ),
+        RelationshipProjectionField(
+            scope=RelationshipProjectionScope.TARGET,
+            field="name",
+            alias="target_name",
+        ),
+    )
+
+    await client.get_relationship(
+        RelationshipPattern(
+            relationship_type=MemoryRelationshipType.RELATES_TO,
+            directed=False,
+            source_label=MemoryNodeType.STATEMENT,
+            target_label=MemoryNodeType.EXTRACTED_ENTITY,
+        ),
+        RelationshipFilter(source=NodeFilter.eq("id", "source-1")),
+        projection=projection,
+        sort=RelationshipSort(
+            fields=(
+                RelationshipSortField(
+                    scope=RelationshipProjectionScope.SOURCE,
+                    field="created_at",
+                    direction=SortDirection.DESC,
+                ),
+                RelationshipSortField(
+                    scope=RelationshipProjectionScope.RELATIONSHIP,
+                    field="weight",
+                    direction=SortDirection.ASC,
+                ),
+                RelationshipSortField(
+                    scope=RelationshipProjectionScope.TARGET,
+                    field="name",
+                    direction=SortDirection.ASC,
+                ),
+            )
+        ),
+    )
+
+    cypher, parameters = driver.calls[0]
+    assert "WITH source, r, target" in cypher
+    assert (
+        "ORDER BY source[$sort_0_field] DESC, "
+        "r[$sort_1_field] ASC, target[$sort_2_field] ASC"
+    ) in cypher
+    assert (
+        "RETURN { `source_name`: source.`name`, "
+        "`relation_predicate`: r.`predicate`, "
+        "`target_name`: target.`name` } AS item"
+    ) in cypher
+    assert cypher.index("WITH source, r, target") < cypher.index("ORDER BY")
+    assert cypher.index("ORDER BY") < cypher.index("RETURN")
+    assert parameters == {
+        "relationship_filter_source_0_field": "id",
+        "relationship_filter_source_0_value": "source-1",
+        "sort_0_field": "created_at",
+        "sort_1_field": "weight",
+        "sort_2_field": "name",
+    }

@@ -11,6 +11,7 @@ from app.core.memory.storage.models import (
     RelationshipFilter,
     RelationshipPattern,
     RelationshipProjection,
+    RelationshipSort,
     StorageReadResult,
     StorageWriteResult,
 )
@@ -80,7 +81,7 @@ class MemoryStorageService:
             pattern: RelationshipPattern,
             rel_filter: RelationshipFilter,
             projection: RelationshipProjection | None = None,
-            sort: NodeSort | None = None,
+            sort: RelationshipSort | None = None,
     ) -> StorageReadResult:
         return await self._read_router.search_relationships_by_graph(
             pattern,

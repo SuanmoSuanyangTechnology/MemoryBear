@@ -708,7 +708,8 @@ class Neo4jSearchService:
         all_entity_ids.discard("")
 
         entity_records = await get_active_entities_by_ids(
-            list(all_entity_ids)
+            self.ctx.end_user_id,
+            list(all_entity_ids),
         )
         return relation_records, entity_records
 

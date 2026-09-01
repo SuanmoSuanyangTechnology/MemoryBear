@@ -20,6 +20,7 @@ from app.core.memory.storage.models import (
     RelationshipFilter,
     RelationshipPattern,
     RelationshipProjection,
+    RelationshipSort,
     StorageReadResult,
     StorageWriteResult,
 )
@@ -32,7 +33,10 @@ from app.core.memory.storage.provider.neo4j.compiler.projection_compiler import 
     compile_neo4j_projection,
     compile_neo4j_relationship_projection,
 )
-from app.core.memory.storage.provider.neo4j.compiler.sort_compiler import compile_neo4j_sort
+from app.core.memory.storage.provider.neo4j.compiler.sort_compiler import (
+    compile_neo4j_relationship_sort,
+    compile_neo4j_sort,
+)
 from app.core.memory.storage.provider.neo4j.config import build_neo4j_driver_config
 from app.core.memory.storage.provider.neo4j.index.definitions import FULLTEXT_ANNC, EMBEDDING_FIELDS
 from app.core.memory.storage.utils.similarity import compute_cosine_similarity
@@ -155,7 +159,7 @@ class Neo4jClient(BaseClient):
         pattern: RelationshipPattern,
         rel_filter: RelationshipFilter,
         projection: RelationshipProjection | None = None,
-        sort: NodeSort | None = None,
+        sort: RelationshipSort | None = None,
     ) -> StorageReadResult:
         """Traverse relationships and return the connected (target) nodes."""
         relationship_type = pattern.relationship_type
@@ -195,11 +199,12 @@ class Neo4jClient(BaseClient):
         return_expression, projection_parameters = (
             compile_neo4j_relationship_projection(projection)
         )
-        order_by, sort_parameters = compile_neo4j_sort(
-            sort,
-            variable="target",
+        order_by, sort_parameters = compile_neo4j_relationship_sort(sort)
+        sort_clause = (
+            f"WITH source, r, target\n        {order_by}"
+            if order_by
+            else ""
         )
-        sort_clause = f"WITH target\n        {order_by}" if order_by else ""
         cypher = f"""
         MATCH {source_pattern}{edge}{target_pattern}
         WHERE {predicate}

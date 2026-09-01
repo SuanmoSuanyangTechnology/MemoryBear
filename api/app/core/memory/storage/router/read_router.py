@@ -12,6 +12,7 @@ from app.core.memory.storage.models import (
     RelationshipFilter,
     RelationshipPattern,
     RelationshipProjection,
+    RelationshipSort,
     StorageReadResult,
 )
 from app.core.memory.storage.models.projection import DEFAULT_PROJECTION
@@ -104,7 +105,7 @@ class ReadRouter:
             pattern: RelationshipPattern,
             rel_filter: RelationshipFilter,
             projection: RelationshipProjection | None = None,
-            sort: NodeSort | None = None,
+            sort: RelationshipSort | None = None,
     ) -> StorageReadResult:
         client = self.backend_factory.get_relationship_client()
         return await client.get_relationship(

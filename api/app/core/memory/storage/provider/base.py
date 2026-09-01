@@ -10,6 +10,7 @@ from app.core.memory.storage.models import (
     RelationshipFilter,
     RelationshipPattern,
     RelationshipProjection,
+    RelationshipSort,
     StorageReadResult,
     StorageWriteResult,
 )
@@ -122,7 +123,7 @@ class BaseClient(ABC):
         pattern: RelationshipPattern,
         rel_filter: RelationshipFilter,
         projection: RelationshipProjection | None = None,
-        sort: NodeSort | None = None,
+        sort: RelationshipSort | None = None,
     ) -> StorageReadResult:
         raise NotImplementedError(
             f"{type(self).__name__} does not support relationship queries"
