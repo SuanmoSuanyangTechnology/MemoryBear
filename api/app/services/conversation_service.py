@@ -1,7 +1,7 @@
 """会话服务"""
 import asyncio
 import uuid
-from datetime import timedelta
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 from typing import Annotated
 from typing import Optional, List, Tuple, Dict, Any
@@ -566,12 +566,31 @@ class ConversationService:
             self,
             conversation_id: uuid.UUID,
             limit: Optional[int] = None,
-            current_only: bool = True
+            current_only: bool = True,
+            keyword: str | None = None,
+            start_at: datetime | None = None,
+            end_at_exclusive: datetime | None = None,
     ) -> List[Message]:
+        """Retrieve filtered messages for a conversation asynchronously.
+
+        Args:
+            conversation_id: Conversation UUID.
+            limit: Optional maximum number of messages.
+            current_only: Whether to return only current message versions.
+            keyword: Optional keyword matched against message content.
+            start_at: Optional inclusive creation-time lower bound.
+            end_at_exclusive: Optional exclusive creation-time upper bound.
+
+        Returns:
+            Messages ordered by creation time.
+        """
         return await self.message_repo.get_message_by_conversation_id_async(
             conversation_id,
             limit,
-            current_only=current_only
+            current_only=current_only,
+            keyword=keyword,
+            start_at=start_at,
+            end_at_exclusive=end_at_exclusive,
         )
 
     def _resolve_v1_internal_user_id(

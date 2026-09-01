@@ -13,6 +13,7 @@ MemoryMessageRepository — memory_messages 表的数据访问层
 import logging
 import uuid
 from contextlib import contextmanager
+from datetime import datetime
 from typing import List, Optional
 
 import sqlalchemy as sa
@@ -328,20 +329,35 @@ class MemoryMessageRepository:
         source: str,
         page: int = 1,
         pagesize: int = 20,
+        keyword: str | None = None,
+        start_at: datetime | None = None,
+        end_at_exclusive: datetime | None = None,
     ) -> tuple[list[MemoryMessage], int]:
-        """按来源分页获取消息 + 该来源总条数（异步版本）。
+        """Fetch a filtered page of messages and the matching total for a source.
 
-        分页语义（service_api / mcp 两种来源完全一致）：
-        - 使用 page / pagesize 分页，page 从 1 开始
-        - 仅按 created_at ASC 排序：入库时间从早到晚，即消息从旧到新
-        - total 通过窗口函数 count(*) OVER () 与数据同一条 SQL 返回，
-          避免独立的 COUNT 往返；页码越界时回退一次 COUNT 保证 total 准确
+        Args:
+            end_user_id: End-user identifier owning the messages.
+            source: Message source to match.
+            page: One-based page number.
+            pagesize: Maximum messages per page.
+            keyword: Optional keyword matched against message content.
+            start_at: Optional inclusive creation-time lower bound.
+            end_at_exclusive: Optional exclusive creation-time upper bound.
+
+        Returns:
+            The messages ordered by creation time and the filtered total count.
         """
         base_filter = [
             MemoryMessage.end_user_id == end_user_id,
             MemoryMessage.conversation_id.is_(None),
             MemoryMessage.source == source,
         ]
+        if keyword is not None:
+            base_filter.append(MemoryMessage.content.ilike(f"%{keyword}%"))
+        if start_at is not None:
+            base_filter.append(MemoryMessage.created_at >= start_at)
+        if end_at_exclusive is not None:
+            base_filter.append(MemoryMessage.created_at < end_at_exclusive)
 
         offset = (page - 1) * pagesize
         rows_result = await self.db.execute(

@@ -593,8 +593,24 @@ class MessageRepository:
             self,
             conversation_id: uuid.UUID,
             limit: Optional[int] = None,
-            current_only: bool = True
+            current_only: bool = True,
+            keyword: str | None = None,
+            start_at: datetime | None = None,
+            end_at_exclusive: datetime | None = None,
     ) -> list[Message]:
+        """Retrieve filtered messages for a conversation asynchronously.
+
+        Args:
+            conversation_id: Conversation UUID.
+            limit: Optional maximum number of messages.
+            current_only: Whether to return only current message versions.
+            keyword: Optional keyword matched against message content.
+            start_at: Optional inclusive creation-time lower bound.
+            end_at_exclusive: Optional exclusive creation-time upper bound.
+
+        Returns:
+            Messages ordered by creation time.
+        """
         stmt = select(Message).where(
             Message.conversation_id == conversation_id,
             Message.is_deleted.is_not(True),
@@ -602,6 +618,13 @@ class MessageRepository:
 
         if current_only:
             stmt = stmt.where(Message.is_current.is_not(False))
+
+        if keyword is not None:
+            stmt = stmt.where(Message.content.ilike(f"%{keyword}%"))
+        if start_at is not None:
+            stmt = stmt.where(Message.created_at >= start_at)
+        if end_at_exclusive is not None:
+            stmt = stmt.where(Message.created_at < end_at_exclusive)
 
         stmt = stmt.order_by(Message.created_at)
 
