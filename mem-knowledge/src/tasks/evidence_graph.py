@@ -10,6 +10,7 @@ from typing import Any
 
 from celery import states
 from celery.exceptions import Ignore, Retry
+from redbear_model.errors import is_provider_rate_limit_error
 
 from ..bootstrap import get_settings
 from ..rag.knowledge_graph.config import (
@@ -114,6 +115,26 @@ def _run_observed(
         )
         raise
     except Exception as exc:
+        if is_provider_rate_limit_error(exc):
+            logger.error(
+                "[EvidenceGraph] task_failed task=%s task_id=%s kb_id=%s "
+                "document_id=%s status=failure reason=rate_limited "
+                "error_type=%s retry=%d elapsed_ms=%d",
+                task_name,
+                safe_task_id,
+                safe_knowledge_id,
+                safe_document_id,
+                type(exc).__name__,
+                retry,
+                int((time.perf_counter() - started_at) * 1000),
+            )
+            run.finish(
+                BusinessOutcome.FAILURE,
+                error_code="KB_GRAPH_RATE_LIMITED",
+                exc=exc,
+                detail="provider_rate_limited",
+            )
+            raise _redacted_exception(exc) from None
         countdown = _retry_countdown(task)
         retry_options = {}
         if isinstance(exc, GraphDocumentDeletionPending):
