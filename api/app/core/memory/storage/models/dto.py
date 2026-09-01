@@ -4,7 +4,7 @@ from typing import Any, Iterable, Self
 
 from pydantic import BaseModel, Field
 
-from app.core.memory.storage.enums import BackendType, MemoryNodeLabel
+from app.core.memory.storage.enums import BackendType, MemoryNodeLabel, MemoryNodeType
 
 
 class StorageResult(BaseModel):
@@ -24,6 +24,13 @@ class StorageWriteResult(StorageResult):
     affected_count: int = Field(default=0, ge=0)
     ids: list[str] = Field(default_factory=list)
     data: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class GraphWriteResult(BaseModel):
+    """Result of one committed memory-graph write transaction."""
+
+    node_ids: dict[MemoryNodeType, list[str]] = Field(default_factory=dict)
+    relationship_count: int = Field(default=0, ge=0)
 
 
 class StorageReadResult(StorageResult):

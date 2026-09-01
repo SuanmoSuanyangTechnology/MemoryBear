@@ -1,4 +1,5 @@
 from app.core.memory.storage.models.dto import (
+    GraphWriteResult,
     StorageReadResult,
     StorageResult,
     StorageWriteResult,
@@ -10,6 +11,7 @@ from app.core.memory.storage.models.filter import (
     NodeFilter,
     RelationshipFilter,
 )
+from app.core.memory.storage.models.graph_write import MemoryGraphWriteCommand
 from app.core.memory.storage.models.projection import (
     CoalesceProjectionField,
     NodeProjection,
@@ -30,6 +32,8 @@ __all__ = [
     "StorageResult",
     "StorageWriteResult",
     "StorageReadResult",
+    "GraphWriteResult",
+    "MemoryGraphWriteCommand",
 
     "FilterCondition",
     "FilterLogic",

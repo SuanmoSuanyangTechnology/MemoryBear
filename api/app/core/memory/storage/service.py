@@ -5,6 +5,8 @@ from typing import Self
 
 from app.core.memory.storage.enums import MemoryNodeLabel, MemoryRelationshipType
 from app.core.memory.storage.models import (
+    GraphWriteResult,
+    MemoryGraphWriteCommand,
     NodeFilter,
     NodeProjection,
     NodeSort,
@@ -96,6 +98,15 @@ class MemoryStorageService:
             data: dict,
     ) -> StorageWriteResult:
         return await self._write_router.save_node(label, data)
+
+    async def save_memory_graph(
+            self,
+            command: MemoryGraphWriteCommand,
+    ) -> GraphWriteResult:
+        return await self._write_router.save_memory_graph(command)
+
+    async def save_memory_summaries(self, summaries) -> GraphWriteResult:
+        return await self._write_router.save_memory_summaries(summaries)
 
     async def update_node(
             self,

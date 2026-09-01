@@ -167,6 +167,10 @@ class BackendFactory:
     def get_relationship_client(self) -> BaseClient:
         return self.get_client(BackendType.NEO4J)
 
+    def get_graph_write_client(self) -> BaseClient:
+        """Return the transactional graph writer client."""
+        return self.get_client(BackendType.NEO4J)
+
     async def close(self) -> None:
         async with self._lock:
             clients = tuple(self._clients.values())

@@ -23,6 +23,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, Dict, List, Optional
 
 from app.core.memory.exceptions import MemoryExtractionBusinessError
+from app.core.memory.storage.outbox.exceptions import OutboxEnqueueError
 from app.core.memory.utils.log.bear_logger import BearLogger
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
@@ -46,9 +47,6 @@ from app.core.memory.storage_services.extraction_engine.knowledge_extraction.mem
     memory_summary_generation,
 )
 from app.core.memory.utils.name_similarity_utils import cosine_similarity
-from app.repositories.neo4j.add_nodes import add_memory_summary_nodes
-from app.repositories.neo4j.add_edges import add_memory_summary_statement_edges
-
 logger = logging.getLogger(__name__)
 bear = BearLogger("memory.pipeline")
 
@@ -237,6 +235,7 @@ class WritePipeline:
         self._llm_client = None
         self._embedder_client = None
         self._neo4j_connector = None
+        self._storage_service = None
 
         # 存储阶段锁（延迟初始化）
         self._store_lock = None
@@ -568,8 +567,7 @@ class WritePipeline:
                     async with bear.step(5, 6, "摘要", "写入情景记忆") as s:
                         try:
                             summaries = await summary_gen_task
-                            await add_memory_summary_nodes(summaries, self._neo4j_connector)
-                            await add_memory_summary_statement_edges(summaries, self._neo4j_connector)
+                            await self._storage_service.save_memory_summaries(summaries)
                             s.metadata(summary_count=len(summaries))
                             # 摘要成功写入 Neo4j 后，同步保存为 PG 展示记录
                             if summaries:
@@ -586,6 +584,9 @@ class WritePipeline:
                                         f"[MemoryDisplayRecord] PG 展示记录写入异常（不影响主流程）: {e}",
                                         exc_info=True,
                                     )
+                        except OutboxEnqueueError:
+                            # Neo4j 已提交但投影事件未落库，必须让上游看到失败并补偿。
+                            raise
                         except Exception as e:
                             logger.error(f"Memory summary step failed: {e}", exc_info=True)
 
@@ -761,14 +762,14 @@ class WritePipeline:
 
     async def _store(self, result: ExtractionResult) -> bool:
         """存储：永久容量分配 → 别名清洗 → Neo4j 写入（含死锁重试）。"""
+        from app.core.memory.storage.models import MemoryGraphWriteCommand
         from app.repositories.neo4j.cypher_queries import PERMANENT_MEMORY_COUNT
-        from app.repositories.neo4j.graph_saver import (
-            save_dialog_and_statements_to_neo4j,
-        )
         from app.services.memory_value_ranking_service import (
             assign_permanent_memory_slots,
             disable_permanent_candidates,
         )
+
+        await self._init_storage_service()
 
         await self._clean_cross_role_aliases(result.entity_nodes)
 
@@ -809,39 +810,29 @@ class WritePipeline:
                 )
 
         max_retries = 3
+        command = MemoryGraphWriteCommand(
+            dialogue_nodes=result.dialogue_nodes,
+            chunk_nodes=result.chunk_nodes,
+            statement_nodes=result.statement_nodes,
+            entity_nodes=result.entity_nodes,
+            perceptual_nodes=result.perceptual_nodes,
+            statement_chunk_edges=result.stmt_chunk_edges,
+            statement_entity_edges=result.stmt_entity_edges,
+            entity_edges=result.entity_entity_edges,
+            perceptual_edges=result.perceptual_edges,
+            assistant_original_nodes=result.assistant_original_nodes,
+            assistant_pruned_nodes=result.assistant_pruned_nodes,
+            assistant_pruned_edges=result.assistant_pruned_edges,
+            conversation_nodes=result.conversation_nodes,
+            assistant_conversation_edges=result.assistant_conversation_edges,
+            user_source_nodes=result.user_source_nodes,
+            user_source_edges=result.user_source_edges,
+        )
         for attempt in range(max_retries):
             try:
-                success = await save_dialog_and_statements_to_neo4j(
-                    dialogue_nodes=result.dialogue_nodes,
-                    chunk_nodes=result.chunk_nodes,
-                    statement_nodes=result.statement_nodes,
-                    entity_nodes=result.entity_nodes,
-                    perceptual_nodes=result.perceptual_nodes,
-                    statement_chunk_edges=result.stmt_chunk_edges,
-                    statement_entity_edges=result.stmt_entity_edges,
-                    entity_edges=result.entity_entity_edges,
-                    perceptual_edges=result.perceptual_edges,
-                    connector=self._neo4j_connector,
-                    assistant_original_nodes=result.assistant_original_nodes,
-                    assistant_pruned_nodes=result.assistant_pruned_nodes,
-                    assistant_pruned_edges=result.assistant_pruned_edges,
-                    conversation_nodes=result.conversation_nodes,
-                    assistant_conversation_edges=result.assistant_conversation_edges,
-                    user_source_nodes=result.user_source_nodes,
-                    user_source_edges=result.user_source_edges,
-                )
-                if success:
-                    logger.debug("Successfully saved all data to Neo4j")
-                    return True
-                # 写入返回 False（部分失败）
-                if attempt < max_retries - 1:
-                    logger.warning(
-                        f"Neo4j 写入部分失败，重试 ({attempt + 2}/{max_retries})"
-                    )
-                    await asyncio.sleep(1 * (attempt + 1))
-                else:
-                    logger.error(f"Neo4j 写入在 {max_retries} 次尝试后仍部分失败")
-                    return False
+                await self._storage_service.save_memory_graph(command)
+                logger.debug("Successfully saved all data to Neo4j and outbox")
+                return True
             except Exception as e:
                 if self._is_deadlock(e) and attempt < max_retries - 1:
                     logger.warning(f"Neo4j 死锁，重试 ({attempt + 2}/{max_retries})")
@@ -1230,6 +1221,15 @@ class WritePipeline:
 
         from app.repositories.neo4j.neo4j_connector import Neo4jConnector
         self._neo4j_connector = Neo4jConnector()
+
+    async def _init_storage_service(self) -> None:
+        """获取进程级 storage service；API 与 Celery 路径均可惰性初始化。"""
+        if self._storage_service is not None:
+            return
+
+        from app.core.memory.storage.service import initialize_storage_service
+
+        self._storage_service = await initialize_storage_service()
 
     def _load_ontology_types(self):
         """
