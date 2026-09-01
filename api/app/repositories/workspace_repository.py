@@ -1,4 +1,5 @@
 import uuid
+from datetime import timedelta
 from typing import List, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -6,12 +7,14 @@ from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import select
 
 from app.core.logging_config import get_db_logger
+from app.core.utils.datetime_utils import utcnow_naive
 from app.models.user_model import User
 from app.models.workspace_model import Workspace, WorkspaceMember, WorkspaceRole
 from app.schemas.workspace_schema import WorkspaceCreate
 
 # 获取数据库专用日志器
 db_logger = get_db_logger()
+_RETENTION_GRACE_PERIOD_DAYS = 3
 
 
 class WorkspaceRepository:
@@ -87,20 +90,51 @@ class WorkspaceRepository:
             workspace_id: uuid.UUID,
             retention_days: int | None,
     ) -> int | None:
-        """更新工作空间的临时身份保留天数并提交事务。"""
+        """Update retention and mark newly expired identities in one transaction.
+
+        Args:
+            workspace_id: Workspace whose retention policy is updated.
+            retention_days: New retention duration, or ``None`` for no expiration.
+        """
         try:
             workspace = (
                 self.db.query(Workspace)
                 .filter(Workspace.id == workspace_id)
+                .with_for_update()
                 .first()
             )
             if workspace is None:
                 raise ValueError(f"Workspace not found: {workspace_id}")
 
+            old_retention_days = workspace.retention_days
+            grace_period_affected_count = 0
+            if retention_days is not None and (
+                    old_retention_days is None
+                    or retention_days < old_retention_days
+            ):
+                from app.repositories.end_user_repository import EndUserRepository
+
+                reference_time = utcnow_naive()
+                grace_period_affected_count = EndUserRepository(
+                    self.db
+                ).mark_grace_period_for_expired_users(
+                    workspace_id=workspace_id,
+                    retention_days=retention_days,
+                    grace_period_until=(
+                        reference_time + timedelta(days=_RETENTION_GRACE_PERIOD_DAYS)
+                    ),
+                    reference_time=reference_time,
+                )
+
             workspace.retention_days = retention_days
             self.db.add(workspace)
             self.db.commit()
             self.db.refresh(workspace)
+            db_logger.info(
+                f"更新工作空间保留天数成功: workspace_id={workspace_id}, "
+                f"retention_days={workspace.retention_days}, "
+                f"grace_period_affected_count={grace_period_affected_count}"
+            )
             return workspace.retention_days
         except Exception as e:
             self.db.rollback()
