@@ -139,7 +139,7 @@ def _build_from_binding(
         base_url=binding.base_url,
         capabilities=config.capabilities,
         is_omni=config.is_omni,
-        params=dict(config.config),
+        params={},
         runtime_options=runtime_options,
     )
 
