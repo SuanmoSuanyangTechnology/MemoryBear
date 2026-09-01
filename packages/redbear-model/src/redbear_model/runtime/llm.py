@@ -65,11 +65,15 @@ class StructResponse:
             if isinstance(content, str):
                 return content
             if isinstance(content, list):
-                return "".join(
-                    str(block.get("text", ""))
-                    for block in content
-                    if isinstance(block, dict) and block.get("type") == "text"
-                )
+                parts: list[str] = []
+                for block in content:
+                    if not isinstance(block, dict):
+                        continue
+                    if block.get("type") == "text":
+                        parts.append(block.get("text") or "")
+                    elif block.get("text"):
+                        parts.append(block.get("text") or "")
+                return "".join(parts)
             return str(content) if content else ""
         raise RuntimeError(f"Unsupported structured response type: {type(other)}")
 
