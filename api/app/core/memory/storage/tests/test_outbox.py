@@ -7,6 +7,7 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
+from app.core.memory.storage.enums import MemoryNodeType
 from app.core.memory.storage.models import NodeFilter, StorageReadResult
 from app.core.memory.storage.outbox.clients import (
     ProjectionClients, project_event,
@@ -44,11 +45,11 @@ def repository():
 ])
 def test_input_rejects_invalid_fields(kwargs):
     with pytest.raises(ValidationError):
-        OutboxEventInput(**({"label": "Statement", "node_id": "n"} | kwargs))
+        OutboxEventInput(**({"label": MemoryNodeType.STATEMENT, "node_id": "n"} | kwargs))
 
 
 def test_input_immutable_and_business_id_unchanged():
-    value = OutboxEventInput(label="Statement", node_id=" n ")
+    value = OutboxEventInput(label=MemoryNodeType.STATEMENT, node_id=" n ")
     assert value.node_id == " n "
     with pytest.raises(ValidationError):
         value.node_id = "different"
@@ -58,7 +59,7 @@ async def test_producer_empty_and_failure_contract():
     repo = Mock(enqueue_many=AsyncMock(side_effect=RuntimeError("secret SQL document password")))
     assert await enqueue_events([], repository=repo) == []
     repo.enqueue_many.assert_not_awaited()
-    value = OutboxEventInput(label="Statement", node_id="n")
+    value = OutboxEventInput(label=MemoryNodeType.STATEMENT, node_id="n")
     with pytest.raises(OutboxEnqueueError) as caught:
         await enqueue_events([value], repository=repo)
     assert caught.value.primary_committed is True

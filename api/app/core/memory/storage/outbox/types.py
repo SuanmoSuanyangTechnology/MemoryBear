@@ -4,7 +4,7 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.core.memory.storage.enums import MemoryNodeType
+from app.core.memory.storage.enums import MemoryNodeLabel
 
 MAX_ATTEMPTS = 3  # 包含首次尝试；刻意不可配置。
 
@@ -20,7 +20,7 @@ class OutboxEventInput(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
     id: UUID = Field(default_factory=uuid4)
-    label: MemoryNodeType
+    label: MemoryNodeLabel
     node_id: str
     operation: OutboxOperation = OutboxOperation.UPSERT
 

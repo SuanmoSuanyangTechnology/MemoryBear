@@ -38,6 +38,14 @@ class MemoryNodeType(MemoryNodeLabel):
     USER_SOURCE = 'UserSource'
 
 
+class RelationshipScope(StrEnum):
+    """Graph element addressed by relationship projection or sorting."""
+
+    SOURCE = "source"
+    RELATIONSHIP = "relationship"
+    TARGET = "target"
+
+
 class MemoryRelationshipType(StrEnum):
     """Neo4j physical relationship types used by the memory graph."""
 
