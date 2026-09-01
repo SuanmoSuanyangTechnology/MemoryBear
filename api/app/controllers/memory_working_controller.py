@@ -263,7 +263,6 @@ async def get_source_messages(
         return success(
             data={
                 "items": [],
-                "total": 0,
                 "source": source,
                 "page": {"page": page, "pagesize": pagesize, "total": 0, "hasnext": False},
             },
@@ -294,7 +293,6 @@ async def get_source_messages(
     return success(
         data={
             "items": items,
-            "total": total,
             "source": source,
             "page": {
                 "page": page,
