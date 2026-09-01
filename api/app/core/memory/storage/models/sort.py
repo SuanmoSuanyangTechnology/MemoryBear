@@ -3,7 +3,7 @@ from typing import Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from app.core.memory.storage.models.projection import RelationshipProjectionScope
+from app.core.memory.storage.enums import RelationshipScope
 
 
 class SortDirection(StrEnum):
@@ -59,7 +59,7 @@ class NodeSort(BaseModel):
 class RelationshipSortField(SortField):
     """A sort field bound to one element of a relationship traversal."""
 
-    scope: RelationshipProjectionScope = RelationshipProjectionScope.TARGET
+    scope: RelationshipScope = RelationshipScope.TARGET
 
 
 class RelationshipSort(BaseModel):
@@ -84,7 +84,7 @@ class RelationshipSort(BaseModel):
     @classmethod
     def asc(
             cls,
-            scope: RelationshipProjectionScope,
+            scope: RelationshipScope,
             *fields: str,
     ) -> Self:
         return cls(
@@ -101,7 +101,7 @@ class RelationshipSort(BaseModel):
     @classmethod
     def desc(
             cls,
-            scope: RelationshipProjectionScope,
+            scope: RelationshipScope,
             *fields: str,
     ) -> Self:
         return cls(

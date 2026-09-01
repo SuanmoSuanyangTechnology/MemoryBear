@@ -1,11 +1,11 @@
 from collections.abc import Mapping
 from typing import Any
 
+from app.core.memory.storage.enums import RelationshipScope
 from app.core.memory.storage.models import (
     CoalesceProjectionField,
     NodeProjection,
     RelationshipProjection,
-    RelationshipProjectionScope,
 )
 from app.core.memory.storage.models.projection import ProjectionItem
 
@@ -66,10 +66,10 @@ def _escape_identifier(identifier: str) -> str:
     return identifier.replace("`", "``")
 
 
-_RELATIONSHIP_SCOPE_VARIABLES: Mapping[RelationshipProjectionScope, str] = {
-    RelationshipProjectionScope.SOURCE: "source",
-    RelationshipProjectionScope.RELATIONSHIP: "r",
-    RelationshipProjectionScope.TARGET: "target",
+_RELATIONSHIP_SCOPE_VARIABLES: Mapping[RelationshipScope, str] = {
+    RelationshipScope.SOURCE: "source",
+    RelationshipScope.RELATIONSHIP: "r",
+    RelationshipScope.TARGET: "target",
 }
 
 

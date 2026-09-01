@@ -1,8 +1,8 @@
 from typing import Any
 
+from app.core.memory.storage.enums import RelationshipScope
 from app.core.memory.storage.models import (
     NodeSort,
-    RelationshipProjectionScope,
     RelationshipSort,
 )
 
@@ -28,9 +28,9 @@ def compile_neo4j_sort(
 
 
 _RELATIONSHIP_SCOPE_VARIABLES = {
-    RelationshipProjectionScope.SOURCE: "source",
-    RelationshipProjectionScope.RELATIONSHIP: "r",
-    RelationshipProjectionScope.TARGET: "target",
+    RelationshipScope.SOURCE: "source",
+    RelationshipScope.RELATIONSHIP: "r",
+    RelationshipScope.TARGET: "target",
 }
 
 

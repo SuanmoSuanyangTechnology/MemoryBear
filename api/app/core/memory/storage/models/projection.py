@@ -1,9 +1,8 @@
-from enum import StrEnum
 from typing import Any, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from app.core.memory.storage.enums import MemoryNodeType
+from app.core.memory.storage.enums import MemoryNodeType, RelationshipScope
 
 
 class ProjectionField(BaseModel):
@@ -101,20 +100,12 @@ class NodeProjection(BaseModel):
         return cls(fields=fields)
 
 
-class RelationshipProjectionScope(StrEnum):
-    """Graph element a relationship-projection field is read from."""
-
-    SOURCE = "source"
-    RELATIONSHIP = "relationship"
-    TARGET = "target"
-
-
 class RelationshipProjectionField(BaseModel):
     """A single output field read from one endpoint or the relationship."""
 
     model_config = ConfigDict(frozen=True)
 
-    scope: RelationshipProjectionScope = RelationshipProjectionScope.TARGET
+    scope: RelationshipScope = RelationshipScope.TARGET
     field: str = Field(min_length=1)
     alias: str | None = None
 

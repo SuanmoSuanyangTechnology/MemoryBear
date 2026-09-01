@@ -1,6 +1,10 @@
 import asyncio
 
-from app.core.memory.storage.enums import MemoryNodeType, MemoryRelationshipType
+from app.core.memory.storage.enums import (
+    MemoryNodeType,
+    MemoryRelationshipType,
+    RelationshipScope,
+)
 from app.core.memory.storage.models import (
     FilterCondition,
     FilterOperator,
@@ -9,7 +13,6 @@ from app.core.memory.storage.models import (
     RelationshipPattern,
     RelationshipProjection,
     RelationshipProjectionField,
-    RelationshipProjectionScope,
 )
 from app.core.memory.storage.service import get_storage_service
 
@@ -31,21 +34,21 @@ async def search_related_entities(
     )
     projection = RelationshipProjection.of(
         RelationshipProjectionField(
-            scope=RelationshipProjectionScope.TARGET,
+            scope=RelationshipScope.TARGET,
             field="id",
         ),
         RelationshipProjectionField(
-            scope=RelationshipProjectionScope.SOURCE,
+            scope=RelationshipScope.SOURCE,
             field="name",
             alias="source_name",
         ),
         RelationshipProjectionField(
-            scope=RelationshipProjectionScope.RELATIONSHIP,
+            scope=RelationshipScope.RELATIONSHIP,
             field="predicate",
             alias="relation_predicate",
         ),
         RelationshipProjectionField(
-            scope=RelationshipProjectionScope.TARGET,
+            scope=RelationshipScope.TARGET,
             field="name",
             alias="target_name",
         ),
@@ -103,12 +106,12 @@ async def get_user_sources_for_entities(
     )
     projection = RelationshipProjection.of(
         RelationshipProjectionField(
-            scope=RelationshipProjectionScope.TARGET,
+            scope=RelationshipScope.TARGET,
             field="id",
             alias="entity_id",
         ),
         RelationshipProjectionField(
-            scope=RelationshipProjectionScope.SOURCE,
+            scope=RelationshipScope.SOURCE,
             field="original_text",
         ),
     )
@@ -161,27 +164,27 @@ async def get_entity_pair_relations(
     )
     projection = RelationshipProjection.of(
         RelationshipProjectionField(
-            scope=RelationshipProjectionScope.SOURCE,
+            scope=RelationshipScope.SOURCE,
             field="id",
             alias="source_id",
         ),
         RelationshipProjectionField(
-            scope=RelationshipProjectionScope.SOURCE,
+            scope=RelationshipScope.SOURCE,
             field="name",
             alias="source_name",
         ),
         RelationshipProjectionField(
-            scope=RelationshipProjectionScope.RELATIONSHIP,
+            scope=RelationshipScope.RELATIONSHIP,
             field="predicate",
             alias="relation_predicate",
         ),
         RelationshipProjectionField(
-            scope=RelationshipProjectionScope.TARGET,
+            scope=RelationshipScope.TARGET,
             field="id",
             alias="target_id",
         ),
         RelationshipProjectionField(
-            scope=RelationshipProjectionScope.TARGET,
+            scope=RelationshipScope.TARGET,
             field="name",
             alias="target_name",
         ),

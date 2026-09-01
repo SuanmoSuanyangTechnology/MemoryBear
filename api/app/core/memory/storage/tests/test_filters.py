@@ -7,6 +7,7 @@ from app.core.memory.storage.enums import (
     BackendType,
     MemoryNodeType,
     MemoryRelationshipType,
+    RelationshipScope,
 )
 from app.core.memory.storage.models import (
     FilterCondition,
@@ -18,7 +19,6 @@ from app.core.memory.storage.models import (
     RelationshipFilter,
     RelationshipProjection,
     RelationshipProjectionField,
-    RelationshipProjectionScope,
     RelationshipSort,
     RelationshipSortField,
     SortDirection,
@@ -591,37 +591,37 @@ def test_node_sort_convenience_constructors_set_direction() -> None:
 
 def test_relationship_sort_supports_scoped_fields() -> None:
     source_sort = RelationshipSort.desc(
-        RelationshipProjectionScope.SOURCE,
+        RelationshipScope.SOURCE,
         "created_at",
     )
     same_name_different_scopes = RelationshipSort(
         fields=(
             RelationshipSortField(
-                scope=RelationshipProjectionScope.SOURCE,
+                scope=RelationshipScope.SOURCE,
                 field="name",
             ),
             RelationshipSortField(
-                scope=RelationshipProjectionScope.TARGET,
+                scope=RelationshipScope.TARGET,
                 field="name",
             ),
         )
     )
 
-    assert source_sort.fields[0].scope == RelationshipProjectionScope.SOURCE
+    assert source_sort.fields[0].scope == RelationshipScope.SOURCE
     assert source_sort.fields[0].direction == SortDirection.DESC
     assert len(same_name_different_scopes.fields) == 2
 
     with pytest.raises(ValidationError):
-        RelationshipSort.asc(RelationshipProjectionScope.RELATIONSHIP)
+        RelationshipSort.asc(RelationshipScope.RELATIONSHIP)
     with pytest.raises(ValidationError):
         RelationshipSort(
             fields=(
                 RelationshipSortField(
-                    scope=RelationshipProjectionScope.TARGET,
+                    scope=RelationshipScope.TARGET,
                     field="name",
                 ),
                 RelationshipSortField(
-                    scope=RelationshipProjectionScope.TARGET,
+                    scope=RelationshipScope.TARGET,
                     field="name",
                     direction=SortDirection.DESC,
                 ),
@@ -633,17 +633,17 @@ def test_neo4j_relationship_sort_compiles_each_scope() -> None:
     relationship_sort = RelationshipSort(
         fields=(
             RelationshipSortField(
-                scope=RelationshipProjectionScope.SOURCE,
+                scope=RelationshipScope.SOURCE,
                 field="created_at",
                 direction=SortDirection.DESC,
             ),
             RelationshipSortField(
-                scope=RelationshipProjectionScope.RELATIONSHIP,
+                scope=RelationshipScope.RELATIONSHIP,
                 field="weight",
                 direction=SortDirection.ASC,
             ),
             RelationshipSortField(
-                scope=RelationshipProjectionScope.TARGET,
+                scope=RelationshipScope.TARGET,
                 field="name",
                 direction=SortDirection.ASC,
             ),
@@ -1093,7 +1093,7 @@ async def test_neo4j_get_relationship_uses_pattern() -> None:
         ),
         rel_filter,
         sort=RelationshipSort.desc(
-            RelationshipProjectionScope.TARGET,
+            RelationshipScope.TARGET,
             "created_at",
         ),
     )
@@ -1121,17 +1121,17 @@ async def test_neo4j_relationship_projection_and_sort_keep_all_variables() -> No
     client.client = driver  # type: ignore[assignment]
     projection = RelationshipProjection.of(
         RelationshipProjectionField(
-            scope=RelationshipProjectionScope.SOURCE,
+            scope=RelationshipScope.SOURCE,
             field="name",
             alias="source_name",
         ),
         RelationshipProjectionField(
-            scope=RelationshipProjectionScope.RELATIONSHIP,
+            scope=RelationshipScope.RELATIONSHIP,
             field="predicate",
             alias="relation_predicate",
         ),
         RelationshipProjectionField(
-            scope=RelationshipProjectionScope.TARGET,
+            scope=RelationshipScope.TARGET,
             field="name",
             alias="target_name",
         ),
@@ -1149,17 +1149,17 @@ async def test_neo4j_relationship_projection_and_sort_keep_all_variables() -> No
         sort=RelationshipSort(
             fields=(
                 RelationshipSortField(
-                    scope=RelationshipProjectionScope.SOURCE,
+                    scope=RelationshipScope.SOURCE,
                     field="created_at",
                     direction=SortDirection.DESC,
                 ),
                 RelationshipSortField(
-                    scope=RelationshipProjectionScope.RELATIONSHIP,
+                    scope=RelationshipScope.RELATIONSHIP,
                     field="weight",
                     direction=SortDirection.ASC,
                 ),
                 RelationshipSortField(
-                    scope=RelationshipProjectionScope.TARGET,
+                    scope=RelationshipScope.TARGET,
                     field="name",
                     direction=SortDirection.ASC,
                 ),
