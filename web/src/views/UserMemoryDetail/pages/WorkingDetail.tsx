@@ -4,12 +4,13 @@
  * @Last Modified by: ZhaoYing
  * @Last Modified time: 2026-08-14 14:51:27
  */
-import { type FC, useEffect, useState, useMemo, useRef, Fragment } from 'react'
+import { type FC, useEffect, useState, useMemo, useRef, useCallback, Fragment } from 'react'
 import clsx from 'clsx'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
-import { Row, Col, Skeleton, Button, Divider, Tooltip, Flex } from 'antd'
+import { Row, Col, Skeleton, Button, Divider, Tooltip, Flex, DatePicker, Form } from 'antd'
 import InfiniteScroll from 'react-infinite-scroll-component'
+import type { Dayjs } from 'dayjs'
 
 import RbCard from '@/components/RbCard/Card'
 import {
@@ -24,6 +25,7 @@ import { formatDateTime } from '@/utils/format'
 import Empty from '@/components/Empty'
 import RbAlert from '@/components/RbAlert'
 import ChatContent from '@/components/Chat/ChatContent'
+import SearchInput from '@/components/SearchInput'
 import type { ChatItem } from '@/components/Chat/types'
 import PageLoading from '@/components/Empty/PageLoading'
 import type { Data as SummaryData } from '../components/AboutMe'
@@ -94,6 +96,22 @@ const WorkingDetail: FC = () => {
   const [summary, setSummary] = useState<SummaryData>({} as SummaryData)
   const [selected, setSelected] = useState<Conversation | ApiMcpListItem | null>(null)
   const apiMcpMessageListRef = useRef<ApiMcpMessageListRef>(null)
+  const [filterForm] = Form.useForm<{ range?: [Dayjs, Dayjs] | null; keyword?: string; }>()
+  const formValues = Form.useWatch([], filterForm)
+
+  /** Date range + keyword filters applied to the conversation message stream. */
+  const filterParams = useMemo(() => {
+    const params: { start_date?: number; end_date?: number; keyword?: string } = {}
+    const range = formValues?.range
+    if (range && range[0] && range[1]) {
+      params.start_date = range[0].startOf('day').valueOf()
+      params.end_date = range[1].endOf('day').valueOf()
+    }
+    if (formValues?.keyword) params.keyword = formValues.keyword
+    return params
+  }, [formValues])
+  const filterParamsRef = useRef(filterParams)
+  filterParamsRef.current = filterParams
 
   /* Fetch conversation list + api/mcp data sources whenever the route user ID changes. */
   useEffect(() => {
@@ -104,6 +122,7 @@ const WorkingDetail: FC = () => {
     setData([])
     setApiMcpList([])
     setHasMore(true)
+    filterForm.resetFields()
     pageRef.current = 1
     Promise.all([getApiMcpList(), getData()])
       .then(([apiMcpItems, conversations]) => {
@@ -113,7 +132,7 @@ const WorkingDetail: FC = () => {
       .finally(() => {
         setLoading(false)
       })
-  }, [id])
+  }, [id, filterForm])
 
   const [apiMcpList, setApiMcpList] = useState<ApiMcpListItem[]>([])
   /** Load api/mcp data sources; resolves with the fetched list. */
@@ -177,10 +196,34 @@ const WorkingDetail: FC = () => {
     })
   }
 
+  const prevSelectedRef = useRef<Conversation | ApiMcpListItem | null>(null)
+  // Merged selection + filter effect: handleSelect batches resetFields + setSelected, which would
+  // otherwise fire both the selection effect and the filter effect in the same render and call
+  // fetchMessages twice. Branch on whether the selection actually changed to fetch only once.
   useEffect(() => {
     if (!id || !selected || (!(selected as Conversation)?.id && !(selected as ApiMcpListItem)?.source)) return
-    getDetail(selected)
-  }, [id, selected])
+    if (selected !== prevSelectedRef.current) {
+      prevSelectedRef.current = selected
+      getDetail(selected)
+    } else {
+      fetchMessages(selected)
+    }
+  }, [id, selected, filterParams])
+
+  /** Fetch chat messages for a conversation, applying the current date/keyword filters. */
+  const fetchMessages = useCallback((conversation: Conversation | ApiMcpListItem) => {
+    if (!id) return
+    const conversationId = (conversation as Conversation).id
+    if (!conversationId) return
+    setMessagesLoading(true)
+    getConversationMessages(id, { conversation_id: conversationId, ...filterParamsRef.current })
+      .then(res => {
+        setMessages(res as ChatItem[])
+      })
+      .finally(() => {
+        setMessagesLoading(false)
+      })
+  }, [id, filterParamsRef.current])
 
   /**
    * Fetch the chat messages for the selected conversation. For `conversation`-type
@@ -195,14 +238,7 @@ const WorkingDetail: FC = () => {
     setMessages([])
     if (conversationId) {
       setDetailLoading(true)
-      setMessagesLoading(true)
-      getConversationMessages(id, conversationId)
-        .then(res => {
-          setMessages(res as ChatItem[])
-        })
-        .finally(() => {
-          setMessagesLoading(false)
-        })
+      fetchMessages(conversation)
       getConversationDetail(id, conversationId)
         .then(res => {
           setDetail(res as Detail)
@@ -218,12 +254,19 @@ const WorkingDetail: FC = () => {
   }
 
   const handleRefresh = () => {
-    if ((selected as ApiMcpListItem)?.source) {
-      apiMcpMessageListRef.current?.refresh()
-      getUserInsight()
-    } else if (selected) {
-      getDetail(selected)
-    }
+    filterForm.resetFields()
+    setTimeout(() => {
+      if ((selected as ApiMcpListItem)?.source) {
+        apiMcpMessageListRef.current?.refresh()
+        getUserInsight()
+      } else if (selected) {
+        getDetail(selected)
+      }
+    }, 0)
+  }
+  const handleSelect = (conversation: Conversation | ApiMcpListItem) => {
+    filterForm.resetFields()
+    setSelected(conversation)
   }
   /** Derive a human-readable date range (e.g. "2024.01 - 2024.03") from message timestamps. */
   const timeRange = useMemo(() => {
@@ -281,7 +324,7 @@ const WorkingDetail: FC = () => {
                           className={clsx("rb:cursor-pointer rb:rounded-xl rb:h-12 rb:py-1! rb:px-3! rb:hover:bg-[#F6F6F6]", {
                             'rb:bg-[#171719] rb:hover:bg-[#171719]! rb:text-white': item.source === (selected as ApiMcpListItem)?.source,
                           })}
-                          onClick={() => setSelected(item)}
+                          onClick={() => handleSelect(item)}
                         >
                           <div className="rb:leading-5 rb:break-all rb:line-clamp-2 rb:flex-1">
                             {t(`userMemory.${item.source}`)}
@@ -296,7 +339,7 @@ const WorkingDetail: FC = () => {
                           className={clsx("rb:cursor-pointer rb:rounded-xl rb:h-12 rb:py-1! rb:px-3! rb:hover:bg-[#F6F6F6]", {
                             'rb:bg-[#171719] rb:hover:bg-[#171719]! rb:text-white': item.id === (selected as Conversation)?.id,
                           })}
-                          onClick={() => setSelected(item)}
+                          onClick={() => handleSelect(item)}
                         >
                           <div className="rb:size-6 rb:bg-cover rb:bg-[url('@/assets/images/userMemory/chat.svg')]"></div>
                           <Tooltip title={item.title}>
@@ -334,11 +377,27 @@ const WorkingDetail: FC = () => {
                   className="rb:h-full!"
                 >
                   <Flex vertical className="rb:h-full! rb:overflow-y-hidden!">
-                    <div className="rb:text-[#5B6167] rb:leading-4.5 rb:text-[12px]">{timeRange}</div>
-                    <Flex justify="space-between" align="center" className="rb:bg-[#F6F6F6] rb:rounded-lg rb:py-2.5! rb:pr-2.5! rb:pl-3.25! rb:mt-3!">
-                      {t('workingDetail.conversationStream')}
-                      <Button className="rb:h-6!" onClick={handleRefresh}>{t('workingDetail.refresh')}</Button>
+                    <Flex align="center" justify="space-between">
+                      <div className="rb:text-[#5B6167] rb:leading-4.5 rb:text-[12px]">{timeRange}</div>
+                      <span className="rb:text-[12px] rb:text-[#5B6167]">
+                        {t('workingDetail.total', { total: (selected as ApiMcpListItem).source ? apiMcpMessageListRef.current?.total || 0 : messages.length })}
+                      </span>
                     </Flex>
+                    <Form form={filterForm} initialValues={{ keyword: undefined, range: undefined}}>
+                      <Flex gap={8} align="center" justify="end" className="rb:bg-[#F6F6F6] rb:rounded-lg rb:py-2.5! rb:pr-2.5! rb:pl-3.25! rb:my-3!">
+                        <Form.Item name="keyword" noStyle>
+                          <SearchInput
+                            placeholder={t('workingDetail.searchPlaceholder')}
+                            variant="outlined"
+                            className="rb:w-40! rb:shrink-0!"
+                          />
+                        </Form.Item>
+                        <Form.Item name="range" noStyle>
+                          <DatePicker.RangePicker allowClear className="rb:max-w-[240px] rb:flex-1!" />
+                        </Form.Item>
+                        <Button onClick={handleRefresh}>{t('common.reset')}</Button>
+                      </Flex>
+                    </Form>
                     {(selected as ApiMcpListItem).source && id
                       ? (
                         <ApiMcpMessageList
@@ -346,6 +405,7 @@ const WorkingDetail: FC = () => {
                           endUserId={id}
                           source={(selected as ApiMcpListItem).source}
                           onMessagesChange={setMessages}
+                          filterParams={filterParams}
                         />
                       )
                       : messagesLoading

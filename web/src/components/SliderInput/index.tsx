@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:26:44 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-03-25 18:14:20
+ * @Last Modified time: 2026-08-31 10:36:11
  */
 /**
  * SliderInput Component
@@ -124,6 +124,7 @@ const SliderInput: FC<SliderInputProps> = ({
             marks={marks}
             tooltip={tooltip}
             className={sliderClassName}
+            classNames={disabled ? { track: 'rb:bg-[#171719]! rb:opacity-65' } : {}}
           />
         </Col>
         {/* Input number component */}
