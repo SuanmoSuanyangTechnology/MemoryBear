@@ -21,7 +21,8 @@ from app.schemas.response_schema import PageData, PageMeta
 from app.core.exceptions import BusinessException
 from app.core.error_codes import BizCode
 from app.core.utils.datetime_utils import utcnow_naive
-from app.utils.redis_cache import invalidate_workspace_model_options, get_json_async, set_json_async, CACHE_MISS
+from app.utils.redis_cache import (invalidate_workspace_model_options, get_json_async, set_json_async,
+                                   CACHE_MISS, invalidate_runtime_model_info, invalidate_runtime_model_info_async)
 
 logger = get_business_logger()
 
@@ -483,6 +484,7 @@ class ModelConfigService:
 
         db.commit()
         db.refresh(model)
+        invalidate_runtime_model_info(model_id)
         _invalidate_model_option_states(old_cache_state, _model_option_cache_state(model))
         return model
 
@@ -604,6 +606,7 @@ class ModelConfigService:
 
         db.commit()
         db.refresh(existing_model)
+        invalidate_runtime_model_info(model_id)
         _invalidate_model_option_states(
             old_cache_state,
             _model_option_cache_state(existing_model),
@@ -620,6 +623,7 @@ class ModelConfigService:
 
         success = ModelConfigRepository.delete(db, model_id, tenant_id=tenant_id)
         db.commit()
+        invalidate_runtime_model_info(model_id)
         _invalidate_model_option_states(old_cache_state)
         return success
 
@@ -939,6 +943,8 @@ class ModelApiKeyService:
         api_key = ModelApiKeyRepository.update(db, api_key_id, api_key_data)
         db.commit()
         db.refresh(api_key)
+        for model_config in api_key.model_configs:
+            await invalidate_runtime_model_info_async(model_config.id)
         return api_key
 
     @staticmethod
@@ -960,6 +966,8 @@ class ModelApiKeyService:
                     model_config.is_active = False
 
         db.commit()
+        for model_config_id in model_config_ids:
+            invalidate_runtime_model_info(model_config_id)
         return success
 
     @staticmethod

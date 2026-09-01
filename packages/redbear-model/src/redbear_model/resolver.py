@@ -134,12 +134,12 @@ def _build_from_binding(
         key_id=None,
         tenant_id=tenant_id,
         provider=binding.provider,
-        model_name=binding.model_name,
+        model_name=config.display_name,
         api_key=binding.api_key,
         base_url=binding.base_url,
-        capabilities=binding.capabilities or config.capabilities,
-        is_omni=binding.is_omni or config.is_omni,
-        params=dict(binding.config or config.config),
+        capabilities=config.capabilities,
+        is_omni=config.is_omni,
+        params=dict(config.config),
         runtime_options=runtime_options,
     )
 

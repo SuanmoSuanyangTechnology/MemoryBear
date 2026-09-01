@@ -40,10 +40,14 @@ def route_through_knowledge_service(
     def decorator(handler):
         @wraps(handler)
         async def wrapper(*args, **kwargs):
+            # 进程内复用方（如 SSO 模块直接调用核心控制器函数）可传
+            # _knowledge_force_local=True 强制走本地逻辑：此时没有可转发的
+            # 原始 HTTP 请求（路径也是 SSO 路径，上游并不存在），不能走代理。
+            force_local = kwargs.pop("_knowledge_force_local", False)
             from .runtime import get_knowledge_route_proxy
 
             proxy = get_knowledge_route_proxy()
-            if proxy is None:
+            if proxy is None or force_local:
                 result = handler(*args, **kwargs)
                 return await result if inspect.isawaitable(result) else result
             request = kwargs.get("request")

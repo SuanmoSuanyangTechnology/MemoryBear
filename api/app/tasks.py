@@ -5407,14 +5407,14 @@ def sync_emotion_stats_for_user(
 
     async def _run() -> Dict[str, Any]:
         start_dt, end_dt = _compute_window()
-        # shared_driver=True：连接池绑定 worker 进程内复用的 loop，不关闭
-        connector = Neo4jConnector(shared_driver=True)
+        # 每次任务独立创建非共享 driver（绑定当前 loop），用完即关——不跨任务/跨 loop 复用
+        connector = Neo4jConnector()
         return await EmotionStatsService.sync_range_for_user(
             end_user_id=end_user_id,
             start_dt=start_dt,
             end_dt=end_dt,
             connector=connector,
-            close_connector=False,
+            close_connector=True,
         )
 
     loop = set_asyncio_event_loop()
@@ -5433,7 +5433,7 @@ def sync_emotion_stats_for_user(
         retrying = True
         raise self.retry(exc=exc, countdown=60)
     finally:
-        # 清理 pending tasks + asyncgens，但不关闭 loop（shared driver 绑定）
+        # 清理 pending tasks + asyncgens，保留 loop 供当前线程的下个任务复用
         _shutdown_loop_gracefully(loop)
         # 解锁时机：
         # 1. 成功（retrying=False）：主动删除在途锁，下轮扫描可重新派发；

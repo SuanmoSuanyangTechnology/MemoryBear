@@ -3018,6 +3018,8 @@ class AgentRunService:
                         return value
                     if isinstance(value, (dict, list)):
                         return value
+                    if hasattr(value, "model_dump"):
+                        return value.model_dump()
                     if hasattr(value, 'dict'):
                         return value.dict()
                     if hasattr(value, '__dict__'):

@@ -20,6 +20,7 @@ from app.dependencies import get_current_user, oauth2_scheme
 from app.models.user_model import User
 from app.i18n.dependencies import get_translator
 from app.core.alert_metric_bridge import report_login_failure_async
+from app.invalidation_notify import notify_user_async
 
 # 获取专用日志器
 auth_logger = get_auth_logger()
@@ -139,7 +140,10 @@ async def login_for_access_token(
     user_service.update_last_login_time(db, user.id)
     
     auth_logger.info(f"用户 {user.username} 登录成功")
-    
+
+    # 决策 #11 修订：登录成功即发通知，identity 重建/刷新快照（新用户首个请求可用）
+    await notify_user_async(str(user.id))
+
     return success(
         data=Token(
             access_token=access_token,
@@ -197,7 +201,10 @@ async def refresh_token(
         await SessionService.set_user_active_session(user.id, new_access_token_id, access_expires_at)
     
     auth_logger.info(f"用户 {user.id} token刷新成功")
-    
+
+    # 决策 #11 修订：refresh 成功即发通知（会话滑动事件，覆盖快照已过期的回归用户）
+    await notify_user_async(str(user.id))
+
     return success(
         data=Token(
             access_token=new_access_token,

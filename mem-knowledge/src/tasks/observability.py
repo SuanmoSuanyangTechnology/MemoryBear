@@ -233,9 +233,12 @@ class DocumentProgressSink:
 
     @staticmethod
     def _append_message(current: str | None, messages: Sequence[str]) -> str:
-        lines = [current.rstrip("\n")] if current else []
-        lines.extend(message.rstrip("\n") for message in messages if message)
-        return "\n".join(line for line in lines if line) + ("\n" if lines else "")
+        current_text = current.rstrip("\n") if current else ""
+        pending_text = "\n".join(message.rstrip("\n") for message in messages if message)
+        # Legacy processors may persist the complete snapshot before terminal flush.
+        if pending_text and f"\n{pending_text}\n" not in f"\n{current_text}\n":
+            current_text = "\n".join(text for text in (current_text, pending_text) if text)
+        return f"{current_text}\n" if current_text else ""
 
     def _should_flush(self, event: TaskEvent, now: float) -> bool:
         return (
