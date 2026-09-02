@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from collections.abc import Mapping
 from typing import Annotated, Any
 from urllib.parse import quote
 
@@ -60,6 +61,54 @@ from ..schemas.knowledge import KnowledgeCreate, KnowledgeUpdate
 router = APIRouter(prefix="/knowledges", tags=["knowledges"])
 
 logger = logging.getLogger(__name__)
+
+_MODEL_UNAVAILABLE_STATUS_REASONS = {
+    401: "Invalid API key for the selected model",
+    403: "The selected model API key is not authorized",
+    404: "The selected model is not available from the provider",
+    429: "The selected model is currently rate limited",
+}
+
+
+def _provider_status_code(exc: BaseException) -> int | None:
+    pending: list[BaseException] = [exc]
+    seen: set[int] = set()
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        response = getattr(current, "response", None)
+        status = getattr(current, "status_code", None)
+        if status is None:
+            status = getattr(response, "status_code", None)
+        if status is None and isinstance(response, Mapping):
+            status = response.get("status_code")
+        try:
+            if status is not None:
+                return int(status)
+        except (TypeError, ValueError):
+            pass
+        for wrapped in (current.__cause__, current.__context__):
+            if isinstance(wrapped, BaseException):
+                pending.append(wrapped)
+    return None
+
+
+def _model_unavailable_reason(exc: BaseException) -> str:
+    status_code = _provider_status_code(exc)
+    if status_code in _MODEL_UNAVAILABLE_STATUS_REASONS:
+        return _MODEL_UNAVAILABLE_STATUS_REASONS[status_code]
+    error_type = type(exc).__name__.lower()
+    if "timeout" in error_type:
+        return "The selected model request timed out"
+    if "connection" in error_type:
+        return "Unable to connect to the selected model provider"
+    if "validation" in error_type:
+        return "The selected model returned an invalid response"
+    if status_code is not None:
+        return f"The selected model provider rejected the request (HTTP {status_code})"
+    return "The selected model is unavailable"
 
 
 def _success(
@@ -131,7 +180,20 @@ async def get_knowledge_graph_entity_types(
                 response_code=400,
                 response_style="http",
             ) from exc
-    result = await graph_service.graph_entity_types(runtime, resolved, scenario)
+    try:
+        result = await graph_service.graph_entity_types(runtime, resolved, scenario)
+    except KnowledgeError:
+        raise
+    except Exception as exc:
+        reason = _model_unavailable_reason(exc)
+        logger.warning(
+            "Graph entity type model unavailable llm_id=%s error_type=%s "
+            "provider_status=%s",
+            llm_id,
+            type(exc).__name__,
+            _provider_status_code(exc),
+        )
+        raise KnowledgeError.from_code("KB_MODEL_UNAVAILABLE", reason) from exc
     return _success(
         request,
         result,

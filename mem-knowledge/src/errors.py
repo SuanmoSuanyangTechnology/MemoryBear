@@ -28,7 +28,7 @@ ERROR_DEFINITIONS = {
     "KB_TASK_DISPATCH_FAILED": ErrorDefinition(500, True, 10001, "internal"),
     "KB_STORAGE_UNAVAILABLE": ErrorDefinition(500, True, 10001, "internal"),
     "KB_SEARCH_UNAVAILABLE": ErrorDefinition(500, True, 10001, "internal"),
-    "KB_MODEL_UNAVAILABLE": ErrorDefinition(500, True, 10001, "internal"),
+    "KB_MODEL_UNAVAILABLE": ErrorDefinition(400, False, 400, "http"),
     "KB_DATABASE_UNAVAILABLE": ErrorDefinition(500, True, 10001, "internal"),
     "KB_INTERNAL_ERROR": ErrorDefinition(500, False, 10001, "internal"),
 }
