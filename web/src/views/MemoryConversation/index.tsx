@@ -378,7 +378,7 @@ const MemoryConversation: FC = () => {
       <Flex vertical={layoutMode !== 'horizontal'}
         className={clsx({
           'rb:h-full! rb:min-h-0! rb:overflow-y-auto! rb:flex-1!': layoutMode === 'mixed',
-          'rb:gap-x-4!': layoutMode === 'horizontal',
+          'rb:gap-x-4! rb:flex-1!': layoutMode === 'horizontal',
           'rb:gap-y-4!': layoutMode !== 'horizontal',
         })}
       >
