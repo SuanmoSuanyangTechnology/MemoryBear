@@ -1183,35 +1183,6 @@ def get_retrieve_types(
     return success(msg="Successfully obtained the retrieval type", data=list(chunk_schema.RetrieveType))
 
 
-def _retrieval_request(
-        retrieve_data: chunk_schema.ChunkRetrieve,
-        source: chunk_schema.KnowledgeRetrievalSource,
-) -> KnowledgeRetrievalRequest:
-    payload = retrieve_data.model_dump(exclude_none=True)
-    if (
-        "vector_similarity_weight" in retrieve_data.model_fields_set
-        and retrieve_data.vector_similarity_weight is None
-    ):
-        payload["vector_similarity_weight"] = None
-    explicit_rerank_mode = retrieve_data.rerank_mode is not None or any(
-        config.rerank_mode is not None
-        for config in retrieve_data.knowledge_bases
-    )
-    if (
-        source is chunk_schema.KnowledgeRetrievalSource.EXTERNAL_API
-        and not explicit_rerank_mode
-    ):
-        payload.pop("rerank_weights", None)
-        payload["knowledge_bases"] = []
-    else:
-        payload["knowledge_bases"] = [
-            config.model_dump(include=config.model_fields_set | {"kb_id"})
-            for config in retrieve_data.knowledge_bases
-        ]
-    payload["source"] = source
-    return KnowledgeRetrievalRequest(**payload)
-
-
 async def retrieve_chunks_with_source(
         retrieve_data: chunk_schema.ChunkRetrieve,
         principal: RetrievalPrincipal | None,
@@ -1237,7 +1208,9 @@ async def retrieve_chunks_with_source(
     )
 
     try:
-        request = _retrieval_request(retrieve_data, source)
+        retrieval_payload = retrieve_data.model_dump(exclude_none=True)
+        retrieval_payload["source"] = source
+        request = KnowledgeRetrievalRequest(**retrieval_payload)
         if (
             principal is None
             or principal.id is None

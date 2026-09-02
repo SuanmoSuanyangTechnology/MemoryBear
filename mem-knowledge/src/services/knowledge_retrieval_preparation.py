@@ -14,7 +14,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..api.dependencies import Principal
 from ..api.schemas.chunk import (
     KnowledgeBaseConfig,
-    KnowledgeRetrievalSource,
     RetrieveType,
 )
 from ..api.schemas.knowledge_metadata import MetadataFilterMode
@@ -63,7 +62,6 @@ class KnowledgeRetrievalPreparation:
         request: KnowledgeRetrievalRequest,
         principal: Principal,
     ) -> RetrievalPreparation:
-        cls._validate_explicit_rerank_source(request)
         refs = await cls._resolve_retrievable_refs(db, request, principal)
         target_count = len(refs)
         local_selections = [
@@ -231,11 +229,7 @@ class KnowledgeRetrievalPreparation:
                 )
             )
             requested.extend(result.scalars().all())
-        explicit = (
-            {}
-            if request.source is KnowledgeRetrievalSource.EXTERNAL_API
-            else {config.kb_id: config for config in request.knowledge_bases}
-        )
+        explicit = {config.kb_id: config for config in request.knowledge_bases}
         requested.extend(explicit)
         refs: list[_KnowledgeRef] = []
         positions: dict[uuid.UUID, int] = {}
@@ -548,19 +542,6 @@ class KnowledgeRetrievalPreparation:
             and target_index == 0
             and not request_has_rerank_id
         )
-
-    @staticmethod
-    def _validate_explicit_rerank_source(
-        request: KnowledgeRetrievalRequest,
-    ) -> None:
-        if request.source is KnowledgeRetrievalSource.EXTERNAL_API and (
-            request.rerank_mode is not None
-            or any(config.rerank_mode is not None for config in request.knowledge_bases)
-        ):
-            raise KnowledgeError.from_code(
-                "KB_VALIDATION_ERROR",
-                "Explicit rerank modes are not available to API Key callers",
-            )
 
     @staticmethod
     def _resolve_retrieve_type(
