@@ -98,6 +98,7 @@ export default defineConfig({
       compress: {
         drop_console: false, // 移除 console
         drop_debugger: true, // 移除 debugger
+        passes: 1, // 增加压缩次数，建议2-3次
       },
     },
   },
