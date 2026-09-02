@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from ...api.schemas.chunk import RetrieveType
+from ...api.schemas.rerank import RerankMode
 from ..knowledge_graph.config import GraphPipeline
+from ..models.chunk import DocumentChunk
 
 
 @dataclass(frozen=True)
@@ -20,6 +22,34 @@ class ModelRuntimeSnapshot:
     is_omni: bool = False
     model_type: str | None = None
     resolved: Any = field(default=None, repr=False, compare=False)
+
+
+@dataclass(frozen=True)
+class RerankWeightsSnapshot:
+    semantic_weight: float
+    participle_weight: float
+
+
+@dataclass(frozen=True)
+class RerankPlan:
+    mode: RerankMode
+    weights: RerankWeightsSnapshot
+    model: ModelRuntimeSnapshot | None
+    compatibility_fallback: bool
+
+
+@dataclass(frozen=True)
+class RetrievalCandidate:
+    chunk: DocumentChunk
+    knowledge_id: uuid.UUID
+    semantic_score: float | None
+    participle_score: float | None
+    graph_score: float | None
+    final_score: float | None
+    arrival_index: int
+
+    def with_final_score(self, score: float) -> RetrievalCandidate:
+        return replace(self, final_score=score)
 
 
 @dataclass(frozen=True)
@@ -141,6 +171,9 @@ __all__ = [
     "GraphRetrievalSnapshot",
     "GraphTargetSnapshot",
     "ModelRuntimeSnapshot",
+    "RerankPlan",
+    "RerankWeightsSnapshot",
+    "RetrievalCandidate",
     "RetrievalParams",
     "RetrievalPreparation",
     "RetrievalSearchOptions",
