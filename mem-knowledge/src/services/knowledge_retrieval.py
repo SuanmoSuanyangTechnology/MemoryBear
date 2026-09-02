@@ -32,6 +32,7 @@ from ..rag.retrieval.async_elasticsearch import AsyncElasticSearchRetrieval
 from ..rag.retrieval.candidates import (
     RetrievalChannel,
     candidate_from_chunk,
+    deduplicate_candidates_first_win,
     materialize_candidates,
     merge_candidates,
 )
@@ -728,7 +729,7 @@ class KnowledgeRetrievalService:
             replace(candidate, arrival_index=index)
             for index, candidate in enumerate(candidates)
         ]
-        unique_candidates = merge_candidates(ordered_candidates)
+        unique_candidates = deduplicate_candidates_first_win(ordered_candidates)
         if not unique_candidates:
             cls._log_finalize(
                 log_id,

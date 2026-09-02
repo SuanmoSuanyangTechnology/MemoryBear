@@ -231,7 +231,11 @@ class KnowledgeRetrievalPreparation:
                 )
             )
             requested.extend(result.scalars().all())
-        explicit = {config.kb_id: config for config in request.knowledge_bases}
+        explicit = (
+            {}
+            if request.source is KnowledgeRetrievalSource.EXTERNAL_API
+            else {config.kb_id: config for config in request.knowledge_bases}
+        )
         requested.extend(explicit)
         refs: list[_KnowledgeRef] = []
         positions: dict[uuid.UUID, int] = {}

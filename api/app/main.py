@@ -9,6 +9,8 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, APIRouter
 from fastapi import HTTPException, Request
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -243,6 +245,45 @@ from app.i18n.exceptions import I18nException
 from app.i18n.service import get_translation_service
 from pydantic import ValidationError as PydanticValidationError
 
+_RERANK_VALIDATION_FIELDS = frozenset({"rerank_mode", "rerank_weights"})
+_RERANK_VALIDATION_MESSAGE = "Invalid rerank configuration"
+
+
+def _is_rerank_validation_error(exc: PydanticValidationError) -> bool:
+    return any(
+        any(part in _RERANK_VALIDATION_FIELDS for part in error.get("loc", ()))
+        for error in exc.errors()
+    )
+
+
+def _rerank_validation_response(request: Request, error_count: int) -> JSONResponse:
+    logger.warning(
+        "Rerank request validation failed",
+        extra={
+            "path": request.url.path,
+            "method": request.method,
+            "error_count": error_count,
+        },
+    )
+    return JSONResponse(
+        status_code=400,
+        content=fail(
+            code=400,
+            msg=_RERANK_VALIDATION_MESSAGE,
+            error=_RERANK_VALIDATION_MESSAGE,
+        ),
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def request_validation_error_handler(
+    request: Request,
+    exc: RequestValidationError,
+):
+    if _is_rerank_validation_error(exc):
+        return _rerank_validation_response(request, len(exc.errors()))
+    return await request_validation_exception_handler(request, exc)
+
 
 # 处理验证异常
 @app.exception_handler(ValidationException)
@@ -323,6 +364,9 @@ async def pydantic_validation_exception_handler(request: Request, exc: PydanticV
     """
     处理 Pydantic 验证错误，支持国际化
     """
+    if _is_rerank_validation_error(exc):
+        return _rerank_validation_response(request, len(exc.errors()))
+
     # 获取当前语言
     language = getattr(request.state, "language", settings.I18N_DEFAULT_LANGUAGE)
     

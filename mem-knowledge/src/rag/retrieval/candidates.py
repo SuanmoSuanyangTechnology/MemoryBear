@@ -80,6 +80,20 @@ def merge_candidates(
     return list(merged.values())
 
 
+def deduplicate_candidates_first_win(
+    candidates: Sequence[RetrievalCandidate],
+) -> list[RetrievalCandidate]:
+    seen: set[tuple[Any, ...]] = set()
+    result: list[RetrievalCandidate] = []
+    for candidate in candidates:
+        key = candidate_identity(candidate)
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(candidate)
+    return result
+
+
 def materialize_candidates(
     candidates: Sequence[RetrievalCandidate],
 ) -> list[DocumentChunk]:
@@ -99,6 +113,7 @@ __all__ = [
     "candidate_identity",
     "candidate_from_chunk",
     "chunk_identity",
+    "deduplicate_candidates_first_win",
     "materialize_candidates",
     "merge_candidates",
 ]
