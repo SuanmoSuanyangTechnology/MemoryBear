@@ -5,7 +5,7 @@ import pytest
 
 from app.core.memory.storage.enums import MemoryNodeType
 from app.core.memory.storage.models import GraphWriteResult, MemoryGraphWriteCommand
-from app.core.memory.storage.provider.neo4j import graph_writer
+from app.core.memory.storage.provider.neo4j import graph_write_queries, graph_writer
 from app.core.memory.storage.provider.neo4j.client import Neo4jClient
 
 
@@ -62,6 +62,15 @@ class Driver:
 
 def test_graph_writer_does_not_depend_on_legacy_neo4j_repository():
     assert "app.repositories.neo4j" not in inspect.getsource(graph_writer)
+
+
+def test_statement_writer_does_not_replace_missing_dates_with_blank_strings():
+    query = graph_write_queries.STATEMENT_NODE_SAVE
+
+    assert "valid_at: statement.valid_at" in query
+    assert "invalid_at: statement.invalid_at" in query
+    assert 'coalesce(statement.valid_at, "")' not in query
+    assert 'coalesce(statement.invalid_at, "")' not in query
 
 
 def empty_graph(**overrides):

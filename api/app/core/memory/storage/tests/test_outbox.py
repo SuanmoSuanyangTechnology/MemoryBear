@@ -313,6 +313,9 @@ async def test_clients_use_provider_elastic_client_without_sdk_retries(monkeypat
     clients.neo4j = Mock(
         get_node=AsyncMock(return_value=read_result([{
             "id": "node-1",
+            "statement": "",
+            "valid_at": "",
+            "invalid_at": "   ",
             "delete_at": datetime(2026, 1, 1),
         }])),
         close=AsyncMock(),
@@ -355,5 +358,8 @@ async def test_clients_use_provider_elastic_client_without_sdk_retries(monkeypat
     assert constructor.call_args.kwargs["retry_on_timeout"] is False
     assert transport.index.await_args.kwargs["document"] == {
         "id": "node-1",
+        "statement": "",
+        "valid_at": None,
+        "invalid_at": None,
         "delete_at": "2026-01-01T00:00:00Z",
     }
