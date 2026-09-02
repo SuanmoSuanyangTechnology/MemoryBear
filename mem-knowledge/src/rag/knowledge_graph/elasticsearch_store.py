@@ -192,7 +192,12 @@ class GraphElasticsearchStore:
             ],
             sort=[
                 {"metadata.sort_id": {"order": "asc", "unmapped_type": "long"}},
-                {"metadata.doc_id": {"order": "asc"}},
+                {
+                    "metadata.doc_id": {
+                        "order": "asc",
+                        "unmapped_type": "keyword",
+                    }
+                },
             ],
             context="load graph source document",
         )
@@ -250,10 +255,35 @@ class GraphElasticsearchStore:
                 "relation_key_kwd",
             ],
             sort=[
-                {"knowledge_graph_kwd": {"order": "asc"}},
-                {"entity_key_kwd": {"order": "asc", "missing": "_last"}},
-                {"relation_key_kwd": {"order": "asc", "missing": "_last"}},
-                {"source_chunk_id_kwd": {"order": "asc", "missing": "_last"}},
+                {"knowledge_graph_kwd": {"order": "asc", "unmapped_type": "keyword"}},
+                {
+                    "entity_key_kwd": {
+                        "order": "asc",
+                        "missing": "_last",
+                        "unmapped_type": "keyword",
+                    }
+                },
+                {
+                    "relation_key_kwd": {
+                        "order": "asc",
+                        "missing": "_last",
+                        "unmapped_type": "keyword",
+                    }
+                },
+                {
+                    "source_chunk_id_kwd": {
+                        "order": "asc",
+                        "missing": "_last",
+                        "unmapped_type": "keyword",
+                    }
+                },
+                {
+                    "document_id": {
+                        "order": "asc",
+                        "missing": "_last",
+                        "unmapped_type": "keyword",
+                    }
+                },
             ],
             context="load graph document evidence keys",
         )
@@ -358,8 +388,21 @@ class GraphElasticsearchStore:
                 [{"terms": {"entity_key_kwd": list(entity_keys)}}],
             ),
             sort=[
-                {"entity_key_kwd": {"order": "asc"}},
-                {"source_chunk_id_kwd": {"order": "asc", "missing": "_last"}},
+                {"entity_key_kwd": {"order": "asc", "unmapped_type": "keyword"}},
+                {
+                    "source_chunk_id_kwd": {
+                        "order": "asc",
+                        "missing": "_last",
+                        "unmapped_type": "keyword",
+                    }
+                },
+                {
+                    "document_id": {
+                        "order": "asc",
+                        "missing": "_last",
+                        "unmapped_type": "keyword",
+                    }
+                },
             ],
             context="load entity evidence",
         )
@@ -1341,8 +1384,21 @@ class GraphElasticsearchStore:
             index_name=index_name,
             query=self._graph_query(knowledge_id, RELATION_EVIDENCE, extra_filters),
             sort=[
-                {"relation_key_kwd": {"order": "asc"}},
-                {"source_chunk_id_kwd": {"order": "asc", "missing": "_last"}},
+                {"relation_key_kwd": {"order": "asc", "unmapped_type": "keyword"}},
+                {
+                    "source_chunk_id_kwd": {
+                        "order": "asc",
+                        "missing": "_last",
+                        "unmapped_type": "keyword",
+                    }
+                },
+                {
+                    "document_id": {
+                        "order": "asc",
+                        "missing": "_last",
+                        "unmapped_type": "keyword",
+                    }
+                },
             ],
             context=context,
         )
