@@ -4,15 +4,23 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable, Sequence
+from dataclasses import dataclass
 
 from ...api.schemas.rerank import RerankMode
 from ..models.chunk import DocumentChunk
 from .candidates import candidate_identity, chunk_identity, materialize_candidates
 from .models import ModelRuntimeSnapshot, RerankPlan, RetrievalCandidate
 
+
+@dataclass(frozen=True)
+class ModelRerankResult:
+    chunks: tuple[DocumentChunk, ...]
+    used_fallback: bool
+
+
 ModelRanker = Callable[
     [ModelRuntimeSnapshot, str, Sequence[DocumentChunk], int],
-    Awaitable[list[DocumentChunk]],
+    Awaitable[ModelRerankResult],
 ]
 
 
@@ -60,12 +68,8 @@ class _ModelRerankAdapter:
             return self._fallback(candidates)
 
         canonical_chunks = materialize_candidates(candidates)
-        canonical_scores = {
-            chunk_identity(chunk): (chunk.metadata or {}).get("score")
-            for chunk in canonical_chunks
-        }
         try:
-            ranked_chunks = await self._model_ranker(
+            model_result = await self._model_ranker(
                 plan.model,
                 query,
                 canonical_chunks,
@@ -82,17 +86,13 @@ class _ModelRerankAdapter:
             candidate_identity(candidate): candidate for candidate in candidates
         }
         result: list[RetrievalCandidate] = []
-        for chunk in ranked_chunks:
+        for chunk in model_result.chunks:
             identity = chunk_identity(chunk)
             candidate = candidates_by_identity.get(identity)
             if candidate is None:
                 continue
             public_score = (chunk.metadata or {}).get("score")
-            if plan.compatibility_fallback and public_score == canonical_scores.get(identity):
-                score = _fallback_score(candidate)
-            else:
-                score = float(public_score or 0.0)
-            result.append(candidate.with_final_score(score))
+            result.append(candidate.with_final_score(float(public_score or 0.0)))
         return result
 
     @staticmethod
@@ -130,4 +130,4 @@ class RerankEngine:
         return filtered[:top_k]
 
 
-__all__ = ["ModelRanker", "RerankEngine"]
+__all__ = ["ModelRanker", "ModelRerankResult", "RerankEngine"]
