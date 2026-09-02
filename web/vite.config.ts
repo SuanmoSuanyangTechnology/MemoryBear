@@ -67,25 +67,6 @@ export default defineConfig({
         main: resolve(__dirname, 'index.html'),
       },
       output: {
-        // 分块策略
-        manualChunks: (id) => {
-          if (id.includes('node_modules')) {
-            if (id.includes('react') || id.includes('react-dom')) {
-              return 'react-vendor';
-            }
-            if (id.includes('react-router')) {
-              return 'router-vendor';
-            }
-            if (id.includes('antd')) {
-              return 'antd-vendor';
-            }
-            if (id.includes('echarts')) {
-              return 'echarts-vendor';
-            }
-            // 其他第三方库
-            return 'vendor';
-          }
-        },
         // 输出文件命名
         chunkFileNames: 'assets/js/[name]-[hash].js',
         entryFileNames: 'assets/js/[name]-[hash].js',
