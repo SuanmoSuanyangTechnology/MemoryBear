@@ -20,6 +20,9 @@ if (
 ):
     raise ValueError("QUICK_SEARCH_ENTITY_LIMIT must be a non-negative integer")
 
+# 用户画像节点的 entity_type 取值，与 SEARCH_USER_METADATA 的定位条件保持一致。
+USER_PROFILE_ENTITY_TYPE = "用户"
+
 SuppressionReason = Literal[
     "CHUNK_REPLACED_BY_SUMMARY",
     "STATEMENT_REPLACED_BY_SUMMARY",
@@ -38,15 +41,28 @@ class SuppressionRecord(TypedDict):
 
 
 def is_user_profile(memory: Memory, end_user_id: str) -> bool:
-    """通过节点类型和用户 ID 识别合成画像，不依赖列表位置。"""
-    return (
-        memory.source == Neo4jNodeType.EXTRACTEDENTITY
-        and memory.id == end_user_id
-    )
+    """识别用户画像节点，不依赖列表位置。
+
+    覆盖两个来源：
+
+    - 合成画像：`MetaSearchService` 以 `end_user_id` 作为 `id` 构造，
+      图中并不存在该节点，该 ID 契约由构造方保证；
+    - 画像原节点：图中 `entity_type='用户'` 的真实 `ExtractedEntity`，
+      判据与 `SEARCH_USER_METADATA` 的 WHERE 条件一致。用 `entity_type`
+      而非 `name` 是为了兼容 name 为“我”/“User”等历史变体的节点。
+
+    `end_user_id` 为空时不做 ID 比对，避免 `id` 为空的实体被误判。
+    """
+
+    if memory.source != Neo4jNodeType.EXTRACTEDENTITY:
+        return False
+    if end_user_id and memory.id == end_user_id:
+        return True
+    return memory.data.get("entity_type") == USER_PROFILE_ENTITY_TYPE
 
 
 def count_non_profile_memories(memories: list[Memory], end_user_id: str) -> int:
-    """统计普通候选数量，不包含合成的用户画像节点。"""
+    """统计普通候选数量，不包含用户画像节点。"""
 
     return sum(not is_user_profile(memory, end_user_id) for memory in memories)
 
