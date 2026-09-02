@@ -38,6 +38,9 @@ def _retrieval_wire_payload(
 ) -> dict[str, Any]:
     normalized = request.model_copy(update={"source": context.source})
     payload = normalized.model_dump(mode="json")
+    for field_name in ("rerank_mode", "rerank_weights"):
+        if field_name not in normalized.model_fields_set:
+            payload.pop(field_name, None)
     payload["knowledge_bases"] = [
         config.model_dump(
             mode="json",
