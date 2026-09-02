@@ -91,12 +91,16 @@ const useCreateModalModels = ({ form, datasets, visible }: UseCreateModalModelsO
       const fieldKey = MODEL_TYPE_CONFIG[normalizedType]?.fieldKey || `${normalizedType}_id`;
       const workspaceField = WORKSPACE_MODEL_FIELD_BY_FORM_FIELD[fieldKey];
       const workspaceModelId = workspaceField ? workspaceModels[workspaceField] : undefined;
-      const options = normalizedType === 'llm'
+      const options = (normalizedType === 'llm'
         ? [...(modelOptionsByType.llm || []), ...(modelOptionsByType.chat || [])]
-        : modelOptionsByType[type] || [];
-      const defaultModelId = workspaceModelId || options[0]?.id || options[0]?.model_id;
+        : modelOptionsByType[type] || []);
 
-      if (defaultModelId && !form.getFieldValue(fieldKey as any)) {
+      const workspaceModel = workspaceModelId
+        ? options.find((model) => model.id === workspaceModelId || model.model_id === workspaceModelId)
+        : undefined;
+      const defaultModelId = workspaceModel?.id || options[0]?.id;
+
+      if (defaultModelId) {
         defaultValues[fieldKey] = defaultModelId;
       }
     });
@@ -123,11 +127,18 @@ const useCreateModalModels = ({ form, datasets, visible }: UseCreateModalModelsO
         setWorkspaceModels({});
       });
   };
+  const resetModelInfo = () => {
+    setCustomModels({});
+    setWorkspaceModels({});
+  };
+
+
 
   return {
     customModels,
     dynamicTypeList,
     getTypeList,
+    resetModelInfo,
   };
 };
 
