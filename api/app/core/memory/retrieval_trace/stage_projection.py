@@ -11,7 +11,7 @@ import re
 from collections.abc import Iterable
 from typing import Any
 
-from app.core.memory.enums import Neo4jNodeType
+from app.core.memory.enums import MemoryDisplayType, Neo4jNodeType
 from app.core.memory.models.service_models import (
     Memory,
     MemorySearchResult,
@@ -88,19 +88,19 @@ def profile_has_content(profile: dict[str, Any]) -> bool:
     return any(bool(value) for value in profile.values())
 
 
-def memory_type(source: Neo4jNodeType | str) -> str:
+def memory_type(source: Neo4jNodeType | str) -> MemoryDisplayType:
     value = source.value if isinstance(source, Neo4jNodeType) else str(source or "")
     if value == "memory_l0":
-        return "profile"
+        return MemoryDisplayType.PROFILE
     return {
-        "Statement": "fact",
-        "Chunk": "fact",
-        "Dialogue": "fact",
-        "ExtractedEntity": "entity",
-        "MemorySummary": "summary",
-        "Perceptual": "file",
-        "Rag": "file",
-    }.get(value, "unknown")
+        Neo4jNodeType.STATEMENT.value: MemoryDisplayType.FACT,
+        Neo4jNodeType.CHUNK.value: MemoryDisplayType.FACT,
+        Neo4jNodeType.DIALOGUE.value: MemoryDisplayType.FACT,
+        Neo4jNodeType.EXTRACTEDENTITY.value: MemoryDisplayType.ENTITY,
+        Neo4jNodeType.MEMORYSUMMARY.value: MemoryDisplayType.SUMMARY,
+        Neo4jNodeType.PERCEPTUAL.value: MemoryDisplayType.FILE,
+        Neo4jNodeType.RAG.value: MemoryDisplayType.FILE,
+    }.get(value, MemoryDisplayType.UNKNOWN)
 
 
 def _score(value: Any) -> float:
@@ -138,13 +138,18 @@ def sanitize_relevance(value: Any) -> float:
     return round(min(max(score, 0.0), 1.0), 4)
 
 
-def _memory_content(memory: Memory, kind: str, *, prefer_perceptual_display: bool = False) -> str:
+def _memory_content(
+    memory: Memory,
+    kind: MemoryDisplayType,
+    *,
+    prefer_perceptual_display: bool = False,
+) -> str:
     data = memory.data if isinstance(memory.data, dict) else {}
-    if kind == "profile":
+    if kind == MemoryDisplayType.PROFILE:
         profile = project_profile_data(MemorySearchResult(memories=[memory]))
         values = profile["core_facts"] or profile["aliases_name"] or ([profile["description"]] if profile["description"] else [])
         return display_text("；".join(values), 300)
-    if memory_type(memory.source) == "entity":
+    if kind == MemoryDisplayType.ENTITY:
         candidates = (data.get("description"), data.get("description_summary"), data.get("name"), memory.content)
     elif memory.source == Neo4jNodeType.PERCEPTUAL and prefer_perceptual_display:
         # 最终结果只展示纯解析文本；解析为空或失败时回退到已存储的 summary。
@@ -166,15 +171,15 @@ def project_memory_item(
         memory: Memory,
         rank: int,
         *,
-        kind: str | None = None,
+        kind: MemoryDisplayType | None = None,
         prefer_perceptual_display: bool = False,
 ) -> dict[str, Any]:
     resolved_kind = kind or memory_type(memory.source)
     item: dict[str, Any] = {
         "rank": rank,
-        "memory_type": resolved_kind,
+        "memory_type": resolved_kind.value,
         "source": memory.source.value if isinstance(memory.source, Neo4jNodeType) else str(memory.source),
-        "score": 1.0 if resolved_kind == "profile" else _score(memory.score),
+        "score": 1.0 if resolved_kind == MemoryDisplayType.PROFILE else _score(memory.score),
         "content": _memory_content(
             memory,
             resolved_kind,
@@ -182,7 +187,7 @@ def project_memory_item(
         ),
     }
     # Rag 与 Perceptual 都展示为文件记忆，但只有 Perceptual 有稳定的文件元数据协议。
-    if resolved_kind == "file" and memory.source == Neo4jNodeType.PERCEPTUAL:
+    if resolved_kind == MemoryDisplayType.FILE and memory.source == Neo4jNodeType.PERCEPTUAL:
         data = memory.data if isinstance(memory.data, dict) else {}
         file_data = {
             "file_name": display_text(data.get("file_name"), 1000),
@@ -223,7 +228,11 @@ def project_result_items(
     if profile_has_content(profile) and limit > 0:
         profile_memory = profile_result.memories[0] if profile_result and profile_result.memories else None
         if profile_memory:
-            items.append(project_memory_item(profile_memory, 1, kind="profile"))
+            items.append(project_memory_item(
+                profile_memory,
+                1,
+                kind=MemoryDisplayType.PROFILE,
+            ))
     if search_result:
         for memory in search_result.memories:
             if len(items) >= limit:
@@ -258,12 +267,17 @@ def project_retrieval_candidate(memory: Memory, rank: int) -> dict[str, Any]:
     final_score = finite_or_none(trace.final_score)
     if final_score is None:
         final_score = 0.0
+    resolved_kind = memory_type(memory.source)
     item: dict[str, Any] = {
         "rank": rank,
         "memory_id": str(memory.id),
-        "memory_type": memory_type(memory.source),
+        "memory_type": resolved_kind.value,
         "source": source,
-        "content": _memory_content(memory, memory_type(memory.source), prefer_perceptual_display=True),
+        "content": _memory_content(
+            memory,
+            resolved_kind,
+            prefer_perceptual_display=True,
+        ),
         "retrieval_type": trace.retrieval_type,
         "keyword_score": finite_or_none(trace.keyword_score),
         "semantic_score": finite_or_none(trace.semantic_score),
