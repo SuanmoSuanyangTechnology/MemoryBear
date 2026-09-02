@@ -340,13 +340,19 @@ class Neo4jSearchService:
             reranked = []
             if documents:
                 try:
-                    # 需要全部候选都拿到 rerank 分：Entity 配额在打分后裁剪，
-                    # 若只给前 limit 个打分，被裁掉的名额会由 0 分候选补位。
+                    # 启用 Entity 配额时必须让全部候选拿到 rerank 分：配额在打分后
+                    # 裁剪，若只给前 limit 个打分，被裁掉的名额会由 0 分候选补位。
+                    # 未启用配额的模式（DEEP/NORMAL）保持基线的 min(limit, ...)。
+                    requested_top_n = (
+                        len(documents)
+                        if entity_limit is not None
+                        else min(limit, len(documents))
+                    )
                     reranked = await asyncio.to_thread(
                         self.reranker.compress_documents,
                         documents,
                         query,
-                        top_n=len(documents)
+                        top_n=requested_top_n
                     )
                 except Exception as e:
                     if self.on_error is not None:
@@ -395,7 +401,9 @@ class Neo4jSearchService:
         rerank_status = "completed" if rerank_applied else "degraded"
         if not rerank_applied:
             degraded_reasons.append("rerank_failed")
-        elif len(index_to_score) < len(memories):
+        elif len(index_to_score) < min(limit, len(memories)):
+            # 与实际请求的 top_n 比较：模型返回数少于被要求的数量才算部分结果，
+            # 否则未开启 Entity 配额时会因 top_n=limit 恒判为 degraded。
             rerank_status = "degraded"
             degraded_reasons.append("rerank_partial_result")
 
