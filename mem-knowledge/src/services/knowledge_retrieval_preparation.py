@@ -165,7 +165,7 @@ class KnowledgeRetrievalPreparation:
                 )
         global_rerank = None
         if global_selection is not None and not single_evidence_graph_target:
-            mode, weights, explicit = global_selection
+            mode, weights, _ = global_selection
             global_rerank = RerankPlan(
                 mode=mode,
                 weights=weights,
@@ -176,9 +176,7 @@ class KnowledgeRetrievalPreparation:
                 )
                 if mode is RerankMode.RERANKING_MODEL
                 else None,
-                compatibility_fallback=(
-                    mode is RerankMode.RERANKING_MODEL and not explicit
-                ),
+                compatibility_fallback=mode is RerankMode.RERANKING_MODEL,
             )
         return RetrievalPreparation(
             targets=tuple(targets),
@@ -327,7 +325,7 @@ class KnowledgeRetrievalPreparation:
             ref.config,
             target_count,
         )
-        local_mode, local_weights, local_explicit = selection
+        local_mode, local_weights, _ = selection
         if knowledge.embedding_id is None:
             raise _model_unavailable(f"embedding_id config error: {knowledge.id}")
         embedding = await cls._snapshot_model(db, knowledge.embedding_id, principal.tenant_id)
@@ -355,9 +353,7 @@ class KnowledgeRetrievalPreparation:
             mode=local_mode,
             weights=local_weights,
             model=reranker if local_mode is RerankMode.RERANKING_MODEL else None,
-            compatibility_fallback=(
-                local_mode is RerankMode.RERANKING_MODEL and not local_explicit
-            ),
+            compatibility_fallback=local_mode is RerankMode.RERANKING_MODEL,
         )
         return RetrievalTarget(
             knowledge_id=knowledge.id,

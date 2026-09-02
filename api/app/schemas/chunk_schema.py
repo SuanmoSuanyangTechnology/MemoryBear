@@ -119,6 +119,7 @@ class ChunkRetrieve(BaseModel):
     query: str
     kb_ids: list[uuid.UUID] = Field(default_factory=list)
     ex_ids: list[str] | None = Field(None)
+    knowledge_bases: list[KnowledgeBaseConfig] = Field(default_factory=list)
     file_names_filter: list[str] | None = Field(None)
     similarity_threshold: float | None = Field(None)
     vector_similarity_weight: float | None = Field(None)
@@ -139,8 +140,8 @@ class ChunkRetrieve(BaseModel):
 
     @model_validator(mode="after")
     def resolve_top_n(self):
-        if not self.kb_ids and not self.ex_ids:
-            raise ValueError("kb_ids and ex_ids cannot both be empty")
+        if not self.kb_ids and not self.ex_ids and not self.knowledge_bases:
+            raise ValueError("kb_ids, ex_ids and knowledge_bases cannot all be empty")
         top_k = self.top_k or 20
         if self.top_n is None or "top_n" not in self.model_fields_set:
             self.top_n = max(top_k, 20)

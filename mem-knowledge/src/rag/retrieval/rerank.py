@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 
@@ -63,24 +62,20 @@ class _ModelRerankAdapter:
         query: str,
         candidates: Sequence[RetrievalCandidate],
         plan: RerankPlan,
+        top_k: int,
     ) -> list[RetrievalCandidate]:
         if plan.model is None or self._model_ranker is None:
-            return self._fallback(candidates)
+            return self._fallback(candidates[:top_k])
 
         canonical_chunks = materialize_candidates(candidates)
-        try:
-            model_result = await self._model_ranker(
-                plan.model,
-                query,
-                canonical_chunks,
-                len(canonical_chunks),
-            )
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            if not plan.compatibility_fallback:
-                raise
-            return self._fallback(candidates)
+        model_result = await self._model_ranker(
+            plan.model,
+            query,
+            canonical_chunks,
+            top_k,
+        )
+        if model_result.used_fallback:
+            return self._fallback(candidates[:top_k])
 
         candidates_by_identity = {
             candidate_identity(candidate): candidate for candidate in candidates
@@ -119,8 +114,19 @@ class RerankEngine:
         top_k: int,
         score_threshold: float,
     ) -> list[RetrievalCandidate]:
-        adapter = self._weighted if plan.mode is RerankMode.WEIGHTED_SCORE else self._model
-        ranked = await adapter.rank(query=query, candidates=candidates, plan=plan)
+        if plan.mode is RerankMode.WEIGHTED_SCORE:
+            ranked = await self._weighted.rank(
+                query=query,
+                candidates=candidates,
+                plan=plan,
+            )
+        else:
+            ranked = await self._model.rank(
+                query=query,
+                candidates=candidates,
+                plan=plan,
+                top_k=top_k,
+            )
         filtered = [
             candidate
             for candidate in ranked

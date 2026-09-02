@@ -963,23 +963,6 @@ class KnowledgeRetrievalService:
         return 0.1
 
     @staticmethod
-    def _deduplicate_chunks(chunks: Sequence[DocumentChunk]) -> list[DocumentChunk]:
-        seen: set[tuple[Any, ...]] = set()
-        result: list[DocumentChunk] = []
-        for chunk in chunks:
-            metadata = chunk.metadata or {}
-            if metadata.get("doc_id"):
-                key = ("doc_id", metadata["doc_id"])
-            elif metadata.get("document_id") is not None and metadata.get("sort_id") is not None:
-                key = ("document_sort", metadata["document_id"], metadata["sort_id"])
-            else:
-                key = ("content", chunk.page_content)
-            if key not in seen:
-                seen.add(key)
-                result.append(chunk)
-        return result
-
-    @staticmethod
     def _apply_rerank_fallback(
         chunks: Sequence[DocumentChunk],
         top_k: int,
@@ -1002,10 +985,10 @@ class KnowledgeRetrievalService:
 
     @staticmethod
     def _round_robin_chunk_groups(
-        groups: Sequence[Sequence[DocumentChunk]],
-    ) -> list[DocumentChunk]:
+        groups: Sequence[Sequence[RetrievalCandidate]],
+    ) -> list[RetrievalCandidate]:
         positions = [0 for _ in groups]
-        result: list[DocumentChunk] = []
+        result: list[RetrievalCandidate] = []
         while True:
             progressed = False
             for index, group in enumerate(groups):
