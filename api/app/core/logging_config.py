@@ -147,8 +147,11 @@ class LoggingConfig:
             neo4j_logger = logging.getLogger(neo4j_logger_name)
             neo4j_logger.addFilter(neo4j_filter)
 
-        # 压制 httpx / httpcore 的请求级日志（大量 HTTP Request: POST ... 噪音）
-        for noisy_logger in ["httpx", "httpcore", "httpcore.http11", "httpcore.connection"]:
+        # 压制 httpx / httpcore / elastic_transport 的请求级日志（大量 HTTP Request: POST ... 噪音）
+        for noisy_logger in [
+            "httpx", "httpcore", "httpcore.http11", "httpcore.connection",
+            "elastic_transport", "elastic_transport.transport",
+        ]:
             logging.getLogger(noisy_logger).setLevel(logging.WARNING)
         
         # 创建格式化器

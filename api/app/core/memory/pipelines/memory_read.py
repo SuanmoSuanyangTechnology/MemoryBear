@@ -5,14 +5,14 @@ import logging
 import time
 import uuid
 
-from app.core.memory.enums import Neo4jNodeType, SearchStrategy, StorageType
-from app.core.memory.models.service_models import MemorySearchResult
-from app.core.memory.pipelines.base_pipeline import BasePipeline, ModelClientMixin
 from app.core.memory.alerts import enqueue_memory_retrieval_alert_safely
+from app.core.memory.enums import Neo4jNodeType, SearchStrategy, StorageType
 from app.core.memory.exceptions import (
     MemoryRetrievalBusinessError,
     MemoryRetrievalImpact,
 )
+from app.core.memory.models.service_models import MemorySearchResult
+from app.core.memory.pipelines.base_pipeline import BasePipeline, ModelClientMixin
 from app.core.memory.read_services.generate_engine.query_preprocessor import QueryPreprocessor
 from app.core.memory.read_services.generate_engine.retrieval_summary import RetrievalSummaryProcessor
 from app.core.memory.read_services.search_engine.content_search import (
@@ -21,8 +21,8 @@ from app.core.memory.read_services.search_engine.content_search import (
     HistorySearchService,
     MetaSearchService
 )
-from app.core.memory.retrieval_trace.stage_events import emit_memory_stage
 from app.core.memory.retrieval_trace.models import RetrievalExecutionTrace
+from app.core.memory.retrieval_trace.stage_events import emit_memory_stage
 from app.core.memory.retrieval_trace.stage_projection import (
     project_memory_items,
     project_profile_data,
@@ -30,8 +30,9 @@ from app.core.memory.retrieval_trace.stage_projection import (
     project_relation_items,
     project_result_items,
 )
+from app.core.memory.storage.enums import MemoryNodeType
 from app.core.models import RedBearLLM
-from app.core.utils.datetime_utils import utcnow, utcnow_naive
+from app.core.utils.datetime_utils import utcnow_naive
 from app.db import get_async_db_context
 from app.repositories.memory_short_repository import ShortTermMemoryRepository
 from app.schemas.memory_retrieval_display_schema import (
@@ -53,10 +54,10 @@ async def _run_with_semaphore(coro):
 
 
 def _safe_merge_results(
-    results: list,
-    label: str,
-    *,
-    on_error,
+        results: list,
+        label: str,
+        *,
+        on_error,
 ) -> MemorySearchResult:
     """合并搜索结果列表，跳过异常项并记录警告。"""
     merged = MemorySearchResult(memories=[])
@@ -278,6 +279,7 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
     def _ensure_run_started(self) -> None:
         if not self._run_started_at:
             self._run_started_at = time.perf_counter()
+
     def _dispatch_display_record(
             self,
             display_query: str,
@@ -720,10 +722,10 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
         """仅全文检索模式：不做 embedding、关系检索、query 拆分、摘要生成。"""
         if includes is None:
             includes = [
-                Neo4jNodeType.CHUNK,
-                Neo4jNodeType.STATEMENT,
-                Neo4jNodeType.EXTRACTEDENTITY,
-                Neo4jNodeType.DIALOGUE,
+                MemoryNodeType.CHUNK,
+                MemoryNodeType.STATEMENT,
+                MemoryNodeType.EXTRACTED_ENTITY,
+                MemoryNodeType.DIALOGUE,
             ]
         meta_task = asyncio.ensure_future(self._user_meta())
         search_service = await self._get_search_service(includes, need_embedder=False, need_llm=False)

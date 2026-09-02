@@ -5,6 +5,7 @@ from typing import Self
 from pydantic import BaseModel, Field, field_serializer, ConfigDict, computed_field
 
 from app.core.memory.enums import Neo4jNodeType, StorageType
+from app.core.memory.storage.enums import MemoryNodeLabel
 from app.core.memory.retrieval_trace.models import (
     RetrievalExecutionTrace,
     RetrievalScoreTrace,
@@ -41,7 +42,7 @@ class MemoryContext(BaseModel):
 
 
 class Memory(BaseModel):
-    source: Neo4jNodeType = Field(...)
+    source: Neo4jNodeType | MemoryNodeLabel = Field(...)
     score: float = Field(default=0.0)
     content: str = Field(default="")
     data: dict = Field(default_factory=dict)
