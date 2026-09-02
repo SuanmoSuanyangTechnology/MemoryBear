@@ -10,7 +10,10 @@ from typing import Any
 
 from celery import states
 from celery.exceptions import Ignore, Retry
-from redbear_model.errors import is_provider_rate_limit_error
+from redbear_model.errors import (
+    PublicCredentialUnavailableError,
+    is_provider_rate_limit_error,
+)
 
 from ..bootstrap import get_settings
 from ..rag.knowledge_graph.config import (
@@ -115,6 +118,26 @@ def _run_observed(
         )
         raise
     except Exception as exc:
+        if isinstance(exc, PublicCredentialUnavailableError):
+            logger.error(
+                "[EvidenceGraph] task_failed task=%s task_id=%s kb_id=%s "
+                "document_id=%s status=failure reason=model_unavailable "
+                "error_type=%s retry=%d elapsed_ms=%d",
+                task_name,
+                safe_task_id,
+                safe_knowledge_id,
+                safe_document_id,
+                type(exc).__name__,
+                retry,
+                int((time.perf_counter() - started_at) * 1000),
+            )
+            run.finish(
+                BusinessOutcome.FAILURE,
+                error_code="KB_GRAPH_MODEL_UNAVAILABLE",
+                exc=exc,
+                detail="model_unavailable",
+            )
+            raise _redacted_exception(exc) from None
         if is_provider_rate_limit_error(exc):
             logger.error(
                 "[EvidenceGraph] task_failed task=%s task_id=%s kb_id=%s "
@@ -387,7 +410,10 @@ def _observe_graph_task(
     )
     return observe_task(
         context,
-        sinks=[StructuredLogSink(), CeleryStateSink(task.update_state)],
+        sinks=[
+            StructuredLogSink(),
+            CeleryStateSink(task.update_state, task_id=context.task_id),
+        ],
         heartbeat_seconds=get_settings().kb_task_heartbeat_seconds,
     )
 
