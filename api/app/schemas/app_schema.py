@@ -6,6 +6,7 @@ from enum import Enum, StrEnum
 from pydantic import BaseModel, Field, ConfigDict, field_serializer, field_validator, model_serializer, model_validator
 
 from app.core.utils.datetime_utils import to_timestamp_ms
+from app.schemas.rerank_schema import RerankMode, RerankWeights
 from app.schemas.workflow_schema import WorkflowConfigCreate
 
 
@@ -110,6 +111,8 @@ class KnowledgeBaseConfig(BaseModel):
     retrieve_type: str = Field(default="hybrid", description="检索方式participle｜ semantic｜hybrid")
     # 混合检索下是否启用证据图谱通道（仅 hybrid 类型生效）；1=启用, 0=关闭, None=沿用请求级兜底
     enable_graph_retrieval: Optional[int] = Field(default=None, ge=0, le=1, description="混合检索下是否启用证据图谱通道")
+    rerank_mode: RerankMode | None = None
+    rerank_weights: RerankWeights | None = None
 
 
 class KnowledgeRetrievalConfig(BaseModel):
@@ -126,6 +129,8 @@ class KnowledgeRetrievalConfig(BaseModel):
     )
     reranker_id: Optional[str] = Field(default=None, description="多知识库结果融合的模型ID")
     reranker_top_k: int = Field(default=10, ge=0, le=1024, description="多知识库结果融合的模型参数")
+    rerank_mode: RerankMode | None = None
+    rerank_weights: RerankWeights | None = None
     use_graph: bool = Field(default=False, description="是否使用图搜索")
 
 

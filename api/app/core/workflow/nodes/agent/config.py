@@ -145,6 +145,8 @@ class AgentNodeConfig(BaseNodeConfig):
                 "merge_strategy",
                 "reranker_id",
                 "reranker_top_k",
+                "rerank_mode",
+                "rerank_weights",
                 "use_graph",
             )
             if key in migrated
