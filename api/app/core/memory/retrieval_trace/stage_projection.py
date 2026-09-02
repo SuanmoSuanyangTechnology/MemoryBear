@@ -99,7 +99,7 @@ def memory_type(source: Neo4jNodeType | str) -> MemoryDisplayType:
         Neo4jNodeType.EXTRACTEDENTITY.value: MemoryDisplayType.ENTITY,
         Neo4jNodeType.MEMORYSUMMARY.value: MemoryDisplayType.SUMMARY,
         Neo4jNodeType.PERCEPTUAL.value: MemoryDisplayType.FILE,
-        Neo4jNodeType.RAG.value: MemoryDisplayType.FILE,
+        Neo4jNodeType.RAG.value: MemoryDisplayType.FACT,
     }.get(value, MemoryDisplayType.UNKNOWN)
 
 
@@ -186,7 +186,6 @@ def project_memory_item(
             prefer_perceptual_display=prefer_perceptual_display,
         ),
     }
-    # Rag 与 Perceptual 都展示为文件记忆，但只有 Perceptual 有稳定的文件元数据协议。
     if resolved_kind == MemoryDisplayType.FILE and memory.source == Neo4jNodeType.PERCEPTUAL:
         data = memory.data if isinstance(memory.data, dict) else {}
         file_data = {
