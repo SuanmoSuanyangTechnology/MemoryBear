@@ -525,7 +525,14 @@ class GraphElasticsearchStore:
         hits = await self._collect_search_after_hits(
             index_name=index_name,
             query=self._graph_query(knowledge_id, DOCUMENT_PROJECTION_MAP),
-            sort=[{"document_id": {"order": "asc"}}],
+            sort=[
+                {
+                    "document_id": {
+                        "order": "asc",
+                        "unmapped_type": "keyword",
+                    }
+                }
+            ],
             context="list graph document maps",
         )
         return [dict(source) for hit in hits if isinstance((source := hit.get("_source")), Mapping)]
