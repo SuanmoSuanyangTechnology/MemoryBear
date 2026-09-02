@@ -620,7 +620,8 @@ class MessageRepository:
             stmt = stmt.where(Message.is_current.is_not(False))
 
         if keyword is not None:
-            stmt = stmt.where(Message.content.ilike(f"%{keyword}%"))
+            escaped_keyword = keyword.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            stmt = stmt.where(Message.content.ilike(f"%{escaped_keyword}%", escape="\\"))
         if start_at is not None:
             stmt = stmt.where(Message.created_at >= start_at)
         if end_at_exclusive is not None:
