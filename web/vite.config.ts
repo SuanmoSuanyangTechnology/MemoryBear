@@ -5,6 +5,7 @@ import AutoImport from 'unplugin-auto-import/vite'
 import tailwindcss from '@tailwindcss/vite'
 import svgr from 'vite-plugin-svgr';
 import { virtualMemoryBrickPlugin } from './plugins/virtualMemoryBrick'
+import legacy from '@vitejs/plugin-legacy'
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -36,6 +37,9 @@ export default defineConfig({
       dts: 'public/auto-imports.d.ts',
     }),
     svgr({ svgrOptions: { icon: true } }),
+    legacy({
+      targets: ['Chrome >= 80'],
+    }),
   ],
   css: {
     modules: {
@@ -57,6 +61,7 @@ export default defineConfig({
     emptyOutDir: true,
     assetsDir: 'assets', // 静态资源目录
     sourcemap: false, // 生产环境不生成 sourcemap
+    // target: 'es2015',
     rollupOptions: {
       input: {
         main: resolve(__dirname, 'index.html'),
