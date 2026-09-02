@@ -61,6 +61,7 @@ class RetrievalParams:
     retrieve_type: RetrieveType
     rerank_score_threshold: float = 0.1
     enable_graph_retrieval: bool = False
+    local_rerank: RerankPlan | None = None
 
 
 @dataclass(frozen=True)
@@ -165,6 +166,14 @@ class RetrievalPreparation:
     metadata_llm: ModelRuntimeSnapshot | None
     graph: GraphRetrievalSnapshot | None
     request_reranker: ModelRuntimeSnapshot | None = None
+    global_rerank: RerankPlan | None = None
+
+
+@dataclass(frozen=True)
+class TargetRetrievalResult:
+    candidates: tuple[RetrievalCandidate, ...]
+    entities: tuple[Any, ...] = ()
+    relationships: tuple[Any, ...] = ()
 
 
 __all__ = [
@@ -179,4 +188,5 @@ __all__ = [
     "RetrievalSearchOptions",
     "RetrievalTarget",
     "RetrievalTimings",
+    "TargetRetrievalResult",
 ]
