@@ -34,6 +34,9 @@ from app.core.memory.retrieval_trace.models import (
     finite_or_none,
     normalized_keyword_score,
 )
+from app.core.memory.read_services.search_engine.quick_retrieval_dedup import (
+    filter_quick_retrieval_memories,
+)
 from app.core.memory.read_services.search_engine.result_builder import MetadataBuilder
 from app.core.memory.read_services.search_engine.result_builder import data_builder_factory
 from app.core.memory.read_services.search_engine.tools import make_entity_search_tool, make_relation_search_tool, \
@@ -161,6 +164,55 @@ class Neo4jSearchService:
             include=self.includes
         )
 
+    @staticmethod
+    def _candidate_limit(
+            node_type: Neo4jNodeType,
+            limit: int,
+            entity_limit: int | None,
+    ) -> int:
+        if node_type == Neo4jNodeType.EXTRACTEDENTITY and entity_limit is not None:
+            return min(limit, entity_limit)
+        return limit
+
+    @staticmethod
+    def _apply_entity_quota(
+            memories: list[Memory],
+            entity_limit: int | None,
+    ) -> list[Memory]:
+        """按当前排序保留前 entity_limit 个 ExtractedEntity，其他类型不受影响。
+
+        供模型 rerank 路径在打分后使用：此时列表已按 rerank 分排序，
+        因此保留的是模型认为最相关的 Entity，而非本地融合分最高的。
+        """
+        if entity_limit is None:
+            return memories
+        kept: list[Memory] = []
+        entity_count = 0
+        for memory in memories:
+            if memory.source == Neo4jNodeType.EXTRACTEDENTITY:
+                if entity_count >= entity_limit:
+                    continue
+                entity_count += 1
+            kept.append(memory)
+        return kept
+
+    def _apply_source_dedup(self, memories: list[Memory]) -> tuple[list[Memory], dict]:
+        """在全局截断前执行同源去重，避免被抑制节点占用 limit 名额。
+
+        返回过滤后的列表和供 pipeline 写日志的摘要；摘要计数针对候选池，
+        不是最终返回条数。
+        """
+        before_count = len(memories)
+        kept, suppression_records = filter_quick_retrieval_memories(
+            memories,
+            end_user_id=str(self.ctx.end_user_id),
+        )
+        return kept, {
+            "before_count": before_count,
+            "after_count": len(kept),
+            "suppression_records": suppression_records,
+        }
+
     def _rerank(
             self,
             keyword_results: list[dict],
@@ -221,7 +273,10 @@ class Neo4jSearchService:
             query: str,
             limit: int,
             score_sidecar: dict[tuple[Neo4jNodeType, str], dict],
-    ) -> tuple[list[Memory], str, list[str]]:
+            entity_limit: int | None = None,
+            apply_source_dedup: bool = False,
+    ) -> tuple[list[Memory], str, list[str], dict]:
+        # 所有类型平等进入模型；Entity 配额改由模型打分后裁剪，见 _apply_entity_quota。
         seen: dict[str, dict] = {}
         for node_type in self.includes:
             for record in kw_results.get(node_type, []):
@@ -238,7 +293,7 @@ class Neo4jSearchService:
                     seen[rid] = record
 
         if not seen:
-            return [], "skipped", []
+            return [], "skipped", [], {}
 
         memories: list[Memory] = []
         for record in seen.values():
@@ -267,6 +322,12 @@ class Neo4jSearchService:
             )
             memories.append(result_memory)
 
+        # 同源去重必须在送入模型前完成：被抑制节点既不该消耗 rerank 名额，
+        # 也不该在模型打分后才被删除而让最终结果少于 limit。
+        dedup_summary: dict = {}
+        if apply_source_dedup:
+            memories, dedup_summary = self._apply_source_dedup(memories)
+
         rerank_applied = False
         try:
             documents = [
@@ -279,11 +340,13 @@ class Neo4jSearchService:
             reranked = []
             if documents:
                 try:
+                    # 需要全部候选都拿到 rerank 分：Entity 配额在打分后裁剪，
+                    # 若只给前 limit 个打分，被裁掉的名额会由 0 分候选补位。
                     reranked = await asyncio.to_thread(
                         self.reranker.compress_documents,
                         documents,
                         query,
-                        top_n=min(limit, len(documents))
+                        top_n=len(documents)
                     )
                 except Exception as e:
                     if self.on_error is not None:
@@ -340,12 +403,13 @@ class Neo4jSearchService:
             if memory.retrieval_trace is not None:
                 memory.retrieval_trace.final_score = float(memory.score)
         memories.sort(key=lambda x: x.score, reverse=True)
+        memories = self._apply_entity_quota(memories, entity_limit)
         memories = memories[:limit]
         if rerank_applied:
             logger.info(
                 f"[Neo4jSearch] Model rerank applied: {len(documents)} → {len(memories)} memories"
             )
-        return memories, rerank_status, degraded_reasons
+        return memories, rerank_status, degraded_reasons, dedup_summary
 
     # WARNING: 下方 sigmoid 归一化公式与 retrieval_trace/models.py 的
     # normalized_keyword_score 互为副本（此处是公式源头，驱动真实排序），
@@ -362,15 +426,19 @@ class Neo4jSearchService:
             self,
             query: str,
             limit: int = 10,
+            entity_limit: int | None = None,
+            apply_source_dedup: bool = False,
     ) -> MemorySearchResult:
         """仅全文检索，不做 embedding / rerank / 关系检索。"""
         async with Neo4jConnector(shared_driver=True) as connector:
             self.connector = connector
             kw_results = await self._keyword_search(query, limit)
 
+        # Entity 配额在汇总时按类型截取，因此天然早于跨类型全局排名。
         all_records = []
         for node_type in self.includes:
-            for record in kw_results.get(node_type, []):
+            type_limit = self._candidate_limit(node_type, limit, entity_limit)
+            for record in kw_results.get(node_type, [])[:type_limit]:
                 record["_node_type"] = node_type
                 all_records.append(record)
 
@@ -393,8 +461,10 @@ class Neo4jSearchService:
 
         all_records.sort(key=lambda x: x["score"], reverse=True)
 
+        # 同源去重只能在 Memory 形态上执行，因此先按排序全量构建再截断。
+        # 若沿用「先截断再去重」，被抑制节点腾出的名额无法回填，结果会少于 limit。
         memories = []
-        for record in all_records[:limit]:
+        for record in all_records:
             node_type = record.pop("_node_type")
             memory = data_builder_factory(node_type, record)
             result_memory = Memory(
@@ -415,8 +485,15 @@ class Neo4jSearchService:
                 matched_queries=[query],
             )
             memories.append(result_memory)
+
+        dedup_summary: dict = {}
+        if apply_source_dedup:
+            memories, dedup_summary = self._apply_source_dedup(memories)
+        memories = memories[:limit]
+
         return MemorySearchResult(
             memories=memories,
+            dedup_summary=dedup_summary,
             execution_trace=RetrievalExecutionTrace(
                 keyword_status="completed",
                 semantic_status="skipped",
@@ -431,6 +508,8 @@ class Neo4jSearchService:
             self,
             query: str,
             limit: int = 10,
+            entity_limit: int | None = None,
+            apply_source_dedup: bool = False,
     ) -> MemorySearchResult:
         async with Neo4jConnector(shared_driver=True) as connector:
             self.connector = connector
@@ -464,17 +543,18 @@ class Neo4jSearchService:
             degraded_reasons.append("semantic_search_failed")
 
         if self.reranker is not None:
-            memories, rerank_status, rerank_reasons = await self._hybrid_search_with_model_rerank(
-                kw_results, emb_results, query, limit, score_sidecar
+            memories, rerank_status, rerank_reasons, dedup_summary = await self._hybrid_search_with_model_rerank(
+                kw_results, emb_results, query, limit, score_sidecar, entity_limit, apply_source_dedup
             )
             degraded_reasons.extend(rerank_reasons)
         else:
             memories = []
+            dedup_summary = {}
             for node_type in self.includes:
                 reranked = self._rerank(
                     kw_results.get(node_type, []),
                     emb_results.get(node_type, []),
-                    limit
+                    self._candidate_limit(node_type, limit, entity_limit)
                 )
                 for record in reranked:
                     memory = data_builder_factory(node_type, record)
@@ -506,11 +586,14 @@ class Neo4jSearchService:
                         matched_queries=[query],
                     )
                     memories.append(result_memory)
+            if apply_source_dedup:
+                memories, dedup_summary = self._apply_source_dedup(memories)
             memories.sort(key=lambda x: x.score, reverse=True)
             memories = memories[:limit]
 
         return MemorySearchResult(
             memories=memories,
+            dedup_summary=dedup_summary,
             execution_trace=RetrievalExecutionTrace(
                 keyword_status="failed" if keyword_failed else "completed",
                 semantic_status="failed" if semantic_failed else "completed",
