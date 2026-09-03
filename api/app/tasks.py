@@ -5199,7 +5199,11 @@ def do_implicit_emotions_for_user(self, end_user_id: str) -> Dict[str, Any]:
                 emotion_success = True
                 logger.info(f"成功更新用户 {end_user_id} 的情绪建议")
             finally:
-                await emotion_service.emotion_repo.connector.close()
+                # 尽力清理：关闭失败仅记录，避免覆盖上方业务原始异常
+                try:
+                    await emotion_service.emotion_repo.connector.close()
+                except Exception as close_err:
+                    logger.warning(f"用户 {end_user_id} 关闭情绪分析独立 driver 失败: {close_err}")
         except Exception as e:
             errors.append(f"情绪建议更新失败: {str(e)}")
             logger.error(f"用户 {end_user_id} 情绪建议更新失败: {e}")
@@ -5577,7 +5581,11 @@ def update_implicit_emotions_storage(self) -> Dict[str, Any]:
                             emotion_success = True
                             logger.info(f"成功更新用户 {end_user_id} 的情绪建议")
                         finally:
-                            await emotion_service.emotion_repo.connector.close()
+                            # 尽力清理：关闭失败仅记录，避免覆盖上方业务原始异常
+                            try:
+                                await emotion_service.emotion_repo.connector.close()
+                            except Exception as close_err:
+                                logger.warning(f"用户 {end_user_id} 关闭情绪分析独立 driver 失败: {close_err}")
                     except Exception as e:
                         error_msg = f"情绪建议更新失败: {str(e)}"
                         errors.append(error_msg)
@@ -5662,7 +5670,11 @@ def update_implicit_emotions_storage(self) -> Dict[str, Any]:
                             emotion_success = True
                             logger.info(f"成功初始化新用户 {end_user_id} 的情绪建议")
                         finally:
-                            await emotion_service.emotion_repo.connector.close()
+                            # 尽力清理：关闭失败仅记录，避免覆盖上方业务原始异常
+                            try:
+                                await emotion_service.emotion_repo.connector.close()
+                            except Exception as close_err:
+                                logger.warning(f"用户 {end_user_id} 关闭情绪分析独立 driver 失败: {close_err}")
                     except Exception as e:
                         errors.append(f"情绪建议初始化失败: {str(e)}")
                         logger.error(f"新用户 {end_user_id} 情绪建议初始化失败: {e}")
@@ -5843,7 +5855,11 @@ def init_implicit_emotions_for_users(self, end_user_ids: List[str]) -> Dict[str,
                             )
                         emotion_ok = True
                     finally:
-                        await emotion_service.emotion_repo.connector.close()
+                        # 尽力清理：关闭失败仅记录，避免覆盖上方业务原始异常
+                        try:
+                            await emotion_service.emotion_repo.connector.close()
+                        except Exception as close_err:
+                            logger.warning(f"用户 {end_user_id} 关闭情绪分析独立 driver 失败: {close_err}")
                 except Exception as e:
                     logger.error(f"用户 {end_user_id} 情绪建议初始化失败: {e}")
 
