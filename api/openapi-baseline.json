@@ -5833,7 +5833,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "title": "Response Get Retrieval Policy V1 Chunks Retrieval Policy Post"
+                  "$ref": "#/components/schemas/RetrievalPolicyResponse"
                 }
               }
             }
@@ -17232,6 +17232,104 @@
             "text": "#/components/schemas/TextRetrievalQuery"
           }
         }
+      },
+      "RetrievalPolicy": {
+        "properties": {
+          "participle": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "text",
+                "image"
+              ]
+            },
+            "type": "array",
+            "title": "Participle",
+            "default": [
+              "text"
+            ]
+          },
+          "semantic": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "text",
+                "image"
+              ]
+            },
+            "type": "array",
+            "title": "Semantic",
+            "default": [
+              "text"
+            ]
+          },
+          "hybrid": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "text",
+                "image"
+              ]
+            },
+            "type": "array",
+            "title": "Hybrid",
+            "default": [
+              "text"
+            ]
+          },
+          "graph": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "text",
+                "image"
+              ]
+            },
+            "type": "array",
+            "title": "Graph",
+            "default": [
+              "text"
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "RetrievalPolicy"
+      },
+      "RetrievalPolicyResponse": {
+        "properties": {
+          "code": {
+            "type": "integer",
+            "title": "Code",
+            "description": "业务状态码，0=成功，非0=各类业务异常",
+            "default": 0
+          },
+          "msg": {
+            "type": "string",
+            "title": "Msg",
+            "description": "给人看的简短提示",
+            "default": "OK"
+          },
+          "data": {
+            "$ref": "#/components/schemas/RetrievalPolicy"
+          },
+          "error": {
+            "type": "string",
+            "title": "Error",
+            "description": "失败时的字段级错误信息，成功时为空字符串",
+            "default": ""
+          },
+          "time": {
+            "type": "integer",
+            "title": "Time",
+            "description": "Unix时间戳（秒）"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "RetrievalPolicyResponse"
       },
       "RetrievalPolicyRequest": {
         "properties": {

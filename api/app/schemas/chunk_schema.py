@@ -10,6 +10,7 @@ from app.integrations.knowledge.contracts import (
 )
 from app.schemas.knowledge_metadata_schema import FilterGroup, MetadataFilterMode
 from app.schemas.rerank_schema import RerankMode, RerankWeights
+from app.schemas.response_schema import ApiResponse
 
 
 class RetrieveType(StrEnum):
@@ -59,6 +60,10 @@ class RetrievalPolicy(BaseModel):
     semantic: tuple[Literal["text", "image"], ...] = ("text",)
     hybrid: tuple[Literal["text", "image"], ...] = ("text",)
     graph: tuple[Literal["text", "image"], ...] = ("text",)
+
+
+class RetrievalPolicyResponse(ApiResponse):
+    data: RetrievalPolicy
 
 
 class TextRetrievalQuery(BaseModel):

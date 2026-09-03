@@ -1183,7 +1183,11 @@ def get_retrieve_types(
     return success(msg="Successfully obtained the retrieval type", data=list(chunk_schema.RetrieveType))
 
 
-@router.post("/retrieval-policy", response_model=Any, status_code=status.HTTP_200_OK)
+@router.post(
+    "/retrieval-policy",
+    response_model=chunk_schema.RetrievalPolicyResponse,
+    status_code=status.HTTP_200_OK,
+)
 @cur_workspace_access_guard_async()
 @route_through_knowledge_service(source=KnowledgeRetrievalSource.MANAGER_API)
 async def get_retrieval_policy(
