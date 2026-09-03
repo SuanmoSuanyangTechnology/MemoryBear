@@ -102,6 +102,12 @@ class Write_UserInput(BaseModel):
         description="对话 ID（可选）。传入时使用该会话存储消息；"
                     "不传时后端按 (workspace_id, end_user_id) 自动查找或创建虚拟会话。",
     )
+    identity_features: Optional[str] = Field(
+        None,
+        description="跨渠道身份标识（单个）。传入=长时身份(confirmed)，"
+                    "不传/空串/纯空白=保持原状（完全不碰身份字段）；"
+                    "与已有主体标识相同时自动归并，本次写入落到归并后的主体上。",
+    )
 
 
 class MergeEndUserInput(BaseModel):

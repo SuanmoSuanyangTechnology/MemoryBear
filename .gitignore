@@ -15,7 +15,6 @@ examples/
 AGENTS.md
 CLAUDE.md
 api/tests/
-api/scripts/
 
 # Environment variables
 .env
@@ -51,3 +50,6 @@ sandbox/lib/seccomp_redbear/target
 
 # Qoder repowiki generated content
 .qoder/repowiki/zh/
+.codex
+.drawio-tmp
+.worktreeinclude

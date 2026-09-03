@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import logging
 import uuid
+from collections.abc import Mapping
 from typing import Annotated, Any
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Body, Depends, Query, Request
 from fastapi.responses import StreamingResponse
 from redbear_model import (
     ModelConfigNotFoundError,
@@ -22,6 +23,10 @@ from ...errors import KnowledgeError
 from ...models.owned import FILE_ROLE_SOURCE, File, KnowledgeType, ParserType, PermissionType
 from ...rag.integrations.feishu import FeishuAPIClient
 from ...rag.integrations.yuque import YuqueAPIClient
+from ...rag.knowledge_graph.config import (
+    GraphPipeline,
+    resolve_graph_pipeline,
+)
 from ...rag.knowledge_graph.elasticsearch_store import GraphElasticsearchStore
 from ...rag.retrieval.async_elasticsearch import collection_name_for_knowledge
 from ...repositories.model_registry import AsyncSQLModelRegistry
@@ -44,18 +49,66 @@ from ...services.qa_export import (
     write_knowledge_csv,
 )
 from ...tasks.dispatch import TaskDispatcher
+from ...tasks.state import (
+    claim_or_get_rebuild_job_async,
+    release_rebuild_job_async,
+)
 from ..dependencies import Principal, get_principal, get_runtime
 from ..schemas.common import SuccessEnvelope, fail, success
 from ..schemas.file import KBBatchDownloadRequest
 from ..schemas.knowledge import KnowledgeCreate, KnowledgeUpdate
 
-router = APIRouter(
-    prefix="/knowledges",
-    tags=["knowledges"],
-    dependencies=[Depends(get_principal)],
-)
+router = APIRouter(prefix="/knowledges", tags=["knowledges"])
 
 logger = logging.getLogger(__name__)
+
+_MODEL_UNAVAILABLE_STATUS_REASONS = {
+    401: "Invalid API key for the selected model",
+    403: "The selected model API key is not authorized",
+    404: "The selected model is not available from the provider",
+    429: "The selected model is currently rate limited",
+}
+
+
+def _provider_status_code(exc: BaseException) -> int | None:
+    pending: list[BaseException] = [exc]
+    seen: set[int] = set()
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        response = getattr(current, "response", None)
+        status = getattr(current, "status_code", None)
+        if status is None:
+            status = getattr(response, "status_code", None)
+        if status is None and isinstance(response, Mapping):
+            status = response.get("status_code")
+        try:
+            if status is not None:
+                return int(status)
+        except (TypeError, ValueError):
+            pass
+        for wrapped in (current.__cause__, current.__context__):
+            if isinstance(wrapped, BaseException):
+                pending.append(wrapped)
+    return None
+
+
+def _model_unavailable_reason(exc: BaseException) -> str:
+    status_code = _provider_status_code(exc)
+    if status_code in _MODEL_UNAVAILABLE_STATUS_REASONS:
+        return _MODEL_UNAVAILABLE_STATUS_REASONS[status_code]
+    error_type = type(exc).__name__.lower()
+    if "timeout" in error_type:
+        return "The selected model request timed out"
+    if "connection" in error_type:
+        return "Unable to connect to the selected model provider"
+    if "validation" in error_type:
+        return "The selected model returned an invalid response"
+    if status_code is not None:
+        return f"The selected model provider rejected the request (HTTP {status_code})"
+    return "The selected model is unavailable"
 
 
 def _success(
@@ -127,7 +180,20 @@ async def get_knowledge_graph_entity_types(
                 response_code=400,
                 response_style="http",
             ) from exc
-    result = await graph_service.graph_entity_types(runtime, resolved, scenario)
+    try:
+        result = await graph_service.graph_entity_types(runtime, resolved, scenario)
+    except KnowledgeError:
+        raise
+    except Exception as exc:
+        reason = _model_unavailable_reason(exc)
+        logger.warning(
+            "Graph entity type model unavailable llm_id=%s error_type=%s "
+            "provider_status=%s",
+            llm_id,
+            type(exc).__name__,
+            _provider_status_code(exc),
+        )
+        raise KnowledgeError.from_code("KB_MODEL_UNAVAILABLE", reason) from exc
     return _success(
         request,
         result,
@@ -140,6 +206,7 @@ async def check_yuque_auth(
     request: Request,
     yuque_user_id: str,
     yuque_token: str,
+    _principal: Annotated[Principal, Depends(get_principal)],
 ) -> SuccessEnvelope[None]:
     async with YuqueAPIClient(yuque_user_id, yuque_token) as client:
         repositories = await client.get_user_repos()
@@ -158,6 +225,7 @@ async def check_feishu_auth(
     feishu_app_id: str,
     feishu_app_secret: str,
     feishu_folder_token: str,
+    _principal: Annotated[Principal, Depends(get_principal)],
 ) -> SuccessEnvelope[None]:
     async with FeishuAPIClient(feishu_app_id, feishu_app_secret) as client:
         files = await client.list_all_folder_files(
@@ -263,9 +331,10 @@ async def get_knowledge_chunk_policy(
         knowledge = await knowledge_service.get_knowledge(db, knowledge_id, principal)
         if knowledge is None:
             raise knowledge_service._not_found()
+        parent_child_mode = {0: None, 1: False, 2: True}[knowledge.chunk_mode]
     return _success(
         request,
-        {"parent_child_mode": {0: None, 1: False, 2: True}[knowledge.chunk_mode]},
+        {"parent_child_mode": parent_child_mode},
         "Successfully obtained knowledge base chunk policy",
     )
 
@@ -291,13 +360,16 @@ async def update_knowledge(
             ignore_unavailable=True,
         )
     async with runtime.database.async_session() as db:
-        knowledge = await knowledge_service.apply_knowledge_update(
+        outcome = await knowledge_service.apply_knowledge_update(
             db,
             plan,
             principal,
-            runtime.redis,
         )
-        data = await knowledge_service.knowledge_to_data(db, knowledge)
+    if outcome.invalidate_workspace_id is not None:
+        await knowledge_service.invalidate_storage_type_cache(
+            runtime.redis,
+            outcome.invalidate_workspace_id,
+        )
     dispatcher = TaskDispatcher()
     if plan.graph_enabled_before is not None:
         try:
@@ -305,7 +377,7 @@ async def update_knowledge(
                 dispatcher,
                 knowledge_id,
                 plan.graph_enabled_before,
-                knowledge.parser_config,
+                outcome.parser_config,
             )
         except Exception:
             logger.error(
@@ -329,7 +401,7 @@ async def update_knowledge(
             )
     return _success(
         request,
-        data,
+        outcome.response_data,
         "The knowledge base information has been successfully updated",
     )
 
@@ -342,11 +414,15 @@ async def delete_knowledge(
     runtime: Annotated[ProcessRuntime, Depends(get_runtime)],
 ) -> SuccessEnvelope[None]:
     async with runtime.database.async_session() as db:
-        await knowledge_service.soft_delete_knowledge(
+        outcome = await knowledge_service.soft_delete_knowledge(
             db,
             knowledge_id,
             principal,
+        )
+    if outcome.invalidate_workspace_id is not None:
+        await knowledge_service.invalidate_storage_type_cache(
             runtime.redis,
+            outcome.invalidate_workspace_id,
         )
     return _success(
         request,
@@ -368,9 +444,15 @@ async def get_knowledge_graph(
         knowledge = await knowledge_service.get_knowledge(db, knowledge_id, principal)
         if knowledge is None:
             raise knowledge_service._not_found()
-    store = GraphElasticsearchStore(await runtime.elasticsearch.client())
+        snapshot = knowledge_service.knowledge_snapshot(knowledge)
     try:
-        data = await graph_service.get_graph(knowledge, store)
+        pipeline = resolve_graph_pipeline(snapshot.parser_config)
+        store = (
+            GraphElasticsearchStore(await runtime.elasticsearch.client())
+            if pipeline is GraphPipeline.EVIDENCE
+            else None
+        )
+        data = await graph_service.get_graph(snapshot, store)
     except ValueError as exc:
         raise KnowledgeError.from_code("KB_VALIDATION_ERROR", str(exc)) from exc
     return _success(
@@ -394,7 +476,8 @@ async def delete_knowledge_graph(
         knowledge = await knowledge_service.get_knowledge(db, knowledge_id, principal)
         if knowledge is None:
             raise knowledge_service._not_found()
-    task_id = await graph_service.delete_graph(knowledge, TaskDispatcher())
+        snapshot = knowledge_service.knowledge_snapshot(knowledge)
+    task_id = await graph_service.delete_graph(snapshot, TaskDispatcher())
     return _success(
         request,
         {"task_id": task_id},
@@ -416,15 +499,41 @@ async def rebuild_knowledge_graph(
         knowledge = await knowledge_service.get_knowledge(db, knowledge_id, principal)
         if knowledge is None:
             raise knowledge_service._not_found()
-    store = GraphElasticsearchStore(await runtime.elasticsearch.client())
-    try:
-        task_id = await graph_service.rebuild_graph(
-            knowledge,
-            store,
-            TaskDispatcher(),
-        )
-    except ValueError as exc:
-        raise KnowledgeError.from_code("KB_VALIDATION_ERROR", str(exc)) from exc
+        try:
+            await graph_service.commit_evidence_pipeline(
+                db,
+                knowledge_id,
+                principal.workspace_id,
+            )
+        except ValueError as exc:
+            raise KnowledgeError.from_code("KB_VALIDATION_ERROR", str(exc)) from exc
+
+    redis = await runtime.redis.client()
+    proposed_task_id = str(uuid.uuid4())
+    claim = await claim_or_get_rebuild_job_async(
+        redis,
+        knowledge_id,
+        proposed_task_id,
+    )
+    task_id = claim.task_id
+    if claim.claimed:
+        try:
+            task_id = await TaskDispatcher().send(
+                "app.core.rag.tasks.rebuild_evidence_graph_knowledge",
+                args=[str(knowledge_id)],
+                queue="graphrag_tasks",
+                task_id=claim.task_id,
+            )
+        except Exception:
+            try:
+                await release_rebuild_job_async(redis, knowledge_id, claim.task_id)
+            except Exception as release_exc:
+                logger.error(
+                    "Failed to release rebuild claim knowledge_id=%s error_type=%s",
+                    knowledge_id,
+                    type(release_exc).__name__,
+                )
+            raise
     return _success(
         request,
         {"task_id": task_id},
@@ -474,9 +583,12 @@ async def export_knowledge_qa_csv(
 @router.post("/{kb_id}/batch-download")
 async def kb_batch_download(
     kb_id: uuid.UUID,
-    request_body: KBBatchDownloadRequest,
     principal: Annotated[Principal, Depends(get_principal)],
     runtime: Annotated[ProcessRuntime, Depends(get_runtime)],
+    request_body: Annotated[
+        KBBatchDownloadRequest,
+        Body(default_factory=KBBatchDownloadRequest),
+    ],
 ) -> StreamingResponse:
     async with runtime.database.async_session() as db:
         knowledge = await knowledge_service.get_knowledge(db, kb_id, principal)
@@ -494,10 +606,11 @@ async def kb_batch_download(
         if not files:
             raise file_service._not_found("Knowledge has no downloadable files")
         specs = [await file_service.get_qa_export_spec(db, file) for file in files]
+        snapshots = [file_service.stored_file_snapshot(file) for file in files]
         knowledge_name = knowledge.name
     client = await runtime.elasticsearch.client()
     qa_exports = {}
-    for file, spec in zip(files, specs, strict=True):
+    for file, spec in zip(snapshots, specs, strict=True):
         if spec is None:
             continue
         result = await write_document_export(
@@ -513,9 +626,9 @@ async def kb_batch_download(
                 spec.file_name,
                 media_type,
             )
-    entries = file_service.build_zip_arcnames(files)
+    entries = file_service.build_zip_arcnames(snapshots)
     zip_name = file_service.make_zip_filename(
-        files,
+        snapshots,
         request_body.zip_filename,
         base_name=knowledge_name,
     )
@@ -528,6 +641,6 @@ async def kb_batch_download(
         media_type="application/zip",
         headers={
             "Content-Disposition": f"attachment; filename*=UTF-8''{quote(zip_name)}",
-            "X-Total-Files": str(len(files)),
+            "X-Total-Files": str(len(snapshots)),
         },
     )

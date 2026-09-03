@@ -1,1 +1,1 @@
-"""Knowledge worker entrypoints without business task registration."""
+"""Knowledge task runtime contracts and worker entrypoints."""

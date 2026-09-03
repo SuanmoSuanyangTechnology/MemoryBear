@@ -139,11 +139,24 @@ class PilotWritePipeline:
     def _init_clients(self) -> None:
         """从 MemoryConfig 构建 LLM 和 Embedding 客户端。"""
         from app.core.memory.pipelines.base_pipeline import ModelClientMixin
+        from app.core.memory.utils.config.config_utils import get_pipeline_config
         from app.db import get_db_context
+
+        # 将抽取温度配置注入共享 LLM 客户端（否则 statement_extraction.temperature 无消费者，
+        # 实际使用服务端默认温度）。temperature=0 必须保留，故用 is not None 判断。
+        stmt_temperature = get_pipeline_config(
+            self.memory_config
+        ).statement_extraction.temperature
+        extra_params = (
+            {"temperature": stmt_temperature} if stmt_temperature is not None else None
+        )
 
         with get_db_context() as db:
             self._llm_client = ModelClientMixin.get_llm_client(
-                db, self.memory_config.llm_model_id, self.memory_config.tenant_id
+                db,
+                self.memory_config.llm_model_id,
+                self.memory_config.tenant_id,
+                extra_params=extra_params,
             )
             self._embedder_client = ModelClientMixin.get_embedding_client(
                 db, self.memory_config.embedding_model_id, self.memory_config.tenant_id

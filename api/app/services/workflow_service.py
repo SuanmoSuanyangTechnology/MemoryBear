@@ -4884,6 +4884,13 @@ class WorkflowService:
                 - The mapped event
                 - Or None if the event is filtered out
         """
+        if internal_event.get("event") == "message":
+            internal_event = {
+                **internal_event,
+                "data": dict(internal_event.get("data") or {}),
+            }
+            internal_event["data"].pop("provisional_node_id", None)
+            internal_event["data"].pop("attempt", None)
         if public:
             mapped = self._map_public_event(internal_event)
         else:
@@ -5611,6 +5618,31 @@ class WorkflowService:
             )
 
         full_content = ""
+        output_contents: dict[str, str] = {}
+        output_order: list[str] = []
+
+        def ensure_output_order(node_id: str) -> None:
+            if node_id not in output_order:
+                output_order.append(node_id)
+
+        def rebuild_output_content() -> str:
+            return "\n".join(
+                output_contents[node_id]
+                for node_id in output_order
+                if output_contents.get(node_id)
+            )
+
+        def ordered_outputs() -> list[dict[str, Any]]:
+            return [
+                {
+                    "node_id": node_id,
+                    "content": output_contents[node_id],
+                    "status": "completed",
+                }
+                for node_id in output_order
+                if output_contents.get(node_id)
+            ]
+
         token_usage: dict[str, Any] = {}
         citations: list[Any] = []
         elapsed_time: Optional[float] = None
@@ -5655,7 +5687,30 @@ class WorkflowService:
                 event_type = event.get("event", "message")
                 event_data = event.get("data", {}) or {}
                 if event_type == "message":
-                    full_content += event_data.get("content", "")
+                    content = event_data.get("content", "") or ""
+                    output_node_id = event_data.get("node_id")
+                    if output_node_id:
+                        ensure_output_order(output_node_id)
+                        output_contents[output_node_id] = (
+                            output_contents.get(output_node_id, "") + content
+                        )
+                        full_content = rebuild_output_content()
+                    else:
+                        full_content += content
+                elif event_type == "message_replace":
+                    replacement = event_data.get("content", "") or ""
+                    output_node_id = event_data.get("node_id")
+                    if output_node_id:
+                        ensure_output_order(output_node_id)
+                        if replacement:
+                            output_contents[output_node_id] = replacement
+                        else:
+                            output_contents.pop(output_node_id, None)
+                        full_content = rebuild_output_content()
+                    else:
+                        full_content = replacement
+                        output_contents.clear()
+                        output_order.clear()
                 elif event_type == "workflow_start":
                     # 重新生成：workflow_start 的 message_id 改用本方法落库的新消息 id，
                     # 与 regenerate_end 保持一致。run_stream 内部生成的占位 id 不对应任何
@@ -5663,6 +5718,20 @@ class WorkflowService:
                     if isinstance(event.get("data"), dict):
                         event["data"]["message_id"] = str(new_message_id)
                 elif event_type in ("workflow_end", "end"):
+                    canonical_outputs = event_data.get("outputs")
+                    if isinstance(canonical_outputs, list):
+                        output_contents.clear()
+                        output_order.clear()
+                        for output in canonical_outputs:
+                            if not isinstance(output, dict) or not output.get("node_id"):
+                                continue
+                            output_node_id = str(output["node_id"])
+                            ensure_output_order(output_node_id)
+                            output_contents[output_node_id] = output.get("content", "") or ""
+                        full_content = rebuild_output_content()
+                    canonical_output = event_data.get("output")
+                    if isinstance(canonical_output, str):
+                        full_content = canonical_output
                     token_usage = event_data.get("usage") or event_data.get("token_usage") or {}
                     citations = event_data.get("citations", []) or []
                     elapsed_time = event_data.get("elapsed_time")
@@ -5709,6 +5778,7 @@ class WorkflowService:
                 "citations": citations,
                 "execution_id": execution_id,
                 "regenerated_from": str(message_id),
+                **({"outputs": ordered_outputs()} if output_contents else {}),
                 **({"waiting_human": True} if paused_for_intervention else {}),
                 "input_snapshot": {
                     "variables": input_snapshot.get("variables", {}),
@@ -6559,6 +6629,8 @@ class WorkflowService:
                 "trigger_id": trigger_id,
                 "trigger_meta": trigger_meta or {},
                 "external_event_id": None,
+                # 记录运行来源；WorkflowAsTool 传入 "tool"，应用日志据此排除内部子调用。
+                "source": str(source or "workflow"),
             },
         )
 
@@ -7209,6 +7281,12 @@ class WorkflowService:
         # 后续任何分支不得再为同一轮入队 save_messages / save_failed_message，
         # 否则 BatchPersistQueue 会因相同 message id 触发 messages 主键冲突。
         messages_finalized = False
+        workflow_event_stream = None
+        accumulated_content = ""
+        output_contents: dict[str, str] = {}
+        output_order: list[str] = []
+        optimistic_checkpoints: dict[tuple[str, int | None], dict[str, Any]] = {}
+        output_moderation = None
 
         try:
             files = await self._handle_file_input(payload.files)
@@ -7416,11 +7494,62 @@ class WorkflowService:
                         except Exception:
                             pass
 
-            accumulated_content = ""
-            # One workflow execution owns one assistant message.  Individual
+            # One workflow execution owns one assistant message. Individual
             # Answer/End outputs are kept as logical responses inside that
-            # message and are addressed by node_id.
-            output_contents: dict[str, str] = {}
+            # message and are addressed by node_id in first-arrival order.
+            # Optimistic transactions are isolated by (source node, attempt).
+
+            def ensure_output_order(
+                    node_id: str,
+                    *,
+                    order: Optional[list[str]] = None,
+            ) -> list[str]:
+                target_order = output_order if order is None else order
+                if node_id not in target_order:
+                    target_order.append(node_id)
+                return target_order
+
+            def stream_key(source_node_id: str, attempt: int | None) -> tuple[str, int | None]:
+                return source_node_id, attempt
+
+            def pop_optimistic_checkpoint(
+                    source_node_id: str,
+                    attempt: int | None,
+            ) -> dict[str, Any] | None:
+                key = stream_key(source_node_id, attempt)
+                checkpoint = optimistic_checkpoints.pop(key, None)
+                if checkpoint is None and attempt is None:
+                    matching = [
+                        candidate for candidate in optimistic_checkpoints
+                        if candidate[0] == source_node_id
+                    ]
+                    if len(matching) == 1:
+                        checkpoint = optimistic_checkpoints.pop(matching[0], None)
+                return checkpoint
+
+            def rebuild_multi_content(
+                    contents: Optional[dict[str, str]] = None,
+                    order: Optional[list[str]] = None,
+            ) -> str:
+                current_contents = output_contents if contents is None else contents
+                current_order = output_order if order is None else order
+                return "\n".join(
+                    current_contents[node_id]
+                    for node_id in current_order
+                    if current_contents.get(node_id)
+                )
+
+            def ordered_outputs() -> list[dict[str, Any]]:
+                return [
+                    {
+                        "node_id": output_node_id,
+                        "content": output_contents[output_node_id],
+                        "status": "completed",
+                    }
+                    for output_node_id in output_order
+                    if output_contents.get(output_node_id)
+                ]
+
             queued_intervention_events = []
 
             moderation_flagged = False
@@ -7431,18 +7560,195 @@ class WorkflowService:
                 conversation_id=str(conversation_id_uuid) if conversation_id_uuid else None,
             )
 
-            async for event in execute_workflow_stream(
-                    workflow_config=workflow_config_dict,
-                    input_data=input_data,
-                    execution_id=execution.execution_id,
-                    workspace_id=str(workspace_id),
-                    user_id=payload.user_id,
-                    memory_storage_type=storage_type,
-                    user_rag_memory_id=user_rag_memory_id
-            ):
+            workflow_event_stream = execute_workflow_stream(
+                workflow_config=workflow_config_dict,
+                input_data=input_data,
+                execution_id=execution.execution_id,
+                workspace_id=str(workspace_id),
+                user_id=payload.user_id,
+                memory_storage_type=storage_type,
+                user_rag_memory_id=user_rag_memory_id,
+            )
+            async for event in workflow_event_stream:
                 _last_event_data = event.get("data") or {}
                 event_type = event.get("event")
                 event_data = event.get("data", {})
+
+                # Internal optimistic-stream controls are consumed here. Clients
+                # continue to see only message/message_replace events.
+                if event_type == "stream_rollback":
+                    source_node_id = event_data.get("source_node_id")
+                    checkpoint = pop_optimistic_checkpoint(
+                        source_node_id,
+                        event_data.get("attempt"),
+                    )
+                    if checkpoint is not None:
+                        output_node_id = checkpoint.get("output_node_id")
+                        if checkpoint.get("scoped") and output_node_id:
+                            restored_content = checkpoint.get("content", "") or ""
+                            if checkpoint.get("existed"):
+                                output_contents[output_node_id] = restored_content
+                            else:
+                                output_contents.pop(output_node_id, None)
+                            accumulated_content = rebuild_multi_content()
+                            replace_content = restored_content
+                            replace_node_id = output_node_id
+                        else:
+                            accumulated_content = checkpoint.get("content", "") or ""
+                            output_contents = dict(checkpoint.get("outputs", {}))
+                            replace_content = accumulated_content
+                            replace_node_id = None
+                        if output_moderation:
+                            output_moderation.reset(accumulated_content)
+                        # Moderated provisional chunks were never published, so
+                        # their rollback is internal-only and must not create an
+                        # empty public answer bucket.
+                        if checkpoint.get("published", True):
+                            replace_event = self._emit(public, {
+                                "event": "message_replace",
+                                "data": {
+                                    "message_id": str(message_id),
+                                    "node_id": replace_node_id,
+                                    "content": replace_content,
+                                },
+                            })
+                            if replace_event:
+                                yield replace_event
+                    continue
+                if event_type == "stream_reconcile":
+                    source_node_id = event_data.get("source_node_id")
+                    checkpoint = pop_optimistic_checkpoint(
+                        source_node_id,
+                        event_data.get("attempt"),
+                    )
+                    if checkpoint is None:
+                        continue
+                    canonical_content = event_data.get("content", "") or ""
+                    output_node_id = checkpoint.get("output_node_id")
+                    if checkpoint.get("scoped") and output_node_id:
+                        stable_output = checkpoint.get("content", "") or ""
+                        provisional_output = output_contents.get(output_node_id, "") or ""
+                        ensure_output_order(output_node_id)
+                        if output_moderation:
+                            # Provisional chunks were withheld. Route only the
+                            # canonical span through the normal moderation path.
+                            output_contents[output_node_id] = stable_output
+                            stable_content = rebuild_multi_content()
+                            accumulated_content = stable_content
+                            output_moderation.reset(stable_content)
+                            event = {
+                                "event": "message",
+                                "data": {
+                                    "content": canonical_content,
+                                    "node_id": output_node_id,
+                                },
+                            }
+                            event_type = "message"
+                            event_data = event["data"]
+                        else:
+                            reconciled_output = stable_output + canonical_content
+                            if provisional_output != reconciled_output:
+                                logger.error(
+                                    "Optimistic stream invariant violated: source_node_id=%s "
+                                    "output_node_id=%s provisional_length=%s canonical_length=%s",
+                                    source_node_id,
+                                    output_node_id,
+                                    len(provisional_output),
+                                    len(reconciled_output),
+                                )
+                                output_contents[output_node_id] = reconciled_output
+                                accumulated_content = rebuild_multi_content()
+                                correction = self._emit(public, {
+                                    "event": "message_replace",
+                                    "data": {
+                                        "message_id": str(message_id),
+                                        "node_id": output_node_id,
+                                        "content": reconciled_output,
+                                    },
+                                })
+                                if correction:
+                                    yield correction
+                            else:
+                                output_contents[output_node_id] = provisional_output
+                                accumulated_content = rebuild_multi_content()
+                            continue
+                    else:
+                        stable_content = checkpoint.get("content", "") or ""
+                        provisional_content = accumulated_content
+                        if output_moderation:
+                            output_contents = dict(checkpoint.get("outputs", {}))
+                            accumulated_content = stable_content
+                            output_moderation.reset(stable_content)
+                            event = {
+                                "event": "message",
+                                "data": {"content": canonical_content},
+                            }
+                            event_type = "message"
+                            event_data = event["data"]
+                        else:
+                            reconciled_content = stable_content + canonical_content
+                            if provisional_content != reconciled_content:
+                                logger.error(
+                                    "Unscoped optimistic stream invariant violated: "
+                                    "source_node_id=%s provisional_length=%s canonical_length=%s",
+                                    source_node_id,
+                                    len(provisional_content),
+                                    len(reconciled_content),
+                                )
+                                accumulated_content = reconciled_content
+                                correction = self._emit(public, {
+                                    "event": "message_replace",
+                                    "data": {
+                                        "message_id": str(message_id),
+                                        "node_id": None,
+                                        "content": reconciled_content,
+                                    },
+                                })
+                                if correction:
+                                    yield correction
+                            else:
+                                accumulated_content = provisional_content
+                            continue
+
+                provisional_node_id = (
+                    event_data.get("provisional_node_id")
+                    if event_type == "message" else None
+                )
+                if provisional_node_id:
+                    attempt = event_data.get("attempt")
+                    checkpoint_key = stream_key(provisional_node_id, attempt)
+                    output_node_id = event_data.get("node_id")
+                    if output_node_id:
+                        ensure_output_order(output_node_id)
+                        optimistic_checkpoints.setdefault(
+                            checkpoint_key,
+                            {
+                                "source_node_id": provisional_node_id,
+                                "attempt": attempt,
+                                "scoped": True,
+                                "output_node_id": output_node_id,
+                                "content": output_contents.get(output_node_id, ""),
+                                "existed": output_node_id in output_contents,
+                                "published": not bool(output_moderation),
+                            },
+                        )
+                    else:
+                        optimistic_checkpoints.setdefault(
+                            checkpoint_key,
+                            {
+                                "source_node_id": provisional_node_id,
+                                "attempt": attempt,
+                                "scoped": False,
+                                "output_node_id": output_node_id,
+                                "content": accumulated_content,
+                                "outputs": dict(output_contents),
+                                "published": not bool(output_moderation),
+                            },
+                        )
+                    # Preserve the existing moderation guarantee: tentative text
+                    # is never exposed before it becomes canonical SUCCESS output.
+                    if output_moderation:
+                        continue
 
                 # 审查触发后，跳过所有后续 message 事件（不再向客户端输出模型流式文本）
                 if moderation_flagged and event_type == "message":
@@ -7453,13 +7759,32 @@ class WorkflowService:
                     if first_message_at is None:
                         first_message_at = time.perf_counter()
                         _log_run_stream_timing("first_message_chunk", content_len=len(event_data.get("content", "") or ""))
-                    chunk = event_data.get("content", "")
-                    if output_moderation.accumulate(chunk):
+                    chunk = event_data.get("content", "") or ""
+                    output_node_id = event_data.get("node_id")
+                    if output_node_id:
+                        candidate_outputs = dict(output_contents)
+                        candidate_order = list(output_order)
+                        ensure_output_order(
+                            output_node_id,
+                            order=candidate_order,
+                        )
+                        candidate_outputs[output_node_id] = (
+                            candidate_outputs.get(output_node_id, "") + chunk
+                        )
+                        candidate_content = rebuild_multi_content(
+                            candidate_outputs,
+                            candidate_order,
+                        )
+                    else:
+                        candidate_content = accumulated_content + chunk
+                    if output_moderation.replace_and_check(candidate_content):
                         moderation_flagged = True
                         yield {"event": "message_replace",
                                "data": {
                                    "message_id": str(message_id),
-                                   "node_id": event_data.get("node_id"),
+                                   # Moderation replaces the whole assistant reply,
+                                   # not one answer bucket.
+                                   "node_id": None,
                                    "content": output_moderation.preset_response,
                                }}
 
@@ -7544,10 +7869,15 @@ class WorkflowService:
                         first_message_at = time.perf_counter()
                         _log_run_stream_timing("first_message_chunk", content_len=len(event_data.get("content", "") or ""))
                     chunk = event_data.get("content", "") or ""
-                    accumulated_content += chunk
                     output_node_id = event_data.get("node_id")
                     if output_node_id:
-                        output_contents[output_node_id] = output_contents.get(output_node_id, "") + chunk
+                        ensure_output_order(output_node_id)
+                        output_contents.setdefault(output_node_id, "")
+                        output_contents[output_node_id] += chunk
+                    if output_node_id:
+                        accumulated_content = rebuild_multi_content()
+                    else:
+                        accumulated_content += chunk
 
                 if event_type == "cycle_item":
                     cycle_id = event_data.get("cycle_id")
@@ -7565,6 +7895,20 @@ class WorkflowService:
                     token_usage = event.get("data", {}).get("token_usage", {}) or {}
                     if status == "completed":
                         finalize_started_at = time.perf_counter()
+                        canonical_outputs = event.get("data", {}).get("outputs")
+                        if isinstance(canonical_outputs, list):
+                            output_contents.clear()
+                            output_order.clear()
+                            for canonical_output in canonical_outputs:
+                                if not isinstance(canonical_output, dict):
+                                    continue
+                                output_node_id = canonical_output.get("node_id")
+                                content = canonical_output.get("content", "") or ""
+                                if not output_node_id or not content:
+                                    continue
+                                ensure_output_order(str(output_node_id))
+                                output_contents[str(output_node_id)] = content
+                            accumulated_content = rebuild_multi_content()
                         final_messages = event.get("data", {}).get("messages", [])[init_message_length:]
                         human_message = ""
                         assistant_message = ""
@@ -7586,6 +7930,47 @@ class WorkflowService:
                                         })
                             if message["role"] == "assistant":
                                 assistant_message = message["content"]
+
+                        canonical_final_content = (
+                            assistant_message
+                            if isinstance(assistant_message, str)
+                            else accumulated_content
+                        )
+                        if accumulated_content != canonical_final_content:
+                            logger.warning(
+                                "Workflow final output invariant corrected: execution_id=%s "
+                                "streamed_length=%s canonical_length=%s",
+                                execution.execution_id,
+                                len(accumulated_content),
+                                len(canonical_final_content),
+                            )
+                            accumulated_content = canonical_final_content
+                        if (
+                                output_moderation
+                                and not moderation_flagged
+                                and output_moderation.replace_and_check(canonical_final_content)
+                        ):
+                            moderation_flagged = True
+                            preset_response = output_moderation.preset_response
+                            accumulated_content = preset_response
+                            assistant_message = preset_response
+                            output_contents.clear()
+                            output_order.clear()
+                            for message in reversed(final_messages):
+                                if message.get("role") == "assistant":
+                                    message["content"] = preset_response
+                                    break
+                            event.setdefault("data", {})["output"] = preset_response
+                            event["data"]["moderation_flagged"] = True
+                            event["data"]["preset_response"] = preset_response
+                            yield {
+                                "event": "message_replace",
+                                "data": {
+                                    "message_id": str(message_id),
+                                    "node_id": None,
+                                    "content": preset_response,
+                                },
+                            }
                         _user_msg = None
                         # 过滤 citations
                         citations = event.get("data", {}).get("citations", [])
@@ -7604,25 +7989,11 @@ class WorkflowService:
                         if filtered_citations:
                             assistant_meta["citations"] = filtered_citations
                         if output_contents:
-                            assistant_meta["outputs"] = [
-                                {
-                                    "node_id": output_node_id,
-                                    "content": content,
-                                    "status": "completed",
-                                }
-                                for output_node_id, content in output_contents.items()
-                            ]
+                            assistant_meta["outputs"] = ordered_outputs()
                         # 输出审查触发时，将 moderation 信息写入 execution output_data
                         workflow_output_data = event.get("data") or {}
                         if output_contents:
-                            workflow_output_data["outputs"] = [
-                                {
-                                    "node_id": output_node_id,
-                                    "content": content,
-                                    "status": "completed",
-                                }
-                                for output_node_id, content in output_contents.items()
-                            ]
+                            workflow_output_data["outputs"] = ordered_outputs()
                         if output_moderation and output_moderation.is_flagged:
                             workflow_output_data["moderation_flagged"] = True
                             workflow_output_data["preset_response"] = output_moderation.preset_response
@@ -7847,16 +8218,18 @@ class WorkflowService:
                             payload.from_message_id,
                             conversation_id_uuid,
                         )
-                        _hitl_user_msg = None
+                        # _add_message_async 在独立短生命周期 Session 中提交后返回 ORM 实体。
+                        # 只传递稳定 UUID，不能在此访问其属性，避免 detached-instance 错误。
+                        hitl_user_message_id = user_message_id or uuid.uuid4()
                         # regenerate_mode 下占位消息同样由 regenerate_stream 末尾统一落库
                         if conversation_id_uuid and not skip_save and not regenerate_mode:
-                            _hitl_user_msg = await self._add_message_async(
+                            await self._add_message_async(
                                 conversation_id=conversation_id_uuid,
                                 role="user",
                                 content=human_message,
                                 meta_data=human_meta,
                                 parent_message_id=_from_msg_id,
-                                message_id=user_message_id,
+                                message_id=hitl_user_message_id,
                             )
                             await self._add_message_async(
                                 message_id=message_id,
@@ -7864,7 +8237,7 @@ class WorkflowService:
                                 role="assistant",
                                 content="",
                                 meta_data={"waiting_human": True, "execution_id": execution.execution_id},
-                                parent_message_id=user_message_id if _hitl_user_msg else None,
+                                parent_message_id=hitl_user_message_id,
                             )
 
                         # message_id is already saved in execution.context["human_intervention"]["message_id"]
@@ -8407,6 +8780,47 @@ class WorkflowService:
             yield {"event": "error", "data": {"execution_id": execution.execution_id, "error": str(e)}}
 
         finally:
+            # Stop the underlying workflow generator explicitly when this stream
+            # exits early (moderation, disconnect, cancellation). This propagates
+            # cancellation to inflight nodes so their provisional transactions can
+            # run rollback cleanup.
+            if workflow_event_stream is not None:
+                try:
+                    await asyncio.shield(workflow_event_stream.aclose())
+                except (Exception, asyncio.CancelledError) as close_err:
+                    logger.debug(
+                        "Failed to close workflow event stream cleanly: execution_id=%s error=%s",
+                        execution.execution_id if execution else None,
+                        close_err,
+                    )
+
+            # A closed transport cannot receive message_replace. Restore all
+            # remaining transactions internally so cancellation persistence and
+            # moderation finalization never retain provisional text.
+            if optimistic_checkpoints:
+                restored_global = False
+                for checkpoint in list(optimistic_checkpoints.values()):
+                    output_node_id = checkpoint.get("output_node_id")
+                    if checkpoint.get("scoped") and output_node_id:
+                        if checkpoint.get("existed"):
+                            output_contents[output_node_id] = checkpoint.get("content", "") or ""
+                        else:
+                            output_contents.pop(output_node_id, None)
+                    else:
+                        accumulated_content = checkpoint.get("content", "") or ""
+                        output_contents.clear()
+                        output_contents.update(checkpoint.get("outputs", {}))
+                        restored_global = True
+                optimistic_checkpoints.clear()
+                if not restored_global:
+                    accumulated_content = "\n".join(
+                        output_contents[node_id]
+                        for node_id in output_order
+                        if output_contents.get(node_id)
+                    )
+                if output_moderation:
+                    output_moderation.reset(accumulated_content)
+
             # ── 中断/取消时持久化变量 + 释放锁 + 清理资源 ──
             if execution and execution.status == "running":
                 try:
@@ -8507,21 +8921,10 @@ class WorkflowService:
         from app.core.workflow.nodes.human_intervention.node import InterventionRegistry as _IR
 
         if self.execution_repo is None:
-            async with get_async_db_context() as db:
-                _stmt = (
-                    select(WorkflowExecution)
-                    .options(selectinload(WorkflowExecution.app))
-                    .where(WorkflowExecution.execution_id == execution_id)
-                )
-                execution = (await db.execute(_stmt)).scalar_one_or_none()
-                if not execution:
-                    runtime_execution = await self._get_runtime_execution_snapshot_async(execution_id)
-                    if runtime_execution:
-                        execution = self._build_execution_record_from_ref(runtime_execution)
-                if execution:
-                    db.expunge(execution)
-                    if execution.app is not None:
-                        db.expunge(execution.app)
+            # DB execution 优先，未持久化时回退 Redis runtime snapshot。
+            # 统一返回 WorkflowExecutionRef，避免对临时 ORM 实例执行 expunge
+            # 或在短生命周期 Session 关闭后访问懒加载关系。
+            execution = await self._get_execution_async(execution_id)
         else:
             execution = self.get_execution(execution_id)
         if not execution:
@@ -9465,40 +9868,25 @@ class WorkflowService:
         from app.core.workflow.engine.runtime_schema import ExecutionContext
         from app.core.workflow.engine.variable_pool import VariablePoolInitializer
 
-        # When WorkflowService is created without a db (e.g. streaming path in
-        # app_controller that uses WorkflowService()), the sync repos are None.
-        # Use async DB context in that case; eager-load the App relationship so
-        # that execution.app.workspace_id is accessible after the session closes.
-        if self.execution_repo is None:
-            async with get_async_db_context() as db:
-                _stmt = (
-                    select(WorkflowExecution)
-                    .options(selectinload(WorkflowExecution.app))
-                    .where(WorkflowExecution.execution_id == execution_id)
-                )
-                execution = (await db.execute(_stmt)).scalar_one_or_none()
-                if not execution:
-                    runtime_execution = await self._get_runtime_execution_snapshot_async(execution_id)
-                    if runtime_execution:
-                        execution = self._build_execution_record_from_ref(runtime_execution)
-                if execution:
-                    db.expunge(execution)
-                    if execution.app is not None:
-                        db.expunge(execution.app)
-        else:
-            execution = self.get_execution(execution_id)
+        # 流式入口以 WorkflowService()（无同步 db/repository）运行；恢复路径必须
+        # 使用独立异步 Session 查询，不能调用 get_execution/get_workflow_config。
+        execution = await self._get_execution_async(execution_id)
         if not execution:
             raise BusinessException("执行记录不存在", BizCode.NOT_FOUND)
 
         intervention_ctx = (execution.context or {}).get("human_intervention", {})
         thread_id_str = intervention_ctx.get("checkpoint_thread_id")
 
-        if self.config_repo is None:
-            config = await self.get_workflow_config_snapshot_async(app_id)
-        else:
-            config = self.get_workflow_config(app_id)
+        config = await self.get_workflow_config_snapshot_async(app_id)
         if not config:
             raise BusinessException("工作流配置不存在", BizCode.CONFIG_MISSING)
+
+        async with get_async_db_context() as db:
+            workspace_id = await db.scalar(
+                select(App.workspace_id).where(App.id == app_id).limit(1)
+            )
+        if not workspace_id:
+            raise BusinessException("应用不存在", BizCode.NOT_FOUND)
 
         workflow_config_dict = {
             "nodes": config.nodes,
@@ -9510,7 +9898,7 @@ class WorkflowService:
 
         execution_context = ExecutionContext(
             execution_id=execution_id,
-            workspace_id=str(execution.app.workspace_id) if execution.app else "",
+            workspace_id=str(workspace_id),
             user_id=str(execution.triggered_by) if execution.triggered_by else "",
             conversation_id=intervention_ctx.get("conversation_id", ""),
             memory_storage_type="neo4j",

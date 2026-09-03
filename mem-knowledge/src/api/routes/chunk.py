@@ -10,31 +10,29 @@ from fastapi import APIRouter, Depends, File, Query, Request, UploadFile
 from ...errors import KnowledgeError
 from ...runtime import ProcessRuntime
 from ...services import chunk as chunk_service
+from ...services import file as file_service
 from ...services.knowledge_file_storage import KnowledgeFileStorage
 from ...services.knowledge_retrieval import KnowledgeRetrievalService
 from ...services.qa_import import (
     create_qa_import_resources,
     dispatch_qa_import,
+    prepare_qa_import_resources,
     validate_qa_upload,
 )
 from ...tasks.dispatch import TaskDispatcher
-from ..dependencies import Principal, get_principal, get_runtime
+from ..dependencies import Principal, get_principal, get_runtime, get_source
 from ..schemas.chunk import (
     ChunkBatchCreate,
     ChunkCreate,
     ChunkRetrieve,
     ChunkUpdate,
-    KnowledgeRetrievalCaller,
+    KnowledgeRetrievalSource,
     RetrieveType,
 )
 from ..schemas.common import SuccessEnvelope, success
 from ..schemas.knowledge_retrieval import KnowledgeRetrievalRequest
 
-router = APIRouter(
-    prefix="/chunks",
-    tags=["chunks"],
-    dependencies=[Depends(get_principal)],
-)
+router = APIRouter(prefix="/chunks", tags=["chunks"])
 
 
 def _success(
@@ -369,16 +367,35 @@ async def get_retrieve_types(request: Request) -> SuccessEnvelope[list[str]]:
     )
 
 
+def _retrieval_request(
+    retrieve_data: ChunkRetrieve,
+    source: KnowledgeRetrievalSource,
+) -> KnowledgeRetrievalRequest:
+    payload = retrieve_data.model_dump(exclude_none=True)
+    if (
+        "vector_similarity_weight" in retrieve_data.model_fields_set
+        and retrieve_data.vector_similarity_weight is None
+    ):
+        payload["vector_similarity_weight"] = None
+    payload["knowledge_bases"] = [
+        config.model_dump(include=config.model_fields_set | {"kb_id"})
+        for config in retrieve_data.knowledge_bases
+    ]
+    payload["source"] = source
+    return KnowledgeRetrievalRequest(**payload)
+
+
 @router.post("/retrieval", response_model=SuccessEnvelope[Any])
 async def retrieve_chunks(
     request: Request,
     retrieve_data: ChunkRetrieve,
     principal: Annotated[Principal, Depends(get_principal)],
+    source: Annotated[KnowledgeRetrievalSource, Depends(get_source)],
     runtime: Annotated[ProcessRuntime, Depends(get_runtime)],
 ) -> SuccessEnvelope[Any]:
-    payload = retrieve_data.model_dump(exclude_none=True)
-    payload["caller"] = KnowledgeRetrievalCaller.IN_API
-    retrieval_request = KnowledgeRetrievalRequest(**payload)
+    retrieval_request = _retrieval_request(retrieve_data, source)
+    if retrieve_data.metadata_filters_resolved:
+        retrieval_request.mark_metadata_filters_resolved()
     result = await KnowledgeRetrievalService.retrieve_async(
         runtime,
         retrieval_request,
@@ -400,10 +417,11 @@ async def import_qa_new_doc(
     filename = file.filename or ""
     content = await file.read()
     validate_qa_upload(filename, content)
+    storage = KnowledgeFileStorage(runtime.storage)
     async with runtime.database.async_session() as db:
-        resources = await create_qa_import_resources(
+        plan = await prepare_qa_import_resources(
             db,
-            KnowledgeFileStorage(runtime.storage),
+            storage,
             kb_id=kb_id,
             parent_id=parent_id,
             filename=filename,
@@ -411,10 +429,21 @@ async def import_qa_new_doc(
             content_type=file.content_type,
             principal=principal,
         )
+    await storage.upload(plan.file_key, content, file.content_type)
+    persistence_succeeded = False
+    try:
+        async with runtime.database.async_session() as db:
+            resources = await create_qa_import_resources(db, plan, principal)
+            persistence_succeeded = True
+    except Exception:
+        if not persistence_succeeded:
+            await file_service.compensate_storage_upload(storage, plan.file_key)
+        raise
     task_id = await dispatch_qa_import(
+        runtime,
         TaskDispatcher(),
         kb_id,
-        resources.document.id,
+        resources.document_id,
         filename,
         content,
     )
@@ -422,8 +451,8 @@ async def import_qa_new_doc(
         request,
         {
             "task_id": task_id,
-            "document_id": str(resources.document.id),
-            "file_id": str(resources.file.id),
+            "document_id": str(resources.document_id),
+            "file_id": str(resources.file_id),
         },
         "QA 导入任务已提交，后台处理中",
     )
@@ -452,6 +481,7 @@ async def import_qa_chunks(
             principal,
         )
     task_id = await dispatch_qa_import(
+        runtime,
         TaskDispatcher(),
         snapshot.knowledge_id,
         snapshot.document_id,

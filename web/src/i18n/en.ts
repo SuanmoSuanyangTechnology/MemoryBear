@@ -10,6 +10,7 @@ import { workflow } from './en/workflow'
 import { engine } from './en/engine'
 import { detail } from './en/detail'
 import { notificationCenter } from './en/notificationCenter'
+import { memoryConversation } from './en/memoryConversation'
 
 export const en = {
   translation: {
@@ -25,5 +26,6 @@ export const en = {
     ...engine,
     ...detail,
     ...notificationCenter,
+    ...memoryConversation,
   },
 }

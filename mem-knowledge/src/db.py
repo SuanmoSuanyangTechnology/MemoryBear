@@ -143,15 +143,24 @@ class DatabaseManager:
             self._sync_session_factory = None
             self._async_session_factory = None
 
-    async def aclose(self) -> None:
+    async def aclose_async(self) -> None:
         with self._lock:
             async_engine = self._async_engine
-            sync_engine = self._sync_engine
             self._async_engine = None
-            self._sync_engine = None
             self._async_session_factory = None
-            self._sync_session_factory = None
         if async_engine is not None:
             await async_engine.dispose()
+
+    def close_sync(self) -> None:
+        with self._lock:
+            sync_engine = self._sync_engine
+            self._sync_engine = None
+            self._sync_session_factory = None
         if sync_engine is not None:
-            await asyncio.to_thread(sync_engine.dispose)
+            sync_engine.dispose()
+
+    async def aclose(self) -> None:
+        """Close both engine families for the async API compatibility path."""
+
+        await self.aclose_async()
+        await asyncio.to_thread(self.close_sync)

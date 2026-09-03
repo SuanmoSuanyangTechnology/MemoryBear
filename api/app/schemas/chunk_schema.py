@@ -1,9 +1,12 @@
-from pydantic import BaseModel, ConfigDict, Field, model_validator
 import uuid
 from enum import StrEnum
-from app.core.rag.models.chunk import QAChunk
-from app.schemas.knowledge_metadata_schema import FilterCondition, FilterGroup, MetadataFilterMode
 from typing import Union
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from app.core.rag.models.chunk import QAChunk
+from app.integrations.knowledge.contracts import KnowledgeRetrievalSource
+from app.schemas.knowledge_metadata_schema import FilterGroup, MetadataFilterMode
 
 
 class RetrieveType(StrEnum):
@@ -12,14 +15,6 @@ class RetrieveType(StrEnum):
     SEMANTIC = "semantic"
     Graph = "graph"
     HYBRID = "hybrid"
-
-
-class KnowledgeRetrievalCaller(StrEnum):
-    GENERAL = "general"
-    EX_API = "ex_api"
-    IN_API = "in_api"
-    AGENT = "agent"
-    WORKFLOW = "workflow"
 
 
 class KnowledgeBaseConfig(BaseModel):
@@ -117,7 +112,7 @@ class ChunkUpdate(BaseModel):
 class ChunkRetrieve(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
-    caller: KnowledgeRetrievalCaller = Field(KnowledgeRetrievalCaller.GENERAL)
+    source: KnowledgeRetrievalSource = Field(KnowledgeRetrievalSource.GENERAL)
     query: str
     kb_ids: list[uuid.UUID] = Field(default_factory=list)
     ex_ids: list[str] | None = Field(None)

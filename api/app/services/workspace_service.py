@@ -5,7 +5,7 @@ from typing import List, Optional
 
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.config.default_ontology_initializer import DefaultOntologyInitializer
 from app.core.config import settings
@@ -24,6 +24,7 @@ from app.models.workspace_model import (
     WorkspaceRole,
 )
 from app.repositories import workspace_repository
+from app.repositories.end_user_repository import EndUserRepository
 from app.repositories.workspace_invite_repository import WorkspaceInviteRepository
 from app.schemas.workspace_schema import (
     InviteAcceptRequest,
@@ -36,6 +37,7 @@ from app.schemas.workspace_schema import (
     WorkspaceUpdate,
 )
 from app.i18n import t
+from app.invalidation_notify import notify_user_async, notify_user_sync
 from app.services.memory_config_service import MemoryConfigService
 from app.services.session_service import SessionService
 from app.utils.redis_cache import (
@@ -65,12 +67,18 @@ def _serialize_model_option(model: ModelConfig) -> dict:
         "capability": [getattr(item, "value", item) for item in (model.capability or [])],
         "logo": model.logo,
         "is_public": bool(model.is_public),
+        # 弃用标记存放在基础模型（model_bases）上，与 ModelConfig schema 的派生方式保持一致
+        "is_deprecated": bool(
+            getattr(model, "model_base", None) is not None
+            and getattr(model.model_base, "is_deprecated", False)
+        ),
     }
 
 
 def _get_accessible_workspace_models(db: Session, tenant_id: uuid.UUID) -> list[ModelConfig]:
     return (
         db.query(ModelConfig)
+        .options(joinedload(ModelConfig.model_base))
         .filter(ModelConfig.is_active.is_(True))
         .filter(
             or_(
@@ -88,6 +96,7 @@ def _get_accessible_workspace_models(db: Session, tenant_id: uuid.UUID) -> list[
 def _get_public_speedbear_models(db: Session) -> list[ModelConfig]:
     return (
         db.query(ModelConfig)
+        .options(joinedload(ModelConfig.model_base))
         .filter(ModelConfig.is_active.is_(True))
         .filter(ModelConfig.provider == ModelProvider.SPEEDBEAR)
         .filter(ModelConfig.is_public.is_(True))
@@ -154,6 +163,7 @@ def _build_workspace_preset_response(db: Session, preset: WorkspaceDefaultModelP
     model_ids = [model_id for model_id in slot_to_model_id.values() if model_id]
     models = (
         db.query(ModelConfig)
+        .options(joinedload(ModelConfig.model_base))
         .filter(ModelConfig.id.in_(model_ids))
         .all()
     )
@@ -505,7 +515,7 @@ def _invalidate_default_config_memory_caches(db: Session) -> None:
             )
 
 
-_VALIDATE_AS_LLM_SLOTS = {"vision", "video", "audio"}
+_VALIDATE_AS_LLM_SLOTS = {"vision", "video", "audio", "image2text"}
 
 
 async def _validate_workspace_slot_runtime(
@@ -516,48 +526,90 @@ async def _validate_workspace_slot_runtime(
     *,
     locale: str,
 ) -> dict | None:
-    """校验单个模型位的运行时可用性，返回精确的问题详情（可用则返回 None）。
-
-    区分以下失败原因：模型不存在/已弃用/无权访问、缺少可用 API Key、API 连通性校验失败。
-    """
+    """校验单个模型位的运行时可用性，返回精确的问题详情（可用则返回 None）。"""
     from app.services.model_service import ModelApiKeyService
     from app.services.model_service import ModelConfigService as ModelSvc
 
     try:
-        model_config = await ModelSvc.get_model_by_id_async(async_db, uuid.UUID(str(model_id)), tenant_id)
+        model_config = await ModelSvc.get_model_by_id_async(
+            async_db, uuid.UUID(str(model_id)), tenant_id
+        )
     except BusinessException as exc:
         reason = "deprecated" if exc.code == BizCode.MODEL_DEPRECATED else "not_found"
-        return _model_issue(slot, reason=reason, locale=locale, model_id=model_id, detail=exc.message)
-    except Exception as exc:  # 无效 ID / 数据库异常等
-        return _model_issue(slot, reason="not_found", locale=locale, model_id=model_id, detail=str(exc))
+        return _model_issue(
+            slot,
+            reason=reason,
+            locale=locale,
+            model_id=model_id,
+            detail=exc.message,
+        )
+    except Exception as exc:
+        return _model_issue(
+            slot,
+            reason="not_found",
+            locale=locale,
+            model_id=model_id,
+            detail=str(exc),
+        )
 
     model_name = model_config.name
     provider = _serialize_provider(model_config)
+    issue_context = {
+        "locale": locale,
+        "model_id": model_id,
+        "model_name": model_name,
+        "provider": provider,
+        "model_type": str(getattr(model_config.type, "value", model_config.type)),
+    }
+
+    is_tenant_model = tenant_id is None or model_config.tenant_id == tenant_id
+    is_public_speedbear = (
+        model_config.provider == ModelProvider.SPEEDBEAR and bool(model_config.is_public)
+    )
+    if not (is_tenant_model or is_public_speedbear):
+        # 跨租户模型只返回请求中的模型 ID，不泄露名称、供应商或状态。
+        return _model_issue(
+            slot,
+            reason="not_accessible",
+            locale=locale,
+            model_id=model_id,
+        )
+
+    if not model_config.is_active:
+        return _model_issue(slot, reason="inactive", **issue_context)
+
+    if slot == "image2text":
+        matches_slot = (
+            str(model_config.type) in {ModelType.LLM.value, ModelType.CHAT.value}
+            and ModelCapability.VISION.value in set(model_config.capability or [])
+        )
+    else:
+        matches_slot = _slot_matches_model(slot, model_config)
+    if not matches_slot:
+        return _model_issue(slot, reason="capability_mismatch", **issue_context)
 
     try:
         api_key_config = await ModelApiKeyService.get_available_api_key_async(
             async_db, model_config.id, tenant_id
         )
+    except BusinessException as exc:
+        reason = "no_api_key" if exc.code == BizCode.AGENT_CONFIG_MISSING else "verify_failed"
+        return _model_issue(
+            slot,
+            reason=reason,
+            detail=exc.message,
+            **issue_context,
+        )
     except Exception as exc:
         return _model_issue(
             slot,
             reason="verify_failed",
-            locale=locale,
-            model_id=model_id,
-            model_name=model_name,
-            provider=provider,
             detail=str(exc),
+            **issue_context,
         )
 
     if not api_key_config:
-        return _model_issue(
-            slot,
-            reason="no_api_key",
-            locale=locale,
-            model_id=model_id,
-            model_name=model_name,
-            provider=provider,
-        )
+        return _model_issue(slot, reason="no_api_key", **issue_context)
 
     validate_type = "llm" if slot in _VALIDATE_AS_LLM_SLOTS else slot
     try:
@@ -575,50 +627,39 @@ async def _validate_workspace_slot_runtime(
         return _model_issue(
             slot,
             reason="verify_failed",
-            locale=locale,
-            model_id=model_id,
-            model_name=api_key_config.model_name or model_name,
-            provider=provider,
             detail=str(exc),
+            **issue_context,
         )
 
     if not result.get("valid"):
         return _model_issue(
             slot,
             reason="api_verify_failed",
-            locale=locale,
-            model_id=model_id,
-            model_name=api_key_config.model_name or model_name,
-            provider=provider,
             detail=str(result.get("error") or result.get("message") or "Unknown error"),
+            **issue_context,
         )
     return None
 
 
-async def _validate_workspace_model_runtime(
-    db: Session,
+async def validate_model_bindings_runtime_async(
     values: dict[str, str | None],
     tenant_id: uuid.UUID,
-    workspace_id: uuid.UUID,
+    workspace_id: uuid.UUID | None,
     *,
     locale: str,
     slots_to_validate: tuple[str, ...],
 ) -> list[dict]:
-    """校验各模型位的运行时可用性，收集全部问题（不中断）。"""
+    """校验最终绑定模型的可见性、能力、API Key 与连通性，并聚合问题。"""
     from app.db import get_async_db_context
 
-    _ = db  # 运行时校验使用独立的异步会话
     warnings: list[dict] = []
-
     async with get_async_db_context() as async_db:
-        for slot in slots_to_validate:
-            if not values.get(slot):
-                warnings.append(_model_issue(slot, reason="not_configured", locale=locale))
-
         for slot in slots_to_validate:
             model_id = values.get(slot)
             if not model_id:
+                warnings.append(_model_issue(slot, reason="not_configured", locale=locale))
                 continue
+
             issue = await _validate_workspace_slot_runtime(
                 async_db, slot, str(model_id), tenant_id, locale=locale
             )
@@ -630,6 +671,25 @@ async def _validate_workspace_model_runtime(
                 warnings.append(issue)
 
     return warnings
+
+
+async def _validate_workspace_model_runtime(
+    db: Session,
+    values: dict[str, str | None],
+    tenant_id: uuid.UUID,
+    workspace_id: uuid.UUID | None,
+    *,
+    locale: str,
+    slots_to_validate: tuple[str, ...],
+) -> list[dict]:
+    _ = db
+    return await validate_model_bindings_runtime_async(
+        values,
+        tenant_id,
+        workspace_id,
+        locale=locale,
+        slots_to_validate=slots_to_validate,
+    )
 
 
 def _resolve_workspace_create_payload(
@@ -786,6 +846,9 @@ async def delete_workspace_member(
 
         # 使被删除成员的所有 token 立即失效
         await SessionService.invalidate_all_user_tokens(str(workspace_member.user_id))
+
+        # 决策 #11 修订：workspace 成员变更发通知，identity 重建快照（workspace_id/roles 变化）
+        await notify_user_async(str(workspace_member.user_id))
     except Exception as e:
         db.rollback()
         business_logger.error(f"删除工作空间成员失败 - 工作空间: {workspace_id}, 成员: {member_id}, 错误: {str(e)}")
@@ -1044,6 +1107,55 @@ def update_workspace(
     except Exception as e:
         business_logger.error(f"工作空间更新失败: workspace_id={workspace_id} - {str(e)}")
         db.rollback()
+        raise
+
+
+def get_workspace_retention_policy(
+        db: Session,
+        workspace_id: uuid.UUID,
+        user: User,
+) -> tuple[int | None, int]:
+    """获取临时身份保留天数和至少有一条记忆的有效临时 EndUser 数量。"""
+    _check_workspace_member_permission(db, workspace_id, user)
+    retention_days = workspace_repository.get_workspace_retention_days(
+        db=db,
+        workspace_id=workspace_id,
+    )
+    end_user_count = (
+        EndUserRepository(db).get_temporary_end_users_count_by_workspace(
+            workspace_id
+        )
+    )
+    return retention_days, end_user_count
+
+
+def update_workspace_retention_policy(
+        db: Session,
+        workspace_id: uuid.UUID,
+        retention_days: int | None,
+        user: User,
+) -> int | None:
+    """以空间成员权限更新指定工作空间的临时身份保留天数。"""
+    business_logger.info(
+        f"更新工作空间保留策略: workspace_id={workspace_id}, "
+        f"retention_days={retention_days}, 操作者={user.username}"
+    )
+    _check_workspace_member_permission(db, workspace_id, user)
+    try:
+        updated_retention_days = workspace_repository.update_workspace_retention_days(
+            db=db,
+            workspace_id=workspace_id,
+            retention_days=retention_days,
+        )
+        business_logger.info(
+            f"工作空间保留策略更新成功: workspace_id={workspace_id}, "
+            f"retention_days={updated_retention_days}"
+        )
+        return updated_retention_days
+    except Exception as e:
+        business_logger.error(
+            f"工作空间保留策略更新失败: workspace_id={workspace_id} - {str(e)}"
+        )
         raise
 
 
@@ -1452,6 +1564,9 @@ def accept_workspace_invite(
         business_logger.info(
             f"用户成功加入工作空间: user={user.username}, workspace={workspace.name}, role={workspace_role}")
 
+        # 决策 #11 修订：workspace 成员变更发通知，identity 重建快照（workspace_id/roles 变化）
+        notify_user_sync(str(user.id))
+
         return {
             "message": "Successfully joined the workspace",
             "workspace": workspace,
@@ -1567,6 +1682,10 @@ def update_workspace_member_roles(
         # 重新获取更新后的成员列表
         updated_members = workspace_repository.get_members_by_workspace(db=db, workspace_id=workspace_id)
         business_logger.info(f"成员角色更新完成: workspace_id={workspace_id}, 更新数量={len(updates)}")
+
+        # 决策 #11 修订：workspace 成员变更发通知，identity 重建快照（workspace_id/roles 变化）
+        for upd in updates:
+            notify_user_sync(str(member_map[upd.id].user_id))
 
         return updated_members
 

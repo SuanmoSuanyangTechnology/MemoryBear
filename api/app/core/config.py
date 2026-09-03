@@ -40,6 +40,12 @@ class Settings:
     SPEEDBEAR_SYSTEM_TENANT_ID: str = os.getenv(
         "SPEEDBEAR_SYSTEM_TENANT_ID", "00000000-0000-0000-0000-000000000000"
     )
+    # SSO 新租户绑定 SpeedBear 失败时的策略（轮询重试后仍失败时生效）：
+    #   true  = 严格模式：物理回滚本次新建的租户及其临时数据，本次登录失败
+    #   false = 宽松模式：保留租户，返回「未绑定成功，请联系管理员」提示
+    SSO_REQUIRE_SPEEDBEAR_BINDING: bool = (
+        os.getenv("SSO_REQUIRE_SPEEDBEAR_BINDING", "true").lower() == "true"
+    )
 
     # Neo4j Configuration (记忆系统数据库)
     NEO4J_URI: str = os.getenv("NEO4J_URI", "bolt://1.94.111.67:7687")
@@ -83,6 +89,11 @@ class Settings:
 
     DB_AUTO_UPGRADE = os.getenv("DB_AUTO_UPGRADE", "false").lower() == "true"
 
+    # Health probe configuration
+    READINESS_CHECK_TIMEOUT_SECONDS: float = float(
+        os.getenv("READINESS_CHECK_TIMEOUT_SECONDS", "2.0")
+    )
+
     # Redis configuration
     REDIS_HOST: str = os.getenv("REDIS_HOST", "127.0.0.1")
     REDIS_PORT: int = int(os.getenv("REDIS_PORT", "6379"))
@@ -111,6 +122,34 @@ class Settings:
     KNOWLEDGE_GRAPH_RETRIEVAL_TIMEOUT_MS: int = max(
         100,
         min(30000, int(os.getenv("KNOWLEDGE_GRAPH_RETRIEVAL_TIMEOUT_MS", "15000"))),
+    )
+
+    # Independent knowledge service routing
+    ENABLE_MEM_KNOWLEDGE: bool = os.getenv("ENABLE_MEM_KNOWLEDGE", "false").lower() == "true"
+    MEM_KNOWLEDGE_BASE_URL: str = os.getenv("MEM_KNOWLEDGE_BASE_URL", "")
+    MEM_KNOWLEDGE_CONNECT_TIMEOUT_SECONDS: float = float(
+        os.getenv("MEM_KNOWLEDGE_CONNECT_TIMEOUT_SECONDS", "5")
+    )
+    MEM_KNOWLEDGE_POOL_TIMEOUT_SECONDS: float = float(
+        os.getenv("MEM_KNOWLEDGE_POOL_TIMEOUT_SECONDS", "5")
+    )
+    MEM_KNOWLEDGE_READ_TIMEOUT_SECONDS: float = float(
+        os.getenv("MEM_KNOWLEDGE_READ_TIMEOUT_SECONDS", "120")
+    )
+    MEM_KNOWLEDGE_WRITE_TIMEOUT_SECONDS: float = float(
+        os.getenv("MEM_KNOWLEDGE_WRITE_TIMEOUT_SECONDS", "600")
+    )
+    MEM_KNOWLEDGE_STREAM_READ_TIMEOUT_SECONDS: float = float(
+        os.getenv("MEM_KNOWLEDGE_STREAM_READ_TIMEOUT_SECONDS", "600")
+    )
+    MEM_KNOWLEDGE_MAX_CONNECTIONS: int = int(
+        os.getenv("MEM_KNOWLEDGE_MAX_CONNECTIONS", "100")
+    )
+    MEM_KNOWLEDGE_MAX_KEEPALIVE_CONNECTIONS: int = int(
+        os.getenv("MEM_KNOWLEDGE_MAX_KEEPALIVE_CONNECTIONS", "20")
+    )
+    MEM_KNOWLEDGE_HEALTH_TIMEOUT_SECONDS: float = float(
+        os.getenv("MEM_KNOWLEDGE_HEALTH_TIMEOUT_SECONDS", "3")
     )
 
     # Xinference configuration
@@ -377,6 +416,14 @@ class Settings:
     FORGET_SCAN_INTERVAL_MINUTES: int = TypeAdapter(
         Annotated[int, Field(ge=1, description="forget candidates scan interval in minutes, must be >= 1")]
     ).validate_python(int(os.getenv("FORGET_SCAN_INTERVAL_MINUTES", "5")))
+
+    # 过期临时用户扫描时间（UTC，默认 17:00 = 北京时间次日 01:00）
+    EXPIRED_END_USER_SCAN_HOUR: int = TypeAdapter(
+        Annotated[int, Field(ge=0, le=23, description="expired end user scan cron hour (UTC) [0, 23]")]
+    ).validate_python(int(os.getenv("EXPIRED_END_USER_SCAN_HOUR", "17")))
+    EXPIRED_END_USER_SCAN_MINUTE: int = TypeAdapter(
+        Annotated[int, Field(ge=0, le=59, description="expired end user scan cron minute [0, 59]")]
+    ).validate_python(int(os.getenv("EXPIRED_END_USER_SCAN_MINUTE", "0")))
 
     IMPLICIT_EMOTIONS_UPDATE_HOUR: int = int(os.getenv("IMPLICIT_EMOTIONS_UPDATE_HOUR", "2"))
     # implicit_emotions_update: 每天几分执行（分钟，0-59）

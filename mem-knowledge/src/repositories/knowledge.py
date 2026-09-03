@@ -58,14 +58,6 @@ async def get_knowledges_paginated_async(
     return total, list(result.scalars().all())
 
 
-async def get_chunked_knowledgeids_async(db: AsyncSession, filters: list) -> list:
-    stmt = select(Knowledge.id, Knowledge.workspace_id)
-    for filter_cond in filters:
-        stmt = stmt.where(filter_cond)
-    result = await db.execute(stmt)
-    return result.all()
-
-
 async def create_knowledge_async(
     db: AsyncSession,
     knowledge: KnowledgeCreate,
@@ -124,34 +116,6 @@ async def get_knowledge_by_external_id_async(
         )
     )
     return result.scalars().first()
-
-
-async def get_knowledge_ids_by_external_ids_async(
-    db: AsyncSession,
-    external_ids: list[str],
-    workspace_id: uuid.UUID,
-) -> list[uuid.UUID]:
-    result = await db.execute(
-        select(Knowledge.id).where(
-            Knowledge.external_id.in_(external_ids),
-            Knowledge.workspace_id == workspace_id,
-            Knowledge.status == 1,
-        )
-    )
-    return list(result.scalars().all())
-
-
-async def get_knowledges_by_parent_id_async(
-    db: AsyncSession,
-    parent_id: uuid.UUID,
-) -> list[Knowledge]:
-    result = await db.execute(
-        select(Knowledge).where(
-            Knowledge.parent_id == parent_id,
-            Knowledge.status == 1,
-        )
-    )
-    return list(result.scalars().all())
 
 
 async def get_knowledges_by_parent_ids_async(
@@ -217,69 +181,3 @@ async def delete_knowledge_by_id_async(
         await db.rollback()
         logger.exception("Failed to delete knowledge: knowledge_id=%s", knowledge_id)
         raise
-
-
-async def get_total_doc_num_by_workspace_async(
-    db: AsyncSession,
-    workspace_id: uuid.UUID,
-) -> int:
-    result = await db.execute(
-        select(func.sum(Knowledge.doc_num)).where(
-            Knowledge.workspace_id == workspace_id,
-            Knowledge.status == 1,
-        )
-    )
-    return result.scalar_one() or 0
-
-
-async def get_total_chunk_num_by_workspace_async(
-    db: AsyncSession,
-    workspace_id: uuid.UUID,
-) -> int:
-    result = await db.execute(
-        select(func.sum(Knowledge.chunk_num)).where(
-            Knowledge.workspace_id == workspace_id,
-            Knowledge.status == 1,
-        )
-    )
-    return result.scalar_one() or 0
-
-
-async def get_total_kb_count_by_workspace_async(
-    db: AsyncSession,
-    workspace_id: uuid.UUID,
-) -> int:
-    result = await db.execute(
-        select(func.count(Knowledge.id)).where(
-            Knowledge.workspace_id == workspace_id,
-            Knowledge.status == 1,
-        )
-    )
-    return result.scalar_one()
-
-async def get_user_kb_chunk_num_by_workspace_async(
-    db: AsyncSession,
-    workspace_id: uuid.UUID,
-) -> int:
-    result = await db.execute(
-        select(func.sum(Knowledge.chunk_num)).where(
-            Knowledge.workspace_id == workspace_id,
-            Knowledge.status == 1,
-            Knowledge.permission_id == PermissionType.Memory,
-        )
-    )
-    return result.scalar_one() or 0
-
-
-async def get_non_user_kb_count_by_workspace_async(
-    db: AsyncSession,
-    workspace_id: uuid.UUID,
-) -> int:
-    result = await db.execute(
-        select(func.count(Knowledge.id)).where(
-            Knowledge.workspace_id == workspace_id,
-            Knowledge.status == 1,
-            Knowledge.permission_id != PermissionType.Memory,
-        )
-    )
-    return result.scalar_one()

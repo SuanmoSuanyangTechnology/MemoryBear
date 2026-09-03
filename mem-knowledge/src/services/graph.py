@@ -2,14 +2,23 @@
 
 from __future__ import annotations
 
+import logging
 import re
+import uuid
 from typing import Any
 
 from redbear_model.runtime import RedBearLLM
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import flag_modified
 
 from ..errors import KnowledgeError
+from ..models.owned import Knowledge
 from ..rag.knowledge_graph.config import GraphPipeline, is_graph_enabled, resolve_graph_pipeline
 from ..rag.knowledge_graph.elasticsearch_store import graph_index_name
+from ..rag.parser_config import set_graph_pipeline_for_migration
+
+logger = logging.getLogger(__name__)
 
 
 async def graph_entity_types(runtime: Any, model_config: Any, scenario: str) -> str:
@@ -38,7 +47,46 @@ async def get_graph(knowledge: Any, store: Any) -> dict[str, Any]:
     if pipeline is GraphPipeline.EVIDENCE:
         graph = await store.load_projection_graph(index_name, str(knowledge.id))
         return {"graph": graph, "mind_map": {}}
-    return await store.load_legacy_graph(index_name, str(knowledge.id))
+    logger.warning(
+        "Legacy graph detail is unavailable; returning an empty result: knowledge=%s",
+        knowledge.id,
+    )
+    return {"graph": {}, "mind_map": {}}
+
+
+async def commit_evidence_pipeline(
+    db: AsyncSession,
+    knowledge_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+) -> Knowledge:
+    result = await db.execute(
+        select(Knowledge)
+        .where(
+            Knowledge.id == knowledge_id,
+            Knowledge.workspace_id == workspace_id,
+        )
+        .with_for_update()
+    )
+    knowledge = result.scalars().first()
+    if knowledge is None:
+        raise KnowledgeError.from_code("KB_RESOURCE_NOT_FOUND", "Knowledge resource not found")
+    if not is_graph_enabled(knowledge.parser_config):
+        raise KnowledgeError.from_code(
+            "KB_VALIDATION_ERROR",
+            "knowledge graph is not enabled",
+        )
+    knowledge.parser_config = set_graph_pipeline_for_migration(
+        knowledge.parser_config,
+        GraphPipeline.EVIDENCE,
+    )
+    flag_modified(knowledge, "parser_config")
+    try:
+        await db.commit()
+        await db.refresh(knowledge)
+    except Exception:
+        await db.rollback()
+        raise
+    return knowledge
 
 
 async def delete_graph(knowledge: Any, dispatcher: Any) -> str:
@@ -50,22 +98,19 @@ async def delete_graph(knowledge: Any, dispatcher: Any) -> str:
 
 
 async def rebuild_graph(knowledge: Any, store: Any, dispatcher: Any) -> str:
+    del store
     if not is_graph_enabled(knowledge.parser_config):
         raise KnowledgeError.from_code("KB_VALIDATION_ERROR", "knowledge graph is not enabled")
-    pipeline = resolve_graph_pipeline(knowledge.parser_config)
-    if pipeline is GraphPipeline.LEGACY:
-        await store.clear_legacy_graph(
-            graph_index_name(str(knowledge.workspace_id)),
-            str(knowledge.id),
-        )
-        return await dispatcher.send(
-            "app.core.rag.tasks.build_graphrag_for_kb",
-            args=[str(knowledge.id)],
-        )
     return await dispatcher.send(
         "app.core.rag.tasks.rebuild_evidence_graph_knowledge",
         args=[str(knowledge.id)],
     )
 
 
-__all__ = ["delete_graph", "get_graph", "graph_entity_types", "rebuild_graph"]
+__all__ = [
+    "commit_evidence_pipeline",
+    "delete_graph",
+    "get_graph",
+    "graph_entity_types",
+    "rebuild_graph",
+]

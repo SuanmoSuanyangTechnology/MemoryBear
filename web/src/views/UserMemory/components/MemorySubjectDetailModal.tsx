@@ -6,6 +6,7 @@ import clsx from 'clsx';
 import type { Data } from '../types';
 import RbModal from '@/components/RbModal';
 import Tag from '@/components/Tag';
+import { formatDateTime } from '@/utils/format'
 
 export interface MemorySubjectDetailModalRef {
   handleOpen: (item: Data) => void;
@@ -69,14 +70,8 @@ const MemorySubjectDetailModal = forwardRef<MemorySubjectDetailModalRef>((_, ref
           value={item?.end_user_id}
         />
 
-        <div className="rb:my-3 rb:rounded-xl rb:bg-[rgba(21,94,239,0.08)] rb:p-3">
-          <DetailField
-            label={t('userMemory.identity')}
-            value={item?.end_user?.other_id}
-          />
-        </div>
 
-        <Row gutter={24}>
+        <Row gutter={24} className="rb:my-3">
           <Col span={12}>
             <div className="rb:text-[#5B6167] rb:leading-5">
               {t('userMemory.userName')}
@@ -96,7 +91,7 @@ const MemorySubjectDetailModal = forwardRef<MemorySubjectDetailModalRef>((_, ref
           </Col>
         </Row>
 
-        <div className="rb:mt-5">
+        <div className="rb:mb-3 rb:rounded-xl rb:bg-[rgba(21,94,239,0.08)] rb:p-3">
           <div className="rb:text-[#5B6167] rb:leading-5">
             {t('userMemory.tags')}
           </div>
@@ -110,6 +105,27 @@ const MemorySubjectDetailModal = forwardRef<MemorySubjectDetailModalRef>((_, ref
             </div>
           )}
         </div>
+        <div className="rb:mb-3 rb:rounded-xl rb:bg-[rgba(21,94,239,0.08)] rb:p-3">
+          <DetailField
+            label={t('userMemory.identity')}
+            value={item?.end_user?.identity_features || t('userMemory.unboundIdentity')}
+          />
+        </div>
+
+        <Row gutter={24}>
+          <Col span={12}>
+            <DetailField
+              label={t('userMemory.lastMemoryActivityTime')}
+              value={item?.end_user?.write_time ? formatDateTime(item.end_user.write_time) : '-'}
+            />
+          </Col>
+          <Col span={12}>
+            <DetailField
+              label={t('userMemory.expireTime')}
+              value={item?.end_user?.expire_time ? formatDateTime(item.end_user.expire_time) : t('userMemory.neverExpires')}
+            />
+          </Col>
+        </Row>
       </section>
 
       <section className="rb:mt-3 rb:border-t rb:border-[#EBEBEB] rb:pt-3">

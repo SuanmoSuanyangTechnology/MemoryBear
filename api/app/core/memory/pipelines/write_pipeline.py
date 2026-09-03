@@ -289,9 +289,10 @@ class WritePipeline:
         if not ref_id:
             ref_id = uuid.uuid4().hex
 
-        # 根据用户消息内容自动检测语言，确保输出语言与输入语言一致
+        # 根据用户消息内容自动检测语言；没有明确语言证据时优先中文。
         import re
-        import langid
+        from app.core.memory.utils.language_utils import detect_memory_language
+
         # 从目标消息和上下文中提取 user 内容进行语言检测
         all_messages = context_before + [target_message] + context_after
         user_content = " ".join(
@@ -300,9 +301,12 @@ class WritePipeline:
             if isinstance(msg, dict) and msg.get("role") == "user" and msg.get("content")
         )
         if user_content:
-            detected = langid.classify(user_content)[0]
-            self.language = detected if detected in ("zh", "en") else "en"
-            logger.info(f"[LanguageDetect] detected={detected}, language={self.language}, text_len={len(user_content)}")
+            self.language = detect_memory_language(user_content)
+            logger.info(
+                "[LanguageDetect] language=%s, text_len=%s",
+                self.language,
+                len(user_content),
+            )
 
         # 处理 dialog_at：三级降级，最终由 ensure_dialog_at 用服务端当前时间兜底
         from app.core.utils.datetime_utils import ensure_dialog_at
@@ -1195,11 +1199,24 @@ class WritePipeline:
         幂等：若已初始化则跳过，避免重复 DB 查询。
         """
         from app.core.memory.pipelines.base_pipeline import ModelClientMixin
+        from app.core.memory.utils.config.config_utils import get_pipeline_config
         from app.db import get_db_context
+
+        # 将抽取温度配置注入共享 LLM 客户端（否则 statement_extraction.temperature 无消费者，
+        # 实际使用服务端默认温度）。temperature=0 必须保留，故用 is not None 判断。
+        stmt_temperature = get_pipeline_config(
+            self.memory_config
+        ).statement_extraction.temperature
+        extra_params = (
+            {"temperature": stmt_temperature} if stmt_temperature is not None else None
+        )
 
         with get_db_context() as db: # 考虑写入是否需要增加异步方法，get_async_db_context
             self._llm_client = ModelClientMixin.get_llm_client(
-                db, self.memory_config.llm_model_id, self.memory_config.tenant_id
+                db,
+                self.memory_config.llm_model_id,
+                self.memory_config.tenant_id,
+                extra_params=extra_params,
             )
             self._embedder_client = ModelClientMixin.get_embedding_client(
                 db, self.memory_config.embedding_model_id, self.memory_config.tenant_id

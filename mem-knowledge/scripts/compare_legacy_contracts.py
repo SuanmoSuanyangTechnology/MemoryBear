@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import ast
 import json
+import subprocess
 import sys
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
@@ -13,12 +14,16 @@ from typing import Any
 
 
 @dataclass(frozen=True, order=True)
-class Operation:
-    """One HTTP operation with its source handler."""
+class OperationContract:
+    """One HTTP operation and its caller-visible transport contract."""
 
     method: str
     path: str
     handler: str
+    parameters: tuple[tuple[str, str, bool], ...]
+    request_content_types: tuple[str, ...]
+    response_content_types: tuple[str, ...]
+    streaming: bool
 
 
 @dataclass(frozen=True)
@@ -50,12 +55,22 @@ EXPECTED_COUNTS = {
 HTTP_METHODS = {"get", "post", "put", "patch", "delete"}
 LEGACY_RESPONSE_FIELDS = {"code", "msg", "data", "error", "time"}
 LEGACY_ERROR_STATUSES = ("400", "404", "409", "500")
-STREAM_OPERATIONS = {
-    ("GET", "/internal/v1/knowledges/{kb_id}/qa/export"),
-    ("POST", "/internal/v1/knowledges/{kb_id}/batch-download"),
-    ("GET", "/internal/v1/files/{file_id}"),
-    ("POST", "/internal/v1/files/batch-download"),
-}
+LEGACY_ORACLE_REF = "fbd5da5604a114f9861986b19ea7ff481eaffaba"
+EXPECTED_STREAM_OPERATIONS = frozenset(
+    {
+        ("GET", "/internal/v1/files/{file_id}"),
+        ("GET", "/internal/v1/knowledges/{kb_id}/qa/export"),
+        ("POST", "/internal/v1/files/batch-download"),
+        ("POST", "/internal/v1/knowledges/{kb_id}/batch-download"),
+    }
+)
+EXPECTED_MULTIPART_OPERATIONS = frozenset(
+    {
+        ("POST", "/internal/v1/chunks/{kb_id}/import_qa"),
+        ("POST", "/internal/v1/chunks/{kb_id}/{document_id}/import_qa"),
+        ("POST", "/internal/v1/files/file"),
+    }
+)
 
 
 def normalize_internal_operation(method: str, legacy_path: str) -> tuple[str, str]:
@@ -80,9 +95,164 @@ def _route_from_decorator(decorator: ast.expr) -> tuple[str, str] | None:
     return target.attr, path.value
 
 
-def _controller_operations(path: Path, prefix: str) -> list[Operation]:
-    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    operations: list[Operation] = []
+def _call_name(candidate: ast.expr | None) -> str | None:
+    if not isinstance(candidate, ast.Call):
+        return None
+    target = candidate.func
+    if isinstance(target, ast.Name):
+        return target.id
+    if isinstance(target, ast.Attribute):
+        return target.attr
+    return None
+
+
+def _is_required(argument: ast.arg, default: ast.expr | None) -> bool:
+    del argument
+    if default is None:
+        return True
+    if not isinstance(default, ast.Call) or not default.args:
+        return False
+    first_arg = default.args[0]
+    return isinstance(first_arg, ast.Constant) and first_arg.value is Ellipsis
+
+
+def _is_scalar_annotation(annotation: ast.expr | None) -> bool:
+    if annotation is None:
+        return True
+    if isinstance(annotation, ast.Name):
+        return annotation.id in {"Any", "UUID", "bool", "bytes", "float", "int", "str"}
+    if isinstance(annotation, ast.Attribute):
+        return (
+            isinstance(annotation.value, ast.Name)
+            and annotation.value.id == "uuid"
+            and annotation.attr == "UUID"
+        )
+    if isinstance(annotation, ast.Subscript):
+        wrapper = annotation.value
+        wrapper_name = wrapper.id if isinstance(wrapper, ast.Name) else ""
+        if wrapper_name in {"Annotated", "Optional"}:
+            element = annotation.slice
+            if isinstance(element, ast.Tuple):
+                element = element.elts[0]
+            return _is_scalar_annotation(element)
+        return False
+    if isinstance(annotation, ast.BinOp) and isinstance(annotation.op, ast.BitOr):
+        operands = (annotation.left, annotation.right)
+        return all(
+            isinstance(item, ast.Constant) and item.value is None
+            or _is_scalar_annotation(item)
+            for item in operands
+        )
+    if isinstance(annotation, ast.Constant) and annotation.value is None:
+        return True
+    return False
+
+
+def _is_implicit_json_body(
+    argument: ast.arg,
+    default: ast.expr | None,
+    method: str,
+) -> bool:
+    del default
+    if method not in {"post", "put", "patch"}:
+        return False
+    return not _is_scalar_annotation(argument.annotation)
+
+
+def _returns_dynamic_response(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+    """Return whether a route directly returns a dynamic response object."""
+
+    class DynamicResponseReturnVisitor(ast.NodeVisitor):
+        found = False
+
+        def visit_Return(self, return_node: ast.Return) -> None:
+            if _call_name(return_node.value) in {"Response", "StreamingResponse"}:
+                self.found = True
+
+        def visit_FunctionDef(self, child: ast.FunctionDef) -> None:
+            del child
+
+        def visit_AsyncFunctionDef(self, child: ast.AsyncFunctionDef) -> None:
+            del child
+
+    visitor = DynamicResponseReturnVisitor()
+    for statement in node.body:
+        visitor.visit(statement)
+    return visitor.found
+
+
+def _function_contract(
+    node: ast.FunctionDef | ast.AsyncFunctionDef,
+    *,
+    method: str,
+    internal_path: str,
+) -> tuple[
+    tuple[tuple[str, str, bool], ...],
+    tuple[str, ...],
+    tuple[str, ...],
+    bool,
+]:
+    positional = [*node.args.posonlyargs, *node.args.args]
+    defaults: list[ast.expr | None] = [None] * (
+        len(positional) - len(node.args.defaults)
+    ) + list(node.args.defaults)
+    keyword_only = list(zip(node.args.kwonlyargs, node.args.kw_defaults, strict=True))
+    arguments = [*zip(positional, defaults, strict=True), *keyword_only]
+
+    parameters: list[tuple[str, str, bool]] = []
+    body_kinds: set[str] = set()
+    for argument, default in arguments:
+        call_name = _call_name(default)
+        if call_name == "Depends":
+            continue
+        if call_name == "File":
+            body_kinds.add("file")
+            continue
+        if call_name == "Form":
+            body_kinds.add("form")
+            continue
+        if call_name == "Body" or _is_implicit_json_body(argument, default, method):
+            body_kinds.add("json")
+            continue
+
+        if f"{{{argument.arg}}}" in internal_path:
+            location = "path"
+            required = True
+        elif call_name in {"Header", "Cookie", "Query"}:
+            location = call_name.lower()
+            required = _is_required(argument, default)
+        else:
+            location = "query"
+            required = _is_required(argument, default)
+        parameters.append((argument.arg, location, required))
+
+    if "file" in body_kinds:
+        request_content_types = ("multipart/form-data",)
+    elif "form" in body_kinds:
+        request_content_types = ("application/x-www-form-urlencoded",)
+    elif "json" in body_kinds:
+        request_content_types = ("application/json",)
+    else:
+        request_content_types = ()
+
+    streaming = _returns_dynamic_response(node)
+    response_content_types = () if streaming else ("application/json",)
+    return (
+        tuple(parameters),
+        request_content_types,
+        response_content_types,
+        streaming,
+    )
+
+
+def _controller_operations_from_source(
+    source: str,
+    *,
+    filename: str,
+    prefix: str,
+) -> list[OperationContract]:
+    tree = ast.parse(source, filename=filename)
+    operations: list[OperationContract] = []
     for node in tree.body:
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
@@ -95,32 +265,37 @@ def _controller_operations(path: Path, prefix: str) -> list[Operation]:
                 method,
                 f"{prefix}{relative_path}",
             )
+            parameters, request_types, response_types, streaming = _function_contract(
+                node,
+                method=method,
+                internal_path=internal_path,
+            )
             operations.append(
-                Operation(
+                OperationContract(
                     method=normalized_method,
                     path=internal_path,
                     handler=node.name,
+                    parameters=parameters,
+                    request_content_types=request_types,
+                    response_content_types=response_types,
+                    streaming=streaming,
                 )
             )
     return operations
 
 
-def collect_legacy_operations(
-    legacy_root: Path,
-) -> tuple[tuple[Operation, ...], dict[str, int]]:
-    """Load and validate the fixed six-controller migration inventory."""
+def _controller_operations(path: Path, prefix: str) -> list[OperationContract]:
+    return _controller_operations_from_source(
+        path.read_text(encoding="utf-8"),
+        filename=str(path),
+        prefix=prefix,
+    )
 
-    controller_root = legacy_root / "app" / "controllers"
-    operations: list[Operation] = []
-    counts: dict[str, int] = {}
-    for spec in CONTROLLERS:
-        controller_path = controller_root / spec.filename
-        if not controller_path.is_file():
-            raise FileNotFoundError(f"Legacy controller is missing: {controller_path}")
-        controller_operations = _controller_operations(controller_path, spec.prefix)
-        counts[spec.filename] = len(controller_operations)
-        operations.extend(controller_operations)
 
+def _validate_legacy_inventory(
+    operations: list[OperationContract],
+    counts: Mapping[str, int],
+) -> tuple[tuple[OperationContract, ...], dict[str, int]]:
     if counts != EXPECTED_COUNTS:
         raise ValueError(
             f"Legacy controller counts changed: expected={EXPECTED_COUNTS} actual={counts}"
@@ -131,12 +306,108 @@ def collect_legacy_operations(
     operation_keys = {(item.method, item.path) for item in operations}
     if len(operation_keys) != len(operations):
         raise ValueError("Legacy knowledge controllers contain duplicate operations")
+    streams = stream_operation_keys(operations)
+    if streams != EXPECTED_STREAM_OPERATIONS:
+        raise ValueError(
+            "Legacy stream operations changed: "
+            f"expected={sorted(EXPECTED_STREAM_OPERATIONS)} actual={sorted(streams)}"
+        )
+    multipart = multipart_operation_keys(operations)
+    if multipart != EXPECTED_MULTIPART_OPERATIONS:
+        raise ValueError(
+            "Legacy multipart operations changed: "
+            f"expected={sorted(EXPECTED_MULTIPART_OPERATIONS)} actual={sorted(multipart)}"
+        )
     return tuple(sorted(operations)), dict(sorted(counts.items()))
+
+
+def stream_operation_keys(
+    operations: Sequence[OperationContract],
+) -> frozenset[tuple[str, str]]:
+    """Return the fixed legacy streaming operation keys."""
+
+    return frozenset(
+        (operation.method, operation.path) for operation in operations if operation.streaming
+    )
+
+
+def multipart_operation_keys(
+    operations: Sequence[OperationContract],
+) -> frozenset[tuple[str, str]]:
+    """Return operations whose request body is multipart form data."""
+
+    return frozenset(
+        (operation.method, operation.path)
+        for operation in operations
+        if "multipart/form-data" in operation.request_content_types
+    )
+
+
+def collect_legacy_operations(
+    legacy_root: Path,
+) -> tuple[tuple[OperationContract, ...], dict[str, int]]:
+    """Load and validate the fixed six-controller migration inventory."""
+
+    controller_root = legacy_root / "app" / "controllers"
+    operations: list[OperationContract] = []
+    counts: dict[str, int] = {}
+    for spec in CONTROLLERS:
+        controller_path = controller_root / spec.filename
+        if not controller_path.is_file():
+            raise FileNotFoundError(f"Legacy controller is missing: {controller_path}")
+        controller_operations = _controller_operations(controller_path, spec.prefix)
+        counts[spec.filename] = len(controller_operations)
+        operations.extend(controller_operations)
+
+    return _validate_legacy_inventory(operations, counts)
+
+
+def collect_legacy_operations_from_git(
+    repo_root: Path,
+    legacy_root: Path,
+    legacy_ref: str = LEGACY_ORACLE_REF,
+) -> tuple[tuple[OperationContract, ...], dict[str, int]]:
+    """Load the behavior oracle from immutable Git objects."""
+
+    if legacy_ref != LEGACY_ORACLE_REF:
+        raise ValueError(
+            f"The fixed legacy oracle must use {LEGACY_ORACLE_REF}, got {legacy_ref}"
+        )
+
+    root_in_repo = (
+        legacy_root.relative_to(repo_root) if legacy_root.is_absolute() else legacy_root
+    )
+    operations: list[OperationContract] = []
+    counts: dict[str, int] = {}
+    for spec in CONTROLLERS:
+        relative_path = root_in_repo / "app" / "controllers" / spec.filename
+        try:
+            completed = subprocess.run(
+                ["git", "show", f"{legacy_ref}:{relative_path.as_posix()}"],
+                cwd=repo_root,
+                check=True,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+            )
+        except subprocess.CalledProcessError as exc:
+            detail = exc.stderr.strip() or exc.stdout.strip() or "git show failed"
+            raise FileNotFoundError(
+                f"Legacy controller is missing at {legacy_ref}:{relative_path}: {detail}"
+            ) from exc
+        controller_operations = _controller_operations_from_source(
+            completed.stdout,
+            filename=f"{legacy_ref}:{relative_path}",
+            prefix=spec.prefix,
+        )
+        counts[spec.filename] = len(controller_operations)
+        operations.extend(controller_operations)
+    return _validate_legacy_inventory(operations, counts)
 
 
 def compare_openapi_operations(
     schema: Mapping[str, Any],
-    expected: Sequence[Operation],
+    expected: Sequence[OperationContract],
 ) -> list[str]:
     """Return deterministic method/path parity errors."""
 
@@ -159,6 +430,71 @@ def compare_openapi_operations(
     return errors
 
 
+def compare_openapi_transport_contracts(
+    schema: Mapping[str, Any],
+    expected: Sequence[OperationContract],
+) -> list[str]:
+    """Return caller-visible parameter and media-type parity errors."""
+
+    errors: list[str] = []
+    for operation in expected:
+        operation_schema = (
+            schema.get("paths", {})
+            .get(operation.path, {})
+            .get(operation.method.lower(), {})
+        )
+        raw_parameters = operation_schema.get("parameters", [])
+        actual_parameters = sorted(
+            (
+                str(parameter.get("name", "")),
+                str(parameter.get("in", "")),
+                bool(parameter.get("required", False)),
+            )
+            for parameter in raw_parameters
+            if isinstance(parameter, Mapping)
+            and not (
+                parameter.get("in") == "header"
+                and str(parameter.get("name", "")).startswith("X-KB-")
+            )
+        )
+        expected_parameters = sorted(operation.parameters)
+        if actual_parameters != expected_parameters:
+            errors.append(
+                "incompatible parameters: "
+                f"{operation.method} {operation.path} "
+                f"expected={expected_parameters} actual={actual_parameters}"
+            )
+
+        request_body = operation_schema.get("requestBody", {})
+        request_content = (
+            request_body.get("content", {}) if isinstance(request_body, Mapping) else {}
+        )
+        actual_request_types = sorted(request_content)
+        expected_request_types = sorted(operation.request_content_types)
+        if actual_request_types != expected_request_types:
+            errors.append(
+                "incompatible request content types: "
+                f"{operation.method} {operation.path} "
+                f"expected={expected_request_types} actual={actual_request_types}"
+            )
+
+        if operation.streaming:
+            continue
+        response = operation_schema.get("responses", {}).get("200", {})
+        response_content = (
+            response.get("content", {}) if isinstance(response, Mapping) else {}
+        )
+        actual_response_types = sorted(response_content)
+        expected_response_types = sorted(operation.response_content_types)
+        if actual_response_types != expected_response_types:
+            errors.append(
+                "incompatible response content types: "
+                f"{operation.method} {operation.path} "
+                f"expected={expected_response_types} actual={actual_response_types}"
+            )
+    return errors
+
+
 def _resolve_schema(
     schema: Mapping[str, Any],
     candidate: Mapping[str, Any],
@@ -176,7 +512,7 @@ def _resolve_schema(
 
 def _operation_response_schema(
     schema: Mapping[str, Any],
-    operation: Operation,
+    operation: OperationContract,
     status_code: str,
 ) -> Mapping[str, Any]:
     operation_schema = (
@@ -194,7 +530,7 @@ def _operation_response_schema(
 
 def compare_openapi_responses(
     schema: Mapping[str, Any],
-    expected: Sequence[Operation],
+    expected: Sequence[OperationContract],
 ) -> list[str]:
     """Return response-envelope errors for the 54 JSON business operations."""
 
@@ -210,8 +546,7 @@ def compare_openapi_responses(
                     f"{operation.method} {operation.path} status={status_code} "
                     f"fields={sorted(error_properties)}"
                 )
-        key = (operation.method, operation.path)
-        if key in STREAM_OPERATIONS:
+        if operation.streaming:
             continue
         resolved = _operation_response_schema(schema, operation, "200")
         properties = resolved.get("properties", {})
@@ -232,7 +567,7 @@ def compare_openapi_responses(
 
 
 def _inventory_payload(
-    operations: Sequence[Operation],
+    operations: Sequence[OperationContract],
     counts: Mapping[str, int],
 ) -> dict[str, Any]:
     return {
@@ -245,6 +580,7 @@ def _inventory_payload(
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--legacy-root", required=True, type=Path)
+    parser.add_argument("--repo-root", default=Path.cwd(), type=Path)
     parser.add_argument("--inventory-only", action="store_true")
     parser.add_argument("--json", action="store_true")
     return parser.parse_args()
@@ -253,7 +589,10 @@ def _parse_args() -> argparse.Namespace:
 def main() -> int:
     args = _parse_args()
     try:
-        operations, counts = collect_legacy_operations(args.legacy_root)
+        operations, counts = collect_legacy_operations_from_git(
+            args.repo_root,
+            args.legacy_root,
+        )
     except (FileNotFoundError, SyntaxError, ValueError) as exc:
         print(str(exc), file=sys.stderr)
         return 1
@@ -262,15 +601,17 @@ def main() -> int:
     if not args.inventory_only:
         from src.main import create_app
 
+        schema = create_app().openapi()
         contract_errors = compare_openapi_operations(
-            create_app().openapi(),
+            schema,
             operations,
         )
         response_errors = compare_openapi_responses(
-            create_app().openapi(),
+            schema,
             operations,
         )
         contract_errors.extend(response_errors)
+        contract_errors.extend(compare_openapi_transport_contracts(schema, operations))
         if contract_errors:
             for error in contract_errors:
                 print(error, file=sys.stderr)
@@ -278,7 +619,10 @@ def main() -> int:
         payload["openapi_operation_count"] = len(operations)
         payload["openapi_json_envelope_count"] = 54
         payload["openapi_error_envelope_operation_count"] = 58
-        payload["openapi_stream_operation_count"] = len(STREAM_OPERATIONS)
+        payload["openapi_stream_operation_count"] = sum(
+            operation.streaming for operation in operations
+        )
+        payload["openapi_transport_contract_count"] = len(operations)
         payload["openapi_parity"] = True
     if args.json:
         json.dump(payload, sys.stdout, ensure_ascii=False, indent=2, sort_keys=True)

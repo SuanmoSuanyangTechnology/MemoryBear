@@ -1,113 +1,110 @@
-"""Asynchronous graph retrieval bridge for the two legacy graph pipelines."""
+"""Pipeline-explicit graph retrieval with Legacy empty-result compatibility."""
 
 from __future__ import annotations
 
-import json
+import logging
+import time
 from typing import Any
 
+from redbear_model.runtime import RedBearEmbeddings, RedBearLLM
+
+from ...runtime import ProcessRuntime
 from ..knowledge_graph.config import GraphPipeline
 from ..knowledge_graph.elasticsearch_store import GraphElasticsearchStore
+from ..knowledge_graph.models import GraphIndexRuntime, GraphRetrievalRequest
+from ..knowledge_graph.query_plan_cache import GraphQueryPlanCache
+from ..knowledge_graph.retrieval_pipeline import KnowledgeGraphRetrievalPipeline
 from ..models.chunk import DocumentChunk
+from .async_elasticsearch import AsyncElasticSearchRetrieval
 from .models import GraphRetrievalSnapshot
+
+logger = logging.getLogger(__name__)
 
 
 class GraphRetrievalBridge:
     @staticmethod
     async def retrieve(
+        runtime: ProcessRuntime,
         client: Any,
         snapshot: GraphRetrievalSnapshot,
         *,
         top_k: int,
+        allowed_document_ids: tuple[str, ...] | None,
+        file_names: tuple[str, ...],
     ) -> tuple[list[DocumentChunk], list[dict[str, Any]], list[dict[str, Any]]]:
+        if snapshot.pipeline is GraphPipeline.LEGACY:
+            logger.warning("Legacy graph retrieval is unavailable; returning an empty result")
+            return [], [], []
+
         chunks: list[DocumentChunk] = []
         entities: list[dict[str, Any]] = []
         relationships: list[dict[str, Any]] = []
-        store = GraphElasticsearchStore(client)
-        for target in snapshot.targets:
-            if snapshot.pipeline is GraphPipeline.LEGACY:
-                data = await store.load_legacy_graph(
-                    target.graph_index_name,
-                    str(target.knowledge_id),
-                )
-                graph = data.get("graph") or {}
-                if graph:
-                    chunks.append(
-                        DocumentChunk(
-                            page_content=json.dumps(graph, ensure_ascii=False),
-                            metadata={
-                                "doc_id": f"graph:{target.knowledge_id}",
-                                "knowledge_id": str(target.knowledge_id),
-                                "chunk_type": "graph",
-                                "retrieval_source": "graph",
-                                "score": 1.0,
-                            },
-                        )
-                    )
-                continue
-            result = await client.search(
-                index=target.graph_index_name,
-                size=max(top_k * 4, 20),
-                query={
-                    "bool": {
-                        "must": {
-                            "multi_match": {
-                                "query": snapshot.query,
-                                "fields": [
-                                    "entity_name_kwd^3",
-                                    "description^2",
-                                    "predicate_kwd",
-                                    "keywords_kwd",
-                                ],
-                            }
-                        },
-                        "filter": [
-                            {"term": {"kb_id": str(target.knowledge_id)}},
-                            {
-                                "terms": {
-                                    "knowledge_graph_kwd": [
-                                        "entity_projection",
-                                        "relation_projection",
-                                    ]
-                                }
-                            },
-                        ],
-                    }
-                },
-                allow_partial_search_results=False,
+        graph_store = GraphElasticsearchStore(client)
+        chunk_store = AsyncElasticSearchRetrieval(client)
+        query_plan_cache = GraphQueryPlanCache(runtime.redis.client)
+        model_pool = runtime.model_runtime.pool
+
+        async def resolve_parent_chunks(
+            chunks: list[DocumentChunk],
+            index: str,
+        ) -> list[DocumentChunk]:
+            has_parent = any(
+                (chunk.metadata or {}).get("chunk_type") == "child"
+                and (chunk.metadata or {}).get("parent_id")
+                for chunk in chunks
             )
-            max_score = float((result.get("hits") or {}).get("max_score") or 1)
-            for hit in (result.get("hits") or {}).get("hits", []):
-                source = hit.get("_source") or {}
-                score = float(hit.get("_score") or 0) / max_score
-                if source.get("knowledge_graph_kwd") == "entity_projection":
-                    key = str(source.get("entity_key_kwd") or "")
-                    if key:
-                        entities.append(
-                            {
-                                "entity_key": key,
-                                "entity_name": source.get("entity_name_kwd") or key,
-                                "description": source.get("description") or "",
-                                "source_chunk_ids": list(source.get("source_chunk_ids_kwd") or []),
-                                "score": score,
-                            }
-                        )
-                else:
-                    key = str(source.get("relation_key_kwd") or "")
-                    if key:
-                        relationships.append(
-                            {
-                                "relation_key": key,
-                                "from_entity_key": source.get("from_entity_key_kwd") or "",
-                                "to_entity_key": source.get("to_entity_key_kwd") or "",
-                                "predicate": source.get("predicate_kwd") or "",
-                                "description": source.get("description") or "",
-                                "source_chunk_ids": list(source.get("source_chunk_ids_kwd") or []),
-                                "score": score,
-                            }
-                        )
-        entities.sort(key=lambda item: item["score"], reverse=True)
-        relationships.sort(key=lambda item: item["score"], reverse=True)
-        return chunks, entities[:top_k], relationships[:top_k]
+            if not has_parent:
+                return chunks
+            started_at = time.perf_counter()
+            try:
+                return await chunk_store.resolve_parent_chunks(chunks, index)
+            finally:
+                if snapshot.timings is not None:
+                    elapsed_ms = max(
+                        0,
+                        int((time.perf_counter() - started_at) * 1000),
+                    )
+                    snapshot.timings.parent_resolution_ms += elapsed_ms
+
+        for target in snapshot.targets:
+            if target.llm.resolved is None or target.embedding.resolved is None:
+                raise ValueError("graph retrieval model snapshot is unavailable")
+            llm_params = dict(target.llm.resolved.provider_params)
+            llm_params["temperature"] = 0
+            llm_config = target.llm.resolved.model_copy(
+                update={"provider_params": llm_params},
+                deep=True,
+            )
+            pipeline = KnowledgeGraphRetrievalPipeline(
+                graph_store,
+                RedBearLLM(llm_config, client_pool=model_pool),
+                RedBearEmbeddings(target.embedding.resolved, client_pool=model_pool),
+                resolve_parent_chunks,
+                query_plan_cache,
+                timeout_ms=runtime.settings.knowledge_graph_retrieval_timeout_ms,
+            )
+            result = await pipeline.retrieve_with_graph_data(
+                GraphRetrievalRequest(
+                    query=snapshot.query,
+                    runtime=GraphIndexRuntime(
+                        knowledge_id=str(target.knowledge_id),
+                        workspace_id=str(target.workspace_id),
+                        graph_index_name=target.graph_index_name,
+                        chunk_index_name=target.chunk_index_name,
+                        entity_types=(),
+                        scene_name="",
+                        llm=llm_config,
+                        embedding=target.embedding.resolved,
+                    ),
+                    allowed_document_ids=allowed_document_ids,
+                    file_names=file_names,
+                    max_candidates=top_k,
+                )
+            )
+            chunks.extend(result.chunks)
+            entities.extend(result.entities)
+            relationships.extend(result.relationships)
+        return chunks, entities, relationships
 
 
 __all__ = ["GraphRetrievalBridge"]

@@ -10,8 +10,16 @@ from app.core.logging_config import get_business_logger
 from app.core.response_utils import success
 from app.db import get_db
 from app.dependencies import get_current_user, cur_workspace_access_guard
-from app.schemas.app_log_schema import AppLogConversation, AppLogConversationDetail, AppLogMessage, LogFileInfo
+from app.schemas.app_log_schema import (
+    AppLogConversation,
+    AppLogConversationDetail,
+    AppLogMessage,
+    LogFileInfo,
+    WorkflowExecutionLog,
+)
 from app.schemas.response_schema import PageData, PageMeta
+from app.core.exceptions import BusinessException
+from app.core.error_codes import BizCode
 from app.services.app_service import AppService
 from app.services.app_log_service import AppLogService
 
@@ -64,6 +72,61 @@ def list_app_logs(
     meta = PageMeta(page=page, pagesize=pagesize, total=total, hasnext=(page * pagesize) < total)
 
     return success(data=PageData(page=meta, items=items))
+
+
+@router.get("/{app_id}/workflow-executions", summary="应用日志 - 工作流执行列表")
+@cur_workspace_access_guard()
+def list_workflow_execution_logs(
+        app_id: uuid.UUID,
+        page: int = Query(1, ge=1),
+        pagesize: int = Query(20, ge=1, le=100),
+        is_draft: Optional[bool] = Query(
+            None,
+            description="是否草稿试运行：true=草稿（release_id 为空），false=已发布版本调用",
+        ),
+        start_date: Optional[datetime] = Query(None, description="开始时间（ISO 8601，UTC）"),
+        end_date: Optional[datetime] = Query(None, description="结束时间（ISO 8601，UTC）"),
+        db: Session = Depends(get_db),
+        current_user=Depends(get_current_user),
+):
+    """分页查看工作流调用记录。
+
+    ``is_draft=false`` 仅返回携带发布版本的调用（API Key 等发布后入口）；
+    ``is_draft=true`` 仅返回草稿试运行；不传则返回全部。
+    """
+    workspace_id = current_user.current_workspace_id
+    AppService(db).get_app(app_id, workspace_id)
+
+    executions, total = AppLogService(db).list_workflow_executions(
+        app_id=app_id,
+        page=page,
+        pagesize=pagesize,
+        is_draft=is_draft,
+        start_date=start_date,
+        end_date=end_date,
+    )
+    items = [WorkflowExecutionLog.model_validate(execution) for execution in executions]
+    meta = PageMeta(page=page, pagesize=pagesize, total=total, hasnext=(page * pagesize) < total)
+    return success(data=PageData(page=meta, items=items))
+
+
+@router.get("/{app_id}/workflow-executions/{execution_id}", summary="应用日志 - 工作流执行详情")
+@cur_workspace_access_guard()
+def get_workflow_execution_log_detail(
+        app_id: uuid.UUID,
+        execution_id: str,
+        db: Session = Depends(get_db),
+        current_user=Depends(get_current_user),
+):
+    """按业务 execution_id 获取单次工作流调用详情。"""
+    workspace_id = current_user.current_workspace_id
+    AppService(db).get_app(app_id, workspace_id)
+
+    detail = AppLogService(db).get_workflow_execution_log_detail(app_id, execution_id)
+    if not detail:
+        raise BusinessException("工作流执行记录不存在", BizCode.NOT_FOUND)
+
+    return success(data=detail)
 
 
 @router.get("/{app_id}/logs/{conversation_id}", summary="应用日志 - 会话消息详情")

@@ -77,9 +77,6 @@ export type FeaturesConfigForm = {
     search_engine: string | null;
   };
   sensitive_word_avoidance: ContentModerationConfig;
-  multi_answer_mode: {
-    enabled: boolean;
-  };
 }
 
 /**

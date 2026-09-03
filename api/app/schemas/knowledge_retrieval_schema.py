@@ -1,9 +1,11 @@
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from app.schemas.chunk_schema import KnowledgeBaseConfig, KnowledgeRetrievalCaller, RetrieveType
+from app.core.rag.models.chunk import DocumentChunk
+from app.integrations.knowledge.contracts import KnowledgeRetrievalSource
+from app.schemas.chunk_schema import KnowledgeBaseConfig, RetrieveType
 from app.schemas.knowledge_metadata_schema import FilterGroup, MetadataFilterMode
 
 
@@ -17,7 +19,7 @@ class KnowledgeRetrievalRequest(BaseModel):
     vector_similarity_weight: float | None = Field(default=0.3, ge=0, le=1)
     top_k: int = Field(default=100, ge=1, le=100)
     top_n: int | None = Field(default=None, ge=1, le=100)
-    caller: KnowledgeRetrievalCaller = KnowledgeRetrievalCaller.GENERAL
+    source: KnowledgeRetrievalSource = KnowledgeRetrievalSource.GENERAL
     retrieve_type: RetrieveType = RetrieveType.HYBRID
     enable_graph_retrieval: int = Field(
         default=0,
@@ -29,16 +31,11 @@ class KnowledgeRetrievalRequest(BaseModel):
     rerank_score_threshold: float | None = Field(default=None, ge=0, le=1)
     metadata_filters: list[FilterGroup] = Field(default_factory=list)
     metadata_filter_mode: MetadataFilterMode = MetadataFilterMode.MANUAL
-    _metadata_filters_prepared: bool = PrivateAttr(default=False)
+    metadata_filters_resolved: bool = False
 
-    def mark_metadata_filters_prepared(self) -> None:
+    def mark_metadata_filters_resolved(self) -> None:
         """Record that an internal caller already evaluated AUTO filters."""
-        self._metadata_filters_prepared = True
-
-    @property
-    def metadata_filters_prepared(self) -> bool:
-        """Whether AUTO filtering was already evaluated by an internal adapter."""
-        return self._metadata_filters_prepared
+        self.metadata_filters_resolved = True
 
     @property
     def graph_retrieval_mix_enabled(self) -> bool:
@@ -80,7 +77,7 @@ class KnowledgeRetrievalRequest(BaseModel):
 
 
 class KnowledgeRetrievalResult(BaseModel):
-    chunks: list[Any] = Field(default_factory=list)
+    chunks: list[DocumentChunk] = Field(default_factory=list)
     entities: list[Any] = Field(default_factory=list)
     relationships: list[Any] = Field(default_factory=list)
 

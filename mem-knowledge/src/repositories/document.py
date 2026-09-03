@@ -42,8 +42,7 @@ async def get_documents_paginated_async(
 
 async def create_document_async(db: AsyncSession, document: DocumentCreate) -> Document:
     try:
-        db_document = Document(**document.model_dump())
-        db.add(db_document)
+        db_document = await add_document_async(db, document)
         await db.commit()
         await db.refresh(db_document)
         return db_document
@@ -51,6 +50,18 @@ async def create_document_async(db: AsyncSession, document: DocumentCreate) -> D
         await db.rollback()
         logger.exception("Failed to create document: file_name=%s", document.file_name)
         raise
+
+
+async def add_document_async(
+    db: AsyncSession,
+    document: DocumentCreate,
+) -> Document:
+    """Add a document row without taking ownership of the transaction."""
+
+    db_document = Document(**document.model_dump())
+    db.add(db_document)
+    await db.flush()
+    return db_document
 
 
 async def get_document_by_id_async(
@@ -86,27 +97,37 @@ async def reset_documents_progress_by_kb_id_async(
     kb_id: uuid.UUID,
 ) -> int:
     try:
-        result = await db.execute(
-            update(Document)
-            .where(Document.kb_id == kb_id)
-            .values(
-                {
-                    Document.chunk_num: 0,
-                    Document.progress: 0,
-                    Document.progress_msg: _pending_progress_msg(),
-                    Document.process_duration: 0,
-                    Document.run: 0,
-                    Document.updated_at: utcnow_naive(),
-                }
-            )
-            .execution_options(synchronize_session=False)
-        )
+        count = await stage_reset_documents_progress_by_kb_id_async(db, kb_id)
         await db.commit()
-        return result.rowcount or 0
+        return count
     except Exception:
         await db.rollback()
         logger.exception("Failed to reset document progress: kb_id=%s", kb_id)
         raise
+
+
+async def stage_reset_documents_progress_by_kb_id_async(
+    db: AsyncSession,
+    kb_id: uuid.UUID,
+) -> int:
+    """Reset document progress without taking ownership of the transaction."""
+
+    result = await db.execute(
+        update(Document)
+        .where(Document.kb_id == kb_id)
+        .values(
+            {
+                Document.chunk_num: 0,
+                Document.progress: 0,
+                Document.progress_msg: _pending_progress_msg(),
+                Document.process_duration: 0,
+                Document.run: 0,
+                Document.updated_at: utcnow_naive(),
+            }
+        )
+        .execution_options(synchronize_session=False)
+    )
+    return result.rowcount or 0
 
 
 async def delete_document_by_id_async(

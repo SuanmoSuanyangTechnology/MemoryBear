@@ -19,6 +19,7 @@ from app.core.logging_config import get_business_logger
 from app.core.exceptions import BusinessException
 from app.core.error_codes import BizCode
 from app.db import get_db, get_async_db_context
+from app.integrations.knowledge.contracts import KnowledgeRetrievalSource
 from app.models import (
     App,
     MultiAgentConfig, AgentConfig, ModelType, WorkflowConfig,
@@ -591,7 +592,13 @@ class AppChatService:
         coros = [
             self.agent_service.load_tools_config(config.tools, web_search, tenant_id, user_id, workspace_id),
             self.agent_service.load_skill_config(config.skills, message, tenant_id, user_id, workspace_id),
-            self.agent_service.load_knowledge_retrieval_config(config.knowledge_retrieval, user_id),
+            self.agent_service.load_knowledge_retrieval_config(
+                config.knowledge_retrieval,
+                user_id,
+                app_id=config.app_id,
+                workspace_id=_ws_id,
+                source=KnowledgeRetrievalSource.AGENT,
+            ),
         ]
         if memory:
             coros.append(
@@ -1159,7 +1166,13 @@ class AppChatService:
             coros = [
                 self.agent_service.load_tools_config(config.tools, web_search, tenant_id, user_id, workspace_id),
                 self.agent_service.load_skill_config(config.skills, message, tenant_id, user_id, workspace_id),
-                self.agent_service.load_knowledge_retrieval_config(config.knowledge_retrieval, user_id),
+                self.agent_service.load_knowledge_retrieval_config(
+                    config.knowledge_retrieval,
+                    user_id,
+                    app_id=config.app_id,
+                    workspace_id=_ws_id,
+                    source=KnowledgeRetrievalSource.AGENT,
+                ),
             ]
             if memory:
                 coros.append(

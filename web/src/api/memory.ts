@@ -21,17 +21,20 @@ import type {
 import type {
   ConfigForm as SelfReflectionEngineConfig
 } from '@/views/SelfReflectionEngine/types'
-import type { TestParams } from '@/views/MemoryConversation'
+import type { TestParams } from '@/views/MemoryConversation/types'
 import type { EndUser } from '@/views/UserMemoryDetail/types'
 import { handleSSE, type SSEMessage } from '@/utils/stream'
 import type { ChatItem } from '@/components/Chat/types'
 import type { Query } from '@/views/UserMemory/types';
 import type { Query as ExtractedEntityQuery } from '@/views/UserMemoryDetail/pages/ExtractedEntityGraphDetail'
+import type { EmotionOverviewQuery, EmotionTimelineQuery } from '@/views/UserMemoryDetail/components/EmotionTimeAnalysis/types'
 
-// Memory conversation
-export const readService = (query: TestParams) => {
-  return request.post('/memory/read/sync', query)
-}
+/** Memory verification streaming conversation. */
+export const readServiceStream = (
+  query: TestParams,
+  onMessage?: (data: SSEMessage[]) => void,
+  onAbort?: (abort: () => void) => void,
+) => handleSSE('/memory/read/sync', query, onMessage, undefined, onAbort)
 /****************** Memory Dashboard APIs *******************************/
 // Memory Dashboard - Total memory count
 export const getTotalMemoryCount = () => {
@@ -227,6 +230,15 @@ export const getEpisodicOverview = (data: { end_user_id: string; time_range: str
 }
 export const getEpisodicDetail = (data: { end_user_id: string; summary_id: string; } ) => {
   return request.post(`/memory/episodic-memory/details`, data)
+}
+
+// Emotion timeline
+export const getEmotionTimeline = (data: EmotionTimelineQuery) => {
+  return request.get('/memory/emotion-memory/query_emotion_timeline', data)
+}
+// Emotion overview
+export const getEmotionOverview = (data: EmotionOverviewQuery) => {
+  return request.get('/memory/emotion-memory/query_emotion_overview', data)
 }
 // Relationship evolution
 export const getRelationshipEvolution = (data: { id: string; label: string; } ) => {

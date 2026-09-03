@@ -9,7 +9,7 @@
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.12+-green?logo=python&logoColor=white)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-teal?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
-[![Neo4j](https://img.shields.io/badge/Neo4j-4.4+-blue?logo=neo4j&logoColor=white)](https://neo4j.com/)
+[![Neo4j](https://img.shields.io/badge/Neo4j-5.13+-blue?logo=neo4j&logoColor=white)](https://neo4j.com/)
 [![Gitee Sync](https://img.shields.io/github/actions/workflow/status/SuanmoSuanyangTechnology/MemoryBear/sync-to-gitee.yml?label=Gitee%20Sync&logo=gitee&logoColor=white)](https://github.com/SuanmoSuanyangTechnology/MemoryBear/actions/workflows/sync-to-gitee.yml)
 
 中文 | [English](./README.md)
@@ -120,15 +120,21 @@ MemoryBear 是红熊 AI 自主研发的新一代 AI 记忆系统，核心突破�
 
 ## 架构总览
 
-<img src="https://github.com/user-attachments/assets/bc356ed3-9159-41c5-bd73-125a67e06ced" alt="MemoryBear System Architecture" width="100%"/>
+<img src="https://github.com/user-attachments/assets/2424784c-0b9d-4560-94a9-36cb1f98d889" alt="MemoryBear System Architecture" width="100%"/>
 
-**Celery 三队列异步架构：**
+**Celery 多队列异步架构（docker-compose 共 7 类 Worker）：**
 
 | 队列 | Worker 类型 | 并发 | 用途 |
 |------|-------------|------|------|
 | `memory_tasks` | threads | 100 | 记忆读写（asyncio 友好） |
+| `memory_fast_tasks` | threads | 32 | 高频快速写入（独立队列，避免互相阻塞） |
 | `document_tasks` | prefork | 4 | 文档解析（CPU 密集） |
-| `periodic_tasks` | prefork | 2 | 定时任务、反思引擎 |
+| `periodic_tasks` | prefork | 2 | 定时任务、反思引擎、各类扫描器 |
+| `workflow_trigger_tasks` | prefork | 2 | 工作流定时触发 |
+| `subscription_state_tasks` | prefork | 4 | 订阅状态变更（企业版） |
+| `subscription_email_tasks` | prefork | 4 | 订阅到期提醒邮件（企业版） |
+
+另有 `graphrag_tasks`、`reflection_tasks`、`memory_heavy_tasks` 等任务队列（GraphRAG 构建、二层反思/去重、遗忘与洞察生成等重计算任务），配合独立任务调度器 `celery_task_scheduler` 与 Celery Beat 协同工作。
 
 ---
 
@@ -179,13 +185,13 @@ docker-compose up -d
 curl -X POST http://127.0.0.1:8002/api/setup
 ```
 
-> **注意**：`docker-compose.yml` 包含 API 服务和 Celery Workers，基础服务（PostgreSQL、Neo4j、Redis、Elasticsearch）需要单独启动。
+> **注意**：`docker-compose.yml` 包含 API 服务、Celery Workers、任务调度器（`celery_task_scheduler`）和沙箱（sandbox）服务，基础服务（PostgreSQL、Neo4j、Redis、Elasticsearch）需要单独启动。
 >
 > **端口说明**：Docker Compose 部署默认端口为 `8002`，手动启动默认端口为 `8000`。下文安装教程以手动启动（`8000`）为例。
 
 服务启动后访问：
 - API 文档：http://localhost:8002/docs
-- 管理后台：http://localhost:3000（启动前端后）
+- 管理后台：http://localhost:5175（启动前端后）
 
 **默认管理员账号：**
 - 账号：`admin@example.com`
@@ -215,7 +221,7 @@ npm install && npm run dev
 
 | 组件 | 版本要求 | 用途 |
 |------|----------|------|
-| Python | 3.12+ | 后端运行环境 |
+| Python | 3.12（不支持 3.13+） | 后端运行环境 |
 | Node.js | 20.19+ 或 22.12+ | 前端运行环境 |
 | PostgreSQL | 13+ | 主数据库 |
 | Neo4j | 4.4+ | 知识图谱存储 |
@@ -275,6 +281,16 @@ source .venv/bin/activate
 - `7474`：Neo4j Browser
 - `7687`：Bolt 协议
 
+> **重要**：必须同时添加环境变量 `NEO4J_PLUGINS=["apoc"]` 安装 APOC 插件（后端图引擎硬依赖，官方镜像默认不带）。若通过 Docker Desktop 图形界面配置不便，可直接用命令行创建容器：
+>
+> ```bash
+> docker run -d --name memorybear-neo4j \
+>   -p 7474:7474 -p 7687:7687 \
+>   -e NEO4J_AUTH=neo4j/<初始密码，至少 8 位> \
+>   -e NEO4J_PLUGINS='["apoc"]' \
+>   neo4j:5
+> ```
+
 <img width="1280" height="731" alt="Neo4j Container" src="https://github.com/user-attachments/assets/881dca96-aec0-4d43-82d0-bb0402eadaf8" />
 
 <img width="1280" height="731" alt="Neo4j Running" src="https://github.com/user-attachments/assets/87423c90-22e8-44a9-a00a-df5d4dce4909" />
@@ -321,6 +337,7 @@ DB_AUTO_UPGRADE=true
 REDIS_HOST=127.0.0.1
 REDIS_PORT=6379
 REDIS_DB=1
+REDIS_PASSWORD=
 
 # Celery
 REDIS_DB_CELERY_BROKER=1
@@ -336,17 +353,16 @@ SECRET_KEY=your-secret-key-here
 
 #### 3.4 初始化 PostgreSQL 数据库
 
-确认 `alembic.ini` 中的数据库连接配置：
-
-```ini
-sqlalchemy.url = postgresql://用户名:密码@数据库地址:端口/数据库名
-```
+数据库连接由 `.env` 中的 `DB_*` 环境变量自动读取（`migrations/env.py` 动态生成连接串），无需修改 `alembic.ini`。
 
 执行迁移，创建完整表结构：
 
 ```bash
 alembic upgrade head
 ```
+
+> **提示**：`.env` 中 `DB_AUTO_UPGRADE=true` 时，API 服务启动时会自动执行 `alembic upgrade head`。
+> 迁移脚本位于 `api/migrations/versions/` 目录，执行前请确认该目录下存在迁移文件。
 
 <img width="1076" height="341" alt="Alembic Migration" src="https://github.com/user-attachments/assets/6970a8e6-712b-4f49-937a-f5870a2d1a2a" />
 
@@ -366,17 +382,28 @@ uv run -m app.main
 
 ```bash
 # 记忆任务 Worker（线程池，支持高并发 asyncio）
-celery -A app.celery_worker.celery_app worker --loglevel=info --pool=threads --concurrency=100 --queues=memory_tasks
+celery -A app.celery_worker.celery_app worker -E --loglevel=info --pool=threads --concurrency=100 --queues=memory_tasks -n memory_worker@%h
+
+# 快速写入 Worker（线程池，独立队列，避免与普通写入互相阻塞）
+celery -A app.celery_worker.celery_app worker -E --loglevel=info --pool=threads --concurrency=32 --queues=memory_fast_tasks -n memory_fast_worker@%h
 
 # 文档解析 Worker（进程池，CPU 密集型）
-celery -A app.celery_worker.celery_app worker --loglevel=info --pool=prefork --concurrency=4 --queues=document_tasks
+celery -A app.celery_worker.celery_app worker -E --loglevel=info --pool=prefork --concurrency=4 --queues=document_tasks --max-tasks-per-child=100 -n document_worker@%h
 
-# 定时任务 Worker（反思引擎等）
-celery -A app.celery_worker.celery_app worker --loglevel=info --pool=prefork --concurrency=2 --queues=periodic_tasks
+# 定时任务 Worker（反思引擎、各类扫描器）
+celery -A app.celery_worker.celery_app worker -E --loglevel=info --pool=prefork --concurrency=2 --queues=periodic_tasks --max-tasks-per-child=50 -n periodic_worker@%h
+
+# 工作流触发 Worker
+celery -A app.celery_worker.celery_app worker -E --loglevel=info --pool=prefork --concurrency=2 --queues=workflow_trigger_tasks --max-tasks-per-child=50 -n workflow_trigger_worker@%h
 
 # Beat 调度器
 celery -A app.celery_worker.celery_app beat --loglevel=info
+
+# 任务调度器服务（任务入队限流与准入控制）
+python -m app.celery_task_scheduler
 ```
+
+> **提示**：以上为核心 Worker，完整部署（含 GraphRAG、订阅/通知等企业版队列 Worker）推荐直接使用 `docker-compose up -d`。
 
 ### 四、前端 Web 应用启动
 
@@ -387,14 +414,16 @@ cd web
 npm install
 ```
 
+> **注意**：企业内网环境需执行 `npm run install:private` 安装私有组件 `@redbear/memory-brick`（开发环境使用 `npm run install:private:dev`）；外网环境该脚本会自动检测并跳过，不影响启动。
+
 #### 4.2 修改 API 代理配置
 
-编辑 `web/vite.config.ts`：
+编辑 `web/vite.config.ts`，将 `/api` 代理的 `target` 指向后端 API 服务（前端 dev server 默认端口为 `5175`）：
 
 ```typescript
 proxy: {
   '/api': {
-    target: 'http://127.0.0.1:8000',  // Windows 用 127.0.0.1，macOS 用 0.0.0.0
+    target: 'http://127.0.0.1:8000',  // 后端 API 地址，按实际部署地址修改
     changeOrigin: true,
   },
 }
@@ -406,7 +435,7 @@ proxy: {
 npm run dev
 ```
 
-<img width="935" height="311" alt="Frontend Start" src="https://github.com/user-attachments/assets/8b08fc46-01d0-458b-ab4d-f5ac04bc2510" />
+<img width="935" height="311" alt="Frontend Start" src="https://github.com/user-attachments/assets/9f339423-19e5-4ba6-bfb5-c03e0953fded" />
 
 <img width="1280" height="652" alt="Frontend UI" src="https://github.com/user-attachments/assets/542dbee3-8cd4-4b16-a8e5-36f8d6153820" />
 
@@ -441,15 +470,15 @@ Step 8  使用管理员账号登录前端页面
 | 层级 | 技术 |
 |------|------|
 | 后端框架 | FastAPI + Uvicorn |
-| 异步任务 | Celery（三队列：memory / document / periodic） |
+| 异步任务 | Celery（多队列：memory / document / periodic / graphrag 等） |
 | 主数据库 | PostgreSQL 13+ |
-| 图数据库 | Neo4j 4.4+ |
+| 图数据库 | Neo4j 5.13+（推荐 5.26 LTS，需安装 APOC 插件） |
 | 搜索引擎 | Elasticsearch 8.x（关键词 + 语义向量混合） |
 | 缓存/队列 | Redis 6.0+ |
 | ORM | SQLAlchemy 2.0 + Alembic |
 | LLM 集成 | LangChain / OpenAI / DashScope / AWS Bedrock |
 | MCP 集成 | fastmcp + langchain-mcp-adapters |
-| 前端框架 | React 18 + TypeScript + Vite |
+| 前端框架 | React 18 + TypeScript + Vite（rolldown-vite） |
 | UI 组件库 | Ant Design 5.x |
 | 图可视化 | AntV X6 + ECharts + D3.js |
 | 包管理 | uv（后端）/ npm（前端） |

@@ -6,7 +6,7 @@ import uuid
 from typing import Any, Annotated, Literal
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
-from sqlalchemy import desc, select, delete
+from sqlalchemy import desc, select, delete, func, or_
 from fastapi import Depends
 
 from app.models.workflow_model import (
@@ -191,6 +191,16 @@ class WorkflowExecutionRepository:
     
     def __init__(self, db: Session | AsyncSession):
         self.db = db
+
+    @staticmethod
+    def _visible_in_app_log_filter():
+        """排除 Agent 作为内部工具调用产生的工作流子执行。
+
+        历史记录没有 ``meta_data.source``，必须保留；否则发布前已有的正常调用
+        会被 SQL 的 NULL 比较意外过滤掉。
+        """
+        source = WorkflowExecution.meta_data["source"].as_string()
+        return or_(source.is_(None), source != "tool")
     
     def get_by_execution_id(self, execution_id: str) -> WorkflowExecution | None:
         """根据执行 ID 获取执行记录
@@ -227,6 +237,55 @@ class WorkflowExecutionRepository:
             desc(WorkflowExecution.started_at)
         ).limit(limit).offset(offset)
         return list(self.db.execute(stmt).scalars())
+
+    def list_for_app_log(
+        self,
+        app_id: uuid.UUID,
+        page: int,
+        pagesize: int,
+        is_draft: bool | None = None,
+        start_date=None,
+        end_date=None,
+    ) -> tuple[list[WorkflowExecution], int]:
+        """分页读取一个应用的工作流执行日志。"""
+        filters = [
+            WorkflowExecution.app_id == app_id,
+            self._visible_in_app_log_filter(),
+        ]
+        if is_draft is True:
+            filters.append(WorkflowExecution.release_id.is_(None))
+        elif is_draft is False:
+            filters.append(WorkflowExecution.release_id.is_not(None))
+        if start_date:
+            filters.append(WorkflowExecution.started_at >= start_date)
+        if end_date:
+            filters.append(WorkflowExecution.started_at <= end_date)
+
+        statement = (
+            select(WorkflowExecution)
+            .where(*filters)
+            .order_by(desc(WorkflowExecution.started_at), desc(WorkflowExecution.created_at))
+            .limit(pagesize)
+            .offset((page - 1) * pagesize)
+        )
+        count_statement = select(func.count()).select_from(WorkflowExecution).where(*filters)
+        return (
+            list(self.db.execute(statement).scalars()),
+            int(self.db.execute(count_statement).scalar_one()),
+        )
+
+    def get_for_app_log(
+        self,
+        app_id: uuid.UUID,
+        execution_id: str,
+    ) -> WorkflowExecution | None:
+        """按业务执行 ID 查询应用内的一条执行记录。"""
+        statement = select(WorkflowExecution).where(
+            WorkflowExecution.app_id == app_id,
+            WorkflowExecution.execution_id == execution_id,
+            self._visible_in_app_log_filter(),
+        )
+        return self.db.execute(statement).scalars().first()
     
     def get_by_conversation_id(
         self,

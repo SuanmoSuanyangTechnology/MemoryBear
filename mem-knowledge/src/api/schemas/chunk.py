@@ -16,12 +16,15 @@ class RetrieveType(StrEnum):
     HYBRID = "hybrid"
 
 
-class KnowledgeRetrievalCaller(StrEnum):
+class KnowledgeRetrievalSource(StrEnum):
     GENERAL = "general"
-    EX_API = "ex_api"
-    IN_API = "in_api"
+    EXTERNAL_API = "ex_api"
+    MANAGER_API = "in_api"
     AGENT = "agent"
     WORKFLOW = "workflow"
+    DRAFT = "draft"
+    SANDBOX = "sandbox"
+    SHARED_CHAT = "shared_chat"
 
 
 class KnowledgeBaseConfig(BaseModel):
@@ -101,10 +104,11 @@ class ChunkUpdate(BaseModel):
 class ChunkRetrieve(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
-    caller: KnowledgeRetrievalCaller = KnowledgeRetrievalCaller.GENERAL
+    source: KnowledgeRetrievalSource = KnowledgeRetrievalSource.GENERAL
     query: str
     kb_ids: list[uuid.UUID] = Field(default_factory=list)
     ex_ids: list[str] | None = None
+    knowledge_bases: list[KnowledgeBaseConfig] = Field(default_factory=list)
     file_names_filter: list[str] | None = None
     similarity_threshold: float | None = None
     vector_similarity_weight: float | None = None
@@ -112,14 +116,16 @@ class ChunkRetrieve(BaseModel):
     top_n: int | None = Field(20, ge=1, le=100)
     retrieve_type: RetrieveType | None = None
     enable_graph_retrieval: int = Field(0, ge=0, le=1)
+    rerank_id: uuid.UUID | None = None
     rerank_score_threshold: float | None = Field(None, ge=0, le=1)
     metadata_filters: list[FilterGroup] | None = None
     metadata_filter_mode: MetadataFilterMode = MetadataFilterMode.MANUAL
+    metadata_filters_resolved: bool = False
 
     @model_validator(mode="after")
     def resolve_top_n(self) -> "ChunkRetrieve":
-        if not self.kb_ids and not self.ex_ids:
-            raise ValueError("kb_ids and ex_ids cannot both be empty")
+        if not self.kb_ids and not self.ex_ids and not self.knowledge_bases:
+            raise ValueError("kb_ids, ex_ids and knowledge_bases cannot all be empty")
         top_k = self.top_k or 20
         if self.top_n is None or "top_n" not in self.model_fields_set:
             self.top_n = max(top_k, 20)

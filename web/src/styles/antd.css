@@ -354,3 +354,10 @@
   max-height: 250px;
   overflow: auto;
 }
+.ant-picker.ant-picker-small  {
+  line-height: 14px !important;
+}
+.ant-picker-small .ant-picker-input>input {
+  font-size: 12px !important;
+  line-height: 22px !important;
+}

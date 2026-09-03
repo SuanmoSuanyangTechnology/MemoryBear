@@ -237,13 +237,6 @@ const FeaturesConfigModal = forwardRef<FeaturesConfigModalRef, FeaturesConfigMod
                 <Button block onClick={() => handleSwitchContentModeration(true)}>{t('application.setting')}</Button>
               </>}
               </div>
-              <div className="rb:relative rb:border rb:border-[#DFE4ED] rb:p-3 rb:rounded-lg rb:bg-[#f5f7fc]">
-                <SwitchFormItem
-                  title={t('application.multi_answer_mode')}
-                  name={['multi_answer_mode', "enabled"]}
-                  desc={t('application.multi_answer_mode_desc')}
-                />
-              </div>
             </>}
 
             <div className="rb:relative rb:border rb:border-[#DFE4ED] rb:p-3 rb:rounded-lg rb:bg-[#f5f7fc]">

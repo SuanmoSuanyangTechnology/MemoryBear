@@ -7,7 +7,11 @@ Predicate filtering against the ontology whitelist is performed in ``parse_respo
 import logging
 from typing import Any
 
+from app.core.memory.enums import TripletPredicate
 from app.core.memory.models.triplet_models import TripletExtractionResponse
+from app.core.memory.storage_services.extraction_engine.deduplication.deduped_and_disamb import (
+    _USER_PLACEHOLDER_NAMES,
+)
 from app.core.memory.utils.data.ontology import PREDICATE_DEFINITIONS
 from app.core.memory.utils.prompt.prompt_utils import render_triplet_extraction_prompt
 
@@ -15,6 +19,49 @@ from .base import ExtractionStep, StepContext
 from .schema import EntityItem, TripletItem, TripletStepInput, TripletStepOutput
 
 logger = logging.getLogger(__name__)
+
+# 「别名属于」谓词的 ID 与 canonical 名称（与 extract_triplet.jinja2 本体 ID 映射一致）
+_ALIAS_OF_ID = TripletPredicate.ALIAS_OF.predicate_id
+_ALIAS_OF_NAME = TripletPredicate.ALIAS_OF.predicate
+
+
+def _flip_user_alias_direction(triplet: TripletItem) -> TripletItem:
+    """当用户实体被放在「别名属于」的别名端时，手动反转三元组方向。
+
+    「别名属于」的方向约束是 ``alias -> 别名属于 -> canonical entity``，
+    用户永远是规范实体，不应作为其它实体的别名。若 LLM 输出
+    ``用户 -> 别名属于 -> X``，视为方向错误，反转为 ``X -> 别名属于 -> 用户``。
+    两端都是用户实体时不反转（同名两端不满足别名关系约束，交由下游处理）。
+
+    Args:
+        triplet: 解析后的三元组
+
+    Returns:
+        反转后的三元组；无需反转时原样返回
+    """
+    if triplet.predicate_id != _ALIAS_OF_ID and triplet.predicate != _ALIAS_OF_NAME:
+        return triplet
+
+    subject_is_user = (triplet.subject_name or "").strip().lower() in _USER_PLACEHOLDER_NAMES
+    object_is_user = (triplet.object_name or "").strip().lower() in _USER_PLACEHOLDER_NAMES
+    if not (subject_is_user and not object_is_user):
+        return triplet
+
+    logger.info(
+        f"[TripletExtractionStep] 反转「别名属于」方向（用户不能作为别名）: "
+        f"({triplet.subject_name}) -[{triplet.predicate}]-> ({triplet.object_name}) "
+        f"==> ({triplet.object_name}) -[{triplet.predicate}]-> ({triplet.subject_name})"
+    )
+    return TripletItem(
+        subject_name=triplet.object_name,
+        subject_id=triplet.object_id,
+        predicate=triplet.predicate,
+        predicate_id=triplet.predicate_id,
+        predicate_surface=triplet.predicate_surface,
+        predicate_description=triplet.predicate_description,
+        object_name=triplet.subject_name,
+        object_id=triplet.subject_id,
+    )
 
 
 class TripletExtractionStep(ExtractionStep[TripletStepInput, TripletStepOutput]):
@@ -120,8 +167,10 @@ class TripletExtractionStep(ExtractionStep[TripletStepInput, TripletStepOutput])
             return self.get_default_output()
 
         # Keep raw triplets from LLM output (no predicate whitelist filtering).
-        parsed_triplets = [
-            TripletItem(
+        # 逐条校正：用户被误放在「别名属于」别名端时反转方向。
+        parsed_triplets = []
+        for t in raw_response.triplets:
+            triplet = TripletItem(
                 subject_name=t.subject_name,
                 subject_id=t.subject_id,
                 predicate=t.predicate,
@@ -131,8 +180,7 @@ class TripletExtractionStep(ExtractionStep[TripletStepInput, TripletStepOutput])
                 object_name=t.object_name,
                 object_id=t.object_id,
             )
-            for t in raw_response.triplets
-        ]
+            parsed_triplets.append(_flip_user_alias_direction(triplet))
 
         entities = [
             EntityItem(

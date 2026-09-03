@@ -9,6 +9,10 @@ class GraphPipelineConfigError(ValueError):
     """Raised when a managed graph pipeline configuration is invalid."""
 
 
+class GraphDocumentDeletionPending(RuntimeError):
+    """Graph cleanup must wait until document deletion is committed."""
+
+
 class GraphPipeline(StrEnum):
     LEGACY = "legacy"
     EVIDENCE = "evidence"
@@ -37,9 +41,7 @@ def resolve_graph_pipeline(
     try:
         return GraphPipeline(str(raw_value).strip().lower())
     except ValueError as exc:
-        raise GraphPipelineConfigError(
-            f"unsupported graph pipeline: {raw_value}"
-        ) from exc
+        raise GraphPipelineConfigError(f"unsupported graph pipeline: {raw_value}") from exc
 
 
 def is_graph_enabled(parser_config: Mapping[str, Any] | None) -> bool:

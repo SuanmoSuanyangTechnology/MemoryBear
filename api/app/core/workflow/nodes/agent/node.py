@@ -30,6 +30,7 @@ from app.core.workflow.nodes.enums import HttpErrorHandle
 from app.core.workflow.nodes.llm.config import strip_unsupported_llm_params, validate_llm_param_constraints
 from app.core.workflow.variable.base_variable import VariableType
 from app.db import get_async_db_context, get_db_read
+from app.integrations.knowledge.contracts import KnowledgeRetrievalSource
 from app.models import ModelCapability, ModelType
 from app.models.workspace_model import Workspace
 from app.schemas.model_schema import ModelInfo
@@ -156,6 +157,9 @@ class AgentNode(BaseNode):
                     kb_config,
                     kb_ids,
                     user_id,
+                    app_id=self.workflow_config.get("app_id"),
+                    workspace_id=workspace_id,
+                    source=KnowledgeRetrievalSource.AGENT,
                 )
                 if kb_tool:
                     langchain_tools.append(kb_tool)

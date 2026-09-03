@@ -111,7 +111,9 @@ async def read_memory_sync(
 
     # ── Single-user mode (backward-compatible) ──
     async with get_async_db_context() as db:
-        await validate_end_user_in_workspace_async(db, payload.end_user_id, api_key_auth.workspace_id)
+        end_user = await validate_end_user_in_workspace_async(db, payload.end_user_id, api_key_auth.workspace_id)
+        # 合并路由：必须先改写 payload 再查 config，否则已合并用户会取到旧用户的记忆配置
+        payload.end_user_id = str(end_user.id)
         config_id = await MemoryConfigService(db).get_config_id_by_end_user_async(payload.end_user_id)
     logger.info(f"V1 memory read (sync) - end_user_id: {payload.end_user_id}, workspace: {api_key_auth.workspace_id}")
     service = await MemoryService.create(
@@ -145,7 +147,9 @@ async def read_memory_internal(
     body = await request.json()
     payload = InternalReadInput(**body)
     async with get_async_db_context() as db:
-        await validate_end_user_in_workspace_async(db, payload.end_user_id, api_key_auth.workspace_id)
+        end_user = await validate_end_user_in_workspace_async(db, payload.end_user_id, api_key_auth.workspace_id)
+        # 合并路由：必须先改写 payload 再查 config，否则已合并用户会取到旧用户的记忆配置
+        payload.end_user_id = str(end_user.id)
         config_id = await MemoryConfigService(db).get_config_id_by_end_user_async(payload.end_user_id)
     logger.info(
         f"V1 memory read (internal) - end_user_id: {payload.end_user_id}, workspace: {api_key_auth.workspace_id}")
@@ -193,7 +197,9 @@ async def write_memory_async(
 
     async with get_async_db_context() as auth_db:
         current_user = await get_current_user_snapshot_from_api_key_async(auth_db, api_key_auth)
-        await validate_end_user_in_workspace_async(auth_db, payload.end_user_id, api_key_auth.workspace_id)
+        end_user = await validate_end_user_in_workspace_async(auth_db, payload.end_user_id, api_key_auth.workspace_id)
+        # 合并路由：改写 payload，Celery 写入任务将落到合并目标用户
+        payload.end_user_id = str(end_user.id)
 
     logger.info(f"V1 memory write (async) - end_user_id: {payload.end_user_id}, workspace: {api_key_auth.workspace_id}")
 

@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-03-24 15:41:20 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-08-14 17:02:49
+ * @Last Modified time: 2026-09-02 17:55:40
  */
 import { type FC, useRef, useState, useMemo, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -10,7 +10,7 @@ import { useParams } from 'react-router-dom';
 import { Flex, Button, Form, Switch, Space, Divider, App, Dropdown, DatePicker, type SegmentedProps } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 
-import { getAppLogsUrl, getAnnotationsListUrl, getAnnotationsSettings, updateAnnotationsSettings, deleteAnnotations, deleteAllAnnotations, exportAnnotation, } from '@/api/application';
+import { getAppLogsUrl, getPureWorkflowAppLogsUrl, getAnnotationsListUrl, getAnnotationsSettings, updateAnnotationsSettings, deleteAnnotations, deleteAllAnnotations, exportAnnotation, } from '@/api/application';
 import Table, { type TableRef } from '@/components/Table'
 import { formatDateTime } from '@/utils/format';
 import type { LogItem, LogDetailModalRef, AnnotationItem, AnnotationSettingForm, AnnotationSettingModalRef, AnnotationFormModalRef, HitHistoryDetailRef } from './types'
@@ -73,6 +73,35 @@ const Logs: FC<{ application: Application; }> = ({ application }) => {
       key: 'action',
       fixed: 'right',
       width: 80,
+      render: (_, record) => (
+        <Flex wrap>
+          <Button
+            type="link"
+            onClick={() => handleViewDetail(record as LogItem)}
+          >
+            {t('common.view')}
+          </Button>
+        </Flex>
+      ),
+    },
+  ];
+  const pureWorkflowColumns: ColumnsType<LogItem> = [
+    {
+      title: t('application.execution_id'),
+      dataIndex: 'execution_id',
+      key: 'execution_id',
+      className: 'rb:text-[#212332]',
+    },
+    {
+      title: t('application.created_at'),
+      dataIndex: 'created_at',
+      key: 'created_at',
+      render: (createdAt: string) => formatDateTime(createdAt, 'YYYY-MM-DD HH:mm:ss'),
+    },
+    {
+      title: t('common.operation'),
+      key: 'action',
+      fixed: 'right',
       render: (_, record) => (
         <Flex wrap>
           <Button
@@ -230,6 +259,10 @@ const Logs: FC<{ application: Application; }> = ({ application }) => {
       ...reset,
     }
   }, [values])
+
+  const isPureWorkflow = useMemo(() => {
+    return application?.type === 'pure_workflow'
+  }, [application.type])
   return (
     <Flex vertical className="rb:bg-white rb:rounded-lg rb:pt-3! rb:px-3! rb:h-full! rb:overflow-hidden!">
       <Flex justify={!isHideAnnotations ? "space-between" : 'flex-end'} className="rb:mb-3!">
@@ -244,12 +277,14 @@ const Logs: FC<{ application: Application; }> = ({ application }) => {
           <Space size={8}>
             {activeTab === 'logs' &&
               <>
-                <Form.Item name="keyword" noStyle>
-                  <SearchInput
-                    placeholder={t(`application.${activeTab}SearchPlaceholder`)}
-                    variant="outlined"
-                  />
-                </Form.Item>
+                {!isPureWorkflow &&
+                  <Form.Item name="keyword" noStyle>
+                    <SearchInput
+                      placeholder={t(`application.${activeTab}SearchPlaceholder`)}
+                      variant="outlined"
+                    />
+                  </Form.Item>
+                }
                 <Form.Item name="dateRange" noStyle>
                   <RangePicker
                     className="rb:w-70"
@@ -334,16 +369,16 @@ const Logs: FC<{ application: Application; }> = ({ application }) => {
         </Form>
       </Flex>
       <div className="rb:flex-1">
-        {activeTab === 'logs' && <>
+        {activeTab === 'logs' && id && application?.type && <>
           <Table<LogItem>
-            apiUrl={getAppLogsUrl(id || '')}
+            apiUrl={isPureWorkflow ? getPureWorkflowAppLogsUrl(id) : getAppLogsUrl(id)}
             apiParams={logsQuery}
-            columns={columns}
-            rowKey="id"
+            columns={isPureWorkflow ? pureWorkflowColumns : columns}
+            rowKey={isPureWorkflow ? 'execution_id' : "id"}
             isScroll={true}
             fillHeight={true}
           />
-          <LogDetailModal ref={logDetailRef} source={application?.type} />
+          <LogDetailModal ref={logDetailRef} source={application?.type} appType={application?.type} />
         </>}
         {!isHideAnnotations && activeTab === 'annotations' && <>
           <Table<AnnotationItem>

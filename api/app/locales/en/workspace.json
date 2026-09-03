@@ -9,6 +9,10 @@
   "permission_denied": "No permission to access this workspace",
   "name_required": "Workspace name is required",
   "invalid_name": "Invalid workspace name format",
+  "retention_policy": {
+    "retrieved": "Workspace retention policy retrieved successfully",
+    "updated": "Workspace retention policy updated successfully"
+  },
   "members": {
     "list_retrieved": "Workspace members list retrieved successfully",
     "role_updated": "Member role updated successfully",
