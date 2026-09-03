@@ -377,7 +377,7 @@ class Settings:
 
     REFLECTION_INTERVAL_SECONDS: float = float(os.getenv("REFLECTION_INTERVAL_SECONDS", "300"))
     HEALTH_CHECK_SECONDS: float = float(os.getenv("HEALTH_CHECK_SECONDS", "600"))
-    REFLECTION_INTERVAL_TIME: Optional[str] = int(os.getenv("REFLECTION_INTERVAL_TIME", 30))
+    REFLECTION_INTERVAL_TIME: int = int(os.getenv("REFLECTION_INTERVAL_TIME", 30))
 
     # Celery Beat Schedule Configuration (定时任务执行频率)
     MEMORY_INCREMENT_HOUR: int = TypeAdapter(

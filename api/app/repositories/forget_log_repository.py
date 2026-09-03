@@ -9,8 +9,6 @@ from app.core.logging_config import get_db_logger
 from app.core.memory.models.service_models import ForgetLog
 from app.models.memory_forget_model import ForgetAuditModel, ForgetTrigger
 from app.models.user_model import User
-from app.repositories.neo4j.graph_search import forget_recover_by_element_id
-from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 
 logger = get_db_logger()
 
@@ -116,12 +114,14 @@ class ForgetLogRepository:
             )
             return
 
-        async with Neo4jConnector() as connector:
-            recovered = await forget_recover_by_element_id(
-                connector,
-                element_id,
-                end_user_id=str(end_user_id),
-            )
+        from app.core.memory.storage.custom.forget_recovery import (
+            recover_forgotten_node_by_element_id,
+        )
+
+        recovered = await recover_forgotten_node_by_element_id(
+            element_id,
+            end_user_id=str(end_user_id),
+        )
 
         if recovered is None:
             raise BusinessException(
@@ -140,7 +140,7 @@ class ForgetLogRepository:
             "Memory recovery persisted: element_id=%s operator=%s recovered_now=%s",
             element_id,
             operator,
-            bool(recovered.get("recovered_now")),
+            bool(recovered.recovered_now),
         )
 
     @staticmethod

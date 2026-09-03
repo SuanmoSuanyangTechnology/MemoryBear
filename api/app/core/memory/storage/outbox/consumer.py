@@ -6,13 +6,13 @@ from contextlib import AsyncExitStack, suppress
 
 from app.core.memory.storage.outbox.clients import ProjectionClients
 from app.core.memory.storage.outbox.exceptions import ClaimLostError, safe_error
-from app.core.memory.storage.outbox.repository import create_repository
-from app.core.memory.storage.outbox.types import MAX_ATTEMPTS
+from app.core.memory.storage.outbox.repository import create_repository, OutboxRepository
+from app.core.memory.storage.outbox.types import MAX_ATTEMPTS, ClaimedEvent
 
 logger = logging.getLogger(__name__)
 
 
-async def _consume_claim(event, repo, projector) -> str:
+async def _consume_claim(event: ClaimedEvent, repo: OutboxRepository, projector) -> str:
     lost = asyncio.Event()
 
     async def check_claim():

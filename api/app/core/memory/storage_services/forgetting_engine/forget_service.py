@@ -6,6 +6,11 @@ from typing import Any
 
 from app.core.memory.enums import Neo4jNodeType
 from app.core.memory.models.service_models import ForgetLog, MemoryContext
+from app.core.memory.storage.custom.automatic_forgetting import (
+    AutomaticForgetOutboxError,
+    soft_delete_forgetting_nodes,
+)
+from app.core.memory.storage.provider.neo4j.client import Neo4jClient
 from app.core.memory.storage_services.forgetting_engine.constants import (
     DIALOGUE_AUDIT_CONTENT_MAX_LENGTH,
     FORGET_CORE_BATCH_SIZE,
@@ -19,7 +24,6 @@ from app.repositories.neo4j.graph_search import (
     forget_count_auxiliary_active_nodes,
     forget_get_auxiliary_candidates,
     forget_get_core_candidates,
-    forget_soft_delete_by_element_ids,
 )
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.utils.redis_cache import invalidate_cache
@@ -64,6 +68,7 @@ class ForgetService:
         self.target_count = max(int(memory_limit * self.target_ratio), 50)
 
         self._connector: Neo4jConnector | None = None
+        self._storage_client: Neo4jClient | None = None
         self._scanned_count = 0
         self._released_count = 0
         self._node_type_counts: defaultdict[str, int] = defaultdict(int)
@@ -75,12 +80,22 @@ class ForgetService:
         self._auxiliary_node_type_counts: defaultdict[str, int] = defaultdict(int)
 
     async def run(self) -> dict[str, Any]:
+        """Execute one automatic forgetting cycle and release storage clients."""
+        self._reset_run_state()
+        try:
+            return await self._run_cycle()
+        finally:
+            storage_client = self._storage_client
+            self._storage_client = None
+            if storage_client is not None:
+                await storage_client.close()
+
+    async def _run_cycle(self) -> dict[str, Any]:
         """执行离散优先、辅助驱动、时间价值兜底的遗忘。
 
         核心池未超过配额时直接返回。超过配额时，核心池实际软删除数
         始终受剩余预算约束，避免越过目标水位。
         """
-        self._reset_run_state()
         async with Neo4jConnector() as connector:
             self._connector = connector
             active_count = await forget_count_active_nodes(
@@ -245,6 +260,47 @@ class ForgetService:
             "release_ratio": 0.0,
         }
 
+    async def _get_storage_client(self) -> Neo4jClient:
+        if self._storage_client is None:
+            self._storage_client = await Neo4jClient.create()
+        return self._storage_client
+
+    async def _soft_delete_candidates(
+        self,
+        candidates: list[dict[str, Any]],
+        now: datetime,
+        *,
+        require_isolated: bool,
+    ) -> list[str]:
+        """Soft-delete through storage custom and preserve committed audits."""
+        try:
+            affected_nodes = await soft_delete_forgetting_nodes(
+                self.ctx.end_user_id,
+                [row["element_id"] for row in candidates],
+                to_iso_z(now),
+                protection_threshold=self.ENTITY_PROTECTION_THRESHOLD,
+                require_isolated=require_isolated,
+                client=await self._get_storage_client(),
+            )
+        except AutomaticForgetOutboxError as exc:
+            committed_ids = {node.element_id for node in exc.affected_nodes}
+            committed_rows = [
+                row for row in candidates if row["element_id"] in committed_ids
+            ]
+            try:
+                self._sync_audit([
+                    self._build_audit(row, now) for row in committed_rows
+                ])
+            except Exception:
+                logger.exception(
+                    "Failed to persist automatic-forget audit after Outbox "
+                    "failure: end_user_id=%s committed=%d",
+                    self.ctx.end_user_id,
+                    len(committed_rows),
+                )
+            raise
+        return [node.element_id for node in affected_nodes]
+
     async def _core_clean(
         self,
         budget: int,
@@ -287,12 +343,9 @@ class ForgetService:
             now = utcnow()
             self._scanned_count += len(candidates)
 
-            deleted_element_ids = await forget_soft_delete_by_element_ids(
-                connector,
-                self.ctx.end_user_id,
-                element_ids,
-                to_iso_z(now),
-                protection_threshold=self.ENTITY_PROTECTION_THRESHOLD,
+            deleted_element_ids = await self._soft_delete_candidates(
+                candidates,
+                now,
                 require_isolated=isolated_only,
             )
             deleted_id_set = set(deleted_element_ids)
@@ -376,12 +429,9 @@ class ForgetService:
 
         element_ids = [row["element_id"] for row in candidates]
         now = utcnow()
-        deleted_element_ids = await forget_soft_delete_by_element_ids(
-            connector,
-            self.ctx.end_user_id,
-            element_ids,
-            to_iso_z(now),
-            protection_threshold=self.ENTITY_PROTECTION_THRESHOLD,
+        deleted_element_ids = await self._soft_delete_candidates(
+            candidates,
+            now,
             require_isolated=False,
         )
         deleted_id_set = set(deleted_element_ids)
