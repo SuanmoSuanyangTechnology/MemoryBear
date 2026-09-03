@@ -24,12 +24,28 @@ _IMAGE_DOWNLOAD_RATE_LIMIT_PATTERNS = (
     ),
 )
 
+_IMAGE_DIMENSION_TOO_LARGE_PATTERNS = (
+    re.compile(
+        r"\bimage\s+(?:length\s+and\s+width|width\s+and\s+height|dimensions?)\b.{0,200}\b(?:maximum|max(?:imum)?|upper\s+limit|at\s+most|no\s+larger\s+than|(?:must|should)\s+be\s+(?:less|smaller)\s+than|(?:cannot|must\s+not|should\s+not)\s+(?:be\s+)?(?:larger|greater)\s+than|(?:cannot|must\s+not|should\s+not)\s+exceed|exceed(?:s|ed|ing)?)\b",
+        re.IGNORECASE | re.DOTALL,
+    ),
+    re.compile(r"(?:图片|图像).{0,30}(?:尺寸|宽度|高度).{0,50}(?:超过|超出|最大|上限|不得大于|不能大于|不大于)"),
+)
+
+_IMAGE_DIMENSION_TOO_SMALL_PATTERNS = (
+    re.compile(
+        r"\bimage\s+(?:length\s+and\s+width|width\s+and\s+height|dimensions?)\b.{0,200}\b(?:minimum|at\s+least|(?:must|should)\s+be\s+(?:larger|greater)\s+than|(?:cannot|must\s+not|should\s+not)\s+(?:be\s+)?(?:less|smaller)\s+than)\b",
+        re.IGNORECASE | re.DOTALL,
+    ),
+    re.compile(r"(?:图片|图像).{0,30}(?:尺寸|宽度|高度).{0,50}(?:最小|至少|不得小于|不能小于|不小于)"),
+)
+
 _IMAGE_DIMENSION_LIMIT_PATTERNS = (
     re.compile(
         r"\bimage\s+(?:length\s+and\s+width|width\s+and\s+height|dimensions?)\b.{0,200}\b(?:do\s+not\s+meet|restrictions?|must\s+be|larger\s+than|minimum)\b",
         re.IGNORECASE | re.DOTALL,
     ),
-    re.compile(r"(?:图片|图像).{0,30}(?:尺寸|宽度|高度).{0,50}(?:不符合|限制|最小|至少|大于)"),
+    re.compile(r"(?:图片|图像).{0,30}(?:尺寸|宽度|高度).{0,50}(?:不符合|限制|最小|至少|大于|最大|上限|超过|超出)"),
 )
 
 _DOWNLOAD_FAILED_PATTERNS = (
@@ -94,9 +110,17 @@ def classify_multimodal_exception(
         kind = "multimodal_input_limit"
         message = "当前上传文件中的图片数量超过模型单次处理上限，请减少图片数量、精简文档内容或拆分文档后重试。"
         retryable = False
-    elif any(pattern.search(text) for pattern in _IMAGE_DIMENSION_LIMIT_PATTERNS):
+    elif any(pattern.search(text) for pattern in _IMAGE_DIMENSION_TOO_LARGE_PATTERNS):
+        kind = "multimodal_image_dimension_limit"
+        message = "上传文件中包含尺寸过大的图片，模型对图片宽度或高度设有最大限制。请缩小或替换此类图片后重试。"
+        retryable = False
+    elif any(pattern.search(text) for pattern in _IMAGE_DIMENSION_TOO_SMALL_PATTERNS):
         kind = "multimodal_image_dimension_limit"
         message = "上传文件中包含尺寸过小的图片，模型要求图片宽度和高度均大于 10 像素。请删除或替换此类图片后重试。"
+        retryable = False
+    elif any(pattern.search(text) for pattern in _IMAGE_DIMENSION_LIMIT_PATTERNS):
+        kind = "multimodal_image_dimension_limit"
+        message = "上传文件中包含不符合模型要求的图片尺寸，请按模型的尺寸限制调整或替换此类图片后重试。"
         retryable = False
     elif any(pattern.search(text) for pattern in _DOWNLOAD_FAILED_PATTERNS):
         kind = "multimodal_download_failed"
