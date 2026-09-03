@@ -535,18 +535,13 @@ class KnowledgeRetrievalService:
         )
         if target_type is RetrieveType.SEMANTIC:
             if image_query is not None:
-                embedding_started_at = time.perf_counter()
-                try:
-                    embedded_query = await embedding.aembed_contents(
-                        EmbeddingRequest(
-                            purpose=EmbeddingPurpose.RETRIEVAL,
-                            contents=(image_query,),
-                        )
-                    )
-                finally:
-                    cls._record_timing(timings, "embedding_ms", embedding_started_at)
+                query_vector = await cls._embed_image_query(
+                    embedding,
+                    image_query,
+                    timings,
+                )
                 chunks = await store.search_by_query_vector(
-                    embedded_query.vector,
+                    query_vector,
                     vector_options,
                 )
             else:
@@ -578,18 +573,13 @@ class KnowledgeRetrievalService:
             )
 
         if image_query is not None:
-            embedding_started_at = time.perf_counter()
-            try:
-                embedded_query = await embedding.aembed_contents(
-                    EmbeddingRequest(
-                        purpose=EmbeddingPurpose.RETRIEVAL,
-                        contents=(image_query,),
-                    )
-                )
-            finally:
-                cls._record_timing(timings, "embedding_ms", embedding_started_at)
+            query_vector = await cls._embed_image_query(
+                embedding,
+                image_query,
+                timings,
+            )
             vector_chunks = await store.search_by_query_vector(
-                embedded_query.vector,
+                query_vector,
                 vector_options,
             )
             text_chunks = []
@@ -713,6 +703,44 @@ class KnowledgeRetrievalService:
             entities=tuple(graph_result.entities),
             relationships=tuple(graph_result.relationships),
         )
+
+    @classmethod
+    async def _embed_image_query(
+        cls,
+        embedding: RedBearEmbeddings,
+        image_query: ImageEmbeddingContent,
+        timings: RetrievalTimings | None,
+    ) -> tuple[float, ...]:
+        embedding_started_at = time.perf_counter()
+        try:
+            result = await embedding.aembed_contents(
+                EmbeddingRequest(
+                    purpose=EmbeddingPurpose.RETRIEVAL,
+                    contents=(image_query,),
+                )
+            )
+        except asyncio.CancelledError:
+            raise
+        except MultimodalInputLimitError as exc:
+            raise KnowledgeError.from_code(
+                "KB_MULTIMODAL_INPUT_LIMIT",
+                "Image embedding input exceeds the model limit",
+            ) from exc
+        except Exception as exc:
+            raise KnowledgeError.from_code(
+                "KB_MULTIMODAL_EMBEDDING_FAILED",
+                "Image embedding failed",
+            ) from exc
+        finally:
+            cls._record_timing(timings, "embedding_ms", embedding_started_at)
+        logger.info(
+            "[Retrieval] image_embedding query_modality=image dimension=%s "
+            "image_tokens=%s duration_ms=%s",
+            result.dimension,
+            result.usage.get("image_tokens", 0),
+            cls._elapsed_ms(embedding_started_at),
+        )
+        return result.vector
 
     @classmethod
     async def _retrieve_evidence_graph_target(

@@ -453,6 +453,7 @@ class KnowledgeRetrievalPreparation:
             target_count,
         )
         local_mode, local_weights, _ = selection
+        retrieve_type = cls._resolve_retrieve_type(request, ref.config)
         if knowledge.embedding_id is None:
             raise _model_unavailable(f"embedding_id config error: {knowledge.id}")
         embedding = await cls._snapshot_model(db, knowledge.embedding_id, principal.tenant_id)
@@ -460,6 +461,7 @@ class KnowledgeRetrievalPreparation:
             raise _model_unavailable(f"No embedding api key found for knowledge {knowledge.id}")
         reranker = None
         if cls._target_reranker_required(
+            retrieve_type=retrieve_type,
             local_mode=local_mode,
             global_mode=global_mode,
             target_index=target_index,
@@ -662,12 +664,16 @@ class KnowledgeRetrievalPreparation:
     @staticmethod
     def _target_reranker_required(
         *,
+        retrieve_type: RetrieveType,
         local_mode: RerankMode,
         global_mode: RerankMode | None,
         target_index: int,
         request_has_rerank_id: bool,
     ) -> bool:
-        if local_mode is RerankMode.RERANKING_MODEL:
+        if (
+            retrieve_type is RetrieveType.HYBRID
+            and local_mode is RerankMode.RERANKING_MODEL
+        ):
             return True
         return (
             global_mode is RerankMode.RERANKING_MODEL
