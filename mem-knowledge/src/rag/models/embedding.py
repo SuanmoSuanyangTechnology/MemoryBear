@@ -50,24 +50,27 @@ def prepare_chunk_embedding_contents(
     metadata = chunk.metadata or {}
     if metadata.get("chunk_type") in {"source", "parent"}:
         return ()
-    contents: list[EmbeddingContent] = []
     text = sanitized_retrieval_text(chunk)
-    if text:
-        contents.append(TextEmbeddingContent(text=text))
+    text_content = TextEmbeddingContent(text=text) if text else None
     if metadata.get("chunk_type") == "qa":
-        return tuple(contents)
+        return (text_content,) if text_content is not None else ()
+    image_contents: list[EmbeddingContent] = []
     raw_ids = metadata.get("asset_file_ids")
-    image_count = 0
     if isinstance(raw_ids, list):
         for value in raw_ids:
             image = images.get(str(value))
             if image is None:
                 continue
-            contents.append(image)
-            image_count += 1
-            if image_count == 10:
+            image_contents.append(image)
+            if len(image_contents) == 10:
                 break
-    return tuple(contents)
+    text_contents: list[EmbeddingContent] = (
+        [text_content] if text_content is not None else []
+    )
+    page_text = _MARKDOWN_IMAGE_PATTERN.sub("", chunk.page_content).strip()
+    if image_contents and not page_text:
+        return tuple([*image_contents, *text_contents])
+    return tuple([*text_contents, *image_contents])
 
 
 __all__ = [
