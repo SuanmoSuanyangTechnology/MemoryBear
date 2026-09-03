@@ -84,6 +84,8 @@ class MemorySearchResult(BaseModel):
     relations: list[RelationMemory] = Field(default_factory=list)
     content_str: str = Field(default="")
     execution_trace: RetrievalExecutionTrace | None = Field(default=None, exclude=True)
+    # QUICK 在全局截断前执行的同源去重摘要，仅供日志使用，不对外输出。
+    dedup_summary: dict = Field(default_factory=dict, exclude=True)
 
     @property
     def content(self) -> str:

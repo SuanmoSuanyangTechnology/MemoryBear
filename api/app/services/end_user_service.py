@@ -62,6 +62,20 @@ class EndUserService:
         if not target_user_info:
             raise BusinessException(message="Target user not found.")
 
+        # ── 1.4 工作空间一致性校验：跨空间归并会串号，须在任何迁移前拦截 ──
+        target_user = await self._get_end_user_any_async(target)
+        if not target_user:
+            raise BusinessException(message="Target user not found.")
+        mismatched = {
+            source_id
+            for source_id, source_user in source_users.items()
+            if source_user.workspace_id != target_user.workspace_id
+        }
+        if mismatched:
+            raise BusinessException(
+                message=f"Cross-workspace merge is not allowed: {mismatched} not in workspace {target_user.workspace_id}."
+            )
+
         # ── 1.5 归并意图先行落库：软删 source + 写 end_user_merge 映射，同一次提交 ──
         # 位置刻意放在「所有前置校验之后、任何数据迁移之前」：
         # ① 必须晚于校验：上面的 target_user_info 校验若失败，source 不能已被软删；

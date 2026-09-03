@@ -1135,7 +1135,14 @@ def update_workspace_retention_policy(
         retention_days: int | None,
         user: User,
 ) -> int | None:
-    """以空间成员权限更新指定工作空间的临时身份保留天数。"""
+    """Update temporary-memory retention and protect newly expired identities.
+
+    Args:
+        db: Active synchronous database session.
+        workspace_id: Workspace whose retention policy is updated.
+        retention_days: New retention duration, or ``None`` for no expiration.
+        user: User requesting the policy update.
+    """
     business_logger.info(
         f"更新工作空间保留策略: workspace_id={workspace_id}, "
         f"retention_days={retention_days}, 操作者={user.username}"

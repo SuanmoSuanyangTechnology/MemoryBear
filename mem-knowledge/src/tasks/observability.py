@@ -316,8 +316,9 @@ class CeleryStateSink:
         "kb_task_progress",
     }
 
-    def __init__(self, update_state: Callable[..., None]) -> None:
+    def __init__(self, update_state: Callable[..., None], *, task_id: str) -> None:
         self._update_state = update_state
+        self._task_id = task_id
 
     def emit(self, event: TaskEvent) -> None:
         if event.event not in self._ACTIVE_EVENTS:
@@ -339,7 +340,7 @@ class CeleryStateSink:
                 meta[f"count_{key}"] = value
         if not meta:
             return
-        self._update_state(state="STARTED", meta=meta)
+        self._update_state(task_id=self._task_id, state="STARTED", meta=meta)
 
 
 def error_fingerprint(exc: BaseException) -> str:

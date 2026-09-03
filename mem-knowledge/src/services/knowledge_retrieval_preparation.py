@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from redbear_model import ResolvedModelConfig, resolve_model_async
@@ -12,9 +12,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..api.dependencies import Principal
-from ..api.schemas.chunk import KnowledgeBaseConfig, RetrieveType
+from ..api.schemas.chunk import (
+    KnowledgeBaseConfig,
+    RetrieveType,
+)
 from ..api.schemas.knowledge_metadata import MetadataFilterMode
 from ..api.schemas.knowledge_retrieval import KnowledgeRetrievalRequest
+from ..api.schemas.rerank import RerankMode, RerankWeights
 from ..errors import KnowledgeError
 from ..models.owned import Knowledge, KnowledgeShare, PermissionType
 from ..rag.knowledge_graph.config import (
@@ -28,6 +32,8 @@ from ..rag.retrieval.models import (
     GraphRetrievalSnapshot,
     GraphTargetSnapshot,
     ModelRuntimeSnapshot,
+    RerankPlan,
+    RerankWeightsSnapshot,
     RetrievalParams,
     RetrievalPreparation,
     RetrievalTarget,
@@ -57,7 +63,42 @@ class KnowledgeRetrievalPreparation:
         principal: Principal,
     ) -> RetrievalPreparation:
         refs = await cls._resolve_retrievable_refs(db, request, principal)
-        targets = [await cls._build_target(db, request, principal, ref) for ref in refs]
+        target_count = len(refs)
+        local_selections = [
+            cls._resolve_local_selection(request, ref.config, target_count)
+            for ref in refs
+        ]
+        single_retrieve_type = (
+            cls._resolve_retrieve_type(request, refs[0].config)
+            if target_count == 1
+            else None
+        )
+        global_selection = cls._resolve_global_selection(
+            request,
+            target_count,
+            single_retrieve_type,
+        )
+        global_mode = global_selection[0] if global_selection is not None else None
+        cls._validate_weighted_selections(
+            request,
+            refs,
+            local_selections,
+            global_mode,
+        )
+        targets = [
+            await cls._build_target(
+                db,
+                request,
+                principal,
+                ref,
+                local_selection=local_selections[index],
+                global_mode=global_mode,
+                target_index=index,
+                target_count=target_count,
+            )
+            for index, ref in enumerate(refs)
+        ]
+        cls._validate_weighted_targets(targets, global_mode)
         metadata_defs_by_kb = {
             target.knowledge_id: (
                 await KnowledgeMetadataService.get_metadata_defs_for_filtering_async(
@@ -89,11 +130,51 @@ class KnowledgeRetrievalPreparation:
             and targets[0].params.retrieve_type is RetrieveType.Graph
         )
         request_reranker = None
-        if not single_evidence_graph_target:
+        single_hybrid_uses_request_model = (
+            request.rerank_id is not None
+            and target_count == 1
+            and targets[0].params.retrieve_type is RetrieveType.HYBRID
+            and targets[0].params.local_rerank is not None
+            and targets[0].params.local_rerank.mode is RerankMode.RERANKING_MODEL
+        )
+        request_model_required = (
+            request.rerank_id is not None
+            and not single_evidence_graph_target
+            and (
+                single_hybrid_uses_request_model
+                or global_mode is RerankMode.RERANKING_MODEL
+            )
+        )
+        if request_model_required:
             request_reranker = await cls._snapshot_model(
                 db,
                 request.rerank_id,
                 principal.tenant_id,
+            )
+        if single_hybrid_uses_request_model:
+            local_plan = targets[0].params.local_rerank
+            if local_plan is not None:
+                targets[0] = replace(
+                    targets[0],
+                    params=replace(
+                        targets[0].params,
+                        local_rerank=replace(local_plan, model=request_reranker),
+                    ),
+                )
+        global_rerank = None
+        if global_selection is not None and not single_evidence_graph_target:
+            mode, weights, _ = global_selection
+            global_rerank = RerankPlan(
+                mode=mode,
+                weights=weights,
+                model=(
+                    request_reranker
+                    if request.rerank_id is not None
+                    else (targets[0].reranker if targets else None)
+                )
+                if mode is RerankMode.RERANKING_MODEL
+                else None,
+                compatibility_fallback=mode is RerankMode.RERANKING_MODEL,
             )
         return RetrievalPreparation(
             targets=tuple(targets),
@@ -103,6 +184,7 @@ class KnowledgeRetrievalPreparation:
             metadata_llm=metadata_llm,
             graph=graph,
             request_reranker=request_reranker,
+            global_rerank=global_rerank,
         )
 
     @classmethod
@@ -229,23 +311,57 @@ class KnowledgeRetrievalPreparation:
         request: KnowledgeRetrievalRequest,
         principal: Principal,
         ref: _KnowledgeRef,
+        *,
+        local_selection: tuple[RerankMode, RerankWeightsSnapshot, bool] | None = None,
+        global_mode: RerankMode | None = None,
+        target_index: int = 0,
+        target_count: int = 1,
     ) -> RetrievalTarget:
         knowledge = ref.knowledge
+        selection = local_selection or cls._resolve_local_selection(
+            request,
+            ref.config,
+            target_count,
+        )
+        local_mode, local_weights, _ = selection
         if knowledge.embedding_id is None:
             raise _model_unavailable(f"embedding_id config error: {knowledge.id}")
         embedding = await cls._snapshot_model(db, knowledge.embedding_id, principal.tenant_id)
         if embedding is None:
             raise _model_unavailable(f"No embedding api key found for knowledge {knowledge.id}")
-        if knowledge.reranker_id is None:
-            raise _model_unavailable(f"reranker_id config error: {knowledge.id}")
-        reranker = await cls._snapshot_model(db, knowledge.reranker_id, principal.tenant_id)
-        if reranker is None:
-            raise _model_unavailable(f"No reranker api key found for knowledge {knowledge.id}")
+        reranker = None
+        if cls._target_reranker_required(
+            local_mode=local_mode,
+            global_mode=global_mode,
+            target_index=target_index,
+            request_has_rerank_id=request.rerank_id is not None,
+        ):
+            if knowledge.reranker_id is None:
+                raise _model_unavailable(f"reranker_id config error: {knowledge.id}")
+            reranker = await cls._snapshot_model(
+                db,
+                knowledge.reranker_id,
+                principal.tenant_id,
+            )
+            if reranker is None:
+                raise _model_unavailable(
+                    f"No reranker api key found for knowledge {knowledge.id}"
+                )
+        local_plan = RerankPlan(
+            mode=local_mode,
+            weights=local_weights,
+            model=reranker if local_mode is RerankMode.RERANKING_MODEL else None,
+            compatibility_fallback=local_mode is RerankMode.RERANKING_MODEL,
+        )
         return RetrievalTarget(
             knowledge_id=knowledge.id,
             workspace_id=knowledge.workspace_id,
             index_name=collection_name_for_knowledge(knowledge.id),
-            params=cls._build_retrieval_params(request, ref.config),
+            params=cls._build_retrieval_params(
+                request,
+                ref.config,
+                local_rerank=local_plan,
+            ),
             embedding=embedding,
             reranker=reranker,
         )
@@ -346,6 +462,8 @@ class KnowledgeRetrievalPreparation:
     def _build_retrieval_params(
         request: KnowledgeRetrievalRequest,
         config: KnowledgeBaseConfig | None,
+        *,
+        local_rerank: RerankPlan | None = None,
     ) -> RetrievalParams:
         fields = config.model_fields_set if config else set()
 
@@ -371,7 +489,140 @@ class KnowledgeRetrievalPreparation:
                 if value("retrieve_type", request.retrieve_type) is RetrieveType.HYBRID
                 else False
             ),
+            local_rerank=local_rerank,
         )
+
+    @staticmethod
+    def _resolve_weights(weights: RerankWeights | None) -> RerankWeightsSnapshot:
+        effective = weights or RerankWeights()
+        return RerankWeightsSnapshot(
+            semantic_weight=effective.semantic_weight,
+            participle_weight=effective.participle_weight,
+        )
+
+    @classmethod
+    def _resolve_local_selection(
+        cls,
+        request: KnowledgeRetrievalRequest,
+        config: KnowledgeBaseConfig | None,
+        target_count: int,
+    ) -> tuple[RerankMode, RerankWeightsSnapshot, bool]:
+        if config is not None and config.rerank_mode is not None:
+            return config.rerank_mode, cls._resolve_weights(config.rerank_weights), True
+        if target_count == 1 and request.rerank_mode is not None:
+            return request.rerank_mode, cls._resolve_weights(request.rerank_weights), True
+        return RerankMode.RERANKING_MODEL, cls._resolve_weights(None), False
+
+    @classmethod
+    def _resolve_global_selection(
+        cls,
+        request: KnowledgeRetrievalRequest,
+        target_count: int,
+        single_retrieve_type: RetrieveType | None,
+    ) -> tuple[RerankMode, RerankWeightsSnapshot, bool] | None:
+        if target_count == 1 and single_retrieve_type is RetrieveType.HYBRID:
+            return None
+        if target_count == 1 and request.rerank_id is None:
+            return None
+        mode = request.rerank_mode or RerankMode.RERANKING_MODEL
+        return mode, cls._resolve_weights(request.rerank_weights), request.rerank_mode is not None
+
+    @staticmethod
+    def _target_reranker_required(
+        *,
+        local_mode: RerankMode,
+        global_mode: RerankMode | None,
+        target_index: int,
+        request_has_rerank_id: bool,
+    ) -> bool:
+        if local_mode is RerankMode.RERANKING_MODEL:
+            return True
+        return (
+            global_mode is RerankMode.RERANKING_MODEL
+            and target_index == 0
+            and not request_has_rerank_id
+        )
+
+    @staticmethod
+    def _resolve_retrieve_type(
+        request: KnowledgeRetrievalRequest,
+        config: KnowledgeBaseConfig | None,
+    ) -> RetrieveType:
+        if (
+            config is not None
+            and "retrieve_type" in config.model_fields_set
+            and config.retrieve_type is not None
+        ):
+            return config.retrieve_type
+        return request.retrieve_type
+
+    @staticmethod
+    def _embedding_space_key(
+        snapshot: ModelRuntimeSnapshot,
+    ) -> tuple[str, str, str]:
+        return (
+            snapshot.provider.strip().lower(),
+            snapshot.model_name.strip(),
+            (snapshot.api_base or "").rstrip("/"),
+        )
+
+    @classmethod
+    def _validate_weighted_targets(
+        cls,
+        targets: list[RetrievalTarget],
+        global_mode: RerankMode | None,
+    ) -> None:
+        for target in targets:
+            local_plan = target.params.local_rerank
+            if local_plan is None or local_plan.mode is not RerankMode.WEIGHTED_SCORE:
+                continue
+            cls._validate_weighted_target(target)
+        if global_mode is not RerankMode.WEIGHTED_SCORE:
+            return
+        for target in targets:
+            cls._validate_weighted_target(target)
+        embedding_spaces = {
+            cls._embedding_space_key(target.embedding) for target in targets
+        }
+        if len(embedding_spaces) > 1:
+            raise KnowledgeError.from_code(
+                "KB_VALIDATION_ERROR",
+                "Weighted rerank requires matching embedding spaces",
+            )
+
+    @classmethod
+    def _validate_weighted_selections(
+        cls,
+        request: KnowledgeRetrievalRequest,
+        refs: list[_KnowledgeRef],
+        local_selections: list[tuple[RerankMode, RerankWeightsSnapshot, bool]],
+        global_mode: RerankMode | None,
+    ) -> None:
+        for ref, selection in zip(refs, local_selections, strict=True):
+            if (
+                selection[0] is not RerankMode.WEIGHTED_SCORE
+                and global_mode is not RerankMode.WEIGHTED_SCORE
+            ):
+                continue
+            params = cls._build_retrieval_params(request, ref.config)
+            cls._validate_weighted_params(params)
+
+    @staticmethod
+    def _validate_weighted_target(target: RetrievalTarget) -> None:
+        KnowledgeRetrievalPreparation._validate_weighted_params(target.params)
+
+    @staticmethod
+    def _validate_weighted_params(params: RetrievalParams) -> None:
+        if params.retrieve_type is not RetrieveType.HYBRID:
+            raise KnowledgeError.from_code(
+                "KB_VALIDATION_ERROR",
+                "Weighted rerank requires hybrid retrieval",
+            )
+        if params.enable_graph_retrieval:
+            raise KnowledgeError.from_code(
+                "KB_VALIDATION_ERROR",
+                "Weighted rerank does not support graph retrieval",
+            )
 
     @staticmethod
     def _get_common_metadata_defs(

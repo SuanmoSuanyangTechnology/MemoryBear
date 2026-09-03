@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from ...rag.models.chunk import DocumentChunk
 from .chunk import KnowledgeBaseConfig, KnowledgeRetrievalSource, RetrieveType
 from .knowledge_metadata import FilterGroup, MetadataFilterMode
+from .rerank import RerankMode, RerankWeights
 
 
 class KnowledgeRetrievalRequest(BaseModel):
@@ -25,6 +26,8 @@ class KnowledgeRetrievalRequest(BaseModel):
     enable_graph_retrieval: int = Field(default=0, ge=0, le=1)
     rerank_id: UUID | None = None
     rerank_score_threshold: float | None = Field(default=None, ge=0, le=1)
+    rerank_mode: RerankMode | None = None
+    rerank_weights: RerankWeights | None = None
     metadata_filters: list[FilterGroup] = Field(default_factory=list)
     metadata_filter_mode: MetadataFilterMode = MetadataFilterMode.MANUAL
     metadata_filters_resolved: bool = False

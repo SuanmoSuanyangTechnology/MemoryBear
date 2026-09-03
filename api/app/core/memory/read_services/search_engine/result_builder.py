@@ -85,6 +85,8 @@ class EntityBuilder(BaseBuilder):
             "id": self.record.get("id"),
             "name": self.record.get("name"),
             "aliases_name": self.record.get("aliases", []),
+            # 召回 Cypher 已返回 entity_type，用于识别画像原节点
+            "entity_type": self.record.get("entity_type"),
             "description": self.record.get("description"),
             "description_summary": self.record.get("description_summary"),
             "event_timeline": self.record.get("event_timeline"),

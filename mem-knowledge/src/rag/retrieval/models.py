@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from ...api.schemas.chunk import RetrieveType
+from ...api.schemas.rerank import RerankMode
 from ..knowledge_graph.config import GraphPipeline
+from ..models.chunk import DocumentChunk
 
 
 @dataclass(frozen=True)
@@ -23,6 +25,34 @@ class ModelRuntimeSnapshot:
 
 
 @dataclass(frozen=True)
+class RerankWeightsSnapshot:
+    semantic_weight: float
+    participle_weight: float
+
+
+@dataclass(frozen=True)
+class RerankPlan:
+    mode: RerankMode
+    weights: RerankWeightsSnapshot
+    model: ModelRuntimeSnapshot | None
+    compatibility_fallback: bool
+
+
+@dataclass(frozen=True)
+class RetrievalCandidate:
+    chunk: DocumentChunk
+    knowledge_id: uuid.UUID
+    semantic_score: float | None
+    participle_score: float | None
+    graph_score: float | None
+    final_score: float | None
+    arrival_index: int
+
+    def with_final_score(self, score: float) -> RetrievalCandidate:
+        return replace(self, final_score=score)
+
+
+@dataclass(frozen=True)
 class RetrievalParams:
     similarity_threshold: float
     vector_similarity_weight: float | None
@@ -31,6 +61,7 @@ class RetrievalParams:
     retrieve_type: RetrieveType
     rerank_score_threshold: float = 0.1
     enable_graph_retrieval: bool = False
+    local_rerank: RerankPlan | None = None
 
 
 @dataclass(frozen=True)
@@ -135,15 +166,27 @@ class RetrievalPreparation:
     metadata_llm: ModelRuntimeSnapshot | None
     graph: GraphRetrievalSnapshot | None
     request_reranker: ModelRuntimeSnapshot | None = None
+    global_rerank: RerankPlan | None = None
+
+
+@dataclass(frozen=True)
+class TargetRetrievalResult:
+    candidates: tuple[RetrievalCandidate, ...]
+    entities: tuple[Any, ...] = ()
+    relationships: tuple[Any, ...] = ()
 
 
 __all__ = [
     "GraphRetrievalSnapshot",
     "GraphTargetSnapshot",
     "ModelRuntimeSnapshot",
+    "RerankPlan",
+    "RerankWeightsSnapshot",
+    "RetrievalCandidate",
     "RetrievalParams",
     "RetrievalPreparation",
     "RetrievalSearchOptions",
     "RetrievalTarget",
     "RetrievalTimings",
+    "TargetRetrievalResult",
 ]

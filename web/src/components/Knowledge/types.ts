@@ -14,9 +14,14 @@ import type { KnowledgeBaseListItem } from '@/views/KnowledgeBase/types'
  * Reranker configuration for knowledge retrieval
  */
 export interface RerankerConfig {
-  rerank_model?: boolean | undefined;
-  reranker_id?: string | undefined;
-  reranker_top_k?: number | undefined;
+  rerank_model?: boolean | null;
+  reranker_id?: string | null;
+  reranker_top_k?: number | null;
+  rerank_mode?: 'reranking_model' | 'weighted_score';
+  rerank_weights?: {
+    semantic_weight: number,
+    participle_weight: number
+  } | null;
 }
 
 /**
@@ -37,12 +42,19 @@ export interface KnowledgeConfigForm {
   enable_graph_retrieval?: 0 | 1;
   weight?: number;
   config?: KnowledgeConfigForm;
+
+  rerank_mode?: 'reranking_model' | 'weighted_score';
+  reranker_id?: string | null;
+  rerank_weights?: {
+    semantic_weight: number,
+    participle_weight: number
+  } | null;
 }
 
 /**
  * Knowledge base with configuration
  */
-export interface KnowledgeBase extends Omit<KnowledgeBaseListItem, 'id'>, KnowledgeConfigForm {
+export interface KnowledgeBase extends Omit<KnowledgeBaseListItem, 'id' | 'reranker_id'>, KnowledgeConfigForm {
   id: string;
   config?: KnowledgeConfigForm
 }

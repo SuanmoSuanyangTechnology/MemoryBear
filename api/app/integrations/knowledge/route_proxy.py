@@ -64,7 +64,9 @@ def route_through_knowledge_service(
 
                     api_key_auth = kwargs.get("api_key_auth")
                     if api_key_auth is None:
-                        raise KnowledgeContextError("API Key context is required")
+                        from app.core.api_key_auth import get_current_api_key_auth
+
+                        api_key_auth = get_current_api_key_auth()
                     trace_id = (
                         getattr(request.state, "trace_id", "") or uuid.uuid4().hex
                     )
