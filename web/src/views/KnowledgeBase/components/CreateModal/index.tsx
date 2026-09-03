@@ -33,7 +33,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({ refreshTa
   const [generatingEntityTypes, setGeneratingEntityTypes] = useState(false);
   const [isRebuildMode, setIsRebuildMode] = useState(false);
   const [originalType, setOriginalType] = useState<string>('');
-  const { customModels, dynamicTypeList, getTypeList } = useCreateModalModels({
+  const { customModels, dynamicTypeList, getTypeList, resetModelInfo } = useCreateModalModels({
     form,
     datasets,
     visible,
@@ -47,6 +47,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({ refreshTa
     setIsRebuildMode(false);
     setOriginalType('');
     setVisible(false);
+    resetModelInfo();
   };
 
   const generateEntityTypes = () => {
@@ -154,8 +155,8 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({ refreshTa
     setOriginalType(type || '');
     setCurrentStep(isRebuild ? 1 : 0);
     setBaseFields(record || null, actualType);
-    getTypeList();
     setVisible(true);
+    getTypeList();
   };
 
   const performSave = () => {

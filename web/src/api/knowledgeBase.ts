@@ -257,6 +257,10 @@ export const reChunks = async (data: any) => {
   const response = await request.post(`/chunks/retrieval`, data);
   return response as any;
 };
+// 获取检索策略
+export const retrievalPolicyApi = (data: { kb_ids: string[] }) => {
+  return request.get('/chunks/retrieval-policy', data)
+}
 // 知识库授权 分享空间列表
 export const getWorkspaceAuthorizationList = async (kb_id: string) => {
   const response = await request.get(`/knowledgeshares/${kb_id}/knowledgeshares`);

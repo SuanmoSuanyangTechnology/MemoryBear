@@ -74,6 +74,9 @@ export interface RecallTestParams {
   hybrid_weight?: string;
   retrieve_type?: string; // 检索类型
   enable_graph_retrieval?: number; // 是否启用图谱检索
+  rerank_mode?: 'reranking_model' | 'weighted_score'; // 重排模式
+  reranker_id?: string; // 重排模型ID
+  rerank_weights?: { semantic_weight: number; participle_weight: number }; // 重排权重
 }
 // 文件夹 
 export interface FolderFormData {

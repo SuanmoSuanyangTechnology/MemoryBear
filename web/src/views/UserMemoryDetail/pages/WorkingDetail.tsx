@@ -2,14 +2,15 @@
  * @Author: ZhaoYing 
  * @Date: 2026-01-12 14:42:02 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-08-14 14:51:27
+ * @Last Modified time: 2026-09-03 12:02:46
  */
-import { type FC, useEffect, useState, useMemo, useRef, Fragment } from 'react'
+import { type FC, useEffect, useState, useMemo, useRef, useCallback, Fragment } from 'react'
 import clsx from 'clsx'
 import { useTranslation } from 'react-i18next'
 import { useParams } from 'react-router-dom'
-import { Row, Col, Skeleton, Button, Divider, Tooltip, Flex } from 'antd'
+import { Row, Col, Skeleton, Button, Divider, Tooltip, Flex, DatePicker, Form } from 'antd'
 import InfiniteScroll from 'react-infinite-scroll-component'
+import type { Dayjs } from 'dayjs'
 
 import RbCard from '@/components/RbCard/Card'
 import {
@@ -24,6 +25,7 @@ import { formatDateTime } from '@/utils/format'
 import Empty from '@/components/Empty'
 import RbAlert from '@/components/RbAlert'
 import ChatContent from '@/components/Chat/ChatContent'
+import SearchInput from '@/components/SearchInput'
 import type { ChatItem } from '@/components/Chat/types'
 import PageLoading from '@/components/Empty/PageLoading'
 import type { Data as SummaryData } from '../components/AboutMe'
@@ -65,6 +67,8 @@ interface ApiMcpListItem {
   latest_at: number;
 }
 
+const PAGE_SIZE = 20
+
 /**
  * WorkingDetail – Three-column working-memory view for a user's conversations.
  *
@@ -86,6 +90,9 @@ const WorkingDetail: FC = () => {
   const pageRef = useRef<number>(1)
   const [messagesLoading, setMessagesLoading] = useState<boolean>(false)
   const [messages, setMessages] = useState<ChatItem[] | ApiMcpMessageItem[]>([])
+  const [messageHasMore, setMessageHasMore] = useState<boolean>(true)
+  const messagePageRef = useRef<number>(1)
+  const messageLoadingRef = useRef<boolean>(false)
   const [detailLoading, setDetailLoading] = useState<boolean>(false)
   const [detail, setDetail] = useState<Detail | null>(null)
   const [insightLoading, setInsightLoading] = useState<boolean>(false)
@@ -94,6 +101,22 @@ const WorkingDetail: FC = () => {
   const [summary, setSummary] = useState<SummaryData>({} as SummaryData)
   const [selected, setSelected] = useState<Conversation | ApiMcpListItem | null>(null)
   const apiMcpMessageListRef = useRef<ApiMcpMessageListRef>(null)
+  const [filterForm] = Form.useForm<{ range?: [Dayjs, Dayjs] | null; keyword?: string; }>()
+  const formValues = Form.useWatch([], filterForm)
+
+  /** Date range + keyword filters applied to the conversation message stream. */
+  const filterParams = useMemo(() => {
+    const params: { start_date?: number; end_date?: number; keyword?: string } = {}
+    const range = formValues?.range
+    if (range && range[0] && range[1]) {
+      params.start_date = range[0].startOf('day').valueOf()
+      params.end_date = range[1].endOf('day').valueOf()
+    }
+    if (formValues?.keyword) params.keyword = formValues.keyword
+    return params
+  }, [formValues])
+  const filterParamsRef = useRef(filterParams)
+  filterParamsRef.current = filterParams
 
   /* Fetch conversation list + api/mcp data sources whenever the route user ID changes. */
   useEffect(() => {
@@ -104,6 +127,7 @@ const WorkingDetail: FC = () => {
     setData([])
     setApiMcpList([])
     setHasMore(true)
+    filterForm.resetFields()
     pageRef.current = 1
     Promise.all([getApiMcpList(), getData()])
       .then(([apiMcpItems, conversations]) => {
@@ -113,7 +137,7 @@ const WorkingDetail: FC = () => {
       .finally(() => {
         setLoading(false)
       })
-  }, [id])
+  }, [id, filterForm])
 
   const [apiMcpList, setApiMcpList] = useState<ApiMcpListItem[]>([])
   /** Load api/mcp data sources; resolves with the fetched list. */
@@ -177,10 +201,54 @@ const WorkingDetail: FC = () => {
     })
   }
 
+  const prevSelectedRef = useRef<Conversation | ApiMcpListItem | null>(null)
+  /** Load earlier messages for the selected conversation (pagination). */
+  const loadMoreMessages = () => {
+    if (!id || !(selected as Conversation)?.id || (selected as ApiMcpListItem)?.source || messageLoadingRef.current || !messageHasMore) return
+    messageLoadingRef.current = true
+    const nextPage = messagePageRef.current + 1
+    getConversationMessages(id, { conversation_id: (selected as Conversation).id, ...filterParamsRef.current, page: nextPage, pagesize: PAGE_SIZE })
+      .then(res => {
+        const response = res as { items: ChatItem[], page: { hasnext: boolean } }
+        setMessages(prev => [...response.items, ...prev])
+        messagePageRef.current = nextPage
+        setMessageHasMore(response.page.hasnext)
+      })
+      .finally(() => {
+        messageLoadingRef.current = false
+      })
+  }
+
+  // Merged selection + filter effect: handleSelect batches resetFields + setSelected, which would
+  // otherwise fire both the selection effect and the filter effect in the same render and call
+  // fetchMessages twice. Branch on whether the selection actually changed to fetch only once.
   useEffect(() => {
     if (!id || !selected || (!(selected as Conversation)?.id && !(selected as ApiMcpListItem)?.source)) return
-    getDetail(selected)
-  }, [id, selected])
+    if (selected !== prevSelectedRef.current) {
+      prevSelectedRef.current = selected
+      getDetail(selected)
+    } else {
+      fetchMessages(selected)
+    }
+  }, [id, selected, filterParams])
+
+  /** Fetch chat messages for a conversation, applying the current date/keyword filters. */
+  const fetchMessages = useCallback((conversation: Conversation | ApiMcpListItem) => {
+    if (!id) return
+    const conversationId = (conversation as Conversation).id
+    if (!conversationId) return
+    setMessagesLoading(true)
+    getConversationMessages(id, { conversation_id: conversationId, ...filterParamsRef.current, page: 1, pagesize: PAGE_SIZE })
+      .then(res => {
+        const response = res as { items: ChatItem[], page: { hasnext: boolean } }
+        setMessages(response.items)
+        messagePageRef.current = 1
+        setMessageHasMore(response.page.hasnext)
+      })
+      .finally(() => {
+        setMessagesLoading(false)
+      })
+  }, [id, filterParamsRef.current])
 
   /**
    * Fetch the chat messages for the selected conversation. For `conversation`-type
@@ -193,16 +261,11 @@ const WorkingDetail: FC = () => {
 
     setDetail(null)
     setMessages([])
+    setMessageHasMore(true)
+    messagePageRef.current = 1
     if (conversationId) {
       setDetailLoading(true)
-      setMessagesLoading(true)
-      getConversationMessages(id, conversationId)
-        .then(res => {
-          setMessages(res as ChatItem[])
-        })
-        .finally(() => {
-          setMessagesLoading(false)
-        })
+      fetchMessages(conversation)
       getConversationDetail(id, conversationId)
         .then(res => {
           setDetail(res as Detail)
@@ -218,21 +281,12 @@ const WorkingDetail: FC = () => {
   }
 
   const handleRefresh = () => {
-    if ((selected as ApiMcpListItem)?.source) {
-      apiMcpMessageListRef.current?.refresh()
-      getUserInsight()
-    } else if (selected) {
-      getDetail(selected)
-    }
+    filterForm.resetFields()
   }
-  /** Derive a human-readable date range (e.g. "2024.01 - 2024.03") from message timestamps. */
-  const timeRange = useMemo(() => {
-    const times = messages.filter(m => m.created_at).map(m => Number(m.created_at))
-    if (times.length === 0) return ''
-    const minTime = Math.min(...times)
-    const maxTime = Math.max(...times)
-    return `${formatDateTime(minTime, 'YYYY.MM')} - ${formatDateTime(maxTime, 'YYYY.MM')}`
-  }, [messages])
+  const handleSelect = (conversation: Conversation | ApiMcpListItem) => {
+    filterForm.resetFields()
+    setSelected(conversation)
+  }
 
   /** Whether the memory insight block has any renderable content. */
   const hasInsight = useMemo(
@@ -281,7 +335,7 @@ const WorkingDetail: FC = () => {
                           className={clsx("rb:cursor-pointer rb:rounded-xl rb:h-12 rb:py-1! rb:px-3! rb:hover:bg-[#F6F6F6]", {
                             'rb:bg-[#171719] rb:hover:bg-[#171719]! rb:text-white': item.source === (selected as ApiMcpListItem)?.source,
                           })}
-                          onClick={() => setSelected(item)}
+                          onClick={() => handleSelect(item)}
                         >
                           <div className="rb:leading-5 rb:break-all rb:line-clamp-2 rb:flex-1">
                             {t(`userMemory.${item.source}`)}
@@ -296,7 +350,7 @@ const WorkingDetail: FC = () => {
                           className={clsx("rb:cursor-pointer rb:rounded-xl rb:h-12 rb:py-1! rb:px-3! rb:hover:bg-[#F6F6F6]", {
                             'rb:bg-[#171719] rb:hover:bg-[#171719]! rb:text-white': item.id === (selected as Conversation)?.id,
                           })}
-                          onClick={() => setSelected(item)}
+                          onClick={() => handleSelect(item)}
                         >
                           <div className="rb:size-6 rb:bg-cover rb:bg-[url('@/assets/images/userMemory/chat.svg')]"></div>
                           <Tooltip title={item.title}>
@@ -334,11 +388,26 @@ const WorkingDetail: FC = () => {
                   className="rb:h-full!"
                 >
                   <Flex vertical className="rb:h-full! rb:overflow-y-hidden!">
-                    <div className="rb:text-[#5B6167] rb:leading-4.5 rb:text-[12px]">{timeRange}</div>
-                    <Flex justify="space-between" align="center" className="rb:bg-[#F6F6F6] rb:rounded-lg rb:py-2.5! rb:pr-2.5! rb:pl-3.25! rb:mt-3!">
-                      {t('workingDetail.conversationStream')}
-                      <Button className="rb:h-6!" onClick={handleRefresh}>{t('workingDetail.refresh')}</Button>
+                    <Flex align="center" justify="end">
+                      <span className="rb:text-[12px] rb:text-[#5B6167]">
+                        {t('workingDetail.total', { total: (selected as ApiMcpListItem).source ? apiMcpMessageListRef.current?.total || 0 : messages.length })}
+                      </span>
                     </Flex>
+                    <Form form={filterForm} initialValues={{ keyword: undefined, range: undefined}}>
+                      <Flex gap={8} align="center" justify="end" className="rb:bg-[#F6F6F6] rb:rounded-lg rb:py-2.5! rb:pr-2.5! rb:pl-3.25! rb:my-3!">
+                        <Form.Item name="keyword" noStyle>
+                          <SearchInput
+                            placeholder={t('workingDetail.searchPlaceholder')}
+                            variant="outlined"
+                            className="rb:w-40! rb:shrink-0!"
+                          />
+                        </Form.Item>
+                        <Form.Item name="range" noStyle>
+                          <DatePicker.RangePicker allowClear className="rb:max-w-[240px] rb:flex-1!" />
+                        </Form.Item>
+                        <Button onClick={handleRefresh}>{t('common.reset')}</Button>
+                      </Flex>
+                    </Form>
                     {(selected as ApiMcpListItem).source && id
                       ? (
                         <ApiMcpMessageList
@@ -346,6 +415,7 @@ const WorkingDetail: FC = () => {
                           endUserId={id}
                           source={(selected as ApiMcpListItem).source}
                           onMessagesChange={setMessages}
+                          filterParams={filterParams}
                         />
                       )
                       : messagesLoading
@@ -353,13 +423,23 @@ const WorkingDetail: FC = () => {
                         : messages.length === 0
                           ? <Empty />
                           : (
-                            <ChatContent
-                              classNames="rb:flex-1 rb:pt-5"
-                              contentClassNames="rb:max-w-110!"
-                              data={messages}
-                              streamLoading={false}
-                              labelFormat={(item) => formatDateTime(item.created_at)}
-                            />
+                            <div id="message-scroll" className="rb:flex-1 rb:overflow-y-auto">
+                              <InfiniteScroll
+                                dataLength={messages.length}
+                                next={loadMoreMessages}
+                                hasMore={messageHasMore}
+                                loader={<div className="rb:text-center rb:py-4 rb:text-[#5B6167]">{t('common.loading')}</div>}
+                                scrollableTarget="message-scroll"
+                              >
+                                <ChatContent
+                                  classNames="rb:pt-5!"
+                                  contentClassNames="rb:max-w-110!"
+                                  data={messages}
+                                  streamLoading={false}
+                                  labelFormat={(item) => formatDateTime(item.created_at)}
+                                />
+                              </InfiniteScroll>
+                            </div>
                           )
                     }
                   </Flex>

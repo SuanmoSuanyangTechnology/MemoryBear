@@ -157,7 +157,9 @@ export const detail = {
       successfulTitle: 'Successful Experience',
       question: 'Lessons Learned',
       summary: 'Core Insights',
-      none: 'None'
+      searchPlaceholder: 'Search keyword',
+      none: 'None',
+      total: 'Total {{total}} Messages',
     },
     ontology: {
       searchPlaceholder: 'Search scenarios',

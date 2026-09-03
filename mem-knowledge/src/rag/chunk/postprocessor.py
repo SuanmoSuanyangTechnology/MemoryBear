@@ -70,6 +70,18 @@ class ChunkPostProcessor:
                 ctx, group.parent, merge_result, len(parent_chunks)
             )
             if parent_chunk is None:
+                has_serializable_child = any(
+                    self._serialize_chunk(
+                        ctx,
+                        child,
+                        merge_result,
+                        len(child_chunks) + child_offset,
+                    )
+                    is not None
+                    for child_offset, child in enumerate(group.children)
+                )
+                if not has_serializable_child:
+                    continue
                 raise ValueError(
                     f"Invalid {mode} hierarchy: parent group {group_index} "
                     "was removed during serialization."

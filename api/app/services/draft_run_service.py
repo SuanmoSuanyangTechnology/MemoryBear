@@ -231,6 +231,8 @@ async def _retrieve_chunks_via_standard(
         vector_similarity_weight=vector_similarity_weight,
         retrieve_type=retrieve_type,
         rerank_id=rerank_id,
+        rerank_mode=kb_config.get("rerank_mode"),
+        rerank_weights=kb_config.get("rerank_weights"),
         enable_graph_retrieval=enable_graph_retrieval,
     )
 
@@ -3018,6 +3020,8 @@ class AgentRunService:
                         return value
                     if isinstance(value, (dict, list)):
                         return value
+                    if hasattr(value, "model_dump"):
+                        return value.model_dump()
                     if hasattr(value, 'dict'):
                         return value.dict()
                     if hasattr(value, '__dict__'):

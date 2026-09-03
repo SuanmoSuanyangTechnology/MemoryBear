@@ -23,17 +23,24 @@ interface ApiMcpMessagesResponse {
   items: ApiMcpMessageItem[];
   page: {
     hasnext: boolean;
+    total: number;
   };
 }
 
 export interface ApiMcpMessageListRef {
   refresh: () => void;
+  total: number;
 }
 
 interface ApiMcpMessageListProps {
   endUserId: string;
   source: ApiMcpSource;
   onMessagesChange?: (messages: ApiMcpMessageItem[]) => void;
+  filterParams?: {
+    start_date?: number;
+    end_date?: number;
+    keyword?: string;
+  }
 }
 
 const PAGE_SIZE = 20
@@ -42,6 +49,7 @@ const ApiMcpMessageList = forwardRef<ApiMcpMessageListRef, ApiMcpMessageListProp
   endUserId,
   source,
   onMessagesChange,
+  filterParams = {},
 }, ref) => {
   const { t } = useTranslation()
   const [messages, setMessages] = useState<ApiMcpMessageItem[]>([])
@@ -52,6 +60,7 @@ const ApiMcpMessageList = forwardRef<ApiMcpMessageListRef, ApiMcpMessageListProp
   const loadingRef = useRef<boolean>(false)
   const requestRef = useRef<number>(0)
   const scrollableTarget = `api-mcp-message-list-${source}`
+  const [total, setTotal] = useState<number>(0)
 
   const refresh = useCallback(() => {
     const requestId = ++requestRef.current
@@ -67,6 +76,7 @@ const ApiMcpMessageList = forwardRef<ApiMcpMessageListRef, ApiMcpMessageListProp
       source,
       page: 1,
       pagesize: PAGE_SIZE,
+      ...filterParams,
     })
       .then(res => {
         if (requestId !== requestRef.current) return
@@ -76,6 +86,7 @@ const ApiMcpMessageList = forwardRef<ApiMcpMessageListRef, ApiMcpMessageListProp
         setMessages(nextMessages)
         setHasMore(Boolean(response.page?.hasnext))
         onMessagesChange?.(nextMessages)
+        setTotal(response.page?.total || 0)
       })
       .catch(() => {
         if (requestId === requestRef.current) {
@@ -87,7 +98,7 @@ const ApiMcpMessageList = forwardRef<ApiMcpMessageListRef, ApiMcpMessageListProp
         loadingRef.current = false
         setLoading(false)
       })
-  }, [endUserId, onMessagesChange, source])
+  }, [endUserId, onMessagesChange, source, filterParams])
 
   const loadMore = useCallback(() => {
     if (loadingRef.current || !hasMore) return
@@ -100,6 +111,7 @@ const ApiMcpMessageList = forwardRef<ApiMcpMessageListRef, ApiMcpMessageListProp
       source,
       page: nextPage,
       pagesize: PAGE_SIZE,
+      ...filterParams,
     })
       .then(res => {
         if (requestId !== requestRef.current) return
@@ -110,6 +122,7 @@ const ApiMcpMessageList = forwardRef<ApiMcpMessageListRef, ApiMcpMessageListProp
         setMessages(nextMessages)
         setHasMore(Boolean(response.page?.hasnext))
         onMessagesChange?.(nextMessages)
+        setTotal(response.page?.total || 0)
       })
       .catch(() => {
         if (requestId === requestRef.current) {
@@ -121,9 +134,12 @@ const ApiMcpMessageList = forwardRef<ApiMcpMessageListRef, ApiMcpMessageListProp
           loadingRef.current = false
         }
       })
-  }, [endUserId, hasMore, onMessagesChange, source])
+  }, [endUserId, hasMore, onMessagesChange, source, filterParams])
 
-  useImperativeHandle(ref, () => ({ refresh }), [refresh])
+  useImperativeHandle(ref, () => ({
+    refresh,
+    total,
+  }), [refresh, total])
 
   useEffect(() => {
     refresh()
@@ -139,7 +155,7 @@ const ApiMcpMessageList = forwardRef<ApiMcpMessageListRef, ApiMcpMessageListProp
   return (
     <div
       id={scrollableTarget}
-      className="rb:mt-5! rb:h-[calc(100%-89px)]! rb:overflow-y-auto! rb:w-full! rb:overflow-x-hidden!"
+      className="rb:mt-5! rb:flex-1! rb:min-h-0! rb:overflow-y-auto! rb:w-full! rb:overflow-x-hidden!"
     >
       <InfiniteScroll
         dataLength={messages.length}

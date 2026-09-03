@@ -5,7 +5,7 @@ from typing import List, Optional
 
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.config.default_ontology_initializer import DefaultOntologyInitializer
 from app.core.config import settings
@@ -37,6 +37,7 @@ from app.schemas.workspace_schema import (
     WorkspaceUpdate,
 )
 from app.i18n import t
+from app.invalidation_notify import notify_user_async, notify_user_sync
 from app.services.memory_config_service import MemoryConfigService
 from app.services.session_service import SessionService
 from app.utils.redis_cache import (
@@ -66,12 +67,18 @@ def _serialize_model_option(model: ModelConfig) -> dict:
         "capability": [getattr(item, "value", item) for item in (model.capability or [])],
         "logo": model.logo,
         "is_public": bool(model.is_public),
+        # 弃用标记存放在基础模型（model_bases）上，与 ModelConfig schema 的派生方式保持一致
+        "is_deprecated": bool(
+            getattr(model, "model_base", None) is not None
+            and getattr(model.model_base, "is_deprecated", False)
+        ),
     }
 
 
 def _get_accessible_workspace_models(db: Session, tenant_id: uuid.UUID) -> list[ModelConfig]:
     return (
         db.query(ModelConfig)
+        .options(joinedload(ModelConfig.model_base))
         .filter(ModelConfig.is_active.is_(True))
         .filter(
             or_(
@@ -89,6 +96,7 @@ def _get_accessible_workspace_models(db: Session, tenant_id: uuid.UUID) -> list[
 def _get_public_speedbear_models(db: Session) -> list[ModelConfig]:
     return (
         db.query(ModelConfig)
+        .options(joinedload(ModelConfig.model_base))
         .filter(ModelConfig.is_active.is_(True))
         .filter(ModelConfig.provider == ModelProvider.SPEEDBEAR)
         .filter(ModelConfig.is_public.is_(True))
@@ -155,6 +163,7 @@ def _build_workspace_preset_response(db: Session, preset: WorkspaceDefaultModelP
     model_ids = [model_id for model_id in slot_to_model_id.values() if model_id]
     models = (
         db.query(ModelConfig)
+        .options(joinedload(ModelConfig.model_base))
         .filter(ModelConfig.id.in_(model_ids))
         .all()
     )
@@ -837,6 +846,9 @@ async def delete_workspace_member(
 
         # 使被删除成员的所有 token 立即失效
         await SessionService.invalidate_all_user_tokens(str(workspace_member.user_id))
+
+        # 决策 #11 修订：workspace 成员变更发通知，identity 重建快照（workspace_id/roles 变化）
+        await notify_user_async(str(workspace_member.user_id))
     except Exception as e:
         db.rollback()
         business_logger.error(f"删除工作空间成员失败 - 工作空间: {workspace_id}, 成员: {member_id}, 错误: {str(e)}")
@@ -1123,7 +1135,14 @@ def update_workspace_retention_policy(
         retention_days: int | None,
         user: User,
 ) -> int | None:
-    """以空间成员权限更新指定工作空间的临时身份保留天数。"""
+    """Update temporary-memory retention and protect newly expired identities.
+
+    Args:
+        db: Active synchronous database session.
+        workspace_id: Workspace whose retention policy is updated.
+        retention_days: New retention duration, or ``None`` for no expiration.
+        user: User requesting the policy update.
+    """
     business_logger.info(
         f"更新工作空间保留策略: workspace_id={workspace_id}, "
         f"retention_days={retention_days}, 操作者={user.username}"
@@ -1552,6 +1571,9 @@ def accept_workspace_invite(
         business_logger.info(
             f"用户成功加入工作空间: user={user.username}, workspace={workspace.name}, role={workspace_role}")
 
+        # 决策 #11 修订：workspace 成员变更发通知，identity 重建快照（workspace_id/roles 变化）
+        notify_user_sync(str(user.id))
+
         return {
             "message": "Successfully joined the workspace",
             "workspace": workspace,
@@ -1667,6 +1689,10 @@ def update_workspace_member_roles(
         # 重新获取更新后的成员列表
         updated_members = workspace_repository.get_members_by_workspace(db=db, workspace_id=workspace_id)
         business_logger.info(f"成员角色更新完成: workspace_id={workspace_id}, 更新数量={len(updates)}")
+
+        # 决策 #11 修订：workspace 成员变更发通知，identity 重建快照（workspace_id/roles 变化）
+        for upd in updates:
+            notify_user_sync(str(member_map[upd.id].user_id))
 
         return updated_members
 

@@ -3,13 +3,15 @@
  * Configures global reranker settings for all knowledge bases
  */
 
-import { forwardRef, useImperativeHandle, useState, useEffect } from 'react';
-import { Form, InputNumber, Switch, Flex } from 'antd';
+import { forwardRef, useImperativeHandle, useState } from 'react';
+import { Form, InputNumber } from 'antd';
 import { useTranslation } from 'react-i18next';
 
 import type { RerankerConfig, KnowledgeGlobalConfigModalRef } from './types'
 import RbModal from '@/components/RbModal'
 import ModelSelect from '@/components/ModelSelect'
+import RadioGroupCard from '@/components/RadioGroupCard'
+import WeightBalanceSlider from './WeightBalanceSlider'
 
 const FormItem = Form.Item;
 
@@ -33,7 +35,7 @@ const KnowledgeGlobalConfigModal = forwardRef<KnowledgeGlobalConfigModalRef, Kno
   };
 
   const handleOpen = () => {
-    form.setFieldsValue({ ...data, rerank_model: !!data?.reranker_id })
+    form.setFieldsValue({ ...data, rerank_mode: data.rerank_mode || 'reranking_model' })
     setVisible(true);
   };
 
@@ -49,14 +51,19 @@ const KnowledgeGlobalConfigModal = forwardRef<KnowledgeGlobalConfigModalRef, Kno
       });
   }
 
-  useEffect(() => {
-    if (values?.rerank_model) {
-      const { rerank_model, ...rest } = data;
-      form.setFieldsValue({ ...rest })
-    } else {
-      form.setFieldsValue({ reranker_id: undefined, reranker_top_k: undefined })
+  const handleChangeMode = (value?: string | null) => {
+    if (value === 'reranking_model') {
+      form.setFieldValue('rerank_weights', null)
+    } else if (value === 'weighted_score') {
+      form.setFieldsValue({
+        reranker_id: null,
+        rerank_weights: {
+          semantic_weight: 1,
+          participle_weight: 0,
+        }
+      })
     }
-  }, [values?.rerank_model])
+  }
 
   useImperativeHandle(ref, () => ({
     handleOpen,
@@ -74,50 +81,69 @@ const KnowledgeGlobalConfigModal = forwardRef<KnowledgeGlobalConfigModalRef, Kno
         form={form}
         layout="vertical"
         size="middle"
+        initialValues={{
+          rerank_mode: 'reranking_model',
+        }}
       >
         <div className="rb:text-[#5B6167] rb:mb-6">{t('application.globalConfigDesc')}</div>
 
-        <Flex align="center" justify="space-between" className="rb:my-6!">
-          <div className="rb:text-[14px] rb:font-medium rb:leading-5">
-            {t('application.rerankModel')}
-            <div className="rb:mt-1 rb:text-[12px] rb:text-[#5B6167] rb:font-regular rb:leading-4">{t('application.rerankModelDesc')}</div>
-          </div>
-          <FormItem
-            name="rerank_model"
-            valuePropName="checked"
-            className="rb:mb-0!"
-          >
-            <Switch />
-          </FormItem>
-        </Flex>
+        <Form.Item name="rerank_mode">
+          <RadioGroupCard
+            options={[
+              { label: t('application.reranking_model'), value: 'reranking_model' },
+              { label: t('application.weighted_score'), value: 'weighted_score' },
+            ]}
+            onChange={value => handleChangeMode(value)}
+          />
+        </Form.Item>
 
-        {values?.rerank_model && <>
-          <FormItem
-            name="reranker_id"
-            label={t('application.rearrangementModel')}
-            rules={[{ required: true, message: t('common.pleaseSelect') }]}
-            extra={t('application.rearrangementModelDesc')}
+        <FormItem
+          name="reranker_id"
+          label={t('application.rearrangementModel')}
+          rules={[{ required: values?.rerank_mode === 'reranking_model', message: t('common.pleaseSelect') }]}
+          extra={t('application.rearrangementModelDesc')}
+          hidden={values?.rerank_mode !== 'reranking_model'}
+        >
+          <ModelSelect
+            params={{ type: 'rerank' }}
+            className="rb:w-full!"
+          />
+        </FormItem>
+
+        {values?.rerank_mode === 'weighted_score' && <>
+          <Form.Item
+            required
+            label={t('application.weight_balance')}
           >
-            <ModelSelect
-              params={{ type: 'rerank' }}
-              className="rb:w-full!"
+            <WeightBalanceSlider
+              semanticWeight={values?.rerank_weights?.semantic_weight}
+              participleWeight={values?.rerank_weights?.participle_weight}
+              onChange={(semanticWeight, participleWeight) => {
+                form.setFieldsValue({
+                  rerank_weights: {
+                    semantic_weight: semanticWeight,
+                    participle_weight: participleWeight,
+                  },
+                });
+              }}
             />
-          </FormItem>
-          <FormItem
-            name="reranker_top_k"
-            label={t('application.reranker_top_k')}
-            rules={[{ required: true, message: t('common.pleaseEnter') }]}
-            extra={t('application.reranker_top_k_desc')}
-          >
-            <InputNumber
-              className="rb:w-full!"
-              placeholder={t('common.pleaseEnter')}
-              min={1}
-              max={20}
-              onChange={(value) => form.setFieldValue('reranker_top_k', value)}
-            />
-          </FormItem>
+          </Form.Item>
         </>}
+        <Form.Item name="rerank_weights" hidden />
+        <FormItem
+          name="reranker_top_k"
+          label={t('application.reranker_top_k')}
+          rules={[{ required: true, message: t('common.pleaseEnter') }]}
+          extra={t('application.reranker_top_k_desc')}
+        >
+          <InputNumber
+            className="rb:w-full!"
+            placeholder={t('common.pleaseEnter')}
+            min={1}
+            max={20}
+            onChange={(value) => form.setFieldValue('reranker_top_k', value)}
+          />
+        </FormItem>
       </Form>
     </RbModal>
   );

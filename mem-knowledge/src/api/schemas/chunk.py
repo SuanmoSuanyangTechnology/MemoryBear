@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from ...rag.models.chunk import QAChunk
 from .knowledge_metadata import FilterGroup, MetadataFilterMode
+from .rerank import RerankMode, RerankWeights
 
 
 class RetrieveType(StrEnum):
@@ -35,6 +36,8 @@ class KnowledgeBaseConfig(BaseModel):
     top_k: int = Field(default=4, ge=1, le=100)
     retrieve_type: RetrieveType = RetrieveType.PARTICIPLE
     enable_graph_retrieval: int | None = Field(default=None, ge=0, le=1)
+    rerank_mode: RerankMode | None = None
+    rerank_weights: RerankWeights | None = None
 
 
 class ChunkType(StrEnum):
@@ -104,7 +107,6 @@ class ChunkUpdate(BaseModel):
 class ChunkRetrieve(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
-    source: KnowledgeRetrievalSource = KnowledgeRetrievalSource.GENERAL
     query: str
     kb_ids: list[uuid.UUID] = Field(default_factory=list)
     ex_ids: list[str] | None = None
@@ -118,6 +120,8 @@ class ChunkRetrieve(BaseModel):
     enable_graph_retrieval: int = Field(0, ge=0, le=1)
     rerank_id: uuid.UUID | None = None
     rerank_score_threshold: float | None = Field(None, ge=0, le=1)
+    rerank_mode: RerankMode | None = None
+    rerank_weights: RerankWeights | None = None
     metadata_filters: list[FilterGroup] | None = None
     metadata_filter_mode: MetadataFilterMode = MetadataFilterMode.MANUAL
     metadata_filters_resolved: bool = False

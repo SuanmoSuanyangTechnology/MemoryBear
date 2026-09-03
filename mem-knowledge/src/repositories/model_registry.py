@@ -19,7 +19,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
-from ..models.references import ModelApiKey, ModelConfig
+from ..bootstrap import get_settings
+from ..models.references import ModelApiKey, ModelConfig, TenantSpeedBearBinding
 from ..models.references.model_registry import model_config_api_key_association
 from ..utils.datetime_utils import to_timestamp_ms
 
@@ -84,11 +85,28 @@ def _active_keys_query(model_config_id: uuid.UUID):
     )
 
 
+def _public_binding_snapshot(
+    binding: TenantSpeedBearBinding | None,
+    tenant_id: uuid.UUID,
+    provider: ModelProvider,
+    speedbear_base_url: str,
+) -> PublicModelBindingSnapshot | None:
+    if binding is None:
+        return None
+    return PublicModelBindingSnapshot(
+        tenant_id=tenant_id,
+        provider=provider,
+        api_key=SecretStr(binding.gateway_api_key),
+        base_url=f"{speedbear_base_url.rstrip('/')}/api/v1",
+    )
+
+
 class SyncSQLModelRegistry(ModelRegistryRepository):
     """Expose Platform model rows to synchronous worker task code."""
 
-    def __init__(self, db: Session):
+    def __init__(self, db: Session, *, speedbear_base_url: str | None = None):
         self.db = db
+        self.speedbear_base_url = speedbear_base_url or get_settings().speedbear_base_url
 
     def get_model_config(
         self,
@@ -114,8 +132,19 @@ class SyncSQLModelRegistry(ModelRegistryRepository):
         tenant_id: uuid.UUID,
         provider: ModelProvider,
     ) -> PublicModelBindingSnapshot | None:
-        del tenant_id, provider
-        return None
+        if provider is not ModelProvider.SPEEDBEAR:
+            return None
+        result = self.db.execute(
+            select(TenantSpeedBearBinding).where(
+                TenantSpeedBearBinding.tenant_id == tenant_id
+            )
+        )
+        return _public_binding_snapshot(
+            result.scalars().first(),
+            tenant_id,
+            provider,
+            self.speedbear_base_url,
+        )
 
     def record_key_usage(self, key_id: uuid.UUID) -> None:
         del key_id
@@ -125,8 +154,9 @@ class SyncSQLModelRegistry(ModelRegistryRepository):
 class AsyncSQLModelRegistry:
     """Expose Platform model rows as immutable scalar snapshots."""
 
-    def __init__(self, db: AsyncSession):
+    def __init__(self, db: AsyncSession, *, speedbear_base_url: str | None = None):
         self.db = db
+        self.speedbear_base_url = speedbear_base_url or get_settings().speedbear_base_url
 
     async def get_model_config(
         self,
@@ -155,8 +185,19 @@ class AsyncSQLModelRegistry:
         tenant_id: uuid.UUID,
         provider: ModelProvider,
     ) -> PublicModelBindingSnapshot | None:
-        del tenant_id, provider
-        return None
+        if provider is not ModelProvider.SPEEDBEAR:
+            return None
+        result = await self.db.execute(
+            select(TenantSpeedBearBinding).where(
+                TenantSpeedBearBinding.tenant_id == tenant_id
+            )
+        )
+        return _public_binding_snapshot(
+            result.scalars().first(),
+            tenant_id,
+            provider,
+            self.speedbear_base_url,
+        )
 
     async def record_key_usage(self, key_id: uuid.UUID) -> None:
         del key_id

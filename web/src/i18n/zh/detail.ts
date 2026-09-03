@@ -157,7 +157,9 @@ export const detail = {
       successfulTitle: '成功经验',
       question: '踩过的坑',
       summary: '核心洞察',
-      none: '无'
+      searchPlaceholder: '搜索关键词',
+      none: '无',
+      total: '共 {{total}} 条聊天记录',
     },
     ontology: {
       searchPlaceholder: '搜索场景',

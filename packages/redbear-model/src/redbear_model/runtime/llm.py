@@ -18,7 +18,10 @@ from langchain_core.outputs import GenerationChunk, LLMResult
 from langchain_core.runnables import Runnable
 
 from redbear_model.contracts import ModelProvider, ModelType, ResolvedModelConfig
-from redbear_model.errors import UnsupportedModelProviderError
+from redbear_model.errors import (
+    UnsupportedModelProviderError,
+    is_provider_rate_limit_error,
+)
 from redbear_model.providers.bedrock import (
     build_bedrock_params,
     load_bedrock_chat_class,
@@ -65,11 +68,15 @@ class StructResponse:
             if isinstance(content, str):
                 return content
             if isinstance(content, list):
-                return "".join(
-                    str(block.get("text", ""))
-                    for block in content
-                    if isinstance(block, dict) and block.get("type") == "text"
-                )
+                parts: list[str] = []
+                for block in content:
+                    if not isinstance(block, dict):
+                        continue
+                    if block.get("type") == "text":
+                        parts.append(block.get("text") or "")
+                    elif block.get("text"):
+                        parts.append(block.get("text") or "")
+                return "".join(parts)
             return str(content) if content else ""
         raise RuntimeError(f"Unsupported structured response type: {type(other)}")
 
@@ -407,7 +414,9 @@ class RedBearLLM(BaseLLM):
             result = await self.with_structured_output(schema, **kwargs).ainvoke(input)
             if result is not None:
                 return result
-        except Exception:
+        except Exception as exc:
+            if is_provider_rate_limit_error(exc):
+                raise
             logger.warning(
                 "Structured output fallback activated for provider=%s model=%s",
                 self._config.provider.value,

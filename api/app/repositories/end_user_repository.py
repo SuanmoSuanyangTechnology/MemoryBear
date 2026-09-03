@@ -18,6 +18,7 @@ from app.utils.redis_cache import redis_cache
 
 # 获取数据库专用日志器
 db_logger = get_db_logger()
+_GRACE_PERIOD_UPDATE_BATCH_SIZE = 1000
 
 
 class UserTagRefreshCandidate(NamedTuple):
@@ -69,10 +70,7 @@ class EndUserRepository:
 
     @staticmethod
     def _expired_temporary_filter():
-        """构造临时身份过期条件。
-
-        PostgreSQL 使用 retention_days 乘以固定的一天 interval，避免拼接动态 SQL。
-        """
+        """Build the filter for temporary identities eligible for deletion."""
         expires_at = EndUserRepository._temporary_expires_at_expr()
         return (
             EndUser.is_active == sa.true(),
@@ -80,7 +78,76 @@ class EndUserRepository:
             EndUser.write_time.is_not(None),
             Workspace.retention_days.is_not(None),
             expires_at < func.now(),
+            or_(
+                EndUser.grace_period_until.is_(None),
+                EndUser.grace_period_until < func.now(),
+            ),
         )
+
+    def mark_grace_period_for_expired_users(
+            self,
+            workspace_id: uuid.UUID,
+            retention_days: int,
+            grace_period_until: datetime,
+            reference_time: datetime,
+    ) -> int:
+        """Mark currently expired temporary identities with a grace deadline.
+
+        Args:
+            workspace_id: Workspace whose temporary identities are evaluated.
+            retention_days: New retention duration in whole days.
+            grace_period_until: Naive UTC deadline assigned to affected identities.
+            reference_time: Naive UTC timestamp used for a consistent expiry cutoff.
+        """
+        cutoff_time = reference_time - timedelta(days=retention_days)
+        affected_count = 0
+        last_write_time: datetime | None = None
+        last_end_user_id: uuid.UUID | None = None
+
+        while True:
+            candidates_query = self.db.query(EndUser.id, EndUser.write_time).filter(
+                EndUser.workspace_id == workspace_id,
+                EndUser.is_active == sa.true(),
+                EndUser.identity_status == "temporary",
+                EndUser.write_time.is_not(None),
+                EndUser.write_time < cutoff_time,
+            )
+            if last_write_time is not None and last_end_user_id is not None:
+                candidates_query = candidates_query.filter(
+                    sa.tuple_(EndUser.write_time, EndUser.id)
+                    > sa.tuple_(last_write_time, last_end_user_id)
+                )
+
+            candidates = (
+                candidates_query
+                .order_by(EndUser.write_time.asc(), EndUser.id.asc())
+                .limit(_GRACE_PERIOD_UPDATE_BATCH_SIZE)
+                .all()
+            )
+            if not candidates:
+                break
+
+            candidate_ids = [candidate.id for candidate in candidates]
+            result = self.db.execute(
+                update(EndUser)
+                .where(
+                    EndUser.id.in_(candidate_ids),
+                    EndUser.workspace_id == workspace_id,
+                    EndUser.is_active == sa.true(),
+                    EndUser.identity_status == "temporary",
+                    EndUser.write_time.is_not(None),
+                    EndUser.write_time < cutoff_time,
+                )
+                .values(grace_period_until=grace_period_until)
+            )
+            affected_count += max(result.rowcount or 0, 0)
+            last_write_time = candidates[-1].write_time
+            last_end_user_id = candidates[-1].id
+
+            if len(candidates) < _GRACE_PERIOD_UPDATE_BATCH_SIZE:
+                break
+
+        return affected_count
 
     def get_expired_temporary_end_user_ids(self) -> List[uuid.UUID]:
         """按空间有效期和最后写入时间稳定查询全部过期临时身份 ID。"""
@@ -104,6 +171,10 @@ class EndUserRepository:
                     EndUser.identity_status == "temporary",
                     EndUser.write_time.is_not(None),
                     EndUser.write_time < cutoff_time,
+                    or_(
+                        EndUser.grace_period_until.is_(None),
+                        EndUser.grace_period_until < scan_time,
+                    ),
                 )
                 .order_by(EndUser.write_time.asc(), EndUser.id.asc())
                 .all()

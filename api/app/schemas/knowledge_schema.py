@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, field_serializer, ConfigDict
+from pydantic import BaseModel, Field, field_serializer, field_validator, ConfigDict
 import datetime
 import uuid
 from .user_schema import User
@@ -29,11 +29,19 @@ class KnowledgeBase(BaseModel):
 
 
 class KnowledgeCreate(KnowledgeBase):
-    pass
+    name: str = Field(..., min_length=1, max_length=255)
+
+    @field_validator("name")
+    @classmethod
+    def _validate_name(cls, v: str) -> str:
+        normalized = v.strip()
+        if not normalized:
+            raise ValueError("知识库名称不能为空或纯空白")
+        return normalized
 
 class KnowledgeUpdate(BaseModel):
     parent_id: uuid.UUID | None = Field(None)
-    name: str | None = Field(None)
+    name: str | None = Field(None, min_length=1, max_length=255)
     description: str | None = Field(None)
     avatar: str | None = Field(None)
     type: KnowledgeType | None = Field(None)
@@ -47,6 +55,25 @@ class KnowledgeUpdate(BaseModel):
     parser_id: str | None = Field(None)
     parser_config: dict | None = Field(None)
     status: int | None = Field(None)
+
+    @field_validator("name")
+    @classmethod
+    def _validate_name(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        normalized = v.strip()
+        if not normalized:
+            raise ValueError("知识库名称不能为空或纯空白")
+        return normalized
+
+    @field_validator("status")
+    @classmethod
+    def _validate_status(cls, v: int | None) -> int | None:
+        if v is None:
+            return v
+        if v not in (0, 1, 2):
+            raise ValueError("status 只允许 0（禁用）/ 1（启用）/ 2（软删除）")
+        return v
 
 
 class Knowledge(KnowledgeBase):
