@@ -8076,10 +8076,6 @@
       },
       "ChunkRetrieve": {
         "properties": {
-          "source": {
-            "$ref": "#/components/schemas/KnowledgeRetrievalSource",
-            "default": "general"
-          },
           "query": {
             "type": "string",
             "title": "Query"
@@ -16902,21 +16898,6 @@
         ],
         "title": "VariableDefinition",
         "description": "变量定义"
-      },
-      "KnowledgeRetrievalSource": {
-        "type": "string",
-        "enum": [
-          "general",
-          "ex_api",
-          "in_api",
-          "agent",
-          "workflow",
-          "draft",
-          "sandbox",
-          "shared_chat"
-        ],
-        "title": "KnowledgeRetrievalSource",
-        "description": "Business source that initiated a knowledge retrieval."
       },
       "app__schemas__app_schema__KnowledgeBaseConfig": {
         "properties": {
