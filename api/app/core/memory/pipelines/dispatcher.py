@@ -99,15 +99,36 @@ def unmark_conversation_pending(conversation_id: str) -> None:
         logger.debug(f"[Dispatcher] unmark_conversation_pending 失败: {e}")
 
 
-def verify_unmark_safe(conversation_id: str) -> bool:
-    """在 unmark 前验证对话确实没有待写入消息。"""
+def safe_unmark_conversation_pending(conversation_id: str) -> None:
+    """并发安全地从 pending_conversations Set 移除对话。
+
+    采用「先删除 → 再校验 → 必要时补回」的顺序，消除 TOCTOU 竞态：
+
+    写入路径保证「先 commit DB、后 sadd」。因此若某个并发写入的 sadd 被本次
+    srem 误删，则该写入的 DB commit 必定发生在 sadd 之前、也就在本次 srem 之前；
+    紧随 srem 之后的 verify_cursor_complete 一定能读到该未处理消息，从而补回标记。
+    反之，若 sadd 发生在 srem 之后，标记本就不会被删。两种情形都不会漏派发。
+
+    补回操作是纯 sadd，最坏只产生一条冗余候选，下一轮 Flush 会自然清理，无副作用。
+    """
+    unmark_conversation_pending(conversation_id)
     try:
         with get_db_read() as db:
-            repo = MemoryMessageRepository(db)
-            return repo.verify_cursor_complete(conversation_id)
+            complete = MemoryMessageRepository(db).verify_cursor_complete(conversation_id)
     except Exception as e:
-        logger.warning(f"[Dispatcher] verify_unmark_safe 失败，保守返回 False: conv={conversation_id}, err={e}")
-        return False
+        # 校验失败时保守补回，宁可多扫也不漏派发。
+        logger.warning(
+            f"[Dispatcher] safe_unmark 校验失败，保守补回 pending: conv={conversation_id}, err={e}"
+        )
+        mark_conversation_pending(conversation_id)
+        return
+
+    if not complete:
+        # srem 后发现仍有未写入消息（并发写入的标记被误删），补回。
+        mark_conversation_pending(conversation_id)
+        logger.info(
+            f"[Dispatcher] safe_unmark 检测到并发新消息，已补回 pending: conv={conversation_id}"
+        )
 
 
 # ──────────────────────────────────────────────
@@ -731,9 +752,10 @@ async def dispatch_flush_conversation(conversation_id: str) -> int:
             ]
 
             if not pending_messages:
-                # 无未写入消息说明游标已追平，可安全清理 pending_conversations Set，
+                # 无未写入消息说明游标已追平，可清理 pending_conversations Set，
                 # 否则该对话会一直残留在 Redis Set 中。
-                unmark_conversation_pending(conversation_id)
+                # 用 safe_unmark（先删后校验）避免与并发写入的 sadd 竞态误删。
+                safe_unmark_conversation_pending(conversation_id)
                 logger.info(f"[Dispatcher] Flush 无未写入消息，跳过并清理 pending: conv={conversation_id}")
                 return 0
 
@@ -766,9 +788,8 @@ async def dispatch_flush_conversation(conversation_id: str) -> int:
             ):
                 dispatched += 1
 
-        # Step 4: 清理 pending_conversations Set
-        if verify_unmark_safe(conversation_id):
-            unmark_conversation_pending(conversation_id)
+        # Step 4: 清理 pending_conversations Set（先删后校验，避免并发误删）
+        safe_unmark_conversation_pending(conversation_id)
 
         logger.info(
             f"[Dispatcher] Flush 已派发 {dispatched} 个 user 消息任务: "
