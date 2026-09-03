@@ -1223,13 +1223,13 @@ class WritePipeline:
         self._neo4j_connector = Neo4jConnector()
 
     async def _init_storage_service(self) -> None:
-        """获取进程级 storage service；API 与 Celery 路径均可惰性初始化。"""
+        """创建当前 WritePipeline 独占的 Neo4j write-only storage service。"""
         if self._storage_service is not None:
             return
 
-        from app.core.memory.storage.service import initialize_storage_service
+        from app.core.memory.storage.service import MemoryStorageService
 
-        self._storage_service = await initialize_storage_service()
+        self._storage_service = await MemoryStorageService.create_graph_write_only()
 
     def _load_ontology_types(self):
         """
@@ -1359,16 +1359,23 @@ class WritePipeline:
             logger.warning(f"写入活动统计缓存失败（不影响主流程）: {e}")
 
     async def _cleanup(self) -> None:
-        """
-        清理资源：关闭 Neo4j 连接器。
+        """关闭当前 WritePipeline 独占的 storage service 和 Neo4j connector.
 
-        LLM/Embedding 客户端不在此处清理——它们在 WritePipeline 生命周期内
-        跨多次 run_with_window 调用复用，由 GC 最终回收。
+        两套资源分别释放；任一关闭失败只记录日志，不覆盖业务结果或原始异常。
+        LLM/Embedding 客户端不在此处清理，由其各自实现管理生命周期。
         """
-        if self._neo4j_connector:
+        if self._storage_service is not None:
+            try:
+                await self._storage_service.close()
+            except Exception as e:
+                logger.error(f"Error closing storage service: {e}")
+            finally:
+                self._storage_service = None
+
+        if self._neo4j_connector is not None:
             try:
                 await self._neo4j_connector.close()
             except Exception as e:
                 logger.error(f"Error closing Neo4j connector: {e}")
-
-        self._neo4j_connector = None
+            finally:
+                self._neo4j_connector = None

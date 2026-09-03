@@ -35,6 +35,11 @@ class MemoryStorageService:
         """Create the service and all storage clients during app lifespan."""
         return cls(await BackendFactory.create())
 
+    @classmethod
+    async def create_graph_write_only(cls) -> Self:
+        """Create an isolated service owning only a Neo4j write client."""
+        return cls(await BackendFactory.create_graph_write_only())
+
     async def search_by_embedding(
             self,
             node_filters: Mapping[MemoryNodeLabel, NodeFilter],

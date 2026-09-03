@@ -21,6 +21,14 @@ from app.core.memory.storage.outbox.types import ClaimedEvent, OutboxEventInput
 from app.core.memory.storage.provider.elasticsearch.client import ElasticClient
 
 
+@pytest.fixture(autouse=True)
+def reset_projection_indices_ready(monkeypatch):
+    monkeypatch.setattr(
+        "app.core.memory.storage.outbox.clients._indices_ready",
+        False,
+    )
+
+
 def event():
     return ClaimedEvent(uuid4(), 1, "Statement", "node-1", "upsert", 0, uuid4())
 
@@ -289,20 +297,26 @@ async def test_client_cleanup_closes_both_even_on_error():
     clients.redis.aclose.assert_awaited_once()
 
 
-async def test_clients_reuse_index_initialization_and_own_redis_pool(monkeypatch):
-    clients = ProjectionClients(30)
-    clients.neo4j = Mock(
-        get_node=AsyncMock(return_value=read_result([])),
-        close=AsyncMock(),
-    )
-    clients.elastic = Mock(delete_node=AsyncMock(), close=AsyncMock())
+async def test_clients_reuse_process_index_initialization_and_own_redis_pool(
+    monkeypatch,
+):
+    first = ProjectionClients(30)
+    second = ProjectionClients(30)
+    for clients in (first, second):
+        clients.neo4j = Mock(
+            get_node=AsyncMock(return_value=read_result([])),
+            close=AsyncMock(),
+        )
+        clients.elastic = Mock(delete_node=AsyncMock(), close=AsyncMock())
     ensure = AsyncMock()
     redis = Mock(return_value=Mock(aclose=AsyncMock()))
     monkeypatch.setattr("app.core.memory.storage.outbox.clients.ensure_indices", ensure)
     monkeypatch.setattr("app.core.memory.storage.outbox.clients.Redis", redis)
-    async with clients:
-        await clients.project(event(), AsyncMock())
-        await clients.project(event(), AsyncMock())
+    async with first:
+        await first.project(event(), AsyncMock())
+        await first.project(event(), AsyncMock())
+    async with second:
+        await second.project(event(), AsyncMock())
     ensure.assert_awaited_once()
     redis.assert_called_once()
     redis.return_value.aclose.assert_awaited_once()

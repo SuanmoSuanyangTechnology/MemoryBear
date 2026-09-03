@@ -22,6 +22,11 @@ from app.core.memory.storage.provider.neo4j.client import Neo4jClient
 from app.core.memory.storage.provider.neo4j.config import build_neo4j_driver_config
 
 
+# 仅缓存当前 Celery worker 进程的初始化结果；连接仍由每个批次独立持有，
+# 避免跨 asyncio.run() 创建的事件循环复用异步客户端。
+_indices_ready = False
+
+
 async def project_event(
     event: ClaimedEvent,
     neo4j: Neo4jClient,
@@ -68,14 +73,13 @@ async def project_event(
 
 
 class ProjectionClients:
-    """按批次惰性初始化一次，并在同一事件循环中关闭。"""
+    """客户端按批次惰性初始化，并在同一事件循环中关闭。"""
 
     def __init__(self, request_timeout: float):
         self.request_timeout = request_timeout
         self.neo4j = None
         self.elastic = None
         self.redis = None
-        self.indices_ready = False
 
     async def __aenter__(self):
         return self
@@ -92,6 +96,8 @@ class ProjectionClients:
         await asyncio.gather(*closing, return_exceptions=True)
 
     async def project(self, event, check_claim):
+        global _indices_ready
+
         if self.neo4j is None:
             config = build_neo4j_driver_config()
             config.update(
@@ -112,7 +118,7 @@ class ProjectionClients:
             client = ElasticClient()
             client.client = AsyncElasticsearch(**config)
             self.elastic = client
-        if not self.indices_ready:
+        if not _indices_ready:
             if self.redis is None:
                 # 同时接管 migration-lock 的连接池：不要让 socket 留在
                 # 即将被 Celery asyncio.run 关闭的事件循环上。
@@ -131,7 +137,8 @@ class ProjectionClients:
                 self.elastic.client,
                 redis_client=self.redis,
             )
-            self.indices_ready = True
+            # 首次并发可能重复检查；索引迁移由 Redis lease 保证互斥。
+            _indices_ready = True
         await project_event(
             event,
             self.neo4j,
