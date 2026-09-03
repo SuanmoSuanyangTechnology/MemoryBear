@@ -656,7 +656,7 @@
           "V1 - App API"
         ],
         "summary": "获取消息预制问题",
-        "description": "获取指定消息的预制问题列表（来自 messages.meta_data.suggested_questions）。\n\nuser_id 必填：仅返回该终端用户本人会话中的消息预制问题。",
+        "description": "获取指定消息的预制问题列表（来自 messages.meta_data.suggested_questions）。",
         "operationId": "get_message_suggested_questions_v1_v1_app_messages__message_id__suggested_get",
         "parameters": [
           {
@@ -668,17 +668,6 @@
               "format": "uuid",
               "title": "Message Id"
             }
-          },
-          {
-            "name": "user_id",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "description": "外部系统用户 ID",
-              "title": "User Id"
-            },
-            "description": "外部系统用户 ID"
           }
         ],
         "requestBody": {

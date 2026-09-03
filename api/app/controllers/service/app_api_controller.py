@@ -773,12 +773,8 @@ async def get_message_suggested_questions_v1(
         api_key_auth: ApiKeyAuth = None,
         db: Session = Depends(get_db),
         conversation_service: Annotated[ConversationService, Depends(get_conversation_service)] = None,
-        user_id: str = Query(..., description="外部系统用户 ID"),
 ):
-    """获取指定消息的预制问题列表（来自 messages.meta_data.suggested_questions）。
-
-    user_id 必填：仅返回该终端用户本人会话中的消息预制问题。
-    """
+    """获取指定消息的预制问题列表（来自 messages.meta_data.suggested_questions）。"""
     app_id = _get_app_id(api_key_auth)
     logger.info(
         f"V1 get message suggested questions - message_id: {message_id}, "
@@ -789,7 +785,6 @@ async def get_message_suggested_questions_v1(
         app_id=app_id,
         workspace_id=api_key_auth.workspace_id,
         message_id=message_id,
-        external_user_id=user_id,
     )
     return success(data=suggested_questions)
 
