@@ -790,7 +790,12 @@ async def permanent_download_file(
     file_key = file_metadata.file_key
     storage = storage_service.storage
 
+    # FastAPI 的依赖清理会等到响应体发送完毕才执行；FileResponse 传输期间
+    # 不再需要数据库连接，立即归还以避免大量图片并发下载耗尽连接池。
+    db.close()
+
     if isinstance(storage, LocalStorage):
+
         full_path = storage._get_full_path(file_key)
 
         if not full_path.exists():

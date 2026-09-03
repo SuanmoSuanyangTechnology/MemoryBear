@@ -1382,6 +1382,8 @@ class LangChainAgent:
                 if node_executions:
                     yield {"type": "node_executions", "data": node_executions}
             except Exception as e:
+                # 对外 SSE 会在调用方转换为安全提示；服务端仍保留完整异常，
+                # 便于通过模型 request_id 和原始上下文排障。
                 logger.error(f"Agent astream_events 失败: {str(e)}", exc_info=True)
                 raise
 
