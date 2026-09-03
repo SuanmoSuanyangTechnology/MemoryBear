@@ -1183,6 +1183,21 @@ def get_retrieve_types(
     return success(msg="Successfully obtained the retrieval type", data=list(chunk_schema.RetrieveType))
 
 
+@router.post("/retrieval-policy", response_model=Any, status_code=status.HTTP_200_OK)
+@cur_workspace_access_guard_async()
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.MANAGER_API)
+async def get_retrieval_policy(
+        policy_request: chunk_schema.RetrievalPolicyRequest,
+        current_user: User = Depends(get_current_user_async),
+        request: Request = None,
+):
+    del policy_request, current_user, request
+    raise HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail="Knowledge retrieval policy requires mem-knowledge",
+    )
+
+
 async def retrieve_chunks_with_source(
         retrieve_data: chunk_schema.ChunkRetrieve,
         principal: RetrievalPrincipal | None,

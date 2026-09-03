@@ -241,6 +241,20 @@ def get_retrieve_types(request: Request = None):
     return success(msg="Successfully obtained the retrieval type", data=list(chunk_schema.RetrieveType))
 
 
+@router.post("/retrieval-policy", response_model=Any, status_code=status.HTTP_200_OK)
+@require_api_key_self_db(scopes=["rag"])
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.EXTERNAL_API)
+async def get_retrieval_policy(
+    request: Request,
+    policy_request: chunk_schema.RetrievalPolicyRequest,
+):
+    del request, policy_request
+    raise HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail="Knowledge retrieval policy requires mem-knowledge",
+    )
+
+
 @router.post("/retrieval", response_model=Any, status_code=status.HTTP_200_OK)
 @require_api_key_self_db(scopes=["rag"])
 @route_through_knowledge_service(source=KnowledgeRetrievalSource.EXTERNAL_API)

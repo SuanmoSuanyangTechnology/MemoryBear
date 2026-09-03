@@ -40,6 +40,27 @@ class KnowledgeBaseConfig(BaseModel):
     )
 
 
+class RetrievalPolicyRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kb_ids: list[uuid.UUID] = Field(min_length=1, max_length=100)
+    rerank_id: uuid.UUID | None = None
+
+    @field_validator("kb_ids")
+    @classmethod
+    def deduplicate_kb_ids(cls, value: list[uuid.UUID]) -> list[uuid.UUID]:
+        return list(dict.fromkeys(value))
+
+
+class RetrievalPolicy(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    participle: tuple[Literal["text", "image"], ...] = ("text",)
+    semantic: tuple[Literal["text", "image"], ...] = ("text",)
+    hybrid: tuple[Literal["text", "image"], ...] = ("text",)
+    graph: tuple[Literal["text", "image"], ...] = ("text",)
+
+
 class TextRetrievalQuery(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
