@@ -179,6 +179,7 @@ const KnowledgeListModal = forwardRef<KnowledgeModalRef, KnowledgeModalProps>(({
         top_k: 3,
         weight: 1,
         enable_graph_retrieval: 0,
+        rerank_mode: 'reranking_model',
       }
     })), 'knowledge')
     setVisible(false);
