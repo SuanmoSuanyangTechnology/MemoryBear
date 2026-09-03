@@ -9,7 +9,14 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
-from redbear_model import ResolvedModelConfig, resolve_model_async
+from redbear_model import (
+    QWEN3_VL_EMBEDDING_DIMENSION,
+    EmbeddingPurpose,
+    EmbeddingRequest,
+    ResolvedModelConfig,
+    is_qwen3_vl_embedding,
+    resolve_model_async,
+)
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,6 +27,10 @@ from ..models.owned import Document
 from ..rag.chunk.metadata import merge_parser_metadata
 from ..rag.chunk.preview import preview_binary
 from ..rag.models.chunk import DocumentChunk
+from ..rag.models.embedding import (
+    collect_asset_file_ids,
+    prepare_chunk_embedding_contents,
+)
 from ..rag.retrieval.async_elasticsearch import AsyncChunkStore
 from ..repositories.model_registry import AsyncSQLModelRegistry
 from ..runtime import ProcessRuntime
@@ -28,6 +39,7 @@ from ..utils.datetime_utils import to_timestamp_ms
 from . import document as document_service
 from . import file as file_service
 from . import knowledge as knowledge_service
+from .multimodal_image import resolve_storage_images_async
 
 logger = logging.getLogger(__name__)
 
@@ -516,6 +528,8 @@ def build_chunk_store(
     resolved_embedding: ResolvedModelConfig | None = None,
 ) -> AsyncChunkStore:
     embed = None
+    embed_chunks = None
+    embedding_dimension = None
     if resolved_embedding is not None:
         from redbear_model.runtime import RedBearEmbeddings
 
@@ -523,8 +537,44 @@ def build_chunk_store(
             resolved_embedding,
             client_pool=runtime.model_runtime.pool,
         )
-        embed = model.aembed_documents
-    return AsyncChunkStore(client, snapshot.knowledge_id, embed=embed)
+        if is_qwen3_vl_embedding(resolved_embedding):
+            embedding_dimension = QWEN3_VL_EMBEDDING_DIMENSION
+
+            async def embed_multimodal_chunks(
+                chunks: list[DocumentChunk],
+            ) -> list[list[float] | None]:
+                asset_ids = collect_asset_file_ids(chunks)
+                images = await resolve_storage_images_async(
+                    runtime,
+                    snapshot.knowledge_id,
+                    asset_ids,
+                    phase="index",
+                )
+                vectors: list[list[float] | None] = []
+                for chunk in chunks:
+                    contents = prepare_chunk_embedding_contents(chunk, images)
+                    if not contents:
+                        vectors.append(None)
+                        continue
+                    result = await model.aembed_contents(
+                        EmbeddingRequest(
+                            purpose=EmbeddingPurpose.INDEX,
+                            contents=contents,
+                        )
+                    )
+                    vectors.append(list(result.vector))
+                return vectors
+
+            embed_chunks = embed_multimodal_chunks
+        else:
+            embed = model.aembed_documents
+    return AsyncChunkStore(
+        client,
+        snapshot.knowledge_id,
+        embed=embed,
+        embed_chunks=embed_chunks,
+        embedding_dimension=embedding_dimension,
+    )
 
 
 async def dispatch_graph_best_effort(snapshot: ChunkDocumentSnapshot) -> None:

@@ -26,6 +26,10 @@ from .models import RetrievalSearchOptions
 ES_DEFAULT_MAX_RESULT_WINDOW = 10000
 ES_FULL_SCAN_BATCH_SIZE = 1000
 EmbedFunction = Callable[[list[str]], Awaitable[list[list[float]]]]
+EmbedChunksFunction = Callable[
+    [list[DocumentChunk]],
+    Awaitable[list[list[float] | None]],
+]
 
 
 class AsyncEmbeddingClient(Protocol):
@@ -43,10 +47,14 @@ class AsyncChunkStore:
         knowledge_id: uuid.UUID | str,
         *,
         embed: EmbedFunction | None = None,
+        embed_chunks: EmbedChunksFunction | None = None,
+        embedding_dimension: int | None = None,
     ):
         self.client = client
         self.index = collection_name_for_knowledge(knowledge_id)
         self.embed = embed
+        self.embed_chunks = embed_chunks
+        self.embedding_dimension = embedding_dimension
 
     @staticmethod
     def build_segment_query(
@@ -235,8 +243,8 @@ class AsyncChunkStore:
         metadata = chunk.metadata or {}
         chunk_type = metadata.get("chunk_type")
         vector = None
-        if chunk_type != "source":
-            vector = (await self._embed_texts([chunk_retrieval_content(chunk)]))[0]
+        if chunk_type not in {"source", "parent"}:
+            vector = (await self._embed_chunks([chunk]))[0]
         source = (
             "ctx._source.page_content = params.new_content; ctx._source.vector = params.new_vector;"
         )
@@ -275,6 +283,11 @@ class AsyncChunkStore:
         return int(response.get("deleted", 0))
 
     async def _embed_chunks(self, chunks: list[DocumentChunk]) -> list[list[float] | None]:
+        if self.embed_chunks is not None:
+            embedded = await self.embed_chunks(chunks)
+            if len(embedded) != len(chunks):
+                raise RuntimeError("Chunk embedding result count does not match input count")
+            return embedded
         texts = []
         positions = []
         vectors: list[list[float] | None] = [None] * len(chunks)
@@ -296,7 +309,11 @@ class AsyncChunkStore:
 
     async def _create_index(self, embeddings: list[list[float] | None]) -> None:
         sample = next((embedding for embedding in embeddings if embedding is not None), None)
-        dimensions = len(sample) if sample is not None else 768
+        dimensions = (
+            len(sample)
+            if sample is not None
+            else (self.embedding_dimension or 768)
+        )
         await self.client.indices.create(
             index=self.index,
             mappings={
@@ -314,6 +331,7 @@ class AsyncChunkStore:
                             "sort_id": {"type": "long"},
                             "status": {"type": "integer"},
                             "parent_id": {"type": "keyword"},
+                            "asset_file_ids": {"type": "keyword"},
                             "vision_text": {"type": "text", "analyzer": "ik_max_word"},
                         },
                     },
