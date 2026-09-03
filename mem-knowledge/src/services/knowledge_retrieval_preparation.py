@@ -134,13 +134,41 @@ def _model_unavailable(message: str) -> KnowledgeError:
 
 class KnowledgeRetrievalPreparation:
     @classmethod
+    async def _resolve_policy_refs(
+        cls,
+        db: AsyncSession,
+        request: RetrievalPolicyRequest,
+        principal: Principal,
+    ) -> list[_KnowledgeRef]:
+        refs: list[_KnowledgeRef] = []
+        seen: set[uuid.UUID] = set()
+        for knowledge_id in request.kb_ids:
+            single_request = request.model_copy(update={"kb_ids": [knowledge_id]})
+            resolved = await cls._resolve_retrievable_refs(
+                db,
+                single_request,
+                principal,
+            )
+            if not resolved:
+                raise KnowledgeError.from_code(
+                    "KB_RESOURCE_NOT_FOUND",
+                    "Knowledge resources were not found",
+                )
+            for ref in resolved:
+                if ref.knowledge.id in seen:
+                    continue
+                seen.add(ref.knowledge.id)
+                refs.append(ref)
+        return refs
+
+    @classmethod
     async def prepare_policy_with_db(
         cls,
         db: AsyncSession,
         request: RetrievalPolicyRequest,
         principal: Principal,
     ) -> RetrievalPolicy:
-        refs = await cls._resolve_retrievable_refs(db, request, principal)
+        refs = await cls._resolve_policy_refs(db, request, principal)
         if not refs:
             raise KnowledgeError.from_code(
                 "KB_RESOURCE_NOT_FOUND",
