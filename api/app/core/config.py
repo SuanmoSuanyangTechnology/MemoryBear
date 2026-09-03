@@ -40,6 +40,12 @@ class Settings:
     SPEEDBEAR_SYSTEM_TENANT_ID: str = os.getenv(
         "SPEEDBEAR_SYSTEM_TENANT_ID", "00000000-0000-0000-0000-000000000000"
     )
+
+    # LiteSkill (MemorySkills) 内部管理接口配置（运营查看后台调用）
+    LITESKILL_BASE_URL: str = os.getenv("LITESKILL_BASE_URL", "http://liteskill:8010")
+    # 服务间凭证；必须与 LiteSkill 侧 INTERNAL_ADMIN_TOKEN 一致
+    LITESKILL_INTERNAL_TOKEN: str = os.getenv("LITESKILL_INTERNAL_TOKEN", "")
+    LITESKILL_TIMEOUT: float = float(os.getenv("LITESKILL_TIMEOUT", "10"))
     # SSO 新租户绑定 SpeedBear 失败时的策略（轮询重试后仍失败时生效）：
     #   true  = 严格模式：物理回滚本次新建的租户及其临时数据，本次登录失败
     #   false = 宽松模式：保留租户，返回「未绑定成功，请联系管理员」提示
