@@ -493,6 +493,7 @@ class KnowledgeRetrievalPreparation:
             local_mode=local_mode,
             global_mode=global_mode,
             target_index=target_index,
+            target_count=target_count,
             request_has_rerank_id=request.rerank_id is not None,
         ):
             if knowledge.reranker_id is None:
@@ -696,13 +697,14 @@ class KnowledgeRetrievalPreparation:
         local_mode: RerankMode,
         global_mode: RerankMode | None,
         target_index: int,
+        target_count: int,
         request_has_rerank_id: bool,
     ) -> bool:
         if (
             retrieve_type is RetrieveType.HYBRID
             and local_mode is RerankMode.RERANKING_MODEL
         ):
-            return True
+            return not (target_count == 1 and request_has_rerank_id)
         return (
             global_mode is RerankMode.RERANKING_MODEL
             and target_index == 0
