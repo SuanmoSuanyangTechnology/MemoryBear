@@ -86,6 +86,7 @@ class DashScopeMultimodalEmbeddingAdapter:
             base_address=resolve_dashscope_native_base_address(self._config.base_url),
             dimension=request.dimension,
             enable_fusion=request.fusion,
+            request_timeout=self._config.runtime.timeout_s,
         )
         if is_dashscope_multimodal_input_limit(response):
             raise MultimodalInputLimitError("embedding")

@@ -86,6 +86,7 @@ class DashScopeMultimodalRerankAdapter:
             base_address=resolve_dashscope_native_base_address(self._config.base_url),
             top_n=top_n,
             return_documents=False,
+            request_timeout=self._config.runtime.timeout_s,
         )
         if is_dashscope_multimodal_input_limit(response):
             raise MultimodalInputLimitError("rerank")
