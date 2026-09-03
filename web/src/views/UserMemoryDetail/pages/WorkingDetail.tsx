@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-01-12 14:42:02 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-08-14 14:51:27
+ * @Last Modified time: 2026-09-03 12:02:46
  */
 import { type FC, useEffect, useState, useMemo, useRef, useCallback, Fragment } from 'react'
 import clsx from 'clsx'
@@ -67,6 +67,8 @@ interface ApiMcpListItem {
   latest_at: number;
 }
 
+const PAGE_SIZE = 20
+
 /**
  * WorkingDetail – Three-column working-memory view for a user's conversations.
  *
@@ -88,6 +90,9 @@ const WorkingDetail: FC = () => {
   const pageRef = useRef<number>(1)
   const [messagesLoading, setMessagesLoading] = useState<boolean>(false)
   const [messages, setMessages] = useState<ChatItem[] | ApiMcpMessageItem[]>([])
+  const [messageHasMore, setMessageHasMore] = useState<boolean>(true)
+  const messagePageRef = useRef<number>(1)
+  const messageLoadingRef = useRef<boolean>(false)
   const [detailLoading, setDetailLoading] = useState<boolean>(false)
   const [detail, setDetail] = useState<Detail | null>(null)
   const [insightLoading, setInsightLoading] = useState<boolean>(false)
@@ -197,6 +202,23 @@ const WorkingDetail: FC = () => {
   }
 
   const prevSelectedRef = useRef<Conversation | ApiMcpListItem | null>(null)
+  /** Load earlier messages for the selected conversation (pagination). */
+  const loadMoreMessages = () => {
+    if (!id || !(selected as Conversation)?.id || (selected as ApiMcpListItem)?.source || messageLoadingRef.current || !messageHasMore) return
+    messageLoadingRef.current = true
+    const nextPage = messagePageRef.current + 1
+    getConversationMessages(id, { conversation_id: (selected as Conversation).id, ...filterParamsRef.current, page: nextPage, pagesize: PAGE_SIZE })
+      .then(res => {
+        const response = res as { items: ChatItem[], page: { hasnext: boolean } }
+        setMessages(prev => [...response.items, ...prev])
+        messagePageRef.current = nextPage
+        setMessageHasMore(response.page.hasnext)
+      })
+      .finally(() => {
+        messageLoadingRef.current = false
+      })
+  }
+
   // Merged selection + filter effect: handleSelect batches resetFields + setSelected, which would
   // otherwise fire both the selection effect and the filter effect in the same render and call
   // fetchMessages twice. Branch on whether the selection actually changed to fetch only once.
@@ -216,9 +238,12 @@ const WorkingDetail: FC = () => {
     const conversationId = (conversation as Conversation).id
     if (!conversationId) return
     setMessagesLoading(true)
-    getConversationMessages(id, { conversation_id: conversationId, ...filterParamsRef.current })
+    getConversationMessages(id, { conversation_id: conversationId, ...filterParamsRef.current, page: 1, pagesize: PAGE_SIZE })
       .then(res => {
-        setMessages(res as ChatItem[])
+        const response = res as { items: ChatItem[], page: { hasnext: boolean } }
+        setMessages(response.items)
+        messagePageRef.current = 1
+        setMessageHasMore(response.page.hasnext)
       })
       .finally(() => {
         setMessagesLoading(false)
@@ -236,6 +261,8 @@ const WorkingDetail: FC = () => {
 
     setDetail(null)
     setMessages([])
+    setMessageHasMore(true)
+    messagePageRef.current = 1
     if (conversationId) {
       setDetailLoading(true)
       fetchMessages(conversation)
@@ -255,27 +282,11 @@ const WorkingDetail: FC = () => {
 
   const handleRefresh = () => {
     filterForm.resetFields()
-    setTimeout(() => {
-      if ((selected as ApiMcpListItem)?.source) {
-        apiMcpMessageListRef.current?.refresh()
-        getUserInsight()
-      } else if (selected) {
-        getDetail(selected)
-      }
-    }, 0)
   }
   const handleSelect = (conversation: Conversation | ApiMcpListItem) => {
     filterForm.resetFields()
     setSelected(conversation)
   }
-  /** Derive a human-readable date range (e.g. "2024.01 - 2024.03") from message timestamps. */
-  const timeRange = useMemo(() => {
-    const times = messages.filter(m => m.created_at).map(m => Number(m.created_at))
-    if (times.length === 0) return ''
-    const minTime = Math.min(...times)
-    const maxTime = Math.max(...times)
-    return `${formatDateTime(minTime, 'YYYY.MM')} - ${formatDateTime(maxTime, 'YYYY.MM')}`
-  }, [messages])
 
   /** Whether the memory insight block has any renderable content. */
   const hasInsight = useMemo(
@@ -377,8 +388,7 @@ const WorkingDetail: FC = () => {
                   className="rb:h-full!"
                 >
                   <Flex vertical className="rb:h-full! rb:overflow-y-hidden!">
-                    <Flex align="center" justify="space-between">
-                      <div className="rb:text-[#5B6167] rb:leading-4.5 rb:text-[12px]">{timeRange}</div>
+                    <Flex align="center" justify="end">
                       <span className="rb:text-[12px] rb:text-[#5B6167]">
                         {t('workingDetail.total', { total: (selected as ApiMcpListItem).source ? apiMcpMessageListRef.current?.total || 0 : messages.length })}
                       </span>
@@ -413,13 +423,23 @@ const WorkingDetail: FC = () => {
                         : messages.length === 0
                           ? <Empty />
                           : (
-                            <ChatContent
-                              classNames="rb:flex-1 rb:pt-5"
-                              contentClassNames="rb:max-w-110!"
-                              data={messages}
-                              streamLoading={false}
-                              labelFormat={(item) => formatDateTime(item.created_at)}
-                            />
+                            <div id="message-scroll" className="rb:flex-1 rb:overflow-y-auto">
+                              <InfiniteScroll
+                                dataLength={messages.length}
+                                next={loadMoreMessages}
+                                hasMore={messageHasMore}
+                                loader={<div className="rb:text-center rb:py-4 rb:text-[#5B6167]">{t('common.loading')}</div>}
+                                scrollableTarget="message-scroll"
+                              >
+                                <ChatContent
+                                  classNames="rb:pt-5!"
+                                  contentClassNames="rb:max-w-110!"
+                                  data={messages}
+                                  streamLoading={false}
+                                  labelFormat={(item) => formatDateTime(item.created_at)}
+                                />
+                              </InfiniteScroll>
+                            </div>
                           )
                     }
                   </Flex>
