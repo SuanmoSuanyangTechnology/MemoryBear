@@ -11,6 +11,8 @@ from app.core.memory.storage.enums import (
     StorageBackendType,
 )
 from app.core.memory.storage.models import (
+    GraphWriteResult,
+    MemoryGraphWriteCommand,
     NodeFilter,
     RelationshipFilter,
     StorageWriteResult,
@@ -42,6 +44,8 @@ def neo4j_client(result: StorageWriteResult | None = None):
         save_node=AsyncMock(return_value=result),
         update_node=AsyncMock(return_value=result),
         delete_node=AsyncMock(return_value=result),
+        save_memory_graph=AsyncMock(),
+        save_memory_summaries=AsyncMock(),
         save_relationship=AsyncMock(return_value=result),
         update_relationship=AsyncMock(return_value=result),
         delete_relationship=AsyncMock(return_value=result),
@@ -83,6 +87,11 @@ def test_all_write_dimensions_route_to_neo4j(dimension):
     assert factory(client).get_write_client(LABEL, dimension) is client
 
 
+def test_graph_write_client_routes_to_neo4j():
+    client = neo4j_client()
+    assert factory(client).get_graph_write_client() is client
+
+
 @pytest.mark.parametrize(
     "dimension",
     [StorageBackendType.GRAPH_MAIN_READ, StorageBackendType.TEXT_NODE],
@@ -102,6 +111,73 @@ async def test_save_node_returns_provider_result_and_enqueues_upsert():
     assert result is expected
     client.save_node.assert_awaited_once_with(LABEL, data)
     assert enqueued(repo) == [(LABEL, "node-1", OutboxOperation.UPSERT)]
+
+
+async def test_save_memory_graph_enqueues_each_committed_node_once():
+    client, repo = neo4j_client(), repository()
+    expected = GraphWriteResult(
+        node_ids={
+            MemoryNodeType.DIALOGUE: ["dialog-1"],
+            MemoryNodeType.STATEMENT: ["statement-1", "statement-1"],
+        },
+        relationship_count=3,
+    )
+    client.save_memory_graph.return_value = expected
+
+    command = MemoryGraphWriteCommand()
+    result = await router(client, repo).save_memory_graph(command)
+
+    assert result is expected
+    client.save_memory_graph.assert_awaited_once_with(command)
+    assert enqueued(repo) == [
+        (MemoryNodeType.DIALOGUE, "dialog-1", OutboxOperation.UPSERT),
+        (MemoryNodeType.STATEMENT, "statement-1", OutboxOperation.UPSERT),
+    ]
+
+
+async def test_save_memory_graph_failure_creates_no_outbox():
+    client, repo = neo4j_client(), repository()
+    client.save_memory_graph.side_effect = RuntimeError("write failed")
+
+    with pytest.raises(RuntimeError, match="write failed"):
+        await router(client, repo).save_memory_graph(MemoryGraphWriteCommand())
+
+    repo.enqueue_many.assert_not_awaited()
+
+
+async def test_save_memory_graph_surfaces_outbox_failure_after_commit():
+    from app.core.memory.storage.outbox.exceptions import OutboxEnqueueError
+
+    client = neo4j_client()
+    repo = Mock(enqueue_many=AsyncMock(side_effect=RuntimeError("secret SQL")))
+    client.save_memory_graph.return_value = GraphWriteResult(
+        node_ids={MemoryNodeType.DIALOGUE: ["dialog-1"]}
+    )
+
+    with pytest.raises(OutboxEnqueueError) as caught:
+        await router(client, repo).save_memory_graph(MemoryGraphWriteCommand())
+
+    client.save_memory_graph.assert_awaited_once()
+    assert caught.value.primary_committed is True
+    assert "secret" not in str(caught.value)
+
+
+async def test_save_memory_summaries_enqueues_summary_nodes():
+    client, repo = neo4j_client(), repository()
+    expected = GraphWriteResult(
+        node_ids={MemoryNodeType.MEMORY_SUMMARY: ["summary-1"]},
+        relationship_count=2,
+    )
+    client.save_memory_summaries.return_value = expected
+    summaries = [Mock(id="summary-1")]
+
+    result = await router(client, repo).save_memory_summaries(summaries)
+
+    assert result is expected
+    client.save_memory_summaries.assert_awaited_once_with(summaries)
+    assert enqueued(repo) == [
+        (MemoryNodeType.MEMORY_SUMMARY, "summary-1", OutboxOperation.UPSERT)
+    ]
 
 
 async def test_update_node_uses_ids_returned_by_same_write():
@@ -306,3 +382,27 @@ async def test_service_write_methods_delegate_to_write_router(method, args):
 
     assert await getattr(service, method)(*args) is expected
     delegate.assert_awaited_once_with(*args)
+
+
+async def test_service_delegates_memory_graph_write():
+    service = MemoryStorageService(factory(neo4j_client()))
+    expected = GraphWriteResult(
+        node_ids={MemoryNodeType.DIALOGUE: ["dialog-1"]}
+    )
+    service._write_router.save_memory_graph = AsyncMock(return_value=expected)
+
+    command = MemoryGraphWriteCommand()
+    assert await service.save_memory_graph(command) is expected
+    service._write_router.save_memory_graph.assert_awaited_once_with(command)
+
+
+async def test_service_delegates_memory_summary_write():
+    service = MemoryStorageService(factory(neo4j_client()))
+    expected = GraphWriteResult(
+        node_ids={MemoryNodeType.MEMORY_SUMMARY: ["summary-1"]}
+    )
+    service._write_router.save_memory_summaries = AsyncMock(return_value=expected)
+    summaries = [Mock(id="summary-1")]
+
+    assert await service.save_memory_summaries(summaries) is expected
+    service._write_router.save_memory_summaries.assert_awaited_once_with(summaries)

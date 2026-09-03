@@ -4,7 +4,7 @@ FastWritePipeline — 快速写入流水线
 三步流水线：清洗 → Embedding → 写入 :Dialogue 节点。
 
 - 不继承、不复用 WritePipeline 编排代码，避免耦合。
-- 共用底层能力（embedder / neo4j connector）单独懒加载。
+- embedder 懒加载；每次任务独占一个 Neo4j write-only storage service。
 - 产品语义约束：1 条 user message → 1 个 DialogueNode，不切块、不截断。
 - 关键失败向上抛出异常（不降级为业务 failed 结果），finally 中 _cleanup。
 """
@@ -30,7 +30,6 @@ from app.core.utils.datetime_utils import (
     ensure_dialog_at,
     parse_iso_to_utc_naive,
 )
-from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 
 logger = logging.getLogger(__name__)
 # 与 WritePipeline 共用同一个结构化步骤日志器（同名 logger，输出风格一致）
@@ -65,7 +64,7 @@ class FastWritePipeline:
 
         # 懒加载底层能力，首次使用时初始化
         self._embedder = None
-        self._neo4j = None
+        self._storage_service = None
 
     async def run(
         self,
@@ -337,27 +336,43 @@ class FastWritePipeline:
             emotion_score=emotion_result.emotion_score if emotion_result else None,
         )
 
-    async def _persist(self, dialog_node: DialogueNode) -> str:
-        """Step 3 — 持久化 DialogueNode 到 Neo4j。
+    async def _init_storage_service(self) -> None:
+        """创建当前 fast write 独占的 Neo4j write-only storage service。"""
+        if self._storage_service is not None:
+            return
+        from app.core.memory.storage.service import MemoryStorageService
+        self._storage_service = await MemoryStorageService.create_graph_write_only()
 
-        - 懒加载独立 connector（不共享 driver，由 _cleanup 负责关闭）。
-        - 用 add_dialogue_nodes([node], connector)，保证 Cypher / 摊平一致。
-        - 死锁重试：与 WritePipeline._is_deadlock 保持一致的宽松判定——异常消息中
+    async def _persist(self, dialog_node: DialogueNode) -> str:
+        """Step 3 — 通过 storage service 写入 Dialogue 到 Neo4j 并入 outbox。
+
+        - 使用当前任务独占的 write-only MemoryStorageService.save_memory_graph，
+          复用 Normal Write 的 WriteRouter → graph_writer → enqueue_events 链路。
+        - Neo4j 提交成功后自动 enqueue outbox Dialogue upsert 事件，
+          由 Beat + memory_projection worker 自动投影到 ES。
+        - 竞态守卫在 DIALOGUE_NODE_SAVE Cypher 层：normal 覆盖 fast，
+          迟到 fast 不降级 normal（write_mode="fast" 触发 canWrite=[] 跳过）。
+        - 死锁重试：与 WritePipeline._is_deadlock 一致的宽松判定——异常消息中
           包含 "deadlock"（大小写不敏感）即视为死锁，最多重试
           NEO4J_MERGE_MAX_RETRY 次，退避 0.1*(attempt+1) 秒。
-        - 快速失败：非死锁异常、或返回节点数 != 1（RuntimeError），首次即抛出，不重试。
+        - 快速失败：非死锁异常首次即抛出，不重试。
+        - outbox enqueue 失败时抛 OutboxEnqueueError(primary_committed=True)，
+          与 Normal Write 一致，由上游补偿。
         """
-        from app.repositories.neo4j.add_nodes import add_dialogue_nodes
+        from app.core.memory.storage.enums import MemoryNodeType
+        from app.core.memory.storage.models import MemoryGraphWriteCommand
 
-        if self._neo4j is None:
-            self._neo4j = Neo4jConnector()
+        await self._init_storage_service()
+
+        command = MemoryGraphWriteCommand(dialogue_nodes=[dialog_node])
 
         for attempt in range(self.NEO4J_MERGE_MAX_RETRY):
             try:
-                result = await add_dialogue_nodes([dialog_node], self._neo4j)
-                if len(result) != 1:
+                result = await self._storage_service.save_memory_graph(command)
+                dialogue_ids = result.node_ids.get(MemoryNodeType.DIALOGUE, [])
+                if not dialogue_ids:
                     raise RuntimeError(
-                        f"expected one dialogue UUID, got {len(result)}"
+                        "expected one dialogue UUID, got none"
                     )
                 logger.info(
                     "[FastWrite] persisted: dialog_id=%s, end_user_id=%s, "
@@ -367,10 +382,8 @@ class FastWritePipeline:
                     dialog_node.dialog_embedding is not None,
                     attempt + 1,
                 )
-                return result[0]
+                return dialogue_ids[0]
             except Exception as e:
-                # 与 WritePipeline._is_deadlock 一致的宽松判定：异常消息中包含
-                # "deadlock"（大小写不敏感）即视为死锁。
                 is_deadlock = "deadlock" in str(e).lower()
                 has_next_attempt = attempt < self.NEO4J_MERGE_MAX_RETRY - 1
                 if not is_deadlock or not has_next_attempt:
@@ -386,18 +399,17 @@ class FastWritePipeline:
                 await asyncio.sleep(0.1 * (attempt + 1))
 
     async def _cleanup(self) -> None:
-        """释放懒加载的底层资源（关闭独立的 neo4j connector）。
-
-        关闭失败不影响主流程：记录 warning 后继续；最终清空引用便于 GC。
-        """
-        if self._neo4j is not None:
-            try:
-                await self._neo4j.close()
-            except Exception as e:
-                logger.warning(
-                    "[FastWrite] failed to close neo4j connector: end_user_id=%s, error=%s",
-                    self.end_user_id,
-                    e,
-                )
-            finally:
-                self._neo4j = None
+        """关闭当前 fast write 独占的 storage service 及 Neo4j driver。"""
+        if self._storage_service is None:
+            return
+        try:
+            await self._storage_service.close()
+        except Exception as e:
+            logger.warning(
+                "[FastWrite] failed to close storage service: "
+                "end_user_id=%s, error=%s",
+                self.end_user_id,
+                e,
+            )
+        finally:
+            self._storage_service = None

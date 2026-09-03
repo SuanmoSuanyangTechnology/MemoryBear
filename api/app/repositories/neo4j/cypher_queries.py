@@ -130,12 +130,11 @@ RETURN id,
        }} AS properties
 """
 
-PERMANENT_MEMORY_UNMARK = """
+PERMANENT_MEMORY_ID_BY_ELEMENT_ID = """
 MATCH (s:Statement {end_user_id: $end_user_id})
 WHERE elementId(s) = $element_id
   AND s.delete_at IS NULL
-SET s.is_permanent = false
-RETURN elementId(s) AS id, s.is_permanent AS is_permanent
+RETURN s.id AS node_id
 """
 
 STATEMENT_EMOTION_UPDATE = """

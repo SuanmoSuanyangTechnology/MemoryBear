@@ -17,7 +17,7 @@ from app.core.memory.storage.provider.elasticsearch.client import (
     ElasticClient,
 )
 from app.core.memory.storage.provider.elasticsearch.serialization import (
-    normalize_elasticsearch_value,
+    normalize_elasticsearch_document,
 )
 from app.core.memory.storage.provider.elasticsearch.config import (
     build_elasticsearch_client_config,
@@ -695,15 +695,35 @@ def test_elasticsearch_document_normalization() -> None:
             tzinfo=timezone(timedelta(hours=8)),
         ),
         "embedding": (1, 2.5),
+        "metadata": {"statement": ""},
     }
 
-    assert normalize_elasticsearch_value(value) == {
+    assert normalize_elasticsearch_document(value, date_fields=set()) == {
         "created_at": "2026-01-01T00:00:00Z",
         "embedding": [1, 2.5],
+        "metadata": {"statement": ""},
     }
-    for invalid in (float("nan"), float("inf"), object(), {1: "value"}):
+    assert normalize_elasticsearch_document(
+        {
+            "valid_at": "",
+            "invalid_at": "   ",
+            "statement": "",
+        },
+        date_fields={"valid_at", "invalid_at"},
+    ) == {
+        "valid_at": None,
+        "invalid_at": None,
+        "statement": "",
+    }
+    invalid_documents = (
+        {"value": float("nan")},
+        {"value": float("inf")},
+        {"value": object()},
+        cast(dict[str, Any], {1: "value"}),
+    )
+    for invalid in invalid_documents:
         with pytest.raises(ValueError):
-            normalize_elasticsearch_value(invalid)
+            normalize_elasticsearch_document(invalid, date_fields=set())
 
 
 async def test_elastic_client_save_and_update_node() -> None:
@@ -747,6 +767,43 @@ async def test_elastic_client_save_and_update_node() -> None:
     assert save_result.data == [{"id": 123, "status": "pending"}]
     assert update_result.backend == BackendType.ELASTIC
     assert update_result.affected_count == 2
+
+
+async def test_elastic_client_normalizes_only_mapped_blank_date_fields() -> None:
+    fake = _FakeElasticsearch()
+    client = ElasticClient()
+    client.client = _as_elasticsearch(fake)
+
+    await client.save_node(
+        MemoryNodeType.STATEMENT,
+        {
+            "id": "statement-1",
+            "statement": "",
+            "valid_at": "",
+            "invalid_at": "   ",
+        },
+    )
+    await client.update_node(
+        MemoryNodeType.STATEMENT,
+        {
+            "statement": "",
+            "valid_at": "   ",
+            "invalid_at": "",
+        },
+        NodeFilter.eq("id", "statement-1"),
+    )
+
+    assert fake.index_calls[0]["document"] == {
+        "id": "statement-1",
+        "statement": "",
+        "valid_at": None,
+        "invalid_at": None,
+    }
+    assert fake.update_by_query_calls[0]["script"]["params"]["properties"] == {
+        "statement": "",
+        "valid_at": None,
+        "invalid_at": None,
+    }
 
 
 @pytest.mark.parametrize(

@@ -76,6 +76,18 @@ class BackendFactory:
         return factory
 
     @classmethod
+    async def create_graph_write_only(cls) -> Self:
+        """Create an isolated factory containing only the Neo4j write client."""
+        cls._ensure_builtin_backends_registered()
+        client_type = cls.BACKENDS.get(BackendType.NEO4J)
+        if client_type is None:
+            raise RuntimeError("Backend NEO4J is not registered")
+
+        factory = cls()
+        factory._clients[BackendType.NEO4J] = await client_type.create()
+        return factory
+
+    @classmethod
     def register(cls, name: BackendType, obj: type[BaseClient]) -> None:
         cls.BACKENDS[name] = obj
 
@@ -165,6 +177,10 @@ class BackendFactory:
         return [self.get_client(backend_type) for backend_type in backend_types]
 
     def get_relationship_client(self) -> BaseClient:
+        return self.get_client(BackendType.NEO4J)
+
+    def get_graph_write_client(self) -> BaseClient:
+        """Return the transactional graph writer client."""
         return self.get_client(BackendType.NEO4J)
 
     async def close(self) -> None:

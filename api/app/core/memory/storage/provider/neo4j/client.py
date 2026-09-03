@@ -1,7 +1,7 @@
 import asyncio
 import heapq
 import traceback
-from typing import Any, Self
+from typing import TYPE_CHECKING, Any, Self
 
 import numpy as np
 from neo4j import AsyncGraphDatabase, AsyncDriver
@@ -14,6 +14,8 @@ from app.core.memory.storage.enums import (
 )
 from app.core.memory.storage.exceptions import UnsupportedQueryError
 from app.core.memory.storage.models import (
+    GraphWriteResult,
+    MemoryGraphWriteCommand,
     NodeFilter,
     NodeProjection,
     NodeSort,
@@ -40,6 +42,9 @@ from app.core.memory.storage.provider.neo4j.compiler.sort_compiler import (
 from app.core.memory.storage.provider.neo4j.config import build_neo4j_driver_config
 from app.core.memory.storage.provider.neo4j.index.definitions import FULLTEXT_ANNC, EMBEDDING_FIELDS
 from app.core.memory.storage.utils.similarity import compute_cosine_similarity
+
+if TYPE_CHECKING:
+    from app.core.memory.models.graph_models import MemorySummaryNode
 
 
 def _to_native(value: Any) -> Any:
@@ -95,6 +100,34 @@ class Neo4jClient(BaseClient):
             {key: _to_native(value) for key, value in record.items()}
             for record in records
         ]
+
+    async def save_memory_graph(
+        self,
+        command: MemoryGraphWriteCommand,
+    ) -> GraphWriteResult:
+        """Commit one extracted memory graph in a Neo4j transaction."""
+        if self.client is None:
+            raise RuntimeError("Neo4jClient is not connected")
+
+        from app.core.memory.storage.provider.neo4j.graph_writer import (
+            save_memory_graph,
+        )
+
+        return await save_memory_graph(self.client, command)
+
+    async def save_memory_summaries(
+        self,
+        summaries: list["MemorySummaryNode"],
+    ) -> GraphWriteResult:
+        """Commit memory summaries and their relationships transactionally."""
+        if self.client is None:
+            raise RuntimeError("Neo4jClient is not connected")
+
+        from app.core.memory.storage.provider.neo4j.graph_writer import (
+            save_memory_summaries,
+        )
+
+        return await save_memory_summaries(self.client, summaries)
 
     async def save_node(
             self,
