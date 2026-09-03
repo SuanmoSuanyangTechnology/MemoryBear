@@ -1207,13 +1207,26 @@ async def retrieve_chunks_with_source(
     """
     retrieve chunk
     """
+    normalized_query = retrieve_data.normalized_query
+    if isinstance(normalized_query, chunk_schema.ImageRetrievalQuery):
+        api_logger.warning(
+            "image retrieval unavailable without mem-knowledge source=%s kb_count=%s",
+            source,
+            len(retrieve_data.kb_ids or []),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Image retrieval requires mem-knowledge",
+        )
     api_logger.info(
-        "retrieve chunk request received: username=%s, source=%s, query_len=%s, kb_count=%s, "
+        "retrieve chunk request received: username=%s, source=%s, query_modality=%s, "
+        "query_len=%s, kb_count=%s, "
         "ex_id_count=%s, retrieve_type=%s, top_k=%s, "
         "metadata_mode=%s, metadata_filter_groups=%s",
         principal.username if principal and principal.username else "anonymous",
         source,
-        len(retrieve_data.query or ""),
+        normalized_query.modality,
+        len(normalized_query.content),
         len(retrieve_data.kb_ids or []),
         len(retrieve_data.ex_ids or []),
         retrieve_data.retrieve_type,
@@ -1224,6 +1237,7 @@ async def retrieve_chunks_with_source(
 
     try:
         retrieval_payload = retrieve_data.model_dump(exclude_none=True)
+        retrieval_payload["query"] = normalized_query.content
         retrieval_payload["source"] = source
         request = KnowledgeRetrievalRequest(**retrieval_payload)
         if (

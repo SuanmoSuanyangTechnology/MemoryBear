@@ -30,7 +30,7 @@ from .errors import (
 from .transport import KnowledgeHttpTransport
 
 logger = logging.getLogger(__name__)
-_RERANK_WIRE_FIELDS = ("rerank_mode", "rerank_weights")
+_RERANK_WIRE_FIELDS = ("rerank_id", "rerank_mode", "rerank_weights")
 
 
 def _retrieval_wire_payload(

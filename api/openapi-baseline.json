@@ -5809,6 +5809,47 @@
           }
         }
       }
+    },
+    "/v1/chunks/retrieval-policy": {
+      "post": {
+        "tags": [
+          "V1 - RAG API"
+        ],
+        "summary": "Get Retrieval Policy",
+        "operationId": "get_retrieval_policy_v1_chunks_retrieval_policy_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetrievalPolicyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Get Retrieval Policy V1 Chunks Retrieval Policy Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -8077,8 +8118,7 @@
       "ChunkRetrieve": {
         "properties": {
           "query": {
-            "type": "string",
-            "title": "Query"
+            "$ref": "#/components/schemas/RetrievalQuery"
           },
           "kb_ids": {
             "items": {
@@ -8182,6 +8222,18 @@
                 "type": "null"
               }
             ]
+          },
+          "rerank_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rerank Id"
           },
           "rerank_mode": {
             "anyOf": [
@@ -17112,6 +17164,106 @@
         "additionalProperties": false,
         "type": "object",
         "title": "RerankWeights"
+      },
+      "ImageRetrievalQuery": {
+        "properties": {
+          "modality": {
+            "type": "string",
+            "const": "image",
+            "title": "Modality"
+          },
+          "content": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Content"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "modality",
+          "content"
+        ],
+        "title": "ImageRetrievalQuery"
+      },
+      "TextRetrievalQuery": {
+        "properties": {
+          "modality": {
+            "type": "string",
+            "const": "text",
+            "title": "Modality"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "modality",
+          "content"
+        ],
+        "title": "TextRetrievalQuery"
+      },
+      "RetrievalQuery": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "$ref": "#/components/schemas/StructuredRetrievalQuery"
+          }
+        ]
+      },
+      "StructuredRetrievalQuery": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/TextRetrievalQuery"
+          },
+          {
+            "$ref": "#/components/schemas/ImageRetrievalQuery"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "modality",
+          "mapping": {
+            "image": "#/components/schemas/ImageRetrievalQuery",
+            "text": "#/components/schemas/TextRetrievalQuery"
+          }
+        }
+      },
+      "RetrievalPolicyRequest": {
+        "properties": {
+          "kb_ids": {
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": "array",
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Kb Ids"
+          },
+          "rerank_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rerank Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "kb_ids"
+        ],
+        "title": "RetrievalPolicyRequest"
       }
     },
     "securitySchemes": {
