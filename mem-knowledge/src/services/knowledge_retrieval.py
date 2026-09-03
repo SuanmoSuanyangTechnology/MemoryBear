@@ -760,7 +760,7 @@ class KnowledgeRetrievalService:
                 runtime,
                 client,
                 GraphRetrievalSnapshot(
-                    query=request.query,
+                    query=request.query_text or "",
                     pipeline=graph_target.pipeline,
                     targets=(graph_target,),
                     timings=timings,
