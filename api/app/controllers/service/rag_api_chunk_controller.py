@@ -7,7 +7,7 @@ from fastapi import APIRouter, Body, Depends, File, HTTPException, Request, stat
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.controllers import chunk_controller
-from app.core.api_key_auth import require_api_key_self_db
+from app.core.api_key_auth import get_current_api_key_auth, require_api_key_self_db
 from app.core.logging_config import get_business_logger
 from app.core.rag.models.chunk import QAChunk
 from app.core.response_utils import success
@@ -246,15 +246,13 @@ def get_retrieve_types(request: Request = None):
 @route_through_knowledge_service(source=KnowledgeRetrievalSource.EXTERNAL_API)
 async def retrieve_chunks(
     request: Request,
-    api_key_auth: ApiKeyAuth = None,
-    query: str = Body(..., description="question"),
+    retrieve_data: chunk_schema.ChunkRetrieve,
 ):
     """
     retrieve chunk
     """
-    body = await request.json()
-    retrieve_data = chunk_schema.ChunkRetrieve(**body)
     try:
+        api_key_auth = get_current_api_key_auth()
         principal = await get_api_key_retrieval_principal_async(api_key_auth)
         return await chunk_controller.retrieve_chunks_with_source(
             retrieve_data=retrieve_data,

@@ -59,6 +59,8 @@ _LEGACY_ERROR_RESPONSES = {
     }
     for status_code in (400, 404, 409, 500)
 }
+_RERANK_VALIDATION_FIELDS = frozenset({"rerank_mode", "rerank_weights"})
+_RERANK_VALIDATION_MESSAGE = "Invalid rerank configuration"
 
 
 def _request_language(request: Request) -> str:
@@ -72,6 +74,13 @@ def _request_language(request: Request) -> str:
 def _http_message(request: Request, status_code: int, detail: object) -> str:
     language = _request_language(request)
     return _HTTP_MESSAGES[language].get(status_code, str(detail))
+
+
+def _is_rerank_validation_error(exc: RequestValidationError) -> bool:
+    return any(
+        any(part in _RERANK_VALIDATION_FIELDS for part in error.get("loc", ()))
+        for error in exc.errors()
+    )
 
 
 def create_app(settings: KnowledgeSettings | None = None) -> FastAPI:
@@ -133,6 +142,16 @@ def create_app(settings: KnowledgeSettings | None = None) -> FastAPI:
             request.headers.get("X-KB-Source"),
             validation_errors,
         )
+        if _is_rerank_validation_error(exc):
+            return JSONResponse(
+                status_code=400,
+                headers={TRACE_ID_HEADER: trace_id},
+                content=fail(
+                    code=400,
+                    msg=_http_message(request, 400, _RERANK_VALIDATION_MESSAGE),
+                    error=_RERANK_VALIDATION_MESSAGE,
+                ),
+            )
         return await request_validation_exception_handler(request, exc)
 
     @application.exception_handler(KnowledgeError)
