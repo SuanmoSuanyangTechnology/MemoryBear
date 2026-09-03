@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import math
 from enum import StrEnum
-from typing import Literal, TypeAlias
+from typing import Literal
 from uuid import UUID
 
 from pydantic import (
@@ -61,7 +61,7 @@ class ContractModel(BaseModel):
 
 
 QWEN3_VL_EMBEDDING_DIMENSION = 2048
-SupportedImageMediaType: TypeAlias = Literal[
+type SupportedImageMediaType = Literal[
     "image/jpeg",
     "image/png",
     "image/webp",
@@ -94,7 +94,7 @@ class ImageEmbeddingContent(ContractModel):
     decoded_bytes: int = Field(ge=1, repr=False)
 
 
-EmbeddingContent: TypeAlias = TextEmbeddingContent | ImageEmbeddingContent
+type EmbeddingContent = TextEmbeddingContent | ImageEmbeddingContent
 
 
 class EmbeddingRequest(ContractModel):
@@ -116,7 +116,7 @@ class EmbeddingResult(ContractModel):
     usage: dict[str, int] = Field(default_factory=dict)
 
 
-RerankQuery: TypeAlias = TextEmbeddingContent | ImageEmbeddingContent
+type RerankQuery = TextEmbeddingContent | ImageEmbeddingContent
 
 
 class RerankCandidateView(ContractModel):
