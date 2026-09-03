@@ -1,4 +1,5 @@
 import copy
+import uuid
 
 from .context import (
     ChunkContext,
@@ -222,5 +223,22 @@ class ChunkPostProcessor:
 
     def _chunk_metadata(self, chunk: LogicalChunk) -> dict:
         metadata = copy.deepcopy(chunk.metadata) if chunk.metadata else {}
+        metadata.pop("asset_file_id", None)
+        raw_asset_file_ids = metadata.get("asset_file_ids")
+        asset_file_ids: list[str] = []
+        seen: set[str] = set()
+        if isinstance(raw_asset_file_ids, (list, tuple)):
+            for value in raw_asset_file_ids:
+                try:
+                    normalized = str(uuid.UUID(str(value)))
+                except (TypeError, ValueError):
+                    continue
+                if normalized not in seen:
+                    seen.add(normalized)
+                    asset_file_ids.append(normalized)
+        if asset_file_ids:
+            metadata["asset_file_ids"] = asset_file_ids
+        else:
+            metadata.pop("asset_file_ids", None)
         metadata.setdefault("heading_path", [])
         return metadata
