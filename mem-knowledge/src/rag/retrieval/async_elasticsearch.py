@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from typing import Any, Protocol
 
 from elasticsearch.helpers import async_bulk
@@ -365,13 +365,30 @@ class AsyncElasticSearchRetrieval:
     def __init__(self, client: Any):
         self.client = client
 
+    @staticmethod
+    def _raise_on_failed_response(response: Mapping[str, Any], operation: str) -> None:
+        if response.get("timed_out") or response.get("failures"):
+            raise RuntimeError(f"Elasticsearch {operation} failed")
+        if response.get("_shards", {}).get("failed", 0):
+            raise RuntimeError(f"Elasticsearch {operation} failed")
+
     async def search_by_vector(
         self,
         embedding: AsyncEmbeddingClient,
         query: str,
         options: RetrievalSearchOptions,
     ) -> list[DocumentChunk]:
-        vector = normalize_vector(await embedding.aembed_query(query))
+        return await self.search_by_query_vector(
+            await embedding.aembed_query(query),
+            options,
+        )
+
+    async def search_by_query_vector(
+        self,
+        query_vector: Sequence[float],
+        options: RetrievalSearchOptions,
+    ) -> list[DocumentChunk]:
+        vector = normalize_vector(query_vector)
         response = await self.client.search(
             index=options.indices,
             from_=0,
@@ -386,6 +403,7 @@ class AsyncElasticSearchRetrieval:
             ),
             allow_partial_search_results=False,
         )
+        self._raise_on_failed_response(response, "vector search")
         return await self.resolve_parent_chunks(
             vector_hits_to_chunks(response, options.score_threshold),
             options.indices,

@@ -13,10 +13,16 @@ from functools import partial
 from typing import Any
 
 from langchain_core.documents import Document as LangChainDocument
+from redbear_model import (
+    EmbeddingPurpose,
+    EmbeddingRequest,
+    ImageEmbeddingContent,
+    is_qwen3_vl_embedding,
+)
 from redbear_model.runtime import RedBearEmbeddings, RedBearLLM, RedBearRerank
 
 from ..api.dependencies import Principal
-from ..api.schemas.chunk import RetrieveType
+from ..api.schemas.chunk import ImageRetrievalQuery, RetrieveType
 from ..api.schemas.knowledge_metadata import MetadataFilterMode
 from ..api.schemas.knowledge_retrieval import (
     KnowledgeRetrievalRequest,
@@ -61,6 +67,7 @@ from ..rag.retrieval.models import (
 from ..rag.retrieval.rerank import ModelRerankResult, RerankEngine
 from ..runtime import ProcessRuntime
 from .knowledge_retrieval_preparation import KnowledgeRetrievalPreparation
+from .multimodal_image import validate_image_data_uri
 
 logger = logging.getLogger(__name__)
 _SOURCE_INDEX = "_retrieval_source_index"
@@ -96,6 +103,14 @@ class _TimedElasticSearchRetrieval(AsyncElasticSearchRetrieval):
             vector = normalize_vector(await embedding.aembed_query(query))
         finally:
             _record_elapsed(self._timings, "embedding_ms", embedding_started_at)
+        return await self.search_by_query_vector(vector, options)
+
+    async def search_by_query_vector(
+        self,
+        query_vector: Sequence[float],
+        options: RetrievalSearchOptions,
+    ) -> list[DocumentChunk]:
+        vector = normalize_vector(query_vector)
         search_started_at = time.perf_counter()
         try:
             response = await self.client.search(
@@ -171,6 +186,7 @@ class KnowledgeRetrievalService:
         request: KnowledgeRetrievalRequest,
         principal: Principal,
     ) -> KnowledgeRetrievalResult:
+        image_query = cls._validated_image_query(request)
         log_id = cls._new_retrieval_log_id()
         started_at = time.perf_counter()
         timings = RetrievalTimings()
@@ -195,6 +211,7 @@ class KnowledgeRetrievalService:
         cls._record_timing(timings, "db_snapshot_ms", snapshot_started_at)
         if not preparation.targets:
             return cls._finish_empty(log_id, started_at, "no_targets", timings)
+        cls._validate_image_targets(preparation, image_query)
 
         metadata_started_at = time.perf_counter()
         filter_groups = await cls._build_metadata_filter_groups(
@@ -235,6 +252,7 @@ class KnowledgeRetrievalService:
             request,
             preparation,
             document_ids,
+            image_query=image_query,
             timings=timings,
             log_id=log_id,
         )
@@ -272,6 +290,7 @@ class KnowledgeRetrievalService:
         preparation: RetrievalPreparation,
         document_ids: list[str] | None,
         *,
+        image_query: ImageEmbeddingContent | None = None,
         timings: RetrievalTimings | None = None,
         log_id: str | None = None,
     ) -> KnowledgeRetrievalResult:
@@ -320,6 +339,7 @@ class KnowledgeRetrievalService:
                         and target.params.retrieve_type is RetrieveType.HYBRID
                     ),
                     request_reranker=preparation.request_reranker,
+                    image_query=image_query,
                     timings=timings,
                     log_id=log_id,
                 )
@@ -403,12 +423,14 @@ class KnowledgeRetrievalService:
         graph_target: GraphTargetSnapshot | None,
         use_request_reranker: bool = False,
         request_reranker: ModelRuntimeSnapshot | None = None,
+        image_query: ImageEmbeddingContent | None = None,
         timings: RetrievalTimings | None = None,
         log_id: str | None = None,
     ) -> TargetRetrievalResult:
         started_at = time.perf_counter()
         params = target.params
         target_type = params.retrieve_type
+        text_query = request.query_text
         if target_type is RetrieveType.Graph:
             if graph_target is None:
                 cls._log_target_done(
@@ -462,7 +484,12 @@ class KnowledgeRetrievalService:
             None if target_type is RetrieveType.PARTICIPLE else params.similarity_threshold,
         )
         if target_type is RetrieveType.PARTICIPLE:
-            chunks = await store.search_by_full_text(request.query, full_text_options)
+            if text_query is None:
+                raise KnowledgeError.from_code(
+                    "KB_VALIDATION_ERROR",
+                    "Image query does not support participle retrieval",
+                )
+            chunks = await store.search_by_full_text(text_query, full_text_options)
             cls._log_target_done(
                 target,
                 0,
@@ -501,7 +528,28 @@ class KnowledgeRetrievalService:
             params.vector_similarity_weight,
         )
         if target_type is RetrieveType.SEMANTIC:
-            chunks = await store.search_by_vector(embedding, request.query, vector_options)
+            if image_query is not None:
+                embedding_started_at = time.perf_counter()
+                try:
+                    embedded_query = await embedding.aembed_contents(
+                        EmbeddingRequest(
+                            purpose=EmbeddingPurpose.RETRIEVAL,
+                            contents=(image_query,),
+                        )
+                    )
+                finally:
+                    cls._record_timing(timings, "embedding_ms", embedding_started_at)
+                chunks = await store.search_by_query_vector(
+                    embedded_query.vector,
+                    vector_options,
+                )
+            else:
+                if text_query is None:
+                    raise KnowledgeError.from_code(
+                        "KB_VALIDATION_ERROR",
+                        "Text query content is unavailable",
+                    )
+                chunks = await store.search_by_vector(embedding, text_query, vector_options)
             cls._log_target_done(
                 target,
                 len(chunks),
@@ -523,46 +571,72 @@ class KnowledgeRetrievalService:
                 )
             )
 
-        vector_task = asyncio.create_task(
-            store.search_by_vector(embedding, request.query, vector_options)
-        )
-        text_task = asyncio.create_task(
-            store.search_by_full_text(request.query, full_text_options)
-        )
-        graph_task = (
-            asyncio.create_task(
-                cls._retrieve_evidence_graph_channel(
-                    runtime,
-                    client,
-                    request,
-                    target,
-                    graph_target,
-                    document_ids,
-                    timings=timings,
-                    log_id=log_id,
+        if image_query is not None:
+            embedding_started_at = time.perf_counter()
+            try:
+                embedded_query = await embedding.aembed_contents(
+                    EmbeddingRequest(
+                        purpose=EmbeddingPurpose.RETRIEVAL,
+                        contents=(image_query,),
+                    )
                 )
+            finally:
+                cls._record_timing(timings, "embedding_ms", embedding_started_at)
+            vector_chunks = await store.search_by_query_vector(
+                embedded_query.vector,
+                vector_options,
             )
-            if (
-                params.enable_graph_retrieval
-                and graph_target is not None
-                and graph_target.pipeline is GraphPipeline.EVIDENCE
+            text_chunks = []
+            graph_result = KnowledgeRetrievalResult()
+            active_tasks = []
+        else:
+            if text_query is None:
+                raise KnowledgeError.from_code(
+                    "KB_VALIDATION_ERROR",
+                    "Text query content is unavailable",
+                )
+            vector_task = asyncio.create_task(
+                store.search_by_vector(embedding, text_query, vector_options)
             )
-            else None
-        )
-        active_tasks = [vector_task, text_task]
-        if graph_task is not None:
-            active_tasks.append(graph_task)
-        try:
-            gathered = await asyncio.gather(*active_tasks)
-        except BaseException:
-            for task in active_tasks:
-                task.cancel()
-            await asyncio.gather(*active_tasks, return_exceptions=True)
-            raise
+            text_task = asyncio.create_task(
+                store.search_by_full_text(text_query, full_text_options)
+            )
+            graph_task = (
+                asyncio.create_task(
+                    cls._retrieve_evidence_graph_channel(
+                        runtime,
+                        client,
+                        request,
+                        target,
+                        graph_target,
+                        document_ids,
+                        timings=timings,
+                        log_id=log_id,
+                    )
+                )
+                if (
+                    params.enable_graph_retrieval
+                    and graph_target is not None
+                    and graph_target.pipeline is GraphPipeline.EVIDENCE
+                )
+                else None
+            )
+            active_tasks = [vector_task, text_task]
+            if graph_task is not None:
+                active_tasks.append(graph_task)
+            try:
+                gathered = await asyncio.gather(*active_tasks)
+            except BaseException:
+                for task in active_tasks:
+                    task.cancel()
+                await asyncio.gather(*active_tasks, return_exceptions=True)
+                raise
 
-        vector_chunks = gathered[0]
-        text_chunks = gathered[1]
-        graph_result = gathered[2] if graph_task is not None else KnowledgeRetrievalResult()
+            vector_chunks = gathered[0]
+            text_chunks = gathered[1]
+            graph_result = (
+                gathered[2] if graph_task is not None else KnowledgeRetrievalResult()
+            )
         semantic_candidates = [
             candidate_from_chunk(
                 chunk,
@@ -950,7 +1024,7 @@ class KnowledgeRetrievalService:
             client_pool=runtime.model_runtime.pool,
         )
         return await generate_filter_groups(
-            request.query,
+            request.query_text or "",
             dict(preparation.common_metadata_defs),
             llm,
         )
@@ -1218,13 +1292,15 @@ class KnowledgeRetrievalService:
         principal: Principal,
         timings: RetrievalTimings,
     ) -> dict[str, Any]:
+        normalized_query = request.normalized_query
         return {
             "id": log_id,
             "actor": cls._compact_id(principal.actor_id),
             "kb_count": len(request.kb_ids),
             "ex_id_count": len(request.ex_ids),
             "knowledge_base_count": len(request.knowledge_bases),
-            "query_len": len(request.query),
+            "query_len": len(request.query_text or ""),
+            "query_modality": normalized_query.modality,
             "type": request.retrieve_type,
             "top_k": request.top_k,
             "top_n": request.top_n,
@@ -1232,6 +1308,60 @@ class KnowledgeRetrievalService:
             "metadata_mode": request.metadata_filter_mode,
             "async_mode": "native",
         } | timings.as_log_fields()
+
+    @staticmethod
+    def _validated_image_query(
+        request: KnowledgeRetrievalRequest,
+    ) -> ImageEmbeddingContent | None:
+        normalized = request.normalized_query
+        if not isinstance(normalized, ImageRetrievalQuery):
+            return None
+        if request.retrieve_type not in {RetrieveType.SEMANTIC, RetrieveType.HYBRID}:
+            raise KnowledgeError.from_code(
+                "KB_VALIDATION_ERROR",
+                "Image query supports semantic or hybrid retrieval only",
+            )
+        if request.enable_graph_retrieval:
+            raise KnowledgeError.from_code(
+                "KB_VALIDATION_ERROR",
+                "Image query does not support graph retrieval",
+            )
+        if request.metadata_filter_mode is MetadataFilterMode.AUTO:
+            raise KnowledgeError.from_code(
+                "KB_VALIDATION_ERROR",
+                "Image query does not support automatic metadata filters",
+            )
+        validated = validate_image_data_uri(normalized.content)
+        return ImageEmbeddingContent(
+            media_type=validated.media_type,
+            data_uri=validated.data_uri,
+            decoded_bytes=validated.decoded_bytes,
+        )
+
+    @staticmethod
+    def _validate_image_targets(
+        preparation: RetrievalPreparation,
+        image_query: ImageEmbeddingContent | None,
+    ) -> None:
+        if image_query is None:
+            return
+        for target in preparation.targets:
+            if target.params.retrieve_type not in {
+                RetrieveType.SEMANTIC,
+                RetrieveType.HYBRID,
+            } or target.params.enable_graph_retrieval:
+                raise KnowledgeError.from_code(
+                    "KB_VALIDATION_ERROR",
+                    "Image query target configuration is not supported",
+                )
+            if (
+                target.embedding.resolved is None
+                or not is_qwen3_vl_embedding(target.embedding.resolved)
+            ):
+                raise KnowledgeError.from_code(
+                    "KB_MODEL_UNAVAILABLE",
+                    "Image query requires qwen3-vl embedding",
+                )
 
     @classmethod
     def _finish_empty(

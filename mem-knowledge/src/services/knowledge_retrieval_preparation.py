@@ -504,6 +504,9 @@ class KnowledgeRetrievalPreparation:
         refs: list[_KnowledgeRef],
         targets: list[RetrievalTarget],
     ) -> GraphRetrievalSnapshot | None:
+        query_text = request.query_text
+        if query_text is None:
+            return None
         knowledge_by_id = {ref.knowledge.id: ref.knowledge for ref in refs}
         snapshots = []
         pipelines: set[GraphPipeline] = set()
@@ -558,7 +561,7 @@ class KnowledgeRetrievalPreparation:
                 "KB_VALIDATION_ERROR",
                 "all graph targets must use the same graph pipeline",
             )
-        return GraphRetrievalSnapshot(request.query, snapshots[0].pipeline, tuple(snapshots))
+        return GraphRetrievalSnapshot(query_text, snapshots[0].pipeline, tuple(snapshots))
 
     @staticmethod
     async def _snapshot_model(
