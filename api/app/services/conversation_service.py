@@ -941,8 +941,21 @@ class ConversationService:
             app_id: uuid.UUID,
             workspace_id: uuid.UUID,
             message_id: uuid.UUID,
+            external_user_id: str,
     ) -> list[str]:
-        """获取指定 assistant 消息的预制问题（meta_data.suggested_questions）。"""
+        """获取指定 assistant 消息的预制问题（meta_data.suggested_questions）。
+
+        external_user_id 为外部业务用户号，用于校验消息所属会话确实属于该终端用户，
+        避免仅凭 message_id 读取他人会话内容的预制问题。
+        """
+        if not external_user_id or not external_user_id.strip():
+            raise BusinessException("user_id 不能为空", BizCode.INVALID_PARAMETER)
+
+        internal_user_id = self._resolve_v1_internal_user_id(
+            workspace_id=workspace_id,
+            external_user_id=external_user_id,
+        )
+
         message = self.db.get(Message, message_id)
         if not message or message.is_deleted:
             raise BusinessException("消息不存在", BizCode.NOT_FOUND)
@@ -959,6 +972,9 @@ class ConversationService:
             conversation.app_id != app_id
             or conversation.workspace_id != workspace_id
             or conversation.is_active is not True
+            or conversation.is_draft is not False
+            or internal_user_id is None
+            or conversation.user_id != internal_user_id
         ):
             # 为避免根据错误码推断会话/消息是否存在，这里与上方保持同样的 NOT_FOUND 返回
             raise BusinessException("消息不存在", BizCode.NOT_FOUND)
@@ -1237,6 +1253,19 @@ class ConversationService:
                         "Conversation does not belong to this app",
                         BizCode.INVALID_CONVERSATION
                     )
+                # 归属校验：与 get_v1_conversation_messages / 消息反馈接口口径一致，
+                # 避免仅凭 conversation_id 访问其他终端用户的会话或控制台草稿会话。
+                if user_id is not None and str(conversation.user_id) != str(user_id):
+                    logger.warning(
+                        "Conversation does not belong to the requesting end user.",
+                        extra={
+                            "conversation_id": str(conversation_id),
+                            "app_id": str(app_id),
+                        }
+                    )
+                    raise BusinessException("会话不存在", BizCode.NOT_FOUND)
+                if conversation.is_draft is not False or conversation.is_active is not True:
+                    raise BusinessException("会话不存在", BizCode.NOT_FOUND)
                 return conversation
             except ResourceNotFoundException:
                 logger.warning(

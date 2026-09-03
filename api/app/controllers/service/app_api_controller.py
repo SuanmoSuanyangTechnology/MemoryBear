@@ -109,10 +109,13 @@ async def _get_or_create_v1_end_user_async(
         return existing_end_user
 
     workspace = await db.get(Workspace, workspace_id)
-    if workspace:
+    # 配额查询在 premium 表缺失时会 rollback 当前 AsyncSession，并使 ORM 实例过期。
+    # 在检查前保存标量，后续禁止再读取 workspace.*，避免触发 MissingGreenlet。
+    workspace_tenant_id = workspace.tenant_id if workspace is not None else None
+    if workspace_tenant_id is not None:
         await check_end_user_quota_async(
             db,
-            workspace.tenant_id,
+            workspace_tenant_id,
             workspace_id=workspace_id,
         )
 
@@ -122,9 +125,9 @@ async def _get_or_create_v1_end_user_async(
         other_id=other_id,
     )
     # 终端用户已落库，用量真正发生变化后才评估告警。
-    if workspace is not None:
+    if workspace_tenant_id is not None:
         await report_quota_change(
-            workspace.tenant_id,
+            workspace_tenant_id,
             "end_user_quota",
             workspace_id=workspace_id,
         )
@@ -195,6 +198,21 @@ def _parse_release_config(release: AppRelease) -> dict:
         except json.JSONDecodeError:
             config = {}
     return config if isinstance(config, dict) else {}
+
+
+async def _read_json_body(request: Request) -> dict:
+    """解析 JSON 请求体。
+
+    端点内手工解析 body 时，非法 JSON 会以未捕获异常落到 500；
+    这里统一转成参数类业务错误（1003 / HTTP 400）。
+    """
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, UnicodeDecodeError, ValueError) as exc:
+        raise BusinessException("请求体不是合法的 JSON", BizCode.INVALID_PARAMETER, cause=exc)
+    if not isinstance(body, dict):
+        raise BusinessException("请求体必须是 JSON 对象", BizCode.INVALID_PARAMETER)
+    return body
 
 
 def _get_standard_variables(variables: list, app_type: AppType) -> list:
@@ -275,7 +293,7 @@ async def chat(
     - 不传 version：使用当前生效版本（current_release，回滚后为回滚目标版本）
     - 传 version=release_id：使用指定版本uuid的历史快照，例如 {"version": "{{release_id}}"}
     """
-    body = await request.json()
+    body = await _read_json_body(request)
     payload = AppChatRequest(**body)
     request_started_at = time.perf_counter()
     request_wall_clock = datetime.datetime.now(datetime.timezone.utc)
@@ -659,11 +677,7 @@ async def submit_human_intervention_api(
         api_key_auth: ApiKeyAuth = None,
         db: Session = Depends(get_db),
 ):
-    app_id = api_key_auth.resource_id
-    # Query by execution_id (unique key) first, then validate app relationship.
-    # Using a combined filter (execution_id + app_id) can fail when the API Key's
-    # resource_id doesn't match the app_id stored in the execution record
-    # (e.g. API Key resource_id points to a release rather than the app directly).
+    app_id = _get_app_id(api_key_auth)
     execution = db.query(WorkflowExecution).filter(
         WorkflowExecution.execution_id == execution_id,
     ).first()
@@ -671,7 +685,14 @@ async def submit_human_intervention_api(
     if not execution:
         raise BusinessException("执行记录不存在", BizCode.NOT_FOUND)
 
-    # Validate that the execution belongs to the API Key's workspace
+    # API Key 只能提交其绑定应用产生的人工介入，避免同工作空间跨应用越权。
+    if execution.app_id != app_id:
+        raise BusinessException("无权操作此执行记录", BizCode.FORBIDDEN)
+
+    # 应用已删除或执行记录成为孤儿时，不能继续访问 relationship 属性导致 500。
+    if execution.app is None:
+        raise BusinessException("执行记录关联的应用不存在", BizCode.NOT_FOUND)
+
     if execution.app.workspace_id != api_key_auth.workspace_id:
         raise BusinessException("无权操作此执行记录", BizCode.FORBIDDEN)
 
@@ -752,8 +773,12 @@ async def get_message_suggested_questions_v1(
         api_key_auth: ApiKeyAuth = None,
         db: Session = Depends(get_db),
         conversation_service: Annotated[ConversationService, Depends(get_conversation_service)] = None,
+        user_id: str = Query(..., description="外部系统用户 ID"),
 ):
-    """获取指定消息的预制问题列表（来自 messages.meta_data.suggested_questions）。"""
+    """获取指定消息的预制问题列表（来自 messages.meta_data.suggested_questions）。
+
+    user_id 必填：仅返回该终端用户本人会话中的消息预制问题。
+    """
     app_id = _get_app_id(api_key_auth)
     logger.info(
         f"V1 get message suggested questions - message_id: {message_id}, "
@@ -764,6 +789,7 @@ async def get_message_suggested_questions_v1(
         app_id=app_id,
         workspace_id=api_key_auth.workspace_id,
         message_id=message_id,
+        external_user_id=user_id,
     )
     return success(data=suggested_questions)
 

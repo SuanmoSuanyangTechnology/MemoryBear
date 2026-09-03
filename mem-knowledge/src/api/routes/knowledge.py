@@ -52,10 +52,11 @@ from ...tasks.state import (
     claim_or_get_rebuild_job_async,
     release_rebuild_job_async,
 )
-from ..dependencies import Principal, get_principal, get_runtime
+from ..dependencies import Principal, get_principal, get_runtime, get_source
+from ..schemas.chunk import KnowledgeRetrievalSource
 from ..schemas.common import SuccessEnvelope, fail, success
 from ..schemas.file import KBBatchDownloadRequest
-from ..schemas.knowledge import KnowledgeCreate, KnowledgeUpdate
+from ..schemas.knowledge import KnowledgeCreate, KnowledgeUpdate, project_public_knowledge_data
 
 router = APIRouter(prefix="/knowledges", tags=["knowledges"])
 
@@ -184,6 +185,7 @@ async def get_knowledges(
     request: Request,
     principal: Annotated[Principal, Depends(get_principal)],
     runtime: Annotated[ProcessRuntime, Depends(get_runtime)],
+    source: Annotated[KnowledgeRetrievalSource, Depends(get_source)],
     parent_id: Annotated[uuid.UUID | None, Query(description="parent folder id")] = None,
     page: Annotated[int, Query(gt=0)] = 1,
     pagesize: Annotated[int, Query(gt=0, le=100)] = 20,
@@ -204,6 +206,8 @@ async def get_knowledges(
             keywords=keywords,
             kb_ids=kb_ids,
         )
+    if source is KnowledgeRetrievalSource.EXTERNAL_API:
+        items = [project_public_knowledge_data(item) for item in items]
     return _success(
         request,
         {
@@ -225,10 +229,13 @@ async def create_knowledge(
     create_data: KnowledgeCreate,
     principal: Annotated[Principal, Depends(get_principal)],
     runtime: Annotated[ProcessRuntime, Depends(get_runtime)],
+    source: Annotated[KnowledgeRetrievalSource, Depends(get_source)],
 ) -> SuccessEnvelope[dict[str, Any]]:
     async with runtime.database.async_session() as db:
         knowledge = await knowledge_service.create_knowledge(db, create_data, principal)
         data = await knowledge_service.knowledge_to_data(db, knowledge)
+    if source is KnowledgeRetrievalSource.EXTERNAL_API:
+        data = project_public_knowledge_data(data)
     return _success(
         request,
         data,
@@ -242,12 +249,15 @@ async def get_knowledge(
     knowledge_id: uuid.UUID,
     principal: Annotated[Principal, Depends(get_principal)],
     runtime: Annotated[ProcessRuntime, Depends(get_runtime)],
+    source: Annotated[KnowledgeRetrievalSource, Depends(get_source)],
 ) -> SuccessEnvelope[dict[str, Any]]:
     async with runtime.database.async_session() as db:
         knowledge = await knowledge_service.get_knowledge(db, knowledge_id, principal)
         if knowledge is None:
             raise knowledge_service._not_found()
         data = await knowledge_service.build_knowledge_detail_data(db, knowledge)
+    if source is KnowledgeRetrievalSource.EXTERNAL_API:
+        data = project_public_knowledge_data(data)
     return _success(
         request,
         data,
@@ -284,6 +294,7 @@ async def update_knowledge(
     update_data: KnowledgeUpdate,
     principal: Annotated[Principal, Depends(get_principal)],
     runtime: Annotated[ProcessRuntime, Depends(get_runtime)],
+    source: Annotated[KnowledgeRetrievalSource, Depends(get_source)],
 ) -> SuccessEnvelope[dict[str, Any]]:
     async with runtime.database.async_session() as db:
         plan = await knowledge_service.prepare_knowledge_update(
@@ -337,9 +348,12 @@ async def update_knowledge(
                 "Failed to dispatch reparse tasks knowledge_id=%s",
                 knowledge_id,
             )
+    response_data = outcome.response_data
+    if source is KnowledgeRetrievalSource.EXTERNAL_API and response_data is not None:
+        response_data = project_public_knowledge_data(response_data)
     return _success(
         request,
-        outcome.response_data,
+        response_data,
         "The knowledge base information has been successfully updated",
     )
 

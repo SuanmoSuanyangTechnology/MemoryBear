@@ -124,3 +124,31 @@ class Knowledge(KnowledgeBase):
     @field_serializer("created_at", "updated_at", when_used="json")
     def _serialize_time(self, value: datetime.datetime) -> int | None:
         return to_timestamp_ms(value)
+
+
+PUBLIC_KNOWLEDGE_MODEL_FIELDS = frozenset({"embedding", "reranker", "llm", "image2text"})
+PUBLIC_MODEL_FORBIDDEN_FIELDS = frozenset({"api_keys", "api_key", "api_base", "config"})
+
+
+def _project_public_model(model: object) -> object:
+    if not isinstance(model, dict):
+        return model
+    return {
+        key: value
+        for key, value in model.items()
+        if key not in PUBLIC_MODEL_FORBIDDEN_FIELDS
+    }
+
+
+def project_public_knowledge_data(data: dict) -> dict:
+    """Copy one knowledge node and remove only model credential/config fields."""
+    public = dict(data)
+    for field in PUBLIC_KNOWLEDGE_MODEL_FIELDS:
+        if field in public:
+            public[field] = _project_public_model(public[field])
+    if isinstance(public.get("children"), list):
+        public["children"] = [
+            project_public_knowledge_data(child)
+            for child in public["children"]
+        ]
+    return public
