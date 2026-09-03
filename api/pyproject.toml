@@ -72,6 +72,7 @@ dependencies = [
     "langchain-openai>=1.0.2",
     "langchain-community>=0.3.31",
     "dashscope>=1.25.0",
+    "redbear-model[runtime,dashscope]",
     "neo4j>=6.0.3",
     "chonkie>=1.1.2",
     "pandas>=2.3.3",
@@ -152,6 +153,9 @@ dependencies = [
     "langid>=1.1.6",
     "asyncpg==0.31.0"
 ]
+
+[tool.uv.sources]
+redbear-model = { path = "../packages/redbear-model" }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

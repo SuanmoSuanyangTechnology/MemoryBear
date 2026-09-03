@@ -1,3 +1,4 @@
+import base64
 from datetime import datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -7,6 +8,26 @@ import uuid
 import math
 import time
 import asyncio
+
+from pydantic import SecretStr
+from redbear_model import (
+    EmbeddingPurpose,
+    EmbeddingRequest,
+    ImageEmbeddingContent,
+    ModelCapability as SharedModelCapability,
+    ModelProvider as SharedModelProvider,
+    ModelRuntimeOptions,
+    ModelType as SharedModelType,
+    RerankCandidateView,
+    ResolvedModelConfig,
+    TextEmbeddingContent,
+    is_qwen3_vl_embedding,
+    is_qwen3_vl_reranker,
+)
+from redbear_model.runtime import (
+    RedBearEmbeddings as SharedRedBearEmbeddings,
+    RedBearRerank as SharedRedBearRerank,
+)
 
 from app.models.models_model import ModelConfig, ModelApiKey, ModelType, LoadBalanceStrategy, ModelProvider
 from app.repositories.model_repository import ModelConfigRepository, ModelApiKeyRepository, ModelBaseRepository
@@ -25,6 +46,113 @@ from app.utils.redis_cache import (invalidate_workspace_model_options, get_json_
                                    CACHE_MISS, invalidate_runtime_model_info, invalidate_runtime_model_info_async)
 
 logger = get_business_logger()
+
+_MODEL_VALIDATION_CONFIG_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
+_MODEL_VALIDATION_KEY_ID = uuid.UUID("00000000-0000-0000-0000-000000000002")
+_MODEL_VALIDATION_TENANT_ID = uuid.UUID("00000000-0000-0000-0000-000000000003")
+_MODEL_VALIDATION_IMAGE_DATA_URI = (
+    "data:image/png;base64,"
+    "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAE0lEQVR4nGP8//8/AwMDEwMYAAAkBgMBXaJOiAAAAABJRU5ErkJggg=="
+)
+_MODEL_VALIDATION_IMAGE_BYTES = len(
+    base64.b64decode(_MODEL_VALIDATION_IMAGE_DATA_URI.partition(",")[2])
+)
+
+
+def _enum_value(value: Any) -> str:
+    return str(getattr(value, "value", value)).lower()
+
+
+def _shared_validation_config(
+    *,
+    model_name: str,
+    provider: str,
+    api_key: str,
+    api_base: str | None,
+    model_type: str,
+    capability: list | None,
+) -> ResolvedModelConfig:
+    return ResolvedModelConfig(
+        model_config_id=_MODEL_VALIDATION_CONFIG_ID,
+        key_id=_MODEL_VALIDATION_KEY_ID,
+        tenant_id=_MODEL_VALIDATION_TENANT_ID,
+        provider=SharedModelProvider(_enum_value(provider)),
+        model_type=SharedModelType(_enum_value(model_type)),
+        model_name=model_name,
+        api_key=SecretStr(api_key),
+        base_url=api_base,
+        capabilities=tuple(
+            SharedModelCapability(_enum_value(item)) for item in (capability or [])
+        ),
+        runtime=ModelRuntimeOptions(timeout_s=10.0, max_retries=0),
+    )
+
+
+def _validation_image() -> ImageEmbeddingContent:
+    return ImageEmbeddingContent(
+        media_type="image/png",
+        data_uri=_MODEL_VALIDATION_IMAGE_DATA_URI,
+        decoded_bytes=_MODEL_VALIDATION_IMAGE_BYTES,
+    )
+
+
+async def _validate_qwen3_vl_embedding(
+    config: ResolvedModelConfig,
+    test_message: str,
+    started_at: float,
+) -> dict[str, Any]:
+    embedding = SharedRedBearEmbeddings(config)
+    try:
+        result = await embedding.aembed_contents(
+            EmbeddingRequest(
+                purpose=EmbeddingPurpose.RETRIEVAL,
+                contents=(TextEmbeddingContent(text=test_message), _validation_image()),
+            )
+        )
+    finally:
+        await embedding.aclose()
+    usage = dict(result.usage)
+    usage.update(vector_count=1, vector_dimension=result.dimension)
+    return {
+        "valid": True,
+        "message": "Embedding 模型配置验证成功",
+        "response": f"成功生成 1 个融合向量，维度: {result.dimension}",
+        "elapsed_time": time.time() - started_at,
+        "usage": usage,
+        "error": None,
+    }
+
+
+async def _validate_qwen3_vl_rerank(
+    config: ResolvedModelConfig,
+    started_at: float,
+) -> dict[str, Any]:
+    rerank = SharedRedBearRerank(config)
+    views = (
+        RerankCandidateView(chunk_index=0, kind="text", content="测试文本候选"),
+        RerankCandidateView(
+            chunk_index=1,
+            kind="image",
+            image_index=0,
+            content=_MODEL_VALIDATION_IMAGE_DATA_URI,
+        ),
+    )
+    try:
+        results = await rerank.arerank_multimodal(
+            _validation_image(),
+            views,
+            top_n=len(views),
+        )
+    finally:
+        await rerank.aclose()
+    return {
+        "valid": True,
+        "message": "Rerank 模型配置验证成功",
+        "response": f"成功完成多模态重排序，返回 {len(results)} 个结果",
+        "elapsed_time": time.time() - started_at,
+        "usage": {"document_count": len(views), "result_count": len(results)},
+        "error": None,
+    }
 
 
 def _model_option_cache_state(model: ModelConfig) -> tuple[uuid.UUID | None, bool]:
@@ -211,13 +339,47 @@ class ModelConfigService:
             Dict: 验证结果
         """
         _ = db
-        from app.core.models import RedBearLLM, RedBearRerank
-        from app.core.models.base import RedBearModelConfig
-        from app.core.models.embedding import RedBearEmbeddings
         import traceback
 
+        model_type_lower = _enum_value(model_type)
+        provider_lower = _enum_value(provider)
+        is_qwen3_vl_request = provider_lower == "dashscope" and (
+            (model_type_lower, model_name)
+            in {
+                ("embedding", "qwen3-vl-embedding"),
+                ("rerank", "qwen3-vl-rerank"),
+            }
+        )
         try:
             start_time = time.time()
+
+            if is_qwen3_vl_request:
+                validation_capability = list(capability or [])
+                if "vision" not in {
+                    _enum_value(item) for item in validation_capability
+                }:
+                    validation_capability.append("vision")
+                shared_config = _shared_validation_config(
+                    model_name=model_name,
+                    provider=provider_lower,
+                    api_key=api_key,
+                    api_base=api_base,
+                    model_type=model_type_lower,
+                    capability=validation_capability,
+                )
+                if is_qwen3_vl_embedding(shared_config):
+                    return await _validate_qwen3_vl_embedding(
+                        shared_config,
+                        test_message,
+                        start_time,
+                    )
+                if is_qwen3_vl_reranker(shared_config):
+                    return await _validate_qwen3_vl_rerank(shared_config, start_time)
+                raise ValueError("Qwen3-VL model capability mismatch")
+
+            from app.core.models import RedBearLLM, RedBearRerank
+            from app.core.models.base import RedBearModelConfig
+            from app.core.models.embedding import RedBearEmbeddings
 
             model_config = RedBearModelConfig(
                 model_name=model_name,
@@ -231,8 +393,6 @@ class ModelConfigService:
             )
 
             # 根据模型类型选择不同的验证方式
-            model_type_lower = model_type.lower()
-
             if model_type_lower in ["llm", "chat"]:
                 # LLM/Chat 模型验证 - 统一使用字符串输入
                 llm = RedBearLLM(model_config, type=ModelType.LLM if model_type_lower == "llm" else ModelType.CHAT)
@@ -367,7 +527,11 @@ class ModelConfigService:
 
         except Exception as e:
             # 提取详细的错误信息
-            error_message = str(e)
+            error_message = (
+                "Qwen3-VL 模型验证失败"
+                if is_qwen3_vl_request
+                else str(e)
+            )
             error_type = type(e).__name__
             # 特殊处理常见的错误类型
             if "unsupported countries" in error_message.lower() or "unsupported region" in error_message.lower():

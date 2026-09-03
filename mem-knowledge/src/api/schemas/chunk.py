@@ -2,8 +2,9 @@
 
 import uuid
 from enum import StrEnum
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from ...rag.models.chunk import QAChunk
 from .knowledge_metadata import FilterGroup, MetadataFilterMode
@@ -38,6 +39,64 @@ class KnowledgeBaseConfig(BaseModel):
     enable_graph_retrieval: int | None = Field(default=None, ge=0, le=1)
     rerank_mode: RerankMode | None = None
     rerank_weights: RerankWeights | None = None
+
+
+class RetrievalPolicyRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kb_ids: list[uuid.UUID] = Field(min_length=1, max_length=100)
+    rerank_id: uuid.UUID | None = None
+
+    @field_validator("kb_ids")
+    @classmethod
+    def deduplicate_kb_ids(cls, value: list[uuid.UUID]) -> list[uuid.UUID]:
+        return list(dict.fromkeys(value))
+
+
+class RetrievalPolicy(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    participle: tuple[Literal["text", "image"], ...] = ("text",)
+    semantic: tuple[Literal["text", "image"], ...] = ("text",)
+    hybrid: tuple[Literal["text", "image"], ...] = ("text",)
+    graph: tuple[Literal["text", "image"], ...] = ("text",)
+
+
+class TextRetrievalQuery(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    modality: Literal["text"]
+    content: str
+
+    @field_validator("content")
+    @classmethod
+    def validate_content(cls, value: str) -> str:
+        content = value.strip()
+        if not content:
+            raise ValueError("text query content must not be empty")
+        return content
+
+
+class ImageRetrievalQuery(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    modality: Literal["image"]
+    content: str = Field(min_length=1, repr=False)
+
+
+type StructuredRetrievalQuery = Annotated[
+    TextRetrievalQuery | ImageRetrievalQuery,
+    Field(discriminator="modality"),
+]
+type RetrievalQuery = str | StructuredRetrievalQuery
+
+
+def normalize_retrieval_query(
+    query: RetrievalQuery,
+) -> TextRetrievalQuery | ImageRetrievalQuery:
+    if isinstance(query, str):
+        return TextRetrievalQuery(modality="text", content=query)
+    return query
 
 
 class ChunkType(StrEnum):
@@ -107,7 +166,7 @@ class ChunkUpdate(BaseModel):
 class ChunkRetrieve(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
-    query: str
+    query: RetrievalQuery
     kb_ids: list[uuid.UUID] = Field(default_factory=list)
     ex_ids: list[str] | None = None
     knowledge_bases: list[KnowledgeBaseConfig] = Field(default_factory=list)
@@ -125,6 +184,20 @@ class ChunkRetrieve(BaseModel):
     metadata_filters: list[FilterGroup] | None = None
     metadata_filter_mode: MetadataFilterMode = MetadataFilterMode.MANUAL
     metadata_filters_resolved: bool = False
+
+    @field_validator("query")
+    @classmethod
+    def validate_query(cls, value: RetrievalQuery) -> RetrievalQuery:
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                raise ValueError("query must not be empty")
+            return stripped
+        return value
+
+    @property
+    def normalized_query(self) -> TextRetrievalQuery | ImageRetrievalQuery:
+        return normalize_retrieval_query(self.query)
 
     @model_validator(mode="after")
     def resolve_top_n(self) -> "ChunkRetrieve":

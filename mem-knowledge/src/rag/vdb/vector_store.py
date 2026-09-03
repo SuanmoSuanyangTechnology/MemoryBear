@@ -2,18 +2,30 @@
 
 from __future__ import annotations
 
+import math
 import uuid
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
 from elasticsearch import NotFoundError
 from elasticsearch.helpers import bulk
+from redbear_model import (
+    EmbeddingPurpose,
+    EmbeddingRequest,
+    ImageEmbeddingContent,
+)
 
 from ..models.chunk import DocumentChunk, chunk_retrieval_content
+from ..models.embedding import (
+    PreparedChunk,
+    collect_asset_file_ids,
+    prepare_chunk_embedding_contents,
+)
 from .field import Field
 
 ES_DEFAULT_MAX_RESULT_WINDOW = 10000
+ImageResolver = Callable[..., dict[str, ImageEmbeddingContent]]
 
 
 @dataclass(frozen=True)
@@ -31,10 +43,22 @@ def collection_name_for_knowledge(knowledge_id: uuid.UUID | str) -> str:
 class TaskVectorStore:
     """Write chunks and perform only task-side metadata operations."""
 
-    def __init__(self, client: Any, knowledge_id: uuid.UUID | str, embeddings: Any):
+    def __init__(
+        self,
+        client: Any,
+        knowledge_id: uuid.UUID | str,
+        embeddings: Any,
+        *,
+        structured_multimodal: bool = False,
+        image_resolver: ImageResolver | None = None,
+        embedding_dimension: int | None = None,
+    ):
         self._client = client
         self._collection_name = collection_name_for_knowledge(knowledge_id)
         self._embeddings = embeddings
+        self._structured_multimodal = structured_multimodal
+        self._image_resolver = image_resolver
+        self._embedding_dimension = embedding_dimension
 
     def add_chunks(self, chunks: list[DocumentChunk]) -> None:
         if not chunks:
@@ -149,6 +173,8 @@ class TaskVectorStore:
         return total, [self._hit_to_chunk(hit) for hit in hits]
 
     def _embed_chunks(self, chunks: list[DocumentChunk]) -> list[list[float] | None]:
+        if self._structured_multimodal:
+            return self._embed_multimodal_chunks(chunks)
         positions = []
         texts = []
         vectors: list[list[float] | None] = [None] * len(chunks)
@@ -177,13 +203,68 @@ class TaskVectorStore:
             vectors[position] = vector
         return vectors
 
+    def _embed_multimodal_chunks(
+        self,
+        chunks: list[DocumentChunk],
+    ) -> list[list[float] | None]:
+        prepared_chunks = self._prepare_multimodal_chunks(chunks)
+        vectors: list[list[float] | None] = [None] * len(chunks)
+        for index, prepared in enumerate(prepared_chunks):
+            if not prepared.embedding_contents:
+                continue
+            result = self._embeddings.embed_contents(
+                EmbeddingRequest(
+                    purpose=EmbeddingPurpose.INDEX,
+                    contents=prepared.embedding_contents,
+                )
+            )
+            vector = list(result.vector)
+            expected_dimension = self._embedding_dimension or result.dimension
+            if len(vector) != expected_dimension or not all(
+                math.isfinite(value) for value in vector
+            ):
+                raise RuntimeError("Embedding result has an invalid vector")
+            vectors[index] = vector
+        return vectors
+
+    def _prepare_multimodal_chunks(
+        self,
+        chunks: list[DocumentChunk],
+    ) -> list[PreparedChunk]:
+        requested_ids = collect_asset_file_ids(chunks)
+        images = (
+            self._image_resolver(requested_ids, phase="index")
+            if requested_ids and self._image_resolver is not None
+            else {}
+        )
+        result: list[PreparedChunk] = []
+        for chunk in chunks:
+            result.append(
+                PreparedChunk(
+                    chunk=chunk,
+                    embedding_contents=prepare_chunk_embedding_contents(chunk, images),
+                )
+            )
+        return result
+
     @staticmethod
     def _validate_embedding_count(embedded: list[Any], expected: int) -> None:
         if len(embedded) != expected:
             raise RuntimeError("Embedding result count does not match input count")
 
     def _create_collection(self, sample: list[float] | None) -> None:
-        dimensions = len(sample) if sample is not None else 768
+        dimensions = (
+            len(sample)
+            if sample is not None
+            else (self._embedding_dimension or 768)
+        )
+        vector_mapping: dict[str, Any] = {
+            "type": "dense_vector",
+            "dims": dimensions,
+            "index": not self._structured_multimodal,
+        }
+        if not self._structured_multimodal:
+            vector_mapping["similarity"] = "cosine"
         self._client.indices.create(
             index=self._collection_name,
             mappings={
@@ -207,18 +288,14 @@ class TaskVectorStore:
                             "sort_id": {"type": "long"},
                             "status": {"type": "integer"},
                             "parent_id": {"type": "keyword"},
+                            "asset_file_ids": {"type": "keyword"},
                             "vision_text": {
                                 "type": "text",
                                 "analyzer": "ik_max_word",
                             },
                         },
                     },
-                    Field.VECTOR.value: {
-                        "type": "dense_vector",
-                        "dims": dimensions,
-                        "index": True,
-                        "similarity": "cosine",
-                    },
+                    Field.VECTOR.value: vector_mapping,
                     Field.CHUNK_TYPE.value: {"type": "keyword"},
                     Field.QUESTION.value: {
                         "type": "text",

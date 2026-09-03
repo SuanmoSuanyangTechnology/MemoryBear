@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 
+from redbear_model import ImageEmbeddingContent
+
 from ...api.schemas.rerank import RerankMode
 from ..models.chunk import DocumentChunk
 from .candidates import candidate_identity, chunk_identity, materialize_candidates
@@ -18,7 +20,7 @@ class ModelRerankResult:
 
 
 ModelRanker = Callable[
-    [ModelRuntimeSnapshot, str, Sequence[DocumentChunk], int],
+    [ModelRuntimeSnapshot, str | ImageEmbeddingContent, Sequence[DocumentChunk], int],
     Awaitable[ModelRerankResult],
 ]
 
@@ -34,7 +36,7 @@ class _WeightedScoreAdapter:
     async def rank(
         self,
         *,
-        query: str,
+        query: str | ImageEmbeddingContent,
         candidates: Sequence[RetrievalCandidate],
         plan: RerankPlan,
     ) -> list[RetrievalCandidate]:
@@ -59,7 +61,7 @@ class _ModelRerankAdapter:
     async def rank(
         self,
         *,
-        query: str,
+        query: str | ImageEmbeddingContent,
         candidates: Sequence[RetrievalCandidate],
         plan: RerankPlan,
         top_k: int,
@@ -108,7 +110,7 @@ class RerankEngine:
     async def rank(
         self,
         *,
-        query: str,
+        query: str | ImageEmbeddingContent,
         candidates: Sequence[RetrievalCandidate],
         plan: RerankPlan,
         top_k: int,

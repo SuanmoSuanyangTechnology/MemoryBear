@@ -1008,6 +1008,34 @@ models:
   - agent-thought
   - stream-tool-call
   logo: dashscope
+- name: qwen3-vl-embedding
+  type: embedding
+  provider: dashscope
+  description: qwen3-vl-embedding多模态嵌入模型，支持文本与图片融合向量
+  is_deprecated: false
+  is_official: true
+  capability:
+  - vision
+  is_omni: false
+  tags:
+  - 嵌入模型
+  - 多模态模型
+  - vision
+  logo: dashscope
+- name: qwen3-vl-rerank
+  type: rerank
+  provider: dashscope
+  description: qwen3-vl-rerank多模态重排序模型，支持文本与图片跨模态排序
+  is_deprecated: false
+  is_official: true
+  capability:
+  - vision
+  is_omni: false
+  tags:
+  - 重排序模型
+  - 多模态模型
+  - vision
+  logo: dashscope
 - name: gte-rerank-v2
   type: rerank
   provider: dashscope
