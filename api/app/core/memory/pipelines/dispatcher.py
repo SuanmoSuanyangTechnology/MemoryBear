@@ -701,7 +701,9 @@ async def dispatch_flush_conversation(conversation_id: str) -> int:
             ).one_or_none()
 
             if row is None:
-                logger.warning(f"[Dispatcher] Flush 对话不存在: conv={conversation_id}")
+                # 对话已不存在，pending 残留没有意义，直接清理。
+                unmark_conversation_pending(conversation_id)
+                logger.warning(f"[Dispatcher] Flush 对话不存在，清理 pending: conv={conversation_id}")
                 return 0
 
             write_cursor, end_user_id, workspace_id = row
@@ -729,7 +731,10 @@ async def dispatch_flush_conversation(conversation_id: str) -> int:
             ]
 
             if not pending_messages:
-                logger.info(f"[Dispatcher] Flush 无未写入消息，跳过: conv={conversation_id}")
+                # 无未写入消息说明游标已追平，可安全清理 pending_conversations Set，
+                # 否则该对话会一直残留在 Redis Set 中。
+                unmark_conversation_pending(conversation_id)
+                logger.info(f"[Dispatcher] Flush 无未写入消息，跳过并清理 pending: conv={conversation_id}")
                 return 0
 
         # Step 2: 解析 memory_config_id（走 workspace 默认配置，与滑动窗口路径一致）
