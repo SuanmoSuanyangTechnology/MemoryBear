@@ -1,9 +1,11 @@
 """LiteSkill（MemorySkills）内部管理接口客户端。
 
 供运营后台 ``/sys/memory-lite/*`` 适配层调用 LiteSkill 的
-``/internal/admin/memory-lite/*`` 只读接口。携带服务凭证
-``X-Internal-Token`` 以证明"请求来自 Enterprise"，并透传 admin_id / request_id
-用于链路追踪。参照 ``speedbear_gateway_client`` 的错误映射范式。
+``/internal/admin/memory-lite/*`` 管理接口，既包含 overview / users / products
+等只读查询接口，也包含 update_product / create_product / recharge_write_quota
+等写入接口。携带服务凭证 ``X-Internal-Token`` 以证明"请求来自 Enterprise"，
+并透传 admin_id / request_id 用于链路追踪。参照 ``speedbear_gateway_client``
+的错误映射范式。
 """
 
 from __future__ import annotations
@@ -26,7 +28,7 @@ class LiteSkillAdminError(Exception):
 
 
 class LiteSkillAdminClient:
-    """调用 LiteSkill 内部只读管理接口。"""
+    """调用 LiteSkill 内部管理接口（含只读查询与写入操作）。"""
 
     def __init__(self) -> None:
         self.base_url = settings.LITESKILL_BASE_URL.rstrip("/")
@@ -157,9 +159,17 @@ class LiteSkillAdminClient:
 
         url = f"{self.base_url}{path}"
         try:
-            with httpx.Client(timeout=self.timeout, follow_redirects=True) as client:
+            # 禁止自动跟随重定向：内部管理接口本不应发生重定向，
+            # 若跟随跨域重定向会把 X-Internal-Token 内部服务凭证泄露给重定向目标主机。
+            with httpx.Client(timeout=self.timeout, follow_redirects=False) as client:
                 response = client.request(
                     method.upper(), url, headers=headers, params=request_params, json=json
+                )
+            if response.is_redirect:
+                raise LiteSkillAdminError(
+                    f"LiteSkill 接口返回意外重定向: {response.status_code} -> "
+                    f"{response.headers.get('location', '')}",
+                    status_code=response.status_code,
                 )
             response.raise_for_status()
         except httpx.HTTPStatusError as exc:
@@ -202,7 +212,21 @@ class LiteSkillAdminClient:
 
     @staticmethod
     def _unwrap(payload: Any) -> Any:
-        """解包 LiteSkill 统一信封 ``{code:"OK", msg, data}`` 取 data。"""
+        """解包 LiteSkill 统一信封 ``{code:"OK", msg, data}`` 取 data。
+
+        HTTP 2xx 不代表业务成功：LiteSkill 可能在成功状态码下返回
+        ``code != "OK"`` 的业务错误信封。此处先校验 ``code``，非 OK 时
+        以信封中的 ``msg`` 抛出 :class:`LiteSkillAdminError`，避免调用方把
+        错误数据当成功结果消费。
+        """
+        if isinstance(payload, dict) and "code" in payload:
+            code = payload.get("code")
+            if code != "OK":
+                raise LiteSkillAdminError(
+                    LiteSkillAdminClient._extract_msg(payload)
+                    or f"LiteSkill 接口返回业务错误: {code}",
+                    payload=payload,
+                )
         if isinstance(payload, dict) and "data" in payload:
             return payload["data"]
         return payload
