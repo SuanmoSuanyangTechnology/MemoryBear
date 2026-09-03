@@ -33,6 +33,7 @@ _MEDIA_TYPE_TO_FORMAT = {
     "image/bmp": "BMP",
 }
 _FORMAT_TO_MEDIA_TYPE = {value: key for key, value in _MEDIA_TYPE_TO_FORMAT.items()}
+_STORAGE_TRANSCODE_FORMATS = frozenset({"GIF"})
 _STORAGE_IMAGE_MAX_EDGE = 4096
 _STORAGE_JPEG_QUALITY = 85
 logger = logging.getLogger(__name__)
@@ -112,7 +113,10 @@ def _open_storage_image(content: bytes) -> tuple[str, int, int]:
             image_format = str(image.format or "")
             width, height = image.size
             image.verify()
-    if image_format not in _FORMAT_TO_MEDIA_TYPE or width < 1 or height < 1:
+    if (
+        image_format not in _FORMAT_TO_MEDIA_TYPE
+        and image_format not in _STORAGE_TRANSCODE_FORMATS
+    ) or width < 1 or height < 1:
         raise ValueError("unsupported storage image")
     return image_format, width, height
 
@@ -121,6 +125,7 @@ def _compress_storage_image(content: bytes) -> bytes:
     with warnings.catch_warnings():
         warnings.simplefilter("error", Image.DecompressionBombWarning)
         with Image.open(io.BytesIO(content)) as source:
+            source.seek(0)
             source.load()
             image = ImageOps.exif_transpose(source)
             if max(image.size) > _STORAGE_IMAGE_MAX_EDGE:
@@ -165,8 +170,10 @@ def prepare_storage_image(
         return None
 
     prepared = content
-    media_type = _FORMAT_TO_MEDIA_TYPE[image_format]
-    if len(content) > MAX_IMAGE_BYTES:
+    requires_transcode = image_format in _STORAGE_TRANSCODE_FORMATS
+    media_type = _FORMAT_TO_MEDIA_TYPE.get(image_format, "image/jpeg")
+    exceeds_size_limit = len(content) > MAX_IMAGE_BYTES
+    if exceeds_size_limit:
         logger.warning(
             "event=multimodal_image_compression_started phase=%s "
             "original_bytes=%s limit_bytes=%s original_width=%s original_height=%s",
@@ -176,6 +183,7 @@ def prepare_storage_image(
             width,
             height,
         )
+    if exceeds_size_limit or requires_transcode:
         try:
             prepared = _compress_storage_image(content)
         except (Image.DecompressionBombError, Image.DecompressionBombWarning) as exc:
