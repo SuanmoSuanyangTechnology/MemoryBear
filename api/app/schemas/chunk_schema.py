@@ -1,8 +1,8 @@
 import uuid
 from enum import StrEnum
-from typing import Union
+from typing import Annotated, Literal, Union
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.core.rag.models.chunk import QAChunk
 from app.integrations.knowledge.contracts import (
@@ -38,6 +38,43 @@ class KnowledgeBaseConfig(BaseModel):
             "during hybrid retrieval. Falls back to the request value when omitted."
         ),
     )
+
+
+class TextRetrievalQuery(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    modality: Literal["text"]
+    content: str
+
+    @field_validator("content")
+    @classmethod
+    def validate_content(cls, value: str) -> str:
+        content = value.strip()
+        if not content:
+            raise ValueError("text query content must not be empty")
+        return content
+
+
+class ImageRetrievalQuery(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    modality: Literal["image"]
+    content: str = Field(min_length=1, repr=False)
+
+
+type StructuredRetrievalQuery = Annotated[
+    TextRetrievalQuery | ImageRetrievalQuery,
+    Field(discriminator="modality"),
+]
+type RetrievalQuery = str | StructuredRetrievalQuery
+
+
+def normalize_retrieval_query(
+    query: RetrievalQuery,
+) -> TextRetrievalQuery | ImageRetrievalQuery:
+    if isinstance(query, str):
+        return TextRetrievalQuery(modality="text", content=query)
+    return query
 
 
 class ChunkType(StrEnum):
@@ -117,7 +154,7 @@ class ChunkUpdate(BaseModel):
 class ChunkRetrieve(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
-    query: str
+    query: RetrievalQuery
     kb_ids: list[uuid.UUID] = Field(default_factory=list)
     ex_ids: list[str] | None = Field(None)
     knowledge_bases: list[KnowledgeBaseConfig] = Field(default_factory=list)
@@ -127,6 +164,7 @@ class ChunkRetrieve(BaseModel):
     top_k: int | None = Field(20, ge=1, le=100)
     top_n: int | None = Field(20, ge=1, le=100)
     retrieve_type: RetrieveType | None = Field(None)
+    rerank_id: uuid.UUID | None = None
     rerank_mode: RerankMode | None = None
     rerank_weights: RerankWeights | None = None
     enable_graph_retrieval: int = Field(
@@ -138,6 +176,20 @@ class ChunkRetrieve(BaseModel):
     rerank_score_threshold: float | None = Field(None, ge=0, le=1)
     metadata_filters: list[FilterGroup] | None = Field(None, description="filter condition groups")
     metadata_filter_mode: MetadataFilterMode = Field(MetadataFilterMode.MANUAL, description="filter mode")
+
+    @field_validator("query")
+    @classmethod
+    def validate_query(cls, value: RetrievalQuery) -> RetrievalQuery:
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                raise ValueError("query must not be empty")
+            return stripped
+        return value
+
+    @property
+    def normalized_query(self) -> TextRetrievalQuery | ImageRetrievalQuery:
+        return normalize_retrieval_query(self.query)
 
     @model_validator(mode="after")
     def resolve_top_n(self):
