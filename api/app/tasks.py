@@ -5180,20 +5180,30 @@ def do_implicit_emotions_for_user(self, end_user_id: str) -> Dict[str, Any]:
             logger.error(f"用户 {end_user_id} 隐性记忆更新失败: {e}")
 
         # --- 情绪建议 ---
+        # worker 进程内事件循环可能被其它任务的 asyncio.run() 更换，
+        # 共享 driver 绑定旧 loop 会报 "Future attached to a different loop"，
+        # 故与上方隐性记忆部分一致：任务级独立 driver，finally 中关闭。
         try:
-            emotion_service = EmotionAnalyticsService()
-            # db=None：内部自行开短 session 查 config → 关闭 → Neo4j + LLM
-            suggestions_data = await emotion_service.generate_emotion_suggestions(
-                end_user_id=end_user_id, language="zh"
-            )
-
-            # Session C：写回
-            with get_db_context() as db:
-                await emotion_service.save_suggestions_cache(
-                    end_user_id=end_user_id, suggestions_data=suggestions_data, db=db
+            emotion_service = EmotionAnalyticsService(shared_driver=False)
+            try:
+                # db=None：内部自行开短 session 查 config → 关闭 → Neo4j + LLM
+                suggestions_data = await emotion_service.generate_emotion_suggestions(
+                    end_user_id=end_user_id, language="zh"
                 )
-            emotion_success = True
-            logger.info(f"成功更新用户 {end_user_id} 的情绪建议")
+
+                # Session C：写回
+                with get_db_context() as db:
+                    await emotion_service.save_suggestions_cache(
+                        end_user_id=end_user_id, suggestions_data=suggestions_data, db=db
+                    )
+                emotion_success = True
+                logger.info(f"成功更新用户 {end_user_id} 的情绪建议")
+            finally:
+                # 尽力清理：关闭失败仅记录，避免覆盖上方业务原始异常
+                try:
+                    await emotion_service.emotion_repo.connector.close()
+                except Exception as close_err:
+                    logger.warning(f"用户 {end_user_id} 关闭情绪分析独立 driver 失败: {close_err}")
         except Exception as e:
             errors.append(f"情绪建议更新失败: {str(e)}")
             logger.error(f"用户 {end_user_id} 情绪建议更新失败: {e}")
@@ -5554,21 +5564,28 @@ def update_implicit_emotions_storage(self) -> Dict[str, Any]:
                         errors.append(error_msg)
                         logger.error(f"用户 {end_user_id} {error_msg}")
 
-                    # 更新情绪建议
+                    # 更新情绪建议（独立 driver：loop 可能被其它任务的 asyncio.run() 更换）
                     try:
-                        emotion_service = EmotionAnalyticsService()
-                        suggestions_data = await emotion_service.generate_emotion_suggestions(
-                            end_user_id=end_user_id,
-                            db=db,
-                            language="zh"
-                        )
-                        await emotion_service.save_suggestions_cache(
-                            end_user_id=end_user_id,
-                            suggestions_data=suggestions_data,
-                            db=db
-                        )
-                        emotion_success = True
-                        logger.info(f"成功更新用户 {end_user_id} 的情绪建议")
+                        emotion_service = EmotionAnalyticsService(shared_driver=False)
+                        try:
+                            suggestions_data = await emotion_service.generate_emotion_suggestions(
+                                end_user_id=end_user_id,
+                                db=db,
+                                language="zh"
+                            )
+                            await emotion_service.save_suggestions_cache(
+                                end_user_id=end_user_id,
+                                suggestions_data=suggestions_data,
+                                db=db
+                            )
+                            emotion_success = True
+                            logger.info(f"成功更新用户 {end_user_id} 的情绪建议")
+                        finally:
+                            # 尽力清理：关闭失败仅记录，避免覆盖上方业务原始异常
+                            try:
+                                await emotion_service.emotion_repo.connector.close()
+                            except Exception as close_err:
+                                logger.warning(f"用户 {end_user_id} 关闭情绪分析独立 driver 失败: {close_err}")
                     except Exception as e:
                         error_msg = f"情绪建议更新失败: {str(e)}"
                         errors.append(error_msg)
@@ -5640,16 +5657,24 @@ def update_implicit_emotions_storage(self) -> Dict[str, Any]:
                         errors.append(f"隐性记忆初始化失败: {str(e)}")
                         logger.error(f"新用户 {end_user_id} 隐性记忆初始化失败: {e}")
 
+                    # 独立 driver：loop 可能被其它任务的 asyncio.run() 更换
                     try:
-                        emotion_service = EmotionAnalyticsService()
-                        suggestions_data = await emotion_service.generate_emotion_suggestions(
-                            end_user_id=end_user_id, db=db, language="zh"
-                        )
-                        await emotion_service.save_suggestions_cache(
-                            end_user_id=end_user_id, suggestions_data=suggestions_data, db=db
-                        )
-                        emotion_success = True
-                        logger.info(f"成功初始化新用户 {end_user_id} 的情绪建议")
+                        emotion_service = EmotionAnalyticsService(shared_driver=False)
+                        try:
+                            suggestions_data = await emotion_service.generate_emotion_suggestions(
+                                end_user_id=end_user_id, db=db, language="zh"
+                            )
+                            await emotion_service.save_suggestions_cache(
+                                end_user_id=end_user_id, suggestions_data=suggestions_data, db=db
+                            )
+                            emotion_success = True
+                            logger.info(f"成功初始化新用户 {end_user_id} 的情绪建议")
+                        finally:
+                            # 尽力清理：关闭失败仅记录，避免覆盖上方业务原始异常
+                            try:
+                                await emotion_service.emotion_repo.connector.close()
+                            except Exception as close_err:
+                                logger.warning(f"用户 {end_user_id} 关闭情绪分析独立 driver 失败: {close_err}")
                     except Exception as e:
                         errors.append(f"情绪建议初始化失败: {str(e)}")
                         logger.error(f"新用户 {end_user_id} 情绪建议初始化失败: {e}")
@@ -5816,17 +5841,25 @@ def init_implicit_emotions_for_users(self, end_user_ids: List[str]) -> Dict[str,
                     logger.error(f"用户 {end_user_id} 隐性记忆初始化失败: {e}")
 
                 # --- 情绪建议：LLM 生成（内部自管理 session）---
+                # 独立 driver：loop 可能被其它任务的 asyncio.run() 更换
                 try:
-                    emotion_service = EmotionAnalyticsService()
-                    suggestions_data = await emotion_service.generate_emotion_suggestions(
-                        end_user_id=end_user_id, language="zh"
-                    )
-                    # Session C：写回
-                    with get_db_context() as db:
-                        await emotion_service.save_suggestions_cache(
-                            end_user_id=end_user_id, suggestions_data=suggestions_data, db=db
+                    emotion_service = EmotionAnalyticsService(shared_driver=False)
+                    try:
+                        suggestions_data = await emotion_service.generate_emotion_suggestions(
+                            end_user_id=end_user_id, language="zh"
                         )
-                    emotion_ok = True
+                        # Session C：写回
+                        with get_db_context() as db:
+                            await emotion_service.save_suggestions_cache(
+                                end_user_id=end_user_id, suggestions_data=suggestions_data, db=db
+                            )
+                        emotion_ok = True
+                    finally:
+                        # 尽力清理：关闭失败仅记录，避免覆盖上方业务原始异常
+                        try:
+                            await emotion_service.emotion_repo.connector.close()
+                        except Exception as close_err:
+                            logger.warning(f"用户 {end_user_id} 关闭情绪分析独立 driver 失败: {close_err}")
                 except Exception as e:
                     logger.error(f"用户 {end_user_id} 情绪建议初始化失败: {e}")
 

@@ -11,6 +11,9 @@ import type { KnowledgeConfigModalRef, KnowledgeBase, KnowledgeConfigForm, Retri
 import RbModal from '@/components/RbModal'
 import RbSlider from '@/components/RbSlider'
 import { formatDateTime } from '@/utils/format';
+import ModelSelect from '@/components/ModelSelect'
+import RadioGroupButton from '@/components/RadioGroupButton'
+import WeightBalanceSlider from './WeightBalanceSlider'
 
 const FormItem = Form.Item;
 
@@ -61,6 +64,19 @@ const KnowledgeConfigModal = forwardRef<KnowledgeConfigModalRef, KnowledgeConfig
         console.log('err', err)
       });
   }
+  const handleChangeMode = (value?: string | null) => {
+    if (value === 'reranking_model') {
+      form.setFieldValue('rerank_weights', null)
+    } else if (value === 'weighted_score') {
+      form.setFieldsValue({
+        reranker_id: null,
+        rerank_weights: {
+          semantic_weight: 1,
+          participle_weight: 0,
+        }
+      })
+    }
+  }
 
   useImperativeHandle(ref, () => ({
     handleOpen,
@@ -101,9 +117,15 @@ const KnowledgeConfigModal = forwardRef<KnowledgeConfigModalRef, KnowledgeConfig
               label: t(`application.${key}`),
               value: key,
             }))}
+            placeholder={t('common.pleaseSelect')}
+            onChange={(value) => {
+              if (value === 'hybrid') {
+                form.setFieldValue('rerank_mode', 'reranking_model')
+              }
+            }}
           />
         </FormItem>
-        {(values?.retrieve_type === 'hybrid') &&
+        {(values?.retrieve_type === 'hybrid') && <>
           <Form.Item
             name="enable_graph_retrieval"
             getValueProps={(value: 0 | 1 | undefined) => ({ checked: value === 1 })}
@@ -114,7 +136,58 @@ const KnowledgeConfigModal = forwardRef<KnowledgeConfigModalRef, KnowledgeConfig
           >
             <Switch checkedChildren={t('knowledgeBase.yes')} unCheckedChildren={t('knowledgeBase.no')} />
           </Form.Item>
-        }
+
+          <Form.Item name="rerank_mode"
+            label={t('application.rerank_mode')}
+            rules={[{ required: true, message: t('common.pleaseSelect') }]}
+          >
+            <RadioGroupButton
+              circle={false}
+              size="default"
+              variant="outlined"
+              block={true}
+              options={[
+                { label: t('application.reranking_model'), value: 'reranking_model' },
+                { label: t('application.weighted_score'), value: 'weighted_score' },
+              ]}
+              onChange={(value) => handleChangeMode(value)}
+            />
+          </Form.Item>
+
+          <FormItem
+            name="reranker_id"
+            label={t('application.rearrangementModel')}
+            rules={[{ required: values?.rerank_mode === 'reranking_model', message: t('common.pleaseSelect') }]}
+            extra={t('application.rearrangementModelDesc')}
+            hidden={values?.rerank_mode !== 'reranking_model'}
+          >
+            <ModelSelect
+              params={{ type: 'rerank' }}
+              className="rb:w-full!"
+            />
+          </FormItem>
+
+          {values?.rerank_mode === 'weighted_score' && <>
+            <Form.Item
+              required
+              label={t('application.weight_balance')}
+            >
+              <WeightBalanceSlider
+                semanticWeight={values?.rerank_weights?.semantic_weight}
+                participleWeight={values?.rerank_weights?.participle_weight}
+                onChange={(semanticWeight, participleWeight) => {
+                  form.setFieldsValue({
+                    rerank_weights: {
+                      semantic_weight: semanticWeight,
+                      participle_weight: participleWeight,
+                    },
+                  });
+                }}
+              />
+            </Form.Item>
+          </>}
+          <Form.Item name="rerank_weights" hidden />
+        </>}
         <FormItem
           name="top_k"
           label={t('application.top_k')}

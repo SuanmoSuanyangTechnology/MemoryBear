@@ -107,7 +107,6 @@ class ChunkUpdate(BaseModel):
 class ChunkRetrieve(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
-    source: KnowledgeRetrievalSource = KnowledgeRetrievalSource.GENERAL
     query: str
     kb_ids: list[uuid.UUID] = Field(default_factory=list)
     ex_ids: list[str] | None = None

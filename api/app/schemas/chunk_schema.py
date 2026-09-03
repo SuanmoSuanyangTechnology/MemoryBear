@@ -5,7 +5,9 @@ from typing import Union
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.core.rag.models.chunk import QAChunk
-from app.integrations.knowledge.contracts import KnowledgeRetrievalSource
+from app.integrations.knowledge.contracts import (
+    KnowledgeRetrievalSource as KnowledgeRetrievalSource,
+)
 from app.schemas.knowledge_metadata_schema import FilterGroup, MetadataFilterMode
 from app.schemas.rerank_schema import RerankMode, RerankWeights
 
@@ -115,7 +117,6 @@ class ChunkUpdate(BaseModel):
 class ChunkRetrieve(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
-    source: KnowledgeRetrievalSource = Field(KnowledgeRetrievalSource.GENERAL)
     query: str
     kb_ids: list[uuid.UUID] = Field(default_factory=list)
     ex_ids: list[str] | None = Field(None)
