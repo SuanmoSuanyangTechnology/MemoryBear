@@ -40,6 +40,16 @@ class RedBearModelError(Exception):
     """Base class for public model errors."""
 
 
+class InvalidProviderResponseError(RedBearModelError):
+    def __init__(self, operation: str, reason: str):
+        super().__init__(f"Invalid {operation} provider response: {reason}")
+
+
+class UnsupportedMultimodalModelError(RedBearModelError):
+    def __init__(self, operation: str):
+        super().__init__(f"The configured model does not support {operation}")
+
+
 class ModelConfigNotFoundError(RedBearModelError):
     def __init__(self, model_config_id: UUID):
         super().__init__(f"Model config was not found: {model_config_id}")

@@ -5,7 +5,12 @@ from __future__ import annotations
 from importlib import import_module
 from typing import Any
 
-from redbear_model.contracts import ModelCapability, ResolvedModelConfig
+from redbear_model.contracts import (
+    ModelCapability,
+    ModelProvider,
+    ModelType,
+    ResolvedModelConfig,
+)
 from redbear_model.errors import ProviderDependencyMissingError
 
 _MODEL_KWARG_KEYS = {
@@ -23,6 +28,34 @@ _CONFIG_ONLY_KEYS = {
     "json_output",
     "response_format",
 }
+
+
+def is_qwen3_vl_embedding(config: ResolvedModelConfig) -> bool:
+    return (
+        config.provider is ModelProvider.DASHSCOPE
+        and config.model_type is ModelType.EMBEDDING
+        and config.model_name == "qwen3-vl-embedding"
+        and ModelCapability.VISION in config.capabilities
+    )
+
+
+def is_qwen3_vl_reranker(config: ResolvedModelConfig) -> bool:
+    return (
+        config.provider is ModelProvider.DASHSCOPE
+        and config.model_type is ModelType.RERANK
+        and config.model_name == "qwen3-vl-rerank"
+        and ModelCapability.VISION in config.capabilities
+    )
+
+
+def resolve_dashscope_native_base_address(base_url: str | None) -> str | None:
+    if base_url is None:
+        return None
+    normalized = base_url.rstrip("/")
+    for suffix in ("/compatible-mode/v1", "/compatible-api/v1"):
+        if normalized.endswith(suffix):
+            return f"{normalized[: -len(suffix)]}/api/v1"
+    return normalized
 
 
 def build_dashscope_params(config: ResolvedModelConfig) -> dict[str, Any]:
