@@ -349,3 +349,8 @@ export interface Model {
   api_keys: ModelApiKey[];
   is_deprecated: boolean;
 }
+
+export interface Provider {
+  provider: string;
+  default_api_base: string;
+}

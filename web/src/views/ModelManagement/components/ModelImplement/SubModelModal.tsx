@@ -178,10 +178,7 @@ const SubModelModal = forwardRef<SubModelModalRef, SubModelModalProps>(({
             placeholder={t('common.pleaseSelect')}
             url={modelProviderUrl}
             hasAll={false}
-            format={(items) => items.map((item) => ({ 
-              label: String(typeof item === 'object' ? item.value : item).charAt(0).toUpperCase() + String(typeof item === 'object' ? item.value : item).slice(1), 
-              value: typeof item === 'object' ? item.value : item 
-            }))}
+            format={(items) => items.map((item) => ({ label: String(item.provider).charAt(0).toUpperCase() + String(item.provider).slice(1), value: String(item.provider) }))}
             onChange={(value) => handleChangeProvider(value)}
           />
         </Form.Item>

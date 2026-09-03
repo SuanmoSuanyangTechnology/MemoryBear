@@ -7,7 +7,9 @@ import logging
 import time
 import uuid
 from collections.abc import Sequence
+from dataclasses import replace
 from enum import Enum
+from functools import partial
 from typing import Any
 
 from langchain_core.documents import Document as LangChainDocument
@@ -20,12 +22,20 @@ from ..api.schemas.knowledge_retrieval import (
     KnowledgeRetrievalRequest,
     KnowledgeRetrievalResult,
 )
+from ..api.schemas.rerank import RerankMode
 from ..errors import KnowledgeError
 from ..rag.knowledge_graph.config import GraphPipeline
 from ..rag.metadata.auto_filter import generate_filter_groups
 from ..rag.metadata.filter_engine import FilterCondition, FilterGroup
 from ..rag.models.chunk import DocumentChunk, chunk_retrieval_content
 from ..rag.retrieval.async_elasticsearch import AsyncElasticSearchRetrieval
+from ..rag.retrieval.candidates import (
+    RetrievalChannel,
+    candidate_from_chunk,
+    deduplicate_candidates_first_win,
+    materialize_candidates,
+    merge_candidates,
+)
 from ..rag.retrieval.elasticsearch_queries import (
     build_filter_clauses,
     build_full_text_query,
@@ -39,11 +49,16 @@ from ..rag.retrieval.models import (
     GraphRetrievalSnapshot,
     GraphTargetSnapshot,
     ModelRuntimeSnapshot,
+    RerankPlan,
+    RerankWeightsSnapshot,
+    RetrievalCandidate,
     RetrievalPreparation,
     RetrievalSearchOptions,
     RetrievalTarget,
     RetrievalTimings,
+    TargetRetrievalResult,
 )
+from ..rag.retrieval.rerank import ModelRerankResult, RerankEngine
 from ..runtime import ProcessRuntime
 from .knowledge_retrieval_preparation import KnowledgeRetrievalPreparation
 
@@ -289,7 +304,7 @@ class KnowledgeRetrievalService:
         async def retrieve_one(
             index: int,
             target: RetrievalTarget,
-        ) -> tuple[int, KnowledgeRetrievalResult]:
+        ) -> tuple[int, TargetRetrievalResult]:
             async with semaphore:
                 result = await cls._retrieve_target(
                     runtime,
@@ -322,11 +337,11 @@ class KnowledgeRetrievalService:
             await asyncio.gather(*tasks, return_exceptions=True)
             raise
 
-        chunks_by_index: list[list[DocumentChunk]] = [[] for _ in targets]
+        candidates_by_index: list[list[RetrievalCandidate]] = [[] for _ in targets]
         entities: list[Any] = []
         relationships: list[Any] = []
         for index, result in retrieved:
-            chunks_by_index[index] = result.chunks
+            candidates_by_index[index] = list(result.candidates)
             entities.extend(result.entities)
             relationships.extend(result.relationships)
 
@@ -336,10 +351,14 @@ class KnowledgeRetrievalService:
             and all(target.params.retrieve_type is RetrieveType.Graph for target in targets)
         )
         candidates = (
-            cls._round_robin_chunk_groups(chunks_by_index)
+            cls._round_robin_chunk_groups(candidates_by_index)
             if evidence_graph_only
-            else [chunk for group in chunks_by_index for chunk in group]
+            else [candidate for group in candidates_by_index for candidate in group]
         )
+        candidates = [
+            replace(candidate, arrival_index=index)
+            for index, candidate in enumerate(candidates)
+        ]
         chunks = await cls._finalize_retrieval_chunks(
             runtime,
             request,
@@ -382,11 +401,11 @@ class KnowledgeRetrievalService:
         document_ids: list[str] | None,
         *,
         graph_target: GraphTargetSnapshot | None,
-        use_request_reranker: bool,
-        request_reranker: ModelRuntimeSnapshot | None,
+        use_request_reranker: bool = False,
+        request_reranker: ModelRuntimeSnapshot | None = None,
         timings: RetrievalTimings | None = None,
         log_id: str | None = None,
-    ) -> KnowledgeRetrievalResult:
+    ) -> TargetRetrievalResult:
         started_at = time.perf_counter()
         params = target.params
         target_type = params.retrieve_type
@@ -401,7 +420,7 @@ class KnowledgeRetrievalService:
                     started_at,
                     timings=timings,
                 )
-                return KnowledgeRetrievalResult()
+                return TargetRetrievalResult(candidates=())
             result = await cls._retrieve_evidence_graph_target(
                 runtime,
                 client,
@@ -421,7 +440,19 @@ class KnowledgeRetrievalService:
                 started_at,
                 timings=timings,
             )
-            return result
+            return TargetRetrievalResult(
+                candidates=tuple(
+                    candidate_from_chunk(
+                        chunk,
+                        target.knowledge_id,
+                        RetrievalChannel.GRAPH,
+                        index,
+                    )
+                    for index, chunk in enumerate(result.chunks)
+                ),
+                entities=tuple(result.entities),
+                relationships=tuple(result.relationships),
+            )
 
         full_text_options = cls._search_options(
             request,
@@ -441,7 +472,17 @@ class KnowledgeRetrievalService:
                 started_at,
                 timings=timings,
             )
-            return KnowledgeRetrievalResult(chunks=chunks)
+            return TargetRetrievalResult(
+                candidates=tuple(
+                    candidate_from_chunk(
+                        chunk,
+                        target.knowledge_id,
+                        RetrievalChannel.PARTICIPLE,
+                        index,
+                    )
+                    for index, chunk in enumerate(chunks)
+                )
+            )
 
         if target.embedding.resolved is None:
             raise KnowledgeError.from_code(
@@ -470,7 +511,17 @@ class KnowledgeRetrievalService:
                 started_at,
                 timings=timings,
             )
-            return KnowledgeRetrievalResult(chunks=chunks)
+            return TargetRetrievalResult(
+                candidates=tuple(
+                    candidate_from_chunk(
+                        chunk,
+                        target.knowledge_id,
+                        RetrievalChannel.SEMANTIC,
+                        index,
+                    )
+                    for index, chunk in enumerate(chunks)
+                )
+            )
 
         vector_task = asyncio.create_task(
             store.search_by_vector(embedding, request.query, vector_options)
@@ -512,43 +563,76 @@ class KnowledgeRetrievalService:
         vector_chunks = gathered[0]
         text_chunks = gathered[1]
         graph_result = gathered[2] if graph_task is not None else KnowledgeRetrievalResult()
-        candidates = cls._deduplicate_chunks(
-            [*vector_chunks, *text_chunks, *graph_result.chunks]
+        semantic_candidates = [
+            candidate_from_chunk(
+                chunk,
+                target.knowledge_id,
+                RetrievalChannel.SEMANTIC,
+                index,
+            )
+            for index, chunk in enumerate(vector_chunks)
+        ]
+        participle_offset = len(semantic_candidates)
+        participle_candidates = [
+            candidate_from_chunk(
+                chunk,
+                target.knowledge_id,
+                RetrievalChannel.PARTICIPLE,
+                participle_offset + index,
+            )
+            for index, chunk in enumerate(text_chunks)
+        ]
+        graph_offset = participle_offset + len(participle_candidates)
+        graph_candidates = [
+            candidate_from_chunk(
+                chunk,
+                target.knowledge_id,
+                RetrievalChannel.GRAPH,
+                graph_offset + index,
+            )
+            for index, chunk in enumerate(graph_result.chunks)
+        ]
+        candidates = merge_candidates(
+            [*semantic_candidates, *participle_candidates, *graph_candidates]
         )
-        reranker = request_reranker if use_request_reranker else target.reranker
+        local_plan = params.local_rerank
+        if local_plan is None:
+            reranker = request_reranker if use_request_reranker else target.reranker
+            local_plan = RerankPlan(
+                mode=RerankMode.RERANKING_MODEL,
+                weights=RerankWeightsSnapshot(0.7, 0.3),
+                model=reranker,
+                compatibility_fallback=True,
+            )
+        candidates_to_rank = cls._seed_model_fallback_scores(candidates, local_plan)
         local_rerank_started_at = time.perf_counter()
         try:
-            if candidates and reranker is not None:
-                ranked = await cls._rerank_with_shared_model(
-                    runtime,
-                    reranker,
-                    request.query,
-                    candidates,
-                    params.top_k,
-                )
-            elif candidates and use_request_reranker:
-                ranked = cls._apply_rerank_fallback(candidates, params.top_k)
-            else:
-                ranked = candidates[: params.top_k]
+            ranked = await RerankEngine(
+                model_ranker=partial(cls._rerank_with_shared_model, runtime)
+            ).rank(
+                query=request.query,
+                candidates=candidates_to_rank,
+                plan=local_plan,
+                top_k=params.top_k,
+                score_threshold=params.rerank_score_threshold,
+            )
         finally:
             cls._record_timing(timings, "local_rerank_ms", local_rerank_started_at)
-        chunks = [
-            chunk
-            for chunk in ranked
-            if float((chunk.metadata or {}).get("score") or 0)
-            > params.rerank_score_threshold
-        ]
         cls._log_target_done(
             target,
             len(vector_chunks),
             len(text_chunks),
             len(candidates),
-            len(chunks),
+            len(ranked),
             started_at,
             local_rerank=True,
             timings=timings,
         )
-        return KnowledgeRetrievalResult(chunks=chunks)
+        return TargetRetrievalResult(
+            candidates=tuple(ranked),
+            entities=tuple(graph_result.entities),
+            relationships=tuple(graph_result.relationships),
+        )
 
     @classmethod
     async def _retrieve_evidence_graph_target(
@@ -635,14 +719,18 @@ class KnowledgeRetrievalService:
         runtime: ProcessRuntime,
         request: KnowledgeRetrievalRequest,
         preparation: RetrievalPreparation,
-        chunks: list[DocumentChunk],
+        candidates: Sequence[RetrievalCandidate],
         *,
         timings: RetrievalTimings | None = None,
         log_id: str | None = None,
     ) -> list[DocumentChunk]:
-        candidates_count = len(chunks)
-        unique_chunks = cls._deduplicate_chunks(chunks)
-        if not unique_chunks:
+        candidates_count = len(candidates)
+        ordered_candidates = [
+            replace(candidate, arrival_index=index)
+            for index, candidate in enumerate(candidates)
+        ]
+        unique_candidates = deduplicate_candidates_first_win(ordered_candidates)
+        if not unique_candidates:
             cls._log_finalize(
                 log_id,
                 candidates_count,
@@ -676,27 +764,32 @@ class KnowledgeRetrievalService:
         if needs_global_rerank:
             global_rerank_started_at = time.perf_counter()
             try:
-                reranker = (
-                    preparation.request_reranker
-                    if request.rerank_id is not None
-                    else targets[0].reranker
-                )
-                if reranker is not None:
-                    ranked = await cls._rerank_with_shared_model(
-                        runtime,
-                        reranker,
-                        request.query,
-                        unique_chunks,
-                        request.top_k,
+                global_plan = preparation.global_rerank
+                if global_plan is None:
+                    reranker = (
+                        preparation.request_reranker
+                        if request.rerank_id is not None
+                        else targets[0].reranker
                     )
-                else:
-                    ranked = cls._apply_rerank_fallback(unique_chunks, request.top_k)
+                    global_plan = RerankPlan(
+                        mode=RerankMode.RERANKING_MODEL,
+                        weights=RerankWeightsSnapshot(0.7, 0.3),
+                        model=reranker,
+                        compatibility_fallback=True,
+                    )
                 threshold = cls._resolve_rerank_score_threshold(request)
-                filtered = [
-                    chunk
-                    for chunk in ranked
-                    if float((chunk.metadata or {}).get("score") or 0) > threshold
-                ]
+                ranked = await RerankEngine(
+                    model_ranker=partial(cls._rerank_with_shared_model, runtime)
+                ).rank(
+                    query=request.query,
+                    candidates=cls._seed_model_fallback_scores(
+                        unique_candidates,
+                        global_plan,
+                    ),
+                    plan=global_plan,
+                    top_k=request.top_k,
+                    score_threshold=threshold,
+                )
             finally:
                 cls._record_timing(
                     timings,
@@ -705,16 +798,17 @@ class KnowledgeRetrievalService:
                 )
         else:
             threshold = None
-            filtered = sorted(
-                unique_chunks,
-                key=lambda chunk: float((chunk.metadata or {}).get("score") or 0),
+            ranked = sorted(
+                unique_candidates,
+                key=cls._candidate_score,
                 reverse=True,
             )
-        result = filtered[: request.top_k]
+        result_candidates = ranked[: request.top_k]
+        result = materialize_candidates(result_candidates)
         cls._log_finalize(
             log_id,
             candidates_count,
-            len(unique_chunks),
+            len(unique_candidates),
             needs_global_rerank,
             threshold,
             len(result),
@@ -749,11 +843,12 @@ class KnowledgeRetrievalService:
         query: str,
         chunks: Sequence[DocumentChunk],
         top_k: int,
-    ) -> list[DocumentChunk]:
+    ) -> ModelRerankResult:
         if top_k <= 0 or not chunks:
-            return []
+            return ModelRerankResult(chunks=(), used_fallback=False)
         if snapshot.resolved is None:
-            return cls._apply_rerank_fallback(chunks, top_k)
+            fallback = cls._apply_rerank_fallback(chunks, top_k)
+            return ModelRerankResult(chunks=tuple(fallback), used_fallback=True)
         documents = [
             LangChainDocument(
                 page_content=chunk_retrieval_content(chunk),
@@ -772,7 +867,8 @@ class KnowledgeRetrievalService:
                 snapshot.provider,
                 type(exc).__name__,
             )
-            return cls._apply_rerank_fallback(chunks, top_k)
+            fallback = cls._apply_rerank_fallback(chunks, top_k)
+            return ModelRerankResult(chunks=tuple(fallback), used_fallback=True)
 
         reranked.sort(
             key=lambda item: float(item.metadata.get("relevance_score") or 0),
@@ -790,7 +886,30 @@ class KnowledgeRetrievalService:
             chunk = chunks[index]
             chunk.metadata["score"] = float(item.metadata.get("relevance_score") or 0)
             result.append(chunk)
+        return ModelRerankResult(chunks=tuple(result), used_fallback=False)
+
+    @staticmethod
+    def _seed_model_fallback_scores(
+        candidates: Sequence[RetrievalCandidate],
+        plan: RerankPlan,
+    ) -> list[RetrievalCandidate]:
+        if plan.mode is not RerankMode.RERANKING_MODEL:
+            return list(candidates)
+        result = []
+        for candidate in candidates:
+            if candidate.final_score is not None:
+                result.append(candidate)
+                continue
+            metadata = candidate.chunk.metadata or {}
+            score = float(metadata["score"]) if metadata.get("score") is not None else 0.5
+            result.append(candidate.with_final_score(score))
         return result
+
+    @staticmethod
+    def _candidate_score(candidate: RetrievalCandidate) -> float:
+        if candidate.final_score is not None:
+            return candidate.final_score
+        return float((candidate.chunk.metadata or {}).get("score") or 0)
 
     @staticmethod
     async def _build_metadata_filter_groups(
@@ -845,23 +964,6 @@ class KnowledgeRetrievalService:
         return 0.1
 
     @staticmethod
-    def _deduplicate_chunks(chunks: Sequence[DocumentChunk]) -> list[DocumentChunk]:
-        seen: set[tuple[Any, ...]] = set()
-        result: list[DocumentChunk] = []
-        for chunk in chunks:
-            metadata = chunk.metadata or {}
-            if metadata.get("doc_id"):
-                key = ("doc_id", metadata["doc_id"])
-            elif metadata.get("document_id") is not None and metadata.get("sort_id") is not None:
-                key = ("document_sort", metadata["document_id"], metadata["sort_id"])
-            else:
-                key = ("content", chunk.page_content)
-            if key not in seen:
-                seen.add(key)
-                result.append(chunk)
-        return result
-
-    @staticmethod
     def _apply_rerank_fallback(
         chunks: Sequence[DocumentChunk],
         top_k: int,
@@ -884,10 +986,10 @@ class KnowledgeRetrievalService:
 
     @staticmethod
     def _round_robin_chunk_groups(
-        groups: Sequence[Sequence[DocumentChunk]],
-    ) -> list[DocumentChunk]:
+        groups: Sequence[Sequence[RetrievalCandidate]],
+    ) -> list[RetrievalCandidate]:
         positions = [0 for _ in groups]
-        result: list[DocumentChunk] = []
+        result: list[RetrievalCandidate] = []
         while True:
             progressed = False
             for index, group in enumerate(groups):

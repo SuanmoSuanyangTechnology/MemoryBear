@@ -7,6 +7,7 @@ from app.core.rag.models.chunk import DocumentChunk
 from app.integrations.knowledge.contracts import KnowledgeRetrievalSource
 from app.schemas.chunk_schema import KnowledgeBaseConfig, RetrieveType
 from app.schemas.knowledge_metadata_schema import FilterGroup, MetadataFilterMode
+from app.schemas.rerank_schema import RerankMode, RerankWeights
 
 
 class KnowledgeRetrievalRequest(BaseModel):
@@ -21,6 +22,8 @@ class KnowledgeRetrievalRequest(BaseModel):
     top_n: int | None = Field(default=None, ge=1, le=100)
     source: KnowledgeRetrievalSource = KnowledgeRetrievalSource.GENERAL
     retrieve_type: RetrieveType = RetrieveType.HYBRID
+    rerank_mode: RerankMode | None = None
+    rerank_weights: RerankWeights | None = None
     enable_graph_retrieval: int = Field(
         default=0,
         ge=0,

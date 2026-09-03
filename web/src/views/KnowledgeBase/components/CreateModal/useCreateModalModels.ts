@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { FormInstance } from 'antd';
-import { getCustomWorkspaceModels } from '@/api/workspaces';
+import { getCustomWorkspaceModels, getWorkspaceModels } from '@/api/workspaces';
 import type { KnowledgeBaseFormData, KnowledgeBaseListItem } from '@/views/KnowledgeBase/types';
 import type { Model } from '@/views/ModelManagement/types';
 
@@ -24,8 +24,17 @@ export const MODEL_TYPE_CONFIG: Record<string, ModelTypeConfig> = {
   chat: { fieldKey: 'chat_id', modelType: 'chat' },
 };
 
+const WORKSPACE_MODEL_FIELD_BY_FORM_FIELD: Record<string, string> = {
+  llm_id: 'llm',
+  embedding_id: 'embedding',
+  reranker_id: 'rerank',
+  image2text_id: 'vision',
+  chat_id: 'chat',
+};
+
 const useCreateModalModels = ({ form, datasets, visible }: UseCreateModalModelsOptions) => {
   const [customModels, setCustomModels] = useState<Record<string, Model[]>>({});
+  const [workspaceModels, setWorkspaceModels] = useState<Record<string, string>>({});
 
   const modelTypeList = useMemo(
     () => [...new Set(
@@ -80,19 +89,26 @@ const useCreateModalModels = ({ form, datasets, visible }: UseCreateModalModelsO
     modelTypeList.forEach((type) => {
       const normalizedType = type.toLowerCase();
       const fieldKey = MODEL_TYPE_CONFIG[normalizedType]?.fieldKey || `${normalizedType}_id`;
-      const options = normalizedType === 'llm'
+      const workspaceField = WORKSPACE_MODEL_FIELD_BY_FORM_FIELD[fieldKey];
+      const workspaceModelId = workspaceField ? workspaceModels[workspaceField] : undefined;
+      const options = (normalizedType === 'llm'
         ? [...(modelOptionsByType.llm || []), ...(modelOptionsByType.chat || [])]
-        : modelOptionsByType[type] || [];
+        : modelOptionsByType[type] || []);
 
-      if (options.length > 0 && !form.getFieldValue(fieldKey as any)) {
-        defaultValues[fieldKey] = options[0].id;
+      const workspaceModel = workspaceModelId
+        ? options.find((model) => model.id === workspaceModelId || model.model_id === workspaceModelId)
+        : undefined;
+      const defaultModelId = workspaceModel?.id || options[0]?.id;
+
+      if (defaultModelId) {
+        defaultValues[fieldKey] = defaultModelId;
       }
     });
 
     if (Object.keys(defaultValues).length) {
       form.setFieldsValue(defaultValues as any);
     }
-  }, [customModels, datasets, form, modelOptionsByType, modelTypeList, visible]);
+  }, [customModels, datasets, form, modelOptionsByType, modelTypeList, visible, workspaceModels]);
 
   const dynamicTypeList = useMemo(
     () => modelTypeList.filter((type) => (modelOptionsByType[type] || []).length),
@@ -100,20 +116,29 @@ const useCreateModalModels = ({ form, datasets, visible }: UseCreateModalModelsO
   );
 
   const getTypeList = () => {
-    getCustomWorkspaceModels()
-      .then((response) => {
-        setCustomModels((response || {}) as Record<string, Model[]>);
+    Promise.all([getCustomWorkspaceModels(), getWorkspaceModels()])
+      .then(([modelsResponse, workspaceResponse]) => {
+        setCustomModels((modelsResponse || {}) as Record<string, Model[]>);
+        setWorkspaceModels((workspaceResponse || {}) as Record<string, string>);
       })
       .catch((error) => {
-        console.error('Failed to fetch models:', error);
+        console.error('Failed to fetch knowledge base models:', error);
         setCustomModels({});
+        setWorkspaceModels({});
       });
   };
+  const resetModelInfo = () => {
+    setCustomModels({});
+    setWorkspaceModels({});
+  };
+
+
 
   return {
     customModels,
     dynamicTypeList,
     getTypeList,
+    resetModelInfo,
   };
 };
 

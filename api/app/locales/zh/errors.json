@@ -15,6 +15,29 @@
     "database_error": "数据库操作失败",
     "file_operation_error": "文件操作失败"
   },
+  "llm": {
+    "authentication_failed": "API Key 无效，请检查配置",
+    "permission_denied": "API Key 权限不足或已被锁定",
+    "quota_exceeded": "模型额度已用尽，请联系管理员充值",
+    "rate_limited": "请求过于频繁，请稍后重试",
+    "timeout": "模型响应超时，请稍后重试",
+    "connection_failed": "模型服务连接失败，请检查 URL 配置",
+    "invalid_request": "请求参数错误，请检查输入或配置",
+    "model_not_found": "模型不存在或已下线",
+    "capability_mismatch": "模型不支持该能力，请检查配置",
+    "server_error": "模型服务异常，请稍后重试",
+    "unknown": "模型调用出现未知错误",
+    "api_key_missing": "当前配置没有可用的 API Key",
+    "empty_response": "模型未返回有效内容",
+    "attachment_prefix": "附件解析失败：",
+    "subjects": {
+      "model": "模型",
+      "image": "图片",
+      "audio": "音频",
+      "video": "视频",
+      "document": "文档"
+    }
+  },
   "auth": {
     "invalid_credentials": "用户名或密码错误",
     "token_expired": "登录已过期，请重新登录",
