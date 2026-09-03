@@ -60,7 +60,7 @@ class ContractModel(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
 
-QWEN3_VL_EMBEDDING_DIMENSION = 2560
+QWEN3_VL_EMBEDDING_DIMENSION = 2048
 SupportedImageMediaType: TypeAlias = Literal[
     "image/jpeg",
     "image/png",
@@ -100,7 +100,7 @@ EmbeddingContent: TypeAlias = TextEmbeddingContent | ImageEmbeddingContent
 class EmbeddingRequest(ContractModel):
     purpose: EmbeddingPurpose
     contents: tuple[EmbeddingContent, ...] = Field(min_length=1, max_length=20)
-    dimension: Literal[2560] = QWEN3_VL_EMBEDDING_DIMENSION
+    dimension: Literal[2048] = QWEN3_VL_EMBEDDING_DIMENSION
     fusion: Literal[True] = True
 
     @model_validator(mode="after")
@@ -112,7 +112,7 @@ class EmbeddingRequest(ContractModel):
 
 class EmbeddingResult(ContractModel):
     vector: tuple[float, ...] = Field(min_length=1, repr=False)
-    dimension: Literal[2560] = QWEN3_VL_EMBEDDING_DIMENSION
+    dimension: Literal[2048] = QWEN3_VL_EMBEDDING_DIMENSION
     usage: dict[str, int] = Field(default_factory=dict)
 
 
