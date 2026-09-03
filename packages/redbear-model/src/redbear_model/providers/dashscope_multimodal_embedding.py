@@ -16,10 +16,12 @@ from redbear_model.contracts import (
 )
 from redbear_model.errors import (
     InvalidProviderResponseError,
+    MultimodalInputLimitError,
     ProviderDependencyMissingError,
     UnsupportedMultimodalModelError,
 )
 from redbear_model.providers.dashscope import (
+    is_dashscope_multimodal_input_limit,
     is_qwen3_vl_embedding,
     resolve_dashscope_native_base_address,
 )
@@ -85,6 +87,8 @@ class DashScopeMultimodalEmbeddingAdapter:
             dimension=request.dimension,
             enable_fusion=request.fusion,
         )
+        if is_dashscope_multimodal_input_limit(response):
+            raise MultimodalInputLimitError("embedding")
         if _value(response, "status_code") != 200:
             raise InvalidProviderResponseError("embedding", "non-success status")
         output = _value(response, "output")

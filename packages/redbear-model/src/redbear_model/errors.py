@@ -45,6 +45,11 @@ class InvalidProviderResponseError(RedBearModelError):
         super().__init__(f"Invalid {operation} provider response: {reason}")
 
 
+class MultimodalInputLimitError(RedBearModelError):
+    def __init__(self, operation: str):
+        super().__init__(f"The {operation} input exceeds the provider limit")
+
+
 class UnsupportedMultimodalModelError(RedBearModelError):
     def __init__(self, operation: str):
         super().__init__(f"The configured model does not support {operation}")

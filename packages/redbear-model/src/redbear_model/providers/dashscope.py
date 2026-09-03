@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from importlib import import_module
 from typing import Any
 
@@ -56,6 +57,27 @@ def resolve_dashscope_native_base_address(base_url: str | None) -> str | None:
         if normalized.endswith(suffix):
             return f"{normalized[: -len(suffix)]}/api/v1"
     return normalized
+
+
+def is_dashscope_multimodal_input_limit(response: Any) -> bool:
+    if isinstance(response, Mapping):
+        status = response.get("status_code")
+        code = response.get("code")
+        message = response.get("message")
+    else:
+        status = getattr(response, "status_code", None)
+        code = getattr(response, "code", None)
+        message = getattr(response, "message", None)
+    try:
+        if int(status) != 400:
+            return False
+    except (TypeError, ValueError):
+        return False
+    text = f"{code or ''} {message or ''}".lower()
+    return (
+        "token" in text
+        and any(marker in text for marker in ("exceed", "limit", "length", "too many"))
+    )
 
 
 def build_dashscope_params(config: ResolvedModelConfig) -> dict[str, Any]:
