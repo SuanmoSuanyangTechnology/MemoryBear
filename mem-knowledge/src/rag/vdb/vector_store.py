@@ -258,6 +258,13 @@ class TaskVectorStore:
             if sample is not None
             else (self._embedding_dimension or 768)
         )
+        vector_mapping: dict[str, Any] = {
+            "type": "dense_vector",
+            "dims": dimensions,
+            "index": not self._structured_multimodal,
+        }
+        if not self._structured_multimodal:
+            vector_mapping["similarity"] = "cosine"
         self._client.indices.create(
             index=self._collection_name,
             mappings={
@@ -288,12 +295,7 @@ class TaskVectorStore:
                             },
                         },
                     },
-                    Field.VECTOR.value: {
-                        "type": "dense_vector",
-                        "dims": dimensions,
-                        "index": True,
-                        "similarity": "cosine",
-                    },
+                    Field.VECTOR.value: vector_mapping,
                     Field.CHUNK_TYPE.value: {"type": "keyword"},
                     Field.QUESTION.value: {
                         "type": "text",

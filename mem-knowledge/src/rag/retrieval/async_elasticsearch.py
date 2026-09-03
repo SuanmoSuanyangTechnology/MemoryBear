@@ -49,12 +49,14 @@ class AsyncChunkStore:
         embed: EmbedFunction | None = None,
         embed_chunks: EmbedChunksFunction | None = None,
         embedding_dimension: int | None = None,
+        vector_indexed: bool = True,
     ):
         self.client = client
         self.index = collection_name_for_knowledge(knowledge_id)
         self.embed = embed
         self.embed_chunks = embed_chunks
         self.embedding_dimension = embedding_dimension
+        self.vector_indexed = vector_indexed
 
     @staticmethod
     def build_segment_query(
@@ -314,6 +316,13 @@ class AsyncChunkStore:
             if sample is not None
             else (self.embedding_dimension or 768)
         )
+        vector_mapping: dict[str, Any] = {
+            "type": "dense_vector",
+            "dims": dimensions,
+            "index": self.vector_indexed,
+        }
+        if self.vector_indexed:
+            vector_mapping["similarity"] = "cosine"
         await self.client.indices.create(
             index=self.index,
             mappings={
@@ -335,12 +344,7 @@ class AsyncChunkStore:
                             "vision_text": {"type": "text", "analyzer": "ik_max_word"},
                         },
                     },
-                    "vector": {
-                        "type": "dense_vector",
-                        "dims": dimensions,
-                        "index": True,
-                        "similarity": "cosine",
-                    },
+                    "vector": vector_mapping,
                     "chunk_type": {"type": "keyword"},
                     "question": {"type": "text", "analyzer": "ik_max_word"},
                     "answer": {"type": "text", "analyzer": "ik_max_word"},

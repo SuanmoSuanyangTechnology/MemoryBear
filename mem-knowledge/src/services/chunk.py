@@ -574,6 +574,9 @@ def build_chunk_store(
         embed=embed,
         embed_chunks=embed_chunks,
         embedding_dimension=embedding_dimension,
+        vector_indexed=not is_qwen3_vl_embedding(resolved_embedding)
+        if resolved_embedding is not None
+        else True,
     )
 
 
