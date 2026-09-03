@@ -1489,16 +1489,6 @@ class KnowledgeRetrievalService:
         normalized = request.normalized_query
         if not isinstance(normalized, ImageRetrievalQuery):
             return None
-        if request.retrieve_type not in {RetrieveType.SEMANTIC, RetrieveType.HYBRID}:
-            raise KnowledgeError.from_code(
-                "KB_VALIDATION_ERROR",
-                "Image query supports semantic or hybrid retrieval only",
-            )
-        if request.enable_graph_retrieval:
-            raise KnowledgeError.from_code(
-                "KB_VALIDATION_ERROR",
-                "Image query does not support graph retrieval",
-            )
         if request.metadata_filter_mode is MetadataFilterMode.AUTO:
             raise KnowledgeError.from_code(
                 "KB_VALIDATION_ERROR",
