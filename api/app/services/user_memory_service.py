@@ -564,15 +564,14 @@ class UserMemoryService:
             db.commit()
             db.refresh(end_user_info_record)
             
-            # 如果 aliases 被更新，同步到 Neo4j
+            # 如果 aliases 被更新，通过 memory_storage 抽象层同步
             if aliases_updated:
                 try:
-                    import asyncio
-                    asyncio.run(self._sync_aliases_to_neo4j(end_user_id, update_data['aliases']))
-                    logger.info(f"已触发 aliases 同步到 Neo4j: end_user_id={end_user_id}, aliases={update_data['aliases']}")
+                    asyncio.run(self._sync_aliases_to_memory_storage(end_user_id, update_data['aliases']))
+                    logger.info(f"已触发 aliases 同步到 memory_storage: end_user_id={end_user_id}, aliases={update_data['aliases']}")
                 except Exception as sync_error:
-                    logger.error(f"触发同步 aliases 到 Neo4j 失败: {sync_error}", exc_info=True)
-                    # 不影响主流程，只记录错误
+                    logger.error(f"触发同步 aliases 到 memory_storage 失败: {sync_error}", exc_info=True)
+                    # PG 已提交；同步失败不影响主流程，只记录错误
             
             # 构建响应数据（转换时间为毫秒时间戳）
             response_data = {
@@ -669,11 +668,11 @@ class UserMemoryService:
             if aliases_updated:
                 neo4j_sync_status = "success"
                 try:
-                    await self._sync_aliases_to_neo4j(end_user_id, update_data['aliases'])
-                    logger.info(f"已触发 aliases 同步到 Neo4j: end_user_id={end_user_id}, aliases={update_data['aliases']}")
+                    await self._sync_aliases_to_memory_storage(end_user_id, update_data['aliases'])
+                    logger.info(f"已触发 aliases 同步到 memory_storage: end_user_id={end_user_id}, aliases={update_data['aliases']}")
                 except Exception as sync_error:
                     neo4j_sync_status = "failed"
-                    logger.error(f"触发同步 aliases 到 Neo4j 失败: {sync_error}", exc_info=True)
+                    logger.error(f"触发同步 aliases 到 memory_storage 失败: {sync_error}", exc_info=True)
             else:
                 neo4j_sync_status = "skipped"
             
@@ -712,41 +711,18 @@ class UserMemoryService:
                 "error": str(e)
             }
     
-    async def _sync_aliases_to_neo4j(self, end_user_id: str, aliases: List[str]) -> None:
-        """
-        将 aliases 同步到 Neo4j 中的用户实体
-        
-        Args:
-            end_user_id: 终端用户ID
-            aliases: 别名列表
-        """
-        from app.repositories.neo4j.neo4j_connector import Neo4jConnector
-        
-        # Cypher 查询：更新用户实体的 aliases
-        cypher_query = """
-        MATCH (e:ExtractedEntity)
-        WHERE e.end_user_id = $end_user_id 
-          AND e.name IN ['用户', '我', 'User', 'I']
-        SET e.aliases = $aliases
-        RETURN e.id AS entity_id, e.name AS entity_name, e.aliases AS updated_aliases
-        """
-        
-        connector = Neo4jConnector()
-        try:
-            result = await connector.execute_query(
-                cypher_query,
-                end_user_id=end_user_id,
-                aliases=aliases
+    async def _sync_aliases_to_memory_storage(self, end_user_id: str, aliases: List[str]) -> None:
+        """通过 memory_storage custom 层更新用户实体 aliases。"""
+        from app.core.memory.storage.custom import update_user_entity_aliases
+
+        affected_count = await update_user_entity_aliases(end_user_id, aliases)
+        if affected_count:
+            logger.info(
+                f"成功同步 aliases 到 memory_storage: end_user_id={end_user_id}, "
+                f"更新了 {affected_count} 个实体节点"
             )
-            
-            if result:
-                logger.info(f"成功同步 aliases 到 Neo4j: end_user_id={end_user_id}, 更新了 {len(result)} 个实体节点")
-            else:
-                logger.warning(f"未找到需要更新的用户实体节点: end_user_id={end_user_id}")
-                
-        except Exception as e:
-            logger.error(f"同步 aliases 到 Neo4j 失败: {e}", exc_info=True)
-            raise
+        else:
+            logger.warning(f"未找到需要更新的用户实体节点: end_user_id={end_user_id}")
 
     async def validate_neo4j_cache_workspace(
         self,

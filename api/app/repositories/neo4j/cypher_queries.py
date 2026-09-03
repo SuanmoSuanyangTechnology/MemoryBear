@@ -3171,16 +3171,6 @@ FORGET_SOFT_DELETE_BY_ELEMENT_IDS = """
     RETURN collect(elementId(n)) AS deleted_element_ids
 """
 
-FORGET_RECOVER_IDEMPOTENT_BY_ELEMENT_ID = """
-    MATCH (n)
-    WHERE elementId(n) = $element_id
-      AND n.end_user_id = $end_user_id
-      AND (n:Statement OR n:Chunk OR n:ExtractedEntity OR n:MemorySummary OR n:Dialogue)
-    WITH n, n.delete_at IS NOT NULL AS recovered_now
-    SET n.delete_at = CASE WHEN recovered_now THEN NULL ELSE n.delete_at END
-    RETURN elementId(n) AS node_id, labels(n) AS labels, recovered_now
-"""
-
 FORGET_CORE_CANDIDATES = f"""
 CALL () {{
     MATCH (c:Chunk {{end_user_id: $end_user_id}})
@@ -3407,40 +3397,48 @@ SET n.end_user_id = $new_id
 """
 
 GDS_GRAPH_BUILD = """
-CALL gds.graph.project.cypher(
+MATCH (source)
+WHERE source.end_user_id = $end_user_id
+  AND source.delete_at IS NULL
+  AND source.id IS NOT NULL
+  AND any(label IN labels(source) WHERE label IN [
+      'Statement', 'MemorySummary', 'Chunk', 'ExtractedEntity', 'Perceptual'
+  ])
+  AND (source.name IS NULL OR source.name <> '用户')
+OPTIONAL MATCH (source)-[r]-(target)
+WHERE target.end_user_id = $end_user_id
+  AND target.delete_at IS NULL
+  AND target.id IS NOT NULL
+  AND source <> target
+  AND any(label IN labels(target) WHERE label IN [
+      'Statement', 'MemorySummary', 'Chunk', 'ExtractedEntity', 'Perceptual'
+  ])
+  AND (target.name IS NULL OR target.name <> '用户')
+WITH source, target, count(r) AS parallel_count
+WITH gds.graph.project(
     $end_user_id,
-    'MATCH (n)
-    WHERE n.end_user_id = $endUserId
-     AND n.delete_at IS NULL
-     AND n.id IS NOT NULL
-     AND any(l IN labels(n) WHERE l IN ["Statement","MemorySummary","Chunk","ExtractedEntity","Perceptual"])
-     AND (n.name IS NULL OR n.name <> "用户")
-    RETURN id(n) AS id',
-    'MATCH (a)-[r]-(b)
-    WHERE a.end_user_id = $endUserId AND b.end_user_id = $endUserId
-     AND a.delete_at IS NULL AND b.delete_at IS NULL
-     AND a <> b AND a.id IS NOT NULL AND b.id IS NOT NULL
-     AND any(l IN labels(a) WHERE l IN ["Statement","MemorySummary","Chunk","ExtractedEntity","Perceptual"])
-     AND any(l IN labels(b) WHERE l IN ["Statement","MemorySummary","Chunk","ExtractedEntity","Perceptual"])
-     AND (a.name IS NULL OR a.name <> "用户") AND (b.name IS NULL OR b.name <> "用户")
-    WITH a, b, count(r) AS parallel_count
-    WITH a, b, parallel_count,
-        [[id(a), id(b)], [id(b), id(a)]] AS directed_pairs
-    UNWIND directed_pairs AS pair
-    RETURN pair[0] AS source, pair[1] AS target, toFloat(parallel_count) AS weight',
-    {
-        parameters: {endUserId: $end_user_id }
-    }
-);"""
+    source,
+    target,
+    {relationshipProperties: {weight: toFloat(parallel_count)}}
+) AS graph
+RETURN graph.graphName AS graphName,
+       graph.nodeCount AS nodeCount,
+       graph.relationshipCount AS relationshipCount,
+       graph.projectMillis AS projectMillis
+"""
 
 G_SCORE = """
 CALL gds.eigenvector.write($end_user_id, {
       relationshipWeightProperty: 'weight',
       scaler: 'Max',
       writeProperty: 'topology_score',
-      maxIterations: 50,
-      tolerance: 0.000005
+      maxIterations: 200,
+      tolerance: 0.00001
   })
 """
 
-CLEAR_GRAPH = f"CALL gds.graph.drop($end_user_id, false);"
+CLEAR_GRAPH = """
+CALL gds.graph.drop($end_user_id, false)
+YIELD graphName
+RETURN graphName
+"""

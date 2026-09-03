@@ -151,3 +151,31 @@ async def search_entities_by_name(
         pre_limit=limit,
     )
     return [item.data for item in result.items]
+
+
+async def update_user_entity_aliases(
+        end_user_id: str,
+        aliases: list[str],
+) -> int:
+    """Update aliases on the user entity for an end user.
+
+    The write is routed through ``MemoryStorageService`` so the graph write and
+    its projection outbox event follow the standard storage abstraction.
+
+    Returns:
+        Number of user entity nodes updated.
+    """
+    service = get_storage_service()
+    result = await service.update_node(
+        MemoryNodeType.EXTRACTED_ENTITY,
+        {"aliases": aliases},
+        NodeFilter.all_of(
+            FilterCondition(field="end_user_id", value=end_user_id),
+            FilterCondition(
+                field="name",
+                operator=FilterOperator.IN,
+                value=["用户", "我", "User", "I"],
+            ),
+        ),
+    )
+    return result.affected_count

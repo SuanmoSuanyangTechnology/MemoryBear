@@ -1227,28 +1227,3 @@ async def forget_soft_delete_by_element_ids(
     if not result:
         return []
     return [str(element_id) for element_id in result[0]["deleted_element_ids"]]
-
-
-async def forget_recover_by_element_id(
-        connector: Neo4jConnector,
-        element_id: str,
-        end_user_id: str,
-) -> dict | None:
-    """幂等恢复节点，并返回本次是否实际清除了软删除标记。
-
-    查询按审计记录中的终端用户和支持的记忆类型限定节点。节点已处于可见状态时
-    仍返回结果，供调用方补齐 PostgreSQL 审计状态，但不会再次刷新访问时间。
-
-    Returns:
-        包含 ``node_id``、``labels`` 和 ``recovered_now`` 的结果；节点不存在时
-        返回 ``None``。
-    """
-    from app.repositories.neo4j.cypher_queries import (
-        FORGET_RECOVER_IDEMPOTENT_BY_ELEMENT_ID,
-    )
-    result = await connector.execute_query(
-        FORGET_RECOVER_IDEMPOTENT_BY_ELEMENT_ID,
-        element_id=element_id,
-        end_user_id=end_user_id,
-    )
-    return result[0] if result else None

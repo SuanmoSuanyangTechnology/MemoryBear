@@ -3794,7 +3794,7 @@ def do_gds_topology_score(self, end_user_id: str, inflight_token: Optional[str] 
         return {"status": "skipped_stale_inflight", "end_user_id": end_user_id}
 
     async def _run() -> Dict[str, Any]:
-        from app.repositories.neo4j.gds_topology_repository import compute_topology_score
+        from app.core.memory.storage.custom import compute_topology_score
 
         write_lock = RedisFairLock(
             key=f"memory_write:{end_user_id}",

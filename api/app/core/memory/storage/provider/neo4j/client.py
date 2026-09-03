@@ -80,6 +80,22 @@ class Neo4jClient(BaseClient):
         if self.client:
             await self.client.close()
 
+    async def execute_query(
+            self,
+            cypher: str,
+            **parameters: Any,
+    ) -> list[dict[str, Any]]:
+        """Execute provider-specific Cypher for storage custom queries."""
+        if self.client is None:
+            raise RuntimeError("Neo4jClient is not initialized")
+        async with self.client.session() as session:
+            statement = await session.run(cypher, **parameters)
+            records = await statement.data()
+        return [
+            {key: _to_native(value) for key, value in record.items()}
+            for record in records
+        ]
+
     async def save_node(
             self,
             label: MemoryNodeLabel,
