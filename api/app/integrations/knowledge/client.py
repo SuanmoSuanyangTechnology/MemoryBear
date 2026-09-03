@@ -30,7 +30,8 @@ from .errors import (
 from .transport import KnowledgeHttpTransport
 
 logger = logging.getLogger(__name__)
-_RERANK_WIRE_FIELDS = ("rerank_id", "rerank_mode", "rerank_weights")
+_REQUEST_RERANK_WIRE_FIELDS = ("rerank_id", "rerank_mode", "rerank_weights")
+_KNOWLEDGE_BASE_RERANK_WIRE_FIELDS = ("rerank_mode", "rerank_weights")
 
 
 def _retrieval_wire_payload(
@@ -39,7 +40,7 @@ def _retrieval_wire_payload(
 ) -> dict[str, Any]:
     normalized = request.model_copy(update={"source": context.source})
     payload = normalized.model_dump(mode="json")
-    for field_name in _RERANK_WIRE_FIELDS:
+    for field_name in _REQUEST_RERANK_WIRE_FIELDS:
         if getattr(normalized, field_name) is None:
             payload.pop(field_name, None)
     knowledge_bases = []
@@ -48,7 +49,7 @@ def _retrieval_wire_payload(
             mode="json",
             include=config.model_fields_set | {"kb_id"},
         )
-        for field_name in _RERANK_WIRE_FIELDS:
+        for field_name in _KNOWLEDGE_BASE_RERANK_WIRE_FIELDS:
             if getattr(config, field_name) is None:
                 config_payload.pop(field_name, None)
         knowledge_bases.append(config_payload)
