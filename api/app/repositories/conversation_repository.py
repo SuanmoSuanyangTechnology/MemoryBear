@@ -594,45 +594,62 @@ class MessageRepository:
             conversation_id: uuid.UUID,
             limit: Optional[int] = None,
             current_only: bool = True,
+            offset: Optional[int] = None,
             keyword: str | None = None,
             start_at: datetime | None = None,
             end_at_exclusive: datetime | None = None,
-    ) -> list[Message]:
+    ) -> tuple[list[Message], int]:
         """Retrieve filtered messages for a conversation asynchronously.
 
         Args:
             conversation_id: Conversation UUID.
             limit: Optional maximum number of messages.
             current_only: Whether to return only current message versions.
+            offset: Optional number of messages to skip.
             keyword: Optional keyword matched against message content.
             start_at: Optional inclusive creation-time lower bound.
             end_at_exclusive: Optional exclusive creation-time upper bound.
 
         Returns:
-            Messages ordered by creation time.
+            Messages ordered by creation time and the filtered total count.
         """
-        stmt = select(Message).where(
+        base_filter = [
             Message.conversation_id == conversation_id,
             Message.is_deleted.is_not(True),
-        )
-
+        ]
         if current_only:
-            stmt = stmt.where(Message.is_current.is_not(False))
-
+            base_filter.append(Message.is_current.is_not(False))
         if keyword is not None:
-            escaped_keyword = keyword.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-            stmt = stmt.where(Message.content.ilike(f"%{escaped_keyword}%", escape="\\"))
+            base_filter.append(Message.content.icontains(keyword, autoescape=True))
         if start_at is not None:
-            stmt = stmt.where(Message.created_at >= start_at)
+            base_filter.append(Message.created_at >= start_at)
         if end_at_exclusive is not None:
-            stmt = stmt.where(Message.created_at < end_at_exclusive)
+            base_filter.append(Message.created_at < end_at_exclusive)
 
-        stmt = stmt.order_by(Message.created_at)
-
-        if limit:
+        stmt = (
+            select(
+                Message,
+                func.count().over().label("total"),
+            )
+            .where(*base_filter)
+            .order_by(Message.created_at.asc())
+        )
+        if offset is not None:
+            stmt = stmt.offset(offset)
+        if limit is not None:
             stmt = stmt.limit(limit)
 
-        messages = list((await self.db.scalars(stmt)).all())
+        rows_result = await self.db.execute(stmt)
+        rows_with_total = rows_result.all()
+        if rows_with_total:
+            total = int(rows_with_total[0].total)
+            messages = [row[0] for row in rows_with_total]
+        else:
+            total_result = await self.db.execute(
+                select(func.count(Message.id)).where(*base_filter)
+            )
+            total = int(total_result.scalar_one())
+            messages = []
 
         logger.info(
             "Fetched messages successfully",
@@ -642,7 +659,7 @@ class MessageRepository:
                 "current_only": current_only
             }
         )
-        return messages
+        return messages, total
 
     def get_messages_since(
             self,

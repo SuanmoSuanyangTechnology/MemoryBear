@@ -565,28 +565,31 @@ class ConversationService:
     async def get_messages_async(
             self,
             conversation_id: uuid.UUID,
-            limit: Optional[int] = None,
+            page: int = 1,
+            pagesize: int = 20,
             current_only: bool = True,
             keyword: str | None = None,
             start_at: datetime | None = None,
             end_at_exclusive: datetime | None = None,
-    ) -> List[Message]:
-        """Retrieve filtered messages for a conversation asynchronously.
+    ) -> tuple[List[Message], int]:
+        """Retrieve a filtered page of messages for a conversation asynchronously.
 
         Args:
             conversation_id: Conversation UUID.
-            limit: Optional maximum number of messages.
+            page: One-based page number.
+            pagesize: Maximum messages per page.
             current_only: Whether to return only current message versions.
             keyword: Optional keyword matched against message content.
             start_at: Optional inclusive creation-time lower bound.
             end_at_exclusive: Optional exclusive creation-time upper bound.
 
         Returns:
-            Messages ordered by creation time.
+            Messages ordered by creation time and the filtered total count.
         """
         return await self.message_repo.get_message_by_conversation_id_async(
-            conversation_id,
-            limit,
+            conversation_id=conversation_id,
+            limit=pagesize,
+            offset=(page - 1) * pagesize,
             current_only=current_only,
             keyword=keyword,
             start_at=start_at,
@@ -818,7 +821,7 @@ class ConversationService:
             raise BusinessException("会话不存在", BizCode.NOT_FOUND)
 
         try:
-            messages = await self.message_repo.get_message_by_conversation_id_async(
+            messages, _ = await self.message_repo.get_message_by_conversation_id_async(
                 conversation_id,
                 limit=limit,
                 current_only=True,
@@ -1076,7 +1079,7 @@ class ConversationService:
         Returns:
             List[dict]: List of message dictionaries with keys 'role' and 'content'.
         """
-        messages = await self.message_repo.get_message_by_conversation_id_async(
+        messages, _ = await self.message_repo.get_message_by_conversation_id_async(
             conversation_id,
             limit=max_history
         )

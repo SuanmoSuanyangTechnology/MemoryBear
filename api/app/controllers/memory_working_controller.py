@@ -74,6 +74,8 @@ async def get_conversations(
 @router.get("/{end_user_id}/messages", response_model=ApiResponse)
 async def get_messages(
         conversation_id: uuid.UUID,
+        page: int = Query(default=1, ge=1, description="页码，从 1 开始"),
+        pagesize: int = Query(default=20, ge=1, le=100, description="每页数量，最大 100"),
         keyword: str | None = Query(default=None, description="消息正文关键词"),
         start_date: int | None = Query(default=None, ge=0, description="开始时间（毫秒时间戳，UTC）"),
         end_date: int | None = Query(default=None, ge=0, description="结束时间（毫秒时间戳，UTC）"),
@@ -84,17 +86,18 @@ async def get_messages(
 
     Args:
         conversation_id (UUID): The ID of the conversation to fetch messages from.
+        page (int): One-based page number.
+        pagesize (int): Number of messages per page.
         keyword (str | None): Optional keyword matched against message content.
         start_date (int | None): Optional inclusive UTC start time in milliseconds.
         end_date (int | None): Optional inclusive UTC end time in milliseconds.
         current_user (CurrentUserSnapshot, optional): The authenticated user.
 
     Returns:
-        ApiResponse: Contains the list of messages in the conversation.
+        ApiResponse: Contains paginated messages and page metadata.
 
     Notes:
         - Uses ConversationService to fetch messages.
-        - Consider paginating results if message history is large.
         - Logging can be added for audit and debugging.
     """
     keyword, start_at, end_at_exclusive = _normalize_message_filters(
@@ -105,8 +108,10 @@ async def get_messages(
 
     async with get_async_db_context() as db:
         conversation_service = ConversationService(db)
-        messages_obj = await conversation_service.get_messages_async(
+        messages_obj, total = await conversation_service.get_messages_async(
             conversation_id,
+            page=page,
+            pagesize=pagesize,
             keyword=keyword,
             start_at=start_at,
             end_at_exclusive=end_at_exclusive,
@@ -115,7 +120,18 @@ async def get_messages(
             conversation_schema.Message.model_validate(message)
             for message in messages_obj
         ]
-    return success(data=messages, msg="get conversation history success")
+    return success(
+        data={
+            "items": messages,
+            "page": {
+                "page": page,
+                "pagesize": pagesize,
+                "total": total,
+                "hasnext": (page * pagesize) < total,
+            },
+        },
+        msg="get conversation history success",
+    )
 
 
 @router.get("/{end_user_id}/detail", response_model=ApiResponse)

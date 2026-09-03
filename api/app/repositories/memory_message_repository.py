@@ -353,8 +353,7 @@ class MemoryMessageRepository:
             MemoryMessage.source == source,
         ]
         if keyword is not None:
-            escaped_keyword = keyword.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-            base_filter.append(MemoryMessage.content.ilike(f"%{escaped_keyword}%", escape="\\"))
+            base_filter.append(MemoryMessage.content.icontains(keyword, autoescape=True))
         if start_at is not None:
             base_filter.append(MemoryMessage.created_at >= start_at)
         if end_at_exclusive is not None:
