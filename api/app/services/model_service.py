@@ -100,7 +100,7 @@ async def _validate_qwen3_vl_embedding(
     config: ResolvedModelConfig,
     test_message: str,
     started_at: float,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     embedding = SharedRedBearEmbeddings(config)
     try:
         result = await embedding.aembed_contents(
@@ -126,7 +126,7 @@ async def _validate_qwen3_vl_embedding(
 async def _validate_qwen3_vl_rerank(
     config: ResolvedModelConfig,
     started_at: float,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     rerank = SharedRedBearRerank(config)
     views = (
         RerankCandidateView(chunk_index=0, kind="text", content="测试文本候选"),

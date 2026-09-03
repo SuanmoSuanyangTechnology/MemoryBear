@@ -1188,7 +1188,7 @@ def get_retrieve_types(
 @route_through_knowledge_service(source=KnowledgeRetrievalSource.MANAGER_API)
 async def get_retrieval_policy(
         policy_request: chunk_schema.RetrievalPolicyRequest,
-        current_user: User = Depends(get_current_user_async),
+        current_user: User = Depends(get_current_user_async),  # noqa: B008
         request: Request = None,
 ):
     del policy_request, current_user, request
