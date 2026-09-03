@@ -1,8 +1,8 @@
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-03-16 14:53:33 
- * @Last Modified by:   ZhaoYing 
- * @Last Modified time: 2026-03-16 14:53:33 
+ * @Last Modified by: ZhaoYing
+ * @Last Modified time: 2026-09-03 14:00:39
  */
 /**
  * RadioGroupButton Component
@@ -21,7 +21,7 @@
  */
 
 import { type FC, type Key, type ReactNode, useEffect } from 'react';
-import { type RadioGroupProps, Space } from 'antd';
+import { type RadioGroupProps, Flex } from 'antd';
 import clsx from 'clsx'
 
 /** Describes a single selectable option within the radio group. */
@@ -35,7 +35,7 @@ interface RadioCardOption {
 }
 
 /** Props for the RadioGroupButton component. */
-interface RadioCardProps extends Omit<RadioGroupProps, 'onChange'> {
+interface RadioCardProps extends Omit<RadioGroupProps, 'onChange' | 'size'> {
   /** List of selectable options to render as pill tags. */
   options: RadioCardOption[];
   /** Side-effect callback invoked whenever the value changes (including on mount). */
@@ -44,6 +44,10 @@ interface RadioCardProps extends Omit<RadioGroupProps, 'onChange'> {
   onChange?: (value: string | null | undefined, option?: RadioCardOption) => void;
   /** If true, clicking the already-selected option will deselect it (set value to null). */
   allowClear?: boolean;
+  circle?: boolean;
+  size?: 'small' | 'default';
+  variant?: 'filled' | 'outlined';
+  block?: boolean;
 }
 
 /** Renders a horizontal row of pill-shaped radio options. */
@@ -53,6 +57,10 @@ const RadioGroupButton: FC<RadioCardProps> = ({
   onValueChange,
   onChange,
   allowClear = false,
+  circle = true,
+  size = 'small',
+  variant = 'filled',
+  block = false,
 }) => {
   /* Notify parent of value changes (useful for side-effects like analytics). */
   useEffect(() => {
@@ -76,20 +84,30 @@ const RadioGroupButton: FC<RadioCardProps> = ({
   }
   
   return (
-    <Space size={12}>
+    <Flex gap={12} className={clsx({
+      'rb:grid rb:w-full!': block,
+      [`rb:grid-cols-${options.length}`]: block
+    })}
+    >
       {options.map(option => (
         <div
           key={String(option.value)}
-          className={clsx('rb:rounded-[14px] rb:py-1 rb:px-2 rb:text-[12px] rb:leading-4.5 rb:cursor-pointer', {
-            'rb:bg-[#171719] rb:font-medium rb:text-white': value === option.value,
-            'rb:bg-[#F6F6F6]': value !== option.value,
+          className={clsx('rb:px-2 rb:leading-4.5 rb:cursor-pointer', {
+            'rb:rounded-full': circle,
+            'rb:rounded-[8px]': !circle,
+            'rb:bg-[#171719] rb:font-medium rb:text-white': value === option.value && variant === 'filled',
+            'rb:bg-[#F6F6F6]': value !== option.value && variant === 'filled',
+            'rb:border rb:border-[#171719] rb:font-medium': value === option.value && variant === 'outlined',
+            'rb-border rb:text-[#171719]': value !== option.value && variant === 'outlined',
+            'rb:py-1 rb:text-[12px]': size === 'small',
+            'rb:py-2 rb:text-[14px]': size === 'default',
           })}
           onClick={() => handleChange(option)}
         >
           {option.label}
         </div>
       ))}
-    </Space>
+    </Flex>
   );
 };
 

@@ -1,11 +1,14 @@
 
 import { forwardRef, useImperativeHandle, useState, useEffect } from 'react';
-import { Form, Input,  Select, Button, InputNumber, Flex, Switch } from 'antd';
+import { Form, Input,  Select, Button, InputNumber, Flex, Switch, Row, Col } from 'antd';
 import { useTranslation } from 'react-i18next';
+
 import type { RecallTestDrawerRef, RecallTestData, RecallTestParams } from '@/views/KnowledgeBase/types';
-// import refreshIcon from '@/assets/images/knowledgeBase/refresh-blue.png';
 import RecallTestResult from './RecallTestResult';
-import { reChunks, getRetrievalModeType } from '@/api/knowledgeBase';
+import { reChunks, retrievalPolicyApi, getRetrievalModeType  } from '@/api/knowledgeBase';
+import RadioGroupButton from '@/components/RadioGroupButton';
+import ModelSelect from '@/components/ModelSelect';
+import WeightBalanceSlider from '@/components/Knowledge/WeightBalanceSlider';
 
 const { TextArea } = Input;
 
@@ -25,6 +28,8 @@ const RecallTest = forwardRef<RecallTestDrawerRef>(({},ref) => {
         { label: t('knowledgeBase.hybrid'), value: true },
         { label: t('knowledgeBase.vector'), value: false },
     ]);
+
+    const formValues = Form.useWatch([], form);
 
     console.log('RecallTest - knowledgeBaseId:', knowledgeBaseId);
     // Get retrieval mode options
@@ -62,8 +67,19 @@ const RecallTest = forwardRef<RecallTestDrawerRef>(({},ref) => {
         setData([]);
         setRetrieveType('hybrid'); // Reset to default value
         // Ensure form field is also set to default value
-        form.setFieldsValue({ retrieve_type: 'hybrid' });
+        form.setFieldsValue({ retrieve_type: 'hybrid', rerank_mode: 'reranking_model' });
+        // getRetrievalPolicy();
     }
+
+    /*
+    const [retrievalPolicy, setRetrievalPolicy] = useState<Record<string, string[]>>({});
+    const getRetrievalPolicy = () => {
+        retrievalPolicyApi({ kb_ids: knowledgeBaseId ? [knowledgeBaseId] : [] })
+        .then((res) => {
+            setRetrievalPolicy(res as Record<string, string[]>);
+        })
+    }
+    */
     const fetchData = (params: RecallTestParams) => {
         if (loading) return;
         setLoading(true);
@@ -77,7 +93,7 @@ const RecallTest = forwardRef<RecallTestDrawerRef>(({},ref) => {
           });
     }
     const handleStartTest = () => {
-        form.validateFields().then((values) => {
+        form.validateFields().then(({rerank_mode, ...values}) => {
             const params: RecallTestParams = {
                 query: values.query || '',
                 kb_ids: knowledgeBaseId ? [knowledgeBaseId] : [],
@@ -87,6 +103,14 @@ const RecallTest = forwardRef<RecallTestDrawerRef>(({},ref) => {
                 // hybrid: values.retrieve_type !== hybrid ? true : false,
                 retrieve_type: retrieveType,
                 enable_graph_retrieval: retrieveType === 'hybrid' ? values.enable_graph_retrieval: undefined,
+                ...(retrieveType === 'hybrid' && rerank_mode ? {
+                    rerank_mode: rerank_mode,
+                    ...(rerank_mode === 'reranking_model' ? {
+                        reranker_id: values.reranker_id,
+                    } : {
+                        rerank_weights: values.rerank_weights,
+                    }),
+                } : {}),
             };
             console.log('RecallTest - params:', params);
             fetchData(params);
@@ -98,9 +122,20 @@ const RecallTest = forwardRef<RecallTestDrawerRef>(({},ref) => {
     useImperativeHandle(ref, () => ({
         handleOpen,
     }));
+
+    const handleChangeRerankMode = (value: string | null | undefined) => {
+        if (value === 'reranking_model') {
+            form.setFieldsValue({ rerank_weights: undefined });
+        } else if (value === 'weighted_score') {
+            form.setFieldsValue({
+                reranker_id: undefined,
+                rerank_weights: { semantic_weight: 0.5, participle_weight: 0.5 },
+            });
+        }
+    };
   return (
     <Flex vertical className='rb:w-full rb:h-full rb:overflow-hidden'>
-      <div className='rb:shrink-0'>
+      <div className='rb:shrink-0 rb:max-h-[50%]! rb:overflow-y-auto'>
         <Flex align="center" justify="space-between" className='rb:mb-2!'>
           <span className='rb:font-medium'>{ t('knowledgeBase.testQuestion')}</span>
           {/* <Flex align="center" justify="end">
@@ -112,7 +147,8 @@ const RecallTest = forwardRef<RecallTestDrawerRef>(({},ref) => {
           <Form.Item name="query">
               <TextArea rows={4} placeholder={t('knowledgeBase.testQuestionPlaceholder')}/>
           </Form.Item>
-          <div className='rb:grid rb:grid-cols-6 rb:gap-x-4'>
+          <div className="rb:grid rb:grid-cols-4 rb:gap-x-4 rb:gap-y-1">
+            <div>
               <Form.Item 
                   name="retrieve_type" 
                   label={t('knowledgeBase.retrieveMode')}
@@ -124,7 +160,9 @@ const RecallTest = forwardRef<RecallTestDrawerRef>(({},ref) => {
                       onChange={(value) => setRetrieveType(value)}
                   />
               </Form.Item>
+            </div>
               
+            <div>
               <Form.Item name="top_k" label={t('knowledgeBase.recallQuantity')}>
                   <InputNumber 
                       placeholder='1 ~ 100'
@@ -133,66 +171,128 @@ const RecallTest = forwardRef<RecallTestDrawerRef>(({},ref) => {
                       className="rb:w-full!"
                   />
               </Form.Item>
+            </div>
 
               {/* Show when retrieve_type = semantic or hybrid */}
               {(retrieveType === 'hybrid') && (
                 <>
-                  <Form.Item name="similarity_threshold" label={t('knowledgeBase.similarityThreshold')}>
+                  <div>
+                    <Form.Item
+                      name="rerank_mode"
+                      label={t('application.rerank_mode')}
+                      className="rb:col-span-full rb:mb-0!"
+                    >
                       <Select
-                          options={[
-                              { label: '0.1', value: 0.1 },
-                              { label: '0.2', value: 0.2 },
-                              { label: '0.3', value: 0.3 },
-                              { label: '0.4', value: 0.4 },
-                              { label: '0.5', value: 0.5 },
-                              { label: '0.6', value: 0.6 },
-                              { label: '0.7', value: 0.7 },
-                              { label: '0.8', value: 0.8 },
-                              { label: '0.9', value: 0.9 },
-                              { label: '1.0', value: 1.0 },
-                          ]}
-                          placeholder={t('knowledgeBase.similarityThreshold')}
+                        options={[
+                          { label: t('application.reranking_model'), value: 'reranking_model' },
+                          { label: t('application.weighted_score'), value: 'weighted_score' },
+                        ]}
+                        onChange={(value) => handleChangeRerankMode(value)}
                       />
-                  </Form.Item>
+                    </Form.Item>
+                  </div>
+                  <div className={formValues?.rerank_mode !== 'reranking_model' ? 'rb:hidden' : ''}>
+                    <Form.Item
+                      name="reranker_id"
+                      label={t('application.rearrangementModel')}
+                      className="rb:col-span-full rb:mb-0!"
+                      hidden={formValues?.rerank_mode !== 'reranking_model'}
+                    >
+                      <ModelSelect
+                        params={{ type: 'rerank', pagesize: 100 }}
+                      />
+                    </Form.Item>
+                  </div>
+
+                  {formValues?.rerank_mode === 'weighted_score' && (
+                    <div>
+                      <Form.Item
+                      label={t('application.weight_balance')}
+                      className="rb:col-span-full rb:mb-0!"
+                      required
+                      >
+                      <WeightBalanceSlider
+                          semanticWeight={formValues?.rerank_weights?.semantic_weight}
+                          participleWeight={formValues?.rerank_weights?.participle_weight}
+                          onChange={(semanticWeight, participleWeight) => {
+                          form.setFieldsValue({
+                              rerank_weights: {
+                              semantic_weight: semanticWeight,
+                              participle_weight: participleWeight,
+                              },
+                          });
+                          }}
+                      />
+                      </Form.Item>
+                      <Form.Item name="rerank_weights" hidden />
+                    </div>
+                  )}
+
+                  {(retrieveType === 'hybrid' && formValues?.rerank_mode === 'reranking_model') &&
+                    <div>
+                      <Form.Item name="similarity_threshold" label={t('knowledgeBase.similarityThreshold')} className="rb:col-span-full rb:mb-0!">
+                          <Select
+                              options={[
+                                  { label: '0.1', value: 0.1 },
+                                  { label: '0.2', value: 0.2 },
+                                  { label: '0.3', value: 0.3 },
+                                  { label: '0.4', value: 0.4 },
+                                  { label: '0.5', value: 0.5 },
+                                  { label: '0.6', value: 0.6 },
+                                  { label: '0.7', value: 0.7 },
+                                  { label: '0.8', value: 0.8 },
+                                  { label: '0.9', value: 0.9 },
+                                  { label: '1.0', value: 1.0 },
+                              ]}
+                              placeholder={t('knowledgeBase.similarityThreshold')}
+                          />
+                      </Form.Item>
+                    </div>
+                  }
                 </>
               )}
 
               {/* Show when retrieve_type = participle or hybrid */}
-              {(retrieveType === 'semantic' || retrieveType === 'hybrid') && (
-                  <Form.Item name="vector_similarity_weight" label={t('knowledgeBase.semanticSimilarity')}>
-                      <Select
-                          options={[
-                              { label: '0.1', value: 0.1 },
-                              { label: '0.2', value: 0.2 },
-                              { label: '0.3', value: 0.3 },
-                              { label: '0.4', value: 0.4 },
-                              { label: '0.5', value: 0.5 },
-                              { label: '0.6', value: 0.6 },
-                              { label: '0.7', value: 0.7 },
-                              { label: '0.8', value: 0.8 },
-                              { label: '0.9', value: 0.9 },
-                              { label: '1.0', value: 1.0 },
-                          ]}
-                          placeholder={t('knowledgeBase.semanticSimilarity')}
-                      />
-                  </Form.Item>
+              {(retrieveType === 'semantic' || (retrieveType === 'hybrid' && formValues?.rerank_mode === 'reranking_model')) && (
+                  <div>
+                    <Form.Item name="vector_similarity_weight" label={t('knowledgeBase.semanticSimilarity')}className="rb:col-span-full rb:mb-0!">
+                        <Select
+                            options={[
+                                { label: '0.1', value: 0.1 },
+                                { label: '0.2', value: 0.2 },
+                                { label: '0.3', value: 0.3 },
+                                { label: '0.4', value: 0.4 },
+                                { label: '0.5', value: 0.5 },
+                                { label: '0.6', value: 0.6 },
+                                { label: '0.7', value: 0.7 },
+                                { label: '0.8', value: 0.8 },
+                                { label: '0.9', value: 0.9 },
+                                { label: '1.0', value: 1.0 },
+                            ]}
+                            placeholder={t('knowledgeBase.semanticSimilarity')}
+                        />
+                    </Form.Item>
+                  </div>
               )}  
 
               {(retrieveType === 'hybrid') &&
-                <Form.Item
-                    name="enable_graph_retrieval"
-                    getValueProps={(value: 0 | 1 | undefined) => ({ checked: value === 1 })}
-                    getValueFromEvent={(checked: boolean) => checked ? 1 : 0}
-                    initialValue={0}
-                    valuePropName="checked"
-                    label={t('knowledgeBase.hybridIsHasGraph')}
-                >
-                    <Switch checkedChildren={t('knowledgeBase.yes')} unCheckedChildren={t('knowledgeBase.no')} />
-                </Form.Item>
+                <div>
+                  <Form.Item
+                      name="enable_graph_retrieval"
+                      getValueProps={(value: 0 | 1 | undefined) => ({ checked: value === 1 })}
+                      getValueFromEvent={(checked: boolean) => checked ? 1 : 0}
+                      initialValue={0}
+                      valuePropName="checked"
+                      label={t('knowledgeBase.hybridIsHasGraph')}
+                      className="rb:col-span-full rb:mb-0!"
+                  >
+                      <Switch checkedChildren={t('knowledgeBase.yes')} unCheckedChildren={t('knowledgeBase.no')} />
+                  </Form.Item>
+                </div>
               }
-              <Form.Item className="rb:flex rb:items-end rb:justify-end">
-                  <Button type="primary" onClick={handleStartTest} loading={loading}>{ t('knowledgeBase.startTesting')}</Button>
-              </Form.Item> 
+              <Flex align="end" className="rb:h-full!">
+                <Button type="primary" onClick={handleStartTest} loading={loading}>{ t('knowledgeBase.startTesting')}</Button>
+              </Flex>
           </div>
         </Form>
       </div>
