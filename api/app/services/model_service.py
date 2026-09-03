@@ -354,13 +354,18 @@ class ModelConfigService:
             start_time = time.time()
 
             if is_qwen3_vl_request:
+                validation_capability = list(capability or [])
+                if "vision" not in {
+                    _enum_value(item) for item in validation_capability
+                }:
+                    validation_capability.append("vision")
                 shared_config = _shared_validation_config(
                     model_name=model_name,
                     provider=provider_lower,
                     api_key=api_key,
                     api_base=api_base,
                     model_type=model_type_lower,
-                    capability=capability,
+                    capability=validation_capability,
                 )
                 if is_qwen3_vl_embedding(shared_config):
                     return await _validate_qwen3_vl_embedding(
