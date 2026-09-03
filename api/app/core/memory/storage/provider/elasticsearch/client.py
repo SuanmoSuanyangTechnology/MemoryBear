@@ -38,9 +38,10 @@ from app.core.memory.storage.provider.elasticsearch.index import (
 from app.core.memory.storage.provider.elasticsearch.index.definitions import (
     EMBEDDING_FIELDS,
     FULLTEXT_FIELDS,
+    get_index_definition,
 )
 from app.core.memory.storage.provider.elasticsearch.serialization import (
-    normalize_elasticsearch_value,
+    normalize_elasticsearch_document,
 )
 from app.core.utils.datetime_utils import to_iso_z, utcnow
 
@@ -72,6 +73,19 @@ def _raise_on_response_failures(
             f"Elasticsearch {operation} shard failures: "
             f"{shards.get('failures', [])!r}"
         )
+
+
+def _normalize_document(
+        label: MemoryNodeLabel,
+        value: Mapping[str, Any],
+) -> dict[str, Any]:
+    properties = get_index_definition(label).mappings.get("properties", {})
+    date_fields = {
+        field
+        for field, mapping in properties.items()
+        if isinstance(mapping, Mapping) and mapping.get("type") == "date"
+    }
+    return normalize_elasticsearch_document(value, date_fields=date_fields)
 
 
 def _validate_search_limit(limit: int) -> None:
@@ -227,9 +241,7 @@ class ElasticClient(BaseClient):
             label: MemoryNodeLabel,
             data: dict,
     ) -> StorageWriteResult:
-        document = normalize_elasticsearch_value(data)
-        if not isinstance(document, dict):
-            raise ValueError("Elasticsearch document must be a mapping")
+        document = _normalize_document(label, data)
         node_id = self.verify_input(label, document)
         result = await self._require_client().index(
             index=get_index_name(label),
@@ -256,9 +268,7 @@ class ElasticClient(BaseClient):
             node_filter: NodeFilter,
     ) -> StorageWriteResult:
         self.verify_label(label)
-        properties = normalize_elasticsearch_value(data)
-        if not isinstance(properties, dict):
-            raise ValueError("Elasticsearch update properties must be a mapping")
+        properties = _normalize_document(label, data)
         result = await self._require_client().update_by_query(
             index=get_index_name(label),
             query=compile_elasticsearch_filter(node_filter),

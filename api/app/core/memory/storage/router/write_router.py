@@ -4,10 +4,13 @@ from __future__ import annotations
 
 from app.core.memory.storage.enums import (
     MemoryNodeLabel,
+    MemoryNodeType,
     MemoryRelationshipType,
     StorageBackendType,
 )
 from app.core.memory.storage.models import (
+    GraphWriteResult,
+    MemoryGraphWriteCommand,
     NodeFilter,
     RelationshipFilter,
     StorageWriteResult,
@@ -36,6 +39,23 @@ class WriteRouter:
     ) -> StorageWriteResult:
         result = await self._write_client(label).save_node(label, data)
         await self._enqueue_result(label, result, OutboxOperation.UPSERT)
+        return result
+
+    async def save_memory_graph(
+        self,
+        command: MemoryGraphWriteCommand,
+    ) -> GraphWriteResult:
+        """Commit one extracted memory graph, then enqueue its node projections."""
+        client = self.backend_factory.get_graph_write_client()
+        result = await client.save_memory_graph(command)
+        await self._enqueue_graph_result(result)
+        return result
+
+    async def save_memory_summaries(self, summaries) -> GraphWriteResult:
+        """Commit summary nodes and edges, then enqueue summary projections."""
+        client = self.backend_factory.get_graph_write_client()
+        result = await client.save_memory_summaries(summaries)
+        await self._enqueue_graph_result(result)
         return result
 
     async def update_node(
@@ -135,3 +155,15 @@ class WriteRouter:
             ],
             repository=self.outbox_repository,
         )
+
+    async def _enqueue_graph_result(self, result: GraphWriteResult) -> None:
+        events = [
+            OutboxEventInput(
+                label=label,
+                node_id=node_id,
+                operation=OutboxOperation.UPSERT,
+            )
+            for label, ids in result.node_ids.items()
+            for node_id in dict.fromkeys(ids)
+        ]
+        await enqueue_events(events, repository=self.outbox_repository)

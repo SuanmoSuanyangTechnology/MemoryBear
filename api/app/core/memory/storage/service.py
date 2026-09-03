@@ -5,6 +5,8 @@ from typing import Self
 
 from app.core.memory.storage.enums import MemoryNodeLabel, MemoryRelationshipType
 from app.core.memory.storage.models import (
+    GraphWriteResult,
+    MemoryGraphWriteCommand,
     NodeFilter,
     NodeProjection,
     NodeSort,
@@ -32,6 +34,11 @@ class MemoryStorageService:
     async def create(cls) -> Self:
         """Create the service and all storage clients during app lifespan."""
         return cls(await BackendFactory.create())
+
+    @classmethod
+    async def create_graph_write_only(cls) -> Self:
+        """Create an isolated service owning only a Neo4j write client."""
+        return cls(await BackendFactory.create_graph_write_only())
 
     async def search_by_embedding(
             self,
@@ -96,6 +103,15 @@ class MemoryStorageService:
             data: dict,
     ) -> StorageWriteResult:
         return await self._write_router.save_node(label, data)
+
+    async def save_memory_graph(
+            self,
+            command: MemoryGraphWriteCommand,
+    ) -> GraphWriteResult:
+        return await self._write_router.save_memory_graph(command)
+
+    async def save_memory_summaries(self, summaries) -> GraphWriteResult:
+        return await self._write_router.save_memory_summaries(summaries)
 
     async def update_node(
             self,
