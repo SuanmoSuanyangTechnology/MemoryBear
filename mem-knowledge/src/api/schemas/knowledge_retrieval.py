@@ -6,13 +6,21 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from ...rag.models.chunk import DocumentChunk
-from .chunk import KnowledgeBaseConfig, KnowledgeRetrievalSource, RetrieveType
+from .chunk import (
+    ImageRetrievalQuery,
+    KnowledgeBaseConfig,
+    KnowledgeRetrievalSource,
+    RetrievalQuery,
+    RetrieveType,
+    TextRetrievalQuery,
+    normalize_retrieval_query,
+)
 from .knowledge_metadata import FilterGroup, MetadataFilterMode
 from .rerank import RerankMode, RerankWeights
 
 
 class KnowledgeRetrievalRequest(BaseModel):
-    query: str
+    query: RetrievalQuery
     kb_ids: list[UUID] = Field(default_factory=list)
     ex_ids: list[str] = Field(default_factory=list)
     knowledge_bases: list[KnowledgeBaseConfig] = Field(default_factory=list)
@@ -53,11 +61,22 @@ class KnowledgeRetrievalRequest(BaseModel):
 
     @field_validator("query")
     @classmethod
-    def validate_query(cls, value: str) -> str:
-        stripped = value.strip()
-        if not stripped:
-            raise ValueError("query must not be empty")
-        return stripped
+    def validate_query(cls, value: RetrievalQuery) -> RetrievalQuery:
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                raise ValueError("query must not be empty")
+            return stripped
+        return value
+
+    @property
+    def normalized_query(self) -> TextRetrievalQuery | ImageRetrievalQuery:
+        return normalize_retrieval_query(self.query)
+
+    @property
+    def query_text(self) -> str | None:
+        query = self.normalized_query
+        return query.content if isinstance(query, TextRetrievalQuery) else None
 
     @model_validator(mode="after")
     def validate_knowledge_ids(self) -> "KnowledgeRetrievalRequest":

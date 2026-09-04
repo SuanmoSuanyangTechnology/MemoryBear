@@ -1,6 +1,12 @@
 """Lightweight public exports for RedBear model resolution."""
 
 from .contracts import (
+    QWEN3_VL_EMBEDDING_DIMENSION,
+    EmbeddingContent,
+    EmbeddingPurpose,
+    EmbeddingRequest,
+    EmbeddingResult,
+    ImageEmbeddingContent,
     LoadBalanceStrategy,
     ModelCapability,
     ModelConfigSnapshot,
@@ -9,20 +15,29 @@ from .contracts import (
     ModelRuntimeOptions,
     ModelType,
     PublicModelBindingSnapshot,
+    RerankCandidateView,
+    RerankQuery,
+    RerankScore,
     ResolvedModelConfig,
+    SupportedImageMediaType,
+    TextEmbeddingContent,
 )
 from .errors import (
+    InvalidProviderResponseError,
     ModelAccessDeniedError,
     ModelConfigInactiveError,
     ModelConfigNotFoundError,
     ModelCredentialNotFoundError,
     ModelUsageRecordError,
+    MultimodalInputLimitError,
     ProviderDependencyMissingError,
     PublicCredentialUnavailableError,
     RedBearModelError,
     UnsupportedModelProviderError,
+    UnsupportedMultimodalModelError,
 )
 from .ports import AsyncModelRegistryRepository, ModelRegistryRepository
+from .providers.dashscope import is_qwen3_vl_embedding, is_qwen3_vl_reranker
 from .resolver import (
     record_model_usage,
     record_model_usage_async,
@@ -31,7 +46,14 @@ from .resolver import (
 )
 
 __all__ = [
+    "QWEN3_VL_EMBEDDING_DIMENSION",
     "AsyncModelRegistryRepository",
+    "EmbeddingContent",
+    "EmbeddingPurpose",
+    "EmbeddingRequest",
+    "EmbeddingResult",
+    "ImageEmbeddingContent",
+    "InvalidProviderResponseError",
     "LoadBalanceStrategy",
     "ModelAccessDeniedError",
     "ModelCapability",
@@ -45,12 +67,21 @@ __all__ = [
     "ModelRuntimeOptions",
     "ModelType",
     "ModelUsageRecordError",
+    "MultimodalInputLimitError",
     "ProviderDependencyMissingError",
     "PublicCredentialUnavailableError",
     "PublicModelBindingSnapshot",
     "RedBearModelError",
+    "RerankCandidateView",
+    "RerankQuery",
+    "RerankScore",
     "ResolvedModelConfig",
+    "SupportedImageMediaType",
+    "TextEmbeddingContent",
     "UnsupportedModelProviderError",
+    "UnsupportedMultimodalModelError",
+    "is_qwen3_vl_embedding",
+    "is_qwen3_vl_reranker",
     "record_model_usage",
     "record_model_usage_async",
     "resolve_model",

@@ -29,6 +29,9 @@ ERROR_DEFINITIONS = {
     "KB_STORAGE_UNAVAILABLE": ErrorDefinition(500, True, 10001, "internal"),
     "KB_SEARCH_UNAVAILABLE": ErrorDefinition(500, True, 10001, "internal"),
     "KB_MODEL_UNAVAILABLE": ErrorDefinition(400, False, 400, "http"),
+    "KB_MULTIMODAL_INPUT_LIMIT": ErrorDefinition(400, False, 400, "http"),
+    "KB_MULTIMODAL_EMBEDDING_FAILED": ErrorDefinition(502, True, 10001, "internal"),
+    "KB_MULTIMODAL_RERANK_FAILED": ErrorDefinition(502, True, 10001, "internal"),
     "KB_DATABASE_UNAVAILABLE": ErrorDefinition(500, True, 10001, "internal"),
     "KB_INTERNAL_ERROR": ErrorDefinition(500, False, 10001, "internal"),
 }

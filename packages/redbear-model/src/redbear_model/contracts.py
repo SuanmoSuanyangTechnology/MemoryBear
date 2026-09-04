@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import logging
+import math
 from enum import StrEnum
+from typing import Literal
 from uuid import UUID
 
 from pydantic import (
@@ -56,6 +58,91 @@ class LoadBalanceStrategy(StrEnum):
 
 class ContractModel(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
+
+
+QWEN3_VL_EMBEDDING_DIMENSION = 2048
+type SupportedImageMediaType = Literal[
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+    "image/bmp",
+]
+
+
+class EmbeddingPurpose(StrEnum):
+    INDEX = "index"
+    RETRIEVAL = "retrieval"
+
+
+class TextEmbeddingContent(ContractModel):
+    type: Literal["text"] = "text"
+    text: str
+
+    @model_validator(mode="after")
+    def normalize_text(self) -> TextEmbeddingContent:
+        text = self.text.strip()
+        if not text:
+            raise ValueError("embedding text must not be blank")
+        object.__setattr__(self, "text", text)
+        return self
+
+
+class ImageEmbeddingContent(ContractModel):
+    type: Literal["image"] = "image"
+    media_type: SupportedImageMediaType
+    data_uri: str = Field(min_length=1, repr=False)
+    decoded_bytes: int = Field(ge=1, repr=False)
+
+
+type EmbeddingContent = TextEmbeddingContent | ImageEmbeddingContent
+
+
+class EmbeddingRequest(ContractModel):
+    purpose: EmbeddingPurpose
+    contents: tuple[EmbeddingContent, ...] = Field(min_length=1, max_length=20)
+    dimension: Literal[2048] = QWEN3_VL_EMBEDDING_DIMENSION
+    fusion: Literal[True] = True
+
+    @model_validator(mode="after")
+    def validate_image_count(self) -> EmbeddingRequest:
+        if sum(isinstance(item, ImageEmbeddingContent) for item in self.contents) > 10:
+            raise ValueError("embedding request supports at most 10 images")
+        return self
+
+
+class EmbeddingResult(ContractModel):
+    vector: tuple[float, ...] = Field(min_length=1, repr=False)
+    dimension: Literal[2048] = QWEN3_VL_EMBEDDING_DIMENSION
+    usage: dict[str, int] = Field(default_factory=dict)
+
+
+type RerankQuery = TextEmbeddingContent | ImageEmbeddingContent
+
+
+class RerankCandidateView(ContractModel):
+    chunk_index: int = Field(ge=0)
+    kind: Literal["text", "image"]
+    content: str = Field(min_length=1, repr=False)
+    image_index: int | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def validate_image_index(self) -> RerankCandidateView:
+        if self.kind == "image" and self.image_index is None:
+            object.__setattr__(self, "image_index", 0)
+        if self.kind == "text" and self.image_index is not None:
+            raise ValueError("text rerank views cannot have an image index")
+        return self
+
+
+class RerankScore(ContractModel):
+    input_index: int = Field(ge=0)
+    relevance_score: float = Field(ge=0, le=1)
+
+    @model_validator(mode="after")
+    def validate_finite_score(self) -> RerankScore:
+        if not math.isfinite(self.relevance_score):
+            raise ValueError("rerank score must be finite")
+        return self
 
 
 class ModelRuntimeOptions(ContractModel):
