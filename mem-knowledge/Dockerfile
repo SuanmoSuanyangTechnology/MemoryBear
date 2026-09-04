@@ -4,6 +4,7 @@ FROM ${PYTHON_BASE_IMAGE} AS builder
 ARG PYPI_INDEX_URL=https://pypi.org/simple
 ARG TIKA_VERSION=3.1.0
 ARG TIKA_SHA1=d32d863e77480fae2885d24973d04a07082c8f19
+ARG NEED_MIRROR=1
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -11,19 +12,33 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /code
 
-RUN apt-get update && \
+RUN if [ "$NEED_MIRROR" == "1" ]; then \
+        sed -i 's|http://deb.debian.org|http://mirrors.tuna.tsinghua.edu.cn|g' /etc/apt/sources.list.d/*.sources 2>/dev/null || true; \
+        pip3 config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple && \
+        pip3 config set global.trusted-host pypi.tuna.tsinghua.edu.cn; \
+        mkdir -p /etc/uv && \
+        printf '[[index]]\nurl = "https://pypi.tuna.tsinghua.edu.cn/simple"\ndefault = true\n' > /etc/uv/uv.toml; \
+    fi; \
+    apt-get update && \
     apt-get install --yes --no-install-recommends \
       ca-certificates \
       curl && \
     rm -rf /var/lib/apt/lists/*
 
-RUN pip install --no-cache-dir --index-url "${PYPI_INDEX_URL}" uv==0.10.11
+RUN if [ "$NEED_MIRROR" == "1" ]; then \
+        pip3 install --no-cache-dir uv==0.10.11; \
+    else \
+        pip install --no-cache-dir --index-url "${PYPI_INDEX_URL}" uv==0.10.11; \
+    fi
 COPY packages/redbear-model /code/packages/redbear-model
 COPY packages/storage-core /code/packages/storage-core
 COPY packages/auth-sdk /code/packages/auth-sdk
 COPY mem-knowledge/pyproject.toml mem-knowledge/uv.lock /code/mem-knowledge/
 
 WORKDIR /code/mem-knowledge
+RUN if [ "$NEED_MIRROR" == "1" ]; then \
+        sed -i 's|pypi.org|pypi.tuna.tsinghua.edu.cn|g' uv.lock; \
+    fi
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev --no-install-project --no-editable
 
@@ -42,6 +57,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 FROM ${PYTHON_BASE_IMAGE} AS runtime
 
+ARG NEED_MIRROR=1
+
 ENV KB_PROCESS_ROLE=api
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -53,7 +70,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /code/mem-knowledge
 
-RUN apt-get update && \
+RUN if [ "$NEED_MIRROR" == "1" ]; then \
+        sed -i 's|http://deb.debian.org|http://mirrors.tuna.tsinghua.edu.cn|g' /etc/apt/sources.list.d/*.sources 2>/dev/null || true; \
+    fi; \
+    apt-get update && \
     apt-get install --yes --no-install-recommends \
       ca-certificates \
       curl \

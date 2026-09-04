@@ -27,9 +27,9 @@ class Settings:
     # 微服务新增：Redis 单命令超时（ms）——快照读取 fail-closed 的判定窗口
     REDIS_CMD_TIMEOUT_MS: int = int(os.getenv("REDIS_CMD_TIMEOUT_MS", "500"))
 
-    # ---- 用户 JWT 验签（与老单体 security.py 一致）----
+    # ---- 用户 JWT 验签（与老单体 security.py 一致；TokenVerifier 按 header alg
+    # 自适应 HS256/RS256，网关未配 JWKS → 实际仅 HS256 可走通，fail-closed）----
     SECRET_KEY: str = os.getenv("SECRET_KEY")                  # 无默认：缺失时验签必然失败，fail-closed
-    USER_JWT_ALGORITHM: str = os.getenv("USER_JWT_ALGORITHM", "HS256")
 
     # ---- 内部 token 签发（决策 #5：本地 RS256；KMS 降级：环境变量/挂载注入私钥）----
     INTERNAL_ISSUER_PRIVATE_KEY: str = os.getenv("INTERNAL_ISSUER_PRIVATE_KEY")

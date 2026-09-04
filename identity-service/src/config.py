@@ -42,8 +42,6 @@ class Settings:
         if REDIS_PASSWORD
         else f"redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}"
     )
-    # 微服务新增：Redis 单命令超时（ms）——快照读取 fail-closed 的判定窗口
-    REDIS_CMD_TIMEOUT_MS: int = int(os.getenv("REDIS_CMD_TIMEOUT_MS", "500"))
 
     # ---- 内部 token 密钥注入（决策 #15：identity 为唯一权威，K8s Secret 管理、不轮换）----
     # 与 gateway 同源变量（INTERNAL_ISSUER_PRIVATE_KEY/INTERNAL_ISSUER_KID），两侧值必须一致；

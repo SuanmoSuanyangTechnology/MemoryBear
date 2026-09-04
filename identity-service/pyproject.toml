@@ -17,7 +17,6 @@ dependencies = [
     "python-jose>=3.3",
     "python-dotenv>=1.0",
     "rsa>=4.9",
-    "psycopg2-binary>=2.9",
     "email-validator>=2.1",
     "alembic>=1.13",
 ]
@@ -28,8 +27,12 @@ dev = ["pytest>=8", "pytest-asyncio>=0.23", "fakeredis>=2.23"]
 [tool.uv.sources]
 auth-sdk = { path = "../packages/auth-sdk" }
 
-[tool.setuptools.packages.find]
-where = ["src"]
+# 包名即 src（src/__init__.py 在服务根下，代码平铺 + 子包并存）：显式声明全部包，
+# 使 wheel 安装产出 package src 及其子包——find where=["src"] 会把子包打成顶层包、
+# 漏掉 src 根模块（main/db/config/keys/redis），uvicorn src.main:app 将不可导入
+[tool.setuptools]
+packages = ["src", "src.controllers", "src.models",
+            "src.repositories", "src.schemas", "src.services"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

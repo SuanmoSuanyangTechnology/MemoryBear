@@ -6,7 +6,7 @@ from auth_sdk.snapshot import api_key_hash
 
 from src.models.base import utcnow_naive
 from src.repositories.api_key import get_api_key
-from src.repositories.user import get_workspace
+from src.repositories.user import get_user, get_workspace
 
 
 async def build_api_key_snapshot(session, api_key: str) -> dict | None:
@@ -18,12 +18,16 @@ async def build_api_key_snapshot(session, api_key: str) -> dict | None:
         return None
     workspace = await get_workspace(session, row.workspace_id)
     tenant_id = str(workspace.tenant_id) if workspace else ""
+    # creator 用户：网关按老单体"API key 代理创建者"语义签发内部 token（sub=creator）。
+    # creator 缺失（用户已删）时快照仍产出、user_id=None——网关退化为 ak: 主体由下游拒绝。
+    creator = await get_user(session, row.created_by) if row.created_by else None
     return {
         "api_key_id": str(row.id), "workspace_id": str(row.workspace_id),
         "tenant_id": tenant_id, "scopes": list(row.scopes or []),
         "rate_limit": row.rate_limit,
         "daily_request_limit": row.daily_request_limit,
         "rate_limit_disabled": bool(row.rate_limit_disabled),
+        "user_id": str(creator.id) if creator else None,
         "expires_at": row.expires_at.isoformat() if row.expires_at else None,  # 仅写入用，不落 Redis
     }
 

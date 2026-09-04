@@ -19,7 +19,12 @@ class UserContext:
 
 @dataclass
 class ApiKeyContext:
-    """API Key 请求的上下文：服务对服务调用（老单体 service_router 语义）。"""
+    """API Key 请求的上下文：服务对服务调用（老单体 service_router 语义）。
+
+    user_id = key 创建者用户：老单体语义中 API key 只是受限凭证，认证后代理其
+    creator 访问（scopes/workspace_id/type/resource_id 收窄权限）。签发内部 token
+    时 sub 用 user_id；creator 缺失（已删除/旧快照）时退化为 ak: 主体由下游拒绝。
+    """
     api_key_id: str
     workspace_id: str
     tenant_id: str
@@ -28,6 +33,7 @@ class ApiKeyContext:
     rate_limit: int | None = None
     daily_request_limit: int | None = None
     rate_limit_disabled: bool = False
+    user_id: str | None = None
 
 
 @dataclass

@@ -54,8 +54,9 @@ class TokenIssuer(Protocol):
 class LocalTokenIssuer:
     """首期签发实现：本地持 RS256 私钥签发内部 token（决策 #5）。
 
-    UserContext → sub=user_id；ApiKeyContext → sub="ak:{api_key_id}"（前缀防与用户 sub
-    撞车）+ auth_type="api_key" + scopes。下游验签后按 auth_type 区分身份类型。
+    UserContext → sub=user_id；ApiKeyContext → sub=user_id（key 创建者，老单体"key 代理
+    creator"语义），user_id 缺失（creator 已删/旧快照）退化为 "ak:{api_key_id}" 防与用户
+    sub 撞车 + auth_type="api_key" + scopes。下游验签后按 auth_type 区分身份类型。
     """
 
     def __init__(self, private_key: str, kid: str, ttl: int = 120, leeway: int = 30,
@@ -75,7 +76,7 @@ class LocalTokenIssuer:
             "iat": now, "exp": now + timedelta(seconds=self.ttl),
         }
         if isinstance(identity, ApiKeyContext):
-            payload["sub"] = f"ak:{identity.api_key_id}"
+            payload["sub"] = identity.user_id or f"ak:{identity.api_key_id}"
             payload["auth_type"] = "api_key"
             payload["scopes"] = list(identity.scopes)
         else:

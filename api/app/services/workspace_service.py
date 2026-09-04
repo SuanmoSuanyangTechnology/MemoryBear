@@ -797,6 +797,9 @@ def switch_workspace(
     try:
         user.current_workspace_id = workspace_id
         db.commit()
+        # 快照重建事件：identity 订阅后按新 current_workspace_id 重写 user 快照，
+        # 网关才签得出新空间的内部 token（漏发则 kb 按旧空间过滤返回空）
+        notify_user_sync(str(user.id))
         business_logger.info(f"用户 {user.username} 成功切换工作空间为 {workspace_id}")
         return
     except Exception as e:

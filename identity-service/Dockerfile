@@ -9,8 +9,7 @@ FROM python:3.12-slim
 
 ARG NEED_MIRROR=1
 
-# 零 apt：asyncpg/psycopg2-binary/pydantic-core 等均有 cp312 manylinux wheel，
-# psycopg2-binary 静态捆绑 libpq，无需编译期系统依赖
+# 零 apt：asyncpg/pydantic-core 等均有 cp312 manylinux wheel，无需编译期系统依赖
 # pip 走清华镜像（NEED_MIRROR=1 时）
 RUN if [ "$NEED_MIRROR" == "1" ]; then \
         pip3 config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple && \
@@ -21,7 +20,10 @@ RUN if [ "$NEED_MIRROR" == "1" ]; then \
 # pip 构建需 auth-sdk 已满足依赖（auth-sdk 不在 PyPI，path 安装为唯一来源）
 # alembic.ini + migrations 一并拷入（prepend_sys_path=src），供 pod 内执行迁移
 COPY core/packages/auth-sdk /app/packages/auth-sdk
-COPY core/identity-service/pyproject.toml core/identity-service/alembic.ini core/identity-service/migrations /app/identity-service/
+# migrations 单独 COPY：多源 COPY 到以 / 结尾的目标会平铺目录内容，
+# 而 alembic.ini 的 script_location = migrations 需要 migrations/ 子目录
+COPY core/identity-service/pyproject.toml core/identity-service/alembic.ini /app/identity-service/
+COPY core/identity-service/migrations /app/identity-service/migrations
 COPY core/identity-service/src /app/identity-service/src
 WORKDIR /app/identity-service
 RUN pip install --no-cache-dir -e /app/packages/auth-sdk && pip install --no-cache-dir .

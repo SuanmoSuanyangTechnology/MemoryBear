@@ -17,4 +17,5 @@ class ApiKey(ReadOnlyBase):
     rate_limit = Column(Integer, nullable=True)
     daily_request_limit = Column(Integer, nullable=True)
     rate_limit_disabled = Column(Boolean, nullable=False, default=False)
+    created_by = Column(UUID(as_uuid=True), nullable=True)  # key 创建者用户（快照 user_id 来源）
     updated_at = Column(DateTime, nullable=True)

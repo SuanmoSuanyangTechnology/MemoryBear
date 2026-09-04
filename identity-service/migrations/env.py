@@ -11,8 +11,8 @@ from alembic import context
 from sqlalchemy import pool
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from identity.config import settings
-from identity.models.base import ServiceBase
+from src.config import settings
+from src.models.base import ServiceBase
 
 config = context.config
 if config.config_file_name is not None:
