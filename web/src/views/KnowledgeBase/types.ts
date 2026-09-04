@@ -64,8 +64,17 @@ export interface RecallTestData {
   children: null | RecallTestData[];
 }
 
+export type RetrievalModality = 'text' | 'image';
+
+export type RetrievalPolicy = Partial<Record<string, RetrievalModality[]>>;
+
+export interface RecallTestQuery {
+  modality: RetrievalModality;
+  content: string;
+}
+
 export interface RecallTestParams {
-  query?: string; // 查询问题
+  query: RecallTestQuery; // 多模态查询内容
   kb_ids?: string[]; // 知识库ID
   similarity_threshold?: number; // 相似度阈值
   vector_similarity_weight?: number; //语义相似度权重

@@ -209,6 +209,7 @@ const RecallTestResult = ({
       <NoData
         title={t('knowledgeBase.recallTestUnStart')}
         subTitle={t('knowledgeBase.recallTestUnStartSubTitle')}
+        className="rb:h-full!"
       />
     );
   }

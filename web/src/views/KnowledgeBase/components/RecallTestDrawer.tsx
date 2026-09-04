@@ -4,7 +4,7 @@ import RbDrawer from '@/components/RbDrawer';
 import type { RecallTestDrawerRef } from '@/views/KnowledgeBase/types';
 import RecallTest from './RecallTest';
 
-const RecallTestDrawer = forwardRef<RecallTestDrawerRef>(({},ref) => {
+const RecallTestDrawer = forwardRef<RecallTestDrawerRef>((_props,ref) => {
     const { t } = useTranslation();
     const [open, setOpen] = useState(false);
     const recallTestRef = useRef<any>(null);

@@ -14,6 +14,8 @@ import type {
   KnowledgeBaseDocumentData,
   KnowledgeBaseListResponse,
   KnowledgeBaseShareListResponse,
+  RecallTestParams,
+  RetrievalPolicy,
 } from "@/views/KnowledgeBase/types";
 
 //获取知识库类型 (返回字符串数组，每个字符串是 KnowledgeBase 的 type 值)
@@ -253,13 +255,13 @@ export const getDocumentChunkList = async (query: PathQuery) => {
   return response as any;
 };
 // 回归测试
-export const reChunks = async (data: any) => {
+export const reChunks = async (data: RecallTestParams) => {
   const response = await request.post(`/chunks/retrieval`, data);
   return response as any;
 };
 // 获取检索策略
-export const retrievalPolicyApi = (data: { kb_ids: string[] }) => {
-  return request.get('/chunks/retrieval-policy', data)
+export const retrievalPolicyApi = (data: { kb_ids: string[] }): Promise<RetrievalPolicy> => {
+  return request.post('/chunks/retrieval-policy', data);
 }
 // 知识库授权 分享空间列表
 export const getWorkspaceAuthorizationList = async (kb_id: string) => {
