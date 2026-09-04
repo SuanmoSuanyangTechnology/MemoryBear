@@ -18,6 +18,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..api.dependencies import Principal
 from ..api.schemas.chunk import (
+    IMAGE_QUERY_TOP_N,
+    ImageRetrievalQuery,
     KnowledgeBaseConfig,
     RetrievalPolicy,
     RetrievalPolicyRequest,
@@ -640,11 +642,16 @@ class KnowledgeRetrievalPreparation:
         if rerank_threshold is None:
             rerank_threshold = vector_weight if vector_weight is not None else 0.1
         top_k = int(value("top_k", request.top_k))
+        top_n = (
+            IMAGE_QUERY_TOP_N
+            if isinstance(request.normalized_query, ImageRetrievalQuery)
+            else max(top_k, int(request.top_n or 20))
+        )
         return RetrievalParams(
             similarity_threshold=float(value("similarity_threshold", request.similarity_threshold)),
             vector_similarity_weight=vector_weight,
             top_k=top_k,
-            top_n=max(top_k, int(request.top_n or 20)),
+            top_n=top_n,
             retrieve_type=value("retrieve_type", request.retrieve_type),
             rerank_score_threshold=float(rerank_threshold),
             enable_graph_retrieval=(
