@@ -10,6 +10,7 @@ from collections.abc import Sequence
 from dataclasses import replace
 from enum import Enum
 from functools import partial
+from itertools import islice, zip_longest
 from typing import Any
 
 from langchain_core.documents import Document as LangChainDocument
@@ -77,6 +78,35 @@ from .multimodal_image import resolve_storage_images_async, validate_image_data_
 logger = logging.getLogger(__name__)
 _SOURCE_INDEX = "_retrieval_source_index"
 _MAX_RETRIEVAL_WORKERS = 3
+_MAX_MULTIMODAL_RERANK_TEXT_VIEWS = 100
+_MAX_MULTIMODAL_RERANK_IMAGE_VIEWS = 40
+
+
+def _select_multimodal_rerank_views(
+    views: Sequence[RerankCandidateView],
+) -> list[RerankCandidateView]:
+    """Keep text in candidate order and distribute image slots across chunks."""
+    text_indices: list[int] = []
+    image_indices_by_chunk: dict[int, list[int]] = {}
+    for index, view in enumerate(views):
+        if view.kind == "text":
+            if len(text_indices) < _MAX_MULTIMODAL_RERANK_TEXT_VIEWS:
+                text_indices.append(index)
+        else:
+            image_indices_by_chunk.setdefault(view.chunk_index, []).append(index)
+
+    round_robin_image_indices = (
+        index
+        for layer in zip_longest(*image_indices_by_chunk.values())
+        for index in layer
+        if index is not None
+    )
+    selected_indices = set(text_indices)
+    selected_indices.update(
+        islice(round_robin_image_indices, _MAX_MULTIMODAL_RERANK_IMAGE_VIEWS)
+    )
+    # Preserve the original payload order and each view's source-chunk mapping.
+    return [view for index, view in enumerate(views) if index in selected_indices]
 
 
 def _record_elapsed(
@@ -1084,10 +1114,20 @@ class KnowledgeRetrievalService:
                     )
                     chunk_image_index += 1
                     image_view_count += 1
-        if text_view_count > 100 or image_view_count > 40:
-            raise KnowledgeError.from_code(
-                "KB_MULTIMODAL_INPUT_LIMIT",
-                "Rerank candidate view count exceeds the model limit",
+        if (
+            text_view_count > _MAX_MULTIMODAL_RERANK_TEXT_VIEWS
+            or image_view_count > _MAX_MULTIMODAL_RERANK_IMAGE_VIEWS
+        ):
+            views = _select_multimodal_rerank_views(views)
+            retained_text_count = sum(view.kind == "text" for view in views)
+            logger.warning(
+                "event=kb_multimodal_rerank_views_trimmed "
+                "text_views_before=%s text_views_after=%s "
+                "image_views_before=%s image_views_after=%s",
+                text_view_count,
+                retained_text_count,
+                image_view_count,
+                len(views) - retained_text_count,
             )
         if not views:
             return ModelRerankResult(chunks=(), used_fallback=False)
