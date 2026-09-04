@@ -1,0 +1,13 @@
+{
+  "routes": [
+    {"path_prefix": "/api/knowledges", "service": "kb", "base_url": "http://mem-knowledge:8080", "aud": "kb"},
+    {"path_prefix": "/v1/knowledges", "service": "kb", "base_url": "http://mem-knowledge:8080", "aud": "kb"},
+    {"path_prefix": "/api/chunks", "service": "kb", "base_url": "http://mem-knowledge:8080", "aud": "kb"},
+    {"path_prefix": "/v1/chunks", "service": "kb", "base_url": "http://mem-knowledge:8080", "aud": "kb"},
+    {"path_prefix": "/api/documents", "service": "kb", "base_url": "http://mem-knowledge:8080", "aud": "kb"},
+    {"path_prefix": "/v1/documents", "service": "kb", "base_url": "http://mem-knowledge:8080", "aud": "kb"},
+    {"path_prefix": "/api/files", "service": "kb", "base_url": "http://mem-knowledge:8080", "aud": "kb"},
+    {"path_prefix": "/v1/files", "service": "kb", "base_url": "http://mem-knowledge:8080", "aud": "kb"},
+    {"path_prefix": "/api/knowledgeshares", "service": "kb", "base_url": "http://mem-knowledge:8080", "aud": "kb"}
+  ]
+}

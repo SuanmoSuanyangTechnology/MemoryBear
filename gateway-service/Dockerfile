@@ -22,6 +22,9 @@ RUN if [ "$NEED_MIRROR" == "1" ]; then \
 COPY core/packages/auth-sdk /app/packages/auth-sdk
 COPY core/gateway-service/pyproject.toml /app/gateway-service/
 COPY core/gateway-service/src /app/gateway-service/src
+# 路由表默认文件内置进镜像（固定路径 /etc/gateway/routes.json）：裸部署开箱即用；
+# compose/k8s 以 bind-mount / ConfigMap 挂载同一路径覆盖镜像默认
+COPY core/gateway-service/routes.json /etc/gateway/routes.json
 WORKDIR /app/gateway-service
 RUN pip install --no-cache-dir -e /app/packages/auth-sdk && pip install --no-cache-dir .
 

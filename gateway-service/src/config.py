@@ -12,6 +12,32 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# 镜像内置默认路由文件（Dockerfile COPY 的固定路径）：裸部署未显式配置时兜底；
+# compose/k8s 以 bind-mount / ConfigMap 挂载同一路径覆盖镜像默认
+_DEFAULT_ROUTES_FILE = "/etc/gateway/routes.json"
+
+
+def _read_routes_file(path: str) -> dict:
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(
+            f"TARGET_ROUTES_FILE unreadable/invalid: {path}: {exc}") from exc
+
+
+def _target_routes_raw() -> dict:
+    path = os.getenv("TARGET_ROUTES_FILE")
+    if path:
+        # 显式配置：文件缺失/非法 = misconfiguration → 启动失败（fail-fast）
+        return _read_routes_file(path)
+    env = os.getenv("TARGET_ROUTES")
+    if env:
+        return json.loads(env)
+    if os.path.exists(_DEFAULT_ROUTES_FILE):
+        return _read_routes_file(_DEFAULT_ROUTES_FILE)
+    return {}
+
 
 class Settings:
     # ---- Redis（用户快照 + 审计队列）----
@@ -58,11 +84,16 @@ class Settings:
     def user_rate_limit_per_minute(self) -> int:
         return int(os.getenv("USER_RATE_LIMIT_PER_MINUTE", "600"))
 
-    # ---- 转发目标路由（TARGET_ROUTES JSON，惰性读）----
+    # ---- 转发目标路由（文件/env 三层，惰性读）----
+    # 优先级：TARGET_ROUTES_FILE（部署显式指向，缺失/非法 = misconfiguration →
+    # RuntimeError 启动失败）> TARGET_ROUTES env（旧行为）> 镜像内置默认
+    # /etc/gateway/routes.json（Dockerfile COPY，裸部署开箱即用；存在即读）> 空路由。
+    # 路由表是静态配置，compose bind-mount / K8s ConfigMap 挂载同路径覆盖镜像默认；
+    # 新增服务只改路由文件不动代码。target_routes 仅 lifespan 消费一次。
     @property
     def target_routes(self) -> list:
         from src.forward import TargetRoute  # 延迟导入避免循环
-        raw = json.loads(os.getenv("TARGET_ROUTES", "{}")) if os.getenv("TARGET_ROUTES") else {}
+        raw = _target_routes_raw()
         return [TargetRoute(**item) for item in raw.get("routes", [])]
 
 
