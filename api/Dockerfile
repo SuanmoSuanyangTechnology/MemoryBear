@@ -6,7 +6,7 @@ ARG NEED_MIRROR=1
 
 WORKDIR /code
 
-# Build from the repository root so local workspace packages are available.
+# Build from the repository root; application files use the api/ prefix.
 
 # 1. Download dependencies through download_deps.py: python download_deps.py --china-mirrors
 # 2. Copy models
@@ -65,7 +65,6 @@ ENV PATH=/root/.local/bin:$PATH
 
 
 # 5. install dependencies from uv.lock file
-COPY packages/redbear-model /packages/redbear-model
 COPY api/pyproject.toml /code/pyproject.toml
 COPY api/uv.lock /code/uv.lock
 COPY api/app /code/app
@@ -84,5 +83,4 @@ RUN --mount=type=cache,id=mem_uv,target=/root/.cache/uv,sharing=locked \
     uv sync --locked --no-dev
 
 ENV PATH=/code/.venv/bin:$PATH
-
 
