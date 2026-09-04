@@ -18,19 +18,18 @@
  * @component
  */
 
-import { useState, useEffect, forwardRef, useImperativeHandle } from 'react';
+import { useState, useEffect, useRef, forwardRef, useImperativeHandle } from 'react';
 import { Upload, Image, App } from 'antd';
 import type { GetProp, UploadFile, UploadProps } from 'antd';
 import type { UploadProps as RcUploadProps } from 'antd/es/upload/interface';
 import { useTranslation } from 'react-i18next';
 
-import PlusIcon from '@/assets/images/plus.svg'
 import { cookieUtils } from '@/utils/request'
 import { fileUploadUrl } from '@/api/fileStorage'
 import styles from './index.module.less'
 
 /** Props interface for UploadImages component */
-interface UploadImagesProps extends Omit<UploadProps, 'onChange' | 'fileList'> {
+export interface UploadImagesProps extends Omit<UploadProps, 'onChange' | 'fileList'> {
   /** Upload API URL */
   action?: string;
   /** Support multiple file selection */
@@ -66,7 +65,7 @@ const ALL_FILE_TYPE: {
 }
 
 /** Ref methods exposed to parent component */
-interface UploadImagesRef {
+export interface UploadImagesRef {
   fileList: UploadFile[];
   clearFiles: () => void;
 }
@@ -101,6 +100,7 @@ const UploadImages = forwardRef<UploadImagesRef, UploadImagesProps>(({
 }, ref) => {
   const { t } = useTranslation();
   const { message, modal } = App.useApp()
+  const readRequestIdRef = useRef(0);
   const [fileList, setFileList] = useState<UploadFile[]>([]);
   const [accept, setAccept] = useState<string | undefined>();
   // const [loading, setLoading] = useState(false);
@@ -112,6 +112,10 @@ const UploadImages = forwardRef<UploadImagesRef, UploadImagesProps>(({
       setFileList([propFileList]);
     }
   }, [propFileList])
+
+  useEffect(() => () => {
+    readRequestIdRef.current += 1;
+  }, []);
 
   /** Update value based on maxCount (single or multiple) */
   const updateValue = (list: UploadFile[]) => {
@@ -139,7 +143,7 @@ const UploadImages = forwardRef<UploadImagesRef, UploadImagesProps>(({
   };
 
   /** Validate file type and size before upload */
-  const beforeUpload: RcUploadProps['beforeUpload'] = async (file: UploadFile) => {
+  const beforeUpload: RcUploadProps['beforeUpload'] = async (file) => {
     // Validate file size
     if (fileSize && file.size) {
       const isLtMaxSize = (file.size / 1024 / 1024) < fileSize;
@@ -149,25 +153,39 @@ const UploadImages = forwardRef<UploadImagesRef, UploadImagesProps>(({
       }
     }
     // Validate file type
-    if (accept && accept.length > 0 && file.type) {
-      const isAccept = accept.includes(file.type);
-      if (!isAccept) {
-        message.error(`${t('common.fileAcceptTip')}${file.type}`);
-        return Upload.LIST_IGNORE;
-      }
+    const acceptedTypes = accept?.split(',').filter(Boolean) ?? [];
+    if (acceptedTypes.length > 0 && !acceptedTypes.includes(file.type)) {
+      message.error(`${t('common.fileAcceptTip')}${file.type || file.name}`);
+      return Upload.LIST_IGNORE;
     }
 
     if (!isAutoUpload) {
-      if (!file.url && !file.preview) {
-        file.url = await getBase64(file.originFileObj as FileType);
+      const readRequestId = readRequestIdRef.current + 1;
+      readRequestIdRef.current = readRequestId;
+      const dataUrl = await getBase64(file as FileType);
+      if (readRequestId !== readRequestIdRef.current) {
+        return Upload.LIST_IGNORE;
       }
-      const newFileList = [...fileList, file];
+
+      const manualFile: UploadFile = {
+        uid: file.uid,
+        name: file.name,
+        status: 'done',
+        type: file.type,
+        size: file.size,
+        originFileObj: file,
+        url: dataUrl,
+        thumbUrl: dataUrl,
+      };
+      const newFileList = maxCount === 1
+        ? [manualFile]
+        : [...fileList, manualFile].slice(-maxCount);
       setFileList(newFileList);
       updateValue(newFileList);
       return Upload.LIST_IGNORE; // Prevent auto upload
     }
 
-    return isAutoUpload;
+    return true;
   };
 
   /** Handle upload status change */
@@ -178,7 +196,10 @@ const UploadImages = forwardRef<UploadImagesRef, UploadImagesProps>(({
 
   /** Clear all uploaded files */
   const clearFiles = () => {
+    readRequestIdRef.current += 1;
     setFileList([]);
+    setPreviewOpen(false);
+    setPreviewImage('');
     updateValue([]);
   }
 
@@ -204,13 +225,13 @@ const UploadImages = forwardRef<UploadImagesRef, UploadImagesProps>(({
 
   /** Generate upload component configuration */
   const uploadProps: UploadProps = {
-    action,
+    action: isAutoUpload ? action : undefined,
     multiple: multiple && maxCount > 1,
     fileList,
     beforeUpload,
-    headers: {
-      authorization: `Bearer ${cookieUtils.get('authToken') }`,
-    },
+    headers: isAutoUpload
+      ? { authorization: `Bearer ${cookieUtils.get('authToken') }` }
+      : undefined,
     onPreview: handlePreview,
     onRemove: handleRemove,
     onChange: handleChange,
