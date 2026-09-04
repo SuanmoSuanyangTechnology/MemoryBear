@@ -105,15 +105,16 @@ async def get_knowledges(
     api_key = await api_key_service.ApiKeyService.get_api_key_async(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
     current_user = get_api_key_request_user(api_key, api_key_auth)
 
-    return await knowledge_controller.get_knowledges(parent_id=parent_id,
-                                                     page=page,
-                                                     pagesize=pagesize,
-                                                     orderby=orderby,
-                                                     desc=desc,
-                                                     keywords=keywords,
-                                                     kb_ids=kb_ids,
-                                                     db=db,
-                                                     current_user=current_user)
+    response = await knowledge_controller.get_knowledges(parent_id=parent_id,
+                                                         page=page,
+                                                         pagesize=pagesize,
+                                                         orderby=orderby,
+                                                         desc=desc,
+                                                         keywords=keywords,
+                                                         kb_ids=kb_ids,
+                                                         db=db,
+                                                         current_user=current_user)
+    return knowledge_schema.project_public_knowledge(response)
 
 
 @router.post("/knowledge", response_model=ApiResponse)
@@ -134,9 +135,10 @@ async def create_knowledge(
     api_key = await api_key_service.ApiKeyService.get_api_key_async(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
     current_user = get_api_key_request_user(api_key, api_key_auth)
 
-    return await knowledge_controller.create_knowledge(create_data=create_data,
-                                                       db=db,
-                                                       current_user=current_user)
+    response = await knowledge_controller.create_knowledge(create_data=create_data,
+                                                           db=db,
+                                                           current_user=current_user)
+    return knowledge_schema.project_public_knowledge(response)
 
 
 @router.get("/{knowledge_id}", response_model=ApiResponse)
@@ -155,9 +157,10 @@ async def get_knowledge(
     api_key = await api_key_service.ApiKeyService.get_api_key_async(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
     current_user = get_api_key_request_user(api_key, api_key_auth)
 
-    return await knowledge_controller.get_knowledge(knowledge_id=knowledge_id,
-                                                    db=db,
-                                                    current_user=current_user)
+    response = await knowledge_controller.get_knowledge(knowledge_id=knowledge_id,
+                                                        db=db,
+                                                        current_user=current_user)
+    return knowledge_schema.project_public_knowledge(response)
 
 
 @router.put("/{knowledge_id}", response_model=ApiResponse)
@@ -176,10 +179,11 @@ async def update_knowledge(
     api_key = await api_key_service.ApiKeyService.get_api_key_async(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
     current_user = get_api_key_request_user(api_key, api_key_auth)
 
-    return await knowledge_controller.update_knowledge(knowledge_id=knowledge_id,
-                                                       update_data=update_data,
-                                                       db=db,
-                                                       current_user=current_user)
+    response = await knowledge_controller.update_knowledge(knowledge_id=knowledge_id,
+                                                            update_data=update_data,
+                                                            db=db,
+                                                            current_user=current_user)
+    return knowledge_schema.project_public_knowledge(response)
 
 
 @router.delete("/{knowledge_id}", response_model=ApiResponse)

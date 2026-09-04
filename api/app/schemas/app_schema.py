@@ -677,6 +677,22 @@ class AppChatRequest(BaseModel):
     files: List[FileInput] = Field(default_factory=list, description="附件列表（支持多文件）")
     version: Optional[uuid.UUID] = Field(default=None, description="指定发布版本ID，不传则使用当前生效版本")
 
+    @field_validator("conversation_id")
+    @classmethod
+    def _validate_conversation_id(cls, v: Optional[str]) -> Optional[str]:
+        """conversation_id 必须是合法 UUID。
+
+        非 UUID 字符串会在 DB 层触发 DataError 并被包装成 500，
+        这里前置校验，返回 422 参数错误。
+        """
+        if v is None or not str(v).strip():
+            return v
+        try:
+            uuid.UUID(str(v).strip())
+        except (ValueError, AttributeError, TypeError):
+            raise ValueError("conversation_id 必须是合法的 UUID")
+        return str(v).strip()
+
 
 class DraftRunRequest(BaseModel):
     """试运行请求"""

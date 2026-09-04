@@ -186,11 +186,14 @@ async def _get_or_create_public_end_user_async(
         return existing_end_user
 
     workspace = await db.get(Workspace, workspace_id)
-    if workspace:
-        logger.info(f"新终端用户，执行配额检查: tenant_id={workspace.tenant_id}")
+    # 配额查询在 premium 表缺失时会 rollback 当前 AsyncSession，并使 ORM 实例过期。
+    # 在检查前保存标量，后续禁止再读取 workspace.*，避免触发 MissingGreenlet。
+    workspace_tenant_id = workspace.tenant_id if workspace is not None else None
+    if workspace_tenant_id is not None:
+        logger.info(f"新终端用户，执行配额检查: tenant_id={workspace_tenant_id}")
         await check_end_user_quota_async(
             db,
-            workspace.tenant_id,
+            workspace_tenant_id,
             workspace_id=workspace_id,
         )
 
@@ -201,9 +204,9 @@ async def _get_or_create_public_end_user_async(
         original_user_id=original_user_id,
     )
     # 终端用户已落库，用量真正发生变化后才评估告警。
-    if workspace is not None:
+    if workspace_tenant_id is not None:
         await report_quota_change(
-            workspace.tenant_id,
+            workspace_tenant_id,
             "end_user_quota",
             workspace_id=workspace_id,
         )

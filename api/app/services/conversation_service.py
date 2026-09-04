@@ -981,6 +981,7 @@ class ConversationService:
             conversation.app_id != app_id
             or conversation.workspace_id != workspace_id
             or conversation.is_active is not True
+            or conversation.is_draft is not False
         ):
             # 为避免根据错误码推断会话/消息是否存在，这里与上方保持同样的 NOT_FOUND 返回
             raise BusinessException("消息不存在", BizCode.NOT_FOUND)
@@ -1259,6 +1260,19 @@ class ConversationService:
                         "Conversation does not belong to this app",
                         BizCode.INVALID_CONVERSATION
                     )
+                # 归属校验：与 get_v1_conversation_messages / 消息反馈接口口径一致，
+                # 避免仅凭 conversation_id 访问其他终端用户的会话或控制台草稿会话。
+                if user_id is not None and str(conversation.user_id) != str(user_id):
+                    logger.warning(
+                        "Conversation does not belong to the requesting end user.",
+                        extra={
+                            "conversation_id": str(conversation_id),
+                            "app_id": str(app_id),
+                        }
+                    )
+                    raise BusinessException("会话不存在", BizCode.NOT_FOUND)
+                if conversation.is_draft is not False or conversation.is_active is not True:
+                    raise BusinessException("会话不存在", BizCode.NOT_FOUND)
                 return conversation
             except ResourceNotFoundException:
                 logger.warning(

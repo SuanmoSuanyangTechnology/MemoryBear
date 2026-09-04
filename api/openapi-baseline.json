@@ -899,6 +899,199 @@
         }
       }
     },
+    "/v1/memory/emotion-memory/query_emotion_overview": {
+      "get": {
+        "tags": [
+          "V1 - Emotion Stats API"
+        ],
+        "summary": "Query Emotion Overview",
+        "description": "获取情绪数据概览（最近2个活跃日 + 数据质量 + 核心结论）\n\n读取 PG dialogue_emotion_raw 表（dialogue 粒度），按 X-Timezone 实时切日聚合；\nend_user 必须属于 API Key 绑定的 workspace。\n注意：首参必须为 `request: Request`（API Key 装饰器约定），Query 参数模型用 `params`。\n\nReturns:\n    data_quality / summary / conclusion / items",
+        "operationId": "query_emotion_overview_v1_memory_emotion_memory_query_emotion_overview_get",
+        "parameters": [
+          {
+            "name": "end_user_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "End User Id"
+            }
+          },
+          {
+            "name": "X-Timezone",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "X-Timezone"
+            }
+          },
+          {
+            "name": "X-Language-Type",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "title": "X-Language-Type"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/memory/emotion-memory/query_emotion_timeline": {
+      "get": {
+        "tags": [
+          "V1 - Emotion Stats API"
+        ],
+        "summary": "Query Emotion Timeline",
+        "description": "获取情绪时间轴（分页返回全部活跃日）\n\n读取 PG dialogue_emotion_raw 表（dialogue 粒度），按 X-Timezone 实时切日聚合，\n支持日期范围过滤与排序（断档 gaps 由前端自算，接口不再返回）；\nend_user 必须属于 API Key 绑定的 workspace。\n注意：首参必须为 `request: Request`（API Key 装饰器约定），Query 参数模型用 `params`。\n\nReturns:\n    page(page/pagesize/total/hasnext) / items",
+        "operationId": "query_emotion_timeline_v1_memory_emotion_memory_query_emotion_timeline_get",
+        "parameters": [
+          {
+            "name": "end_user_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "End User Id"
+            }
+          },
+          {
+            "name": "start_date",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Start Date"
+            }
+          },
+          {
+            "name": "end_date",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "End Date"
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "type": "string",
+              "default": "asc",
+              "title": "Sort"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "pagesize",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 10000,
+              "minimum": 1,
+              "default": 5,
+              "title": "Pagesize"
+            }
+          },
+          {
+            "name": "X-Timezone",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "X-Timezone"
+            }
+          },
+          {
+            "name": "X-Language-Type",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "title": "X-Language-Type"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/knowledges/knowledgetype": {
       "get": {
         "tags": [
@@ -3205,6 +3398,47 @@
         }
       }
     },
+    "/v1/chunks/retrieval-policy": {
+      "post": {
+        "tags": [
+          "V1 - RAG API"
+        ],
+        "summary": "Get Retrieval Policy",
+        "operationId": "get_retrieval_policy_v1_chunks_retrieval_policy_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetrievalPolicyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RetrievalPolicyResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/chunks/retrieval": {
       "post": {
         "tags": [
@@ -3507,6 +3741,46 @@
         }
       }
     },
+    "/v1/memory/files/upload": {
+      "post": {
+        "tags": [
+          "V1 - Memory API"
+        ],
+        "summary": "Upload Memory File",
+        "description": "上传文件到存储后端，供 /write 接口以 local_file 方式引用。\n\n- 入参: multipart/form-data，字段 file\n- 出参: {\"file_id\": \"...\", \"file_key\": \"...\"}\n- 在 /write 的 files 字段中引用，例如:\n  {\"type\": \"image\", \"transfer_method\": \"local_file\", \"upload_file_id\": \"<file_id>\"}",
+        "operationId": "upload_memory_file_v1_memory_files_upload_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_memory_file_v1_memory_files_upload_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/end_user/create": {
       "post": {
         "tags": [
@@ -3710,6 +3984,45 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/Body_update_end_user_info_v1_end_user_info_update_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/end_user/identity/update": {
+      "post": {
+        "tags": [
+          "V1 - End User API"
+        ],
+        "summary": "Update End User Identity",
+        "description": "Update end user cross-channel identity features.\n\nSets / clears the identity_features of the specified end user and runs\nidentity confirmation & cross-channel merge. Delegates to the manager-side\ncontroller for shared logic (no double implementation).",
+        "operationId": "update_end_user_identity_v1_end_user_identity_update_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_update_end_user_identity_v1_end_user_identity_update_post"
               }
             }
           }
@@ -5013,6 +5326,85 @@
         }
       }
     },
+    "/v1/memory-display/retrieved": {
+      "get": {
+        "tags": [
+          "V1 - Memory Display API"
+        ],
+        "summary": "Get Retrieved Memories",
+        "description": "获取读取展示记录列表。",
+        "operationId": "get_retrieved_memories_v1_memory_display_retrieved_get",
+        "parameters": [
+          {
+            "name": "end_user_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "终端用户 ID",
+              "title": "End User Id"
+            },
+            "description": "终端用户 ID"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "页码，从 1 开始",
+              "default": 1,
+              "title": "Page"
+            },
+            "description": "页码，从 1 开始"
+          },
+          {
+            "name": "pagesize",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "每页数量",
+              "default": 10,
+              "title": "Pagesize"
+            },
+            "description": "每页数量"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiKeyAuth"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/memory-display/engines": {
       "get": {
         "tags": [
@@ -5070,6 +5462,124 @@
               "title": "X-Timezone"
             },
             "description": "IANA 时区名称，前端必传 useI18n().timeZone，如 Asia/Shanghai"
+          },
+          {
+            "name": "X-Language-Type",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Language-Type"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiKeyAuth"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/memory-display/all": {
+      "get": {
+        "tags": [
+          "V1 - Memory Display API"
+        ],
+        "summary": "Get All Memory Display",
+        "description": "获取写入、读取和引擎动态的统一时间线。",
+        "operationId": "get_all_memory_display_v1_memory_display_all_get",
+        "parameters": [
+          {
+            "name": "end_user_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "终端用户 ID",
+              "title": "End User Id"
+            },
+            "description": "终端用户 ID"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "页码，从 1 开始",
+              "default": 1,
+              "title": "Page"
+            },
+            "description": "页码，从 1 开始"
+          },
+          {
+            "name": "pagesize",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "每页数量",
+              "default": 10,
+              "title": "Pagesize"
+            },
+            "description": "每页数量"
+          },
+          {
+            "name": "include_engines",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "是否包含引擎动态卡片",
+              "default": true,
+              "title": "Include Engines"
+            },
+            "description": "是否包含引擎动态卡片"
+          },
+          {
+            "name": "X-Timezone",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "IANA 时区名称，即使 include_engines=false 也必传",
+              "title": "X-Timezone"
+            },
+            "description": "IANA 时区名称，即使 include_engines=false 也必传"
           },
           {
             "name": "X-Language-Type",
@@ -5794,47 +6304,6 @@
             "content": {
               "application/json": {
                 "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/chunks/retrieval-policy": {
-      "post": {
-        "tags": [
-          "V1 - RAG API"
-        ],
-        "summary": "Get Retrieval Policy",
-        "operationId": "get_retrieval_policy_v1_chunks_retrieval_policy_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/RetrievalPolicyRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RetrievalPolicyResponse"
-                }
               }
             }
           },
@@ -7676,6 +8145,20 @@
         "type": "object",
         "title": "Body_update_document_v1_documents__document_id__put"
       },
+      "Body_update_end_user_identity_v1_end_user_identity_update_post": {
+        "properties": {
+          "api_key_auth": {
+            "$ref": "#/components/schemas/ApiKeyAuth"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "description": "Request body"
+          }
+        },
+        "type": "object",
+        "title": "Body_update_end_user_identity_v1_end_user_identity_update_post"
+      },
       "Body_update_end_user_info_v1_end_user_info_update_post": {
         "properties": {
           "api_key_auth": {
@@ -7918,6 +8401,23 @@
           "context"
         ],
         "title": "Body_upload_files_batch_api_api_upload_batch_post"
+      },
+      "Body_upload_memory_file_v1_memory_files_upload_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "format": "binary",
+            "title": "File"
+          },
+          "api_key_auth": {
+            "$ref": "#/components/schemas/ApiKeyAuth"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_upload_memory_file_v1_memory_files_upload_post"
       },
       "Body_write_memory_async_v1_memory_write_post": {
         "properties": {
@@ -9921,6 +10421,33 @@
         "title": "EmotionWordcloudRequest",
         "description": "获取情绪词云数据请求"
       },
+      "EndUserIdentityUpdate": {
+        "properties": {
+          "end_user_id": {
+            "type": "string",
+            "title": "End User Id",
+            "description": "要修改的终端用户 ID（UUID 字符串）"
+          },
+          "identity_features": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Identity Features",
+            "description": "身份标识。传值=确认为长时身份(confirmed)并尝试归并；传 null/空串/纯空白=清空标识并降级为临时身份(temporary)。"
+          }
+        },
+        "type": "object",
+        "required": [
+          "end_user_id"
+        ],
+        "title": "EndUserIdentityUpdate",
+        "description": "修改终端用户身份标识请求模型。\n\nend_user_id 用 str（与 EndUserInfoUpdate 对齐）：格式错误在函数体内返回\nHTTP 200 + code 9601，而非被 Pydantic 拦成 400。"
+      },
       "EndUserInfoUpdate": {
         "properties": {
           "end_user_id": {
@@ -11005,6 +11532,27 @@
         ],
         "title": "HumanInterventionSubmitRequest"
       },
+      "ImageRetrievalQuery": {
+        "properties": {
+          "modality": {
+            "type": "string",
+            "const": "image",
+            "title": "Modality"
+          },
+          "content": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Content"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "modality",
+          "content"
+        ],
+        "title": "ImageRetrievalQuery"
+      },
       "InviteStatus": {
         "type": "string",
         "enum": [
@@ -11051,72 +11599,6 @@
         "type": "object",
         "title": "KBBatchDownloadRequest"
       },
-      "KnowledgeBaseConfig": {
-        "properties": {
-          "kb_id": {
-            "type": "string",
-            "title": "Kb Id",
-            "description": "知识库ID"
-          },
-          "top_k": {
-            "type": "integer",
-            "maximum": 20.0,
-            "minimum": 1.0,
-            "title": "Top K",
-            "description": "检索返回的文档数量",
-            "default": 3
-          },
-          "similarity_threshold": {
-            "type": "number",
-            "maximum": 1.0,
-            "minimum": 0.0,
-            "title": "Similarity Threshold",
-            "description": "相似度阈值",
-            "default": 0.7
-          },
-          "vector_similarity_weight": {
-            "anyOf": [
-              {
-                "type": "number",
-                "maximum": 1.0,
-                "minimum": 0.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Vector Similarity Weight",
-            "description": "向量相似度权重（语义/混合/图谱检索使用，分词检索不使用）",
-            "default": 0.5
-          },
-          "retrieve_type": {
-            "type": "string",
-            "title": "Retrieve Type",
-            "description": "检索方式participle｜ semantic｜hybrid",
-            "default": "hybrid"
-          },
-          "enable_graph_retrieval": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "maximum": 1.0,
-                "minimum": 0.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Enable Graph Retrieval",
-            "description": "混合检索下是否启用证据图谱通道"
-          }
-        },
-        "type": "object",
-        "required": [
-          "kb_id"
-        ],
-        "title": "KnowledgeBaseConfig",
-        "description": "单个知识库配置"
-      },
       "KnowledgeCreate": {
         "properties": {
           "workspace_id": {
@@ -11157,6 +11639,8 @@
           },
           "name": {
             "type": "string",
+            "maxLength": 255,
+            "minLength": 1,
             "title": "Name"
           },
           "description": {
@@ -11376,17 +11860,6 @@
         "type": "object",
         "title": "KnowledgeMetadataUpdate"
       },
-      "KnowledgeRetrievalCaller": {
-        "type": "string",
-        "enum": [
-          "general",
-          "ex_api",
-          "in_api",
-          "agent",
-          "workflow"
-        ],
-        "title": "KnowledgeRetrievalCaller"
-      },
       "KnowledgeRetrievalConfig": {
         "properties": {
           "knowledge_bases": {
@@ -11567,7 +12040,9 @@
           "name": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 255,
+                "minLength": 1
               },
               {
                 "type": "null"
@@ -14463,28 +14938,14 @@
             "title": "Version Name"
           },
           "release_notes": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
+            "type": "string",
             "title": "Release Notes",
             "description": "版本说明"
           },
           "name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
+            "type": "string",
             "title": "Name",
-            "description": "公开分享标题，未传则使用应用名称"
+            "description": "公开分享标题"
           },
           "icon": {
             "anyOf": [
@@ -14501,7 +14962,9 @@
         },
         "type": "object",
         "required": [
-          "version_name"
+          "version_name",
+          "release_notes",
+          "name"
         ],
         "title": "PublishRequest",
         "description": "发布应用请求"
@@ -14740,6 +15203,175 @@
         ],
         "title": "ReportReviewRequest",
         "description": "举报审核请求"
+      },
+      "RerankMode": {
+        "type": "string",
+        "enum": [
+          "reranking_model",
+          "weighted_score"
+        ],
+        "title": "RerankMode"
+      },
+      "RerankWeights": {
+        "properties": {
+          "semantic_weight": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Semantic Weight",
+            "default": 0.7
+          },
+          "participle_weight": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Participle Weight",
+            "default": 0.3
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "RerankWeights"
+      },
+      "RetrievalPolicy": {
+        "properties": {
+          "participle": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "text",
+                "image"
+              ]
+            },
+            "type": "array",
+            "title": "Participle",
+            "default": [
+              "text"
+            ]
+          },
+          "semantic": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "text",
+                "image"
+              ]
+            },
+            "type": "array",
+            "title": "Semantic",
+            "default": [
+              "text"
+            ]
+          },
+          "hybrid": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "text",
+                "image"
+              ]
+            },
+            "type": "array",
+            "title": "Hybrid",
+            "default": [
+              "text"
+            ]
+          },
+          "graph": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "text",
+                "image"
+              ]
+            },
+            "type": "array",
+            "title": "Graph",
+            "default": [
+              "text"
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "RetrievalPolicy"
+      },
+      "RetrievalPolicyRequest": {
+        "properties": {
+          "kb_ids": {
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": "array",
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Kb Ids"
+          },
+          "rerank_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rerank Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "kb_ids"
+        ],
+        "title": "RetrievalPolicyRequest"
+      },
+      "RetrievalPolicyResponse": {
+        "properties": {
+          "code": {
+            "type": "integer",
+            "title": "Code",
+            "description": "业务状态码，0=成功，非0=各类业务异常",
+            "default": 0
+          },
+          "msg": {
+            "type": "string",
+            "title": "Msg",
+            "description": "给人看的简短提示",
+            "default": "OK"
+          },
+          "data": {
+            "$ref": "#/components/schemas/RetrievalPolicy"
+          },
+          "error": {
+            "type": "string",
+            "title": "Error",
+            "description": "失败时的字段级错误信息，成功时为空字符串",
+            "default": ""
+          },
+          "time": {
+            "type": "integer",
+            "title": "Time",
+            "description": "Unix时间戳（秒）"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "RetrievalPolicyResponse"
+      },
+      "RetrievalQuery": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "$ref": "#/components/schemas/StructuredRetrievalQuery"
+          }
+        ]
       },
       "RetrieveType": {
         "type": "string",
@@ -15099,6 +15731,23 @@
         "title": "SkillUpdate",
         "description": "更新 Skill"
       },
+      "StructuredRetrievalQuery": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/TextRetrievalQuery"
+          },
+          {
+            "$ref": "#/components/schemas/ImageRetrievalQuery"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "modality",
+          "mapping": {
+            "image": "#/components/schemas/ImageRetrievalQuery",
+            "text": "#/components/schemas/TextRetrievalQuery"
+          }
+        }
+      },
       "SubAgentConfig": {
         "properties": {
           "agent_id": {
@@ -15174,6 +15823,26 @@
         "type": "object",
         "title": "SuggestedQuestionsConfig",
         "description": "下一步问题建议配置"
+      },
+      "TextRetrievalQuery": {
+        "properties": {
+          "modality": {
+            "type": "string",
+            "const": "text",
+            "title": "Modality"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "modality",
+          "content"
+        ],
+        "title": "TextRetrievalQuery"
       },
       "TextToSpeechConfig": {
         "properties": {
@@ -15501,6 +16170,91 @@
         ],
         "title": "TranslationUpdateRequest",
         "description": "Request to update a translation"
+      },
+      "TrialRunChatHistoryMessage": {
+        "properties": {
+          "role": {
+            "type": "string",
+            "enum": [
+              "user",
+              "assistant"
+            ],
+            "title": "Role",
+            "description": "消息角色"
+          },
+          "content": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Content",
+            "description": "文本内容"
+          },
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/FileInput"
+            },
+            "type": "array",
+            "title": "Files",
+            "description": "历史附件仅为请求格式兼容保留，试运行对话不会解析"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "role",
+          "content"
+        ],
+        "title": "TrialRunChatHistoryMessage",
+        "description": "萃取试运行对话的显式历史消息。"
+      },
+      "TrialRunChatInput": {
+        "properties": {
+          "config_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Config Id",
+            "description": "萃取引擎配置 ID"
+          },
+          "message": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Message",
+            "description": "当前用户消息"
+          },
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/FileInput"
+            },
+            "type": "array",
+            "title": "Files",
+            "description": "当前消息附件"
+          },
+          "history": {
+            "items": {
+              "$ref": "#/components/schemas/TrialRunChatHistoryMessage"
+            },
+            "type": "array",
+            "title": "History",
+            "description": "显式对话上下文"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "config_id",
+          "message"
+        ],
+        "title": "TrialRunChatInput",
+        "description": "萃取试运行 AI 对话请求。"
       },
       "TriggerConfig": {
         "properties": {
@@ -16323,6 +17077,26 @@
         "title": "WorkspaceModelsUpdate",
         "description": "工作空间模型配置更新请求"
       },
+      "WorkspaceRetentionPolicyUpdate": {
+        "properties": {
+          "retention_days": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 3650.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retention Days",
+            "description": "临时身份保留天数，null 表示永不过期"
+          }
+        },
+        "type": "object",
+        "title": "WorkspaceRetentionPolicyUpdate"
+      },
       "WorkspaceRole": {
         "type": "string",
         "enum": [
@@ -16509,6 +17283,18 @@
             ],
             "title": "Conversation Id",
             "description": "对话 ID（可选）。传入时使用该会话存储消息；不传时后端按 (workspace_id, end_user_id) 自动查找或创建虚拟会话。"
+          },
+          "identity_features": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Identity Features",
+            "description": "跨渠道身份标识（单个）。传入=长时身份(confirmed)，不传/空串/纯空白=保持原状（完全不碰身份字段）；与已有主体标识相同时自动归并，本次写入落到归并后的主体上。"
           }
         },
         "type": "object",
@@ -16552,6 +17338,92 @@
           "tool_input"
         ],
         "title": "ToolExecuteRequest"
+      },
+      "app__schemas__app_schema__KnowledgeBaseConfig": {
+        "properties": {
+          "kb_id": {
+            "type": "string",
+            "title": "Kb Id",
+            "description": "知识库ID"
+          },
+          "top_k": {
+            "type": "integer",
+            "maximum": 20.0,
+            "minimum": 1.0,
+            "title": "Top K",
+            "description": "检索返回的文档数量",
+            "default": 3
+          },
+          "similarity_threshold": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Similarity Threshold",
+            "description": "相似度阈值",
+            "default": 0.7
+          },
+          "vector_similarity_weight": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vector Similarity Weight",
+            "description": "向量相似度权重（语义/混合/图谱检索使用，分词检索不使用）",
+            "default": 0.5
+          },
+          "retrieve_type": {
+            "type": "string",
+            "title": "Retrieve Type",
+            "description": "检索方式participle｜ semantic｜hybrid",
+            "default": "hybrid"
+          },
+          "enable_graph_retrieval": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enable Graph Retrieval",
+            "description": "混合检索下是否启用证据图谱通道"
+          },
+          "rerank_mode": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RerankMode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rerank_weights": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RerankWeights"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "kb_id"
+        ],
+        "title": "KnowledgeBaseConfig",
+        "description": "单个知识库配置"
       },
       "app__schemas__app_schema__VariableDefinition": {
         "properties": {
@@ -16615,6 +17487,105 @@
         ],
         "title": "VariableDefinition",
         "description": "变量定义"
+      },
+      "app__schemas__chunk_schema__KnowledgeBaseConfig": {
+        "properties": {
+          "kb_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Kb Id",
+            "description": "Knowledge base ID"
+          },
+          "similarity_threshold": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Similarity Threshold",
+            "description": "Knowledge base similarity threshold",
+            "default": 0.2
+          },
+          "vector_similarity_weight": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vector Similarity Weight",
+            "description": "Knowledge base vector similarity weight（语义/混合/图谱检索使用，分词检索不使用）",
+            "default": 0.3
+          },
+          "rerank_score_threshold": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rerank Score Threshold",
+            "description": "Knowledge base rerank score threshold"
+          },
+          "top_k": {
+            "type": "integer",
+            "maximum": 100.0,
+            "minimum": 1.0,
+            "title": "Top K",
+            "description": "Knowledge base top k",
+            "default": 4
+          },
+          "retrieve_type": {
+            "$ref": "#/components/schemas/RetrieveType",
+            "description": "Retrieve type",
+            "default": "participle"
+          },
+          "rerank_mode": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RerankMode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rerank_weights": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RerankWeights"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "enable_graph_retrieval": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enable Graph Retrieval",
+            "description": "Whether this knowledge base adds the Evidence Graph channel during hybrid retrieval. Falls back to the request value when omitted."
+          }
+        },
+        "type": "object",
+        "required": [
+          "kb_id"
+        ],
+        "title": "KnowledgeBaseConfig"
       },
       "app__schemas__multi_agent_schema__ExecutionConfig": {
         "properties": {
@@ -16950,418 +17921,6 @@
         ],
         "title": "VariableDefinition",
         "description": "变量定义"
-      },
-      "app__schemas__app_schema__KnowledgeBaseConfig": {
-        "properties": {
-          "kb_id": {
-            "type": "string",
-            "title": "Kb Id",
-            "description": "知识库ID"
-          },
-          "top_k": {
-            "type": "integer",
-            "maximum": 20.0,
-            "minimum": 1.0,
-            "title": "Top K",
-            "description": "检索返回的文档数量",
-            "default": 3
-          },
-          "similarity_threshold": {
-            "type": "number",
-            "maximum": 1.0,
-            "minimum": 0.0,
-            "title": "Similarity Threshold",
-            "description": "相似度阈值",
-            "default": 0.7
-          },
-          "vector_similarity_weight": {
-            "anyOf": [
-              {
-                "type": "number",
-                "maximum": 1.0,
-                "minimum": 0.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Vector Similarity Weight",
-            "description": "向量相似度权重（语义/混合/图谱检索使用，分词检索不使用）",
-            "default": 0.5
-          },
-          "retrieve_type": {
-            "type": "string",
-            "title": "Retrieve Type",
-            "description": "检索方式participle｜ semantic｜hybrid",
-            "default": "hybrid"
-          },
-          "enable_graph_retrieval": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "maximum": 1.0,
-                "minimum": 0.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Enable Graph Retrieval",
-            "description": "混合检索下是否启用证据图谱通道"
-          },
-          "rerank_mode": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/RerankMode"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "rerank_weights": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/RerankWeights"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "type": "object",
-        "required": [
-          "kb_id"
-        ],
-        "title": "KnowledgeBaseConfig",
-        "description": "单个知识库配置"
-      },
-      "app__schemas__chunk_schema__KnowledgeBaseConfig": {
-        "properties": {
-          "kb_id": {
-            "type": "string",
-            "format": "uuid",
-            "title": "Kb Id",
-            "description": "Knowledge base ID"
-          },
-          "similarity_threshold": {
-            "type": "number",
-            "maximum": 1.0,
-            "minimum": 0.0,
-            "title": "Similarity Threshold",
-            "description": "Knowledge base similarity threshold",
-            "default": 0.2
-          },
-          "vector_similarity_weight": {
-            "anyOf": [
-              {
-                "type": "number",
-                "maximum": 1.0,
-                "minimum": 0.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Vector Similarity Weight",
-            "description": "Knowledge base vector similarity weight（语义/混合/图谱检索使用，分词检索不使用）",
-            "default": 0.3
-          },
-          "rerank_score_threshold": {
-            "anyOf": [
-              {
-                "type": "number",
-                "maximum": 1.0,
-                "minimum": 0.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Rerank Score Threshold",
-            "description": "Knowledge base rerank score threshold"
-          },
-          "top_k": {
-            "type": "integer",
-            "maximum": 100.0,
-            "minimum": 1.0,
-            "title": "Top K",
-            "description": "Knowledge base top k",
-            "default": 4
-          },
-          "retrieve_type": {
-            "$ref": "#/components/schemas/RetrieveType",
-            "description": "Retrieve type",
-            "default": "participle"
-          },
-          "rerank_mode": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/RerankMode"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "rerank_weights": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/RerankWeights"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "enable_graph_retrieval": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "maximum": 1.0,
-                "minimum": 0.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Enable Graph Retrieval",
-            "description": "Whether this knowledge base adds the Evidence Graph channel during hybrid retrieval. Falls back to the request value when omitted."
-          }
-        },
-        "type": "object",
-        "required": [
-          "kb_id"
-        ],
-        "title": "KnowledgeBaseConfig"
-      },
-      "RerankMode": {
-        "type": "string",
-        "enum": [
-          "reranking_model",
-          "weighted_score"
-        ],
-        "title": "RerankMode"
-      },
-      "RerankWeights": {
-        "properties": {
-          "semantic_weight": {
-            "type": "number",
-            "maximum": 1.0,
-            "minimum": 0.0,
-            "title": "Semantic Weight",
-            "default": 0.7
-          },
-          "participle_weight": {
-            "type": "number",
-            "maximum": 1.0,
-            "minimum": 0.0,
-            "title": "Participle Weight",
-            "default": 0.3
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "title": "RerankWeights"
-      },
-      "ImageRetrievalQuery": {
-        "properties": {
-          "modality": {
-            "type": "string",
-            "const": "image",
-            "title": "Modality"
-          },
-          "content": {
-            "type": "string",
-            "minLength": 1,
-            "title": "Content"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "modality",
-          "content"
-        ],
-        "title": "ImageRetrievalQuery"
-      },
-      "TextRetrievalQuery": {
-        "properties": {
-          "modality": {
-            "type": "string",
-            "const": "text",
-            "title": "Modality"
-          },
-          "content": {
-            "type": "string",
-            "title": "Content"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "modality",
-          "content"
-        ],
-        "title": "TextRetrievalQuery"
-      },
-      "RetrievalQuery": {
-        "anyOf": [
-          {
-            "type": "string"
-          },
-          {
-            "$ref": "#/components/schemas/StructuredRetrievalQuery"
-          }
-        ]
-      },
-      "StructuredRetrievalQuery": {
-        "oneOf": [
-          {
-            "$ref": "#/components/schemas/TextRetrievalQuery"
-          },
-          {
-            "$ref": "#/components/schemas/ImageRetrievalQuery"
-          }
-        ],
-        "discriminator": {
-          "propertyName": "modality",
-          "mapping": {
-            "image": "#/components/schemas/ImageRetrievalQuery",
-            "text": "#/components/schemas/TextRetrievalQuery"
-          }
-        }
-      },
-      "RetrievalPolicy": {
-        "properties": {
-          "participle": {
-            "items": {
-              "type": "string",
-              "enum": [
-                "text",
-                "image"
-              ]
-            },
-            "type": "array",
-            "title": "Participle",
-            "default": [
-              "text"
-            ]
-          },
-          "semantic": {
-            "items": {
-              "type": "string",
-              "enum": [
-                "text",
-                "image"
-              ]
-            },
-            "type": "array",
-            "title": "Semantic",
-            "default": [
-              "text"
-            ]
-          },
-          "hybrid": {
-            "items": {
-              "type": "string",
-              "enum": [
-                "text",
-                "image"
-              ]
-            },
-            "type": "array",
-            "title": "Hybrid",
-            "default": [
-              "text"
-            ]
-          },
-          "graph": {
-            "items": {
-              "type": "string",
-              "enum": [
-                "text",
-                "image"
-              ]
-            },
-            "type": "array",
-            "title": "Graph",
-            "default": [
-              "text"
-            ]
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "title": "RetrievalPolicy"
-      },
-      "RetrievalPolicyResponse": {
-        "properties": {
-          "code": {
-            "type": "integer",
-            "title": "Code",
-            "description": "业务状态码，0=成功，非0=各类业务异常",
-            "default": 0
-          },
-          "msg": {
-            "type": "string",
-            "title": "Msg",
-            "description": "给人看的简短提示",
-            "default": "OK"
-          },
-          "data": {
-            "$ref": "#/components/schemas/RetrievalPolicy"
-          },
-          "error": {
-            "type": "string",
-            "title": "Error",
-            "description": "失败时的字段级错误信息，成功时为空字符串",
-            "default": ""
-          },
-          "time": {
-            "type": "integer",
-            "title": "Time",
-            "description": "Unix时间戳（秒）"
-          }
-        },
-        "type": "object",
-        "required": [
-          "data"
-        ],
-        "title": "RetrievalPolicyResponse"
-      },
-      "RetrievalPolicyRequest": {
-        "properties": {
-          "kb_ids": {
-            "items": {
-              "type": "string",
-              "format": "uuid"
-            },
-            "type": "array",
-            "maxItems": 100,
-            "minItems": 1,
-            "title": "Kb Ids"
-          },
-          "rerank_id": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "uuid"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Rerank Id"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "kb_ids"
-        ],
-        "title": "RetrievalPolicyRequest"
       }
     },
     "securitySchemes": {
