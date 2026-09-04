@@ -28,21 +28,16 @@ def get_runtime(request: Request) -> ProcessRuntime:
     return request.app.state.runtime
 
 
-async def get_principal(
-    actor_id: Annotated[str | None, Header(alias="X-KB-Actor-ID")] = None,
-    tenant_id: Annotated[str | None, Header(alias="X-KB-Tenant-ID")] = None,
-    workspace_id: Annotated[str | None, Header(alias="X-KB-Workspace-ID")] = None,
-    actor_name: Annotated[str | None, Header(alias="X-KB-Actor-Name")] = None,
-) -> Principal:
-    """Parse the trusted internal identity headers as one ordinary DTO."""
+def _principal_from_headers(request: Request) -> Principal:
+    """通道 2 兜底解析：老单体直连（已由中间件放行）按身份头解析。"""
 
     try:
         return Principal.model_validate(
             {
-                "actor_id": actor_id,
-                "actor_name": actor_name,
-                "tenant_id": tenant_id,
-                "workspace_id": workspace_id,
+                "actor_id": request.headers.get("X-KB-Actor-ID"),
+                "actor_name": request.headers.get("X-KB-Actor-Name"),
+                "tenant_id": request.headers.get("X-KB-Tenant-ID"),
+                "workspace_id": request.headers.get("X-KB-Workspace-ID"),
             }
         )
     except ValidationError as exc:
@@ -52,18 +47,33 @@ async def get_principal(
         ) from exc
 
 
-async def get_optional_principal(
-    actor_id: Annotated[str | None, Header(alias="X-KB-Actor-ID")] = None,
-    tenant_id: Annotated[str | None, Header(alias="X-KB-Tenant-ID")] = None,
-    workspace_id: Annotated[str | None, Header(alias="X-KB-Workspace-ID")] = None,
-    actor_name: Annotated[str | None, Header(alias="X-KB-Actor-Name")] = None,
-) -> Principal | None:
-    """Return no principal only when every trusted identity header is absent."""
+async def get_principal(request: Request) -> Principal:
+    """身份依赖：中间件验签结果优先（通道 1 claims 权威），否则按原头解析（通道 2）。
 
-    values = (actor_id, tenant_id, workspace_id, actor_name)
+    路由签名不变：Depends(get_principal) 由 FastAPI 自动注入 Request。
+    """
+
+    principal = getattr(request.state, "principal", None)
+    if isinstance(principal, Principal):
+        return principal
+    return _principal_from_headers(request)
+
+
+async def get_optional_principal(request: Request) -> Principal | None:
+    """Return middleware-populated request.state.principal before falling back to trusted identity headers."""
+
+    principal = getattr(request.state, "principal", None)
+    if isinstance(principal, Principal):
+        return principal
+    values = (
+        request.headers.get("X-KB-Actor-ID"),
+        request.headers.get("X-KB-Tenant-ID"),
+        request.headers.get("X-KB-Workspace-ID"),
+        request.headers.get("X-KB-Actor-Name"),
+    )
     if all(value is None for value in values):
         return None
-    return await get_principal(actor_id, tenant_id, workspace_id, actor_name)
+    return _principal_from_headers(request)
 
 
 async def get_source(

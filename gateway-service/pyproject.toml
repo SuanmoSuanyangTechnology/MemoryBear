@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gateway-service"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = ["auth-sdk>=0.1", "fastapi>=0.110", "uvicorn>=0.29", "redis>=6.0", "httpx>=0.27", "python-jose[cryptography]>=3.3", "python-dotenv>=1.0", "prometheus-client>=0.21,<1"]
+
+[tool.uv.sources]
+auth-sdk = { path = "../packages/auth-sdk" }
+
+[dependency-groups]
+dev = ["pytest>=8", "pytest-asyncio>=0.23", "fakeredis>=2.23"]
+
+# 包名即 src（src/__init__.py 在服务根下，代码平铺于 src 顶层）：显式声明，使
+# wheel/path 安装产出 package src（find where=["src"] 会找不到包 → 空 wheel）
+[tool.setuptools]
+packages = ["src"]
+
+[tool.setuptools.package-dir]
+"" = "."
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"

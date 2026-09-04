@@ -9,6 +9,7 @@ description = "Independent MemoryBear knowledge service"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "asyncpg>=0.31,<1",
+    "auth-sdk>=0.1",
     "amqp==5.3.1",
     "beautifulsoup4>=4.13,<5",
     "billiard==4.2.2",
@@ -55,6 +56,7 @@ dev = [
 [tool.uv.sources]
 redbear-model = { path = "../packages/redbear-model" }
 mem-storage-core = { path = "../packages/storage-core" }
+auth-sdk = { path = "../packages/auth-sdk" }
 
 [tool.hatch.build.targets.wheel]
 packages = ["src"]

@@ -114,6 +114,25 @@ def create_app(settings: KnowledgeSettings | None = None) -> FastAPI:
     )
     application.state.runtime = runtime
     application.add_middleware(TraceIdMiddleware)
+    # 鉴权最外层（后注册者最外层）：无凭据请求在路由前即 401
+    from .auth import KbAuthConfig, KbAuthMiddleware
+
+    application.add_middleware(
+        KbAuthMiddleware,
+        kb_auth=KbAuthConfig(
+            auth_mode=service_settings.kb_auth_mode,
+            service_name=service_settings.kb_service_name,
+            kill_switch_file=service_settings.kb_kill_switch_file,
+            jwks_url=service_settings.kb_jwks_url,
+            secret=(
+                service_settings.kb_secret.get_secret_value()
+                if service_settings.kb_secret is not None
+                else None
+            ),
+            api_key_verify_url=service_settings.kb_api_key_verify_url,
+            redis=runtime.redis.client,
+        ),
+    )
     application.include_router(internal_v1_router)
 
     @application.exception_handler(RequestValidationError)
