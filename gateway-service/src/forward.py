@@ -38,7 +38,7 @@ _DROP_HEADERS = ("content-length", "transfer-encoding", "connection")
 class TargetRoute(BaseModel):
     path_prefix: str
     service: str
-    base_url: str      # K8s Service DNS 名，如 http://kb-service:8080
+    base_url: str      # K8s Service DNS 名，如 http://mem-knowledge:8080
     aud: str           # 内部 token 受众 = 目标服务名
 
 
