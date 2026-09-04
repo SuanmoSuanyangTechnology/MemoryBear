@@ -16,6 +16,7 @@ from app.schemas.response_schema import ApiResponse, PageData
 from app.services.model_service import ModelConfigService, ModelApiKeyService, ModelBaseService
 from app.core.logging_config import get_api_logger
 from app.core.quota_stub import check_model_quota, check_model_activation_quota
+from app.core.model_provider_config import get_model_provider_metadata
 
 # 获取API专用日志器
 api_logger = get_api_logger()
@@ -31,9 +32,11 @@ def get_model_types():
 
 
 @router.get("/provider", response_model=ApiResponse)
-def get_model_providers():
-    providers = [p for p in ModelProvider if p != ModelProvider.COMPOSITE]
-    return success(msg="获取模型提供商成功", data=providers)
+def get_model_providers(
+    current_user: User = Depends(get_current_user),
+):
+    _ = current_user
+    return success(msg="获取模型提供商成功", data=get_model_provider_metadata())
 
 @router.get("/strategy", response_model=ApiResponse)
 def get_model_strategies():

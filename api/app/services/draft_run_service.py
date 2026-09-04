@@ -23,6 +23,7 @@ from app.core.agent.langchain_agent import LangChainAgent
 from app.core.config import settings
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
+from app.core.llm_error_handler import classify_multimodal_exception
 from app.core.logging_config import get_business_logger
 from app.integrations.knowledge.context_factory import build_app_knowledge_context
 from app.integrations.knowledge.contracts import KnowledgeRetrievalSource
@@ -2208,12 +2209,25 @@ class AgentRunService:
 
         except Exception as e:
             debug_id = self._build_debug_id()
-            compact_error = self._build_compact_error(e, debug_id=debug_id)
-            logger.error(
-                "流式 Agent 调用失败",
-                extra={"error": str(e), "debug_id": debug_id, "compact_error": compact_error},
-                exc_info=True
-            )
+            public_error = classify_multimodal_exception(e, debug_id=debug_id)
+            if public_error is not None:
+                compact_error = public_error
+                logger.error(
+                    "流式 Agent 多模态输入失败（已安全处理）",
+                    extra={
+                        "error_type": type(e).__name__,
+                        "error_kind": compact_error["kind"],
+                        "debug_id": debug_id,
+                    },
+                )
+            else:
+                # 非目标异常保持原有处理和日志行为。
+                compact_error = self._build_compact_error(e, debug_id=debug_id)
+                logger.error(
+                    "流式 Agent 调用失败",
+                    extra={"error": str(e), "debug_id": debug_id, "compact_error": compact_error},
+                    exc_info=True,
+                )
             try:
                 await self.db.rollback()
             except Exception:

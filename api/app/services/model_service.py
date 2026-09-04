@@ -19,6 +19,10 @@ from app.schemas.model_schema import (
     ModelConfigQuery, ModelStats, ModelConfigQueryNew, ModelInfo
 )
 from app.core.config import settings
+from app.core.model_provider_config import (
+    is_local_deployment_provider,
+    validate_api_base_against_default,
+)
 from app.core.logging_config import get_business_logger
 from app.schemas.response_schema import PageData, PageMeta
 from app.core.exceptions import BusinessException
@@ -162,6 +166,29 @@ async def _validate_qwen3_vl_rerank(
     }
 
 
+def _require_api_base_for_local_provider(provider: ModelProvider | str, api_base: Optional[str]) -> None:
+    """本地部署提供商必须显式配置实际服务地址。"""
+    if is_local_deployment_provider(provider) and not (
+        isinstance(api_base, str) and api_base.strip()
+    ):
+        raise BusinessException(
+            f"本地部署提供商 {getattr(provider, 'value', provider)} 必须配置 API Base URL",
+            BizCode.INVALID_PARAMETER,
+        )
+
+
+def _require_supported_api_base(
+    provider: ModelProvider | str,
+    api_base: Optional[str],
+    model_type: str,
+    is_omni: bool = False,
+) -> None:
+    """运行时不读取 api_base 的组合，只允许留空或官方默认地址。"""
+    error = validate_api_base_against_default(provider, api_base, model_type, is_omni)
+    if error:
+        raise BusinessException(error, BizCode.INVALID_PARAMETER)
+
+
 def _model_option_cache_state(model: ModelConfig) -> tuple[uuid.UUID | None, bool]:
     provider = getattr(model.provider, "value", model.provider)
     public_speedbear = (
@@ -244,6 +271,12 @@ class ModelConfigService:
             model_id,
             tenant_id=tenant_id,
         )
+        if not model.is_active:
+            raise BusinessException(
+                "当前模型未启用，请在模型配置中确认 API Key 和 URL 已配置后启用模型",
+                BizCode.MODEL_CONFIG_INVALID,
+            )
+
         api_key = await ModelApiKeyService.get_available_api_key_async(
             db,
             model.id,
@@ -598,6 +631,13 @@ class ModelConfigService:
         if ModelConfigRepository.get_by_name(db, model_data.name, provider=model_data.provider, tenant_id=tenant_id):
             raise BusinessException("模型名称已存在", BizCode.DUPLICATE_NAME)
 
+        if model_data.api_keys:
+            for api_key_data in model_data.api_keys:
+                _require_api_base_for_local_provider(
+                    model_data.provider,
+                    api_key_data.api_base,
+                )
+
         # 验证配置
         if not model_data.skip_validation and model_data.api_keys:
             api_key_data_list = model_data.api_keys
@@ -946,7 +986,8 @@ class ModelApiKeyService:
     @staticmethod
     async def create_api_key_by_provider(db: Session, data: model_schema.ModelApiKeyCreateByProvider) -> tuple[
         list[Any], list[Any]]:
-        """根据provider为多个ModelConfig创建API Key"""
+        """根据provider为多个ModelConfig创建API Key。"""
+        _require_api_base_for_local_provider(data.provider, data.api_base)
         created_keys = []
         failed_models = []  # 记录验证失败的模型
 
@@ -957,22 +998,33 @@ class ModelApiKeyService:
 
             data.is_omni = model_config.is_omni
             data.capability = model_config.capability
-
-            # 从ModelBase获取model_name
             model_name = model_config.model_base.name if model_config.model_base else model_config.name
 
-            # 检查是否存在API Key（包括软删除），需要考虑tenant_id
+            validation_result = await ModelConfigService.validate_model_config(
+                db=db,
+                model_name=model_name,
+                provider=data.provider,
+                api_key=data.api_key,
+                api_base=data.api_base,
+                model_type=model_config.type,
+                test_message="Hello",
+                is_omni=data.is_omni,
+                capability=model_config.capability,
+            )
+            if not validation_result["valid"]:
+                failed_models.append(model_name)
+                continue
+
             existing_key = db.query(ModelApiKey).join(
                 ModelApiKey.model_configs
             ).filter(
                 ModelApiKey.api_key == data.api_key,
                 ModelApiKey.provider == data.provider,
                 ModelApiKey.model_name == model_name,
-                ModelConfig.tenant_id == model_config.tenant_id
+                ModelConfig.tenant_id == model_config.tenant_id,
             ).first()
 
             if existing_key:
-                # 如果已存在，重新激活并更新
                 if existing_key.is_active:
                     continue
                 existing_key.is_active = True
@@ -984,31 +1036,12 @@ class ModelApiKeyService:
                 existing_key.capability = data.capability
                 existing_key.is_omni = data.is_omni
 
-                # 检查是否已关联该模型配置
                 if model_config not in existing_key.model_configs:
                     existing_key.model_configs.append(model_config)
 
                 created_keys.append(existing_key)
                 continue
 
-            # 验证配置
-            validation_result = await ModelConfigService.validate_model_config(
-                db=db,
-                model_name=model_name,
-                provider=data.provider,
-                api_key=data.api_key,
-                api_base=data.api_base,
-                model_type=model_config.type,
-                test_message="Hello",
-                is_omni=data.is_omni,
-                capability=model_config.capability
-            )
-            if not validation_result["valid"]:
-                # 记录验证失败的模型，但不抛出异常
-                failed_models.append(model_name)
-                continue
-
-            # 创建API Key
             api_key_data = ModelApiKeyCreate(
                 model_config_ids=[model_config_id],
                 model_name=model_name,
@@ -1020,7 +1053,7 @@ class ModelApiKeyService:
                 is_omni=data.is_omni,
                 config=data.config,
                 is_active=data.is_active,
-                priority=data.priority
+                priority=data.priority,
             )
             api_key_obj = ModelApiKeyRepository.create(db, api_key_data)
             created_keys.append(api_key_obj)
@@ -1034,6 +1067,11 @@ class ModelApiKeyService:
 
     @staticmethod
     async def create_api_key(db: Session, api_key_data: ModelApiKeyCreate) -> ModelApiKey:
+        _require_api_base_for_local_provider(
+            api_key_data.provider,
+            api_key_data.api_base,
+        )
+
         # 验证所有关联的模型配置是否存在
         if api_key_data.model_config_ids:
             for model_config_id in api_key_data.model_config_ids:
@@ -1045,39 +1083,14 @@ class ModelApiKeyService:
                 if api_key_data.capability is None:
                     api_key_data.capability = model_config.capability
 
-                # 检查API Key是否已存在(包括软删除)，需要考虑tenant_id
-                existing_key = db.query(ModelApiKey).join(
-                    ModelApiKey.model_configs
-                ).filter(
-                    ModelApiKey.api_key == api_key_data.api_key,
-                    ModelApiKey.provider == api_key_data.provider,
-                    ModelApiKey.model_name == api_key_data.model_name,
-                    ModelConfig.tenant_id == model_config.tenant_id
-                ).first()
+                # 运行时不读取 api_base 的组合，填自定义地址无意义，直接拦下
+                _require_supported_api_base(
+                    api_key_data.provider,
+                    api_key_data.api_base,
+                    model_config.type,
+                    api_key_data.is_omni,
+                )
 
-                if existing_key:
-                    if existing_key.is_active:
-                        # 如果已激活，跳过
-                        raise BusinessException("该API Key已存在", BizCode.DUPLICATE_NAME)
-                    # 如果已存在，重新激活并更新
-                    existing_key.is_active = True
-                    existing_key.api_base = api_key_data.api_base
-                    existing_key.description = api_key_data.description
-                    existing_key.config = api_key_data.config
-                    existing_key.priority = api_key_data.priority
-                    existing_key.model_name = api_key_data.model_name
-                    existing_key.capability = api_key_data.capability
-                    existing_key.is_omni = api_key_data.is_omni
-
-                    # 检查是否已关联该模型配置
-                    if model_config not in existing_key.model_configs:
-                        existing_key.model_configs.append(model_config)
-
-                    db.commit()
-                    db.refresh(existing_key)
-                    return existing_key
-
-                # 验证配置
                 validation_result = await ModelConfigService.validate_model_config(
                     db=db,
                     model_name=api_key_data.model_name,
@@ -1087,13 +1100,41 @@ class ModelApiKeyService:
                     model_type=model_config.type,
                     test_message="Hello",
                     is_omni=api_key_data.is_omni,
-                    capability=model_config.capability
+                    capability=model_config.capability,
                 )
                 if not validation_result["valid"]:
                     raise BusinessException(
                         f"模型配置验证失败: {validation_result['error']}",
-                        BizCode.INVALID_PARAMETER
+                        BizCode.INVALID_PARAMETER,
                     )
+
+                existing_key = db.query(ModelApiKey).join(
+                    ModelApiKey.model_configs
+                ).filter(
+                    ModelApiKey.api_key == api_key_data.api_key,
+                    ModelApiKey.provider == api_key_data.provider,
+                    ModelApiKey.model_name == api_key_data.model_name,
+                    ModelConfig.tenant_id == model_config.tenant_id,
+                ).first()
+
+                if existing_key:
+                    if existing_key.is_active:
+                        raise BusinessException("该API Key已存在", BizCode.DUPLICATE_NAME)
+                    existing_key.is_active = True
+                    existing_key.api_base = api_key_data.api_base
+                    existing_key.description = api_key_data.description
+                    existing_key.config = api_key_data.config
+                    existing_key.priority = api_key_data.priority
+                    existing_key.model_name = api_key_data.model_name
+                    existing_key.capability = api_key_data.capability
+                    existing_key.is_omni = api_key_data.is_omni
+
+                    if model_config not in existing_key.model_configs:
+                        existing_key.model_configs.append(model_config)
+
+                    db.commit()
+                    db.refresh(existing_key)
+                    return existing_key
 
         api_key = ModelApiKeyRepository.create(db, api_key_data)
         db.commit()
@@ -1102,30 +1143,45 @@ class ModelApiKeyService:
 
     @staticmethod
     async def update_api_key(db: Session, api_key_id: uuid.UUID, api_key_data: ModelApiKeyUpdate) -> ModelApiKey:
-        """更新API Key"""
+        """更新API Key。"""
         existing_api_key = ModelApiKeyRepository.get_by_id(db, api_key_id)
         if not existing_api_key:
             raise BusinessException("API Key不存在", BizCode.NOT_FOUND)
 
-        # 获取关联的模型配置以获取模型类型
+        provider = api_key_data.provider or existing_api_key.provider
+        api_base = (
+            api_key_data.api_base
+            if "api_base" in api_key_data.model_fields_set
+            else existing_api_key.api_base
+        )
+        _require_api_base_for_local_provider(provider, api_base)
+
         if existing_api_key.model_configs:
             model_config = existing_api_key.model_configs[0]
-
+            # 运行时不读取 api_base 的组合，填自定义地址无意义，直接拦下
+            _require_supported_api_base(
+                provider,
+                api_base,
+                model_config.type,
+                api_key_data.is_omni
+                if api_key_data.is_omni is not None
+                else existing_api_key.is_omni,
+            )
             validation_result = await ModelConfigService.validate_model_config(
                 db=db,
                 model_name=api_key_data.model_name or existing_api_key.model_name,
-                provider=api_key_data.provider or existing_api_key.provider,
+                provider=provider,
                 api_key=api_key_data.api_key or existing_api_key.api_key,
-                api_base=api_key_data.api_base or existing_api_key.api_base,
+                api_base=api_base,
                 model_type=model_config.type,
                 test_message="Hello",
                 is_omni=model_config.is_omni,
-                capability=model_config.capability
+                capability=model_config.capability,
             )
             if not validation_result["valid"]:
                 raise BusinessException(
                     f"模型配置验证失败: {validation_result['error']}",
-                    BizCode.INVALID_PARAMETER
+                    BizCode.INVALID_PARAMETER,
                 )
 
         api_key = ModelApiKeyRepository.update(db, api_key_id, api_key_data)
