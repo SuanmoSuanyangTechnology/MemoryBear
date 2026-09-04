@@ -21,16 +21,30 @@ async def healthz():
     return {"status": "ok"}
 
 
+def _stub_identity(request: Request, expected: type) -> object | None:
+    """direct 模式（默认 AUTH_STRATEGY=direct）不终结凭据——中间件不解析身份、
+    不注入身份头，request.state 无 identity/internal_token；stub 回显仅对 gateway
+    终结策略有定义。身份缺失返回 None，由调用方给明确 400（而非 500 AttributeError）。
+    """
+    identity = getattr(request.state, "identity", None)
+    if not isinstance(identity, expected):
+        return None
+    return identity
+
+
 @router.get("/stub")
 async def stub(request: Request):
-    identity = request.state.identity
-    if not isinstance(identity, UserContext):
-        # 防御：/stub 不是 API key 路径，走到这里只可能是用户 JWT 身份
-        return JSONResponse(status_code=400, content={"error": "expects user identity"})
+    identity = _stub_identity(request, UserContext)
+    if identity is None:
+        # direct 模式无身份可回显；非 API key 身份（防御）同样拒绝
+        return JSONResponse(status_code=400, content={
+            "error": "expects user identity",
+            "detail": "identity not resolved: /stub requires AUTH_STRATEGY=gateway "
+                      "(direct mode passes credentials through for downstream verification)"})
     return {
         "user_id": identity.user_id, "tenant_id": identity.tenant_id,
         "workspace_id": identity.workspace_id,
-        "internal_token": request.state.internal_token,
+        "internal_token": getattr(request.state, "internal_token", None),
         "has_user_authorization": "authorization" in request.headers,
         # 中间件注入后的下游请求头回显（供 e2e/单测断言身份头注入）
         "x_headers": {
@@ -43,16 +57,18 @@ async def stub(request: Request):
 
 @router.get("/v1/stub")
 async def api_key_stub(request: Request):
-    identity = request.state.identity
-    if not isinstance(identity, ApiKeyContext):
-        # 防御：/v1/ 路径下身份只可能是 API key
-        return JSONResponse(status_code=400, content={"error": "expects api key identity"})
+    identity = _stub_identity(request, ApiKeyContext)
+    if identity is None:
+        return JSONResponse(status_code=400, content={
+            "error": "expects api key identity",
+            "detail": "identity not resolved: /v1/stub requires AUTH_STRATEGY=gateway "
+                      "(direct mode passes credentials through for downstream verification)"})
     return {
         "api_key_id": identity.api_key_id,
         "tenant_id": identity.tenant_id,
         "workspace_id": identity.workspace_id,
         "scopes": identity.scopes,
-        "internal_token": request.state.internal_token,
+        "internal_token": getattr(request.state, "internal_token", None),
         "has_x_api_key": "x-api-key" in request.headers,   # 剥除后应为 False
         "x_headers": {
             "x-api-key-id": request.headers.get("x-api-key-id"),

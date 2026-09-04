@@ -121,7 +121,9 @@ class KbAuthMiddleware(BaseHTTPMiddleware):
             if self._verifier is None:
                 return JSONResponse(status_code=500, content={"detail": "auth misconfigured"})
             try:
-                payload = await self._verifier.verify_jwt(token)
+                # type 强校验=access：防 refresh token（同 SECRET_KEY、TTL 更长）访问
+                # 业务端点，对齐老单体 verify_token 默认语义与网关用户路径（4.2 步骤 1）
+                payload = await self._verifier.verify_jwt(token, token_type="access")
             except Exception:
                 return JSONResponse(status_code=401, content={"detail": "invalid token"})
             try:

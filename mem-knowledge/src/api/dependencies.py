@@ -60,7 +60,7 @@ async def get_principal(request: Request) -> Principal:
 
 
 async def get_optional_principal(request: Request) -> Principal | None:
-    """Return no principal only when every trusted identity header is absent."""
+    """Return middleware-populated request.state.principal before falling back to trusted identity headers."""
 
     principal = getattr(request.state, "principal", None)
     if isinstance(principal, Principal):
