@@ -43,6 +43,7 @@ LEGACY_GRAPH_TYPES = ("graph", "subgraph", "entity", "relation")
 
 _SCAN_BATCH_SIZE = 1000
 _PAGERANK_BULK_SIZE = 1000
+_MAX_INDEXED_VECTOR_DIMENSION = 1024
 
 
 def graph_index_name(workspace_id: str) -> str:
@@ -117,16 +118,17 @@ class GraphElasticsearchStore:
         properties = (index_mapping.get("mappings") or {}).get("properties") or {}
         current = properties.get(field_name)
         if current is None:
+            indexed = dimension <= _MAX_INDEXED_VECTOR_DIMENSION
+            vector_mapping: dict[str, Any] = {
+                "type": "dense_vector",
+                "dims": dimension,
+                "index": indexed,
+            }
+            if indexed:
+                vector_mapping["similarity"] = "cosine"
             await self._client.indices.put_mapping(
                 index=index_name,
-                properties={
-                    field_name: {
-                        "type": "dense_vector",
-                        "dims": dimension,
-                        "index": True,
-                        "similarity": "cosine",
-                    }
-                },
+                properties={field_name: vector_mapping},
             )
         elif current.get("type") != "dense_vector" or current.get("dims") != dimension:
             raise ValueError("graph vector mapping is incompatible")

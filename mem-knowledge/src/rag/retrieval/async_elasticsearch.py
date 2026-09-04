@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from typing import Any, Protocol
 
 from elasticsearch.helpers import async_bulk
@@ -26,6 +26,10 @@ from .models import RetrievalSearchOptions
 ES_DEFAULT_MAX_RESULT_WINDOW = 10000
 ES_FULL_SCAN_BATCH_SIZE = 1000
 EmbedFunction = Callable[[list[str]], Awaitable[list[list[float]]]]
+EmbedChunksFunction = Callable[
+    [list[DocumentChunk]],
+    Awaitable[list[list[float] | None]],
+]
 
 
 class AsyncEmbeddingClient(Protocol):
@@ -43,10 +47,16 @@ class AsyncChunkStore:
         knowledge_id: uuid.UUID | str,
         *,
         embed: EmbedFunction | None = None,
+        embed_chunks: EmbedChunksFunction | None = None,
+        embedding_dimension: int | None = None,
+        vector_indexed: bool = True,
     ):
         self.client = client
         self.index = collection_name_for_knowledge(knowledge_id)
         self.embed = embed
+        self.embed_chunks = embed_chunks
+        self.embedding_dimension = embedding_dimension
+        self.vector_indexed = vector_indexed
 
     @staticmethod
     def build_segment_query(
@@ -235,8 +245,8 @@ class AsyncChunkStore:
         metadata = chunk.metadata or {}
         chunk_type = metadata.get("chunk_type")
         vector = None
-        if chunk_type != "source":
-            vector = (await self._embed_texts([chunk_retrieval_content(chunk)]))[0]
+        if chunk_type not in {"source", "parent"}:
+            vector = (await self._embed_chunks([chunk]))[0]
         source = (
             "ctx._source.page_content = params.new_content; ctx._source.vector = params.new_vector;"
         )
@@ -275,6 +285,11 @@ class AsyncChunkStore:
         return int(response.get("deleted", 0))
 
     async def _embed_chunks(self, chunks: list[DocumentChunk]) -> list[list[float] | None]:
+        if self.embed_chunks is not None:
+            embedded = await self.embed_chunks(chunks)
+            if len(embedded) != len(chunks):
+                raise RuntimeError("Chunk embedding result count does not match input count")
+            return embedded
         texts = []
         positions = []
         vectors: list[list[float] | None] = [None] * len(chunks)
@@ -296,7 +311,18 @@ class AsyncChunkStore:
 
     async def _create_index(self, embeddings: list[list[float] | None]) -> None:
         sample = next((embedding for embedding in embeddings if embedding is not None), None)
-        dimensions = len(sample) if sample is not None else 768
+        dimensions = (
+            len(sample)
+            if sample is not None
+            else (self.embedding_dimension or 768)
+        )
+        vector_mapping: dict[str, Any] = {
+            "type": "dense_vector",
+            "dims": dimensions,
+            "index": self.vector_indexed,
+        }
+        if self.vector_indexed:
+            vector_mapping["similarity"] = "cosine"
         await self.client.indices.create(
             index=self.index,
             mappings={
@@ -314,15 +340,11 @@ class AsyncChunkStore:
                             "sort_id": {"type": "long"},
                             "status": {"type": "integer"},
                             "parent_id": {"type": "keyword"},
+                            "asset_file_ids": {"type": "keyword"},
                             "vision_text": {"type": "text", "analyzer": "ik_max_word"},
                         },
                     },
-                    "vector": {
-                        "type": "dense_vector",
-                        "dims": dimensions,
-                        "index": True,
-                        "similarity": "cosine",
-                    },
+                    "vector": vector_mapping,
                     "chunk_type": {"type": "keyword"},
                     "question": {"type": "text", "analyzer": "ik_max_word"},
                     "answer": {"type": "text", "analyzer": "ik_max_word"},
@@ -347,13 +369,30 @@ class AsyncElasticSearchRetrieval:
     def __init__(self, client: Any):
         self.client = client
 
+    @staticmethod
+    def _raise_on_failed_response(response: Mapping[str, Any], operation: str) -> None:
+        if response.get("timed_out") or response.get("failures"):
+            raise RuntimeError(f"Elasticsearch {operation} failed")
+        if response.get("_shards", {}).get("failed", 0):
+            raise RuntimeError(f"Elasticsearch {operation} failed")
+
     async def search_by_vector(
         self,
         embedding: AsyncEmbeddingClient,
         query: str,
         options: RetrievalSearchOptions,
     ) -> list[DocumentChunk]:
-        vector = normalize_vector(await embedding.aembed_query(query))
+        return await self.search_by_query_vector(
+            await embedding.aembed_query(query),
+            options,
+        )
+
+    async def search_by_query_vector(
+        self,
+        query_vector: Sequence[float],
+        options: RetrievalSearchOptions,
+    ) -> list[DocumentChunk]:
+        vector = normalize_vector(query_vector)
         response = await self.client.search(
             index=options.indices,
             from_=0,
@@ -368,6 +407,7 @@ class AsyncElasticSearchRetrieval:
             ),
             allow_partial_search_results=False,
         )
+        self._raise_on_failed_response(response, "vector search")
         return await self.resolve_parent_chunks(
             vector_hits_to_chunks(response, options.score_threshold),
             options.indices,

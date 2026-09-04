@@ -110,6 +110,7 @@ class MinerUV3Parser(DocumentParser):
                 alt = str(block.metadata.get("alt") or "")
                 block.content = f"![{alt}]({asset.download_url})"
                 block.metadata["src"] = asset.download_url
+                block.metadata["asset_file_id"] = str(asset.file_id)
                 retained.add(asset.file_id)
             except Exception as exc:  # noqa: BLE001 - preserve remaining image assets.
                 failures += 1

@@ -3209,6 +3209,7 @@ dependencies = [
     { name = "python-pptx" },
     { name = "pyyaml" },
     { name = "rdflib" },
+    { name = "redbear-model", extra = ["dashscope", "runtime"] },
     { name = "redis" },
     { name = "requests" },
     { name = "roman-numbers" },
@@ -3352,6 +3353,7 @@ requires-dist = [
     { name = "python-pptx", specifier = "==1.0.2" },
     { name = "pyyaml", specifier = "==6.0.3" },
     { name = "rdflib", specifier = ">=7.0.0" },
+    { name = "redbear-model", extras = ["runtime", "dashscope"], directory = "../packages/redbear-model" },
     { name = "redis", specifier = "==6.4.0" },
     { name = "requests", specifier = "==2.32.5" },
     { name = "roman-numbers", specifier = "==1.0.2" },
@@ -3388,6 +3390,52 @@ requires-dist = [
     { name = "xpinyin", specifier = "==0.7.7" },
     { name = "xxhash", specifier = "==3.6.0" },
 ]
+
+[[package]]
+name = "redbear-model"
+version = "0.1.0"
+source = { directory = "../packages/redbear-model" }
+dependencies = [
+    { name = "pydantic" },
+]
+
+[package.optional-dependencies]
+dashscope = [
+    { name = "dashscope" },
+]
+runtime = [
+    { name = "httpx" },
+    { name = "json-repair" },
+    { name = "langchain-community" },
+    { name = "langchain-core" },
+    { name = "langchain-openai" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "dashscope", marker = "extra == 'all'", specifier = ">=1.25,<2" },
+    { name = "dashscope", marker = "extra == 'dashscope'", specifier = ">=1.25,<2" },
+    { name = "httpx", marker = "extra == 'all'", specifier = ">=0.28,<1" },
+    { name = "httpx", marker = "extra == 'runtime'", specifier = ">=0.28,<1" },
+    { name = "httpx", extras = ["socks"], marker = "extra == 'all'", specifier = ">=0.28,<1" },
+    { name = "httpx", extras = ["socks"], marker = "extra == 'ollama'", specifier = ">=0.28,<1" },
+    { name = "json-repair", marker = "extra == 'all'", specifier = ">=0.53,<1" },
+    { name = "json-repair", marker = "extra == 'runtime'", specifier = ">=0.53,<1" },
+    { name = "langchain-aws", marker = "extra == 'all'", specifier = ">=1.0.0a1,<2" },
+    { name = "langchain-aws", marker = "extra == 'bedrock'", specifier = ">=1.0.0a1,<2" },
+    { name = "langchain-community", marker = "extra == 'all'", specifier = ">=0.3,<1" },
+    { name = "langchain-community", marker = "extra == 'runtime'", specifier = ">=0.3,<1" },
+    { name = "langchain-core", marker = "extra == 'all'", specifier = ">=1.0,<2" },
+    { name = "langchain-core", marker = "extra == 'runtime'", specifier = ">=1.0,<2" },
+    { name = "langchain-ollama", marker = "extra == 'all'", specifier = ">=1.0,<2" },
+    { name = "langchain-ollama", marker = "extra == 'ollama'", specifier = ">=1.0,<2" },
+    { name = "langchain-openai", marker = "extra == 'all'", specifier = ">=1.0,<2" },
+    { name = "langchain-openai", marker = "extra == 'runtime'", specifier = ">=1.0,<2" },
+    { name = "pydantic", specifier = ">=2.12,<3" },
+    { name = "volcengine-python-sdk", extras = ["ark"], marker = "extra == 'all'", specifier = ">=5.0.19,<6" },
+    { name = "volcengine-python-sdk", extras = ["ark"], marker = "extra == 'generation'", specifier = ">=5.0.19,<6" },
+]
+provides-extras = ["runtime", "ollama", "bedrock", "dashscope", "generation", "all"]
 
 [[package]]
 name = "redis"

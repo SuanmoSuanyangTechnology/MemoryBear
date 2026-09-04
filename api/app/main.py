@@ -9,6 +9,8 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, APIRouter
 from fastapi import HTTPException, Request
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -26,6 +28,10 @@ from app.core.exceptions import BusinessException
 from app.core.logging_config import LoggingConfig, get_logger
 from app.core.response_utils import fail
 from app.integrations.knowledge.errors import KnowledgeClientError, KnowledgeServiceError
+from app.integrations.knowledge.validation import (
+    is_retrieval_request_validation_error,
+    safe_retrieval_validation_response,
+)
 from app.core.models.scripts.loader import load_models
 from app.db import get_db_context
 
@@ -318,6 +324,21 @@ async def i18n_exception_handler(request: Request, exc: I18nException):
 
 
 # 处理 Pydantic 验证错误（国际化支持）
+@app.exception_handler(RequestValidationError)
+async def request_validation_error_handler(
+    request: Request,
+    exc: RequestValidationError,
+):
+    if is_retrieval_request_validation_error(request.url.path, exc.errors()):
+        logger.warning(
+            "Knowledge retrieval request validation failed path=%s method=%s",
+            request.url.path,
+            request.method,
+        )
+        return safe_retrieval_validation_response()
+    return await request_validation_exception_handler(request, exc)
+
+
 @app.exception_handler(PydanticValidationError)
 async def pydantic_validation_exception_handler(request: Request, exc: PydanticValidationError):
     """
