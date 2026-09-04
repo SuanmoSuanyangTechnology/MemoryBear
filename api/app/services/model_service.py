@@ -3,31 +3,13 @@ from datetime import datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
-from typing import List, Optional, Dict, Any
+from typing import TYPE_CHECKING, List, Optional, Dict, Any
 import uuid
 import math
 import time
 import asyncio
 
 from pydantic import SecretStr
-from redbear_model import (
-    EmbeddingPurpose,
-    EmbeddingRequest,
-    ImageEmbeddingContent,
-    ModelCapability as SharedModelCapability,
-    ModelProvider as SharedModelProvider,
-    ModelRuntimeOptions,
-    ModelType as SharedModelType,
-    RerankCandidateView,
-    ResolvedModelConfig,
-    TextEmbeddingContent,
-    is_qwen3_vl_embedding,
-    is_qwen3_vl_reranker,
-)
-from redbear_model.runtime import (
-    RedBearEmbeddings as SharedRedBearEmbeddings,
-    RedBearRerank as SharedRedBearRerank,
-)
 
 from app.models.models_model import ModelConfig, ModelApiKey, ModelType, LoadBalanceStrategy, ModelProvider
 from app.repositories.model_repository import ModelConfigRepository, ModelApiKeyRepository, ModelBaseRepository
@@ -44,6 +26,9 @@ from app.core.error_codes import BizCode
 from app.core.utils.datetime_utils import utcnow_naive
 from app.utils.redis_cache import (invalidate_workspace_model_options, get_json_async, set_json_async,
                                    CACHE_MISS, invalidate_runtime_model_info, invalidate_runtime_model_info_async)
+
+if TYPE_CHECKING:
+    from redbear_model import ImageEmbeddingContent, ResolvedModelConfig
 
 logger = get_business_logger()
 
@@ -71,7 +56,21 @@ def _shared_validation_config(
     api_base: str | None,
     model_type: str,
     capability: list | None,
-) -> ResolvedModelConfig:
+) -> "ResolvedModelConfig":
+    from redbear_model import (
+        ModelCapability as SharedModelCapability,
+    )
+    from redbear_model import (
+        ModelProvider as SharedModelProvider,
+    )
+    from redbear_model import (
+        ModelRuntimeOptions,
+        ResolvedModelConfig,
+    )
+    from redbear_model import (
+        ModelType as SharedModelType,
+    )
+
     return ResolvedModelConfig(
         model_config_id=_MODEL_VALIDATION_CONFIG_ID,
         key_id=_MODEL_VALIDATION_KEY_ID,
@@ -88,7 +87,9 @@ def _shared_validation_config(
     )
 
 
-def _validation_image() -> ImageEmbeddingContent:
+def _validation_image() -> "ImageEmbeddingContent":
+    from redbear_model import ImageEmbeddingContent
+
     return ImageEmbeddingContent(
         media_type="image/png",
         data_uri=_MODEL_VALIDATION_IMAGE_DATA_URI,
@@ -97,10 +98,13 @@ def _validation_image() -> ImageEmbeddingContent:
 
 
 async def _validate_qwen3_vl_embedding(
-    config: ResolvedModelConfig,
+    config: "ResolvedModelConfig",
     test_message: str,
     started_at: float,
 ) -> dict[str, Any]:
+    from redbear_model import EmbeddingPurpose, EmbeddingRequest, TextEmbeddingContent
+    from redbear_model.runtime import RedBearEmbeddings as SharedRedBearEmbeddings
+
     embedding = SharedRedBearEmbeddings(config)
     try:
         result = await embedding.aembed_contents(
@@ -124,9 +128,12 @@ async def _validate_qwen3_vl_embedding(
 
 
 async def _validate_qwen3_vl_rerank(
-    config: ResolvedModelConfig,
+    config: "ResolvedModelConfig",
     started_at: float,
 ) -> dict[str, Any]:
+    from redbear_model import RerankCandidateView
+    from redbear_model.runtime import RedBearRerank as SharedRedBearRerank
+
     rerank = SharedRedBearRerank(config)
     views = (
         RerankCandidateView(chunk_index=0, kind="text", content="测试文本候选"),
@@ -354,6 +361,23 @@ class ModelConfigService:
             start_time = time.time()
 
             if is_qwen3_vl_request:
+                try:
+                    from redbear_model import (
+                        is_qwen3_vl_embedding,
+                        is_qwen3_vl_reranker,
+                    )
+                except ModuleNotFoundError as exc:
+                    if exc.name != "redbear_model":
+                        raise
+                    return {
+                        "valid": False,
+                        "message": "当前 API 暂不支持 Qwen3-VL 模型配置验证",
+                        "response": None,
+                        "elapsed_time": time.time() - start_time,
+                        "usage": None,
+                        "error": "API 未安装可选的 redbear-model 包，暂无法验证 Qwen3-VL 模型",
+                        "error_type": "ModelRuntimeUnavailable",
+                    }
                 validation_capability = list(capability or [])
                 if "vision" not in {
                     _enum_value(item) for item in validation_capability
