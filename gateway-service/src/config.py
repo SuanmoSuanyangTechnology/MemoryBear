@@ -21,7 +21,7 @@ def _read_routes_file(path: str) -> dict:
     try:
         with open(path, encoding="utf-8") as fh:
             return json.load(fh)
-    except (OSError, json.JSONDecodeError) as exc:
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise RuntimeError(
             f"TARGET_ROUTES_FILE unreadable/invalid: {path}: {exc}") from exc
 
