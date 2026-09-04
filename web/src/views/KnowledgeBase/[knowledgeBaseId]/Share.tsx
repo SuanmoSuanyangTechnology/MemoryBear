@@ -182,7 +182,11 @@ const Share: FC = () => {
         {/* <p className="rb:text-gray-600 rb:mt-2">{knowledgeBase.description || t('knowledgeBase.noDescription')}</p> */}
         <span className='rb:text-white rb:text-xs rb:bg-blue-500 rb:px-1 rb:py-0.5 rb:rounded'>{knowledgeBase.permission_id}</span>
         <Popover
-          content={<InfoPanel title={t('knowledgeBase.knowledgeBaseInfo')} items={infoItems} />}
+          content={
+            <div className="rb:max-h-75 rb:overflow-y-auto">
+              <InfoPanel title={t('knowledgeBase.knowledgeBaseInfo')} items={infoItems} />
+            </div>
+          }
           trigger="hover"
           placement="bottomLeft"
           arrow={false}
