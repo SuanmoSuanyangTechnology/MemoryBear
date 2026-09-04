@@ -13,10 +13,19 @@ from functools import partial
 from typing import Any
 
 from langchain_core.documents import Document as LangChainDocument
+from redbear_model import (
+    EmbeddingPurpose,
+    EmbeddingRequest,
+    ImageEmbeddingContent,
+    MultimodalInputLimitError,
+    RerankCandidateView,
+    is_qwen3_vl_embedding,
+    is_qwen3_vl_reranker,
+)
 from redbear_model.runtime import RedBearEmbeddings, RedBearLLM, RedBearRerank
 
 from ..api.dependencies import Principal
-from ..api.schemas.chunk import RetrieveType
+from ..api.schemas.chunk import ImageRetrievalQuery, RetrieveType
 from ..api.schemas.knowledge_metadata import MetadataFilterMode
 from ..api.schemas.knowledge_retrieval import (
     KnowledgeRetrievalRequest,
@@ -24,10 +33,12 @@ from ..api.schemas.knowledge_retrieval import (
 )
 from ..api.schemas.rerank import RerankMode
 from ..errors import KnowledgeError
+from ..rag.chunk.token_utils import num_tokens_from_string
 from ..rag.knowledge_graph.config import GraphPipeline
 from ..rag.metadata.auto_filter import generate_filter_groups
 from ..rag.metadata.filter_engine import FilterCondition, FilterGroup
 from ..rag.models.chunk import DocumentChunk, chunk_retrieval_content
+from ..rag.models.embedding import collect_asset_file_ids, sanitized_retrieval_text
 from ..rag.retrieval.async_elasticsearch import AsyncElasticSearchRetrieval
 from ..rag.retrieval.candidates import (
     RetrievalChannel,
@@ -61,6 +72,7 @@ from ..rag.retrieval.models import (
 from ..rag.retrieval.rerank import ModelRerankResult, RerankEngine
 from ..runtime import ProcessRuntime
 from .knowledge_retrieval_preparation import KnowledgeRetrievalPreparation
+from .multimodal_image import resolve_storage_images_async, validate_image_data_uri
 
 logger = logging.getLogger(__name__)
 _SOURCE_INDEX = "_retrieval_source_index"
@@ -96,6 +108,14 @@ class _TimedElasticSearchRetrieval(AsyncElasticSearchRetrieval):
             vector = normalize_vector(await embedding.aembed_query(query))
         finally:
             _record_elapsed(self._timings, "embedding_ms", embedding_started_at)
+        return await self.search_by_query_vector(vector, options)
+
+    async def search_by_query_vector(
+        self,
+        query_vector: Sequence[float],
+        options: RetrievalSearchOptions,
+    ) -> list[DocumentChunk]:
+        vector = normalize_vector(query_vector)
         search_started_at = time.perf_counter()
         try:
             response = await self.client.search(
@@ -171,6 +191,7 @@ class KnowledgeRetrievalService:
         request: KnowledgeRetrievalRequest,
         principal: Principal,
     ) -> KnowledgeRetrievalResult:
+        image_query = cls._validated_image_query(request)
         log_id = cls._new_retrieval_log_id()
         started_at = time.perf_counter()
         timings = RetrievalTimings()
@@ -195,6 +216,7 @@ class KnowledgeRetrievalService:
         cls._record_timing(timings, "db_snapshot_ms", snapshot_started_at)
         if not preparation.targets:
             return cls._finish_empty(log_id, started_at, "no_targets", timings)
+        cls._validate_image_targets(preparation, image_query)
 
         metadata_started_at = time.perf_counter()
         filter_groups = await cls._build_metadata_filter_groups(
@@ -235,6 +257,7 @@ class KnowledgeRetrievalService:
             request,
             preparation,
             document_ids,
+            image_query=image_query,
             timings=timings,
             log_id=log_id,
         )
@@ -272,6 +295,7 @@ class KnowledgeRetrievalService:
         preparation: RetrievalPreparation,
         document_ids: list[str] | None,
         *,
+        image_query: ImageEmbeddingContent | None = None,
         timings: RetrievalTimings | None = None,
         log_id: str | None = None,
     ) -> KnowledgeRetrievalResult:
@@ -320,6 +344,7 @@ class KnowledgeRetrievalService:
                         and target.params.retrieve_type is RetrieveType.HYBRID
                     ),
                     request_reranker=preparation.request_reranker,
+                    image_query=image_query,
                     timings=timings,
                     log_id=log_id,
                 )
@@ -364,6 +389,7 @@ class KnowledgeRetrievalService:
             request,
             preparation,
             candidates,
+            image_query=image_query,
             timings=timings,
             log_id=log_id,
         )
@@ -403,12 +429,14 @@ class KnowledgeRetrievalService:
         graph_target: GraphTargetSnapshot | None,
         use_request_reranker: bool = False,
         request_reranker: ModelRuntimeSnapshot | None = None,
+        image_query: ImageEmbeddingContent | None = None,
         timings: RetrievalTimings | None = None,
         log_id: str | None = None,
     ) -> TargetRetrievalResult:
         started_at = time.perf_counter()
         params = target.params
         target_type = params.retrieve_type
+        text_query = request.query_text
         if target_type is RetrieveType.Graph:
             if graph_target is None:
                 cls._log_target_done(
@@ -462,7 +490,12 @@ class KnowledgeRetrievalService:
             None if target_type is RetrieveType.PARTICIPLE else params.similarity_threshold,
         )
         if target_type is RetrieveType.PARTICIPLE:
-            chunks = await store.search_by_full_text(request.query, full_text_options)
+            if text_query is None:
+                raise KnowledgeError.from_code(
+                    "KB_VALIDATION_ERROR",
+                    "Image query does not support participle retrieval",
+                )
+            chunks = await store.search_by_full_text(text_query, full_text_options)
             cls._log_target_done(
                 target,
                 0,
@@ -501,7 +534,23 @@ class KnowledgeRetrievalService:
             params.vector_similarity_weight,
         )
         if target_type is RetrieveType.SEMANTIC:
-            chunks = await store.search_by_vector(embedding, request.query, vector_options)
+            if image_query is not None:
+                query_vector = await cls._embed_image_query(
+                    embedding,
+                    image_query,
+                    timings,
+                )
+                chunks = await store.search_by_query_vector(
+                    query_vector,
+                    vector_options,
+                )
+            else:
+                if text_query is None:
+                    raise KnowledgeError.from_code(
+                        "KB_VALIDATION_ERROR",
+                        "Text query content is unavailable",
+                    )
+                chunks = await store.search_by_vector(embedding, text_query, vector_options)
             cls._log_target_done(
                 target,
                 len(chunks),
@@ -523,46 +572,67 @@ class KnowledgeRetrievalService:
                 )
             )
 
-        vector_task = asyncio.create_task(
-            store.search_by_vector(embedding, request.query, vector_options)
-        )
-        text_task = asyncio.create_task(
-            store.search_by_full_text(request.query, full_text_options)
-        )
-        graph_task = (
-            asyncio.create_task(
-                cls._retrieve_evidence_graph_channel(
-                    runtime,
-                    client,
-                    request,
-                    target,
-                    graph_target,
-                    document_ids,
-                    timings=timings,
-                    log_id=log_id,
+        if image_query is not None:
+            query_vector = await cls._embed_image_query(
+                embedding,
+                image_query,
+                timings,
+            )
+            vector_chunks = await store.search_by_query_vector(
+                query_vector,
+                vector_options,
+            )
+            text_chunks = []
+            graph_result = KnowledgeRetrievalResult()
+            active_tasks = []
+        else:
+            if text_query is None:
+                raise KnowledgeError.from_code(
+                    "KB_VALIDATION_ERROR",
+                    "Text query content is unavailable",
                 )
+            vector_task = asyncio.create_task(
+                store.search_by_vector(embedding, text_query, vector_options)
             )
-            if (
-                params.enable_graph_retrieval
-                and graph_target is not None
-                and graph_target.pipeline is GraphPipeline.EVIDENCE
+            text_task = asyncio.create_task(
+                store.search_by_full_text(text_query, full_text_options)
             )
-            else None
-        )
-        active_tasks = [vector_task, text_task]
-        if graph_task is not None:
-            active_tasks.append(graph_task)
-        try:
-            gathered = await asyncio.gather(*active_tasks)
-        except BaseException:
-            for task in active_tasks:
-                task.cancel()
-            await asyncio.gather(*active_tasks, return_exceptions=True)
-            raise
+            graph_task = (
+                asyncio.create_task(
+                    cls._retrieve_evidence_graph_channel(
+                        runtime,
+                        client,
+                        request,
+                        target,
+                        graph_target,
+                        document_ids,
+                        timings=timings,
+                        log_id=log_id,
+                    )
+                )
+                if (
+                    params.enable_graph_retrieval
+                    and graph_target is not None
+                    and graph_target.pipeline is GraphPipeline.EVIDENCE
+                )
+                else None
+            )
+            active_tasks = [vector_task, text_task]
+            if graph_task is not None:
+                active_tasks.append(graph_task)
+            try:
+                gathered = await asyncio.gather(*active_tasks)
+            except BaseException:
+                for task in active_tasks:
+                    task.cancel()
+                await asyncio.gather(*active_tasks, return_exceptions=True)
+                raise
 
-        vector_chunks = gathered[0]
-        text_chunks = gathered[1]
-        graph_result = gathered[2] if graph_task is not None else KnowledgeRetrievalResult()
+            vector_chunks = gathered[0]
+            text_chunks = gathered[1]
+            graph_result = (
+                gathered[2] if graph_task is not None else KnowledgeRetrievalResult()
+            )
         semantic_candidates = [
             candidate_from_chunk(
                 chunk,
@@ -610,7 +680,7 @@ class KnowledgeRetrievalService:
             ranked = await RerankEngine(
                 model_ranker=partial(cls._rerank_with_shared_model, runtime)
             ).rank(
-                query=request.query,
+                query=image_query if image_query is not None else (text_query or ""),
                 candidates=candidates_to_rank,
                 plan=local_plan,
                 top_k=params.top_k,
@@ -633,6 +703,44 @@ class KnowledgeRetrievalService:
             entities=tuple(graph_result.entities),
             relationships=tuple(graph_result.relationships),
         )
+
+    @classmethod
+    async def _embed_image_query(
+        cls,
+        embedding: RedBearEmbeddings,
+        image_query: ImageEmbeddingContent,
+        timings: RetrievalTimings | None,
+    ) -> tuple[float, ...]:
+        embedding_started_at = time.perf_counter()
+        try:
+            result = await embedding.aembed_contents(
+                EmbeddingRequest(
+                    purpose=EmbeddingPurpose.RETRIEVAL,
+                    contents=(image_query,),
+                )
+            )
+        except asyncio.CancelledError:
+            raise
+        except MultimodalInputLimitError as exc:
+            raise KnowledgeError.from_code(
+                "KB_MULTIMODAL_INPUT_LIMIT",
+                "Image embedding input exceeds the model limit",
+            ) from exc
+        except Exception as exc:
+            raise KnowledgeError.from_code(
+                "KB_MULTIMODAL_EMBEDDING_FAILED",
+                "Image embedding failed",
+            ) from exc
+        finally:
+            cls._record_timing(timings, "embedding_ms", embedding_started_at)
+        logger.info(
+            "[Retrieval] image_embedding query_modality=image dimension=%s "
+            "image_tokens=%s duration_ms=%s",
+            result.dimension,
+            result.usage.get("image_tokens", 0),
+            cls._elapsed_ms(embedding_started_at),
+        )
+        return result.vector
 
     @classmethod
     async def _retrieve_evidence_graph_target(
@@ -680,7 +788,7 @@ class KnowledgeRetrievalService:
                 runtime,
                 client,
                 GraphRetrievalSnapshot(
-                    query=request.query,
+                    query=request.query_text or "",
                     pipeline=graph_target.pipeline,
                     targets=(graph_target,),
                     timings=timings,
@@ -721,6 +829,7 @@ class KnowledgeRetrievalService:
         preparation: RetrievalPreparation,
         candidates: Sequence[RetrievalCandidate],
         *,
+        image_query: ImageEmbeddingContent | None = None,
         timings: RetrievalTimings | None = None,
         log_id: str | None = None,
     ) -> list[DocumentChunk]:
@@ -781,7 +890,11 @@ class KnowledgeRetrievalService:
                 ranked = await RerankEngine(
                     model_ranker=partial(cls._rerank_with_shared_model, runtime)
                 ).rank(
-                    query=request.query,
+                    query=(
+                        image_query
+                        if image_query is not None
+                        else (request.query_text or "")
+                    ),
                     candidates=cls._seed_model_fallback_scores(
                         unique_candidates,
                         global_plan,
@@ -840,12 +953,20 @@ class KnowledgeRetrievalService:
         cls,
         runtime: ProcessRuntime,
         snapshot: ModelRuntimeSnapshot,
-        query: str,
+        query: str | ImageEmbeddingContent,
         chunks: Sequence[DocumentChunk],
         top_k: int,
     ) -> ModelRerankResult:
         if top_k <= 0 or not chunks:
             return ModelRerankResult(chunks=(), used_fallback=False)
+        if isinstance(query, ImageEmbeddingContent):
+            return await cls._rerank_multimodal_chunks(
+                runtime,
+                snapshot,
+                query,
+                chunks,
+                top_k,
+            )
         if snapshot.resolved is None:
             fallback = cls._apply_rerank_fallback(chunks, top_k)
             return ModelRerankResult(chunks=tuple(fallback), used_fallback=True)
@@ -885,6 +1006,132 @@ class KnowledgeRetrievalService:
                 continue
             chunk = chunks[index]
             chunk.metadata["score"] = float(item.metadata.get("relevance_score") or 0)
+            result.append(chunk)
+        return ModelRerankResult(chunks=tuple(result), used_fallback=False)
+
+    @classmethod
+    async def _rerank_multimodal_chunks(
+        cls,
+        runtime: ProcessRuntime,
+        snapshot: ModelRuntimeSnapshot,
+        query: ImageEmbeddingContent,
+        chunks: Sequence[DocumentChunk],
+        top_k: int,
+    ) -> ModelRerankResult:
+        if (
+            snapshot.resolved is None
+            or not is_qwen3_vl_reranker(snapshot.resolved)
+        ):
+            raise KnowledgeError.from_code(
+                "KB_MODEL_UNAVAILABLE",
+                "Image query requires qwen3-vl rerank",
+            )
+        asset_ids_by_kb: dict[uuid.UUID, list[str]] = {}
+        chunks_by_kb: dict[uuid.UUID, list[DocumentChunk]] = {}
+        for chunk in chunks:
+            raw_kb_id = (chunk.metadata or {}).get("knowledge_id")
+            try:
+                knowledge_id = uuid.UUID(str(raw_kb_id))
+            except (TypeError, ValueError):
+                continue
+            chunks_by_kb.setdefault(knowledge_id, []).append(chunk)
+        for knowledge_id, kb_chunks in chunks_by_kb.items():
+            asset_ids_by_kb[knowledge_id] = collect_asset_file_ids(kb_chunks)
+        images: dict[str, ImageEmbeddingContent] = {}
+        for knowledge_id, asset_ids in asset_ids_by_kb.items():
+            images.update(
+                await resolve_storage_images_async(
+                    runtime,
+                    knowledge_id,
+                    asset_ids,
+                    phase="rerank",
+                )
+            )
+
+        views: list[RerankCandidateView] = []
+        text_view_count = 0
+        image_view_count = 0
+        for chunk_index, chunk in enumerate(chunks):
+            text = sanitized_retrieval_text(chunk)
+            if text:
+                if num_tokens_from_string(text) > 8_000:
+                    raise KnowledgeError.from_code(
+                        "KB_MULTIMODAL_INPUT_LIMIT",
+                        "Rerank text view exceeds the token limit",
+                    )
+                views.append(
+                    RerankCandidateView(
+                        chunk_index=chunk_index,
+                        kind="text",
+                        content=text,
+                    )
+                )
+                text_view_count += 1
+            raw_ids = (chunk.metadata or {}).get("asset_file_ids")
+            chunk_image_index = 0
+            if isinstance(raw_ids, list):
+                for value in raw_ids:
+                    image = images.get(str(value))
+                    if image is None:
+                        continue
+                    views.append(
+                        RerankCandidateView(
+                            chunk_index=chunk_index,
+                            kind="image",
+                            image_index=chunk_image_index,
+                            content=image.data_uri,
+                        )
+                    )
+                    chunk_image_index += 1
+                    image_view_count += 1
+        if text_view_count > 100 or image_view_count > 40:
+            raise KnowledgeError.from_code(
+                "KB_MULTIMODAL_INPUT_LIMIT",
+                "Rerank candidate view count exceeds the model limit",
+            )
+        if not views:
+            return ModelRerankResult(chunks=(), used_fallback=False)
+
+        try:
+            reranker = RedBearRerank(snapshot.resolved)
+            scores = await reranker.arerank_multimodal(
+                query,
+                tuple(views),
+                top_n=len(views),
+            )
+        except asyncio.CancelledError:
+            raise
+        except MultimodalInputLimitError as exc:
+            raise KnowledgeError.from_code(
+                "KB_MULTIMODAL_INPUT_LIMIT",
+                "Multimodal rerank input exceeds the model limit",
+            ) from exc
+        except Exception as exc:
+            raise KnowledgeError.from_code(
+                "KB_MULTIMODAL_RERANK_FAILED",
+                "Multimodal rerank failed",
+            ) from exc
+
+        scores_by_chunk: dict[int, float] = {}
+        for score in scores:
+            if score.input_index < 0 or score.input_index >= len(views):
+                raise KnowledgeError.from_code(
+                    "KB_MULTIMODAL_RERANK_FAILED",
+                    "Multimodal rerank returned an invalid index",
+                )
+            chunk_index = views[score.input_index].chunk_index
+            scores_by_chunk[chunk_index] = max(
+                scores_by_chunk.get(chunk_index, 0.0),
+                score.relevance_score,
+            )
+        ranked = sorted(
+            scores_by_chunk.items(),
+            key=lambda item: (-item[1], item[0]),
+        )
+        result: list[DocumentChunk] = []
+        for chunk_index, score in ranked[:top_k]:
+            chunk = chunks[chunk_index].model_copy(deep=True)
+            chunk.metadata["score"] = score
             result.append(chunk)
         return ModelRerankResult(chunks=tuple(result), used_fallback=False)
 
@@ -950,7 +1197,7 @@ class KnowledgeRetrievalService:
             client_pool=runtime.model_runtime.pool,
         )
         return await generate_filter_groups(
-            request.query,
+            request.query_text or "",
             dict(preparation.common_metadata_defs),
             llm,
         )
@@ -1218,13 +1465,15 @@ class KnowledgeRetrievalService:
         principal: Principal,
         timings: RetrievalTimings,
     ) -> dict[str, Any]:
+        normalized_query = request.normalized_query
         return {
             "id": log_id,
             "actor": cls._compact_id(principal.actor_id),
             "kb_count": len(request.kb_ids),
             "ex_id_count": len(request.ex_ids),
             "knowledge_base_count": len(request.knowledge_bases),
-            "query_len": len(request.query),
+            "query_len": len(request.query_text or ""),
+            "query_modality": normalized_query.modality,
             "type": request.retrieve_type,
             "top_k": request.top_k,
             "top_n": request.top_n,
@@ -1232,6 +1481,83 @@ class KnowledgeRetrievalService:
             "metadata_mode": request.metadata_filter_mode,
             "async_mode": "native",
         } | timings.as_log_fields()
+
+    @staticmethod
+    def _validated_image_query(
+        request: KnowledgeRetrievalRequest,
+    ) -> ImageEmbeddingContent | None:
+        normalized = request.normalized_query
+        if not isinstance(normalized, ImageRetrievalQuery):
+            return None
+        if request.metadata_filter_mode is MetadataFilterMode.AUTO:
+            raise KnowledgeError.from_code(
+                "KB_VALIDATION_ERROR",
+                "Image query does not support automatic metadata filters",
+            )
+        validated = validate_image_data_uri(normalized.content)
+        return ImageEmbeddingContent(
+            media_type=validated.media_type,
+            data_uri=validated.data_uri,
+            decoded_bytes=validated.decoded_bytes,
+        )
+
+    @staticmethod
+    def _validate_image_targets(
+        preparation: RetrievalPreparation,
+        image_query: ImageEmbeddingContent | None,
+    ) -> None:
+        if image_query is None:
+            return
+        for target in preparation.targets:
+            if target.params.retrieve_type not in {
+                RetrieveType.SEMANTIC,
+                RetrieveType.HYBRID,
+            } or target.params.enable_graph_retrieval:
+                raise KnowledgeError.from_code(
+                    "KB_VALIDATION_ERROR",
+                    "Image query target configuration is not supported",
+                )
+            if (
+                target.embedding.resolved is None
+                or not is_qwen3_vl_embedding(target.embedding.resolved)
+            ):
+                raise KnowledgeError.from_code(
+                    "KB_MODEL_UNAVAILABLE",
+                    "Image query requires qwen3-vl embedding",
+                )
+            if target.params.retrieve_type is RetrieveType.HYBRID:
+                local_plan = target.params.local_rerank
+                if local_plan is None or local_plan.mode is RerankMode.WEIGHTED_SCORE:
+                    raise KnowledgeError.from_code(
+                        "KB_VALIDATION_ERROR",
+                        "Image hybrid requires model rerank mode",
+                    )
+                if (
+                    local_plan.model is None
+                    or local_plan.model.resolved is None
+                    or not is_qwen3_vl_reranker(local_plan.model.resolved)
+                ):
+                    raise KnowledgeError.from_code(
+                        "KB_MODEL_UNAVAILABLE",
+                        "Image hybrid requires qwen3-vl rerank",
+                    )
+        global_plan = preparation.global_rerank
+        if global_plan is None:
+            return
+        if global_plan.mode is RerankMode.WEIGHTED_SCORE:
+            raise KnowledgeError.from_code(
+                "KB_VALIDATION_ERROR",
+                "Image query does not support weighted global rerank",
+            )
+        if (
+            global_plan.model is None
+            or global_plan.model.resolved is None
+            or not is_qwen3_vl_reranker(global_plan.model.resolved)
+        ):
+            raise KnowledgeError.from_code(
+                "KB_MODEL_UNAVAILABLE",
+                "Image query global rerank requires qwen3-vl rerank",
+            )
 
     @classmethod
     def _finish_empty(

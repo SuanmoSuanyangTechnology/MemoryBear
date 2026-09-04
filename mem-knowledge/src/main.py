@@ -61,6 +61,7 @@ _LEGACY_ERROR_RESPONSES = {
 }
 _RERANK_VALIDATION_FIELDS = frozenset({"rerank_mode", "rerank_weights"})
 _RERANK_VALIDATION_MESSAGE = "Invalid rerank configuration"
+_RETRIEVAL_VALIDATION_MESSAGE = "Invalid retrieval request"
 
 
 def _request_language(request: Request) -> str:
@@ -142,6 +143,16 @@ def create_app(settings: KnowledgeSettings | None = None) -> FastAPI:
             request.headers.get("X-KB-Source"),
             validation_errors,
         )
+        if request.url.path.endswith("/chunks/retrieval"):
+            return JSONResponse(
+                status_code=400,
+                headers={TRACE_ID_HEADER: trace_id},
+                content=fail(
+                    code=400,
+                    msg=_http_message(request, 400, _RETRIEVAL_VALIDATION_MESSAGE),
+                    error=_RETRIEVAL_VALIDATION_MESSAGE,
+                ),
+            )
         if _is_rerank_validation_error(exc):
             return JSONResponse(
                 status_code=400,

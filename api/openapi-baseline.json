@@ -3398,6 +3398,47 @@
         }
       }
     },
+    "/v1/chunks/retrieval-policy": {
+      "post": {
+        "tags": [
+          "V1 - RAG API"
+        ],
+        "summary": "Get Retrieval Policy",
+        "operationId": "get_retrieval_policy_v1_chunks_retrieval_policy_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetrievalPolicyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RetrievalPolicyResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/chunks/retrieval": {
       "post": {
         "tags": [
@@ -8577,8 +8618,7 @@
       "ChunkRetrieve": {
         "properties": {
           "query": {
-            "type": "string",
-            "title": "Query"
+            "$ref": "#/components/schemas/RetrievalQuery"
           },
           "kb_ids": {
             "items": {
@@ -8682,6 +8722,18 @@
                 "type": "null"
               }
             ]
+          },
+          "rerank_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rerank Id"
           },
           "rerank_mode": {
             "anyOf": [
@@ -11479,6 +11531,27 @@
           "action_id"
         ],
         "title": "HumanInterventionSubmitRequest"
+      },
+      "ImageRetrievalQuery": {
+        "properties": {
+          "modality": {
+            "type": "string",
+            "const": "image",
+            "title": "Modality"
+          },
+          "content": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Content"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "modality",
+          "content"
+        ],
+        "title": "ImageRetrievalQuery"
       },
       "InviteStatus": {
         "type": "string",
@@ -15160,6 +15233,146 @@
         "type": "object",
         "title": "RerankWeights"
       },
+      "RetrievalPolicy": {
+        "properties": {
+          "participle": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "text",
+                "image"
+              ]
+            },
+            "type": "array",
+            "title": "Participle",
+            "default": [
+              "text"
+            ]
+          },
+          "semantic": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "text",
+                "image"
+              ]
+            },
+            "type": "array",
+            "title": "Semantic",
+            "default": [
+              "text"
+            ]
+          },
+          "hybrid": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "text",
+                "image"
+              ]
+            },
+            "type": "array",
+            "title": "Hybrid",
+            "default": [
+              "text"
+            ]
+          },
+          "graph": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "text",
+                "image"
+              ]
+            },
+            "type": "array",
+            "title": "Graph",
+            "default": [
+              "text"
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "RetrievalPolicy"
+      },
+      "RetrievalPolicyRequest": {
+        "properties": {
+          "kb_ids": {
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": "array",
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Kb Ids"
+          },
+          "rerank_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rerank Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "kb_ids"
+        ],
+        "title": "RetrievalPolicyRequest"
+      },
+      "RetrievalPolicyResponse": {
+        "properties": {
+          "code": {
+            "type": "integer",
+            "title": "Code",
+            "description": "业务状态码，0=成功，非0=各类业务异常",
+            "default": 0
+          },
+          "msg": {
+            "type": "string",
+            "title": "Msg",
+            "description": "给人看的简短提示",
+            "default": "OK"
+          },
+          "data": {
+            "$ref": "#/components/schemas/RetrievalPolicy"
+          },
+          "error": {
+            "type": "string",
+            "title": "Error",
+            "description": "失败时的字段级错误信息，成功时为空字符串",
+            "default": ""
+          },
+          "time": {
+            "type": "integer",
+            "title": "Time",
+            "description": "Unix时间戳（秒）"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "RetrievalPolicyResponse"
+      },
+      "RetrievalQuery": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "$ref": "#/components/schemas/StructuredRetrievalQuery"
+          }
+        ]
+      },
       "RetrieveType": {
         "type": "string",
         "enum": [
@@ -15518,6 +15731,23 @@
         "title": "SkillUpdate",
         "description": "更新 Skill"
       },
+      "StructuredRetrievalQuery": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/TextRetrievalQuery"
+          },
+          {
+            "$ref": "#/components/schemas/ImageRetrievalQuery"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "modality",
+          "mapping": {
+            "image": "#/components/schemas/ImageRetrievalQuery",
+            "text": "#/components/schemas/TextRetrievalQuery"
+          }
+        }
+      },
       "SubAgentConfig": {
         "properties": {
           "agent_id": {
@@ -15593,6 +15823,26 @@
         "type": "object",
         "title": "SuggestedQuestionsConfig",
         "description": "下一步问题建议配置"
+      },
+      "TextRetrievalQuery": {
+        "properties": {
+          "modality": {
+            "type": "string",
+            "const": "text",
+            "title": "Modality"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "modality",
+          "content"
+        ],
+        "title": "TextRetrievalQuery"
       },
       "TextToSpeechConfig": {
         "properties": {

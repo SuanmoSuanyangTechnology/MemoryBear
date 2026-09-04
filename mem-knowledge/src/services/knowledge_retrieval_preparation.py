@@ -7,13 +7,20 @@ import uuid
 from dataclasses import dataclass, replace
 from typing import Any
 
-from redbear_model import ResolvedModelConfig, resolve_model_async
+from redbear_model import (
+    ResolvedModelConfig,
+    is_qwen3_vl_embedding,
+    is_qwen3_vl_reranker,
+    resolve_model_async,
+)
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..api.dependencies import Principal
 from ..api.schemas.chunk import (
     KnowledgeBaseConfig,
+    RetrievalPolicy,
+    RetrievalPolicyRequest,
     RetrieveType,
 )
 from ..api.schemas.knowledge_metadata import MetadataFilterMode
@@ -50,11 +57,159 @@ class _KnowledgeRef:
     config: KnowledgeBaseConfig | None
 
 
+@dataclass(frozen=True)
+class RetrievalPolicyModelTarget:
+    embedding: ModelRuntimeSnapshot
+    reranker: ModelRuntimeSnapshot | None
+
+
+def _supports_qwen3_vl_embedding(snapshot: ModelRuntimeSnapshot) -> bool:
+    return isinstance(snapshot.resolved, ResolvedModelConfig) and is_qwen3_vl_embedding(
+        snapshot.resolved
+    )
+
+
+def _supports_qwen3_vl_rerank(snapshot: ModelRuntimeSnapshot | None) -> bool:
+    return (
+        snapshot is not None
+        and isinstance(snapshot.resolved, ResolvedModelConfig)
+        and is_qwen3_vl_reranker(snapshot.resolved)
+    )
+
+
+def select_effective_reranker(
+    *,
+    request_has_rerank_id: bool,
+    request_reranker: ModelRuntimeSnapshot | None,
+    fallback_reranker: ModelRuntimeSnapshot | None,
+) -> ModelRuntimeSnapshot | None:
+    return request_reranker if request_has_rerank_id else fallback_reranker
+
+
+def build_retrieval_policy(
+    *,
+    targets: tuple[RetrievalPolicyModelTarget, ...],
+    request_reranker: ModelRuntimeSnapshot | None,
+    request_has_rerank_id: bool,
+) -> RetrievalPolicy:
+    if not targets:
+        raise ValueError("retrieval policy requires at least one target")
+    embeddings_support_image = all(
+        _supports_qwen3_vl_embedding(target.embedding) for target in targets
+    )
+    global_reranker = select_effective_reranker(
+        request_has_rerank_id=request_has_rerank_id,
+        request_reranker=request_reranker,
+        fallback_reranker=targets[0].reranker,
+    )
+    semantic_requires_reranker = len(targets) > 1 or request_has_rerank_id
+    semantic_supports_image = embeddings_support_image and (
+        not semantic_requires_reranker
+        or _supports_qwen3_vl_rerank(global_reranker)
+    )
+    if len(targets) == 1:
+        local_reranker = select_effective_reranker(
+            request_has_rerank_id=request_has_rerank_id,
+            request_reranker=request_reranker,
+            fallback_reranker=targets[0].reranker,
+        )
+        hybrid_supports_image = embeddings_support_image and _supports_qwen3_vl_rerank(
+            local_reranker
+        )
+    else:
+        hybrid_supports_image = (
+            embeddings_support_image
+            and all(_supports_qwen3_vl_rerank(target.reranker) for target in targets)
+            and _supports_qwen3_vl_rerank(global_reranker)
+        )
+    return RetrievalPolicy(
+        semantic=("text", "image") if semantic_supports_image else ("text",),
+        hybrid=("text", "image") if hybrid_supports_image else ("text",),
+    )
+
+
 def _model_unavailable(message: str) -> KnowledgeError:
     return KnowledgeError.from_code("KB_MODEL_UNAVAILABLE", message)
 
 
 class KnowledgeRetrievalPreparation:
+    @classmethod
+    async def _resolve_policy_refs(
+        cls,
+        db: AsyncSession,
+        request: RetrievalPolicyRequest,
+        principal: Principal,
+    ) -> list[_KnowledgeRef]:
+        refs: list[_KnowledgeRef] = []
+        seen: set[uuid.UUID] = set()
+        for knowledge_id in request.kb_ids:
+            single_request = request.model_copy(update={"kb_ids": [knowledge_id]})
+            resolved = await cls._resolve_retrievable_refs(
+                db,
+                single_request,
+                principal,
+            )
+            if not resolved:
+                raise KnowledgeError.from_code(
+                    "KB_RESOURCE_NOT_FOUND",
+                    "Knowledge resources were not found",
+                )
+            for ref in resolved:
+                if ref.knowledge.id in seen:
+                    continue
+                seen.add(ref.knowledge.id)
+                refs.append(ref)
+        return refs
+
+    @classmethod
+    async def prepare_policy_with_db(
+        cls,
+        db: AsyncSession,
+        request: RetrievalPolicyRequest,
+        principal: Principal,
+    ) -> RetrievalPolicy:
+        refs = await cls._resolve_policy_refs(db, request, principal)
+        if not refs:
+            raise KnowledgeError.from_code(
+                "KB_RESOURCE_NOT_FOUND",
+                "Knowledge resources were not found",
+            )
+        targets: list[RetrievalPolicyModelTarget] = []
+        for ref in refs:
+            knowledge = ref.knowledge
+            if knowledge.embedding_id is None:
+                raise _model_unavailable("Knowledge embedding model is unavailable")
+            embedding = await cls._snapshot_model(
+                db,
+                knowledge.embedding_id,
+                principal.tenant_id,
+            )
+            if embedding is None:
+                raise _model_unavailable("Knowledge embedding model is unavailable")
+            reranker = await cls._snapshot_model(
+                db,
+                knowledge.reranker_id,
+                principal.tenant_id,
+            )
+            targets.append(
+                RetrievalPolicyModelTarget(
+                    embedding=embedding,
+                    reranker=reranker,
+                )
+            )
+        request_reranker = await cls._snapshot_model(
+            db,
+            request.rerank_id,
+            principal.tenant_id,
+        )
+        if request.rerank_id is not None and request_reranker is None:
+            raise _model_unavailable("Request rerank model is unavailable")
+        return build_retrieval_policy(
+            targets=tuple(targets),
+            request_reranker=request_reranker,
+            request_has_rerank_id=request.rerank_id is not None,
+        )
+
     @classmethod
     async def prepare_with_db(
         cls,
@@ -167,10 +322,10 @@ class KnowledgeRetrievalPreparation:
             global_rerank = RerankPlan(
                 mode=mode,
                 weights=weights,
-                model=(
-                    request_reranker
-                    if request.rerank_id is not None
-                    else (targets[0].reranker if targets else None)
+                model=select_effective_reranker(
+                    request_has_rerank_id=request.rerank_id is not None,
+                    request_reranker=request_reranker,
+                    fallback_reranker=targets[0].reranker if targets else None,
                 )
                 if mode is RerankMode.RERANKING_MODEL
                 else None,
@@ -216,20 +371,22 @@ class KnowledgeRetrievalPreparation:
     async def _resolve_retrievable_refs(
         cls,
         db: AsyncSession,
-        request: KnowledgeRetrievalRequest,
+        request: KnowledgeRetrievalRequest | RetrievalPolicyRequest,
         principal: Principal,
     ) -> list[_KnowledgeRef]:
         requested = list(request.kb_ids)
-        if request.ex_ids:
+        ex_ids = getattr(request, "ex_ids", None)
+        if ex_ids:
             result = await db.execute(
                 select(Knowledge.id).where(
-                    Knowledge.external_id.in_(request.ex_ids),
+                    Knowledge.external_id.in_(ex_ids),
                     Knowledge.workspace_id == principal.workspace_id,
                     Knowledge.status == 1,
                 )
             )
             requested.extend(result.scalars().all())
-        explicit = {config.kb_id: config for config in request.knowledge_bases}
+        knowledge_bases = getattr(request, "knowledge_bases", ())
+        explicit = {config.kb_id: config for config in knowledge_bases}
         requested.extend(explicit)
         refs: list[_KnowledgeRef] = []
         positions: dict[uuid.UUID, int] = {}
@@ -324,6 +481,7 @@ class KnowledgeRetrievalPreparation:
             target_count,
         )
         local_mode, local_weights, _ = selection
+        retrieve_type = cls._resolve_retrieve_type(request, ref.config)
         if knowledge.embedding_id is None:
             raise _model_unavailable(f"embedding_id config error: {knowledge.id}")
         embedding = await cls._snapshot_model(db, knowledge.embedding_id, principal.tenant_id)
@@ -331,9 +489,11 @@ class KnowledgeRetrievalPreparation:
             raise _model_unavailable(f"No embedding api key found for knowledge {knowledge.id}")
         reranker = None
         if cls._target_reranker_required(
+            retrieve_type=retrieve_type,
             local_mode=local_mode,
             global_mode=global_mode,
             target_index=target_index,
+            target_count=target_count,
             request_has_rerank_id=request.rerank_id is not None,
         ):
             if knowledge.reranker_id is None:
@@ -375,6 +535,9 @@ class KnowledgeRetrievalPreparation:
         refs: list[_KnowledgeRef],
         targets: list[RetrievalTarget],
     ) -> GraphRetrievalSnapshot | None:
+        query_text = request.query_text
+        if query_text is None:
+            return None
         knowledge_by_id = {ref.knowledge.id: ref.knowledge for ref in refs}
         snapshots = []
         pipelines: set[GraphPipeline] = set()
@@ -429,7 +592,7 @@ class KnowledgeRetrievalPreparation:
                 "KB_VALIDATION_ERROR",
                 "all graph targets must use the same graph pipeline",
             )
-        return GraphRetrievalSnapshot(request.query, snapshots[0].pipeline, tuple(snapshots))
+        return GraphRetrievalSnapshot(query_text, snapshots[0].pipeline, tuple(snapshots))
 
     @staticmethod
     async def _snapshot_model(
@@ -530,13 +693,18 @@ class KnowledgeRetrievalPreparation:
     @staticmethod
     def _target_reranker_required(
         *,
+        retrieve_type: RetrieveType,
         local_mode: RerankMode,
         global_mode: RerankMode | None,
         target_index: int,
+        target_count: int,
         request_has_rerank_id: bool,
     ) -> bool:
-        if local_mode is RerankMode.RERANKING_MODEL:
-            return True
+        if (
+            retrieve_type is RetrieveType.HYBRID
+            and local_mode is RerankMode.RERANKING_MODEL
+        ):
+            return not (target_count == 1 and request_has_rerank_id)
         return (
             global_mode is RerankMode.RERANKING_MODEL
             and target_index == 0
@@ -645,4 +813,9 @@ class KnowledgeRetrievalPreparation:
         return list(dict.fromkeys(values))
 
 
-__all__ = ["KnowledgeRetrievalPreparation"]
+__all__ = [
+    "KnowledgeRetrievalPreparation",
+    "RetrievalPolicyModelTarget",
+    "build_retrieval_policy",
+    "select_effective_reranker",
+]

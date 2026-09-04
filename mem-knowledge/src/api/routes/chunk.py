@@ -13,6 +13,7 @@ from ...services import chunk as chunk_service
 from ...services import file as file_service
 from ...services.knowledge_file_storage import KnowledgeFileStorage
 from ...services.knowledge_retrieval import KnowledgeRetrievalService
+from ...services.knowledge_retrieval_preparation import KnowledgeRetrievalPreparation
 from ...services.qa_import import (
     create_qa_import_resources,
     dispatch_qa_import,
@@ -27,6 +28,8 @@ from ..schemas.chunk import (
     ChunkRetrieve,
     ChunkUpdate,
     KnowledgeRetrievalSource,
+    RetrievalPolicy,
+    RetrievalPolicyRequest,
     RetrieveType,
 )
 from ..schemas.common import SuccessEnvelope, success
@@ -364,6 +367,29 @@ async def get_retrieve_types(request: Request) -> SuccessEnvelope[list[str]]:
         request,
         list(RetrieveType),
         "Successfully obtained the retrieval type",
+    )
+
+
+@router.post(
+    "/retrieval-policy",
+    response_model=SuccessEnvelope[RetrievalPolicy],
+)
+async def get_retrieval_policy(
+    request: Request,
+    policy_request: RetrievalPolicyRequest,
+    principal: Annotated[Principal, Depends(get_principal)],
+    runtime: Annotated[ProcessRuntime, Depends(get_runtime)],
+) -> SuccessEnvelope[RetrievalPolicy]:
+    async with runtime.database.async_session() as db:
+        policy = await KnowledgeRetrievalPreparation.prepare_policy_with_db(
+            db,
+            policy_request,
+            principal,
+        )
+    return _success(
+        request,
+        policy.model_dump(mode="json"),
+        "retrieval policy resolved",
     )
 
 
