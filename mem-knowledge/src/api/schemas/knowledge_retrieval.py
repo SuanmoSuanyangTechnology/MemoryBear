@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from ...rag.models.chunk import DocumentChunk
 from .chunk import (
+    IMAGE_QUERY_TOP_N,
     ImageRetrievalQuery,
     KnowledgeBaseConfig,
     KnowledgeRetrievalSource,
@@ -82,7 +83,9 @@ class KnowledgeRetrievalRequest(BaseModel):
     def validate_knowledge_ids(self) -> "KnowledgeRetrievalRequest":
         if not self.kb_ids and not self.ex_ids and not self.knowledge_bases:
             raise ValueError("kb_ids, ex_ids and knowledge_bases cannot all be empty")
-        if self.top_n is None or "top_n" not in self.model_fields_set:
+        if isinstance(self.normalized_query, ImageRetrievalQuery):
+            self.top_n = IMAGE_QUERY_TOP_N
+        elif self.top_n is None or "top_n" not in self.model_fields_set:
             self.top_n = max(self.top_k, 20)
         elif self.top_n < self.top_k:
             raise ValueError("top_n must be greater than or equal to top_k")

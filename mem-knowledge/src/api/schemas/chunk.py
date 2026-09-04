@@ -10,6 +10,8 @@ from ...rag.models.chunk import QAChunk
 from .knowledge_metadata import FilterGroup, MetadataFilterMode
 from .rerank import RerankMode, RerankWeights
 
+IMAGE_QUERY_TOP_N = 20
+
 
 class RetrieveType(StrEnum):
     PARTICIPLE = "participle"
@@ -204,7 +206,9 @@ class ChunkRetrieve(BaseModel):
         if not self.kb_ids and not self.ex_ids and not self.knowledge_bases:
             raise ValueError("kb_ids, ex_ids and knowledge_bases cannot all be empty")
         top_k = self.top_k or 20
-        if self.top_n is None or "top_n" not in self.model_fields_set:
+        if isinstance(self.normalized_query, ImageRetrievalQuery):
+            self.top_n = IMAGE_QUERY_TOP_N
+        elif self.top_n is None or "top_n" not in self.model_fields_set:
             self.top_n = max(top_k, 20)
         elif self.top_n < top_k:
             raise ValueError("top_n must be greater than or equal to top_k")
