@@ -232,23 +232,38 @@ const WorkingDetail: FC = () => {
     }
   }, [id, selected, filterParams])
 
+  const fetchMessagesTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
   /** Fetch chat messages for a conversation, applying the current date/keyword filters. */
   const fetchMessages = useCallback((conversation: Conversation | ApiMcpListItem) => {
     if (!id) return
     const conversationId = (conversation as Conversation).id
     if (!conversationId) return
-    setMessagesLoading(true)
-    getConversationMessages(id, { conversation_id: conversationId, ...filterParamsRef.current, page: 1, pagesize: PAGE_SIZE })
-      .then(res => {
-        const response = res as { items: ChatItem[], page: { hasnext: boolean } }
-        setMessages(response.items)
-        messagePageRef.current = 1
-        setMessageHasMore(response.page.hasnext)
-      })
-      .finally(() => {
-        setMessagesLoading(false)
-      })
-  }, [id, filterParamsRef.current])
+    if (fetchMessagesTimerRef.current) {
+      clearTimeout(fetchMessagesTimerRef.current)
+    }
+    fetchMessagesTimerRef.current = setTimeout(() => {
+      setMessagesLoading(true)
+      getConversationMessages(id, { conversation_id: conversationId, ...filterParamsRef.current, page: 1, pagesize: PAGE_SIZE })
+        .then(res => {
+          const response = res as { items: ChatItem[], page: { hasnext: boolean } }
+          setMessages(response.items)
+          messagePageRef.current = 1
+          setMessageHasMore(response.page.hasnext)
+        })
+        .finally(() => {
+          setMessagesLoading(false)
+        })
+    }, 300)
+  }, [id])
+
+  useEffect(() => {
+    return () => {
+      if (fetchMessagesTimerRef.current) {
+        clearTimeout(fetchMessagesTimerRef.current)
+      }
+    }
+  }, [])
 
   /**
    * Fetch the chat messages for the selected conversation. For `conversation`-type

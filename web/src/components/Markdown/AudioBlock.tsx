@@ -13,13 +13,32 @@
  * @component
  */
 
-import { memo, type FC } from 'react'
+import { memo, useEffect, useState, type FC } from 'react'
 
 /** Props interface for AudioBlock component */
 interface AudioBlockProps {
   node: {
     children: { properties: { src: string } }[]
   }
+}
+
+interface AudioSourceProps {
+  src: string
+}
+
+const AudioSource: FC<AudioSourceProps> = ({ src }) => {
+  const [hasError, setHasError] = useState(false)
+  const isRelativePath = !/^(?:[a-z][a-z\d+.-]*:|\/\/)/i.test(src) && !src.startsWith('/')
+
+  useEffect(() => {
+    setHasError(false)
+  }, [src])
+
+  if (isRelativePath || hasError) {
+    return <span className="rb:break-all">{src}</span>
+  }
+
+  return <audio src={src} controls onError={() => setHasError(true)} />
 }
 
 /** Audio block component that renders audio elements from markdown nodes */
@@ -30,7 +49,7 @@ const AudioBlock: FC<AudioBlockProps> = (props) => {
 
   return (
     <>
-      {srcs.map(src => <audio key={src} src={src} controls />)}
+      {srcs.map(src => <AudioSource key={src} src={src} />)}
     </>
     
   )
