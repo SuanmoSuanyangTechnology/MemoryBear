@@ -57,10 +57,10 @@ const MemoryActivity: FC<MemoryActivityProps> = ({ id }) => {
 
     return (
       <Flex gap={12} align="center" className="rb:rounded-xl rb:bg-white rb:p-3! rb:shadow-[0_1px_2px_rgba(0,0,0,0.05)] rb:transition-[background-color,box-shadow] rb:hover:bg-[#FAFAFC] rb:hover:shadow-[0_2px_8px_rgba(0,0,0,0.06)]">
-        <div
-          className={clsx('rb:flex rb:size-7.5 rb:items-center rb:justify-center rb:rounded-lg rb:text-[14px]', {
+        <Flex align="center" justify="center"
+          className={clsx('rb:size-7.5 rb:rounded-lg rb:text-[14px]', {
             'rb:bg-gray-900 rb:text-white': activityType === 'engine',
-            'rb:bg-gray-50 rb:text-gray-400': filter === 'read',
+            'rb:bg-gray-50 rb:text-gray-500': filter === 'read',
             'rb:bg-gray-200 rb:text-gray-600': activityType === 'write',
           })}
           title={record.memory_type
@@ -80,7 +80,7 @@ const MemoryActivity: FC<MemoryActivityProps> = ({ id }) => {
                     return <ActIcon />
                   })()
                 : null}
-        </div>
+        </Flex>
 
         <Flex vertical gap={4} className="rb:min-w-0 rb:flex-1 rb:shrink-0">
           <Tooltip title={record.name || record.query || '-'} placement="topLeft">
@@ -95,18 +95,18 @@ const MemoryActivity: FC<MemoryActivityProps> = ({ id }) => {
             </div>
           </Tooltip>
 
-          <Flex align="center" justify="space-between" gap={10} className="rb:text-[10px] rb:leading-4 rb:text-gray-400">
-            <span className="rb:shrink-0">
-              {formatDateTime(record.occurred_at, 'HH:mm') || '-'}
+          <Flex align="center" justify="space-between" gap={10} className="rb:text-[10px] rb:leading-4 rb:text-gray-500 rb:overflow-hidden">
+            <span className="rb:wrap-break-word">
+              {formatDateTime(record.occurred_at) || '-'}
             </span>
             {record.memory_type &&
-              <Tag size="small" color={TAG_COLORS[record.memory_type]} className="rb:shrink-0!">{t(`episodicDetail.${record.memory_type}`)}</Tag>
+              <Tag size="small" color={TAG_COLORS[record.memory_type]} className="rb:max-w-[55%] rb:shrink-0!">{t(`episodicDetail.${record.memory_type}`)}</Tag>
             }
             {record.engine_type &&
-              <Tag size="small" color="default" className="rb:shrink-0!">{t(`userMemory.${record.engine_type}`)}</Tag>
+              <Tag size="small" color="default" className="rb:max-w-[55%] rb:shrink-0!">{t(`userMemory.${record.engine_type}`)}</Tag>
             }
             {record.search_mode &&
-              <Tag size="small" color="default" className="rb:shrink-0!">{t(`userMemory.${record.search_mode}_mode`)}</Tag>
+              <Tag size="small" color="default" className="rb:max-w-[55%] rb:shrink-0!">{t(`userMemory.${record.search_mode}_mode`)}</Tag>
             }
           </Flex>
         </Flex>
@@ -130,7 +130,7 @@ const MemoryActivity: FC<MemoryActivityProps> = ({ id }) => {
               <span className="rb:text-[11px] rb:font-medium rb:text-gray-600">
                 {t(`userMemory.${activityDateLabelKeys[group]}`)}
               </span>
-              <span className="rb:text-[10px] rb:tabular-nums rb:text-gray-400">
+              <span className="rb:text-[10px] rb:tabular-nums rb:text-gray-500">
                 {groupRecords.length}
               </span>
             </Flex>
@@ -161,7 +161,7 @@ const MemoryActivity: FC<MemoryActivityProps> = ({ id }) => {
                   type="button"
                   className={clsx('rb:h-6 rb:cursor-pointer rb:rounded-full rb:border-0 rb:px-2.5! rb:text-[11px] rb:font-medium rb:transition-colors', language === lng
                     ? 'rb:bg-white rb:shadow-[0_1px_2px_rgba(0,0,0,0.12)]'
-                    : 'rb:bg-transparent rb:text-gray-400 rb:hover:text-gray-900')}
+                    : 'rb:bg-transparent rb:text-gray-500 rb:hover:text-gray-900')}
                   onClick={() => changeLanguage(lng)}
                 >
                   {lng === 'zh' ? '中' : 'EN'}
