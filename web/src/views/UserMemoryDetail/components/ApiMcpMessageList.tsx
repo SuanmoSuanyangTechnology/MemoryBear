@@ -62,42 +62,49 @@ const ApiMcpMessageList = forwardRef<ApiMcpMessageListRef, ApiMcpMessageListProp
   const scrollableTarget = `api-mcp-message-list-${source}`
   const [total, setTotal] = useState<number>(0)
 
+  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
   const refresh = useCallback(() => {
     const requestId = ++requestRef.current
-    pageRef.current = 1
-    loadingRef.current = true
-    messagesRef.current = []
-    setMessages([])
-    setHasMore(true)
-    setLoading(true)
-    onMessagesChange?.([])
+    if (refreshTimerRef.current) {
+      clearTimeout(refreshTimerRef.current)
+    }
+    refreshTimerRef.current = setTimeout(() => {
+      pageRef.current = 1
+      loadingRef.current = true
+      messagesRef.current = []
+      setMessages([])
+      setHasMore(true)
+      setLoading(true)
+      onMessagesChange?.([])
 
-    getApiMcpMessages(endUserId, {
-      source,
-      page: 1,
-      pagesize: PAGE_SIZE,
-      ...filterParams,
-    })
-      .then(res => {
-        if (requestId !== requestRef.current) return
-        const response = res as ApiMcpMessagesResponse
-        const nextMessages = response.items || []
-        messagesRef.current = nextMessages
-        setMessages(nextMessages)
-        setHasMore(Boolean(response.page?.hasnext))
-        onMessagesChange?.(nextMessages)
-        setTotal(response.page?.total || 0)
+      getApiMcpMessages(endUserId, {
+        source,
+        page: 1,
+        pagesize: PAGE_SIZE,
+        ...filterParams,
       })
-      .catch(() => {
-        if (requestId === requestRef.current) {
-          setHasMore(false)
-        }
-      })
-      .finally(() => {
-        if (requestId !== requestRef.current) return
-        loadingRef.current = false
-        setLoading(false)
-      })
+        .then(res => {
+          if (requestId !== requestRef.current) return
+          const response = res as ApiMcpMessagesResponse
+          const nextMessages = response.items || []
+          messagesRef.current = nextMessages
+          setMessages(nextMessages)
+          setHasMore(Boolean(response.page?.hasnext))
+          onMessagesChange?.(nextMessages)
+          setTotal(response.page?.total || 0)
+        })
+        .catch(() => {
+          if (requestId === requestRef.current) {
+            setHasMore(false)
+          }
+        })
+        .finally(() => {
+          if (requestId !== requestRef.current) return
+          loadingRef.current = false
+          setLoading(false)
+        })
+    }, 300)
   }, [endUserId, onMessagesChange, source, filterParams])
 
   const loadMore = useCallback(() => {
@@ -146,6 +153,9 @@ const ApiMcpMessageList = forwardRef<ApiMcpMessageListRef, ApiMcpMessageListProp
     return () => {
       requestRef.current += 1
       loadingRef.current = false
+      if (refreshTimerRef.current) {
+        clearTimeout(refreshTimerRef.current)
+      }
     }
   }, [refresh])
 
