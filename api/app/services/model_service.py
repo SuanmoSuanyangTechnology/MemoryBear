@@ -1000,6 +1000,14 @@ class ModelApiKeyService:
             data.capability = model_config.capability
             model_name = model_config.model_base.name if model_config.model_base else model_config.name
 
+            # 与单模型创建接口保持一致：原生 SDK 模型不接受任意自定义 API Base URL。
+            _require_supported_api_base(
+                data.provider,
+                data.api_base,
+                model_config.type,
+                data.is_omni,
+            )
+
             validation_result = await ModelConfigService.validate_model_config(
                 db=db,
                 model_name=model_name,
@@ -1012,8 +1020,11 @@ class ModelApiKeyService:
                 capability=model_config.capability,
             )
             if not validation_result["valid"]:
-                failed_models.append(model_name)
-                continue
+                # 同一批次共享同一个 API Key；首个验证失败即终止，避免对后续模型重复发起无效请求。
+                raise BusinessException(
+                    f"模型配置验证失败: {validation_result['error']}",
+                    BizCode.INVALID_PARAMETER,
+                )
 
             existing_key = db.query(ModelApiKey).join(
                 ModelApiKey.model_configs
