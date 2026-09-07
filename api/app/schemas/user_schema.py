@@ -114,3 +114,6 @@ class User(UserBase):
             return int(v)
         return v
 
+
+class UserSnap(BaseModel):
+    id: uuid.UUID

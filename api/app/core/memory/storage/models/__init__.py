@@ -20,6 +20,7 @@ from app.core.memory.storage.models.projection import (
     RelationshipProjectionField,
 )
 from app.core.memory.storage.models.pattern import RelationshipPattern
+from app.core.memory.storage.models.search import NodeSearchSpec
 from app.core.memory.storage.models.sort import (
     NodeSort,
     RelationshipSort,
@@ -47,6 +48,7 @@ __all__ = [
     "RelationshipProjection",
     "RelationshipProjectionField",
     "RelationshipPattern",
+    "NodeSearchSpec",
 
     "NodeSort",
     "RelationshipSort",

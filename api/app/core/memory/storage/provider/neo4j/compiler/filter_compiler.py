@@ -9,6 +9,11 @@ from app.core.memory.storage.models import (
 )
 
 
+def _escape_identifier(identifier: str) -> str:
+    """Escape a Cypher identifier while keeping it static for index planning."""
+    return identifier.replace("`", "``")
+
+
 def compile_neo4j_filter(
     node_filter: NodeFilter,
     variable: str = "n",
@@ -80,10 +85,10 @@ def _compile_group(
             condition_prefix = (
                 f"{parameter_prefix}_" + "_".join(map(str, expression_path))
             )
-            field_parameter = f"{condition_prefix}_field"
             value_parameter = f"{condition_prefix}_value"
-            property_expression = f"{variable}[${field_parameter}]"
-            parameters[field_parameter] = expression.field
+            property_expression = (
+                f"{variable}.`{_escape_identifier(expression.field)}`"
+            )
             predicate = _compile_condition(
                 expression,
                 property_expression=property_expression,

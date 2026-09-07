@@ -1,6 +1,7 @@
 import asyncio
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 
+from app.core.logging_config import get_logger
 from app.core.memory.storage.enums import (
     MemoryNodeLabel,
     StorageBackendType,
@@ -8,6 +9,7 @@ from app.core.memory.storage.enums import (
 from app.core.memory.storage.models import (
     NodeFilter,
     NodeProjection,
+    NodeSearchSpec,
     NodeSort,
     RelationshipFilter,
     RelationshipPattern,
@@ -16,7 +18,10 @@ from app.core.memory.storage.models import (
     StorageReadResult,
 )
 from app.core.memory.storage.models.projection import DEFAULT_PROJECTION
+from app.core.memory.storage.provider.base import BaseClient
 from app.core.memory.storage.provider.factory import BackendFactory
+
+logger = get_logger()
 
 
 def _merge_read_results(
@@ -35,6 +40,39 @@ def _merge_read_results(
         items=items,
         total=sum(result.total for result in results),
     )
+
+
+async def _run_grouped_search(
+        resolved: list[tuple[BaseClient, NodeSearchSpec]],
+        invoke: Callable[
+            [BaseClient, list[NodeSearchSpec]],
+            Awaitable[list[StorageReadResult]],
+        ],
+) -> list[StorageReadResult]:
+    groups: list[
+        tuple[BaseClient, list[tuple[int, NodeSearchSpec]]]
+    ] = []
+    for index, (client, spec) in enumerate(resolved):
+        for grouped_client, indexed_specs in groups:
+            if grouped_client is client:
+                indexed_specs.append((index, spec))
+                break
+        else:
+            groups.append((client, [(index, spec)]))
+
+    batches = await asyncio.gather(*(
+        invoke(client, [spec for _, spec in indexed_specs])
+        for client, indexed_specs in groups
+    ))
+    ordered: dict[int, StorageReadResult] = {}
+    for (_, indexed_specs), batch in zip(groups, batches):
+        if len(batch) != len(indexed_specs):
+            raise RuntimeError(
+                "storage batch search returned an unexpected result count"
+            )
+        for (index, _), result in zip(indexed_specs, batch):
+            ordered[index] = result
+    return [ordered[index] for index in range(len(resolved))]
 
 
 class ReadRouter:
@@ -61,20 +99,28 @@ class ReadRouter:
             pre_limit: int,
             projection: NodeProjection | None = None,
     ) -> StorageReadResult:
-        tasks = [
-            self.backend_factory.get_read_client(
-                label,
-                StorageBackendType.VECTOR_MAIN_READ,
-            ).search_by_embedding(
-                label,
-                node_filter,
-                embed,
-                pre_limit,
-                projection or DEFAULT_PROJECTION[label],
+        resolved = [
+            (
+                self.backend_factory.get_read_client(
+                    label,
+                    StorageBackendType.VECTOR_MAIN_READ,
+                ),
+                NodeSearchSpec(
+                    label=label,
+                    node_filter=node_filter,
+                    projection=projection or DEFAULT_PROJECTION[label],
+                ),
             )
             for label, node_filter in node_filters.items()
         ]
-        results: list[StorageReadResult] = list(await asyncio.gather(*tasks))
+        results = await _run_grouped_search(
+            resolved,
+            lambda client, specs: client.search_many_by_embedding(
+                specs,
+                embed,
+                pre_limit,
+            ),
+        )
         return _merge_read_results(results)
 
     async def search_by_fulltext(
@@ -84,20 +130,28 @@ class ReadRouter:
             pre_limit: int,
             projection: NodeProjection | None = None,
     ) -> StorageReadResult:
-        tasks = [
-            self.backend_factory.get_read_client(
-                label,
-                StorageBackendType.TEXT_MAIN_READ,
-            ).search_by_fulltext(
-                label,
-                node_filter,
-                text,
-                pre_limit,
-                projection or DEFAULT_PROJECTION[label],
+        resolved = [
+            (
+                self.backend_factory.get_read_client(
+                    label,
+                    StorageBackendType.TEXT_MAIN_READ,
+                ),
+                NodeSearchSpec(
+                    label=label,
+                    node_filter=node_filter,
+                    projection=projection or DEFAULT_PROJECTION[label],
+                ),
             )
             for label, node_filter in node_filters.items()
         ]
-        results: list[StorageReadResult] = list(await asyncio.gather(*tasks))
+        results = await _run_grouped_search(
+            resolved,
+            lambda client, specs: client.search_many_by_fulltext(
+                specs,
+                text,
+                pre_limit,
+            ),
+        )
         return _merge_read_results(results)
 
     async def search_relationships_by_graph(

@@ -747,7 +747,7 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
             includes=None,
             enable_rerank: bool = False
     ) -> MemorySearchResult:
-        meta_task = asyncio.ensure_future(self._user_meta())
+        meta_task = asyncio.create_task(self._user_meta())
         search_service = await self._get_search_service(
             includes,
             need_llm=False,
