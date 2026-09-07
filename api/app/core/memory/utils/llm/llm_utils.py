@@ -1,5 +1,5 @@
 from typing import TYPE_CHECKING
-
+from sqlalchemy.orm import Session
 from app.core.memory.llm_tools.openai_client import OpenAIClient
 from app.core.models.base import RedBearModelConfig
 from pydantic import BaseModel
