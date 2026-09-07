@@ -2,11 +2,15 @@
 import json
 import uuid
 
-from fastapi import APIRouter, Body, Depends, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.api_key_auth import require_api_key_self_db
+from app.core.api_key_auth import (
+    document_api_key_headers,
+    get_current_api_key_auth,
+    require_api_key_self_db,
+)
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
@@ -14,7 +18,6 @@ from app.core.response_utils import success
 from app.db import get_async_db
 from app.models import Conversation, Message, MessageFeedback
 from app.schemas import app_schema, conversation_schema
-from app.schemas.api_key_schema import ApiKeyAuth
 
 router = APIRouter(prefix="/app", tags=["V1 - App Message Feedback"])
 logger = get_business_logger()
@@ -39,25 +42,36 @@ async def _resolve_v1_internal_user_id(
     return str(end_user.id) if end_user else None
 
 
-@router.post("/messages/{message_id}/feedback", summary="提交消息反馈（点赞/点踩）")
+def _normalize_required_external_user_id(user_id: str) -> str:
+    normalized = user_id.strip()
+    if not normalized:
+        raise BusinessException("user_id 不能为空或全为空白", BizCode.INVALID_PARAMETER)
+    return normalized
+
+
+@router.post(
+    "/messages/{message_id}/feedback",
+    summary="提交消息反馈（点赞/点踩）",
+    openapi_extra={
+        "requestBody": {
+            "required": True,
+            "content": {
+                "application/json": {
+                    "schema": app_schema.MessageFeedbackRequest.model_json_schema(),
+                },
+            },
+        },
+    },
+)
 @require_api_key_self_db(scopes=["app"])
 async def submit_message_feedback(
     request: Request,
     message_id: uuid.UUID,
     user_id: str = Query(..., description="外部系统用户 ID（other_id）"),
-    api_key_auth: ApiKeyAuth = None,
+    _api_key_headers: None = Depends(document_api_key_headers),
     db: AsyncSession = Depends(get_async_db),
-    body_placeholder: str = Body(None, description="占位参数，实际请求体通过 request.json() 解析"),
 ):
-    """点赞/点踩 AI 回复（v1 对外，API Key 认证）
-
-    幂等设计：重复点击同类型取消反馈；like/dislike 互斥切换。
-    user_id 为外部系统用户标识（other_id），后端解析为终端用户 end_user.id，不存在则拒绝。
-
-    请求体无需 payload 包裹，直接传 {"feedback_type": "like|dislike", "feedback_content": "..."}。
-    与 /v1/app/chat、/v1/memory/read 等接口一致：标量 body 占位 + request.json() 手动解析，
-    避免 api_key_auth（Pydantic 模型）与 body 模型共存时 FastAPI 嵌入式校验导致的包裹要求。
-    """
+    """点赞/点踩 AI 回复（v1 对外，API Key 认证）。"""
     try:
         body = await request.json()
     except (json.JSONDecodeError, UnicodeDecodeError, ValueError) as exc:
@@ -65,9 +79,8 @@ async def submit_message_feedback(
     if not isinstance(body, dict):
         raise BusinessException("请求体必须是 JSON 对象", BizCode.INVALID_PARAMETER)
     payload = app_schema.MessageFeedbackRequest(**body)
-
-    if not user_id:
-        raise BusinessException("user_id 不能为空", BizCode.INVALID_PARAMETER)
+    user_id = _normalize_required_external_user_id(user_id)
+    api_key_auth = get_current_api_key_auth()
 
     workspace_id = api_key_auth.workspace_id
     app_id = api_key_auth.resource_id
@@ -169,16 +182,12 @@ async def get_conversation_feedback(
     conversation_id: uuid.UUID,
     user_id: str = Query(..., description="外部系统用户 ID（other_id）"),
     limit: int = Query(50, ge=1, le=200, description="返回消息数量，最大 200"),
-    api_key_auth: ApiKeyAuth = None,
+    _api_key_headers: None = Depends(document_api_key_headers),
     db: AsyncSession = Depends(get_async_db),
 ):
-    """获取会话下所有消息的反馈状态（供前端渲染）
-
-    返回每条消息的反馈状态，不含 is_favorite（收藏功能不在本接口范围）。
-    user_id 为外部系统用户标识（other_id），后端解析为终端用户 end_user.id，不存在则拒绝。
-    """
-    if not user_id:
-        raise BusinessException("user_id 不能为空", BizCode.INVALID_PARAMETER)
+    """获取会话下所有消息的反馈状态（供前端渲染）。"""
+    user_id = _normalize_required_external_user_id(user_id)
+    api_key_auth = get_current_api_key_auth()
 
     internal_user_id = await _resolve_v1_internal_user_id(
         db, api_key_auth.workspace_id, user_id

@@ -5,7 +5,7 @@ import time
 import uuid
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Request, Body, Query, File, UploadFile, HTTPException
+from fastapi import APIRouter, Depends, Request, Query, File, UploadFile, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 from starlette.responses import StreamingResponse
@@ -15,7 +15,12 @@ from app.services.file_storage_service import (
     get_file_storage_service,
     upload_workspace_file,
 )
-from app.core.api_key_auth import require_api_key, require_api_key_self_db
+from app.core.api_key_auth import (
+    document_api_key_headers,
+    get_current_api_key_auth,
+    require_api_key,
+    require_api_key_self_db,
+)
 from app.core.config import settings
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
@@ -30,6 +35,7 @@ from app.models.workflow_model import WorkflowExecution
 from app.repositories import knowledge_repository
 from app.repositories.end_user_repository import EndUserRepository
 from app.schemas import AppChatRequest, conversation_schema
+from app.schemas.app_schema import HumanInterventionRequest
 from app.schemas.api_key_schema import ApiKeyAuth
 from app.schemas.response_schema import ApiResponse, PageData, PageMeta
 from app.services import workspace_service
@@ -215,6 +221,17 @@ async def _read_json_body(request: Request) -> dict:
     return body
 
 
+def _app_chat_request_openapi_schema() -> dict[str, Any]:
+    """生成引用全局 OpenAPI components 的聊天请求 Schema。"""
+    schema = AppChatRequest.model_json_schema(
+        ref_template="#/components/schemas/{model}",
+    )
+    # FastAPI 已为 FileInput 及其枚举生成 components；移除 Pydantic 的局部
+    # $defs，避免嵌入 OpenAPI 操作对象后 #/$defs/... 引用失效。
+    schema.pop("$defs", None)
+    return schema
+
+
 def _get_standard_variables(variables: list, app_type: AppType) -> list:
     """统一 Agent / Workflow 变量输出格式。"""
     is_agent = app_type in (AppType.AGENT, AppType.MULTI_AGENT)
@@ -280,21 +297,28 @@ async def get_app_variables(
     return success(data=_variables_from_release(release))
 
 
-@router.post("/chat")
+@router.post(
+    "/chat",
+    openapi_extra={
+        "requestBody": {
+            "required": True,
+            "content": {
+                "application/json": {
+                    "schema": _app_chat_request_openapi_schema(),
+                },
+            },
+        },
+    },
+)
 @require_api_key_self_db(scopes=["app"])
 async def chat(
         request: Request,
-        api_key_auth: ApiKeyAuth = None,
-        message: str | None = Body(None, description="聊天消息内容"),
+        _api_key_headers: None = Depends(document_api_key_headers),
 ):
-    """
-    Agent/Workflow 聊天接口
-
-    - 不传 version：使用当前生效版本（current_release，回滚后为回滚目标版本）
-    - 传 version=release_id：使用指定版本uuid的历史快照，例如 {"version": "{{release_id}}"}
-    """
+    """Agent/Workflow 聊天接口。"""
     body = await _read_json_body(request)
     payload = AppChatRequest(**body)
+    api_key_auth = get_current_api_key_auth()
     request_started_at = time.perf_counter()
     request_wall_clock = datetime.datetime.now(datetime.timezone.utc)
 
@@ -671,12 +695,15 @@ async def list_v1_conversation_messages(
 async def submit_human_intervention_api(
         request: Request,
         execution_id: str,
-        node_id: str = Body(..., description="人工介入节点 ID"),
-        action_id: str = Body(..., description="用户触发的操作 ID"),
-        form_data: dict | None = Body(default=None, description="用户填写的表单数据"),
-        api_key_auth: ApiKeyAuth = None,
+        payload: HumanInterventionRequest,
+        _api_key_headers: None = Depends(document_api_key_headers),
+        api_key_auth: ApiKeyAuth = Depends(lambda: None),
         db: Session = Depends(get_db),
 ):
+    execution_id = execution_id.strip()
+    if not execution_id:
+        raise BusinessException("execution_id 不能为空", BizCode.INVALID_PARAMETER)
+
     app_id = _get_app_id(api_key_auth)
     execution = db.query(WorkflowExecution).filter(
         WorkflowExecution.execution_id == execution_id,
@@ -702,7 +729,7 @@ async def submit_human_intervention_api(
             BizCode.BAD_REQUEST,
         )
 
-    result = submit_intervention(execution_id, node_id, action_id, form_data)
+    result = submit_intervention(execution_id, payload.node_id, payload.action_id, payload.form_data)
     if not result:
         raise BusinessException(
             "未找到等待中的干预请求，可能 SSE 连接已断开",
@@ -711,9 +738,9 @@ async def submit_human_intervention_api(
 
     return success(data={
         "execution_id": execution_id,
-        "node_id": node_id,
-        "action_id": action_id,
-        "form_data": form_data,
+        "node_id": payload.node_id,
+        "action_id": payload.action_id,
+        "form_data": payload.form_data,
     })
 
 

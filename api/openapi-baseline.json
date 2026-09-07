@@ -373,17 +373,46 @@
           "V1 - App API"
         ],
         "summary": "Chat",
-        "description": "Agent/Workflow 聊天接口\n\n- 不传 version：使用当前生效版本（current_release，回滚后为回滚目标版本）\n- 传 version=release_id：使用指定版本uuid的历史快照，例如 {\"version\": \"{{release_id}}\"}",
+        "description": "Agent/Workflow 聊天接口。",
         "operationId": "chat_v1_app_chat_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/Body_chat_v1_app_chat_post"
-              }
-            }
+        "parameters": [
+          {
+            "name": "Authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "API Key，格式：Bearer <API Key>；可替换为 X-API-Key",
+              "title": "Authorization"
+            },
+            "description": "API Key，格式：Bearer <API Key>；可替换为 X-API-Key"
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "API Key；可替换为 Authorization: Bearer <API Key>",
+              "title": "X-Api-Key"
+            },
+            "description": "API Key；可替换为 Authorization: Bearer <API Key>"
           }
-        },
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -400,6 +429,101 @@
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
                 }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "message": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "用户消息，pure_workflow 可不传",
+                    "title": "Message"
+                  },
+                  "conversation_id": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "会话 ID（用于多轮对话）",
+                    "title": "Conversation Id"
+                  },
+                  "user_id": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "用户 ID（用于会话管理）",
+                    "title": "User Id"
+                  },
+                  "variables": {
+                    "anyOf": [
+                      {
+                        "additionalProperties": true,
+                        "type": "object"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "自定义变量参数值",
+                    "title": "Variables"
+                  },
+                  "stream": {
+                    "default": false,
+                    "description": "是否流式返回",
+                    "title": "Stream",
+                    "type": "boolean"
+                  },
+                  "thinking": {
+                    "default": false,
+                    "description": "是否启用深度思考（需 Agent 配置支持）",
+                    "title": "Thinking",
+                    "type": "boolean"
+                  },
+                  "files": {
+                    "description": "附件列表（支持多文件）",
+                    "items": {
+                      "$ref": "#/components/schemas/FileInput"
+                    },
+                    "title": "Files",
+                    "type": "array"
+                  },
+                  "version": {
+                    "anyOf": [
+                      {
+                        "format": "uuid",
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "指定发布版本 ID，不传则使用当前生效版本",
+                    "title": "Version"
+                  }
+                },
+                "title": "AppChatRequest",
+                "type": "object"
               }
             }
           }
@@ -574,6 +698,42 @@
               "type": "string",
               "title": "Execution Id"
             }
+          },
+          {
+            "name": "Authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "API Key，格式：Bearer <API Key>；可替换为 X-API-Key",
+              "title": "Authorization"
+            },
+            "description": "API Key，格式：Bearer <API Key>；可替换为 X-API-Key"
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "API Key；可替换为 Authorization: Bearer <API Key>",
+              "title": "X-Api-Key"
+            },
+            "description": "API Key；可替换为 Authorization: Bearer <API Key>"
           }
         ],
         "requestBody": {
@@ -581,7 +741,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/Body_submit_human_intervention_api_v1_app_workflow_interventions__execution_id__submit_post"
+                "$ref": "#/components/schemas/HumanInterventionRequest"
               }
             }
           }
@@ -767,7 +927,7 @@
           "V1 - App Message Feedback"
         ],
         "summary": "提交消息反馈（点赞/点踩）",
-        "description": "点赞/点踩 AI 回复（v1 对外，API Key 认证）\n\n幂等设计：重复点击同类型取消反馈；like/dislike 互斥切换。\nuser_id 为外部系统用户标识（other_id），后端解析为终端用户 end_user.id，不存在则拒绝。\n\n请求体无需 payload 包裹，直接传 {\"feedback_type\": \"like|dislike\", \"feedback_content\": \"...\"}。\n与 /v1/app/chat、/v1/memory/read 等接口一致：标量 body 占位 + request.json() 手动解析，\n避免 api_key_auth（Pydantic 模型）与 body 模型共存时 FastAPI 嵌入式校验导致的包裹要求。",
+        "description": "点赞/点踩 AI 回复（v1 对外，API Key 认证）。",
         "operationId": "submit_message_feedback_v1_app_messages__message_id__feedback_post",
         "parameters": [
           {
@@ -790,17 +950,44 @@
               "title": "User Id"
             },
             "description": "外部系统用户 ID（other_id）"
+          },
+          {
+            "name": "Authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "API Key，格式：Bearer <API Key>；可替换为 X-API-Key",
+              "title": "Authorization"
+            },
+            "description": "API Key，格式：Bearer <API Key>；可替换为 X-API-Key"
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "API Key；可替换为 Authorization: Bearer <API Key>",
+              "title": "X-Api-Key"
+            },
+            "description": "API Key；可替换为 Authorization: Bearer <API Key>"
           }
         ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/Body_submit_message_feedback_v1_app_messages__message_id__feedback_post"
-              }
-            }
-          }
-        },
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -820,6 +1007,41 @@
               }
             }
           }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "消息反馈请求（点赞/点踩）。",
+                "properties": {
+                  "feedback_type": {
+                    "description": "反馈类型: like/dislike",
+                    "pattern": "^(like|dislike)$",
+                    "title": "Feedback Type",
+                    "type": "string"
+                  },
+                  "feedback_content": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "反馈内容（点踩时填写原因；默认 null）",
+                    "title": "Feedback Content"
+                  }
+                },
+                "required": [
+                  "feedback_type"
+                ],
+                "title": "MessageFeedbackRequest",
+                "type": "object"
+              }
+            }
+          }
         }
       }
     },
@@ -829,7 +1051,7 @@
           "V1 - App Message Feedback"
         ],
         "summary": "获取会话下消息的点赞与反馈",
-        "description": "获取会话下所有消息的反馈状态（供前端渲染）\n\n返回每条消息的反馈状态，不含 is_favorite（收藏功能不在本接口范围）。\nuser_id 为外部系统用户标识（other_id），后端解析为终端用户 end_user.id，不存在则拒绝。",
+        "description": "获取会话下所有消息的反馈状态（供前端渲染）。",
         "operationId": "get_conversation_feedback_v1_app_conversations__conversation_id__messages_feedbacks_get",
         "parameters": [
           {
@@ -866,17 +1088,44 @@
               "title": "Limit"
             },
             "description": "返回消息数量，最大 200"
+          },
+          {
+            "name": "Authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "API Key，格式：Bearer <API Key>；可替换为 X-API-Key",
+              "title": "Authorization"
+            },
+            "description": "API Key，格式：Bearer <API Key>；可替换为 X-API-Key"
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "API Key；可替换为 Authorization: Bearer <API Key>",
+              "title": "X-Api-Key"
+            },
+            "description": "API Key；可替换为 Authorization: Bearer <API Key>"
           }
         ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ApiKeyAuth"
-              }
-            }
-          }
-        },
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -7146,7 +7395,7 @@
               }
             ],
             "title": "Conversation Id",
-            "description": "会话ID（用于多轮对话）"
+            "description": "会话 ID（用于多轮对话）"
           },
           "user_id": {
             "anyOf": [
@@ -7158,7 +7407,7 @@
               }
             ],
             "title": "User Id",
-            "description": "用户ID（用于会话管理）"
+            "description": "用户 ID（用于会话管理）"
           },
           "variables": {
             "anyOf": [
@@ -7182,7 +7431,7 @@
           "thinking": {
             "type": "boolean",
             "title": "Thinking",
-            "description": "是否启用深度思考（需Agent配置支持）",
+            "description": "是否启用深度思考（需 Agent 配置支持）",
             "default": false
           },
           "files": {
@@ -7204,7 +7453,7 @@
               }
             ],
             "title": "Version",
-            "description": "指定发布版本ID，不传则使用当前生效版本"
+            "description": "指定发布版本 ID，不传则使用当前生效版本"
           }
         },
         "type": "object",
@@ -7545,27 +7794,6 @@
           "config_id"
         ],
         "title": "Body_active_config_api_memory_config_active_config_post"
-      },
-      "Body_chat_v1_app_chat_post": {
-        "properties": {
-          "api_key_auth": {
-            "$ref": "#/components/schemas/ApiKeyAuth"
-          },
-          "message": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Message",
-            "description": "聊天消息内容"
-          }
-        },
-        "type": "object",
-        "title": "Body_chat_v1_app_chat_post"
       },
       "Body_create_chunk_v1_chunks__kb_id___document_id__chunk_post": {
         "properties": {
@@ -8014,56 +8242,6 @@
         },
         "type": "object",
         "title": "Body_read_memory_sync_v1_memory_read_sync_post"
-      },
-      "Body_submit_human_intervention_api_v1_app_workflow_interventions__execution_id__submit_post": {
-        "properties": {
-          "node_id": {
-            "type": "string",
-            "title": "Node Id",
-            "description": "人工介入节点 ID"
-          },
-          "action_id": {
-            "type": "string",
-            "title": "Action Id",
-            "description": "用户触发的操作 ID"
-          },
-          "form_data": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Form Data",
-            "description": "用户填写的表单数据"
-          },
-          "api_key_auth": {
-            "$ref": "#/components/schemas/ApiKeyAuth"
-          }
-        },
-        "type": "object",
-        "required": [
-          "node_id",
-          "action_id"
-        ],
-        "title": "Body_submit_human_intervention_api_v1_app_workflow_interventions__execution_id__submit_post"
-      },
-      "Body_submit_message_feedback_v1_app_messages__message_id__feedback_post": {
-        "properties": {
-          "api_key_auth": {
-            "$ref": "#/components/schemas/ApiKeyAuth"
-          },
-          "body_placeholder": {
-            "type": "string",
-            "title": "Body Placeholder",
-            "description": "占位参数，实际请求体通过 request.json() 解析"
-          }
-        },
-        "type": "object",
-        "title": "Body_submit_message_feedback_v1_app_messages__message_id__feedback_post"
       },
       "Body_update_chunk_v1_chunks__kb_id___document_id___doc_id__put": {
         "properties": {
@@ -10808,7 +10986,7 @@
               }
             ],
             "title": "Upload File Id",
-            "description": "已上传文件ID（local_file时必填）"
+            "description": "已上传文件 ID（local_file 时必填）"
           },
           "url": {
             "anyOf": [
@@ -10820,7 +10998,7 @@
               }
             ],
             "title": "Url",
-            "description": "远程URL（remote_url时必填）"
+            "description": "远程 HTTP(S) URL（remote_url 时必填）"
           },
           "file_type": {
             "anyOf": [
@@ -10832,7 +11010,7 @@
               }
             ],
             "title": "File Type",
-            "description": "具体文件格式（如image/jpg、audio/wav、document/docx、video/mp4）"
+            "description": "具体文件格式（如 image/jpeg、audio/wav）"
           },
           "name": {
             "anyOf": [
@@ -10849,14 +11027,15 @@
           "size": {
             "anyOf": [
               {
-                "type": "integer"
+                "type": "integer",
+                "minimum": 0.0
               },
               {
                 "type": "null"
               }
             ],
             "title": "Size",
-            "description": "文件大小（字节）"
+            "description": "文件大小（字节，不能为负数）"
           }
         },
         "type": "object",
@@ -10865,7 +11044,7 @@
           "transfer_method"
         ],
         "title": "FileInput",
-        "description": "文件输入 Schema"
+        "description": "应用聊天的多模态文件输入。"
       },
       "FileMetadataUpdate": {
         "properties": {
@@ -11498,6 +11677,42 @@
         },
         "type": "object",
         "title": "HTTPValidationError"
+      },
+      "HumanInterventionRequest": {
+        "properties": {
+          "node_id": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Node Id",
+            "description": "人工介入节点 ID"
+          },
+          "action_id": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Action Id",
+            "description": "用户触发的操作 ID"
+          },
+          "form_data": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Form Data",
+            "description": "用户填写的表单数据"
+          }
+        },
+        "type": "object",
+        "required": [
+          "node_id",
+          "action_id"
+        ],
+        "title": "HumanInterventionRequest",
+        "description": "应用工作流人工介入请求。"
       },
       "HumanInterventionSubmitRequest": {
         "properties": {
@@ -12778,7 +12993,7 @@
               }
             ],
             "title": "Feedback Content",
-            "description": "反馈内容（点踩时填写原因）"
+            "description": "反馈内容（点踩时填写原因；默认 null）"
           }
         },
         "type": "object",
@@ -12786,7 +13001,7 @@
           "feedback_type"
         ],
         "title": "MessageFeedbackRequest",
-        "description": "消息反馈请求（点赞/点踩）"
+        "description": "消息反馈请求（点赞/点踩）。"
       },
       "MessageReportRequest": {
         "properties": {

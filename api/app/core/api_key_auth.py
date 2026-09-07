@@ -6,7 +6,7 @@ from contextvars import ContextVar
 from functools import wraps
 from typing import Optional, List
 
-from fastapi import Request, Response
+from fastapi import Header, Request, Response
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
@@ -47,6 +47,26 @@ def get_current_api_key_auth() -> "ApiKeyAuth":
     if auth is None:
         raise BusinessException("API Key 认证信息缺失", BizCode.API_KEY_NOT_FOUND)
     return auth
+
+
+def document_api_key_headers(
+    authorization: Optional[str] = Header(
+        default=None,
+        alias="Authorization",
+        description="API Key，格式：Bearer <API Key>；可替换为 X-API-Key",
+    ),
+    x_api_key: Optional[str] = Header(
+        default=None,
+        alias="X-API-Key",
+        description="API Key；可替换为 Authorization: Bearer <API Key>",
+    ),
+) -> None:
+    """仅用于在 OpenAPI 中公开 API Key Header。
+
+    实际鉴权仍由 ``require_api_key`` / ``require_api_key_self_db`` 执行，
+    因此这里不读取或校验 Header 的值。
+    """
+    return None
 
 
 # ── Async log-writer: batched single-consumer queue ──────────────────
@@ -413,19 +433,25 @@ def require_api_key_self_db(
                     resource_id=_resource_id,
                 )
 
-            # Set ContextVar for endpoints that use get_current_api_key_auth()
-            _current_api_key_auth.set(_api_key_auth)
-            # Backward-compat: only inject into kwargs if the function expects it
-            func_sig = inspect.signature(func)
-            if 'api_key_auth' in func_sig.parameters:
-                kwargs["api_key_auth"] = _api_key_auth
+            # Set ContextVar for endpoints that use get_current_api_key_auth().
+            # Reset it after the endpoint finishes so direct/reused coroutine calls cannot
+            # accidentally observe authentication from a prior request.
+            context_token = _current_api_key_auth.set(_api_key_auth)
+            try:
+                # Backward-compat: only inject into kwargs if the function expects it
+                func_sig = inspect.signature(func)
+                if 'api_key_auth' in func_sig.parameters:
+                    kwargs["api_key_auth"] = _api_key_auth
 
-            start_time = time.perf_counter()
-            # Bind arguments by name so Request can appear anywhere in the endpoint signature.
-            call_kwargs = dict(kwargs)
-            if 'request' in func_sig.parameters:
-                call_kwargs['request'] = request
-            response = await func(**call_kwargs)
+                start_time = time.perf_counter()
+                # Bind arguments by name so Request can appear anywhere in the endpoint signature.
+                call_kwargs = dict(kwargs)
+                if 'request' in func_sig.parameters:
+                    call_kwargs['request'] = request
+                response = await func(**call_kwargs)
+            finally:
+                _current_api_key_auth.reset(context_token)
+
             end_time = time.perf_counter()
             response_time = (end_time - start_time) * 1000
 

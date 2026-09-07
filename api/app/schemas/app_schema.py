@@ -2,6 +2,7 @@ import datetime
 import uuid
 from typing import Optional, Any, List, Dict, Union
 from enum import Enum, StrEnum
+from urllib.parse import urlparse
 
 from pydantic import BaseModel, Field, ConfigDict, field_serializer, field_validator, model_serializer, model_validator
 
@@ -40,31 +41,32 @@ class TransferMethod(str, Enum):
 
 
 class FileInput(BaseModel):
-    """文件输入 Schema"""
+    """应用聊天的多模态文件输入。"""
+
     type: FileType = Field(..., description="文件类型: image/document/audio/video")
     transfer_method: TransferMethod = Field(..., description="传输方式: local_file/remote_url")
-    upload_file_id: Optional[uuid.UUID] = Field(None, description="已上传文件ID（local_file时必填）")
-    url: Optional[str] = Field(None, description="远程URL（remote_url时必填）")
-    file_type: Optional[str] = Field(None, description="具体文件格式（如image/jpg、audio/wav、document/docx、video/mp4）")
+    upload_file_id: Optional[uuid.UUID] = Field(None, description="已上传文件 ID（local_file 时必填）")
+    url: Optional[str] = Field(None, description="远程 HTTP(S) URL（remote_url 时必填）")
+    file_type: Optional[str] = Field(None, description="具体文件格式（如 image/jpeg、audio/wav）")
     name: Optional[str] = Field(None, description="文件名")
-    size: Optional[int] = Field(None, description="文件大小（字节）")
+    size: Optional[int] = Field(None, ge=0, description="文件大小（字节，不能为负数）")
 
     _content = None
 
     def __init__(self, **data):
+        # 保持 file_id 与省略 transfer_method 的旧客户端兼容性；新客户端应显式传递
+        # transfer_method，避免依赖服务端推断。
         if "transfer_method" not in data:
             if "upload_file_id" in data or "file_id" in data:
-                data["transfer_method"] = "local_file"
+                data["transfer_method"] = TransferMethod.LOCAL_FILE
             elif "url" in data and not str(data.get("url", "")).startswith("blob:"):
-                data["transfer_method"] = "remote_url"
+                data["transfer_method"] = TransferMethod.REMOTE_URL
             else:
-                data["transfer_method"] = "local_file"
+                data["transfer_method"] = TransferMethod.LOCAL_FILE
 
         if str(data.get("url", "")).startswith("blob:"):
             data.pop("url", None)
 
-        if "type" in data:
-            data["file_type"] = data["type"]
         if "file_id" in data and "upload_file_id" not in data:
             data["upload_file_id"] = data.pop("file_id")
         super().__init__(**data)
@@ -77,25 +79,34 @@ class FileInput(BaseModel):
 
     @field_validator("type", mode="before")
     @classmethod
-    def validate_type(cls, v):
-        """验证文件类型"""
-        return FileType.trans(v)
-
-    @field_validator("upload_file_id")
-    @classmethod
-    def validate_local_file(cls, v, info):
-        """验证 local_file 时必须提供 upload_file_id"""
-        if info.data.get("transfer_method") == TransferMethod.LOCAL_FILE and not v:
-            raise ValueError("transfer_method 为 local_file 时，upload_file_id 不能为空")
-        return v
+    def validate_type(cls, value):
+        """应用 API 仅接受精确的 FileType 枚举值。"""
+        if isinstance(value, FileType):
+            return value
+        try:
+            return FileType(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("type 仅支持 image、document、audio 或 video") from exc
 
     @field_validator("url")
     @classmethod
-    def validate_remote_url(cls, v, info):
-        """验证 remote_url 时必须提供 url"""
-        if info.data.get("transfer_method") == TransferMethod.REMOTE_URL and not v:
+    def normalize_url(cls, value: Optional[str]) -> Optional[str]:
+        return value.strip() if value is not None else None
+
+    @model_validator(mode="after")
+    def validate_transfer_fields(self):
+        if self.transfer_method == TransferMethod.LOCAL_FILE:
+            if self.upload_file_id is None:
+                raise ValueError("transfer_method 为 local_file 时，upload_file_id 不能为空")
+            return self
+
+        if not self.url:
             raise ValueError("transfer_method 为 remote_url 时，url 不能为空")
-        return v
+
+        parsed = urlparse(self.url)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise ValueError("transfer_method 为 remote_url 时，url 必须是合法的 HTTP(S) URL")
+        return self
 
 
 # ---------- Input Schemas ----------
@@ -669,29 +680,56 @@ class AppShare(BaseModel):
 
 class AppChatRequest(BaseModel):
     message: Optional[str] = Field(default=None, description="用户消息，pure_workflow 可不传")
-    conversation_id: Optional[str] = Field(default=None, description="会话ID（用于多轮对话）")
-    user_id: Optional[str] = Field(default=None, description="用户ID（用于会话管理）")
+    conversation_id: Optional[str] = Field(default=None, description="会话 ID（用于多轮对话）")
+    user_id: Optional[str] = Field(default=None, description="用户 ID（用于会话管理）")
     variables: Optional[Dict[str, Any]] = Field(default=None, description="自定义变量参数值")
     stream: bool = Field(default=False, description="是否流式返回")
-    thinking: bool = Field(default=False, description="是否启用深度思考（需Agent配置支持）")
+    thinking: bool = Field(default=False, description="是否启用深度思考（需 Agent 配置支持）")
     files: List[FileInput] = Field(default_factory=list, description="附件列表（支持多文件）")
-    version: Optional[uuid.UUID] = Field(default=None, description="指定发布版本ID，不传则使用当前生效版本")
+    version: Optional[uuid.UUID] = Field(default=None, description="指定发布版本 ID，不传则使用当前生效版本")
+
+    @field_validator("message")
+    @classmethod
+    def _normalize_message(cls, value: Optional[str]) -> Optional[str]:
+        """统一去除外围空白，交由应用类型规则决定是否允许空消息。"""
+        return value.strip() if value is not None else None
 
     @field_validator("conversation_id")
     @classmethod
-    def _validate_conversation_id(cls, v: Optional[str]) -> Optional[str]:
+    def _validate_conversation_id(cls, value: Optional[str]) -> Optional[str]:
         """conversation_id 必须是合法 UUID。
 
         非 UUID 字符串会在 DB 层触发 DataError 并被包装成 500，
         这里前置校验，返回 422 参数错误。
         """
-        if v is None or not str(v).strip():
-            return v
+        if value is None:
+            return None
+
+        normalized = value.strip()
+        if not normalized:
+            return None
+
         try:
-            uuid.UUID(str(v).strip())
-        except (ValueError, AttributeError, TypeError):
-            raise ValueError("conversation_id 必须是合法的 UUID")
-        return str(v).strip()
+            uuid.UUID(normalized)
+        except (ValueError, AttributeError, TypeError) as exc:
+            raise ValueError("conversation_id 必须是合法的 UUID") from exc
+        return normalized
+
+
+class HumanInterventionRequest(BaseModel):
+    """应用工作流人工介入请求。"""
+
+    node_id: str = Field(..., min_length=1, description="人工介入节点 ID")
+    action_id: str = Field(..., min_length=1, description="用户触发的操作 ID")
+    form_data: Optional[Dict[str, Any]] = Field(default=None, description="用户填写的表单数据")
+
+    @field_validator("node_id", "action_id")
+    @classmethod
+    def _normalize_required_identifier(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("标识不能为空或全为空白")
+        return normalized
 
 
 class DraftRunRequest(BaseModel):
@@ -899,9 +937,10 @@ class DraftRunCompareResponse(BaseModel):
 # ========== 消息交互功能 Schema ==========
 
 class MessageFeedbackRequest(BaseModel):
-    """消息反馈请求（点赞/点踩）"""
+    """消息反馈请求（点赞/点踩）。"""
+
     feedback_type: str = Field(..., pattern="^(like|dislike)$", description="反馈类型: like/dislike")
-    feedback_content: Optional[str] = Field(None, description="反馈内容（点踩时填写原因）")
+    feedback_content: Optional[str] = Field(default=None, description="反馈内容（点踩时填写原因；默认 null）")
 
 
 class MessageFeedbackResponse(BaseModel):
