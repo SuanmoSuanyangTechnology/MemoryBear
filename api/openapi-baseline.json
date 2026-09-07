@@ -373,7 +373,7 @@
           "V1 - App API"
         ],
         "summary": "Chat",
-        "description": "Agent/Workflow 聊天接口。",
+        "description": "Agent/Workflow 聊天接口\n\n- 不传 version：使用当前生效版本（current_release，回滚后为回滚目标版本）\n- 传 version=release_id：使用指定版本uuid的历史快照，例如 {\"version\": \"{{release_id}}\"}",
         "operationId": "chat_v1_app_chat_post",
         "requestBody": {
           "content": {
@@ -767,7 +767,7 @@
           "V1 - App Message Feedback"
         ],
         "summary": "提交消息反馈（点赞/点踩）",
-        "description": "点赞/点踩 AI 回复（v1 对外，API Key 认证）。",
+        "description": "点赞/点踩 AI 回复（v1 对外，API Key 认证）\n\n幂等设计：重复点击同类型取消反馈；like/dislike 互斥切换。\nuser_id 为外部系统用户标识（other_id），后端解析为终端用户 end_user.id，不存在则拒绝。\n请求体无需 payload 包裹，直接传 {\"feedback_type\": \"like|dislike\", \"feedback_content\": \"...\"}。\n与 /v1/app/chat、/v1/memory/read 等接口一致：标量 body 占位 + request.json() 手动解析，\n避免 api_key_auth（Pydantic 模型）与 body 模型共存时 FastAPI 嵌入式校验导致的包裹要求。",
         "operationId": "submit_message_feedback_v1_app_messages__message_id__feedback_post",
         "parameters": [
           {
@@ -829,7 +829,7 @@
           "V1 - App Message Feedback"
         ],
         "summary": "获取会话下消息的点赞与反馈",
-        "description": "获取会话下所有消息的反馈状态（供前端渲染）。",
+        "description": "获取会话下所有消息的反馈状态（供前端渲染）\n\n返回每条消息的反馈状态，不含 is_favorite（收藏功能不在本接口范围）。\nuser_id 为外部系统用户标识（other_id），后端解析为终端用户 end_user.id，不存在则拒绝。",
         "operationId": "get_conversation_feedback_v1_app_conversations__conversation_id__messages_feedbacks_get",
         "parameters": [
           {
