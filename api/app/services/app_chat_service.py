@@ -1725,7 +1725,27 @@ class AppChatService:
             logger.debug("流式聊天被中断")
             raise
         except Exception as e:
-            logger.error(f"流式聊天失败: {str(e)}", exc_info=True)
+            # 体验分享的 Agent 流式调用不经过 AgentRunService.run_stream，
+            # 因此需要在此统一的异常边界补齐多模态错误分类。
+            from app.core.llm_error_handler import classify_multimodal_exception
+
+            debug_id = self.agent_service._build_debug_id()
+            public_error = classify_multimodal_exception(e, debug_id=debug_id)
+            display_error = public_error["message"] if public_error else str(e)
+
+            if public_error is not None:
+                logger.error(
+                    "流式聊天多模态输入失败（已安全处理）",
+                    extra={
+                        "error_type": type(e).__name__,
+                        "error_kind": public_error["kind"],
+                        "debug_id": debug_id,
+                    },
+                    exc_info=True,
+                )
+            else:
+                logger.error(f"流式聊天失败: {str(e)}", exc_info=True)
+
             # 保存失败的消息，使前端可以展示失败状态
             # 注意：如果 save_messages 已经入队，不要再入队 save_failed_message，
             # 否则会因为相同的 message_id 导致 messages 表主键冲突。
@@ -1740,7 +1760,7 @@ class AppChatService:
                             "message_id": str(message_id) if 'message_id' in locals() else str(uuid.uuid4()),
                             "user_message_content": message if 'message' in locals() else "",
                             "files_meta": [],
-                            "error_message": "An error occurred during generation.",
+                            "error_message": display_error,
                             "error_detail": str(e)[:2000],
                         },
                     ))
@@ -1770,8 +1790,8 @@ class AppChatService:
                 ))
             except Exception:
                 pass  # 保存失败不影响错误事件发送
-            # 发送错误事件
-            yield f"event: end\ndata: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
+            # 保持体验分享页面既有的 end/error 字符串契约，避免前端出现对象渲染问题。
+            yield f"event: end\ndata: {json.dumps({'error': display_error}, ensure_ascii=False)}\n\n"
 
     @staticmethod
     def _format_sse_chunk(chunk: dict) -> str:
