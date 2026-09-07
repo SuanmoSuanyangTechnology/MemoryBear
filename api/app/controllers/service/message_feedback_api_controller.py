@@ -62,7 +62,14 @@ async def submit_message_feedback(
         description="占位参数，实际请求体通过 request.json() 解析",
     ),
 ):
-    """点赞/点踩 AI 回复（v1 对外，API Key 认证）。"""
+    """点赞/点踩 AI 回复（v1 对外，API Key 认证）
+
+    幂等设计：重复点击同类型取消反馈；like/dislike 互斥切换。
+    user_id 为外部系统用户标识（other_id），后端解析为终端用户 end_user.id，不存在则拒绝。
+    请求体无需 payload 包裹，直接传 {"feedback_type": "like|dislike", "feedback_content": "..."}。
+    与 /v1/app/chat、/v1/memory/read 等接口一致：标量 body 占位 + request.json() 手动解析，
+    避免 api_key_auth（Pydantic 模型）与 body 模型共存时 FastAPI 嵌入式校验导致的包裹要求。
+    """
     try:
         body = await request.json()
     except (json.JSONDecodeError, UnicodeDecodeError, ValueError) as exc:
@@ -175,7 +182,11 @@ async def get_conversation_feedback(
     api_key_auth: ApiKeyAuth = None,
     db: AsyncSession = Depends(get_async_db),
 ):
-    """获取会话下所有消息的反馈状态（供前端渲染）。"""
+    """获取会话下所有消息的反馈状态（供前端渲染）
+
+    返回每条消息的反馈状态，不含 is_favorite（收藏功能不在本接口范围）。
+    user_id 为外部系统用户标识（other_id），后端解析为终端用户 end_user.id，不存在则拒绝。
+    """
     user_id = _normalize_required_external_user_id(user_id)
 
     internal_user_id = await _resolve_v1_internal_user_id(

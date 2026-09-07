@@ -290,7 +290,12 @@ async def chat(
         api_key_auth: ApiKeyAuth = None,
         message: str | None = Body(None, description="聊天消息内容"),
 ):
-    """Agent/Workflow 聊天接口。"""
+    """
+    Agent/Workflow 聊天接口
+
+    - 不传 version：使用当前生效版本（current_release，回滚后为回滚目标版本）
+    - 传 version=release_id：使用指定版本uuid的历史快照，例如 {"version": "{{release_id}}"}
+    """
     body = await _read_json_body(request)
     payload = AppChatRequest(**body)
     request_started_at = time.perf_counter()
