@@ -59,7 +59,9 @@ class MemoryMessageRepository:
         不同分组之间互不阻塞。详见设计文档 §3.3。
         """
         if conversation_id is not None:
-            lock_key = f"mm_seq:conv:{conversation_id}"
+            # 用 uuid.UUID() 归一化（大小写/连字符），与 _next_seq 的分组键对齐，
+            # 避免同一 conversation 因字符串格式不一致拿到不同锁导致并发撞号。
+            lock_key = f"mm_seq:conv:{uuid.UUID(conversation_id)}"
         else:
             lock_key = f"mm_seq:{end_user_id}:{source.value}"
         self.db.execute(
@@ -203,6 +205,30 @@ class MemoryMessageRepository:
                 MemoryMessage.message_seq == message_seq,
             )
         ).scalar_one_or_none()
+
+    def get_seq_group(
+        self,
+        conversation_id: str,
+        message_seq: int,
+    ) -> List[MemoryMessage]:
+        """返回同一 (conversation_id, message_seq) 的全部行，按入库时间升序。
+
+        正常状态每组仅 1 行；历史脏数据可能同 seq 多行。按 (created_at, id)
+        升序保证确定性，供“撞号整组逐行派发”使用：先入库的排前面（1、2、3…）。
+        """
+        return list(
+            self.db.scalars(
+                select(MemoryMessage)
+                .where(
+                    MemoryMessage.conversation_id == conversation_id,
+                    MemoryMessage.message_seq == message_seq,
+                )
+                .order_by(
+                    MemoryMessage.created_at.asc(),
+                    MemoryMessage.id.asc(),
+                )
+            ).all()
+        )
 
     def get_pending_messages(
         self,
@@ -465,7 +491,11 @@ class MemoryMessageRepository:
                     MemoryMessage.message_seq >= upper_bound,
                     MemoryMessage.message_seq < target_seq,
                 )
-                .order_by(MemoryMessage.message_seq.asc())
+                .order_by(
+                    MemoryMessage.message_seq.asc(),
+                    MemoryMessage.created_at.asc(),
+                    MemoryMessage.id.asc(),
+                )
             ).scalars().all()
         )
 
@@ -502,7 +532,11 @@ class MemoryMessageRepository:
                         MemoryMessage.conversation_id == conversation_id,
                         MemoryMessage.message_seq > target_seq,
                     )
-                    .order_by(MemoryMessage.message_seq.asc())
+                    .order_by(
+                        MemoryMessage.message_seq.asc(),
+                        MemoryMessage.created_at.asc(),
+                        MemoryMessage.id.asc(),
+                    )
                 ).scalars().all()
             )
 
@@ -516,7 +550,11 @@ class MemoryMessageRepository:
                     MemoryMessage.message_seq > target_seq,
                     MemoryMessage.message_seq <= lower_bound,
                 )
-                .order_by(MemoryMessage.message_seq.asc())
+                .order_by(
+                    MemoryMessage.message_seq.asc(),
+                    MemoryMessage.created_at.asc(),
+                    MemoryMessage.id.asc(),
+                )
             ).scalars().all()
         )
 

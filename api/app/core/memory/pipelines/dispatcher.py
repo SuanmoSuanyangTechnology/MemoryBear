@@ -766,27 +766,40 @@ async def dispatch_flush_conversation(conversation_id: str) -> int:
             return 0
         config_id = str(config_id_resolved)
 
-        # Step 3: 逐条处理
+        # Step 3: 按 seq 分组逐组处理。
+        # 每组只 claim 一次 cursor；组内 role=user + should_memorize=TRUE 的行
+        # 逐行派发（同 seq 撞号时后续行附加行级 dialogue 后缀，不被下游覆盖），
+        # 其余角色/标记行仅推进游标，保证“入库即被处理”。
         dispatched = 0
         skipped_non_user = 0  # 因角色不是 user 或 should_memorize=False 被跳过（只推进游标）
-        for msg in pending_messages:
-            target_seq = msg["message_seq"]
+        group_start = 0
+        n_rows = len(pending_messages)
+        while group_start < n_rows:
+            target_seq = pending_messages[group_start]["message_seq"]
 
-            if msg["role"] != "user" or not msg["should_memorize"]:
+            group_end = group_start + 1
+            while group_end < n_rows and pending_messages[group_end]["message_seq"] == target_seq:
+                group_end += 1
+            group_msgs = pending_messages[group_start:group_end]
+            group_start = group_end
+
+            has_target = any(
+                m["role"] == "user" and m["should_memorize"] for m in group_msgs
+            )
+            if not has_target:
                 with get_db_context() as db:
                     MemoryMessageRepository(db).advance_write_cursor(conversation_id, target_seq)
                     db.commit()
-                skipped_non_user += 1
+                skipped_non_user += len(group_msgs)
                 continue
 
-            if await dispatch_single_message(
+            dispatched += await dispatch_single_message(
                 conversation_id=conversation_id,
                 target_seq=target_seq,
                 end_user_id=end_user_id,
                 config_id=config_id,
                 workspace_id=workspace_id,
-            ):
-                dispatched += 1
+            )
 
         # Step 4: 清理 pending_conversations Set（先删后校验，避免并发误删）
         safe_unmark_conversation_pending(conversation_id)
@@ -855,6 +868,23 @@ async def check_sliding_window_and_dispatch(
             )
             return
 
+        # 该 seq 若存在撞号多行（历史脏数据），按“整组逐行派发”处理：
+        # 组内 claim cursor 一次、首条用规范 id、后续 user 行带行级后缀，
+        # 避免后续行被 cursor 跳过后永远不被处理。无撞号时走下方原有单条路径。
+        with get_db_context() as db:
+            repo = MemoryMessageRepository(db)
+            seq_rows = repo.get_seq_group(conversation_id, target_seq)
+        if len(seq_rows) > 1:
+            await dispatch_single_message(
+                conversation_id=conversation_id,
+                target_seq=target_seq,
+                end_user_id=end_user_id,
+                config_id=config_id,
+                workspace_id=workspace_id,
+                language=language,
+            )
+            return
+
         # 先推进 cursor，确保同一条消息不会被后续调用（flush 或下次 ingest）重复派发。
         # advance_write_cursor 使用 WHERE write_cursor < seq，具有原子性保护。
         with get_db_context() as db:
@@ -900,45 +930,92 @@ async def dispatch_single_message(
     end_user_id: str,
     config_id: str,
     workspace_id: str,
-) -> bool:
-    """为单条 user 消息构建上下文并派发写入任务（Flush 路径使用）。"""
+    language: str = "zh",
+) -> int:
+    """整组派发同一个 message_seq（Flush 路径使用）。
+
+    正常无撞号时 1 组 1 条 user，行为与原单条派发一致。历史脏数据同 seq 多行时：
+      - claim cursor 一次，组内逐行派发，保证“入库即被处理”、后续行不被 cursor 吞掉；
+      - 组内首条 user 行使用规范 dialogue_id（Dialog_{conv}_{seq}），保持与快写/既有
+        覆盖语义一致；同组后续 user 行附加行级后缀（源自 memory_messages.id），使其
+        成为独立 Dialogue 节点，不被下游同 id 覆盖/去重；
+      - 上下文按“本组更早入库的行”前插，保持 1、2、3… 的先后顺序。
+
+    Returns:
+        派发的 user 任务数；0 表示无 user 目标，或 cursor 已被其他路径推进。
+    """
     from app.repositories.memory_message_repository import message_to_dict
 
     with get_db_context() as db:
         repo = MemoryMessageRepository(db)
-        target_orm = repo.get_by_seq(conversation_id, target_seq)
-        if target_orm is None:
-            return False
-        msg_dict = message_to_dict(target_orm)
-        context_before = [message_to_dict(m) for m in repo.build_context_before(conversation_id, target_seq)]
-        context_after = [message_to_dict(m) for m in repo.build_context_after(conversation_id, target_seq)]
+        group_rows = repo.get_seq_group(conversation_id, target_seq)
 
-    # 先推进 cursor，防止并发 flush 重复派发同一条消息
+    if not group_rows:
+        return 0
+
+    if len(group_rows) > 1:
+        logger.warning(
+            "[WriteDispatcher] 检测到同 seq 撞号多行，将整组逐行派发: "
+            "conv=%s, seq=%s, rows=%d",
+            conversation_id, target_seq, len(group_rows),
+        )
+
+    eligible = [r for r in group_rows if r.role == "user" and r.should_memorize]
+    if not eligible:
+        # 组内无 user 目标（例如纯 assistant 消息），由调用方负责推进游标。
+        return 0
+
+    # 先 claim 该 seq（WHERE write_cursor < seq 原子保护），
+    # 防止并发 flush / 滑动窗口重复派发整组。
     with get_db_context() as db:
-        repo = MemoryMessageRepository(db)
-        acquired = repo.advance_write_cursor(conversation_id, target_seq)
+        acquired = MemoryMessageRepository(db).advance_write_cursor(conversation_id, target_seq)
         db.commit()
 
     if not acquired:
         logger.info(
-            f"[WriteDispatcher] cursor 已被推进，跳过重复派发: "
+            f"[WriteDispatcher] cursor 已被推进，跳过整组重复派发: "
             f"conv={conversation_id}, seq={target_seq}"
         )
-        return False
+        return 0
 
-    await push_write_task(
-        end_user_id=end_user_id,
-        target_message=msg_dict,
-        context_before=context_before,
-        context_after=context_after,
-        config_id=config_id,
-        workspace_id=workspace_id,
-        conversation_id=conversation_id,
-        message_seq=target_seq,
-        source=MemoryMessageSource.AGENT.value,
-    )
+    # 基于 seq 的滑动窗口上下文（不含本组自身；组内更早的行下方前插补齐）
+    with get_db_context() as db:
+        repo = MemoryMessageRepository(db)
+        context_before_base = [
+            message_to_dict(m) for m in repo.build_context_before(conversation_id, target_seq)
+        ]
+        context_after = [
+            message_to_dict(m) for m in repo.build_context_after(conversation_id, target_seq)
+        ]
 
-    return True
+    group_dicts = [message_to_dict(r) for r in group_rows]
+    row_pos_by_id = {r.id: i for i, r in enumerate(group_rows)}
+    dispatched = 0
+    for k, row in enumerate(eligible):
+        row_pos = row_pos_by_id[row.id]
+        earlier_rows = group_dicts[:row_pos]
+        context_before = context_before_base + earlier_rows
+
+        target_dict = dict(group_dicts[row_pos])
+        # 组内第 1 个 user 行用规范 id；同 seq 撞号的后续 user 行加行级后缀。
+        if k > 0:
+            target_dict["_dialogue_suffix"] = f"m{str(row.id).replace('-', '')[:16]}"
+
+        await push_write_task(
+            end_user_id=end_user_id,
+            target_message=target_dict,
+            context_before=context_before,
+            context_after=context_after,
+            config_id=config_id,
+            workspace_id=workspace_id,
+            conversation_id=conversation_id,
+            message_seq=target_seq,
+            language=language,
+            source=MemoryMessageSource.AGENT.value,
+        )
+        dispatched += 1
+
+    return dispatched
 
 
 # ──────────────────────────────────────────────
