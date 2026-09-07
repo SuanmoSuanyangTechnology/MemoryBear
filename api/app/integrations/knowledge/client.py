@@ -247,7 +247,7 @@ class KnowledgeServiceClient:
             if not isinstance(code, int):
                 raise KnowledgeProtocolError("Knowledge service envelope code must be an integer")
             if not 200 <= upstream.status_code < 300 or code != 0:
-                message = str(envelope.get("msg") or envelope.get("error") or "Knowledge error")
+                message = str(envelope.get("error") or envelope.get("msg") or "Knowledge error")
                 raise KnowledgeServiceError(upstream.status_code, code, message, trace_id)
             data = envelope.get("data")
             try:
