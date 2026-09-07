@@ -29,11 +29,11 @@ from app.core.memory.models.service_models import MemoryContext
 from app.core.memory.prompt import prompt_manager
 from app.core.memory.read_services.search_engine.result_builder import MetadataBuilder
 from app.core.memory.read_services.search_engine.result_builder import data_builder_factory
-from app.core.memory.read_services.search_engine.tools import make_entity_search_tool, make_relation_search_tool, \
-    make_user_source_lookup_tool
 from app.core.memory.read_services.search_engine.search_policy import (
     build_content_search_filters,
 )
+from app.core.memory.read_services.search_engine.tools import make_entity_search_tool, make_relation_search_tool, \
+    make_user_source_lookup_tool
 from app.core.memory.retrieval_trace.models import (
     RetrievalExecutionTrace,
     build_score_trace,
@@ -59,6 +59,7 @@ from app.db import get_async_db_context
 from app.models import Conversation, MemoryMessage
 from app.repositories import knowledge_repository
 from app.schemas.app_schema import FileInput, FileType, TransferMethod
+from app.utils.redis_cache import redis_cache
 
 logger = logging.getLogger(__name__)
 
@@ -146,6 +147,10 @@ class Neo4jSearchService:
             )
         return sidecar
 
+    @redis_cache(prefix="embeddings", skip_args=["self"], id_arg="model_name")
+    async def get_embed(self, model_name, query):
+        return await self.embedder.aembed_query(query)
+
     async def _keyword_search(
             self,
             query: str,
@@ -165,7 +170,8 @@ class Neo4jSearchService:
             query: str,
             limit: int
     ) -> StorageReadResult:
-        query_embed = await self.embedder.aembed_query(query)
+        query_embed = await self.get_embed(self.embedder._config.model_name, query)
+        # query_embed = await self.embedder.aembed_query(query)
         return await self.service.search_by_embedding(
             node_filters=build_content_search_filters(
                 self.includes,

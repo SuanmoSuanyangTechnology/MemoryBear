@@ -15,6 +15,8 @@ from app.core.utils.datetime_utils import parse_timestamp_to_utc_naive, to_times
 from app.models.api_key_model import ApiKeyType
 from app.models.end_user_model import EndUser as _EndUser
 from app.repositories.end_user_repository import EndUserRepository as _EndUserRepository
+from app.schemas.user_schema import UserSnap
+from app.utils.redis_cache import redis_cache
 
 
 def generate_api_key(key_type: ApiKeyType) -> str:
@@ -91,9 +93,9 @@ def get_current_user_from_api_key(db: _Session, api_key_auth):
 
 
 def validate_end_user_in_workspace(
-    db: _Session,
-    end_user_id: str,
-    workspace_id,
+        db: _Session,
+        end_user_id: str,
+        workspace_id,
 ) -> _EndUser:
     """校验 end_user 是否存在且属于指定 workspace。
 
@@ -137,9 +139,9 @@ def validate_end_user_in_workspace(
 
 
 async def validate_end_user_in_workspace_async(
-    db: AsyncSession,
-    end_user_id: str,
-    workspace_id,
+        db: AsyncSession,
+        end_user_id: str,
+        workspace_id,
 ) -> _EndUser:
     try:
         end_user_id = _uuid.UUID(end_user_id)
@@ -167,9 +169,41 @@ async def validate_end_user_in_workspace_async(
     return end_user
 
 
+@redis_cache(prefix="end_user", skip_args=["db"], id_arg="end_user_id", return_type=UserSnap)
+async def validate_end_user_snap_in_workspace_async(
+        db: AsyncSession,
+        end_user_id: str,
+        workspace_id,
+) -> UserSnap:
+    try:
+        end_user_id = _uuid.UUID(end_user_id)
+    except (ValueError, AttributeError):
+        raise _BusinessException(
+            f"Invalid end_user_id format: {end_user_id}",
+            _BizCode.INVALID_PARAMETER,
+        )
+
+    end_user_repo = _EndUserRepository(db)
+    end_user = await end_user_repo.get_end_user_by_id_async(end_user_id)
+
+    if end_user is None:
+        raise _BusinessException(
+            "End user not found",
+            _BizCode.USER_NOT_FOUND,
+        )
+
+    if str(end_user.workspace_id) != str(workspace_id):
+        raise _BusinessException(
+            "End user does not belong to this workspace",
+            _BizCode.PERMISSION_DENIED,
+        )
+
+    return UserSnap(id=end_user.id)
+
+
 async def get_current_user_snapshot_from_api_key_async(
-    db: AsyncSession,
-    api_key_auth,
+        db: AsyncSession,
+        api_key_auth,
 ) -> "CurrentUserSnapshot":
     """通过 API Key 异步构造 CurrentUserSnapshot（detach-safe）。
 

@@ -63,7 +63,7 @@ def test_filter_condition_rejects_non_portable_values(
         FilterCondition(field="status", operator=operator, value=value)
 
 
-def test_neo4j_filter_is_fully_parameterized() -> None:
+def test_neo4j_filter_escapes_identifiers_and_parameterizes_values() -> None:
     unsafe_field = "status`) MATCH (x) //"
     node_filter = NodeFilter(
         conditions=(
@@ -75,14 +75,12 @@ def test_neo4j_filter_is_fully_parameterized() -> None:
     predicate, parameters = compile_neo4j_filter(node_filter)
 
     assert predicate == (
-        "(n[$filter_0_field] = $filter_0_value) AND "
-        "(n[$filter_1_field] >= $filter_1_value)"
+        "(n.`status``) MATCH (x) //` = $filter_0_value) AND "
+        "(n.`score` >= $filter_1_value)"
     )
     assert unsafe_field not in predicate
     assert parameters == {
-        "filter_0_field": unsafe_field,
         "filter_0_value": "active",
-        "filter_1_field": "score",
         "filter_1_value": 10,
     }
 
@@ -108,7 +106,7 @@ def test_neo4j_filter_supports_or_in_and_missing_checks() -> None:
 
     assert " OR " in predicate
     assert " IN $filter_0_value" in predicate
-    assert "n[$filter_1_field] IS NULL" in predicate
+    assert "n.`deleted_at` IS NULL" in predicate
     assert set(parameters["filter_0_value"]) == {"active", "pending"}
 
 
@@ -333,14 +331,12 @@ async def test_neo4j_delete_relationship_uses_scoped_filter() -> None:
 
     query, parameters = driver.calls[0]
     assert "[r:`RELATES_TO`]" in query
-    assert "r[$relationship_filter_relationship_0_field]" in query
-    assert "source[$relationship_filter_source_0_field]" in query
+    assert "r.`id`" in query
+    assert "source.`tenant_id`" in query
     assert "DELETE r" in query
     assert "RETURN relationship_id, properties" in query
     assert parameters == {
-        "relationship_filter_relationship_0_field": "id",
         "relationship_filter_relationship_0_value": "edge-1",
-        "relationship_filter_source_0_field": "tenant_id",
         "relationship_filter_source_0_value": "tenant-1",
     }
     assert result.backend == BackendType.NEO4J
@@ -425,11 +421,10 @@ async def test_neo4j_update_node_uses_custom_filter_without_data_id() -> None:
 
     query, parameters = driver.calls[0]
     assert "MATCH (n:Test)" in query
-    assert "WHERE (n[$filter_0_field] = $filter_0_value)" in query
+    assert "WHERE (n.`external_id` = $filter_0_value)" in query
     assert "MERGE" not in query
     assert parameters == {
         "properties": {"change": True},
-        "filter_0_field": "external_id",
         "filter_0_value": "node-1",
     }
     assert result.backend == BackendType.NEO4J
@@ -455,16 +450,13 @@ def test_neo4j_filter_supports_nested_boolean_groups() -> None:
     predicate, parameters = compile_neo4j_filter(node_filter)
 
     assert predicate == (
-        "(n[$filter_0_field] = $filter_0_value) AND "
-        "((n[$filter_1_0_field] = $filter_1_0_value) OR "
-        "(n[$filter_1_1_field] IN $filter_1_1_value))"
+        "(n.`tenant_id` = $filter_0_value) AND "
+        "((n.`status` = $filter_1_0_value) OR "
+        "(n.`priority` IN $filter_1_1_value))"
     )
     assert parameters == {
-        "filter_0_field": "tenant_id",
         "filter_0_value": "tenant-1",
-        "filter_1_0_field": "status",
         "filter_1_0_value": "pending",
-        "filter_1_1_field": "priority",
         "filter_1_1_value": ["high", "urgent"],
     }
 
@@ -509,9 +501,8 @@ def test_neo4j_filter_uses_cypher_not_in_syntax() -> None:
 
     predicate, parameters = compile_neo4j_filter(node_filter)
 
-    assert predicate == "(NOT n[$filter_0_field] IN $filter_0_value)"
+    assert predicate == "(NOT n.`status` IN $filter_0_value)"
     assert parameters == {
-        "filter_0_field": "status",
         "filter_0_value": ["deleted", "ignored"],
     }
 
@@ -556,10 +547,9 @@ async def test_neo4j_get_node_uses_selected_field_projection() -> None:
     )
 
     query, parameters = driver.calls[0]
-    assert "WHERE (n[$filter_0_field] = $filter_0_value)" in query
+    assert "WHERE (n.`id` = $filter_0_value)" in query
     assert "RETURN n { .`id`, .`name` } AS n" in query
     assert parameters == {
-        "filter_0_field": "id",
         "filter_0_value": 1,
     }
 
@@ -711,7 +701,6 @@ async def test_neo4j_get_node_sorts_before_projecting_fields() -> None:
     assert "RETURN n { .`id` } AS n" in query
     assert query.index("ORDER BY") < query.index("RETURN")
     assert parameters == {
-        "filter_0_field": "category",
         "filter_0_value": "sort-test",
         "sort_0_field": "score",
         "sort_1_field": "id",
@@ -769,17 +758,15 @@ async def test_neo4j_delete_node_uses_parameterized_filter_and_returns_ids() -> 
     query, parameters = driver.calls[0]
     assert "MATCH (n:Test)" in query
     assert (
-        "WHERE (n[$filter_0_field] = $filter_0_value) AND "
-        "(n[$filter_1_field] = $filter_1_value)"
+        "WHERE (n.`external_id``) DETACH DELETE all //` = $filter_0_value) AND "
+        "(n.`tenant_id` = $filter_1_value)"
     ) in query
     assert "WITH n, n.id AS id" in query
     assert "DETACH DELETE n" in query
     assert "RETURN id" in query
     assert unsafe_field not in query
     assert parameters == {
-        "filter_0_field": unsafe_field,
         "filter_0_value": "node-1",
-        "filter_1_field": "tenant_id",
         "filter_1_value": "tenant-1",
     }
     assert result.backend == BackendType.NEO4J
@@ -805,17 +792,15 @@ async def test_neo4j_delete_node_draft_sets_delete_at_without_detaching() -> Non
     query, parameters = driver.calls[0]
     assert "MATCH (n:Test)" in query
     assert (
-        "WHERE ((n[$filter_0_field] = $filter_0_value) OR "
-        "(n[$filter_1_field] = $filter_1_value)) "
+        "WHERE ((n.`external_id` = $filter_0_value) OR "
+        "(n.`external_id` = $filter_1_value)) "
         "AND n.delete_at IS NULL"
     ) in query
     assert "SET n.delete_at = datetime()" in query
     assert "DETACH DELETE" not in query
     assert "RETURN n.id AS id" in query
     assert parameters == {
-        "filter_0_field": "external_id",
         "filter_0_value": "node-1",
-        "filter_1_field": "external_id",
         "filter_1_value": "node-2",
     }
     assert result.backend == BackendType.NEO4J
@@ -1045,7 +1030,6 @@ async def test_neo4j_get_node_passes_coalesce_default_as_parameter() -> None:
         "coalesce(n.`nickname`, n.`name`, $projection_0_default) } AS n"
     ) in query
     assert parameters == {
-        "filter_0_field": "id",
         "filter_0_value": 1,
         "projection_0_default": "Unknown",
     }
@@ -1105,7 +1089,6 @@ async def test_neo4j_get_relationship_uses_pattern() -> None:
     )
     assert "ORDER BY target[$sort_0_field] DESC" in cypher
     assert parameters == {
-        "relationship_filter_source_0_field": "id",
         "relationship_filter_source_0_value": "source-1",
         "sort_0_field": "created_at",
     }
@@ -1181,7 +1164,6 @@ async def test_neo4j_relationship_projection_and_sort_keep_all_variables() -> No
     assert cypher.index("WITH source, r, target") < cypher.index("ORDER BY")
     assert cypher.index("ORDER BY") < cypher.index("RETURN")
     assert parameters == {
-        "relationship_filter_source_0_field": "id",
         "relationship_filter_source_0_value": "source-1",
         "sort_0_field": "created_at",
         "sort_1_field": "weight",

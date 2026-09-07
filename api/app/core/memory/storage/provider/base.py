@@ -1,11 +1,12 @@
 from abc import ABC, abstractmethod
-
+import asyncio
 from typing import Self
 
 from app.core.memory.storage.enums import MemoryNodeLabel, MemoryRelationshipType
 from app.core.memory.storage.models import (
     NodeFilter,
     NodeProjection,
+    NodeSearchSpec,
     NodeSort,
     RelationshipFilter,
     RelationshipPattern,
@@ -106,6 +107,42 @@ class BaseClient(ABC):
             projection: NodeProjection | None = None,
     ) -> StorageReadResult:
         pass
+
+    async def search_many_by_fulltext(
+            self,
+            specs: list[NodeSearchSpec],
+            text: str,
+            limit: int,
+    ) -> list[StorageReadResult]:
+        """Search multiple labels, falling back to one request per label."""
+        return list(await asyncio.gather(*(
+            self.search_by_fulltext(
+                spec.label,
+                spec.node_filter,
+                text,
+                limit,
+                spec.projection,
+            )
+            for spec in specs
+        )))
+
+    async def search_many_by_embedding(
+            self,
+            specs: list[NodeSearchSpec],
+            embed: list,
+            limit: int,
+    ) -> list[StorageReadResult]:
+        """Search multiple labels, falling back to one request per label."""
+        return list(await asyncio.gather(*(
+            self.search_by_embedding(
+                spec.label,
+                spec.node_filter,
+                embed,
+                limit,
+                spec.projection,
+            )
+            for spec in specs
+        )))
 
     async def save_relationship(
         self,

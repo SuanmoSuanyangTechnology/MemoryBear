@@ -13,6 +13,7 @@ from app.core.memory.storage.models import (
     FilterOperator,
     NodeFilter,
     NodeProjection,
+    NodeSearchSpec,
     NodeSort,
     ProjectionField,
     StorageReadResult,
@@ -143,6 +144,20 @@ def _compile_search_source_options(
     return {"source": False}, False
 
 
+def _compile_msearch_source_options(
+        projection: NodeProjection | None,
+) -> tuple[dict[str, Any], bool]:
+    source_fields = compile_elasticsearch_projection(
+        projection,
+        virtual_fields={VIRTUAL_SCORE_FIELD},
+    )
+    if source_fields is None:
+        return {}, True
+    if source_fields:
+        return {"_source": source_fields}, True
+    return {"_source": False}, False
+
+
 def _parse_search_hits(
         result: ObjectApiResponse[Any],
         projection: NodeProjection | None,
@@ -201,6 +216,39 @@ def _parse_search_hits(
             )
         )
     return nodes
+
+
+def _parse_msearch_responses(
+        result: Mapping[str, Any],
+        specs: list[NodeSearchSpec],
+        operation: str,
+) -> list[Mapping[str, Any]]:
+    responses = result.get("responses")
+    if not isinstance(responses, (list, tuple)):
+        raise RuntimeError(
+            f"Elasticsearch {operation} returned invalid responses"
+        )
+    if len(responses) != len(specs):
+        raise RuntimeError(
+            f"Elasticsearch {operation} response count mismatch: "
+            f"expected {len(specs)}, got {len(responses)}"
+        )
+
+    parsed: list[Mapping[str, Any]] = []
+    for index, (spec, response) in enumerate(zip(specs, responses)):
+        if not isinstance(response, Mapping):
+            raise RuntimeError(
+                f"Elasticsearch {operation} returned invalid response "
+                f"at index {index}"
+            )
+        error = response.get("error")
+        if error is not None:
+            raise RuntimeError(
+                f"Elasticsearch {operation} failed for "
+                f"{spec.label.value}: {error!r}"
+            )
+        parsed.append(response)
+    return parsed
 
 
 class ElasticClient(BaseClient):
@@ -417,6 +465,198 @@ class ElasticClient(BaseClient):
         finally:
             await client.close_point_in_time(id=pit_id)
         return StorageReadResult.from_items(nodes, label=label, backend=self.name)
+
+    async def search_many_by_embedding(
+            self,
+            specs: list[NodeSearchSpec],
+            embed: list,
+            limit: int,
+    ) -> list[StorageReadResult]:
+        if not specs:
+            return []
+
+        embedding_fields: list[str] = []
+        for spec in specs:
+            self.verify_label(spec.label)
+            embedding_field = EMBEDDING_FIELDS.get(spec.label)
+            if embedding_field is None:
+                raise UnsupportedQueryError(
+                    self.name,
+                    spec.label,
+                    "embedding",
+                )
+            embedding_fields.append(embedding_field)
+
+        _validate_search_limit(limit)
+        query_vector = _normalize_query_vector(embed)
+        vector_norm = math.hypot(*query_vector)
+        if not math.isfinite(vector_norm):
+            raise ValueError("embedding query vector norm must be finite")
+        if vector_norm == 0:
+            return [
+                StorageReadResult(backend=self.name)
+                for _ in specs
+            ]
+
+        num_candidates = min(
+            MAX_SEARCH_LIMIT,
+            max(
+                MIN_KNN_CANDIDATES,
+                limit,
+                limit * KNN_CANDIDATE_MULTIPLIER,
+            ),
+        )
+        searches: list[dict[str, Any]] = []
+        source_required: list[bool] = []
+        for spec, embedding_field in zip(specs, embedding_fields):
+            source_options, requires_source = _compile_msearch_source_options(
+                spec.projection
+            )
+            source_required.append(requires_source)
+            searches.extend(
+                [
+                    {
+                        "index": get_index_name(spec.label),
+                        "allow_partial_search_results": False,
+                    },
+                    {
+                        "knn": {
+                            "field": embedding_field,
+                            "query_vector": query_vector,
+                            "k": limit,
+                            "num_candidates": num_candidates,
+                            "filter": compile_elasticsearch_filter(
+                                spec.node_filter
+                            ),
+                        },
+                        "size": limit,
+                        **source_options,
+                    },
+                ]
+            )
+
+        result = await self._require_client().msearch(
+            searches=searches,
+            max_concurrent_searches=len(specs),
+        )
+        responses = _parse_msearch_responses(
+            result,
+            specs,
+            "embedding msearch",
+        )
+        return [
+            StorageReadResult.from_items(
+                _parse_search_hits(
+                    response,
+                    spec.projection,
+                    f"embedding msearch for {spec.label.value}",
+                    source_required=requires_source,
+                    score_transform=lambda score: (2.0 * score) - 1.0,
+                ),
+                label=spec.label,
+                backend=self.name,
+            )
+            for spec, response, requires_source in zip(
+                specs,
+                responses,
+                source_required,
+            )
+        ]
+
+    async def search_many_by_fulltext(
+            self,
+            specs: list[NodeSearchSpec],
+            text: str,
+            limit: int,
+    ) -> list[StorageReadResult]:
+        if not specs:
+            return []
+
+        fulltext_fields: list[tuple[str, ...]] = []
+        for spec in specs:
+            self.verify_label(spec.label)
+            fields = FULLTEXT_FIELDS.get(spec.label)
+            if fields is None:
+                raise UnsupportedQueryError(
+                    self.name,
+                    spec.label,
+                    "fulltext",
+                )
+            fulltext_fields.append(fields)
+
+        _validate_search_limit(limit)
+        if not isinstance(text, str):
+            raise ValueError("fulltext query must be a string")
+        normalized_text = text.strip()
+        if not normalized_text:
+            return [
+                StorageReadResult(backend=self.name)
+                for _ in specs
+            ]
+
+        searches: list[dict[str, Any]] = []
+        source_required: list[bool] = []
+        for spec, fields in zip(specs, fulltext_fields):
+            source_options, requires_source = _compile_msearch_source_options(
+                spec.projection
+            )
+            source_required.append(requires_source)
+            searches.extend(
+                [
+                    {
+                        "index": get_index_name(spec.label),
+                        "allow_partial_search_results": False,
+                    },
+                    {
+                        "query": {
+                            "bool": {
+                                "must": [
+                                    {
+                                        "multi_match": {
+                                            "query": normalized_text,
+                                            "fields": list(fields),
+                                        }
+                                    }
+                                ],
+                                "filter": [
+                                    compile_elasticsearch_filter(
+                                        spec.node_filter
+                                    )
+                                ],
+                            }
+                        },
+                        "size": limit,
+                        **source_options,
+                    },
+                ]
+            )
+
+        result = await self._require_client().msearch(
+            searches=searches,
+            max_concurrent_searches=len(specs),
+        )
+        responses = _parse_msearch_responses(
+            result,
+            specs,
+            "fulltext msearch",
+        )
+        return [
+            StorageReadResult.from_items(
+                _parse_search_hits(
+                    response,
+                    spec.projection,
+                    f"fulltext msearch for {spec.label.value}",
+                    source_required=requires_source,
+                ),
+                label=spec.label,
+                backend=self.name,
+            )
+            for spec, response, requires_source in zip(
+                specs,
+                responses,
+                source_required,
+            )
+        ]
 
     async def search_by_embedding(
             self,

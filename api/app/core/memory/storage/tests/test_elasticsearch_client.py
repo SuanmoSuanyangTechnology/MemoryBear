@@ -8,7 +8,13 @@ from elasticsearch import AsyncElasticsearch
 
 from app.core.config import settings
 from app.core.memory.storage.enums import BackendType, MemoryNodeType
-from app.core.memory.storage.models import NodeFilter, NodeProjection, NodeSort
+from app.core.memory.storage.models import (
+    NodeFilter,
+    NodeProjection,
+    NodeSearchSpec,
+    NodeSort,
+    StorageReadResult,
+)
 from app.core.memory.storage.models.dto import StorageItem
 from app.core.memory.storage.provider.elasticsearch import index as elasticsearch_index
 from app.core.memory.storage.provider.elasticsearch.client import (
@@ -250,6 +256,7 @@ class _FakeElasticsearch:
         self.index_calls: list[dict[str, Any]] = []
         self.open_point_in_time_calls: list[dict[str, Any]] = []
         self.search_calls: list[dict[str, Any]] = []
+        self.msearch_calls: list[dict[str, Any]] = []
         self.close_point_in_time_calls: list[dict[str, Any]] = []
         self.update_by_query_calls: list[dict[str, Any]] = []
         self.delete_by_query_calls: list[dict[str, Any]] = []
@@ -262,6 +269,7 @@ class _FakeElasticsearch:
         self.open_point_in_time_result: dict[str, Any] = {"id": "pit-1"}
         self.search_result: dict[str, Any] = {"hits": {"hits": []}}
         self.search_results: list[dict[str, Any]] = []
+        self.msearch_result: dict[str, Any] = {"responses": []}
         self.index_result: dict[str, Any] = {"result": "created"}
         self.update_result: dict[str, Any] | None = None
         self.delete_result: dict[str, Any] | None = None
@@ -289,6 +297,10 @@ class _FakeElasticsearch:
 
             return self.search_results.pop(0)
         return self.search_result
+
+    async def msearch(self, **kwargs: Any) -> dict[str, Any]:
+        self.msearch_calls.append(kwargs)
+        return self.msearch_result
 
     async def close_point_in_time(self, **kwargs: Any) -> dict[str, bool]:
         self.close_point_in_time_calls.append(kwargs)
@@ -1775,6 +1787,269 @@ async def test_elastic_client_fulltext_search_uses_multi_match_filter_and_score(
             data={"id": "entity-1", "score": 3.25},
         ),
     ]
+
+
+async def test_elastic_client_fulltext_msearch_preserves_spec_order() -> None:
+    fake = _FakeElasticsearch()
+    fake.msearch_result = {
+        "responses": [
+            {
+                "hits": {
+                    "hits": [
+                        {"_source": {"id": "statement-1"}, "_score": 2.5},
+                    ]
+                }
+            },
+            {
+                "hits": {
+                    "hits": [
+                        {"_source": {"id": "chunk-1"}, "_score": 1.5},
+                    ]
+                }
+            },
+        ]
+    }
+    client = ElasticClient()
+    client.client = _as_elasticsearch(fake)
+    specs = [
+        NodeSearchSpec(
+            MemoryNodeType.STATEMENT,
+            NodeFilter.eq("end_user_id", "user-1"),
+            NodeProjection.of("id", "score"),
+        ),
+        NodeSearchSpec(
+            MemoryNodeType.CHUNK,
+            NodeFilter.eq("end_user_id", "user-1"),
+            NodeProjection.of("id"),
+        ),
+    ]
+
+    results = await client.search_many_by_fulltext(specs, "  memory  ", 3)
+
+    assert fake.msearch_calls == [
+        {
+            "searches": [
+                {
+                    "index": get_index_name(MemoryNodeType.STATEMENT),
+                    "allow_partial_search_results": False,
+                },
+                {
+                    "query": {
+                        "bool": {
+                            "must": [
+                                {
+                                    "multi_match": {
+                                        "query": "memory",
+                                        "fields": ["statement"],
+                                    }
+                                }
+                            ],
+                            "filter": [
+                                {
+                                    "bool": {
+                                        "filter": [
+                                            {
+                                                "term": {
+                                                    "end_user_id": "user-1"
+                                                }
+                                            }
+                                        ]
+                                    }
+                                }
+                            ],
+                        }
+                    },
+                    "size": 3,
+                    "_source": ["id"],
+                },
+                {
+                    "index": get_index_name(MemoryNodeType.CHUNK),
+                    "allow_partial_search_results": False,
+                },
+                {
+                    "query": {
+                        "bool": {
+                            "must": [
+                                {
+                                    "multi_match": {
+                                        "query": "memory",
+                                        "fields": ["content"],
+                                    }
+                                }
+                            ],
+                            "filter": [
+                                {
+                                    "bool": {
+                                        "filter": [
+                                            {
+                                                "term": {
+                                                    "end_user_id": "user-1"
+                                                }
+                                            }
+                                        ]
+                                    }
+                                }
+                            ],
+                        }
+                    },
+                    "size": 3,
+                    "_source": ["id"],
+                },
+            ],
+            "max_concurrent_searches": 2,
+        }
+    ]
+    assert results == [
+        StorageReadResult.from_items(
+            [{"id": "statement-1", "score": 2.5}],
+            label=MemoryNodeType.STATEMENT,
+            backend=BackendType.ELASTIC,
+        ),
+        StorageReadResult.from_items(
+            [{"id": "chunk-1"}],
+            label=MemoryNodeType.CHUNK,
+            backend=BackendType.ELASTIC,
+        ),
+    ]
+
+
+async def test_elastic_client_embedding_msearch_uses_knn_and_transforms_score() -> None:
+    fake = _FakeElasticsearch()
+    fake.msearch_result = {
+        "responses": [
+            {
+                "hits": {
+                    "hits": [
+                        {"_source": {"id": "statement-1"}, "_score": 0.9},
+                    ]
+                }
+            },
+            {
+                "hits": {
+                    "hits": [
+                        {"_source": {"id": "chunk-1"}, "_score": 0.75},
+                    ]
+                }
+            },
+        ]
+    }
+    client = ElasticClient()
+    client.client = _as_elasticsearch(fake)
+    specs = [
+        NodeSearchSpec(
+            MemoryNodeType.STATEMENT,
+            NodeFilter.eq("end_user_id", "user-1"),
+            NodeProjection.of("id", "score"),
+        ),
+        NodeSearchSpec(
+            MemoryNodeType.CHUNK,
+            NodeFilter.eq("end_user_id", "user-1"),
+            NodeProjection.of("id", "score"),
+        ),
+    ]
+
+    results = await client.search_many_by_embedding(
+        specs,
+        [0.1, 0.2],
+        2,
+    )
+
+    searches = fake.msearch_calls[0]["searches"]
+    assert fake.msearch_calls[0]["max_concurrent_searches"] == 2
+    assert searches[0] == {
+        "index": get_index_name(MemoryNodeType.STATEMENT),
+        "allow_partial_search_results": False,
+    }
+    assert searches[1] == {
+        "knn": {
+            "field": "statement_embedding",
+            "query_vector": [0.1, 0.2],
+            "k": 2,
+            "num_candidates": 100,
+            "filter": {
+                "bool": {
+                    "filter": [{"term": {"end_user_id": "user-1"}}]
+                }
+            },
+        },
+        "size": 2,
+        "_source": ["id"],
+    }
+    assert searches[2]["index"] == get_index_name(MemoryNodeType.CHUNK)
+    assert searches[3]["knn"]["field"] == "chunk_embedding"
+    assert results[0].items[0].data == {
+        "id": "statement-1",
+        "score": pytest.approx(0.8),
+    }
+    assert results[1].items[0].data == {
+        "id": "chunk-1",
+        "score": pytest.approx(0.5),
+    }
+
+
+@pytest.mark.parametrize(
+    ("msearch_result", "error_pattern"),
+    [
+        ({}, "invalid responses"),
+        ({"responses": []}, "response count mismatch"),
+        (
+            {
+                "responses": [
+                    {
+                        "error": {
+                            "type": "search_phase_execution_exception",
+                            "reason": "boom",
+                        },
+                        "status": 500,
+                    }
+                ]
+            },
+            "failed for Statement",
+        ),
+    ],
+)
+async def test_elastic_client_msearch_rejects_invalid_or_failed_response(
+        msearch_result: dict[str, Any],
+        error_pattern: str,
+) -> None:
+    fake = _FakeElasticsearch()
+    fake.msearch_result = msearch_result
+    client = ElasticClient()
+    client.client = _as_elasticsearch(fake)
+    specs = [
+        NodeSearchSpec(
+            MemoryNodeType.STATEMENT,
+            NodeFilter.eq("end_user_id", "user-1"),
+            NodeProjection.of("id"),
+        )
+    ]
+
+    with pytest.raises(RuntimeError, match=error_pattern):
+        await client.search_many_by_fulltext(specs, "memory", 2)
+
+
+async def test_elastic_client_msearch_skips_blank_text_and_zero_vector() -> None:
+    fake = _FakeElasticsearch()
+    client = ElasticClient()
+    client.client = _as_elasticsearch(fake)
+    specs = [
+        NodeSearchSpec(
+            MemoryNodeType.STATEMENT,
+            NodeFilter.eq("end_user_id", "user-1"),
+            NodeProjection.of("id"),
+        )
+    ]
+
+    fulltext = await client.search_many_by_fulltext(specs, "   ", 2)
+    embedding = await client.search_many_by_embedding(
+        specs,
+        [0.0, 0.0],
+        2,
+    )
+
+    assert fulltext == [StorageReadResult(backend=BackendType.ELASTIC)]
+    assert embedding == [StorageReadResult(backend=BackendType.ELASTIC)]
+    assert fake.msearch_calls == []
 
 
 async def test_elastic_client_search_supports_score_only_projection() -> None:
