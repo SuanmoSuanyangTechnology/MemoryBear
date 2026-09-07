@@ -27,6 +27,9 @@ from app.core.memory.models.service_models import (
 )
 from app.core.memory.models.service_models import MemoryContext
 from app.core.memory.prompt import prompt_manager
+from app.core.memory.read_services.search_engine.quick_retrieval_dedup import (
+    filter_quick_retrieval_memories,
+)
 from app.core.memory.read_services.search_engine.result_builder import MetadataBuilder
 from app.core.memory.read_services.search_engine.result_builder import data_builder_factory
 from app.core.memory.read_services.search_engine.search_policy import (
@@ -52,13 +55,6 @@ from app.core.memory.storage.enums import MemoryNodeType, MemoryNodeLabel
 from app.core.memory.storage.models import StorageReadResult
 from app.core.memory.storage.models.dto import StorageItem
 from app.core.memory.storage.service import get_storage_service
-from app.core.memory.read_services.search_engine.quick_retrieval_dedup import (
-    filter_quick_retrieval_memories,
-)
-from app.core.memory.read_services.search_engine.result_builder import MetadataBuilder
-from app.core.memory.read_services.search_engine.result_builder import data_builder_factory
-from app.core.memory.read_services.search_engine.tools import make_entity_search_tool, make_relation_search_tool, \
-    make_user_source_lookup_tool
 from app.core.models import RedBearEmbeddings, RedBearLLM, RedBearRerank
 from app.core.models.llm import StructResponse
 from app.core.rag.nlp.search import knowledge_retrieval
@@ -1070,7 +1066,7 @@ class RAGSearchService:
     def __init__(self, ctx: MemoryContext):
         self.ctx = ctx
 
-    async def keyword_search(self, query: str, limit: int = 10) -> MemorySearchResult:
+    async def keyword_search(self, query: str, limit: int = 10, **kwargs) -> MemorySearchResult:
         """RAG 不支持纯全文检索，回退到 hybrid_search。"""
         return await self.hybrid_search(query, limit)
 
@@ -1100,7 +1096,7 @@ class RAGSearchService:
             "reranker_top_k": limit
         }
 
-    async def hybrid_search(self, query: str, limit: int) -> MemorySearchResult:
+    async def hybrid_search(self, query: str, limit: int, **kwargs) -> MemorySearchResult:
         try:
             async with get_async_db_context() as db:
                 kb_config = await self.get_kb_config(db, limit)

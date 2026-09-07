@@ -7,13 +7,6 @@ import uuid
 
 from app.core.memory.alerts import enqueue_memory_retrieval_alert_safely
 from app.core.memory.enums import Neo4jNodeType, SearchStrategy, StorageType
-from app.core.memory.models.service_models import MemorySearchResult
-from app.core.memory.pipelines.base_pipeline import BasePipeline, ModelClientMixin
-from app.core.memory.alerts import enqueue_memory_retrieval_alert_safely
-from app.core.memory.read_services.search_engine.quick_retrieval_dedup import (
-    QUICK_SEARCH_ENTITY_LIMIT,
-    log_quick_retrieval_dedup_safely,
-)
 from app.core.memory.exceptions import (
     MemoryRetrievalBusinessError,
     MemoryRetrievalImpact,
@@ -27,6 +20,10 @@ from app.core.memory.read_services.search_engine.content_search import (
     RAGSearchService,
     HistorySearchService,
     MetaSearchService
+)
+from app.core.memory.read_services.search_engine.quick_retrieval_dedup import (
+    QUICK_SEARCH_ENTITY_LIMIT,
+    log_quick_retrieval_dedup_safely,
 )
 from app.core.memory.retrieval_trace.models import RetrievalExecutionTrace
 from app.core.memory.retrieval_trace.stage_events import emit_memory_stage
@@ -747,7 +744,12 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
             ]
         meta_task = asyncio.ensure_future(self._user_meta())
         search_service = await self._get_search_service(includes, need_embedder=False, need_llm=False)
-        express_res = await search_service.keyword_search(query, limit)
+        express_res = await search_service.keyword_search(
+            query,
+            limit,
+            entity_limit=QUICK_SEARCH_ENTITY_LIMIT,
+            apply_source_dedup=True
+        )
         memory_l0 = await meta_task
         profile = project_profile_data(memory_l0)
         await self._emit_stage("profile_loaded", {
@@ -773,7 +775,12 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
             need_llm=False,
             enable_rerank=enable_rerank
         )
-        quick_res = await search_service.hybrid_search(query, limit)
+        quick_res = await search_service.hybrid_search(
+            query,
+            limit,
+            entity_limit=QUICK_SEARCH_ENTITY_LIMIT,
+            apply_source_dedup=True
+        )
         memory_l0 = await meta_task
         profile = project_profile_data(memory_l0)
         await self._emit_stage("profile_loaded", {
