@@ -249,12 +249,12 @@ class LiteSkillAdminClient:
             response = await client.request(
                 method.upper(), url, headers=headers, params=request_params, json=json
             )
-            if response.is_redirect:
-                # 先消费响应体再抛错：未读完的 body 会让 httpx 关闭该连接，
-                # 无法归还 keep-alive 池复用；3xx 响应体通常为空，读取开销可忽略。
+            if 300 <= response.status_code < 400:
+                # 拒绝全部 3xx：内部接口不应出现任何重定向/未修改等响应。
+                # 先消费响应体再抛错，保证连接归还 keep-alive 池。
                 await response.aread()
                 raise LiteSkillAdminError(
-                    f"LiteSkill 接口返回意外重定向: {response.status_code} -> "
+                    f"LiteSkill 接口返回意外 3xx 状态: {response.status_code} -> "
                     f"{response.headers.get('location', '')}",
                     status_code=response.status_code,
                     category=LiteSkillAdminErrorCategory.UPSTREAM,
