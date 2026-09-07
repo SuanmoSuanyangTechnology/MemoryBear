@@ -165,6 +165,16 @@ class ModelApiKey(ReferenceBase):
     priority = Column(String, default="1", comment="priority")
 
 
+class TenantSpeedBearBinding(ReferenceBase):
+    """Minimal read-only projection of the Platform tenant credential binding."""
+
+    __tablename__ = "tenant_speedbear_bindings"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    tenant_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    gateway_api_key = Column(Text, nullable=False)
+
+
 class ModelBase(ReferenceBase):
     __tablename__ = "model_bases"
 

@@ -393,6 +393,8 @@ class KnowledgeRetrievalNode(BaseNode):
             retrieve_type=first_kb.retrieve_type,
             enable_graph_retrieval=enable_graph_retrieval,
             rerank_id=self.typed_config.reranker_id,
+            rerank_mode=self.typed_config.rerank_mode,
+            rerank_weights=self.typed_config.rerank_weights,
             metadata_filter_mode=self.typed_config.metadata_filter_mode,
             metadata_filters=(
                 auto_filter_groups

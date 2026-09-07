@@ -100,6 +100,7 @@ const SwitchSpaceModal = forwardRef<SwitchSpaceModalRef>((_props, ref) => {
           <CustomSelect
             url={getWorkspacesUrl}
             hasAll={false}
+            showSearch={true}
             format={(list) => list.map(item => ({
               value: item.id,
               label: <Space>{item.name}<Tag color={item.storage_type === 'rag' ? 'processing' : 'warning'}>{t(`space.${item.storage_type || 'neo4j'}`)}</Tag></Space>

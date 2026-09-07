@@ -82,26 +82,27 @@ const AboutMe = forwardRef<AboutMeRef, { className?: string; }>(({ className }, 
                   <Tag key={index} color="default">{tag}</Tag>
                 ))}
               </Flex>
+              <Divider className="rb:my-4!" />
             </>}
             {data.user_summary && <>
-              <Divider className="rb:my-4!" />
               <div className="rb:font-regular rb:leading-5 rb:text-[#5B6167]">
                 {data.user_summary}
               </div>
+              <Divider className="rb:my-4!" />
             </>}
             {data.personality && <>
-              <Divider className="rb:my-4!" />
               <div className="rb:font-medium rb:leading-5">{t('userMemory.personality')}</div>
               <div className="rb:font-regular rb:leading-5 rb:text-[#5B6167] rb:mt-2">
                 {data.personality}
               </div>
+              <Divider className="rb:my-4!" />
             </>}
             {data.core_values && <>
-              <Divider className="rb:my-4!" />
               <div className="rb:font-medium rb:leading-5">{t('userMemory.core_values')}</div>
               <div className="rb:font-regular rb:leading-5 rb:text-[#5B6167] rb:mt-2">
                 {data.core_values}
               </div>
+              <Divider className="rb:my-4!" />
             </>}
             {data.one_sentence && 
               <RbAlert className="rb:mt-4! rb:text-[14px]!">{data.one_sentence}</RbAlert>

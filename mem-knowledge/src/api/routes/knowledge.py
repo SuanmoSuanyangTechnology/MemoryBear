@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from collections.abc import Mapping
 from typing import Annotated, Any
 from urllib.parse import quote
 
@@ -52,14 +53,63 @@ from ...tasks.state import (
     claim_or_get_rebuild_job_async,
     release_rebuild_job_async,
 )
-from ..dependencies import Principal, get_principal, get_runtime
+from ..dependencies import Principal, get_principal, get_runtime, get_source
+from ..schemas.chunk import KnowledgeRetrievalSource
 from ..schemas.common import SuccessEnvelope, fail, success
 from ..schemas.file import KBBatchDownloadRequest
-from ..schemas.knowledge import KnowledgeCreate, KnowledgeUpdate
+from ..schemas.knowledge import KnowledgeCreate, KnowledgeUpdate, project_public_knowledge_data
 
 router = APIRouter(prefix="/knowledges", tags=["knowledges"])
 
 logger = logging.getLogger(__name__)
+
+_MODEL_UNAVAILABLE_STATUS_REASONS = {
+    401: "Invalid API key for the selected model",
+    403: "The selected model API key is not authorized",
+    404: "The selected model is not available from the provider",
+    429: "The selected model is currently rate limited",
+}
+
+
+def _provider_status_code(exc: BaseException) -> int | None:
+    pending: list[BaseException] = [exc]
+    seen: set[int] = set()
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        response = getattr(current, "response", None)
+        status = getattr(current, "status_code", None)
+        if status is None:
+            status = getattr(response, "status_code", None)
+        if status is None and isinstance(response, Mapping):
+            status = response.get("status_code")
+        try:
+            if status is not None:
+                return int(status)
+        except (TypeError, ValueError):
+            pass
+        for wrapped in (current.__cause__, current.__context__):
+            if isinstance(wrapped, BaseException):
+                pending.append(wrapped)
+    return None
+
+
+def _model_unavailable_reason(exc: BaseException) -> str:
+    status_code = _provider_status_code(exc)
+    if status_code in _MODEL_UNAVAILABLE_STATUS_REASONS:
+        return _MODEL_UNAVAILABLE_STATUS_REASONS[status_code]
+    error_type = type(exc).__name__.lower()
+    if "timeout" in error_type:
+        return "The selected model request timed out"
+    if "connection" in error_type:
+        return "Unable to connect to the selected model provider"
+    if "validation" in error_type:
+        return "The selected model returned an invalid response"
+    if status_code is not None:
+        return f"The selected model provider rejected the request (HTTP {status_code})"
+    return "The selected model is unavailable"
 
 
 def _success(
@@ -131,7 +181,20 @@ async def get_knowledge_graph_entity_types(
                 response_code=400,
                 response_style="http",
             ) from exc
-    result = await graph_service.graph_entity_types(runtime, resolved, scenario)
+    try:
+        result = await graph_service.graph_entity_types(runtime, resolved, scenario)
+    except KnowledgeError:
+        raise
+    except Exception as exc:
+        reason = _model_unavailable_reason(exc)
+        logger.warning(
+            "Graph entity type model unavailable llm_id=%s error_type=%s "
+            "provider_status=%s",
+            llm_id,
+            type(exc).__name__,
+            _provider_status_code(exc),
+        )
+        raise KnowledgeError.from_code("KB_MODEL_UNAVAILABLE", reason) from exc
     return _success(
         request,
         result,
@@ -184,6 +247,7 @@ async def get_knowledges(
     request: Request,
     principal: Annotated[Principal, Depends(get_principal)],
     runtime: Annotated[ProcessRuntime, Depends(get_runtime)],
+    source: Annotated[KnowledgeRetrievalSource, Depends(get_source)],
     parent_id: Annotated[uuid.UUID | None, Query(description="parent folder id")] = None,
     page: Annotated[int, Query(gt=0)] = 1,
     pagesize: Annotated[int, Query(gt=0, le=100)] = 20,
@@ -204,6 +268,8 @@ async def get_knowledges(
             keywords=keywords,
             kb_ids=kb_ids,
         )
+    if source is KnowledgeRetrievalSource.EXTERNAL_API:
+        items = [project_public_knowledge_data(item) for item in items]
     return _success(
         request,
         {
@@ -225,10 +291,13 @@ async def create_knowledge(
     create_data: KnowledgeCreate,
     principal: Annotated[Principal, Depends(get_principal)],
     runtime: Annotated[ProcessRuntime, Depends(get_runtime)],
+    source: Annotated[KnowledgeRetrievalSource, Depends(get_source)],
 ) -> SuccessEnvelope[dict[str, Any]]:
     async with runtime.database.async_session() as db:
         knowledge = await knowledge_service.create_knowledge(db, create_data, principal)
         data = await knowledge_service.knowledge_to_data(db, knowledge)
+    if source is KnowledgeRetrievalSource.EXTERNAL_API:
+        data = project_public_knowledge_data(data)
     return _success(
         request,
         data,
@@ -242,12 +311,15 @@ async def get_knowledge(
     knowledge_id: uuid.UUID,
     principal: Annotated[Principal, Depends(get_principal)],
     runtime: Annotated[ProcessRuntime, Depends(get_runtime)],
+    source: Annotated[KnowledgeRetrievalSource, Depends(get_source)],
 ) -> SuccessEnvelope[dict[str, Any]]:
     async with runtime.database.async_session() as db:
         knowledge = await knowledge_service.get_knowledge(db, knowledge_id, principal)
         if knowledge is None:
             raise knowledge_service._not_found()
         data = await knowledge_service.build_knowledge_detail_data(db, knowledge)
+    if source is KnowledgeRetrievalSource.EXTERNAL_API:
+        data = project_public_knowledge_data(data)
     return _success(
         request,
         data,
@@ -284,6 +356,7 @@ async def update_knowledge(
     update_data: KnowledgeUpdate,
     principal: Annotated[Principal, Depends(get_principal)],
     runtime: Annotated[ProcessRuntime, Depends(get_runtime)],
+    source: Annotated[KnowledgeRetrievalSource, Depends(get_source)],
 ) -> SuccessEnvelope[dict[str, Any]]:
     async with runtime.database.async_session() as db:
         plan = await knowledge_service.prepare_knowledge_update(
@@ -337,9 +410,12 @@ async def update_knowledge(
                 "Failed to dispatch reparse tasks knowledge_id=%s",
                 knowledge_id,
             )
+    response_data = outcome.response_data
+    if source is KnowledgeRetrievalSource.EXTERNAL_API and response_data is not None:
+        response_data = project_public_knowledge_data(response_data)
     return _success(
         request,
-        outcome.response_data,
+        response_data,
         "The knowledge base information has been successfully updated",
     )
 

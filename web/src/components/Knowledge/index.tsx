@@ -132,8 +132,6 @@ const Knowledge: FC<KnowledgeProps> = ({
       onChange && onChange({
         ...editConfig,
         ...rerankerValues,
-        reranker_id: rerankerValues.rerank_model ? rerankerValues.reranker_id : undefined,
-        reranker_top_k: rerankerValues.rerank_model ? rerankerValues.reranker_top_k : undefined,
       })
     }
   }

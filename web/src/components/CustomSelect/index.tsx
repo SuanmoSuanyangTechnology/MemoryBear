@@ -13,7 +13,7 @@
  * @component
  */
 
-import { useEffect, useState, useMemo, type FC } from 'react';
+import { isValidElement, useEffect, useState, useMemo, type FC, type ReactNode } from 'react';
 import { Select } from 'antd';
 import type { SelectProps, DefaultOptionType } from 'antd/es/select';
 import { useTranslation } from 'react-i18next';
@@ -55,11 +55,28 @@ interface CustomSelectProps extends Omit<SelectProps, 'filterOption'> {
   filterOption?: (inputValue: string, option?: DefaultOptionType) => boolean;
 }
 
-// Default filter function for search - performs case-insensitive substring matching
+// Extract searchable text from plain values and nested React elements
+const getTextContent = (content: ReactNode): string => {
+  if (typeof content === 'string' || typeof content === 'number') {
+    return String(content);
+  }
+  if (Array.isArray(content)) {
+    return content.map(getTextContent).join(' ');
+  }
+  if (isValidElement<{ children?: ReactNode }>(content)) {
+    return getTextContent(content.props.children);
+  }
+  return '';
+};
+
+// Default filter function for search - matches label and value case-insensitively
 const defaultFilterOption = (inputValue: string, option?: DefaultOptionType): boolean => {
-  if (!option || !inputValue) return true;
-  const label = String(option.children || option.label || '');
-  return label.toLowerCase().includes(inputValue.toLowerCase());
+  const keyword = inputValue.trim().toLowerCase();
+  if (!keyword || !option) return true;
+
+  const label = getTextContent(option.label) || getTextContent(option.children);
+  const value = String(option.value ?? '');
+  return label.toLowerCase().includes(keyword) || value.toLowerCase().includes(keyword);
 };
 
 const CustomSelect: FC<CustomSelectProps> = ({

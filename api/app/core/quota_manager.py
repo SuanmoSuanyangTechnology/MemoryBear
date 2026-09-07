@@ -147,19 +147,22 @@ def _get_quota_breakdown(
         from premium.platform_admin.package_plan_service import TenantSubscriptionService
         from premium.platform_admin.resource_pack_service import ResourcePackService
 
-        base = TenantSubscriptionService(db).get_effective_quota(tenant_id)
+        # premium 表缺失时只回滚 SAVEPOINT，不能回滚调用方整个事务；否则调用方
+        # 已加载的 ORM 实例会过期，后续属性访问可能触发隐式 IO。
+        with db.begin_nested():
+            base = TenantSubscriptionService(db).get_effective_quota(tenant_id)
+            overlay = ResourcePackService(db).get_overlay(tenant_id)
         if not base:
             logger.debug(f"租户 {tenant_id} 无 premium 订阅，降级到免费套餐")
             base = _free_quota_config()
-        return base, ResourcePackService(db).get_overlay(tenant_id)
+        return base, overlay
     except (ModuleNotFoundError, ImportError):
         logger.debug("premium 模块不存在，使用社区版免费套餐配额")
         return _free_quota_config(), {}
     except ProgrammingError as error:
         if not _is_missing_premium_quota_schema(error):
             raise
-        db.rollback()
-        logger.warning("premium 配额表不存在，回滚失败事务并使用社区版免费套餐配额")
+        logger.warning("premium 配额表不存在，已回滚 SAVEPOINT 并使用社区版免费套餐配额")
         return _free_quota_config(), {}
 
 
@@ -171,19 +174,22 @@ async def _get_quota_breakdown_async(
         from premium.platform_admin.package_plan_service import TenantSubscriptionService
         from premium.platform_admin.resource_pack_service import ResourcePackService
 
-        base = await TenantSubscriptionService(db).get_effective_quota_async(tenant_id)
+        # 与同步路径一致：premium 表缺失时只回滚 SAVEPOINT，保持调用方事务及
+        # 已加载 ORM 实例有效，避免 AsyncSession 后续属性访问触发 MissingGreenlet。
+        async with db.begin_nested():
+            base = await TenantSubscriptionService(db).get_effective_quota_async(tenant_id)
+            overlay = await ResourcePackService.get_overlay_async(db, tenant_id)
         if not base:
             logger.debug(f"租户 {tenant_id} 无 premium 订阅，降级到免费套餐")
             base = _free_quota_config()
-        return base, await ResourcePackService.get_overlay_async(db, tenant_id)
+        return base, overlay
     except (ModuleNotFoundError, ImportError):
         logger.debug("premium 模块不存在，使用社区版免费套餐配额")
         return _free_quota_config(), {}
     except ProgrammingError as error:
         if not _is_missing_premium_quota_schema(error):
             raise
-        await db.rollback()
-        logger.warning("premium 配额表不存在，回滚失败事务并使用社区版免费套餐配额")
+        logger.warning("premium 配额表不存在，已回滚 SAVEPOINT 并使用社区版免费套餐配额")
         return _free_quota_config(), {}
 
 

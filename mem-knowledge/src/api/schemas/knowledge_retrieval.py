@@ -6,12 +6,22 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from ...rag.models.chunk import DocumentChunk
-from .chunk import KnowledgeBaseConfig, KnowledgeRetrievalSource, RetrieveType
+from .chunk import (
+    IMAGE_QUERY_TOP_N,
+    ImageRetrievalQuery,
+    KnowledgeBaseConfig,
+    KnowledgeRetrievalSource,
+    RetrievalQuery,
+    RetrieveType,
+    TextRetrievalQuery,
+    normalize_retrieval_query,
+)
 from .knowledge_metadata import FilterGroup, MetadataFilterMode
+from .rerank import RerankMode, RerankWeights
 
 
 class KnowledgeRetrievalRequest(BaseModel):
-    query: str
+    query: RetrievalQuery
     kb_ids: list[UUID] = Field(default_factory=list)
     ex_ids: list[str] = Field(default_factory=list)
     knowledge_bases: list[KnowledgeBaseConfig] = Field(default_factory=list)
@@ -25,6 +35,8 @@ class KnowledgeRetrievalRequest(BaseModel):
     enable_graph_retrieval: int = Field(default=0, ge=0, le=1)
     rerank_id: UUID | None = None
     rerank_score_threshold: float | None = Field(default=None, ge=0, le=1)
+    rerank_mode: RerankMode | None = None
+    rerank_weights: RerankWeights | None = None
     metadata_filters: list[FilterGroup] = Field(default_factory=list)
     metadata_filter_mode: MetadataFilterMode = MetadataFilterMode.MANUAL
     metadata_filters_resolved: bool = False
@@ -50,17 +62,30 @@ class KnowledgeRetrievalRequest(BaseModel):
 
     @field_validator("query")
     @classmethod
-    def validate_query(cls, value: str) -> str:
-        stripped = value.strip()
-        if not stripped:
-            raise ValueError("query must not be empty")
-        return stripped
+    def validate_query(cls, value: RetrievalQuery) -> RetrievalQuery:
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                raise ValueError("query must not be empty")
+            return stripped
+        return value
+
+    @property
+    def normalized_query(self) -> TextRetrievalQuery | ImageRetrievalQuery:
+        return normalize_retrieval_query(self.query)
+
+    @property
+    def query_text(self) -> str | None:
+        query = self.normalized_query
+        return query.content if isinstance(query, TextRetrievalQuery) else None
 
     @model_validator(mode="after")
     def validate_knowledge_ids(self) -> "KnowledgeRetrievalRequest":
         if not self.kb_ids and not self.ex_ids and not self.knowledge_bases:
             raise ValueError("kb_ids, ex_ids and knowledge_bases cannot all be empty")
-        if self.top_n is None or "top_n" not in self.model_fields_set:
+        if isinstance(self.normalized_query, ImageRetrievalQuery):
+            self.top_n = IMAGE_QUERY_TOP_N
+        elif self.top_n is None or "top_n" not in self.model_fields_set:
             self.top_n = max(self.top_k, 20)
         elif self.top_n < self.top_k:
             raise ValueError("top_n must be greater than or equal to top_k")

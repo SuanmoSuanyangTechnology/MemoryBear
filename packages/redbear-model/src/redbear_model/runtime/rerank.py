@@ -10,9 +10,22 @@ from typing import Any
 from langchain_core.callbacks import Callbacks
 from langchain_core.documents import BaseDocumentCompressor, Document
 
-from redbear_model.contracts import ModelProvider, ResolvedModelConfig
+from redbear_model.contracts import (
+    ModelProvider,
+    RerankCandidateView,
+    RerankQuery,
+    RerankScore,
+    ResolvedModelConfig,
+    TextEmbeddingContent,
+)
 from redbear_model.errors import UnsupportedModelProviderError
-from redbear_model.providers.dashscope import load_dashscope_rerank_class
+from redbear_model.providers.dashscope import (
+    is_qwen3_vl_reranker,
+    load_dashscope_rerank_class,
+)
+from redbear_model.providers.dashscope_multimodal_rerank import (
+    DashScopeMultimodalRerankAdapter,
+)
 from redbear_model.telemetry import (
     ModelTelemetry,
     NoOpModelTelemetry,
@@ -64,6 +77,7 @@ class RedBearRerank(BaseDocumentCompressor):
         model: Any | None = None,
         owns_model: bool | None = None,
         telemetry: ModelTelemetry | None = None,
+        multimodal_adapter: Any | None = None,
     ):
         object.__setattr__(self, "_config", config)
         object.__setattr__(self, "_telemetry", telemetry or NoOpModelTelemetry())
@@ -73,10 +87,21 @@ class RedBearRerank(BaseDocumentCompressor):
             model is None if owns_model is None else owns_model,
         )
         object.__setattr__(self, "_closed", False)
+        is_qwen3_vl = is_qwen3_vl_reranker(config)
+        object.__setattr__(self, "_is_qwen3_vl", is_qwen3_vl)
+        object.__setattr__(
+            self,
+            "_multimodal_adapter",
+            multimodal_adapter
+            if multimodal_adapter is not None
+            else (DashScopeMultimodalRerankAdapter(config) if is_qwen3_vl else None),
+        )
         object.__setattr__(
             self,
             "_model",
-            model if model is not None else self._create_model(config),
+            model
+            if model is not None
+            else (None if is_qwen3_vl else self._create_model(config)),
         )
 
     def _create_model(self, config: ResolvedModelConfig):
@@ -129,6 +154,27 @@ class RedBearRerank(BaseDocumentCompressor):
     ) -> list[dict[str, Any]]:
         started = time.perf_counter()
         try:
+            if self._is_qwen3_vl:
+                views = [
+                    RerankCandidateView(
+                        chunk_index=index,
+                        kind="text",
+                        content=self._document_text(document),
+                    )
+                    for index, document in enumerate(documents)
+                ]
+                resolved_top_n = len(views) if top_n is None or top_n < 0 else top_n
+                return [
+                    {
+                        "index": score.input_index,
+                        "relevance_score": score.relevance_score,
+                    }
+                    for score in self.rerank_multimodal(
+                        TextEmbeddingContent(text=query),
+                        views,
+                        top_n=resolved_top_n,
+                    )
+                ]
             return self._model.rerank(
                 documents=documents,
                 query=query,
@@ -143,6 +189,45 @@ class RedBearRerank(BaseDocumentCompressor):
                 started_at=started,
             )
             raise
+
+    @staticmethod
+    def _document_text(document: str | Document | dict) -> str:
+        if isinstance(document, str):
+            return document
+        if isinstance(document, Document):
+            return document.page_content
+        for key in ("text", "page_content"):
+            value = document.get(key)
+            if isinstance(value, str):
+                return value
+        raise ValueError("qwen3-vl text rerank documents require text content")
+
+    def rerank_multimodal(
+        self,
+        query: RerankQuery,
+        views: list[RerankCandidateView] | tuple[RerankCandidateView, ...],
+        *,
+        top_n: int,
+    ) -> list[RerankScore]:
+        if not self._is_qwen3_vl or self._multimodal_adapter is None:
+            raise NotImplementedError(
+                f"Multimodal rerank is not supported by {self._config.model_name}"
+            )
+        return self._multimodal_adapter.rerank(query, views, top_n=top_n)
+
+    async def arerank_multimodal(
+        self,
+        query: RerankQuery,
+        views: list[RerankCandidateView] | tuple[RerankCandidateView, ...],
+        *,
+        top_n: int,
+    ) -> list[RerankScore]:
+        return await asyncio.to_thread(
+            self.rerank_multimodal,
+            query,
+            views,
+            top_n=top_n,
+        )
 
     def _close_target(self):
         close = getattr(self._model, "close", None)

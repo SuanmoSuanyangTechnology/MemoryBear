@@ -14,9 +14,9 @@ import { forwardRef, useImperativeHandle, useState } from 'react';
 import { Form, Input, App, Button } from 'antd';
 import { useTranslation } from 'react-i18next';
 
-import type { KeyConfigModalForm, ProviderModelItem, KeyConfigModalRef, KeyConfigModalProps } from '../types';
+import type { KeyConfigModalForm, ProviderModelItem, KeyConfigModalRef, KeyConfigModalProps, Provider } from '../types';
 import RbModal from '@/components/RbModal'
-import { updateProviderApiKeys } from '@/api/models'
+import { updateProviderApiKeys, getModelProviderList } from '@/api/models'
 
 /**
  * Key configuration modal component
@@ -31,6 +31,7 @@ const KeyConfigModal = forwardRef<KeyConfigModalRef, KeyConfigModalProps>(({
   const [form] = Form.useForm<KeyConfigModalForm>();
   const [loading, setLoading] = useState(false)
   const [abortController, setAbortController] = useState<AbortController | null>(null)
+  const [currentProvider, setCurrentProvider] = useState<Provider | null>(null)
 
   /** Close modal and reset state */
   const handleClose = () => {
@@ -40,12 +41,18 @@ const KeyConfigModal = forwardRef<KeyConfigModalRef, KeyConfigModalProps>(({
     form.resetFields();
     setLoading(false)
     setVisible(false);
+    setCurrentProvider(null)
   };
 
   /** Open modal with provider model data */
   const handleOpen = (vo: ProviderModelItem) => {
     setVisible(true);
     setModel(vo);
+    getModelProviderList().then((res) => {
+      const providerList = res as Provider[]
+      const filter = providerList.find(item => item.provider === vo.provider)
+      setCurrentProvider(filter || null)
+    })
   };
   /** Save API key configuration */
   const handleSave = () => {
@@ -107,7 +114,7 @@ const KeyConfigModal = forwardRef<KeyConfigModalRef, KeyConfigModalProps>(({
         <Form.Item
           name="api_base"
           label={t('modelNew.api_base')}
-          rules={[{ required: true, message: t('common.inputPlaceholder', { title: t('modelNew.api_base') }) }]}
+          rules={[{ required: !currentProvider?.default_api_base, message: t('common.inputPlaceholder', { title: t('modelNew.api_base') }) }]}
         >
           <Input placeholder="https://api.example.com/v1" />
         </Form.Item>

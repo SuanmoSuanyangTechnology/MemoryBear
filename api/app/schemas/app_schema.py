@@ -6,6 +6,7 @@ from enum import Enum, StrEnum
 from pydantic import BaseModel, Field, ConfigDict, field_serializer, field_validator, model_serializer, model_validator
 
 from app.core.utils.datetime_utils import to_timestamp_ms
+from app.schemas.rerank_schema import RerankMode, RerankWeights
 from app.schemas.workflow_schema import WorkflowConfigCreate
 
 
@@ -110,6 +111,8 @@ class KnowledgeBaseConfig(BaseModel):
     retrieve_type: str = Field(default="hybrid", description="检索方式participle｜ semantic｜hybrid")
     # 混合检索下是否启用证据图谱通道（仅 hybrid 类型生效）；1=启用, 0=关闭, None=沿用请求级兜底
     enable_graph_retrieval: Optional[int] = Field(default=None, ge=0, le=1, description="混合检索下是否启用证据图谱通道")
+    rerank_mode: RerankMode | None = None
+    rerank_weights: RerankWeights | None = None
 
 
 class KnowledgeRetrievalConfig(BaseModel):
@@ -126,6 +129,8 @@ class KnowledgeRetrievalConfig(BaseModel):
     )
     reranker_id: Optional[str] = Field(default=None, description="多知识库结果融合的模型ID")
     reranker_top_k: int = Field(default=10, ge=0, le=1024, description="多知识库结果融合的模型参数")
+    rerank_mode: RerankMode | None = None
+    rerank_weights: RerankWeights | None = None
     use_graph: bool = Field(default=False, description="是否使用图搜索")
 
 
@@ -671,6 +676,22 @@ class AppChatRequest(BaseModel):
     thinking: bool = Field(default=False, description="是否启用深度思考（需Agent配置支持）")
     files: List[FileInput] = Field(default_factory=list, description="附件列表（支持多文件）")
     version: Optional[uuid.UUID] = Field(default=None, description="指定发布版本ID，不传则使用当前生效版本")
+
+    @field_validator("conversation_id")
+    @classmethod
+    def _validate_conversation_id(cls, v: Optional[str]) -> Optional[str]:
+        """conversation_id 必须是合法 UUID。
+
+        非 UUID 字符串会在 DB 层触发 DataError 并被包装成 500，
+        这里前置校验，返回 422 参数错误。
+        """
+        if v is None or not str(v).strip():
+            return v
+        try:
+            uuid.UUID(str(v).strip())
+        except (ValueError, AttributeError, TypeError):
+            raise ValueError("conversation_id 必须是合法的 UUID")
+        return str(v).strip()
 
 
 class DraftRunRequest(BaseModel):

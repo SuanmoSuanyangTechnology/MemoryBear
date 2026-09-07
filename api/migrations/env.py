@@ -90,6 +90,20 @@ import_all_models_from_package('app.models') # <--- NEW CALL
 # ... etc.
 
 
+def include_object(obj, name, type_, reflected, compare_to):
+    """autogenerate 只对比老单体链自有表，避免把微服务同库自有表判为删除。
+
+    微服务独立迁移链与老单体链（alembic_version）共存于同一库：identity 链建
+    acl_rules/audit_logs（version_table=alembic_version_identity），老单体侧不做
+    过滤时，autogenerate 会把库中存在但不在 Base.metadata 的这些表生成 drop_table，
+    误执行即毁微服务数据。identity 侧已做对称过滤（identity-service/migrations/env.py）。
+    仅影响 autogenerate 对比；upgrade/downgrade 按脚本执行不受影响。
+    """
+    if type_ == "table":
+        return name in Base.metadata.tables
+    return True
+
+
 def run_migrations_offline() -> None:
     """Run migrations in 'offline' mode.
 
@@ -108,6 +122,7 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
+        include_object=include_object,
     )
 
     with context.begin_transaction():
@@ -129,7 +144,8 @@ def run_migrations_online() -> None:
 
     with connectable.connect() as connection:
         context.configure(
-            connection=connection, target_metadata=target_metadata, transaction_per_migration=True
+            connection=connection, target_metadata=target_metadata,
+            transaction_per_migration=True, include_object=include_object,
         )
 
         with context.begin_transaction():

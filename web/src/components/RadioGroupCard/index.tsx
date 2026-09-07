@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-02-02 15:19:30 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-07-02 16:30:15
+ * @Last Modified time: 2026-09-03 14:20:12
  */
 /**
  * RadioGroupCard Component
@@ -45,9 +45,9 @@ interface RadioCardProps extends Omit<RadioGroupProps, 'onChange'> {
   /** Array of radio card options */
   options: RadioCardOption[];
   /** Callback fired when value changes (for side effects) */
-  onValueChange?: (value: string | null | undefined, option?: RadioCardOption) => void;
+  onValueChange?: (value?: string | null, option?: RadioCardOption) => void;
   /** Callback fired when selection changes */
-  onChange?: (value: string | null | undefined, option?: RadioCardOption) => void;
+  onChange?: (value?: string | null, option?: RadioCardOption) => void;
   /** Custom render function for each option */
   itemRender?: (option: RadioCardOption) => ReactNode;
   /** Whether clicking selected option clears selection */

@@ -41,4 +41,12 @@ export const applicationPart2 = {
       moderation_input_output_required: 'Review Input and Output Content Required',
       moderation_input_output_required_desc: 'At least one of review input and review output must be enabled',
       execution_id: 'Execution ID',
+      rerank_mode: 'Rerank Mode',
+      reranking_model: 'Model Rerank',
+      weighted_score: 'Weighted Score Rerank',
+      semantic_weight: 'Semantic Weight',
+      participle_weight: 'Keyword Weight',
+      weight_balance: 'Weight Balance',
+      semantic_label: 'Semantic',
+      keyword_label: 'Keyword',
 }

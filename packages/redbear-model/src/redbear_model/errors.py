@@ -2,11 +2,57 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from uuid import UUID
+
+
+def _status_code(value: object) -> int | None:
+    status = getattr(value, "status_code", None)
+    if status is None and isinstance(value, Mapping):
+        status = value.get("status_code")
+    try:
+        return int(status) if status is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def is_provider_rate_limit_error(exc: BaseException) -> bool:
+    """Return whether an exception chain contains a provider HTTP 429."""
+
+    pending: list[BaseException] = [exc]
+    seen: set[int] = set()
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        if _status_code(current) == 429 or _status_code(
+            getattr(current, "response", None)
+        ) == 429:
+            return True
+        for wrapped in (current.__cause__, current.__context__):
+            if isinstance(wrapped, BaseException):
+                pending.append(wrapped)
+    return False
 
 
 class RedBearModelError(Exception):
     """Base class for public model errors."""
+
+
+class InvalidProviderResponseError(RedBearModelError):
+    def __init__(self, operation: str, reason: str):
+        super().__init__(f"Invalid {operation} provider response: {reason}")
+
+
+class MultimodalInputLimitError(RedBearModelError):
+    def __init__(self, operation: str):
+        super().__init__(f"The {operation} input exceeds the provider limit")
+
+
+class UnsupportedMultimodalModelError(RedBearModelError):
+    def __init__(self, operation: str):
+        super().__init__(f"The configured model does not support {operation}")
 
 
 class ModelConfigNotFoundError(RedBearModelError):

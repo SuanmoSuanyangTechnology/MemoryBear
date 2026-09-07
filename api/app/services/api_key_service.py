@@ -17,6 +17,7 @@ from app.core.exceptions import (
 )
 from app.core.logging_config import get_business_logger
 from app.core.utils.datetime_utils import as_utc_aware, utcnow_naive
+from app.invalidation_notify import api_key_hash, notify_api_key_created_sync, notify_api_key_sync
 from app.models.api_key_model import ApiKey, ApiKeyType
 from app.models.app_model import App
 from app.repositories.api_key_repository import ApiKeyRepository, ApiKeyLogRepository
@@ -128,6 +129,10 @@ class ApiKeyService:
                 "api_key_name": data.name,
                 "type": data.type
             })
+
+            # 决策 #11 修订：创建带明文通知（identity 删旧 + 直连 DB 组装快照写回，
+            # 新 key 首次访问即可用；仅 hash 的吊销消息会漏建快照）
+            notify_api_key_created_sync(api_key)
 
             return api_key_obj
 
@@ -246,11 +251,14 @@ class ApiKeyService:
     ) -> bool:
         """删除 API Key"""
         api_key = ApiKeyService.get_api_key(db, api_key_id, workspace_id)
+        old_plain = api_key.api_key  # commit 前捕获明文（expire_on_commit 会触发 reload）
 
         ApiKeyRepository.delete(db, api_key_id)
         db.commit()
 
         logger.info("API Key 删除成功", extra={"api_key_id": str(api_key_id)})
+        # 决策 #11 修订：API key 吊销发通知（hash 与 auth_sdk 一致），identity 删除 api_key:{hash} 快照
+        notify_api_key_sync(api_key_hash(old_plain))
         return True
 
     @staticmethod
@@ -269,12 +277,19 @@ class ApiKeyService:
         # 生成新的 API Key
         new_api_key = generate_api_key(api_key.type)
 
+        # 决策 #11 修订：API key 吊销发通知（hash 与 auth_sdk 一致），identity 删除 api_key:{hash} 快照
+        notify_api_key_sync(api_key_hash(api_key.api_key))
+
         # 更新
         ApiKeyRepository.update(db, api_key_id, {
             "api_key": new_api_key
         })
         db.commit()
         db.refresh(api_key)
+
+        # 决策 #11 修订：重建同样带明文通知（旧 key 吊销消息仅 hash → 只删旧快照，
+        # 新 key 的快照须由带明文消息重建，否则首次访问 401）
+        notify_api_key_created_sync(new_api_key)
 
         logger.info("API Key 重新生成成功", extra={"api_key_id": str(api_key_id)})
         return api_key
@@ -402,18 +417,27 @@ class RateLimiterService:
 
         rate_limit_disabled=True 的 Key 跳过全部限流检查（如预置的 MemorySkills 空间 Key）。
         """
-        if api_key.rate_limit_disabled:
+        # 配额查询可能因 premium 表不存在而 rollback 当前 AsyncSession，导致传入的
+        # ORM 实例属性全部过期。必须在任何 await/数据库操作前快照后续所需标量，
+        # 避免 rollback 后访问 api_key.* 触发 MissingGreenlet。
+        rate_limit_disabled = api_key.rate_limit_disabled
+        api_key_id = api_key.id
+        workspace_id = api_key.workspace_id
+        api_key_rate_limit = api_key.rate_limit
+        daily_request_limit = api_key.daily_request_limit
+
+        if rate_limit_disabled:
             return True, "", {}
 
         # 1. 取套餐限额与 api_key 自身限额的最小值
-        effective_limit = api_key.rate_limit
+        effective_limit = api_key_rate_limit
         tenant_limit = None
         if db is not None:
             try:
                 from app.models.workspace_model import Workspace
                 from app.core.quota_manager import get_api_ops_rate_limit, get_api_ops_rate_limit_async
 
-                cache_key = f"tenant_api_ops_limit:{api_key.workspace_id}"
+                cache_key = f"tenant_api_ops_limit:{workspace_id}"
                 cached = await self.redis.get(cache_key)
                 if cached is not None:
                     try:
@@ -423,7 +447,7 @@ class RateLimiterService:
                         tenant_limit = None
 
                 if cached is None:
-                    stmt = select(Workspace).where(Workspace.id == api_key.workspace_id)
+                    stmt = select(Workspace).where(Workspace.id == workspace_id)
                     if isinstance(db, AsyncSession):
                         result = await db.execute(stmt)
                     else:
@@ -439,15 +463,15 @@ class RateLimiterService:
                         tenant_limit = None
 
                 if tenant_limit:
-                    effective_limit = min(api_key.rate_limit, tenant_limit)
+                    effective_limit = min(api_key_rate_limit, tenant_limit)
             except Exception as e:
                 logger.warning(f"获取套餐限额失败，使用 api_key 自身限额: {e}")
 
         # 用最终有效限额做 QPS 检查
-        qps_ok, qps_info = await self.check_qps(api_key.id, effective_limit)
+        qps_ok, qps_info = await self.check_qps(api_key_id, effective_limit)
         if not qps_ok:
             # 判断是套餐限额触发还是 api_key 自身限额触发
-            if tenant_limit and effective_limit == tenant_limit and api_key.rate_limit > tenant_limit:
+            if tenant_limit and effective_limit == tenant_limit and api_key_rate_limit > tenant_limit:
                 error_msg = "Tenant limit exceeded"
             else:
                 error_msg = "QPS limit exceeded"
@@ -459,8 +483,8 @@ class RateLimiterService:
 
         # 2. 检查日调用量
         daily_ok, daily_info = await self.check_daily_requests(
-            api_key.id,
-            api_key.daily_request_limit
+            api_key_id,
+            daily_request_limit
         )
         if not daily_ok:
             return False, "Daily request limit exceeded", {

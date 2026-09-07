@@ -357,6 +357,23 @@ class KnowledgeSettings(BaseSettings):
         ge=1,
         validation_alias="KB_RESULT_EXPIRES_SECONDS",
     )
+    # Auth gateway cut-over (评审稿 4.3)：direct 社区默认（独立部署无需企业包）；
+    # gateway（企业版双通道）需私有 enterprise-extensions 包，缺失即启动期报错——
+    # 企业部署须显式设 KB_AUTH_MODE=gateway（外层仓库 k8s 已显式声明，不依赖默认值）
+    kb_auth_mode: str = Field(default="direct", validation_alias="KB_AUTH_MODE")
+    kb_service_name: str = Field(default="kb", validation_alias="KB_SERVICE_NAME")
+    kb_jwks_url: str | None = Field(default=None, validation_alias="KB_JWKS_URL")
+    kb_secret: SecretStr | None = Field(default=None, validation_alias="KB_SECRET")
+    kb_kill_switch_file: str | None = Field(
+        default=None,
+        validation_alias="KB_KILL_SWITCH_FILE",
+    )
+    # direct 模式 API key 集中校验端点（identity POST /internal/api-key-verify）；None 时
+    # direct 模式 x-api-key 请求 fail-closed 拒绝
+    kb_api_key_verify_url: str | None = Field(
+        default=None,
+        validation_alias="KB_API_KEY_VERIFY_URL",
+    )
 
     # Knowledge business environment variables
     max_file_size: int = Field(

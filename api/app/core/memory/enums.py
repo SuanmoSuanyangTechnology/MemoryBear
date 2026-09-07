@@ -50,6 +50,15 @@ class Neo4jNodeType(StrEnum):
     RAG = "Rag"
     HISTORY = "HISTORY"
 
+class MemoryDisplayType(StrEnum):
+    """检索结果对外展示的稳定记忆分类。"""
+
+    PROFILE = "profile"
+    FACT = "fact"
+    ENTITY = "entity"
+    SUMMARY = "summary"
+    FILE = "file"
+    UNKNOWN = "unknown"
 
 class TripletPredicate(Enum):
     """

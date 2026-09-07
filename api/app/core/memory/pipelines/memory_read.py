@@ -7,6 +7,13 @@ import uuid
 
 from app.core.memory.alerts import enqueue_memory_retrieval_alert_safely
 from app.core.memory.enums import Neo4jNodeType, SearchStrategy, StorageType
+from app.core.memory.models.service_models import MemorySearchResult
+from app.core.memory.pipelines.base_pipeline import BasePipeline, ModelClientMixin
+from app.core.memory.alerts import enqueue_memory_retrieval_alert_safely
+from app.core.memory.read_services.search_engine.quick_retrieval_dedup import (
+    QUICK_SEARCH_ENTITY_LIMIT,
+    log_quick_retrieval_dedup_safely,
+)
 from app.core.memory.exceptions import (
     MemoryRetrievalBusinessError,
     MemoryRetrievalImpact,
@@ -222,6 +229,17 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
             if self._notification_error is not None:
                 await self._enqueue_retrieval_alert(self._notification_error)
             raise
+
+        # 同源去重已在检索层的全局截断前完成，这里只负责写日志：
+        # operation_id 只有 pipeline 层持有。
+        if search_switch in {SearchStrategy.QUICK, SearchStrategy.EXPRESS} and res.dedup_summary:
+            log_quick_retrieval_dedup_safely(
+                operation_id=self._retrieval_operation_id,
+                search_mode=search_switch.name.lower(),
+                before_count=res.dedup_summary.get("before_count", 0),
+                after_count=res.dedup_summary.get("after_count", 0),
+                suppression_records=res.dedup_summary.get("suppression_records", []),
+            )
 
         if search_switch in [SearchStrategy.QUICK, SearchStrategy.EXPRESS, SearchStrategy.META]:
             await self._emit_result_ready(res, started_at)
@@ -738,6 +756,8 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
         })
         combined = memory_l0 + express_res
         combined.execution_trace = express_res.execution_trace
+        # __add__ 只合并 memories/relations/content_str，其余字段必须显式传递。
+        combined.dedup_summary = express_res.dedup_summary
         return combined
 
     async def _quick_read(
@@ -762,6 +782,8 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
         })
         combined = memory_l0 + quick_res
         combined.execution_trace = quick_res.execution_trace
+        # __add__ 只合并 memories/relations/content_str，其余字段必须显式传递。
+        combined.dedup_summary = quick_res.dedup_summary
         return combined
 
     async def _conv_history(self) -> MemorySearchResult:

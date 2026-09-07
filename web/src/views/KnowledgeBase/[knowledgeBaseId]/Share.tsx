@@ -182,7 +182,11 @@ const Share: FC = () => {
         {/* <p className="rb:text-gray-600 rb:mt-2">{knowledgeBase.description || t('knowledgeBase.noDescription')}</p> */}
         <span className='rb:text-white rb:text-xs rb:bg-blue-500 rb:px-1 rb:py-0.5 rb:rounded'>{knowledgeBase.permission_id}</span>
         <Popover
-          content={<InfoPanel title={t('knowledgeBase.knowledgeBaseInfo')} items={infoItems} />}
+          content={
+            <div className="rb:max-h-75 rb:overflow-y-auto">
+              <InfoPanel title={t('knowledgeBase.knowledgeBaseInfo')} items={infoItems} />
+            </div>
+          }
           trigger="hover"
           placement="bottomLeft"
           arrow={false}
@@ -192,16 +196,16 @@ const Share: FC = () => {
           >{t('knowledgeBase.viewBasicInfo')}</span>
         </Popover>
       </Flex>
-      <Flex align="center" gap={8} className="rb:w-full rb:mb-5!">
+      <Flex align="center" gap={8} className="rb:w-full rb:mb-3!">
         <img src={shareUserIcon} className='rb:size-4 rb:ml-2' />
           <span className='rb:text-gray-500 rb:text-xs'>{knowledgeBase.created_by}</span>
           <img src={timestampIcon} className='rb:size-4 rb:ml-2' />
           <span className='rb:text-gray-500 rb:text-xs'>{formatDateTime(knowledgeBase.created_at)}</span>
       </Flex>
       <Flex gap={16} className="rb:flex-1 rb:min-h-0">
-        <Flex vertical className="rb:flex-1 rb:p-4! rb:border rb:border-[#DFE4ED] rb:bg-white rb:rounded-xl rb:overflow-hidden">
-          <Flex vertical gap={8} className='rb:txt-left rb:mb-5! rb:shrink-0'>
-            <h1 className="rb:text-lg rb:font-bold">{t('knowledgeBase.knowledgeBase')} {t('knowledgeBase.recallTest')}</h1>
+        <Flex vertical className="rb:flex-1 rb:p-4! rb-border rb:bg-white rb:rounded-xl rb:overflow-hidden">
+          <Flex vertical gap={8} className='rb:txt-left rb:mb-3! rb:shrink-0'>
+            <h1 className="rb:text-[16px] rb:font-bold">{t('knowledgeBase.knowledgeBase')} {t('knowledgeBase.recallTest')}</h1>
             <span className='rb:text-gray-500 rb:text-xs'>{t('knowledgeBase.recallTestDescription')}</span>
           </Flex>
           <div className='rb:flex-1 rb:min-h-0'>

@@ -59,6 +59,9 @@ _LEGACY_ERROR_RESPONSES = {
     }
     for status_code in (400, 404, 409, 500)
 }
+_RERANK_VALIDATION_FIELDS = frozenset({"rerank_mode", "rerank_weights"})
+_RERANK_VALIDATION_MESSAGE = "Invalid rerank configuration"
+_RETRIEVAL_VALIDATION_MESSAGE = "Invalid retrieval request"
 
 
 def _request_language(request: Request) -> str:
@@ -72,6 +75,13 @@ def _request_language(request: Request) -> str:
 def _http_message(request: Request, status_code: int, detail: object) -> str:
     language = _request_language(request)
     return _HTTP_MESSAGES[language].get(status_code, str(detail))
+
+
+def _is_rerank_validation_error(exc: RequestValidationError) -> bool:
+    return any(
+        any(part in _RERANK_VALIDATION_FIELDS for part in error.get("loc", ()))
+        for error in exc.errors()
+    )
 
 
 def create_app(settings: KnowledgeSettings | None = None) -> FastAPI:
@@ -104,6 +114,25 @@ def create_app(settings: KnowledgeSettings | None = None) -> FastAPI:
     )
     application.state.runtime = runtime
     application.add_middleware(TraceIdMiddleware)
+    # 鉴权最外层（后注册者最外层）：无凭据请求在路由前即 401
+    from .auth import KbAuthConfig, KbAuthMiddleware
+
+    application.add_middleware(
+        KbAuthMiddleware,
+        kb_auth=KbAuthConfig(
+            auth_mode=service_settings.kb_auth_mode,
+            service_name=service_settings.kb_service_name,
+            kill_switch_file=service_settings.kb_kill_switch_file,
+            jwks_url=service_settings.kb_jwks_url,
+            secret=(
+                service_settings.kb_secret.get_secret_value()
+                if service_settings.kb_secret is not None
+                else None
+            ),
+            api_key_verify_url=service_settings.kb_api_key_verify_url,
+            redis=runtime.redis.client,
+        ),
+    )
     application.include_router(internal_v1_router)
 
     @application.exception_handler(RequestValidationError)
@@ -133,6 +162,26 @@ def create_app(settings: KnowledgeSettings | None = None) -> FastAPI:
             request.headers.get("X-KB-Source"),
             validation_errors,
         )
+        if request.url.path.endswith("/chunks/retrieval"):
+            return JSONResponse(
+                status_code=400,
+                headers={TRACE_ID_HEADER: trace_id},
+                content=fail(
+                    code=400,
+                    msg=_http_message(request, 400, _RETRIEVAL_VALIDATION_MESSAGE),
+                    error=_RETRIEVAL_VALIDATION_MESSAGE,
+                ),
+            )
+        if _is_rerank_validation_error(exc):
+            return JSONResponse(
+                status_code=400,
+                headers={TRACE_ID_HEADER: trace_id},
+                content=fail(
+                    code=400,
+                    msg=_http_message(request, 400, _RERANK_VALIDATION_MESSAGE),
+                    error=_RERANK_VALIDATION_MESSAGE,
+                ),
+            )
         return await request_validation_exception_handler(request, exc)
 
     @application.exception_handler(KnowledgeError)

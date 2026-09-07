@@ -27,11 +27,12 @@ def _default_graph_config() -> dict[str, Any]:
 def resolve_layout_recognize(
     parser_config: Mapping[str, Any] | None,
 ) -> Literal["plain", "mineru", "textln"]:
+    """Default missing layouts to Plain and unsupported explicit values to MinerU."""
     if parser_config is None or "layout_recognize" not in parser_config:
         return "plain"
     raw_value = parser_config["layout_recognize"]
     if not isinstance(raw_value, str):
-        raise GraphPipelineConfigError(f"unsupported layout_recognize: {raw_value!r}")
+        return "mineru"
     normalized = raw_value.strip().lower()
     aliases = {
         "plain": "plain",
@@ -40,10 +41,7 @@ def resolve_layout_recognize(
         "mineru": "mineru",
         "textln": "textln",
     }
-    try:
-        return aliases[normalized]
-    except KeyError:
-        raise GraphPipelineConfigError(f"unsupported layout_recognize: {raw_value}") from None
+    return aliases.get(normalized, "mineru")
 
 
 def build_default_knowledge_parser_config() -> dict[str, Any]:

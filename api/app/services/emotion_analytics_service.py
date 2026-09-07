@@ -50,9 +50,17 @@ class EmotionAnalyticsService:
         emotion_repo: 情绪数据仓储实例
     """
 
-    def __init__(self):
-        """初始化情绪分析服务"""
-        connector = Neo4jConnector(shared_driver=True)
+    def __init__(self, shared_driver: bool = True):
+        """初始化情绪分析服务
+
+        Args:
+            shared_driver: 是否使用进程级共享 driver。
+                FastAPI 进程（单事件循环）保持默认 True；
+                Celery 任务内因事件循环可能被其它任务的 asyncio.run() 更换
+                （共享 driver 绑定旧 loop 会报 "Future attached to a different
+                loop"），应传 False 使用任务级独立 driver，并在用完后 close。
+        """
+        connector = Neo4jConnector(shared_driver=shared_driver)
         self.emotion_repo = EmotionRepository(connector)
         logger.info("情绪分析服务初始化完成")
 

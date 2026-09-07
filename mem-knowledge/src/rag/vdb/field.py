@@ -20,6 +20,7 @@ class Field(StrEnum):
     SORT_ID = "metadata.sort_id"
     STATUS = "metadata.status"
     VISION_TEXT = "metadata.vision_text"
+    ASSET_FILE_IDS = "metadata.asset_file_ids"
     CHUNK_TYPE = "chunk_type"
     QUESTION = "question"
     ANSWER = "answer"

@@ -15,6 +15,29 @@
     "database_error": "Database operation failed",
     "file_operation_error": "File operation failed"
   },
+  "llm": {
+    "authentication_failed": "Invalid API Key, please check your configuration",
+    "permission_denied": "API Key permission denied or locked",
+    "quota_exceeded": "Model quota exhausted, please contact admin to top up",
+    "rate_limited": "Too many requests, please try again later",
+    "timeout": "Model response timed out, please try again later",
+    "connection_failed": "Failed to connect to model service, please check URL configuration",
+    "invalid_request": "Invalid request parameters, please check your input or configuration",
+    "model_not_found": "Model not found or has been taken offline",
+    "capability_mismatch": "Model does not support this capability, please check configuration",
+    "server_error": "Model service error, please try again later",
+    "unknown": "An unknown error occurred during model invocation",
+    "api_key_missing": "No available API Key in the current configuration",
+    "empty_response": "Model did not return valid content",
+    "attachment_prefix": "Attachment parsing failed: ",
+    "subjects": {
+      "model": "Model",
+      "image": "Image",
+      "audio": "Audio",
+      "video": "Video",
+      "document": "Document"
+    }
+  },
   "auth": {
     "invalid_credentials": "Invalid username or password",
     "token_expired": "Session expired, please login again",

@@ -1,4 +1,5 @@
 """App 消息反馈服务接口 - 基于 API Key 认证（点赞/点踩，不含收藏）"""
+import json
 import uuid
 
 from fastapi import APIRouter, Body, Depends, Query, Request
@@ -57,7 +58,13 @@ async def submit_message_feedback(
     与 /v1/app/chat、/v1/memory/read 等接口一致：标量 body 占位 + request.json() 手动解析，
     避免 api_key_auth（Pydantic 模型）与 body 模型共存时 FastAPI 嵌入式校验导致的包裹要求。
     """
-    payload = app_schema.MessageFeedbackRequest(**(await request.json()))
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, UnicodeDecodeError, ValueError) as exc:
+        raise BusinessException("请求体不是合法的 JSON", BizCode.INVALID_PARAMETER, cause=exc) from exc
+    if not isinstance(body, dict):
+        raise BusinessException("请求体必须是 JSON 对象", BizCode.INVALID_PARAMETER)
+    payload = app_schema.MessageFeedbackRequest(**body)
 
     if not user_id:
         raise BusinessException("user_id 不能为空", BizCode.INVALID_PARAMETER)

@@ -11,14 +11,14 @@
  */
 
 import { forwardRef, useEffect, useImperativeHandle, useState } from 'react';
-import { Form, Input, App, Checkbox, Button, Row, Col } from 'antd';
+import { Form, Input, App, Checkbox, Button, Row, Col, Select } from 'antd';
 import { useTranslation } from 'react-i18next';
 
-import type { CustomModelForm, ModelListItem, CustomModelModalRef, CustomModelModalProps, Capability } from '../types';
+import type { CustomModelForm, ModelListItem, CustomModelModalRef, CustomModelModalProps, Capability, Provider } from '../types';
 import RbModal from '@/components/RbModal'
 import CustomSelect from '@/components/CustomSelect'
 import UploadImages from '@/components/Upload/UploadImages'
-import { updateCustomModel, addCustomModel, modelTypeUrl, modelProviderUrl } from '@/api/models'
+import { updateCustomModel, addCustomModel, modelTypeUrl, getModelProviderList } from '@/api/models'
 import { getFileLink } from '@/api/fileStorage'
 import { validateSquareImage, stringRegExp } from '@/utils/validator'
 import { formatModelType } from '../utils'
@@ -41,6 +41,7 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
   const isOmni = Form.useWatch(['is_omni'], form);
   const isThinking = Form.useWatch(['is_thinking'], form);
   const thinkingOnly = Form.useWatch(['thinking_only'], form);
+  const [currentProvider, setCurrentProvider] = useState<Provider | null>(null)
 
   useEffect(() => {
     if (isOmni) {
@@ -85,7 +86,15 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
       form.resetFields();
     }
     setVisible(true);
+    getProviderList()
   };
+  const [providerList, setProviderList] = useState<Provider[]>([])
+  const getProviderList = () => {
+    getModelProviderList()
+      .then(res => {
+        setProviderList((res || []) as Provider[])
+      })
+  }
   /** Update or create custom model */
   const handleUpdate = (data: CustomModelForm) => {
     setLoading(true)
@@ -114,7 +123,7 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
           type,
         }
         if (!['embedding', 'rerank'].includes(type as string)) {
-          let capability: Capability[] = is_omni ? ["vision", "audio", 'video'] : []
+          const capability: Capability[] = is_omni ? ["vision", "audio", 'video'] : []
 
           if (!is_omni) {
             if (is_vision) {
@@ -162,6 +171,16 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
       .catch((err) => {
         console.log('err', err)
       });
+  }
+  const handleChangeProvider = (value?: string) => {
+    const filter = providerList.find((item) => item.provider === value)
+    if (filter) {
+      setCurrentProvider(filter)
+      form.setFieldValue(["api_keys", 0, "api_base"], filter.default_api_base)
+    } else {
+      setCurrentProvider(null)
+      form.setFieldValue(["api_keys", 0, "api_base"], undefined)
+    }
   }
 
   /** Expose methods to parent component */
@@ -225,11 +244,11 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
           label={t('modelNew.provider')}
           rules={[{ required: true, message: t('common.selectPlaceholder', { title: t('modelNew.provider') }) }]}
         >
-          <CustomSelect
-            url={modelProviderUrl}
-            hasAll={false}
+          <Select
             disabled={isEdit}
-            format={(items) => items.map((item) => ({ label: String(item).charAt(0).toUpperCase() + String(item).slice(1), value: String(item) }))}
+            placeholder={t('common.pleaseSelect')}
+            options={providerList.map((item) => ({ label: String(item.provider).charAt(0).toUpperCase() + String(item.provider).slice(1), value: String(item.provider) }))}
+            onChange={handleChangeProvider}
           />
         </Form.Item>
 
@@ -255,7 +274,7 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
             label={t('modelNew.api_base')}
             rules={[{ required: true, message: t('common.inputPlaceholder', { title: t('modelNew.api_base') }) }]}
           >
-            <Input placeholder="https://api.example.com/v1" />
+            <Input placeholder="https://api.example.com/v1" disabled={!!currentProvider?.default_api_base} />
           </Form.Item>
         </>}
 

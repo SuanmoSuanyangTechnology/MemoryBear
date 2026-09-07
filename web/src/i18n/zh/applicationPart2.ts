@@ -39,4 +39,12 @@ export const applicationPart2 = {
       moderation_input_output_required: '审查输入输出内容必填',
       moderation_input_output_required_desc: '审查输入内容和审查输出内容至少启用一项',
       execution_id: '执行ID',
+      rerank_mode: '重排模式',
+      reranking_model: '模型重排',
+      weighted_score: '加权重排',
+      semantic_weight: '语义权重',
+      participle_weight: '词元权重',
+      weight_balance: '权重分配',
+      semantic_label: '语义',
+      keyword_label: '关键词',
 }

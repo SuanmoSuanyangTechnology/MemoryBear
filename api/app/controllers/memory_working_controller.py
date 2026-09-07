@@ -1,12 +1,14 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, Query
 
+from app.core.error_codes import BizCode
+from app.core.exceptions import BusinessException
 from app.core.logging_config import get_api_logger
 from app.core.memory.enums import MemoryMessageSource
 from app.core.response_utils import success
-from app.core.utils.datetime_utils import to_timestamp_ms
+from app.core.utils.datetime_utils import parse_timestamp_to_utc_naive, to_timestamp_ms
 from app.db import get_async_db_context
 from app.dependencies import get_current_user_async, CurrentUserSnapshot
 from app.repositories.memory_message_repository import MemoryMessageRepository
@@ -72,6 +74,11 @@ async def get_conversations(
 @router.get("/{end_user_id}/messages", response_model=ApiResponse)
 async def get_messages(
         conversation_id: uuid.UUID,
+        page: int = Query(default=1, ge=1, description="页码，从 1 开始"),
+        pagesize: int = Query(default=20, ge=1, le=100, description="每页数量，最大 100"),
+        keyword: str | None = Query(default=None, description="消息正文关键词"),
+        start_date: int | None = Query(default=None, ge=0, description="开始时间（毫秒时间戳，UTC）"),
+        end_date: int | None = Query(default=None, ge=0, description="结束时间（毫秒时间戳，UTC）"),
         current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ):
     """
@@ -79,26 +86,52 @@ async def get_messages(
 
     Args:
         conversation_id (UUID): The ID of the conversation to fetch messages from.
+        page (int): One-based page number.
+        pagesize (int): Number of messages per page.
+        keyword (str | None): Optional keyword matched against message content.
+        start_date (int | None): Optional inclusive UTC start time in milliseconds.
+        end_date (int | None): Optional inclusive UTC end time in milliseconds.
         current_user (CurrentUserSnapshot, optional): The authenticated user.
 
     Returns:
-        ApiResponse: Contains the list of messages in the conversation.
+        ApiResponse: Contains paginated messages and page metadata.
 
     Notes:
         - Uses ConversationService to fetch messages.
-        - Consider paginating results if message history is large.
         - Logging can be added for audit and debugging.
     """
+    keyword, start_at, end_at_exclusive = _normalize_message_filters(
+        keyword=keyword,
+        start_date=start_date,
+        end_date=end_date,
+    )
+
     async with get_async_db_context() as db:
         conversation_service = ConversationService(db)
-        messages_obj = await conversation_service.get_messages_async(
+        messages_obj, total = await conversation_service.get_messages_async(
             conversation_id,
+            page=page,
+            pagesize=pagesize,
+            keyword=keyword,
+            start_at=start_at,
+            end_at_exclusive=end_at_exclusive,
         )
         messages = [
             conversation_schema.Message.model_validate(message)
             for message in messages_obj
         ]
-    return success(data=messages, msg="get conversation history success")
+    return success(
+        data={
+            "items": messages,
+            "page": {
+                "page": page,
+                "pagesize": pagesize,
+                "total": total,
+                "hasnext": (page * pagesize) < total,
+            },
+        },
+        msg="get conversation history success",
+    )
 
 
 @router.get("/{end_user_id}/detail", response_model=ApiResponse)
@@ -152,6 +185,37 @@ def _parse_dialog_at_to_ms(dialog_at: str | None) -> int | None:
         return None
 
 
+def _normalize_message_filters(
+        keyword: str | None,
+        start_date: int | None,
+        end_date: int | None,
+) -> tuple[str | None, datetime | None, datetime | None]:
+    """Normalize shared message keyword and inclusive timestamp filters.
+
+    Args:
+        keyword: Optional message-content keyword.
+        start_date: Optional inclusive UTC start time in milliseconds.
+        end_date: Optional inclusive UTC end time in milliseconds.
+
+    Returns:
+        A normalized keyword, inclusive start datetime, and exclusive end datetime.
+
+    Raises:
+        BusinessException: If the start timestamp is greater than the end timestamp.
+    """
+    if start_date is not None and end_date is not None and start_date > end_date:
+        raise BusinessException("start_date 不能大于 end_date", BizCode.INVALID_PARAMETER)
+
+    normalized_keyword = keyword.strip() if keyword is not None else None
+    if normalized_keyword == "":
+        normalized_keyword = None
+
+    start_at = parse_timestamp_to_utc_naive(start_date)
+    end_at = parse_timestamp_to_utc_naive(end_date)
+    end_at_exclusive = end_at + timedelta(milliseconds=1) if end_at is not None else None
+    return normalized_keyword, start_at, end_at_exclusive
+
+
 @router.get("/{end_user_id}/sources", response_model=ApiResponse)
 async def get_sources(
         end_user_id: uuid.UUID,
@@ -182,6 +246,9 @@ async def get_source_messages(
         source: str = Query(..., description="来源：service_api 或 mcp"),
         page: int = Query(default=1, ge=1, description="页码，从 1 开始"),
         pagesize: int = Query(default=20, ge=1, le=100, description="每页数量，最大 100"),
+        keyword: str | None = Query(default=None, description="消息正文关键词"),
+        start_date: int | None = Query(default=None, ge=0, description="开始时间（毫秒时间戳，UTC）"),
+        end_date: int | None = Query(default=None, ge=0, description="结束时间（毫秒时间戳，UTC）"),
         current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ):
     """按来源分页获取工作记忆消息，按 created_at 从旧到新排列，形成连贯对话流。
@@ -196,13 +263,22 @@ async def get_source_messages(
         source: service_api 或 mcp
         page: 页码（默认 1，最小 1）
         pagesize: 每页数量（默认 20，最小 1，最大 100）
+        keyword: Optional message-content keyword.
+        start_date: Optional inclusive UTC start time in milliseconds.
+        end_date: Optional inclusive UTC end time in milliseconds.
+        current_user: The authenticated user snapshot.
     """
+    keyword, start_at, end_at_exclusive = _normalize_message_filters(
+        keyword=keyword,
+        start_date=start_date,
+        end_date=end_date,
+    )
+
     allowed_sources = {MemoryMessageSource.SERVICE_API.value, MemoryMessageSource.MCP.value}
     if source not in allowed_sources:
         return success(
             data={
                 "items": [],
-                "total": 0,
                 "source": source,
                 "page": {"page": page, "pagesize": pagesize, "total": 0, "hasnext": False},
             },
@@ -216,6 +292,9 @@ async def get_source_messages(
             source=source,
             page=page,
             pagesize=pagesize,
+            keyword=keyword,
+            start_at=start_at,
+            end_at_exclusive=end_at_exclusive,
         )
         items = [
             {
@@ -230,7 +309,6 @@ async def get_source_messages(
     return success(
         data={
             "items": items,
-            "total": total,
             "source": source,
             "page": {
                 "page": page,

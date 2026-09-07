@@ -112,7 +112,7 @@ const tabKeys = ['square', 'list', 'group']
                 <CustomSelect
                   url={modelProviderUrl}
                   hasAll={false}
-                  format={(items) => items.map((item) => ({ label: String(item).charAt(0).toUpperCase() + String(item).slice(1), value: String(item) }))}
+                  format={(items) => items.map((item) => ({ label: String(item.provider).charAt(0).toUpperCase() + String(item.provider).slice(1), value: String(item.provider) }))}
                   className="rb:w-40"
                   allowClear={true}
                   placeholder={t('modelNew.provider')}

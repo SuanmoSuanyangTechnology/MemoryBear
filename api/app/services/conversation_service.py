@@ -1,7 +1,7 @@
 """会话服务"""
 import asyncio
 import uuid
-from datetime import timedelta
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 from typing import Annotated
 from typing import Optional, List, Tuple, Dict, Any
@@ -565,13 +565,35 @@ class ConversationService:
     async def get_messages_async(
             self,
             conversation_id: uuid.UUID,
-            limit: Optional[int] = None,
-            current_only: bool = True
-    ) -> List[Message]:
+            page: int = 1,
+            pagesize: int = 20,
+            current_only: bool = True,
+            keyword: str | None = None,
+            start_at: datetime | None = None,
+            end_at_exclusive: datetime | None = None,
+    ) -> tuple[List[Message], int]:
+        """Retrieve a filtered page of messages for a conversation asynchronously.
+
+        Args:
+            conversation_id: Conversation UUID.
+            page: One-based page number.
+            pagesize: Maximum messages per page.
+            current_only: Whether to return only current message versions.
+            keyword: Optional keyword matched against message content.
+            start_at: Optional inclusive creation-time lower bound.
+            end_at_exclusive: Optional exclusive creation-time upper bound.
+
+        Returns:
+            Messages ordered by creation time and the filtered total count.
+        """
         return await self.message_repo.get_message_by_conversation_id_async(
-            conversation_id,
-            limit,
-            current_only=current_only
+            conversation_id=conversation_id,
+            limit=pagesize,
+            offset=(page - 1) * pagesize,
+            current_only=current_only,
+            keyword=keyword,
+            start_at=start_at,
+            end_at_exclusive=end_at_exclusive,
         )
 
     def _resolve_v1_internal_user_id(
@@ -799,7 +821,7 @@ class ConversationService:
             raise BusinessException("会话不存在", BizCode.NOT_FOUND)
 
         try:
-            messages = await self.message_repo.get_message_by_conversation_id_async(
+            messages, _ = await self.message_repo.get_message_by_conversation_id_async(
                 conversation_id,
                 limit=limit,
                 current_only=True,
@@ -959,6 +981,7 @@ class ConversationService:
             conversation.app_id != app_id
             or conversation.workspace_id != workspace_id
             or conversation.is_active is not True
+            or conversation.is_draft is not False
         ):
             # 为避免根据错误码推断会话/消息是否存在，这里与上方保持同样的 NOT_FOUND 返回
             raise BusinessException("消息不存在", BizCode.NOT_FOUND)
@@ -1057,7 +1080,7 @@ class ConversationService:
         Returns:
             List[dict]: List of message dictionaries with keys 'role' and 'content'.
         """
-        messages = await self.message_repo.get_message_by_conversation_id_async(
+        messages, _ = await self.message_repo.get_message_by_conversation_id_async(
             conversation_id,
             limit=max_history
         )
@@ -1237,6 +1260,19 @@ class ConversationService:
                         "Conversation does not belong to this app",
                         BizCode.INVALID_CONVERSATION
                     )
+                # 归属校验：与 get_v1_conversation_messages / 消息反馈接口口径一致，
+                # 避免仅凭 conversation_id 访问其他终端用户的会话或控制台草稿会话。
+                if user_id is not None and str(conversation.user_id) != str(user_id):
+                    logger.warning(
+                        "Conversation does not belong to the requesting end user.",
+                        extra={
+                            "conversation_id": str(conversation_id),
+                            "app_id": str(app_id),
+                        }
+                    )
+                    raise BusinessException("会话不存在", BizCode.NOT_FOUND)
+                if conversation.is_draft is not False or conversation.is_active is not True:
+                    raise BusinessException("会话不存在", BizCode.NOT_FOUND)
                 return conversation
             except ResourceNotFoundException:
                 logger.warning(

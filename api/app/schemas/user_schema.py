@@ -1,5 +1,5 @@
 from dataclasses import field
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator, ConfigDict
 from typing import Optional, List
 import datetime
 import uuid
@@ -100,8 +100,10 @@ class User(UserBase):
             return int(v)
         return v
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(
+        from_attributes=True,
+        use_enum_values=True
+    )
 
     @field_validator("last_login_at", mode="before")
     @classmethod

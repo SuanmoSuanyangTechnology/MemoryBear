@@ -14,9 +14,9 @@ import { forwardRef, useImperativeHandle, useState } from 'react';
 import { Form, Input, App, Button, Flex } from 'antd';
 import { useTranslation } from 'react-i18next';
 
-import type { ModelListItem, MultiKeyForm, MultiKeyConfigModalRef, MultiKeyConfigModalProps } from '../types';
+import type { ModelListItem, MultiKeyForm, MultiKeyConfigModalRef, MultiKeyConfigModalProps, Provider } from '../types';
 import RbModal from '@/components/RbModal'
-import { addModelApiKey, deleteModelApiKey, getModelInfo } from '@/api/models'
+import { addModelApiKey, deleteModelApiKey, getModelInfo, getModelProviderList } from '@/api/models'
 
 /**
  * Multi-key configuration modal component
@@ -29,6 +29,7 @@ const MultiKeyConfigModal = forwardRef<MultiKeyConfigModalRef, MultiKeyConfigMod
   const [form] = Form.useForm<MultiKeyForm>();
   const [loading, setLoading] = useState(false)
   const [abortController, setAbortController] = useState<AbortController | null>(null)
+  const [currentProvider, setCurrentProvider] = useState<Provider | null>(null)
 
   /** Close modal and refresh parent */
   const handleClose = () => {
@@ -40,12 +41,18 @@ const MultiKeyConfigModal = forwardRef<MultiKeyConfigModalRef, MultiKeyConfigMod
     form.resetFields();
     setLoading(false)
     setVisible(false);
+    setCurrentProvider(null)
   };
 
   /** Open modal with model data */
   const handleOpen = (vo: ModelListItem) => {
     setVisible(true);
     getData(vo)
+    getModelProviderList().then((res) => {
+      const providerList = res as Provider[]
+      const filter = providerList.find(item => item.provider === vo.provider)
+      setCurrentProvider(filter || null)
+    })
   };
 
   /** Fetch model information */
@@ -133,7 +140,7 @@ const MultiKeyConfigModal = forwardRef<MultiKeyConfigModalRef, MultiKeyConfigMod
         <Form.Item
           name="api_base"
           label={t('modelNew.api_base')}
-          rules={[{ required: true, message: t('common.inputPlaceholder', { title: t('modelNew.api_base') }) }]}
+          rules={[{ required: !currentProvider?.default_api_base, message: t('common.inputPlaceholder', { title: t('modelNew.api_base') }) }]}
         >
           <Input placeholder="https://api.example.com/v1" />
         </Form.Item>

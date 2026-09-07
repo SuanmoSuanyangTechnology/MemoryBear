@@ -364,11 +364,19 @@ def require_api_key_self_db(
                             context={"required_scopes": scopes, "missing_scopes": missing_scopes}
                         )
 
+                # 套餐配额查询可能回滚当前 AsyncSession，使 ORM 实例属性过期。
+                # 在进入限流前快照后续鉴权与日志所需标量，限流后不再读取 api_key_obj。
+                _api_key_id = api_key_obj.id
+                _workspace_id = api_key_obj.workspace_id
+                _api_key_type = api_key_obj.type
+                _api_key_scopes = list(api_key_obj.scopes or [])
+                _resource_id = api_key_obj.resource_id
+
                 rate_limiter = RateLimiterService()
                 is_allowed, error_msg, rate_headers = await rate_limiter.check_all_limits(api_key_obj, db=db)
                 if not is_allowed:
                     logger.warning("API Key 限流触发", extra={
-                        "api_key_id": str(api_key_obj.id),
+                        "api_key_id": str(_api_key_id),
                         "endpoint": str(request.url),
                         "method": request.method,
                         "error_msg": error_msg
@@ -392,18 +400,17 @@ def require_api_key_self_db(
                 # Resolve tenant_id from workspace (needed by downstream loaders)
                 from sqlalchemy import select as sa_select
                 _ws_result = await db.execute(
-                    sa_select(Workspace.tenant_id).where(Workspace.id == api_key_obj.workspace_id)
+                    sa_select(Workspace.tenant_id).where(Workspace.id == _workspace_id)
                 )
                 _tenant_id = _ws_result.scalar_one_or_none()
 
-                _api_key_id = api_key_obj.id
                 _api_key_auth = ApiKeyAuth(
-                    api_key_id=api_key_obj.id,
-                    workspace_id=api_key_obj.workspace_id,
+                    api_key_id=_api_key_id,
+                    workspace_id=_workspace_id,
                     tenant_id=_tenant_id,
-                    type=api_key_obj.type,
-                    scopes=api_key_obj.scopes,
-                    resource_id=api_key_obj.resource_id,
+                    type=_api_key_type,
+                    scopes=_api_key_scopes,
+                    resource_id=_resource_id,
                 )
 
             # Set ContextVar for endpoints that use get_current_api_key_auth()

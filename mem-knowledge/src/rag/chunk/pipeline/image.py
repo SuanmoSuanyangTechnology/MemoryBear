@@ -33,7 +33,9 @@ class ImageChunkPipeline(ChunkPipeline):
         self._callback(ctx, 0.1, "Start to parse image.")
         if not is_direct_image_vision_enabled(ctx.parser_config):
             source_markdown, source_url = self._source_image_markdown(ctx, source_file_id)
-            blocks, _source_block = self._parse_markdown_blocks(source_markdown, source_url)
+            blocks, source_block = self._parse_markdown_blocks(source_markdown, source_url)
+            if source_block is not None:
+                source_block.metadata["asset_file_id"] = source_file_id
             self._callback(ctx, 0.8, "Finish parsing image.")
             return ParseResult(
                 blocks=blocks,
@@ -76,6 +78,7 @@ class ImageChunkPipeline(ChunkPipeline):
         if source_block is not None:
             source_block.image = source_image
             source_block.image_vision_scope = ImageVisionScope.DIRECT
+            source_block.metadata["asset_file_id"] = source_file_id
         if mode == 0 and not has_ocr_text:
             raise ValueError("MinerU returned no text content for image OCR mode.")
         self._callback(ctx, 0.8, "Finish parsing image.")

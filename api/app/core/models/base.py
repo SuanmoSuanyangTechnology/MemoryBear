@@ -15,6 +15,10 @@ from pydantic import BaseModel, Field, model_validator
 
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
+from app.core.model_provider_config import (
+    get_default_provider_api_base,
+    is_local_deployment_provider,
+)
 from app.models.models_model import ModelProvider, ModelType, ModelCapability
 from app.core.models.compatible_chat import CompatibleChatOpenAI
 
@@ -104,6 +108,20 @@ class RedBearModelConfig(BaseModel):
                 if field_name not in data:
                     data[field_name] = extra_params[param_key]
         return data
+
+    @model_validator(mode="after")
+    def _resolve_default_base_url(self) -> "RedBearModelConfig":
+        """补齐云端默认地址，并拒绝本地提供商的空地址配置。"""
+        if isinstance(self.base_url, str):
+            self.base_url = self.base_url.strip()
+
+        if not self.base_url:
+            if is_local_deployment_provider(self.provider):
+                raise ValueError(
+                    f"本地部署提供商 {self.provider} 必须配置 API Base URL"
+                )
+            self.base_url = get_default_provider_api_base(self.provider)
+        return self
 
     @model_validator(mode="after")
     def _resolve_capabilities(self) -> "RedBearModelConfig":

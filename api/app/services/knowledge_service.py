@@ -366,23 +366,23 @@ def create_knowledge(
 
         workspace = db.query(Workspace).filter(Workspace.id == knowledge.workspace_id).first()
         if not workspace:
-            raise Exception(f"Workspace {knowledge.workspace_id} not found")
+            raise BusinessException(f"Workspace {knowledge.workspace_id} not found", code=BizCode.WORKSPACE_NOT_FOUND)
 
         tenant_id = workspace.tenant_id
 
         if not knowledge.embedding_id:
             if not workspace.embedding:
-                raise Exception("工作空间未配置 Embedding 模型，请先完善工作空间配置后重试")
+                raise BusinessException("工作空间未配置 Embedding 模型，请先完善工作空间配置后重试", code=BizCode.MODEL_NOT_FOUND)
             knowledge.embedding_id = workspace.embedding
 
         if not knowledge.reranker_id:
             if not workspace.rerank:
-                raise Exception("工作空间未配置 Rerank 模型，请先完善工作空间配置后重试")
+                raise BusinessException("工作空间未配置 Rerank 模型，请先完善工作空间配置后重试", code=BizCode.MODEL_NOT_FOUND)
             knowledge.reranker_id = workspace.rerank
 
         if not knowledge.llm_id:
             if not workspace.llm:
-                raise Exception("工作空间未配置 LLM 模型，请先完善工作空间配置后重试")
+                raise BusinessException("工作空间未配置 LLM 模型，请先完善工作空间配置后重试", code=BizCode.MODEL_NOT_FOUND)
             knowledge.llm_id = workspace.llm
 
         if not knowledge.image2text_id:
@@ -400,7 +400,7 @@ def create_knowledge(
                 ModelConfig.is_active == True,
             ).order_by(ModelConfig.created_at.desc()).first()
             if not model:
-                raise Exception("租户下没有可用的视觉模型，创建知识库失败")
+                raise BusinessException("租户下没有可用的视觉模型，创建知识库失败", code=BizCode.MODEL_NOT_FOUND)
             knowledge.image2text_id = model.id
             business_logger.debug(f"Auto-bind image2text model: {model.id}")
 
@@ -454,23 +454,23 @@ async def create_knowledge_async(
 
         workspace = await db.get(Workspace, knowledge.workspace_id)
         if not workspace:
-            raise Exception(f"Workspace {knowledge.workspace_id} not found")
+            raise BusinessException(f"Workspace {knowledge.workspace_id} not found", code=BizCode.WORKSPACE_NOT_FOUND)
 
         tenant_id = workspace.tenant_id
 
         if not knowledge.embedding_id:
             if not workspace.embedding:
-                raise Exception("工作空间未配置 Embedding 模型，请先完善工作空间配置后重试")
+                raise BusinessException("工作空间未配置 Embedding 模型，请先完善工作空间配置后重试", code=BizCode.MODEL_NOT_FOUND)
             knowledge.embedding_id = workspace.embedding
 
         if not knowledge.reranker_id:
             if not workspace.rerank:
-                raise Exception("工作空间未配置 Rerank 模型，请先完善工作空间配置后重试")
+                raise BusinessException("工作空间未配置 Rerank 模型，请先完善工作空间配置后重试", code=BizCode.MODEL_NOT_FOUND)
             knowledge.reranker_id = workspace.rerank
 
         if not knowledge.llm_id:
             if not workspace.llm:
-                raise Exception("工作空间未配置 LLM 模型，请先完善工作空间配置后重试")
+                raise BusinessException("工作空间未配置 LLM 模型，请先完善工作空间配置后重试", code=BizCode.MODEL_NOT_FOUND)
             knowledge.llm_id = workspace.llm
 
         if not knowledge.image2text_id:
@@ -495,7 +495,7 @@ async def create_knowledge_async(
             result = await db.execute(stmt)
             model = result.scalars().first()
             if not model:
-                raise Exception("租户下没有可用的视觉模型，创建知识库失败")
+                raise BusinessException("租户下没有可用的视觉模型，创建知识库失败", code=BizCode.MODEL_NOT_FOUND)
             knowledge.image2text_id = model.id
             business_logger.debug(f"Auto-bind image2text model: {model.id}")
 

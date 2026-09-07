@@ -1,12 +1,15 @@
+import base64
 from datetime import datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
-from typing import List, Optional, Dict, Any
+from typing import TYPE_CHECKING, List, Optional, Dict, Any
 import uuid
 import math
 import time
 import asyncio
+
+from pydantic import SecretStr
 
 from app.models.models_model import ModelConfig, ModelApiKey, ModelType, LoadBalanceStrategy, ModelProvider
 from app.repositories.model_repository import ModelConfigRepository, ModelApiKeyRepository, ModelBaseRepository
@@ -16,14 +19,174 @@ from app.schemas.model_schema import (
     ModelConfigQuery, ModelStats, ModelConfigQueryNew, ModelInfo
 )
 from app.core.config import settings
+from app.core.model_provider_config import (
+    is_local_deployment_provider,
+    validate_api_base_against_default,
+)
 from app.core.logging_config import get_business_logger
 from app.schemas.response_schema import PageData, PageMeta
 from app.core.exceptions import BusinessException
 from app.core.error_codes import BizCode
 from app.core.utils.datetime_utils import utcnow_naive
-from app.utils.redis_cache import invalidate_workspace_model_options, get_json_async, set_json_async, CACHE_MISS
+from app.utils.redis_cache import (invalidate_workspace_model_options, get_json_async, set_json_async,
+                                   CACHE_MISS, invalidate_runtime_model_info, invalidate_runtime_model_info_async)
+
+if TYPE_CHECKING:
+    from redbear_model import ImageEmbeddingContent, ResolvedModelConfig
 
 logger = get_business_logger()
+
+_MODEL_VALIDATION_CONFIG_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
+_MODEL_VALIDATION_KEY_ID = uuid.UUID("00000000-0000-0000-0000-000000000002")
+_MODEL_VALIDATION_TENANT_ID = uuid.UUID("00000000-0000-0000-0000-000000000003")
+_MODEL_VALIDATION_IMAGE_DATA_URI = (
+    "data:image/png;base64,"
+    "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAE0lEQVR4nGP8//8/AwMDEwMYAAAkBgMBXaJOiAAAAABJRU5ErkJggg=="
+)
+_MODEL_VALIDATION_IMAGE_BYTES = len(
+    base64.b64decode(_MODEL_VALIDATION_IMAGE_DATA_URI.partition(",")[2])
+)
+
+
+def _enum_value(value: Any) -> str:
+    return str(getattr(value, "value", value)).lower()
+
+
+def _shared_validation_config(
+    *,
+    model_name: str,
+    provider: str,
+    api_key: str,
+    api_base: str | None,
+    model_type: str,
+    capability: list | None,
+) -> "ResolvedModelConfig":
+    from redbear_model import (
+        ModelCapability as SharedModelCapability,
+    )
+    from redbear_model import (
+        ModelProvider as SharedModelProvider,
+    )
+    from redbear_model import (
+        ModelRuntimeOptions,
+        ResolvedModelConfig,
+    )
+    from redbear_model import (
+        ModelType as SharedModelType,
+    )
+
+    return ResolvedModelConfig(
+        model_config_id=_MODEL_VALIDATION_CONFIG_ID,
+        key_id=_MODEL_VALIDATION_KEY_ID,
+        tenant_id=_MODEL_VALIDATION_TENANT_ID,
+        provider=SharedModelProvider(_enum_value(provider)),
+        model_type=SharedModelType(_enum_value(model_type)),
+        model_name=model_name,
+        api_key=SecretStr(api_key),
+        base_url=api_base,
+        capabilities=tuple(
+            SharedModelCapability(_enum_value(item)) for item in (capability or [])
+        ),
+        runtime=ModelRuntimeOptions(timeout_s=10.0, max_retries=0),
+    )
+
+
+def _validation_image() -> "ImageEmbeddingContent":
+    from redbear_model import ImageEmbeddingContent
+
+    return ImageEmbeddingContent(
+        media_type="image/png",
+        data_uri=_MODEL_VALIDATION_IMAGE_DATA_URI,
+        decoded_bytes=_MODEL_VALIDATION_IMAGE_BYTES,
+    )
+
+
+async def _validate_qwen3_vl_embedding(
+    config: "ResolvedModelConfig",
+    test_message: str,
+    started_at: float,
+) -> dict[str, Any]:
+    from redbear_model import EmbeddingPurpose, EmbeddingRequest, TextEmbeddingContent
+    from redbear_model.runtime import RedBearEmbeddings as SharedRedBearEmbeddings
+
+    embedding = SharedRedBearEmbeddings(config)
+    try:
+        result = await embedding.aembed_contents(
+            EmbeddingRequest(
+                purpose=EmbeddingPurpose.RETRIEVAL,
+                contents=(TextEmbeddingContent(text=test_message), _validation_image()),
+            )
+        )
+    finally:
+        await embedding.aclose()
+    usage = dict(result.usage)
+    usage.update(vector_count=1, vector_dimension=result.dimension)
+    return {
+        "valid": True,
+        "message": "Embedding 模型配置验证成功",
+        "response": f"成功生成 1 个融合向量，维度: {result.dimension}",
+        "elapsed_time": time.time() - started_at,
+        "usage": usage,
+        "error": None,
+    }
+
+
+async def _validate_qwen3_vl_rerank(
+    config: "ResolvedModelConfig",
+    started_at: float,
+) -> dict[str, Any]:
+    from redbear_model import RerankCandidateView
+    from redbear_model.runtime import RedBearRerank as SharedRedBearRerank
+
+    rerank = SharedRedBearRerank(config)
+    views = (
+        RerankCandidateView(chunk_index=0, kind="text", content="测试文本候选"),
+        RerankCandidateView(
+            chunk_index=1,
+            kind="image",
+            image_index=0,
+            content=_MODEL_VALIDATION_IMAGE_DATA_URI,
+        ),
+    )
+    try:
+        results = await rerank.arerank_multimodal(
+            _validation_image(),
+            views,
+            top_n=len(views),
+        )
+    finally:
+        await rerank.aclose()
+    return {
+        "valid": True,
+        "message": "Rerank 模型配置验证成功",
+        "response": f"成功完成多模态重排序，返回 {len(results)} 个结果",
+        "elapsed_time": time.time() - started_at,
+        "usage": {"document_count": len(views), "result_count": len(results)},
+        "error": None,
+    }
+
+
+def _require_api_base_for_local_provider(provider: ModelProvider | str, api_base: Optional[str]) -> None:
+    """本地部署提供商必须显式配置实际服务地址。"""
+    if is_local_deployment_provider(provider) and not (
+        isinstance(api_base, str) and api_base.strip()
+    ):
+        raise BusinessException(
+            f"本地部署提供商 {getattr(provider, 'value', provider)} 必须配置 API Base URL",
+            BizCode.INVALID_PARAMETER,
+        )
+
+
+def _require_supported_api_base(
+    provider: ModelProvider | str,
+    api_base: Optional[str],
+    model_type: str,
+    is_omni: bool = False,
+) -> None:
+    """运行时不读取 api_base 的组合，只允许留空或官方默认地址。"""
+    error = validate_api_base_against_default(provider, api_base, model_type, is_omni)
+    if error:
+        raise BusinessException(error, BizCode.INVALID_PARAMETER)
 
 
 def _model_option_cache_state(model: ModelConfig) -> tuple[uuid.UUID | None, bool]:
@@ -108,6 +271,12 @@ class ModelConfigService:
             model_id,
             tenant_id=tenant_id,
         )
+        if not model.is_active:
+            raise BusinessException(
+                "当前模型未启用，请在模型配置中确认 API Key 和 URL 已配置后启用模型",
+                BizCode.MODEL_CONFIG_INVALID,
+            )
+
         api_key = await ModelApiKeyService.get_available_api_key_async(
             db,
             model.id,
@@ -210,13 +379,64 @@ class ModelConfigService:
             Dict: 验证结果
         """
         _ = db
-        from app.core.models import RedBearLLM, RedBearRerank
-        from app.core.models.base import RedBearModelConfig
-        from app.core.models.embedding import RedBearEmbeddings
         import traceback
 
+        model_type_lower = _enum_value(model_type)
+        provider_lower = _enum_value(provider)
+        is_qwen3_vl_request = provider_lower == "dashscope" and (
+            (model_type_lower, model_name)
+            in {
+                ("embedding", "qwen3-vl-embedding"),
+                ("rerank", "qwen3-vl-rerank"),
+            }
+        )
         try:
             start_time = time.time()
+
+            if is_qwen3_vl_request:
+                try:
+                    from redbear_model import (
+                        is_qwen3_vl_embedding,
+                        is_qwen3_vl_reranker,
+                    )
+                except ModuleNotFoundError as exc:
+                    if exc.name != "redbear_model":
+                        raise
+                    return {
+                        "valid": False,
+                        "message": "当前 API 暂不支持 Qwen3-VL 模型配置验证",
+                        "response": None,
+                        "elapsed_time": time.time() - start_time,
+                        "usage": None,
+                        "error": "API 未安装可选的 redbear-model 包，暂无法验证 Qwen3-VL 模型",
+                        "error_type": "ModelRuntimeUnavailable",
+                    }
+                validation_capability = list(capability or [])
+                if "vision" not in {
+                    _enum_value(item) for item in validation_capability
+                }:
+                    validation_capability.append("vision")
+                shared_config = _shared_validation_config(
+                    model_name=model_name,
+                    provider=provider_lower,
+                    api_key=api_key,
+                    api_base=api_base,
+                    model_type=model_type_lower,
+                    capability=validation_capability,
+                )
+                if is_qwen3_vl_embedding(shared_config):
+                    return await _validate_qwen3_vl_embedding(
+                        shared_config,
+                        test_message,
+                        start_time,
+                    )
+                if is_qwen3_vl_reranker(shared_config):
+                    return await _validate_qwen3_vl_rerank(shared_config, start_time)
+                raise ValueError("Qwen3-VL model capability mismatch")
+
+            from app.core.models import RedBearLLM, RedBearRerank
+            from app.core.models.base import RedBearModelConfig
+            from app.core.models.embedding import RedBearEmbeddings
 
             model_config = RedBearModelConfig(
                 model_name=model_name,
@@ -230,8 +450,6 @@ class ModelConfigService:
             )
 
             # 根据模型类型选择不同的验证方式
-            model_type_lower = model_type.lower()
-
             if model_type_lower in ["llm", "chat"]:
                 # LLM/Chat 模型验证 - 统一使用字符串输入
                 llm = RedBearLLM(model_config, type=ModelType.LLM if model_type_lower == "llm" else ModelType.CHAT)
@@ -366,7 +584,11 @@ class ModelConfigService:
 
         except Exception as e:
             # 提取详细的错误信息
-            error_message = str(e)
+            error_message = (
+                "Qwen3-VL 模型验证失败"
+                if is_qwen3_vl_request
+                else str(e)
+            )
             error_type = type(e).__name__
             # 特殊处理常见的错误类型
             if "unsupported countries" in error_message.lower() or "unsupported region" in error_message.lower():
@@ -408,6 +630,13 @@ class ModelConfigService:
         # 检查名称是否已存在（同租户内）
         if ModelConfigRepository.get_by_name(db, model_data.name, provider=model_data.provider, tenant_id=tenant_id):
             raise BusinessException("模型名称已存在", BizCode.DUPLICATE_NAME)
+
+        if model_data.api_keys:
+            for api_key_data in model_data.api_keys:
+                _require_api_base_for_local_provider(
+                    model_data.provider,
+                    api_key_data.api_base,
+                )
 
         # 验证配置
         if not model_data.skip_validation and model_data.api_keys:
@@ -483,6 +712,7 @@ class ModelConfigService:
 
         db.commit()
         db.refresh(model)
+        invalidate_runtime_model_info(model_id)
         _invalidate_model_option_states(old_cache_state, _model_option_cache_state(model))
         return model
 
@@ -604,6 +834,7 @@ class ModelConfigService:
 
         db.commit()
         db.refresh(existing_model)
+        invalidate_runtime_model_info(model_id)
         _invalidate_model_option_states(
             old_cache_state,
             _model_option_cache_state(existing_model),
@@ -620,6 +851,7 @@ class ModelConfigService:
 
         success = ModelConfigRepository.delete(db, model_id, tenant_id=tenant_id)
         db.commit()
+        invalidate_runtime_model_info(model_id)
         _invalidate_model_option_states(old_cache_state)
         return success
 
@@ -754,7 +986,8 @@ class ModelApiKeyService:
     @staticmethod
     async def create_api_key_by_provider(db: Session, data: model_schema.ModelApiKeyCreateByProvider) -> tuple[
         list[Any], list[Any]]:
-        """根据provider为多个ModelConfig创建API Key"""
+        """根据provider为多个ModelConfig创建API Key。"""
+        _require_api_base_for_local_provider(data.provider, data.api_base)
         created_keys = []
         failed_models = []  # 记录验证失败的模型
 
@@ -765,22 +998,33 @@ class ModelApiKeyService:
 
             data.is_omni = model_config.is_omni
             data.capability = model_config.capability
-
-            # 从ModelBase获取model_name
             model_name = model_config.model_base.name if model_config.model_base else model_config.name
 
-            # 检查是否存在API Key（包括软删除），需要考虑tenant_id
+            validation_result = await ModelConfigService.validate_model_config(
+                db=db,
+                model_name=model_name,
+                provider=data.provider,
+                api_key=data.api_key,
+                api_base=data.api_base,
+                model_type=model_config.type,
+                test_message="Hello",
+                is_omni=data.is_omni,
+                capability=model_config.capability,
+            )
+            if not validation_result["valid"]:
+                failed_models.append(model_name)
+                continue
+
             existing_key = db.query(ModelApiKey).join(
                 ModelApiKey.model_configs
             ).filter(
                 ModelApiKey.api_key == data.api_key,
                 ModelApiKey.provider == data.provider,
                 ModelApiKey.model_name == model_name,
-                ModelConfig.tenant_id == model_config.tenant_id
+                ModelConfig.tenant_id == model_config.tenant_id,
             ).first()
 
             if existing_key:
-                # 如果已存在，重新激活并更新
                 if existing_key.is_active:
                     continue
                 existing_key.is_active = True
@@ -792,31 +1036,12 @@ class ModelApiKeyService:
                 existing_key.capability = data.capability
                 existing_key.is_omni = data.is_omni
 
-                # 检查是否已关联该模型配置
                 if model_config not in existing_key.model_configs:
                     existing_key.model_configs.append(model_config)
 
                 created_keys.append(existing_key)
                 continue
 
-            # 验证配置
-            validation_result = await ModelConfigService.validate_model_config(
-                db=db,
-                model_name=model_name,
-                provider=data.provider,
-                api_key=data.api_key,
-                api_base=data.api_base,
-                model_type=model_config.type,
-                test_message="Hello",
-                is_omni=data.is_omni,
-                capability=model_config.capability
-            )
-            if not validation_result["valid"]:
-                # 记录验证失败的模型，但不抛出异常
-                failed_models.append(model_name)
-                continue
-
-            # 创建API Key
             api_key_data = ModelApiKeyCreate(
                 model_config_ids=[model_config_id],
                 model_name=model_name,
@@ -828,7 +1053,7 @@ class ModelApiKeyService:
                 is_omni=data.is_omni,
                 config=data.config,
                 is_active=data.is_active,
-                priority=data.priority
+                priority=data.priority,
             )
             api_key_obj = ModelApiKeyRepository.create(db, api_key_data)
             created_keys.append(api_key_obj)
@@ -842,6 +1067,11 @@ class ModelApiKeyService:
 
     @staticmethod
     async def create_api_key(db: Session, api_key_data: ModelApiKeyCreate) -> ModelApiKey:
+        _require_api_base_for_local_provider(
+            api_key_data.provider,
+            api_key_data.api_base,
+        )
+
         # 验证所有关联的模型配置是否存在
         if api_key_data.model_config_ids:
             for model_config_id in api_key_data.model_config_ids:
@@ -853,39 +1083,14 @@ class ModelApiKeyService:
                 if api_key_data.capability is None:
                     api_key_data.capability = model_config.capability
 
-                # 检查API Key是否已存在(包括软删除)，需要考虑tenant_id
-                existing_key = db.query(ModelApiKey).join(
-                    ModelApiKey.model_configs
-                ).filter(
-                    ModelApiKey.api_key == api_key_data.api_key,
-                    ModelApiKey.provider == api_key_data.provider,
-                    ModelApiKey.model_name == api_key_data.model_name,
-                    ModelConfig.tenant_id == model_config.tenant_id
-                ).first()
+                # 运行时不读取 api_base 的组合，填自定义地址无意义，直接拦下
+                _require_supported_api_base(
+                    api_key_data.provider,
+                    api_key_data.api_base,
+                    model_config.type,
+                    api_key_data.is_omni,
+                )
 
-                if existing_key:
-                    if existing_key.is_active:
-                        # 如果已激活，跳过
-                        raise BusinessException("该API Key已存在", BizCode.DUPLICATE_NAME)
-                    # 如果已存在，重新激活并更新
-                    existing_key.is_active = True
-                    existing_key.api_base = api_key_data.api_base
-                    existing_key.description = api_key_data.description
-                    existing_key.config = api_key_data.config
-                    existing_key.priority = api_key_data.priority
-                    existing_key.model_name = api_key_data.model_name
-                    existing_key.capability = api_key_data.capability
-                    existing_key.is_omni = api_key_data.is_omni
-
-                    # 检查是否已关联该模型配置
-                    if model_config not in existing_key.model_configs:
-                        existing_key.model_configs.append(model_config)
-
-                    db.commit()
-                    db.refresh(existing_key)
-                    return existing_key
-
-                # 验证配置
                 validation_result = await ModelConfigService.validate_model_config(
                     db=db,
                     model_name=api_key_data.model_name,
@@ -895,13 +1100,41 @@ class ModelApiKeyService:
                     model_type=model_config.type,
                     test_message="Hello",
                     is_omni=api_key_data.is_omni,
-                    capability=model_config.capability
+                    capability=model_config.capability,
                 )
                 if not validation_result["valid"]:
                     raise BusinessException(
                         f"模型配置验证失败: {validation_result['error']}",
-                        BizCode.INVALID_PARAMETER
+                        BizCode.INVALID_PARAMETER,
                     )
+
+                existing_key = db.query(ModelApiKey).join(
+                    ModelApiKey.model_configs
+                ).filter(
+                    ModelApiKey.api_key == api_key_data.api_key,
+                    ModelApiKey.provider == api_key_data.provider,
+                    ModelApiKey.model_name == api_key_data.model_name,
+                    ModelConfig.tenant_id == model_config.tenant_id,
+                ).first()
+
+                if existing_key:
+                    if existing_key.is_active:
+                        raise BusinessException("该API Key已存在", BizCode.DUPLICATE_NAME)
+                    existing_key.is_active = True
+                    existing_key.api_base = api_key_data.api_base
+                    existing_key.description = api_key_data.description
+                    existing_key.config = api_key_data.config
+                    existing_key.priority = api_key_data.priority
+                    existing_key.model_name = api_key_data.model_name
+                    existing_key.capability = api_key_data.capability
+                    existing_key.is_omni = api_key_data.is_omni
+
+                    if model_config not in existing_key.model_configs:
+                        existing_key.model_configs.append(model_config)
+
+                    db.commit()
+                    db.refresh(existing_key)
+                    return existing_key
 
         api_key = ModelApiKeyRepository.create(db, api_key_data)
         db.commit()
@@ -910,35 +1143,52 @@ class ModelApiKeyService:
 
     @staticmethod
     async def update_api_key(db: Session, api_key_id: uuid.UUID, api_key_data: ModelApiKeyUpdate) -> ModelApiKey:
-        """更新API Key"""
+        """更新API Key。"""
         existing_api_key = ModelApiKeyRepository.get_by_id(db, api_key_id)
         if not existing_api_key:
             raise BusinessException("API Key不存在", BizCode.NOT_FOUND)
 
-        # 获取关联的模型配置以获取模型类型
+        provider = api_key_data.provider or existing_api_key.provider
+        api_base = (
+            api_key_data.api_base
+            if "api_base" in api_key_data.model_fields_set
+            else existing_api_key.api_base
+        )
+        _require_api_base_for_local_provider(provider, api_base)
+
         if existing_api_key.model_configs:
             model_config = existing_api_key.model_configs[0]
-
+            # 运行时不读取 api_base 的组合，填自定义地址无意义，直接拦下
+            _require_supported_api_base(
+                provider,
+                api_base,
+                model_config.type,
+                api_key_data.is_omni
+                if api_key_data.is_omni is not None
+                else existing_api_key.is_omni,
+            )
             validation_result = await ModelConfigService.validate_model_config(
                 db=db,
                 model_name=api_key_data.model_name or existing_api_key.model_name,
-                provider=api_key_data.provider or existing_api_key.provider,
+                provider=provider,
                 api_key=api_key_data.api_key or existing_api_key.api_key,
-                api_base=api_key_data.api_base or existing_api_key.api_base,
+                api_base=api_base,
                 model_type=model_config.type,
                 test_message="Hello",
                 is_omni=model_config.is_omni,
-                capability=model_config.capability
+                capability=model_config.capability,
             )
             if not validation_result["valid"]:
                 raise BusinessException(
                     f"模型配置验证失败: {validation_result['error']}",
-                    BizCode.INVALID_PARAMETER
+                    BizCode.INVALID_PARAMETER,
                 )
 
         api_key = ModelApiKeyRepository.update(db, api_key_id, api_key_data)
         db.commit()
         db.refresh(api_key)
+        for model_config in api_key.model_configs:
+            await invalidate_runtime_model_info_async(model_config.id)
         return api_key
 
     @staticmethod
@@ -960,6 +1210,8 @@ class ModelApiKeyService:
                     model_config.is_active = False
 
         db.commit()
+        for model_config_id in model_config_ids:
+            invalidate_runtime_model_info(model_config_id)
         return success
 
     @staticmethod

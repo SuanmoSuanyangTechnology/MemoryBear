@@ -19,6 +19,7 @@ from app.core.workflow.nodes.llm.config import (
 
 from app.schemas.chunk_schema import KnowledgeBaseConfig
 from app.schemas.knowledge_metadata_schema import FilterGroup, MetadataFilterMode
+from app.schemas.rerank_schema import RerankMode, RerankWeights
 
 
 class KnowledgeModelCompletionParamsConfig(BaseModel):
@@ -119,6 +120,9 @@ class KnowledgeRetrievalNodeConfig(BaseNodeConfig):
         default=4,
         description="Knowledge base top k"
     )
+
+    rerank_mode: RerankMode | None = None
+    rerank_weights: RerankWeights | None = None
 
     metadata_filter_mode: MetadataFilterMode = Field(
         default=MetadataFilterMode.DISABLED,

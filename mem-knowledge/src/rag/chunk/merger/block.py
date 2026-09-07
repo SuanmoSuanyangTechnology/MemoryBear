@@ -1,3 +1,4 @@
+import uuid
 from copy import deepcopy
 from dataclasses import dataclass
 from html import escape
@@ -1558,6 +1559,10 @@ class BlockMerger(ChunkMerger):
 
     def _metadata_for_block(self, block: ParsedBlock) -> dict:
         metadata = deepcopy(block.metadata)
+        metadata.pop("asset_file_id", None)
+        asset_file_ids = self._asset_file_ids_for_blocks([block])
+        if asset_file_ids:
+            metadata["asset_file_ids"] = asset_file_ids
         metadata.update(
             {
                 "block_type": block.type.value,
@@ -1581,7 +1586,32 @@ class BlockMerger(ChunkMerger):
             "end_line": last.end_line,
         }
         self._add_range_context_metadata(metadata, blocks)
+        asset_file_ids = self._asset_file_ids_for_blocks(blocks)
+        if asset_file_ids:
+            metadata["asset_file_ids"] = asset_file_ids
         return metadata
+
+    @staticmethod
+    def _asset_file_ids_for_blocks(blocks: list[ParsedBlock]) -> list[str]:
+        result: list[str] = []
+        seen: set[str] = set()
+        for block in blocks:
+            block_metadata = block.metadata if isinstance(block.metadata, dict) else {}
+            values = []
+            if block_metadata.get("asset_file_id") is not None:
+                values.append(block_metadata["asset_file_id"])
+            raw_values = block_metadata.get("asset_file_ids")
+            if isinstance(raw_values, (list, tuple)):
+                values.extend(raw_values)
+            for value in values:
+                try:
+                    normalized = str(uuid.UUID(str(value)))
+                except (TypeError, ValueError):
+                    continue
+                if normalized not in seen:
+                    seen.add(normalized)
+                    result.append(normalized)
+        return result
 
     def _add_range_context_metadata(self, metadata: dict, blocks: list[ParsedBlock]) -> None:
         heading_paths = _unique_paths(

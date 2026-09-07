@@ -233,9 +233,12 @@ class DocumentProgressSink:
 
     @staticmethod
     def _append_message(current: str | None, messages: Sequence[str]) -> str:
-        lines = [current.rstrip("\n")] if current else []
-        lines.extend(message.rstrip("\n") for message in messages if message)
-        return "\n".join(line for line in lines if line) + ("\n" if lines else "")
+        current_text = current.rstrip("\n") if current else ""
+        pending_text = "\n".join(message.rstrip("\n") for message in messages if message)
+        # Legacy processors may persist the complete snapshot before terminal flush.
+        if pending_text and f"\n{pending_text}\n" not in f"\n{current_text}\n":
+            current_text = "\n".join(text for text in (current_text, pending_text) if text)
+        return f"{current_text}\n" if current_text else ""
 
     def _should_flush(self, event: TaskEvent, now: float) -> bool:
         return (
@@ -313,8 +316,9 @@ class CeleryStateSink:
         "kb_task_progress",
     }
 
-    def __init__(self, update_state: Callable[..., None]) -> None:
+    def __init__(self, update_state: Callable[..., None], *, task_id: str) -> None:
         self._update_state = update_state
+        self._task_id = task_id
 
     def emit(self, event: TaskEvent) -> None:
         if event.event not in self._ACTIVE_EVENTS:
@@ -336,7 +340,7 @@ class CeleryStateSink:
                 meta[f"count_{key}"] = value
         if not meta:
             return
-        self._update_state(state="STARTED", meta=meta)
+        self._update_state(task_id=self._task_id, state="STARTED", meta=meta)
 
 
 def error_fingerprint(exc: BaseException) -> str:

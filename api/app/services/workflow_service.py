@@ -5739,6 +5739,9 @@ class WorkflowService:
                     if event_data.get("error"):
                         stream_error = event_data.get("error")
                         stream_status = "failed"
+                        # run_stream 的失败终止事件由本方法在回滚后统一重发，
+                        # 避免前端先收到内层 workflow_end，再收到重复的失败终止事件。
+                        continue
                 elif event_type == "intervention_required":
                     # 重新生成命中人工介入暂停：记录 execution_id 与暂停标志，
                     # 末尾落库新版本消息时按“等待人工”形态保存（与首次暂停一致）。
@@ -5759,8 +5762,12 @@ class WorkflowService:
             self.db.query(Message).filter(Message.id == message_id).update({"is_current": True})
             self.db.commit()
             yield {
-                "event": "error",
-                "data": {"error": failure_error or stream_error or "工作流重新生成失败"},
+                "event": "workflow_end",
+                "data": {
+                    "status": "failed",
+                    "execution_id": execution_id,
+                    "error": failure_error or stream_error or "工作流重新生成失败",
+                },
             }
             return
 
@@ -8777,7 +8784,14 @@ class WorkflowService:
                         "error": str(e),
                     },
                 )
-            yield {"event": "error", "data": {"execution_id": execution.execution_id, "error": str(e)}}
+            yield {
+                "event": "workflow_end",
+                "data": {
+                    "status": "failed",
+                    "execution_id": execution.execution_id,
+                    "error": str(e),
+                },
+            }
 
         finally:
             # Stop the underlying workflow generator explicitly when this stream

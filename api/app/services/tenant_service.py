@@ -3,6 +3,7 @@ from typing import List, Optional
 import uuid
 
 from app.core.logging_config import get_business_logger
+from app.invalidation_notify import notify_tenant_sync
 from app.repositories.tenant_repository import TenantRepository
 from app.repositories.user_repository import UserRepository
 from app.repositories.workspace_repository import WorkspaceRepository
@@ -134,6 +135,8 @@ class TenantService:
             success = self.tenant_repo.delete_tenant(tenant_id)
             if success:
                 business_logger.info(f"删除租户成功: {tenant.name} (ID: {tenant.id})")
+                # 决策 #11 修订：租户禁用发通知（identity 侧当前 no-op，TTL 兜底；为校正任务预留）
+                notify_tenant_sync(str(tenant_id))
             return success
             
         except Exception as e:

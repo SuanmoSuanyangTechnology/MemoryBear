@@ -4,6 +4,8 @@ import asyncio
 import unicodedata
 from typing import Any, Protocol
 
+from redbear_model.errors import is_provider_rate_limit_error
+
 from .models import ExtractionBatch, ExtractionResult
 from .prompts import EXTRACTION_SYSTEM_PROMPT, build_extraction_prompt
 from .structured_output import unwrap_structured_result
@@ -46,8 +48,8 @@ class LLMEntityRelationExtractor:
                     unwrap_structured_result(raw_result, ExtractionResult),
                     batch,
                 )
-            except Exception:
-                if attempt == 1:
+            except Exception as exc:
+                if is_provider_rate_limit_error(exc) or attempt == 1:
                     raise
                 await asyncio.sleep(0.25)
         raise RuntimeError("unreachable extraction retry state")

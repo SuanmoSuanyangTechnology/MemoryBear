@@ -5,12 +5,20 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from app.core.rag.models.chunk import DocumentChunk
 from app.integrations.knowledge.contracts import KnowledgeRetrievalSource
-from app.schemas.chunk_schema import KnowledgeBaseConfig, RetrieveType
+from app.schemas.chunk_schema import (
+    ImageRetrievalQuery,
+    KnowledgeBaseConfig,
+    RetrievalQuery,
+    RetrieveType,
+    TextRetrievalQuery,
+    normalize_retrieval_query,
+)
 from app.schemas.knowledge_metadata_schema import FilterGroup, MetadataFilterMode
+from app.schemas.rerank_schema import RerankMode, RerankWeights
 
 
 class KnowledgeRetrievalRequest(BaseModel):
-    query: str
+    query: RetrievalQuery
     kb_ids: list[UUID] = Field(default_factory=list)
     ex_ids: list[str] = Field(default_factory=list)
     knowledge_bases: list[KnowledgeBaseConfig] = Field(default_factory=list)
@@ -21,6 +29,8 @@ class KnowledgeRetrievalRequest(BaseModel):
     top_n: int | None = Field(default=None, ge=1, le=100)
     source: KnowledgeRetrievalSource = KnowledgeRetrievalSource.GENERAL
     retrieve_type: RetrieveType = RetrieveType.HYBRID
+    rerank_mode: RerankMode | None = None
+    rerank_weights: RerankWeights | None = None
     enable_graph_retrieval: int = Field(
         default=0,
         ge=0,
@@ -57,11 +67,22 @@ class KnowledgeRetrievalRequest(BaseModel):
 
     @field_validator("query")
     @classmethod
-    def validate_query(cls, value: str) -> str:
-        stripped = value.strip()
-        if not stripped:
-            raise ValueError("query must not be empty")
-        return stripped
+    def validate_query(cls, value: RetrievalQuery) -> RetrievalQuery:
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                raise ValueError("query must not be empty")
+            return stripped
+        return value
+
+    @property
+    def normalized_query(self) -> TextRetrievalQuery | ImageRetrievalQuery:
+        return normalize_retrieval_query(self.query)
+
+    @property
+    def query_text(self) -> str | None:
+        query = self.normalized_query
+        return query.content if isinstance(query, TextRetrievalQuery) else None
 
     @model_validator(mode="after")
     def validate_knowledge_ids(self) -> "KnowledgeRetrievalRequest":

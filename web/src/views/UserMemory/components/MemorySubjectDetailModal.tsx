@@ -108,7 +108,7 @@ const MemorySubjectDetailModal = forwardRef<MemorySubjectDetailModalRef>((_, ref
         <div className="rb:mb-3 rb:rounded-xl rb:bg-[rgba(21,94,239,0.08)] rb:p-3">
           <DetailField
             label={t('userMemory.identity')}
-            value={item?.end_user?.other_id || t('userMemory.unboundIdentity')}
+            value={item?.end_user?.identity_features || t('userMemory.unboundIdentity')}
           />
         </div>
 

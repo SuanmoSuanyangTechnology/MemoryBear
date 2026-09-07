@@ -2,7 +2,7 @@
  * @Author: ZhaoYing 
  * @Date: 2026-03-24 15:41:20 
  * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-08-14 17:02:49
+ * @Last Modified time: 2026-09-02 17:55:40
  */
 import { type FC, useRef, useState, useMemo, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -259,6 +259,10 @@ const Logs: FC<{ application: Application; }> = ({ application }) => {
       ...reset,
     }
   }, [values])
+
+  const isPureWorkflow = useMemo(() => {
+    return application?.type === 'pure_workflow'
+  }, [application.type])
   return (
     <Flex vertical className="rb:bg-white rb:rounded-lg rb:pt-3! rb:px-3! rb:h-full! rb:overflow-hidden!">
       <Flex justify={!isHideAnnotations ? "space-between" : 'flex-end'} className="rb:mb-3!">
@@ -273,12 +277,14 @@ const Logs: FC<{ application: Application; }> = ({ application }) => {
           <Space size={8}>
             {activeTab === 'logs' &&
               <>
-                <Form.Item name="keyword" noStyle>
-                  <SearchInput
-                    placeholder={t(`application.${activeTab}SearchPlaceholder`)}
-                    variant="outlined"
-                  />
-                </Form.Item>
+                {!isPureWorkflow &&
+                  <Form.Item name="keyword" noStyle>
+                    <SearchInput
+                      placeholder={t(`application.${activeTab}SearchPlaceholder`)}
+                      variant="outlined"
+                    />
+                  </Form.Item>
+                }
                 <Form.Item name="dateRange" noStyle>
                   <RangePicker
                     className="rb:w-70"
@@ -365,10 +371,10 @@ const Logs: FC<{ application: Application; }> = ({ application }) => {
       <div className="rb:flex-1">
         {activeTab === 'logs' && id && application?.type && <>
           <Table<LogItem>
-            apiUrl={application.type === 'pure_workflow' ? getPureWorkflowAppLogsUrl(id) : getAppLogsUrl(id)}
+            apiUrl={isPureWorkflow ? getPureWorkflowAppLogsUrl(id) : getAppLogsUrl(id)}
             apiParams={logsQuery}
-            columns={application.type === 'pure_workflow' ? pureWorkflowColumns : columns}
-            rowKey={application.type === 'pure_workflow' ? 'execution_id' : "id"}
+            columns={isPureWorkflow ? pureWorkflowColumns : columns}
+            rowKey={isPureWorkflow ? 'execution_id' : "id"}
             isScroll={true}
             fillHeight={true}
           />

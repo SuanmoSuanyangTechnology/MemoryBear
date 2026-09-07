@@ -17,6 +17,8 @@ from typing import Any
 
 from jinja2 import Environment
 from pypdf import PdfReader
+from redbear_model import QWEN3_VL_EMBEDDING_DIMENSION, is_qwen3_vl_embedding
+from redbear_model.runtime import RedBearEmbeddings
 
 from ..models.owned import Document, Knowledge
 from ..models.references import Workspace
@@ -44,6 +46,7 @@ from ..tasks.observability import BusinessOutcome, TaskRun
 from ..tasks.state import PARSE_CANCEL_KEY, PARSE_TASK_KEY
 from ..utils.datetime_utils import to_iso_z, to_timestamp_ms, utcnow, utcnow_naive
 from .knowledge_file_storage import KnowledgeFileStorage
+from .multimodal_image import StorageImageResolver
 
 logger = logging.getLogger(__name__)
 
@@ -294,14 +297,31 @@ def _preflight_document(
     vision_model = _build_vision_model(runtime, snapshot)
     if snapshot.embedding_id is None:
         raise ValueError(f"embedding_id config error: {snapshot.knowledge_id}")
-    embeddings = factory.create_embeddings(
+    embedding_config = factory.resolve_embedding(
         snapshot.embedding_id,
         snapshot.tenant_id,
     )
+    try:
+        embeddings = RedBearEmbeddings(
+            embedding_config,
+            client_pool=runtime.model_runtime.pool,
+        )
+    except Exception:
+        raise RuntimeError("Failed to initialize embedding model") from None
+    structured_multimodal = is_qwen3_vl_embedding(embedding_config)
     vector_store = TaskVectorStore(
         runtime.elasticsearch.sync_client(),
         snapshot.knowledge_id,
         embeddings,
+        structured_multimodal=structured_multimodal,
+        image_resolver=(
+            StorageImageResolver(runtime, snapshot.knowledge_id)
+            if structured_multimodal
+            else None
+        ),
+        embedding_dimension=(
+            QWEN3_VL_EMBEDDING_DIMENSION if structured_multimodal else None
+        ),
     )
     return ParseDocumentPreflight(
         vision_model=vision_model,

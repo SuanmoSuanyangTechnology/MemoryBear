@@ -244,6 +244,7 @@ class WorkspaceModelOptionItem(BaseModel):
     capability: list[str] = Field(default_factory=list)
     logo: str | None = None
     is_public: bool = False
+    is_deprecated: bool = False
 
 
 class WorkspaceDefaultModelPresetUpdate(BaseModel):
