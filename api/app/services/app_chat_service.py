@@ -2238,7 +2238,7 @@ class AppChatService:
                 for f in meta_files:
                     try:
                         file_input = FileInput(
-                            type=FileType(f.get("type", "document")),
+                            type=f.get("type", "document"),
                             transfer_method=TransferMethod.REMOTE_URL if f.get("url") else TransferMethod.LOCAL_FILE,
                             url=f.get("url"),
                             file_type=f.get("file_type"),
@@ -2328,7 +2328,7 @@ class AppChatService:
         from app.models import Message, Conversation
         from app.core.error_codes import BizCode
         from app.core.exceptions import BusinessException
-        from app.schemas.app_schema import FileType, TransferMethod
+        from app.schemas.app_schema import TransferMethod
 
         # 1. 获取原消息
         original_msg = self.db.get(Message, message_id)
@@ -2375,7 +2375,7 @@ class AppChatService:
                 for f in meta_files:
                     try:
                         file_input = FileInput(
-                            type=FileType(f.get("type", "document")),
+                            type=f.get("type", "document"),
                             transfer_method=TransferMethod.REMOTE_URL if f.get("url") else TransferMethod.LOCAL_FILE,
                             url=f.get("url"),
                             file_type=f.get("file_type"),
