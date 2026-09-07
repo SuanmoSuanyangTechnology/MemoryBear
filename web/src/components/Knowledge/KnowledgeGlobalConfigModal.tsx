@@ -58,8 +58,8 @@ const KnowledgeGlobalConfigModal = forwardRef<KnowledgeGlobalConfigModalRef, Kno
       form.setFieldsValue({
         reranker_id: null,
         rerank_weights: {
-          semantic_weight: 1,
-          participle_weight: 0,
+          semantic_weight: 0.7,
+          participle_weight: 0.3,
         }
       })
     }
