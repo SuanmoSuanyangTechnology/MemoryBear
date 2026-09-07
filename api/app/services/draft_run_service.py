@@ -4425,7 +4425,7 @@ class AgentRunService:
                 for f in meta_files:
                     try:
                         file_input = FileInput(
-                            type=FileType(f.get("type", "document")),
+                            type=f.get("type", "document"),
                             transfer_method=TransferMethod.REMOTE_URL if f.get("url") else TransferMethod.LOCAL_FILE,
                             url=f.get("url"),
                             file_type=f.get("file_type"),
@@ -4552,12 +4552,12 @@ class AgentRunService:
         if parent_msg and parent_msg.meta_data:
             meta_files = parent_msg.meta_data.get("files", [])
             if meta_files:
-                from app.schemas.app_schema import FileInput, FileType, TransferMethod
+                from app.schemas.app_schema import FileInput, TransferMethod
                 files = []
                 for f in meta_files:
                     try:
                         file_input = FileInput(
-                            type=FileType(f.get("type", "document")),
+                            type=f.get("type", "document"),
                             transfer_method=TransferMethod.REMOTE_URL if f.get("url") else TransferMethod.LOCAL_FILE,
                             url=f.get("url"),
                             file_type=f.get("file_type"),

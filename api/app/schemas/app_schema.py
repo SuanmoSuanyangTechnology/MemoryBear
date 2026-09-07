@@ -54,6 +54,16 @@ class FileInput(BaseModel):
     _content = None
 
     def __init__(self, **data):
+        raw_type = data.get("type")
+        if isinstance(raw_type, str) and not data.get("file_type"):
+            try:
+                normalized_type = FileType.trans(raw_type)
+            except (AttributeError, RuntimeError, TypeError, ValueError):
+                pass
+            else:
+                if raw_type != normalized_type.value:
+                    data["file_type"] = raw_type
+
         # 保持 file_id 与省略 transfer_method 的旧客户端兼容性；新客户端应显式传递
         # transfer_method，避免依赖服务端推断。
         if "transfer_method" not in data:
@@ -80,13 +90,13 @@ class FileInput(BaseModel):
     @field_validator("type", mode="before")
     @classmethod
     def validate_type(cls, value):
-        """应用 API 仅接受精确的 FileType 枚举值。"""
+        """兼容精确类别值及历史的类别前缀格式。"""
         if isinstance(value, FileType):
             return value
         try:
-            return FileType(value)
-        except (TypeError, ValueError) as exc:
-            raise ValueError("type 仅支持 image、document、audio 或 video") from exc
+            return FileType.trans(value)
+        except (AttributeError, RuntimeError, TypeError, ValueError) as exc:
+            raise ValueError("type 仅支持 image、document、audio 或 video 及其子类型") from exc
 
     @field_validator("url")
     @classmethod
