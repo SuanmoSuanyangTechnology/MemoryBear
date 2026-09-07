@@ -7,7 +7,6 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.api_key_auth import (
-    document_api_key_headers,
     get_current_api_key_auth,
     require_api_key_self_db,
 )
@@ -68,7 +67,6 @@ async def submit_message_feedback(
     request: Request,
     message_id: uuid.UUID,
     user_id: str = Query(..., description="外部系统用户 ID（other_id）"),
-    _api_key_headers: None = Depends(document_api_key_headers),
     db: AsyncSession = Depends(get_async_db),
 ):
     """点赞/点踩 AI 回复（v1 对外，API Key 认证）。"""
@@ -182,7 +180,6 @@ async def get_conversation_feedback(
     conversation_id: uuid.UUID,
     user_id: str = Query(..., description="外部系统用户 ID（other_id）"),
     limit: int = Query(50, ge=1, le=200, description="返回消息数量，最大 200"),
-    _api_key_headers: None = Depends(document_api_key_headers),
     db: AsyncSession = Depends(get_async_db),
 ):
     """获取会话下所有消息的反馈状态（供前端渲染）。"""

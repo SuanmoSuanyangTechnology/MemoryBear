@@ -16,7 +16,6 @@ from app.services.file_storage_service import (
     upload_workspace_file,
 )
 from app.core.api_key_auth import (
-    document_api_key_headers,
     get_current_api_key_auth,
     require_api_key,
     require_api_key_self_db,
@@ -313,7 +312,6 @@ async def get_app_variables(
 @require_api_key_self_db(scopes=["app"])
 async def chat(
         request: Request,
-        _api_key_headers: None = Depends(document_api_key_headers),
 ):
     """Agent/Workflow 聊天接口。"""
     body = await _read_json_body(request)
@@ -696,7 +694,6 @@ async def submit_human_intervention_api(
         request: Request,
         execution_id: str,
         payload: HumanInterventionRequest,
-        _api_key_headers: None = Depends(document_api_key_headers),
         api_key_auth: ApiKeyAuth = Depends(lambda: None),
         db: Session = Depends(get_db),
 ):

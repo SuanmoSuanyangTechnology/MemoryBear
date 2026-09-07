@@ -6,7 +6,7 @@ from contextvars import ContextVar
 from functools import wraps
 from typing import Optional, List
 
-from fastapi import Header, Request, Response
+from fastapi import Request, Response
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
@@ -47,26 +47,6 @@ def get_current_api_key_auth() -> "ApiKeyAuth":
     if auth is None:
         raise BusinessException("API Key 认证信息缺失", BizCode.API_KEY_NOT_FOUND)
     return auth
-
-
-def document_api_key_headers(
-    authorization: Optional[str] = Header(
-        default=None,
-        alias="Authorization",
-        description="API Key，格式：Bearer <API Key>；可替换为 X-API-Key",
-    ),
-    x_api_key: Optional[str] = Header(
-        default=None,
-        alias="X-API-Key",
-        description="API Key；可替换为 Authorization: Bearer <API Key>",
-    ),
-) -> None:
-    """仅用于在 OpenAPI 中公开 API Key Header。
-
-    实际鉴权仍由 ``require_api_key`` / ``require_api_key_self_db`` 执行，
-    因此这里不读取或校验 Header 的值。
-    """
-    return None
 
 
 # ── Async log-writer: batched single-consumer queue ──────────────────

@@ -375,66 +375,7 @@
         "summary": "Chat",
         "description": "Agent/Workflow 聊天接口。",
         "operationId": "chat_v1_app_chat_post",
-        "parameters": [
-          {
-            "name": "Authorization",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "API Key，格式：Bearer <API Key>；可替换为 X-API-Key",
-              "title": "Authorization"
-            },
-            "description": "API Key，格式：Bearer <API Key>；可替换为 X-API-Key"
-          },
-          {
-            "name": "X-API-Key",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "API Key；可替换为 Authorization: Bearer <API Key>",
-              "title": "X-Api-Key"
-            },
-            "description": "API Key；可替换为 Authorization: Bearer <API Key>"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        },
         "requestBody": {
-          "required": true,
           "content": {
             "application/json": {
               "schema": {
@@ -448,8 +389,8 @@
                         "type": "null"
                       }
                     ],
-                    "description": "用户消息，pure_workflow 可不传",
-                    "title": "Message"
+                    "title": "Message",
+                    "description": "用户消息，pure_workflow 可不传"
                   },
                   "conversation_id": {
                     "anyOf": [
@@ -460,8 +401,8 @@
                         "type": "null"
                       }
                     ],
-                    "description": "会话 ID（用于多轮对话）",
-                    "title": "Conversation Id"
+                    "title": "Conversation Id",
+                    "description": "会话 ID（用于多轮对话）"
                   },
                   "user_id": {
                     "anyOf": [
@@ -472,8 +413,8 @@
                         "type": "null"
                       }
                     ],
-                    "description": "用户 ID（用于会话管理）",
-                    "title": "User Id"
+                    "title": "User Id",
+                    "description": "用户 ID（用于会话管理）"
                   },
                   "variables": {
                     "anyOf": [
@@ -485,45 +426,56 @@
                         "type": "null"
                       }
                     ],
-                    "description": "自定义变量参数值",
-                    "title": "Variables"
+                    "title": "Variables",
+                    "description": "自定义变量参数值"
                   },
                   "stream": {
-                    "default": false,
-                    "description": "是否流式返回",
+                    "type": "boolean",
                     "title": "Stream",
-                    "type": "boolean"
+                    "description": "是否流式返回",
+                    "default": false
                   },
                   "thinking": {
-                    "default": false,
-                    "description": "是否启用深度思考（需 Agent 配置支持）",
+                    "type": "boolean",
                     "title": "Thinking",
-                    "type": "boolean"
+                    "description": "是否启用深度思考（需 Agent 配置支持）",
+                    "default": false
                   },
                   "files": {
-                    "description": "附件列表（支持多文件）",
                     "items": {
                       "$ref": "#/components/schemas/FileInput"
                     },
+                    "type": "array",
                     "title": "Files",
-                    "type": "array"
+                    "description": "附件列表（支持多文件）"
                   },
                   "version": {
                     "anyOf": [
                       {
-                        "format": "uuid",
-                        "type": "string"
+                        "type": "string",
+                        "format": "uuid"
                       },
                       {
                         "type": "null"
                       }
                     ],
-                    "description": "指定发布版本 ID，不传则使用当前生效版本",
-                    "title": "Version"
+                    "title": "Version",
+                    "description": "指定发布版本 ID，不传则使用当前生效版本"
                   }
                 },
-                "title": "AppChatRequest",
-                "type": "object"
+                "type": "object",
+                "title": "AppChatRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
               }
             }
           }
@@ -698,42 +650,6 @@
               "type": "string",
               "title": "Execution Id"
             }
-          },
-          {
-            "name": "Authorization",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "API Key，格式：Bearer <API Key>；可替换为 X-API-Key",
-              "title": "Authorization"
-            },
-            "description": "API Key，格式：Bearer <API Key>；可替换为 X-API-Key"
-          },
-          {
-            "name": "X-API-Key",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "API Key；可替换为 Authorization: Bearer <API Key>",
-              "title": "X-Api-Key"
-            },
-            "description": "API Key；可替换为 Authorization: Bearer <API Key>"
           }
         ],
         "requestBody": {
@@ -950,42 +866,6 @@
               "title": "User Id"
             },
             "description": "外部系统用户 ID（other_id）"
-          },
-          {
-            "name": "Authorization",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "API Key，格式：Bearer <API Key>；可替换为 X-API-Key",
-              "title": "Authorization"
-            },
-            "description": "API Key，格式：Bearer <API Key>；可替换为 X-API-Key"
-          },
-          {
-            "name": "X-API-Key",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "API Key；可替换为 Authorization: Bearer <API Key>",
-              "title": "X-Api-Key"
-            },
-            "description": "API Key；可替换为 Authorization: Bearer <API Key>"
           }
         ],
         "responses": {
@@ -1088,42 +968,6 @@
               "title": "Limit"
             },
             "description": "返回消息数量，最大 200"
-          },
-          {
-            "name": "Authorization",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "API Key，格式：Bearer <API Key>；可替换为 X-API-Key",
-              "title": "Authorization"
-            },
-            "description": "API Key，格式：Bearer <API Key>；可替换为 X-API-Key"
-          },
-          {
-            "name": "X-API-Key",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "API Key；可替换为 Authorization: Bearer <API Key>",
-              "title": "X-Api-Key"
-            },
-            "description": "API Key；可替换为 Authorization: Bearer <API Key>"
           }
         ],
         "responses": {
