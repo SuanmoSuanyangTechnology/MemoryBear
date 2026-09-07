@@ -719,8 +719,8 @@ class AppChatRequest(BaseModel):
 class HumanInterventionRequest(BaseModel):
     """应用工作流人工介入请求。"""
 
-    node_id: str = Field(..., min_length=1, description="人工介入节点 ID")
-    action_id: str = Field(..., min_length=1, description="用户触发的操作 ID")
+    node_id: str = Field(..., description="人工介入节点 ID")
+    action_id: str = Field(..., description="用户触发的操作 ID")
     form_data: Optional[Dict[str, Any]] = Field(default=None, description="用户填写的表单数据")
 
     @field_validator("node_id", "action_id")

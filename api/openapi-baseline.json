@@ -379,96 +379,10 @@
           "content": {
             "application/json": {
               "schema": {
-                "properties": {
-                  "message": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ],
-                    "title": "Message",
-                    "description": "用户消息，pure_workflow 可不传"
-                  },
-                  "conversation_id": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ],
-                    "title": "Conversation Id",
-                    "description": "会话 ID（用于多轮对话）"
-                  },
-                  "user_id": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ],
-                    "title": "User Id",
-                    "description": "用户 ID（用于会话管理）"
-                  },
-                  "variables": {
-                    "anyOf": [
-                      {
-                        "additionalProperties": true,
-                        "type": "object"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ],
-                    "title": "Variables",
-                    "description": "自定义变量参数值"
-                  },
-                  "stream": {
-                    "type": "boolean",
-                    "title": "Stream",
-                    "description": "是否流式返回",
-                    "default": false
-                  },
-                  "thinking": {
-                    "type": "boolean",
-                    "title": "Thinking",
-                    "description": "是否启用深度思考（需 Agent 配置支持）",
-                    "default": false
-                  },
-                  "files": {
-                    "items": {
-                      "$ref": "#/components/schemas/FileInput"
-                    },
-                    "type": "array",
-                    "title": "Files",
-                    "description": "附件列表（支持多文件）"
-                  },
-                  "version": {
-                    "anyOf": [
-                      {
-                        "type": "string",
-                        "format": "uuid"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ],
-                    "title": "Version",
-                    "description": "指定发布版本 ID，不传则使用当前生效版本"
-                  }
-                },
-                "type": "object",
-                "title": "AppChatRequest"
+                "$ref": "#/components/schemas/Body_chat_v1_app_chat_post"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "200": {
@@ -476,6 +390,16 @@
             "content": {
               "application/json": {
                 "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
               }
             }
           }
@@ -657,7 +581,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/HumanInterventionRequest"
+                "$ref": "#/components/schemas/Body_submit_human_intervention_api_v1_app_workflow_interventions__execution_id__submit_post"
               }
             }
           }
@@ -868,6 +792,15 @@
             "description": "外部系统用户 ID（other_id）"
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_submit_message_feedback_v1_app_messages__message_id__feedback_post"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -884,41 +817,6 @@
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
                 }
-              }
-            }
-          }
-        },
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "description": "消息反馈请求（点赞/点踩）。",
-                "properties": {
-                  "feedback_type": {
-                    "description": "反馈类型: like/dislike",
-                    "pattern": "^(like|dislike)$",
-                    "title": "Feedback Type",
-                    "type": "string"
-                  },
-                  "feedback_content": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ],
-                    "description": "反馈内容（点踩时填写原因；默认 null）",
-                    "title": "Feedback Content"
-                  }
-                },
-                "required": [
-                  "feedback_type"
-                ],
-                "title": "MessageFeedbackRequest",
-                "type": "object"
               }
             }
           }
@@ -970,6 +868,15 @@
             "description": "返回消息数量，最大 200"
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiKeyAuth"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -7639,6 +7546,27 @@
         ],
         "title": "Body_active_config_api_memory_config_active_config_post"
       },
+      "Body_chat_v1_app_chat_post": {
+        "properties": {
+          "api_key_auth": {
+            "$ref": "#/components/schemas/ApiKeyAuth"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message",
+            "description": "聊天消息内容"
+          }
+        },
+        "type": "object",
+        "title": "Body_chat_v1_app_chat_post"
+      },
       "Body_create_chunk_v1_chunks__kb_id___document_id__chunk_post": {
         "properties": {
           "api_key_auth": {
@@ -8086,6 +8014,56 @@
         },
         "type": "object",
         "title": "Body_read_memory_sync_v1_memory_read_sync_post"
+      },
+      "Body_submit_human_intervention_api_v1_app_workflow_interventions__execution_id__submit_post": {
+        "properties": {
+          "node_id": {
+            "type": "string",
+            "title": "Node Id",
+            "description": "人工介入节点 ID"
+          },
+          "action_id": {
+            "type": "string",
+            "title": "Action Id",
+            "description": "用户触发的操作 ID"
+          },
+          "form_data": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Form Data",
+            "description": "用户填写的表单数据"
+          },
+          "api_key_auth": {
+            "$ref": "#/components/schemas/ApiKeyAuth"
+          }
+        },
+        "type": "object",
+        "required": [
+          "node_id",
+          "action_id"
+        ],
+        "title": "Body_submit_human_intervention_api_v1_app_workflow_interventions__execution_id__submit_post"
+      },
+      "Body_submit_message_feedback_v1_app_messages__message_id__feedback_post": {
+        "properties": {
+          "api_key_auth": {
+            "$ref": "#/components/schemas/ApiKeyAuth"
+          },
+          "body_placeholder": {
+            "type": "string",
+            "title": "Body Placeholder",
+            "description": "占位参数，实际请求体通过 request.json() 解析"
+          }
+        },
+        "type": "object",
+        "title": "Body_submit_message_feedback_v1_app_messages__message_id__feedback_post"
       },
       "Body_update_chunk_v1_chunks__kb_id___document_id___doc_id__put": {
         "properties": {
@@ -11521,42 +11499,6 @@
         },
         "type": "object",
         "title": "HTTPValidationError"
-      },
-      "HumanInterventionRequest": {
-        "properties": {
-          "node_id": {
-            "type": "string",
-            "minLength": 1,
-            "title": "Node Id",
-            "description": "人工介入节点 ID"
-          },
-          "action_id": {
-            "type": "string",
-            "minLength": 1,
-            "title": "Action Id",
-            "description": "用户触发的操作 ID"
-          },
-          "form_data": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Form Data",
-            "description": "用户填写的表单数据"
-          }
-        },
-        "type": "object",
-        "required": [
-          "node_id",
-          "action_id"
-        ],
-        "title": "HumanInterventionRequest",
-        "description": "应用工作流人工介入请求。"
       },
       "HumanInterventionSubmitRequest": {
         "properties": {

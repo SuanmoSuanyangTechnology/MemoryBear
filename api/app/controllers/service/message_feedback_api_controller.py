@@ -2,14 +2,11 @@
 import json
 import uuid
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Body, Depends, Query, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.api_key_auth import (
-    get_current_api_key_auth,
-    require_api_key_self_db,
-)
+from app.core.api_key_auth import require_api_key_self_db
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
@@ -17,6 +14,7 @@ from app.core.response_utils import success
 from app.db import get_async_db
 from app.models import Conversation, Message, MessageFeedback
 from app.schemas import app_schema, conversation_schema
+from app.schemas.api_key_schema import ApiKeyAuth
 
 router = APIRouter(prefix="/app", tags=["V1 - App Message Feedback"])
 logger = get_business_logger()
@@ -51,23 +49,18 @@ def _normalize_required_external_user_id(user_id: str) -> str:
 @router.post(
     "/messages/{message_id}/feedback",
     summary="提交消息反馈（点赞/点踩）",
-    openapi_extra={
-        "requestBody": {
-            "required": True,
-            "content": {
-                "application/json": {
-                    "schema": app_schema.MessageFeedbackRequest.model_json_schema(),
-                },
-            },
-        },
-    },
 )
 @require_api_key_self_db(scopes=["app"])
 async def submit_message_feedback(
     request: Request,
     message_id: uuid.UUID,
     user_id: str = Query(..., description="外部系统用户 ID（other_id）"),
+    api_key_auth: ApiKeyAuth = None,
     db: AsyncSession = Depends(get_async_db),
+    body_placeholder: str = Body(
+        None,
+        description="占位参数，实际请求体通过 request.json() 解析",
+    ),
 ):
     """点赞/点踩 AI 回复（v1 对外，API Key 认证）。"""
     try:
@@ -78,7 +71,6 @@ async def submit_message_feedback(
         raise BusinessException("请求体必须是 JSON 对象", BizCode.INVALID_PARAMETER)
     payload = app_schema.MessageFeedbackRequest(**body)
     user_id = _normalize_required_external_user_id(user_id)
-    api_key_auth = get_current_api_key_auth()
 
     workspace_id = api_key_auth.workspace_id
     app_id = api_key_auth.resource_id
@@ -180,11 +172,11 @@ async def get_conversation_feedback(
     conversation_id: uuid.UUID,
     user_id: str = Query(..., description="外部系统用户 ID（other_id）"),
     limit: int = Query(50, ge=1, le=200, description="返回消息数量，最大 200"),
+    api_key_auth: ApiKeyAuth = None,
     db: AsyncSession = Depends(get_async_db),
 ):
     """获取会话下所有消息的反馈状态（供前端渲染）。"""
     user_id = _normalize_required_external_user_id(user_id)
-    api_key_auth = get_current_api_key_auth()
 
     internal_user_id = await _resolve_v1_internal_user_id(
         db, api_key_auth.workspace_id, user_id
