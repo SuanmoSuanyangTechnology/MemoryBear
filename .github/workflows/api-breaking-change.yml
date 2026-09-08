@@ -16,7 +16,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: refs/pull/${{ github.event.pull_request.number }}/merge
+          ref: ${{ github.sha }}
 
       - name: Check if API files changed
         id: filter
@@ -41,12 +41,14 @@ jobs:
       - name: Install dependencies
         if: steps.filter.outputs.skip == 'false'
         run: |
-          pip install uv==0.7.12
+          pip install uv==0.7.12 packaging==25.0
           cd api
+          python scripts/check_openapi_dependencies.py
           uv venv .venv-openapi
           uv pip sync --python .venv-openapi/bin/python requirements-openapi.txt
           uv pip check --python .venv-openapi/bin/python
-          .venv-openapi/bin/python -m unittest discover -s scripts -p test_openapi_export_stubs.py
+          .venv-openapi/bin/python scripts/check_openapi_dependencies.py
+          .venv-openapi/bin/python -m unittest discover -s scripts -p 'test_openapi_*.py'
 
       - name: Export current OpenAPI schema
         if: steps.filter.outputs.skip == 'false'
@@ -65,14 +67,22 @@ jobs:
           # Use the same export harness, but import each revision's own application.
           cp api/scripts/export_openapi.py "$BASE_DIR/api/scripts/export_openapi.py"
           cp api/scripts/openapi_export_stubs.py "$BASE_DIR/api/scripts/openapi_export_stubs.py"
+          cp api/scripts/check_openapi_dependencies.py "$BASE_DIR/api/scripts/check_openapi_dependencies.py"
           if [ ! -f "$BASE_DIR/api/requirements-openapi.txt" ]; then
-            echo "PR base lacks isolated export dependencies; land the export infrastructure first."
-            exit 1
+            # Bootstrap only when application code and its dependencies are identical.
+            if ! git diff --quiet "${{ github.event.pull_request.base.sha }}" HEAD -- \
+              api/app/ api/pyproject.toml api/uv.lock packages/redbear-model/; then
+              echo "::error::Land isolated export infrastructure separately from application/dependency changes."
+              exit 1
+            fi
+            cp api/requirements-openapi.txt "$BASE_DIR/api/requirements-openapi.txt"
           fi
           cd "$BASE_DIR/api"
+          python scripts/check_openapi_dependencies.py
           uv venv .venv-openapi
           uv pip sync --python .venv-openapi/bin/python requirements-openapi.txt
           uv pip check --python .venv-openapi/bin/python
+          .venv-openapi/bin/python scripts/check_openapi_dependencies.py
           .venv-openapi/bin/python scripts/export_openapi.py \
             --isolated --v1-only \
             --audit-output "${{ github.workspace }}/api/openapi-pr-base-audit.json" \
@@ -120,26 +130,34 @@ jobs:
           HEAD_SHORT=$(git rev-parse --short HEAD)
 
           # ─── 门禁：目标分支代码 vs PR 合并结果 ───
-          OASDIFF_OUTPUT=$(oasdiff breaking "$RELEASE_BASELINE" "$CURRENT" --fail-on ERR 2>&1)
-          OASDIFF_EXIT=$?
-
-          # Without fail-on, a nonzero exit means the tool could not compare the schemas.
-          oasdiff breaking "$RELEASE_BASELINE" "$CURRENT" > /dev/null 2>&1
+          # A nonzero tool exit is an execution error; incompatibility is data.
+          OASDIFF_OUTPUT=$(oasdiff breaking "$RELEASE_BASELINE" "$CURRENT" --format json 2> oasdiff-gate-error.log)
           OASDIFF_VALIDATION_EXIT=$?
+          OASDIFF_EXIT=0
+          if ! jq -e 'type == "array" and all(.[]; .level == 1 or .level == 2 or .level == 3)' <<< "$OASDIFF_OUTPUT" > /dev/null; then
+            OASDIFF_VALIDATION_EXIT=1
+          elif jq -e 'any(.[]; .level == 3)' <<< "$OASDIFF_OUTPUT" > /dev/null; then
+            OASDIFF_EXIT=1
+          fi
 
           OPENAPI_DIFF_OUTPUT=$(docker run --rm \
-            -v "${{ github.workspace }}/api:/work" \
+            -v "${{ github.workspace }}/api:/work:ro" \
             openapitools/openapi-diff:2.1.0-beta.11 \
             /work/"$RELEASE_BASELINE" \
             /work/"$CURRENT" \
-            --fail-on-incompatible 2>&1)
-          OPENAPI_DIFF_EXIT=$?
-
-          docker run --rm \
-            -v "${{ github.workspace }}/api:/work:ro" \
-            openapitools/openapi-diff:2.1.0-beta.11 \
-            /work/"$RELEASE_BASELINE" /work/"$CURRENT" > /dev/null 2>&1
+            --state 2> openapi-gate-error.log)
           OPENAPI_VALIDATION_EXIT=$?
+          OPENAPI_DIFF_EXIT=0
+          case "$OPENAPI_DIFF_OUTPUT" in
+            no_changes|compatible) ;;
+            incompatible) OPENAPI_DIFF_EXIT=1 ;;
+            *) OPENAPI_VALIDATION_EXIT=1 ;;
+          esac
+          if [ "$OASDIFF_VALIDATION_EXIT" -ne 0 ] || [ "$OPENAPI_VALIDATION_EXIT" -ne 0 ]; then
+            cat oasdiff-gate-error.log openapi-gate-error.log
+            echo "::error::Comparison execution failed; approval cannot override tool errors."
+            exit 1
+          fi
 
           # ─── PR 变更报告：当前 schema vs PR Base schema ───
           PR_CHANGELOG=""
