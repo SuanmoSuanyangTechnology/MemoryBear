@@ -45,7 +45,7 @@ def main():
     parser.add_argument("--v1-only", action="store_true", help="Only include /v1 paths")
     args = parser.parse_args()
 
-    # Mock external connections
+    # Mock external connections and import-time OCR initialization, not API schemas.
     es_mock = MagicMock()
     es_mock.return_value.info.return_value = {"status": "green"}
     es_mock.return_value.ping.return_value = True
@@ -55,10 +55,10 @@ def main():
 
     with patch("elasticsearch.Elasticsearch", es_mock), \
          patch("neo4j.GraphDatabase.driver", return_value=neo4j_mock), \
-         patch("app.repositories.neo4j.neo4j_connector.Neo4jConnector._build_driver", return_value=neo4j_mock), \
-         patch("app.repositories.neo4j.neo4j_connector.Neo4jConnector._create_or_get_driver", return_value=neo4j_mock), \
+         patch("neo4j.AsyncGraphDatabase.driver", return_value=neo4j_mock), \
          patch("redis.Redis", return_value=redis_mock), \
-         patch("redis.StrictRedis", return_value=redis_mock):
+         patch("redis.StrictRedis", return_value=redis_mock), \
+         patch("app.core.rag.deepdoc.vision.OCR", return_value=MagicMock()):
         from app.main import app
         schema = app.openapi()
 
