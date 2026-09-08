@@ -66,7 +66,7 @@ def isolate_runtime():
     blocker = _HeavyImportBlocker()
     sys.meta_path.insert(0, blocker)
     def no_network(*args, **kwargs):
-        raise OSError("Network disabled during OpenAPI export")
+        guard.fail("network connection")
 
     try:
         with patch.dict(sys.modules, {
@@ -74,7 +74,9 @@ def isolate_runtime():
         }), \
              patch("tiktoken.get_encoding", return_value=Encoder()), \
              patch("socket.socket.connect", no_network), \
-             patch("socket.socket.connect_ex", no_network):
+             patch("socket.socket.connect_ex", no_network), \
+             patch("psycopg2.connect", guard.callable("psycopg2.connect")), \
+             patch("asyncpg.connect", guard.callable("asyncpg.connect")):
             yield guard
             guard.assert_unused()
     finally:

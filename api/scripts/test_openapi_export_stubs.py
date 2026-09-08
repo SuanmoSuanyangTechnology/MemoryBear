@@ -60,9 +60,23 @@ class RuntimeIsolationTests(unittest.TestCase):
                     pass
 
     def test_network_disabled(self):
-        with isolate_runtime(), socket.socket() as connection:
-            with self.assertRaisesRegex(OSError, "Network disabled"):
+        with self.assertRaisesRegex(ExportIsolationError, "network connection"):
+            with isolate_runtime(), socket.socket() as connection:
                 connection.connect(("127.0.0.1", 9))
+
+    def test_swallowed_network_error_still_fails(self):
+        with self.assertRaisesRegex(ExportIsolationError, "Isolation violations"):
+            with isolate_runtime(), socket.socket() as connection:
+                try:
+                    connection.connect(("127.0.0.1", 9))
+                except RuntimeError:
+                    pass
+
+    def test_native_postgres_connection_blocked(self):
+        with self.assertRaisesRegex(ExportIsolationError, "psycopg2.connect"):
+            with isolate_runtime():
+                import psycopg2
+                psycopg2.connect("")
 
     def test_patches_restored_after_failure(self):
         import tiktoken
