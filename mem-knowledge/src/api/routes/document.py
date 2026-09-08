@@ -97,9 +97,10 @@ async def create_document(
 ) -> SuccessEnvelope[dict[str, Any]]:
     async with runtime.database.async_session() as db:
         document = await document_service.create_document(db, create_data, principal)
+        data = document_service.document_to_data(document)
     return _success(
         request,
-        document_service.document_to_data(document),
+        data,
         "Document creation successful",
     )
 
