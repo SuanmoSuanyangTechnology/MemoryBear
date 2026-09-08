@@ -41,6 +41,7 @@ def _encode_result(result):
 @require_api_key_self_db(scopes=["memory"])
 async def get_written_memories(
     request: Request,
+    demo_trace: Optional[str] = Query(None, description="CI demo: optional trace parameter"),
     end_user_id: str = Query(..., description="终端用户 ID"),
     page: int = Query(1, ge=1, description="页码，从 1 开始"),
     pagesize: int = Query(10, ge=1, le=100, description="每页数量"),
