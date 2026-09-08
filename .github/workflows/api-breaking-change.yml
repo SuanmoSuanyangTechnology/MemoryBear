@@ -15,11 +15,12 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: refs/pull/${{ github.event.pull_request.number }}/merge
 
       - name: Check if API files changed
         id: filter
         run: |
-          CHANGED=$(git diff --name-only ${{ github.event.pull_request.base.sha }}...HEAD -- 'api/app/' 'api/openapi-baseline.json' | head -1)
+          CHANGED=$(git diff --name-only ${{ github.event.pull_request.base.sha }}...HEAD -- 'api/app/' 'api/scripts/export_openapi.py' 'api/pyproject.toml' 'api/uv.lock' 'api/openapi-baseline.json' '.github/workflows/api-breaking-change.yml')
           if [ -z "$CHANGED" ]; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else
@@ -40,19 +41,28 @@ jobs:
         if: steps.filter.outputs.skip == 'false'
         run: |
           pip install uv==0.7.12
-          cd api && uv sync
+          cd api && uv sync --frozen
 
       - name: Export current OpenAPI schema
         if: steps.filter.outputs.skip == 'false'
         run: |
           cd api
-          uv run python scripts/export_openapi.py --v1-only -o openapi-current.json
+          uv run --frozen python scripts/export_openapi.py --v1-only -o openapi-current.json
 
-      - name: Get baseline from target branch
+      # Compare the target branch with the merged result, including target-side changes.
+      - name: Export PR base OpenAPI schema
         if: steps.filter.outputs.skip == 'false'
+        id: pr_base
         run: |
-          cd api
-          git show ${{ github.event.pull_request.base.sha }}:api/openapi-baseline.json > openapi-target-baseline.json
+          set -e
+          BASE_DIR="${RUNNER_TEMP}/openapi-pr-base"
+          git worktree add --detach "$BASE_DIR" "${{ github.event.pull_request.base.sha }}"
+          cd "$BASE_DIR/api"
+          uv sync --frozen
+          uv run --frozen python scripts/export_openapi.py \
+            --v1-only \
+            -o "${{ github.workspace }}/api/openapi-pr-base.json"
+          echo "exported=true" >> "$GITHUB_OUTPUT"
 
       - name: Check breaking approval label
         if: steps.filter.outputs.skip == 'false'
@@ -77,41 +87,87 @@ jobs:
         id: api_diff
         env:
           API_BREAKING_APPROVED: ${{ steps.approval.outputs.approved }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_BASE_EXPORTED: ${{ steps.pr_base.outputs.exported }}
         run: |
           cd api
           set +e
 
           REPORT="oasdiff-report.md"
-          BASELINE="openapi-target-baseline.json"
+          # Both the gate and report compare actual code exports.
+          RELEASE_BASELINE="openapi-pr-base.json"
+          # PR 报告基线：PR Base SHA 实际导出的 schema
+          PR_BASE_SCHEMA="openapi-pr-base.json"
+          # 目标：PR 合并结果实际导出的 schema
           CURRENT="openapi-current.json"
 
+          BASE_SHORT=$(git rev-parse --short "$PR_BASE_SHA")
+          HEAD_SHORT=$(git rev-parse --short HEAD)
+
+          # ─── 门禁：目标分支代码 vs PR 合并结果 ───
+          OASDIFF_OUTPUT=$(oasdiff breaking "$RELEASE_BASELINE" "$CURRENT" --fail-on ERR 2>&1)
+          OASDIFF_EXIT=$?
+
+          # Without fail-on, a nonzero exit means the tool could not compare the schemas.
+          oasdiff breaking "$RELEASE_BASELINE" "$CURRENT" > /dev/null 2>&1
+          OASDIFF_VALIDATION_EXIT=$?
+
+          OPENAPI_DIFF_OUTPUT=$(docker run --rm \
+            -v "${{ github.workspace }}/api:/work" \
+            openapitools/openapi-diff:2.1.0-beta.11 \
+            /work/"$RELEASE_BASELINE" \
+            /work/"$CURRENT" \
+            --fail-on-incompatible 2>&1)
+          OPENAPI_DIFF_EXIT=$?
+
+          docker run --rm \
+            -v "${{ github.workspace }}/api:/work:ro" \
+            openapitools/openapi-diff:2.1.0-beta.11 \
+            /work/"$RELEASE_BASELINE" /work/"$CURRENT" > /dev/null 2>&1
+          OPENAPI_VALIDATION_EXIT=$?
+
+          # ─── PR 变更报告：当前 schema vs PR Base schema ───
+          PR_CHANGELOG=""
+          PR_DIFF_MD=""
+          PR_REPORT_EXIT=1
+          if [ "$PR_BASE_EXPORTED" = "true" ] && [ -f "$PR_BASE_SCHEMA" ]; then
+            PR_CHANGELOG=$(oasdiff changelog "$PR_BASE_SCHEMA" "$CURRENT" 2>&1)
+            PR_CHANGELOG_EXIT=$?
+
+            docker run --rm \
+              -v "${{ github.workspace }}/api:/work" \
+              openapitools/openapi-diff:2.1.0-beta.11 \
+              /work/"$PR_BASE_SCHEMA" \
+              /work/"$CURRENT" \
+              --markdown /work/openapi-pr-diff.md > /dev/null 2>&1
+            PR_REPORT_EXIT=$?
+            if [ "$PR_CHANGELOG_EXIT" -ne 0 ]; then PR_REPORT_EXIT=1; fi
+            PR_DIFF_MD=$(cat openapi-pr-diff.md 2>/dev/null)
+          fi
+
+          # ─── 生成报告 ───
           {
-            echo "# API Breaking Change Report"
+            echo "# API 接口契约报告"
             echo ""
-            echo "Comparing against \`${{ github.base_ref }}\` baseline."
+            echo "| 对比 | 基线 | 目标 |"
+            echo "| --- | --- | --- |"
+            echo "| 门禁与本 PR 接口变化 | 目标分支 \`$BASE_SHORT\` | 合并结果 \`$HEAD_SHORT\` |"
             echo ""
-            echo "Breaking change approval label: \`api-breaking-approved\` = \`$API_BREAKING_APPROVED\`."
+            echo "破坏性变更审批标签：\`api-breaking-approved\` = \`$API_BREAKING_APPROVED\`"
+            echo ""
+            echo "## 门禁结果"
+            echo ""
+            echo "检查本次合并对目标分支已接受接口契约的影响，不依赖手工 baseline。"
             echo ""
             echo "| Tool | Result |"
             echo "| --- | --- |"
           } > "$REPORT"
-
-          OASDIFF_OUTPUT=$(oasdiff breaking "$BASELINE" "$CURRENT" --fail-on ERR 2>&1)
-          OASDIFF_EXIT=$?
 
           if [ "$OASDIFF_EXIT" -eq 0 ]; then
             echo "| oasdiff | ✅ PASS |" >> "$REPORT"
           else
             echo "| oasdiff | ❌ FAIL |" >> "$REPORT"
           fi
-
-          OPENAPI_DIFF_OUTPUT=$(docker run --rm \
-            -v "${{ github.workspace }}/api:/work" \
-            openapitools/openapi-diff:2.1.0-beta.11 \
-            /work/"$BASELINE" \
-            /work/"$CURRENT" \
-            --fail-on-incompatible 2>&1)
-          OPENAPI_DIFF_EXIT=$?
 
           if [ "$OPENAPI_DIFF_EXIT" -eq 0 ]; then
             echo "| openapi-diff | ✅ PASS |" >> "$REPORT"
@@ -121,10 +177,8 @@ jobs:
 
           {
             echo ""
-            echo "## oasdiff"
-            echo ""
             echo "<details open>"
-            echo "<summary>Output</summary>"
+            echo "<summary>oasdiff breaking</summary>"
             echo ""
             echo '```text'
             if [ -n "$OASDIFF_OUTPUT" ]; then
@@ -137,10 +191,8 @@ jobs:
             echo "</details>"
 
             echo ""
-            echo "## openapi-diff"
-            echo ""
             echo "<details open>"
-            echo "<summary>Output</summary>"
+            echo "<summary>openapi-diff</summary>"
             echo ""
             echo '```text'
             if [ -n "$OPENAPI_DIFF_OUTPUT" ]; then
@@ -151,23 +203,75 @@ jobs:
             echo '```'
             echo ""
             echo "</details>"
+
+            echo ""
+            echo "### 门禁判定"
+            echo ""
+            if [ "$OASDIFF_VALIDATION_EXIT" -ne 0 ] || [ "$OPENAPI_VALIDATION_EXIT" -ne 0 ]; then
+              echo "比较工具执行失败，门禁阻断，审批标签不可豁免。"
+            elif [ "$OASDIFF_EXIT" -ne 0 ] || [ "$OPENAPI_DIFF_EXIT" -ne 0 ]; then
+              if [ "$API_BREAKING_APPROVED" = "true" ]; then
+                echo "检测到破坏性变更，但本 PR 已带 \`api-breaking-approved\` 标签，门禁放行。"
+              else
+                echo "检测到破坏性变更。只有在破坏性接口变更经过评审并批准后，才添加 \`api-breaking-approved\` 标签。"
+              fi
+            else
+              echo "未检测到破坏性变更，门禁在没有审批豁免的情况下通过。"
+            fi
+
+            echo ""
+            echo "## 本 PR 接口变化"
+            echo ""
+            echo "目标分支 \`$BASE_SHORT\` 与合并结果 \`$HEAD_SHORT\` 比较。"
+            echo ""
           } >> "$REPORT"
+
+          if [ "$PR_BASE_EXPORTED" = "true" ] && [ -f "$PR_BASE_SCHEMA" ]; then
+            {
+              echo "<details open>"
+              echo "<summary>oasdiff changelog</summary>"
+              echo ""
+              echo '```text'
+              if [ -n "$PR_CHANGELOG" ]; then
+                echo "$PR_CHANGELOG"
+              else
+                echo "本 PR 未改变 API 契约。"
+              fi
+              echo '```'
+              echo ""
+              echo "</details>"
+              if [ -n "$PR_DIFF_MD" ]; then
+                echo ""
+                echo "<details>"
+                echo "<summary>openapi-diff</summary>"
+                echo ""
+                echo "$PR_DIFF_MD"
+                echo ""
+                echo "</details>"
+              fi
+            } >> "$REPORT"
+          else
+            echo "> PR Base schema 导出失败，本节无法生成，检查将失败。详见 Export PR base OpenAPI schema 步骤日志。" >> "$REPORT"
+          fi
+
+          if [ "$PR_REPORT_EXIT" -ne 0 ]; then
+            echo "> PR 报告生成失败，请检查导出与 diff 日志后重跑。" >> "$REPORT"
+          fi
 
           echo "oasdiff_exit=$OASDIFF_EXIT" >> "$GITHUB_OUTPUT"
           echo "openapi_diff_exit=$OPENAPI_DIFF_EXIT" >> "$GITHUB_OUTPUT"
 
-          if [ "$OASDIFF_EXIT" -ne 0 ] || [ "$OPENAPI_DIFF_EXIT" -ne 0 ]; then
-            {
-              echo ""
-              echo "## Gate decision"
-              echo ""
-              if [ "$API_BREAKING_APPROVED" = "true" ]; then
-                echo "Breaking changes were detected, but this PR has the \`api-breaking-approved\` label. The check is allowed to pass."
-              else
-                echo "Breaking changes were detected. Add the \`api-breaking-approved\` label only after the breaking API change has been reviewed and approved."
-              fi
-            } >> "$REPORT"
+          cat "$REPORT" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$OASDIFF_VALIDATION_EXIT" -ne 0 ] || [ "$OPENAPI_VALIDATION_EXIT" -ne 0 ]; then
+            echo "::error::A comparison tool failed. Approval labels cannot override execution errors."
+            exit 1
+          fi
+          if [ "$PR_REPORT_EXIT" -ne 0 ]; then
+            echo "::error::PR schema export or diff report failed; inspect the step logs."
+            exit 1
+          fi
 
+          if [ "$OASDIFF_EXIT" -ne 0 ] || [ "$OPENAPI_DIFF_EXIT" -ne 0 ]; then
             if [ "$API_BREAKING_APPROVED" = "true" ]; then
               exit 0
             else
@@ -175,15 +279,8 @@ jobs:
             fi
           fi
 
-          {
-            echo ""
-            echo "## Gate decision"
-            echo ""
-            echo "No breaking changes detected. The check passed without approval override."
-          } >> "$REPORT"
-
       - name: Comment PR
-        if: always() && steps.filter.outputs.skip == 'false'
+        if: always() && steps.filter.outputs.skip == 'false' && hashFiles('api/oasdiff-report.md') != ''
         uses: marocchino/sticky-pull-request-comment@v2
         with:
           header: oasdiff
