@@ -35,6 +35,7 @@ from app.schemas.memory_storage_schema import (
     ForgettingConfigUpdateRequest,
 )
 from app.schemas.response_schema import ApiResponse
+from app.schemas.scene_memory_schema import SceneConfig, SceneConfigUpdate
 from app.services.emotion_config_service import EmotionConfigService
 from app.services.memory_forget_service import MemoryForgetService
 from app.services.memory_storage_service import DataConfigService
@@ -554,3 +555,46 @@ async def delete_config(
         except Exception as e:
             api_logger.error(f"Delete config failed: {str(e)}", exc_info=True)
             return fail(BizCode.INTERNAL_ERROR, "删除配置失败", str(e))
+
+
+@router.get("/read_config_scene", response_model=ApiResponse)
+async def read_config_scene(
+    config_id: UUID | int,
+    current_user: CurrentUserSnapshot = Depends(get_current_user_async),
+):
+    """读取 Scene 边界与 SceneSummary 配置。"""
+    from app.models.memory_config_model import MemoryConfig as MemoryConfigModel
+
+    async with get_async_db_context() as db:
+        resolved_id = await resolve_config_id_async(config_id, db)
+        row = await db.get(MemoryConfigModel, resolved_id)
+        if row is None:
+            return fail(BizCode.MEMORY_CONFIG_NOT_FOUND, "配置不存在")
+        if str(row.workspace_id) != str(current_user.current_workspace_id):
+            return fail(BizCode.MEMORY_CONFIG_NOT_FOUND, "无权访问该配置")
+        data = SceneConfig.model_validate(row).model_dump(mode="json")
+        return success(data=data, msg="查询成功")
+
+
+@router.post("/update_config_scene", response_model=ApiResponse)
+async def update_config_scene(
+    payload: SceneConfigUpdate,
+    current_user: CurrentUserSnapshot = Depends(get_current_user_async),
+):
+    """全量更新 Scene 配置并立即失效运行时 MemoryConfig 缓存。"""
+    from app.models.memory_config_model import MemoryConfig as MemoryConfigModel
+    from app.utils.redis_cache import invalidate_cache
+
+    async with get_async_db_context() as db:
+        row = await db.get(MemoryConfigModel, payload.config_id)
+        if row is None or str(row.workspace_id) != str(current_user.current_workspace_id):
+            return fail(BizCode.MEMORY_CONFIG_NOT_FOUND, "配置不存在或无权访问")
+        values = payload.model_dump(exclude={"config_id"})
+        for field, value in values.items():
+            setattr(row, field, value)
+        await db.commit()
+        await db.refresh(row)
+        # 会话退出时的 rollback 会 expire 实例属性，须在块内完成序列化
+        data = SceneConfig.model_validate(row).model_dump(mode="json")
+    await invalidate_cache(prefix=f"memory_config:{payload.config_id}")
+    return success(data=data, msg="更新成功")

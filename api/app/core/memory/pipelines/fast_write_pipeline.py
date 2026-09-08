@@ -57,6 +57,8 @@ class FastWritePipeline:
     EMBED_TIMEOUT_SEC = 15
     # BERT 情绪单步硬上限（秒），超时即降级为 None，不重试。
     EMOTION_TIMEOUT_SEC = 2
+    # Scene 边界判断分支硬上限（秒），超时按 BERT 失败继续当前 Scene。
+    SCENE_BOUNDARY_TIMEOUT_SEC = 5
 
     def __init__(self, memory_config: "MemoryConfig", end_user_id: str, language: str = "zh"):
         self.memory_config = memory_config
@@ -74,6 +76,7 @@ class FastWritePipeline:
         message_seq: int = 0,
         source: str = "",
         dispatch_at: str = "",
+        scene_context=None,
     ) -> dict:
         """驱动三步流水线。
 
@@ -107,11 +110,23 @@ class FastWritePipeline:
                         reason=drop_reason or "-",
                     )
                 if drop_reason:
-                    return {"status": "dropped", "reason": drop_reason, "dialog_id": None}
+                    scene_decision = None
+                    if scene_context is not None:
+                        scene_decision = (
+                            scene_context.direct_decision
+                            if scene_context.direct_decision is not None
+                            else "CONTINUE"
+                        )
+                    return {
+                        "status": "dropped",
+                        "reason": drop_reason,
+                        "dialog_id": None,
+                        "scene_decision": scene_decision,
+                    }
 
-                # Step 2/3 — Embedding + BERT 情绪（并行，各自内部降级为 None，不重试）
-                async with bear.step(2, 3, "并行处理", "Embedding + 情绪") as s:
-                    embedding, emotion_result = await asyncio.gather(
+                # Step 2/3 — Embedding + 情绪 + 必要的 Scene BERT 并行
+                async with bear.step(2, 3, "并行处理", "Embedding + 情绪 + Scene") as s:
+                    embedding, emotion_result, scene_decision = await asyncio.gather(
                         self._embed(cleaned),
                         self._extract_emotion(
                             cleaned,
@@ -119,10 +134,12 @@ class FastWritePipeline:
                                 (target_message or {}).get("original_message_id") or ""
                             ),
                         ),
+                        self._predict_scene_boundary(scene_context),
                     )
                     s.metadata(
                         has_embedding=embedding is not None,
                         has_emotion=emotion_result is not None,
+                        scene_decision=scene_decision or "-",
                     )
 
                 # 时间来源降级：dialog_at → dispatch_at → 当前时间（ensure_dialog_at 兜底）
@@ -146,11 +163,61 @@ class FastWritePipeline:
                     dialog_id = await self._persist(node)
                     s.metadata(dialog_id=dialog_id)
 
-                return {"status": "success", "dialog_id": dialog_id}
+                return {
+                    "status": "success",
+                    "dialog_id": dialog_id,
+                    "scene_decision": scene_decision,
+                }
             finally:
                 await self._cleanup()
 
     # ──────────────────────────────────────────────
+
+    async def _predict_scene_boundary(self, scene_context):
+        """Step 2 并行分支 — 优先复用同步规则结果，必要时调用 BERT 判断场景连续性。"""
+        if scene_context is None:
+            return None
+        if scene_context.direct_decision is not None:
+            return scene_context.direct_decision
+
+        from app.core.memory.scene.scene_continuity_bert_client import (
+            SceneContinuityBertClient,
+            SceneContinuityError,
+        )
+
+        try:
+            score = await asyncio.wait_for(
+                SceneContinuityBertClient().predict(
+                    scene_context.history_user_messages,
+                    scene_context.current_content,
+                ),
+                timeout=self.SCENE_BOUNDARY_TIMEOUT_SEC,
+            )
+        except asyncio.TimeoutError:
+            logger.warning(
+                "[FastWrite] Scene boundary timed out, degrading: "
+                "message_id=%s timeout=%ss end_user_id=%s",
+                scene_context.current_message_id,
+                self.SCENE_BOUNDARY_TIMEOUT_SEC,
+                self.end_user_id,
+            )
+            return "BERT_FAILED_CONTINUE"
+        except SceneContinuityError as exc:
+            logger.warning(
+                "[FastWrite] Scene continuity degraded: "
+                "message_id=%s end_user_id=%s error=%s",
+                scene_context.current_message_id,
+                self.end_user_id,
+                exc,
+            )
+            return "BERT_FAILED_CONTINUE"
+
+        return (
+            "CONTINUE"
+            if score > self.memory_config.scene_threshold
+            else "SHIFTED"
+        )
+
     # 以下为本任务范围外的方法占位，后续任务填充实现
     # ──────────────────────────────────────────────
 
@@ -245,7 +312,7 @@ class FastWritePipeline:
           user_message_id）读情绪缓存，**读后即删**（GETDEL）：快写是唯一消费者，
           命中即复用 emotion + score 并跳过 BERT。
         - text 为空、或未配置（URL/API_KEY/MODEL 任一缺失）→ 直接返回 None，不发请求、不空等超时。
-        - 已配置时才调用；硬超时 EMOTION_TIMEOUT_SEC，超时/异常一律降级为 None，不重试。
+        - 已配置时才调用；总耗时受 EMOTION_TOTAL_TIMEOUT_SECONDS 硬限制，超时/异常一律降级为 None，不重试。
         - 未命中时自己算出的结果**不回写缓存**（唯一消费者，回写无意义）。
         - 关键约束：服务故障绝不伪造 neutral；真实中性(emotion='neutral')
           与服务失败(emotion=None)必须可区分。

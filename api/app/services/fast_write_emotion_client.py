@@ -24,9 +24,6 @@ _VALID_EMOTIONS = frozenset({
     "anger", "frustration", "loneliness", "confusion", "hope",
 })
 
-# 超时（秒），与 FastWritePipeline.EMOTION_TIMEOUT_SEC 对齐；硬编码，不走 env。
-_EMOTION_TIMEOUT_SEC = 2.0
-
 # 每线程一个 client：连接池绑定在创建它的 loop 上，threads pool 下每线程独立 loop，
 # 故用 thread-local 隔离，避免跨 loop 复用。
 _local = threading.local()
@@ -45,7 +42,7 @@ def _get_client() -> httpx.AsyncClient:
     client = getattr(_local, "client", None)
     if client is None or getattr(_local, "loop", None) is not loop:
         _local.client = httpx.AsyncClient(
-            timeout=_EMOTION_TIMEOUT_SEC,
+            timeout=settings.FAST_WRITE_EMOTION_HTTP_TIMEOUT_SECONDS,
             # 每线程串行、一次一请求：池子稳态只需 1 条，留 1 条余量给瞬时重连。
             limits=httpx.Limits(max_keepalive_connections=1, max_connections=2),
         )

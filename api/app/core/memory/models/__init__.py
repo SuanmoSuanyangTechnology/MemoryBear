@@ -35,6 +35,7 @@ from app.core.memory.models.graph_models import (
     # Nodes
     Node,
     DialogueNode,
+    SceneSummaryNode,
     StatementNode,
     ChunkNode,
     ExtractedEntityNode,
@@ -114,6 +115,7 @@ __all__ = [
     # Graph nodes
     "Node",
     "DialogueNode",
+    "SceneSummaryNode",
     "StatementNode",
     "ChunkNode",
     "ExtractedEntityNode",

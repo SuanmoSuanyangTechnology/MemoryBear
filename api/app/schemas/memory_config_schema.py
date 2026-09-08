@@ -21,6 +21,16 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
+from app.schemas.scene_memory_schema import (
+    SceneHistoryWindowSize,
+    SceneIdleTimeoutSeconds,
+    SceneMaxTurns,
+    SceneMinCharsToSummary,
+    SceneMinTurns,
+    SceneThreshold,
+    validate_scene_turn_range,
+)
+
 # ==================== Configuration Exception Classes ====================
 
 
@@ -422,6 +432,14 @@ class MemoryConfig(BaseModel):
     pruning_scene: Optional[str] = "education"
     pruning_threshold: float = 0.5
 
+    # Pipeline config: Scene boundary and SceneSummary
+    scene_threshold: SceneThreshold = 0.8
+    scene_history_window_size: SceneHistoryWindowSize = 4
+    scene_min_turns: SceneMinTurns = 2
+    scene_max_turns: SceneMaxTurns = 10
+    scene_idle_timeout_seconds: SceneIdleTimeoutSeconds = 86400
+    scene_min_chars_to_summary: SceneMinCharsToSummary = 0
+
     # Pipeline config: Emotion extraction
     emotion_enabled: bool = False
 
@@ -440,6 +458,7 @@ class MemoryConfig(BaseModel):
 
         if not self.llm_model_id:
             raise InvalidConfigError("LLM model ID is required")
+        validate_scene_turn_range(self.scene_min_turns, self.scene_max_turns)
         return self
     
     @classmethod

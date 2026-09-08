@@ -240,3 +240,13 @@ async def add_memory_summary_nodes(
     except Exception as e:
         logger.error(f"Failed to save MemorySummary nodes to Neo4j: {e}")
         return None
+
+
+async def add_scene_summary_node(summary: dict, connector: Neo4jConnector) -> str:
+    """Idempotently MERGE one SceneSummary by start_message_id."""
+    from app.repositories.neo4j.cypher_queries import SCENE_SUMMARY_NODE_SAVE
+
+    rows = await connector.execute_query(SCENE_SUMMARY_NODE_SAVE, summary=summary)
+    if not rows:
+        raise RuntimeError("SceneSummary MERGE returned no row")
+    return str(rows[0]["id"])

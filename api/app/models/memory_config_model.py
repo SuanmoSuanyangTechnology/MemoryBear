@@ -83,6 +83,14 @@ class MemoryConfig(Base):
     max_history_length = Column(Integer, default=100, comment="访问历史最大长度，默认100")
     min_days_since_access = Column(Integer, default=30, comment="最小未访问天数，默认30")
     
+    # SceneSummary 场景边界配置
+    scene_threshold = Column(Float, nullable=False, default=0.8, comment="Scene 连续性阈值")
+    scene_history_window_size = Column(Integer, nullable=False, default=4, comment="BERT 历史 user 窗口")
+    scene_min_turns = Column(Integer, nullable=False, default=2, comment="Scene 最小保护轮次")
+    scene_max_turns = Column(Integer, nullable=False, default=10, comment="Scene 最大轮次")
+    scene_idle_timeout_seconds = Column(Integer, nullable=False, default=86400, comment="Scene 静默超时秒数")
+    scene_min_chars_to_summary = Column(Integer, nullable=False, default=0, comment="SceneSummary 最小有效字符数")
+
     # 情绪引擎配置
     emotion_enabled = Column(Boolean, default=True, comment="是否启用情绪提取")
     emotion_model_id = Column(String, nullable=True, comment="情绪分析专用模型ID")
