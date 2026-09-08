@@ -139,9 +139,10 @@ async def create_metadata_field(
             principal.tenant_id,
             principal.actor_id,
         )
+        response = KnowledgeMetadataResponse.model_validate(field).model_dump(mode="json")
     return _success(
         request,
-        KnowledgeMetadataResponse.model_validate(field).model_dump(mode="json"),
+        response,
         "字段创建成功",
     )
 
@@ -167,9 +168,10 @@ async def update_metadata_field(
             data.name,
             principal.actor_id,
         )
+        response = KnowledgeMetadataResponse.model_validate(field).model_dump(mode="json")
     return _success(
         request,
-        KnowledgeMetadataResponse.model_validate(field).model_dump(mode="json"),
+        response,
         "字段更新成功",
     )
 
