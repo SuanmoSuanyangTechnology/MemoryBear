@@ -11,6 +11,7 @@ permissions:
 jobs:
   openapi-diff:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
@@ -20,7 +21,7 @@ jobs:
       - name: Check if API files changed
         id: filter
         run: |
-          CHANGED=$(git diff --name-only ${{ github.event.pull_request.base.sha }}...HEAD -- 'api/app/' 'api/scripts/export_openapi.py' 'api/pyproject.toml' 'api/uv.lock' 'api/openapi-baseline.json' '.github/workflows/api-breaking-change.yml')
+          CHANGED=$(git diff --name-only ${{ github.event.pull_request.base.sha }}...HEAD -- 'api/app/' 'api/scripts/' 'api/requirements-openapi.txt' 'api/pyproject.toml' 'api/uv.lock' 'api/openapi-baseline.json' '.github/workflows/api-breaking-change.yml')
           if [ -z "$CHANGED" ]; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else
@@ -41,13 +42,17 @@ jobs:
         if: steps.filter.outputs.skip == 'false'
         run: |
           pip install uv==0.7.12
-          cd api && uv sync --frozen
+          cd api
+          uv venv .venv-openapi
+          uv pip sync --python .venv-openapi/bin/python requirements-openapi.txt
+          uv pip check --python .venv-openapi/bin/python
+          .venv-openapi/bin/python -m unittest discover -s scripts -p test_openapi_export_stubs.py
 
       - name: Export current OpenAPI schema
         if: steps.filter.outputs.skip == 'false'
         run: |
           cd api
-          uv run --frozen python scripts/export_openapi.py --v1-only -o openapi-current.json
+          .venv-openapi/bin/python scripts/export_openapi.py --isolated --v1-only -o openapi-current.json --audit-output openapi-current-audit.json
 
       # Compare the target branch with the merged result, including target-side changes.
       - name: Export PR base OpenAPI schema
@@ -59,10 +64,18 @@ jobs:
           git worktree add --detach "$BASE_DIR" "${{ github.event.pull_request.base.sha }}"
           # Use the same export harness, but import each revision's own application.
           cp api/scripts/export_openapi.py "$BASE_DIR/api/scripts/export_openapi.py"
+          cp api/scripts/openapi_export_stubs.py "$BASE_DIR/api/scripts/openapi_export_stubs.py"
+          if [ ! -f "$BASE_DIR/api/requirements-openapi.txt" ]; then
+            echo "PR base lacks isolated export dependencies; land the export infrastructure first."
+            exit 1
+          fi
           cd "$BASE_DIR/api"
-          uv sync --frozen
-          uv run --frozen python scripts/export_openapi.py \
-            --v1-only \
+          uv venv .venv-openapi
+          uv pip sync --python .venv-openapi/bin/python requirements-openapi.txt
+          uv pip check --python .venv-openapi/bin/python
+          .venv-openapi/bin/python scripts/export_openapi.py \
+            --isolated --v1-only \
+            --audit-output "${{ github.workspace }}/api/openapi-pr-base-audit.json" \
             -o "${{ github.workspace }}/api/openapi-pr-base.json"
           echo "exported=true" >> "$GITHUB_OUTPUT"
 
@@ -287,3 +300,14 @@ jobs:
         with:
           header: oasdiff
           path: api/oasdiff-report.md
+
+      - name: Upload contract evidence
+        if: always() && steps.filter.outputs.skip == 'false'
+        uses: actions/upload-artifact@v4
+        with:
+          name: openapi-contract-evidence
+          path: |
+            api/openapi-current.json
+            api/openapi-pr-base.json
+            api/openapi-*-audit.json
+            api/oasdiff-report.md
