@@ -58,7 +58,7 @@ def main():
          patch("neo4j.AsyncGraphDatabase.driver", return_value=neo4j_mock), \
          patch("redis.Redis", return_value=redis_mock), \
          patch("redis.StrictRedis", return_value=redis_mock), \
-         patch("app.core.rag.deepdoc.vision.OCR", return_value=MagicMock()):
+         patch("app.core.rag.deepdoc.vision:OCR", return_value=MagicMock()):
         from app.main import app
         schema = app.openapi()
 
