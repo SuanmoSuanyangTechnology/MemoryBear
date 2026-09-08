@@ -22,7 +22,6 @@ import os
 import pathlib
 import sys
 from unittest.mock import patch, MagicMock
-from openapi_export_stubs import isolate_runtime
 
 # Ensure app is importable
 api_dir = str(pathlib.Path(__file__).resolve().parent.parent)
@@ -68,7 +67,10 @@ def main():
     neo4j_mock = MagicMock()
     redis_mock = MagicMock()
 
-    isolation = isolate_runtime() if args.isolated else nullcontext()
+    isolation = nullcontext()
+    if args.isolated:
+        from openapi_export_stubs import isolate_runtime
+        isolation = isolate_runtime()
     with isolation as guard, patch("elasticsearch.Elasticsearch", es_mock), \
          patch("neo4j.GraphDatabase.driver", return_value=neo4j_mock), \
          patch("neo4j.AsyncGraphDatabase.driver", return_value=neo4j_mock), \

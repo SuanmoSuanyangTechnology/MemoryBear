@@ -66,8 +66,13 @@ jobs:
           cp api/scripts/export_openapi.py "$BASE_DIR/api/scripts/export_openapi.py"
           cp api/scripts/openapi_export_stubs.py "$BASE_DIR/api/scripts/openapi_export_stubs.py"
           if [ ! -f "$BASE_DIR/api/requirements-openapi.txt" ]; then
-            echo "PR base lacks isolated export dependencies; land the export infrastructure first."
-            exit 1
+            # Bootstrap only when application code and its dependencies are identical.
+            if ! git diff --quiet "${{ github.event.pull_request.base.sha }}" HEAD -- \
+              api/app/ api/pyproject.toml api/uv.lock packages/redbear-model/; then
+              echo "::error::Land isolated export infrastructure separately from application/dependency changes."
+              exit 1
+            fi
+            cp api/requirements-openapi.txt "$BASE_DIR/api/requirements-openapi.txt"
           fi
           cd "$BASE_DIR/api"
           uv venv .venv-openapi
