@@ -944,18 +944,21 @@ async def dispatch_single_message(
         repo = MemoryMessageRepository(db)
         # 同一 message_seq 的全部行（按入库时间升序）；正常 1 组 1 行，历史脏数据可能多行
         seq_group_rows = repo.get_seq_group(conversation_id, target_seq)
+        # 必须在 session 关闭前转 dict：退出 get_db_context 会 rollback（对象属性被标记
+        # 过期）+ close（脱离 session），之后再访问属性会触发属性刷新 → DetachedInstanceError。
+        group_dicts = [message_to_dict(r) for r in seq_group_rows]
 
-    if not seq_group_rows:
+    if not group_dicts:
         return 0
 
-    if len(seq_group_rows) > 1:
+    if len(group_dicts) > 1:
         logger.warning(
             "[WriteDispatcher] 检测到同 seq 撞号多行，将整组逐行派发: "
             "conv=%s, seq=%s, rows=%d",
-            conversation_id, target_seq, len(seq_group_rows),
+            conversation_id, target_seq, len(group_dicts),
         )
     # 跳过assistant_message的派发
-    if not any(r.role == "user" and r.should_memorize for r in seq_group_rows):
+    if not any(d["role"] == "user" and d["should_memorize"] for d in group_dicts):
         # 组内无 user 目标（例如纯 assistant 消息），由调用方负责推进游标。
         return 0
 
@@ -985,7 +988,7 @@ async def dispatch_single_message(
     # 整组按入库顺序逐行派发。同 seq 撞号时：首个 user 行使用规范 dialogue_id
     # （Dialog_{conv}_{seq}），后续 user 行附加行级后缀成为独立 Dialogue 节点，
     # 不被下游同 id 覆盖/去重；每行上文 = 窗口上文 + 本组更早入库的行。
-    group_dicts = [message_to_dict(r) for r in seq_group_rows]
+    # group_dicts 已在上方 session 内转换完成（ORM 对象脱离 session 后不可再访问属性）。
     dispatched = 0
     is_first_user_row = True
 
