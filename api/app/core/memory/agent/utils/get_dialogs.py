@@ -18,6 +18,7 @@ async def get_chunked_dialogs(
         conversation_id: str = "",
         message_seq: int = 0,
         source: str = "",
+        dialogue_id_suffix: str = "",  # 同 seq 撞号消歧后缀（行级）；空串=规范 id
 ) -> List[DialogData]:
     """Generate chunks from structured messages using the specified chunker strategy.
 
@@ -83,7 +84,12 @@ async def get_chunked_dialogs(
     # 及所有引用 dialog_data.id 的子节点（Chunk/Assistant*/MemorySummary 的 dialog_id）天然一致，
     # 由正写覆盖升级快写占位节点。缺少分组信息（如试运行）时省略 id，回退模型默认的随机 uuid。
     if conversation_id or source:
-        dialog_kwargs["id"] = build_dialogue_id(conversation_id, message_seq, source, end_user_id)
+        _dialog_id = build_dialogue_id(conversation_id, message_seq, source, end_user_id)
+        if dialogue_id_suffix:
+            # 同 seq 撞号且非首条时附加行级后缀，避免与首条共用同一 Dialogue id
+            # 而在下游被覆盖/去重吞掉。
+            _dialog_id = f"{_dialog_id}#{dialogue_id_suffix}"
+        dialog_kwargs["id"] = _dialog_id
     dialog_data = DialogData(**dialog_kwargs)
 
 # step3： 分块
