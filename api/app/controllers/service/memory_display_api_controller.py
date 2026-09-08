@@ -37,7 +37,7 @@ def _encode_result(result):
 # ==================== 写入展示记录 ====================
 
 
-@router.get("/written")
+@router.get("/written-demo-breaking")
 @require_api_key_self_db(scopes=["memory"])
 async def get_written_memories(
     request: Request,
