@@ -57,6 +57,8 @@ jobs:
           set -e
           BASE_DIR="${RUNNER_TEMP}/openapi-pr-base"
           git worktree add --detach "$BASE_DIR" "${{ github.event.pull_request.base.sha }}"
+          # Use the same export harness, but import each revision's own application.
+          cp api/scripts/export_openapi.py "$BASE_DIR/api/scripts/export_openapi.py"
           cd "$BASE_DIR/api"
           uv sync --frozen
           uv run --frozen python scripts/export_openapi.py \
