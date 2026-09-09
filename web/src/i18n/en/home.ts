@@ -126,6 +126,7 @@ export const home = {
       systemSettings: 'System Settings',
       upgradePackage: 'Upgrade Package',
       account: 'Account Center',
+      brainMemory: 'Brain-Inspired Memory Flow',
     },
     dashboard: {
       total_models: 'Available Models',
