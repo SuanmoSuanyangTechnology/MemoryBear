@@ -1168,9 +1168,10 @@ class MemoryMessageRepository:
         return starts[:batch_size]
 
     def _load_scene_configs(self, end_user_ids: set[str]) -> dict[str, object | None]:
-        """一次查询加载当前批次涉及的 Scene 配置。"""
+        """一次查询加载当前批次涉及的 workspace Scene 配置。"""
         from app.models.end_user_model import EndUser
         from app.models.memory_config_model import MemoryConfig
+        from app.models.workspace_model import Workspace
 
         valid_ids = []
         configs: dict[str, object | None] = {end_user_id: None for end_user_id in end_user_ids}
@@ -1190,7 +1191,8 @@ class MemoryMessageRepository:
                     "scene_idle_timeout_seconds"
                 ),
             )
-            .join(MemoryConfig, EndUser.memory_config_id == MemoryConfig.config_id)
+            .join(Workspace, EndUser.workspace_id == Workspace.id)
+            .join(MemoryConfig, Workspace.memory_config == MemoryConfig.config_id)
             .where(EndUser.id.in_(valid_ids))
         ).all()
         for row in rows:
