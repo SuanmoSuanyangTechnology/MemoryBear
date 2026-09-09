@@ -41,18 +41,16 @@ from app.core.memory.utils.debug.reflection_snapshot_recorder import (
     ReflectionSnapshotRecorder,
     change,
 )
-from app.repositories.neo4j.cypher_queries import (
-    REFLECTION_DESC_UPDATE,
-    REFLECTION_RENAME_CHECK_CONFLICT,
-    REFLECTION_RENAME_ENTITY,
-    REFLECTION_UPDATE_NAME_EMBEDDING,
-    UNRESOLVED_CREATE_ENTITY,
-    UNRESOLVED_UPDATE_NAME_EMBEDDING,
-    UNRESOLVED_APPEND_USER_INFO,
-    UNRESOLVED_CREATE_RELATIONSHIP,
-    UNRESOLVED_CREATE_STATEMENT_ENTITY_EDGE,
-    UNRESOLVED_UPDATE_STATEMENT_FLAG,
+from app.core.memory.storage.custom.reflection_entity_updates import (
+    merge_entity_description,
+    rename_entity,
+    update_entity_name_embedding,
 )
+from app.core.memory.storage.custom.reflection_mutations import (
+    append_user_info, create_unresolved_entity, create_unresolved_relationship,
+    create_unresolved_statement_entity_edge, resolve_statement,
+)
+from app.repositories.neo4j.cypher_queries import REFLECTION_RENAME_CHECK_CONFLICT
 
 logger = logging.getLogger(__name__)
 
@@ -193,6 +191,60 @@ class Layer2Inspector:
         self._recorder: Optional[ReflectionSnapshotRecorder] = None
         # 实体合并后 name_embedding 重算失败记录（不中断合并，由步骤聚合进告警）
         self._embedding_errors: List[str] = []
+        # 本轮巡检独占的 write-only storage service，供模式 A 使用，见 _get_storage_service
+        self._storage_service = None
+        self._storage_service_lock = asyncio.Lock()
+        # 本轮巡检独占的 storage Neo4j client，供模式 B 的 custom 事务使用，见 _get_reflection_client
+        self._reflection_client = None
+        self._reflection_client_lock = asyncio.Lock()
+
+    async def _get_storage_service(self):
+        """返回本轮巡检独占的 write-only storage service，供模式 A 的节点 CRUD 使用。
+
+        反思跑在 celery worker 进程，不经过 FastAPI lifespan，
+        ``get_storage_service()`` 的进程级单例在这里恒为 None。因此自建
+        独占实例，只含 Neo4j write client，由 ``close_storage_service`` 释放。
+        """
+        if self._storage_service is None:
+            from app.core.memory.storage.service import MemoryStorageService
+
+            async with self._storage_service_lock:
+                if self._storage_service is None:
+                    self._storage_service = await MemoryStorageService.create_graph_write_only()
+        return self._storage_service
+
+    async def _get_reflection_client(self):
+        """返回本轮巡检独占的 storage Neo4j client，供模式 B 的 custom 事务使用。
+
+        模式 B 的写入要自己开显式事务、在 commit 前校验 affected identities，因此需要
+        裸 client 而不是 ``MemoryStorageService``——后者的公开方法一律经 Router 并登记
+        Outbox，不提供绕过投影的出口。这里自建并整轮复用，由
+        ``close_storage_service`` 与模式 A 的 service 一并释放。
+        """
+        if self._reflection_client is None:
+            from app.core.memory.storage.provider.neo4j.client import Neo4jClient
+
+            async with self._reflection_client_lock:
+                if self._reflection_client is None:
+                    self._reflection_client = await Neo4jClient.create()
+        return self._reflection_client
+
+    async def close_storage_service(self) -> None:
+        """释放本轮独占的 storage 资源。由 pipeline 在 finally 中调用。
+
+        模式 A 的 write-only service 与模式 B 的 custom 事务 client 各持一个独立
+        Neo4j driver，两者都要释放，且前者关闭失败不能影响后者。
+        """
+        service, self._storage_service = self._storage_service, None
+        client, self._reflection_client = self._reflection_client, None
+        for name, resource in (("storage service", service),
+                               ("custom 事务 client", client)):
+            if resource is None:
+                continue
+            try:
+                await resource.close()
+            except Exception as e:
+                logger.warning(f"[Layer2] 关闭 {name} 失败: {e}")
 
     def _snap(self, subproblem: str, stage: str, data) -> None:
         """安全落普通阶段文件；recorder 为 None / 关闭 / 异常时只告警，不影响主流程。"""
@@ -458,9 +510,15 @@ class Layer2Inspector:
             llm_ms = int((time.perf_counter() - llm_t0) * 1000)
 
             # S2 drop（只删边）
-            await drop_alias_edges(self.connector, end_user_id, drop_ids)
+            await drop_alias_edges(
+                self.connector,
+                end_user_id,
+                drop_ids,
+                neo4j_client=await self._get_reflection_client(),
+            )
             # S3-5 merge（按 merge 集合）+ S6 PG 同步
-            result = await merge_alias_belongs_to(self.connector, end_user_id, alias_ids=merge_ids)
+            result = await merge_alias_belongs_to(self.connector, end_user_id, alias_ids=merge_ids,
+                                                 neo4j_client=await self._get_reflection_client())
 
             # 写日志（含 LLM 判定与重复短路命中的候选；仅 skip 不写）
             timing = {"recall_ms": recall_ms, "llm_ms": llm_ms}
@@ -564,6 +622,7 @@ class Layer2Inspector:
                 end_user_id=end_user_id,
                 language=language,
                 min_fragments=self.desc_config.min_fragments,
+                neo4j_client=await self._get_reflection_client(),
                 collect_trace=want_trace,
             )
 
@@ -974,11 +1033,12 @@ class Layer2Inspector:
 
                 t1 = time.perf_counter()
                 merge_status = await execute_merge(
-                    self.connector, end_user_id,
+                    end_user_id,
                     keeper["entity_id"], loser["entity_id"],
                     merged_name, merged_aliases,
                     loser_degree=loser_degree,
                     merge_max_degree=config.merge_max_degree,
+                    neo4j_client=await self._get_reflection_client(),
                 )
                 write_ms = int((time.perf_counter() - t1) * 1000)
 
@@ -1361,11 +1421,12 @@ class Layer2Inspector:
         # Step 5: 写入
         tracker.start_step("写入", "write")
         merge_status = await execute_merge(
-            self.connector, end_user_id,
+            end_user_id,
             keeper["entity_id"], loser["entity_id"],
             merged_name, merged_aliases,
             loser_degree=loser_degree,
             merge_max_degree=self.dedup_config.merge_max_degree,
+            neo4j_client=await self._get_reflection_client(),
         )
         if merge_status == "skipped_super_node":
             # 当前版本超级节点保护已关闭，理论上不会进此分支；保留兜底。
@@ -1407,6 +1468,9 @@ class Layer2Inspector:
 
         Embedding 重算失败不中断合并，但记入 ``_embedding_errors`` 供步骤聚合为
         MODEL_CALL_FAILED + Embedding，让告警能区分是 Embedding 模型出问题。
+
+        写入经 storage custom，会发布 keeper 的 UPSERT 投影事件。写入失败同样只告警：
+        合并本身已经成功提交，不该因为向量没写上就把整次合并判为失败。
         """
         old_name = keeper.get("name") or ""
         if not merged_name or merged_name == old_name:
@@ -1422,10 +1486,10 @@ class Layer2Inspector:
 
         if emb:
             try:
-                await self.connector.execute_query(
-                    REFLECTION_UPDATE_NAME_EMBEDDING,
-                    entity_id=keeper.get("entity_id") or keeper.get("id"),
+                await update_entity_name_embedding(
+                    keeper.get("entity_id") or keeper.get("id"),
                     name_embedding=emb,
+                    storage_service=await self._get_storage_service(),
                 )
             except Exception as e:
                 logger.warning(f"合并后写入 name_embedding 失败 name={merged_name}: {e}")
@@ -1480,11 +1544,12 @@ class Layer2Inspector:
         merged_aliases = build_merged_aliases(keeper, loser, merged_name)  # 不传 new_aliases
 
         merge_status = await execute_merge(
-            self.connector, end_user_id,
+            end_user_id,
             keeper["entity_id"], loser["entity_id"],
             merged_name, merged_aliases,
             loser_degree=loser_degree,
             merge_max_degree=self.dedup_config.merge_max_degree,
+            neo4j_client=await self._get_reflection_client(),
         )
         if merge_status != "success":
             return False, None, None, None, None
@@ -1594,11 +1659,12 @@ class Layer2Inspector:
                 loser_degree = degrees.get(loser["entity_id"], 0)
 
                 merge_status = await execute_merge(
-                    self.connector, end_user_id,
+                    end_user_id,
                     keeper_id, loser["entity_id"],
                     merged_name, merged_aliases,
                     loser_degree=loser_degree,
                     merge_max_degree=self.dedup_config.merge_max_degree,
+                    neo4j_client=await self._get_reflection_client(),
                 )
                 if merge_status != "success":
                     continue
@@ -1828,29 +1894,30 @@ class Layer2Inspector:
             if entity.name.strip() == "用户":
                 if entity.description:
                     try:
-                        await self.connector.execute_query(
-                            UNRESOLVED_APPEND_USER_INFO,
-                            end_user_id=end_user_id,
-                            description=entity.description,
+                        await append_user_info(
+                            end_user_id, entity.description,
+                            neo4j_client=await self._get_reflection_client(),
                         )
                     except Exception as user_err:
                         logger.warning(
                             f"追加用户实体描述失败 end_user={end_user_id}: {user_err}"
                         )
                 continue
-            entity_result = await self.connector.execute_query(
-                UNRESOLVED_CREATE_ENTITY,
-                end_user_id=end_user_id,
-                name=entity.name,
-                entity_type=entity.type,
-                description=entity.description,
-                run_id=fallback_run_id,
-                type_id=entity.type_id,
-                type_description=entity.type_description,
-                entity_idx=entity.entity_idx,
-                is_explicit_memory=entity.is_explicit_memory,
-                statement_id=stmt["statement_id"],
-                created_at=entity_last_seen,
+            entity_result = await create_unresolved_entity(
+                dict(
+                    end_user_id=end_user_id,
+                    name=entity.name,
+                    entity_type=entity.type,
+                    description=entity.description,
+                    run_id=fallback_run_id,
+                    type_id=entity.type_id,
+                    type_description=entity.type_description,
+                    entity_idx=entity.entity_idx,
+                    is_explicit_memory=entity.is_explicit_memory,
+                    statement_id=stmt["statement_id"],
+                    created_at=entity_last_seen,
+                ),
+                neo4j_client=await self._get_reflection_client(),
             )
             if entity_result:
                 entity_id = entity_result[0].get("entity_id", "")
@@ -1861,10 +1928,10 @@ class Layer2Inspector:
                         name_embedding = self.embedding_client.embed_query(entity.name)
                         if name_embedding:
                             snap_name_embeddings[entity.name] = name_embedding
-                            await self.connector.execute_query(
-                                UNRESOLVED_UPDATE_NAME_EMBEDDING,
-                                entity_id=entity_id,
+                            await update_entity_name_embedding(
+                                entity_id,
                                 name_embedding=name_embedding,
+                                storage_service=await self._get_storage_service(),
                             )
                     except Exception as emb_err:
                         logger.warning(f"补 name_embedding 失败 entity={entity.name}: {emb_err}")
@@ -1872,39 +1939,43 @@ class Layer2Inspector:
         # 4.2 创建关系边
         for triplet in validated.triplets:
             try:
-                await self.connector.execute_query(
-                    UNRESOLVED_CREATE_RELATIONSHIP,
-                    end_user_id=end_user_id,
-                    subject_name=triplet.subject_name,
-                    object_name=triplet.object_name,
-                    predicate=triplet.predicate,
-                    predicate_id=triplet.predicate_id,
-                    predicate_surface=triplet.predicate_surface,
-                    predicate_description=triplet.predicate_description,
-                    statement_id=stmt["statement_id"],
-                    valid_at=triplet.valid_at,
-                    invalid_at=triplet.invalid_at,
-                    run_id=fallback_run_id,
-                    created_at=utcnow_naive(),
+                await create_unresolved_relationship(
+                    {
+                        "end_user_id": end_user_id,
+                        "subject_name": triplet.subject_name,
+                        "object_name": triplet.object_name,
+                        "predicate": triplet.predicate,
+                        "predicate_id": triplet.predicate_id,
+                        "predicate_surface": triplet.predicate_surface,
+                        "predicate_description": triplet.predicate_description,
+                        "statement_id": stmt["statement_id"],
+                        "valid_at": triplet.valid_at,
+                        "invalid_at": triplet.invalid_at,
+                        "run_id": fallback_run_id,
+                        "created_at": utcnow_naive(),
+                    },
+                    neo4j_client=await self._get_reflection_client(),
                 )
             except Exception as rel_err:
                 logger.warning(f"创建关系边失败: {rel_err}")
 
         # 4.3 创建 REFERENCES_ENTITY 边
         for entity in validated.entities:
-            await self.connector.execute_query(
-                UNRESOLVED_CREATE_STATEMENT_ENTITY_EDGE,
-                statement_id=stmt["statement_id"],
-                end_user_id=end_user_id,
-                entity_name=entity.name,
-                run_id=fallback_run_id,
-                created_at=utcnow_naive(),
+            await create_unresolved_statement_entity_edge(
+                {
+                    "statement_id": stmt["statement_id"],
+                    "end_user_id": end_user_id,
+                    "entity_name": entity.name,
+                    "run_id": fallback_run_id,
+                    "created_at": utcnow_naive(),
+                },
+                neo4j_client=await self._get_reflection_client(),
             )
 
         # 4.4 更新 Statement 标记
-        await self.connector.execute_query(
-            UNRESOLVED_UPDATE_STATEMENT_FLAG,
-            statement_id=stmt["statement_id"],
+        await resolve_statement(
+            stmt["statement_id"],
+            neo4j_client=await self._get_reflection_client(),
         )
         tracker.end_step(
             f"创建 {len(validated.entities)} 实体, "
@@ -2171,15 +2242,24 @@ class Layer2Inspector:
             event_timeline = existing_event_timeline
 
         # Step 5: 写入 Neo4j（summary + timeline + event_timeline + 清空 description）
+        # 经 storage custom → MemoryStorageService，写入后发布 UPSERT 投影事件，
+        # 让 Elasticsearch 拿到新的 description_summary。
         tracker.start_step("写入", "write")
         merged_text = result.description_summary
-        await self.connector.execute_query(
-            REFLECTION_DESC_UPDATE,
-            entity_id=entity["entity_id"],
-            summary=merged_text,
-            timeline=timeline,
+        updated = await merge_entity_description(
+            entity["entity_id"],
+            description_summary=merged_text,
+            description_timeline=timeline,
             event_timeline=event_timeline,
+            storage_service=await self._get_storage_service(),
         )
+        if not updated:
+            # 未命中说明候选扫描之后实体被软删或改了归属。不中断本方法：
+            # 后续的更名判断、ReflectionLog 与快照照常执行，这里只留一行日志便于排查。
+            logger.info(
+                f"描述合并未命中实体（已软删或改归属）entity_id={entity['entity_id']}, "
+                f"end_user_id={end_user_id}"
+            )
         tracker.end_step("写入完成")
 
         # Step 6: 更名判断
@@ -2290,23 +2370,29 @@ class Layer2Inspector:
             )
             return "rejected:conflict"
 
-        # 执行更名
-        await self.connector.execute_query(
-            REFLECTION_RENAME_ENTITY,
-            entity_id=entity["entity_id"],
+        # 执行更名（经 storage custom，写入后发布 UPSERT 投影事件）
+        renamed = await rename_entity(
+            entity["entity_id"],
             new_name=suggested_name.strip(),
-            old_name=old_name,
+            storage_service=await self._get_storage_service(),
         )
+        if not renamed:
+            # 未命中说明候选扫描之后实体被软删或改了归属。不中断流程，
+            # 后续的 name_embedding 重算与日志照常执行，这里只留一行日志便于排查。
+            logger.info(
+                f"更名未命中实体（已软删或改归属）entity_id={entity['entity_id']}, "
+                f"end_user_id={end_user_id}"
+            )
 
         # 重新生成 name_embedding（同步方法）
         if self.embedding_client:
             try:
                 name_embedding = self.embedding_client.embed_query(suggested_name.strip())
                 if name_embedding:
-                    await self.connector.execute_query(
-                        REFLECTION_UPDATE_NAME_EMBEDDING,
-                        entity_id=entity["entity_id"],
+                    await update_entity_name_embedding(
+                        entity["entity_id"],
                         name_embedding=name_embedding,
+                        storage_service=await self._get_storage_service(),
                     )
             except Exception as emb_err:
                 logger.warning(f"更名后补 name_embedding 失败: {emb_err}")

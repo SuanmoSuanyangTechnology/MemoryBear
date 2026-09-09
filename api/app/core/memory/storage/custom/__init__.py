@@ -52,6 +52,24 @@ from app.core.memory.storage.custom.forget_recovery import (
     recover_forgotten_node_by_element_id,
     resolve_forget_recovery_target,
 )
+from app.core.memory.storage.custom.reflection_entity_updates import (
+    merge_entity_description,
+    rename_entity,
+    update_entity_name_embedding,
+)
+from app.core.memory.storage.custom.reflection_mutations import (
+    append_user_info,
+    create_unresolved_entity,
+    create_unresolved_relationship,
+    create_unresolved_statement_entity_edge,
+    delete_alias_nodes,
+    drop_alias_belongs_edges,
+    merge_alias_properties,
+    merge_entities,
+    patch_entity_metadata,
+    redirect_alias_edges,
+    resolve_statement,
+)
 
 __all__ = [
     "AutomaticForgetOutboxError",
@@ -68,9 +86,15 @@ __all__ = [
     "ForgottenNodeIdentity",
     "ForgetRecoveryTarget",
     "ManualDeleteTarget",
+    "append_user_info",
     "compute_topology_score",
+    "create_unresolved_entity",
+    "create_unresolved_relationship",
+    "create_unresolved_statement_entity_edge",
+    "delete_alias_nodes",
     "delete_end_user_memory_nodes",
     "delete_manual_node_by_element_id",
+    "drop_alias_belongs_edges",
     "resolve_manual_delete_target",
     "recover_forgotten_node_by_element_id",
     "resolve_forget_recovery_target",
@@ -80,9 +104,17 @@ __all__ = [
     "get_user_entity_id",
     "get_user_metadata",
     "get_user_sources_for_entities",
+    "merge_alias_properties",
     "merge_end_user_memory_nodes",
+    "merge_entities",
+    "merge_entity_description",
+    "patch_entity_metadata",
+    "redirect_alias_edges",
+    "rename_entity",
+    "resolve_statement",
     "search_entities_by_name",
     "search_related_entities",
     "soft_delete_forgetting_nodes",
+    "update_entity_name_embedding",
     "update_user_entity_aliases",
 ]
