@@ -29,6 +29,7 @@ from app.services import workspace_service
 from app.services.memory_config_service import MemoryConfigService
 from app.services.model_service import ModelConfigService, ModelApiKeyService
 from app.services.prompt import prompt_manager
+from app.utils.redis_cache import redis_cache
 
 logger = get_business_logger()
 
@@ -1483,6 +1484,7 @@ class ConversationService:
             "content": target_msg.content,
         }
 
+    @redis_cache(skip_args=['self', 'user'], return_type=ConversationOut)
     async def get_conversation_detail(
             self,
             user: User,

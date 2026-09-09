@@ -1,16 +1,19 @@
+import asyncio
 import uuid
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.aioRedis import get_thread_safe_sync_redis
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_memory_logger
+from app.core.memory.storage.custom import merge_end_user_memory_nodes
 from app.models import EndUserInfo
 from app.models.end_user_model import EndUser
 from app.repositories.end_user_info_repository import EndUserInfoRepository
 from app.repositories.end_user_repository import EndUserRepository
-from app.repositories.neo4j.end_user_merge_repository import EndUserMergeNeo4jRepository
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+from app.utils.redis_lock import RedisFairLock
 
 logger = get_memory_logger()
 
@@ -22,6 +25,63 @@ class EndUserService:
         self.db = db
 
     async def merge_end_users(self, source: set[uuid.UUID], target: uuid.UUID):
+        """Merge end users while holding all graph ownership write locks."""
+        if not source:
+            raise BusinessException(message="No source user provided.")
+        if target in source:
+            raise BusinessException(message="Target user cannot be a source user.")
+
+        locks = await self._acquire_memory_write_locks(source, target)
+        try:
+            return await self._merge_end_users_locked(source, target)
+        finally:
+            await self._release_memory_write_locks(locks)
+
+    @staticmethod
+    async def _acquire_memory_write_locks(
+        source: set[uuid.UUID],
+        target: uuid.UUID,
+    ) -> list[RedisFairLock]:
+        redis_client = get_thread_safe_sync_redis()
+        locks: list[RedisFairLock] = []
+        lock_ids = sorted({str(target), *(str(source_id) for source_id in source)})
+        try:
+            for end_user_id in lock_ids:
+                lock = RedisFairLock(
+                    key=f"memory_write:{end_user_id}",
+                    redis_client=redis_client,
+                    expire=1200,
+                    timeout=60,
+                    auto_renewal=True,
+                )
+                if not await asyncio.to_thread(lock.acquire):
+                    raise BusinessException(
+                        message=f"Memory write lock timed out: {end_user_id}"
+                    )
+                locks.append(lock)
+            return locks
+        except Exception:
+            await EndUserService._release_memory_write_locks(locks)
+            raise
+
+    @staticmethod
+    async def _release_memory_write_locks(
+        locks: list[RedisFairLock],
+    ) -> None:
+        for lock in reversed(locks):
+            try:
+                await asyncio.to_thread(lock.release)
+            except Exception:
+                logger.exception(
+                    "[merge_end_users] 释放 memory_write 锁失败: key=%s",
+                    lock.key,
+                )
+
+    async def _merge_end_users_locked(
+        self,
+        source: set[uuid.UUID],
+        target: uuid.UUID,
+    ):
         """将 source 中的用户合并到 target 用户。
 
         合并操作涵盖（顺序即执行顺序，其中第 2 步是「归并意图先行落库」）：
@@ -64,8 +124,13 @@ class EndUserService:
 
         # ── 1.4 工作空间一致性校验：跨空间归并会串号，须在任何迁移前拦截 ──
         target_user = await self._get_end_user_any_async(target)
-        if not target_user:
-            raise BusinessException(message="Target user not found.")
+        if not target_user or not target_user.is_active:
+            raise BusinessException(message="Target user not found or inactive.")
+        missing_sources = source - set(source_users)
+        if missing_sources:
+            raise BusinessException(
+                message=f"Source users not found: {missing_sources}."
+            )
         mismatched = {
             source_id
             for source_id, source_user in source_users.items()
@@ -75,6 +140,38 @@ class EndUserService:
             raise BusinessException(
                 message=f"Cross-workspace merge is not allowed: {mismatched} not in workspace {target_user.workspace_id}."
             )
+
+        existing_merge_targets: dict[uuid.UUID, uuid.UUID | None] = {}
+        for source_id, source_user in source_users.items():
+            merge_target = await self.user_repo.get_merge_target_id_async(
+                source_id,
+                target_user.workspace_id,
+            )
+            existing_merge_targets[source_id] = merge_target
+            if merge_target is not None and merge_target != target:
+                raise BusinessException(
+                    message=f"Source user {source_id} is already merged to {merge_target}."
+                )
+            if not source_user.is_active and merge_target != target:
+                raise BusinessException(
+                    message=f"Inactive source user {source_id} has no matching merge intent."
+                )
+
+        # Snapshot every ORM value needed after the first commit.  The application
+        # session factory currently uses expire_on_commit=False, but this service
+        # accepts any AsyncSession; callers and tests may use the SQLAlchemy default
+        # (expire_on_commit=True).  Keeping only plain values across the commit also
+        # prevents future rollback/close changes from reintroducing detached access.
+        source_other_ids = {
+            source_id: source_user.other_id
+            for source_id, source_user in source_users.items()
+        }
+        target_aliases_snapshot = list(target_user_info.aliases or [])
+        target_meta_snapshot = dict(target_user_info.meta_data or {})
+        source_info_snapshots = [
+            (list(info.aliases or []), dict(info.meta_data or {}))
+            for info in end_user_infos
+        ]
 
         # ── 1.5 归并意图先行落库：软删 source + 写 end_user_merge 映射，同一次提交 ──
         # 位置刻意放在「所有前置校验之后、任何数据迁移之前」：
@@ -94,11 +191,12 @@ class EndUserService:
         await self.user_repo.soft_delete_many_pending_async(source)
         await self.user_repo.flatten_merge_chain_async(source, target, workspace_id)
         for src_id in source:
-            src_user = source_users.get(src_id)
+            if existing_merge_targets.get(src_id) == target:
+                continue
             # EndUserMerge.origin_other_id 是 NOT NULL，而 EndUser.other_id 允许为空
             # （agent chat 等入口可不传 user_id）。这里必须兜底为 id 字符串，
             # 否则归并会因非空约束直接失败。
-            origin_other_id = (src_user.other_id if src_user else None) or str(src_id)
+            origin_other_id = source_other_ids.get(src_id) or str(src_id)
             self.user_repo.create_merge_record(
                 origin_id=src_id,
                 origin_other_id=origin_other_id,
@@ -112,29 +210,28 @@ class EndUserService:
         )
 
         # ── 2. 合并 aliases 与 meta_data 到 target EndUserInfo ──
-        final_aliases: list[str] = list(target_user_info.aliases or [])
+        final_aliases: list[str] = list(target_aliases_snapshot)
         seen_alias_lower = {a.lower() for a in final_aliases}
 
-        merged_meta: dict = dict(target_user_info.meta_data or {})
+        merged_meta: dict = dict(target_meta_snapshot)
 
-        for info in end_user_infos:
-            for alias in (info.aliases or []):
+        for aliases, meta_data in source_info_snapshots:
+            for alias in aliases:
                 alias = alias.strip()
                 if alias and alias.lower() not in seen_alias_lower:
                     final_aliases.append(alias)
                     seen_alias_lower.add(alias.lower())
 
-            if info.meta_data:
-                for key, values in info.meta_data.items():
-                    if not isinstance(values, list):
-                        continue
-                    existing = list(merged_meta.get(key) or [])
-                    existing_set = {str(v).lower() for v in existing}
-                    for v in values:
-                        if str(v).lower() not in existing_set:
-                            existing.append(v)
-                            existing_set.add(str(v).lower())
-                    merged_meta[key] = existing
+            for key, values in meta_data.items():
+                if not isinstance(values, list):
+                    continue
+                existing = list(merged_meta.get(key) or [])
+                existing_set = {str(v).lower() for v in existing}
+                for v in values:
+                    if str(v).lower() not in existing_set:
+                        existing.append(v)
+                        existing_set.add(str(v).lower())
+                merged_meta[key] = existing
 
         target_user_info.aliases = final_aliases
         target_user_info.meta_data = merged_meta
@@ -146,20 +243,20 @@ class EndUserService:
             f"meta_keys={list(merged_meta.keys())}"
         )
 
-        # ── 3. Neo4j 操作（委托给 EndUserMergeNeo4jRepository） ──
+        # ── 3. Neo4j 操作（storage custom 原子事务 + 逐节点 Outbox） ──
+        source_strs = sorted(str(sid) for sid in source)
+        stats = await merge_end_user_memory_nodes(source_strs, str(target))
+        logger.info(
+            f"[merge_end_users] Neo4j 合并完成: "
+            f"sources={stats.sources_merged}, "
+            f"nodes={stats.reassigned_nodes}, "
+            f"edges={stats.reassigned_edges}, "
+            f"outbox={stats.outbox_events}"
+        )
+
+        # 同步 target 用户的 memory_count（只读 Neo4j 计数）。
         connector = Neo4jConnector(shared_driver=True)
         try:
-            neo4j_repo = EndUserMergeNeo4jRepository(connector)
-            source_strs = [str(sid) for sid in source]
-            stats = await neo4j_repo.reassign_all_to_target(
-                source_strs, str(target)
-            )
-            logger.info(
-                f"[merge_end_users] Neo4j 合并完成: "
-                f"nodes={stats['nodes']}, edges={stats['edges']}"
-            )
-
-            # 同步 target 用户的 memory_count（合并后节点数已变化）
             from app.core.memory.utils.memory_count_utils import (
                 sync_end_user_memory_count_from_neo4j,
             )
@@ -256,23 +353,53 @@ class EndUserService:
             await self.user_repo.acquire_identity_lock_async(
                 workspace_id, clean_features
             )
-            existing = await self.user_repo.find_active_by_identity_features(
-                workspace_id, clean_features
+            candidate = await self.user_repo.find_active_by_identity_features(
+                workspace_id,
+                clean_features,
+                for_update=False,
             )
-            if existing and existing.id != current_end_user.id:
-                # 先落标识再归并：source 行被软删后仍带 identity_features，
-                # 便于事后排查「这条记录当时按哪个标识被并走」。
-                current_end_user.identity_features = clean_features
-                current_end_user.identity_status = identity_status
-                await self.db.flush()
-                await self.merge_end_users(
-                    source={current_end_user.id}, target=existing.id
+            current_end_user_id = uuid.UUID(str(current_end_user.id))
+            candidate_id = uuid.UUID(str(candidate.id)) if candidate else None
+            if candidate_id is not None and candidate_id != current_end_user_id:
+                source_ids = {current_end_user_id}
+                locks = await self._acquire_memory_write_locks(
+                    source_ids,
+                    candidate_id,
                 )
+                try:
+                    existing = await self.user_repo.find_active_by_identity_features(
+                        workspace_id,
+                        clean_features,
+                        for_update=True,
+                    )
+                    existing_id = (
+                        uuid.UUID(str(existing.id)) if existing is not None else None
+                    )
+                    if existing_id is None or existing_id == current_end_user_id:
+                        raise BusinessException(
+                            message="Identity merge target changed during lock acquisition."
+                        )
+                    if existing_id != candidate_id:
+                        raise BusinessException(
+                            message="Identity merge target changed during lock acquisition."
+                        )
+
+                    # 先落标识再归并：source 行被软删后仍带 identity_features，
+                    # 便于事后排查「这条记录当时按哪个标识被并走」。
+                    current_end_user.identity_features = clean_features
+                    current_end_user.identity_status = identity_status
+                    await self.db.flush()
+                    await self._merge_end_users_locked(
+                        source=source_ids,
+                        target=existing_id,
+                    )
+                finally:
+                    await self._release_memory_write_locks(locks)
                 logger.info(
-                    f"[confirm_identity] 跨渠道归并: source={current_end_user.id} "
-                    f"→ target={existing.id}, identity_features={clean_features}"
+                    f"[confirm_identity] 跨渠道归并: source={current_end_user_id} "
+                    f"→ target={existing_id}, identity_features={clean_features}"
                 )
-                return existing.id, "confirmed", True
+                return existing_id, "confirmed", True
 
         current_end_user.identity_features = clean_features
         current_end_user.identity_status = identity_status

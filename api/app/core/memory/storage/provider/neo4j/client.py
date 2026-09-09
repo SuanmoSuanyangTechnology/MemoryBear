@@ -1,7 +1,7 @@
 import asyncio
 import heapq
 import traceback
-from typing import TYPE_CHECKING, Any, Self
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, Self, TypeVar
 
 import numpy as np
 from neo4j import AsyncGraphDatabase, AsyncDriver
@@ -45,6 +45,9 @@ from app.core.memory.storage.utils.similarity import compute_cosine_similarity
 
 if TYPE_CHECKING:
     from app.core.memory.models.graph_models import MemorySummaryNode
+
+
+ValidatedWriteResult = TypeVar("ValidatedWriteResult")
 
 
 def _to_native(value: Any) -> Any:
@@ -100,6 +103,43 @@ class Neo4jClient(BaseClient):
             {key: _to_native(value) for key, value in record.items()}
             for record in records
         ]
+
+    async def execute_validated_write_query(
+            self,
+            cypher: str,
+            validator: Callable[[list[dict[str, Any]]], ValidatedWriteResult],
+            **parameters: Any,
+    ) -> ValidatedWriteResult:
+        """Execute a custom mutation and validate its rows before commit.
+
+        ``validator`` runs inside the managed write transaction callback. Any
+        exception it raises propagates through ``execute_write`` and rolls the
+        mutation back instead of exposing an already-committed invalid result.
+        """
+        if self.client is None:
+            raise RuntimeError("Neo4jClient is not initialized")
+
+        async def _execute(tx):
+            statement = await tx.run(cypher, **parameters)
+            records = await statement.data()
+            rows = [
+                {key: _to_native(value) for key, value in record.items()}
+                for record in records
+            ]
+            return validator(rows)
+
+        async with self.client.session() as session:
+            return await session.execute_write(_execute)
+
+    async def execute_write_transaction(
+            self,
+            operation: Callable[[Any], Awaitable[ValidatedWriteResult]],
+    ) -> ValidatedWriteResult:
+        """Run a storage custom callback in one managed write transaction."""
+        if self.client is None:
+            raise RuntimeError("Neo4jClient is not initialized")
+        async with self.client.session() as session:
+            return await session.execute_write(operation)
 
     async def save_memory_graph(
         self,

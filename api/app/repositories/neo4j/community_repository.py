@@ -48,8 +48,19 @@ _DEADLOCK_MAX_RETRY = 3
 
 
 class CommunityRepository:
-    def __init__(self, connector: Neo4jConnector):
+    def __init__(
+        self,
+        connector: Neo4jConnector,
+        *,
+        strict_reads: bool = False,
+    ):
         self.connector = connector
+        self.strict_reads = strict_reads
+
+    def _read_fallback(self, error: Exception, fallback):
+        if self.strict_reads:
+            raise error
+        return fallback
 
     async def upsert_community(
         self, community_id: str, end_user_id: str, member_count: int = 0
@@ -100,7 +111,7 @@ class CommunityRepository:
             )
         except Exception as e:
             logger.error(f"get_entity_neighbors failed: {e}")
-            return []
+            return self._read_fallback(e, [])
 
     async def get_all_entities(self, end_user_id: str) -> List[Dict]:
         """拉取某用户下所有实体及其当前社区归属。"""
@@ -111,7 +122,7 @@ class CommunityRepository:
             )
         except Exception as e:
             logger.error(f"get_all_entities failed: {e}")
-            return []
+            return self._read_fallback(e, [])
 
     async def get_entity_count(self, end_user_id: str) -> int:
         """仅返回用户实体总数，不加载实体数据。"""
@@ -123,7 +134,7 @@ class CommunityRepository:
             return result[0]["entity_count"] if result else 0
         except Exception as e:
             logger.error(f"get_entity_count failed: {e}")
-            return 0
+            return self._read_fallback(e, 0)
 
     async def get_all_entity_ids(self, end_user_id: str) -> List[str]:
         """仅返回用户所有实体 ID 列表，不加载 embedding 等大字段。"""
@@ -135,7 +146,7 @@ class CommunityRepository:
             return [r["id"] for r in result]
         except Exception as e:
             logger.error(f"get_all_entity_ids failed: {e}")
-            return []
+            return self._read_fallback(e, [])
 
     async def get_entities_page(
         self, end_user_id: str, skip: int, limit: int
@@ -150,7 +161,7 @@ class CommunityRepository:
             )
         except Exception as e:
             logger.error(f"get_entities_page failed: {e}")
-            return []
+            return self._read_fallback(e, [])
 
     async def get_entity_neighbors_for_ids(
         self, entity_ids: List[str], end_user_id: str
@@ -170,7 +181,7 @@ class CommunityRepository:
             return result
         except Exception as e:
             logger.error(f"get_entity_neighbors_for_ids failed: {e}")
-            return {}
+            return self._read_fallback(e, {})
 
     async def get_community_members(
         self, community_id: str, end_user_id: str
@@ -184,7 +195,7 @@ class CommunityRepository:
             )
         except Exception as e:
             logger.error(f"get_community_members failed: {e}")
-            return []
+            return self._read_fallback(e, [])
 
     async def get_community_relationships(
         self, community_id: str, end_user_id: str
@@ -198,7 +209,7 @@ class CommunityRepository:
             )
         except Exception as e:
             logger.error(f"get_community_relationships failed: {e}")
-            return []
+            return self._read_fallback(e, [])
 
     async def batch_assign_entities_to_communities(
         self, assignments: List[Dict], end_user_id: str,
@@ -282,7 +293,7 @@ class CommunityRepository:
             return result
         except Exception as e:
             logger.error(f"get_community_avg_embeddings_batch failed: {e}")
-            return {}
+            return self._read_fallback(e, {})
 
     async def has_communities(self, end_user_id: str) -> bool:
         """检查该用户是否已有 Community 节点（用于判断全量 vs 增量）。"""
@@ -294,7 +305,7 @@ class CommunityRepository:
             return result[0]["community_count"] > 0 if result else False
         except Exception as e:
             logger.error(f"has_communities failed: {e}")
-            return False
+            return self._read_fallback(e, False)
 
     async def refresh_member_count(
         self, community_id: str, end_user_id: str
@@ -324,7 +335,7 @@ class CommunityRepository:
             return [row["community_id"] for row in result]
         except Exception as e:
             logger.error(f"get_incomplete_communities failed: {e}")
-            return []
+            return self._read_fallback(e, [])
 
     async def is_community_complete(self, community_id: str, end_user_id: str, check_embedding: bool = False) -> bool:
         """检查单个社区节点的属性是否完整。"""
@@ -334,7 +345,7 @@ class CommunityRepository:
             return result[0]["is_complete"] if result else False
         except Exception as e:
             logger.error(f"is_community_complete failed: {e}")
-            return False
+            return self._read_fallback(e, False)
 
     async def update_community_metadata(
         self,
