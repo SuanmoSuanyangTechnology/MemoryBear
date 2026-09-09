@@ -177,6 +177,20 @@ class Settings:
     FAST_WRITE_EMOTION_URL: str = os.getenv("FAST_WRITE_EMOTION_URL", "")
     FAST_WRITE_EMOTION_MODEL: str = os.getenv("FAST_WRITE_EMOTION_MODEL", "")
     FAST_WRITE_EMOTION_API_KEY: str = os.getenv("FAST_WRITE_EMOTION_API_KEY", "")
+    FAST_WRITE_EMOTION_HTTP_TIMEOUT_SECONDS: float = max(
+        0.1, float(os.getenv("FAST_WRITE_EMOTION_HTTP_TIMEOUT_SECONDS", "2.0"))
+    )
+
+    # Scene continuity BERT (/v1/rerank)
+    SCENE_CONTINUITY_URL: str = os.getenv("SCENE_CONTINUITY_URL", "")
+    SCENE_CONTINUITY_API_KEY: str = os.getenv("SCENE_CONTINUITY_API_KEY", "")
+    SCENE_CONTINUITY_MODEL: str = os.getenv("SCENE_CONTINUITY_MODEL", "topic-shift-detector")
+    SCENE_CONTINUITY_TIMEOUT_SECONDS: float = max(
+        0.1, float(os.getenv("SCENE_CONTINUITY_TIMEOUT_SECONDS", "2.0"))
+    )
+    MEMORY_MESSAGE_MAX_CONTENT_CHARS: int = max(
+        1, int(os.getenv("MEMORY_MESSAGE_MAX_CONTENT_CHARS", "12000"))
+    )
 
     # JWT Token Configuration
     SECRET_KEY: str = os.getenv("SECRET_KEY", "a_default_secret_key_that_is_long_and_random")

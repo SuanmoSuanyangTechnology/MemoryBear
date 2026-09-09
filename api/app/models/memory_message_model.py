@@ -10,7 +10,7 @@ API Service / MCP 直接写入时 conversation_id 为 NULL，用 (end_user_id, s
 """
 import uuid
 
-from sqlalchemy import Column, String, Boolean, DateTime, Integer, Text, ForeignKey, Index
+from sqlalchemy import Column, String, Boolean, DateTime, Integer, Text, ForeignKey, Index, text
 from sqlalchemy.dialects.postgresql import UUID, JSON
 from sqlalchemy.orm import relationship
 
@@ -34,6 +34,47 @@ class MemoryMessage(Base):
     __table_args__ = (
         Index("idx_memory_messages_conv_seq", "conversation_id", "message_seq"),
         Index("idx_memory_messages_user_source", "end_user_id", "source"),
+        Index(
+            "idx_memory_messages_scene_shifted_conversation",
+            "end_user_id", "conversation_id", "created_at", "id",
+            postgresql_where=text(
+                "conversation_id IS NOT NULL AND role = 'user' "
+                "AND should_memorize = TRUE AND scene_boundary = 'SHIFTED'"
+            ),
+        ),
+        Index(
+            "idx_memory_messages_scene_shifted_source",
+            "end_user_id", "source", "created_at", "id",
+            postgresql_where=text(
+                "conversation_id IS NULL AND role = 'user' "
+                "AND should_memorize = TRUE AND scene_boundary = 'SHIFTED'"
+            ),
+        ),
+        Index(
+            "idx_memory_messages_scene_conversation_order",
+            "end_user_id", "conversation_id", "created_at", "message_seq", "id",
+            postgresql_where=text(
+                "conversation_id IS NOT NULL AND should_memorize = TRUE "
+                "AND role IN ('user', 'assistant')"
+            ),
+        ),
+        Index(
+            "idx_memory_messages_scene_source_order",
+            "end_user_id", "source", "created_at", "message_seq", "id",
+            postgresql_where=text(
+                "conversation_id IS NULL AND should_memorize = TRUE "
+                "AND role IN ('user', 'assistant')"
+            ),
+        ),
+        Index(
+            "idx_memory_messages_scene_unclaimed_scan",
+            "created_at", "id",
+            postgresql_where=text(
+                "role = 'user' AND should_memorize = TRUE "
+                "AND scene_boundary = 'SHIFTED' "
+                "AND scene_summary_claimed_at IS NULL"
+            ),
+        ),
     )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
@@ -106,6 +147,17 @@ class MemoryMessage(Base):
         String(512),
         nullable=True,
         comment="LLM 剪枝产出的实体锚点（processed_user_topic_entity_hint）；NULL=未剪枝或无锚点",
+    )
+
+    scene_boundary = Column(
+        String(32),
+        nullable=True,
+        comment="场景判断：CONTINUE/SHIFTED/BERT_FAILED_CONTINUE；NULL=不适用或尚未写入",
+    )
+    scene_summary_claimed_at = Column(
+        DateTime,
+        nullable=True,
+        comment="SceneSummary 首次被领取时间；非空表示已派发或处理中，不保证生成成功",
     )
 
     # 时间戳

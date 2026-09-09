@@ -14,6 +14,7 @@ FULLTEXT_DEFS: List[Tuple[str, str, List[str], str]] = [
      ["name", "description", "aliases", "description_summary", "description_timeline"], "cjk"),
     ("chunksFulltext", "Chunk", ["content"], "cjk"),
     ("summariesFulltext", "MemorySummary", ["content"], "cjk"),
+    ("sceneSummariesFulltext", "SceneSummary", ["content"], "cjk"),
     ("communitiesFulltext", "Community", ["name", "summary"], "cjk"),
     ("perceptualFulltext", "Perceptual", ["summary", "topic", "domain", "keywords"], "cjk"),
     ("assistantPrunedFulltext", "AssistantPruned", ["text"], "cjk"),
@@ -26,6 +27,7 @@ VECTOR_DEFS: List[Tuple[str, str, str, int]] = [
     ("chunk_embedding_index", "Chunk", "chunk_embedding", 1024),
     ("entity_embedding_index", "ExtractedEntity", "name_embedding", 1024),
     ("summary_embedding_index", "MemorySummary", "summary_embedding", 1024),
+    ("scene_summary_embedding_index", "SceneSummary", "summary_embedding", 1024),
     ("community_summary_embedding_index", "Community", "summary_embedding", 1024),
     ("dialogue_embedding_index", "Dialogue", "dialog_embedding", 1024),
     ("perceptual_summary_embedding_index", "Perceptual", "summary_embedding", 1024),
@@ -41,7 +43,8 @@ RANGE_DEFS: List[Tuple[str, str]] = [
     ("user_statement", "Statement"),
     ("user_chunk", "Chunk"),
     ("user_extracted_entity", "ExtractedEntity"),
-    ("user_memorysummary", "MemorySummary")
+    ("user_memorysummary", "MemorySummary"),
+    ("user_scenesummary", "SceneSummary"),
 ]
 
 COMPOSITE_DEFS: List[Tuple[str, str, str]] = [
@@ -70,6 +73,7 @@ CONSTRAINT_DEFS: List[Tuple[str, str, str]] = [
     ("conversation_id_unique", "Conversation", "id"),
     ("entity_id_unique", "ExtractedEntity", "id"),
     ("memory_summary_id_unique", "MemorySummary", "id"),
+    ("scene_summary_id_unique", "SceneSummary", "id"),
     ("perceptual_id_unique", "Perceptual", "id"),
     ("community_id_unique", "Community", "community_id"),
     ("user_source_id_unique", "UserSource", "id"),

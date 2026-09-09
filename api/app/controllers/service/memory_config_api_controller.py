@@ -17,6 +17,7 @@ from app.core.logging_config import get_business_logger
 from app.db import get_async_db_context, get_db_context
 from app.repositories.memory_config_repository import MemoryConfigRepository
 from app.schemas.api_key_schema import ApiKeyAuth
+from app.schemas.scene_memory_schema import SceneConfigUpdate
 from app.schemas.memory_api_schema import (
     ConfigUpdateExtractedRequest,
     ConfigUpdateRequest,
@@ -475,3 +476,73 @@ async def delete_memory_config(
             config_id=config_id,
             current_user=current_user,
         )
+
+
+@router.get("/read_config_scene")
+@require_api_key_self_db(scopes=["memory"])
+async def read_config_scene(
+    request: Request,
+    config_id: str = Query(..., description="config_id"),
+    api_key_auth: ApiKeyAuth = None,
+):
+    """
+    Get Scene boundary and SceneSummary config for a specific memory config.
+
+    Requires API Key with 'memory' scope.
+    Only configs belonging to the authorized workspace can be queried.
+    """
+    logger.info(
+        f"V1 read scene config - config_id: {config_id}, workspace: {api_key_auth.workspace_id}"
+    )
+
+    async with get_async_db_context() as auth_db:
+        ownership_error = await _verify_config_ownership_async(
+            config_id, api_key_auth.workspace_id, auth_db
+        )
+        if ownership_error:
+            return ownership_error
+        current_user = await get_current_user_snapshot_from_api_key_async(
+            auth_db, api_key_auth
+        )
+    return jsonable_encoder(
+        await memory_config_controller.read_config_scene(
+            config_id=config_id, current_user=current_user
+        )
+    )
+
+
+@router.put("/update_config_scene")
+@require_api_key_self_db(scopes=["memory"])
+async def update_config_scene(
+    request: Request,
+    api_key_auth: ApiKeyAuth = None,
+    message: str = Body(None, description="Request body"),
+):
+    """
+    Update Scene boundary and SceneSummary config (full update).
+
+    All configuration fields are required.
+    Requires API Key with 'memory' scope.
+    Only configs belonging to the authorized workspace can be updated.
+    """
+    body = await request.json()
+    payload = SceneConfigUpdate(**body)
+
+    logger.info(
+        f"V1 update scene config - config_id: {payload.config_id}, workspace: {api_key_auth.workspace_id}"
+    )
+
+    async with get_async_db_context() as auth_db:
+        ownership_error = await _verify_config_ownership_async(
+            str(payload.config_id), api_key_auth.workspace_id, auth_db
+        )
+        if ownership_error:
+            return ownership_error
+        current_user = await get_current_user_snapshot_from_api_key_async(
+            auth_db, api_key_auth
+        )
+    return jsonable_encoder(
+        await memory_config_controller.update_config_scene(
+            payload=payload, current_user=current_user
+        )
+    )
