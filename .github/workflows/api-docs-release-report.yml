@@ -18,6 +18,9 @@ on:
         required: true
         default: "release/v0.3.10"
 
+permissions:
+  contents: read
+
 jobs:
   generate:
     runs-on: ubuntu-latest
@@ -109,6 +112,8 @@ jobs:
         run: |
           mkdir -p ../artifacts/raw
           uv run python scripts/export_openapi.py --v1-only -o ../artifacts/openapi-current.json
+          # 保留未经兼容性改写的版本契约快照。
+          cp ../artifacts/openapi-current.json ../artifacts/raw/openapi-current.pristine.json
 
       # ─── 导出基线版本 OpenAPI schema ───
       - name: Checkout base ref
