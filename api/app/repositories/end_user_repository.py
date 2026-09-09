@@ -432,6 +432,65 @@ class EndUserRepository:
             )
             raise
 
+    async def get_memory_counts_by_ids_async(
+        self,
+        workspace_id: uuid.UUID,
+        end_user_ids: List[uuid.UUID],
+    ) -> List[tuple]:
+        """批量查询终端用户的记忆量（读 end_users.memory_count 字段）。
+
+        仅返回「属于目标 workspace 且 is_active=True」的用户；不属于空间或已删除的
+        id 不在结果中（由调用方决定是否报错，默认静默丢弃）。
+
+        Returns:
+            List[tuple]: 每项为 (id, other_name, memory_count)
+        """
+        if not end_user_ids:
+            return []
+        try:
+            result = await self.db.execute(
+                select(EndUser.id, EndUser.other_name, EndUser.memory_count)
+                .where(
+                    EndUser.id.in_(end_user_ids),
+                    EndUser.workspace_id == workspace_id,
+                    EndUser.is_active.is_(True),
+                )
+            )
+            return list(result.all())
+        except Exception as e:
+            await self.db.rollback()
+            db_logger.error(
+                f"批量查询工作空间 {workspace_id} 下终端用户记忆量时出错: {str(e)}"
+            )
+            raise
+
+    async def get_memory_counts_by_workspace_async(
+        self,
+        workspace_id: uuid.UUID,
+    ) -> List[tuple]:
+        """查询指定 workspace 下所有活跃终端用户的记忆量（读 end_users.memory_count 字段）。
+
+        仅查询接口真正需要的 3 列，避免拉取整行宽表字段。
+
+        Returns:
+            List[tuple]: 每项为 (id, other_name, memory_count)
+        """
+        try:
+            result = await self.db.execute(
+                select(EndUser.id, EndUser.other_name, EndUser.memory_count)
+                .where(
+                    EndUser.workspace_id == workspace_id,
+                    EndUser.is_active.is_(True),
+                )
+            )
+            return list(result.all())
+        except Exception as e:
+            await self.db.rollback()
+            db_logger.error(
+                f"查询工作空间 {workspace_id} 下终端用户记忆量时出错: {str(e)}"
+            )
+            raise
+
     async def get_end_user_by_id_async(self, end_user_id: uuid.UUID) -> Optional[EndUser]:
         try:
             result = await self.db.execute(
