@@ -1,4 +1,4 @@
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react'
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState, type Dispatch, type SetStateAction } from 'react'
 import clsx from 'clsx'
 import { Divider, Flex, Skeleton } from 'antd'
 import { useTranslation } from 'react-i18next'
@@ -29,7 +29,6 @@ interface ApiMcpMessagesResponse {
 
 export interface ApiMcpMessageListRef {
   refresh: () => void;
-  total: number;
 }
 
 interface ApiMcpMessageListProps {
@@ -40,7 +39,8 @@ interface ApiMcpMessageListProps {
     start_date?: number;
     end_date?: number;
     keyword?: string;
-  }
+  };
+  updateTotal: Dispatch<SetStateAction<number>>;
 }
 
 const PAGE_SIZE = 20
@@ -50,6 +50,7 @@ const ApiMcpMessageList = forwardRef<ApiMcpMessageListRef, ApiMcpMessageListProp
   source,
   onMessagesChange,
   filterParams = {},
+  updateTotal,
 }, ref) => {
   const { t } = useTranslation()
   const [messages, setMessages] = useState<ApiMcpMessageItem[]>([])
@@ -60,7 +61,6 @@ const ApiMcpMessageList = forwardRef<ApiMcpMessageListRef, ApiMcpMessageListProp
   const loadingRef = useRef<boolean>(false)
   const requestRef = useRef<number>(0)
   const scrollableTarget = `api-mcp-message-list-${source}`
-  const [total, setTotal] = useState<number>(0)
 
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -92,7 +92,7 @@ const ApiMcpMessageList = forwardRef<ApiMcpMessageListRef, ApiMcpMessageListProp
           setMessages(nextMessages)
           setHasMore(Boolean(response.page?.hasnext))
           onMessagesChange?.(nextMessages)
-          setTotal(response.page?.total || 0)
+          updateTotal(response.page?.total || 0)
         })
         .catch(() => {
           if (requestId === requestRef.current) {
@@ -105,7 +105,7 @@ const ApiMcpMessageList = forwardRef<ApiMcpMessageListRef, ApiMcpMessageListProp
           setLoading(false)
         })
     }, 300)
-  }, [endUserId, onMessagesChange, source, filterParams])
+  }, [endUserId, onMessagesChange, source, filterParams, updateTotal])
 
   const loadMore = useCallback(() => {
     if (loadingRef.current || !hasMore) return
@@ -129,7 +129,7 @@ const ApiMcpMessageList = forwardRef<ApiMcpMessageListRef, ApiMcpMessageListProp
         setMessages(nextMessages)
         setHasMore(Boolean(response.page?.hasnext))
         onMessagesChange?.(nextMessages)
-        setTotal(response.page?.total || 0)
+        updateTotal(response.page?.total || 0)
       })
       .catch(() => {
         if (requestId === requestRef.current) {
@@ -141,12 +141,11 @@ const ApiMcpMessageList = forwardRef<ApiMcpMessageListRef, ApiMcpMessageListProp
           loadingRef.current = false
         }
       })
-  }, [endUserId, hasMore, onMessagesChange, source, filterParams])
+  }, [endUserId, hasMore, onMessagesChange, source, filterParams, updateTotal])
 
   useImperativeHandle(ref, () => ({
     refresh,
-    total,
-  }), [refresh, total])
+  }), [refresh])
 
   useEffect(() => {
     refresh()
