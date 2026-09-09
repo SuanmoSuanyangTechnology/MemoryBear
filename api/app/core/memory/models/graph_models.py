@@ -243,6 +243,26 @@ class DialogueNode(Node):
     )
 
 
+class SceneSummaryNode(BaseModel):
+    """A stable, idempotent long-term summary of one Scene."""
+
+    id: str
+    end_user_id: str
+    conversation_id: str | None = None
+    content: str
+    summary_embedding: List[float]
+    source_message_ids: List[str]
+    start_message_id: str
+    end_message_id: str
+    started_at: datetime
+    ended_at: datetime
+    turn_count: int
+    close_reason: str
+    config_id: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
 class StatementNode(Node):
     """Node representing a statement extracted from dialogue.
 

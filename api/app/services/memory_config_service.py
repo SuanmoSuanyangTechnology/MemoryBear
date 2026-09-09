@@ -282,6 +282,14 @@ def _build_memory_config(
         pruning_scene=memory_config_row.pruning_scene or "education",
         pruning_threshold=float(
             memory_config_row.pruning_threshold) if memory_config_row.pruning_threshold is not None else 0.5,
+        # Pipeline config: Scene boundary and SceneSummary
+        scene_threshold=float(memory_config_row.scene_threshold if memory_config_row.scene_threshold is not None else 0.8),
+        scene_history_window_size=int(memory_config_row.scene_history_window_size if memory_config_row.scene_history_window_size is not None else 4),
+        scene_min_turns=int(memory_config_row.scene_min_turns if memory_config_row.scene_min_turns is not None else 2),
+        scene_max_turns=int(memory_config_row.scene_max_turns if memory_config_row.scene_max_turns is not None else 10),
+        scene_idle_timeout_seconds=int(memory_config_row.scene_idle_timeout_seconds if memory_config_row.scene_idle_timeout_seconds is not None else 86400),
+        scene_min_chars_to_summary=int(memory_config_row.scene_min_chars_to_summary if memory_config_row.scene_min_chars_to_summary is not None else 0),
+        time_decay_penalty=float(memory_config_row.time_decay_penalty if memory_config_row.time_decay_penalty is not None else 0.1),
         # Pipeline config: Emotion extraction
         emotion_enabled=bool(
             memory_config_row.emotion_enabled) if memory_config_row.emotion_enabled is not None else False,

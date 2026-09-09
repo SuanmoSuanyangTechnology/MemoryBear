@@ -370,6 +370,7 @@ class MemoryService:
             message_seq: int = 0,
             source: str = "",
             dispatch_at: str = "",
+            scene_context=None,
     ) -> dict:
         """快速写入记忆：清洗 → Embedding → 写入 :Dialogue 节点
 
@@ -404,6 +405,7 @@ class MemoryService:
             message_seq=message_seq,
             source=source,
             dispatch_at=dispatch_at,
+            scene_context=scene_context,
         )
 
     async def pilot_write(

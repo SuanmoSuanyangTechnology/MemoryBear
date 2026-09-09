@@ -2928,8 +2928,11 @@ def fast_write_message_task(
     )
     start_time = time.time()
 
+    scene_context_holder: dict[str, Any] = {}
+
     async def _run() -> dict:
         from app.core.memory.memory_service import MemoryService
+        from app.core.memory.scene.scene_boundary_service import SceneBoundaryService
 
         service = MemoryService(
             config_id=uuid.UUID(config_id),
@@ -2937,6 +2940,17 @@ def fast_write_message_task(
             workspace_id=workspace_id,
             language=language,
         )
+        scene_context = None
+        memory_message_id = str((target_message or {}).get("memory_message_id") or "")
+        if memory_message_id and str((target_message or {}).get("role") or "") == "user":
+            with get_db_context() as db:
+                scene_context = SceneBoundaryService.prepare_context(
+                    db,
+                    resolved_end_user_id=resolved_end_user_id,
+                    memory_message_id=memory_message_id,
+                    config=service.ctx.memory_config,
+                )
+        scene_context_holder["context"] = scene_context
 
         return await service.fast_write(
             target_message=target_message or {"role": "user", "content": ""},
@@ -2944,6 +2958,7 @@ def fast_write_message_task(
             message_seq=message_seq,
             source=source,
             dispatch_at=dispatch_at,
+            scene_context=scene_context,
         )
 
     loop = None
@@ -2951,6 +2966,45 @@ def fast_write_message_task(
         loop = set_asyncio_event_loop()
 
         result = loop.run_until_complete(_run())
+
+        scene_context = scene_context_holder.get("context")
+        scene_decision = result.get("scene_decision") if isinstance(result, dict) else None
+        if scene_context is not None and scene_decision:
+            from app.core.memory.scene.scene_boundary_service import SceneBoundaryService
+
+            summary_claimed = False
+            with get_db_context() as db:
+                _updated, persisted = SceneBoundaryService.save_initial_decision(
+                    db, context=scene_context, decision=scene_decision
+                )
+                if persisted == "SHIFTED" and scene_context.previous_shifted_message_id:
+                    summary_claimed = SceneBoundaryService.claim_summary(
+                        db,
+                        scene_start_message_id=scene_context.previous_shifted_message_id,
+                        end_user_id=resolved_end_user_id,
+                    )
+                db.commit()
+            if summary_claimed:
+                try:
+                    generate_scene_summary.apply_async(
+                        kwargs={
+                            "end_user_id": resolved_end_user_id,
+                            "config_id": config_id,
+                            "scene_start_message_id": scene_context.previous_shifted_message_id,
+                            "close_before_message_id": scene_context.current_message_id,
+                            "close_reason": "SHIFTED",
+                        }
+                    )
+                except Exception:
+                    with get_db_context() as db:
+                        SceneBoundaryService.release_summary_claim(
+                            db,
+                            scene_start_message_id=scene_context.previous_shifted_message_id,
+                            end_user_id=resolved_end_user_id,
+                        )
+                        db.commit()
+                    raise
+
         elapsed_time = time.time() - start_time
 
         logger.info(f"[CELERY FAST WRITE] Task completed - elapsed_time={elapsed_time:.2f}s")
@@ -6921,3 +6975,228 @@ def draft_data_clean():
         "neo4j_deleted_nodes": neo4j_deleted_nodes,
         "neo4j_failed": neo4j_failed,
     }
+
+
+# ============================================================================
+# Scene boundary and SceneSummary maintenance
+# ============================================================================
+
+_SCENE_IDLE_SCAN_CURSOR_KEY = "scene_summary:idle_scan_cursor:v1"
+_SCENE_IDLE_SCAN_LOCK_KEY = "scene_summary:idle_scan_lock:v1"
+_SCENE_IDLE_SCAN_LOCK_TTL_SECONDS = 300
+_SCENE_IDLE_SCAN_CURSOR_TTL_SECONDS = 86400 * 30
+
+
+@celery_app.task(
+    bind=True,
+    name="app.core.memory.generate_scene_summary",
+    acks_late=True,
+    autoretry_for=(Exception,),
+    retry_backoff=True,
+    retry_kwargs={"max_retries": 3},
+)
+def generate_scene_summary(
+    self,
+    end_user_id: str,
+    config_id: str,
+    scene_start_message_id: str,
+    close_reason: str,
+    close_before_message_id: str | None = None,
+    idle_high_watermark_message_id: str | None = None,
+):
+    from app.core.memory.scene.scene_summary_service import SceneSummaryService
+    from app.schemas.scene_memory_schema import GenerateSceneSummaryTask
+
+    payload = GenerateSceneSummaryTask(
+        end_user_id=end_user_id,
+        config_id=config_id,
+        scene_start_message_id=scene_start_message_id,
+        close_before_message_id=close_before_message_id,
+        idle_high_watermark_message_id=idle_high_watermark_message_id,
+        close_reason=close_reason,
+    )
+    loop = set_asyncio_event_loop()
+    try:
+        result = loop.run_until_complete(SceneSummaryService().generate(payload))
+        logger.info(
+            "[SceneSummary] generation completed: scene_start=%s, "
+            "close_reason=%s, status=%s, reason=%s, summary_id=%s",
+            scene_start_message_id,
+            close_reason,
+            result.get("status"),
+            result.get("reason"),
+            result.get("summary_id"),
+        )
+        return result
+    finally:
+        _shutdown_loop_gracefully(loop)
+
+
+@celery_app.task(name="app.tasks.scan_scene_summary_idle")
+def scan_scene_summary_idle(
+    limit: int = 100,
+    batch_size: int = 200,
+    scan_budget: int = 2000,
+):
+    """分批扫描静默 Scene，并派发 SceneSummary 生成任务。
+
+    返回指标：
+    - scanned：本轮实际检查的 stream 数量。
+    - candidates：其中满足静默条件的 Scene 数量。
+    - claimed：通过原子更新成功取得处理权的 Scene 数量。
+    - dispatched：成功投递到 Celery 的摘要任务数量。
+    - dispatch_failed：投递到 Celery 失败的任务数量。
+    - exhausted：是否已经扫描到当前数据集末尾。
+    - skipped_due_to_lock：是否因其他 scanner 正在运行而跳过本轮。
+    """
+    from app.repositories.memory_message_repository import MemoryMessageRepository
+
+    redis_client = get_sync_redis_client()
+    lock_token = uuid.uuid4().hex
+    lock_acquired = False
+    cursor_created_at = None
+    cursor_id = None
+
+    if redis_client is not None:
+        try:
+            lock_acquired = bool(
+                redis_client.set(
+                    _SCENE_IDLE_SCAN_LOCK_KEY,
+                    lock_token,
+                    nx=True,
+                    ex=_SCENE_IDLE_SCAN_LOCK_TTL_SECONDS,
+                )
+            )
+            if not lock_acquired:
+                logger.info("[SceneSummary] idle scanner skipped: another scanner is running")
+                return {
+                    "scanned": 0,
+                    "candidates": 0,
+                    "claimed": 0,
+                    "dispatched": 0,
+                    "dispatch_failed": 0,
+                    "skipped_due_to_lock": True,
+                }
+            raw_cursor = redis_client.get(_SCENE_IDLE_SCAN_CURSOR_KEY)
+            if raw_cursor:
+                cursor_payload = json.loads(raw_cursor)
+                cursor_created_at = parse_iso_to_utc_naive(cursor_payload.get("created_at"))
+                cursor_id = str(uuid.UUID(cursor_payload["id"]))
+        except Exception as exc:
+            logger.warning(
+                "[SceneSummary] idle scanner Redis state unavailable; "
+                "falling back to bounded scan from the beginning: %s",
+                exc,
+            )
+            if lock_acquired:
+                try:
+                    redis_client.eval(
+                        UNLOCK_SCRIPT,
+                        1,
+                        _SCENE_IDLE_SCAN_LOCK_KEY,
+                        lock_token,
+                    )
+                except Exception:
+                    pass
+            redis_client = None
+            lock_acquired = False
+
+    try:
+        with get_db_context() as db:
+            repo = MemoryMessageRepository(db)
+            scan_result = repo.list_idle_scene_candidates(
+                limit=limit,
+                batch_size=batch_size,
+                scan_budget=scan_budget,
+                after_created_at=cursor_created_at,
+                after_id=cursor_id,
+            )
+            candidates = scan_result["candidates"]
+            claimed = [
+                candidate
+                for candidate in candidates
+                if repo.claim_scene_summary(
+                    scene_start_message_id=candidate["scene_start_message_id"],
+                    end_user_id=candidate["end_user_id"],
+                )
+            ]
+            db.commit()
+
+        if redis_client is not None:
+            try:
+                next_cursor = scan_result["next_cursor"]
+                if scan_result["exhausted"] or next_cursor is None:
+                    redis_client.delete(_SCENE_IDLE_SCAN_CURSOR_KEY)
+                else:
+                    redis_client.set(
+                        _SCENE_IDLE_SCAN_CURSOR_KEY,
+                        json.dumps({
+                            "created_at": to_iso_z(next_cursor["created_at"]),
+                            "id": next_cursor["id"],
+                        }),
+                        ex=_SCENE_IDLE_SCAN_CURSOR_TTL_SECONDS,
+                    )
+            except Exception as exc:
+                logger.warning("[SceneSummary] idle scanner cursor update failed: %s", exc)
+
+        dispatched = 0
+        dispatch_failed = 0
+        for candidate in claimed:
+            try:
+                async_result = generate_scene_summary.apply_async(
+                    kwargs={
+                        "end_user_id": candidate["end_user_id"],
+                        "config_id": candidate["config_id"],
+                        "scene_start_message_id": candidate["scene_start_message_id"],
+                        "idle_high_watermark_message_id": candidate["idle_high_watermark_message_id"],
+                        "close_reason": "IDLE_TIMEOUT",
+                    }
+                )
+                dispatched += 1
+                logger.info(
+                    "[SceneSummary] idle task dispatched: scene_start=%s, task_id=%s",
+                    candidate["scene_start_message_id"],
+                    async_result.id,
+                )
+            except Exception:
+                dispatch_failed += 1
+                logger.exception(
+                    "[SceneSummary] idle task dispatch failed, releasing claim: scene_start=%s",
+                    candidate["scene_start_message_id"],
+                )
+                with get_db_context() as db:
+                    MemoryMessageRepository(db).release_scene_summary_claim(
+                        scene_start_message_id=candidate["scene_start_message_id"],
+                        end_user_id=candidate["end_user_id"],
+                    )
+                    db.commit()
+        logger.info(
+            "[SceneSummary] idle scanner completed: scanned=%s, candidates=%s, "
+            "claimed=%s, dispatched=%s, dispatch_failed=%s, exhausted=%s",
+            scan_result["scanned"],
+            len(candidates),
+            len(claimed),
+            dispatched,
+            dispatch_failed,
+            scan_result["exhausted"],
+        )
+        return {
+            "scanned": scan_result["scanned"],
+            "candidates": len(candidates),
+            "claimed": len(claimed),
+            "dispatched": dispatched,
+            "dispatch_failed": dispatch_failed,
+            "exhausted": scan_result["exhausted"],
+            "skipped_due_to_lock": False,
+        }
+    finally:
+        if redis_client is not None and lock_acquired:
+            try:
+                redis_client.eval(
+                    UNLOCK_SCRIPT,
+                    1,
+                    _SCENE_IDLE_SCAN_LOCK_KEY,
+                    lock_token,
+                )
+            except Exception as exc:
+                logger.warning("[SceneSummary] idle scanner lock release failed: %s", exc)

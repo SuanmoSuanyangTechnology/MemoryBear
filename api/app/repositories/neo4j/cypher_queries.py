@@ -3441,3 +3441,18 @@ CALL gds.graph.drop($end_user_id, false)
 YIELD graphName
 RETURN graphName
 """
+
+
+# SceneSummary uses start_message_id as its stable id.
+SCENE_SUMMARY_GET = """
+MATCH (s:SceneSummary {id: $id})
+RETURN s.id AS id, s.source_message_ids AS source_message_ids
+"""
+
+SCENE_SUMMARY_NODE_SAVE = """
+MERGE (s:SceneSummary {id: $summary.id})
+WITH s, coalesce(s.created_at, $summary.created_at) AS original_created_at
+SET s += $summary,
+    s.created_at = original_created_at
+RETURN s.id AS id
+"""

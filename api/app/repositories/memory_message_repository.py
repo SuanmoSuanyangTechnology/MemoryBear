@@ -18,7 +18,7 @@ from typing import List, Optional
 
 import sqlalchemy as sa
 from sqlalchemy import func, select, update
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.memory.enums import MemoryMessageSource
@@ -59,7 +59,9 @@ class MemoryMessageRepository:
         不同分组之间互不阻塞。详见设计文档 §3.3。
         """
         if conversation_id is not None:
-            lock_key = f"mm_seq:conv:{conversation_id}"
+            # 用 uuid.UUID() 归一化（大小写/连字符），与 _next_seq 的分组键对齐，
+            # 避免同一 conversation 因字符串格式不一致拿到不同锁导致并发撞号。
+            lock_key = f"mm_seq:conv:{uuid.UUID(conversation_id)}"
         else:
             lock_key = f"mm_seq:{end_user_id}:{source.value}"
         self.db.execute(
@@ -203,6 +205,30 @@ class MemoryMessageRepository:
                 MemoryMessage.message_seq == message_seq,
             )
         ).scalar_one_or_none()
+
+    def get_seq_group(
+        self,
+        conversation_id: str,
+        message_seq: int,
+    ) -> List[MemoryMessage]:
+        """返回同一 (conversation_id, message_seq) 的全部行，按入库时间升序。
+
+        正常状态每组仅 1 行；历史脏数据可能同 seq 多行。按 (created_at, id)
+        升序保证确定性，供“撞号整组逐行派发”使用：先入库的排前面（1、2、3…）。
+        """
+        return list(
+            self.db.scalars(
+                select(MemoryMessage)
+                .where(
+                    MemoryMessage.conversation_id == conversation_id,
+                    MemoryMessage.message_seq == message_seq,
+                )
+                .order_by(
+                    MemoryMessage.created_at.asc(),
+                    MemoryMessage.id.asc(),
+                )
+            ).all()
+        )
 
     def get_pending_messages(
         self,
@@ -465,7 +491,11 @@ class MemoryMessageRepository:
                     MemoryMessage.message_seq >= upper_bound,
                     MemoryMessage.message_seq < target_seq,
                 )
-                .order_by(MemoryMessage.message_seq.asc())
+                .order_by(
+                    MemoryMessage.message_seq.asc(),
+                    MemoryMessage.created_at.asc(),
+                    MemoryMessage.id.asc(),
+                )
             ).scalars().all()
         )
 
@@ -502,7 +532,11 @@ class MemoryMessageRepository:
                         MemoryMessage.conversation_id == conversation_id,
                         MemoryMessage.message_seq > target_seq,
                     )
-                    .order_by(MemoryMessage.message_seq.asc())
+                    .order_by(
+                        MemoryMessage.message_seq.asc(),
+                        MemoryMessage.created_at.asc(),
+                        MemoryMessage.id.asc(),
+                    )
                 ).scalars().all()
             )
 
@@ -516,7 +550,11 @@ class MemoryMessageRepository:
                     MemoryMessage.message_seq > target_seq,
                     MemoryMessage.message_seq <= lower_bound,
                 )
-                .order_by(MemoryMessage.message_seq.asc())
+                .order_by(
+                    MemoryMessage.message_seq.asc(),
+                    MemoryMessage.created_at.asc(),
+                    MemoryMessage.id.asc(),
+                )
             ).scalars().all()
         )
 
@@ -636,6 +674,613 @@ class MemoryMessageRepository:
         }
 
 
+    # ──────────────────────────────────────────────
+    # Scene boundary / SceneSummary queries
+    # ──────────────────────────────────────────────
+
+    @staticmethod
+    def _scene_effective_filters():
+        return (
+            MemoryMessage.should_memorize.is_(True),
+            MemoryMessage.role.in_(("user", "assistant")),
+            func.length(func.trim(MemoryMessage.content)) > 0,
+        )
+
+    @staticmethod
+    def _scene_summary_ready_filters():
+        """摘要扫描忽略尚未完成边界判断的 user 消息。"""
+        return (
+            *MemoryMessageRepository._scene_effective_filters(),
+            sa.or_(
+                MemoryMessage.role == "assistant",
+                MemoryMessage.scene_boundary.is_not(None),
+            ),
+        )
+
+    @staticmethod
+    def _before(message: MemoryMessage):
+        return sa.tuple_(MemoryMessage.created_at, MemoryMessage.id) < sa.tuple_(
+            message.created_at, message.id
+        )
+
+    @staticmethod
+    def _scene_stream_filters(message: MemoryMessage):
+        filters = [MemoryMessage.end_user_id == message.end_user_id]
+        if message.conversation_id is not None:
+            filters.append(MemoryMessage.conversation_id == message.conversation_id)
+        else:
+            filters.extend((
+                MemoryMessage.conversation_id.is_(None),
+                MemoryMessage.source == message.source,
+            ))
+        return tuple(filters)
+
+    def get_scene_context(
+        self,
+        *,
+        resolved_end_user_id: str,
+        memory_message_id: str,
+        history_window_size: int,
+    ) -> dict | None:
+        current = self.db.execute(
+            select(MemoryMessage).where(
+                MemoryMessage.id == uuid.UUID(str(memory_message_id)),
+                MemoryMessage.end_user_id == resolved_end_user_id,
+                MemoryMessage.role == "user",
+                MemoryMessage.should_memorize.is_(True),
+                func.length(func.trim(MemoryMessage.content)) > 0,
+            )
+        ).scalar_one_or_none()
+        if current is None:
+            return None
+
+        stream_filters = self._scene_stream_filters(current)
+        previous_valid = self.db.execute(
+            select(MemoryMessage)
+            .where(
+                *stream_filters,
+                self._before(current),
+                *self._scene_effective_filters(),
+            )
+            .order_by(MemoryMessage.created_at.desc(), MemoryMessage.id.desc())
+            .limit(1)
+        ).scalar_one_or_none()
+        shifted = self.db.execute(
+            select(MemoryMessage)
+            .where(
+                *stream_filters,
+                MemoryMessage.role == "user",
+                MemoryMessage.should_memorize.is_(True),
+                MemoryMessage.scene_boundary == "SHIFTED",
+                self._before(current),
+            )
+            .order_by(MemoryMessage.created_at.desc(), MemoryMessage.id.desc())
+            .limit(1)
+        ).scalar_one_or_none()
+
+        scene_filter = []
+        if shifted is not None:
+            scene_filter.append(
+                sa.tuple_(MemoryMessage.created_at, MemoryMessage.id)
+                >= sa.tuple_(shifted.created_at, shifted.id)
+            )
+        user_count = int(
+            self.db.execute(
+                select(func.count(MemoryMessage.id)).where(
+                    *stream_filters,
+                    MemoryMessage.role == "user",
+                    MemoryMessage.should_memorize.is_(True),
+                    MemoryMessage.scene_boundary.in_(("SHIFTED", "CONTINUE", "BERT_FAILED_CONTINUE")),
+                    func.length(func.trim(MemoryMessage.content)) > 0,
+                    self._before(current),
+                    *scene_filter,
+                )
+            ).scalar_one()
+        )
+        user_rows = list(
+            self.db.execute(
+                select(MemoryMessage)
+                .where(
+                    *stream_filters,
+                    MemoryMessage.role == "user",
+                    MemoryMessage.should_memorize.is_(True),
+                    MemoryMessage.scene_boundary.in_(("SHIFTED", "CONTINUE", "BERT_FAILED_CONTINUE")),
+                    func.length(func.trim(MemoryMessage.content)) > 0,
+                    self._before(current),
+                    *scene_filter,
+                )
+                .order_by(MemoryMessage.created_at.desc(), MemoryMessage.id.desc())
+                .limit(max(history_window_size, 1))
+            ).scalars().all()
+        )
+        return {
+            "current_content": current.content,
+            "current_created_at": current.created_at,
+            "previous_shifted_message_id": str(shifted.id) if shifted else None,
+            "previous_message_created_at": previous_valid.created_at if previous_valid else None,
+            "current_scene_turn_count": user_count,
+            "history_user_messages": [row.content for row in reversed(user_rows)],
+            "existing_boundary": current.scene_boundary,
+        }
+
+    def cas_scene_boundary(
+        self,
+        *,
+        memory_message_id: str,
+        resolved_end_user_id: str,
+        decision: str,
+    ) -> tuple[bool, str | None]:
+        conditions = [
+            MemoryMessage.id == uuid.UUID(str(memory_message_id)),
+            MemoryMessage.end_user_id == resolved_end_user_id,
+            MemoryMessage.role == "user",
+            MemoryMessage.should_memorize.is_(True),
+            MemoryMessage.scene_boundary.is_(None),
+        ]
+        result = self.db.execute(
+            update(MemoryMessage).where(*conditions).values(scene_boundary=decision)
+        )
+        if result.rowcount:
+            return True, decision
+        current = self.db.execute(
+            select(MemoryMessage.scene_boundary).where(
+                MemoryMessage.id == uuid.UUID(str(memory_message_id)),
+                MemoryMessage.end_user_id == resolved_end_user_id,
+            )
+        ).scalar_one_or_none()
+        return False, current
+
+    def claim_scene_summary(
+        self,
+        *,
+        scene_start_message_id: str,
+        end_user_id: str,
+    ) -> bool:
+        """原子领取一个 SHIFTED Scene 起点，保证摘要任务最多派发一次。"""
+        result = self.db.execute(
+            update(MemoryMessage)
+            .where(
+                MemoryMessage.id == uuid.UUID(str(scene_start_message_id)),
+                MemoryMessage.end_user_id == end_user_id,
+                MemoryMessage.role == "user",
+                MemoryMessage.should_memorize.is_(True),
+                MemoryMessage.scene_boundary == "SHIFTED",
+                MemoryMessage.scene_summary_claimed_at.is_(None),
+            )
+            .values(scene_summary_claimed_at=utcnow_naive())
+        )
+        return bool(result.rowcount)
+
+    def release_scene_summary_claim(
+        self,
+        *,
+        scene_start_message_id: str,
+        end_user_id: str,
+    ) -> bool:
+        """释放未真正进入生成流程的领取，使其可再次被 scanner 获取。"""
+        result = self.db.execute(
+            update(MemoryMessage)
+            .where(
+                MemoryMessage.id == uuid.UUID(str(scene_start_message_id)),
+                MemoryMessage.end_user_id == end_user_id,
+                MemoryMessage.role == "user",
+                MemoryMessage.should_memorize.is_(True),
+                MemoryMessage.scene_boundary == "SHIFTED",
+                MemoryMessage.scene_summary_claimed_at.is_not(None),
+            )
+            .values(scene_summary_claimed_at=None)
+        )
+        return bool(result.rowcount)
+
+    def load_scene_interval(
+        self,
+        *,
+        end_user_id: str,
+        scene_start_message_id: str,
+        close_before_message_id: str | None,
+        idle_high_watermark_message_id: str | None,
+        idle_timeout_seconds: int,
+        max_message_chars: int,
+        close_reason: str,
+    ) -> dict | None:
+        start = self.db.execute(
+            select(
+                MemoryMessage.id,
+                MemoryMessage.end_user_id,
+                MemoryMessage.conversation_id,
+                MemoryMessage.source,
+                MemoryMessage.created_at,
+                MemoryMessage.message_seq,
+            ).where(
+                MemoryMessage.id == uuid.UUID(scene_start_message_id),
+                MemoryMessage.end_user_id == end_user_id,
+                MemoryMessage.role == "user",
+                MemoryMessage.should_memorize.is_(True),
+                MemoryMessage.scene_boundary == "SHIFTED",
+            )
+        ).one_or_none()
+        if start is None:
+            return None
+
+        stream_filters = self._scene_stream_filters(start)
+        close = None
+        if close_before_message_id:
+            close = self.db.execute(
+                select(
+                    MemoryMessage.id,
+                    MemoryMessage.created_at,
+                    MemoryMessage.message_seq,
+                ).where(
+                    MemoryMessage.id == uuid.UUID(close_before_message_id),
+                    *stream_filters,
+                    MemoryMessage.role == "user",
+                    MemoryMessage.should_memorize.is_(True),
+                    MemoryMessage.scene_boundary == "SHIFTED",
+                    sa.tuple_(
+                        MemoryMessage.created_at,
+                        MemoryMessage.message_seq,
+                        MemoryMessage.id,
+                    )
+                    > sa.tuple_(start.created_at, start.message_seq, start.id),
+                )
+            ).one_or_none()
+            if close is None:
+                return None
+        elif close_reason == "IDLE_TIMEOUT":
+            close = self.db.execute(
+                select(
+                    MemoryMessage.id,
+                    MemoryMessage.created_at,
+                    MemoryMessage.message_seq,
+                )
+                .where(
+                    *stream_filters,
+                    MemoryMessage.role == "user",
+                    MemoryMessage.should_memorize.is_(True),
+                    MemoryMessage.scene_boundary == "SHIFTED",
+                    sa.tuple_(
+                        MemoryMessage.created_at,
+                        MemoryMessage.message_seq,
+                        MemoryMessage.id,
+                    )
+                    > sa.tuple_(start.created_at, start.message_seq, start.id),
+                )
+                .order_by(
+                    MemoryMessage.created_at.asc(),
+                    MemoryMessage.message_seq.asc(),
+                    MemoryMessage.id.asc(),
+                )
+                .limit(1)
+            ).one_or_none()
+
+        conditions = [
+            *stream_filters,
+            sa.tuple_(
+                MemoryMessage.created_at,
+                MemoryMessage.message_seq,
+                MemoryMessage.id,
+            )
+            >= sa.tuple_(start.created_at, start.message_seq, start.id),
+            *(
+                self._scene_summary_ready_filters()
+                if close_reason == "IDLE_TIMEOUT" and close is None
+                else self._scene_effective_filters()
+            ),
+        ]
+        if close is not None:
+            conditions.append(
+                sa.tuple_(
+                    MemoryMessage.created_at,
+                    MemoryMessage.message_seq,
+                    MemoryMessage.id,
+                )
+                < sa.tuple_(close.created_at, close.message_seq, close.id)
+            )
+        rows = list(
+            self.db.execute(
+                select(
+                    MemoryMessage.id,
+                    MemoryMessage.role,
+                    func.left(
+                        MemoryMessage.content,
+                        max(int(max_message_chars), 1),
+                    ).label("content"),
+                    MemoryMessage.created_at,
+                )
+                .where(*conditions)
+                .order_by(
+                    MemoryMessage.created_at.asc(),
+                    MemoryMessage.message_seq.asc(),
+                    MemoryMessage.id.asc(),
+                )
+            ).all()
+        )
+        if not rows:
+            return None
+        if close_reason == "IDLE_TIMEOUT" and close is None:
+            last = rows[-1]
+            if idle_high_watermark_message_id != str(last.id):
+                return None
+            if (utcnow_naive() - last.created_at).total_seconds() < idle_timeout_seconds:
+                return None
+        return {
+            "messages": [
+                {
+                    "id": str(row.id),
+                    "role": row.role,
+                    "content": row.content,
+                    "created_at": row.created_at,
+                }
+                for row in rows
+            ],
+            "conversation_id": str(start.conversation_id) if start.conversation_id else None,
+            "close_reason": "SHIFTED" if close is not None else close_reason,
+        }
+
+    @staticmethod
+    def _latest_shifted_scene_start_statements(
+        *,
+        after_created_at=None,
+        after_id=None,
+        batch_size: int | None = None,
+    ):
+        start = aliased(MemoryMessage, name="scene_start")
+        later = aliased(MemoryMessage, name="later_shift")
+
+        shifted_filters = (
+            start.role == "user",
+            start.should_memorize.is_(True),
+            start.scene_boundary == "SHIFTED",
+            start.scene_summary_claimed_at.is_(None),
+        )
+        later_shifted = (
+            select(later.id)
+            .where(
+                later.end_user_id == start.end_user_id,
+                later.role == "user",
+                later.should_memorize.is_(True),
+                later.scene_boundary == "SHIFTED",
+                sa.tuple_(later.created_at, later.id)
+                > sa.tuple_(start.created_at, start.id),
+                sa.or_(
+                    sa.and_(
+                        start.conversation_id.is_not(None),
+                        later.conversation_id == start.conversation_id,
+                    ),
+                    sa.and_(
+                        start.conversation_id.is_(None),
+                        later.conversation_id.is_(None),
+                        later.source == start.source,
+                    ),
+                ),
+            )
+            .exists()
+        )
+        columns = (
+            start.id.label("id"),
+            start.end_user_id.label("end_user_id"),
+            start.conversation_id.label("conversation_id"),
+            start.source.label("source"),
+            start.created_at.label("created_at"),
+        )
+
+        def last_ready_message_lateral(name: str, *, conversation_stream: bool):
+            message = aliased(MemoryMessage, name=f"{name}_message")
+            stream_conditions = (
+                (message.conversation_id == start.conversation_id,)
+                if conversation_stream
+                else (
+                    message.conversation_id.is_(None),
+                    message.source == start.source,
+                )
+            )
+            return (
+                select(
+                    message.id.label("last_message_id"),
+                    message.created_at.label("last_message_at"),
+                )
+                .where(
+                    message.end_user_id == start.end_user_id,
+                    *stream_conditions,
+                    message.should_memorize.is_(True),
+                    message.role.in_(("user", "assistant")),
+                    func.length(func.trim(message.content)) > 0,
+                    sa.or_(
+                        message.role == "assistant",
+                        message.scene_boundary.is_not(None),
+                    ),
+                    sa.tuple_(message.created_at, message.id)
+                    >= sa.tuple_(start.created_at, start.id),
+                )
+                .order_by(message.created_at.desc(), message.id.desc())
+                .limit(1)
+                .correlate(start)
+                .lateral(name)
+            )
+
+        cursor_filter = ()
+        if after_created_at is not None and after_id is not None:
+            cursor_filter = (
+                sa.tuple_(start.created_at, start.id)
+                > sa.tuple_(after_created_at, uuid.UUID(str(after_id))),
+            )
+
+        conversation_last = last_ready_message_lateral(
+            "conversation_last",
+            conversation_stream=True,
+        )
+        source_last = last_ready_message_lateral(
+            "source_last",
+            conversation_stream=False,
+        )
+        conversation_streams = (
+            select(
+                *columns,
+                conversation_last.c.last_message_id,
+                conversation_last.c.last_message_at,
+            )
+            .outerjoin(conversation_last, sa.true())
+            .where(
+                *shifted_filters,
+                start.conversation_id.is_not(None),
+                ~later_shifted,
+                *cursor_filter,
+            )
+            .order_by(start.created_at.asc(), start.id.asc())
+        )
+        source_streams = (
+            select(
+                *columns,
+                source_last.c.last_message_id,
+                source_last.c.last_message_at,
+            )
+            .outerjoin(source_last, sa.true())
+            .where(
+                *shifted_filters,
+                start.conversation_id.is_(None),
+                ~later_shifted,
+                *cursor_filter,
+            )
+            .order_by(start.created_at.asc(), start.id.asc())
+        )
+        if batch_size is not None:
+            size = max(int(batch_size), 1)
+            conversation_streams = conversation_streams.limit(size)
+            source_streams = source_streams.limit(size)
+        return conversation_streams, source_streams
+
+    def _latest_shifted_scene_start_batch(
+        self,
+        *,
+        after_created_at=None,
+        after_id=None,
+        batch_size: int,
+    ) -> list:
+        starts = []
+        statements = self._latest_shifted_scene_start_statements(
+            after_created_at=after_created_at,
+            after_id=after_id,
+            batch_size=batch_size,
+        )
+        for statement in statements:
+            starts.extend(self.db.execute(statement).all())
+        starts.sort(key=lambda row: (row.created_at, row.id))
+        return starts[:batch_size]
+
+    def _load_scene_configs(self, end_user_ids: set[str]) -> dict[str, object | None]:
+        """一次查询加载当前批次涉及的 workspace Scene 配置。"""
+        from app.models.end_user_model import EndUser
+        from app.models.memory_config_model import MemoryConfig
+        from app.models.workspace_model import Workspace
+
+        valid_ids = []
+        configs: dict[str, object | None] = {end_user_id: None for end_user_id in end_user_ids}
+        for end_user_id in end_user_ids:
+            try:
+                valid_ids.append(uuid.UUID(end_user_id))
+            except ValueError:
+                continue
+        if not valid_ids:
+            return configs
+
+        rows = self.db.execute(
+            select(
+                EndUser.id.label("end_user_id"),
+                MemoryConfig.config_id.label("config_id"),
+                MemoryConfig.scene_idle_timeout_seconds.label(
+                    "scene_idle_timeout_seconds"
+                ),
+            )
+            .join(Workspace, EndUser.workspace_id == Workspace.id)
+            .join(MemoryConfig, Workspace.memory_config == MemoryConfig.config_id)
+            .where(EndUser.id.in_(valid_ids))
+        ).all()
+        for row in rows:
+            configs[str(row.end_user_id)] = row
+        return configs
+
+    def list_idle_scene_candidates(
+        self,
+        limit: int = 100,
+        *,
+        batch_size: int = 200,
+        scan_budget: int = 2000,
+        after_created_at=None,
+        after_id=None,
+    ) -> dict:
+        """按 keyset 游标分批扫描 idle Scene，并限制单轮扫描总量。"""
+        candidate_limit = max(int(limit), 1)
+        max_scanned = max(int(scan_budget), 1)
+        page_size = min(max(int(batch_size), 1), max_scanned)
+        configs = {}
+        candidates = []
+        scanned = 0
+        cursor_created_at = after_created_at
+        cursor_id = after_id
+        exhausted = False
+
+        while scanned < max_scanned and len(candidates) < candidate_limit:
+            fetch_size = min(page_size, max_scanned - scanned)
+            starts = self._latest_shifted_scene_start_batch(
+                after_created_at=cursor_created_at,
+                after_id=cursor_id,
+                batch_size=fetch_size,
+            )
+            if not starts:
+                exhausted = True
+                break
+
+            missing_config_ids = {
+                start.end_user_id
+                for start in starts
+                if start.end_user_id not in configs
+            }
+            if missing_config_ids:
+                configs.update(self._load_scene_configs(missing_config_ids))
+
+            for start in starts:
+                cursor_created_at = start.created_at
+                cursor_id = start.id
+                scanned += 1
+                end_user_id = start.end_user_id
+                config = configs[end_user_id]
+                if config is None:
+                    continue
+                if start.last_message_id is None or start.last_message_at is None:
+                    continue
+                idle_seconds = (utcnow_naive() - start.last_message_at).total_seconds()
+                if idle_seconds < config.scene_idle_timeout_seconds:
+                    continue
+
+                candidates.append({
+                    "end_user_id": end_user_id,
+                    "config_id": str(config.config_id),
+                    "scene_start_message_id": str(start.id),
+                    "idle_high_watermark_message_id": str(start.last_message_id),
+                })
+                if len(candidates) >= candidate_limit:
+                    break
+
+            if len(candidates) >= candidate_limit or scanned >= max_scanned:
+                break
+            if len(starts) < fetch_size:
+                exhausted = True
+                break
+
+        next_cursor = None
+        if cursor_created_at is not None and cursor_id is not None:
+            next_cursor = {
+                "created_at": cursor_created_at,
+                "id": str(cursor_id),
+            }
+        return {
+            "candidates": candidates,
+            "scanned": scanned,
+            "next_cursor": next_cursor,
+            "exhausted": exhausted,
+        }
+
+
 def message_to_dict(message: MemoryMessage) -> dict:
     """将 MemoryMessage ORM 对象转换为字典格式。"""
     return {
@@ -650,4 +1295,9 @@ def message_to_dict(message: MemoryMessage) -> dict:
         "files": message.files,
         "pruned_content": message.pruned_content,
         "topic_entity_hint": message.topic_entity_hint,
+        "scene_boundary": message.scene_boundary,
+        "scene_summary_claimed_at": (
+            to_iso_z(message.scene_summary_claimed_at)
+            if message.scene_summary_claimed_at else None
+        ),
     }

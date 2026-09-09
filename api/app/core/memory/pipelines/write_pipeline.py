@@ -466,6 +466,9 @@ class WritePipeline:
                         conversation_id=conversation_id,
                         message_seq=message_seq,
                         source=source,
+                        # 同 seq 撞号时 dispatcher 会在 target_message 里附带该后缀，
+                        # 透传给 dialogue id 生成，避免后续行与首条共用同一节点 id。
+                        dialogue_id_suffix=target_message.get("_dialogue_suffix", ""),
                     )
                     # 注入剪枝记录到 dialog_data.metadata
                     if pruning_records:
