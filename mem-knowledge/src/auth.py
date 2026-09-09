@@ -38,6 +38,11 @@ _PUBLIC_PATHS = {
     "/internal/v1/knowledges/parsertype",
 }
 
+# 公开例外仅限精确单文件下载 GET /internal/v1/files/{uuid}（浏览器 <img> 渲染
+# 无鉴权头，评审稿 4.3.4）。必须精确匹配整段路径：列表等其余 /files/* 路由若公开，
+# 攻击者可伪造 X-KB-* 头跨工作区拉取文件。
+_SINGLE_FILE_DOWNLOAD_RE = re.compile(r"/internal/v1/files/[0-9a-fA-F-]{36}")
+
 
 @dataclass
 class KbAuthConfig:
@@ -58,16 +63,20 @@ class KbAuthConfig:
     api_key_client: object | None = None
 
 
+def _is_single_file_download(path: str, method: str) -> bool:
+    return method == "GET" and _SINGLE_FILE_DOWNLOAD_RE.fullmatch(path) is not None
+
+
+def _has_credentials(request: Request) -> bool:
+    """请求是否携带可验证凭据（Bearer 内部 token/JWT 或 API key）。"""
+    auth = request.headers.get("authorization", "")
+    return auth.startswith("Bearer ") or request.headers.get("x-api-key") is not None
+
+
 def is_public_path(path: str, method: str) -> bool:
     if path in _PUBLIC_PATHS:
         return True
-    # 公开例外仅限精确单文件下载 GET /internal/v1/files/{uuid}（浏览器 <img> 渲染
-    # 无鉴权头，评审稿 4.3.4；身份由上游网关/老单体保证）。必须精确匹配整段路径：
-    # 列表等其余 /files/* 路由若公开，攻击者可伪造 X-KB-* 头跨工作区拉取文件。
-    if (method == "GET" and re.fullmatch(
-            r"/internal/v1/files/[0-9a-fA-F-]{36}", path) is not None):
-        return True
-    return False
+    return _is_single_file_download(path, method)
 
 
 def _load_gateway_auth(kb_auth: KbAuthConfig):
@@ -110,7 +119,14 @@ class KbAuthMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
         path = request.url.path
         if is_public_path(path, request.method):
-            return await call_next(request)
+            # 单文件下载公开例外只放行无凭据请求（浏览器 <img> 渲染 / 老单体公开
+            # 下载代理只带 X-KB-Source 头，身份由上游网关/老单体保证）。带凭据
+            # （内部 token/JWT/API key）不得短路：网关通道 1 剥除 X-KB-* 头后若
+            # 原样放行，路由层 principal=None 且 X-KB-Source=GENERAL →
+            # 400 KB_PRINCIPAL_INVALID，必须走下方鉴权由中间件验签构 Principal。
+            if (not _is_single_file_download(path, request.method)
+                    or not _has_credentials(request)):
+                return await call_next(request)
         if self._kb_auth.auth_mode == "gateway":
             return await self._gateway_dispatch(request, call_next)
         # direct（社区版）：不读 X-KB-* 头；JWT 本地验签 / API key 走 identity 集中
