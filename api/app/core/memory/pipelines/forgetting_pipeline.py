@@ -2,6 +2,9 @@ import logging
 import uuid
 
 from app.core.memory.pipelines.base_pipeline import BasePipeline
+from app.core.memory.storage.custom.end_user_delete import (
+    delete_end_user_memory_nodes,
+)
 from app.core.memory.storage.custom.manual_node_delete import (
     delete_manual_node_by_element_id as delete_manual_node,
 )
@@ -62,11 +65,5 @@ class ForgettingPipeline(BasePipeline):
 
     @staticmethod
     async def delete_all_nodes_by_end_user_id(end_user_id: str) -> int:
-        """删除指定用户的所有 Neo4j 记忆节点和边。
-
-        Returns:
-            删除的节点总数
-        """
-
-        async with Neo4jConnector() as connector:
-            return await connector.delete_group(end_user_id)
+        """Delete all memory nodes through the shared storage custom operation."""
+        return await delete_end_user_memory_nodes(end_user_id)

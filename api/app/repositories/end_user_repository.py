@@ -741,7 +741,11 @@ class EndUserRepository:
         )
 
     async def find_active_by_identity_features(
-        self, workspace_id: uuid.UUID, identity_features: str
+        self,
+        workspace_id: uuid.UUID,
+        identity_features: str,
+        *,
+        for_update: bool = True,
     ) -> Optional["EndUser"]:
         """按 workspace_id + identity_features 查询相同标识的活跃记录（用于跨渠道归并）。
 
@@ -755,7 +759,7 @@ class EndUserRepository:
         获取的 advisory 锁并回滚其 pending 状态，事务边界应由调用方决定。
         """
         try:
-            result = await self.db.execute(
+            stmt = (
                 select(EndUser)
                 .where(
                     EndUser.workspace_id == workspace_id,
@@ -764,8 +768,10 @@ class EndUserRepository:
                 )
                 .order_by(EndUser.created_at.asc())
                 .limit(1)
-                .with_for_update()
             )
+            if for_update:
+                stmt = stmt.with_for_update()
+            result = await self.db.execute(stmt)
             return result.scalars().first()
         except Exception as e:
             db_logger.error(f"按身份标识查询终端用户时出错: {str(e)}")
@@ -808,6 +814,23 @@ class EndUserRepository:
                 f"合并路由: other_id={other_id} → target={target_id}"
             )
         return target_user
+
+    async def get_merge_target_id_async(
+        self,
+        origin_id: uuid.UUID,
+        workspace_id: uuid.UUID,
+    ) -> uuid.UUID | None:
+        """Return the latest durable merge target for an origin in a workspace."""
+        result = await self.db.execute(
+            select(EndUserMerge.target_id)
+            .where(
+                EndUserMerge.origin_id == origin_id,
+                EndUserMerge.workspace_id == workspace_id,
+            )
+            .order_by(EndUserMerge.id.desc())
+            .limit(1)
+        )
+        return result.scalars().first()
 
     async def resolve_merge_by_origin_id_async(
         self, origin_id: uuid.UUID
@@ -1225,6 +1248,30 @@ class EndUserRepository:
         except Exception as e:
             self.db.rollback()
             db_logger.error(f"批量校验终端用户ID时出错: {str(e)}")
+            raise
+
+    async def filter_existing_ids_any_status_async(
+            self,
+            end_user_ids: set[uuid.UUID],
+            workspace_id: uuid.UUID,
+    ) -> Set[uuid.UUID]:
+        """Return existing end-user IDs in one workspace regardless of status."""
+        if not end_user_ids:
+            return set()
+        try:
+            result = await self.db.execute(
+                select(EndUser.id).where(
+                    EndUser.id.in_(end_user_ids),
+                    EndUser.workspace_id == workspace_id,
+                )
+            )
+            return set(result.scalars().all())
+        except Exception as e:
+            await self.db.rollback()
+            db_logger.error(
+                "批量校验终端用户（含 inactive）异常%s",
+                str(e),
+            )
             raise
 
     async def filter_existing_ids_async(
@@ -2722,6 +2769,30 @@ class EndUserRepository:
         except Exception as e:
             await self.db.rollback()
             db_logger.error(f"更新记忆计数失败(异步): end_user_id={end_user_id}, error={str(e)}")
+            raise
+
+    async def finalize_memory_delete_async(self, end_user_id: uuid.UUID) -> bool:
+        """Idempotently mark an existing graph-deleted user inactive and empty."""
+        try:
+            result = await self.db.execute(
+                update(EndUser)
+                .where(EndUser.id == end_user_id)
+                .values(memory_count=0, is_active=False)
+            )
+            await self.db.commit()
+            if result.rowcount:
+                db_logger.info(
+                    "完成终端用户记忆删除 PG 收尾: end_user_id=%s",
+                    end_user_id,
+                )
+            return bool(result.rowcount)
+        except Exception as e:
+            await self.db.rollback()
+            db_logger.error(
+                "终端用户记忆删除 PG 收尾失败: end_user_id=%s, error=%s",
+                end_user_id,
+                str(e),
+            )
             raise
 
 

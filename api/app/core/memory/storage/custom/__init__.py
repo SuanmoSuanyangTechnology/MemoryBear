@@ -28,6 +28,24 @@ from app.core.memory.storage.custom.manual_node_delete import (
     delete_manual_node_by_element_id,
     resolve_manual_delete_target,
 )
+from app.core.memory.storage.custom.end_user_delete import (
+    DeletedEndUserNodeIdentity,
+    EndUserDeleteOutboxError,
+    delete_end_user_memory_nodes,
+)
+from app.core.memory.storage.custom.end_user_merge import (
+    EndUserMergeNodeIdentity,
+    EndUserMergeOutboxError,
+    EndUserMergePrimaryError,
+    EndUserMergeStats,
+    merge_end_user_memory_nodes,
+)
+from app.core.memory.storage.custom.community_mutations import (
+    CommunityMutationOutboxError,
+    CommunityMutationWriter,
+    CommunityNodeIdentity,
+    CommunityReconcileStats,
+)
 from app.core.memory.storage.custom.topology_score import compute_topology_score
 from app.core.memory.storage.custom.forget_recovery import (
     ForgetRecoveryTarget,
@@ -37,10 +55,21 @@ from app.core.memory.storage.custom.forget_recovery import (
 
 __all__ = [
     "AutomaticForgetOutboxError",
+    "CommunityMutationOutboxError",
+    "CommunityMutationWriter",
+    "CommunityNodeIdentity",
+    "CommunityReconcileStats",
+    "DeletedEndUserNodeIdentity",
+    "EndUserDeleteOutboxError",
+    "EndUserMergeNodeIdentity",
+    "EndUserMergeOutboxError",
+    "EndUserMergePrimaryError",
+    "EndUserMergeStats",
     "ForgottenNodeIdentity",
     "ForgetRecoveryTarget",
     "ManualDeleteTarget",
     "compute_topology_score",
+    "delete_end_user_memory_nodes",
     "delete_manual_node_by_element_id",
     "resolve_manual_delete_target",
     "recover_forgotten_node_by_element_id",
@@ -51,6 +80,7 @@ __all__ = [
     "get_user_entity_id",
     "get_user_metadata",
     "get_user_sources_for_entities",
+    "merge_end_user_memory_nodes",
     "search_entities_by_name",
     "search_related_entities",
     "soft_delete_forgetting_nodes",
