@@ -126,6 +126,7 @@ export const home = {
       systemSettings: '系统设置',
       upgradePackage: '套餐升级',
       account: '账户中心',
+      brainMemory: '类脑记忆流',
     },
     dashboard: {
       total_models: '可用模型总数',

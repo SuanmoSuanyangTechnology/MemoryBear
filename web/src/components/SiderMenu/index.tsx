@@ -122,6 +122,9 @@ const Menu: FC<{
     } else if (!isPrivateAvailable && !noAuthList.includes('account')) {
       noAuthList.push('account')
     }
+    if (!isPrivateAvailable) {
+      noAuthList.push('brainMemory')
+    }
 
     if (noAuthList && !noAuthList?.includes('all')) {
       const filterMenus = (list: MenuItem[]): MenuItem[] =>{

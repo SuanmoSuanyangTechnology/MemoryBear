@@ -165,6 +165,21 @@
     "type": "group",
     "subs": [
       {
+        "id": 20,
+        "parent": 2,
+        "icon": "rb:bg-[url('@/assets/images/menuNew/brainMemory.svg')]",
+        "active_icon": "rb:bg-[url('@/assets/images/menuNew/brainMemory_active.svg')]",
+        "code": "brainMemory",
+        "label": "类脑记忆流",
+        "i18nKey": "menu.brainMemory",
+        "path": "/brain-memory",
+        "enable": true,
+        "display": true,
+        "level": 2,
+        "sort": 0,
+        "subs": null
+      },
+      {
         "id": 21,
         "parent": 2,
         "icon": "rb:bg-[url('@/assets/images/menuNew/memory.svg')]",
