@@ -15,6 +15,7 @@ SceneMinTurns = Annotated[int, Field(ge=0, le=10)]
 SceneMaxTurns = Annotated[int, Field(ge=5, le=100)]
 SceneIdleTimeoutSeconds = Annotated[int, Field(ge=60, le=30 * 24 * 60 * 60)]
 SceneMinCharsToSummary = Annotated[int, Field(ge=0, le=200)]
+SceneTimeDecayPenalty = Annotated[float, Field(ge=0, le=0.2)]
 
 
 def validate_scene_turn_range(scene_min_turns: int, scene_max_turns: int) -> None:
@@ -32,6 +33,7 @@ class SceneConfig(BaseModel):
     scene_max_turns: SceneMaxTurns = 10
     scene_idle_timeout_seconds: SceneIdleTimeoutSeconds = 86400
     scene_min_chars_to_summary: SceneMinCharsToSummary = 0
+    time_decay_penalty: SceneTimeDecayPenalty = 0.1
 
     @model_validator(mode="after")
     def validate_scene_ranges(self):

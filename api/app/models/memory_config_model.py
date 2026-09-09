@@ -90,6 +90,7 @@ class MemoryConfig(Base):
     scene_max_turns = Column(Integer, nullable=False, default=10, comment="Scene 最大轮次")
     scene_idle_timeout_seconds = Column(Integer, nullable=False, default=86400, comment="Scene 静默超时秒数")
     scene_min_chars_to_summary = Column(Integer, nullable=False, default=0, comment="SceneSummary 最小有效字符数")
+    time_decay_penalty = Column(Float, nullable=False, default=0.1, server_default="0.1",comment="时间衰减惩罚（0-0.2），仅存储，暂不参与计算",)
 
     # 情绪引擎配置
     emotion_enabled = Column(Boolean, default=True, comment="是否启用情绪提取")

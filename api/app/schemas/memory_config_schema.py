@@ -27,6 +27,7 @@ from app.schemas.scene_memory_schema import (
     SceneMaxTurns,
     SceneMinCharsToSummary,
     SceneMinTurns,
+    SceneTimeDecayPenalty,
     SceneThreshold,
     validate_scene_turn_range,
 )
@@ -439,6 +440,7 @@ class MemoryConfig(BaseModel):
     scene_max_turns: SceneMaxTurns = 10
     scene_idle_timeout_seconds: SceneIdleTimeoutSeconds = 86400
     scene_min_chars_to_summary: SceneMinCharsToSummary = 0
+    time_decay_penalty: SceneTimeDecayPenalty = 0.1
 
     # Pipeline config: Emotion extraction
     emotion_enabled: bool = False

@@ -289,6 +289,7 @@ def _build_memory_config(
         scene_max_turns=int(memory_config_row.scene_max_turns if memory_config_row.scene_max_turns is not None else 10),
         scene_idle_timeout_seconds=int(memory_config_row.scene_idle_timeout_seconds if memory_config_row.scene_idle_timeout_seconds is not None else 86400),
         scene_min_chars_to_summary=int(memory_config_row.scene_min_chars_to_summary if memory_config_row.scene_min_chars_to_summary is not None else 0),
+        time_decay_penalty=float(memory_config_row.time_decay_penalty if memory_config_row.time_decay_penalty is not None else 0.1),
         # Pipeline config: Emotion extraction
         emotion_enabled=bool(
             memory_config_row.emotion_enabled) if memory_config_row.emotion_enabled is not None else False,
