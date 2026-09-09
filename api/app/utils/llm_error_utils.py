@@ -123,6 +123,13 @@ _DASHSCOPE_CODE_MAP = {
     "serviceunavailable": "server_error",
 }
 
+_DASHSCOPE_AMBIGUOUS_CODES = frozenset({
+    "invalidparameter",
+    "invalidinput",
+    "invalid_request",
+    "invalid_request_error",
+})
+
 _QUOTA_PHRASES = (
     "arrearage",
     "欠费",
@@ -143,6 +150,52 @@ _CAPABILITY_PHRASES = (
     "not supported",
     "unsupported capability",
     "unsupported modality",
+    "capability mismatch",
+)
+
+_DASHSCOPE_AUTHENTICATION_PHRASES = (
+    "invalid api key",
+    "invalidapikey",
+    "incorrect api key",
+    "authentication failed",
+    "api key expired",
+)
+
+_DASHSCOPE_PERMISSION_PHRASES = (
+    "access denied",
+    "permission denied",
+    "forbidden",
+    "model access denied",
+    "insufficient permission",
+)
+
+_DASHSCOPE_RATE_LIMIT_PHRASES = (
+    "rate limit",
+    "too many requests",
+    "throttling",
+)
+
+_DASHSCOPE_MODEL_NOT_FOUND_PHRASES = (
+    "model not found",
+    "unknown model",
+    "model not exist",
+    "model does not exist",
+    "model doesn't exist",
+    "no such model",
+    "invalid model name",
+    "model name is invalid",
+    "模型不存在",
+    "模型未找到",
+    "模型已下线",
+    "模型无效",
+)
+
+_DASHSCOPE_CAPABILITY_PHRASES = (
+    "unsupported modality",
+    "unsupported capability",
+    "does not support image",
+    "does not support video",
+    "does not support audio",
     "capability mismatch",
 )
 
@@ -387,6 +440,93 @@ def _classification_for_dashscope_code(code: str | None) -> ClassifiedLLMError |
     return _CLASSIFICATIONS[key] if key else None
 
 
+def _classification_for_explicit_dashscope_code(
+        code: str | None,
+) -> ClassifiedLLMError | None:
+    """Map an unambiguous native or OpenAI-compatible DashScope code."""
+    if not code or code in _DASHSCOPE_AMBIGUOUS_CODES:
+        return None
+    return (
+        _classification_for_dashscope_code(code)
+        or _classification_for_provider_code(code)
+    )
+
+
+def _enrich_dashscope_error_info(
+        info: ProviderErrorInfo,
+        exception_chain: tuple[Exception, ...],
+) -> ProviderErrorInfo:
+    """Merge native DashScope multiline fields into provider diagnostics."""
+    fields = _parse_dashscope_error_fields(exception_chain)
+    provider_code = info.provider_code or _normalize_code(fields.get("code"))
+    http_status = info.http_status or _as_int(fields.get("status_code"))
+    request_id = info.request_id or fields.get("request_id")
+
+    message = info.message
+    if field_message := fields.get("message"):
+        normalized_message = field_message.lower()
+        if normalized_message not in message:
+            message = f"{message} | {normalized_message}"
+
+    return replace(
+        info,
+        http_status=http_status,
+        provider_code=provider_code,
+        request_id=request_id,
+        message=message,
+    )
+
+
+def _classify_ambiguous_dashscope_error(
+        info: ProviderErrorInfo,
+) -> ClassifiedLLMError | None:
+    """Classify ambiguous DashScope failures from status, code, and message."""
+    status = info.http_status
+    code = info.provider_code
+    message = info.message
+    dashscope_code_known = _classification_for_dashscope_code(code) is not None
+    provider_code_known = _classification_for_provider_code(code) is not None
+    should_inspect = (
+        code in _DASHSCOPE_AMBIGUOUS_CODES
+        or (not dashscope_code_known and not provider_code_known)
+    )
+    if not should_inspect:
+        return None
+
+    if status == 401 or _contains_any(message, _DASHSCOPE_AUTHENTICATION_PHRASES):
+        return _CLASSIFICATIONS["authentication_failed"]
+    if status == 403 or _contains_any(message, _DASHSCOPE_PERMISSION_PHRASES):
+        return _CLASSIFICATIONS["permission_denied"]
+    if status == 402 or _contains_any(message, _QUOTA_PHRASES):
+        return _CLASSIFICATIONS["quota_exceeded"]
+    if status == 429 or _contains_any(message, _DASHSCOPE_RATE_LIMIT_PHRASES):
+        return _CLASSIFICATIONS["rate_limited"]
+    if status in (400, 404) and _contains_any(
+            message,
+            _DASHSCOPE_MODEL_NOT_FOUND_PHRASES,
+    ):
+        return _CLASSIFICATIONS["model_not_found"]
+    if status in (400, 422) and _contains_any(
+            message,
+            _DASHSCOPE_CAPABILITY_PHRASES,
+    ):
+        return _CLASSIFICATIONS["capability_mismatch"]
+    if status in (408, 504) or _contains_any(
+            message,
+            ("request timeout", "timed out", "timeout"),
+    ):
+        return _CLASSIFICATIONS["timeout"]
+    is_server_status = status is not None and 500 <= status < 600
+    if is_server_status or _contains_any(
+            message,
+            ("internal error", "internal server error", "service unavailable"),
+    ):
+        return _CLASSIFICATIONS["server_error"]
+    if status in (400, 422) or code in _DASHSCOPE_AMBIGUOUS_CODES:
+        return _CLASSIFICATIONS["invalid_request"]
+    return None
+
+
 class _OpenAIErrorAdapter:
     def classify(
             self,
@@ -462,28 +602,19 @@ class _DashScopeErrorAdapter:
             info: ProviderErrorInfo,
             exception_chain: tuple[Exception, ...],
     ) -> ClassifiedLLMError | None:
-        """Normalize native ChatTongyi errors without affecting DashScope Omni OpenAI errors."""
-        fields = _parse_dashscope_error_fields(exception_chain)
-        provider_code = info.provider_code or _normalize_code(fields.get("code"))
-        if classified := _classification_for_dashscope_code(provider_code):
+        """Normalize native and OpenAI-compatible DashScope errors."""
+        if classified := _classification_for_explicit_dashscope_code(
+                info.provider_code,
+        ):
             return classified
 
-        http_status = info.http_status or _as_int(fields.get("status_code"))
-        request_id = info.request_id or fields.get("request_id")
-        message = info.message
-        if field_message := fields.get("message"):
-            normalized_message = field_message.lower()
-            if normalized_message not in message:
-                message = f"{message} | {normalized_message}"
+        if classified := _classify_ambiguous_dashscope_error(info):
+            return classified
 
-        enriched_info = replace(
-            info,
-            http_status=http_status,
-            provider_code=provider_code,
-            request_id=request_id,
-            message=message,
-        )
-        return _GENERIC_HTTP_ADAPTER.classify(enriched_info, exception_chain)
+        if classified := _classification_for_dashscope_code(info.provider_code):
+            return classified
+
+        return None
 
 
 _OPENAI_ADAPTER = _OpenAIErrorAdapter()
@@ -496,16 +627,25 @@ register_provider_error_adapter("dashscope", _DASHSCOPE_ADAPTER)
 def classify_llm_error(
         error: Exception,
         provider: str | None = None,
+        is_omni: bool = False,
 ) -> ClassifiedLLMError:
     """Normalize one provider exception using structured adapters and strict fallbacks."""
     info, chain = extract_provider_error_info(error, provider)
+    if info.provider == "dashscope":
+        info = _enrich_dashscope_error_info(info, chain)
+
+    provider_adapter = _PROVIDER_ADAPTERS.get(info.provider or "")
+    is_native_dashscope = info.provider == "dashscope" and not is_omni
+
+    if is_native_dashscope and provider_adapter is not None:
+        if classified := provider_adapter.classify(info, chain):
+            return classified
 
     if any(isinstance(item, OpenAIError) for item in chain):
         if classified := _OPENAI_ADAPTER.classify(info, chain):
             return classified
 
-    provider_adapter = _PROVIDER_ADAPTERS.get(info.provider or "")
-    if provider_adapter is not None:
+    if provider_adapter is not None and not is_native_dashscope:
         if classified := provider_adapter.classify(info, chain):
             return classified
 
