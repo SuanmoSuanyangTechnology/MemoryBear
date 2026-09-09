@@ -1020,11 +1020,8 @@ class ModelApiKeyService:
                 capability=model_config.capability,
             )
             if not validation_result["valid"]:
-                # 同一批次共享同一个 API Key；首个验证失败即终止，避免对后续模型重复发起无效请求。
-                raise BusinessException(
-                    f"模型配置验证失败: {validation_result['error']}",
-                    BizCode.INVALID_PARAMETER,
-                )
+                failed_models.append(model_name)
+                continue
 
             existing_key = db.query(ModelApiKey).join(
                 ModelApiKey.model_configs
