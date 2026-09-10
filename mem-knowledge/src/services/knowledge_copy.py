@@ -251,6 +251,8 @@ async def copy_knowledge_configuration(
     db: AsyncSession,
     knowledge_id: uuid.UUID,
     principal: Principal,
+    *,
+    name: str | None = None,
 ) -> dict[str, Any]:
     """Copy one ordinary knowledge configuration in a single transaction."""
     try:
@@ -281,12 +283,21 @@ async def copy_knowledge_configuration(
         except ValueError as exc:
             raise _validation(str(exc)) from exc
 
-        occupied_names = await knowledge_repository.get_knowledge_copy_names_async(
-            db,
-            principal.workspace_id,
-            source["name"],
-        )
-        copy_name = choose_copy_name(source["name"], occupied_names)
+        copy_name = (name or "").strip()
+        if copy_name:
+            if await knowledge_repository.get_knowledge_by_name_async(
+                db, copy_name, principal.workspace_id
+            ):
+                raise knowledge_service._conflict(
+                    f"The knowledge base name already exists: {copy_name}"
+                )
+        else:
+            occupied_names = await knowledge_repository.get_knowledge_copy_names_async(
+                db,
+                principal.workspace_id,
+                source["name"],
+            )
+            copy_name = choose_copy_name(source["name"], occupied_names)
         copied_id = uuid.uuid4()
         now = utcnow_naive()
         values = _build_knowledge_values(

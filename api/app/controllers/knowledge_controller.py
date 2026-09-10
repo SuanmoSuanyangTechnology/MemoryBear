@@ -4,7 +4,7 @@ import json
 from typing import Optional
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, status, Query, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy import or_, select
@@ -447,6 +447,7 @@ async def copy_knowledge(
         db: AsyncSession = Depends(get_async_db),  # noqa: B008
         current_user: User = Depends(get_current_user_async),  # noqa: B008
         request: Request = None,
+        name: Optional[str] = Body(default=None, embed=True),  # noqa: B008
 ):
     message = "Knowledge configuration copy requires the knowledge service"
     return JSONResponse(

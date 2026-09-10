@@ -318,12 +318,16 @@ async def copy_knowledge(
     knowledge_id: uuid.UUID,
     principal: Annotated[Principal, Depends(require_knowledge_copy_principal)],
     runtime: Annotated[ProcessRuntime, Depends(get_runtime)],
+    name: Annotated[
+        str | None, Body(embed=True, description="Optional copied knowledge name")
+    ] = None,
 ) -> SuccessEnvelope[dict[str, Any]]:
     async with runtime.database.async_session() as db:
         data = await knowledge_copy_service.copy_knowledge_configuration(
             db,
             knowledge_id,
             principal,
+            name=name,
         )
     return _success(
         request,
