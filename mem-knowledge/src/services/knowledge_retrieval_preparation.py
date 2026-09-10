@@ -684,8 +684,6 @@ class KnowledgeRetrievalPreparation:
             return config.rerank_mode, cls._resolve_weights(config.rerank_weights), True
         if target_count == 1 and request.rerank_mode is not None:
             return request.rerank_mode, cls._resolve_weights(request.rerank_weights), True
-        if target_count > 1 and request.rerank_mode is RerankMode.WEIGHTED_SCORE:
-            return request.rerank_mode, cls._resolve_weights(request.rerank_weights), True
         return RerankMode.RERANKING_MODEL, cls._resolve_weights(None), False
 
     @classmethod
