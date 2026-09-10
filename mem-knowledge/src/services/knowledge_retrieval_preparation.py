@@ -104,7 +104,7 @@ def build_retrieval_policy(
         request_reranker=request_reranker,
         fallback_reranker=targets[0].reranker,
     )
-    semantic_requires_reranker = len(targets) > 1 or request_has_rerank_id
+    semantic_requires_reranker = len(targets) > 1
     semantic_supports_image = embeddings_support_image and (
         not semantic_requires_reranker
         or _supports_qwen3_vl_rerank(global_reranker)
@@ -679,7 +679,11 @@ class KnowledgeRetrievalPreparation:
     ) -> tuple[RerankMode, RerankWeightsSnapshot, bool]:
         if config is not None and config.rerank_mode is not None:
             return config.rerank_mode, cls._resolve_weights(config.rerank_weights), True
-        if target_count == 1 and request.rerank_mode is not None:
+        if (
+            target_count == 1
+            and cls._resolve_retrieve_type(request, config) is RetrieveType.HYBRID
+            and request.rerank_mode is not None
+        ):
             return request.rerank_mode, cls._resolve_weights(request.rerank_weights), True
         return RerankMode.RERANKING_MODEL, cls._resolve_weights(None), False
 
@@ -690,9 +694,7 @@ class KnowledgeRetrievalPreparation:
         target_count: int,
         single_retrieve_type: RetrieveType | None,
     ) -> tuple[RerankMode, RerankWeightsSnapshot, bool] | None:
-        if target_count == 1 and single_retrieve_type is RetrieveType.HYBRID:
-            return None
-        if target_count == 1 and request.rerank_id is None:
+        if target_count == 1:
             return None
         mode = request.rerank_mode or RerankMode.RERANKING_MODEL
         return mode, cls._resolve_weights(request.rerank_weights), request.rerank_mode is not None
