@@ -7,6 +7,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequenc
 from typing import Any, Protocol
 
 from elasticsearch.helpers import async_bulk
+from redbear_model import TextEmbeddingContent
 
 from ..models.chunk import DocumentChunk, chunk_retrieval_content
 from ..models.embedding import collect_asset_file_ids
@@ -57,6 +58,8 @@ class AsyncChunkStore:
         *,
         embed: EmbedFunction | None = None,
         embed_chunks: EmbedChunksFunction | None = None,
+        embed_unit_contents: Callable[[list[Any]], Awaitable[Any]] | None = None,
+        image_resolver: Any = None,
         embedding_dimension: int | None = None,
         vector_indexed: bool = True,
     ):
@@ -64,6 +67,8 @@ class AsyncChunkStore:
         self.index = collection_name_for_knowledge(knowledge_id)
         self.embed = embed
         self.embed_chunks = embed_chunks
+        self.embed_unit_contents = embed_unit_contents
+        self.image_resolver = image_resolver
         self.embedding_dimension = embedding_dimension
         self.vector_indexed = vector_indexed
 
@@ -130,6 +135,16 @@ class AsyncChunkStore:
         metadata["score"] = hit.get("_score")
         return DocumentChunk(page_content=page_content, vector=None, metadata=metadata)
 
+    def _segment_list_query(self, base: dict[str, Any]) -> dict[str, Any]:
+        """Restrict segment listing to chunk_record docs on unit indexes."""
+
+        if self.embed_unit_contents is None:
+            return base
+        bool_query = base.setdefault("bool", {})
+        filters = bool_query.setdefault("filter", [])
+        filters.append({"term": {Field.UNIT_KIND.value: "chunk_record"}})
+        return base
+
     async def search_by_segment(
         self,
         *,
@@ -144,11 +159,13 @@ class AsyncChunkStore:
         if not await self.client.indices.exists(index=self.index):
             return 0, []
         offset = pagesize * (page - 1)
-        segment_query = self.build_segment_query(
-            document_id,
-            query,
-            chunk_types,
-            parent_ids,
+        segment_query = self._segment_list_query(
+            self.build_segment_query(
+                document_id,
+                query,
+                chunk_types,
+                parent_ids,
+            )
         )
         if offset + pagesize > ES_DEFAULT_MAX_RESULT_WINDOW:
             hits = [
@@ -190,11 +207,13 @@ class AsyncChunkStore:
         async for hit in iter_async_search_after_hits(
             self.client,
             index=self.index,
-            query=self.build_segment_query(
-                document_id,
-                query,
-                chunk_types,
-                parent_ids,
+            query=self._segment_list_query(
+                self.build_segment_query(
+                    document_id,
+                    query,
+                    chunk_types,
+                    parent_ids,
+                )
             ),
             sort=self.segment_sort(asc),
             batch_size=ES_FULL_SCAN_BATCH_SIZE,
@@ -204,11 +223,22 @@ class AsyncChunkStore:
     async def get_by_segment(self, doc_id: str) -> DocumentChunk | None:
         if not await self.client.indices.exists(index=self.index):
             return None
+        if self.embed_unit_contents is not None:
+            query: dict[str, Any] = {
+                "bool": {
+                    "must": [
+                        {"term": {Field.CHUNK_ID.value: doc_id}},
+                        {"term": {Field.UNIT_KIND.value: "chunk_record"}},
+                    ]
+                }
+            }
+        else:
+            query = {"term": {Field.DOC_ID.value: doc_id}}
         response = await self.client.search(
             index=self.index,
             from_=0,
             size=1,
-            query={"term": {Field.DOC_ID.value: doc_id}},
+            query=query,
         )
         self._raise_on_failed_response(response, "segment get")
         hits = response.get("hits", {}).get("hits", [])
@@ -226,6 +256,9 @@ class AsyncChunkStore:
 
     async def add_chunks(self, chunks: list[DocumentChunk]) -> None:
         if not chunks:
+            return
+        if self.embed_unit_contents is not None:
+            await self.add_unit_chunks(chunks)
             return
         embeddings = await self._embed_chunks(chunks)
         if not await self.client.indices.exists(index=self.index):
@@ -252,6 +285,14 @@ class AsyncChunkStore:
 
     async def update_chunk(self, chunk: DocumentChunk) -> int:
         metadata = chunk.metadata or {}
+        if self.embed_unit_contents is not None:
+            # Unit layout may change with content; rebuild this chunk's units.
+            doc_id = str(metadata.get("doc_id") or "")
+            if not doc_id:
+                return 0
+            await self.delete_units_by_chunk_ids([doc_id])
+            await self.add_unit_chunks([chunk])
+            return 1
         chunk_type = metadata.get("chunk_type")
         vector = None
         if chunk_type not in {"source", "parent"}:
@@ -281,6 +322,12 @@ class AsyncChunkStore:
     async def delete_by_ids(self, ids: list[str], *, refresh: bool = False) -> int:
         if not ids or not await self.client.indices.exists(index=self.index):
             return 0
+        if self.embed_unit_contents is not None:
+            # ids are chunk doc_ids; unit docs key off chunk_id.
+            deleted = await self.delete_units_by_chunk_ids(ids)
+            if refresh:
+                await self.client.indices.refresh(index=self.index)
+            return deleted
         response = await self.client.delete_by_query(
             index=self.index,
             query={"terms": {Field.DOC_ID.value: ids}},
@@ -367,7 +414,7 @@ class AsyncChunkStore:
     async def add_unit_chunks(
         self,
         chunks: list[DocumentChunk],
-        image_resolver: Any,
+        image_resolver: Any = None,
     ) -> None:
         """Expand multimodal chunks into retrieval units and index them."""
 
@@ -375,16 +422,17 @@ class AsyncChunkStore:
             return
         if not await self.client.indices.exists(index=self.index):
             await self._create_index([])
+        resolver = image_resolver if image_resolver is not None else self.image_resolver
         asset_ids = collect_asset_file_ids(chunks)
         images = (
-            await image_resolver(asset_ids)
-            if asset_ids and image_resolver is not None
+            await resolver(asset_ids)
+            if asset_ids and resolver is not None
             else {}
         )
         actions: list[dict[str, Any]] = []
         for chunk in chunks:
             units = build_retrieval_units(chunk, images)
-            vectors = await self._embed_units(units)
+            vectors = await self._embed_units(units, images)
             if len(vectors) != len(units):
                 raise RuntimeError("Unit embedding count does not match unit count")
             for unit, vector in zip(units, vectors, strict=True):
@@ -415,22 +463,25 @@ class AsyncChunkStore:
         if actions:
             await async_bulk(self.client, actions)
 
-    async def _embed_units(self, units: list[RetrievalUnit]) -> list[list[float] | None]:
+    async def _embed_units(
+        self,
+        units: list[RetrievalUnit],
+        images: Mapping[str, Any] | None = None,
+    ) -> list[list[float] | None]:
         vectors: list[list[float] | None] = [None] * len(units)
-        text_positions = [
-            i
-            for i, u in enumerate(units)
-            if u.kind is RetrievalUnitKind.TEXT and u.content.strip()
-        ]
-        if text_positions:
-            if self.embed is None:
-                raise RuntimeError("Embedding model is required for unit embedding")
-            embedded = await self.embed([units[i].content for i in text_positions])
-            for pos, vector in zip(text_positions, embedded, strict=True):
-                vectors[pos] = vector
-        # Image-unit vectors require the multimodal embed path wired in the
-        # chunk service (P5); without it image units stay vectorless and recall
-        # falls back to the text unit (vision_text) of the same chunk.
+        embed_contents = self.embed_unit_contents
+        images = images or {}
+        for index, unit in enumerate(units):
+            contents: list[Any] = []
+            if unit.kind is RetrievalUnitKind.TEXT and unit.content.strip():
+                contents = [TextEmbeddingContent(text=unit.content)]
+            elif unit.kind is RetrievalUnitKind.IMAGE and unit.asset_file_id:
+                image = images.get(unit.asset_file_id)
+                if image is not None:
+                    contents = [image]
+            if contents and embed_contents is not None:
+                result = await embed_contents(contents)
+                vectors[index] = list(result)
         return vectors
 
     async def delete_units_by_chunk_ids(self, chunk_ids: list[str]) -> int:
