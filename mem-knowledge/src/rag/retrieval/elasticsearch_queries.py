@@ -76,6 +76,52 @@ def build_vector_script_query(
     }
 
 
+def build_unit_filter_clauses(
+    file_names_filter: Sequence[str] | None,
+    document_ids_include: Sequence[str] | None,
+    *,
+    unit_kinds: Sequence[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Filter clauses for unit-granularity recall on a multimodal index.
+
+    Always excludes ``chunk_record`` docs (authoritative records, no vector) and
+    optionally restricts to specific unit kinds (e.g. text-only for full text).
+    """
+
+    filters = build_filter_clauses(
+        file_names_filter,
+        document_ids_include,
+        require_vector=True,
+    )
+    if unit_kinds:
+        filters.append({"terms": {Field.UNIT_KIND.value: list(unit_kinds)}})
+    else:
+        filters.append(
+            {"bool": {"must_not": [{"term": {Field.UNIT_KIND.value: "chunk_record"}}]}}
+        )
+    return filters
+
+
+def build_vector_knn_query(
+    query_vector: Sequence[float],
+    filters: Sequence[dict[str, Any]],
+    *,
+    k: int,
+    num_candidates: int,
+) -> dict[str, Any]:
+    """Approximate HNSW kNN query for the multimodal unit index."""
+
+    return {
+        "knn": {
+            "field": Field.VECTOR.value,
+            "query_vector": list(query_vector),
+            "k": k,
+            "num_candidates": num_candidates,
+            "filter": list(filters),
+        }
+    }
+
+
 def raise_on_shard_failures(result: Mapping[str, Any], context: str) -> None:
     failed = int((result.get("_shards") or {}).get("failed") or 0)
     if failed:
@@ -95,6 +141,18 @@ def _hit_to_chunk(
         answer = source.get(Field.ANSWER.value, "")
         page_content = f"question: {question}\nanswer: {answer}"
         metadata.update(chunk_type="qa", question=question, answer=answer)
+    # Carry unit identity through metadata so the service layer can fold units
+    # back to chunks. Underscore-prefixed keys are internal and never emitted.
+    for src_key, meta_key in (
+        (Field.UNIT_ID.value, "_unit_id"),
+        (Field.UNIT_KIND.value, "_unit_kind"),
+        (Field.CHUNK_ID.value, "_chunk_id"),
+        (Field.RETURN_CHUNK_ID.value, "_return_chunk_id"),
+        (Field.ASSET_FILE_ID.value, "_asset_file_id"),
+    ):
+        value = source.get(src_key)
+        if value is not None:
+            metadata[meta_key] = value
     metadata["score"] = score
     return DocumentChunk(page_content=page_content, metadata=metadata)
 
@@ -167,6 +225,8 @@ __all__ = [
     "build_filter_clauses",
     "build_full_text_query",
     "build_parent_lookup_query",
+    "build_unit_filter_clauses",
+    "build_vector_knn_query",
     "build_vector_script_query",
     "full_text_hits_to_chunks",
     "merge_parent_chunks",
