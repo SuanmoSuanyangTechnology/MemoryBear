@@ -223,11 +223,13 @@ async def merge_memory(
     if payload.target in payload.end_user_ids:
         payload.end_user_ids.remove(payload.target)
     all_users = payload.end_user_ids | {payload.target}
-    activate_end_users = await EndUserRepository(db).filter_existing_ids_async(
+    existing_end_users = await EndUserRepository(
+        db
+    ).filter_existing_ids_any_status_async(
         all_users,
-        workspace_id=auth.workspace_id
+        workspace_id=auth.workspace_id,
     )
-    not_found = all_users - activate_end_users
+    not_found = all_users - existing_end_users
     if not_found:
         return fail(code=BizCode.USER_NOT_FOUND, msg=f"Not found users - {not_found}.")
 

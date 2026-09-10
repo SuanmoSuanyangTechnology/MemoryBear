@@ -2,7 +2,10 @@
 import logging
 from typing import Dict, List, Optional, Tuple
 
-from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+# NOTE: 下方被注释掉的 fetch_degrees / fetch_degrees_batch 依赖 Neo4jConnector，
+# 恢复它们时需要一并恢复 `from app.repositories.neo4j.neo4j_connector import Neo4jConnector`。
+from app.core.memory.storage.custom.reflection_mutations import merge_entities
+from app.core.memory.storage.provider.neo4j.client import Neo4jClient
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +86,6 @@ def choose_keeper(
 
 
 async def execute_merge(
-    connector: Neo4jConnector,
     end_user_id: str,
     keeper_id: str,
     loser_id: str,
@@ -91,6 +93,8 @@ async def execute_merge(
     merged_aliases: List[str],
     loser_degree: int = 0,
     merge_max_degree: int = 1000,
+    *,
+    neo4j_client: Neo4jClient | None = None,
 ) -> str:
     """执行合并事务（属性合并 + 边迁移 + 删除 loser）
 
@@ -101,7 +105,6 @@ async def execute_merge(
     NOTE: 当前版本暂时关闭超级节点保护（loser_degree / merge_max_degree 参数仍保留，
     用于度数优先的 keeper 选择 / 调用方签名兼容）。下个版本恢复时把下方 if 块取消注释即可。
     """
-    from app.repositories.neo4j.cypher_queries import DEDUP_MERGE_ENTITIES
 
     # === 超级节点保护（暂时关闭，下版打开）===
     # if loser_degree > merge_max_degree:
@@ -113,8 +116,8 @@ async def execute_merge(
     # ========================================
 
     try:
-        result = await connector.execute_query(
-            DEDUP_MERGE_ENTITIES,
+        result = await merge_entities(
+            neo4j_client=neo4j_client,
             end_user_id=end_user_id,
             keeper_id=keeper_id,
             loser_id=loser_id,

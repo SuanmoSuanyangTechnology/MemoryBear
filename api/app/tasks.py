@@ -3,6 +3,7 @@ import json
 import os
 import re
 import shutil
+import socket
 import tempfile
 import time
 import uuid
@@ -23,12 +24,17 @@ from fastapi.encoders import jsonable_encoder
 from redis.exceptions import RedisError
 from sqlalchemy import String, cast, select
 
-from app.aioRedis import get_thread_safe_redis
+from app.aioRedis import get_thread_safe_redis, get_thread_safe_sync_redis
 from app.celery_app import celery_app
 from app.core.config import settings
 from app.core.logging_config import get_logger
 from app.core.memory.exceptions import MemoryExtractionBusinessError
 from app.core.models import RedBearEmbeddings, RedBearLLM
+from app.core.memory.storage.outbox.consumer import (
+    cleanup_outbox_events,
+    consume_outbox_batch,
+)
+from app.core.memory.storage.outbox.exceptions import safe_error
 from app.core.memory.storage_services.reflection_engine import retry_registry as rr
 from app.core.memory.storage_services.forgetting_engine.constants import (
     FORGET_CANDIDATES_KEY as _FORGET_CANDIDATES_KEY,
@@ -1039,6 +1045,45 @@ def _shutdown_loop_gracefully(loop: asyncio.AbstractEventLoop):
         loop.run_until_complete(loop.shutdown_asyncgens())
     except Exception:
         pass
+
+
+@celery_app.task(
+    name="app.tasks.scan_outbox_projection",
+    queue="memory_projection",
+    max_retries=0,
+)
+def scan_outbox_projection():
+    worker_id = f"{socket.gethostname()[:60]}:{os.getpid()}:{uuid.uuid4()}"
+    try:
+        result = asyncio.run(
+            consume_outbox_batch(settings.OUTBOX_BATCH_SIZE, worker_id)
+        )
+    except Exception as exc:
+        # Celery 会记录抛出的异常；剥离驱动 SQL、凭据与负载。
+        error = safe_error(exc, settings.OUTBOX_ERROR_MAX_LENGTH)
+        logger.error("Outbox task failed: %s", error)
+        raise RuntimeError(f"Outbox task failed: {error}") from None
+    logger.info("Outbox task completed: %s", result)
+    return result
+
+
+@celery_app.task(
+    name="app.tasks.cleanup_outbox",
+    queue="memory_projection",
+    max_retries=0,
+)
+def cleanup_outbox():
+    try:
+        result = asyncio.run(
+            cleanup_outbox_events(settings.OUTBOX_BATCH_SIZE)
+        )
+    except Exception as exc:
+        # Celery 会记录抛出的异常；剥离驱动 SQL、凭据与负载。
+        error = safe_error(exc, settings.OUTBOX_ERROR_MAX_LENGTH)
+        logger.error("Outbox task failed: %s", error)
+        raise RuntimeError(f"Outbox task failed: {error}") from None
+    logger.info("Outbox task completed: %s", result)
+    return result
 
 
 @celery_app.task(name="tasks.process_item")
@@ -3803,7 +3848,7 @@ def do_gds_topology_score(self, end_user_id: str, inflight_token: Optional[str] 
         return {"status": "skipped_stale_inflight", "end_user_id": end_user_id}
 
     async def _run() -> Dict[str, Any]:
-        from app.repositories.neo4j.gds_topology_repository import compute_topology_score
+        from app.core.memory.storage.custom import compute_topology_score
 
         write_lock = RedisFairLock(
             key=f"memory_write:{end_user_id}",
@@ -6190,6 +6235,50 @@ def refresh_hot_memory_tags_cache(self) -> Dict[str, Any]:
 
 # =============================================================================
 # 社区聚类补全任务（触发型）
+
+def _resolve_community_clustering_owner_id(end_user_id: str) -> str:
+    """Resolve a possibly merged user to the current active graph owner."""
+    with get_db_context() as db:
+        from app.repositories.end_user_repository import EndUserRepository
+
+        resolved = EndUserRepository(db).resolve_merge_by_origin_id(
+            uuid.UUID(end_user_id)
+        )
+        return str(resolved.id) if resolved else end_user_id
+
+
+def _acquire_community_clustering_lock(
+    original_end_user_id: str,
+    *,
+    redis_client,
+    expire: int,
+) -> tuple[str, RedisFairLock]:
+    """Resolve, lock, and re-resolve until the lock protects current owner."""
+    candidate_id = original_end_user_id
+    while True:
+        effective_id = _resolve_community_clustering_owner_id(candidate_id)
+        write_lock = RedisFairLock(
+            key=f"memory_write:{effective_id}",
+            redis_client=redis_client,
+            expire=expire,
+            timeout=60,
+            auto_renewal=True,
+        )
+        if not write_lock.acquire():
+            raise RuntimeError(
+                f"Get redis lock timeout: memory_write:{effective_id}"
+            )
+        try:
+            confirmed_id = _resolve_community_clustering_owner_id(candidate_id)
+        except Exception:
+            write_lock.release()
+            raise
+        if confirmed_id == effective_id:
+            return effective_id, write_lock
+        write_lock.release()
+        candidate_id = confirmed_id
+
+
 # =============================================================================
 
 @celery_app.task(
@@ -6223,9 +6312,12 @@ def run_incremental_clustering(
         包含任务执行结果的字典
     """
     start_time = time.time()
+    original_end_user_id = end_user_id
 
     async def _run() -> Dict[str, Any]:
         from app.core.logging_config import get_logger
+        from app.core.memory.storage.custom import CommunityMutationWriter
+        from app.core.memory.storage.provider.neo4j.client import Neo4jClient
         from app.repositories.neo4j.neo4j_connector import Neo4jConnector
         from app.core.memory.storage_services.clustering_engine.label_propagation import LabelPropagationEngine
 
@@ -6242,10 +6334,13 @@ def run_incremental_clustering(
             memory_config = MemoryConfigService(db).load_memory_config(config_id=config_id)
 
         connector = Neo4jConnector()
+        storage_client = None
         try:
+            storage_client = await Neo4jClient.create()
             engine = LabelPropagationEngine(
                 connector=connector,
                 memory_config=memory_config,
+                community_writer=CommunityMutationWriter(storage_client),
                 language=language,
             )
 
@@ -6263,10 +6358,20 @@ def run_incremental_clustering(
             logger.error(f"[IncrementalClustering] 增量聚类失败: {e}", exc_info=True)
             raise
         finally:
-            await connector.close()
+            try:
+                if storage_client is not None:
+                    await storage_client.close()
+            finally:
+                await connector.close()
 
     loop = set_asyncio_event_loop()
+    write_lock = None
     try:
+        end_user_id, write_lock = _acquire_community_clustering_lock(
+            original_end_user_id,
+            redis_client=get_thread_safe_sync_redis(),
+            expire=1800,
+        )
         result = loop.run_until_complete(_run())
         result["elapsed_time"] = time.time() - start_time
         result["task_id"] = self.request.id
@@ -6279,6 +6384,8 @@ def run_incremental_clustering(
         return result
     # 不再 catch 全局异常，直接冒出 → Celery FAILURE
     finally:
+        if write_lock is not None:
+            write_lock.release()
         _shutdown_loop_gracefully(loop)
 
 
@@ -6310,6 +6417,8 @@ def init_community_clustering_for_users(self, end_user_ids: List[str], workspace
     async def _run() -> Dict[str, Any]:
         from app.core.logging_config import get_logger
         from app.repositories.neo4j.community_repository import CommunityRepository
+        from app.core.memory.storage.custom import CommunityMutationWriter
+        from app.core.memory.storage.provider.neo4j.client import Neo4jClient
         from app.repositories.neo4j.neo4j_connector import Neo4jConnector
         from app.core.memory.storage_services.clustering_engine.label_propagation import LabelPropagationEngine
 
@@ -6321,8 +6430,12 @@ def init_community_clustering_for_users(self, end_user_ids: List[str], workspace
         failed = 0
 
         connector = Neo4jConnector()
+        storage_client = None
         try:
+            storage_client = await Neo4jClient.create()
             repo = CommunityRepository(connector)
+            community_writer = CommunityMutationWriter(storage_client)
+            redis_client = get_thread_safe_sync_redis()
 
             # 批量预取所有用户的 MemoryConfig（tenant 与 model_id 同源），避免循环内逐个查库。
             # 加载失败的用户不存入 map，循环内检测到缺失时直接 skip。
@@ -6342,13 +6455,40 @@ def init_community_clustering_for_users(self, end_user_ids: List[str], workspace
             except Exception as e:
                 logger.error(f"[CommunityCluster] 批量获取配置失败: {e}")
 
-            for end_user_id in end_user_ids:
+            for requested_end_user_id in end_user_ids:
+                write_lock = None
+                end_user_id = requested_end_user_id
                 try:
+                    end_user_id, write_lock = _acquire_community_clustering_lock(
+                        requested_end_user_id,
+                        redis_client=redis_client,
+                        expire=7200,
+                    )
+
                     # 配置加载失败的用户直接跳过
                     memory_config = user_config_map.get(end_user_id)
+                    if not memory_config and end_user_id != requested_end_user_id:
+                        with get_db_context() as db:
+                            from app.services.memory_agent_service import (
+                                get_end_users_connected_configs_batch,
+                            )
+                            from app.services.memory_config_service import MemoryConfigService
+
+                            resolved_configs = get_end_users_connected_configs_batch(
+                                [end_user_id], db
+                            )
+                            config_info = resolved_configs.get(end_user_id) or {}
+                            resolved_config_id = config_info.get("memory_config_id")
+                            if resolved_config_id:
+                                memory_config = MemoryConfigService(db).load_memory_config(
+                                    config_id=resolved_config_id
+                                )
+                                user_config_map[end_user_id] = memory_config
                     if not memory_config:
                         failed += 1
-                        logger.warning(f"[CommunityCluster] 用户 {end_user_id} 无有效配置，跳过聚类")
+                        logger.warning(
+                            f"[CommunityCluster] 用户 {end_user_id} 无有效配置，跳过聚类"
+                        )
                         continue
 
                     # 已有社区节点时，检查是否存在属性不完整的节点
@@ -6367,6 +6507,7 @@ def init_community_clustering_for_users(self, end_user_ids: List[str], workspace
                         engine = LabelPropagationEngine(
                             connector=connector,
                             memory_config=memory_config,
+                            community_writer=community_writer,
                         )
                         logger.info(
                             f"[CommunityCluster] 用户 {end_user_id} 发现 {len(incomplete_ids)} 个属性不完整的社区，开始补全"
@@ -6375,7 +6516,9 @@ def init_community_clustering_for_users(self, end_user_ids: List[str], workspace
                         patch_fail = 0
                         for cid in incomplete_ids:
                             try:
-                                await engine._generate_community_metadata([cid], end_user_id)
+                                await engine._generate_community_metadata(
+                                    [cid], end_user_id
+                                )
                                 patch_ok += 1
                             except Exception as patch_err:
                                 patch_fail += 1
@@ -6397,6 +6540,7 @@ def init_community_clustering_for_users(self, end_user_ids: List[str], workspace
                     engine = LabelPropagationEngine(
                         connector=connector,
                         memory_config=memory_config,
+                        community_writer=community_writer,
                     )
 
                     logger.info(
@@ -6409,9 +6553,16 @@ def init_community_clustering_for_users(self, end_user_ids: List[str], workspace
                 except Exception as e:
                     failed += 1
                     logger.error(f"[CommunityCluster] 用户 {end_user_id} 聚类失败: {e}")
+                finally:
+                    if write_lock is not None:
+                        write_lock.release()
 
         finally:
-            await connector.close()
+            try:
+                if storage_client is not None:
+                    await storage_client.close()
+            finally:
+                await connector.close()
 
         logger.info(
             f"[CommunityCluster] 任务完成: 初始化={initialized}, 跳过={skipped}, 失败={failed}"
@@ -6749,7 +6900,8 @@ def run_workflow_schedule_trigger(app_id: str, release_id: str, trigger_id: str,
 @celery_app.task(name="app.tasks.draft_data_clean", queue="memory_tasks")
 def draft_data_clean():
     import asyncio
-    from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+
+    from app.core.memory.storage.custom import delete_end_user_memory_nodes
 
     with get_db_context() as db:
         stmt = select(EndUser.id).join(
@@ -6759,35 +6911,70 @@ def draft_data_clean():
             EndUser.is_active == True
         )
         result = db.execute(stmt)
-        end_user_ids = [str(eid) for eid in result.scalars()]
+        candidate_ids = list(result.scalars())
 
-        if not end_user_ids:
+        if not candidate_ids:
             logger.info("draft_data_clean: 没有需要清理的终端用户")
             return {"deleted_count": 0}
 
-        updated = (
+        # Preserve the legacy cleanup invariant: deactivate the complete PG
+        # batch first. Graph cleanup is best-effort afterwards, so a Neo4j or
+        # Outbox failure must never leave these users active again.
+        pg_deleted = (
             db.query(EndUser)
-            .filter(EndUser.id.in_(end_user_ids))
-            .update({"is_active": False}, synchronize_session=False)
+            .filter(
+                EndUser.id.in_(candidate_ids),
+                EndUser.is_active == True,
+            )
+            .update(
+                {"is_active": False, "memory_count": 0},
+                synchronize_session=False,
+            )
         )
         db.commit()
-        logger.info(f"draft_data_clean: 软删除 {updated} 个终端用户")
 
-    async def _delete_neo4j_groups():
-        async with Neo4jConnector() as connector:
-            deleted = 0
-            for eid in end_user_ids:
-                try:
-                    await connector.delete_group(eid)
-                    deleted += 1
-                except Exception as e:
-                    logger.error(f"draft_data_clean: Neo4j 删除失败 end_user_id={eid}: {e}")
-        return deleted
+    end_user_ids = [str(end_user_id) for end_user_id in candidate_ids]
+    neo4j_deleted = 0
+    neo4j_deleted_nodes = 0
+    neo4j_failed = 0
+    redis_client = get_thread_safe_sync_redis()
+    for eid in end_user_ids:
+        write_lock = RedisFairLock(
+            key=f"memory_write:{eid}",
+            redis_client=redis_client,
+            expire=1200,
+            timeout=60,
+            auto_renewal=True,
+        )
+        try:
+            with write_lock:
+                deleted_nodes = asyncio.run(
+                    delete_end_user_memory_nodes(eid)
+                )
+            neo4j_deleted += 1
+            neo4j_deleted_nodes += deleted_nodes
+        except Exception:
+            neo4j_failed += 1
+            logger.exception(
+                "draft_data_clean: Neo4j/Outbox 删除失败，继续下一个用户 "
+                "end_user_id=%s",
+                eid,
+            )
+            continue
 
-    neo4j_deleted = asyncio.run(_delete_neo4j_groups())
-    logger.info(f"draft_data_clean: Neo4j 删除 {neo4j_deleted} 组节点")
-
-    return {"pg_deleted": updated, "neo4j_deleted": neo4j_deleted}
+    logger.info(
+        "draft_data_clean: PG 软删除 %s 个用户；Neo4j 成功 %s 组、%s 个节点，失败 %s 组",
+        pg_deleted,
+        neo4j_deleted,
+        neo4j_deleted_nodes,
+        neo4j_failed,
+    )
+    return {
+        "pg_deleted": pg_deleted,
+        "neo4j_deleted": neo4j_deleted,
+        "neo4j_deleted_nodes": neo4j_deleted_nodes,
+        "neo4j_failed": neo4j_failed,
+    }
 
 
 # ============================================================================

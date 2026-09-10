@@ -1,9 +1,11 @@
+import asyncio
 from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header
 from fastapi.responses import StreamingResponse
 
+from app.aioRedis import get_thread_safe_sync_redis
 from app.core.error_codes import BizCode
 from app.core.language_utils import get_language_from_header
 from app.core.logging_config import get_api_logger
@@ -32,6 +34,7 @@ from app.services.memory_storage_service import (
 )
 
 from app.utils.config_utils import resolve_config_id, resolve_config_id_async
+from app.utils.redis_lock import RedisFairLock
 
 # Get API logger
 api_logger = get_api_logger()
@@ -395,37 +398,135 @@ async def delete_end_user(
 
     try:
         from app.repositories.end_user_repository import EndUserRepository
-
-        async with get_async_db_context() as db:
-            end_user = await EndUserRepository(db).get_end_user_by_id_async(end_user_id)
-            if not end_user:
-                api_logger.warning(f"终端用户不存在或已删除: end_user_id={end_user_id_str}")
-                return fail(BizCode.NOT_FOUND, "终端用户不存在或已删除", f"end_user_id={end_user_id_str}")
-            if str(end_user.workspace_id) != str(workspace_id):
-                api_logger.warning(
-                    f"用户 {current_user.username} 尝试删除不属于工作空间 {workspace_id} 的终端用户 {end_user_id_str}"
-                )
-                return fail(BizCode.PERMISSION_DENIED, "该终端用户不属于当前工作空间", "end_user workspace mismatch")
-
         from app.core.memory.memory_service import MemoryService
 
-        total_deleted = await MemoryService.delete_all_nodes_by_end_user_id(end_user_id_str)
-
-        try:
+        while True:
+            resolved_snapshot: tuple[UUID, str] | None = None
             async with get_async_db_context() as db:
-                repo = EndUserRepository(db)
-                await repo.update_memory_count_async(end_user_id, 0)
-                await repo.soft_delete_by_end_user_id_async(end_user_id)
-        except Exception as sync_err:
-            api_logger.warning(f"同步 end_user 失败（不影响 Neo4j 删除结果）: {sync_err}")
+                end_user = await EndUserRepository(db).get_end_user_by_id_async(
+                    end_user_id
+                )
+                if end_user is not None:
+                    resolved_snapshot = (
+                        UUID(str(end_user.id)),
+                        str(end_user.workspace_id),
+                    )
+            if resolved_snapshot is None:
+                api_logger.warning(
+                    f"终端用户不存在或已删除: end_user_id={end_user_id_str}"
+                )
+                return fail(
+                    BizCode.NOT_FOUND,
+                    "终端用户不存在或已删除",
+                    f"end_user_id={end_user_id_str}",
+                )
 
-        api_logger.info(
-            f"终端用户删除完成: end_user_id={end_user_id_str}, total_deleted={total_deleted}"
-        )
-        return success(
-            data={"deleted": True, "end_user_id": end_user_id_str, "total_deleted": total_deleted},
-            msg=f"删除用户{end_user_id_str}记忆库成功"
-        )
+            resolved_end_user_id, resolved_workspace_id = resolved_snapshot
+            if resolved_workspace_id != str(workspace_id):
+                api_logger.warning(
+                    f"用户 {current_user.username} 尝试删除不属于工作空间 "
+                    f"{workspace_id} 的终端用户 {end_user_id_str}"
+                )
+                return fail(
+                    BizCode.PERMISSION_DENIED,
+                    "该终端用户不属于当前工作空间",
+                    "end_user workspace mismatch",
+                )
+
+            if resolved_end_user_id != end_user_id:
+                api_logger.warning(
+                    "拒绝通过已合并源用户删除目标用户记忆: requested_id=%s, "
+                    "resolved_id=%s",
+                    end_user_id_str,
+                    resolved_end_user_id,
+                )
+                return fail(
+                    BizCode.NOT_FOUND,
+                    "终端用户不存在或已删除",
+                    f"end_user_id={end_user_id_str}",
+                )
+
+            effective_end_user_id = resolved_end_user_id
+            effective_end_user_id_str = str(effective_end_user_id)
+            write_lock = RedisFairLock(
+                key=f"memory_write:{effective_end_user_id_str}",
+                redis_client=get_thread_safe_sync_redis(),
+                expire=1200,
+                timeout=60,
+                auto_renewal=True,
+            )
+            if not await asyncio.to_thread(write_lock.acquire):
+                raise RuntimeError("memory write lock acquisition timed out")
+            try:
+                # The requested active user may be merged between the first
+                # lookup and lock acquisition. Re-resolve under its old lock;
+                # retry preflight so the merged source is rejected before any
+                # target lock or destructive operation.
+                confirmed_snapshot: tuple[UUID, str] | None = None
+                async with get_async_db_context() as db:
+                    confirmed = await EndUserRepository(
+                        db
+                    ).get_end_user_by_id_async(end_user_id)
+                    if confirmed is not None:
+                        confirmed_snapshot = (
+                            UUID(str(confirmed.id)),
+                            str(confirmed.workspace_id),
+                        )
+                if confirmed_snapshot is None:
+                    return fail(
+                        BizCode.NOT_FOUND,
+                        "终端用户不存在或已删除",
+                        f"end_user_id={end_user_id_str}",
+                    )
+
+                confirmed_id, confirmed_workspace_id = confirmed_snapshot
+                if confirmed_workspace_id != str(workspace_id):
+                    return fail(
+                        BizCode.PERMISSION_DENIED,
+                        "该终端用户不属于当前工作空间",
+                        "end_user workspace mismatch",
+                    )
+
+                if confirmed_id != effective_end_user_id:
+                    api_logger.info(
+                        "删除终端用户时 merge owner 已变化，释放旧锁并重跑预检: "
+                        "%s -> %s",
+                        effective_end_user_id,
+                        confirmed_id,
+                    )
+                    continue
+
+                total_deleted = await MemoryService.delete_all_nodes_by_end_user_id(
+                    effective_end_user_id_str
+                )
+
+                async with get_async_db_context() as db:
+                    finalized = await EndUserRepository(
+                        db
+                    ).finalize_memory_delete_async(effective_end_user_id)
+                    if not finalized:
+                        raise RuntimeError(
+                            "effective end user disappeared during memory deletion"
+                        )
+
+                api_logger.info(
+                    "终端用户删除完成: requested_id=%s, effective_id=%s, "
+                    "total_deleted=%s",
+                    end_user_id_str,
+                    effective_end_user_id_str,
+                    total_deleted,
+                )
+                return success(
+                    data={
+                        "deleted": True,
+                        "end_user_id": end_user_id_str,
+                        "effective_end_user_id": effective_end_user_id_str,
+                        "total_deleted": total_deleted,
+                    },
+                    msg=f"删除用户{end_user_id_str}记忆库成功",
+                )
+            finally:
+                await asyncio.to_thread(write_lock.release)
 
     except Exception as e:
         api_logger.error(f"删除终端用户失败: end_user_id={end_user_id_str}, error={str(e)}")

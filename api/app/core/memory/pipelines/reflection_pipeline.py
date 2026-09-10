@@ -148,6 +148,9 @@ class ReflectionPipeline:
                 language=self.language,
             )
         finally:
+            # inspector 内部自建的 storage service 与这里的 Neo4jConnector
+            # 各自持有独立的 Neo4j driver，两者都要释放。
+            await inspector.close_storage_service()
             await connector.close()
 
         await self._save_reflection_display_event(result, "layer2_frequent")
@@ -185,6 +188,7 @@ class ReflectionPipeline:
         try:
             result = await inspector.run_dedup_full_scan(self.end_user_id, baseline=baseline)
         finally:
+            await inspector.close_storage_service()
             await connector.close()
 
         await self._save_reflection_display_event(result, "dedup_full_scan")

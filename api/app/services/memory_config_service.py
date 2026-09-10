@@ -1052,6 +1052,7 @@ class MemoryConfigService:
         config_id = self.get_workspace_active_config_id(end_user.workspace_id)
         return config_id
 
+    @redis_cache(prefix="memory_config", skip_args=["self"], id_arg="end_user_id", return_type=uuid.UUID)
     async def get_config_id_by_end_user_async(
             self,
             end_user_id: uuid.UUID | str,
