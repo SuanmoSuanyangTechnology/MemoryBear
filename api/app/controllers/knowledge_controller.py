@@ -6,7 +6,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
 from fastapi.encoders import jsonable_encoder
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.background import BackgroundTask
@@ -436,6 +436,23 @@ async def create_knowledge(
     except Exception as e:
         api_logger.error(f"The creation of the knowledge base failed: {create_data.name} - {str(e)}")
         raise
+
+
+@router.post("/{knowledge_id}/copy", response_model=ApiResponse)
+@cur_workspace_access_guard_async()
+@check_knowledge_capacity_quota
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.MANAGER_API)
+async def copy_knowledge(
+        knowledge_id: uuid.UUID,
+        db: AsyncSession = Depends(get_async_db),  # noqa: B008
+        current_user: User = Depends(get_current_user_async),  # noqa: B008
+        request: Request = None,
+):
+    message = "Knowledge configuration copy requires the knowledge service"
+    return JSONResponse(
+        status_code=503,
+        content=fail(503, msg=message, error=message),
+    )
 
 
 @router.get("/{knowledge_id}", response_model=ApiResponse)
