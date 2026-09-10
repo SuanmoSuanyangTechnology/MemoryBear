@@ -406,6 +406,7 @@ class ElasticClient(BaseClient):
             "query": compile_elasticsearch_filter(node_filter),
             "size": SEARCH_BATCH_SIZE,
             "sort": sort,
+            "allow_partial_search_results": False,
         }
         if source_includes is not None:
             search_options["source_includes"] = source_includes
@@ -414,7 +415,6 @@ class ElasticClient(BaseClient):
         pit_result = await client.open_point_in_time(
             index=get_index_name(label),
             keep_alive=PIT_KEEP_ALIVE,
-            allow_partial_search_results=False,
         )
         pit_id = pit_result.get("id")
         if not isinstance(pit_id, str) or not pit_id:
