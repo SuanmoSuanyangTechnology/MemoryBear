@@ -16,6 +16,7 @@ MemoryWriteDispatcher — 记忆写入派发层
 各入口点保持原位置，通过本模块的函数进行统一派发。
 """
 
+import asyncio
 import logging
 import uuid
 from datetime import datetime, timezone
@@ -536,17 +537,25 @@ async def ingest_agent_messages(
     # 写 memory_messages。original_message_id 与 messages 已解耦（无外键约束），
     # 写入顺序不再受限，无需 FK 退避重试；异常冒泡由上层 dispatch_memory_pair
     # 捕获并降级为 warning，不影响主流程。
-    with get_db_context() as db:
-        repo = MemoryMessageRepository(db)
-        written = repo.write_batch(
-            conversation_id=str(conversation_id),
-            messages=batch_inputs,
-            end_user_id=end_user_id,
-            source=MemoryMessageSource.AGENT,
-        )
-        if not written:
-            return False
-        db.commit()
+    # 同步阻塞 DB 段挪到线程池执行，避免冻结请求事件循环（详见 ingest_workflow_messages 注释）。
+    def _write_batch_sync() -> List[dict]:
+        with get_db_context() as db:
+            repo = MemoryMessageRepository(db)
+            written_rows = repo.write_batch(
+                conversation_id=str(conversation_id),
+                messages=batch_inputs,
+                end_user_id=end_user_id,
+                source=MemoryMessageSource.AGENT,
+            )
+            if not written_rows:
+                # 无有效写入：不 commit（回滚由 get_db_context 兜底），返回空列表由调用方判定
+                return []
+            db.commit()
+            return written_rows
+
+    written = await asyncio.to_thread(_write_batch_sync)
+    if not written:
+        return False
 
     await refresh_active_key(conversation_id)
     mark_conversation_pending(conversation_id)
@@ -615,15 +624,21 @@ async def ingest_workflow_messages(
         if str(msg.get("content", "") or "").strip()
     ]
 
-    with get_db_context() as db:
-        repo = MemoryMessageRepository(db)
-        written_mms = repo.write_batch(
-            conversation_id=conversation_id,
-            messages=messages,
-            end_user_id=end_user_id,
-            source=MemoryMessageSource.WORKFLOW,
-        )
-        db.commit()
+    # 同步阻塞 DB 段挪到线程池执行，避免冻结调用方事件循环（workflow 节点/agent 请求
+    # 与 batch_persist 等异步任务共用一个 loop，若在此阻塞会导致持锁方无法提交→死锁式僵局）。
+    def _write_batch_sync() -> List[dict]:
+        with get_db_context() as db:
+            repo = MemoryMessageRepository(db)
+            written = repo.write_batch(
+                conversation_id=conversation_id,
+                messages=messages,
+                end_user_id=end_user_id,
+                source=MemoryMessageSource.WORKFLOW,
+            )
+            db.commit()
+            return written
+
+    written_mms = await asyncio.to_thread(_write_batch_sync)
 
     await refresh_active_key(conversation_id)
     mark_conversation_pending(conversation_id)
@@ -823,19 +838,28 @@ async def check_sliding_window_and_dispatch(
 
     from app.repositories.memory_message_repository import message_to_dict
 
-    with get_db_context() as db:
-        repo = MemoryMessageRepository(db)
-        write_cursor = repo.get_write_cursor(conversation_id) or 0
-        pending = repo.get_pending_messages(conversation_id, write_cursor)
-        pending_dicts = [message_to_dict(m) for m in pending]
+    # 以下所有同步阻塞 DB 段统一挪到线程池执行，避免冻结调用方事件循环
+    # （advance_write_cursor 的 UPDATE conversations 若在 loop 上阻塞等锁，会导致
+    #  持锁的异步任务无法被调度提交→死锁式僵局，最终触发 60s statement_timeout）。
+    def _load_pending_sync() -> List[dict]:
+        with get_db_context() as db:
+            repo = MemoryMessageRepository(db)
+            write_cursor = repo.get_write_cursor(conversation_id) or 0
+            pending = repo.get_pending_messages(conversation_id, write_cursor)
+            return [message_to_dict(m) for m in pending]
+
+    pending_dicts = await asyncio.to_thread(_load_pending_sync)
 
     if not pending_dicts:
         return
 
     # 取所有 user 消息的 seq 列表（用于计算下文条数）
-    with get_db_context() as db:
-        repo = MemoryMessageRepository(db)
-        all_user_seqs: List[int] = repo.get_user_seqs(conversation_id)
+    def _load_user_seqs_sync() -> List[int]:
+        with get_db_context() as db:
+            repo = MemoryMessageRepository(db)
+            return repo.get_user_seqs(conversation_id)
+
+    all_user_seqs: List[int] = await asyncio.to_thread(_load_user_seqs_sync)
 
     for msg in pending_dicts:
         # 滑动窗口路径只负责派发 user 消息的写入任务，cursor 只推进到 user 消息的 seq。
@@ -857,10 +881,15 @@ async def check_sliding_window_and_dispatch(
 
         # 先推进 cursor，确保同一条消息不会被后续调用（flush 或下次 ingest）重复派发。
         # advance_write_cursor 使用 WHERE write_cursor < seq，具有原子性保护。
-        with get_db_context() as db:
-            repo = MemoryMessageRepository(db)
-            acquired = repo.advance_write_cursor(conversation_id, target_seq)
-            db.commit()
+        # 同步阻塞 DB 挪到线程池，避免在事件循环上等锁冻结 loop。
+        def _advance_cursor_sync(seq: int) -> bool:
+            with get_db_context() as db:
+                repo = MemoryMessageRepository(db)
+                _acquired = repo.advance_write_cursor(conversation_id, seq)
+                db.commit()
+                return _acquired
+
+        acquired = await asyncio.to_thread(_advance_cursor_sync, target_seq)
 
         if not acquired:
             # cursor 已被推进（该消息已被其他路径处理），跳过
@@ -870,11 +899,15 @@ async def check_sliding_window_and_dispatch(
             )
             return
 
-        # 构建上下文窗口
-        with get_db_context() as db:
-            repo = MemoryMessageRepository(db)
-            context_before = [message_to_dict(m) for m in repo.build_context_before(conversation_id, target_seq)]
-            context_after = [message_to_dict(m) for m in repo.build_context_after(conversation_id, target_seq)]
+        # 构建上下文窗口（同步阻塞 DB 挪到线程池）
+        def _build_context_sync(seq: int) -> tuple[list[dict], list[dict]]:
+            with get_db_context() as db:
+                repo = MemoryMessageRepository(db)
+                cb = [message_to_dict(m) for m in repo.build_context_before(conversation_id, seq)]
+                ca = [message_to_dict(m) for m in repo.build_context_after(conversation_id, seq)]
+                return cb, ca
+
+        context_before, context_after = await asyncio.to_thread(_build_context_sync, target_seq)
 
         # 派发写入任务
         await push_write_task(
