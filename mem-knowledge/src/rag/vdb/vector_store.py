@@ -14,13 +14,15 @@ from redbear_model import (
     EmbeddingPurpose,
     EmbeddingRequest,
     ImageEmbeddingContent,
+    TextEmbeddingContent,
 )
 
 from ..models.chunk import DocumentChunk, chunk_retrieval_content
-from ..models.embedding import (
-    PreparedChunk,
-    collect_asset_file_ids,
-    prepare_chunk_embedding_contents,
+from ..models.embedding import collect_asset_file_ids
+from ..models.retrieval_unit import (
+    RetrievalUnit,
+    RetrievalUnitKind,
+    build_retrieval_units,
 )
 from .field import Field
 
@@ -70,6 +72,8 @@ class TaskVectorStore:
 
         if not chunks:
             return PreparedChunkBatch(actions=(), chunk_count=0)
+        if self._structured_multimodal:
+            return self._prepare_multimodal_units(chunks)
         vectors = self._embed_chunks(chunks)
         actions = []
         for chunk, vector in zip(chunks, vectors, strict=True):
@@ -90,6 +94,83 @@ class TaskVectorStore:
                     source[field.value] = metadata[field.value]
             actions.append({"_index": self._collection_name, "_source": source})
         return PreparedChunkBatch(actions=tuple(actions), chunk_count=len(chunks))
+
+    def _prepare_multimodal_units(self, chunks: list[DocumentChunk]) -> PreparedChunkBatch:
+        """Expand each chunk into retrieval units and embed text/image units."""
+
+        requested_ids = collect_asset_file_ids(chunks)
+        images = (
+            self._image_resolver(requested_ids, phase="index")
+            if requested_ids and self._image_resolver is not None
+            else {}
+        )
+        units_with_vectors: list[tuple[RetrievalUnit, list[float] | None]] = []
+        for chunk in chunks:
+            units = build_retrieval_units(chunk, images)
+            vectors = self._embed_units(units, chunk, images)
+            if len(vectors) != len(units):
+                raise RuntimeError("Unit embedding count does not match unit count")
+            units_with_vectors.extend(zip(units, vectors, strict=True))
+        actions = []
+        for unit, vector in units_with_vectors:
+            source: dict[str, Any] = {
+                Field.UNIT_ID.value: unit.unit_id,
+                Field.UNIT_KIND.value: unit.kind.value,
+                Field.UNIT_INDEX.value: unit.unit_index,
+                Field.CHUNK_ID.value: unit.chunk_id,
+                Field.RETURN_CHUNK_ID.value: unit.return_chunk_id,
+                Field.CONTENT_KEY.value: unit.content,
+                Field.METADATA_KEY.value: unit.metadata,
+                Field.VECTOR.value: vector,
+            }
+            if unit.asset_file_id is not None:
+                source[Field.ASSET_FILE_ID.value] = unit.asset_file_id
+            for field in (
+                Field.CHUNK_TYPE,
+                Field.QUESTION,
+                Field.ANSWER,
+                Field.SOURCE_CHUNK_ID,
+                Field.PARENT_ID,
+            ):
+                if unit.metadata.get(field.value):
+                    source[field.value] = unit.metadata[field.value]
+            actions.append({"_id": unit.unit_id, "_index": self._collection_name, "_source": source})
+        return PreparedChunkBatch(actions=tuple(actions), chunk_count=len(units_with_vectors))
+
+    def _embed_units(
+        self,
+        units: list[RetrievalUnit],
+        chunk: DocumentChunk,
+        images: Mapping[str, ImageEmbeddingContent],
+    ) -> list[list[float] | None]:
+        """Embed each text/image unit with a single-content fusion request."""
+
+        vectors: list[list[float] | None] = [None] * len(units)
+        for index, unit in enumerate(units):
+            contents = self._unit_embedding_contents(unit, images)
+            if not contents:
+                continue
+            result = self._embeddings.embed_contents(
+                EmbeddingRequest(purpose=EmbeddingPurpose.INDEX, contents=contents)
+            )
+            vector = list(result.vector)
+            expected = self._embedding_dimension or result.dimension
+            if len(vector) != expected or not all(math.isfinite(v) for v in vector):
+                raise RuntimeError("Embedding result has an invalid vector")
+            vectors[index] = vector
+        return vectors
+
+    @staticmethod
+    def _unit_embedding_contents(
+        unit: RetrievalUnit,
+        images: Mapping[str, ImageEmbeddingContent],
+    ) -> tuple:
+        if unit.kind is RetrievalUnitKind.TEXT:
+            return (TextEmbeddingContent(text=unit.content),) if unit.content.strip() else ()
+        if unit.kind is RetrievalUnitKind.IMAGE:
+            image = images.get(unit.asset_file_id or "")
+            return (image,) if image is not None else ()
+        return ()
 
     def write_prepared_batches(self, batches: list[PreparedChunkBatch]) -> None:
         """Validate every prepared batch before the first Elasticsearch write."""
@@ -173,8 +254,8 @@ class TaskVectorStore:
         return total, [self._hit_to_chunk(hit) for hit in hits]
 
     def _embed_chunks(self, chunks: list[DocumentChunk]) -> list[list[float] | None]:
-        if self._structured_multimodal:
-            return self._embed_multimodal_chunks(chunks)
+        """Embed text chunks for the non-multimodal (plain text) write path."""
+
         positions = []
         texts = []
         vectors: list[list[float] | None] = [None] * len(chunks)
@@ -203,50 +284,6 @@ class TaskVectorStore:
             vectors[position] = vector
         return vectors
 
-    def _embed_multimodal_chunks(
-        self,
-        chunks: list[DocumentChunk],
-    ) -> list[list[float] | None]:
-        prepared_chunks = self._prepare_multimodal_chunks(chunks)
-        vectors: list[list[float] | None] = [None] * len(chunks)
-        for index, prepared in enumerate(prepared_chunks):
-            if not prepared.embedding_contents:
-                continue
-            result = self._embeddings.embed_contents(
-                EmbeddingRequest(
-                    purpose=EmbeddingPurpose.INDEX,
-                    contents=prepared.embedding_contents,
-                )
-            )
-            vector = list(result.vector)
-            expected_dimension = self._embedding_dimension or result.dimension
-            if len(vector) != expected_dimension or not all(
-                math.isfinite(value) for value in vector
-            ):
-                raise RuntimeError("Embedding result has an invalid vector")
-            vectors[index] = vector
-        return vectors
-
-    def _prepare_multimodal_chunks(
-        self,
-        chunks: list[DocumentChunk],
-    ) -> list[PreparedChunk]:
-        requested_ids = collect_asset_file_ids(chunks)
-        images = (
-            self._image_resolver(requested_ids, phase="index")
-            if requested_ids and self._image_resolver is not None
-            else {}
-        )
-        result: list[PreparedChunk] = []
-        for chunk in chunks:
-            result.append(
-                PreparedChunk(
-                    chunk=chunk,
-                    embedding_contents=prepare_chunk_embedding_contents(chunk, images),
-                )
-            )
-        return result
-
     @staticmethod
     def _validate_embedding_count(embedded: list[Any], expected: int) -> None:
         if len(embedded) != expected:
@@ -258,57 +295,64 @@ class TaskVectorStore:
             if sample is not None
             else (self._embedding_dimension or 768)
         )
+        # Both plain-text and multimodal (unit) indexes use HNSW now; multimodal
+        # units are per-unit 2048-dim vectors, no longer a fused non-indexed blob.
         vector_mapping: dict[str, Any] = {
             "type": "dense_vector",
             "dims": dimensions,
-            "index": not self._structured_multimodal,
+            "index": True,
+            "similarity": "cosine",
         }
-        if not self._structured_multimodal:
-            vector_mapping["similarity"] = "cosine"
+        properties: dict[str, Any] = {
+            Field.CONTENT_KEY.value: {
+                "type": "text",
+                "analyzer": "ik_max_word",
+            },
+            Field.METADATA_KEY.value: {
+                "type": "object",
+                "properties": {
+                    "doc_id": {"type": "keyword"},
+                    "file_id": {"type": "keyword"},
+                    "file_name": {"type": "keyword"},
+                    "file_created_at": {
+                        "type": "date",
+                        "format": "epoch_millis",
+                    },
+                    "document_id": {"type": "keyword"},
+                    "knowledge_id": {"type": "keyword"},
+                    "sort_id": {"type": "long"},
+                    "status": {"type": "integer"},
+                    "parent_id": {"type": "keyword"},
+                    "asset_file_ids": {"type": "keyword"},
+                    "vision_text": {
+                        "type": "text",
+                        "analyzer": "ik_max_word",
+                    },
+                },
+            },
+            Field.VECTOR.value: vector_mapping,
+            Field.CHUNK_TYPE.value: {"type": "keyword"},
+            Field.QUESTION.value: {
+                "type": "text",
+                "analyzer": "ik_max_word",
+            },
+            Field.ANSWER.value: {
+                "type": "text",
+                "analyzer": "ik_max_word",
+            },
+            Field.SOURCE_CHUNK_ID.value: {"type": "keyword"},
+            Field.PARENT_ID.value: {"type": "keyword"},
+        }
+        if self._structured_multimodal:
+            properties[Field.UNIT_ID.value] = {"type": "keyword"}
+            properties[Field.UNIT_KIND.value] = {"type": "keyword"}
+            properties[Field.UNIT_INDEX.value] = {"type": "long"}
+            properties[Field.CHUNK_ID.value] = {"type": "keyword"}
+            properties[Field.RETURN_CHUNK_ID.value] = {"type": "keyword"}
+            properties[Field.ASSET_FILE_ID.value] = {"type": "keyword"}
         self._client.indices.create(
             index=self._collection_name,
-            mappings={
-                "properties": {
-                    Field.CONTENT_KEY.value: {
-                        "type": "text",
-                        "analyzer": "ik_max_word",
-                    },
-                    Field.METADATA_KEY.value: {
-                        "type": "object",
-                        "properties": {
-                            "doc_id": {"type": "keyword"},
-                            "file_id": {"type": "keyword"},
-                            "file_name": {"type": "keyword"},
-                            "file_created_at": {
-                                "type": "date",
-                                "format": "epoch_millis",
-                            },
-                            "document_id": {"type": "keyword"},
-                            "knowledge_id": {"type": "keyword"},
-                            "sort_id": {"type": "long"},
-                            "status": {"type": "integer"},
-                            "parent_id": {"type": "keyword"},
-                            "asset_file_ids": {"type": "keyword"},
-                            "vision_text": {
-                                "type": "text",
-                                "analyzer": "ik_max_word",
-                            },
-                        },
-                    },
-                    Field.VECTOR.value: vector_mapping,
-                    Field.CHUNK_TYPE.value: {"type": "keyword"},
-                    Field.QUESTION.value: {
-                        "type": "text",
-                        "analyzer": "ik_max_word",
-                    },
-                    Field.ANSWER.value: {
-                        "type": "text",
-                        "analyzer": "ik_max_word",
-                    },
-                    Field.SOURCE_CHUNK_ID.value: {"type": "keyword"},
-                    Field.PARENT_ID.value: {"type": "keyword"},
-                }
-            },
+            mappings={"properties": properties},
             settings={"index": {"refresh_interval": "1s"}},
         )
 
