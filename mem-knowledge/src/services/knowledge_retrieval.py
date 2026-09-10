@@ -10,7 +10,6 @@ from collections.abc import Sequence
 from dataclasses import replace
 from enum import Enum
 from functools import partial
-from itertools import islice, zip_longest
 from typing import Any
 
 from langchain_core.documents import Document as LangChainDocument
@@ -39,7 +38,7 @@ from ..rag.knowledge_graph.config import GraphPipeline
 from ..rag.metadata.auto_filter import generate_filter_groups
 from ..rag.metadata.filter_engine import FilterCondition, FilterGroup
 from ..rag.models.chunk import DocumentChunk, chunk_retrieval_content
-from ..rag.models.embedding import collect_asset_file_ids, sanitized_retrieval_text
+from ..rag.models.retrieval_unit import RetrievalUnitKind
 from ..rag.retrieval.async_elasticsearch import AsyncElasticSearchRetrieval
 from ..rag.retrieval.candidates import (
     RetrievalChannel,
@@ -71,6 +70,11 @@ from ..rag.retrieval.models import (
     TargetRetrievalResult,
 )
 from ..rag.retrieval.rerank import ModelRerankResult, RerankEngine
+from ..rag.retrieval.unit_collapse import (
+    UnitCandidate,
+    collapse_units_to_chunks,
+    select_units_for_rerank,
+)
 from ..runtime import ProcessRuntime
 from .knowledge_retrieval_preparation import KnowledgeRetrievalPreparation
 from .multimodal_image import resolve_storage_images_async, validate_image_data_uri
@@ -80,33 +84,6 @@ _SOURCE_INDEX = "_retrieval_source_index"
 _MAX_RETRIEVAL_WORKERS = 3
 _MAX_MULTIMODAL_RERANK_TEXT_VIEWS = 100
 _MAX_MULTIMODAL_RERANK_IMAGE_VIEWS = 40
-
-
-def _select_multimodal_rerank_views(
-    views: Sequence[RerankCandidateView],
-) -> list[RerankCandidateView]:
-    """Keep text in candidate order and distribute image slots across chunks."""
-    text_indices: list[int] = []
-    image_indices_by_chunk: dict[int, list[int]] = {}
-    for index, view in enumerate(views):
-        if view.kind == "text":
-            if len(text_indices) < _MAX_MULTIMODAL_RERANK_TEXT_VIEWS:
-                text_indices.append(index)
-        else:
-            image_indices_by_chunk.setdefault(view.chunk_index, []).append(index)
-
-    round_robin_image_indices = (
-        index
-        for layer in zip_longest(*image_indices_by_chunk.values())
-        for index in layer
-        if index is not None
-    )
-    selected_indices = set(text_indices)
-    selected_indices.update(
-        islice(round_robin_image_indices, _MAX_MULTIMODAL_RERANK_IMAGE_VIEWS)
-    )
-    # Preserve the original payload order and each view's source-chunk mapping.
-    return [view for index, view in enumerate(views) if index in selected_indices]
 
 
 def _record_elapsed(
@@ -570,10 +547,17 @@ class KnowledgeRetrievalService:
                     image_query,
                     timings,
                 )
-                chunks = await store.search_by_query_vector(
-                    query_vector,
-                    vector_options,
-                )
+                if is_qwen3_vl_embedding(target.embedding.resolved):
+                    unit_candidates = await store.search_units_by_vector(
+                        query_vector,
+                        vector_options,
+                    )
+                    chunks = collapse_units_to_chunks(unit_candidates)
+                else:
+                    chunks = await store.search_by_query_vector(
+                        query_vector,
+                        vector_options,
+                    )
             else:
                 if text_query is None:
                     raise KnowledgeError.from_code(
@@ -608,10 +592,19 @@ class KnowledgeRetrievalService:
                 image_query,
                 timings,
             )
-            vector_chunks = await store.search_by_query_vector(
-                query_vector,
-                vector_options,
-            )
+            if is_qwen3_vl_embedding(target.embedding.resolved):
+                unit_candidates = await store.search_units_by_vector(
+                    query_vector,
+                    vector_options,
+                )
+                vector_chunks = [
+                    cls._unit_to_chunk(uc) for uc in unit_candidates
+                ]
+            else:
+                vector_chunks = await store.search_by_query_vector(
+                    query_vector,
+                    vector_options,
+                )
             text_chunks = []
             graph_result = KnowledgeRetrievalResult()
             active_tasks = []
@@ -979,11 +972,12 @@ class KnowledgeRetrievalService:
         if top_k <= 0 or not chunks:
             return ModelRerankResult(chunks=(), used_fallback=False)
         if isinstance(query, ImageEmbeddingContent):
-            return await cls._rerank_multimodal_chunks(
+            unit_candidates = cls._chunks_to_unit_candidates(chunks)
+            return await cls._rerank_multimodal_units(
                 runtime,
                 snapshot,
                 query,
-                chunks,
+                unit_candidates,
                 top_k,
             )
         if snapshot.resolved is None:
@@ -1028,15 +1022,75 @@ class KnowledgeRetrievalService:
             result.append(chunk)
         return ModelRerankResult(chunks=tuple(result), used_fallback=False)
 
+    @staticmethod
+    def _unit_to_chunk(candidate: UnitCandidate) -> DocumentChunk:
+        """Materialize a unit candidate as a chunk carrying its unit identity."""
+
+        chunk = candidate.chunk.model_copy(deep=True)
+        metadata = dict(chunk.metadata or {})
+        metadata.update(
+            _unit_id=candidate.unit_id,
+            _unit_kind=candidate.kind.value,
+            _chunk_id=candidate.chunk_id,
+            _return_chunk_id=candidate.return_chunk_id,
+            score=candidate.score,
+        )
+        if candidate.asset_file_id is not None:
+            metadata["_asset_file_id"] = candidate.asset_file_id
+        chunk.metadata = metadata
+        return chunk
+
+    @staticmethod
+    def _chunks_to_unit_candidates(
+        chunks: Sequence[DocumentChunk],
+    ) -> list[UnitCandidate]:
+        """Rebuild unit candidates from unit-tagged chunks.
+
+        Multimodal unit recall tags each hit's metadata with ``_unit_*`` keys;
+        chunks lacking them are treated as plain text units (their content is
+        the retrieval text), keeping non-unit callers working.
+        """
+
+        candidates: list[UnitCandidate] = []
+        for chunk in chunks:
+            metadata = chunk.metadata or {}
+            score = float(metadata.get("score") or 0)
+            chunk_id = str(metadata.get("_chunk_id") or metadata.get("doc_id") or "")
+            kind_raw = metadata.get("_unit_kind") or RetrievalUnitKind.TEXT.value
+            candidates.append(
+                UnitCandidate(
+                    unit_id=str(metadata.get("_unit_id") or f"{chunk_id}:text"),
+                    chunk_id=chunk_id,
+                    return_chunk_id=str(
+                        metadata.get("_return_chunk_id")
+                        or metadata.get("parent_id")
+                        or chunk_id
+                    ),
+                    kind=RetrievalUnitKind(kind_raw),
+                    asset_file_id=metadata.get("_asset_file_id"),
+                    content=chunk.page_content,
+                    score=score,
+                    chunk=chunk,
+                )
+            )
+        return candidates
+
     @classmethod
-    async def _rerank_multimodal_chunks(
+    async def _rerank_multimodal_units(
         cls,
         runtime: ProcessRuntime,
         snapshot: ModelRuntimeSnapshot,
         query: ImageEmbeddingContent,
-        chunks: Sequence[DocumentChunk],
+        candidates: Sequence[UnitCandidate],
         top_k: int,
     ) -> ModelRerankResult:
+        """Rerank unit candidates directly; collapse to chunks afterwards.
+
+        Each unit is one rerank document, so candidate count == unit count ==
+        top_n is fully controlled. Over-limit lists are truncated by score with
+        a warning instead of failing the request.
+        """
+
         if (
             snapshot.resolved is None
             or not is_qwen3_vl_reranker(snapshot.resolved)
@@ -1045,79 +1099,71 @@ class KnowledgeRetrievalService:
                 "KB_MODEL_UNAVAILABLE",
                 "Image query requires qwen3-vl rerank",
             )
+
+        asset_ids = [c.asset_file_id for c in candidates if c.asset_file_id]
         asset_ids_by_kb: dict[uuid.UUID, list[str]] = {}
-        chunks_by_kb: dict[uuid.UUID, list[DocumentChunk]] = {}
-        for chunk in chunks:
-            raw_kb_id = (chunk.metadata or {}).get("knowledge_id")
+        for candidate in candidates:
+            if not candidate.asset_file_id:
+                continue
+            raw_kb_id = (candidate.chunk.metadata or {}).get("knowledge_id")
             try:
                 knowledge_id = uuid.UUID(str(raw_kb_id))
             except (TypeError, ValueError):
                 continue
-            chunks_by_kb.setdefault(knowledge_id, []).append(chunk)
-        for knowledge_id, kb_chunks in chunks_by_kb.items():
-            asset_ids_by_kb[knowledge_id] = collect_asset_file_ids(kb_chunks)
+            asset_ids_by_kb.setdefault(knowledge_id, []).append(candidate.asset_file_id)
         images: dict[str, ImageEmbeddingContent] = {}
-        for knowledge_id, asset_ids in asset_ids_by_kb.items():
+        for knowledge_id, kb_asset_ids in asset_ids_by_kb.items():
             images.update(
                 await resolve_storage_images_async(
                     runtime,
                     knowledge_id,
-                    asset_ids,
+                    list(dict.fromkeys(kb_asset_ids)),
                     phase="rerank",
                 )
             )
 
+        trimmed = select_units_for_rerank(
+            candidates,
+            max_text=_MAX_MULTIMODAL_RERANK_TEXT_VIEWS,
+            max_image=_MAX_MULTIMODAL_RERANK_IMAGE_VIEWS,
+        )
+
         views: list[RerankCandidateView] = []
-        text_view_count = 0
-        image_view_count = 0
-        for chunk_index, chunk in enumerate(chunks):
-            text = sanitized_retrieval_text(chunk)
-            if text:
+        kept: list[UnitCandidate] = []
+        for unit in trimmed:
+            if unit.kind is RetrievalUnitKind.TEXT:
+                text = unit.content
+                if not text.strip():
+                    continue
                 if num_tokens_from_string(text) > 8_000:
-                    raise KnowledgeError.from_code(
-                        "KB_MULTIMODAL_INPUT_LIMIT",
-                        "Rerank text view exceeds the token limit",
+                    logger.warning(
+                        "event=kb_multimodal_rerank_unit_skipped reason=text_token_limit "
+                        "unit_id=%s",
+                        unit.unit_id,
                     )
+                    continue
                 views.append(
                     RerankCandidateView(
-                        chunk_index=chunk_index,
+                        chunk_index=len(kept),
                         kind="text",
                         content=text,
                     )
                 )
-                text_view_count += 1
-            raw_ids = (chunk.metadata or {}).get("asset_file_ids")
-            chunk_image_index = 0
-            if isinstance(raw_ids, list):
-                for value in raw_ids:
-                    image = images.get(str(value))
-                    if image is None:
-                        continue
-                    views.append(
-                        RerankCandidateView(
-                            chunk_index=chunk_index,
-                            kind="image",
-                            image_index=chunk_image_index,
-                            content=image.data_uri,
-                        )
+                kept.append(unit)
+            else:
+                image = images.get(unit.asset_file_id or "")
+                if image is None:
+                    continue
+                views.append(
+                    RerankCandidateView(
+                        chunk_index=len(kept),
+                        kind="image",
+                        image_index=0,
+                        content=image.data_uri,
                     )
-                    chunk_image_index += 1
-                    image_view_count += 1
-        if (
-            text_view_count > _MAX_MULTIMODAL_RERANK_TEXT_VIEWS
-            or image_view_count > _MAX_MULTIMODAL_RERANK_IMAGE_VIEWS
-        ):
-            views = _select_multimodal_rerank_views(views)
-            retained_text_count = sum(view.kind == "text" for view in views)
-            logger.warning(
-                "event=kb_multimodal_rerank_views_trimmed "
-                "text_views_before=%s text_views_after=%s "
-                "image_views_before=%s image_views_after=%s",
-                text_view_count,
-                retained_text_count,
-                image_view_count,
-                len(views) - retained_text_count,
-            )
+                )
+                kept.append(unit)
+
         if not views:
             return ModelRerankResult(chunks=(), used_fallback=False)
 
@@ -1141,28 +1187,20 @@ class KnowledgeRetrievalService:
                 "Multimodal rerank failed",
             ) from exc
 
-        scores_by_chunk: dict[int, float] = {}
+        scored_units: list[UnitCandidate] = []
         for score in scores:
-            if score.input_index < 0 or score.input_index >= len(views):
+            if score.input_index < 0 or score.input_index >= len(kept):
                 raise KnowledgeError.from_code(
                     "KB_MULTIMODAL_RERANK_FAILED",
                     "Multimodal rerank returned an invalid index",
                 )
-            chunk_index = views[score.input_index].chunk_index
-            scores_by_chunk[chunk_index] = max(
-                scores_by_chunk.get(chunk_index, 0.0),
-                score.relevance_score,
+            unit = kept[score.input_index]
+            scored_units.append(
+                replace(unit, score=score.relevance_score)
             )
-        ranked = sorted(
-            scores_by_chunk.items(),
-            key=lambda item: (-item[1], item[0]),
-        )
-        result: list[DocumentChunk] = []
-        for chunk_index, score in ranked[:top_k]:
-            chunk = chunks[chunk_index].model_copy(deep=True)
-            chunk.metadata["score"] = score
-            result.append(chunk)
-        return ModelRerankResult(chunks=tuple(result), used_fallback=False)
+
+        collapsed = collapse_units_to_chunks(scored_units)
+        return ModelRerankResult(chunks=tuple(collapsed[:top_k]), used_fallback=False)
 
     @staticmethod
     def _seed_model_fallback_scores(
