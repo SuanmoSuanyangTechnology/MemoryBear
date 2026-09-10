@@ -138,6 +138,7 @@ class CycleGraphNode(BaseNode):
         self.child_variable_pool.copy(variable_pool)
         builder = GraphBuilder(
             {
+                **self.workflow_config,
                 "nodes": self.cycle_nodes,
                 "edges": self.cycle_edges,
             },
@@ -187,6 +188,7 @@ class CycleGraphNode(BaseNode):
                 variable_pool=variable_pool,
                 cycle_nodes=self.cycle_nodes,
                 cycle_edges=self.cycle_edges,
+                workflow_config=self.workflow_config,
             ).run()
         raise RuntimeError("Unknown cycle node type")
 
@@ -218,6 +220,7 @@ class CycleGraphNode(BaseNode):
                     variable_pool=variable_pool,
                     cycle_nodes=self.cycle_nodes,
                     cycle_edges=self.cycle_edges,
+                    workflow_config=self.workflow_config,
                 ).run()
             }
             return
