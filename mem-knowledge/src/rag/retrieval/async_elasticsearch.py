@@ -9,12 +9,20 @@ from typing import Any, Protocol
 from elasticsearch.helpers import async_bulk
 
 from ..models.chunk import DocumentChunk, chunk_retrieval_content
+from ..models.embedding import collect_asset_file_ids
+from ..models.retrieval_unit import (
+    RetrievalUnit,
+    RetrievalUnitKind,
+    build_retrieval_units,
+)
 from ..vdb.field import Field
 from ..vdb.pit_search import iter_async_search_after_hits
 from .elasticsearch_queries import (
     build_filter_clauses,
     build_full_text_query,
     build_parent_lookup_query,
+    build_unit_filter_clauses,
+    build_vector_knn_query,
     build_vector_script_query,
     full_text_hits_to_chunks,
     merge_parent_chunks,
@@ -22,6 +30,7 @@ from .elasticsearch_queries import (
     vector_hits_to_chunks,
 )
 from .models import RetrievalSearchOptions
+from .unit_collapse import UnitCandidate
 
 ES_DEFAULT_MAX_RESULT_WINDOW = 10000
 ES_FULL_SCAN_BATCH_SIZE = 1000
@@ -355,6 +364,89 @@ class AsyncChunkStore:
             settings={"index": {"refresh_interval": "1s"}},
         )
 
+    async def add_unit_chunks(
+        self,
+        chunks: list[DocumentChunk],
+        image_resolver: Any,
+    ) -> None:
+        """Expand multimodal chunks into retrieval units and index them."""
+
+        if not chunks:
+            return
+        if not await self.client.indices.exists(index=self.index):
+            await self._create_index([])
+        asset_ids = collect_asset_file_ids(chunks)
+        images = (
+            await image_resolver(asset_ids)
+            if asset_ids and image_resolver is not None
+            else {}
+        )
+        actions: list[dict[str, Any]] = []
+        for chunk in chunks:
+            units = build_retrieval_units(chunk, images)
+            vectors = await self._embed_units(units)
+            if len(vectors) != len(units):
+                raise RuntimeError("Unit embedding count does not match unit count")
+            for unit, vector in zip(units, vectors, strict=True):
+                source: dict[str, Any] = {
+                    Field.UNIT_ID.value: unit.unit_id,
+                    Field.UNIT_KIND.value: unit.kind.value,
+                    Field.UNIT_INDEX.value: unit.unit_index,
+                    Field.CHUNK_ID.value: unit.chunk_id,
+                    Field.RETURN_CHUNK_ID.value: unit.return_chunk_id,
+                    Field.CONTENT_KEY.value: unit.content,
+                    Field.METADATA_KEY.value: unit.metadata,
+                    Field.VECTOR.value: vector,
+                }
+                if unit.asset_file_id is not None:
+                    source[Field.ASSET_FILE_ID.value] = unit.asset_file_id
+                for field, key in (
+                    (Field.CHUNK_TYPE, "chunk_type"),
+                    (Field.QUESTION, "question"),
+                    (Field.ANSWER, "answer"),
+                    (Field.SOURCE_CHUNK_ID, "source_chunk_id"),
+                    (Field.PARENT_ID, "parent_id"),
+                ):
+                    if unit.metadata.get(key):
+                        source[field.value] = unit.metadata[key]
+                actions.append(
+                    {"_id": unit.unit_id, "_index": self.index, "_source": source}
+                )
+        if actions:
+            await async_bulk(self.client, actions)
+
+    async def _embed_units(self, units: list[RetrievalUnit]) -> list[list[float] | None]:
+        vectors: list[list[float] | None] = [None] * len(units)
+        text_positions = [
+            i
+            for i, u in enumerate(units)
+            if u.kind is RetrievalUnitKind.TEXT and u.content.strip()
+        ]
+        if text_positions:
+            if self.embed is None:
+                raise RuntimeError("Embedding model is required for unit embedding")
+            embedded = await self.embed([units[i].content for i in text_positions])
+            for pos, vector in zip(text_positions, embedded, strict=True):
+                vectors[pos] = vector
+        # Image-unit vectors require the multimodal embed path wired in the
+        # chunk service (P5); without it image units stay vectorless and recall
+        # falls back to the text unit (vision_text) of the same chunk.
+        return vectors
+
+    async def delete_units_by_chunk_ids(self, chunk_ids: list[str]) -> int:
+        """Cascade-delete every unit (and chunk_record) of the given chunks."""
+
+        if not chunk_ids or not await self.client.indices.exists(index=self.index):
+            return 0
+        response = await self.client.delete_by_query(
+            index=self.index,
+            query={"terms": {Field.CHUNK_ID.value: chunk_ids}},
+            conflicts="abort",
+            wait_for_completion=True,
+        )
+        self._raise_on_failed_response(response, "unit delete")
+        return int(response.get("deleted", 0))
+
     @staticmethod
     def _raise_on_failed_response(response: Mapping[str, Any], operation: str) -> None:
         if response.get("timed_out") or response.get("failures"):
@@ -433,6 +525,109 @@ class AsyncElasticSearchRetrieval:
             full_text_hits_to_chunks(response, options.score_threshold),
             options.indices,
         )
+
+    # --- Multimodal unit-granularity recall (qwen3-vl indexes) ---
+
+    def _hit_to_unit_candidate(
+        self,
+        hit: Mapping[str, Any],
+        score: float,
+    ) -> UnitCandidate | None:
+        source = hit.get("_source") or {}
+        kind_raw = source.get(Field.UNIT_KIND.value)
+        chunk_id = source.get(Field.CHUNK_ID.value)
+        if not kind_raw or not chunk_id:
+            return None
+        metadata = dict(source.get(Field.METADATA_KEY.value) or {})
+        chunk = DocumentChunk(
+            page_content=source.get(Field.CONTENT_KEY.value) or "",
+            metadata=metadata,
+        )
+        return UnitCandidate(
+            unit_id=str(source.get(Field.UNIT_ID.value) or ""),
+            chunk_id=str(chunk_id),
+            return_chunk_id=str(source.get(Field.RETURN_CHUNK_ID.value) or chunk_id),
+            kind=RetrievalUnitKind(kind_raw),
+            asset_file_id=source.get(Field.ASSET_FILE_ID.value),
+            content=source.get(Field.CONTENT_KEY.value) or "",
+            score=score,
+            chunk=chunk,
+        )
+
+    async def search_units_by_vector(
+        self,
+        query_vector: Sequence[float],
+        options: RetrievalSearchOptions,
+    ) -> list[UnitCandidate]:
+        vector = normalize_vector(query_vector)
+        num_candidates = max(options.top_k * 4, options.knn_num_candidates or 100)
+        response = await self.client.search(
+            index=options.indices,
+            size=options.top_k,
+            **build_vector_knn_query(
+                vector,
+                build_unit_filter_clauses(
+                    options.file_names_filter,
+                    options.document_ids_include,
+                ),
+                k=options.top_k,
+                num_candidates=num_candidates,
+            ),
+            allow_partial_search_results=False,
+        )
+        self._raise_on_failed_response(response, "unit vector search")
+        result: list[UnitCandidate] = []
+        for hit in (response.get("hits") or {}).get("hits", []):
+            score = float(hit.get("_score") or 0)
+            if options.score_threshold is not None and score <= options.score_threshold:
+                continue
+            candidate = self._hit_to_unit_candidate(hit, score)
+            if candidate is not None:
+                result.append(candidate)
+        return result
+
+    async def search_units_full_text(
+        self,
+        query: str,
+        options: RetrievalSearchOptions,
+    ) -> list[UnitCandidate]:
+        """Full-text recall restricted to text units (Q9)."""
+
+        filters = build_unit_filter_clauses(
+            options.file_names_filter,
+            options.document_ids_include,
+            unit_kinds=[RetrievalUnitKind.TEXT.value],
+        )
+        response = await self.client.search(
+            index=options.indices,
+            from_=0,
+            size=options.top_k,
+            query={
+                "bool": {
+                    "must": {
+                        "multi_match": {
+                            "query": query,
+                            "fields": [Field.CONTENT_KEY.value, Field.VISION_TEXT.value],
+                            "analyzer": "ik_max_word",
+                        }
+                    },
+                    "filter": filters,
+                }
+            },
+            allow_partial_search_results=False,
+        )
+        self._raise_on_failed_response(response, "unit full text search")
+        hits = (response.get("hits") or {})
+        max_score = float(hits.get("max_score") or 1)
+        result: list[UnitCandidate] = []
+        for hit in hits.get("hits", []):
+            score = float(hit.get("_score") or 0) / max_score
+            if options.score_threshold is not None and score <= options.score_threshold:
+                continue
+            candidate = self._hit_to_unit_candidate(hit, score)
+            if candidate is not None:
+                result.append(candidate)
+        return result
 
     async def resolve_parent_chunks(
         self,
