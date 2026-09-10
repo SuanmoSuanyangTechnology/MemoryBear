@@ -882,24 +882,7 @@ class KnowledgeRetrievalService:
             return []
 
         targets = preparation.targets
-        single_hybrid_uses_request_rerank = (
-            request.rerank_id is not None
-            and len(targets) == 1
-            and targets[0].params.retrieve_type is RetrieveType.HYBRID
-        )
-        single_evidence_graph_target = (
-            preparation.graph is not None
-            and preparation.graph.pipeline is GraphPipeline.EVIDENCE
-            and len(targets) == 1
-            and targets[0].params.retrieve_type is RetrieveType.Graph
-        )
-        needs_global_rerank = not single_evidence_graph_target and (
-            len(targets) > 1
-            or (
-                request.rerank_id is not None
-                and not single_hybrid_uses_request_rerank
-            )
-        )
+        needs_global_rerank = len(targets) > 1
         if needs_global_rerank:
             global_rerank_started_at = time.perf_counter()
             try:
@@ -946,7 +929,13 @@ class KnowledgeRetrievalService:
                 key=cls._candidate_score,
                 reverse=True,
             )
-        result_candidates = ranked[: request.top_k]
+        # A single non-hybrid target is governed by its own retrieval limit.
+        top_k = (
+            targets[0].params.top_k
+            if len(targets) == 1 and targets[0].params.retrieve_type is not RetrieveType.HYBRID
+            else request.top_k
+        )
+        result_candidates = ranked[:top_k]
         result = materialize_candidates(result_candidates)
         cls._log_finalize(
             log_id,
