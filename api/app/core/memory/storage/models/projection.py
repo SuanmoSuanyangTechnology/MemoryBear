@@ -169,6 +169,12 @@ DEFAULT_PROJECTION = {
     MemoryNodeType.MEMORY_SUMMARY: NodeProjection(
         fields=("id", "name", "content", "created_at", "score")
     ),
+    MemoryNodeType.SCENE_SUMMARY: NodeProjection(
+        fields=(
+            "id", "content", "source_message_ids", "started_at", "ended_at",
+            "turn_count", "close_reason", "created_at", "updated_at", "score",
+        )
+    ),
     MemoryNodeType.PERCEPTUAL: NodeProjection(
         fields=(
             "id", "perceptual_type", "file_path", "file_name", "file_ext", "summary",

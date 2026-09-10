@@ -9,7 +9,10 @@ from pathlib import Path
 from jinja2 import Template
 
 from app.core.config import settings
+from app.core.memory.models.graph_models import SceneSummaryNode
 from app.core.memory.pipelines.base_pipeline import ModelClientMixin
+from app.core.memory.storage.enums import MemoryNodeType
+from app.core.memory.storage.service import MemoryStorageService
 from app.db import get_db_context
 from app.repositories.memory_message_repository import MemoryMessageRepository
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
@@ -98,27 +101,38 @@ class SceneSummaryService:
             existing_ids = await repo.get_source_message_ids(task.scene_start_message_id)
             if existing_ids == source_ids:
                 return {"status": "skipped", "reason": "unchanged"}
+
             content, embedding = await self._generate_content(messages, config)
             now = datetime.now(timezone.utc)
             first, last = messages[0], messages[-1]
-            summary = {
-                "id": task.scene_start_message_id,
-                "end_user_id": task.end_user_id,
-                "conversation_id": interval["conversation_id"],
-                "content": content,
-                "summary_embedding": embedding,
-                "source_message_ids": source_ids,
-                "start_message_id": task.scene_start_message_id,
-                "end_message_id": last.id,
-                "started_at": first.created_at.replace(tzinfo=timezone.utc),
-                "ended_at": last.created_at.replace(tzinfo=timezone.utc),
-                "turn_count": sum(1 for item in messages if item.role == "user"),
-                "close_reason": interval["close_reason"],
-                "config_id": task.config_id,
-                "created_at": now,
-                "updated_at": now,
-            }
-            summary_id = await repo.upsert(summary)
-            return {"status": "success", "summary_id": summary_id}
+            summary = SceneSummaryNode(
+                id=task.scene_start_message_id,
+                end_user_id=task.end_user_id,
+                conversation_id=interval["conversation_id"],
+                content=content,
+                summary_embedding=embedding,
+                source_message_ids=source_ids,
+                start_message_id=task.scene_start_message_id,
+                end_message_id=last.id,
+                started_at=first.created_at.replace(tzinfo=timezone.utc),
+                ended_at=last.created_at.replace(tzinfo=timezone.utc),
+                turn_count=sum(1 for item in messages if item.role == "user"),
+                close_reason=interval["close_reason"],
+                config_id=task.config_id,
+                created_at=now,
+                updated_at=now,
+            )
+            storage = await MemoryStorageService.create_graph_write_only()
+            try:
+                result = await storage.save_node(
+                    MemoryNodeType.SCENE_SUMMARY,
+                    summary.model_dump(),
+                )
+                if result.affected_count != 1 or result.ids != [summary.id]:
+                    raise RuntimeError("SceneSummary storage write returned no row")
+                summary_id = result.ids[0]
+                return {"status": "success", "summary_id": summary_id}
+            finally:
+                await storage.close()
         finally:
             await connector.close()

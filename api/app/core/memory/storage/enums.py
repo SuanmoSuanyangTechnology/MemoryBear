@@ -34,6 +34,7 @@ class MemoryNodeType(MemoryNodeLabel):
     EXTRACTED_ENTITY = 'ExtractedEntity'
     MEMORY_SUMMARY = 'MemorySummary'
     PERCEPTUAL = 'Perceptual'
+    SCENE_SUMMARY = 'SceneSummary'
     STATEMENT = 'Statement'
     USER_SOURCE = 'UserSource'
 
