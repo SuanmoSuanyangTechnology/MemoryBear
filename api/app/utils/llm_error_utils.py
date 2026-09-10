@@ -443,13 +443,10 @@ def _classification_for_dashscope_code(code: str | None) -> ClassifiedLLMError |
 def _classification_for_explicit_dashscope_code(
         code: str | None,
 ) -> ClassifiedLLMError | None:
-    """Map an unambiguous native or OpenAI-compatible DashScope code."""
+    """Map an unambiguous native DashScope code."""
     if not code or code in _DASHSCOPE_AMBIGUOUS_CODES:
         return None
-    return (
-        _classification_for_dashscope_code(code)
-        or _classification_for_provider_code(code)
-    )
+    return _classification_for_dashscope_code(code)
 
 
 def _enrich_dashscope_error_info(
@@ -485,10 +482,9 @@ def _classify_ambiguous_dashscope_error(
     code = info.provider_code
     message = info.message
     dashscope_code_known = _classification_for_dashscope_code(code) is not None
-    provider_code_known = _classification_for_provider_code(code) is not None
     should_inspect = (
         code in _DASHSCOPE_AMBIGUOUS_CODES
-        or (not dashscope_code_known and not provider_code_known)
+        or not dashscope_code_known
     )
     if not should_inspect:
         return None
@@ -602,16 +598,13 @@ class _DashScopeErrorAdapter:
             info: ProviderErrorInfo,
             exception_chain: tuple[Exception, ...],
     ) -> ClassifiedLLMError | None:
-        """Normalize native and OpenAI-compatible DashScope errors."""
+        """Normalize native DashScope errors."""
         if classified := _classification_for_explicit_dashscope_code(
                 info.provider_code,
         ):
             return classified
 
         if classified := _classify_ambiguous_dashscope_error(info):
-            return classified
-
-        if classified := _classification_for_dashscope_code(info.provider_code):
             return classified
 
         return None
@@ -631,23 +624,22 @@ def classify_llm_error(
 ) -> ClassifiedLLMError:
     """Normalize one provider exception using structured adapters and strict fallbacks."""
     info, chain = extract_provider_error_info(error, provider)
-    if info.provider == "dashscope":
-        info = _enrich_dashscope_error_info(info, chain)
-
     provider_adapter = _PROVIDER_ADAPTERS.get(info.provider or "")
     is_native_dashscope = info.provider == "dashscope" and not is_omni
 
-    if is_native_dashscope and provider_adapter is not None:
-        if classified := provider_adapter.classify(info, chain):
-            return classified
+    if is_native_dashscope:
+        info = _enrich_dashscope_error_info(info, chain)
+        if provider_adapter is not None:
+            if classified := provider_adapter.classify(info, chain):
+                return classified
+    else:
+        if any(isinstance(item, OpenAIError) for item in chain):
+            if classified := _OPENAI_ADAPTER.classify(info, chain):
+                return classified
 
-    if any(isinstance(item, OpenAIError) for item in chain):
-        if classified := _OPENAI_ADAPTER.classify(info, chain):
-            return classified
-
-    if provider_adapter is not None and not is_native_dashscope:
-        if classified := provider_adapter.classify(info, chain):
-            return classified
+        if info.provider != "dashscope" and provider_adapter is not None:
+            if classified := provider_adapter.classify(info, chain):
+                return classified
 
     if classified := _GENERIC_HTTP_ADAPTER.classify(info, chain):
         return classified
