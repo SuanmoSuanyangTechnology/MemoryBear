@@ -348,7 +348,10 @@ const processNodeVariables = (
       const sourceVariable = variableList.find(v =>
         v.value === output || `{{${v.value}}}` === output
       );
-      const outputType = sourceVariable?.dataType ?? 'string';
+      let outputType = sourceVariable?.dataType ?? 'string';
+      if (outputType.startsWith('array[')) {
+        outputType = outputType.replace(/^array\[(.+)\]$/, '$1');
+      }
       addVariable(variableList, addedKeys, `${dataNodeId}_output`, 'output', `array[${outputType}]`, `${dataNodeId}.output`, nodeData);
       break;
     }
@@ -366,7 +369,7 @@ const processNodeVariables = (
         if (cv.name?.trim()) addVariable(variableList, addedKeys, `${dataNodeId}_cycle_${cv.name}`, cv.name, cv.type || 'string', `${dataNodeId}.${cv.name}`, nodeData, undefined, cv.defaultValue ?? cv.default);
       });
       break;
-    case 'llm':
+    case 'llm': {
       // Add structured output variables when structured_output is enabled
       const structuredOutput = config.structured_output?.defaultValue ?? config.structured_output;
       if (structuredOutput) {
@@ -404,8 +407,9 @@ const processNodeVariables = (
         addVariable(variableList, addedKeys, `${dataNodeId}_structured_output`, 'structured_output', 'object', `${dataNodeId}.structured_output`, nodeData, { children });
       }
       break;
+    }
 
-    case 'trigger':
+    case 'trigger': {
       // Add webhook trigger variables
       const triggerType = config.trigger_type?.defaultValue ?? config.trigger_type;
       if (triggerType === 'webhook') {
@@ -422,6 +426,7 @@ const processNodeVariables = (
         addVariable(variableList, addedKeys, `${dataNodeId}_webhook_raw`, 'webhook_raw', 'object', `${dataNodeId}.webhook_raw`, nodeData, undefined);
       }
       break;
+    }
     case 'human-intervention':
       // Add human intervention form fields as variables
       (config.form_fields?.defaultValue || []).forEach((field: any) => {
@@ -791,6 +796,19 @@ export const useVariableList = (
         addVariable(list, keys, `${pid}_item`, 'item', itemType, `${pid}.item`, pd);
         addVariable(list, keys, `${pid}_index`, 'index', 'number', `${pid}.index`, pd);
       }
+    }
+
+    const selectedNodeData = selectedNode.getData();
+    const selectedCycle = selectedNodeData?.cycle;
+    const isCycleContainer = ['loop', 'iteration'].includes(selectedNodeData?.type);
+
+    // 容器需要使用内部节点输出配置自身的 output/condition；容器外的节点仅能看到容器输出，
+    // 不能使用 iteration/loop 内部子节点的原始输出变量。
+    if (!isCycleContainer) {
+      return list.filter(variable => {
+        const producerCycle = variable.nodeData?.cycle;
+        return !producerCycle || producerCycle === selectedCycle;
+      });
     }
 
     return list;

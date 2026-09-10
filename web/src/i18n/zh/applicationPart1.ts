@@ -10,6 +10,7 @@ export const applicationPart1 = {
       applicationName: '应用名称',
       applicationIcon: '应用图标',
       applicationType: '应用类型',
+      applicationTypePlaceholder: '应用类型',
       allType: '全部类型',
 
       agent: 'Agent',
