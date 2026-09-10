@@ -123,9 +123,15 @@ def _record_elapsed(
 class _TimedElasticSearchRetrieval(AsyncElasticSearchRetrieval):
     """Record oracle-compatible phases without owning another ES client."""
 
-    def __init__(self, client: Any, timings: RetrievalTimings | None) -> None:
+    def __init__(
+        self,
+        client: Any,
+        timings: RetrievalTimings | None,
+        *,
+        track_parent_matches: bool = False,
+    ) -> None:
         self._timings = timings
-        super().__init__(client)
+        super().__init__(client, track_parent_matches=track_parent_matches)
 
     async def search_by_vector(
         self,
@@ -279,7 +285,13 @@ class KnowledgeRetrievalService:
             )
 
         client = await runtime.elasticsearch.client()
-        store = _TimedElasticSearchRetrieval(client, timings)
+        store = _TimedElasticSearchRetrieval(
+            client,
+            timings,
+            track_parent_matches=bool(
+                preparation.global_rerank and preparation.global_rerank.recompute_keywords
+            ),
+        )
         retrieval_result = await cls._retrieve_prepared(
             runtime,
             client,
@@ -374,6 +386,7 @@ class KnowledgeRetrievalService:
                         and target.params.retrieve_type is RetrieveType.HYBRID
                     ),
                     request_reranker=preparation.request_reranker,
+                    global_rerank=preparation.global_rerank,
                     image_query=image_query,
                     timings=timings,
                     log_id=log_id,
@@ -459,6 +472,7 @@ class KnowledgeRetrievalService:
         graph_target: GraphTargetSnapshot | None,
         use_request_reranker: bool = False,
         request_reranker: ModelRuntimeSnapshot | None = None,
+        global_rerank: RerankPlan | None = None,
         image_query: ImageEmbeddingContent | None = None,
         timings: RetrievalTimings | None = None,
         log_id: str | None = None,
@@ -602,6 +616,12 @@ class KnowledgeRetrievalService:
                 )
             )
 
+        weighted_semantics = bool(
+            global_rerank
+            and global_rerank.recompute_keywords
+            and global_rerank.weights.semantic_weight > 0
+        )
+        query_vector: list[float] | None = None
         if image_query is not None:
             query_vector = await cls._embed_image_query(
                 embedding,
@@ -621,9 +641,18 @@ class KnowledgeRetrievalService:
                     "KB_VALIDATION_ERROR",
                     "Text query content is unavailable",
                 )
-            vector_task = asyncio.create_task(
-                store.search_by_vector(embedding, text_query, vector_options)
-            )
+            async def search_vector() -> list[DocumentChunk]:
+                nonlocal query_vector
+                if not weighted_semantics:
+                    return await store.search_by_vector(embedding, text_query, vector_options)
+                embedding_started_at = time.perf_counter()
+                try:
+                    query_vector = normalize_vector(await embedding.aembed_query(text_query))
+                finally:
+                    cls._record_timing(timings, "embedding_ms", embedding_started_at)
+                return await store.search_by_query_vector(query_vector, vector_options)
+
+            vector_task = asyncio.create_task(search_vector())
             text_task = asyncio.create_task(
                 store.search_by_full_text(text_query, full_text_options)
             )
@@ -718,6 +747,27 @@ class KnowledgeRetrievalService:
             )
         finally:
             cls._record_timing(timings, "local_rerank_ms", local_rerank_started_at)
+        if weighted_semantics and query_vector is not None:
+            missing = [candidate for candidate in ranked if candidate.semantic_score is None]
+            if missing:
+                scoring_started_at = time.perf_counter()
+                try:
+                    scores = await store.score_candidates_by_vector(
+                        query_vector, [candidate.chunk for candidate in missing], vector_options
+                    )
+                finally:
+                    cls._record_timing(timings, "es_vector_ms", scoring_started_at)
+                ranked = [
+                    replace(
+                        candidate,
+                        semantic_score=scores.get(
+                            str((candidate.chunk.metadata or {}).get("doc_id") or ""), 0.0
+                        ),
+                    )
+                    if candidate.semantic_score is None
+                    else candidate
+                    for candidate in ranked
+                ]
         cls._log_target_done(
             target,
             len(vector_chunks),

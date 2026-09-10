@@ -43,6 +43,7 @@ dependencies = [
     "uvicorn[standard]>=0.37,<1",
     "xlrd>=2.0,<3",
     "xxhash>=3.5,<5",
+    "jieba==0.42.1",
 ]
 
 [dependency-groups]

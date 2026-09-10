@@ -332,6 +332,9 @@ class KnowledgeRetrievalPreparation:
                 if mode is RerankMode.RERANKING_MODEL
                 else None,
                 compatibility_fallback=mode is RerankMode.RERANKING_MODEL,
+                recompute_keywords=(
+                    target_count > 1 and mode is RerankMode.WEIGHTED_SCORE
+                ),
             )
         return RetrievalPreparation(
             targets=tuple(targets),
@@ -680,6 +683,8 @@ class KnowledgeRetrievalPreparation:
         if config is not None and config.rerank_mode is not None:
             return config.rerank_mode, cls._resolve_weights(config.rerank_weights), True
         if target_count == 1 and request.rerank_mode is not None:
+            return request.rerank_mode, cls._resolve_weights(request.rerank_weights), True
+        if target_count > 1 and request.rerank_mode is RerankMode.WEIGHTED_SCORE:
             return request.rerank_mode, cls._resolve_weights(request.rerank_weights), True
         return RerankMode.RERANKING_MODEL, cls._resolve_weights(None), False
 

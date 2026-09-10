@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 
 from redbear_model import ImageEmbeddingContent
 
 from ...api.schemas.rerank import RerankMode
-from ..models.chunk import DocumentChunk
+from ..models.chunk import DocumentChunk, chunk_retrieval_content
 from .candidates import candidate_identity, chunk_identity, materialize_candidates
 from .models import ModelRuntimeSnapshot, RerankPlan, RetrievalCandidate
+from .weighted_scoring import keyword_similarities
 
 
 @dataclass(frozen=True)
@@ -40,13 +42,21 @@ class _WeightedScoreAdapter:
         candidates: Sequence[RetrievalCandidate],
         plan: RerankPlan,
     ) -> list[RetrievalCandidate]:
-        del query
+        keyword_scores = [candidate.participle_score or 0.0 for candidate in candidates]
+        if plan.recompute_keywords and plan.weights.participle_weight > 0:
+            if not isinstance(query, str):
+                raise ValueError("Weighted keyword scoring requires a text query")
+            keyword_scores = await asyncio.to_thread(
+                keyword_similarities,
+                query,
+                [chunk_retrieval_content(candidate.chunk) for candidate in candidates],
+            )
         ranked = [
             candidate.with_final_score(
                 plan.weights.semantic_weight * (candidate.semantic_score or 0.0)
-                + plan.weights.participle_weight * (candidate.participle_score or 0.0)
+                + plan.weights.participle_weight * keyword_score
             )
-            for candidate in candidates
+            for candidate, keyword_score in zip(candidates, keyword_scores, strict=True)
         ]
         return sorted(
             ranked,
