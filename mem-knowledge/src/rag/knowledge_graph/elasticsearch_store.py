@@ -141,7 +141,10 @@ class GraphElasticsearchStore:
         )
 
     async def refresh_graph(self, graph_index_name: str) -> None:
-        await self._client.indices.refresh(index=graph_index_name, ignore_unavailable=True)
+        result = await self._client.indices.refresh(
+            index=graph_index_name, ignore_unavailable=True
+        )
+        raise_on_shard_failures(result, "graph refresh")
 
     async def _collect_search_after_hits(
         self,
@@ -1456,6 +1459,9 @@ class GraphElasticsearchStore:
         context: str,
         ensure_valid: Callable[[], None] | None,
     ) -> None:
+        self._ensure_valid(ensure_valid)
+        # delete_by_query refreshes after deletion, not before taking its search snapshot.
+        await self.refresh_graph(index_name)
         self._ensure_valid(ensure_valid)
         result = await self._client.delete_by_query(
             index=index_name,
