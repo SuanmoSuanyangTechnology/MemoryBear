@@ -564,7 +564,17 @@ class KnowledgeRetrievalService:
                         "KB_VALIDATION_ERROR",
                         "Text query content is unavailable",
                     )
-                chunks = await store.search_by_vector(embedding, text_query, vector_options)
+                if is_qwen3_vl_embedding(target.embedding.resolved):
+                    # Multimodal KB: text query recalls text units (image chunks
+                    # surface via their vision_text text unit), then collapse.
+                    query_vector = normalize_vector(await embedding.aembed_query(text_query))
+                    unit_candidates = await store.search_units_by_vector(
+                        query_vector,
+                        vector_options,
+                    )
+                    chunks = collapse_units_to_chunks(unit_candidates)
+                else:
+                    chunks = await store.search_by_vector(embedding, text_query, vector_options)
             cls._log_target_done(
                 target,
                 len(chunks),
@@ -614,12 +624,21 @@ class KnowledgeRetrievalService:
                     "KB_VALIDATION_ERROR",
                     "Text query content is unavailable",
                 )
-            vector_task = asyncio.create_task(
-                store.search_by_vector(embedding, text_query, vector_options)
-            )
-            text_task = asyncio.create_task(
-                store.search_by_full_text(text_query, full_text_options)
-            )
+            multimodal_kb = is_qwen3_vl_embedding(target.embedding.resolved)
+            if multimodal_kb:
+                vector_task = asyncio.create_task(
+                    cls._search_units_by_text(embedding, store, text_query, vector_options)
+                )
+                text_task = asyncio.create_task(
+                    store.search_units_full_text(text_query, full_text_options)
+                )
+            else:
+                vector_task = asyncio.create_task(
+                    store.search_by_vector(embedding, text_query, vector_options)
+                )
+                text_task = asyncio.create_task(
+                    store.search_by_full_text(text_query, full_text_options)
+                )
             graph_task = (
                 asyncio.create_task(
                     cls._retrieve_evidence_graph_channel(
@@ -653,6 +672,9 @@ class KnowledgeRetrievalService:
 
             vector_chunks = gathered[0]
             text_chunks = gathered[1]
+            if multimodal_kb:
+                vector_chunks = [cls._unit_to_chunk(uc) for uc in vector_chunks]
+                text_chunks = [cls._unit_to_chunk(uc) for uc in text_chunks]
             graph_result = (
                 gathered[2] if graph_task is not None else KnowledgeRetrievalResult()
             )
@@ -1021,6 +1043,18 @@ class KnowledgeRetrievalService:
             chunk.metadata["score"] = float(item.metadata.get("relevance_score") or 0)
             result.append(chunk)
         return ModelRerankResult(chunks=tuple(result), used_fallback=False)
+
+    @staticmethod
+    async def _search_units_by_text(
+        embedding: Any,
+        store: Any,
+        text_query: str,
+        options: RetrievalSearchOptions,
+    ) -> list[UnitCandidate]:
+        """Embed a text query and recall text units from a multimodal index."""
+
+        query_vector = normalize_vector(await embedding.aembed_query(text_query))
+        return await store.search_units_by_vector(query_vector, options)
 
     @staticmethod
     def _unit_to_chunk(candidate: UnitCandidate) -> DocumentChunk:
