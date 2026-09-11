@@ -91,7 +91,11 @@ export const updateKnowledgeBase = async (id: string, data: KnowledgeBaseFormDat
 export const deleteKnowledgeBase = async (id: string) => { 
     const response = await request.delete(`/knowledges/${id}`);
     return response as any;
-}     
+}
+// 复制知识库
+export const copyKnowledgeBase = (knowledge_id: string, data: { name?: string; }) => {
+    return request.post(`/knowledges/${knowledge_id}/copy`, data)
+}       
 
 // 知识库分享 获取分享空间列表
 export const getShareSpaceList = async (id: string) => {
