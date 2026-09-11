@@ -149,6 +149,10 @@ def build_retrieval_units(
     # Image chunk: text unit uses vision_text (the image's textual form).
     vision_text = metadata.get("vision_text")
     if isinstance(vision_text, str) and vision_text.strip():
+        text_metadata = dict(metadata)
+        # Keep the chunk's original markdown body so recall can return it instead
+        # of the vision caption when this text unit is the hit.
+        text_metadata["original_page_content"] = chunk.page_content
         units.append(
             RetrievalUnit(
                 unit_id=unit_id_for(chunk_id, RetrievalUnitKind.TEXT, 0),
@@ -156,7 +160,7 @@ def build_retrieval_units(
                 return_chunk_id=return_chunk_id,
                 kind=RetrievalUnitKind.TEXT,
                 content=vision_text.strip(),
-                metadata=metadata,
+                metadata=text_metadata,
             )
         )
     for index, asset_id in enumerate(asset_ids):

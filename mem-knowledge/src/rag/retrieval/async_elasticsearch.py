@@ -596,8 +596,14 @@ class AsyncElasticSearchRetrieval:
         if not kind_raw or not chunk_id:
             return None
         metadata = dict(source.get(Field.METADATA_KEY.value) or {})
+        page_content = source.get(Field.CONTENT_KEY.value) or ""
+        # Image-chunk text units store vision_text as content for retrieval; the
+        # chunk's real markdown body is in metadata.original_page_content.
+        original = metadata.pop("original_page_content", None)
+        if isinstance(original, str) and original.strip():
+            page_content = original
         chunk = DocumentChunk(
-            page_content=source.get(Field.CONTENT_KEY.value) or "",
+            page_content=page_content,
             metadata=metadata,
         )
         return UnitCandidate(
