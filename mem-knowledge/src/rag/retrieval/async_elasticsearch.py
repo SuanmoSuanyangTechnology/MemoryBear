@@ -412,6 +412,18 @@ class AsyncChunkStore:
                     "answer": {"type": "text", "analyzer": "ik_max_word"},
                     "source_chunk_id": {"type": "keyword"},
                     "parent_id": {"type": "keyword"},
+                    **(
+                        {
+                            Field.UNIT_ID.value: {"type": "keyword"},
+                            Field.UNIT_KIND.value: {"type": "keyword"},
+                            Field.UNIT_INDEX.value: {"type": "long"},
+                            Field.CHUNK_ID.value: {"type": "keyword"},
+                            Field.RETURN_CHUNK_ID.value: {"type": "keyword"},
+                            Field.ASSET_FILE_ID.value: {"type": "keyword"},
+                        }
+                        if self.multimodal
+                        else {}
+                    ),
                 }
             },
             settings={"index": {"refresh_interval": "1s"}},

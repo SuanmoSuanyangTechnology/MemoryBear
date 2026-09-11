@@ -571,8 +571,8 @@ def build_chunk_store(
         embed_unit_contents=embed_unit_contents,
         image_resolver=image_resolver,
         embedding_dimension=embedding_dimension,
-        # Unit indexes are HNSW-backed for both plain-text and multimodal KBs.
-        vector_indexed=True,
+        # Match worker indexes: multimodal vectors use script_score recall.
+        vector_indexed=not multimodal,
         multimodal=multimodal,
     )
 
