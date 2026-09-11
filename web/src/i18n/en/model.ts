@@ -126,6 +126,7 @@ export const model = {
       load_balance_strategy: 'Concurrency Strategy',
       round_robin: 'Sequential Execution - Call each model in order',
       none: 'None',
+      remark: 'Remark',
 
       api_key: 'API KEY',
       api_base: 'API Base URL',

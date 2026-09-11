@@ -55,8 +55,10 @@ export interface CompositeModelForm {
   type?: string;
   /** Model description */
   description: string;
-  /** Associated API key IDs */
-  api_key_ids: ModelApiKey[] | string[];
+  members: {
+    provider: string;
+    model_name: string;
+  }[]
 }
 
 /**
@@ -125,10 +127,6 @@ export interface ModelApiKey {
  */
 export interface ModelListItem {
   model_id?: string;
-  /** Model name */
-  model_name?: string;
-  /** Associated model config IDs */
-  model_config_ids: string[];
   /** Display name */
   name: string;
   /** Model type */
@@ -151,10 +149,14 @@ export interface ModelListItem {
   created_at: number;
   /** Update timestamp */
   updated_at: number;
-  /** Associated API keys */
-  api_keys: ModelApiKey[];
   capability?: string[];
   is_omni?: boolean;
+  is_deprecated: boolean;
+  is_available: boolean;
+  members: {
+    provider: string;
+    model_name: string;
+  }[]
 }
 
 /**
@@ -176,27 +178,11 @@ export interface ProviderModelItem {
  */
 export interface KeyConfigModalForm {
   /** Model provider */
-  provider: string;
+  provider: Provider;
   /** API key value */
   api_key: string;
   /** API base URL */
   api_base: string;
-}
-
-/**
- * Key configuration modal ref interface
- */
-export interface KeyConfigModalRef {
-  /** Open modal with provider model data */
-  handleOpen: (vo: ProviderModelItem) => void;
-}
-
-/**
- * Key configuration modal props
- */
-export interface KeyConfigModalProps {
-  /** Callback to refresh model list */
-  refresh?: () => void;
 }
 
 /**
@@ -220,7 +206,7 @@ export interface MultiKeyForm {
  */
 export interface MultiKeyConfigModalRef {
   /** Open modal with model data */
-  handleOpen: (vo: ModelListItem, provider?: string) => void;
+  handleOpen: (vo: ModelListItem | ProviderModelItem, provider?: Provider) => void;
   handleClose: () => void;
 }
 
@@ -230,6 +216,7 @@ export interface MultiKeyConfigModalRef {
 export interface MultiKeyConfigModalProps {
   /** Callback to refresh model list */
   refresh?: () => void;
+  source?: 'provider';
 }
 
 /**
@@ -286,12 +273,6 @@ export interface CustomModelForm {
   logo?: any;
   /** Model description */
   description: string;
-  api_keys: Array<{
-    /** API key value */
-    api_key: string;
-    /** API base URL */
-    api_base: string;
-  }>
   is_vision?: boolean;
   is_video?: boolean;
   is_audio?: boolean;
@@ -346,7 +327,6 @@ export interface Model {
   id: string;
   created_at: number;
   updated_at: number;
-  api_keys: ModelApiKey[];
   is_deprecated: boolean;
 }
 
