@@ -332,6 +332,9 @@ class KnowledgeRetrievalPreparation:
                 if mode is RerankMode.RERANKING_MODEL
                 else None,
                 compatibility_fallback=mode is RerankMode.RERANKING_MODEL,
+                recompute_keywords=(
+                    target_count > 1 and mode is RerankMode.WEIGHTED_SCORE
+                ),
             )
         return RetrievalPreparation(
             targets=tuple(targets),

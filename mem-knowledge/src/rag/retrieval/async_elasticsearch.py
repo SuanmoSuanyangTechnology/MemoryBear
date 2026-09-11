@@ -617,8 +617,10 @@ class AsyncChunkStore:
 class AsyncElasticSearchRetrieval:
     """Native asynchronous vector and full-text retrieval."""
 
-    def __init__(self, client: Any):
+    def __init__(self, client: Any, *, track_parent_matches: bool = False):
         self.client = client
+        self._track_parent_matches = track_parent_matches
+        self._parent_matches: dict[tuple[str, str], set[str]] = {}
 
     @staticmethod
     def _raise_on_failed_response(response: Mapping[str, Any], operation: str) -> None:
@@ -836,6 +838,87 @@ class AsyncElasticSearchRetrieval:
             result.append(replace(candidate, chunk=chunk))
         return result
 
+    async def score_candidates_by_vector(
+        self,
+        query_vector: Sequence[float],
+        chunks: Sequence[DocumentChunk],
+        options: RetrievalSearchOptions,
+    ) -> dict[str, float]:
+        """Score authorized candidate IDs, including only actually matched children."""
+        source_ids: dict[str, set[str]] = {}
+        for chunk in chunks:
+            metadata = chunk.metadata or {}
+            doc_id = str(metadata.get("doc_id") or "")
+            if not doc_id:
+                continue
+            source_ids[doc_id] = (
+                self._parent_matches.get((options.indices, doc_id), set())
+                if metadata.get("chunk_type") == "parent"
+                else {doc_id}
+            )
+        return await self._score_sources_by_vector(query_vector, source_ids, options)
+
+    async def score_units_by_vector(
+        self,
+        query_vector: Sequence[float],
+        chunks: Sequence[DocumentChunk],
+        options: RetrievalSearchOptions,
+    ) -> dict[str, float]:
+        """Score only selected units, without expanding to sibling or parent units."""
+        unit_ids = {
+            str(chunk.metadata["_unit_id"])
+            for chunk in chunks
+            if (chunk.metadata or {}).get("_unit_id")
+        }
+        return await self._score_sources_by_vector(
+            query_vector, {unit_id: {unit_id} for unit_id in unit_ids}, options,
+            unit_scoring=True,
+        )
+
+    async def _score_sources_by_vector(
+        self,
+        query_vector: Sequence[float],
+        source_ids: dict[str, set[str]],
+        options: RetrievalSearchOptions,
+        *,
+        unit_scoring: bool = False,
+    ) -> dict[str, float]:
+        ids = sorted({source for sources in source_ids.values() for source in sources})
+        scores = dict.fromkeys(source_ids, 0.0)
+        if not ids or options.document_ids_include == ():
+            return scores
+        identity_field = Field.UNIT_ID.value if unit_scoring else Field.DOC_ID.value
+        filters = (
+            build_unit_filter_clauses(options.file_names_filter, options.document_ids_include)
+            if unit_scoring
+            else build_filter_clauses(
+                options.file_names_filter, options.document_ids_include, require_vector=True
+            )
+        )
+        filters.append({"terms": {identity_field: ids}})
+        response = await self.client.search(
+            index=options.indices,
+            size=len(ids),
+            query=build_vector_script_query(query_vector, filters),
+            source_includes=[identity_field],
+            allow_partial_search_results=False,
+        )
+        self._raise_on_failed_response(response, "candidate vector scoring")
+        by_id: dict[str, float] = {}
+        for hit in (response.get("hits") or {}).get("hits", []):
+            source = hit.get("_source") or {}
+            doc_id = str(
+                source.get(Field.UNIT_ID.value) if unit_scoring
+                else (source.get("metadata") or {}).get("doc_id")
+            )
+            score = float(hit["_score"]) / 2
+            if not math.isfinite(score):
+                raise RuntimeError("Elasticsearch candidate vector score is not finite")
+            by_id[doc_id] = max(by_id.get(doc_id, 0.0), min(1.0, max(0.0, score)))
+        for doc_id, sources in source_ids.items():
+            scores[doc_id] = max((by_id.get(source, 0.0) for source in sources), default=0.0)
+        return scores
+
     async def resolve_parent_chunks(
         self,
         chunks: list[DocumentChunk],
@@ -851,6 +934,15 @@ class AsyncElasticSearchRetrieval:
         )
         if not parent_ids:
             return chunks
+        if self._track_parent_matches:
+            for chunk in chunks:
+                metadata = chunk.metadata or {}
+                if metadata.get("chunk_type") == "child" and metadata.get("parent_id"):
+                    child_id = metadata.get("doc_id")
+                    if child_id:
+                        self._parent_matches.setdefault(
+                            (index, str(metadata["parent_id"])), set()
+                        ).add(str(child_id))
         try:
             response = await self.client.search(
                 index=index,
