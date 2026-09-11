@@ -122,6 +122,20 @@ def build_vector_knn_query(
     }
 
 
+def build_unit_vector_script_query(
+    query_vector: Sequence[float],
+    filters: Sequence[dict[str, Any]],
+) -> dict[str, Any]:
+    """Scripted cosine recall over unit vectors (2048-dim, non-indexed).
+
+    The unit index stores 2048-dim qwen3-vl vectors which this ES version cannot
+    index for HNSW, so vector recall uses the same script_score cosine as the
+    legacy fused path, scoped to units via ``filters``.
+    """
+
+    return build_vector_script_query(query_vector, filters)
+
+
 def raise_on_shard_failures(result: Mapping[str, Any], context: str) -> None:
     failed = int((result.get("_shards") or {}).get("failed") or 0)
     if failed:

@@ -23,7 +23,7 @@ from .elasticsearch_queries import (
     build_full_text_query,
     build_parent_lookup_query,
     build_unit_filter_clauses,
-    build_vector_knn_query,
+    build_unit_vector_script_query,
     build_vector_script_query,
     full_text_hits_to_chunks,
     merge_parent_chunks,
@@ -611,25 +611,24 @@ class AsyncElasticSearchRetrieval:
         options: RetrievalSearchOptions,
     ) -> list[UnitCandidate]:
         vector = normalize_vector(query_vector)
-        num_candidates = max(options.top_k * 4, options.knn_num_candidates or 100)
         response = await self.client.search(
             index=options.indices,
+            from_=0,
             size=options.top_k,
-            **build_vector_knn_query(
+            query=build_unit_vector_script_query(
                 vector,
                 build_unit_filter_clauses(
                     options.file_names_filter,
                     options.document_ids_include,
                 ),
-                k=options.top_k,
-                num_candidates=num_candidates,
             ),
             allow_partial_search_results=False,
         )
         self._raise_on_failed_response(response, "unit vector search")
         result: list[UnitCandidate] = []
         for hit in (response.get("hits") or {}).get("hits", []):
-            score = float(hit.get("_score") or 0)
+            # script_score emits cosine+1.0 (0..2); normalize back to 0..1.
+            score = float(hit.get("_score") or 0) / 2
             if options.score_threshold is not None and score <= options.score_threshold:
                 continue
             candidate = self._hit_to_unit_candidate(hit, score)

@@ -134,7 +134,13 @@ class TaskVectorStore:
             ):
                 if unit.metadata.get(field.value):
                     source[field.value] = unit.metadata[field.value]
-            actions.append({"_id": unit.unit_id, "_index": self._collection_name, "_source": source})
+            actions.append(
+                {
+                    "_id": unit.unit_id,
+                    "_index": self._collection_name,
+                    "_source": source,
+                }
+            )
         return PreparedChunkBatch(actions=tuple(actions), chunk_count=len(units_with_vectors))
 
     def _embed_units(
@@ -295,14 +301,17 @@ class TaskVectorStore:
             if sample is not None
             else (self._embedding_dimension or 768)
         )
-        # Both plain-text and multimodal (unit) indexes use HNSW now; multimodal
-        # units are per-unit 2048-dim vectors, no longer a fused non-indexed blob.
+        # Multimodal qwen3-vl emits 2048-dim vectors; this ES version (8.7) caps
+        # indexed dense_vector at 1024 dims, so unit vectors stay non-indexed and
+        # recall uses script_score cosine (same as the legacy fused path). Plain
+        # text KBs keep HNSW. (HNSW for units is a future ES-upgrade follow-up.)
         vector_mapping: dict[str, Any] = {
             "type": "dense_vector",
             "dims": dimensions,
-            "index": True,
-            "similarity": "cosine",
+            "index": not self._structured_multimodal,
         }
+        if not self._structured_multimodal:
+            vector_mapping["similarity"] = "cosine"
         properties: dict[str, Any] = {
             Field.CONTENT_KEY.value: {
                 "type": "text",
