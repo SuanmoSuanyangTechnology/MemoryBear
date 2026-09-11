@@ -1100,7 +1100,6 @@ class KnowledgeRetrievalService:
                 "Image query requires qwen3-vl rerank",
             )
 
-        asset_ids = [c.asset_file_id for c in candidates if c.asset_file_id]
         asset_ids_by_kb: dict[uuid.UUID, list[str]] = {}
         for candidate in candidates:
             if not candidate.asset_file_id:
