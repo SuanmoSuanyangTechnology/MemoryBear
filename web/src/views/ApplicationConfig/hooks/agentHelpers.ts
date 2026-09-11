@@ -73,12 +73,7 @@ export function buildAgentSaveParams(data: Config, values: Config): Config {
         const kb_config = item.config || item;
         return {
           kb_id: item.kb_id || item.id,
-          retrieve_type: kb_config.retrieve_type,
-          top_k: kb_config.top_k,
-          similarity_threshold: ['participle', 'semantic', 'graph'].includes(kb_config.retrieve_type || '') ? undefined : kb_config.similarity_threshold,
-          vector_similarity_weight: kb_config.vector_similarity_weight,
-          enable_graph_retrieval: kb_config.enable_graph_retrieval,
-          // ...(item.config || {})
+          ...kb_config,
         }
       })
     } as KnowledgeConfig : null,

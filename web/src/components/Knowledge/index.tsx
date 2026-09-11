@@ -85,7 +85,7 @@ const Knowledge: FC<KnowledgeProps> = ({
   const handleDeleteKnowledge = (id: string) => {
     const list = knowledgeList.filter(item => item.id !== id)
     setKnowledgeList([...list])
-    onChange && onChange({
+    onChange?.({
       ...editConfig,
       knowledge_bases: [...list],
     })
@@ -109,7 +109,7 @@ const Knowledge: FC<KnowledgeProps> = ({
         list = [...values as KnowledgeBase[]]
       }
       setKnowledgeList([...list])
-      onChange && onChange({
+      onChange?.({
         ...editConfig,
         knowledge_bases: [...list],
       })
@@ -121,15 +121,16 @@ const Knowledge: FC<KnowledgeProps> = ({
         ...values,
         config: { ...values as KnowledgeConfigForm }
       }
+      console.log('list', list)
       setKnowledgeList([...list])
-      onChange && onChange({
+      onChange?.({
         ...editConfig,
         knowledge_bases: [...list],
       })
     } else if (type === 'rerankerConfig') {
       const rerankerValues = values as RerankerConfig
       setEditConfig(prev => ({ ...prev, ...rerankerValues }))
-      onChange && onChange({
+      onChange?.({
         ...editConfig,
         ...rerankerValues,
       })
@@ -147,6 +148,7 @@ const Knowledge: FC<KnowledgeProps> = ({
               className="rb:h-6! rb:py-0! rb:px-2! rb:rounded-md! rb:text-[#21233"
               icon={<div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/application/set.svg')]"></div>}
               onClick={handleKnowledgeConfig}
+              disabled={knowledgeList.length === 0}
             >{t('application.globalConfig')}</Button>
             <Button className="rb:h-6! rb:py-0! rb:px-2! rb:rounded-md! rb:text-[#21233" onClick={handleAddKnowledge}>+</Button>
           </Space>
