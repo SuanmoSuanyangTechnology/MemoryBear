@@ -28,6 +28,8 @@ from app.db import get_db, get_async_db_context, get_async_db
 from app.repositories.end_user_repository import EndUserRepository
 from app.schemas.api_key_schema import ApiKeyAuth
 from app.schemas.memory_agent_schema import Write_UserInput, InternalReadInput, ReadSyncInput, MergeEndUserInput
+from app.schemas.response_schema import ApiResponse
+from app.services.memory_storage_service import analytics_hot_memory_tags
 from app.services.end_user_service import EndUserService
 from app.services.file_storage_service import FileStorageService, get_file_storage_service, upload_workspace_file
 from app.services.memory_config_service import MemoryConfigService
@@ -267,3 +269,23 @@ async def upload_memory_file(
         storage_service=storage_service,
     )
     return success(data=upload_result, msg="File upload successful")
+
+
+@router.get("/analytics/hot_memory_tags", response_model=ApiResponse)
+@require_api_key_self_db(scopes=["memory"])
+async def get_hot_memory_tags_api(
+    request: Request,
+    api_key_auth: ApiKeyAuth = None,
+    limit: int = 10,
+):
+    """查询 API Key 绑定空间下的热门记忆标签（实时聚合，无缓存）。
+
+    空间由 API Key 绑定、不接受外部指定，杜绝跨空间越权。数据源为
+    end_users.memory_tags，按文本精确匹配合并，frequency 为采用该 tag 的
+    终端用户数。返回 data=[{"name", "frequency"}]，与管理端接口一致。
+    """
+    async with get_async_db_context() as db:
+        current_user = await get_current_user_snapshot_from_api_key_async(db, api_key_auth)
+        result = await analytics_hot_memory_tags(db, current_user, limit)
+    logger.info(f"V1 hot memory tags - workspace: {api_key_auth.workspace_id}")
+    return success(data=result, msg="查询成功")

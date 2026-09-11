@@ -288,6 +288,32 @@ class EndUserRepository:
             db_logger.error(f"查询工作空间 {workspace_id} 下终端用户时出错: {str(e)}")
             raise
 
+    async def get_memory_tags_by_workspace_async(
+        self, workspace_id: uuid.UUID
+    ) -> List[list]:
+        """获取指定 workspace 下活跃终端用户的 memory_tags 数组列表。
+
+        仅返回 memory_tags 非空的活跃用户，用于热门标签实时聚合。
+
+        Returns:
+            List[list]: 每项为一个用户的 memory_tags（JSONB 数组）
+        """
+        try:
+            result = await self.db.execute(
+                select(EndUser.memory_tags).where(
+                    EndUser.workspace_id == workspace_id,
+                    EndUser.is_active.is_(True),
+                    EndUser.memory_tags.isnot(None),
+                )
+            )
+            return [row[0] for row in result.all() if row[0]]
+        except Exception as e:
+            await self.db.rollback()
+            db_logger.error(
+                f"查询工作空间 {workspace_id} 下 memory_tags 时出错: {str(e)}"
+            )
+            raise
+
     def get_end_users_count_by_workspace(self, workspace_id: uuid.UUID) -> int:
         """获取指定 workspace 下的所有 end_user数量"""
         try:
@@ -429,6 +455,65 @@ class EndUserRepository:
             db_logger.error(
                 f"异步查询工作空间 {workspace_id} 下的终端用户 "
                 f"{end_user_id} 时出错: {str(e)}"
+            )
+            raise
+
+    async def get_memory_counts_by_ids_async(
+        self,
+        workspace_id: uuid.UUID,
+        end_user_ids: List[uuid.UUID],
+    ) -> List[tuple]:
+        """批量查询终端用户的记忆量（读 end_users.memory_count 字段）。
+
+        仅返回「属于目标 workspace 且 is_active=True」的用户；不属于空间或已删除的
+        id 不在结果中（由调用方决定是否报错，默认静默丢弃）。
+
+        Returns:
+            List[tuple]: 每项为 (id, other_name, memory_count)
+        """
+        if not end_user_ids:
+            return []
+        try:
+            result = await self.db.execute(
+                select(EndUser.id, EndUser.other_name, EndUser.memory_count)
+                .where(
+                    EndUser.id.in_(end_user_ids),
+                    EndUser.workspace_id == workspace_id,
+                    EndUser.is_active.is_(True),
+                )
+            )
+            return list(result.all())
+        except Exception as e:
+            await self.db.rollback()
+            db_logger.error(
+                f"批量查询工作空间 {workspace_id} 下终端用户记忆量时出错: {str(e)}"
+            )
+            raise
+
+    async def get_memory_counts_by_workspace_async(
+        self,
+        workspace_id: uuid.UUID,
+    ) -> List[tuple]:
+        """查询指定 workspace 下所有活跃终端用户的记忆量（读 end_users.memory_count 字段）。
+
+        仅查询接口真正需要的 3 列，避免拉取整行宽表字段。
+
+        Returns:
+            List[tuple]: 每项为 (id, other_name, memory_count)
+        """
+        try:
+            result = await self.db.execute(
+                select(EndUser.id, EndUser.other_name, EndUser.memory_count)
+                .where(
+                    EndUser.workspace_id == workspace_id,
+                    EndUser.is_active.is_(True),
+                )
+            )
+            return list(result.all())
+        except Exception as e:
+            await self.db.rollback()
+            db_logger.error(
+                f"查询工作空间 {workspace_id} 下终端用户记忆量时出错: {str(e)}"
             )
             raise
 

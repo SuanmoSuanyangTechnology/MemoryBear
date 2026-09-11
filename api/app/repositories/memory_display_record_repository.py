@@ -5,7 +5,8 @@
 
 import logging
 import uuid
-from typing import List, Tuple
+from datetime import datetime
+from typing import List, Optional, Tuple
 
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -47,6 +48,7 @@ class MemoryDisplayRecordRepository:
             values.append({
                 "id": r.id,
                 "end_user_id": r.end_user_id,
+                "workspace_id": r.workspace_id,
                 "operation_id": r.operation_id,
                 "operation": r.operation,
                 "memory_id": r.memory_id,
@@ -134,26 +136,44 @@ class MemoryDisplayRecordRepository:
 
     async def query_written_paginated_async(
         self,
-        end_user_id: uuid.UUID,
         workspace_id: uuid.UUID,
         page: int,
         pagesize: int,
+        end_user_id: Optional[uuid.UUID] = None,
+        start_time: Optional[datetime] = None,
+        end_time: Optional[datetime] = None,
     ) -> Tuple[List[MemoryDisplayRecord], int]:
-        """异步按 occurred_at DESC, id DESC 分页查询写入展示记录。"""
-        owned_by_workspace = (
-            select(EndUser.id)
-            .where(
-                EndUser.id == end_user_id,
-                EndUser.workspace_id == workspace_id,
-                EndUser.is_active.is_(True),
+        """异步按 occurred_at DESC, id DESC 分页查询写入展示记录。
+
+        - 传 ``end_user_id``：用户级查询，附加 end_users 归属 EXISTS 做越权隔离，
+          走 ``idx_memory_display_write_user_occurred``；
+        - 不传 ``end_user_id``：空间级查询，直接按冗余列 ``workspace_id`` 过滤，
+          走 ``idx_memory_display_write_ws_occurred``。
+
+        start_time/end_time 为 naive UTC datetime，按 occurred_at 闭区间过滤
+        （总数与当前页使用同一过滤条件）。
+        """
+        base_filter = MemoryDisplayRecord.operation == "WRITE"
+        if end_user_id is not None:
+            owned_by_workspace = (
+                select(EndUser.id)
+                .where(
+                    EndUser.id == end_user_id,
+                    EndUser.workspace_id == workspace_id,
+                    EndUser.is_active.is_(True),
+                )
+                .exists()
             )
-            .exists()
-        )
-        base_filter = (
-            (MemoryDisplayRecord.end_user_id == end_user_id)
-            & (MemoryDisplayRecord.operation == "WRITE")
-            & owned_by_workspace
-        )
+            base_filter &= (
+                (MemoryDisplayRecord.end_user_id == end_user_id)
+                & owned_by_workspace
+            )
+        else:
+            base_filter &= MemoryDisplayRecord.workspace_id == workspace_id
+        if start_time is not None:
+            base_filter &= MemoryDisplayRecord.occurred_at >= start_time
+        if end_time is not None:
+            base_filter &= MemoryDisplayRecord.occurred_at <= end_time
 
         total_result = await self.db.execute(
             select(func.count(MemoryDisplayRecord.id)).where(base_filter)
@@ -243,15 +263,46 @@ class MemoryDisplayRecordRepository:
 
     async def query_retrieved_paginated_async(
         self,
-        end_user_id: uuid.UUID,
+        workspace_id: uuid.UUID,
         page: int,
         pagesize: int,
+        end_user_id: Optional[uuid.UUID] = None,
+        start_time: Optional[datetime] = None,
+        end_time: Optional[datetime] = None,
     ) -> Tuple[List[MemoryDisplayRecord], int]:
-        """异步按 occurred_at DESC, id DESC 分页查询读取展示记录。"""
-        base_filter = (
-            (MemoryDisplayRecord.end_user_id == end_user_id)
-            & (MemoryDisplayRecord.operation == "RETRIEVE")
-        )
+        """异步按 occurred_at DESC, id DESC 分页查询读取展示记录。
+
+        - 传 ``end_user_id``：用户级查询，把归属过滤下推到 SQL（与 written 一致，
+          纵深防御），走用户级部分索引；
+        - 不传 ``end_user_id``：空间级查询，按冗余列 ``workspace_id`` 过滤，
+          走 ``idx_memory_display_retrieve_ws_occurred``。
+
+        ``workspace_id`` 必传（与 written 孪生方法对齐），避免空间级路径退化成
+        ``workspace_id IS NULL`` 的越权查询。
+
+        start_time/end_time 为 naive UTC datetime，按 occurred_at 闭区间过滤。
+        """
+        base_filter = MemoryDisplayRecord.operation == "RETRIEVE"
+        if end_user_id is not None:
+            owned_by_workspace = (
+                select(EndUser.id)
+                .where(
+                    EndUser.id == end_user_id,
+                    EndUser.workspace_id == workspace_id,
+                    EndUser.is_active.is_(True),
+                )
+                .exists()
+            )
+            base_filter &= (
+                (MemoryDisplayRecord.end_user_id == end_user_id)
+                & owned_by_workspace
+            )
+        else:
+            base_filter &= MemoryDisplayRecord.workspace_id == workspace_id
+        if start_time is not None:
+            base_filter &= MemoryDisplayRecord.occurred_at >= start_time
+        if end_time is not None:
+            base_filter &= MemoryDisplayRecord.occurred_at <= end_time
 
         total_result = await self.db.execute(
             select(func.count(MemoryDisplayRecord.id)).where(base_filter)

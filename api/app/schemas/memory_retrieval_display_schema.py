@@ -34,6 +34,8 @@ class RetrieveDisplayTask:
     query: str
     content: str
     occurred_at: datetime
+    # 冗余入库，支撑空间级倒序分页查询；缺省时置 NULL。
+    workspace_id: uuid.UUID | None = None
 
     def to_row(self) -> dict:
         """转换为可直接用于批量 INSERT 的行。"""
@@ -44,6 +46,7 @@ class RetrieveDisplayTask:
         return {
             "id": self.id,
             "end_user_id": self.end_user_id,
+            "workspace_id": self.workspace_id,
             "operation_id": self.operation_id,
             "operation": "RETRIEVE",
             "memory_id": None,

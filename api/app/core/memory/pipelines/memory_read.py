@@ -319,6 +319,9 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
                 )
                 return
 
+            # memory_config 为空时取 None
+            workspace_uuid = getattr(self.ctx.memory_config, "workspace_id", None)
+
             snapshot = build_retrieve_snapshot(
                 result=result,
                 query=display_query,
@@ -335,6 +338,7 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
                     id=uuid.uuid4(),
                     operation_id=uuid.uuid4(),
                     end_user_id=end_user_uuid,
+                    workspace_id=workspace_uuid,
                     search_mode=search_mode,
                     query=snapshot["query"],
                     content=snapshot["content"],

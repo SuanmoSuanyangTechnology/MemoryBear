@@ -297,82 +297,18 @@ async def get_workspace_total_memory_count(
     current_user,
     end_user_id: str = None
 ) -> dict:
+    """获取工作空间的记忆总量（保留旧函数名，委托给 _async 版本）。
+
+    历史上此函数与 get_workspace_total_memory_count_async 是两份重复实现，
+    均通过实时扫描 Neo4j 聚合。现统一改为读取 end_users.memory_count 字段，
+    为避免逻辑漂移，这里直接委托，二者行为与响应结构完全一致。
     """
-    获取工作空间的记忆总量（通过聚合所有host的记忆数）
-    
-    逻辑：
-    1. 从 memory_list 获取所有 host_id
-    2. 对每个 host_id 调用 search_all 获取 total
-    3. 将所有 total 求和返回
-    """
-    business_logger.info(f"获取工作空间记忆总量: workspace_id={workspace_id}, 操作者: {current_user.username}")
-    
-    try:
-        # 1. 获取所有 hosts（异步版本）
-        hosts = await get_workspace_end_users_async(db, workspace_id, current_user)
-        business_logger.info(f"获取到 {len(hosts)} 个宿主")
-        
-        if not hosts:
-            business_logger.warning("未找到任何宿主，返回0")
-            return {
-                "total_memory_count": 0,
-                "host_count": 0,
-                "details": []
-            }
-        
-        # 2. 使用 search_all_batch 批量查询所有宿主的记忆数量
-        from app.services import memory_storage_service
-        
-        # 如果提供了 end_user_id，只查询该用户
-        if end_user_id:
-            batch_result = await memory_storage_service.search_all_batch([end_user_id])
-            count = batch_result.get(end_user_id, 0)
-            # 查询用户名称
-            from app.repositories.end_user_repository import get_end_user_by_id_async
-            end_user = await get_end_user_by_id_async(db, uuid.UUID(end_user_id))
-            user_name = end_user.other_name if end_user else None
-            
-            return {
-                "total_memory_count": count,
-                "host_count": 1,
-                "details": [{
-                    "end_user_id": end_user_id, 
-                    "count": count,
-                    "name": user_name
-                }]
-            }
-        
-        # 批量查询所有宿主记忆数量（一次 Neo4j 查询）
-        end_user_ids = [str(host.id) for host in hosts]
-        batch_result = await memory_storage_service.search_all_batch(end_user_ids)
-        
-        # 构建 host name 映射
-        host_name_map = {str(host.id): host.other_name for host in hosts}
-        
-        total_count = sum(batch_result.values())
-        details = [
-            {
-                "end_user_id": uid,
-                "count": batch_result.get(uid, 0),
-                "name": host_name_map.get(uid)
-            }
-            for uid in end_user_ids
-        ]
-        
-        result = {
-            "total_memory_count": total_count,
-            "host_count": len(hosts),
-            "details": details
-        }
-        
-        business_logger.info(f"成功获取工作空间记忆总量: {total_count} (来自 {len(hosts)} 个宿主)")
-        return result
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        business_logger.error(f"获取工作空间记忆总量失败: workspace_id={workspace_id} - {str(e)}")
-        raise
+    return await get_workspace_total_memory_count_async(
+        db=db,
+        workspace_id=workspace_id,
+        current_user=current_user,
+        end_user_id=end_user_id,
+    )
 
 
 async def get_workspace_total_memory_count_async(
@@ -381,70 +317,152 @@ async def get_workspace_total_memory_count_async(
     current_user,
     end_user_id: str = None
 ) -> dict:
-    """获取工作空间的记忆总量（异步版本，使用 AsyncSession）"""
+    """获取工作空间的记忆总量（异步版本，使用 AsyncSession）。
+
+    数据来源：直接读取 end_users.memory_count 字段聚合，不再实时扫描 Neo4j。
+    memory_count 由写入/遗忘等流程维护，可能相对 Neo4j 实时计数有极小滞后，
+    但换取的是数量级的耗时下降（全库扫描 -> 单条索引聚合）。
+    """
     business_logger.info(f"获取工作空间记忆总量(异步): workspace_id={workspace_id}, 操作者: {current_user.username}")
-    
+
     try:
-        hosts = await get_workspace_end_users_async(db, workspace_id, current_user)
-        business_logger.info(f"获取到 {len(hosts)} 个宿主")
-        
-        if not hosts:
+        from app.repositories.end_user_repository import EndUserRepository
+
+        repo = EndUserRepository(db)
+
+        # 指定宿主：只查该宿主的 memory_count（保留合并路由语义）
+        if end_user_id:
+            end_user = await repo.get_end_user_by_id_async(uuid.UUID(end_user_id))
+            if not end_user:
+                business_logger.warning(f"未找到宿主 {end_user_id}，返回0")
+                return {
+                    "total_memory_count": 0,
+                    "host_count": 0,
+                    "details": []
+                }
+
+            count = int(end_user.memory_count or 0)
+            return {
+                "total_memory_count": count,
+                "host_count": 1,
+                "details": [{
+                    "end_user_id": end_user_id,
+                    "count": count,
+                    "name": end_user.other_name or None
+                }]
+            }
+
+        # 全工作空间：一次轻量查询取所有活跃宿主的 (id, other_name, memory_count)
+        rows = await repo.get_memory_counts_by_workspace_async(workspace_id)
+        if not rows:
             business_logger.warning("未找到任何宿主，返回0")
             return {
                 "total_memory_count": 0,
                 "host_count": 0,
                 "details": []
             }
-        
-        from app.services import memory_storage_service
-        
-        if end_user_id:
-            batch_result = await memory_storage_service.search_all_batch([end_user_id])
-            count = batch_result.get(end_user_id, 0)
-            from app.repositories.end_user_repository import EndUserRepository
-            repo = EndUserRepository(db)
-            end_user = await repo.get_end_user_by_id_async(uuid.UUID(end_user_id))
-            user_name = end_user.other_name if end_user else None
-            
-            return {
-                "total_memory_count": count,
-                "host_count": 1,
-                "details": [{
-                    "end_user_id": end_user_id, 
-                    "count": count,
-                    "name": user_name
-                }]
-            }
-        
-        end_user_ids = [str(host.id) for host in hosts]
-        batch_result = await memory_storage_service.search_all_batch(end_user_ids)
-        
-        host_name_map = {str(host.id): host.other_name for host in hosts}
-        
-        total_count = sum(batch_result.values())
+
         details = [
             {
-                "end_user_id": uid,
-                "count": batch_result.get(uid, 0),
-                "name": host_name_map.get(uid)
+                "end_user_id": str(row.id),
+                "count": int(row.memory_count or 0),
+                "name": row.other_name or None
             }
-            for uid in end_user_ids
+            for row in rows
         ]
-        
+        total_count = sum(item["count"] for item in details)
+
         result = {
             "total_memory_count": total_count,
-            "host_count": len(hosts),
+            "host_count": len(rows),
             "details": details
         }
-        
-        business_logger.info(f"成功获取工作空间记忆总量: {total_count} (来自 {len(hosts)} 个宿主)")
+
+        business_logger.info(f"成功获取工作空间记忆总量: {total_count} (来自 {len(rows)} 个宿主)")
         return result
-        
+
     except HTTPException:
         raise
     except Exception as e:
         business_logger.error(f"获取工作空间记忆总量失败(异步): workspace_id={workspace_id} - {str(e)}")
         raise
+
+
+async def get_end_user_memory_counts_async(
+    db,
+    workspace_id: uuid.UUID,
+    end_user_ids: List[uuid.UUID],
+) -> Dict[str, Any]:
+    """批量查询终端用户记忆量（读 end_users.memory_count 字段）。
+
+    仅统计「属于目标空间且 is_active=True」的用户；不属于空间/已删除的 id 不返回
+    （不报错）。id 的合法性与数量上限由 controller 层校验。
+
+    Returns:
+        {"total": int, "items": [{"end_user_id", "other_name", "memory_count"}]}
+    """
+    business_logger.info(
+        f"批量查询终端用户记忆量: workspace_id={workspace_id}, count={len(end_user_ids)}"
+    )
+    from app.repositories.end_user_repository import EndUserRepository
+
+    repo = EndUserRepository(db)
+    rows = await repo.get_memory_counts_by_ids_async(workspace_id, end_user_ids)
+
+    items = [
+        {
+            "end_user_id": str(row.id),
+            "other_name": row.other_name or None,
+            "memory_count": int(row.memory_count or 0),
+        }
+        for row in rows
+    ]
+    total = sum(item["memory_count"] for item in items)
+
+    business_logger.info(f"批量查询终端用户记忆量完成: total={total}, hit={len(items)}")
+    return {"total": total, "items": items}
+
+
+async def get_memory_increment_daily_async(
+    db,
+    workspace_id: uuid.UUID,
+    start_ms: int,
+    end_ms: int,
+) -> Dict[str, Any]:
+    """按时间段逐日返回记忆增量总量（同日取当日最新一条）。
+
+    过滤 memory_increments.created_at（闭区间）；start_ms/end_ms 为毫秒 UTC 时间戳。
+    返回的 date 为代表日期的 UTC 当日 00:00:00.000 毫秒时间戳。
+
+    Returns:
+        {"items": [{"date": int(ms), "total_num": int}]}
+    """
+    from datetime import datetime, timezone
+
+    from app.core.utils.datetime_utils import parse_timestamp_to_utc_naive
+    from app.repositories.memory_increment_repository import MemoryIncrementRepository
+
+    # 毫秒 UTC → naive UTC datetime（DB 按项目约定存 naive UTC）
+    start_dt = parse_timestamp_to_utc_naive(start_ms)
+    end_dt = parse_timestamp_to_utc_naive(end_ms)
+
+    business_logger.info(
+        f"按日查询记忆增量: workspace_id={workspace_id}, start={start_dt}, end={end_dt}"
+    )
+
+    repo = MemoryIncrementRepository(db)
+    rows = await repo.get_daily_latest_by_workspace_async(workspace_id, start_dt, end_dt)
+
+    items = []
+    for day, total_num in rows:
+        # day 为 date；转为该 UTC 日期 00:00:00.000 的毫秒时间戳
+        day_ms = int(
+            datetime(day.year, day.month, day.day, tzinfo=timezone.utc).timestamp() * 1000
+        )
+        items.append({"date": day_ms, "total_num": int(total_num or 0)})
+
+    business_logger.info(f"按日查询记忆增量完成: days={len(items)}")
+    return {"items": items}
 
 
 # ======== RAG 相关服务 ========

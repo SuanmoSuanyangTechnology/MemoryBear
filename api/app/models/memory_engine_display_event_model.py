@@ -7,7 +7,7 @@ PG 只是非关键的展示投影，采用尽力写入（best effort）。
 
 import uuid
 
-from sqlalchemy import Column, DateTime, ForeignKey, String, UniqueConstraint
+from sqlalchemy import Column, DateTime, ForeignKey, Index, String, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 
 from app.core.utils.datetime_utils import utcnow_naive
@@ -38,6 +38,13 @@ class MemoryEngineDisplayEvent(Base):
         ForeignKey("end_users.id"),
         nullable=False,
     )
+    # 冗余列：终端用户所属工作空间，支撑空间级聚合查询（免 JOIN end_users）。
+    # nullable=True 兼容存量回填期与展示写入的容错语义（写入失败不影响主流程）。
+    workspace_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("workspaces.id"),
+        nullable=True,
+    )
     operation_id = Column(UUID(as_uuid=True), nullable=False)
     # EXTRACTION / CROSS_MODAL / EMOTION / FORGETTING / REFLECTION
     engine_type = Column(String(32), nullable=False)
@@ -50,5 +57,13 @@ class MemoryEngineDisplayEvent(Base):
         UniqueConstraint(
             "end_user_id", "engine_type", "operation_id",
             name="uq_engine_display_user_type_op",
+        ),
+        # 空间级聚合分页支撑：按 workspace_id 过滤 + occurred_at 时间窗/排序。
+        # 用户级查询走唯一约束前导列 end_user_id，此处仅为 end_user_id 缺省的
+        # 空间级路径服务。
+        Index(
+            "idx_engine_display_ws_occurred",
+            "workspace_id",
+            occurred_at.desc(),
         ),
     )

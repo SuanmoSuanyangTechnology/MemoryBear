@@ -581,6 +581,7 @@ class WritePipeline:
                                     await MemoryDisplayRecordService.save_written(
                                         summaries=summaries,
                                         end_user_id=self.end_user_id,
+                                        workspace_id=self.memory_config.workspace_id,
                                     )
                                 except Exception as e:
                                     logger.warning(
