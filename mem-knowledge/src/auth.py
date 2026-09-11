@@ -104,6 +104,7 @@ class KbAuthMiddleware(BaseHTTPMiddleware):
         self._gateway = _load_gateway_auth(kb_auth) if kb_auth.auth_mode == "gateway" else None
 
     async def dispatch(self, request: Request, call_next):
+        request.state.kb_legacy_proxy_authenticated = False
         # 应急开关：文件存在即恢复无鉴权状态（仅灰度窗口期，评审稿 6.2）
         if self._kill_switch_active():
             logger.warning("kb auth kill switch ACTIVE — bypassing auth")
@@ -177,6 +178,7 @@ class KbAuthMiddleware(BaseHTTPMiddleware):
             return JSONResponse(status_code=401, content={"detail": "invalid token"})
         if ctx is None:
             # 通道 2：老单体直连豁免（过渡态，NetworkPolicy 兜底受信来源）
+            request.state.kb_legacy_proxy_authenticated = True
             return await call_next(request)
         try:
             request.state.principal = Principal(

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from typing import Any
 
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,6 +12,14 @@ from ..models.owned import Document, KnowledgeMetadata, KnowledgeMetadataBinding
 
 
 class KnowledgeMetadataRepository:
+    @staticmethod
+    def stage_copy_fields(
+        db: AsyncSession,
+        values: list[dict[str, Any]],
+    ) -> None:
+        """Add copied metadata fields without flushing or committing."""
+        db.add_all([KnowledgeMetadata(**value) for value in values])
+
     @staticmethod
     async def create_async(
         db: AsyncSession,
