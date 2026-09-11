@@ -48,6 +48,10 @@ export const getProviderApiKeys = (data: { provider: Provider; is_active?: boole
 export const createProviderApiKeys = (data: KeyConfigModalForm, signal?: AbortSignal) => {
   return request.post('/models/provider/apikeys', data, { signal })
 }
+// Update API keys for all matching models by provider
+export const updateProviderApiKeys = (api_key_id: string, data: { is_active: boolean; }) => {
+  return request.put(`/models/provider/apikeys/${api_key_id}`, data)
+}
 // Delete API keys for all matching models by provider
 export const deleteProviderApiKeys = (api_key_id: string) => {
   return request.delete(`/models/provider/apikeys/${api_key_id}`)
