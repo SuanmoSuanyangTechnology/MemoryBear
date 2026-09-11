@@ -62,6 +62,7 @@ class AsyncChunkStore:
         image_resolver: Any = None,
         embedding_dimension: int | None = None,
         vector_indexed: bool = True,
+        multimodal: bool | None = None,
     ):
         self.client = client
         self.index = collection_name_for_knowledge(knowledge_id)
@@ -71,6 +72,11 @@ class AsyncChunkStore:
         self.image_resolver = image_resolver
         self.embedding_dimension = embedding_dimension
         self.vector_indexed = vector_indexed
+        # Unit-layout index marker. Read-only callers (chunk list) set this
+        # without wiring embedders so they still collapse/filter units correctly.
+        self.multimodal = (
+            multimodal if multimodal is not None else embed_unit_contents is not None
+        )
 
     @staticmethod
     def build_segment_query(
@@ -138,7 +144,7 @@ class AsyncChunkStore:
     def _segment_list_query(self, base: dict[str, Any]) -> dict[str, Any]:
         """Restrict segment listing to chunk_record docs on unit indexes."""
 
-        if self.embed_unit_contents is None:
+        if not self.multimodal:
             return base
         bool_query = base.setdefault("bool", {})
         filters = bool_query.setdefault("filter", [])
@@ -223,7 +229,7 @@ class AsyncChunkStore:
     async def get_by_segment(self, doc_id: str) -> DocumentChunk | None:
         if not await self.client.indices.exists(index=self.index):
             return None
-        if self.embed_unit_contents is not None:
+        if self.multimodal:
             query: dict[str, Any] = {
                 "bool": {
                     "must": [
@@ -257,7 +263,7 @@ class AsyncChunkStore:
     async def add_chunks(self, chunks: list[DocumentChunk]) -> None:
         if not chunks:
             return
-        if self.embed_unit_contents is not None:
+        if self.multimodal:
             await self.add_unit_chunks(chunks)
             return
         embeddings = await self._embed_chunks(chunks)
@@ -285,7 +291,7 @@ class AsyncChunkStore:
 
     async def update_chunk(self, chunk: DocumentChunk) -> int:
         metadata = chunk.metadata or {}
-        if self.embed_unit_contents is not None:
+        if self.multimodal:
             # Unit layout may change with content; rebuild this chunk's units.
             doc_id = str(metadata.get("doc_id") or "")
             if not doc_id:
@@ -322,7 +328,7 @@ class AsyncChunkStore:
     async def delete_by_ids(self, ids: list[str], *, refresh: bool = False) -> int:
         if not ids or not await self.client.indices.exists(index=self.index):
             return 0
-        if self.embed_unit_contents is not None:
+        if self.multimodal:
             # ids are chunk doc_ids; unit docs key off chunk_id.
             deleted = await self.delete_units_by_chunk_ids(ids)
             if refresh:

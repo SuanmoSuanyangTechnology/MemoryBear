@@ -522,20 +522,27 @@ def build_chunk_store(
     client: Any,
     snapshot: ChunkDocumentSnapshot,
     resolved_embedding: ResolvedModelConfig | None = None,
+    *,
+    for_mutation: bool = True,
 ) -> AsyncChunkStore:
     embed = None
     embed_chunks = None
     embed_unit_contents = None
     image_resolver = None
     embedding_dimension = None
-    if resolved_embedding is not None:
+    multimodal = (
+        resolved_embedding is not None and is_qwen3_vl_embedding(resolved_embedding)
+    )
+    # Read-only paths (e.g. chunk listing) only need the multimodal marker to
+    # collapse unit docs; skip building the embedding model client entirely.
+    if resolved_embedding is not None and for_mutation:
         from redbear_model.runtime import RedBearEmbeddings
 
         model = RedBearEmbeddings(
             resolved_embedding,
             client_pool=runtime.model_runtime.pool,
         )
-        if is_qwen3_vl_embedding(resolved_embedding):
+        if multimodal:
             embedding_dimension = QWEN3_VL_EMBEDDING_DIMENSION
 
             async def embed_unit_contents(contents: list[Any]) -> Any:
@@ -566,6 +573,7 @@ def build_chunk_store(
         embedding_dimension=embedding_dimension,
         # Unit indexes are HNSW-backed for both plain-text and multimodal KBs.
         vector_indexed=True,
+        multimodal=multimodal,
     )
 
 
