@@ -114,6 +114,109 @@ class RedBearRerank(BaseDocumentCompressor):
             report_model_gateway_failure(self._config, "rerank", exc, started)
             raise
 
+    @staticmethod
+    def _dashscope_response_value(response: Any, key: str, default: Any = None) -> Any:
+        """同时兼容 DashScope 响应对象和普通字典的字段读取。"""
+        if response is None:
+            return default
+        if isinstance(response, dict):
+            return response.get(key, default)
+
+        try:
+            getter = getattr(response, "get", None)
+        except (AttributeError, KeyError):
+            getter = None
+        if callable(getter):
+            try:
+                return getter(key, default)
+            except (AttributeError, KeyError, TypeError):
+                pass
+
+        try:
+            return getattr(response, key)
+        except (AttributeError, KeyError):
+            return default
+
+    @classmethod
+    def _dashscope_error_message(cls, response: Any, detail: Optional[str] = None) -> str:
+        """保留 DashScope 失败响应中的状态码、错误码和错误信息。"""
+        fields = []
+        for key in ("status_code", "code", "message"):
+            value = cls._dashscope_response_value(response, key)
+            if value not in (None, ""):
+                fields.append(f"{key}: {value}")
+        if detail:
+            fields.append(f"detail: {detail}")
+        return " \n ".join(fields) if fields else (
+            f"DashScope rerank 请求失败: {detail or '未返回可用的错误信息'}"
+        )
+
+    def _rerank_with_dashscope(
+            self,
+            documents: Sequence[Union[str, Document, dict]],
+            query: str,
+            top_n: int,
+    ) -> List[Dict[str, Any]]:
+        """直接解析 DashScope 响应，避免第三方适配器掩盖供应商错误。"""
+        from dashscope import TextReRank
+
+        if not documents:
+            return []
+
+        normalized_documents = [
+            document.page_content if isinstance(document, Document) else document
+            for document in documents
+        ]
+        effective_top_n = (
+            top_n
+            if top_n is None or top_n > 0
+            else self._model.top_n
+        )
+        response = TextReRank.call(
+            model=self._config.model_name,
+            query=query,
+            documents=normalized_documents,
+            top_n=effective_top_n,
+            return_documents=False,
+            api_key=self._config.api_key,
+        )
+
+        status_code = self._dashscope_response_value(response, "status_code")
+        if status_code not in (None, 200, "200"):
+            raise RuntimeError(self._dashscope_error_message(response))
+
+        output = self._dashscope_response_value(response, "output")
+        results = self._dashscope_response_value(output, "results")
+        if results is None:
+            raise RuntimeError(
+                self._dashscope_error_message(
+                    response,
+                    "响应中缺少 output.results",
+                )
+            )
+
+        parsed_results = []
+        for result in results:
+            index = self._dashscope_response_value(result, "index")
+            relevance_score = self._dashscope_response_value(
+                result,
+                "relevance_score",
+            )
+            if index is None or relevance_score is None:
+                raise RuntimeError(
+                    self._dashscope_error_message(
+                        response,
+                        "响应中的 rerank 结果缺少 index 或 relevance_score",
+                    )
+                )
+            parsed_results.append(
+                {
+                    "index": index,
+                    "relevance_score": relevance_score,
+                }
+            )
+        return parsed_results
+
     @network_retry
     def _rerank_with_retry(
             self,
@@ -127,7 +230,5 @@ class RedBearRerank(BaseDocumentCompressor):
             model_instance: JinaRerank = self._model
             return model_instance.rerank(documents=documents, query=query, top_n=top_n)
         if provider == ModelProvider.DASHSCOPE:
-            from langchain_community.document_compressors.dashscope_rerank import DashScopeRerank
-            model_instance: DashScopeRerank = self._model
-            return model_instance.rerank(documents=documents, query=query, top_n=top_n)
+            return self._rerank_with_dashscope(documents, query, top_n)
         raise ValueError(f"不支持的模型提供商: {provider}")

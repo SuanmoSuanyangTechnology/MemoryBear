@@ -165,20 +165,28 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({ refreshTa
         setLoading(true);
         const formValues = form.getFieldsValue(true);
         const save = () => {
-          if (formValues.parser_config?.graphrag?.entity_types) {
-            const entityTypesString = formValues.parser_config.graphrag.entity_types as any as string;
-            formValues.parser_config.graphrag.entity_types = entityTypesString
-              .split('\n')
-              .map((item: string) => item.trim())
-              .filter((item: string) => item.length > 0);
-          }
-
+          const rawEntityTypes = formValues.parser_config?.graphrag?.entity_types as string[] | string | undefined;
+          const entityTypes = Array.isArray(rawEntityTypes)
+            ? rawEntityTypes.map((item) => item.trim()).filter(Boolean)
+            : (rawEntityTypes || '')
+                .split('\n')
+                .map((item) => item.trim())
+                .filter(Boolean);
           const saveType = originalType === 'rebuild' ? currentType : formValues.type || currentType;
           const payload: KnowledgeBaseFormData = {
             ...formValues,
             type: saveType,
             permission_id: formValues.permission_id || 'Private',
             parent_id: datasets?.parent_id || undefined,
+            parser_config: {
+              ...formValues.parser_config,
+              graphrag: formValues.parser_config?.graphrag
+                ? {
+                    ...formValues.parser_config.graphrag,
+                    entity_types: entityTypes,
+                  }
+                : undefined,
+            },
           };
           console.log('Saving payload:', payload);
           const submit = datasets?.id

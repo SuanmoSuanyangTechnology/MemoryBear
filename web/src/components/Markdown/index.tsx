@@ -68,6 +68,36 @@ interface RbMarkdownProps {
   isNeedCopy?: boolean;
 }
 
+/** Image renderer with a text fallback when the source cannot be loaded. */
+const MarkdownImage: FC<any> = ({ src, alt, onError, ...props }) => {
+  const [hasError, setHasError] = useState(false)
+  const isRelativePath = typeof src === 'string' && !/^(?:[a-z][a-z\d+.-]*:|\/\/)/i.test(src) && !src.startsWith('/')
+
+  useEffect(() => {
+    setHasError(false)
+  }, [src])
+
+  // Relative paths may resolve to the application's bundled `/assets/` path.
+  // Render them as text directly so a missing user-provided file cannot be
+  // mistaken for a fatal static asset failure by the global error boundary.
+  if (isRelativePath || !src || hasError) {
+    return <span className="rb:break-all">![]({src})</span>
+  }
+
+  return (
+    <Image
+      src={src}
+      alt={alt}
+      width={200}
+      {...props}
+      onError={(event) => {
+        setHasError(true)
+        onError?.(event)
+      }}
+    />
+  )
+}
+
 /** Build stable components map — form submission handled via FormContext */
 const buildComponents = (isNeedCopy = true) => ({
   h1: ({ children, ...props }: any) => <h1 className="rb:text-2xl rb:font-bold rb:mb-2" {...props}>{children}</h1>,
@@ -93,7 +123,7 @@ const buildComponents = (isNeedCopy = true) => ({
   },
 
   code: ({ children, className, ...props }: any) => <Code children={String(children)} isNeedCopy={isNeedCopy ?? true} className={className || ''} {...props} />,
-  img: ({ src, alt, ...props }: any) => <Image src={src} alt={alt} width={200} {...props} />,
+  img: ({ src, ...props }: any) => <MarkdownImage src={src} {...props} />,
   video: ({ src, ...props }: any) => <VideoBlock node={{ children: [{ properties: { src: src || '' } }] }} {...props} />,
   audio: ({ src, ...props }: any) => <AudioBlock node={{ children: [{ properties: { src: src || '' } }] }} {...props} />,
   a: ({ href, children, ...props }: any) => <Link href={href || '#'} {...props}>{children}</Link>,

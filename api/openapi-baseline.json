@@ -767,7 +767,7 @@
           "V1 - App Message Feedback"
         ],
         "summary": "提交消息反馈（点赞/点踩）",
-        "description": "点赞/点踩 AI 回复（v1 对外，API Key 认证）\n\n幂等设计：重复点击同类型取消反馈；like/dislike 互斥切换。\nuser_id 为外部系统用户标识（other_id），后端解析为终端用户 end_user.id，不存在则拒绝。\n\n请求体无需 payload 包裹，直接传 {\"feedback_type\": \"like|dislike\", \"feedback_content\": \"...\"}。\n与 /v1/app/chat、/v1/memory/read 等接口一致：标量 body 占位 + request.json() 手动解析，\n避免 api_key_auth（Pydantic 模型）与 body 模型共存时 FastAPI 嵌入式校验导致的包裹要求。",
+        "description": "点赞/点踩 AI 回复（v1 对外，API Key 认证）\n\n幂等设计：重复点击同类型取消反馈；like/dislike 互斥切换。\nuser_id 为外部系统用户标识（other_id），后端解析为终端用户 end_user.id，不存在则拒绝。\n请求体无需 payload 包裹，直接传 {\"feedback_type\": \"like|dislike\", \"feedback_content\": \"...\"}。\n与 /v1/app/chat、/v1/memory/read 等接口一致：标量 body 占位 + request.json() 手动解析，\n避免 api_key_auth（Pydantic 模型）与 body 模型共存时 FastAPI 嵌入式校验导致的包裹要求。",
         "operationId": "submit_message_feedback_v1_app_messages__message_id__feedback_post",
         "parameters": [
           {
@@ -7146,7 +7146,7 @@
               }
             ],
             "title": "Conversation Id",
-            "description": "会话ID（用于多轮对话）"
+            "description": "会话 ID（用于多轮对话）"
           },
           "user_id": {
             "anyOf": [
@@ -7158,7 +7158,7 @@
               }
             ],
             "title": "User Id",
-            "description": "用户ID（用于会话管理）"
+            "description": "用户 ID（用于会话管理）"
           },
           "variables": {
             "anyOf": [
@@ -7182,7 +7182,7 @@
           "thinking": {
             "type": "boolean",
             "title": "Thinking",
-            "description": "是否启用深度思考（需Agent配置支持）",
+            "description": "是否启用深度思考（需 Agent 配置支持）",
             "default": false
           },
           "files": {
@@ -7204,7 +7204,7 @@
               }
             ],
             "title": "Version",
-            "description": "指定发布版本ID，不传则使用当前生效版本"
+            "description": "指定发布版本 ID，不传则使用当前生效版本"
           }
         },
         "type": "object",
@@ -10808,7 +10808,7 @@
               }
             ],
             "title": "Upload File Id",
-            "description": "已上传文件ID（local_file时必填）"
+            "description": "已上传文件 ID（local_file 时必填）"
           },
           "url": {
             "anyOf": [
@@ -10820,7 +10820,7 @@
               }
             ],
             "title": "Url",
-            "description": "远程URL（remote_url时必填）"
+            "description": "远程 HTTP(S) URL（remote_url 时必填）"
           },
           "file_type": {
             "anyOf": [
@@ -10832,7 +10832,7 @@
               }
             ],
             "title": "File Type",
-            "description": "具体文件格式（如image/jpg、audio/wav、document/docx、video/mp4）"
+            "description": "具体文件格式（如 image/jpeg、audio/wav）"
           },
           "name": {
             "anyOf": [
@@ -10849,14 +10849,15 @@
           "size": {
             "anyOf": [
               {
-                "type": "integer"
+                "type": "integer",
+                "minimum": 0.0
               },
               {
                 "type": "null"
               }
             ],
             "title": "Size",
-            "description": "文件大小（字节）"
+            "description": "文件大小（字节，不能为负数）"
           }
         },
         "type": "object",
@@ -10865,7 +10866,7 @@
           "transfer_method"
         ],
         "title": "FileInput",
-        "description": "文件输入 Schema"
+        "description": "应用聊天的多模态文件输入。"
       },
       "FileMetadataUpdate": {
         "properties": {
@@ -12778,7 +12779,7 @@
               }
             ],
             "title": "Feedback Content",
-            "description": "反馈内容（点踩时填写原因）"
+            "description": "反馈内容（点踩时填写原因；默认 null）"
           }
         },
         "type": "object",
@@ -12786,7 +12787,7 @@
           "feedback_type"
         ],
         "title": "MessageFeedbackRequest",
-        "description": "消息反馈请求（点赞/点踩）"
+        "description": "消息反馈请求（点赞/点踩）。"
       },
       "MessageReportRequest": {
         "properties": {

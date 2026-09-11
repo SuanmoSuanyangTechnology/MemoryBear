@@ -35,6 +35,7 @@ class IterationRuntime:
             variable_pool: VariablePool,
             cycle_nodes: list,
             cycle_edges: list,
+            workflow_config: dict[str, Any],
     ):
         """
         Initialize the iteration runtime.
@@ -61,10 +62,14 @@ class IterationRuntime:
                           Passed to GraphBuilder when constructing each task's subgraph.
             cycle_edges:  List of edge config dicts connecting nodes within the subgraph.
                           Passed to GraphBuilder alongside cycle_nodes.
+            workflow_config: Runtime workflow config of the parent graph. Its runtime
+                          fields (app_id, workflow_config_id, features, ...) are
+                          inherited by nodes inside the subgraph.
         """
         self.stream = stream
         self.state = state
         self.node_id = node_id
+        self.workflow_config = workflow_config
         self.typed_config = IterationNodeConfig(**config)
         self.looping = True
         self.variable_pool = variable_pool
@@ -97,7 +102,11 @@ class IterationRuntime:
         child_pool = VariablePool()
         child_pool.copy(self.variable_pool)
         builder = GraphBuilder(
-            {"nodes": self.cycle_nodes, "edges": self.cycle_edges},
+            {
+                **self.workflow_config,
+                "nodes": self.cycle_nodes,
+                "edges": self.cycle_edges,
+            },
             stream=self.stream,
             variable_pool=child_pool,
             cycle=self.node_id,

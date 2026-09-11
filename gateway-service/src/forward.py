@@ -1,10 +1,12 @@
 """转发目标解析：路径前缀 → 目标服务（首期 static 配置 → K8s Service DNS）。
 
-Forwarder：普通请求转发——外部路径 /api|/v1 → 内部 /internal/v1，白名单请求头
-透传 + x-* 身份头透传。凭据头按部署模式处理（设计 4.1.2 / 4.2.1）：
-gateway 模式把中间件注入的内部 token 改写为 authorization: Bearer（x-internal-token
-不透传，避免双凭据信源）；direct 模式原样透传外部 authorization / x-api-key 供下游自验
-（Task 4 追加流式转发）。
+Forwarder：统一转发——外部路径 /api|/v1 → 内部 /internal/v1，白名单请求头透传 +
+x-* 身份头透传。凭据头按部署模式处理（设计 4.1.2 / 4.2.1）：gateway 模式把中间件
+注入的内部 token 改写为 authorization: Bearer（x-internal-token 不透传，避免双凭据
+信源）；direct 模式原样透传外部 authorization / x-api-key 供下游自验。
+
+流式/缓冲不分路径配置：一律 send(stream=True) 后按上游响应头分流（响应头驱动，
+见 is_streaming_response）——下载/导出等流式响应逐块透传，JSON 等缓冲交付。
 """
 from __future__ import annotations
 
@@ -33,6 +35,22 @@ logger = logging.getLogger(__name__)
 _FORWARD_HEADERS = ("accept", "accept-language", "content-type", "content-length", "range")
 # 回包剥除的逐跳/长度头：由转发层按块重建（与 Task 3 原逻辑一致）
 _DROP_HEADERS = ("content-length", "transfer-encoding", "connection")
+# 流式内容类型：命中即逐块透传。KB 现状流式响应即下载/导出
+# （file.py/knowledge.py StreamingResponse：application/octet-stream、zip、csv），
+# 无 text/event-stream 端点；新增流式类型加进集合即可，无需路由配置
+_STREAMING_CONTENT_TYPES = frozenset({
+    "application/octet-stream", "application/zip", "text/csv", "text/event-stream",
+})
+
+
+def is_streaming_response(headers) -> bool:
+    """响应头驱动分流：流式内容类型或显式 Content-Disposition: attachment 下载头
+    → 逐块透传；否则缓冲交付。响应侧事实是唯一依据——下载类请求（fetch/a 标签）
+    请求头不携带流式意图，Accept 判别不可行。"""
+    content_type = headers.get("content-type", "").split(";", 1)[0].strip().lower()
+    if content_type in _STREAMING_CONTENT_TYPES:
+        return True
+    return "attachment" in headers.get("content-disposition", "").lower()
 
 
 class TargetRoute(BaseModel):
@@ -64,14 +82,18 @@ class Forwarder:
     def __init__(self, client: httpx.AsyncClient,
                  circuit: CircuitBreaker | None = None,
                  streaming_max_connections: int = 100,
-                 sse_idle_timeout: float = 300.0) -> None:
+                 sse_idle_timeout: float = 300.0,
+                 read_timeout: float = 30.0) -> None:
         self._client = client
         self._circuit = circuit or CircuitBreaker()
         self._streaming_max = streaming_max_connections
         self._active_streams = 0
         self._stream_lock = asyncio.Lock()
-        # SSE 空闲看门狗：读无超时上限，但上游超过该时长不发数据即视为挂死，回收流
+        # 流式空闲看门狗：读无超时上限，但上游超过该时长不发数据即视为挂死，回收流
         self._sse_idle_timeout = sse_idle_timeout
+        # 缓冲分支体读取超时（对齐老 forward() 的 read=30s）：响应头已到、体迟迟
+        # 不来/读断时快速失败，不占满看门狗时长
+        self._read_timeout = read_timeout
 
     def internal_path(self, external_path: str) -> str:
         if external_path.startswith("/internal/v1/"):
@@ -115,40 +137,34 @@ class Forwarder:
         return headers
 
     async def forward(self, request: Request, route: TargetRoute) -> Response:
+        # 熔断门只约束新连接：开路期间新请求直接 502，已建立的流不受影响（评审稿 4.1.4）
         if self._circuit.is_open():
             gateway_circuit_breaker_state.labels(target=route.service).set(1)
             return JSONResponse(status_code=502, content={"detail": "circuit open"})
         gateway_circuit_breaker_state.labels(target=route.service).set(0)
-        # 评审稿 4.1.4：GET/HEAD 对上游 502/503/504 状态码重试 1 次（200ms 抖动），
-        # 传输异常（超时/连不上）同规则重试；非幂等（POST 等）不重试。重试的首次
-        # 5xx 不计数/不记熔断（breaker 只跟踪传输故障），最终响应才按现状记录。
         # request.url.path 不含查询串，query 须单独拼回，否则分页/过滤等参数静默丢失
         url = route.base_url + self.internal_path(request.url.path)
         if request.url.query:
             url += "?" + request.url.query
         headers = self.build_headers(request)
         body = await request.body()
+        # 评审稿 4.1.4：GET/HEAD 对上游 502/503/504 状态码重试 1 次（200ms 抖动），
+        # 传输异常（超时/连不上）同规则重试；非幂等（POST 等）不重试。重试的首次
+        # 5xx 不计数/不记熔断（breaker 只跟踪传输故障），最终响应才按现状记录。
         retriable = request.method in ("GET", "HEAD")
         for attempt in range(2 if retriable else 1):
+            # client.request() 会预读完整响应（send 默认 stream=False），流式响应
+            # 预读既让 aiter_raw 抛 StreamConsumed，又会永远挂起等 EOF——必须先
+            # send(stream=True) 拿未消费的响应；流式/缓冲的分流依据是上游响应头
+            # （content-type / content-disposition，见 is_streaming_response），
+            # 只有拿到响应头才能判定。响应头等待阶段无读超时（QA 导出等生成型
+            # 端点响应头可能晚到；连接建立 connect=5s 兜底）
+            upstream_request = self._client.build_request(
+                request.method, url, headers=headers, content=body,
+                timeout=httpx.Timeout(connect=5.0, read=None, write=30.0, pool=5.0),
+            )
             try:
-                upstream = await self._client.request(
-                    request.method, url, headers=headers, content=body,
-                    timeout=httpx.Timeout(connect=5.0, read=30.0, write=30.0, pool=5.0),
-                )
-                if upstream.status_code in (502, 503, 504) and retriable and attempt == 0:
-                    gateway_forward_retries_total.labels(
-                        target=route.service, method=request.method).inc()
-                    await asyncio.sleep(random.uniform(0.15, 0.25))
-                    continue
-                gateway_forward_requests_total.labels(
-                    target=route.service, status_class=f"{upstream.status_code // 100}xx").inc()
-                self._circuit.record_success()
-                return Response(
-                    content=upstream.content,
-                    status_code=upstream.status_code,
-                    headers={k: v for k, v in upstream.headers.items()
-                             if k.lower() not in _DROP_HEADERS},
-                )
+                upstream = await self._client.send(upstream_request, stream=True)
             except httpx.TimeoutException:
                 gateway_upstream_errors_total.labels(
                     target=route.service, error_type="timeout").inc()
@@ -157,6 +173,7 @@ class Forwarder:
                     return JSONResponse(status_code=504, content={"detail": "upstream timeout"})
                 # 重试间隔 200ms 抖动：避免多个连接同时重试造成惊群
                 await asyncio.sleep(random.uniform(0.15, 0.25))
+                continue
             except httpx.HTTPError:
                 gateway_upstream_errors_total.labels(
                     target=route.service, error_type="connect").inc()
@@ -165,69 +182,102 @@ class Forwarder:
                     return JSONResponse(status_code=502, content={"detail": "upstream unavailable"})
                 # 重试间隔 200ms 抖动：避免多个连接同时重试造成惊群
                 await asyncio.sleep(random.uniform(0.15, 0.25))
+                continue
+            if upstream.status_code in (502, 503, 504) and retriable and attempt == 0:
+                # 5xx 时响应体尚未生成/无意义：关连接重发（流式下载同样受益——
+                # 下载 503 重试一次无害）
+                gateway_forward_retries_total.labels(
+                    target=route.service, method=request.method).inc()
+                await upstream.aclose()
+                await asyncio.sleep(random.uniform(0.15, 0.25))
+                continue
+            # 建连成功即计数；流中途失败不 record_failure（熔断只约束新连接，
+            # 已建立流的中断不代表上游整体不健康）
+            gateway_forward_requests_total.labels(
+                target=route.service, status_class=f"{upstream.status_code // 100}xx").inc()
+            self._circuit.record_success()
+            # 响应头驱动分流：流式类型（下载/导出）逐块透传，其余缓冲交付
+            if is_streaming_response(upstream.headers):
+                return await self._stream_response(request, route, upstream, url)
+            return await self._buffered_response(route, upstream)
 
-    async def forward_stream(self, request: Request, route: TargetRoute) -> Response:
+    async def _stream_response(self, request: Request, route: TargetRoute,
+                               upstream: httpx.Response, url: str) -> Response:
+        # 并发槽在确认是流式响应后才申请：缓冲请求不受 _streaming_max 约束（判型
+        # 前无法预知流式/缓冲，缓冲请求若也先占槽，JSON 并发会被误限到 100）
         async with self._stream_lock:
             if self._active_streams >= self._streaming_max:
+                # 并发槽满：丢弃已建连响应（aclose 中断上游生成），拒收不计失败
+                await upstream.aclose()
                 return JSONResponse(status_code=503, content={"detail": "too many streams"})
             self._active_streams += 1
         gateway_streaming_active_connections.inc()
         active = True
 
         def release_stream() -> None:
-            # 槽位在流真正结束（或建连失败）时释放：forward_stream 返回时流尚未开始，
-            # 若在函数 finally 里释放，并发上限与活跃连接 gauge 将恒为 0
+            # 槽位在流真正结束时释放：_stream_response 返回时流尚未开始，若在
+            # finally 里释放，并发上限与活跃连接 gauge 将恒为 0
             nonlocal active
             if active:
                 active = False
                 self._active_streams -= 1
                 gateway_streaming_active_connections.dec()
 
-        try:
-            url = route.base_url + self.internal_path(request.url.path)
-            if request.url.query:
-                url += "?" + request.url.query
-            headers = self.build_headers(request)
-            body = await request.body()
-            # client.request() 会预读完整响应（send 默认 stream=False）；SSE 是
-            # 无限流——预读既让 aiter_raw 抛 StreamConsumed，又会永远挂起等 EOF。
-            # 必须 send(stream=True) 拿未消费的流式响应。
-            upstream_request = self._client.build_request(
-                request.method, url, headers=headers, content=body,
-                timeout=httpx.Timeout(connect=5.0, read=None, write=30.0, pool=5.0),
-            )
+        async def body_iter():
             try:
-                upstream = await self._client.send(upstream_request, stream=True)
-            except httpx.HTTPError:
+                # 读无超时上限，但空闲超过 sse_idle_timeout（默认 300s）即视为
+                # 上游挂死：看门狗回收，finally 释放并发槽位并关闭上游连接
+                it = upstream.aiter_raw()
+                while True:
+                    try:
+                        chunk = await asyncio.wait_for(
+                            it.__anext__(), timeout=self._sse_idle_timeout)
+                    except StopAsyncIteration:
+                        break
+                    except TimeoutError:
+                        logger.warning("stream idle timeout (%.0fs), closing upstream: %s %s",
+                                       self._sse_idle_timeout, request.method, url)
+                        break
+                    except httpx.HTTPError:
+                        logger.warning("upstream read error, closing stream: %s %s",
+                                       request.method, url)
+                        break
+                    yield chunk
+            finally:
+                # 客户端断连/空闲超时会取消本生成器 → finally 关闭上游（双向取消）
                 release_stream()
-                return JSONResponse(status_code=502, content={"detail": "upstream unavailable"})
+                await upstream.aclose()
+        # 响应头对齐缓冲分支全透传语义：复制上游头并剥逐跳头（content-length 由
+        # 分块传输重建）；Cache-Control 不补写（端到端缓存语义权威在源，大文件
+        # 下载的缓存策略不应被网关改写）；X-Accel-Buffering 强写 no（发给入口
+        # nginx 的本跳指令，防响应被缓冲导致下载/导出无进展）
+        passthrough = {k.lower(): v for k, v in upstream.headers.items()
+                       if k.lower() not in _DROP_HEADERS}
+        passthrough["x-accel-buffering"] = "no"
+        return StreamingResponse(body_iter(), status_code=upstream.status_code,
+                                 headers=passthrough)
 
-            async def body_iter():
-                try:
-                    # SSE 读无超时上限，但空闲超过 sse_idle_timeout（默认 300s）即视为
-                    # 上游挂死：看门狗回收，finally 释放并发槽位并关闭上游连接
-                    it = upstream.aiter_raw()
-                    while True:
-                        try:
-                            chunk = await asyncio.wait_for(
-                                it.__anext__(), timeout=self._sse_idle_timeout)
-                        except StopAsyncIteration:
-                            break
-                        except TimeoutError:
-                            logger.warning("SSE idle timeout (%.0fs), closing upstream: %s %s",
-                                           self._sse_idle_timeout, request.method, url)
-                            break
-                        yield chunk
-                finally:
-                    # 客户端断连/空闲超时会取消本生成器 → finally 关闭上游（双向取消）
-                    release_stream()
-                    await upstream.aclose()
-            content_type = upstream.headers.get("content-type", "text/event-stream")
-            return StreamingResponse(body_iter(), status_code=upstream.status_code,
-                                     media_type=content_type,
-                                     headers={"Cache-Control": "no-cache",
-                                              "X-Accel-Buffering": "no"})
-        except BaseException:
-            # 建连阶段（body 读取/握手）异常：释放槽位后原样抛出
-            release_stream()
-            raise
+    async def _buffered_response(self, route: TargetRoute,
+                                 upstream: httpx.Response) -> Response:
+        # 缓冲交付：响应头已到，体读取给显式 read_timeout（默认 30s，对齐老
+        # forward() 的 read=30）；超时/读断快速失败，不占满流式看门狗时长
+        try:
+            content = await asyncio.wait_for(upstream.aread(), timeout=self._read_timeout)
+        except TimeoutError:
+            gateway_upstream_errors_total.labels(
+                target=route.service, error_type="timeout").inc()
+            self._circuit.record_failure()
+            await upstream.aclose()
+            return JSONResponse(status_code=504, content={"detail": "upstream timeout"})
+        except httpx.HTTPError:
+            gateway_upstream_errors_total.labels(
+                target=route.service, error_type="connect").inc()
+            self._circuit.record_failure()
+            await upstream.aclose()
+            return JSONResponse(status_code=502, content={"detail": "upstream unavailable"})
+        return Response(
+            content=content,
+            status_code=upstream.status_code,
+            headers={k.lower(): v for k, v in upstream.headers.items()
+                     if k.lower() not in _DROP_HEADERS},
+        )

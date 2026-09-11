@@ -1000,6 +1000,14 @@ class ModelApiKeyService:
             data.capability = model_config.capability
             model_name = model_config.model_base.name if model_config.model_base else model_config.name
 
+            # 与单模型创建接口保持一致：原生 SDK 模型不接受任意自定义 API Base URL。
+            _require_supported_api_base(
+                data.provider,
+                data.api_base,
+                model_config.type,
+                data.is_omni,
+            )
+
             validation_result = await ModelConfigService.validate_model_config(
                 db=db,
                 model_name=model_name,

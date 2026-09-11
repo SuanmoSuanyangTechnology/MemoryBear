@@ -5,7 +5,7 @@ import time
 import uuid
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Request, Body, Query, File, UploadFile, HTTPException
+from fastapi import APIRouter, Body, Depends, Request, Query, File, UploadFile, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 from starlette.responses import StreamingResponse
@@ -15,7 +15,10 @@ from app.services.file_storage_service import (
     get_file_storage_service,
     upload_workspace_file,
 )
-from app.core.api_key_auth import require_api_key, require_api_key_self_db
+from app.core.api_key_auth import (
+    require_api_key,
+    require_api_key_self_db,
+)
 from app.core.config import settings
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
@@ -677,6 +680,10 @@ async def submit_human_intervention_api(
         api_key_auth: ApiKeyAuth = None,
         db: Session = Depends(get_db),
 ):
+    execution_id = execution_id.strip()
+    if not execution_id:
+        raise BusinessException("execution_id 不能为空", BizCode.INVALID_PARAMETER)
+
     app_id = _get_app_id(api_key_auth)
     execution = db.query(WorkflowExecution).filter(
         WorkflowExecution.execution_id == execution_id,

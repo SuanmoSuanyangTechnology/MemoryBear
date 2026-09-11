@@ -210,7 +210,7 @@ const RecallTest = forwardRef<RecallTestDrawerRef>((props, ref) => {
     } else if (value === 'weighted_score') {
       form.setFieldsValue({
         reranker_id: undefined,
-        rerank_weights: { semantic_weight: 0.5, participle_weight: 0.5 },
+        rerank_weights: { semantic_weight: 0.7, participle_weight: 0.3 },
         enable_graph_retrieval: 0,
       });
     }

@@ -1254,13 +1254,11 @@ class ConversationService:
             try:
                 conversation = await self.conversation_repo.get_conversation_by_conversation_id_async(
                     conversation_id=conversation_id,
-                    workspace_id=workspace_id
+                    workspace_id=workspace_id,
                 )
                 if conversation.app_id != app_id:
-                    raise BusinessException(
-                        "Conversation does not belong to this app",
-                        BizCode.INVALID_CONVERSATION
-                    )
+                    # 对外接口统一按不存在处理，避免利用 conversation_id 探测其他应用资源。
+                    raise BusinessException("会话不存在", BizCode.NOT_FOUND)
                 # 归属校验：与 get_v1_conversation_messages / 消息反馈接口口径一致，
                 # 避免仅凭 conversation_id 访问其他终端用户的会话或控制台草稿会话。
                 if user_id is not None and str(conversation.user_id) != str(user_id):
@@ -1276,16 +1274,32 @@ class ConversationService:
                     raise BusinessException("会话不存在", BizCode.NOT_FOUND)
                 return conversation
             except ResourceNotFoundException:
-                logger.warning(
-                    "Conversation not found. A new conversation will be created.",
-                    extra={"conversation_id": str(conversation_id)}
-                )
+                # 当前 workspace 中不存在时，必须确认该 ID 是否属于别的 workspace。
+                # 只有全局也不存在才保持旧的“带 conversation_id 创建新会话”兼容行为。
+                try:
+                    await self.conversation_repo.get_conversation_by_conversation_id_async(
+                        conversation_id=conversation_id,
+                    )
+                except ResourceNotFoundException:
+                    logger.warning(
+                        "Conversation not found. A new conversation will be created.",
+                        extra={"conversation_id": str(conversation_id)},
+                    )
+                else:
+                    logger.warning(
+                        "Conversation belongs to a different workspace.",
+                        extra={
+                            "conversation_id": str(conversation_id),
+                            "workspace_id": str(workspace_id),
+                        },
+                    )
+                    raise BusinessException("会话不存在", BizCode.NOT_FOUND)
 
         return await self.create_conversation_async(
             app_id=app_id,
             workspace_id=workspace_id,
             user_id=user_id,
-            is_draft=is_draft
+            is_draft=is_draft,
         )
 
     async def delete_message(

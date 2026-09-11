@@ -413,19 +413,25 @@ def require_api_key_self_db(
                     resource_id=_resource_id,
                 )
 
-            # Set ContextVar for endpoints that use get_current_api_key_auth()
-            _current_api_key_auth.set(_api_key_auth)
-            # Backward-compat: only inject into kwargs if the function expects it
-            func_sig = inspect.signature(func)
-            if 'api_key_auth' in func_sig.parameters:
-                kwargs["api_key_auth"] = _api_key_auth
+            # Set ContextVar for endpoints that use get_current_api_key_auth().
+            # Reset it after the endpoint finishes so direct/reused coroutine calls cannot
+            # accidentally observe authentication from a prior request.
+            context_token = _current_api_key_auth.set(_api_key_auth)
+            try:
+                # Backward-compat: only inject into kwargs if the function expects it
+                func_sig = inspect.signature(func)
+                if 'api_key_auth' in func_sig.parameters:
+                    kwargs["api_key_auth"] = _api_key_auth
 
-            start_time = time.perf_counter()
-            # Bind arguments by name so Request can appear anywhere in the endpoint signature.
-            call_kwargs = dict(kwargs)
-            if 'request' in func_sig.parameters:
-                call_kwargs['request'] = request
-            response = await func(**call_kwargs)
+                start_time = time.perf_counter()
+                # Bind arguments by name so Request can appear anywhere in the endpoint signature.
+                call_kwargs = dict(kwargs)
+                if 'request' in func_sig.parameters:
+                    call_kwargs['request'] = request
+                response = await func(**call_kwargs)
+            finally:
+                _current_api_key_auth.reset(context_token)
+
             end_time = time.perf_counter()
             response_time = (end_time - start_time) * 1000
 
