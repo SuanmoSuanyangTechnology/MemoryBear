@@ -42,7 +42,6 @@ class MemoryEngineDisplayEvent(Base):
     # nullable=True 兼容存量回填期与展示写入的容错语义（写入失败不影响主流程）。
     workspace_id = Column(
         UUID(as_uuid=True),
-        ForeignKey("workspaces.id"),
         nullable=True,
     )
     operation_id = Column(UUID(as_uuid=True), nullable=False)
