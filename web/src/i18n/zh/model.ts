@@ -127,6 +127,7 @@ export const model = {
       round_robin: '顺序执行 - 按顺序依次调用每个模型',
       none: '无',
       remark: '备注',
+      priority: 'Api Key 优先级',
 
       api_key: 'API KEY',
       api_base: 'API Base URL',

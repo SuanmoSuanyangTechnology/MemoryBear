@@ -127,6 +127,7 @@ export const model = {
       round_robin: 'Sequential Execution - Call each model in order',
       none: 'None',
       remark: 'Remark',
+      priority: 'API Key Priority',
 
       api_key: 'API KEY',
       api_base: 'API Base URL',
