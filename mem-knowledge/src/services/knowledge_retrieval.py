@@ -396,6 +396,7 @@ class KnowledgeRetrievalService:
             request,
             preparation,
             candidates,
+            store=store,
             image_query=image_query,
             timings=timings,
             log_id=log_id,
@@ -745,29 +746,18 @@ class KnowledgeRetrievalService:
             )
         finally:
             cls._record_timing(timings, "local_rerank_ms", local_rerank_started_at)
-        # Parent-child mode: swap child hits for their parents so callers receive
-        # the parent block. merge_parent_chunks carries the child score onto the
-        # parent's metadata.score, so the resolved chunk already has its score.
-        ranked_chunks = await store.resolve_parent_chunks(
-            [candidate.chunk for candidate in ranked],
-            target.index_name,
-        )
-        resolved_ranked = [
-            cls._candidate_from_resolved_chunk(chunk, target.knowledge_id, index)
-            for index, chunk in enumerate(ranked_chunks)
-        ]
         cls._log_target_done(
             target,
             len(vector_chunks),
             len(text_chunks),
             len(candidates),
-            len(resolved_ranked),
+            len(ranked),
             started_at,
             local_rerank=True,
             timings=timings,
         )
         return TargetRetrievalResult(
-            candidates=tuple(resolved_ranked),
+            candidates=tuple(ranked),
             entities=tuple(graph_result.entities),
             relationships=tuple(graph_result.relationships),
         )
@@ -897,6 +887,7 @@ class KnowledgeRetrievalService:
         preparation: RetrievalPreparation,
         candidates: Sequence[RetrievalCandidate],
         *,
+        store: AsyncElasticSearchRetrieval | None = None,
         image_query: ImageEmbeddingContent | None = None,
         timings: RetrievalTimings | None = None,
         log_id: str | None = None,
@@ -975,6 +966,10 @@ class KnowledgeRetrievalService:
         )
         result_candidates = ranked[:top_k]
         result = materialize_candidates(result_candidates)
+        if store is not None:
+            result = await cls._resolve_final_parent_chunks(
+                store, result_candidates, result, targets,
+            )
         cls._log_finalize(
             log_id,
             candidates_count,
@@ -1080,24 +1075,43 @@ class KnowledgeRetrievalService:
         return await store.search_units_by_vector(query_vector, options)
 
     @staticmethod
-    def _candidate_from_resolved_chunk(
-        chunk: DocumentChunk,
-        knowledge_id: uuid.UUID,
-        arrival_index: int,
-    ) -> RetrievalCandidate:
-        """Rebuild a candidate after parent resolution, keeping its score."""
+    async def _resolve_final_parent_chunks(
+        store: AsyncElasticSearchRetrieval,
+        candidates: Sequence[RetrievalCandidate],
+        chunks: list[DocumentChunk],
+        targets: Sequence[RetrievalTarget],
+    ) -> list[DocumentChunk]:
+        """Resolve parents only after all ranking, preserving final result order."""
 
-        score = (chunk.metadata or {}).get("score")
-        final = float(score) if score is not None else None
-        return RetrievalCandidate(
-            chunk=chunk,
-            knowledge_id=knowledge_id,
-            semantic_score=None,
-            participle_score=None,
-            graph_score=None,
-            final_score=final,
-            arrival_index=arrival_index,
-        )
+        children_by_kb: dict[uuid.UUID, list[DocumentChunk]] = {}
+        for candidate, chunk in zip(candidates, chunks, strict=True):
+            if chunk.metadata.get("chunk_type") == "child" and chunk.metadata.get("parent_id"):
+                children_by_kb.setdefault(candidate.knowledge_id, []).append(chunk)
+        if not children_by_kb:
+            return chunks
+        indices = {target.knowledge_id: target.index_name for target in targets}
+        resolved_by_id: dict[tuple[uuid.UUID, str], DocumentChunk] = {}
+        for knowledge_id, children in children_by_kb.items():
+            resolved = await store.resolve_parent_chunks(children, indices[knowledge_id])
+            for chunk in resolved:
+                resolved_by_id[(knowledge_id, str(chunk.metadata.get("doc_id")))] = chunk
+
+        result: list[DocumentChunk] = []
+        seen: set[tuple[uuid.UUID, str]] = set()
+        for candidate, chunk in zip(candidates, chunks, strict=True):
+            if chunk.metadata.get("chunk_type") == "child" and chunk.metadata.get("parent_id"):
+                parent = resolved_by_id.get(
+                    (candidate.knowledge_id, str(chunk.metadata["parent_id"]))
+                )
+                if parent is not None:
+                    parent = parent.model_copy(deep=True)
+                    parent.metadata["score"] = chunk.metadata["score"]
+                    chunk = parent
+            key = (candidate.knowledge_id, str(chunk.metadata.get("doc_id")))
+            if key not in seen:
+                seen.add(key)
+                result.append(chunk)
+        return result
 
     @staticmethod
     def _unit_to_chunk(candidate: UnitCandidate) -> DocumentChunk:
