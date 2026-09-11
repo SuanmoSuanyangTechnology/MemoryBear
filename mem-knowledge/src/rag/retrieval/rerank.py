@@ -9,7 +9,14 @@ from redbear_model import ImageEmbeddingContent
 
 from ...api.schemas.rerank import RerankMode
 from ..models.chunk import DocumentChunk
-from .candidates import candidate_identity, chunk_identity, materialize_candidates
+from .candidates import (
+    aggregate_chunk_channel_scores,
+    candidate_identity,
+    has_unit_candidates,
+    materialize_candidates,
+    retrieval_identity,
+    select_top_chunk_units,
+)
 from .models import ModelRuntimeSnapshot, RerankPlan, RetrievalCandidate
 
 
@@ -41,6 +48,8 @@ class _WeightedScoreAdapter:
         plan: RerankPlan,
     ) -> list[RetrievalCandidate]:
         del query
+        if has_unit_candidates(candidates):
+            candidates = aggregate_chunk_channel_scores(candidates)
         ranked = [
             candidate.with_final_score(
                 plan.weights.semantic_weight * (candidate.semantic_score or 0.0)
@@ -84,7 +93,7 @@ class _ModelRerankAdapter:
         }
         result: list[RetrievalCandidate] = []
         for chunk in model_result.chunks:
-            identity = chunk_identity(chunk)
+            identity = retrieval_identity(chunk)
             candidate = candidates_by_identity.get(identity)
             if candidate is None:
                 continue
@@ -116,6 +125,7 @@ class RerankEngine:
         top_k: int,
         score_threshold: float,
     ) -> list[RetrievalCandidate]:
+        unit_ranking = has_unit_candidates(candidates)
         if plan.mode is RerankMode.WEIGHTED_SCORE:
             ranked = await self._weighted.rank(
                 query=query,
@@ -127,7 +137,7 @@ class RerankEngine:
                 query=query,
                 candidates=candidates,
                 plan=plan,
-                top_k=top_k,
+                top_k=len(candidates) if unit_ranking else top_k,
             )
         filtered = [
             candidate
@@ -135,6 +145,8 @@ class RerankEngine:
             if candidate.final_score is not None
             and candidate.final_score > score_threshold
         ]
+        if unit_ranking:
+            return select_top_chunk_units(filtered, top_k)
         return filtered[:top_k]
 
 

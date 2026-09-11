@@ -43,7 +43,9 @@ from ..rag.retrieval.async_elasticsearch import AsyncElasticSearchRetrieval
 from ..rag.retrieval.candidates import (
     RetrievalChannel,
     candidate_from_chunk,
+    collapse_ranked_candidates,
     deduplicate_candidates_first_win,
+    has_unit_candidates,
     materialize_candidates,
     merge_candidates,
 )
@@ -85,6 +87,9 @@ _MAX_RETRIEVAL_WORKERS = 3
 _MAX_MULTIMODAL_RERANK_TEXT_VIEWS = 100
 _MAX_MULTIMODAL_RERANK_IMAGE_VIEWS = 40
 _UNIT_CONTENT = "_unit_content"
+_UNIT_METADATA_KEYS = (
+    _UNIT_CONTENT, "_unit_id", "_unit_kind", "_chunk_id", "_return_chunk_id", "_asset_file_id",
+)
 
 
 def _record_elapsed(
@@ -564,8 +569,7 @@ class KnowledgeRetrievalService:
                         query_vector,
                         vector_options,
                     )
-                    chunks = collapse_units_to_chunks(unit_candidates)
-                    chunks = await store.resolve_parent_chunks(chunks, target.index_name)
+                    chunks = [cls._unit_to_chunk(candidate) for candidate in unit_candidates]
                 else:
                     chunks = await store.search_by_query_vector(
                         query_vector,
@@ -578,15 +582,13 @@ class KnowledgeRetrievalService:
                         "Text query content is unavailable",
                     )
                 if is_qwen3_vl_embedding(target.embedding.resolved):
-                    # Multimodal KB: text query recalls text units (image chunks
-                    # surface via their vision_text text unit), then collapse.
+                    # Keep unit identity for any subsequent global ranking stage.
                     query_vector = normalize_vector(await embedding.aembed_query(text_query))
                     unit_candidates = await store.search_units_by_vector(
                         query_vector,
                         vector_options,
                     )
-                    chunks = collapse_units_to_chunks(unit_candidates)
-                    chunks = await store.resolve_parent_chunks(chunks, target.index_name)
+                    chunks = [cls._unit_to_chunk(candidate) for candidate in unit_candidates]
                 else:
                     chunks = await store.search_by_vector(embedding, text_query, vector_options)
             cls._log_target_done(
@@ -965,6 +967,8 @@ class KnowledgeRetrievalService:
             if len(targets) == 1 and targets[0].params.retrieve_type is not RetrieveType.HYBRID
             else request.top_k
         )
+        if has_unit_candidates(ranked):
+            ranked = collapse_ranked_candidates(ranked)
         result_candidates = ranked[:top_k]
         result = materialize_candidates(result_candidates)
         if store is not None:
@@ -972,7 +976,8 @@ class KnowledgeRetrievalService:
                 store, result_candidates, result, targets,
             )
         for chunk in result:
-            chunk.metadata.pop(_UNIT_CONTENT, None)
+            for key in _UNIT_METADATA_KEYS:
+                chunk.metadata.pop(key, None)
         cls._log_finalize(
             log_id,
             candidates_count,
@@ -1294,8 +1299,11 @@ class KnowledgeRetrievalService:
                 replace(unit, score=score.relevance_score)
             )
 
-        collapsed = collapse_units_to_chunks(scored_units)
-        return ModelRerankResult(chunks=tuple(collapsed[:top_k]), used_fallback=False)
+        ranked_units = sorted(scored_units, key=lambda unit: -unit.score)
+        return ModelRerankResult(
+            chunks=tuple(cls._unit_to_chunk(unit) for unit in ranked_units[:top_k]),
+            used_fallback=False,
+        )
 
     @staticmethod
     def _seed_model_fallback_scores(
