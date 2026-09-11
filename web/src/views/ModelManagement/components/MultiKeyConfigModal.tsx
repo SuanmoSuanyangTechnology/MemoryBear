@@ -5,7 +5,7 @@
  */
 
 import { forwardRef, useImperativeHandle, useState } from 'react';
-import { Form, Input, App, Button, Flex, Switch, Space } from 'antd';
+import { Form, Input, App, Button, Flex, Switch, Space, InputNumber } from 'antd';
 import { useTranslation } from 'react-i18next';
 
 import type { ModelListItem, ProviderModelItem, MultiKeyForm, MultiKeyConfigModalRef, MultiKeyConfigModalProps, Provider } from '../types';
@@ -170,7 +170,8 @@ const MultiKeyConfigModal = forwardRef<MultiKeyConfigModalRef, MultiKeyConfigMod
             <Flex align="center" justify="space-between" gap={12} key={key.id} className="rb:p-3! rb:bg-gray-100 rb:rounded-lg rb:mb-2!">
               <div className="rb:flex-1">
                 <div className="rb:text-[14px] rb:font-medium rb:break-all">{key.credential_masked}</div>
-                <div className="rb:text-gray-600 rb:text-[12px] rb:mt-1">{key.api_base}</div>
+                {key.api_base && <div className="rb:text-gray-600 rb:text-[12px] rb:mt-1">{key.api_base}</div>}
+                {key.remark && <div className="rb:text-gray-600 rb:text-[12px] rb:mt-1">{key.remark}</div>}
               </div>
 
               <Space size={12}>
@@ -205,16 +206,19 @@ const MultiKeyConfigModal = forwardRef<MultiKeyConfigModalRef, MultiKeyConfigMod
           </>
         }
 
-        {source === 'provider' &&
-          <>
-            <Form.Item
-              name="remark"
-              label={t('modelNew.remark')}
-            >
-              <Input placeholder={t('common.pleaseEnter')} />
-            </Form.Item>
-          </>
-        }
+        <Form.Item
+          name="priority"
+          label={t('modelNew.priority')}
+        >
+          <InputNumber placeholder={t('common.pleaseEnter')} className="rb:w-full!" />
+        </Form.Item>
+
+        <Form.Item
+          name="remark"
+          label={t('modelNew.remark')}
+        >
+          <Input.TextArea placeholder={t('common.pleaseEnter')} />
+        </Form.Item>
 
         <Form.Item>
           <Button type="primary" block onClick={handleSave} loading={loading}>+ {t('modelNew.add')}</Button>

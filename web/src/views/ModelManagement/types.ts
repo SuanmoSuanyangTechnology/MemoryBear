@@ -282,6 +282,12 @@ export interface CustomModelForm {
   json_output?: boolean;
   function_call?: boolean;
   capability?: Capability[];
+  credential: {
+    api_key: string;
+    api_base?: string;
+    remark?: string;
+    priority?: number;
+  }
 }
 
 /**

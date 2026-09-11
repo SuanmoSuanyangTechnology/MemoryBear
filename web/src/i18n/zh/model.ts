@@ -126,7 +126,8 @@ export const model = {
       load_balance_strategy: '并发策略',
       round_robin: '顺序执行 - 按顺序依次调用每个模型',
       none: '无',
-      remark: '备注',
+      remark: 'API KEY 备注',
+      priority: 'API KEY 优先级',
 
       api_key: 'API KEY',
       api_base: 'API Base URL',

@@ -5,7 +5,7 @@
  */
 
 import { forwardRef, useEffect, useImperativeHandle, useState } from 'react';
-import { Form, Input, App, Checkbox, Button, Row, Col, Select } from 'antd';
+import { Form, Input, App, Checkbox, Button, Row, Col, Select, InputNumber } from 'antd';
 import { useTranslation } from 'react-i18next';
 
 import type { CustomModelForm, ModelListItem, CustomModelModalRef, CustomModelModalProps, Capability, Provider } from '../types';
@@ -240,6 +240,34 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
           name="description"
           label={t('modelNew.description')}
           rules={[{ max: 500 }]}
+        >
+          <Input.TextArea placeholder={t('common.pleaseEnter')} />
+        </Form.Item>
+        <Form.Item
+          name={['credential', "api_key"]}
+          label={t('modelNew.api_key')}
+          rules={[{ required: true, message: t('common.inputPlaceholder', { title: t('modelNew.api_key') }) }]}
+        >
+          <Input.Password placeholder={t('common.pleaseEnter')} />
+        </Form.Item>
+
+        <Form.Item
+          name={['credential', "api_base"]}
+          label={t('modelNew.api_base')}
+        >
+          <Input placeholder="https://api.example.com/v1" />
+        </Form.Item>
+
+        <Form.Item
+          name={['credential', "priority"]}
+          label={t('modelNew.priority')}
+        >
+          <InputNumber placeholder={t('common.pleaseEnter')} className="rb:w-full!" />
+        </Form.Item>
+
+        <Form.Item
+          name={['credential', "remark"]}
+          label={t('modelNew.remark')}
         >
           <Input.TextArea placeholder={t('common.pleaseEnter')} />
         </Form.Item>
