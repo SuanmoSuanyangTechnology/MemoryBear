@@ -5,14 +5,15 @@
 
 import logging
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Tuple
 
-from sqlalchemy import and_, or_, select, text
+from sqlalchemy import Date, DateTime, and_, cast, func, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
+from app.models.end_user_model import EndUser
 from app.models.memory_engine_display_event_model import MemoryEngineDisplayEvent
 
 logger = logging.getLogger(__name__)
@@ -116,102 +117,101 @@ class MemoryEngineDisplayEventRepository:
         # 使用 AT TIME ZONE 转换生成本地日期
         # occurred_at 是 naive UTC，需要先声明为 UTC 再转目标时区
 
-        # 可选时间窗（naive UTC，闭区间）：先过滤事件，再按时区自然日聚合。
-        # window_clause 仅由固定 SQL 片段拼接，值全部走绑定参数，无注入风险。
-        window_clause = ""
-        window_params: Dict[str, Any] = {}
-        if start_time is not None:
-            window_clause += " AND r.occurred_at >= :start_time"
-            window_params["start_time"] = start_time
-        if end_time is not None:
-            window_clause += " AND r.occurred_at <= :end_time"
-            window_params["end_time"] = end_time
-
         is_workspace_level = end_user_id is None
 
+        DisplayEvent = MemoryEngineDisplayEvent
+
+        # 时区自然日表达式：occurred_at 是 naive UTC，先声明为 UTC 再转目标时区，
+        # 最后截断为 date。func.timezone(zone, ts) 等价于 SQL 的
+        # `ts AT TIME ZONE zone`，timezone 走绑定参数，无注入风险。
+        local_date_col = cast(
+            func.timezone(timezone, func.timezone("UTC", DisplayEvent.occurred_at)),
+            Date,
+        ).label("local_date")
+
+        # 分组维度：用户级按 (local_date, engine_type)；
+        # 空间级额外按 end_user_id 拆分，卡片仍按用户维度分组。
+        group_cols = [local_date_col, DisplayEvent.engine_type]
+        extra_select_cols = []
         if is_workspace_level:
-            # 空间级：按冗余列过滤（免 JOIN），聚合键额外含 end_user_id
-            scope_from = "FROM memory_engine_display_records r"
-            scope_where = "r.workspace_id = CAST(:workspace_id AS uuid)"
-            group_extra_select = "r.end_user_id AS end_user_id,"
-            group_extra_key = "end_user_id,"
-            group_by_cols = "local_date, engine_type, end_user_id"
-            count_group_extra = ", r.end_user_id"
-            scope_params: Dict[str, Any] = {"workspace_id": workspace_id}
-        else:
-            # 用户级：JOIN end_users 做归属隔离，聚合键为 (local_date, engine_type)
-            scope_from = (
-                "FROM memory_engine_display_records r "
-                "JOIN end_users u ON u.id = r.end_user_id"
+            group_cols.append(DisplayEvent.end_user_id)
+            extra_select_cols.append(DisplayEvent.end_user_id.label("end_user_id"))
+
+        def _apply_scope_and_window(stmt):
+            """附加作用域隔离与可选时间窗过滤（count 与 keys 查询共用）。"""
+            if is_workspace_level:
+                # 空间级：按冗余列过滤（免 JOIN end_users），
+                # 走 idx_engine_display_ws_occurred。
+                stmt = stmt.select_from(DisplayEvent).where(DisplayEvent.workspace_id == workspace_id)
+            else:
+                # 用户级：JOIN end_users 做归属隔离。
+                stmt = (
+                    stmt.select_from(DisplayEvent)
+                    .join(EndUser, EndUser.id == DisplayEvent.end_user_id)
+                    .where(
+                        DisplayEvent.end_user_id == end_user_id,
+                        EndUser.workspace_id == workspace_id,
+                        EndUser.is_active.is_(True),
+                    )
+                )
+            # 时间窗（naive UTC，闭区间）：先过滤事件，再按时区自然日聚合。
+            if start_time is not None:
+                stmt = stmt.where(DisplayEvent.occurred_at >= start_time)
+            if end_time is not None:
+                stmt = stmt.where(DisplayEvent.occurred_at <= end_time)
+            return stmt
+
+        # 聚合组子查询（按时区自然日 + engine_type[+ end_user_id]），
+        # count 与 keys 查询共用。
+        grouped = (
+            _apply_scope_and_window(
+                select(
+                    local_date_col,
+                    DisplayEvent.engine_type.label("engine_type"),
+                    *extra_select_cols,
+                    func.max(DisplayEvent.occurred_at).label("max_occurred_at"),
+                )
             )
-            scope_where = (
-                "r.end_user_id = CAST(:user_id AS uuid) "
-                "AND u.workspace_id = CAST(:workspace_id AS uuid) "
-                "AND u.is_active = true"
-            )
-            group_extra_select = ""
-            group_extra_key = ""
-            group_by_cols = "local_date, engine_type"
-            count_group_extra = ""
-            scope_params = {"user_id": end_user_id, "workspace_id": workspace_id}
+            .group_by(*group_cols)
+            .subquery("grouped")
+        )
 
         # Step 1: 统计聚合组总数
-        count_sql = text(f"""
-            SELECT COUNT(*) FROM (
-                SELECT 1
-                {scope_from}
-                WHERE {scope_where}
-                  {window_clause}
-                GROUP BY (r.occurred_at AT TIME ZONE 'UTC' AT TIME ZONE :tz)::date,
-                         r.engine_type{count_group_extra}
-            ) sub
-        """)
-        total_result = await self.db.execute(
-            count_sql,
-            {**scope_params, "tz": timezone, **window_params},
-        )
-        total = total_result.scalar() or 0
+        total = (
+            await self.db.execute(select(func.count()).select_from(grouped))
+        ).scalar() or 0
 
         if total == 0:
             return [], 0
 
-        # Step 2: 获取当前页的聚合键及其 UTC 边界，按 max_occurred_at DESC
+        # Step 2: 获取当前页的聚合键及其 UTC 边界，按 max_occurred_at DESC。
+        # UTC 边界反算：本地日 0 点 / 次日 0 点按时区折回 naive UTC。
         offset = (page - 1) * pagesize
-        keys_sql = text(f"""
-            WITH grouped AS (
-                SELECT
-                    (r.occurred_at AT TIME ZONE 'UTC' AT TIME ZONE :tz)::date AS local_date,
-                    r.engine_type AS engine_type,
-                    {group_extra_select}
-                    MAX(r.occurred_at) AS max_occurred_at
-                {scope_from}
-                WHERE {scope_where}
-                  {window_clause}
-                GROUP BY {group_by_cols}
+        local_ts = cast(grouped.c.local_date, DateTime)
+        start_utc = func.timezone(
+            "UTC", func.timezone(timezone, local_ts)
+        ).label("start_utc")
+        end_utc = func.timezone(
+            "UTC", func.timezone(timezone, local_ts + timedelta(days=1))
+        ).label("end_utc")
+
+        keys_stmt = (
+            select(
+                grouped.c.local_date,
+                grouped.c.engine_type,
+                *([grouped.c.end_user_id] if is_workspace_level else []),
+                grouped.c.max_occurred_at,
+                start_utc,
+                end_utc,
             )
-            SELECT
-                local_date,
-                engine_type,
-                {group_extra_key}
-                max_occurred_at,
-                CAST(local_date AS timestamp)
-                    AT TIME ZONE :tz AT TIME ZONE 'UTC' AS start_utc,
-                (CAST(local_date AS timestamp) + interval '1 day')
-                    AT TIME ZONE :tz AT TIME ZONE 'UTC' AS end_utc
-            FROM grouped
-            ORDER BY max_occurred_at DESC, engine_type ASC
-            LIMIT :limit OFFSET :offset
-        """)
-        keys_query_result = await self.db.execute(
-            keys_sql,
-            {
-                **scope_params,
-                "tz": timezone,
-                "limit": pagesize,
-                "offset": offset,
-                **window_params,
-            },
+            .order_by(
+                grouped.c.max_occurred_at.desc(),
+                grouped.c.engine_type.asc(),
+            )
+            .limit(pagesize)
+            .offset(offset)
         )
+        keys_query_result = await self.db.execute(keys_stmt)
         keys_result = keys_query_result.fetchall()
 
         if not keys_result:

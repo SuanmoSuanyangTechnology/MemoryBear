@@ -317,17 +317,8 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
                 )
                 return
 
-            # 冗余 workspace_id 入库，支撑空间级查询；非法值置 None 不影响投递。
-            workspace_uuid = None
-            raw_workspace_id = getattr(self.ctx.memory_config, "workspace_id", None)
-            if raw_workspace_id is not None:
-                try:
-                    workspace_uuid = uuid.UUID(str(raw_workspace_id))
-                except (ValueError, AttributeError, TypeError):
-                    logger.warning(
-                        f"[ReadPipeLine] workspace_id 不是合法 UUID，读取展示置空: "
-                        f"{raw_workspace_id}"
-                    )
+            # memory_config 为空时取 None
+            workspace_uuid = getattr(self.ctx.memory_config, "workspace_id", None)
 
             snapshot = build_retrieve_snapshot(
                 result=result,
