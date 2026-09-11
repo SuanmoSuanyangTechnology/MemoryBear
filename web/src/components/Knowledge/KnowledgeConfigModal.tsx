@@ -202,7 +202,7 @@ const KnowledgeConfigModal = forwardRef<KnowledgeConfigModalRef, KnowledgeConfig
             onChange={(value) => form.setFieldValue('top_k', value)}
           />
         </FormItem>
-        {!['participle', 'semantic', 'graph'].includes(values?.retrieve_type || '') &&
+        {!['participle', 'semantic', 'graph'].includes(values?.retrieve_type || '') && !(values?.retrieve_type === 'hybrid' && values?.rerank_mode === 'weighted_score') &&
           <FormItem
             name="similarity_threshold"
             label={t('application.similarity_threshold')}
@@ -217,7 +217,7 @@ const KnowledgeConfigModal = forwardRef<KnowledgeConfigModalRef, KnowledgeConfig
             />
           </FormItem>
         }
-        {!['participle', 'graph'].includes(values?.retrieve_type || '') &&
+        {!['participle', 'graph'].includes(values?.retrieve_type || '') && !(values?.retrieve_type === 'hybrid' && values?.rerank_mode === 'weighted_score') &&
           <FormItem
             name="vector_similarity_weight"
             label={t('application.vector_similarity_weight')}
