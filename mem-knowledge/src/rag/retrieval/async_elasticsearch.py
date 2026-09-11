@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from typing import Any, Protocol
@@ -292,13 +293,7 @@ class AsyncChunkStore:
     async def update_chunk(self, chunk: DocumentChunk) -> int:
         metadata = chunk.metadata or {}
         if self.multimodal:
-            # Unit layout may change with content; rebuild this chunk's units.
-            doc_id = str(metadata.get("doc_id") or "")
-            if not doc_id:
-                return 0
-            await self.delete_units_by_chunk_ids([doc_id])
-            await self.add_unit_chunks([chunk])
-            return 1
+            return await self._update_unit_chunk(chunk)
         chunk_type = metadata.get("chunk_type")
         vector = None
         if chunk_type not in {"source", "parent"}:
@@ -324,6 +319,92 @@ class AsyncChunkStore:
         )
         self._raise_on_failed_response(response, "segment update")
         return int(response.get("updated", 0))
+
+    async def _update_unit_chunk(self, chunk: DocumentChunk) -> int:
+        """Prepare content edits without reloading images or deleting existing units."""
+
+        doc_id = str((chunk.metadata or {}).get("doc_id") or "")
+        if not doc_id or not await self.client.indices.exists(index=self.index):
+            return 0
+        existing = {
+            hit["_id"]: hit.get("_source") or {}
+            async for hit in iter_async_search_after_hits(
+                self.client,
+                index=self.index,
+                query={"term": {Field.CHUNK_ID.value: doc_id}},
+                sort=[{Field.UNIT_ID.value: "asc"}],
+                batch_size=ES_FULL_SCAN_BATCH_SIZE,
+            )
+        }
+        record = next(
+            (
+                source for source in existing.values()
+                if source.get(Field.UNIT_KIND.value) == RetrievalUnitKind.CHUNK_RECORD.value
+            ),
+            None,
+        )
+        if record is None:
+            return 0
+        # The edit API changes only the body or QA fields. Keep immutable image
+        # inputs and vision_text from the authoritative stored record.
+        metadata = dict(record.get(Field.METADATA_KEY.value) or {})
+        if (chunk.metadata or {}).get("chunk_type") == "qa":
+            metadata.update(
+                chunk_type="qa",
+                question=chunk.metadata.get("question", ""),
+                answer=chunk.metadata.get("answer", ""),
+            )
+        edited = DocumentChunk(page_content=chunk.page_content, metadata=metadata)
+        actions: list[dict[str, Any]] = []
+        retained_ids: set[str] = set()
+        for unit in build_retrieval_units(edited):
+            old = existing.get(unit.unit_id)
+            vector = None
+            if unit.kind is RetrievalUnitKind.IMAGE:
+                # Editing content does not repair missing image units or replace assets.
+                if old is None:
+                    continue
+                vector = old.get(Field.VECTOR.value)
+            elif unit.kind is RetrievalUnitKind.TEXT:
+                if old is not None and old.get(Field.CONTENT_KEY.value) == unit.content:
+                    vector = old.get(Field.VECTOR.value)
+                else:
+                    if self.embed_unit_contents is None:
+                        raise RuntimeError("Embedding model is required for changed unit text")
+                    vector = list(await self.embed_unit_contents(
+                        [TextEmbeddingContent(text=unit.content)]
+                    ))
+                    if (
+                        not vector
+                        or (self.embedding_dimension and len(vector) != self.embedding_dimension)
+                        or not all(math.isfinite(value) for value in vector)
+                    ):
+                        raise RuntimeError("Embedding result has an invalid vector")
+            if unit.kind is not RetrievalUnitKind.CHUNK_RECORD:
+                unit.metadata["original_page_content"] = edited.page_content
+            actions.append(
+                {
+                    "_id": unit.unit_id,
+                    "_index": self.index,
+                    "_source": self._unit_source(unit, vector),
+                }
+            )
+            retained_ids.add(unit.unit_id)
+
+        # All external preparation has succeeded. Stable IDs replace documents
+        # in place; failed writes never trigger removal of the previous unit set.
+        await async_bulk(self.client, actions, refresh="wait_for")
+        stale_ids = existing.keys() - retained_ids
+        if stale_ids:
+            await async_bulk(
+                self.client,
+                [
+                    {"_op_type": "delete", "_index": self.index, "_id": unit_id}
+                    for unit_id in stale_ids
+                ],
+                refresh="wait_for",
+            )
+        return 1
 
     async def delete_by_ids(self, ids: list[str], *, refresh: bool = False) -> int:
         if not ids or not await self.client.indices.exists(index=self.index):
@@ -454,32 +535,40 @@ class AsyncChunkStore:
             if len(vectors) != len(units):
                 raise RuntimeError("Unit embedding count does not match unit count")
             for unit, vector in zip(units, vectors, strict=True):
-                source: dict[str, Any] = {
-                    Field.UNIT_ID.value: unit.unit_id,
-                    Field.UNIT_KIND.value: unit.kind.value,
-                    Field.UNIT_INDEX.value: unit.unit_index,
-                    Field.CHUNK_ID.value: unit.chunk_id,
-                    Field.RETURN_CHUNK_ID.value: unit.return_chunk_id,
-                    Field.CONTENT_KEY.value: unit.content,
-                    Field.METADATA_KEY.value: unit.metadata,
-                    Field.VECTOR.value: vector,
-                }
-                if unit.asset_file_id is not None:
-                    source[Field.ASSET_FILE_ID.value] = unit.asset_file_id
-                for field, key in (
-                    (Field.CHUNK_TYPE, "chunk_type"),
-                    (Field.QUESTION, "question"),
-                    (Field.ANSWER, "answer"),
-                    (Field.SOURCE_CHUNK_ID, "source_chunk_id"),
-                    (Field.PARENT_ID, "parent_id"),
-                ):
-                    if unit.metadata.get(key):
-                        source[field.value] = unit.metadata[key]
                 actions.append(
-                    {"_id": unit.unit_id, "_index": self.index, "_source": source}
+                    {
+                        "_id": unit.unit_id,
+                        "_index": self.index,
+                        "_source": self._unit_source(unit, vector),
+                    }
                 )
         if actions:
             await async_bulk(self.client, actions)
+
+    @staticmethod
+    def _unit_source(unit: RetrievalUnit, vector: list[float] | None) -> dict[str, Any]:
+        source: dict[str, Any] = {
+            Field.UNIT_ID.value: unit.unit_id,
+            Field.UNIT_KIND.value: unit.kind.value,
+            Field.UNIT_INDEX.value: unit.unit_index,
+            Field.CHUNK_ID.value: unit.chunk_id,
+            Field.RETURN_CHUNK_ID.value: unit.return_chunk_id,
+            Field.CONTENT_KEY.value: unit.content,
+            Field.METADATA_KEY.value: unit.metadata,
+            Field.VECTOR.value: vector,
+        }
+        if unit.asset_file_id is not None:
+            source[Field.ASSET_FILE_ID.value] = unit.asset_file_id
+        for field in (
+            Field.CHUNK_TYPE,
+            Field.QUESTION,
+            Field.ANSWER,
+            Field.SOURCE_CHUNK_ID,
+            Field.PARENT_ID,
+        ):
+            if unit.metadata.get(field.value):
+                source[field.value] = unit.metadata[field.value]
+        return source
 
     async def _embed_units(
         self,
