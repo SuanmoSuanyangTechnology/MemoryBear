@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "memory-profile"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    # 独立迁移链（migrations/，version_table=alembic_version_memory_profile）
+    "alembic>=1.13",
+    "asyncpg>=0.31.0",
+    "auth-sdk>=0.1.0",
+    "fastapi>=0.141.1",
+    "httpx[http2]>=0.28.1",
+    # Neo4j 图数据库驱动（analytics 图数据查询）
+    "neo4j>=5.28",
+    "orjson>=3.10",
+    "pydantic>=2.13.5",
+    "python-dotenv>=1.2.3",
+    # 显式声明：infrastructure/redis 与 utils/redis_cache 直接 import redis
+    # （此前仅由 auth-sdk 传递引入，未声明）
+    "redis>=6.0",
+    "sqlalchemy>=2.0.52",
+    "uvicorn>=0.52.4",
+    # redis_cache key 摘要（xxh64）与序列化，与老单体保持逐字节一致
+    "xxhash>=3.5",
+]
+
+[tool.uv.sources]
+auth-sdk = { path = "../packages/auth-sdk" }
+
+# 包名即 src（src/ 内含子包 controller/infrastructure/...，import 均以 src. 前缀）。
+# find where=["."] 从服务根定位 src 及其子包，显式 include 保证 wheel/path 安装齐全。
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src", "src.*"]
