@@ -44,8 +44,6 @@ class MemoryDisplayRecord(Base):
         nullable=False,
     )
     # 冗余列：终端用户所属工作空间，支撑空间级倒序分页查询。
-    # 不建外键：本表为展示投影（best effort 写入），空间归属可经
-    # end_user_id -> end_users.workspace_id 间接保证，避免外键校验破坏写入容错语义。
     # nullable=True 兼容存量数据回填期与展示写入的容错语义（写入失败不影响主流程）。
     workspace_id = Column(
         UUID(as_uuid=True),
