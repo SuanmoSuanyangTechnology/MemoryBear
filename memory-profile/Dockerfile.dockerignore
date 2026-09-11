@@ -1,0 +1,24 @@
+**
+
+# memory-profile 自身
+!memory-profile/
+!memory-profile/pyproject.toml
+!memory-profile/alembic.ini
+!memory-profile/migrations/
+!memory-profile/migrations/**
+!memory-profile/locales/
+!memory-profile/locales/**
+!memory-profile/src/
+!memory-profile/src/**
+!memory-profile/.env
+
+# auth-sdk 是 path 依赖，随镜像构建
+!packages/
+!packages/auth-sdk/
+!packages/auth-sdk/**
+
+# 放行之后再排掉缓存类文件（后面的规则优先）
+**/__pycache__/**
+**/__pycache__
+**/*.pyc
+**/*.pyo
