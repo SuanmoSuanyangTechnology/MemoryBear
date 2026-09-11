@@ -439,11 +439,12 @@ async def get_memory_increment_daily_async(
     """
     from datetime import datetime, timezone
 
+    from app.core.utils.datetime_utils import parse_timestamp_to_utc_naive
     from app.repositories.memory_increment_repository import MemoryIncrementRepository
 
     # 毫秒 UTC → naive UTC datetime（DB 按项目约定存 naive UTC）
-    start_dt = datetime.fromtimestamp(start_ms / 1000, tz=timezone.utc).replace(tzinfo=None)
-    end_dt = datetime.fromtimestamp(end_ms / 1000, tz=timezone.utc).replace(tzinfo=None)
+    start_dt = parse_timestamp_to_utc_naive(start_ms)
+    end_dt = parse_timestamp_to_utc_naive(end_ms)
 
     business_logger.info(
         f"按日查询记忆增量: workspace_id={workspace_id}, start={start_dt}, end={end_dt}"
