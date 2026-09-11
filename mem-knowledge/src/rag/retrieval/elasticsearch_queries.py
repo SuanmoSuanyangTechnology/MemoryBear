@@ -15,6 +15,20 @@ def normalize_vector(vector: Any) -> list[float]:
     return list(vector)
 
 
+def build_chunk_record_filter() -> dict[str, Any]:
+    """Select authoritative unit records and documents from legacy chunk indexes."""
+
+    return {
+        "bool": {
+            "should": [
+                {"term": {Field.UNIT_KIND.value: "chunk_record"}},
+                {"bool": {"must_not": [{"exists": {"field": Field.UNIT_KIND.value}}]}},
+            ],
+            "minimum_should_match": 1,
+        }
+    }
+
+
 def build_filter_clauses(
     file_names_filter: Sequence[str] | None,
     document_ids_include: Sequence[str] | None,
@@ -236,6 +250,7 @@ def merge_parent_chunks(
 
 
 __all__ = [
+    "build_chunk_record_filter",
     "build_filter_clauses",
     "build_full_text_query",
     "build_parent_lookup_query",
