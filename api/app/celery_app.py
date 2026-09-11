@@ -124,7 +124,6 @@ celery_app.conf.update(
         'app.tasks.do_layer2_dedup_full_scan': {'queue': 'reflection_tasks'},
         'app.tasks.scan_reflection_retry': {'queue': 'periodic_tasks'},
         'app.tasks.regenerate_memory_cache': {'queue': 'periodic_tasks'},
-        'app.tasks.refresh_hot_memory_tags_cache': {'queue': 'periodic_tasks'},
 
         # GDS 拓扑分数：scan 在 periodic 扫描，计算在 memory_heavy 执行
         'app.tasks.scan_gds_topology_score': {'queue': 'periodic_tasks'},
@@ -249,7 +248,6 @@ layer2_reflection_schedule = timedelta(minutes=settings.LAYER2_REFLECTION_INTERV
 layer2_dedup_full_scan_schedule = crontab(hour=settings.LAYER2_DEDUP_FULL_SCAN_HOUR, minute=0)
 reflection_retry_schedule = timedelta(minutes=settings.REFLECTION_RETRY_SCAN_INTERVAL_MINUTES)
 gds_topology_scan_schedule = timedelta(minutes=settings.GDS_TOPOLOGY_SCAN_INTERVAL_MINUTES)
-hot_memory_tags_refresh_schedule = crontab(hour=settings.HOT_MEMORY_TAGS_REFRESH_HOUR, minute=0)
 draft_data_clean_schedule = crontab(hour=settings.DRAFT_DATA_CLEAN_HOUR, minute=0)
 forget_scan_schedule = timedelta(minutes=settings.FORGET_SCAN_INTERVAL_MINUTES)
 # 构建定时任务配置
@@ -315,11 +313,6 @@ beat_schedule_config = {
     "run-gds-topology-score": {
         "task": "app.tasks.scan_gds_topology_score",
         "schedule": gds_topology_scan_schedule,
-        "args": (),
-    },
-    "refresh-hot-memory-tags-cache": {
-        "task": "app.tasks.refresh_hot_memory_tags_cache",
-        "schedule": hot_memory_tags_refresh_schedule,
         "args": (),
     },
     # "scan-idle-conversations": {

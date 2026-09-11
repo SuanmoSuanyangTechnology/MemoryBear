@@ -288,6 +288,32 @@ class EndUserRepository:
             db_logger.error(f"查询工作空间 {workspace_id} 下终端用户时出错: {str(e)}")
             raise
 
+    async def get_memory_tags_by_workspace_async(
+        self, workspace_id: uuid.UUID
+    ) -> List[list]:
+        """获取指定 workspace 下活跃终端用户的 memory_tags 数组列表。
+
+        仅返回 memory_tags 非空的活跃用户，用于热门标签实时聚合。
+
+        Returns:
+            List[list]: 每项为一个用户的 memory_tags（JSONB 数组）
+        """
+        try:
+            result = await self.db.execute(
+                select(EndUser.memory_tags).where(
+                    EndUser.workspace_id == workspace_id,
+                    EndUser.is_active.is_(True),
+                    EndUser.memory_tags.isnot(None),
+                )
+            )
+            return [row[0] for row in result.all() if row[0]]
+        except Exception as e:
+            await self.db.rollback()
+            db_logger.error(
+                f"查询工作空间 {workspace_id} 下 memory_tags 时出错: {str(e)}"
+            )
+            raise
+
     def get_end_users_count_by_workspace(self, workspace_id: uuid.UUID) -> int:
         """获取指定 workspace 下的所有 end_user数量"""
         try:

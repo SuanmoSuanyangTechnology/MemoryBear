@@ -43,6 +43,13 @@ class MemoryDisplayRecord(Base):
         ForeignKey("end_users.id"),
         nullable=False,
     )
+    # 冗余列：终端用户所属工作空间，支撑空间级倒序分页查询。
+    # nullable=True 兼容存量数据回填期与展示写入的容错语义（写入失败不影响主流程）。
+    workspace_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("workspaces.id"),
+        nullable=True,
+    )
     operation_id = Column(UUID(as_uuid=True), nullable=False)
     operation = Column(String(16), nullable=False)  # "WRITE" or "RETRIEVE"
     # 以下三列仅 WRITE 使用，RETRIEVE 存 NULL
@@ -76,6 +83,29 @@ class MemoryDisplayRecord(Base):
         Index(
             "idx_memory_display_retrieve_user_occurred",
             "end_user_id",
+            occurred_at.desc(),
+            id.desc(),
+            postgresql_where=text("operation = 'RETRIEVE'"),
+        ),
+        # WRITE 侧时间窗 + 倒序分页支撑（对应展示接口新增的 start_time/end_time）
+        Index(
+            "idx_memory_display_write_user_occurred",
+            "end_user_id",
+            occurred_at.desc(),
+            id.desc(),
+            postgresql_where=text("operation = 'WRITE'"),
+        ),
+        # 空间级倒序分页支撑（end_user_id 缺省时按 workspace_id 查全空间）
+        Index(
+            "idx_memory_display_write_ws_occurred",
+            "workspace_id",
+            occurred_at.desc(),
+            id.desc(),
+            postgresql_where=text("operation = 'WRITE'"),
+        ),
+        Index(
+            "idx_memory_display_retrieve_ws_occurred",
+            "workspace_id",
             occurred_at.desc(),
             id.desc(),
             postgresql_where=text("operation = 'RETRIEVE'"),

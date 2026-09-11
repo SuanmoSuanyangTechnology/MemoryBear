@@ -5,6 +5,7 @@
 """
 
 import uuid
+from typing import Optional
 
 from fastapi import APIRouter, Depends, Header, Query
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -33,15 +34,25 @@ router = APIRouter(
 # 某类超过该上限时会打 warning，此时深页取不到被截断的部分。
 ALL_ITEM_LIMIT = 1000
 
+def _time_window_error(start_time: Optional[int], end_time: Optional[int]):
+    """校验时间窗：start_time > end_time 时返回 fail 响应，否则返回 None。"""
+    if start_time is not None and end_time is not None and start_time > end_time:
+        return fail(
+            BizCode.INVALID_PARAMETER,
+            "start_time 不能大于 end_time",
+            f"start={start_time}, end={end_time}",
+        )
+    return None
+
 
 @router.get("/all", response_model=ApiResponse)
 async def get_all_memory_display(
-    end_user_id: str = Query(..., description="终端用户 ID"),
     timezone: str = Header(
         ...,
         alias="X-Timezone",
         description="IANA 时区名称，前端必传 useI18n().timeZone，如 Asia/Shanghai",
     ),
+    end_user_id: Optional[str] = Query(None, description="终端用户 ID；不传则查询整个工作空间"),
     page: int = Query(1, ge=1, description="页码，从 1 开始"),
     pagesize: int = Query(10, ge=1, le=100, description="每页数量"),
     include_engines: bool = Query(
@@ -49,6 +60,8 @@ async def get_all_memory_display(
         description="是否包含引擎动态卡片（engines）。false 时不查询该类数据，"
                     "合并列表和 total 都不含它",
     ),
+    start_time: Optional[int] = Query(None, description="起始时间（毫秒 UTC，闭区间）"), # 设置为可选
+    end_time: Optional[int] = Query(None, description="结束时间（毫秒 UTC，闭区间）"),
     language_type: str = Header(default=None, alias="X-Language-Type"),
     current_user: CurrentUserSnapshot = Depends(get_current_user_async),
     db: AsyncSession = Depends(get_async_db),
@@ -77,22 +90,18 @@ async def get_all_memory_display(
             "current_workspace_id is None",
         )
 
-    if not end_user_id or not end_user_id.strip():
-        return fail(
-            BizCode.MISSING_PARAMETER,
-            "end_user_id 不能为空",
-            "end_user_id is required",
-        )
-
-    normalized_end_user_id = end_user_id.strip()
-    try:
-        end_user_uuid = uuid.UUID(normalized_end_user_id)
-    except (ValueError, AttributeError):
-        return fail(
-            BizCode.INVALID_PARAMETER,
-            "无效的 end_user_id",
-            f"'{normalized_end_user_id}' is not a valid UUID",
-        )
+    # end_user_id 可选：传了才校验 UUID 合法性，不传即空间级聚合查询。
+    end_user_uuid = None
+    if end_user_id is not None and end_user_id.strip():
+        normalized_end_user_id = end_user_id.strip()
+        try:
+            end_user_uuid = uuid.UUID(normalized_end_user_id)
+        except (ValueError, AttributeError):
+            return fail(
+                BizCode.INVALID_PARAMETER,
+                "无效的 end_user_id",
+                f"'{normalized_end_user_id}' is not a valid UUID",
+            )
 
     # 验证时区请求头（必传，非法值直接报错，避免按错误时区聚合）
     if not timezone or not timezone.strip():
@@ -111,6 +120,10 @@ async def get_all_memory_display(
             str(e),
         )
 
+    window_error = _time_window_error(start_time, end_time)
+    if window_error is not None:
+        return window_error
+
     try:
         language = get_language_from_header(language_type)
 
@@ -120,6 +133,8 @@ async def get_all_memory_display(
             workspace_id=workspace_id,
             page=1,
             pagesize=ALL_ITEM_LIMIT,
+            start_time=start_time,
+            end_time=end_time,
         )
         retrieved_result = await MemoryRetrievalDisplayService.query_retrieved(
             db=db,
@@ -127,6 +142,8 @@ async def get_all_memory_display(
             workspace_id=workspace_id,
             page=1,
             pagesize=ALL_ITEM_LIMIT,
+            start_time=start_time,
+            end_time=end_time,
         )
         engines_result = None
         if include_engines:
@@ -138,6 +155,8 @@ async def get_all_memory_display(
                 language=language,
                 page=1,
                 pagesize=ALL_ITEM_LIMIT,
+                start_time=start_time,
+                end_time=end_time,
             )
 
         # 三个 Service 都用同一个归属校验，任一为 None 说明用户不在当前工作空间
@@ -203,21 +222,25 @@ async def get_all_memory_display(
         )
         return fail(BizCode.INTERNAL_ERROR, "展示记录查询失败", str(e))
 
-
 @router.get("/written", response_model=ApiResponse)
 async def get_written_memories(
-    end_user_id: str = Query(..., description="终端用户 ID"),
+    end_user_id: Optional[str] = Query(None, description="终端用户 ID；不传则查询整个工作空间"),
     page: int = Query(1, ge=1, description="页码，从 1 开始"),
     pagesize: int = Query(10, ge=1, le=100, description="每页数量"),
+    start_time: Optional[int] = Query(None, description="起始时间（毫秒 UTC，闭区间）"),
+    end_time: Optional[int] = Query(None, description="结束时间（毫秒 UTC，闭区间）"),
     current_user: CurrentUserSnapshot = Depends(get_current_user_async),
     db: AsyncSession = Depends(get_async_db),
 ) -> dict:
     """获取写入展示记录列表
 
-    返回指定用户的写入记忆展示记录，按 occurred_at 倒序分页。
+    - 传 end_user_id：返回指定用户的写入记忆展示记录；
+    - 不传 end_user_id：返回当前工作空间的全部写入记录（空间级），
+      每项额外携带 end_user_id 字段区分归属。
 
-    memory_type 始终返回稳定英文枚举，由前端负责展示文案映射；name 和
-    content 保持记忆生成时的原始语言，不受 X-Language-Type 影响。
+    统一按 occurred_at 倒序分页。memory_type 始终返回稳定英文枚举，由前端
+    负责展示文案映射；name 和 content 保持记忆生成时的原始语言，不受
+    X-Language-Type 影响。
     """
     workspace_id = current_user.current_workspace_id
     if workspace_id is None:
@@ -227,30 +250,32 @@ async def get_written_memories(
             "current_workspace_id is None",
         )
 
-    if not end_user_id or not end_user_id.strip():
-        return fail(
-            BizCode.MISSING_PARAMETER,
-            "end_user_id 不能为空",
-            "end_user_id is required",
-        )
+    # end_user_id 可选：传了才校验 UUID 合法性，不传即空间级查询。
+    end_user_uuid = None
+    if end_user_id is not None and end_user_id.strip():
+        normalized_end_user_id = end_user_id.strip()
+        try:
+            end_user_uuid = uuid.UUID(normalized_end_user_id)
+        except (ValueError, AttributeError):
+            return fail(
+                BizCode.INVALID_PARAMETER,
+                "无效的 end_user_id",
+                f"'{normalized_end_user_id}' is not a valid UUID",
+            )
 
-    normalized_end_user_id = end_user_id.strip()
-    try:
-        end_user_uuid = uuid.UUID(normalized_end_user_id)
-    except (ValueError, AttributeError):
-        return fail(
-            BizCode.INVALID_PARAMETER,
-            "无效的 end_user_id",
-            f"'{normalized_end_user_id}' is not a valid UUID",
-        )
+    window_error = _time_window_error(start_time, end_time)
+    if window_error is not None:
+        return window_error
 
     try:
         query_result = await MemoryDisplayRecordService.query_written(
             db=db,
-            end_user_id=end_user_uuid,
             workspace_id=workspace_id,
             page=page,
             pagesize=pagesize,
+            end_user_id=end_user_uuid,
+            start_time=start_time,
+            end_time=end_time,
         )
         if query_result is None:
             return fail(
@@ -279,19 +304,23 @@ async def get_written_memories(
         )
         return fail(BizCode.INTERNAL_ERROR, "写入展示记录查询失败", str(e))
 
-
 @router.get("/retrieved", response_model=ApiResponse)
 async def get_retrieved_memories(
-    end_user_id: str = Query(..., description="终端用户 ID"),
+    end_user_id: Optional[str] = Query(None, description="终端用户 ID；不传则查询整个工作空间"),
     page: int = Query(1, ge=1, description="页码，从 1 开始"),
     pagesize: int = Query(10, ge=1, le=100, description="每页数量"),
+    start_time: Optional[int] = Query(None, description="起始时间（毫秒 UTC，闭区间）"),
+    end_time: Optional[int] = Query(None, description="结束时间（毫秒 UTC，闭区间）"),
     current_user: CurrentUserSnapshot = Depends(get_current_user_async),
     db: AsyncSession = Depends(get_async_db),
 ) -> dict:
     """获取读取展示卡片列表
 
-    一次用户可见的记忆检索对应一条记录，按 occurred_at 倒序分页。
+    - 传 end_user_id：返回指定用户的读取展示卡片；
+    - 不传 end_user_id：返回当前工作空间的全部读取卡片（空间级），
+      每项额外携带 end_user_id 字段区分归属。
 
+    一次用户可见的记忆检索对应一条记录，按 occurred_at 倒序分页。
     search_mode 始终返回稳定英文枚举，由前端负责展示文案映射；content
     是检索发生时按当时记忆语言聚合的快照，查询时不再翻译。
     """
@@ -303,30 +332,32 @@ async def get_retrieved_memories(
             "current_workspace_id is None",
         )
 
-    if not end_user_id or not end_user_id.strip():
-        return fail(
-            BizCode.MISSING_PARAMETER,
-            "end_user_id 不能为空",
-            "end_user_id is required",
-        )
+    # end_user_id 可选：传了才校验 UUID 合法性，不传即空间级查询。
+    end_user_uuid = None
+    if end_user_id is not None and end_user_id.strip():
+        normalized_end_user_id = end_user_id.strip()
+        try:
+            end_user_uuid = uuid.UUID(normalized_end_user_id)
+        except (ValueError, AttributeError):
+            return fail(
+                BizCode.INVALID_PARAMETER,
+                "无效的 end_user_id",
+                f"'{normalized_end_user_id}' is not a valid UUID",
+            )
 
-    normalized_end_user_id = end_user_id.strip()
-    try:
-        end_user_uuid = uuid.UUID(normalized_end_user_id)
-    except (ValueError, AttributeError):
-        return fail(
-            BizCode.INVALID_PARAMETER,
-            "无效的 end_user_id",
-            f"'{normalized_end_user_id}' is not a valid UUID",
-        )
+    window_error = _time_window_error(start_time, end_time)
+    if window_error is not None:
+        return window_error
 
     try:
         query_result = await MemoryRetrievalDisplayService.query_retrieved(
             db=db,
-            end_user_id=end_user_uuid,
             workspace_id=workspace_id,
             page=page,
             pagesize=pagesize,
+            end_user_id=end_user_uuid,
+            start_time=start_time,
+            end_time=end_time,
         )
         if query_result is None:
             return fail(
@@ -355,27 +386,31 @@ async def get_retrieved_memories(
         )
         return fail(BizCode.INTERNAL_ERROR, "读取展示记录查询失败", str(e))
 
-
 @router.get("/engines", response_model=ApiResponse)
 async def get_engine_display_cards(
-    end_user_id: str = Query(..., description="终端用户 ID"),
     timezone: str = Header(
         ...,
         alias="X-Timezone",
         description="IANA 时区名称，前端必传 useI18n().timeZone，如 Asia/Shanghai",
     ),
+    end_user_id: Optional[str] = Query(None, description="终端用户 ID；不传则查询整个工作空间"),
     page: int = Query(1, ge=1, description="页码，从 1 开始"),
     pagesize: int = Query(10, ge=1, le=100, description="每页数量"),
+    start_time: Optional[int] = Query(None, description="起始时间（毫秒 UTC，闭区间）"),
+    end_time: Optional[int] = Query(None, description="结束时间（毫秒 UTC，闭区间）"),
     language_type: str = Header(default=None, alias="X-Language-Type"),
     current_user: CurrentUserSnapshot = Depends(get_current_user_async),
     db: AsyncSession = Depends(get_async_db),
 ) -> dict:
     """获取引擎动态展示卡片列表
 
-    按"指定时区下的自然日 + 引擎类型"聚合事件并返回卡片。
+    - 传 end_user_id：返回指定用户的引擎卡片；
+    - 不传 end_user_id：返回当前工作空间的全部引擎卡片（空间级，仍按用户维度
+      拆分），每张卡片额外携带 end_user_id。
 
-    engine_type 始终返回 EXTRACTION、CROSS_MODAL 或 EMOTION，
-    由前端负责展示文案映射；X-Language-Type 仅控制 name/content 文案。
+    按"指定时区下的自然日 + 引擎类型"聚合事件并返回卡片。engine_type 始终返回
+    EXTRACTION、CROSS_MODAL 或 EMOTION，由前端负责展示文案映射；X-Language-Type
+    仅控制 name/content 文案。
 
     聚合边界必须在服务端确定，因此 X-Timezone 为必传请求头，
     前端统一传全局时区设置（useI18n().timeZone），
@@ -389,22 +424,18 @@ async def get_engine_display_cards(
             "current_workspace_id is None",
         )
 
-    if not end_user_id or not end_user_id.strip():
-        return fail(
-            BizCode.MISSING_PARAMETER,
-            "end_user_id 不能为空",
-            "end_user_id is required",
-        )
-
-    normalized_end_user_id = end_user_id.strip()
-    try:
-        end_user_uuid = uuid.UUID(normalized_end_user_id)
-    except (ValueError, AttributeError):
-        return fail(
-            BizCode.INVALID_PARAMETER,
-            "无效的 end_user_id",
-            f"'{normalized_end_user_id}' is not a valid UUID",
-        )
+    # end_user_id 可选：传了才校验 UUID 合法性，不传即空间级查询。
+    end_user_uuid = None
+    if end_user_id is not None and end_user_id.strip():
+        normalized_end_user_id = end_user_id.strip()
+        try:
+            end_user_uuid = uuid.UUID(normalized_end_user_id)
+        except (ValueError, AttributeError):
+            return fail(
+                BizCode.INVALID_PARAMETER,
+                "无效的 end_user_id",
+                f"'{normalized_end_user_id}' is not a valid UUID",
+            )
 
     # 验证时区请求头（必传，非法值直接报错，避免按错误时区聚合）
     if not timezone or not timezone.strip():
@@ -423,16 +454,22 @@ async def get_engine_display_cards(
             str(e),
         )
 
+    window_error = _time_window_error(start_time, end_time)
+    if window_error is not None:
+        return window_error
+
     try:
         language = get_language_from_header(language_type)
         query_result = await MemoryEngineDisplayService.query_cards(
             db=db,
-            end_user_id=end_user_uuid,
             workspace_id=workspace_id,
             timezone=tz_name,
             language=language,
             page=page,
             pagesize=pagesize,
+            end_user_id=end_user_uuid,
+            start_time=start_time,
+            end_time=end_time,
         )
         if query_result is None:
             return fail(
