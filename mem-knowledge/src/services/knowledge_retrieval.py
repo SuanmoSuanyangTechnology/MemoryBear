@@ -84,6 +84,7 @@ _SOURCE_INDEX = "_retrieval_source_index"
 _MAX_RETRIEVAL_WORKERS = 3
 _MAX_MULTIMODAL_RERANK_TEXT_VIEWS = 100
 _MAX_MULTIMODAL_RERANK_IMAGE_VIEWS = 40
+_UNIT_CONTENT = "_unit_content"
 
 
 def _record_elapsed(
@@ -970,6 +971,8 @@ class KnowledgeRetrievalService:
             result = await cls._resolve_final_parent_chunks(
                 store, result_candidates, result, targets,
             )
+        for chunk in result:
+            chunk.metadata.pop(_UNIT_CONTENT, None)
         cls._log_finalize(
             log_id,
             candidates_count,
@@ -1126,6 +1129,7 @@ class KnowledgeRetrievalService:
             _return_chunk_id=candidate.return_chunk_id,
             score=candidate.score,
         )
+        metadata[_UNIT_CONTENT] = candidate.content
         if candidate.asset_file_id is not None:
             metadata["_asset_file_id"] = candidate.asset_file_id
         chunk.metadata = metadata
@@ -1148,6 +1152,7 @@ class KnowledgeRetrievalService:
             score = float(metadata.get("score") or 0)
             chunk_id = str(metadata.get("_chunk_id") or metadata.get("doc_id") or "")
             kind_raw = metadata.get("_unit_kind") or RetrievalUnitKind.TEXT.value
+            unit_content = metadata.get(_UNIT_CONTENT)
             candidates.append(
                 UnitCandidate(
                     unit_id=str(metadata.get("_unit_id") or f"{chunk_id}:text"),
@@ -1159,7 +1164,7 @@ class KnowledgeRetrievalService:
                     ),
                     kind=RetrievalUnitKind(kind_raw),
                     asset_file_id=metadata.get("_asset_file_id"),
-                    content=chunk.page_content,
+                    content=unit_content if isinstance(unit_content, str) else chunk.page_content,
                     score=score,
                     chunk=chunk,
                 )

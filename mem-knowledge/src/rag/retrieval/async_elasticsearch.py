@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
+from dataclasses import replace
 from typing import Any, Protocol
 
 from elasticsearch.helpers import async_bulk
@@ -701,7 +702,7 @@ class AsyncElasticSearchRetrieval:
         # Image-chunk text units store vision_text as content for retrieval; the
         # chunk's real markdown body is in metadata.original_page_content.
         original = metadata.pop("original_page_content", None)
-        if isinstance(original, str) and original.strip():
+        if isinstance(original, str):
             page_content = original
         chunk = DocumentChunk(
             page_content=page_content,
@@ -747,7 +748,7 @@ class AsyncElasticSearchRetrieval:
             candidate = self._hit_to_unit_candidate(hit, score)
             if candidate is not None:
                 result.append(candidate)
-        return result
+        return await self._materialize_unit_records(result, options.indices)
 
     async def search_units_full_text(
         self,
@@ -790,6 +791,49 @@ class AsyncElasticSearchRetrieval:
             candidate = self._hit_to_unit_candidate(hit, score)
             if candidate is not None:
                 result.append(candidate)
+        return await self._materialize_unit_records(result, options.indices)
+
+    async def _materialize_unit_records(
+        self,
+        candidates: list[UnitCandidate],
+        index: str,
+    ) -> list[UnitCandidate]:
+        """Load return bodies in one batch without replacing unit retrieval inputs."""
+
+        if not candidates:
+            return []
+        chunk_ids = list(dict.fromkeys(candidate.chunk_id for candidate in candidates))
+        response = await self.client.search(
+            index=index,
+            size=len(chunk_ids),
+            query={
+                "bool": {
+                    "filter": [
+                        {"terms": {Field.CHUNK_ID.value: chunk_ids}},
+                        {"term": {Field.UNIT_KIND.value: RetrievalUnitKind.CHUNK_RECORD.value}},
+                    ]
+                }
+            },
+            source_excludes=[Field.VECTOR.value],
+            allow_partial_search_results=False,
+        )
+        self._raise_on_failed_response(response, "unit record lookup")
+        records = {
+            str((hit.get("_source") or {}).get(Field.CHUNK_ID.value)): (
+                AsyncChunkStore.hit_to_chunk(hit)
+            )
+            for hit in (response.get("hits") or {}).get("hits", [])
+        }
+        result: list[UnitCandidate] = []
+        for candidate in candidates:
+            record = records.get(candidate.chunk_id)
+            if record is None:
+                result.append(candidate)
+                continue
+            chunk = record.model_copy(deep=True)
+            chunk.metadata.pop("original_page_content", None)
+            chunk.metadata["score"] = candidate.score
+            result.append(replace(candidate, chunk=chunk))
         return result
 
     async def resolve_parent_chunks(
