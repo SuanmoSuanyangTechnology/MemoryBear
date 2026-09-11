@@ -26,3 +26,10 @@ class Field(StrEnum):
     ANSWER = "answer"
     SOURCE_CHUNK_ID = "source_chunk_id"
     PARENT_ID = "parent_id"
+    # Retrieval-unit fields (multimodal qwen3-vl indexes only).
+    UNIT_ID = "unit_id"
+    UNIT_KIND = "unit_kind"
+    UNIT_INDEX = "unit_index"
+    CHUNK_ID = "chunk_id"
+    RETURN_CHUNK_ID = "return_chunk_id"
+    ASSET_FILE_ID = "asset_file_id"

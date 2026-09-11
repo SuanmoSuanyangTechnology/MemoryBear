@@ -10,7 +10,7 @@ from elasticsearch import BadRequestError, NotFoundError
 
 from ...utils.datetime_utils import utcnow_naive
 from ..models.chunk import DocumentChunk
-from ..retrieval.elasticsearch_queries import raise_on_shard_failures
+from ..retrieval.elasticsearch_queries import build_chunk_record_filter, raise_on_shard_failures
 from ..vdb.pit_search import iter_async_search_after_hits
 from .models import (
     AffectedProjectionKeys,
@@ -182,6 +182,7 @@ class GraphElasticsearchStore:
                         {"term": {"metadata.knowledge_id": knowledge_id}},
                         {"term": {"metadata.document_id": document_id}},
                         {"term": {"metadata.status": 1}},
+                        build_chunk_record_filter(),
                     ]
                 }
             },

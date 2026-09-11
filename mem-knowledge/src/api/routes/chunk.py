@@ -131,10 +131,20 @@ async def get_chunks(
             document_id,
             principal,
         )
+        # Listing must resolve the embedding config so multimodal (unit) indexes
+        # are recognized and collapsed to chunk records; otherwise every unit of
+        # a chunk would surface as a duplicate row.
+        resolved_embedding = await chunk_service.resolve_embedding_config(
+            db,
+            snapshot,
+            principal,
+        )
     store = chunk_service.build_chunk_store(
         runtime,
         await runtime.elasticsearch.client(),
         snapshot,
+        resolved_embedding,
+        for_mutation=False,
     )
     return _success(
         request,
@@ -281,10 +291,17 @@ async def get_chunk(
             document_id,
             principal,
         )
+        resolved_embedding = await chunk_service.resolve_embedding_config(
+            db,
+            snapshot,
+            principal,
+        )
     store = chunk_service.build_chunk_store(
         runtime,
         await runtime.elasticsearch.client(),
         snapshot,
+        resolved_embedding,
+        for_mutation=False,
     )
     chunk = await chunk_service.require_owned_chunk(store, snapshot, doc_id)
     return _success(
