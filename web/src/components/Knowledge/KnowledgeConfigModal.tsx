@@ -66,7 +66,7 @@ const KnowledgeConfigModal = forwardRef<KnowledgeConfigModalRef, KnowledgeConfig
   }
   const handleChangeMode = (value?: string | null) => {
     if (value === 'reranking_model') {
-      form.setFieldValue('rerank_weights', null)
+      form.setFieldsValue({ rerank_weights: null, enable_graph_retrieval: 0 });
     } else if (value === 'weighted_score') {
       form.setFieldsValue({
         reranker_id: null,
@@ -126,17 +126,6 @@ const KnowledgeConfigModal = forwardRef<KnowledgeConfigModalRef, KnowledgeConfig
           />
         </FormItem>
         {(values?.retrieve_type === 'hybrid') && <>
-          <Form.Item
-            name="enable_graph_retrieval"
-            getValueProps={(value: 0 | 1 | undefined) => ({ checked: value === 1 })}
-            getValueFromEvent={(checked: boolean) => checked ? 1 : 0}
-            initialValue={0}
-            label={t('knowledgeBase.hybridIsHasGraph')}
-            layout="horizontal"
-          >
-            <Switch checkedChildren={t('knowledgeBase.yes')} unCheckedChildren={t('knowledgeBase.no')} />
-          </Form.Item>
-
           <Form.Item name="rerank_mode"
             label={t('application.rerank_mode')}
             rules={[{ required: true, message: t('common.pleaseSelect') }]}
@@ -153,7 +142,18 @@ const KnowledgeConfigModal = forwardRef<KnowledgeConfigModalRef, KnowledgeConfig
               onChange={(value) => handleChangeMode(value)}
             />
           </Form.Item>
-
+          {values?.rerank_mode === 'reranking_model' &&
+            <Form.Item
+              name="enable_graph_retrieval"
+              getValueProps={(value: 0 | 1 | undefined) => ({ checked: value === 1 })}
+              getValueFromEvent={(checked: boolean) => checked ? 1 : 0}
+              initialValue={0}
+              label={t('knowledgeBase.hybridIsHasGraph')}
+              layout="horizontal"
+            >
+              <Switch checkedChildren={t('knowledgeBase.yes')} unCheckedChildren={t('knowledgeBase.no')} />
+            </Form.Item>
+          }
           <FormItem
             name="reranker_id"
             label={t('application.rearrangementModel')}
@@ -202,7 +202,7 @@ const KnowledgeConfigModal = forwardRef<KnowledgeConfigModalRef, KnowledgeConfig
             onChange={(value) => form.setFieldValue('top_k', value)}
           />
         </FormItem>
-        {!['participle', 'semantic', 'graph'].includes(values?.retrieve_type || '') &&
+        {!['participle', 'semantic', 'graph'].includes(values?.retrieve_type || '') && !(values?.retrieve_type === 'hybrid' && values?.rerank_mode === 'weighted_score') &&
           <FormItem
             name="similarity_threshold"
             label={t('application.similarity_threshold')}
@@ -217,7 +217,7 @@ const KnowledgeConfigModal = forwardRef<KnowledgeConfigModalRef, KnowledgeConfig
             />
           </FormItem>
         }
-        {!['participle', 'graph'].includes(values?.retrieve_type || '') &&
+        {!['participle', 'graph'].includes(values?.retrieve_type || '') && !(values?.retrieve_type === 'hybrid' && values?.rerank_mode === 'weighted_score') &&
           <FormItem
             name="vector_similarity_weight"
             label={t('application.vector_similarity_weight')}
