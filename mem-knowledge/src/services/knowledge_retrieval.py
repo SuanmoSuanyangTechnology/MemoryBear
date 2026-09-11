@@ -502,7 +502,16 @@ class KnowledgeRetrievalService:
                     "KB_VALIDATION_ERROR",
                     "Image query does not support participle retrieval",
                 )
-            chunks = await store.search_by_full_text(text_query, full_text_options)
+            if is_qwen3_vl_embedding(target.embedding.resolved):
+                # Multimodal KB stores units: full-text hits text units only,
+                # then collapse back to chunks (single-channel, no rerank).
+                unit_candidates = await store.search_units_full_text(
+                    text_query,
+                    full_text_options,
+                )
+                chunks = collapse_units_to_chunks(unit_candidates)
+            else:
+                chunks = await store.search_by_full_text(text_query, full_text_options)
             cls._log_target_done(
                 target,
                 0,
