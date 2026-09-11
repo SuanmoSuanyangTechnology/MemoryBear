@@ -510,6 +510,7 @@ class KnowledgeRetrievalService:
                     full_text_options,
                 )
                 chunks = collapse_units_to_chunks(unit_candidates)
+                chunks = await store.resolve_parent_chunks(chunks, target.index_name)
             else:
                 chunks = await store.search_by_full_text(text_query, full_text_options)
             cls._log_target_done(
@@ -562,6 +563,7 @@ class KnowledgeRetrievalService:
                         vector_options,
                     )
                     chunks = collapse_units_to_chunks(unit_candidates)
+                    chunks = await store.resolve_parent_chunks(chunks, target.index_name)
                 else:
                     chunks = await store.search_by_query_vector(
                         query_vector,
@@ -582,6 +584,7 @@ class KnowledgeRetrievalService:
                         vector_options,
                     )
                     chunks = collapse_units_to_chunks(unit_candidates)
+                    chunks = await store.resolve_parent_chunks(chunks, target.index_name)
                 else:
                     chunks = await store.search_by_vector(embedding, text_query, vector_options)
             cls._log_target_done(
@@ -742,18 +745,29 @@ class KnowledgeRetrievalService:
             )
         finally:
             cls._record_timing(timings, "local_rerank_ms", local_rerank_started_at)
+        # Parent-child mode: swap child hits for their parents so callers receive
+        # the parent block. merge_parent_chunks carries the child score onto the
+        # parent's metadata.score, so the resolved chunk already has its score.
+        ranked_chunks = await store.resolve_parent_chunks(
+            [candidate.chunk for candidate in ranked],
+            target.index_name,
+        )
+        resolved_ranked = [
+            cls._candidate_from_resolved_chunk(chunk, target.knowledge_id, index)
+            for index, chunk in enumerate(ranked_chunks)
+        ]
         cls._log_target_done(
             target,
             len(vector_chunks),
             len(text_chunks),
             len(candidates),
-            len(ranked),
+            len(resolved_ranked),
             started_at,
             local_rerank=True,
             timings=timings,
         )
         return TargetRetrievalResult(
-            candidates=tuple(ranked),
+            candidates=tuple(resolved_ranked),
             entities=tuple(graph_result.entities),
             relationships=tuple(graph_result.relationships),
         )
@@ -1064,6 +1078,26 @@ class KnowledgeRetrievalService:
 
         query_vector = normalize_vector(await embedding.aembed_query(text_query))
         return await store.search_units_by_vector(query_vector, options)
+
+    @staticmethod
+    def _candidate_from_resolved_chunk(
+        chunk: DocumentChunk,
+        knowledge_id: uuid.UUID,
+        arrival_index: int,
+    ) -> RetrievalCandidate:
+        """Rebuild a candidate after parent resolution, keeping its score."""
+
+        score = (chunk.metadata or {}).get("score")
+        final = float(score) if score is not None else None
+        return RetrievalCandidate(
+            chunk=chunk,
+            knowledge_id=knowledge_id,
+            semantic_score=None,
+            participle_score=None,
+            graph_score=None,
+            final_score=final,
+            arrival_index=arrival_index,
+        )
 
     @staticmethod
     def _unit_to_chunk(candidate: UnitCandidate) -> DocumentChunk:

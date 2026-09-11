@@ -58,6 +58,11 @@ def collapse_units_to_chunks(
         chunk = candidate.chunk.model_copy(deep=True)
         metadata = dict(chunk.metadata or {})
         metadata["score"] = score
+        # Mark child hits so downstream parent resolution swaps in the parent.
+        # A unit whose return target differs from its own chunk is a child.
+        if candidate.return_chunk_id and candidate.return_chunk_id != candidate.chunk_id:
+            metadata.setdefault("chunk_type", "child")
+            metadata["parent_id"] = candidate.return_chunk_id
         chunk.metadata = metadata
         result.append(chunk)
     return result
