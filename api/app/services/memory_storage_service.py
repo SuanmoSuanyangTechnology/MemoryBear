@@ -817,7 +817,11 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
                     return {
                         "error": True,
                         "subject": file_type.value.lower(),
-                        "classified": classify_llm_error(e, provider=model_info.provider),
+                        "classified": classify_llm_error(
+                            e,
+                            provider=model_info.provider,
+                            is_omni=model_info.is_omni,
+                        ),
                     }
                 response_text = "".join(
                     self._stream_content_to_texts(getattr(response, "content", None))
@@ -957,7 +961,11 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
                 raise
             except Exception as e:
                 logger.error("[TRIAL_RUN_CHAT_STREAM] Final LLM generation failed", exc_info=True)
-                classified = classify_llm_error(e, provider=final_model_info.provider)
+                classified = classify_llm_error(
+                    e,
+                    provider=final_model_info.provider,
+                    is_omni=final_model_info.is_omni,
+                )
                 yield format_sse_message(
                     "error",
                     self._classified_llm_error_data(classified, language),
