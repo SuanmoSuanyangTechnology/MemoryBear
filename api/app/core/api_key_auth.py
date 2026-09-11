@@ -1,5 +1,6 @@
 import asyncio
 import inspect
+import random
 import time
 import uuid
 from contextvars import ContextVar
@@ -56,9 +57,52 @@ def get_current_api_key_auth() -> "ApiKeyAuth":
 
 BATCH_SIZE = 20       # max entries per commit
 BATCH_TIMEOUT = 0.5   # seconds — flush partial batch if no new entries arrive
+BATCH_MAX_ATTEMPTS = 3  # 死锁重试上限（PG 死锁会任选一方回滚，属**预期可重试**错误）
+
+_DEADLOCK_SQLSTATE = "40P01"   # PostgreSQL: deadlock_detected
 
 _log_queue: asyncio.Queue | None = None
 _consumer_task: asyncio.Task | None = None
+
+
+def _is_deadlock(exc: BaseException) -> bool:
+    """判定是否 PG 死锁（SQLSTATE ``40P01``）。
+
+    真实异常藏在两层包装里（实测结构）::
+
+        DBAPIError.orig        → sqlalchemy...asyncpg.Error（类型名只是 "Error"，按类名匹配不可靠）
+        DBAPIError.orig.__cause__ → asyncpg.exceptions.DeadlockDetectedError
+
+    故先看 ``sqlstate``（asyncpg）与 ``pgcode``（psycopg 风格），两者 SQLAlchemy 的
+    适配器都提供；都取不到时才退化为沿 ``__cause__`` 链比对类名。
+    """
+    candidates = [exc, getattr(exc, "orig", None)]
+    for base in list(candidates):
+        if base is not None:
+            candidates.append(getattr(base, "__cause__", None))
+
+    for cur in candidates:
+        if cur is None:
+            continue
+        if getattr(cur, "sqlstate", None) == _DEADLOCK_SQLSTATE:
+            return True
+        if getattr(cur, "pgcode", None) == _DEADLOCK_SQLSTATE:
+            return True
+        if "DeadlockDetected" in type(cur).__name__:
+            return True
+    return False
+
+
+async def _write_batch(batch: list) -> None:
+    counts: dict[uuid.UUID, int] = {}
+    async with get_async_db_context() as db:
+        for log_data in batch:
+            log_data.setdefault("id", uuid.uuid4())
+            await ApiKeyLogRepository.create_async(db, log_data)
+            key_id = log_data["api_key_id"]
+            counts[key_id] = counts.get(key_id, 0) + 1
+        await ApiKeyRepository.bump_usage_async(db, counts)
+        await db.commit()
 
 
 async def _consume_logs():
@@ -79,14 +123,37 @@ async def _consume_logs():
                 break
 
         try:
-            async with get_async_db_context() as db:
-                for log_data in batch:
-                    log_data.setdefault("id", uuid.uuid4())
-                    await ApiKeyLogRepository.create_async(db, log_data)
-                    await ApiKeyRepository.update_usage_async(db, log_data["api_key_id"])
-                await db.commit()
-        except Exception:
-            logger.error("日志批量写入失败 (batch=%d)", len(batch), exc_info=True)
+            for attempt in range(1, BATCH_MAX_ATTEMPTS + 1):
+                try:
+                    await _write_batch(batch)
+                    break
+                except Exception as exc:
+                    if _is_deadlock(exc) and attempt < BATCH_MAX_ATTEMPTS:
+                        # 退避重试：上一个事务已由 get_async_db_context 回滚，
+                        # 重跑本次批（日志 id 在 setdefault 时已固定，重试不会产生重复行）
+                        await asyncio.sleep(random.uniform(0.05, 0.2) * attempt)
+                        continue
+                    logger.error(
+                        "日志批量写入失败 (batch=%d, attempt=%d/%d)",
+                        len(batch), attempt, BATCH_MAX_ATTEMPTS, exc_info=True,
+                    )
+                    # 失败不再静默丢弃：重新入队补写一次
+                    # （_requeued 标记兜住"毒丸"条目，避免无限循环）
+                    requeued = 0
+                    if _log_queue is not None:
+                        for log_data in batch:
+                            if not log_data.get("_requeued"):
+                                log_data["_requeued"] = True
+                                _log_queue.put_nowait(log_data)
+                                requeued += 1
+                    if requeued:
+                        logger.warning("已将 %d 条用量日志重新入队补写", requeued)
+                    else:
+                        logger.error(
+                            "丢弃 %d 条用量日志（重试后仍失败 → 用量/配额统计会偏少）",
+                            len(batch),
+                        )
+                    break
         finally:
             for _ in batch:
                 _log_queue.task_done()
