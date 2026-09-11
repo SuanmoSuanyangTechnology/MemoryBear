@@ -291,10 +291,17 @@ async def get_chunk(
             document_id,
             principal,
         )
+        resolved_embedding = await chunk_service.resolve_embedding_config(
+            db,
+            snapshot,
+            principal,
+        )
     store = chunk_service.build_chunk_store(
         runtime,
         await runtime.elasticsearch.client(),
         snapshot,
+        resolved_embedding,
+        for_mutation=False,
     )
     chunk = await chunk_service.require_owned_chunk(store, snapshot, doc_id)
     return _success(
