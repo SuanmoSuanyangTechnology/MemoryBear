@@ -1,9 +1,3 @@
-/*
- * @Author: ZhaoYing 
- * @Date: 2026-02-03 16:49:33 
- * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-07-01 10:12:44
- */
 /**
  * Group Model Modal
  * Modal for creating and editing composite/group models
@@ -14,7 +8,7 @@ import { forwardRef, useImperativeHandle, useState } from 'react';
 import { Form, Input, App, Select } from 'antd';
 import { useTranslation } from 'react-i18next';
 
-import type { ModelListItem, CompositeModelForm, GroupModelModalRef, GroupModelModalProps, ModelApiKey } from '../types';
+import type { ModelListItem, CompositeModelForm, GroupModelModalRef, GroupModelModalProps } from '../types';
 import RbModal from '@/components/RbModal'
 import CustomSelect from '@/components/CustomSelect'
 import { updateCompositeModel, modelTypeUrl, addCompositeModel } from '@/api/models'
@@ -54,7 +48,6 @@ const GroupModelModal = forwardRef<GroupModelModalRef, GroupModelModalProps>(({
       setModel(model);
       form.setFieldsValue({
         ...model,
-        api_key_ids: model.api_keys,
         logo: model.logo ? { url: model.logo, uid: model.logo, status: 'done', name: 'logo' } : undefined
       })
     } else {
@@ -68,11 +61,10 @@ const GroupModelModal = forwardRef<GroupModelModalRef, GroupModelModalProps>(({
     form
       .validateFields()
       .then((values) => {
-        const { api_key_ids = [], logo, ...rest } = values
+        const { logo, ...rest } = values
 
         const formData: CompositeModelForm = {
           ...rest,
-          api_key_ids: api_key_ids.map(vo => (vo as ModelApiKey).id)
         }
 
         if (logo?.response?.data.file_id) {
@@ -96,7 +88,8 @@ const GroupModelModal = forwardRef<GroupModelModalRef, GroupModelModalProps>(({
   /** Update or create group model */
   const handleUpdate = (data: CompositeModelForm) => {
     setLoading(true)
-    const { type, ...rest } = data
+    const rest = { ...data }
+    delete rest.type
     const res = isEdit
       ? updateCompositeModel(model.id, { ...rest })
       : addCompositeModel(data)
@@ -193,7 +186,7 @@ const GroupModelModal = forwardRef<GroupModelModalRef, GroupModelModalProps>(({
           />
         </Form.Item>
 
-        <Form.Item name="api_key_ids">
+        <Form.Item name="members">
           <ModelImplement type={type} />
         </Form.Item>
       </Form>

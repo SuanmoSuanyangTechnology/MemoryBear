@@ -306,7 +306,6 @@ export interface Model {
   id: string;
   created_at: string;
   updated_at: string;
-  api_keys: ModelAPIKey[];
 }
 
 // 创建用户信息

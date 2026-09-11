@@ -14,13 +14,13 @@ import { useRef, useState, useEffect, forwardRef, useImperativeHandle } from 're
 import { Button, Flex, Row, Col, Tooltip } from 'antd'
 import { useTranslation } from 'react-i18next';
 
-import type { ProviderModelItem, KeyConfigModalRef, ModelListDetailRef, ModelListItem, BaseRef } from './types'
+import type { ProviderModelItem, MultiKeyConfigModalRef, ModelListDetailRef, ModelListItem, BaseRef, Provider } from './types'
 import RbCard from '@/components/RbCard'
 import { getModelNewList } from '@/api/models'
 import PageEmpty from '@/components/Empty/PageEmpty';
 import OverflowTags from '@/components/OverflowTags';
 import Tag from '@/components/Tag';
-import KeyConfigModal from './components/KeyConfigModal'
+import MultiKeyConfigModal from './components/MultiKeyConfigModal'
 import ModelListDetail from './components/ModelListDetail'
 import { getListLogoUrl } from './utils'
 
@@ -29,7 +29,7 @@ import { getListLogoUrl } from './utils'
  */
 const ModelList = forwardRef<BaseRef, { query: any; handleEdit: (vo?: ModelListItem) => void; handleCloseModel: () => void; }>(({ query, handleEdit, handleCloseModel }, ref) => {
   const { t } = useTranslation();
-  const keyConfigModalRef = useRef<KeyConfigModalRef>(null)
+  const multiKeyConfigModalRef = useRef<MultiKeyConfigModalRef>(null)
   const modelListDetailRef = useRef<ModelListDetailRef>(null)
   const [list, setList] = useState<ProviderModelItem[]>([])
 
@@ -53,7 +53,7 @@ const ModelList = forwardRef<BaseRef, { query: any; handleEdit: (vo?: ModelListI
   }
   /** Open key configuration modal */
   const handleKeyConfig = (vo: ProviderModelItem) => {
-    keyConfigModalRef.current?.handleOpen(vo)
+    multiKeyConfigModalRef.current?.handleOpen(vo, vo.provider as unknown as Provider)
   }
 
   /** Expose methods to parent component */
@@ -99,9 +99,9 @@ const ModelList = forwardRef<BaseRef, { query: any; handleEdit: (vo?: ModelListI
         )
       }
 
-      <KeyConfigModal
-        ref={keyConfigModalRef}
-        refresh={getList}
+      <MultiKeyConfigModal
+        ref={multiKeyConfigModalRef}
+        source="provider"
       />
       <ModelListDetail
         ref={modelListDetailRef}
