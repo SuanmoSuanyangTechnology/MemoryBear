@@ -34,6 +34,7 @@ from ...runtime import ProcessRuntime
 from ...services import file as file_service
 from ...services import graph as graph_service
 from ...services import knowledge as knowledge_service
+from ...services import knowledge_copy as knowledge_copy_service
 from ...services.knowledge_commands import (
     dispatch_graph_transition,
     dispatch_reparse_snapshots,
@@ -53,7 +54,13 @@ from ...tasks.state import (
     claim_or_get_rebuild_job_async,
     release_rebuild_job_async,
 )
-from ..dependencies import Principal, get_principal, get_runtime, get_source
+from ..dependencies import (
+    Principal,
+    get_principal,
+    get_runtime,
+    get_source,
+    require_knowledge_copy_principal,
+)
 from ..schemas.chunk import KnowledgeRetrievalSource
 from ..schemas.common import SuccessEnvelope, fail, success
 from ..schemas.file import KBBatchDownloadRequest
@@ -302,6 +309,30 @@ async def create_knowledge(
         request,
         data,
         "The knowledge base has been successfully created",
+    )
+
+
+@router.post("/{knowledge_id}/copy", response_model=SuccessEnvelope[dict[str, Any]])
+async def copy_knowledge(
+    request: Request,
+    knowledge_id: uuid.UUID,
+    principal: Annotated[Principal, Depends(require_knowledge_copy_principal)],
+    runtime: Annotated[ProcessRuntime, Depends(get_runtime)],
+    name: Annotated[
+        str | None, Body(embed=True, description="Optional copied knowledge name")
+    ] = None,
+) -> SuccessEnvelope[dict[str, Any]]:
+    async with runtime.database.async_session() as db:
+        data = await knowledge_copy_service.copy_knowledge_configuration(
+            db,
+            knowledge_id,
+            principal,
+            name=name,
+        )
+    return _success(
+        request,
+        data,
+        "The knowledge base configuration has been successfully copied",
     )
 
 

@@ -13,13 +13,17 @@ from typing import Any, Dict, List
 
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.repositories.neo4j.cypher_queries import (
-    MERGE_ALIAS_BELONGS_TO,
-    REDIRECT_ALIAS_EDGES,
-    DELETE_ALIAS_NODES,
     GET_USER_ENTITY_ALIASES,
     GET_ALIAS_BELONGS_CANDIDATES,
-    DROP_ALIAS_BELONGS_EDGES,
 )
+
+from app.core.memory.storage.custom.reflection_mutations import (
+    delete_alias_nodes,
+    drop_alias_belongs_edges,
+    merge_alias_properties,
+    redirect_alias_edges,
+)
+from app.core.memory.storage.provider.neo4j.client import Neo4jClient
 
 logger = logging.getLogger(__name__)
 
@@ -40,29 +44,36 @@ async def drop_alias_edges(
     connector: Neo4jConnector,
     end_user_id: str,
     drop_alias_ids: List[str],
+    *,
+    neo4j_client: Neo4jClient | None = None,
 ) -> int:
     """删除被判 drop 的 "别名属于" 边（只删边，不删节点）。返回删除条数。"""
     if not drop_alias_ids:
         return 0
-    records = await connector.execute_query(
-        DROP_ALIAS_BELONGS_EDGES,
-        end_user_id=end_user_id,
-        drop_alias_ids=drop_alias_ids,
+    return await drop_alias_belongs_edges(
+        end_user_id,
+        drop_alias_ids,
+        neo4j_client=neo4j_client,
     )
-    return records[0].get("dropped_count", 0) if records else 0
 
 
 async def merge_alias_belongs_to(
     connector: Neo4jConnector,
     end_user_id: str,
     alias_ids: List[str],
+    *,
+    neo4j_client: Neo4jClient | None = None,
 ) -> Dict[str, Any]:
     """按 end_user_id 全量处理 "别名属于" 关系。
 
-    顺序执行三步，每步独立异常隔离：
+    顺序执行三步，每步一个独立的 storage 事务、独立的异常隔离：
       1. 别名归并：source.name → target.aliases，source.description → target.description
       2. 边重定向：别名节点其它边 → 规范实体
       3. 删除别名节点：DETACH DELETE
+
+    某步失败只记 warning 并写入 ``errors``，不回滚其它步骤、不跳过后续步骤，
+    第 4 步 PG 同步照常执行。第 1、3 步各自登记节点 Outbox 事件，
+    第 2 步是纯关系写、不发事件。
 
     归并完成后，再将用户实体的最新 aliases 同步回 PostgreSQL end_user_info
     （aliases 增量合并、other_name 为空时取 aliases[0]、同步 end_user.other_name）。
@@ -70,6 +81,8 @@ async def merge_alias_belongs_to(
     Args:
         connector: Neo4j 连接器
         end_user_id: 终端用户 ID
+        alias_ids: 判定通过、需要归并的别名节点业务 ID
+        neo4j_client: 本轮复用的 storage Neo4j client；缺省时下层自建并即用即关
 
     Returns:
         统计字典：alias_merged / edges_redirected / alias_nodes_deleted / pg_synced / errors
@@ -88,12 +101,9 @@ async def merge_alias_belongs_to(
     else:
         # ── 1. 别名归并（name 进 aliases，description 拼接） ──
         try:
-            records = await connector.execute_query(
-                MERGE_ALIAS_BELONGS_TO,
-                end_user_id=end_user_id,
-                alias_ids=alias_ids,
+            result["alias_merged"] = await merge_alias_properties(
+                end_user_id, alias_ids, neo4j_client=neo4j_client
             )
-            result["alias_merged"] = len(records) if records else 0
             logger.info(
                 f"[AliasMerge] 别名归并完成 end_user_id={end_user_id}, "
                 f"影响 target={result['alias_merged']}"
@@ -104,18 +114,9 @@ async def merge_alias_belongs_to(
 
         # ── 2. 边重定向（别名节点其它边 → 规范实体） ──
         try:
-            redirect_records = await connector.execute_query(
-                REDIRECT_ALIAS_EDGES,
-                end_user_id=end_user_id,
-                alias_ids=alias_ids,
+            result["edges_redirected"] = await redirect_alias_edges(
+                end_user_id, alias_ids, neo4j_client=neo4j_client
             )
-            if redirect_records:
-                row = redirect_records[0]
-                result["edges_redirected"] = (
-                    (row.get("redirected_incoming") or 0)
-                    + (row.get("redirected_outgoing") or 0)
-                    + (row.get("redirected_stmt") or 0)
-                )
             logger.info(
                 f"[AliasMerge] 边重定向完成 end_user_id={end_user_id}, "
                 f"汇总={result['edges_redirected']}"
@@ -126,13 +127,8 @@ async def merge_alias_belongs_to(
 
         # ── 3. 删除别名节点（DETACH DELETE） ──
         try:
-            delete_records = await connector.execute_query(
-                DELETE_ALIAS_NODES,
-                end_user_id=end_user_id,
-                alias_ids=alias_ids,
-            )
-            result["alias_nodes_deleted"] = (
-                delete_records[0].get("deleted_count", 0) if delete_records else 0
+            result["alias_nodes_deleted"] = await delete_alias_nodes(
+                end_user_id, alias_ids, neo4j_client=neo4j_client
             )
             logger.info(
                 f"[AliasMerge] 别名节点删除完成 end_user_id={end_user_id}, "

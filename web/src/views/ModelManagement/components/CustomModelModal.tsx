@@ -1,9 +1,3 @@
-/*
- * @Author: ZhaoYing 
- * @Date: 2026-02-03 16:49:28 
- * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-07-01 10:13:47
- */
 /**
  * Custom Model Modal
  * Modal for creating and editing custom models in the model square
@@ -11,7 +5,7 @@
  */
 
 import { forwardRef, useEffect, useImperativeHandle, useState } from 'react';
-import { Form, Input, App, Checkbox, Button, Row, Col, Select } from 'antd';
+import { Form, Input, App, Checkbox, Button, Row, Col, Select, InputNumber } from 'antd';
 import { useTranslation } from 'react-i18next';
 
 import type { CustomModelForm, ModelListItem, CustomModelModalRef, CustomModelModalProps, Capability, Provider } from '../types';
@@ -41,7 +35,6 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
   const isOmni = Form.useWatch(['is_omni'], form);
   const isThinking = Form.useWatch(['is_thinking'], form);
   const thinkingOnly = Form.useWatch(['thinking_only'], form);
-  const [currentProvider, setCurrentProvider] = useState<Provider | null>(null)
 
   useEffect(() => {
     if (isOmni) {
@@ -100,7 +93,9 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
     setLoading(true)
     const controller = new AbortController()
     setAbortController(controller)
-    const { type, provider, ...rest} = data
+    const rest = { ...data }
+    delete rest.type
+    delete rest.provider
     const res = isEdit ? updateCustomModel(model.id, rest, controller.signal) : addCustomModel(data, controller.signal)
 
     res.then(() => {
@@ -172,16 +167,6 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
         console.log('err', err)
       });
   }
-  const handleChangeProvider = (value?: string) => {
-    const filter = providerList.find((item) => item.provider === value)
-    if (filter) {
-      setCurrentProvider(filter)
-      form.setFieldValue(["api_keys", 0, "api_base"], filter.default_api_base)
-    } else {
-      setCurrentProvider(null)
-      form.setFieldValue(["api_keys", 0, "api_base"], undefined)
-    }
-  }
 
   /** Expose methods to parent component */
   useImperativeHandle(ref, () => ({
@@ -248,7 +233,6 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
             disabled={isEdit}
             placeholder={t('common.pleaseSelect')}
             options={providerList.map((item) => ({ label: String(item.provider).charAt(0).toUpperCase() + String(item.provider).slice(1), value: String(item.provider) }))}
-            onChange={handleChangeProvider}
           />
         </Form.Item>
 
@@ -259,24 +243,34 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
         >
           <Input.TextArea placeholder={t('common.pleaseEnter')} />
         </Form.Item>
+        <Form.Item
+          name={['credential', "api_key"]}
+          label={t('modelNew.api_key')}
+          rules={[{ required: true, message: t('common.inputPlaceholder', { title: t('modelNew.api_key') }) }]}
+        >
+          <Input.Password placeholder={t('common.pleaseEnter')} />
+        </Form.Item>
 
-        {!isEdit && <>
-          <Form.Item
-            name={["api_keys", 0, "api_key"]}
-            label={t('modelNew.api_key')}
-            rules={[{ required: true, message: t('common.inputPlaceholder', { title: t('modelNew.api_key') }) }]}
-          >
-            <Input.Password placeholder={t('common.pleaseEnter')} />
-          </Form.Item>
+        <Form.Item
+          name={['credential', "api_base"]}
+          label={t('modelNew.api_base')}
+        >
+          <Input placeholder="https://api.example.com/v1" />
+        </Form.Item>
 
-          <Form.Item
-            name={["api_keys", 0, "api_base"]}
-            label={t('modelNew.api_base')}
-            rules={[{ required: true, message: t('common.inputPlaceholder', { title: t('modelNew.api_base') }) }]}
-          >
-            <Input placeholder="https://api.example.com/v1" disabled={!!currentProvider?.default_api_base} />
-          </Form.Item>
-        </>}
+        <Form.Item
+          name={['credential', "priority"]}
+          label={t('modelNew.priority')}
+        >
+          <InputNumber placeholder={t('common.pleaseEnter')} className="rb:w-full!" />
+        </Form.Item>
+
+        <Form.Item
+          name={['credential', "remark"]}
+          label={t('modelNew.remark')}
+        >
+          <Input.TextArea placeholder={t('common.pleaseEnter')} />
+        </Form.Item>
 
         {['llm', 'chat'].includes(modelType as string) &&
           <Row gutter={16}>

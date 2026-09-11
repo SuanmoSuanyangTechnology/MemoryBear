@@ -15,6 +15,13 @@ from typing import Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
+from app.core.memory.storage.custom import (
+    CommunityMutationOutboxError,
+    CommunityMutationWriter,
+)
+from app.core.memory.storage.custom.community_mutations import (
+    COMMUNITY_ASSIGN_CHUNK_SIZE,
+)
 from app.repositories.neo4j.community_repository import CommunityRepository
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.schemas.memory_config_schema import MemoryConfig
@@ -92,10 +99,12 @@ class LabelPropagationEngine:
         self,
         connector: Neo4jConnector,
         memory_config: MemoryConfig,
+        community_writer: CommunityMutationWriter,
         language: str = "zh",
     ):
         self.connector = connector
         self.repo = CommunityRepository(connector)
+        self.community_writer = community_writer
         # memory_config 打包了 tenant_id 与各 model_id（同源加载，不会漏传 tenant）。
         # MemoryConfig 是 frozen dataclass（纯值），可安全跨 db 会话/进程边界持有。
         self.memory_config = memory_config
@@ -103,6 +112,35 @@ class LabelPropagationEngine:
         # 缓存客户端实例，避免重复初始化
         self._llm_client = None
         self._embedder_client = None
+
+    async def _compat_write(self, operation, fallback, action: str):
+        try:
+            return await operation
+        except CommunityMutationOutboxError:
+            raise
+        except Exception as error:
+            logger.error(f"{action} failed: {error}", exc_info=True)
+            return fallback
+
+    async def _assign_entities_compat(
+        self,
+        assignments: List[Dict],
+        end_user_id: str,
+    ) -> List:
+        affected = []
+        for start in range(0, len(assignments), COMMUNITY_ASSIGN_CHUNK_SIZE):
+            chunk = assignments[start:start + COMMUNITY_ASSIGN_CHUNK_SIZE]
+            result = await self._compat_write(
+                self.community_writer.assign_entities_to_communities(
+                    chunk,
+                    end_user_id,
+                    chunk_size=COMMUNITY_ASSIGN_CHUNK_SIZE,
+                ),
+                [],
+                "batch_assign_entities_to_communities",
+            )
+            affected.extend(result)
+        return affected
 
 
     # ──────────────────────────────────────────────────────────────────────────
@@ -125,7 +163,13 @@ class LabelPropagationEngine:
             logger.info(f"[Clustering] 用户 {end_user_id} 首次聚类，执行全量初始化")
             await self.full_clustering(end_user_id)
             # 全量聚类后做全量对账（None = 重算全部社区 member_count）
-            await self.repo.reconcile_after_clustering(end_user_id, refresh_community_ids=None)
+            await self._compat_write(
+                self.community_writer.reconcile_after_clustering(
+                    end_user_id, refresh_community_ids=None
+                ),
+                None,
+                "reconcile_after_clustering",
+            )
         else:
             if not new_entity_ids:
                 return
@@ -134,7 +178,13 @@ class LabelPropagationEngine:
             )
             affected = await self.incremental_update(new_entity_ids, end_user_id)
             # 增量后只对本轮触达的社区重算 member_count（删空社区仍全量，覆盖合并解散/并发去重清空）
-            await self.repo.reconcile_after_clustering(end_user_id, refresh_community_ids=affected)
+            await self._compat_write(
+                self.community_writer.reconcile_after_clustering(
+                    end_user_id, refresh_community_ids=affected
+                ),
+                None,
+                "reconcile_after_clustering",
+            )
 
     async def full_clustering(self, end_user_id: str) -> None:
         """
@@ -265,6 +315,8 @@ class LabelPropagationEngine:
                 return_exceptions=True,
             )
             for res in results:
+                if isinstance(res, CommunityMutationOutboxError):
+                    raise res
                 if isinstance(res, Exception):
                     logger.warning(f"[Clustering] _process_single_entity 失败（已忽略）: {res}")
                 elif res:
@@ -305,8 +357,20 @@ class LabelPropagationEngine:
         if not neighbors:
             # 孤立实体：创建单成员社区
             new_cid = self._new_community_id()
-            await self.repo.upsert_community(new_cid, end_user_id, member_count=1)
-            await self.repo.assign_entity_to_community(entity_id, new_cid, end_user_id)
+            await self._compat_write(
+                self.community_writer.upsert_community(
+                    new_cid, end_user_id, member_count=1
+                ),
+                None,
+                "upsert_community",
+            )
+            await self._compat_write(
+                self.community_writer.assign_entity_to_community(
+                    entity_id, new_cid, end_user_id
+                ),
+                False,
+                "assign_entity_to_community",
+            )
             logger.debug(f"[Clustering] 孤立实体 {entity_id} → 新社区 {new_cid}")
             return new_cid
 
@@ -320,21 +384,49 @@ class LabelPropagationEngine:
         if target_cid is None:
             # 邻居都没有社区，连同新实体一起创建新社区
             new_cid = self._new_community_id()
-            await self.repo.upsert_community(new_cid, end_user_id)
-            await self.repo.assign_entity_to_community(entity_id, new_cid, end_user_id)
+            await self._compat_write(
+                self.community_writer.upsert_community(new_cid, end_user_id),
+                None,
+                "upsert_community",
+            )
+            await self._compat_write(
+                self.community_writer.assign_entity_to_community(
+                    entity_id, new_cid, end_user_id
+                ),
+                False,
+                "assign_entity_to_community",
+            )
             for nb in neighbors:
-                await self.repo.assign_entity_to_community(
-                    nb["id"], new_cid, end_user_id
+                await self._compat_write(
+                    self.community_writer.assign_entity_to_community(
+                        nb["id"], new_cid, end_user_id
+                    ),
+                    False,
+                    "assign_entity_to_community",
                 )
-            await self.repo.refresh_member_count(new_cid, end_user_id)
+            await self._compat_write(
+                self.community_writer.refresh_member_count(new_cid, end_user_id),
+                0,
+                "refresh_member_count",
+            )
             logger.debug(
                 f"[Clustering] 新实体 {entity_id} 与 {len(neighbors)} 个无社区邻居 → 新社区 {new_cid}"
             )
             return new_cid
         else:
             # 加入得票最多的社区
-            await self.repo.assign_entity_to_community(entity_id, target_cid, end_user_id)
-            await self.repo.refresh_member_count(target_cid, end_user_id)
+            await self._compat_write(
+                self.community_writer.assign_entity_to_community(
+                    entity_id, target_cid, end_user_id
+                ),
+                False,
+                "assign_entity_to_community",
+            )
+            await self._compat_write(
+                self.community_writer.refresh_member_count(target_cid, end_user_id),
+                0,
+                "refresh_member_count",
+            )
             logger.debug(f"[Clustering] 新实体 {entity_id} → 社区 {target_cid}")
 
             # 若邻居分属多个社区，评估合并
@@ -438,7 +530,7 @@ class LabelPropagationEngine:
             members = await self.repo.get_community_members(dissolve, end_user_id)
             if members:
                 assignments = [{"entity_id": m["id"], "community_id": keep} for m in members]
-                await self.repo.batch_assign_entities_to_communities(assignments, end_user_id)
+                await self._assign_entities_compat(assignments, end_user_id)
 
             # 合并后更新内存中的平均向量（加权平均），供后续对比使用
             keep_emb = community_embeddings.get(keep)
@@ -456,7 +548,11 @@ class LabelPropagationEngine:
 
             community_sizes[keep] = total_size
             community_sizes[dissolve] = 0
-            await self.repo.refresh_member_count(keep, end_user_id)
+            await self._compat_write(
+                self.community_writer.refresh_member_count(keep, end_user_id),
+                0,
+                "refresh_member_count",
+            )
             logger.info(
                 f"[Clustering] 社区合并: {dissolve} → {keep}，"
                 f"相似度={current_sim:.3f}，迁移 {len(members)} 个成员"
@@ -474,21 +570,35 @@ class LabelPropagationEngine:
 
         # 先创建所有唯一社区节点（数量远少于实体，串行可接受）
         for cid in unique_communities:
-            await self.repo.upsert_community(cid, end_user_id)
+            await self._compat_write(
+                self.community_writer.upsert_community(cid, end_user_id),
+                None,
+                "upsert_community",
+            )
 
         # 批量分配实体：一次 UNWIND 替代 N×2 次串行 Cypher
         assignments = [
             {"entity_id": eid, "community_id": cid}
             for eid, cid in labels.items()
         ]
-        await self.repo.batch_assign_entities_to_communities(assignments, end_user_id)
+        await self._assign_entities_compat(assignments, end_user_id)
         logger.info(f"[Clustering] _flush_labels 批量写入完成，实体数={len(assignments)}，社区数={len(unique_communities)}")
 
         # 刷新成员数（并发执行）
-        await asyncio.gather(
-            *[self.repo.refresh_member_count(cid, end_user_id) for cid in unique_communities],
+        refresh_results = await asyncio.gather(
+            *[
+                self._compat_write(
+                    self.community_writer.refresh_member_count(cid, end_user_id),
+                    0,
+                    "refresh_member_count",
+                )
+                for cid in unique_communities
+            ],
             return_exceptions=True,
         )
+        for result in refresh_results:
+            if isinstance(result, CommunityMutationOutboxError):
+                raise result
 
     async def _get_entity_embedding(
         self, entity_id: str, end_user_id: str
@@ -710,24 +820,19 @@ class LabelPropagationEngine:
         for m in metadata_list:
             m.pop("prompt", None)
         
-        if len(metadata_list) == 1:
-            m = metadata_list[0]
-            result = await self.repo.update_community_metadata(
-                community_id=m["community_id"],
-                end_user_id=m["end_user_id"],
-                name=m["name"],
-                summary=m["summary"],
-                core_entities=m["core_entities"],
-                summary_embedding=m["summary_embedding"],
+        affected = await self._compat_write(
+            self.community_writer.update_community_metadata(metadata_list),
+            [],
+            "update_community_metadata",
+        )
+        if len(metadata_list) == 1 and not affected:
+            logger.error(
+                f"[Clustering] 社区 {metadata_list[0]['community_id']} 元数据写入失败"
             )
-            if not result:
-                logger.error(f"[Clustering] 社区 {m['community_id']} 元数据写入失败")
         else:
-            ok = await self.repo.batch_update_community_metadata(metadata_list)
-            if not ok:
-                logger.error(f"[Clustering] 批量写入 {len(metadata_list)} 个社区元数据失败")
-            else:
-                logger.info(f"[Clustering] 批量写入 {len(metadata_list)} 个社区元数据成功")
+            logger.info(
+                f"[Clustering] 批量写入 {len(metadata_list)} 个社区元数据成功"
+            )
     def _get_llm_client(self):
         """获取或创建 LLM 客户端（单例缓存）。
 

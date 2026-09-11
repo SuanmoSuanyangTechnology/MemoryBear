@@ -122,6 +122,9 @@ async def lifespan(app: FastAPI):
     from app.services.memory_retrieval_display_queue import MemoryRetrievalDisplayQueue
     await MemoryRetrievalDisplayQueue.start()
 
+    from app.core.memory.storage.service import initialize_storage_service
+    await initialize_storage_service()
+
     logger.info("应用程序启动完成")
 
     async with mcp_app.lifespan(app):
@@ -143,6 +146,9 @@ async def lifespan(app: FastAPI):
     from app.services.memory_retrieval_display_queue import MemoryRetrievalDisplayQueue
     await MemoryRetrievalDisplayQueue.flush()
     await MemoryRetrievalDisplayQueue.stop()
+
+    from app.core.memory.storage.service import close_storage_service
+    await close_storage_service()
 
     from app.repositories.neo4j.neo4j_connector import Neo4jConnector
     await Neo4jConnector.shutdown()

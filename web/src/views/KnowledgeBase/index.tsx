@@ -17,6 +17,7 @@ import SearchInput from '@/components/SearchInput'
 import Empty from '@/components/Empty'
 import { getKnowledgeBaseList, getModelList, getModelTypeList, deleteKnowledgeBase, getKnowledgeBaseTypeList } from '@/api/knowledgeBase'
 import copy from 'copy-to-clipboard'
+import CopyModal, { type CopyModalRef } from './components/CopyModal';
 
 import InfiniteScroll from 'react-infinite-scroll-component';
 
@@ -46,6 +47,7 @@ const KnowledgeBaseManagement: FC = () => {
   const modelListCache = useRef<Record<string, string>>({});
   const modalRef = useRef<CreateModalRef>(null)
   const processedStateRef = useRef<any>(null);
+  const copyModalRef = useRef<CopyModalRef>(null)
   
   // 使用面包屑管理 Hook
   const { updateBreadcrumbs } = useBreadcrumbManager({
@@ -69,7 +71,6 @@ const KnowledgeBaseManagement: FC = () => {
   });
   const [folderPath, setFolderPath] = useState<BreadcrumbItem[]>([]);
   
-
   // 生成下拉菜单项（根据当前 item）
   const getOptMenuItems = (item: KnowledgeBaseListItem): MenuProps['items'] => {
     const items: NonNullable<MenuProps['items']> = [];
@@ -85,6 +86,17 @@ const KnowledgeBaseManagement: FC = () => {
           handleEdit(item);
         },
       });
+
+      if (item.type !== 'Folder') {
+        items.push({
+          key: '3',
+          icon: <div className="rb:size-4 rb:bg-cover rb:cursor-pointer rb:bg-[url('@/assets/images/common/copy_dark.svg')]" />,
+          label: t('knowledgeBase.copy'),
+          onClick: () => {
+            handleCopyKb(item);
+          },
+        });
+      }
     }
 
     items.push({
@@ -386,7 +398,9 @@ const KnowledgeBaseManagement: FC = () => {
   const handleEdit = (item: KnowledgeBaseListItem) => {
     modalRef?.current?.handleOpen(item, item.type);
   };
-
+  const handleCopyKb = (item: KnowledgeBaseListItem) => {
+    copyModalRef.current?.handleOpen(item)
+  }
   // 处理删除
   const handleDelete = (item: KnowledgeBaseListItem) => {
     modal.confirm({
@@ -593,13 +607,13 @@ const KnowledgeBaseManagement: FC = () => {
                           }
                         >
                           <div>
-                            <Flex className="rb:text-[#5B6167] rb:h-5 rb:line-clamp-1 rb:text-sm rb:leading-5 rb:mb-3!">
+                            <Flex className="rb:text-gray-600 rb:h-5 rb:line-clamp-1 rb:text-sm rb:leading-5 rb:mb-3!">
                                 {/* <div className="rb:font-medium rb:w-20">{t('knowledgeBase.description')} </div> */}
                                 <Tooltip title={item.description}>
                                     <div className='rb:flex-1 rb:text-left rb:leading-5 rb:text-gray-800 rb:wrap-break-word rb:line-clamp-2'>{(item.description && item.description != '') ? item.description : t('knowledgeBase.noDescription')}</div>
                                 </Tooltip>
                             </Flex>
-                            <Flex vertical gap={4} className='rb:min-h-15 rb:py-2.5! rb:px-3! rb:bg-[#F6F6F6] rb:rounded-lg rb:mb-3!'>
+                            <Flex vertical gap={4} className='rb:min-h-15 rb:py-2.5! rb:px-3! rb:bg-gray-100 rb:rounded-lg rb:mb-3!'>
                               <div className="rb:cursor-pointer rb:mb-3 rb:w-full" onClick={() => handleCopy(item.id)}>
                                 <div className="rb:text-gray-800 rb:font-medium">ID:</div>
                                 <Flex align="center" className="rb:text-[#5B6167]">
@@ -666,6 +680,7 @@ const KnowledgeBaseManagement: FC = () => {
           ref={modalRef}
           refreshTable={handleRefresh}
         />
+        <CopyModal ref={copyModalRef} refresh={handleRefresh} />
       </div>
     </Flex>
   )

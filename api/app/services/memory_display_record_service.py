@@ -14,7 +14,7 @@ from typing import List
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.utils.datetime_utils import to_timestamp_ms, utcnow_naive
+from app.core.utils.datetime_utils import parse_timestamp_to_utc_naive, to_timestamp_ms, utcnow_naive
 from app.repositories.end_user_repository import EndUserRepository
 from app.repositories.memory_display_record_repository import (
     MemoryDisplayRecordRepository,
@@ -32,33 +32,44 @@ class MemoryDisplayRecordService:
     @staticmethod
     async def query_written(
         db: AsyncSession,
-        end_user_id: uuid.UUID,
         workspace_id: uuid.UUID,
         page: int,
         pagesize: int,
+        end_user_id: uuid.UUID | None = None,
+        start_time: int | None = None,
+        end_time: int | None = None,
     ) -> tuple[List[dict], int] | None:
         """查询写入展示记录并组装前端 DTO。
 
+        - 传 ``end_user_id``：用户级查询，先校验其归属当前工作空间；
+        - 不传 ``end_user_id``：空间级查询，返回整个 workspace 的写入记录，
+          DTO 额外携带 ``end_user_id`` 供调用方区分归属。
+
+        start_time/end_time 为毫秒 UTC 时间戳，按 occurred_at 闭区间过滤。
         返回 None 表示终端用户不属于当前工作空间。
         """
-        end_user_repo = EndUserRepository(db)
-        if await end_user_repo.get_active_end_user_in_workspace_async(
-            end_user_id,
-            workspace_id,
-        ) is None:
-            return None
+        if end_user_id is not None: # end_user_id = None传入仓储层，进行空间级查询
+            end_user_repo = EndUserRepository(db)
+            if await end_user_repo.get_active_end_user_in_workspace_async(
+                end_user_id,
+                workspace_id,
+            ) is None:
+                return None
 
         repo = MemoryDisplayRecordRepository(db)
         records, total = await repo.query_written_paginated_async(
-            end_user_id=end_user_id,
             workspace_id=workspace_id,
             page=page,
             pagesize=pagesize,
+            end_user_id=end_user_id,
+            start_time=parse_timestamp_to_utc_naive(start_time),
+            end_time=parse_timestamp_to_utc_naive(end_time),
         )
 
         items = [
             {
                 "id": str(record.id),
+                "end_user_id": str(record.end_user_id),
                 "memory_id": record.memory_id,
                 "memory_type": record.memory_type,
                 "name": record.name,
@@ -73,6 +84,7 @@ class MemoryDisplayRecordService:
     async def save_written(
         summaries: list,
         end_user_id: str,
+        workspace_id: uuid.UUID | None = None,
     ) -> None:
         """将成功写入 Neo4j 的 MemorySummary 同步保存为 PG 展示记录。
 
@@ -82,6 +94,8 @@ class MemoryDisplayRecordService:
         Args:
             summaries: 成功写入 Neo4j 的 MemorySummaryNode 列表
             end_user_id: 终端用户 ID
+            workspace_id: 终端用户所属工作空间 ID（UUID），冗余入库支撑空间级查询。
+                缺省时置 NULL，不影响主写入流程。
         """
         if not summaries:
             return
@@ -131,6 +145,7 @@ class MemoryDisplayRecordService:
             record = MemoryDisplayRecord(
                 id=uuid.uuid4(),
                 end_user_id=end_user_uuid,
+                workspace_id=workspace_id,
                 operation_id=operation_id,
                 operation="WRITE",
                 memory_id=s.id,

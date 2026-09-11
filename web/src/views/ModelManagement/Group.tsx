@@ -1,9 +1,3 @@
-/*
- * @Author: ZhaoYing 
- * @Date: 2026-02-03 16:50:00 
- * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-08-03 16:58:45
- */
 /**
  * Group Model View
  * Displays composite/group models in card grid layout
@@ -95,7 +89,7 @@ const Group = forwardRef <BaseRef,{ query: any; handleEdit: (data: ModelListItem
                       gap={12}
                       className="rb:text-[14px] rb:leading-5"
                     >
-                      <span className="rb:whitespace-nowrap rb:text-[#5B6167]">{(description.label as string)}</span>
+                      <span className="rb:whitespace-nowrap rb:text-gray-600">{(description.label as string)}</span>
                       <span className={clsx({
                         "rb:font-medium": description.key === 'type',
                       })}>{(description.children as string)}</span>

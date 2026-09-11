@@ -104,6 +104,8 @@ const WorkingDetail: FC = () => {
   const [filterForm] = Form.useForm<{ range?: [Dayjs, Dayjs] | null; keyword?: string; }>()
   const formValues = Form.useWatch([], filterForm)
 
+  const [total, setTotal] = useState(0)
+
   /** Date range + keyword filters applied to the conversation message stream. */
   const filterParams = useMemo(() => {
     const params: { start_date?: number; end_date?: number; keyword?: string } = {}
@@ -232,23 +234,39 @@ const WorkingDetail: FC = () => {
     }
   }, [id, selected, filterParams])
 
+  const fetchMessagesTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
   /** Fetch chat messages for a conversation, applying the current date/keyword filters. */
   const fetchMessages = useCallback((conversation: Conversation | ApiMcpListItem) => {
     if (!id) return
     const conversationId = (conversation as Conversation).id
     if (!conversationId) return
-    setMessagesLoading(true)
-    getConversationMessages(id, { conversation_id: conversationId, ...filterParamsRef.current, page: 1, pagesize: PAGE_SIZE })
-      .then(res => {
-        const response = res as { items: ChatItem[], page: { hasnext: boolean } }
-        setMessages(response.items)
-        messagePageRef.current = 1
-        setMessageHasMore(response.page.hasnext)
-      })
-      .finally(() => {
-        setMessagesLoading(false)
-      })
-  }, [id, filterParamsRef.current])
+    if (fetchMessagesTimerRef.current) {
+      clearTimeout(fetchMessagesTimerRef.current)
+    }
+    fetchMessagesTimerRef.current = setTimeout(() => {
+      setMessagesLoading(true)
+      getConversationMessages(id, { conversation_id: conversationId, ...filterParamsRef.current, page: 1, pagesize: PAGE_SIZE })
+        .then(res => {
+          const response = res as { items: ChatItem[], page: { hasnext: boolean; total: number; } }
+          setMessages(response.items)
+          messagePageRef.current = 1
+          setMessageHasMore(response.page.hasnext)
+          setTotal(response.page.total || 0)
+        })
+        .finally(() => {
+          setMessagesLoading(false)
+        })
+    }, 300)
+  }, [id])
+
+  useEffect(() => {
+    return () => {
+      if (fetchMessagesTimerRef.current) {
+        clearTimeout(fetchMessagesTimerRef.current)
+      }
+    }
+  }, [])
 
   /**
    * Fetch the chat messages for the selected conversation. For `conversation`-type
@@ -286,6 +304,7 @@ const WorkingDetail: FC = () => {
   const handleSelect = (conversation: Conversation | ApiMcpListItem) => {
     filterForm.resetFields()
     setSelected(conversation)
+    setTotal(0)
   }
 
   /** Whether the memory insight block has any renderable content. */
@@ -390,7 +409,7 @@ const WorkingDetail: FC = () => {
                   <Flex vertical className="rb:h-full! rb:overflow-y-hidden!">
                     <Flex align="center" justify="end">
                       <span className="rb:text-[12px] rb:text-[#5B6167]">
-                        {t('workingDetail.total', { total: (selected as ApiMcpListItem).source ? apiMcpMessageListRef.current?.total || 0 : messages.length })}
+                        {t('workingDetail.total', { total: total })}
                       </span>
                     </Flex>
                     <Form form={filterForm} initialValues={{ keyword: undefined, range: undefined}}>
@@ -416,6 +435,7 @@ const WorkingDetail: FC = () => {
                           source={(selected as ApiMcpListItem).source}
                           onMessagesChange={setMessages}
                           filterParams={filterParams}
+                          updateTotal={setTotal}
                         />
                       )
                       : messagesLoading

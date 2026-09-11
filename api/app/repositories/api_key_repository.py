@@ -2,7 +2,7 @@
 import uuid
 from typing import Optional, List, Tuple
 
-from sqlalchemy import select, func, and_
+from sqlalchemy import select, func, and_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session, joinedload
 
@@ -101,28 +101,75 @@ class ApiKeyRepository:
         return False
 
     @staticmethod
+    async def bump_usage_async(
+        db: AsyncSession,
+        counts: dict[uuid.UUID, int],
+        *,
+        last_used_at=None,
+    ) -> int:
+        """按 api_key_id 批量**原子自增**用量（usage_count / quota_used）。
+
+        为什么不用 ORM 读改写（``db.get`` + ``+= 1`` + flush）：
+
+        1. **丢更新**：并发事务各自读到旧值再写绝对值，自增互相覆盖——配额判断
+           （``quota_used >= quota_limit``）因此偏松，配额可被超用；
+        2. **死锁**：一个批里有多个 Key 时事务会锁多行，两个事务按相反顺序锁同样的
+           行即成环（线上已复现 ``DeadlockDetectedError``：同一个 batch 内的
+           ``UPDATE api_keys`` 互相等锁）。
+
+        改为单条 ``UPDATE ... SET usage_count = usage_count + n``（PG 在行锁下
+        自增是原子的，不再需要先 SELECT），并按 api_key_id **排序**后逐条执行，
+        使锁顺序单调一致 → 不成环。
+
+        Args:
+            counts: ``{api_key_id: 增量}``，调用方按批聚合（同一 Key 只进来一次）。
+            last_used_at: 统一写入的最后使用时间；None 取当前 UTC naive。
+
+        Returns:
+            实际更新的行数（Key 不存在或增量为 0 的不计入）。
+        """
+        if not counts:
+            return 0
+
+        ts = last_used_at or utcnow_naive()
+        updated = 0
+        # 注意：uuid.UUID 不支持比较，必须显式给 key，否则 sorted() 抛 TypeError
+        for key_id in sorted(counts, key=str):
+            delta = int(counts[key_id])
+            if delta <= 0:
+                continue
+            result = await db.execute(
+                update(ApiKey)
+                .where(ApiKey.id == key_id)
+                .values(
+                    usage_count=ApiKey.usage_count + delta,
+                    quota_used=ApiKey.quota_used + delta,
+                    last_used_at=ts,
+                )
+                .execution_options(synchronize_session=False)
+            )
+            updated += result.rowcount or 0
+        return updated
+
+    @staticmethod
     def update_usage(db: Session, api_key_id: uuid.UUID) -> bool:
-        """更新使用统计"""
-        api_key = db.get(ApiKey, api_key_id)
-        if api_key:
-            api_key.usage_count += 1
-            api_key.quota_used += 1
-            api_key.last_used_at = utcnow_naive()
-            db.flush()
-            return True
-        return False
+        """更新使用统计（同步版，原子自增；与异步版同源，避免丢更新）。"""
+        result = db.execute(
+            update(ApiKey)
+            .where(ApiKey.id == api_key_id)
+            .values(
+                usage_count=ApiKey.usage_count + 1,
+                quota_used=ApiKey.quota_used + 1,
+                last_used_at=utcnow_naive(),
+            )
+            .execution_options(synchronize_session=False)
+        )
+        return bool(result.rowcount)
 
     @staticmethod
     async def update_usage_async(db: AsyncSession, api_key_id: uuid.UUID) -> bool:
-        """Async version of update_usage."""
-        api_key = await db.get(ApiKey, api_key_id)
-        if api_key:
-            api_key.usage_count += 1
-            api_key.quota_used += 1
-            api_key.last_used_at = utcnow_naive()
-            await db.flush()
-            return True
-        return False
+        """单 Key 自增一次（走批量原子自增，避免读改写）。"""
+        return await ApiKeyRepository.bump_usage_async(db, {api_key_id: 1}) > 0
 
     @staticmethod
     def get_stats(db: Session, api_key_id: uuid.UUID) -> dict:

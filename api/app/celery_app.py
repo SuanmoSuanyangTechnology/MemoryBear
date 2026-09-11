@@ -98,11 +98,15 @@ celery_app.conf.update(
 
     # task routing
     task_routes={
+        'app.tasks.scan_outbox_projection': {'queue': 'memory_projection'},
+        'app.tasks.cleanup_outbox': {'queue': 'memory_projection'},
         # Memory tasks → memory_tasks queue (threads worker)
         'app.core.memory.agent.write_message': {'queue': 'memory_tasks'},
 
         # Fast Write tasks → memory_fast_tasks queue (threads worker，独立队列，避免与普通写入互相阻塞)
         'app.core.memory.fast_write_message': {'queue': 'memory_fast_tasks'},
+        'app.core.memory.generate_scene_summary': {'queue': 'memory_heavy_tasks'},
+        'app.tasks.scan_scene_summary_idle': {'queue': 'periodic_tasks'},
 
         # Document tasks → document_tasks queue (prefork worker)
         'app.core.rag.tasks.parse_document': {'queue': 'document_tasks'},
@@ -124,7 +128,6 @@ celery_app.conf.update(
         'app.tasks.do_layer2_dedup_full_scan': {'queue': 'reflection_tasks'},
         'app.tasks.scan_reflection_retry': {'queue': 'periodic_tasks'},
         'app.tasks.regenerate_memory_cache': {'queue': 'periodic_tasks'},
-        'app.tasks.refresh_hot_memory_tags_cache': {'queue': 'periodic_tasks'},
 
         # GDS 拓扑分数：scan 在 periodic 扫描，计算在 memory_heavy 执行
         'app.tasks.scan_gds_topology_score': {'queue': 'periodic_tasks'},
@@ -249,11 +252,25 @@ layer2_reflection_schedule = timedelta(minutes=settings.LAYER2_REFLECTION_INTERV
 layer2_dedup_full_scan_schedule = crontab(hour=settings.LAYER2_DEDUP_FULL_SCAN_HOUR, minute=0)
 reflection_retry_schedule = timedelta(minutes=settings.REFLECTION_RETRY_SCAN_INTERVAL_MINUTES)
 gds_topology_scan_schedule = timedelta(minutes=settings.GDS_TOPOLOGY_SCAN_INTERVAL_MINUTES)
-hot_memory_tags_refresh_schedule = crontab(hour=settings.HOT_MEMORY_TAGS_REFRESH_HOUR, minute=0)
 draft_data_clean_schedule = crontab(hour=settings.DRAFT_DATA_CLEAN_HOUR, minute=0)
 forget_scan_schedule = timedelta(minutes=settings.FORGET_SCAN_INTERVAL_MINUTES)
 # 构建定时任务配置
 beat_schedule_config = {
+    "scan-outbox-projection": {
+        "task": "app.tasks.scan_outbox_projection",
+        "schedule": timedelta(seconds=settings.OUTBOX_SCAN_INTERVAL_SECONDS),
+        "options": {"queue": "memory_projection", "expires": settings.OUTBOX_SCAN_INTERVAL_SECONDS},
+    },
+    "cleanup-outbox": {
+        "task": "app.tasks.cleanup_outbox",
+        "schedule": crontab(hour=settings.OUTBOX_CLEANUP_HOUR, minute=0),
+        "options": {"queue": "memory_projection"},
+    },
+    "scan-scene-summary-idle": {
+        "task": "app.tasks.scan_scene_summary_idle",
+        "schedule": 300.0,
+        "options": {"queue": "periodic_tasks", "expires": 55},
+    },
     # "run-workspace-reflection": {
     #     "task": "app.tasks.workspace_reflection_task",
     #     "schedule": workspace_reflection_schedule,
@@ -315,11 +332,6 @@ beat_schedule_config = {
     "run-gds-topology-score": {
         "task": "app.tasks.scan_gds_topology_score",
         "schedule": gds_topology_scan_schedule,
-        "args": (),
-    },
-    "refresh-hot-memory-tags-cache": {
-        "task": "app.tasks.refresh_hot_memory_tags_cache",
-        "schedule": hot_memory_tags_refresh_schedule,
         "args": (),
     },
     # "scan-idle-conversations": {

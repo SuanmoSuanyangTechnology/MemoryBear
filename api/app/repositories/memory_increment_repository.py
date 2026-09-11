@@ -1,6 +1,8 @@
+from datetime import datetime
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
-from typing import Optional
+from typing import List, Optional, Tuple
 import uuid
 
 from app.core.utils.datetime_utils import utcnow_naive
@@ -32,6 +34,50 @@ class MemoryIncrementRepository:
             return memory_increment
         except Exception as e:
             db_logger.error(f"查询工作空间 {workspace_id} 下最新内存增量时出错: {str(e)}")
+            raise
+
+    async def get_daily_latest_by_workspace_async(
+        self,
+        workspace_id: uuid.UUID,
+        start_dt: datetime,
+        end_dt: datetime,
+    ) -> List[Tuple]:
+        """按天取「当日 created_at 最晚的一条」total_num（created_at 闭区间过滤）。
+
+        用 PostgreSQL 的 DISTINCT ON (created_at::date) 在库侧完成切日去重；
+        同日多条取 created_at 最晚（时刻相同则 id 更大）的一条作为当天代表。
+
+        Args:
+            workspace_id: 工作空间 ID
+            start_dt: 起始时间（naive UTC，闭区间）
+            end_dt: 结束时间（naive UTC，闭区间）
+
+        Returns:
+            List[Tuple]: 每项为 (day: date, total_num: int)，按日期升序
+        """
+        day_expr = func.date(MemoryIncrement.created_at)
+        stmt = (
+            select(day_expr.label("day"), MemoryIncrement.total_num)
+            .where(
+                MemoryIncrement.workspace_id == workspace_id,
+                MemoryIncrement.created_at >= start_dt,
+                MemoryIncrement.created_at <= end_dt,
+            )
+            .distinct(day_expr)
+            .order_by(
+                day_expr.asc(),
+                MemoryIncrement.created_at.desc(),
+                MemoryIncrement.id.desc(),
+            )
+        )
+        try:
+            result = await self.db.execute(stmt)
+            return [(row.day, row.total_num) for row in result.all()]
+        except Exception as e:
+            await self.db.rollback()
+            db_logger.error(
+                f"按日查询工作空间 {workspace_id} 记忆增量时出错: {str(e)}"
+            )
             raise
 
     def write_memory_increment(

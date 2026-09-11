@@ -1,9 +1,11 @@
+import asyncio
 from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header
 from fastapi.responses import StreamingResponse
 
+from app.aioRedis import get_thread_safe_sync_redis
 from app.core.error_codes import BizCode
 from app.core.language_utils import get_language_from_header
 from app.core.logging_config import get_api_logger
@@ -16,7 +18,6 @@ from app.schemas.memory_storage_schema import (
 )
 from app.schemas.response_schema import ApiResponse
 from app.services.memory_storage_service import (
-    HOT_MEMORY_TAGS_CACHE_EXPIRE,
     DataConfigService,
     MemoryStorageService,
     analytics_hot_memory_tags,
@@ -32,6 +33,7 @@ from app.services.memory_storage_service import (
 )
 
 from app.utils.config_utils import resolve_config_id, resolve_config_id_async
+from app.utils.redis_lock import RedisFairLock
 
 # Get API logger
 api_logger = get_api_logger()
@@ -257,101 +259,26 @@ async def search_entity_edges(
         api_logger.error(f"Search edges failed: {str(e)}")
         return fail(BizCode.INTERNAL_ERROR, "边查询失败", str(e))
 
-
 @router.get("/analytics/hot_memory_tags", response_model=ApiResponse)
 async def get_hot_memory_tags_api(
         limit: int = 10,
         current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ) -> dict:
-    """
-    获取热门记忆标签（带Redis缓存）
-    
-    缓存策略：
-    - 缓存键：workspace_id + limit
-    - 过期时间：28小时（HOT_MEMORY_TAGS_CACHE_EXPIRE），由每日定时任务预热刷新
-    - 缓存命中：~50ms
-    - 缓存未命中：~600-800ms（取决于LLM速度），实时查询后回写缓存作为兜底
+    """获取热门记忆标签（实时聚合，无缓存）。
+
+    数据源为 end_users.memory_tags（用户名片 Tag），按文本精确匹配合并，
+    frequency 为采用该 tag 的终端用户数。空间取当前会话空间。
     """
     workspace_id = current_user.current_workspace_id
-
-    # 构建缓存键
-    cache_key = f"hot_memory_tags:{workspace_id}:{limit}"
-
     api_logger.info(f"Hot memory tags requested for workspace: {workspace_id}, limit: {limit}")
 
     try:
-        # 尝试从Redis缓存获取
-        import json
-
-        from app.aioRedis import aio_redis_get, aio_redis_set
-
-        cached_result = await aio_redis_get(cache_key)
-        if cached_result:
-            api_logger.info(f"Cache hit for key: {cache_key}")
-            try:
-                data = json.loads(cached_result)
-                return success(data=data, msg="查询成功（缓存）")
-            except json.JSONDecodeError:
-                api_logger.warning(f"Failed to parse cached data, will refresh")
-
-        # 缓存未命中，执行查询
-        api_logger.info(f"Cache miss for key: {cache_key}, executing query")
         async with get_async_db_context() as db:
             result = await analytics_hot_memory_tags(db, current_user, limit)
-
-        # 写入缓存（过期时间：28小时）
-        # 注意：result是列表，需要转换为JSON字符串
-        try:
-            cache_data = json.dumps(result, ensure_ascii=False)
-            await aio_redis_set(cache_key, cache_data, expire=HOT_MEMORY_TAGS_CACHE_EXPIRE)
-            api_logger.info(f"Cached result for key: {cache_key}")
-        except Exception as cache_error:
-            # 缓存写入失败不影响主流程
-            api_logger.warning(f"Failed to cache result: {str(cache_error)}")
-
         return success(data=result, msg="查询成功")
-
     except Exception as e:
         api_logger.error(f"Hot memory tags failed: {str(e)}")
         return fail(BizCode.INTERNAL_ERROR, "热门标签查询失败", str(e))
-
-
-@router.delete("/analytics/hot_memory_tags/cache", response_model=ApiResponse)
-async def clear_hot_memory_tags_cache(
-        current_user: CurrentUserSnapshot = Depends(get_current_user_async),
-) -> dict:
-    """
-    清除热门标签缓存
-    
-    用于：
-    - 手动刷新数据
-    - 调试和测试
-    - 数据更新后立即生效
-    """
-    workspace_id = current_user.current_workspace_id
-
-    api_logger.info(f"Clear hot memory tags cache requested for workspace: {workspace_id}")
-
-    try:
-        from app.aioRedis import aio_redis_delete
-
-        # 清除所有limit的缓存（常见的limit值）
-        cleared_count = 0
-        for limit in [5, 10, 15, 20, 30, 50]:
-            cache_key = f"hot_memory_tags:{workspace_id}:{limit}"
-            result = await aio_redis_delete(cache_key)
-            if result:
-                cleared_count += 1
-                api_logger.info(f"Cleared cache for key: {cache_key}")
-
-        return success(
-            data={"cleared_count": cleared_count},
-            msg=f"成功清除 {cleared_count} 个缓存"
-        )
-
-    except Exception as e:
-        api_logger.error(f"Clear cache failed: {str(e)}")
-        return fail(BizCode.INTERNAL_ERROR, "清除缓存失败", str(e))
 
 
 @router.get("/analytics/recent_activity_stats", response_model=ApiResponse)
@@ -395,37 +322,135 @@ async def delete_end_user(
 
     try:
         from app.repositories.end_user_repository import EndUserRepository
-
-        async with get_async_db_context() as db:
-            end_user = await EndUserRepository(db).get_end_user_by_id_async(end_user_id)
-            if not end_user:
-                api_logger.warning(f"终端用户不存在或已删除: end_user_id={end_user_id_str}")
-                return fail(BizCode.NOT_FOUND, "终端用户不存在或已删除", f"end_user_id={end_user_id_str}")
-            if str(end_user.workspace_id) != str(workspace_id):
-                api_logger.warning(
-                    f"用户 {current_user.username} 尝试删除不属于工作空间 {workspace_id} 的终端用户 {end_user_id_str}"
-                )
-                return fail(BizCode.PERMISSION_DENIED, "该终端用户不属于当前工作空间", "end_user workspace mismatch")
-
         from app.core.memory.memory_service import MemoryService
 
-        total_deleted = await MemoryService.delete_all_nodes_by_end_user_id(end_user_id_str)
-
-        try:
+        while True:
+            resolved_snapshot: tuple[UUID, str] | None = None
             async with get_async_db_context() as db:
-                repo = EndUserRepository(db)
-                await repo.update_memory_count_async(end_user_id, 0)
-                await repo.soft_delete_by_end_user_id_async(end_user_id)
-        except Exception as sync_err:
-            api_logger.warning(f"同步 end_user 失败（不影响 Neo4j 删除结果）: {sync_err}")
+                end_user = await EndUserRepository(db).get_end_user_by_id_async(
+                    end_user_id
+                )
+                if end_user is not None:
+                    resolved_snapshot = (
+                        UUID(str(end_user.id)),
+                        str(end_user.workspace_id),
+                    )
+            if resolved_snapshot is None:
+                api_logger.warning(
+                    f"终端用户不存在或已删除: end_user_id={end_user_id_str}"
+                )
+                return fail(
+                    BizCode.NOT_FOUND,
+                    "终端用户不存在或已删除",
+                    f"end_user_id={end_user_id_str}",
+                )
 
-        api_logger.info(
-            f"终端用户删除完成: end_user_id={end_user_id_str}, total_deleted={total_deleted}"
-        )
-        return success(
-            data={"deleted": True, "end_user_id": end_user_id_str, "total_deleted": total_deleted},
-            msg=f"删除用户{end_user_id_str}记忆库成功"
-        )
+            resolved_end_user_id, resolved_workspace_id = resolved_snapshot
+            if resolved_workspace_id != str(workspace_id):
+                api_logger.warning(
+                    f"用户 {current_user.username} 尝试删除不属于工作空间 "
+                    f"{workspace_id} 的终端用户 {end_user_id_str}"
+                )
+                return fail(
+                    BizCode.PERMISSION_DENIED,
+                    "该终端用户不属于当前工作空间",
+                    "end_user workspace mismatch",
+                )
+
+            if resolved_end_user_id != end_user_id:
+                api_logger.warning(
+                    "拒绝通过已合并源用户删除目标用户记忆: requested_id=%s, "
+                    "resolved_id=%s",
+                    end_user_id_str,
+                    resolved_end_user_id,
+                )
+                return fail(
+                    BizCode.NOT_FOUND,
+                    "终端用户不存在或已删除",
+                    f"end_user_id={end_user_id_str}",
+                )
+
+            effective_end_user_id = resolved_end_user_id
+            effective_end_user_id_str = str(effective_end_user_id)
+            write_lock = RedisFairLock(
+                key=f"memory_write:{effective_end_user_id_str}",
+                redis_client=get_thread_safe_sync_redis(),
+                expire=1200,
+                timeout=60,
+                auto_renewal=True,
+            )
+            if not await asyncio.to_thread(write_lock.acquire):
+                raise RuntimeError("memory write lock acquisition timed out")
+            try:
+                # The requested active user may be merged between the first
+                # lookup and lock acquisition. Re-resolve under its old lock;
+                # retry preflight so the merged source is rejected before any
+                # target lock or destructive operation.
+                confirmed_snapshot: tuple[UUID, str] | None = None
+                async with get_async_db_context() as db:
+                    confirmed = await EndUserRepository(
+                        db
+                    ).get_end_user_by_id_async(end_user_id)
+                    if confirmed is not None:
+                        confirmed_snapshot = (
+                            UUID(str(confirmed.id)),
+                            str(confirmed.workspace_id),
+                        )
+                if confirmed_snapshot is None:
+                    return fail(
+                        BizCode.NOT_FOUND,
+                        "终端用户不存在或已删除",
+                        f"end_user_id={end_user_id_str}",
+                    )
+
+                confirmed_id, confirmed_workspace_id = confirmed_snapshot
+                if confirmed_workspace_id != str(workspace_id):
+                    return fail(
+                        BizCode.PERMISSION_DENIED,
+                        "该终端用户不属于当前工作空间",
+                        "end_user workspace mismatch",
+                    )
+
+                if confirmed_id != effective_end_user_id:
+                    api_logger.info(
+                        "删除终端用户时 merge owner 已变化，释放旧锁并重跑预检: "
+                        "%s -> %s",
+                        effective_end_user_id,
+                        confirmed_id,
+                    )
+                    continue
+
+                total_deleted = await MemoryService.delete_all_nodes_by_end_user_id(
+                    effective_end_user_id_str
+                )
+
+                async with get_async_db_context() as db:
+                    finalized = await EndUserRepository(
+                        db
+                    ).finalize_memory_delete_async(effective_end_user_id)
+                    if not finalized:
+                        raise RuntimeError(
+                            "effective end user disappeared during memory deletion"
+                        )
+
+                api_logger.info(
+                    "终端用户删除完成: requested_id=%s, effective_id=%s, "
+                    "total_deleted=%s",
+                    end_user_id_str,
+                    effective_end_user_id_str,
+                    total_deleted,
+                )
+                return success(
+                    data={
+                        "deleted": True,
+                        "end_user_id": end_user_id_str,
+                        "effective_end_user_id": effective_end_user_id_str,
+                        "total_deleted": total_deleted,
+                    },
+                    msg=f"删除用户{end_user_id_str}记忆库成功",
+                )
+            finally:
+                await asyncio.to_thread(write_lock.release)
 
     except Exception as e:
         api_logger.error(f"删除终端用户失败: end_user_id={end_user_id_str}, error={str(e)}")

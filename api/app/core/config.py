@@ -117,6 +117,11 @@ class Settings:
     ELASTICSEARCH_REQUEST_TIMEOUT: int = int(os.getenv("ELASTICSEARCH_REQUEST_TIMEOUT", "100000"))
     ELASTICSEARCH_RETRY_ON_TIMEOUT: bool = os.getenv("ELASTICSEARCH_RETRY_ON_TIMEOUT", "True").lower() == "true"
     ELASTICSEARCH_MAX_RETRIES: int = int(os.getenv("ELASTICSEARCH_MAX_RETRIES", "10"))
+
+    # Memory storage read backend（记忆存储读取后端，BackendFactory.get_read_client 使用）
+    # 可选值: ELASTIC / NEO4J；加载时统一去除空白并转为大写，非法值在工厂初始化时快速失败
+    MEMORY_READ_BACKEND: str = os.getenv("MEMORY_READ_BACKEND", "ELASTIC").strip().upper()
+
     KNOWLEDGE_RETRIEVAL_MAX_WORKERS: int = int(os.getenv("KNOWLEDGE_RETRIEVAL_MAX_WORKERS", "3"))
     KNOWLEDGE_RETRIEVAL_GRAPH_MAX_CONCURRENCY: int = int(
         os.getenv("KNOWLEDGE_RETRIEVAL_GRAPH_MAX_CONCURRENCY", "2")
@@ -177,6 +182,20 @@ class Settings:
     FAST_WRITE_EMOTION_URL: str = os.getenv("FAST_WRITE_EMOTION_URL", "")
     FAST_WRITE_EMOTION_MODEL: str = os.getenv("FAST_WRITE_EMOTION_MODEL", "")
     FAST_WRITE_EMOTION_API_KEY: str = os.getenv("FAST_WRITE_EMOTION_API_KEY", "")
+    FAST_WRITE_EMOTION_HTTP_TIMEOUT_SECONDS: float = max(
+        0.1, float(os.getenv("FAST_WRITE_EMOTION_HTTP_TIMEOUT_SECONDS", "2.0"))
+    )
+
+    # Scene continuity BERT (/v1/rerank)
+    SCENE_CONTINUITY_URL: str = os.getenv("SCENE_CONTINUITY_URL", "")
+    SCENE_CONTINUITY_API_KEY: str = os.getenv("SCENE_CONTINUITY_API_KEY", "")
+    SCENE_CONTINUITY_MODEL: str = os.getenv("SCENE_CONTINUITY_MODEL", "topic-shift-detector")
+    SCENE_CONTINUITY_TIMEOUT_SECONDS: float = max(
+        0.1, float(os.getenv("SCENE_CONTINUITY_TIMEOUT_SECONDS", "2.0"))
+    )
+    MEMORY_MESSAGE_MAX_CONTENT_CHARS: int = max(
+        1, int(os.getenv("MEMORY_MESSAGE_MAX_CONTENT_CHARS", "12000"))
+    )
 
     # JWT Token Configuration
     SECRET_KEY: str = os.getenv("SECRET_KEY", "a_default_secret_key_that_is_long_and_random")
@@ -378,7 +397,7 @@ class Settings:
 
     REFLECTION_INTERVAL_SECONDS: float = float(os.getenv("REFLECTION_INTERVAL_SECONDS", "300"))
     HEALTH_CHECK_SECONDS: float = float(os.getenv("HEALTH_CHECK_SECONDS", "600"))
-    REFLECTION_INTERVAL_TIME: Optional[str] = int(os.getenv("REFLECTION_INTERVAL_TIME", 30))
+    REFLECTION_INTERVAL_TIME: int = int(os.getenv("REFLECTION_INTERVAL_TIME", 30))
 
     # Celery Beat Schedule Configuration (定时任务执行频率)
     MEMORY_INCREMENT_HOUR: int = TypeAdapter(
@@ -463,13 +482,38 @@ class Settings:
     GDS_TOPOLOGY_ACTIVE_HOURS: int = TypeAdapter(
         Annotated[int, Field(ge=1, description="GDS topology active window in hours, must be >= 1")]
     ).validate_python(int(os.getenv("GDS_TOPOLOGY_ACTIVE_HOURS", "2")))
-    # 热门记忆标签缓存预热时间（UTC 小时，0-23）。19 = 北京时间 03:00
-    HOT_MEMORY_TAGS_REFRESH_HOUR: int = TypeAdapter(
-        Annotated[int, Field(ge=0, le=23, description="Hot memory tags cache refresh hour (UTC), 0-23. 19=Beijing 03:00")]
-    ).validate_python(int(os.getenv("HOT_MEMORY_TAGS_REFRESH_HOUR", "19")))
     DRAFT_DATA_CLEAN_HOUR: int = TypeAdapter(
         Annotated[int, Field(ge=0, le=23, description="Draft data clean hour (UTC), 0-23. 16=Beijing 00:00")]
     ).validate_python(int(os.getenv("DRAFT_DATA_CLEAN_HOUR", "16")))
+    # Storage Outbox：恰好三次原地重试，无延迟重试相关配置。
+    # 扫描调度间隔（秒）：Celery beat 每隔该周期派发一轮投影任务，也用作任务过期时间。
+    OUTBOX_SCAN_INTERVAL_SECONDS: int = TypeAdapter(
+        Annotated[int, Field(ge=1, le=3600)]
+    ).validate_python(int(os.getenv("OUTBOX_SCAN_INTERVAL_SECONDS", "5")))
+    # 每轮投影任务最多认领并处理的事件数，单次消费容量上限。
+    OUTBOX_BATCH_SIZE: int = TypeAdapter(
+        Annotated[int, Field(ge=1, le=1000)]
+    ).validate_python(int(os.getenv("OUTBOX_BATCH_SIZE", "100")))
+    # 事件租约存活时长（秒）：认领后允许的最大处理窗口，超时则判定租约丢失并回收重投。
+    OUTBOX_PROCESSING_TIMEOUT_SECONDS: int = TypeAdapter(
+        Annotated[int, Field(ge=30, le=3600)]
+    ).validate_python(int(os.getenv("OUTBOX_PROCESSING_TIMEOUT_SECONDS", "300")))
+    # 已处理事件的保留天数：超过后由清理任务删除，用于历史回溯窗口。
+    OUTBOX_RETENTION_DAYS: int = TypeAdapter(
+        Annotated[int, Field(ge=1, le=3650)]
+    ).validate_python(int(os.getenv("OUTBOX_RETENTION_DAYS", "30")))
+    # 终态失败事件的保留天数：超过后由清理任务删除，给运维介入排查留出时间。
+    OUTBOX_FAILED_RETENTION_DAYS: int = TypeAdapter(
+        Annotated[int, Field(ge=1, le=3650)]
+    ).validate_python(int(os.getenv("OUTBOX_FAILED_RETENTION_DAYS", "60")))
+    # 每日清理任务触发的 UTC 小时（0-23）；18 UTC = 北京时间次日 02:00。
+    OUTBOX_CLEANUP_HOUR: int = TypeAdapter(
+        Annotated[int, Field(ge=0, le=23)]
+    ).validate_python(int(os.getenv("OUTBOX_CLEANUP_HOUR", "18")))
+    # 落库错误信息最大字符长度：超出截断，避免大异常文本撑爆事件行与日志。
+    OUTBOX_ERROR_MAX_LENGTH: int = TypeAdapter(
+        Annotated[int, Field(ge=64, le=16384)]
+    ).validate_python(int(os.getenv("OUTBOX_ERROR_MAX_LENGTH", "4096")))
     # Memory Module Configuration (internal)
     
     MEMORY_OUTPUT_DIR: str = os.getenv("MEMORY_OUTPUT_DIR", "logs/memory-output")

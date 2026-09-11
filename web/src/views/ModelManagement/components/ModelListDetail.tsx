@@ -1,9 +1,3 @@
-/*
- * @Author: ZhaoYing 
- * @Date: 2026-02-03 16:49:45 
- * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-07-01 10:20:14
- */
 /**
  * Model List Detail Drawer
  * Displays detailed list of models from a specific provider
@@ -73,7 +67,7 @@ const ModelListDetail = forwardRef<ModelListDetailRef, ModelListDetailProps>(({ 
   }
   /** Open key configuration modal */
   const handleKeyConfig = (vo: ModelListItem) => {
-    multiKeyConfigModalRef.current?.handleOpen(vo, data.provider)
+    multiKeyConfigModalRef.current?.handleOpen(vo)
   }
   /** Toggle model active status */
   const handleChange = (vo: ModelListItem) => {
@@ -145,13 +139,12 @@ const ModelListDetail = forwardRef<ModelListDetailRef, ModelListDetailProps>(({ 
                 <OverflowTags
                   items={[
                     <Tag>{formatModelType(item.type)}</Tag>,
-                    item.provider !== 'speedbear' ? <Tag color="warning">{item.api_keys.length}{t('modelNew.apiKeyNum')}</Tag> : null,
                     ...(item.capability ?? []).map(vo => <Tag>{t(`modelNew.${vo}`)}</Tag>)
                   ].filter(Boolean)}
                 />}
               avatarUrl={getLogoUrl(item.logo)}
               avatar={
-                <Flex align="center" justify="center" className="rb:size-12 rb:rounded-lg rb:bg-[#155eef] rb:text-[28px] rb:text-[#ffffff]">
+                <Flex align="center" justify="center" className="rb:size-12 rb:rounded-lg rb:bg-blue-500 rb:text-[28px] rb:text-white">
                   {item.name[0]}
                 </Flex>
               }
@@ -163,7 +156,7 @@ const ModelListDetail = forwardRef<ModelListDetailRef, ModelListDetailProps>(({ 
               variant="outlined"
             >
               <Tooltip title={item.description}>
-                <div className="rb:text-[#5B6167] rb:text-[12px] rb:leading-4.5 rb:font-regular rb:wrap-break-word rb:line-clamp-2">{item.description}</div>
+                <div className="rb:text-gray-600 rb:text-[12px] rb:leading-4.5 rb:font-regular rb:wrap-break-word rb:line-clamp-2">{item.description}</div>
               </Tooltip>
               {item.provider !== 'speedbear' &&
                 <div className="rb:absolute rb:bottom-4 rb:left-6 rb:right-6">

@@ -226,11 +226,16 @@ class BatchPersistQueue:
     # -- batch write ------------------------------------------------------------
 
     async def _batch_write(self, batch: list[PersistTask]) -> None:
-        """Write a batch of tasks in a single DB session.
+        """Write a batch of tasks, committing messages before anything else.
 
         Message-persistence tasks (save_messages / save_failed_message) are
-        extracted and committed together via one multi-row INSERT plus atomic
-        conversation counter UPDATEs — the DB is opened only once per batch.
+        merged into one multi-row INSERT plus atomic conversation counter
+        UPDATEs, which raise row locks on ``conversations``. That commit must
+        happen before the other handlers run: it releases the row locks early
+        (other writers wait on them, e.g. the memory dispatcher's cursor
+        advance) and isolates the message batch from a handler that closes or
+        fails its own session. Every other task then gets its own session and
+        commit so one bad handler cannot affect the rest.
         """
         if not batch:
             return
@@ -242,19 +247,22 @@ class BatchPersistQueue:
         pool_status_before = _get_async_pool_status_safe()
 
         try:
-            async with get_async_db_context() as db:
-                if msg_tasks:
+            if msg_tasks:
+                async with get_async_db_context() as db:
                     await _bulk_persist_messages(db, msg_tasks)
-                for task in other_tasks:
-                    try:
+                    await db.commit()
+
+            for task in other_tasks:
+                try:
+                    async with get_async_db_context() as db:
                         await self._execute_task(db, task)
-                    except Exception:
-                        logger.exception(
-                            "Failed to execute persist task %s (args keys: %s)",
-                            task.task_type,
-                            list(task.args.keys()),
-                        )
-                await db.commit()
+                        await db.commit()
+                except Exception:
+                    logger.exception(
+                        "Failed to execute persist task %s (args keys: %s)",
+                        task.task_type,
+                        list(task.args.keys()),
+                    )
 
             elapsed_ms = (time.time() - t0) * 1000
             pool_status_after = _get_async_pool_status_safe()

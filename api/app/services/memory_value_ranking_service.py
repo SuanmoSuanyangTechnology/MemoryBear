@@ -13,6 +13,9 @@ from app.core.quota_manager import (
     get_end_user_memory_limit,
     get_end_user_memory_limit_async,
 )
+from app.core.memory.storage.enums import MemoryNodeType
+from app.core.memory.storage.models import NodeFilter
+from app.core.memory.storage.service import MemoryStorageService, get_storage_service
 from app.core.utils.datetime_utils import (
     convert_neo4j_datetime_to_python,
     to_timestamp_ms,
@@ -27,8 +30,8 @@ from app.repositories.end_user_repository import (
 from app.repositories.neo4j.cypher_queries import (
     LIVE_STATEMENT_COUNT,
     PERMANENT_MEMORY_COUNT,
+    PERMANENT_MEMORY_ID_BY_ELEMENT_ID,
     PERMANENT_MEMORY_LIST,
-    PERMANENT_MEMORY_UNMARK,
 )
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.schemas.memory_value_ranking_schema import (
@@ -155,9 +158,17 @@ class MemoryValueRankingService:
         self,
         db: AsyncSession,
         connector_factory: Callable[[], Neo4jConnector] | None = None,
+        storage_service: MemoryStorageService | None = None,
     ) -> None:
         self.db = db
         self.connector_factory = connector_factory or Neo4jConnector
+        self.storage_service = storage_service
+
+    def _get_storage_service(self) -> MemoryStorageService:
+        """Return the injected service or the API-lifespan singleton."""
+        if self.storage_service is not None:
+            return self.storage_service
+        return get_storage_service()
 
     async def _get_end_user(
         self,
@@ -284,11 +295,22 @@ class MemoryValueRankingService:
         try:
             total_memory_limit = await get_total_memory_limit(str(end_user.id))
             rows = await connector.execute_query(
-                PERMANENT_MEMORY_UNMARK,
+                PERMANENT_MEMORY_ID_BY_ELEMENT_ID,
                 element_id=element_id,
                 end_user_id=str(end_user.id),
             )
-            if not rows:
+            if not rows or not rows[0].get("node_id"):
+                raise PermanentMemoryNotFound("statement not found")
+            node_id = str(rows[0]["node_id"])
+            result = await self._get_storage_service().update_node(
+                MemoryNodeType.STATEMENT,
+                {"is_permanent": False},
+                NodeFilter.all_of(
+                    NodeFilter.eq("id", node_id),
+                    NodeFilter.eq("end_user_id", str(end_user.id)),
+                ),
+            )
+            if result.affected_count != 1 or len(result.ids) != 1:
                 raise PermanentMemoryNotFound("statement not found")
             used = await self._count(connector, str(end_user.id))
             try:
@@ -306,7 +328,7 @@ class MemoryValueRankingService:
                     end_user.id,
                 )
             return PermanentMemoryUnmarkResult(
-                id=str(rows[0]["id"]),
+                id=element_id,
                 is_permanent=False,
                 quota=self._quota(total_memory_limit, used),
             )

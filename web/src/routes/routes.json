@@ -41,6 +41,7 @@
       { "path": "/ontology", "element": "Ontology" },
       { "path": "/prompt", "element": "Prompt" },
       { "path": "/prompt/history", "element": "PromptHistory" },
+      { "path": "/brain-memory", "element": "BrainMemory" },
       { "path": "/no-permission", "element": "NoPermission" },
       { "path": "/*", "element": "NotFound" }
     ]

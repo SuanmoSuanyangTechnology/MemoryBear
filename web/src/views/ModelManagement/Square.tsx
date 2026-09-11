@@ -1,9 +1,3 @@
-/*
- * @Author: ZhaoYing 
- * @Date: 2026-02-03 16:50:14 
- * @Last Modified by: ZhaoYing
- * @Last Modified time: 2026-08-03 17:00:07
- */
 /**
  * Model Square View
  * Displays public model marketplace grouped by provider
@@ -69,9 +63,9 @@ const ModelSquare = forwardRef <BaseRef, { query: any; }>(({ query }, ref) => {
             {list.map(vo => (
               <div
                 key={vo.provider}
-                className={clsx('rb:border rb:border-[#171719] rb:rounded-full rb:px-2 rb:py-1 rb:cursor-pointer', {
-                  'rb:text-white rb:bg-[#171719]': activeProvider === vo.provider,
-                  'rb:text-[#171719]': activeProvider !== vo.provider,
+                className={clsx('rb:border rb:border-gray-900 rb:rounded-full rb:px-2 rb:py-1 rb:cursor-pointer', {
+                  'rb:text-white rb:bg-gray-900': activeProvider === vo.provider,
+                  'rb:text-gray-900': activeProvider !== vo.provider,
                 })}
                 onClick={() => setActiveProvider(vo.provider)}
               >{String(vo.provider).charAt(0).toUpperCase() + String(vo.provider).slice(1)}</div>
@@ -104,7 +98,7 @@ const ModelSquare = forwardRef <BaseRef, { query: any; }>(({ query }, ref) => {
                     </Flex>
                     }
                     isNeedTooltip={false}
-                    footer={<Flex justify="space-between" align="center" className="rb:text-[#5B6167] rb:text-[12px]">
+                    footer={<Flex justify="space-between" align="center" className="rb:text-gray-600 rb:text-[12px]">
                       @{String(item.provider).charAt(0).toUpperCase() + String(item.provider).slice(1)}
                       <Space size={4}><UsergroupAddOutlined /> {item.add_count}</Space>
                     </Flex>}
@@ -116,18 +110,18 @@ const ModelSquare = forwardRef <BaseRef, { query: any; }>(({ query }, ref) => {
                     <Flex gap={8} wrap align="center" className="rb:mt-2!">
                       <Flex gap={6}>
                         {item.tags?.slice(0, 2).map((type, i) => (
-                          <div key={i} className="rb:bg-[#F6F6F6] rb:rounded-md rb:py-px rb:px-1 rb:text-[12px] rb:leading-4.5">{type}</div>
+                          <div key={i} className="rb:bg-gray-100 rb:rounded-md rb:py-px rb:px-1 rb:text-[12px] rb:leading-4.5">{type}</div>
                         ))}
                       </Flex>
                       {item.tags.length > 2 && (
                         <Tooltip
                           title={<Flex wrap gap={6}>{item.tags?.slice(2, item.tags.length).map((type, i) => (
-                            <div key={i} className="rb:bg-[#F6F6F6] rb:rounded-md rb:py-px rb:px-1 rb:text-[12px] rb:leading-4.5 rb:text-[#171719]">{type}</div>
+                            <div key={i} className="rb:bg-gray-100 rb:rounded-md rb:py-px rb:px-1 rb:text-[12px] rb:leading-4.5 rb:text-gray-900">{type}</div>
                           ))}</Flex>}
                           color="white"
                           placement="bottom"
                         >
-                          <div className="rb:bg-[#F6F6F6] rb:rounded-md rb:py-px rb:px-1 rb:text-[12px] rb:leading-4.5">+{item.tags.length - 2}</div>
+                          <div className="rb:bg-gray-100 rb:rounded-md rb:py-px rb:px-1 rb:text-[12px] rb:leading-4.5">+{item.tags.length - 2}</div>
                         </Tooltip>
                       )}
                     </Flex>

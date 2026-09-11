@@ -80,7 +80,7 @@ const CreateModalKnowledgeGraphConfig = ({
               onClick={onGenerateEntityTypes}
               className="rb:mt-3"
             >
-              {!entity_types || entity_types.trim() === ''
+              {!entity_types || (typeof entity_types === 'string' && entity_types?.trim() === '') || (Array.isArray(entity_types) && !entity_types.length)
                 ? t('knowledgeBase.generateEntityTypes')
                 : t('knowledgeBase.regenerateEntityTypes')}
             </Button>

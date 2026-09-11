@@ -5,7 +5,7 @@
  * @Last Modified time: 2026-02-03 14:00:09 
  */
 import { request } from '@/utils/request'
-import type { MultiKeyForm, Query, KeyConfigModalForm, CompositeModelForm, CustomModelForm } from '@/views/ModelManagement/types'
+import type { MultiKeyForm, Query, KeyConfigModalForm, CompositeModelForm, CustomModelForm, Provider } from '@/views/ModelManagement/types'
 
 // Model list
 export const getModelListUrl = '/models'
@@ -40,17 +40,33 @@ export const updateCompositeModel = (model_id: string, data: CompositeModelForm)
 export const deleteCompositeModel = (model_id: string) => {
   return request.delete(`/models/composite/${model_id}`)
 }
+// Get API keys for all matching models by provider
+export const getProviderApiKeys = (data: { provider: Provider; is_active?: boolean; page?: number; pagesize?: number}) => {
+  return request.get('/models/provider/apikeys', data)
+}
 // Create API keys for all matching models by provider
-export const updateProviderApiKeys = (data: KeyConfigModalForm, signal?: AbortSignal) => {
+export const createProviderApiKeys = (data: KeyConfigModalForm, signal?: AbortSignal) => {
   return request.post('/models/provider/apikeys', data, { signal })
+}
+// Update API keys for all matching models by provider
+export const updateProviderApiKeys = (api_key_id: string, data: { is_active: boolean; }) => {
+  return request.put(`/models/provider/apikeys/${api_key_id}`, data)
+}
+// Delete API keys for all matching models by provider
+export const deleteProviderApiKeys = (api_key_id: string) => {
+  return request.delete(`/models/provider/apikeys/${api_key_id}`)
+}
+// Get model API key
+export const getModelApiKeys = (model_id: string) => {
+  return request.get(`/models/${model_id}/apikeys`)
 }
 // Create model API key
 export const addModelApiKey = (model_id: string, data: MultiKeyForm, signal?: AbortSignal) => {
   return request.post(`/models/${model_id}/apikeys`, data, { signal })
 }
 // Delete model API key
-export const deleteModelApiKey = (api_key_id: string) => {
-  return request.delete(`/models/apikeys/${api_key_id}`)
+export const deleteModelApiKey = (model_id: string, api_key_id: string) => {
+  return request.delete(`/models/${model_id}/apikeys/${api_key_id}`)
 }
 // Update model status
 export const updateModelStatus = (model_id: string, data: { is_active: boolean; }) => {

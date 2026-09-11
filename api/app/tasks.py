@@ -3,6 +3,7 @@ import json
 import os
 import re
 import shutil
+import socket
 import tempfile
 import time
 import uuid
@@ -23,12 +24,17 @@ from fastapi.encoders import jsonable_encoder
 from redis.exceptions import RedisError
 from sqlalchemy import String, cast, select
 
-from app.aioRedis import get_thread_safe_redis
+from app.aioRedis import get_thread_safe_redis, get_thread_safe_sync_redis
 from app.celery_app import celery_app
 from app.core.config import settings
 from app.core.logging_config import get_logger
 from app.core.memory.exceptions import MemoryExtractionBusinessError
 from app.core.models import RedBearEmbeddings, RedBearLLM
+from app.core.memory.storage.outbox.consumer import (
+    cleanup_outbox_events,
+    consume_outbox_batch,
+)
+from app.core.memory.storage.outbox.exceptions import safe_error
 from app.core.memory.storage_services.reflection_engine import retry_registry as rr
 from app.core.memory.storage_services.forgetting_engine.constants import (
     FORGET_CANDIDATES_KEY as _FORGET_CANDIDATES_KEY,
@@ -1039,6 +1045,45 @@ def _shutdown_loop_gracefully(loop: asyncio.AbstractEventLoop):
         loop.run_until_complete(loop.shutdown_asyncgens())
     except Exception:
         pass
+
+
+@celery_app.task(
+    name="app.tasks.scan_outbox_projection",
+    queue="memory_projection",
+    max_retries=0,
+)
+def scan_outbox_projection():
+    worker_id = f"{socket.gethostname()[:60]}:{os.getpid()}:{uuid.uuid4()}"
+    try:
+        result = asyncio.run(
+            consume_outbox_batch(settings.OUTBOX_BATCH_SIZE, worker_id)
+        )
+    except Exception as exc:
+        # Celery 会记录抛出的异常；剥离驱动 SQL、凭据与负载。
+        error = safe_error(exc, settings.OUTBOX_ERROR_MAX_LENGTH)
+        logger.error("Outbox task failed: %s", error)
+        raise RuntimeError(f"Outbox task failed: {error}") from None
+    logger.info("Outbox task completed: %s", result)
+    return result
+
+
+@celery_app.task(
+    name="app.tasks.cleanup_outbox",
+    queue="memory_projection",
+    max_retries=0,
+)
+def cleanup_outbox():
+    try:
+        result = asyncio.run(
+            cleanup_outbox_events(settings.OUTBOX_BATCH_SIZE)
+        )
+    except Exception as exc:
+        # Celery 会记录抛出的异常；剥离驱动 SQL、凭据与负载。
+        error = safe_error(exc, settings.OUTBOX_ERROR_MAX_LENGTH)
+        logger.error("Outbox task failed: %s", error)
+        raise RuntimeError(f"Outbox task failed: {error}") from None
+    logger.info("Outbox task completed: %s", result)
+    return result
 
 
 @celery_app.task(name="tasks.process_item")
@@ -2883,8 +2928,11 @@ def fast_write_message_task(
     )
     start_time = time.time()
 
+    scene_context_holder: dict[str, Any] = {}
+
     async def _run() -> dict:
         from app.core.memory.memory_service import MemoryService
+        from app.core.memory.scene.scene_boundary_service import SceneBoundaryService
 
         service = MemoryService(
             config_id=uuid.UUID(config_id),
@@ -2892,6 +2940,17 @@ def fast_write_message_task(
             workspace_id=workspace_id,
             language=language,
         )
+        scene_context = None
+        memory_message_id = str((target_message or {}).get("memory_message_id") or "")
+        if memory_message_id and str((target_message or {}).get("role") or "") == "user":
+            with get_db_context() as db:
+                scene_context = SceneBoundaryService.prepare_context(
+                    db,
+                    resolved_end_user_id=resolved_end_user_id,
+                    memory_message_id=memory_message_id,
+                    config=service.ctx.memory_config,
+                )
+        scene_context_holder["context"] = scene_context
 
         return await service.fast_write(
             target_message=target_message or {"role": "user", "content": ""},
@@ -2899,6 +2958,7 @@ def fast_write_message_task(
             message_seq=message_seq,
             source=source,
             dispatch_at=dispatch_at,
+            scene_context=scene_context,
         )
 
     loop = None
@@ -2906,6 +2966,45 @@ def fast_write_message_task(
         loop = set_asyncio_event_loop()
 
         result = loop.run_until_complete(_run())
+
+        scene_context = scene_context_holder.get("context")
+        scene_decision = result.get("scene_decision") if isinstance(result, dict) else None
+        if scene_context is not None and scene_decision:
+            from app.core.memory.scene.scene_boundary_service import SceneBoundaryService
+
+            summary_claimed = False
+            with get_db_context() as db:
+                _updated, persisted = SceneBoundaryService.save_initial_decision(
+                    db, context=scene_context, decision=scene_decision
+                )
+                if persisted == "SHIFTED" and scene_context.previous_shifted_message_id:
+                    summary_claimed = SceneBoundaryService.claim_summary(
+                        db,
+                        scene_start_message_id=scene_context.previous_shifted_message_id,
+                        end_user_id=resolved_end_user_id,
+                    )
+                db.commit()
+            if summary_claimed:
+                try:
+                    generate_scene_summary.apply_async(
+                        kwargs={
+                            "end_user_id": resolved_end_user_id,
+                            "config_id": config_id,
+                            "scene_start_message_id": scene_context.previous_shifted_message_id,
+                            "close_before_message_id": scene_context.current_message_id,
+                            "close_reason": "SHIFTED",
+                        }
+                    )
+                except Exception:
+                    with get_db_context() as db:
+                        SceneBoundaryService.release_summary_claim(
+                            db,
+                            scene_start_message_id=scene_context.previous_shifted_message_id,
+                            end_user_id=resolved_end_user_id,
+                        )
+                        db.commit()
+                    raise
+
         elapsed_time = time.time() - start_time
 
         logger.info(f"[CELERY FAST WRITE] Task completed - elapsed_time={elapsed_time:.2f}s")
@@ -3749,7 +3848,7 @@ def do_gds_topology_score(self, end_user_id: str, inflight_token: Optional[str] 
         return {"status": "skipped_stale_inflight", "end_user_id": end_user_id}
 
     async def _run() -> Dict[str, Any]:
-        from app.repositories.neo4j.gds_topology_repository import compute_topology_score
+        from app.core.memory.storage.custom import compute_topology_score
 
         write_lock = RedisFairLock(
             key=f"memory_write:{end_user_id}",
@@ -6035,107 +6134,52 @@ def init_interest_distribution_for_users(self, end_user_ids: List[str]) -> Dict[
         _shutdown_loop_gracefully(loop)
 
 
-@celery_app.task(
-    name="app.tasks.refresh_hot_memory_tags_cache",
-    bind=True,
-    ignore_result=False,
-    max_retries=0,
-    acks_late=False,
-    time_limit=3600,
-    soft_time_limit=3300,
-)
-def refresh_hot_memory_tags_cache(self) -> Dict[str, Any]:
-    """定时任务：为所有活跃 workspace 预热热门记忆标签缓存（limit=10）。
-
-    执行时间由 settings.HOT_MEMORY_TAGS_REFRESH_HOUR（UTC 小时）决定，
-    默认 19（= 北京时间 03:00）。缓存过期 28h，使白天请求全程命中缓存。
-    """
-    start_time = time.time()
-
-    async def _run() -> Dict[str, Any]:
-        import json as _json
-
-        from app.aioRedis import aio_redis_get, aio_redis_set
-        from app.models.workspace_model import Workspace
-        from app.services.memory_storage_service import (
-            HOT_MEMORY_TAGS_CACHE_EXPIRE,
-            HOT_MEMORY_TAGS_CACHE_PREFIX,
-            compute_hot_memory_tags,
-        )
-
-        limit = 10  # 前端首页固定 limit
-
-        # 1. 取全量启用（is_active=True）的 workspace id（短事务，取完即出）
-        #    与 write_all_workspaces_memory_task 一致，仅排除已停用/软删除的 workspace
-        with get_db_context() as db:
-            workspace_ids = [
-                str(wid) for (wid,) in db.query(Workspace.id).filter(
-                    Workspace.is_active.is_(True)
-                ).all()
-            ]
-
-        if not workspace_ids:
-            return {"status": "SUCCESS", "message": "无活跃工作空间", "total": 0}
-
-        logger.info(f"[HotTagsRefresh] 开始预热 {len(workspace_ids)} 个 workspace 的热门标签缓存")
-
-        refreshed = 0
-        empty = 0
-        failed = 0
-
-        # 2. 逐个 workspace 计算并写缓存（串行，避免 LLM 并发压力）
-        for workspace_id in workspace_ids:
-            try:
-                result = await compute_hot_memory_tags(workspace_id, limit)
-                if not result:
-                    empty += 1
-                cache_key = f"{HOT_MEMORY_TAGS_CACHE_PREFIX}:{workspace_id}:{limit}"
-                cache_data = _json.dumps(result, ensure_ascii=False)
-                await aio_redis_set(cache_key, cache_data, expire=HOT_MEMORY_TAGS_CACHE_EXPIRE)
-
-                # aio_redis_set 内部吞异常（写失败仅记日志、不抛），这里写后读回校验，
-                # 确保 refreshed 计数真实反映「缓存确实写入」，而非虚报成功
-                verify = await aio_redis_get(cache_key)
-                if verify is None:
-                    failed += 1
-                    logger.error(f"[HotTagsRefresh] 缓存写入校验失败（读回为空） key={cache_key}")
-                    continue
-
-                refreshed += 1
-                logger.info(
-                    f"[HotTagsRefresh] 缓存写入成功 key={cache_key} "
-                    f"tags={len(result)} expire={HOT_MEMORY_TAGS_CACHE_EXPIRE}s"
-                )
-            except Exception as e:
-                failed += 1
-                logger.error(f"[HotTagsRefresh] workspace={workspace_id} 预热失败: {e}", exc_info=True)
-
-        logger.info(f"[HotTagsRefresh] 预热完成: refreshed={refreshed}, empty={empty}, failed={failed}")
-        return {
-            "status": "SUCCESS",
-            "total": len(workspace_ids),
-            "refreshed": refreshed,
-            "empty": empty,
-            "failed": failed,
-        }
-
-    try:
-        loop = set_asyncio_event_loop()
-        result = loop.run_until_complete(_run())
-        result["elapsed_time"] = time.time() - start_time
-        result["task_id"] = self.request.id
-        return result
-    except Exception as e:
-        return {
-            "status": "FAILURE",
-            "error": str(e),
-            "elapsed_time": time.time() - start_time,
-            "task_id": self.request.id,
-        }
-
-
 # =============================================================================
 # 社区聚类补全任务（触发型）
+
+def _resolve_community_clustering_owner_id(end_user_id: str) -> str:
+    """Resolve a possibly merged user to the current active graph owner."""
+    with get_db_context() as db:
+        from app.repositories.end_user_repository import EndUserRepository
+
+        resolved = EndUserRepository(db).resolve_merge_by_origin_id(
+            uuid.UUID(end_user_id)
+        )
+        return str(resolved.id) if resolved else end_user_id
+
+
+def _acquire_community_clustering_lock(
+    original_end_user_id: str,
+    *,
+    redis_client,
+    expire: int,
+) -> tuple[str, RedisFairLock]:
+    """Resolve, lock, and re-resolve until the lock protects current owner."""
+    candidate_id = original_end_user_id
+    while True:
+        effective_id = _resolve_community_clustering_owner_id(candidate_id)
+        write_lock = RedisFairLock(
+            key=f"memory_write:{effective_id}",
+            redis_client=redis_client,
+            expire=expire,
+            timeout=60,
+            auto_renewal=True,
+        )
+        if not write_lock.acquire():
+            raise RuntimeError(
+                f"Get redis lock timeout: memory_write:{effective_id}"
+            )
+        try:
+            confirmed_id = _resolve_community_clustering_owner_id(candidate_id)
+        except Exception:
+            write_lock.release()
+            raise
+        if confirmed_id == effective_id:
+            return effective_id, write_lock
+        write_lock.release()
+        candidate_id = confirmed_id
+
+
 # =============================================================================
 
 @celery_app.task(
@@ -6169,9 +6213,12 @@ def run_incremental_clustering(
         包含任务执行结果的字典
     """
     start_time = time.time()
+    original_end_user_id = end_user_id
 
     async def _run() -> Dict[str, Any]:
         from app.core.logging_config import get_logger
+        from app.core.memory.storage.custom import CommunityMutationWriter
+        from app.core.memory.storage.provider.neo4j.client import Neo4jClient
         from app.repositories.neo4j.neo4j_connector import Neo4jConnector
         from app.core.memory.storage_services.clustering_engine.label_propagation import LabelPropagationEngine
 
@@ -6188,10 +6235,13 @@ def run_incremental_clustering(
             memory_config = MemoryConfigService(db).load_memory_config(config_id=config_id)
 
         connector = Neo4jConnector()
+        storage_client = None
         try:
+            storage_client = await Neo4jClient.create()
             engine = LabelPropagationEngine(
                 connector=connector,
                 memory_config=memory_config,
+                community_writer=CommunityMutationWriter(storage_client),
                 language=language,
             )
 
@@ -6209,10 +6259,20 @@ def run_incremental_clustering(
             logger.error(f"[IncrementalClustering] 增量聚类失败: {e}", exc_info=True)
             raise
         finally:
-            await connector.close()
+            try:
+                if storage_client is not None:
+                    await storage_client.close()
+            finally:
+                await connector.close()
 
     loop = set_asyncio_event_loop()
+    write_lock = None
     try:
+        end_user_id, write_lock = _acquire_community_clustering_lock(
+            original_end_user_id,
+            redis_client=get_thread_safe_sync_redis(),
+            expire=1800,
+        )
         result = loop.run_until_complete(_run())
         result["elapsed_time"] = time.time() - start_time
         result["task_id"] = self.request.id
@@ -6225,6 +6285,8 @@ def run_incremental_clustering(
         return result
     # 不再 catch 全局异常，直接冒出 → Celery FAILURE
     finally:
+        if write_lock is not None:
+            write_lock.release()
         _shutdown_loop_gracefully(loop)
 
 
@@ -6256,6 +6318,8 @@ def init_community_clustering_for_users(self, end_user_ids: List[str], workspace
     async def _run() -> Dict[str, Any]:
         from app.core.logging_config import get_logger
         from app.repositories.neo4j.community_repository import CommunityRepository
+        from app.core.memory.storage.custom import CommunityMutationWriter
+        from app.core.memory.storage.provider.neo4j.client import Neo4jClient
         from app.repositories.neo4j.neo4j_connector import Neo4jConnector
         from app.core.memory.storage_services.clustering_engine.label_propagation import LabelPropagationEngine
 
@@ -6267,8 +6331,12 @@ def init_community_clustering_for_users(self, end_user_ids: List[str], workspace
         failed = 0
 
         connector = Neo4jConnector()
+        storage_client = None
         try:
+            storage_client = await Neo4jClient.create()
             repo = CommunityRepository(connector)
+            community_writer = CommunityMutationWriter(storage_client)
+            redis_client = get_thread_safe_sync_redis()
 
             # 批量预取所有用户的 MemoryConfig（tenant 与 model_id 同源），避免循环内逐个查库。
             # 加载失败的用户不存入 map，循环内检测到缺失时直接 skip。
@@ -6288,13 +6356,40 @@ def init_community_clustering_for_users(self, end_user_ids: List[str], workspace
             except Exception as e:
                 logger.error(f"[CommunityCluster] 批量获取配置失败: {e}")
 
-            for end_user_id in end_user_ids:
+            for requested_end_user_id in end_user_ids:
+                write_lock = None
+                end_user_id = requested_end_user_id
                 try:
+                    end_user_id, write_lock = _acquire_community_clustering_lock(
+                        requested_end_user_id,
+                        redis_client=redis_client,
+                        expire=7200,
+                    )
+
                     # 配置加载失败的用户直接跳过
                     memory_config = user_config_map.get(end_user_id)
+                    if not memory_config and end_user_id != requested_end_user_id:
+                        with get_db_context() as db:
+                            from app.services.memory_agent_service import (
+                                get_end_users_connected_configs_batch,
+                            )
+                            from app.services.memory_config_service import MemoryConfigService
+
+                            resolved_configs = get_end_users_connected_configs_batch(
+                                [end_user_id], db
+                            )
+                            config_info = resolved_configs.get(end_user_id) or {}
+                            resolved_config_id = config_info.get("memory_config_id")
+                            if resolved_config_id:
+                                memory_config = MemoryConfigService(db).load_memory_config(
+                                    config_id=resolved_config_id
+                                )
+                                user_config_map[end_user_id] = memory_config
                     if not memory_config:
                         failed += 1
-                        logger.warning(f"[CommunityCluster] 用户 {end_user_id} 无有效配置，跳过聚类")
+                        logger.warning(
+                            f"[CommunityCluster] 用户 {end_user_id} 无有效配置，跳过聚类"
+                        )
                         continue
 
                     # 已有社区节点时，检查是否存在属性不完整的节点
@@ -6313,6 +6408,7 @@ def init_community_clustering_for_users(self, end_user_ids: List[str], workspace
                         engine = LabelPropagationEngine(
                             connector=connector,
                             memory_config=memory_config,
+                            community_writer=community_writer,
                         )
                         logger.info(
                             f"[CommunityCluster] 用户 {end_user_id} 发现 {len(incomplete_ids)} 个属性不完整的社区，开始补全"
@@ -6321,7 +6417,9 @@ def init_community_clustering_for_users(self, end_user_ids: List[str], workspace
                         patch_fail = 0
                         for cid in incomplete_ids:
                             try:
-                                await engine._generate_community_metadata([cid], end_user_id)
+                                await engine._generate_community_metadata(
+                                    [cid], end_user_id
+                                )
                                 patch_ok += 1
                             except Exception as patch_err:
                                 patch_fail += 1
@@ -6343,6 +6441,7 @@ def init_community_clustering_for_users(self, end_user_ids: List[str], workspace
                     engine = LabelPropagationEngine(
                         connector=connector,
                         memory_config=memory_config,
+                        community_writer=community_writer,
                     )
 
                     logger.info(
@@ -6355,9 +6454,16 @@ def init_community_clustering_for_users(self, end_user_ids: List[str], workspace
                 except Exception as e:
                     failed += 1
                     logger.error(f"[CommunityCluster] 用户 {end_user_id} 聚类失败: {e}")
+                finally:
+                    if write_lock is not None:
+                        write_lock.release()
 
         finally:
-            await connector.close()
+            try:
+                if storage_client is not None:
+                    await storage_client.close()
+            finally:
+                await connector.close()
 
         logger.info(
             f"[CommunityCluster] 任务完成: 初始化={initialized}, 跳过={skipped}, 失败={failed}"
@@ -6695,7 +6801,8 @@ def run_workflow_schedule_trigger(app_id: str, release_id: str, trigger_id: str,
 @celery_app.task(name="app.tasks.draft_data_clean", queue="memory_tasks")
 def draft_data_clean():
     import asyncio
-    from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+
+    from app.core.memory.storage.custom import delete_end_user_memory_nodes
 
     with get_db_context() as db:
         stmt = select(EndUser.id).join(
@@ -6705,32 +6812,292 @@ def draft_data_clean():
             EndUser.is_active == True
         )
         result = db.execute(stmt)
-        end_user_ids = [str(eid) for eid in result.scalars()]
+        candidate_ids = list(result.scalars())
 
-        if not end_user_ids:
+        if not candidate_ids:
             logger.info("draft_data_clean: 没有需要清理的终端用户")
             return {"deleted_count": 0}
 
-        updated = (
+        # Preserve the legacy cleanup invariant: deactivate the complete PG
+        # batch first. Graph cleanup is best-effort afterwards, so a Neo4j or
+        # Outbox failure must never leave these users active again.
+        pg_deleted = (
             db.query(EndUser)
-            .filter(EndUser.id.in_(end_user_ids))
-            .update({"is_active": False}, synchronize_session=False)
+            .filter(
+                EndUser.id.in_(candidate_ids),
+                EndUser.is_active == True,
+            )
+            .update(
+                {"is_active": False, "memory_count": 0},
+                synchronize_session=False,
+            )
         )
         db.commit()
-        logger.info(f"draft_data_clean: 软删除 {updated} 个终端用户")
 
-    async def _delete_neo4j_groups():
-        async with Neo4jConnector() as connector:
-            deleted = 0
-            for eid in end_user_ids:
+    end_user_ids = [str(end_user_id) for end_user_id in candidate_ids]
+    neo4j_deleted = 0
+    neo4j_deleted_nodes = 0
+    neo4j_failed = 0
+    redis_client = get_thread_safe_sync_redis()
+    for eid in end_user_ids:
+        write_lock = RedisFairLock(
+            key=f"memory_write:{eid}",
+            redis_client=redis_client,
+            expire=1200,
+            timeout=60,
+            auto_renewal=True,
+        )
+        try:
+            with write_lock:
+                deleted_nodes = asyncio.run(
+                    delete_end_user_memory_nodes(eid)
+                )
+            neo4j_deleted += 1
+            neo4j_deleted_nodes += deleted_nodes
+        except Exception:
+            neo4j_failed += 1
+            logger.exception(
+                "draft_data_clean: Neo4j/Outbox 删除失败，继续下一个用户 "
+                "end_user_id=%s",
+                eid,
+            )
+            continue
+
+    logger.info(
+        "draft_data_clean: PG 软删除 %s 个用户；Neo4j 成功 %s 组、%s 个节点，失败 %s 组",
+        pg_deleted,
+        neo4j_deleted,
+        neo4j_deleted_nodes,
+        neo4j_failed,
+    )
+    return {
+        "pg_deleted": pg_deleted,
+        "neo4j_deleted": neo4j_deleted,
+        "neo4j_deleted_nodes": neo4j_deleted_nodes,
+        "neo4j_failed": neo4j_failed,
+    }
+
+
+# ============================================================================
+# Scene boundary and SceneSummary maintenance
+# ============================================================================
+
+_SCENE_IDLE_SCAN_CURSOR_KEY = "scene_summary:idle_scan_cursor:v1"
+_SCENE_IDLE_SCAN_LOCK_KEY = "scene_summary:idle_scan_lock:v1"
+_SCENE_IDLE_SCAN_LOCK_TTL_SECONDS = 300
+_SCENE_IDLE_SCAN_CURSOR_TTL_SECONDS = 86400 * 30
+
+
+@celery_app.task(
+    bind=True,
+    name="app.core.memory.generate_scene_summary",
+    acks_late=True,
+    autoretry_for=(Exception,),
+    retry_backoff=True,
+    retry_kwargs={"max_retries": 3},
+)
+def generate_scene_summary(
+    self,
+    end_user_id: str,
+    config_id: str,
+    scene_start_message_id: str,
+    close_reason: str,
+    close_before_message_id: str | None = None,
+    idle_high_watermark_message_id: str | None = None,
+):
+    from app.core.memory.scene.scene_summary_service import SceneSummaryService
+    from app.schemas.scene_memory_schema import GenerateSceneSummaryTask
+
+    payload = GenerateSceneSummaryTask(
+        end_user_id=end_user_id,
+        config_id=config_id,
+        scene_start_message_id=scene_start_message_id,
+        close_before_message_id=close_before_message_id,
+        idle_high_watermark_message_id=idle_high_watermark_message_id,
+        close_reason=close_reason,
+    )
+    loop = set_asyncio_event_loop()
+    try:
+        result = loop.run_until_complete(SceneSummaryService().generate(payload))
+        logger.info(
+            "[SceneSummary] generation completed: scene_start=%s, "
+            "close_reason=%s, status=%s, reason=%s, summary_id=%s",
+            scene_start_message_id,
+            close_reason,
+            result.get("status"),
+            result.get("reason"),
+            result.get("summary_id"),
+        )
+        return result
+    finally:
+        _shutdown_loop_gracefully(loop)
+
+
+@celery_app.task(name="app.tasks.scan_scene_summary_idle")
+def scan_scene_summary_idle(
+    limit: int = 100,
+    batch_size: int = 200,
+    scan_budget: int = 2000,
+):
+    """分批扫描静默 Scene，并派发 SceneSummary 生成任务。
+
+    返回指标：
+    - scanned：本轮实际检查的 stream 数量。
+    - candidates：其中满足静默条件的 Scene 数量。
+    - claimed：通过原子更新成功取得处理权的 Scene 数量。
+    - dispatched：成功投递到 Celery 的摘要任务数量。
+    - dispatch_failed：投递到 Celery 失败的任务数量。
+    - exhausted：是否已经扫描到当前数据集末尾。
+    - skipped_due_to_lock：是否因其他 scanner 正在运行而跳过本轮。
+    """
+    from app.repositories.memory_message_repository import MemoryMessageRepository
+
+    redis_client = get_sync_redis_client()
+    lock_token = uuid.uuid4().hex
+    lock_acquired = False
+    cursor_created_at = None
+    cursor_id = None
+
+    if redis_client is not None:
+        try:
+            lock_acquired = bool(
+                redis_client.set(
+                    _SCENE_IDLE_SCAN_LOCK_KEY,
+                    lock_token,
+                    nx=True,
+                    ex=_SCENE_IDLE_SCAN_LOCK_TTL_SECONDS,
+                )
+            )
+            if not lock_acquired:
+                logger.info("[SceneSummary] idle scanner skipped: another scanner is running")
+                return {
+                    "scanned": 0,
+                    "candidates": 0,
+                    "claimed": 0,
+                    "dispatched": 0,
+                    "dispatch_failed": 0,
+                    "skipped_due_to_lock": True,
+                }
+            raw_cursor = redis_client.get(_SCENE_IDLE_SCAN_CURSOR_KEY)
+            if raw_cursor:
+                cursor_payload = json.loads(raw_cursor)
+                cursor_created_at = parse_iso_to_utc_naive(cursor_payload.get("created_at"))
+                cursor_id = str(uuid.UUID(cursor_payload["id"]))
+        except Exception as exc:
+            logger.warning(
+                "[SceneSummary] idle scanner Redis state unavailable; "
+                "falling back to bounded scan from the beginning: %s",
+                exc,
+            )
+            if lock_acquired:
                 try:
-                    await connector.delete_group(eid)
-                    deleted += 1
-                except Exception as e:
-                    logger.error(f"draft_data_clean: Neo4j 删除失败 end_user_id={eid}: {e}")
-        return deleted
+                    redis_client.eval(
+                        UNLOCK_SCRIPT,
+                        1,
+                        _SCENE_IDLE_SCAN_LOCK_KEY,
+                        lock_token,
+                    )
+                except Exception:
+                    pass
+            redis_client = None
+            lock_acquired = False
 
-    neo4j_deleted = asyncio.run(_delete_neo4j_groups())
-    logger.info(f"draft_data_clean: Neo4j 删除 {neo4j_deleted} 组节点")
+    try:
+        with get_db_context() as db:
+            repo = MemoryMessageRepository(db)
+            scan_result = repo.list_idle_scene_candidates(
+                limit=limit,
+                batch_size=batch_size,
+                scan_budget=scan_budget,
+                after_created_at=cursor_created_at,
+                after_id=cursor_id,
+            )
+            candidates = scan_result["candidates"]
+            claimed = [
+                candidate
+                for candidate in candidates
+                if repo.claim_scene_summary(
+                    scene_start_message_id=candidate["scene_start_message_id"],
+                    end_user_id=candidate["end_user_id"],
+                )
+            ]
+            db.commit()
 
-    return {"pg_deleted": updated, "neo4j_deleted": neo4j_deleted}
+        if redis_client is not None:
+            try:
+                next_cursor = scan_result["next_cursor"]
+                if scan_result["exhausted"] or next_cursor is None:
+                    redis_client.delete(_SCENE_IDLE_SCAN_CURSOR_KEY)
+                else:
+                    redis_client.set(
+                        _SCENE_IDLE_SCAN_CURSOR_KEY,
+                        json.dumps({
+                            "created_at": to_iso_z(next_cursor["created_at"]),
+                            "id": next_cursor["id"],
+                        }),
+                        ex=_SCENE_IDLE_SCAN_CURSOR_TTL_SECONDS,
+                    )
+            except Exception as exc:
+                logger.warning("[SceneSummary] idle scanner cursor update failed: %s", exc)
+
+        dispatched = 0
+        dispatch_failed = 0
+        for candidate in claimed:
+            try:
+                async_result = generate_scene_summary.apply_async(
+                    kwargs={
+                        "end_user_id": candidate["end_user_id"],
+                        "config_id": candidate["config_id"],
+                        "scene_start_message_id": candidate["scene_start_message_id"],
+                        "idle_high_watermark_message_id": candidate["idle_high_watermark_message_id"],
+                        "close_reason": "IDLE_TIMEOUT",
+                    }
+                )
+                dispatched += 1
+                logger.info(
+                    "[SceneSummary] idle task dispatched: scene_start=%s, task_id=%s",
+                    candidate["scene_start_message_id"],
+                    async_result.id,
+                )
+            except Exception:
+                dispatch_failed += 1
+                logger.exception(
+                    "[SceneSummary] idle task dispatch failed, releasing claim: scene_start=%s",
+                    candidate["scene_start_message_id"],
+                )
+                with get_db_context() as db:
+                    MemoryMessageRepository(db).release_scene_summary_claim(
+                        scene_start_message_id=candidate["scene_start_message_id"],
+                        end_user_id=candidate["end_user_id"],
+                    )
+                    db.commit()
+        logger.info(
+            "[SceneSummary] idle scanner completed: scanned=%s, candidates=%s, "
+            "claimed=%s, dispatched=%s, dispatch_failed=%s, exhausted=%s",
+            scan_result["scanned"],
+            len(candidates),
+            len(claimed),
+            dispatched,
+            dispatch_failed,
+            scan_result["exhausted"],
+        )
+        return {
+            "scanned": scan_result["scanned"],
+            "candidates": len(candidates),
+            "claimed": len(claimed),
+            "dispatched": dispatched,
+            "dispatch_failed": dispatch_failed,
+            "exhausted": scan_result["exhausted"],
+            "skipped_due_to_lock": False,
+        }
+    finally:
+        if redis_client is not None and lock_acquired:
+            try:
+                redis_client.eval(
+                    UNLOCK_SCRIPT,
+                    1,
+                    _SCENE_IDLE_SCAN_LOCK_KEY,
+                    lock_token,
+                )
+            except Exception as exc:
+                logger.warning("[SceneSummary] idle scanner lock release failed: %s", exc)

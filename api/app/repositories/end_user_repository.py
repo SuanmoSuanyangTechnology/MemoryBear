@@ -288,6 +288,32 @@ class EndUserRepository:
             db_logger.error(f"查询工作空间 {workspace_id} 下终端用户时出错: {str(e)}")
             raise
 
+    async def get_memory_tags_by_workspace_async(
+        self, workspace_id: uuid.UUID
+    ) -> List[list]:
+        """获取指定 workspace 下活跃终端用户的 memory_tags 数组列表。
+
+        仅返回 memory_tags 非空的活跃用户，用于热门标签实时聚合。
+
+        Returns:
+            List[list]: 每项为一个用户的 memory_tags（JSONB 数组）
+        """
+        try:
+            result = await self.db.execute(
+                select(EndUser.memory_tags).where(
+                    EndUser.workspace_id == workspace_id,
+                    EndUser.is_active.is_(True),
+                    EndUser.memory_tags.isnot(None),
+                )
+            )
+            return [row[0] for row in result.all() if row[0]]
+        except Exception as e:
+            await self.db.rollback()
+            db_logger.error(
+                f"查询工作空间 {workspace_id} 下 memory_tags 时出错: {str(e)}"
+            )
+            raise
+
     def get_end_users_count_by_workspace(self, workspace_id: uuid.UUID) -> int:
         """获取指定 workspace 下的所有 end_user数量"""
         try:
@@ -429,6 +455,65 @@ class EndUserRepository:
             db_logger.error(
                 f"异步查询工作空间 {workspace_id} 下的终端用户 "
                 f"{end_user_id} 时出错: {str(e)}"
+            )
+            raise
+
+    async def get_memory_counts_by_ids_async(
+        self,
+        workspace_id: uuid.UUID,
+        end_user_ids: List[uuid.UUID],
+    ) -> List[tuple]:
+        """批量查询终端用户的记忆量（读 end_users.memory_count 字段）。
+
+        仅返回「属于目标 workspace 且 is_active=True」的用户；不属于空间或已删除的
+        id 不在结果中（由调用方决定是否报错，默认静默丢弃）。
+
+        Returns:
+            List[tuple]: 每项为 (id, other_name, memory_count)
+        """
+        if not end_user_ids:
+            return []
+        try:
+            result = await self.db.execute(
+                select(EndUser.id, EndUser.other_name, EndUser.memory_count)
+                .where(
+                    EndUser.id.in_(end_user_ids),
+                    EndUser.workspace_id == workspace_id,
+                    EndUser.is_active.is_(True),
+                )
+            )
+            return list(result.all())
+        except Exception as e:
+            await self.db.rollback()
+            db_logger.error(
+                f"批量查询工作空间 {workspace_id} 下终端用户记忆量时出错: {str(e)}"
+            )
+            raise
+
+    async def get_memory_counts_by_workspace_async(
+        self,
+        workspace_id: uuid.UUID,
+    ) -> List[tuple]:
+        """查询指定 workspace 下所有活跃终端用户的记忆量（读 end_users.memory_count 字段）。
+
+        仅查询接口真正需要的 3 列，避免拉取整行宽表字段。
+
+        Returns:
+            List[tuple]: 每项为 (id, other_name, memory_count)
+        """
+        try:
+            result = await self.db.execute(
+                select(EndUser.id, EndUser.other_name, EndUser.memory_count)
+                .where(
+                    EndUser.workspace_id == workspace_id,
+                    EndUser.is_active.is_(True),
+                )
+            )
+            return list(result.all())
+        except Exception as e:
+            await self.db.rollback()
+            db_logger.error(
+                f"查询工作空间 {workspace_id} 下终端用户记忆量时出错: {str(e)}"
             )
             raise
 
@@ -741,7 +826,11 @@ class EndUserRepository:
         )
 
     async def find_active_by_identity_features(
-        self, workspace_id: uuid.UUID, identity_features: str
+        self,
+        workspace_id: uuid.UUID,
+        identity_features: str,
+        *,
+        for_update: bool = True,
     ) -> Optional["EndUser"]:
         """按 workspace_id + identity_features 查询相同标识的活跃记录（用于跨渠道归并）。
 
@@ -755,7 +844,7 @@ class EndUserRepository:
         获取的 advisory 锁并回滚其 pending 状态，事务边界应由调用方决定。
         """
         try:
-            result = await self.db.execute(
+            stmt = (
                 select(EndUser)
                 .where(
                     EndUser.workspace_id == workspace_id,
@@ -764,8 +853,10 @@ class EndUserRepository:
                 )
                 .order_by(EndUser.created_at.asc())
                 .limit(1)
-                .with_for_update()
             )
+            if for_update:
+                stmt = stmt.with_for_update()
+            result = await self.db.execute(stmt)
             return result.scalars().first()
         except Exception as e:
             db_logger.error(f"按身份标识查询终端用户时出错: {str(e)}")
@@ -808,6 +899,23 @@ class EndUserRepository:
                 f"合并路由: other_id={other_id} → target={target_id}"
             )
         return target_user
+
+    async def get_merge_target_id_async(
+        self,
+        origin_id: uuid.UUID,
+        workspace_id: uuid.UUID,
+    ) -> uuid.UUID | None:
+        """Return the latest durable merge target for an origin in a workspace."""
+        result = await self.db.execute(
+            select(EndUserMerge.target_id)
+            .where(
+                EndUserMerge.origin_id == origin_id,
+                EndUserMerge.workspace_id == workspace_id,
+            )
+            .order_by(EndUserMerge.id.desc())
+            .limit(1)
+        )
+        return result.scalars().first()
 
     async def resolve_merge_by_origin_id_async(
         self, origin_id: uuid.UUID
@@ -1225,6 +1333,30 @@ class EndUserRepository:
         except Exception as e:
             self.db.rollback()
             db_logger.error(f"批量校验终端用户ID时出错: {str(e)}")
+            raise
+
+    async def filter_existing_ids_any_status_async(
+            self,
+            end_user_ids: set[uuid.UUID],
+            workspace_id: uuid.UUID,
+    ) -> Set[uuid.UUID]:
+        """Return existing end-user IDs in one workspace regardless of status."""
+        if not end_user_ids:
+            return set()
+        try:
+            result = await self.db.execute(
+                select(EndUser.id).where(
+                    EndUser.id.in_(end_user_ids),
+                    EndUser.workspace_id == workspace_id,
+                )
+            )
+            return set(result.scalars().all())
+        except Exception as e:
+            await self.db.rollback()
+            db_logger.error(
+                "批量校验终端用户（含 inactive）异常%s",
+                str(e),
+            )
             raise
 
     async def filter_existing_ids_async(
@@ -2722,6 +2854,30 @@ class EndUserRepository:
         except Exception as e:
             await self.db.rollback()
             db_logger.error(f"更新记忆计数失败(异步): end_user_id={end_user_id}, error={str(e)}")
+            raise
+
+    async def finalize_memory_delete_async(self, end_user_id: uuid.UUID) -> bool:
+        """Idempotently mark an existing graph-deleted user inactive and empty."""
+        try:
+            result = await self.db.execute(
+                update(EndUser)
+                .where(EndUser.id == end_user_id)
+                .values(memory_count=0, is_active=False)
+            )
+            await self.db.commit()
+            if result.rowcount:
+                db_logger.info(
+                    "完成终端用户记忆删除 PG 收尾: end_user_id=%s",
+                    end_user_id,
+                )
+            return bool(result.rowcount)
+        except Exception as e:
+            await self.db.rollback()
+            db_logger.error(
+                "终端用户记忆删除 PG 收尾失败: end_user_id=%s, error=%s",
+                end_user_id,
+                str(e),
+            )
             raise
 
 

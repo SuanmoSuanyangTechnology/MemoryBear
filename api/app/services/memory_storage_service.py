@@ -21,10 +21,6 @@ from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_config_logger, get_logger
 from app.i18n.service import t
-from app.core.memory.analytics.hot_memory_tags import (
-    filter_tags_with_llm,
-    get_raw_tags_batch,
-)
 from app.core.memory.analytics.recent_activity_stats import get_recent_activity_stats
 from app.core.utils.datetime_utils import to_timestamp_ms
 from app.models import Workspace
@@ -817,7 +813,11 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
                     return {
                         "error": True,
                         "subject": file_type.value.lower(),
-                        "classified": classify_llm_error(e, provider=model_info.provider),
+                        "classified": classify_llm_error(
+                            e,
+                            provider=model_info.provider,
+                            is_omni=model_info.is_omni,
+                        ),
                     }
                 response_text = "".join(
                     self._stream_content_to_texts(getattr(response, "content", None))
@@ -957,7 +957,11 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
                 raise
             except Exception as e:
                 logger.error("[TRIAL_RUN_CHAT_STREAM] Final LLM generation failed", exc_info=True)
-                classified = classify_llm_error(e, provider=final_model_info.provider)
+                classified = classify_llm_error(
+                    e,
+                    provider=final_model_info.provider,
+                    is_omni=final_model_info.is_omni,
+                )
                 yield format_sse_message(
                     "error",
                     self._classified_llm_error_data(classified, language),
@@ -1324,75 +1328,63 @@ async def search_all_batch(end_user_ids: List[str], connector: Neo4jConnector = 
     return data
 
 
-# 热门记忆标签缓存 key 前缀（与 controller、清缓存接口保持一致）
-HOT_MEMORY_TAGS_CACHE_PREFIX = "hot_memory_tags"
-# 缓存过期：28 小时（= 24h 预热周期 + 4h 安全余量，避免次日预热前空窗）
-HOT_MEMORY_TAGS_CACHE_EXPIRE = 100800
-
-
-async def compute_hot_memory_tags(
-        workspace_id: str,
-        limit: int = 10,
-) -> List[Dict[str, Any]]:
-    """计算指定 workspace 的热门记忆标签（不依赖 current_user）。
-
-    供接口实时查询与定时预热任务共用。
-
-    策略：
-        1. 按 workspace_id 取所有 end_user_id
-        2. 单次批量 Cypher 聚合标签频率（get_raw_tags_batch）
-        3. 调用一次 LLM 筛选（filter_tags_with_llm）
-        4. 按频率/顺序过滤后返回前 limit 个
-    """
-    # 防护：limit 可能来自 API 查询参数，非正值会导致 raw_limit 无效（Cypher LIMIT 无意义），
-    # 回退到默认值 10
-    if limit <= 0:
-        limit = 10
-    raw_limit = limit * 4
-
-    from app.db import get_db_read
-    from app.repositories.end_user_repository import EndUserRepository
-
-    def _get_end_user_ids_in_thread() -> List[str]:
-        """独立线程独立 session，避免跨线程共享连接。"""
-        with get_db_read() as thread_db:
-            end_users = EndUserRepository(thread_db).get_end_users_by_workspace(workspace_id)
-            return [str(eu.id) for eu in end_users]
-
-    end_user_ids = await asyncio.to_thread(_get_end_user_ids_in_thread)
-    if not end_user_ids:
-        return []
-
-    connector = Neo4jConnector()
-    try:
-        sorted_tags = await get_raw_tags_batch(connector, end_user_ids, limit=raw_limit)
-        if not sorted_tags:
-            return []
-
-        tag_names = [tag for tag, _ in sorted_tags]
-        first_end_user_id = end_user_ids[0]
-        filtered_tag_names = await filter_tags_with_llm(tag_names, first_end_user_id)
-
-        filtered_set = set(filtered_tag_names)
-        final_tags = [(tag, freq) for tag, freq in sorted_tags if tag in filtered_set]
-        top_tags = final_tags[:limit]
-        return [{"name": t, "frequency": f} for t, f in top_tags]
-    finally:
-        await connector.close()
-
-
 async def analytics_hot_memory_tags(
-        db: Session,
+        db: AsyncSession,
         current_user: User,
         limit: int = 10
 ) -> List[Dict[str, Any]]:
-    """获取热门记忆标签（接口入口）。
+    """获取热门记忆标签（实时聚合，无缓存、无 LLM/Neo4j）。
 
-    从 current_user 取 workspace 后委托 compute_hot_memory_tags。
-    签名保持不变（db / current_user 仍保留），controller 调用方零改动。
+    - 空间取 ``current_user.current_workspace_id``（管理端=当前会话空间，对外=API Key
+      绑定空间）。
+    - 数据源：``end_users.memory_tags``（活跃终端用户的用户名片 Tag 数组）。
+    - 合并方式：文本**精确匹配**——复用名片 Tag 规范化规则（去空白折叠、空值/超长
+      剔除、大小写折叠后精确一致才合并），不做语义/Embedding/LLM 归并。
+    - 计数口径：``frequency`` = 采用该 tag 的终端用户数（每人对同一 tag 只计一次）。
+    - 排序：``frequency`` 降序、同频按代表文本升序，取 Top-N。
     """
     workspace_id = current_user.current_workspace_id
-    return await compute_hot_memory_tags(str(workspace_id), limit)
+    if workspace_id is None:
+        return []
+    if limit <= 0:
+        limit = 10
+
+    from app.core.memory.analytics.user_card_tags import normalize_stored_user_card_tags
+    from app.repositories.end_user_repository import EndUserRepository
+
+    repo = EndUserRepository(db)
+    tags_per_user = await repo.get_memory_tags_by_workspace_async(
+        uuid.UUID(str(workspace_id))
+    )
+    if not tags_per_user:
+        return []
+
+    # casefold key -> {"name": 代表文本（首次出现的规范化形式）, "count": 采用用户数}
+    aggregated: Dict[str, Dict[str, Any]] = {}
+    for stored_tags in tags_per_user:
+        # 每个用户先按名片规则规范化（去空白折叠/超长剔除/大小写折叠去重/限量）
+        normalized_tags = normalize_stored_user_card_tags(stored_tags)
+        # 同一用户对同一 tag 只计一次（normalize 已按 casefold 去重，这里再兜底）
+        seen_keys: set[str] = set()
+        for tag in normalized_tags:
+            key = tag.casefold()
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+            entry = aggregated.get(key)
+            if entry is None:
+                aggregated[key] = {"name": tag, "count": 1}
+            else:
+                entry["count"] += 1
+
+    if not aggregated:
+        return []
+
+    ranked = sorted(
+        aggregated.values(),
+        key=lambda item: (-item["count"], item["name"]),
+    )
+    return [{"name": item["name"], "frequency": item["count"]} for item in ranked[:limit]]
 
 
 async def analytics_recent_activity_stats(workspace_id: Optional[str] = None) -> Dict[str, Any]:

@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.utils.datetime_utils import to_timestamp_ms, utcnow_naive
+from app.core.utils.datetime_utils import parse_timestamp_to_utc_naive, to_timestamp_ms, utcnow_naive
 from app.repositories.end_user_repository import EndUserRepository
 from app.repositories.memory_engine_display_event_repository import (
     MemoryEngineDisplayEventRepository,
@@ -55,35 +55,45 @@ class MemoryEngineDisplayService:
     @staticmethod
     async def query_cards(
         db: AsyncSession,
-        end_user_id: uuid.UUID,
         workspace_id: uuid.UUID,
         timezone: str,
         language: str,
         page: int,
         pagesize: int,
+        end_user_id: uuid.UUID | None = None,
+        start_time: int | None = None,
+        end_time: int | None = None,
     ) -> tuple[List[Dict[str, Any]], int] | None:
         """查询聚合事件并组装引擎展示卡片。
 
-        返回 None 表示终端用户不属于当前工作空间。
+        - 传 ``end_user_id``：用户级查询，先校验其归属当前工作空间；
+        - 不传 ``end_user_id``：空间级查询，返回整个 workspace 的引擎卡片
+          （仍按用户维度拆分），每张卡片额外携带 ``end_user_id``。
+
+        start_time/end_time 为毫秒 UTC 时间戳，先按 occurred_at 闭区间过滤事件，
+        再按时区自然日聚合。返回 None 表示终端用户不属于当前工作空间。
         """
-        end_user_repo = EndUserRepository(db)
-        if await end_user_repo.get_active_end_user_in_workspace_async(
-            end_user_id,
-            workspace_id,
-        ) is None:
-            return None
+        if end_user_id is not None:
+            end_user_repo = EndUserRepository(db)
+            if await end_user_repo.get_active_end_user_in_workspace_async(
+                end_user_id,
+                workspace_id,
+            ) is None:
+                return None
 
         repo = MemoryEngineDisplayEventRepository(db)
         groups, total = await repo.query_aggregated_paginated(
-            end_user_id=end_user_id,
             workspace_id=workspace_id,
             timezone=timezone,
             page=page,
             pagesize=pagesize,
+            end_user_id=end_user_id,
+            start_time=parse_timestamp_to_utc_naive(start_time),
+            end_time=parse_timestamp_to_utc_naive(end_time),
         )
         cards = MemoryEngineDisplayService.build_cards_from_groups(
             groups=groups,
-            end_user_id=str(end_user_id),
+            end_user_id=str(end_user_id) if end_user_id is not None else None,
             timezone=timezone,
             language=language,
         )
@@ -195,7 +205,7 @@ class MemoryEngineDisplayService:
     @staticmethod
     def build_cards_from_groups(
         groups: List[Dict[str, Any]],
-        end_user_id: str,
+        end_user_id: str | None,
         timezone: str,
         language: str,
     ) -> List[Dict[str, Any]]:
@@ -203,12 +213,13 @@ class MemoryEngineDisplayService:
 
         Args:
             groups: repository 返回的聚合组列表
-            end_user_id: 终端用户 ID
+            end_user_id: 用户级查询的终端用户 ID；空间级为 None，
+                此时改用每个聚合组自带的 end_user_id 生成卡片 ID
             timezone: 请求时区（用于生成确定性 ID）
             language: 响应文案语言（zh / en）
 
         Returns:
-            卡片列表，每项包含 id, engine_type, name, content, occurred_at
+            卡片列表，每项包含 id, end_user_id, engine_type, name, content, occurred_at
         """
         cards = []
         for group in groups:
@@ -217,8 +228,15 @@ class MemoryEngineDisplayService:
             max_occurred_at = group["max_occurred_at"]
             events = group["events"]
 
+            # 空间级卡片按组自带的 end_user_id 生成 ID，保证跨用户唯一；
+            # 用户级沿用入参 end_user_id。
+            group_end_user_id = group.get("end_user_id")
+            card_end_user_id = (
+                str(group_end_user_id) if group_end_user_id is not None else end_user_id
+            )
+
             # 生成确定性 ID（UUID v5）
-            card_id = _generate_card_id(end_user_id, engine_type, timezone, local_date)
+            card_id = _generate_card_id(card_end_user_id, engine_type, timezone, local_date)
 
             # 聚合 details
             merged = _merge_event_details(engine_type, events)
@@ -227,6 +245,7 @@ class MemoryEngineDisplayService:
 
             cards.append({
                 "id": card_id,
+                "end_user_id": card_end_user_id,
                 "engine_type": engine_type,
                 "name": name,
                 "content": content,
@@ -266,20 +285,31 @@ async def _persist_events(end_user_id: str, events_data: List[Dict[str, Any]]) -
     operation_id = uuid.uuid4()
     occurred_at = utcnow_naive()
 
-    records = [
-        MemoryEngineDisplayEvent(
-            id=uuid.uuid4(),
-            end_user_id=user_uuid,
-            operation_id=operation_id,
-            engine_type=data["engine_type"],
-            details=data["details"],
-            occurred_at=occurred_at,
-        )
-        for data in events_data
-    ]
-
     try:
         with get_db_context() as db:
+            # 冗余列 workspace_id：三个写入入口（写入/遗忘/反思）的上下文形态不一，
+            # 统一在此按 end_user_id 主键回查 end_users.workspace_id，保证一致落库。
+            # 查不到时置 NULL，不影响尽力写入语义。
+            from app.models.end_user_model import EndUser
+            workspace_uuid = (
+                db.query(EndUser.workspace_id)
+                .filter(EndUser.id == user_uuid)
+                .scalar()
+            )
+
+            records = [
+                MemoryEngineDisplayEvent(
+                    id=uuid.uuid4(),
+                    end_user_id=user_uuid,
+                    workspace_id=workspace_uuid,
+                    operation_id=operation_id,
+                    engine_type=data["engine_type"],
+                    details=data["details"],
+                    occurred_at=occurred_at,
+                )
+                for data in events_data
+            ]
+
             MemoryEngineDisplayEventRepository(db).bulk_insert_events(records)
         logger.info(
             f"[EngineDisplay] PG 写入成功: end_user_id={end_user_id}, "

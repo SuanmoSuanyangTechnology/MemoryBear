@@ -4,7 +4,7 @@ FastWritePipeline — 快速写入流水线
 三步流水线：清洗 → Embedding → 写入 :Dialogue 节点。
 
 - 不继承、不复用 WritePipeline 编排代码，避免耦合。
-- 共用底层能力（embedder / neo4j connector）单独懒加载。
+- embedder 懒加载；每次任务独占一个 Neo4j write-only storage service。
 - 产品语义约束：1 条 user message → 1 个 DialogueNode，不切块、不截断。
 - 关键失败向上抛出异常（不降级为业务 failed 结果），finally 中 _cleanup。
 """
@@ -30,7 +30,6 @@ from app.core.utils.datetime_utils import (
     ensure_dialog_at,
     parse_iso_to_utc_naive,
 )
-from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 
 logger = logging.getLogger(__name__)
 # 与 WritePipeline 共用同一个结构化步骤日志器（同名 logger，输出风格一致）
@@ -57,6 +56,8 @@ class FastWritePipeline:
     EMBED_TIMEOUT_SEC = 15
     # BERT 情绪单步硬上限（秒），超时即降级为 None，不重试。
     EMOTION_TIMEOUT_SEC = 2
+    # Scene 边界判断分支硬上限（秒），超时按 BERT 失败继续当前 Scene。
+    SCENE_BOUNDARY_TIMEOUT_SEC = 5
 
     def __init__(self, memory_config: "MemoryConfig", end_user_id: str, language: str = "zh"):
         self.memory_config = memory_config
@@ -65,7 +66,7 @@ class FastWritePipeline:
 
         # 懒加载底层能力，首次使用时初始化
         self._embedder = None
-        self._neo4j = None
+        self._storage_service = None
 
     async def run(
         self,
@@ -74,6 +75,7 @@ class FastWritePipeline:
         message_seq: int = 0,
         source: str = "",
         dispatch_at: str = "",
+        scene_context=None,
     ) -> dict:
         """驱动三步流水线。
 
@@ -107,11 +109,23 @@ class FastWritePipeline:
                         reason=drop_reason or "-",
                     )
                 if drop_reason:
-                    return {"status": "dropped", "reason": drop_reason, "dialog_id": None}
+                    scene_decision = None
+                    if scene_context is not None:
+                        scene_decision = (
+                            scene_context.direct_decision
+                            if scene_context.direct_decision is not None
+                            else "CONTINUE"
+                        )
+                    return {
+                        "status": "dropped",
+                        "reason": drop_reason,
+                        "dialog_id": None,
+                        "scene_decision": scene_decision,
+                    }
 
-                # Step 2/3 — Embedding + BERT 情绪（并行，各自内部降级为 None，不重试）
-                async with bear.step(2, 3, "并行处理", "Embedding + 情绪") as s:
-                    embedding, emotion_result = await asyncio.gather(
+                # Step 2/3 — Embedding + 情绪 + 必要的 Scene BERT 并行
+                async with bear.step(2, 3, "并行处理", "Embedding + 情绪 + Scene") as s:
+                    embedding, emotion_result, scene_decision = await asyncio.gather(
                         self._embed(cleaned),
                         self._extract_emotion(
                             cleaned,
@@ -119,10 +133,12 @@ class FastWritePipeline:
                                 (target_message or {}).get("original_message_id") or ""
                             ),
                         ),
+                        self._predict_scene_boundary(scene_context),
                     )
                     s.metadata(
                         has_embedding=embedding is not None,
                         has_emotion=emotion_result is not None,
+                        scene_decision=scene_decision or "-",
                     )
 
                 # 时间来源降级：dialog_at → dispatch_at → 当前时间（ensure_dialog_at 兜底）
@@ -146,11 +162,61 @@ class FastWritePipeline:
                     dialog_id = await self._persist(node)
                     s.metadata(dialog_id=dialog_id)
 
-                return {"status": "success", "dialog_id": dialog_id}
+                return {
+                    "status": "success",
+                    "dialog_id": dialog_id,
+                    "scene_decision": scene_decision,
+                }
             finally:
                 await self._cleanup()
 
     # ──────────────────────────────────────────────
+
+    async def _predict_scene_boundary(self, scene_context):
+        """Step 2 并行分支 — 优先复用同步规则结果，必要时调用 BERT 判断场景连续性。"""
+        if scene_context is None:
+            return None
+        if scene_context.direct_decision is not None:
+            return scene_context.direct_decision
+
+        from app.core.memory.scene.scene_continuity_bert_client import (
+            SceneContinuityBertClient,
+            SceneContinuityError,
+        )
+
+        try:
+            score = await asyncio.wait_for(
+                SceneContinuityBertClient().predict(
+                    scene_context.history_user_messages,
+                    scene_context.current_content,
+                ),
+                timeout=self.SCENE_BOUNDARY_TIMEOUT_SEC,
+            )
+        except asyncio.TimeoutError:
+            logger.warning(
+                "[FastWrite] Scene boundary timed out, degrading: "
+                "message_id=%s timeout=%ss end_user_id=%s",
+                scene_context.current_message_id,
+                self.SCENE_BOUNDARY_TIMEOUT_SEC,
+                self.end_user_id,
+            )
+            return "BERT_FAILED_CONTINUE"
+        except SceneContinuityError as exc:
+            logger.warning(
+                "[FastWrite] Scene continuity degraded: "
+                "message_id=%s end_user_id=%s error=%s",
+                scene_context.current_message_id,
+                self.end_user_id,
+                exc,
+            )
+            return "BERT_FAILED_CONTINUE"
+
+        return (
+            "CONTINUE"
+            if score > self.memory_config.scene_threshold
+            else "SHIFTED"
+        )
+
     # 以下为本任务范围外的方法占位，后续任务填充实现
     # ──────────────────────────────────────────────
 
@@ -245,7 +311,7 @@ class FastWritePipeline:
           user_message_id）读情绪缓存，**读后即删**（GETDEL）：快写是唯一消费者，
           命中即复用 emotion + score 并跳过 BERT。
         - text 为空、或未配置（URL/API_KEY/MODEL 任一缺失）→ 直接返回 None，不发请求、不空等超时。
-        - 已配置时才调用；硬超时 EMOTION_TIMEOUT_SEC，超时/异常一律降级为 None，不重试。
+        - 已配置时才调用；总耗时受 EMOTION_TOTAL_TIMEOUT_SECONDS 硬限制，超时/异常一律降级为 None，不重试。
         - 未命中时自己算出的结果**不回写缓存**（唯一消费者，回写无意义）。
         - 关键约束：服务故障绝不伪造 neutral；真实中性(emotion='neutral')
           与服务失败(emotion=None)必须可区分。
@@ -337,27 +403,43 @@ class FastWritePipeline:
             emotion_score=emotion_result.emotion_score if emotion_result else None,
         )
 
-    async def _persist(self, dialog_node: DialogueNode) -> str:
-        """Step 3 — 持久化 DialogueNode 到 Neo4j。
+    async def _init_storage_service(self) -> None:
+        """创建当前 fast write 独占的 Neo4j write-only storage service。"""
+        if self._storage_service is not None:
+            return
+        from app.core.memory.storage.service import MemoryStorageService
+        self._storage_service = await MemoryStorageService.create_graph_write_only()
 
-        - 懒加载独立 connector（不共享 driver，由 _cleanup 负责关闭）。
-        - 用 add_dialogue_nodes([node], connector)，保证 Cypher / 摊平一致。
-        - 死锁重试：与 WritePipeline._is_deadlock 保持一致的宽松判定——异常消息中
+    async def _persist(self, dialog_node: DialogueNode) -> str:
+        """Step 3 — 通过 storage service 写入 Dialogue 到 Neo4j 并入 outbox。
+
+        - 使用当前任务独占的 write-only MemoryStorageService.save_memory_graph，
+          复用 Normal Write 的 WriteRouter → graph_writer → enqueue_events 链路。
+        - Neo4j 提交成功后自动 enqueue outbox Dialogue upsert 事件，
+          由 Beat + memory_projection worker 自动投影到 ES。
+        - 竞态守卫在 DIALOGUE_NODE_SAVE Cypher 层：normal 覆盖 fast，
+          迟到 fast 不降级 normal（write_mode="fast" 触发 canWrite=[] 跳过）。
+        - 死锁重试：与 WritePipeline._is_deadlock 一致的宽松判定——异常消息中
           包含 "deadlock"（大小写不敏感）即视为死锁，最多重试
           NEO4J_MERGE_MAX_RETRY 次，退避 0.1*(attempt+1) 秒。
-        - 快速失败：非死锁异常、或返回节点数 != 1（RuntimeError），首次即抛出，不重试。
+        - 快速失败：非死锁异常首次即抛出，不重试。
+        - outbox enqueue 失败时抛 OutboxEnqueueError(primary_committed=True)，
+          与 Normal Write 一致，由上游补偿。
         """
-        from app.repositories.neo4j.add_nodes import add_dialogue_nodes
+        from app.core.memory.storage.enums import MemoryNodeType
+        from app.core.memory.storage.models import MemoryGraphWriteCommand
 
-        if self._neo4j is None:
-            self._neo4j = Neo4jConnector()
+        await self._init_storage_service()
+
+        command = MemoryGraphWriteCommand(dialogue_nodes=[dialog_node])
 
         for attempt in range(self.NEO4J_MERGE_MAX_RETRY):
             try:
-                result = await add_dialogue_nodes([dialog_node], self._neo4j)
-                if len(result) != 1:
+                result = await self._storage_service.save_memory_graph(command)
+                dialogue_ids = result.node_ids.get(MemoryNodeType.DIALOGUE, [])
+                if not dialogue_ids:
                     raise RuntimeError(
-                        f"expected one dialogue UUID, got {len(result)}"
+                        "expected one dialogue UUID, got none"
                     )
                 logger.info(
                     "[FastWrite] persisted: dialog_id=%s, end_user_id=%s, "
@@ -367,10 +449,8 @@ class FastWritePipeline:
                     dialog_node.dialog_embedding is not None,
                     attempt + 1,
                 )
-                return result[0]
+                return dialogue_ids[0]
             except Exception as e:
-                # 与 WritePipeline._is_deadlock 一致的宽松判定：异常消息中包含
-                # "deadlock"（大小写不敏感）即视为死锁。
                 is_deadlock = "deadlock" in str(e).lower()
                 has_next_attempt = attempt < self.NEO4J_MERGE_MAX_RETRY - 1
                 if not is_deadlock or not has_next_attempt:
@@ -386,18 +466,17 @@ class FastWritePipeline:
                 await asyncio.sleep(0.1 * (attempt + 1))
 
     async def _cleanup(self) -> None:
-        """释放懒加载的底层资源（关闭独立的 neo4j connector）。
-
-        关闭失败不影响主流程：记录 warning 后继续；最终清空引用便于 GC。
-        """
-        if self._neo4j is not None:
-            try:
-                await self._neo4j.close()
-            except Exception as e:
-                logger.warning(
-                    "[FastWrite] failed to close neo4j connector: end_user_id=%s, error=%s",
-                    self.end_user_id,
-                    e,
-                )
-            finally:
-                self._neo4j = None
+        """关闭当前 fast write 独占的 storage service 及 Neo4j driver。"""
+        if self._storage_service is None:
+            return
+        try:
+            await self._storage_service.close()
+        except Exception as e:
+            logger.warning(
+                "[FastWrite] failed to close storage service: "
+                "end_user_id=%s, error=%s",
+                self.end_user_id,
+                e,
+            )
+        finally:
+            self._storage_service = None

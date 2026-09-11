@@ -7,12 +7,14 @@ from sqlalchemy.orm import Session
 
 from app.core.logging_config import get_api_logger
 from app.core.memory.analytics.user_card_tags import normalize_stored_user_card_tags
+from app.core.error_codes import BizCode
 from app.core.quota_manager import get_end_user_memory_limit
-from app.core.response_utils import success
+from app.core.response_utils import fail, success
 from app.core.utils.datetime_utils import to_timestamp_ms, utcnow_naive
 from app.db import get_db, get_async_db_context
 from app.dependencies import get_current_user, get_current_user_async, CurrentUserSnapshot
 from app.models.user_model import User
+from app.schemas.memory_dashboard_schema import EndUserMemoryCountsRequest
 from app.schemas.response_schema import ApiResponse
 from app.services import memory_dashboard_service, workspace_service
 
@@ -400,7 +402,6 @@ async def get_workspace_memory_list(
     api_logger.info("成功获取记忆列表")
     return success(data=memory_list, msg="记忆列表获取成功")
 
-
 @router.get("/total_memory_count", response_model=ApiResponse)
 async def get_workspace_total_memory_count(
     end_user_id: Optional[str] = Query(None, description="可选的用户ID"),
@@ -746,3 +747,98 @@ async def dashboard_data(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"获取dashboard整合数据失败: {str(e)}"
         )
+
+
+@router.post("/end_user_memory_counts", response_model=ApiResponse)
+async def get_end_user_memory_counts(
+    payload: EndUserMemoryCountsRequest,
+    current_user: CurrentUserSnapshot = Depends(get_current_user_async),
+):
+    """批量查询终端用户记忆量（读 end_users.memory_count 字段）。
+
+    - 空间：统一取调用方自身绑定空间——管理端为 current_workspace_id，
+      对外（v1）快照里的 current_workspace_id 已注入为 API Key 绑定空间。
+      不接受外部指定 workspace_id，避免跨空间越权。
+    - end_user_ids：数组，单次上限 200，必须为合法 UUID。
+    - 严格校验：所有 id 必须属于该空间且有效；只要存在不属于当前空间或不存在的
+      id，整单报错并在错误信息中列出问题 id（不返回部分结果）。
+    """
+    # 内外统一：空间恒为调用方自身绑定空间，不接受跨空间指定
+    workspace_id = current_user.current_workspace_id
+    if workspace_id is None:
+        return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
+
+    end_user_ids = payload.end_user_ids or []
+    if not end_user_ids:
+        return fail(BizCode.MISSING_PARAMETER, "end_user_ids 不能为空", "end_user_ids is required")
+    if len(end_user_ids) > 200:
+        return fail(BizCode.INVALID_PARAMETER, "end_user_ids 单次上限 200 个", f"got {len(end_user_ids)}")
+
+    try:
+        parsed_ids = [uuid.UUID(str(x)) for x in end_user_ids]
+    except (ValueError, AttributeError):
+        return fail(BizCode.INVALID_PARAMETER, "存在非法的 end_user_id", "invalid UUID in end_user_ids")
+
+    api_logger.info(
+        f"用户 {current_user.username} 批量查询终端用户记忆量: "
+        f"workspace={workspace_id}, count={len(parsed_ids)}"
+    )
+    async with get_async_db_context() as db:
+        result = await memory_dashboard_service.get_end_user_memory_counts_async(
+            db=db,
+            workspace_id=workspace_id,
+            end_user_ids=parsed_ids,
+        )
+
+    # 严格校验：请求的 id 必须全部属于该空间且有效，否则整单报错并列出问题 id。
+    # （service 只返回命中项；未命中即「不属于当前空间或不存在」）
+    found_ids = {item["end_user_id"] for item in result["items"]}
+    invalid_ids = [str(x) for x in parsed_ids if str(x) not in found_ids]
+    if invalid_ids:
+        return fail(
+            BizCode.INVALID_PARAMETER,
+            "存在不属于当前工作空间或不存在的 end_user_id",
+            f"invalid end_user_ids: {invalid_ids}",
+        )
+
+    return success(data=result, msg="查询成功")
+
+
+@router.get("/memory_increment_daily", response_model=ApiResponse)
+async def get_memory_increment_daily(
+    start_time: int = Query(..., description="起始时间（毫秒 UTC，闭区间）"),
+    end_time: int = Query(..., description="结束时间（毫秒 UTC，闭区间）"),
+    workspace_id: Optional[uuid.UUID] = Query(
+        None, description="工作空间ID（可选，默认当前用户工作空间）"
+    ),
+    current_user: CurrentUserSnapshot = Depends(get_current_user_async),
+):
+    """按时间段逐日查询记忆增量（同日取当日最新一条）。
+
+    - 空间：管理端可传 workspace_id，缺省回落当前会话空间。
+    - start_time/end_time：毫秒 UTC，过滤 memory_increments.created_at（闭区间）。
+    - 返回 items[].date 为代表日期的 UTC 当日 00:00:00.000 毫秒时间戳。
+    """
+    target_workspace_id = workspace_id or current_user.current_workspace_id
+    if target_workspace_id is None:
+        return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间", "current_workspace_id is None")
+
+    if start_time > end_time:
+        return fail(
+            BizCode.INVALID_PARAMETER,
+            "start_time 不能大于 end_time",
+            f"start={start_time}, end={end_time}",
+        )
+
+    api_logger.info(
+        f"用户 {current_user.username} 查询逐日记忆增量: "
+        f"workspace={target_workspace_id}, start={start_time}, end={end_time}"
+    )
+    async with get_async_db_context() as db:
+        result = await memory_dashboard_service.get_memory_increment_daily_async(
+            db=db,
+            workspace_id=target_workspace_id,
+            start_ms=start_time,
+            end_ms=end_time,
+        )
+    return success(data=result, msg="查询成功")

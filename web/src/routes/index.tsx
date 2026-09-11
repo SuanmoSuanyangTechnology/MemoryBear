@@ -93,6 +93,7 @@ const componentMap: Record<string, LazyExoticComponent<ComponentType<object>>> =
   SkillConfig: lazy(() => import('@/views/Skills/pages/SkillConfig')),
   Account: lazy(() => import('@/views/Account')),
   MemoryEngine: lazy(() => import('@/views/MemoryEngine')),
+  BrainMemory: lazy(() => import('@/views/BrainMemory')),
   Jump: lazy(() => import('@/views/JumpPage')),
   Login: lazy(() => import('@/views/Login')),
   InviteRegister: lazy(() => import('@/views/InviteRegister')),

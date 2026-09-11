@@ -3,11 +3,13 @@ import logging
 from langchain.tools import tool
 from pydantic import BaseModel, Field
 
-from app.core.memory.enums import Neo4jNodeType
 from app.core.memory.models.service_models import MemoryContext
-from app.repositories.neo4j.cypher_queries import FETCH_USER_SOURCES_FOR_ENTITIES
-from app.repositories.neo4j.graph_search import search_by_fulltext, search_graph_by_relationship, search_user_metadata
-from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+from app.core.memory.storage.custom import (
+    get_user_entity_id,
+    get_user_sources_for_entities,
+    search_entities_by_name,
+    search_related_entities,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -36,15 +38,10 @@ def make_entity_search_tool(ctx: MemoryContext):
         Returns:
             [{"id": "entity id", "name": "entity name", "entity_type": "entity type"}, ...]
         """
-        async with Neo4jConnector(shared_driver=True) as connector:
-            res = await search_by_fulltext(
-                connector=connector,
-                node_type=Neo4jNodeType.EXTRACTEDENTITY,
-                end_user_id=ctx.end_user_id,
-                query=name,
-                limit=10,
-            )
-            return [{"id": r["id"], "name": r["name"], "entity_type": r.get("entity_type")} for r in res]
+        return await search_entities_by_name(
+            ctx.end_user_id,
+            name,
+        )
 
     return entity_search_tool
 
@@ -65,17 +62,26 @@ def make_relation_search_tool(ctx: MemoryContext):
         Returns:
             [{"id": "target entity id", "source_name": "source entity name", "relation_predicate": "predicate used", "target_name": "target entity name"}, ...]
         """
-        async with Neo4jConnector(shared_driver=True) as connector:
-            if not source_id:
-                source_id = (await search_user_metadata(connector, ctx.end_user_id)).get("id")
-            res = await search_graph_by_relationship(
-                connector=connector,
-                end_user_id=ctx.end_user_id,
-                source_id=source_id,
-                predicates=relation_predicates,
-            )
-            logger.info(f"[relation_search_tool] source:{source_id}, predicates:{relation_predicates}, res:{res}")
-            return res
+        if not relation_predicates:
+            return []
+
+        if not source_id:
+            source_id = await get_user_entity_id(ctx.end_user_id)
+            if source_id is None:
+                return []
+
+        records = await search_related_entities(
+            ctx.end_user_id,
+            source_id,
+            relation_predicates,
+        )
+        logger.info(
+            "[relation_search_tool] source:%s, predicates:%s, res:%s",
+            source_id,
+            relation_predicates,
+            records,
+        )
+        return records
 
     return relation_search_tool
 
@@ -99,19 +105,10 @@ def make_user_source_lookup_tool(ctx: MemoryContext):
         if not entity_ids:
             return []
 
-        async with Neo4jConnector(shared_driver=True) as connector:
-            records = await connector.execute_query(
-                FETCH_USER_SOURCES_FOR_ENTITIES,
-                entity_ids=entity_ids,
-                end_user_id=ctx.end_user_id,
-            )
-
-        result = []
-        for rec in records:
-            eid = rec.get("entity_id", "")
-            text = rec.get("original_text", "")
-            if eid and text:
-                result.append({"entity_id": eid, "original_text": text})
+        result = await get_user_sources_for_entities(
+            ctx.end_user_id,
+            entity_ids,
+        )
 
         logger.info(f"[user_source_lookup_tool] entity_ids:{entity_ids}, found:{len(result)}")
         return result

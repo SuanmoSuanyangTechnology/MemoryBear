@@ -20,6 +20,8 @@ from app.core.memory.storage_services.reflection_engine.errors import (
     ReflectionFailureReason,
     ReflectionModelType,
 )
+from app.core.memory.storage.custom.reflection_mutations import patch_entity_metadata
+from app.core.memory.storage.provider.neo4j.client import Neo4jClient
 
 logger = logging.getLogger(__name__)
 
@@ -184,6 +186,7 @@ async def extract_metadata_for_user(
     min_fragments: int = 5,
     max_list_len_per_field: int = 200,
     collect_trace: bool = False,
+    neo4j_client: Neo4jClient | None = None,
 ) -> Dict[str, Any]:
     """对指定用户的 User 实体执行元数据提取 + Neo4j 回写 + PostgreSQL 同步。
 
@@ -203,7 +206,6 @@ async def extract_metadata_for_user(
     """
     from app.core.memory.models.metadata_models import ALLOWED_METADATA_FIELDS
     from app.repositories.neo4j.cypher_queries import (
-        ENTITY_METADATA_PATCH,
         ENTITY_METADATA_QUERY,
         USER_ENTITY_FOR_METADATA,
     )
@@ -274,7 +276,7 @@ async def extract_metadata_for_user(
                 descriptions=entity_dict.get("descriptions", []),
                 allowed_fields=ALLOWED_METADATA_FIELDS,
                 metadata_query=ENTITY_METADATA_QUERY,
-                metadata_patch=ENTITY_METADATA_PATCH,
+                neo4j_client=neo4j_client,
                 max_list_len_per_field=max_list_len_per_field,
                 collect_trace=collect_trace,
             )
@@ -414,14 +416,16 @@ async def _extract_single_entity(
     descriptions: List[str],
     allowed_fields: Tuple[str, ...],
     metadata_query: str,
-    metadata_patch: str,
     max_list_len_per_field: int,
     collect_trace: bool = False,
+    neo4j_client: Neo4jClient | None = None,
 ) -> Dict[str, Any] | None:
     """对单个 User 实体执行：读取已有元数据 → LLM 提取 → patch 回写。
 
     Returns:
-        成功时返回 {"post_state": {...}}，跳过或无变更时返回 None。
+        成功时返回 {"post_state": {...}}，跳过时返回 None。
+        LLM 有输出但 patch 未命中任何节点（实体已被软删）时 ``post_state`` 为空 dict，
+        调用方仍把该实体计入 ``extracted``。
         collect_trace=True 时额外带 "_trace"（input/llm_raw/changes 片段）。
     """
     from app.core.memory.storage_services.extraction_engine.steps.schema import (
@@ -471,13 +475,13 @@ async def _extract_single_entity(
     # 构建详细变更列表（在 patch 前记录，因为 patch 后 operations 仍然有效）
     operations_detail = _build_operations_detail(result)
 
-    patch_records = await connector.execute_query(
-        metadata_patch,
-        **_build_patch_params(
+    patch_records = await patch_entity_metadata(
+        _build_patch_params(
             result, entity_id, existing, entity_name,
             allowed_fields, max_list_len_per_field,
             truncated_sink=truncated_recs if collect_trace else None,
         ),
+        neo4j_client=neo4j_client,
     )
     counts = result.counts()
     logger.info(
