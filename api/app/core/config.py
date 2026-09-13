@@ -197,6 +197,13 @@ class Settings:
         1, int(os.getenv("MEMORY_MESSAGE_MAX_CONTENT_CHARS", "12000"))
     )
 
+    # 模型凭据加密（model_channels 信封主密钥；base64 32B，spec §8.1）
+    MODEL_CREDENTIALS_KEY: str = os.getenv("MODEL_CREDENTIALS_KEY", "")
+
+    # 渠道解析开关：off=纯旧路径 / prefer=v2 优先+旧兜底 / only=纯 v2
+    # （off 档含 speedbear 绑定表旧读分支；开关与旧读路径退役推迟到 Task 19 旧表删除时评估）
+    MODEL_CHANNEL_RESOLUTION: str = os.getenv("MODEL_CHANNEL_RESOLUTION", "prefer")
+
     # JWT Token Configuration
     SECRET_KEY: str = os.getenv("SECRET_KEY", "a_default_secret_key_that_is_long_and_random")
     ALGORITHM: str = "HS256"
@@ -572,6 +579,24 @@ class Settings:
     # ========================================================================
     # context engine的agent历史消息条数上限
     AGENT_MAX_HISTORY: int = int(os.getenv("AGENT_MAX_HISTORY", 20))
+
+    # ========================================================================
+    # Model Usage Metering (M4，spec §13)
+    # ========================================================================
+    # 用量事件消费 beat 周期（秒）
+    MODEL_USAGE_CONSUME_INTERVAL_SECONDS: int = int(
+        os.getenv("MODEL_USAGE_CONSUME_INTERVAL_SECONDS", "5")
+    )
+    # least-used 选路负载窗口（分钟）：model_usage_records 按 channel_id 滚动聚合
+    MODEL_USAGE_LOAD_WINDOW_MINUTES: int = int(
+        os.getenv("MODEL_USAGE_LOAD_WINDOW_MINUTES", "15")
+    )
+    # least-used 选路开关（默认开；关闭退化为 priority desc → created_at asc）
+    MODEL_USAGE_LEAST_USED_ENABLED: bool = (
+        os.getenv("MODEL_USAGE_LEAST_USED_ENABLED", "true").lower() == "true"
+    )
+    # 消费积压告警阈值（xlen / xpending 超此值记 warning）
+    MODEL_USAGE_BACKLOG_WARN: int = int(os.getenv("MODEL_USAGE_BACKLOG_WARN", "50000"))
 
     def get_memory_output_path(self, filename: str = "") -> str:
         """

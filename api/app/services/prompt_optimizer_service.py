@@ -184,14 +184,10 @@ class PromptOptimizerService:
             model_config.id,
             tenant_id=tenant_id,
         )
-        llm = RedBearLLM(RedBearModelConfig(
-            model_name=api_config.model_name,
-            provider=api_config.provider,
-            api_key=api_config.api_key,
-            base_url=api_config.api_base,
-            is_omni=api_config.is_omni,
-            capability=api_config.capability,
-        ), type=ModelType(model_config.type))
+        llm = RedBearLLM(
+            RedBearModelConfig.from_api_key(api_config),
+            type=ModelType(model_config.type),
+        )
         try:
             rendered_system_message = prompt_manager.render(
                 'prompt_optimizer_system',

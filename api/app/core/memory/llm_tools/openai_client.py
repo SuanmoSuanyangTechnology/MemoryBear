@@ -52,20 +52,8 @@ class OpenAIClient(LLMClient):
             except Exception as e:
                 logger.warning(f"初始化 Langfuse 处理器失败: {e}")
 
-        # 初始化 RedBearLLM 客户端
-        self.client = RedBearLLM(
-            RedBearModelConfig(
-                model_name=self.model_name,
-                provider=self.provider,
-                api_key=self.api_key,
-                base_url=self.base_url,
-                max_retries=self.max_retries,
-                is_omni=self.is_omni,
-                capability=self.capability,
-                timeout=self.timeout,
-            ),
-            type=type_
-        )
+        # 初始化 RedBearLLM 客户端（基类已保存原始 config，直接复用）
+        self.client = RedBearLLM(self.config, type=type_)
 
         logger.debug(f"OpenAI 客户端初始化完成: type={type_}")
 

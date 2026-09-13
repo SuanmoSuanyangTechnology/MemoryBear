@@ -1,14 +1,25 @@
-import datetime
 import uuid
 from enum import StrEnum
 
-from sqlalchemy import Column, String, Boolean, DateTime, Text, ForeignKey, UniqueConstraint, Integer, Table, text
-from sqlalchemy.dialects.postgresql import UUID, JSON, ARRAY
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    Column,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Table,
+    Text,
+    UniqueConstraint,
+    text,
+)
+from sqlalchemy.dialects.postgresql import ARRAY, JSON, JSONB, UUID
 from sqlalchemy.orm import relationship
-from sqlalchemy.sql import func
 
-from app.db import Base
 from app.core.utils.datetime_utils import utcnow_naive
+from app.db import Base
 
 
 class BaseModel(Base):
@@ -70,6 +81,7 @@ class LoadBalanceStrategy(StrEnum):
     NONE = "none"  # 无
 
 
+# 过渡期实体（阶段一收敛后冻结；切流稳定后独立迁移删除，见 spec §8.3）
 # 多对多关联表
 model_config_api_key_association = Table(
     'model_config_api_key_association',
@@ -126,6 +138,7 @@ class ModelConfig(BaseModel):
         return f"<ModelConfig(id={self.id}, name={self.name}, type={self.type})>"
 
 
+# 过渡期实体（阶段一收敛后冻结；切流稳定后独立迁移删除，见 spec §8.3）
 class ModelApiKey(BaseModel):
     """模型API密钥表"""
     __tablename__ = "model_api_keys"
@@ -151,6 +164,12 @@ class ModelApiKey(BaseModel):
     
     # 状态管理
     priority = Column(String, default="1", comment="优先级")
+
+    # 用量事件归属透传（spec §13.2）：由 ModelApiKeyService 在返回运行时壳时填充，
+    # 非 ORM 列、不参与 flush；消费方将其透传给 RedBearModelConfig
+    tenant_id = None
+    model_config_id = None
+    channel_id = None
 
     # 关联关系
     model_configs = relationship(
@@ -192,3 +211,34 @@ class ModelBase(Base):
 
     def __repr__(self):
         return f"<ModelBase(name={self.name}, provider={self.provider}, type={self.type})>"
+
+
+class ModelChannel(BaseModel):
+    """渠道凭据登记表（阶段一新增；model_api_keys 的收敛目标，spec §7）
+
+    继承 BaseModel 获取 id/created_at/updated_at/is_active；软停用 = is_active=False（只影响新解析）。
+    """
+    __tablename__ = "model_channels"
+
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, comment="凭据归属租户")
+    provider = Column(String(50), nullable=False, comment="供应商（不允许 composite）")
+    model_names = Column(JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb"), comment="覆盖模型集；[]=provider 级默认渠道")
+    api_base = Column(String(512), nullable=True, comment="执行端点；空=provider 默认 base_url（不参与覆盖匹配）")
+    credential_encrypted = Column(Text, nullable=False, comment="信封 v{ver}:iv:tag:ct")
+    credential_sha256 = Column(String(64), nullable=False, comment="凭据指纹（幂等合并键）")
+    credential_masked = Column(String(255), nullable=False, comment="展示用掩码 sk-****abcd")
+    priority = Column(Integer, nullable=False, default=0, server_default="0", comment="同精确度主备权重")
+    cooldown_until_ms = Column(BigInteger, nullable=True, comment="熔断预留（阶段一恒空）")
+    source = Column(String(20), nullable=False, default="manual", server_default="manual", comment="manual|platform")
+    extra = Column(JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb"), comment="speedbear 等企业语义")
+    remark = Column(Text, nullable=True)
+    created_by = Column(UUID(as_uuid=True), nullable=True, comment="登记人弱引用（不建 FK）")
+
+    __table_args__ = (
+        UniqueConstraint("provider", "tenant_id", "api_base", "credential_sha256",
+                         name="uq_channel_credential", postgresql_nulls_not_distinct=True),
+        Index("ix_channel_tenant_provider", "tenant_id", "provider"),
+    )
+
+    def __repr__(self):
+        return f"<ModelChannel(id={self.id}, provider={self.provider}, tenant_id={self.tenant_id})>"

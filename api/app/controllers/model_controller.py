@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends, status, Query
+from fastapi import APIRouter, Depends, status, Query, Response
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from typing import Optional
 import uuid
@@ -11,9 +12,10 @@ from app.models.models_model import ModelProvider, ModelType, LoadBalanceStrateg
 from app.models.user_model import User
 from app.repositories.model_repository import ModelConfigRepository
 from app.schemas import model_schema
-from app.core.response_utils import success
+from app.core.response_utils import success, fail
 from app.schemas.response_schema import ApiResponse, PageData
-from app.services.model_service import ModelConfigService, ModelApiKeyService, ModelBaseService
+from app.services.model_service import ModelConfigService, ModelBaseService
+from app.services.model_channel_service import ChannelApiKeyService
 from app.core.logging_config import get_api_logger
 from app.core.quota_stub import check_model_quota, check_model_activation_quota
 from app.core.model_provider_config import get_model_provider_metadata
@@ -25,6 +27,19 @@ router = APIRouter(
     prefix="/models",
     tags=["Models"],
 )
+
+
+def _model_in_use_response(exc: BusinessException) -> JSONResponse | None:
+    """模型被业务引用（RESOURCE_IN_USE）时渲染 409 + 影响面清单；其他业务异常返回 None。
+
+    全局异常处理器会丢弃 context，故此处按既有 JSONResponse 先例自行渲染。
+    """
+    impact = exc.context.get("impact") if exc.code == BizCode.RESOURCE_IN_USE else None
+    if impact is None:
+        return None
+    code = exc.code.value if isinstance(exc.code, BizCode) else exc.code
+    return JSONResponse(status_code=409, content=fail(code, exc.message, data=impact))
+
 
 @router.get("/type", response_model=ApiResponse)
 def get_model_types():
@@ -46,7 +61,7 @@ def get_model_strategies():
 @router.get("", response_model=ApiResponse)
 def get_model_list(
         type: Optional[list[str]] = Query(None, description="模型类型筛选（支持多个，如 ?type=LLM 或 ?type=LLM,EMBEDDING）"),
-        capability: Optional[list[str]] = Query(None, description="能力筛选（支持多个，如 ?capability=chat 或 ?capability=chat, embedding）"),
+        capability: Optional[list[str]] = Query(None, description="能力筛选（支持多个，如 ?capability=vision 或 ?capability=vision, video）"),
         provider: Optional[model_schema.ModelProvider] = Query(None, description="提供商筛选(基于API Key)"),
         is_active: Optional[bool] = Query(None, description="激活状态筛选"),
         is_public: Optional[bool] = Query(None, description="公开状态筛选"),
@@ -233,10 +248,10 @@ def delete_model_base(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """删除基础模型"""
-    
-    ModelBaseService.delete_model_base(db=db, model_base_id=model_base_id)
-    return success(msg="基础模型删除成功")
+    """停用基础模型（软停用；引用面清单随响应返回，前端据此提示影响范围）"""
+
+    impact = ModelBaseService.delete_model_base(db=db, model_base_id=model_base_id)
+    return success(data=impact, msg="基础模型已停用")
 
 
 @router.post("/model_plaza/{model_base_id}/add", response_model=ApiResponse)
@@ -269,7 +284,10 @@ def get_model_by_id(
         
         # 将ORM对象转换为Pydantic模型
         result_pydantic = model_schema.ModelConfig.model_validate(result_orm)
-        
+        result_pydantic.is_available = ModelConfigService.is_model_available(
+            db, result_orm, current_user.tenant_id
+        )
+
         return success(data=result_pydantic, msg="模型配置获取成功")
     except Exception as e:
         api_logger.error(f"获取模型配置失败: model_id={model_id} - {str(e)}")
@@ -283,18 +301,19 @@ async def create_model(
     current_user: User = Depends(get_current_user)
 ):
     """
-    创建模型配置
-    
-    - 创建模型配置基础信息
-    - 如果包含 API Key，会先验证配置有效性，然后创建
-    - 验证失败时会抛出异常，不会创建配置
-    - 可通过 skip_validation=true 跳过验证
+    创建自定义模型
+
+    - 内嵌 credential 必填：创建时以该凭据做活体验证，验证通过后 config 与点名渠道
+      单事务落库；验证失败拒绝创建（零写入）
     """
     api_logger.info(f"创建模型配置请求: {model_data.name}, 用户: {current_user.username}, tenant_id={current_user.tenant_id}")
-    
+
     try:
         api_logger.debug(f"开始创建模型配置: {model_data.name}")
-        result_orm = await ModelConfigService.create_model(db=db, model_data=model_data, tenant_id=current_user.tenant_id)
+        result_orm = await ModelConfigService.create_model(
+            db=db, model_data=model_data, tenant_id=current_user.tenant_id,
+            created_by=current_user.id,
+        )
         api_logger.info(f"模型配置创建成功: {result_orm.name} (ID: {result_orm.id})")
         
         # 将ORM对象转换为Pydantic模型
@@ -365,11 +384,17 @@ def delete_composite_model(
 ):
     """删除组合模型"""
     api_logger.info(f"删除组合模型请求: model_id={model_id}, 用户: {current_user.username}")
-    
+
     try:
         ModelConfigService.delete_model(db=db, model_id=model_id, tenant_id=current_user.tenant_id)
         api_logger.info(f"组合模型删除成功: model_id={model_id}")
         return success(msg="组合模型删除成功")
+    except BusinessException as exc:
+        response = _model_in_use_response(exc)
+        if response is None:
+            raise
+        api_logger.warning(f"组合模型被业务引用，拒绝删除: model_id={model_id}, total={exc.context['impact']['total']}")
+        return response
     except Exception as e:
         api_logger.error(f"删除组合模型失败: model_id={model_id} - {str(e)}")
         raise
@@ -383,7 +408,7 @@ def update_model(
     current_user: User = Depends(get_current_user)
 ):
     """
-    更新模型配置
+    更新模型配置（启用前做渠道可用性预检：无候选 409，组合成员为空 400）
     """
     api_logger.info(f"更新模型配置请求: model_id={model_id}, 用户: {current_user.username}, tenant_id={current_user.tenant_id}")
 
@@ -391,9 +416,10 @@ def update_model(
         raise BusinessException("不允许更改模型类型和供应商", BizCode.INVALID_PARAMETER)
 
     if model_data.is_active:
-        active_keys = ModelApiKeyService.get_api_keys_by_model(db=db, model_config_id=model_id, is_active=model_data.is_active)
-        if not active_keys:
-            raise BusinessException("请先为该模型配置可用的 API Key", BizCode.INVALID_PARAMETER)
+        model_config = ModelConfigRepository.get_by_id(db, model_id, tenant_id=current_user.tenant_id)
+        if not model_config:
+            raise BusinessException("模型配置不存在", BizCode.MODEL_NOT_FOUND)
+        ChannelApiKeyService.assert_enableable(db, model_config, current_user.tenant_id)
     
     try:
         api_logger.debug(f"开始更新模型配置: model_id={model_id}")
@@ -419,183 +445,224 @@ def delete_model(
     删除模型配置
     """
     api_logger.info(f"删除模型配置请求: model_id={model_id}, 用户: {current_user.username}, tenant_id={current_user.tenant_id}")
-    
+
     try:
         api_logger.debug(f"开始删除模型配置: model_id={model_id}")
         ModelConfigService.delete_model(db=db, model_id=model_id, tenant_id=current_user.tenant_id)
         api_logger.info(f"模型配置删除成功: model_id={model_id}")
         return success(msg="模型配置删除成功")
+    except BusinessException as exc:
+        response = _model_in_use_response(exc)
+        if response is None:
+            raise
+        api_logger.warning(f"模型被业务引用，拒绝删除: model_id={model_id}, total={exc.context['impact']['total']}")
+        return response
     except Exception as e:
         api_logger.error(f"删除模型配置失败: model_id={model_id} - {str(e)}")
         raise
 
 
-# API Key 相关接口
-@router.get("/{model_id}/apikeys", response_model=ApiResponse)
-def get_model_api_keys(
-    model_id: uuid.UUID,
-    is_active: bool = Query(True, description="是否只获取活跃的API Key"),
+# ---------- Provider 域凭据（provider 级公共渠道；声明必须先于 /{model_id}/apikeys） ----------
+@router.get("/provider/apikeys", response_model=ApiResponse)
+def list_provider_api_keys(
+    provider: Optional[str] = Query(None, description="供应商筛选"),
+    is_active: Optional[bool] = Query(None, description="渠道启停筛选"),
+    source: Optional[str] = Query(None, description="来源筛选（manual/platform/import）"),
+    page: int = Query(1, ge=1, description="页码"),
+    pagesize: int = Query(10, ge=1, le=100, description="每页数量"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """
-    获取模型的API Key列表
-    """
-    api_logger.info(f"获取模型API Key列表请求: model_id={model_id}, 用户: {current_user.username}")
-    
-    try:
-        api_logger.debug(f"开始获取模型API Key列表: model_id={model_id}")
-        result_orm = ModelApiKeyService.get_api_keys_by_model(
-            db=db, model_config_id=model_id, is_active=is_active
-        )
-        
-        # 将ORM对象列表转换为Pydantic模型列表
-        result_pydantic = [model_schema.ModelApiKey.model_validate(item) for item in result_orm]
+    """获取租户 provider 级公共凭据列表（脱敏；覆盖该供应商全部未点名模型；点名渠道在模型域管理）"""
+    api_logger.info(f"获取渠道凭据列表请求: provider={provider}, 用户: {current_user.username}")
 
-        api_logger.info(f"模型API Key列表获取成功: 数量={len(result_pydantic)}")
-        return success(data=result_pydantic, msg="模型API Key列表获取成功")
+    try:
+        result = ChannelApiKeyService.list_provider_keys(
+            db=db,
+            tenant_id=current_user.tenant_id,
+            provider=provider,
+            is_active=is_active,
+            source=source,
+            page=page,
+            pagesize=pagesize,
+        )
+        return success(data=result, msg="渠道凭据列表获取成功")
     except Exception as e:
-        api_logger.error(f"获取模型API Key列表失败: model_id={model_id} - {str(e)}")
+        api_logger.error(f"获取渠道凭据列表失败: {str(e)}")
         raise
 
 
 @router.post("/provider/apikeys", response_model=ApiResponse)
-async def create_model_api_key_by_provider(
-        api_key_data: model_schema.ModelApiKeyCreateByProvider,
-        db: Session = Depends(get_db),
-        current_user: User = Depends(get_current_user)
+def create_provider_api_key(
+    api_key_data: model_schema.ProviderApiKeyCreate,
+    response: Response,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     """
-    根据供应商为所有匹配的模型创建API Key
+    登记供应商公共凭据（覆盖该供应商全部未点名模型）
+
+    同凭据同端点已存在时幂等合并（200，不覆盖既有属性）；新建 201。
     """
-    api_logger.info(f"创建API Key请求: provider={api_key_data.provider}, 用户: {current_user.username}")
+    api_logger.info(f"登记供应商公共凭据请求: provider={api_key_data.provider}, 用户: {current_user.username}")
 
     try:
-        # 根据tenant_id和provider筛选model_config_id列表
-        model_config_ids = api_key_data.model_config_ids
-        if not model_config_ids:
-            model_config_ids = ModelConfigRepository.get_model_config_ids_by_provider(
-                db=db,
-                tenant_id=current_user.tenant_id,
-                provider=api_key_data.provider
-            )
-        
-        if not model_config_ids:
-            raise BusinessException(f"未找到供应商 {api_key_data.provider} 的模型配置", BizCode.MODEL_NOT_FOUND)
-        
-        # 构造schema并调用service
-        create_data = model_schema.ModelApiKeyCreateByProvider(
-            provider=api_key_data.provider,
-            api_key=api_key_data.api_key,
-            api_base=api_key_data.api_base,
-            description=api_key_data.description,
-            config=api_key_data.config,
-            is_active=api_key_data.is_active,
-            priority=api_key_data.priority,
-            model_config_ids=model_config_ids,
-            capability=api_key_data.capability,
-            is_omni=api_key_data.is_omni
+        result, action = ChannelApiKeyService.create_provider_key(
+            db=db,
+            data=api_key_data,
+            tenant_id=current_user.tenant_id,
+            created_by=current_user.id,
         )
-        created_keys, failed_models = await ModelApiKeyService.create_api_key_by_provider(db=db, data=create_data)
-        
-        api_logger.info(f"API Key创建成功: 关联{len(created_keys)}个模型")
-        # result_list = [model_schema.ModelApiKey.model_validate(key) for key in created_keys]
-        result = "API Key已存在" if len(created_keys) == 0 and len(failed_models) == 0 else \
-            f"成功为 {len(created_keys)} 个模型创建API Key, 失败模型列表{failed_models}"
-        return success(data=result, msg=f"成功为 {len(created_keys)} 个模型创建API Key")
+        if action == "created":
+            response.status_code = status.HTTP_201_CREATED
+        msg = "凭据登记成功" if action == "created" else "凭据已存在（合并到既有渠道）"
+        api_logger.info(f"供应商公共凭据登记完成: provider={api_key_data.provider} action={action}")
+        return success(data=result, msg=msg)
     except Exception as e:
-        api_logger.error(f"创建API Key失败: {str(e)}")
+        api_logger.error(f"登记供应商公共凭据失败: {str(e)}")
+        raise
+
+
+@router.get("/provider/apikeys/{apikey_id}", response_model=ApiResponse)
+def get_provider_api_key(
+    apikey_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """获取渠道凭据详情（脱敏；删除影响面 = model_names 覆盖清单）"""
+    api_logger.info(f"获取渠道凭据详情请求: apikey_id={apikey_id}, 用户: {current_user.username}")
+
+    try:
+        result = ChannelApiKeyService.get_provider_key(
+            db=db, apikey_id=apikey_id, tenant_id=current_user.tenant_id
+        )
+        return success(data=result, msg="渠道凭据获取成功")
+    except Exception as e:
+        api_logger.error(f"获取渠道凭据失败: apikey_id={apikey_id} - {str(e)}")
+        raise
+
+
+@router.put("/provider/apikeys/{apikey_id}", response_model=ApiResponse)
+def update_provider_api_key(
+    apikey_id: uuid.UUID,
+    api_key_data: model_schema.ProviderApiKeyUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """更新渠道凭据（属性 / 启停 / 重填凭据；model_names 不可改）"""
+    api_logger.info(f"更新渠道凭据请求: apikey_id={apikey_id}, 用户: {current_user.username}")
+
+    try:
+        result = ChannelApiKeyService.update_provider_key(
+            db=db, apikey_id=apikey_id, data=api_key_data, tenant_id=current_user.tenant_id
+        )
+        return success(data=result, msg="渠道凭据更新成功")
+    except Exception as e:
+        api_logger.error(f"更新渠道凭据失败: apikey_id={apikey_id} - {str(e)}")
+        raise
+
+
+@router.delete("/provider/apikeys/{apikey_id}", response_model=ApiResponse)
+def delete_provider_api_key(
+    apikey_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """删除渠道凭据本体（不可恢复；影响面由列表/详情前置提示）"""
+    api_logger.info(f"删除渠道凭据请求: apikey_id={apikey_id}, 用户: {current_user.username}")
+
+    try:
+        ChannelApiKeyService.delete_provider_key(
+            db=db, apikey_id=apikey_id, tenant_id=current_user.tenant_id
+        )
+        api_logger.info(f"渠道凭据删除成功: apikey_id={apikey_id}")
+        return success(msg="渠道凭据删除成功")
+    except Exception as e:
+        api_logger.error(f"删除渠道凭据失败: apikey_id={apikey_id} - {str(e)}")
+        raise
+
+
+# ---------- 模型域凭据（点名渠道列表 + 登记 + 解绑） ----------
+@router.get("/{model_id}/apikeys", response_model=ApiResponse)
+def get_model_api_keys(
+    model_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    获取模型级（点名）渠道列表（脱敏；含停用，停用态可在此重新启用）
+
+    管理面口径（非运行期候选链）：不含供应商公共备援；启停/编辑复用
+    `PUT /models/provider/apikeys/{apikey_id}`，解绑走本域 DELETE。
+    """
+    api_logger.info(f"获取模型渠道凭据列表请求: model_id={model_id}, 用户: {current_user.username}")
+
+    try:
+        result = ChannelApiKeyService.list_model_candidates(
+            db=db, model_id=model_id, tenant_id=current_user.tenant_id
+        )
+        api_logger.info(f"模型渠道凭据列表获取成功: 数量={len(result)}")
+        return success(data=result, msg="模型渠道凭据列表获取成功")
+    except Exception as e:
+        api_logger.error(f"获取模型渠道凭据列表失败: model_id={model_id} - {str(e)}")
         raise
 
 
 @router.post("/{model_id}/apikeys", response_model=ApiResponse, status_code=status.HTTP_201_CREATED)
 async def create_model_api_key(
     model_id: uuid.UUID,
-    api_key_data: model_schema.ModelApiKeyCreate,
+    api_key_data: model_schema.ApiKeyRegister,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """
-    为模型创建API Key
+    为模型登记点名凭据（provider/真实模型名由服务端按模型配置读取）
+
+    登记前会做一次活体验证；同凭据同端点已存在时幂等合并（公共渠道吸收为 no-op）。
     """
-    api_logger.info(f"创建模型API Key请求: model_id={model_id}, model_name={api_key_data.model_name}, 用户: {current_user.username}")
-    
+    api_logger.info(f"登记模型凭据请求: model_id={model_id}, 用户: {current_user.username}")
+
     try:
-        # 设置模型配置ID
-        api_key_data.model_config_ids = [model_id]
-        
-        api_logger.debug(f"开始创建模型API Key: {api_key_data.model_name}")
-        result_orm = await ModelApiKeyService.create_api_key(db=db, api_key_data=api_key_data)
-        api_logger.info(f"模型API Key创建成功: {result_orm.model_name} (ID: {result_orm.id})")
-        result = model_schema.ModelApiKey.model_validate(result_orm)
-        return success(data=result, msg="模型API Key创建成功")
+        result, action = await ChannelApiKeyService.add_model_key(
+            db=db,
+            model_id=model_id,
+            data=api_key_data,
+            tenant_id=current_user.tenant_id,
+            created_by=current_user.id,
+        )
+        msg = "凭据登记成功" if action == "created" else "凭据已存在（合并到既有渠道）"
+        api_logger.info(f"模型凭据登记完成: model_id={model_id} action={action}")
+        return success(data=result, msg=msg)
     except Exception as e:
-        api_logger.error(f"创建模型API Key失败: {api_key_data.model_name} - {str(e)}")
+        api_logger.error(f"登记模型凭据失败: model_id={model_id} - {str(e)}")
         raise
 
 
-@router.get("/apikeys/{api_key_id}", response_model=ApiResponse)
-def get_api_key_by_id(
-    api_key_id: uuid.UUID,
+@router.delete("/{model_id}/apikeys/{apikey_id}", response_model=ApiResponse)
+def unbind_model_api_key(
+    model_id: uuid.UUID,
+    apikey_id: uuid.UUID,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """
-    根据ID获取API Key
+    解绑模型凭据（点名渠道移除该模型；移除后无点名模型则凭据随之删除）
+
+    供应商公共凭据不可在此解绑，请前往 Provider 域停用/删除。
     """
-    api_logger.info(f"获取API Key请求: api_key_id={api_key_id}, 用户: {current_user.username}")
-    
+    api_logger.info(
+        f"解绑模型凭据请求: model_id={model_id}, apikey_id={apikey_id}, 用户: {current_user.username}"
+    )
+
     try:
-        api_logger.debug(f"开始获取API Key: api_key_id={api_key_id}")
-        result = ModelApiKeyService.get_api_key_by_id(db=db, api_key_id=api_key_id)
-        api_logger.info(f"API Key获取成功: {result.model_name}")
-        return success(data=result, msg="API Key获取成功")
+        result = ChannelApiKeyService.unbind_model_key(
+            db=db, model_id=model_id, apikey_id=apikey_id, tenant_id=current_user.tenant_id
+        )
+        api_logger.info(f"模型凭据解绑成功: model_id={model_id}, apikey_id={apikey_id} deleted={result['deleted']}")
+        msg = "凭据解绑成功（该凭据已随之删除）" if result["deleted"] else "凭据解绑成功"
+        return success(data=result, msg=msg)
     except Exception as e:
-        api_logger.error(f"获取API Key失败: api_key_id={api_key_id} - {str(e)}")
-        raise
-
-
-@router.put("/apikeys/{api_key_id}", response_model=ApiResponse)
-async def update_api_key(
-    api_key_id: uuid.UUID,
-    api_key_data: model_schema.ModelApiKeyUpdate,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    """
-    更新API Key
-    """
-    api_logger.info(f"更新API Key请求: api_key_id={api_key_id}, 用户: {current_user.username}")
-    
-    try:
-        api_logger.debug(f"开始更新API Key: api_key_id={api_key_id}")
-        result = await ModelApiKeyService.update_api_key(db=db, api_key_id=api_key_id, api_key_data=api_key_data)
-        api_logger.info(f"API Key更新成功: {result.model_name} (ID: {api_key_id})")
-        result_pydantic = model_schema.ModelApiKey.model_validate(result) 
-        return success(data=result_pydantic, msg="API Key更新成功")
-    except Exception as e:
-        api_logger.error(f"更新API Key失败: api_key_id={api_key_id} - {str(e)}")
-        raise
-
-
-@router.delete("/apikeys/{api_key_id}", response_model=ApiResponse)
-def delete_api_key(
-    api_key_id: uuid.UUID,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    """
-    删除API Key
-    """
-    api_logger.info(f"删除API Key请求: api_key_id={api_key_id}, 用户: {current_user.username}")
-    
-    try:
-        api_logger.debug(f"开始删除API Key: api_key_id={api_key_id}")
-        ModelApiKeyService.delete_api_key(db=db, api_key_id=api_key_id)
-        api_logger.info(f"API Key删除成功: api_key_id={api_key_id}")
-        return success(msg="API Key删除成功")
-    except Exception as e:
-        api_logger.error(f"删除API Key失败: api_key_id={api_key_id} - {str(e)}")
+        api_logger.error(f"解绑模型凭据失败: model_id={model_id}, apikey_id={apikey_id} - {str(e)}")
         raise
 
 

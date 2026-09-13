@@ -667,9 +667,9 @@ class LLMNode(BaseNode):
 
         # Vision: only enable for providers whose LLM class accepts
         # OpenAI-style multimodal content format ([{type: text, text: ...}]).
-        # DashScope non-Omni (ChatTongyi) rejects this format by default,
-        # but if the model itself declares the VISION capability we trust
-        # that flag and pass multimodal content through.
+        # DashScope now runs the OpenAI-compatible API for all models
+        # (ChatTongyi retired), but if the model itself declares the VISION
+        # capability we trust that flag and pass multimodal content through.
         effective_vision = self.typed_config.vision
         if effective_vision:
             try:
@@ -688,13 +688,8 @@ class LLMNode(BaseNode):
                     f"OpenAI 多模态内容格式，已自动关闭 vision")
 
         llm = RedBearLLM(
-            RedBearModelConfig(
-                model_name=model_info.model_name,
-                provider=model_info.provider,
-                api_key=model_info.api_key,
-                base_url=model_info.api_base,
-                is_omni=model_info.is_omni,
-                capability=model_info.capability,
+            RedBearModelConfig.from_api_key(
+                model_info,
                 deep_thinking=deep_thinking,
                 thinking_budget_tokens=thinking_budget_tokens,
                 json_output=json_output,

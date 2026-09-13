@@ -769,12 +769,7 @@ async def run_hybrid_search(
                 with get_db_context() as db:
                     config_service = MemoryConfigService(db)
                     embedder_config_dict = config_service.get_embedder_config(str(memory_config.embedding_model_id))
-                rb_config = RedBearModelConfig(
-                    model_name=embedder_config_dict["model_name"],
-                    provider=embedder_config_dict["provider"],
-                    api_key=embedder_config_dict["api_key"],
-                    base_url=embedder_config_dict["base_url"]
-                )
+                rb_config = RedBearModelConfig.from_api_key(embedder_config_dict)
                 config_load_time = time.time() - config_load_start
                 logger.info(f"[PERF] Config loading took {config_load_time:.4f}s")
 

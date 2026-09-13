@@ -25,7 +25,7 @@ from app.schemas.knowledge_retrieval_schema import KnowledgeRetrievalRequest
 from app.services.knowledge_metadata_service import KnowledgeMetadataService
 from app.services.knowledge_retrieval_preparation import KnowledgeRetrievalPreparation
 from app.services.metadata_auto_filter_service import MetadataAutoFilterService
-from app.services.model_service import ModelConfigService
+from app.services.model_service import ModelApiKeyService, ModelConfigService
 
 logger = logging.getLogger(__name__)
 
@@ -167,6 +167,7 @@ class KnowledgeRetrievalNode(BaseNode):
 
     async def _prepare_auto_filter_state_async(
         self,
+        variable_pool: VariablePool,
     ) -> tuple[dict[str, Any], ModelRuntimeSnapshot, dict[str, Any]] | None:
         """Snapshot the Workflow AUTO filter inputs in a short async DB context."""
         cfg = self._get_typed_config()
@@ -198,7 +199,13 @@ class KnowledgeRetrievalNode(BaseNode):
                 db,
                 model_cfg.model_id,
             )
-            api_key = self.model_balance(model_config)
+            api_key = await ModelApiKeyService.get_available_api_key_async(
+                db,
+                model_config.id,
+                tenant_id=await self.resolve_tenant_id_async(variable_pool),
+            )
+            if not api_key:
+                raise BusinessException("模型配置缺少 API Key", BizCode.INVALID_PARAMETER)
             model = ModelRuntimeSnapshot(
                 model_name=api_key.model_name,
                 provider=api_key.provider or model_config.provider,
@@ -211,6 +218,9 @@ class KnowledgeRetrievalNode(BaseNode):
                     else bool(model_config.is_omni)
                 ),
                 model_type=model_config.type,
+                tenant_id=api_key.tenant_id,
+                model_config_id=api_key.model_config_id,
+                channel_id=api_key.channel_id,
             )
 
         return (
@@ -292,8 +302,8 @@ class KnowledgeRetrievalNode(BaseNode):
             )
         return options
 
-    async def _extract_auto_filter_groups_async(self, query: str) -> list[FilterGroup]:
-        prepared = await self._prepare_auto_filter_state_async()
+    async def _extract_auto_filter_groups_async(self, query: str, variable_pool: VariablePool) -> list[FilterGroup]:
+        prepared = await self._prepare_auto_filter_state_async(variable_pool)
         if prepared is None:
             return []
 
@@ -302,15 +312,7 @@ class KnowledgeRetrievalNode(BaseNode):
         if model.model_type in {ModelType.LLM.value, ModelType.CHAT.value}:
             model_type = ModelType(model.model_type)
         llm = RedBearLLM(
-            RedBearModelConfig(
-                model_name=model.model_name,
-                provider=model.provider,
-                api_key=model.api_key,
-                base_url=model.api_base,
-                capability=list(model.capability),
-                is_omni=model.is_omni,
-                extra_params=generation_options,
-            ),
+            RedBearModelConfig.from_api_key(model, extra_params=generation_options),
             type=model_type,
         )
         filter_groups = await MetadataAutoFilterService.generate_filter_groups_async(
@@ -362,7 +364,7 @@ class KnowledgeRetrievalNode(BaseNode):
         # 2.5 auto 模式：节点层用配置好的模型 + 参数，提取出源数据过滤条件（list[FilterGroup]，配置层类型）
         auto_filter_groups: list | None = None
         if self.typed_config.metadata_filter_mode == MetadataFilterMode.AUTO:
-            auto_filter_groups = await self._extract_auto_filter_groups_async(query)
+            auto_filter_groups = await self._extract_auto_filter_groups_async(query, variable_pool)
 
         # 3. Construct KnowledgeRetrievalRequest
         first_kb = self.typed_config.knowledge_bases[0]

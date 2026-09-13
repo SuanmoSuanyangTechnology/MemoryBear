@@ -468,11 +468,11 @@ _PARAM_PROVIDER_SUPPORT: dict[str, frozenset[ModelProvider]] = {
     }),
     "frequency_penalty": frozenset({
         ModelProvider.OPENAI, ModelProvider.XINFERENCE, ModelProvider.GPUSTACK,
-        ModelProvider.VOLCANO, ModelProvider.DASHSCOPE, ModelProvider.SPEEDBEAR,
+        ModelProvider.VOLCANO, ModelProvider.SPEEDBEAR,
     }),
     "presence_penalty": frozenset({
         ModelProvider.OPENAI, ModelProvider.XINFERENCE, ModelProvider.GPUSTACK,
-        ModelProvider.VOLCANO, ModelProvider.DASHSCOPE, ModelProvider.SPEEDBEAR,
+        ModelProvider.VOLCANO, ModelProvider.SPEEDBEAR,
     }),
     "enable_search": frozenset({ModelProvider.DASHSCOPE}),
 }
@@ -488,10 +488,9 @@ _PARAM_PROVIDER_WARNINGS: dict[str, str] = {
 
 # Providers whose LLM chat class accepts OpenAI-style multimodal content
 # format: [{"type": "text", "text": "..."}], [{"type": "image_url", ...}] etc.
-# DashScope non-Omni (ChatTongyi) uses its own format and rejects OpenAI-style lists.
 _MULTIMODAL_COMPATIBLE_PROVIDERS = frozenset({
     ModelProvider.OPENAI, ModelProvider.XINFERENCE, ModelProvider.GPUSTACK,
-    ModelProvider.VOLCANO, ModelProvider.SPEEDBEAR,
+    ModelProvider.DASHSCOPE, ModelProvider.VOLCANO, ModelProvider.SPEEDBEAR,
     ModelProvider.OLLAMA,
     ModelProvider.BEDROCK,
 })
@@ -500,14 +499,13 @@ _MULTIMODAL_COMPATIBLE_PROVIDERS = frozenset({
 def strip_unsupported_llm_params(
         extra_params: dict[str, Any],
         provider: str,
-        is_omni: bool = False,
+        is_omni: bool = False,  # 过渡保留：DashScope 协议已统一，阶段 2 清理
 ) -> tuple[dict[str, Any], list[str]]:
     """Strip provider-unsupported parameters from extra_params.
 
     Parameters listed in _PARAM_PROVIDER_SUPPORT are only kept when the
-    provider (or, for DashScope, the Omni variant) is in the support set.
-    Other parameters (top_p, frequency_penalty, presence_penalty, etc.)
-    are kept by default — they'll be routed to model_kwargs or top-level
+    provider is in the support set. Other parameters (top_p, etc.) are
+    kept by default — they'll be routed to model_kwargs or top-level
     by RedBearModelFactory.get_model_params based on the provider.
 
     Note: temperature, max_tokens, seed, stop, top_k, repetition_penalty,
@@ -527,30 +525,6 @@ def strip_unsupported_llm_params(
     except ValueError:
         return extra_params, warnings
 
-    # DashScope Omni is OpenAI-compatible; non-Omni (ChatTongyi) is not.
-    # frequency_penalty / presence_penalty are only safe for Omni.
-    # Other params (top_k, seed, enable_search, repetition_penalty) are
-    # supported by ChatTongyi via model_kwargs routing in RedBearModelFactory.
-    if provider_enum == ModelProvider.DASHSCOPE and not is_omni:
-        # Map DashScope non-Omni to a virtual "dashscope_native" so that
-        # OpenAI-only params (frequency_penalty, presence_penalty) are
-        # stripped while DashScope-native params (top_k, seed,
-        # enable_search, repetition_penalty via model_kwargs) remain.
-        _DASHSCOPE_NATIVE_SUPPORT: dict[str, bool] = {
-            "top_k": True,
-            "repetition_penalty": True,
-            "seed": True,
-            "frequency_penalty": False,
-            "presence_penalty": False,
-            "enable_search": True,
-        }
-        for param_key, supported in _DASHSCOPE_NATIVE_SUPPORT.items():
-            if param_key in extra_params and not supported:
-                warnings.append(_PARAM_PROVIDER_WARNINGS.get(param_key, f"参数 {param_key} 已自动剥离"))
-                extra_params.pop(param_key, None)
-        return extra_params, warnings
-
-    # General case: check _PARAM_PROVIDER_SUPPORT
     for param_key, supported_providers in _PARAM_PROVIDER_SUPPORT.items():
         if param_key in extra_params and provider_enum not in supported_providers:
             warnings.append(_PARAM_PROVIDER_WARNINGS.get(param_key, f"参数 {param_key} 已自动剥离"))

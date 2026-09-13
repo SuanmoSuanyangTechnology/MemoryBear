@@ -73,7 +73,11 @@ def get_embedder_client(embedding_id: str) -> OpenAIEmbedderClient:
         raise ValueError(f"Invalid embedding ID '{embedding_id}': {str(e)}") from e
 
     try:
-        embedder_config = RedBearModelConfig(**embedder_config_dict)
+        embedder_config = RedBearModelConfig.from_api_key(
+            embedder_config_dict,
+            timeout=embedder_config_dict.get("timeout", 120.0),
+            max_retries=embedder_config_dict.get("max_retries", 5),
+        )
         embedder_client = OpenAIEmbedderClient(embedder_config)
         return embedder_client
     except Exception as e:

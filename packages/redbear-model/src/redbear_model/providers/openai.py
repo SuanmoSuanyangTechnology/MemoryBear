@@ -134,9 +134,7 @@ def build_openai_compatible_params(
         "model": config.model_name,
         "base_url": (
             "https://dashscope.aliyuncs.com/compatible-mode/v1"
-            if config.provider is ModelProvider.DASHSCOPE
-            and config.is_omni
-            and not config.base_url
+            if config.provider is ModelProvider.DASHSCOPE and not config.base_url
             else config.base_url
         ),
         "api_key": config.api_key.get_secret_value(),
@@ -150,14 +148,11 @@ def build_openai_compatible_params(
     for key in ("temperature", "max_tokens", "seed", "stop"):
         if provider_specific.get(key) is not None:
             params[key] = provider_specific[key]
-    if (
-        config.provider is ModelProvider.DASHSCOPE
-        and config.is_omni
-        and provider_specific.get("repetition_penalty") is not None
-    ):
-        params.setdefault("extra_body", {})["repetition_penalty"] = (
-            provider_specific["repetition_penalty"]
-        )
+    if config.provider is ModelProvider.DASHSCOPE:
+        # DashScope 扩展参数不是 OpenAI 标准字段，经 extra_body 透传
+        for key in ("repetition_penalty", "top_k", "enable_search"):
+            if provider_specific.get(key) is not None:
+                params.setdefault("extra_body", {})[key] = provider_specific[key]
     default_headers = provider_params.get("default_headers")
     if isinstance(default_headers, dict):
         params["default_headers"] = default_headers

@@ -39,17 +39,8 @@ class OpenAIEmbedderClient(EmbedderClient):
         """
         super().__init__(model_config)
 
-        # 初始化 RedBearEmbeddings（自动支持火山引擎多模态）
-        self.model = RedBearEmbeddings(
-            RedBearModelConfig(
-                model_name=self.model_name,
-                provider=self.provider,
-                api_key=self.api_key,
-                base_url=self.base_url,
-                max_retries=self.max_retries,
-                timeout=self.timeout,
-            )
-        )
+        # 初始化 RedBearEmbeddings（自动支持火山引擎多模态；基类已保存原始 config，直接复用）
+        self.model = RedBearEmbeddings(self.config)
         self.is_multimodal = self.model.is_multimodal_supported()
 
         logger.info(f"OpenAI Embedder 客户端初始化完成 (provider={self.provider}, multimodal={self.is_multimodal})")

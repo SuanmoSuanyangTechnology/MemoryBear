@@ -19,7 +19,7 @@ from app.schemas.memory_agent_schema import Write_UserInput
 from app.schemas.response_schema import ApiResponse
 from app.services.memory_agent_service import MemoryAgentService
 from app.services.memory_config_service import MemoryConfigService
-from app.services.model_service import ModelConfigService
+from app.services.model_service import ModelApiKeyService, ModelConfigService
 
 load_dotenv()
 api_logger = get_api_logger()
@@ -135,7 +135,9 @@ async def file_update(
     """
     api_logger.info(f"File upload requested, file count: {len(files)}")
     config = ModelConfigService.get_model_by_id(db=db, model_id=model_id)
-    apiConfig: ModelApiKey = config.api_keys[0]
+    apiConfig: ModelApiKey = ModelApiKeyService.get_available_api_key(db, config.id)
+    if not apiConfig:
+        return fail(BizCode.INVALID_PARAMETER, "模型配置缺少 API Key")
     file_content = []
     try:
         for file in files:

@@ -245,6 +245,9 @@ class LangChainAgent:
             thinking_budget_tokens: Optional[int] = None,  # 深度思考 token 预算
             json_output: bool = False,  # 是否强制 JSON 输出
             capability: Optional[List[str]] = None,  # 模型能力列表，用于校验是否支持深度思考
+            tenant_id: Optional[str] = None,  # 用量归属：租户
+            model_config_id: Optional[str] = None,  # 用量归属：模型配置
+            channel_id: Optional[str] = None,  # 用量归属：渠道
             tool_call_limit: int = 1,  # 每个工具的最大调用次数（防止模型陷入工具循环）
             context_evidence: Optional[List[Any]] = None,
             context_query: str = "",
@@ -352,6 +355,9 @@ class LangChainAgent:
             base_url=api_base,
             is_omni=is_omni,
             capability=capability,
+            tenant_id=tenant_id,
+            model_config_id=model_config_id,
+            channel_id=channel_id,
             deep_thinking=deep_thinking,
             thinking_budget_tokens=thinking_budget_tokens,
             json_output=json_output,

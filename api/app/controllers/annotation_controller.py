@@ -36,14 +36,7 @@ def _build_annotation_embedding_config(db: Session, model_config_id: uuid.UUID, 
     if not api_key_obj:
         return None
 
-    return RedBearModelConfig(
-        model_name=api_key_obj.model_name,
-        provider=api_key_obj.provider,
-        api_key=api_key_obj.api_key,
-        base_url=api_key_obj.api_base or None,
-        timeout=60,
-        max_retries=3,
-    )
+    return RedBearModelConfig.from_api_key(api_key_obj, timeout=60, max_retries=3)
 
 
 @router.post("", summary="创建标注")

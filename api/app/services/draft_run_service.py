@@ -24,6 +24,7 @@ from app.core.config import settings
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.llm_error_handler import classify_multimodal_exception
+from app.core.usage_context import bind_usage
 from app.core.logging_config import get_business_logger
 from app.integrations.knowledge.context_factory import build_app_knowledge_context
 from app.integrations.knowledge.contracts import KnowledgeRetrievalSource
@@ -37,7 +38,7 @@ from app.models.annotation_model import AppAnnotation, AppAnnotationHitLog, AppA
 from app.models.appshare_model import AppShare
 from app.models.file_metadata_model import FileMetadata
 from app.models.knowledgeshare_model import KnowledgeShare
-from app.models.models_model import ModelCapability, ModelType, ModelApiKey
+from app.models.models_model import ModelCapability, ModelType
 from app.repositories.tool_repository import ToolRepository
 from app.schemas.app_schema import FileInput, Citation, FileType, TransferMethod
 from app.schemas.model_schema import ModelInfo
@@ -614,14 +615,7 @@ class AgentRunService:
         if not api_key_id:
             return False
         async with get_async_db_context() as db:
-            api_key = await db.get(ModelApiKey, api_key_id)
-            if not api_key:
-                return False
-            current_count = int(api_key.usage_count or "0")
-            api_key.usage_count = str(current_count + 1)
-            api_key.last_used_at = utcnow_naive()
-            await db.commit()
-            return True
+            return await ModelApiKeyService.record_api_key_usage_bridge_async(db, api_key_id)
 
     def _build_debug_id(self) -> str:
         """生成可用于日志和 SSE 对齐的错误追踪 ID。"""
@@ -788,17 +782,13 @@ class AgentRunService:
                     "provider": api_key_obj.provider,
                     "api_key": api_key_obj.api_key,
                     "api_base": api_key_obj.api_base,
+                    "tenant_id": api_key_obj.tenant_id,
+                    "model_config_id": api_key_obj.model_config_id,
+                    "channel_id": api_key_obj.channel_id,
                 }
 
             from app.core.models.base import RedBearModelConfig
-            config = RedBearModelConfig(
-                model_name=api_key_data["model_name"],
-                provider=api_key_data["provider"],
-                api_key=api_key_data["api_key"],
-                base_url=api_key_data["api_base"] or None,
-                timeout=60,
-                max_retries=3,
-            )
+            config = RedBearModelConfig.from_api_key(api_key_data, timeout=60, max_retries=3)
 
             query_embedding = await asyncio.to_thread(AnnotationService.generate_embedding, message, config)
             best_match = None
@@ -869,13 +859,12 @@ class AgentRunService:
                     "provider": api_key_obj.provider,
                     "api_key": api_key_obj.api_key,
                     "api_base": api_key_obj.api_base,
+                    "tenant_id": api_key_obj.tenant_id,
+                    "model_config_id": api_key_obj.model_config_id,
+                    "channel_id": api_key_obj.channel_id,
                 }
             from app.core.models.base import RedBearModelConfig
-            model_config = RedBearModelConfig(
-                model_name=api_key_data["model_name"], provider=api_key_data["provider"],
-                api_key=api_key_data["api_key"], base_url=api_key_data["api_base"] or None,
-                timeout=60, max_retries=3,
-            )
+            model_config = RedBearModelConfig.from_api_key(api_key_data, timeout=60, max_retries=3)
             candidates = await asyncio.to_thread(
                 AnnotationService.find_context_candidates,
                 message, annotations, model_config, 0.6, 3,
@@ -1171,6 +1160,7 @@ class AgentRunService:
             result.append(item)
         return result
 
+    @bind_usage("app", "agent_config.app_id")
     async def run(
             self,
             *,
@@ -1384,7 +1374,10 @@ class AgentRunService:
                 api_base=api_key_config["api_base"],
                 capability=api_key_config["capability"],
                 is_omni=api_key_config["is_omni"],
-                model_type=model_config.type
+                model_type=model_config.type,
+                tenant_id=api_key_config.get("tenant_id"),
+                model_config_id=api_key_config.get("model_config_id"),
+                channel_id=api_key_config.get("channel_id"),
             )
 
             # 6. 加载历史消息（包含开场白）
@@ -1482,6 +1475,9 @@ class AgentRunService:
                 thinking_budget_tokens=effective_params.get("thinking_budget_tokens"),
                 json_output=effective_params.get("json_output", False),
                 capability=capability,
+                tenant_id=api_key_config.get("tenant_id"),
+                model_config_id=api_key_config.get("model_config_id"),
+                channel_id=api_key_config.get("channel_id"),
                 context_query=message,
                 context_base_text=system_prompt + "\n" + str(history) + "\n" + message,
                 context_evidence_loader=load_annotation_context,
@@ -1643,6 +1639,7 @@ class AgentRunService:
                     pass
             raise BusinessException(f"Agent 调用失败: {str(e)}", BizCode.INTERNAL_ERROR, cause=e)
 
+    @bind_usage("app", "agent_config.app_id")
     async def run_stream(
             self,
             *,
@@ -1854,7 +1851,10 @@ class AgentRunService:
                 api_base=api_key_config["api_base"],
                 capability=api_key_config["capability"],
                 is_omni=api_key_config["is_omni"],
-                model_type=model_config.type
+                model_type=model_config.type,
+                tenant_id=api_key_config.get("tenant_id"),
+                model_config_id=api_key_config.get("model_config_id"),
+                channel_id=api_key_config.get("channel_id"),
             )
 
             # 6. 加载历史消息
@@ -1980,6 +1980,9 @@ class AgentRunService:
                     thinking_budget_tokens=effective_params.get("thinking_budget_tokens"),
                     json_output=effective_params.get("json_output", False),
                     capability=capability,
+                    tenant_id=api_key_config.get("tenant_id"),
+                    model_config_id=api_key_config.get("model_config_id"),
+                    channel_id=api_key_config.get("channel_id"),
                     context_query=message,
                     context_base_text=system_prompt + "\n" + str(history) + "\n" + message,
                     context_evidence_loader=load_annotation_context,
@@ -2558,21 +2561,6 @@ class AgentRunService:
         Raises:
             BusinessException: 当没有可用的 API Key 时
         """
-        # api_keys = ModelApiKeyRepository.get_by_model_config(self.db, model_config_id)
-        # stmt = (
-        #     select(ModelApiKey).join(
-        #         ModelConfig, ModelApiKey.model_configs
-        #     )
-        #     .where(
-        #         ModelConfig.id == model_config_id,
-        #         ModelApiKey.is_active.is_(True)
-        #     )
-        #     .order_by(ModelApiKey.priority.desc())
-        #     .limit(1)
-        # )
-        #
-        # api_key = self.db.scalars(stmt).first()
-        # api_key = api_keys[0] if api_keys else None
         async with get_async_db_context() as db:
             api_key = await ModelApiKeyService.get_available_api_key_async(
                 db,
@@ -2590,7 +2578,10 @@ class AgentRunService:
                 "api_base": api_key.api_base,
                 "api_key_id": api_key.id,
                 "is_omni": api_key.is_omni,
-                "capability": api_key.capability
+                "capability": api_key.capability,
+                "tenant_id": api_key.tenant_id,
+                "model_config_id": api_key.model_config_id,
+                "channel_id": api_key.channel_id,
             }
 
     async def _ensure_conversation(
@@ -3082,14 +3073,9 @@ class AgentRunService:
             from langchain_core.messages import HumanMessage
             from app.core.models import RedBearLLM, RedBearModelConfig
             llm = RedBearLLM(
-                RedBearModelConfig(
-                    model_name=api_key_config["model_name"],
-                    provider=api_key_config.get("provider", "openai"),
-                    api_key=api_key_config["api_key"],
-                    base_url=api_key_config.get("api_base"),
-                    capability=api_key_config.get("capability", []),
-                    is_omni=api_key_config.get("is_omni", False),
-                    extra_params={"temperature": 0.5, "max_tokens": 200}
+                RedBearModelConfig.from_api_key(
+                    api_key_config,
+                    extra_params={"temperature": 0.5, "max_tokens": 200},
                 ),
                 type=ModelType.CHAT
             )

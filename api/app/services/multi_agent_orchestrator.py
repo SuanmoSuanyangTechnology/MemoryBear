@@ -2648,17 +2648,9 @@ class MultiAgentOrchestrator:
             )
 
             # 创建 RedBearModelConfig
-            model_config = RedBearModelConfig(
-                model_name=api_key_config.model_name,
-                provider=api_key_config.provider,
-                api_key=api_key_config.api_key,
-                base_url=api_key_config.api_base,
-                is_omni=api_key_config.is_omni,
-                capability=api_key_config.capability,
-                extra_params={
-                    "temperature": 0.7,   # 整合任务使用中等温度
-                    "max_tokens": 2000
-                }
+            model_config = RedBearModelConfig.from_api_key(
+                api_key_config,
+                extra_params={"temperature": 0.7, "max_tokens": 2000},
             )
 
             # 创建 LLM 实例
@@ -2833,18 +2825,9 @@ class MultiAgentOrchestrator:
             )
 
             # 创建 RedBearModelConfig（启用流式）
-            model_config = RedBearModelConfig(
-                model_name=api_key_config.model_name,
-                provider=api_key_config.provider,
-                api_key=api_key_config.api_key,
-                base_url=api_key_config.api_base,
-                is_omni=api_key_config.is_omni,
-                capability=api_key_config.capability,
-                extra_params={
-                    "temperature": 0.7,
-                    "max_tokens": 2000,
-                    "streaming": True   # 启用流式输出
-                }
+            model_config = RedBearModelConfig.from_api_key(
+                api_key_config,
+                extra_params={"temperature": 0.7, "max_tokens": 2000, "streaming": True},
             )
 
             # 创建 LLM 实例

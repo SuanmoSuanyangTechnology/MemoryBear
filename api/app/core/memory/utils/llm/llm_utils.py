@@ -41,14 +41,7 @@ class MemoryClientFactory:
 
         try:
             return OpenAIClient(
-                RedBearModelConfig(
-                    model_name=model_config.get("model_name"),
-                    provider=model_config.get("provider"),
-                    api_key=model_config.get("api_key"),
-                    base_url=model_config.get("base_url"),
-                    is_omni=model_config.get("is_omni"),
-                    capability=model_config.get("capability")
-                ),
+                RedBearModelConfig.from_api_key(model_config),
                 type_=model_config.get("type")
             )
         except Exception as e:
@@ -72,12 +65,7 @@ class MemoryClientFactory:
 
         try:
             return OpenAIEmbedderClient(
-                RedBearModelConfig(
-                    model_name=embedder_config.get("model_name"),
-                    provider=embedder_config.get("provider"),
-                    api_key=embedder_config.get("api_key"),
-                    base_url=embedder_config.get("base_url")
-                )
+                RedBearModelConfig.from_api_key(embedder_config)
             )
         except Exception as e:
             model_name = embedder_config.get('model_name', 'unknown')
@@ -98,14 +86,7 @@ class MemoryClientFactory:
 
         try:
             return OpenAIClient(
-                RedBearModelConfig(
-                    model_name=model_config.get("model_name"),
-                    provider=model_config.get("provider"),
-                    api_key=model_config.get("api_key"),
-                    base_url=model_config.get("base_url"),
-                    is_omni=model_config.get("is_omni"),
-                    capability=model_config.get("capability")
-                ),
+                RedBearModelConfig.from_api_key(model_config),
                 type_=model_config.get("type")
             )
         except Exception as e:

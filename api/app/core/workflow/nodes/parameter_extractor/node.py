@@ -125,26 +125,13 @@ class ParameterExtractorNode(BaseNode):
                 raise BusinessException("Configured model does not exist", BizCode.NOT_FOUND)
 
             api_config = self.get_runtime_api_config(db, config, variable_pool)
-            model_name = api_config.model_name
-            provider = api_config.provider
-            api_key = api_config.api_key
-            api_base = api_config.api_base
-            is_omni = api_config.is_omni
             capability = api_config.capability
             model_type = config.type
+            model_config = RedBearModelConfig.from_api_key(api_config)
 
         self._model_capability = capability or []
 
-        llm = RedBearLLM(
-            RedBearModelConfig(
-                model_name=model_name,
-                provider=provider,
-                api_key=api_key,
-                base_url=api_base,
-                is_omni=is_omni
-            ),
-            type=ModelType(model_type)
-        )
+        llm = RedBearLLM(model_config, type=ModelType(model_type))
         return llm
 
     async def _load_model_info_async(self, variable_pool: VariablePool) -> ModelInfo:
@@ -172,18 +159,15 @@ class ParameterExtractorNode(BaseNode):
                 provider=api_config.provider,
                 is_omni=api_config.is_omni,
                 capability=api_config.capability,
+                tenant_id=api_config.tenant_id,
+                model_config_id=api_config.model_config_id,
+                channel_id=api_config.channel_id,
             )
 
     def _build_llm_from_model_info(self, model_info: ModelInfo) -> RedBearLLM:
         self._model_capability = model_info.capability or []
         return RedBearLLM(
-            RedBearModelConfig(
-                model_name=model_info.model_name,
-                provider=model_info.provider,
-                api_key=model_info.api_key,
-                base_url=model_info.api_base,
-                is_omni=model_info.is_omni
-            ),
+            RedBearModelConfig.from_api_key(model_info),
             type=model_info.model_type
         )
 

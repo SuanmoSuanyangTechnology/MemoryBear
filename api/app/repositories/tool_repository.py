@@ -12,7 +12,7 @@ from app.models.tool_model import (
 from app.utils.redis_cache import redis_cache
 
 
-@redis_cache(ttl=300, prefix="tenant_by_workspace", skip_args=["db"])
+@redis_cache(ttl=300, prefix="tenant_by_workspace", skip_args=["db"], return_type=uuid.UUID)
 async def _get_tenant_id_by_workspace_id_cached(db: AsyncSession, workspace_id: str) -> uuid.UUID | None:
     """Cached wrapper — see get_tenant_id_by_workspace_id_async_nocache."""
     from app.models.workspace_model import Workspace

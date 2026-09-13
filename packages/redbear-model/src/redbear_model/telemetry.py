@@ -1,4 +1,4 @@
-"""Optional telemetry port for model runtime events."""
+"""Optional telemetry ports for model runtime events."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import time
 from typing import Protocol
 
 from .contracts import ResolvedModelConfig
+from .usage import UsageEvent
 
 logger = logging.getLogger(__name__)
 _GATEWAY_ERROR_NAMES = (
@@ -44,6 +45,20 @@ class NoOpModelTelemetry:
         error_type: str,
         latency_ms: float,
     ) -> None:
+        return None
+
+
+class UsagePublisher(Protocol):
+    """旁路计量出口（spec §13.2）：宿主注册 RedisStreamPublisher（XADD model:usage）。
+
+    计量是旁路——publisher 失败仅告警，绝不阻塞/回滚业务调用。
+    """
+
+    def report_usage(self, event: UsageEvent) -> None: ...
+
+
+class NoOpUsagePublisher:
+    def report_usage(self, event: UsageEvent) -> None:
         return None
 
 
@@ -109,4 +124,17 @@ def report_failure_safely(
             config.provider.value,
             config.model_name,
             operation,
+        )
+
+
+def publish_usage_safely(publisher: UsagePublisher, event: UsageEvent) -> None:
+    """旁路发布用量事件：任何异常仅告警日志，绝不抛回业务调用（spec §13.2）。"""
+    try:
+        publisher.report_usage(event)
+    except Exception:
+        logger.exception(
+            "Usage publishing failed for event=%s provider=%s model=%s",
+            event.event_id,
+            event.provider.value,
+            event.model_name,
         )

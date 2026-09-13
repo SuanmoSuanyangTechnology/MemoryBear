@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from uuid import UUID
 
 from pydantic import SecretStr
 
 from .contracts import (
+    ChannelSnapshot,
+    ChannelSource,
     LoadBalanceStrategy,
     ModelCapability,
     ModelConfigSnapshot,
@@ -17,13 +19,17 @@ from .contracts import (
     PublicModelBindingSnapshot,
     ResolvedModelConfig,
 )
+from .crypto import CredentialCipher
 from .errors import (
+    CredentialDecryptError,
     ModelAccessDeniedError,
     ModelConfigInactiveError,
     ModelConfigNotFoundError,
     ModelCredentialNotFoundError,
     ModelUsageRecordError,
+    NoAvailableChannelError,
     PublicCredentialUnavailableError,
+    SpeedbearChannelMissingError,
 )
 from .ports import AsyncModelRegistryRepository, ModelRegistryRepository
 
@@ -79,6 +85,7 @@ def _build_resolved(
     is_omni: bool,
     params: dict,
     runtime_options: ModelRuntimeOptions | None,
+    channel_id: UUID | None = None,
 ) -> ResolvedModelConfig:
     deep_thinking, thinking_budget, json_output = _runtime_flags(
         params,
@@ -86,6 +93,7 @@ def _build_resolved(
     return ResolvedModelConfig(
         model_config_id=config.model_config_id,
         key_id=key_id,
+        channel_id=channel_id,
         tenant_id=tenant_id,
         provider=provider,
         model_type=config.model_type,
@@ -134,7 +142,7 @@ def _build_from_binding(
         key_id=None,
         tenant_id=tenant_id,
         provider=binding.provider,
-        model_name=config.display_name,
+        model_name=config.name,
         api_key=binding.api_key,
         base_url=binding.base_url,
         capabilities=config.capabilities,
@@ -142,7 +150,6 @@ def _build_from_binding(
         params={},
         runtime_options=runtime_options,
     )
-
 
 def resolve_model(
     repository: ModelRegistryRepository,
@@ -220,3 +227,144 @@ async def record_model_usage_async(
         await repository.record_key_usage(key_id)
     except Exception as exc:
         raise ModelUsageRecordError(key_id, exc) from exc
+
+
+# ---- v2 渠道解析核（spec §10.1/§11.1）：输入为本租户活跃渠道快照池，纯函数无 I/O ----
+# v1（resolve_model / ports / ModelKeySnapshot）在 M3 宿主切流前原样保留。
+
+
+def match_channel_candidates(
+    config: ModelConfigSnapshot,
+    channels: Sequence[ChannelSnapshot],
+    *,
+    model_name: str,
+) -> list[ChannelSnapshot]:
+    """§10.1.3 自动匹配：provider 相等 && is_active && 覆盖集命中（[]=全量，点名=仅列出名）。
+
+    channels 应为 registry 返回的该租户活跃渠道池（含全部 provider）；source=platform 渠道
+    仅出现在 provider=speedbear 池（租户自持，无跨租户泄漏问题），普通匹配不做 source 排除。
+    """
+    return [
+        ch
+        for ch in channels
+        if ch.provider == config.provider
+        and ch.is_active
+        and ch.covers(model_name)
+    ]
+
+
+def match_platform_speedbear_channels(
+    channels: Sequence[ChannelSnapshot],
+) -> list[ChannelSnapshot]:
+    """§10.1.4 speedbear 公共模型候选：provider=speedbear && source=platform，不收窄 model_names。"""
+    return [
+        ch
+        for ch in channels
+        if ch.provider == ModelProvider.SPEEDBEAR
+        and ch.source == ChannelSource.PLATFORM
+        and ch.is_active
+    ]
+
+
+def order_channel_candidates(
+    candidates: Sequence[ChannelSnapshot],
+    *,
+    model_name: str,
+    loads: Mapping[UUID, int] | None = None,
+) -> list[ChannelSnapshot]:
+    """§11.1 选路排序：点名（model_names 含模型名）> provider 级 → priority desc → least-used
+    → created_at asc（created_at 相同按 id 定序）。返回整条有序链：编排失败换渠道沿链向后走。
+
+    loads 为渠道 id → 滚动窗口用量（宿主从 usage_records 派生）；None/缺省视为 0，
+    即 M4 计量落地前退化为先登记优先。
+    """
+    return sorted(
+        candidates,
+        key=lambda ch: (
+            0 if model_name in ch.model_names else 1,
+            -ch.priority,
+            0 if loads is None else loads.get(ch.id, 0),
+            ch.created_at_ms,
+            str(ch.id),
+        ),
+    )
+
+
+def build_resolved_from_channel(
+    config: ModelConfigSnapshot,
+    channel: ChannelSnapshot,
+    *,
+    tenant_id: UUID,
+    model_name: str,
+    cipher: CredentialCipher,
+    runtime_options: ModelRuntimeOptions | None = None,
+) -> ResolvedModelConfig:
+    """解密命中渠道凭据并组 ResolvedModelConfig（解密收敛点；失败抛 CredentialDecryptError）。"""
+    try:
+        plaintext = cipher.decrypt(
+            channel.credential_encrypted,
+            aad=f"{channel.provider}:{tenant_id}",
+        )
+    except Exception as exc:
+        raise CredentialDecryptError(channel.id, channel.provider, exc) from exc
+    return _build_resolved(
+        config,
+        key_id=None,
+        channel_id=channel.id,
+        tenant_id=tenant_id,
+        provider=config.provider,
+        model_name=model_name,
+        api_key=SecretStr(plaintext),
+        base_url=channel.api_base,
+        capabilities=config.capabilities,
+        is_omni=config.is_omni,
+        params=dict(config.config),
+        runtime_options=runtime_options,
+    )
+
+
+def resolve_from_channel_pool(
+    config: ModelConfigSnapshot,
+    channels: Sequence[ChannelSnapshot],
+    *,
+    tenant_id: UUID,
+    cipher: CredentialCipher,
+    model_name: str | None = None,
+    runtime_options: ModelRuntimeOptions | None = None,
+    loads: Mapping[UUID, int] | None = None,
+) -> ResolvedModelConfig:
+    """v2 解析门面（M3 宿主把 resolve_model 内部切到这里）。
+
+    锚点名 = 显式 model_name（组合编排传成员声明名）or config.name（普通模型真实调用名）。
+    组合 config 无单渠道解析（成员编排在 orchestration），直接命中此处视为调用方错误。
+    """
+    _validate_config_access(config, tenant_id)
+    anchor = model_name or config.name
+    if config.provider is ModelProvider.COMPOSITE:
+        raise NoAvailableChannelError(
+            config.model_config_id,
+            str(config.provider),
+            anchor,
+            "composite config resolves via member orchestration only",
+        )
+    if config.provider is ModelProvider.SPEEDBEAR and config.is_public:
+        candidates = match_platform_speedbear_channels(channels)
+        if not candidates:
+            raise SpeedbearChannelMissingError(config.model_config_id, tenant_id)
+    else:
+        candidates = match_channel_candidates(config, channels, model_name=anchor)
+        if not candidates:
+            raise NoAvailableChannelError(
+                config.model_config_id,
+                str(config.provider),
+                anchor,
+            )
+    ordered = order_channel_candidates(candidates, model_name=anchor, loads=loads)
+    return build_resolved_from_channel(
+        config,
+        ordered[0],
+        tenant_id=tenant_id,
+        model_name=anchor,
+        cipher=cipher,
+        runtime_options=runtime_options,
+    )

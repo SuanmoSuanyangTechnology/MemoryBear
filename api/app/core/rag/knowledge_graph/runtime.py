@@ -19,14 +19,7 @@ from app.services.model_service import ModelApiKeyService
 
 
 def build_model_config(snapshot: ModelRuntimeSnapshot) -> RedBearModelConfig:
-    return RedBearModelConfig(
-        model_name=snapshot.model_name,
-        provider=snapshot.provider,
-        api_key=snapshot.api_key,
-        base_url=snapshot.api_base,
-        capability=list(snapshot.capability),
-        is_omni=snapshot.is_omni,
-    )
+    return RedBearModelConfig.from_api_key(snapshot)
 
 
 def _require_runtime_api_key(api_key: object | None, model_role: str) -> object:

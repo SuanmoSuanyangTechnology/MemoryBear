@@ -10,7 +10,7 @@ import yaml
 from fastapi import APIRouter, Depends, Path, Form, UploadFile, File, Query
 from fastapi.responses import StreamingResponse, Response
 from sqlalchemy import select, text
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session
 from urllib.parse import quote
 
 from app.core.config import settings
@@ -125,8 +125,6 @@ def _build_model_config_snapshot(source):
         updated_at=source.updated_at,
         is_active=source.is_active,
     )
-    if hasattr(source, "api_keys") and source.api_keys is not None:
-        snapshot.api_keys = source.api_keys
     return snapshot
 
 
@@ -412,7 +410,6 @@ async def _load_agent_runtime_config(
             model_config = await db.scalar(
                 select(ModelConfig)
                 .where(ModelConfig.id == agent_cfg_snapshot.default_model_config_id)
-                .options(selectinload(ModelConfig.api_keys))
             )
             if not model_config:
                 raise ResourceNotFoundException("模型配置", str(agent_cfg_snapshot.default_model_config_id))
@@ -421,36 +418,6 @@ async def _load_agent_runtime_config(
             raise BusinessException("模型配置不存在，无法试运行", BizCode.AGENT_CONFIG_MISSING)
 
         model_config_snapshot = _build_model_config_snapshot(model_config)
-
-        # SpeedBear 公共模型的 api_key 来自 TenantSpeedBearBinding，不存于 api_keys 关系
-        if model_config_snapshot.provider == "speedbear" and model_config_snapshot.is_public:
-            from app.models.workspace_model import Workspace
-            tenant_row = await db.execute(
-                select(Workspace.tenant_id).where(Workspace.id == workspace_id).limit(1)
-            )
-            tenant_id = tenant_row.scalar_one_or_none()
-            if tenant_id:
-                from premium.platform_admin.speedbear_model import TenantSpeedBearBinding
-                bind_row = await db.execute(
-                    select(TenantSpeedBearBinding)
-                    .where(TenantSpeedBearBinding.tenant_id == tenant_id)
-                    .limit(1)
-                )
-                binding = bind_row.scalar_one_or_none()
-                if binding:
-                    from app.models.models_model import ModelApiKey
-                    base_url = f"{settings.SPEEDBEAR_BASE_URL.rstrip('/')}/api/v1"
-                    model_config_snapshot.api_keys = [
-                        ModelApiKey(
-                            model_name=model_config_snapshot.name,
-                            provider="speedbear",
-                            api_key=binding.gateway_api_key,
-                            api_base=base_url,
-                            capability=model_config_snapshot.capability,
-                            is_omni=model_config_snapshot.is_omni,
-                            is_active=True,
-                        )
-                    ]
 
     return agent_cfg_snapshot, model_config_snapshot, is_shared
 
@@ -1388,9 +1355,7 @@ async def draft_run_compare(
         model_configs = []
         for model_item in payload.models:
             model_config = await db.scalar(
-                select(ModelConfig)
-                .where(ModelConfig.id == model_item.model_config_id)
-                .options(selectinload(ModelConfig.api_keys))
+                select(ModelConfig).where(ModelConfig.id == model_item.model_config_id)
             )
             if not model_config:
                 from app.core.exceptions import ResourceNotFoundException

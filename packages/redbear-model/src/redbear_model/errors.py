@@ -85,6 +85,70 @@ class PublicCredentialUnavailableError(RedBearModelError):
         )
 
 
+class NoAvailableChannelError(RedBearModelError):
+    def __init__(
+        self,
+        model_config_id: UUID,
+        provider: str,
+        model_name: str | None = None,
+        reason: str | None = None,
+    ):
+        suffix = "" if reason is None else f": {reason}"
+        super().__init__(
+            f"No available channel for model config {model_config_id} "
+            f"(provider {provider}, model {model_name}){suffix}"
+        )
+
+
+class SpeedbearChannelMissingError(NoAvailableChannelError):
+    """租户无 provider=speedbear && source=platform 渠道（替代旧 PublicCredentialUnavailableError 文案面）。"""
+
+    def __init__(self, model_config_id: UUID, tenant_id: UUID):
+        super().__init__(
+            model_config_id,
+            "speedbear",
+            None,
+            f"tenant {tenant_id} has no platform speedbear channel",
+        )
+
+
+class CredentialDecryptError(RedBearModelError):
+    def __init__(self, channel_id: UUID, provider: str, cause: Exception):
+        self.__cause__ = cause
+        super().__init__(
+            f"Failed to decrypt credential for channel {channel_id} "
+            f"(provider {provider})"
+        )
+
+
+class ChannelSwitchExhaustedError(RedBearModelError):
+    """候选渠道全部耗尽（spec §11.2 候选耗尽行）：聚合报错——尝试过的渠道链 + 原始错误链。
+
+    failures = [(channel_id | None, error_type), ...]，仅渠道 id 与错误类型名，
+    不含任何凭据明文/密文；原始最后错误经 __cause__ 保留堆栈。
+    """
+
+    def __init__(
+        self,
+        model_config_id: UUID,
+        provider: str,
+        model_name: str,
+        failures: list[tuple[UUID | None, str]],
+        cause: BaseException | None,
+    ):
+        self.failures = failures
+        if cause is not None:
+            self.__cause__ = cause
+        chain = ", ".join(
+            f"channel={channel_id}:{error_type}" for channel_id, error_type in failures
+        )
+        super().__init__(
+            f"All candidate channels failed for model config {model_config_id} "
+            f"(provider {provider}, model {model_name})"
+            + ("" if not chain else f": {chain}")
+        )
+
+
 class UnsupportedModelProviderError(RedBearModelError):
     def __init__(self, provider: str):
         super().__init__(f"Unsupported model provider: {provider}")

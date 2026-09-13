@@ -422,7 +422,7 @@ def _classification_for_provider_code(code: str | None) -> ClassifiedLLMError | 
 
 
 def _parse_dashscope_error_fields(exception_chain: tuple[Exception, ...]) -> dict[str, str]:
-    """Parse the stable multiline error format emitted by ChatTongyi for 400/401 responses."""
+    """Parse the stable multiline error format emitted by the legacy native DashScope SDK."""
     fields: dict[str, str] = {}
     supported_fields = {"request_id", "status_code", "code", "message"}
     for error in exception_chain:

@@ -1582,23 +1582,12 @@ class ConversationService:
             logger.error(f"Model API keys missing for model_id={model_id}")
             raise BusinessException("Model configuration missing API keys.", BizCode.INVALID_PARAMETER)
 
-        model_name = api_config.model_name
         provider = api_config.provider
-        api_key = api_config.api_key
-        api_base = api_config.api_base
         is_omni = api_config.is_omni
-        capability = api_config.capability
         model_type = config.type
 
         llm = RedBearLLM(
-            RedBearModelConfig(
-                model_name=model_name,
-                provider=provider,
-                api_key=api_key,
-                base_url=api_base,
-                is_omni=is_omni,
-                capability=capability,
-            ),
+            RedBearModelConfig.from_api_key(api_config),
             type=ModelType(model_type)
         )
 

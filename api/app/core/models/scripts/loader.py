@@ -76,7 +76,7 @@ def load_models(db: Session, providers: list[str] = None, silent: bool = False) 
                     for key, value in model_data.items():
                         setattr(existing, key, value)
                     
-                    # 更新绑定了该 model_id 的 ModelConfig 和 ModelApiKey
+                    # 更新绑定了该 model_id 的 ModelConfig（能力以 config 为源，渠道运行期取 config 快照）
                     sync_fields = [k for k in config_sync_fields.keys() if k in model_data]
                     if sync_fields:
                         # 批量更新 ModelConfig
@@ -85,30 +85,7 @@ def load_models(db: Session, providers: list[str] = None, silent: bool = False) 
                             update_kwargs,
                             synchronize_session=False
                         )
-                        
-                        # 更新 ModelApiKey 的 capability 和 is_omni
-                        if 'capability' in model_data or 'is_omni' in model_data:
-                            from app.models.models_model import ModelApiKey, model_config_api_key_association
-                            api_key_update = {}
-                            if 'capability' in model_data:
-                                api_key_update['capability'] = model_data['capability']
-                            if 'is_omni' in model_data:
-                                api_key_update['is_omni'] = model_data['is_omni']
-                            
-                            if api_key_update:
-                                # 查找所有关联的 API Key
-                                api_key_ids = db.query(model_config_api_key_association.c.api_key_id).join(
-                                    ModelConfig,
-                                    ModelConfig.id == model_config_api_key_association.c.model_config_id
-                                ).filter(ModelConfig.model_id == existing.id).distinct().all()
-                                
-                                if api_key_ids:
-                                    api_key_ids = [aid[0] for aid in api_key_ids]
-                                    db.query(ModelApiKey).filter(ModelApiKey.id.in_(api_key_ids)).update(
-                                        api_key_update,
-                                        synchronize_session=False
-                                    )
-                    
+
                     db.commit()
                     if not silent:
                         print(f"更新成功: {model_data['name']}")

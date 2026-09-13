@@ -2,7 +2,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import Any, Iterator, AsyncIterator, List, Optional, Literal, Type
+from typing import Any, Callable, Iterator, AsyncIterator, List, Optional, Literal, Type
 
 from json_repair import json_repair
 from langchain_core.callbacks import CallbackManagerForLLMRun, AsyncCallbackManagerForLLMRun
@@ -17,12 +17,29 @@ from app.core.alert_metric_bridge import (
     report_model_gateway_success_async,
 )
 from app.core.models import RedBearModelConfig, RedBearModelFactory, get_provider_llm_class
+from app.core.usage_bridge import (
+    report_usage_failure,
+    report_usage_failure_async,
+    report_usage_success,
+    report_usage_success_async,
+)
 from app.core.models.network_retry import (
     NETWORK_RETRYABLE,
     NETWORK_RETRY_ATTEMPTS,
     network_retry,
 )
 from app.models.models_model import ModelType
+
+_USAGE_CAPABILITY = "llm"
+
+
+def _is_streaming(model: Any) -> bool:
+    """底层模型处于流式消费（含 streaming 聚合）时，事件按流式标记。
+
+    LangGraph 内部经 ainvoke 调用、但底层 langchain 模型 streaming=True 时，
+    响应是逐字流式产出的——事件 stream 字段应反映该消费形态而非包装层方法名。
+    """
+    return bool(getattr(model, "streaming", False))
 
 
 class StructResponse:
@@ -98,10 +115,21 @@ class StructResponse:
 class _ObservedRunnable(Runnable):
     """观察由 bind/bind_tools/with_structured_output 派生出的真实调用。"""
 
-    def __init__(self, runnable: Any, config: RedBearModelConfig, operation: str):
+    def __init__(
+        self,
+        runnable: Any,
+        config: RedBearModelConfig,
+        operation: str,
+        stream_probe: Callable[[], bool] | None = None,
+    ):
         self._runnable = runnable
         self._model_config = config
         self._operation = operation
+        self._stream_probe = stream_probe
+
+    def _streaming(self) -> bool:
+        """invoke/ainvoke 的流式标记：底层模型 streaming=True 时逐步消费（同 _is_streaming 口径）。"""
+        return bool(self._stream_probe is not None and self._stream_probe())
 
     def invoke(self, input: Any, config: Optional[dict] = None, **kwargs: Any) -> Any:
         started = time.perf_counter()
@@ -111,8 +139,16 @@ class _ObservedRunnable(Runnable):
             report_model_gateway_failure(
                 self._model_config, self._operation, exc, started
             )
+            report_usage_failure(
+                self._model_config, _USAGE_CAPABILITY, self._operation, exc, started,
+                stream=self._streaming(),
+            )
             raise
         report_model_gateway_success(self._model_config, self._operation, started)
+        report_usage_success(
+            self._model_config, _USAGE_CAPABILITY, self._operation, started, result=result,
+            stream=self._streaming(),
+        )
         return result
 
     async def ainvoke(self, input: Any, config: Optional[dict] = None, **kwargs: Any) -> Any:
@@ -123,8 +159,16 @@ class _ObservedRunnable(Runnable):
             await report_model_gateway_failure_async(
                 self._model_config, self._operation, exc, started
             )
+            await report_usage_failure_async(
+                self._model_config, _USAGE_CAPABILITY, self._operation, exc, started,
+                stream=self._streaming(),
+            )
             raise
         await report_model_gateway_success_async(self._model_config, self._operation, started)
+        await report_usage_success_async(
+            self._model_config, _USAGE_CAPABILITY, self._operation, started, result=result,
+            stream=self._streaming(),
+        )
         return result
 
     def stream(self, input: Any, config: Optional[dict] = None, **kwargs: Any):
@@ -135,9 +179,17 @@ class _ObservedRunnable(Runnable):
             report_model_gateway_failure(
                 self._model_config, f"{self._operation}.stream", exc, started
             )
+            report_usage_failure(
+                self._model_config, _USAGE_CAPABILITY, f"{self._operation}.stream",
+                exc, started, stream=True,
+            )
             raise
         # 流被完整消费后才算调用成功；中途被放弃（GeneratorExit）不会走到这里。
         report_model_gateway_success(self._model_config, f"{self._operation}.stream", started)
+        report_usage_success(
+            self._model_config, _USAGE_CAPABILITY, f"{self._operation}.stream",
+            started, stream=True,
+        )
 
     async def astream(self, input: Any, config: Optional[dict] = None, **kwargs: Any):
         started = time.perf_counter()
@@ -148,9 +200,17 @@ class _ObservedRunnable(Runnable):
             await report_model_gateway_failure_async(
                 self._model_config, f"{self._operation}.astream", exc, started
             )
+            await report_usage_failure_async(
+                self._model_config, _USAGE_CAPABILITY, f"{self._operation}.astream",
+                exc, started, stream=True,
+            )
             raise
         await report_model_gateway_success_async(
             self._model_config, f"{self._operation}.astream", started
+        )
+        await report_usage_success_async(
+            self._model_config, _USAGE_CAPABILITY, f"{self._operation}.astream",
+            started, stream=True,
         )
 
     def __getattr__(self, name: str) -> Any:
@@ -202,8 +262,16 @@ class RedBearLLM(BaseLLM):
             result = self._model._generate(prompts, stop=stop, run_manager=run_manager, **kwargs)
         except Exception as exc:
             report_model_gateway_failure(self._config, "generate", exc, started)
+            report_usage_failure(
+                self._config, _USAGE_CAPABILITY, "generate", exc, started,
+                stream=_is_streaming(self._model),
+            )
             raise
         report_model_gateway_success(self._config, "generate", started)
+        report_usage_success(
+            self._config, _USAGE_CAPABILITY, "generate", started,
+            stream=_is_streaming(self._model), result=result,
+        )
         return result
 
     async def _agenerate(
@@ -219,8 +287,16 @@ class RedBearLLM(BaseLLM):
             result = await self._model._agenerate(prompts, stop=stop, run_manager=run_manager, **kwargs)
         except Exception as exc:
             await report_model_gateway_failure_async(self._config, "agenerate", exc, started)
+            await report_usage_failure_async(
+                self._config, _USAGE_CAPABILITY, "agenerate", exc, started,
+                stream=_is_streaming(self._model),
+            )
             raise
         await report_model_gateway_success_async(self._config, "agenerate", started)
+        await report_usage_success_async(
+            self._config, _USAGE_CAPABILITY, "agenerate", started,
+            stream=_is_streaming(self._model), result=result,
+        )
         return result
 
     # ==================== Advanced Methods (Support Message Lists) ====================
@@ -241,15 +317,25 @@ class RedBearLLM(BaseLLM):
         """
         started = time.perf_counter()
         try:
-            return self._invoke_with_retry(input, config, kwargs)
-        except AttributeError as e:
-            if 'invoke' in str(e):
+            try:
+                result = self._invoke_with_retry(input, config, kwargs)
+            except AttributeError as e:
+                if 'invoke' not in str(e):
+                    raise
                 # Underlying model doesn't support invoke, fallback to parent implementation
-                return super().invoke(input, config=config, **kwargs)
-            raise
+                result = super().invoke(input, config=config, **kwargs)
         except Exception as exc:
             report_model_gateway_failure(self._config, "invoke", exc, started)
+            report_usage_failure(
+                self._config, _USAGE_CAPABILITY, "invoke", exc, started,
+                stream=_is_streaming(self._model),
+            )
             raise
+        report_usage_success(
+            self._config, _USAGE_CAPABILITY, "invoke", started,
+            stream=_is_streaming(self._model), result=result,
+        )
+        return result
 
     @network_retry
     def _invoke_with_retry(self, input: Any, config: Optional[dict], kwargs: dict) -> Any:
@@ -271,18 +357,25 @@ class RedBearLLM(BaseLLM):
         """
         started = time.perf_counter()
         try:
-            return await self._ainvoke_with_retry(input, config, kwargs)
-        except AttributeError as e:
-            if 'ainvoke' in str(e):
+            try:
+                result = await self._ainvoke_with_retry(input, config, kwargs)
+            except AttributeError as e:
+                if 'ainvoke' not in str(e):
+                    raise
                 # Underlying model doesn't support ainvoke, fallback to parent implementation
                 result = await super().ainvoke(input, config=config, **kwargs)
-                await report_model_gateway_success_async(self._config, "ainvoke", started)
-                return result
-            raise
         except Exception as exc:
             await report_model_gateway_failure_async(self._config, "ainvoke", exc, started)
+            await report_usage_failure_async(
+                self._config, _USAGE_CAPABILITY, "ainvoke", exc, started,
+                stream=_is_streaming(self._model),
+            )
             raise
         await report_model_gateway_success_async(self._config, "ainvoke", started)
+        await report_usage_success_async(
+            self._config, _USAGE_CAPABILITY, "ainvoke", started,
+            stream=_is_streaming(self._model), result=result,
+        )
         return result
 
     @network_retry
@@ -322,14 +415,24 @@ class RedBearLLM(BaseLLM):
                     report_model_gateway_failure(
                         self._config, "stream", fallback_exc, started
                     )
+                    report_usage_failure(
+                        self._config, _USAGE_CAPABILITY, "stream", fallback_exc,
+                        started, stream=True,
+                    )
                     raise
             else:
                 raise
         except Exception as exc:
             report_model_gateway_failure(self._config, "stream", exc, started)
+            report_usage_failure(
+                self._config, _USAGE_CAPABILITY, "stream", exc, started, stream=True
+            )
             raise
         # 流被完整消费后才算调用成功（含回退路径）。
         report_model_gateway_success(self._config, "stream", started)
+        report_usage_success(
+            self._config, _USAGE_CAPABILITY, "stream", started, stream=True
+        )
 
     def _stream_with_retry(
             self,
@@ -393,13 +496,23 @@ class RedBearLLM(BaseLLM):
                     await report_model_gateway_failure_async(
                         self._config, "astream", fallback_exc, started
                     )
+                    await report_usage_failure_async(
+                        self._config, _USAGE_CAPABILITY, "astream", fallback_exc,
+                        started, stream=True,
+                    )
                     raise
             else:
                 raise
         except Exception as exc:
             await report_model_gateway_failure_async(self._config, "astream", exc, started)
+            await report_usage_failure_async(
+                self._config, _USAGE_CAPABILITY, "astream", exc, started, stream=True
+            )
             raise
         await report_model_gateway_success_async(self._config, "astream", started)
+        await report_usage_success_async(
+            self._config, _USAGE_CAPABILITY, "astream", started, stream=True
+        )
 
     async def _astream_with_retry(
             self,
@@ -439,7 +552,8 @@ class RedBearLLM(BaseLLM):
         with_so = getattr(self._model, "with_structured_output", None)
         if callable(with_so):
             return _ObservedRunnable(
-                with_so(schema, **kwargs), self._config, "structured_output"
+                with_so(schema, **kwargs), self._config, "structured_output",
+                stream_probe=lambda: _is_streaming(self._model),
             )
         raise NotImplementedError(
             f"Underlying model {type(self._model).__name__} does not implement "
@@ -534,7 +648,10 @@ class RedBearLLM(BaseLLM):
                     try:
                         result = attr(*args, **kwargs)
                         if name in {"bind", "bind_tools"} and hasattr(result, "invoke"):
-                            return _ObservedRunnable(result, self._config, name)
+                            return _ObservedRunnable(
+                                result, self._config, name,
+                                stream_probe=lambda: _is_streaming(self._model),
+                            )
                         return result
                     except Exception:
                         # Can add logging or error handling here

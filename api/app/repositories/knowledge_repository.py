@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session, selectinload
 from app.models.document_model import Document
 from app.models.knowledge_model import Knowledge, PermissionType
-from app.models.models_model import ModelApiKey, ModelConfig
+from app.models.models_model import ModelConfig
 from app.schemas import knowledge_schema
 from app.core.logging_config import get_db_logger
 from app.core.rag.parser_config import (
@@ -34,12 +34,7 @@ def _knowledge_values(
 
 def knowledge_schema_load_options():
     def model_config_options(relationship_attr):
-        return (
-            selectinload(relationship_attr).selectinload(ModelConfig.model_base),
-            selectinload(relationship_attr)
-            .selectinload(ModelConfig.api_keys)
-            .selectinload(ModelApiKey.model_configs),
-        )
+        return (selectinload(relationship_attr).selectinload(ModelConfig.model_base),)
 
     return (
         selectinload(Knowledge.created_user),

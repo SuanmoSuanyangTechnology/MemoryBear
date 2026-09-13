@@ -2,16 +2,16 @@ from __future__ import annotations
 
 import os
 import threading
+from collections.abc import Mapping
 from typing import Any, ClassVar, Dict, List, Optional, TypeVar
 
 import httpx
 from langchain_aws import ChatBedrock
-from langchain_community.chat_models import ChatTongyi
 from langchain_core.embeddings import Embeddings
 from langchain_core.language_models import BaseLLM
 from langchain_ollama import OllamaLLM
 from langchain_openai import ChatOpenAI, OpenAI
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
@@ -67,6 +67,19 @@ def _get_shared_openai_clients(
     return sync_client, async_client
 
 
+def _shell_field(obj: Any, *names: str) -> Any:
+    """从运行期 key 壳（属性对象或 dict 快照）读字段，按序取首个存在的值。"""
+    for name in names:
+        if isinstance(obj, Mapping):
+            if name in obj:
+                return obj[name]
+        else:
+            value = getattr(obj, name, None)
+            if value is not None:
+                return value
+    return None
+
+
 class RedBearModelConfig(BaseModel):
     """模型配置基类"""
     model_name: str
@@ -84,6 +97,18 @@ class RedBearModelConfig(BaseModel):
     max_retries: int = Field(default_factory=lambda: int(os.getenv("LLM_MAX_RETRIES", "2")))
     concurrency: int = 5  # 并发限流
     extra_params: Dict[str, Any] = {}
+    # 用量事件归属（spec §13.2）：中央构建器从解析结果填充，业务调用点不感知；
+    # tenant/model_config 缺失时用量事件跳过，channel 缺失则记 NULL
+    tenant_id: Optional[str] = None
+    model_config_id: Optional[str] = None
+    channel_id: Optional[str] = None
+
+    @field_validator("tenant_id", "model_config_id", "channel_id", mode="before")
+    @classmethod
+    def _coerce_attribution_id(cls, value: Any) -> Any:
+        if value is None or isinstance(value, str):
+            return value
+        return str(value)
 
     EXTRA_PARAMS_FIELD_MAP: ClassVar[dict] = {
         "deep_thinking": "deep_thinking",
@@ -165,6 +190,37 @@ class RedBearModelConfig(BaseModel):
             self.json_output = False
         return self
 
+    @classmethod
+    def from_api_key(cls, api_key_obj: Any, **overrides: Any) -> "RedBearModelConfig":
+        """运行期 key 壳 → 模型配置（spec §13.2：用量归属三字段随行）。
+
+        壳可为解析壳/speedbear/legacy 的运行期 ModelApiKey、ModelInfo、snapshot
+        或 dict 快照；`overrides` 为调用点特有参数（timeout/max_retries/
+        extra_params 等），同名覆盖。tenant/model_config/channel 缺失即 None
+        （用量事件侧跳过/NULL，语义与中央构建器一致）。
+        """
+        data: Dict[str, Any] = {
+            "model_name": _shell_field(api_key_obj, "model_name"),
+            "provider": _shell_field(api_key_obj, "provider"),
+            "api_key": _shell_field(api_key_obj, "api_key"),
+            "base_url": _shell_field(api_key_obj, "api_base", "base_url") or None,
+            "capability": [
+                str(item) for item in (_shell_field(api_key_obj, "capability") or [])
+            ],
+            "is_omni": bool(_shell_field(api_key_obj, "is_omni")),
+            "tenant_id": _shell_field(api_key_obj, "tenant_id"),
+            "model_config_id": _shell_field(api_key_obj, "model_config_id"),
+            "channel_id": _shell_field(api_key_obj, "channel_id"),
+        }
+        missing = [
+            name for name in ("model_name", "provider", "api_key") if data[name] is None
+        ]
+        if missing:
+            raise ValueError(f"from_api_key: 壳缺少必需字段 {', '.join(missing)}")
+        data["provider"] = str(data["provider"])
+        data.update(overrides)
+        return cls(**data)
+
 
 def _map_budget_to_reasoning_effort(budget_tokens: Optional[int]) -> Optional[str]:
     if budget_tokens is None:
@@ -203,13 +259,13 @@ class RedBearModelFactory:
         返回 (过滤后的 extra_params, provider_specific dict)
 
         provider_specific 包含需要按提供商路由的参数：
-        - top_k: 仅 Ollama/DashScope 支持，DashScope non-Omni 需通过 model_kwargs
-        - repetition_penalty: 仅 Ollama/DashScope 支持
-        - seed: 仅部分提供商支持，DashScope non-Omni 需通过 model_kwargs
-        - enable_search: 仅 DashScope 支持
+        - top_k: 仅 Ollama 支持顶层；DashScope 兼容模式经 extra_body 透传
+        - repetition_penalty: 仅 Ollama/DashScope 支持，DashScope 兼容模式经 extra_body
+        - seed: 仅部分提供商支持
+        - enable_search: 仅 DashScope 支持，兼容模式经 extra_body 透传
         - stop: 仅 OpenAI 兼容提供商支持顶级传递
-        - temperature: ChatTongyi 不接受顶级传递，需通过 model_kwargs
-        - max_tokens: ChatTongyi 不接受顶级传递，需通过 model_kwargs
+        - temperature: OpenAI 兼容提供商顶级传递
+        - max_tokens: OpenAI 兼容提供商顶级传递
 
         config_only_keys 中的字段是 RedBearModelConfig 配置字段，
         不应该被展开到最终 LLM 类的构造参数中。
@@ -238,8 +294,8 @@ class RedBearModelFactory:
         if default_headers:
             logger.info(f"额外请求头已注入: {default_headers}")
 
-        # dashscope 的 omni 模型使用 OpenAI 兼容模式
-        if provider == ModelProvider.DASHSCOPE and config.is_omni:
+        # dashscope 全量模型使用 OpenAI 兼容模式（Task 10：ChatTongyi 原生协议退役）
+        if provider == ModelProvider.DASHSCOPE:
             if not config.base_url:
                 config.base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
             timeout_config = httpx.Timeout(
@@ -277,11 +333,12 @@ class RedBearModelFactory:
                         extra_body["thinking_budget"] = config.thinking_budget_tokens
                 else:
                     extra_body["enable_thinking"] = False
-            # Omni uses OpenAI-compatible API: all provider-specific params
-            # are top-level args (temperature, max_tokens, seed, stop, etc.)
-            for key in ("temperature", "max_tokens", "seed", "stop", "repetition_penalty"):
+            # DashScope OpenAI 兼容 API：标准参数（temperature/max_tokens/seed/stop）
+            # 走顶层；DashScope 扩展参数（repetition_penalty/top_k/enable_search）经 extra_body
+            for key in ("temperature", "max_tokens", "seed", "stop",
+                        "repetition_penalty", "top_k", "enable_search"):
                 if key in provider_specific and provider_specific[key] is not None:
-                    if key == "repetition_penalty":
+                    if key in ("repetition_penalty", "top_k", "enable_search"):
                         extra_body = params.setdefault("extra_body", {})
                         extra_body[key] = provider_specific[key]
                     else:
@@ -384,41 +441,6 @@ class RedBearModelFactory:
                 ):
                     model_kwargs["response_format"] = _json_response_format(config)
             return params
-        elif provider == ModelProvider.DASHSCOPE:
-            params = {
-                "model": config.model_name,
-                "dashscope_api_key": config.api_key,
-                "max_retries": config.max_retries,
-                **filtered_extra_params
-            }
-            # ChatTongyi 不接受 temperature/max_tokens/seed/stop/enable_search
-            # 等参数作为顶级构造器参数，需通过 model_kwargs 传递
-            model_kwargs = params.setdefault("model_kwargs", {})
-            for key in ("top_k", "repetition_penalty", "seed", "enable_search",
-                        "stop", "temperature", "max_tokens"):
-                if key in provider_specific and provider_specific[key] is not None:
-                    model_kwargs[key] = provider_specific[key]
-            # thinking 参数处理：
-            # - thinking_only（B类）：不能传 enable_thinking，不做任何处理
-            # - thinking（A类）：混合思考，流式和非流式均可开关，非流式也支持 thinking_budget
-            if ModelCapability.THINKING in config.capability:
-                is_streaming = bool(config.extra_params.get("streaming"))
-                model_kwargs = params.setdefault("model_kwargs", {})
-                if config.deep_thinking:
-                    model_kwargs["enable_thinking"] = True
-                    if config.thinking_budget_tokens:
-                        model_kwargs["thinking_budget"] = config.thinking_budget_tokens
-                    if is_streaming:
-                        model_kwargs["incremental_output"] = True
-                else:
-                    model_kwargs["enable_thinking"] = False
-            # JSON 输出模式
-            # thinking（A类）模型启用深度思考时，response_format 与思考模式 API 冲突，跳过由调用方 prompt 注入兜底
-            if _should_send_response_format(config):
-                if not (ModelCapability.THINKING in config.capability and config.deep_thinking):
-                    model_kwargs = params.setdefault("model_kwargs", {})
-                    model_kwargs["response_format"] = _json_response_format(config)
-            return params
         elif provider == ModelProvider.BEDROCK:
             # Bedrock 使用 AWS 凭证
             # api_key 格式: "access_key_id:secret_access_key" 或只是 access_key_id
@@ -511,12 +533,10 @@ def get_provider_llm_class(config: RedBearModelConfig, type: ModelType = ModelTy
     """根据模型提供商获取对应的模型类"""
     provider = config.provider.lower()
 
-    # dashscope的omni模型 和 volcano模型使用
-    if provider == ModelProvider.DASHSCOPE and config.is_omni:
-        return CompatibleChatOpenAI
-    if provider == ModelProvider.VOLCANO:
-        return CompatibleChatOpenAI
+    # dashscope 全量模型与 volcano 模型使用 OpenAI 兼容协议（ChatTongyi 已退役）
     if provider in [
+        ModelProvider.DASHSCOPE,
+        ModelProvider.VOLCANO,
         ModelProvider.OPENAI,
         ModelProvider.XINFERENCE,
         ModelProvider.GPUSTACK,
@@ -524,14 +544,6 @@ def get_provider_llm_class(config: RedBearModelConfig, type: ModelType = ModelTy
         ModelProvider.SPEEDBEAR,
     ]:
         return CompatibleChatOpenAI
-        # if type == ModelType.LLM:
-        #     return OpenAI
-        # elif type == ModelType.CHAT:
-        #     return CompatibleChatOpenAI
-        # else:
-        #     raise BusinessException(f"不支持的模型提供商及类型: {provider}-{type}", code=BizCode.PROVIDER_NOT_SUPPORTED)
-    elif provider == ModelProvider.DASHSCOPE:
-        return ChatTongyi
     elif provider == ModelProvider.OLLAMA:
         return OllamaLLM
     elif provider == ModelProvider.BEDROCK:

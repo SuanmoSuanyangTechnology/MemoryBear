@@ -162,7 +162,7 @@ class ModelConfigSnapshot(ContractModel):
     tenant_id: UUID
     provider: ModelProvider
     model_type: ModelType
-    display_name: str = Field(min_length=1)
+    name: str = Field(min_length=1)  # 解析锚点名：非组合 config 的 name 即真实调用名（组合模型调用名在 members 声明）
     is_active: bool
     is_public: bool
     load_balance_strategy: LoadBalanceStrategy = LoadBalanceStrategy.NONE
@@ -171,6 +171,7 @@ class ModelConfigSnapshot(ContractModel):
     config: dict[str, JsonValue] = Field(default_factory=dict)
 
 
+# deprecated（阶段一过渡）：mem-knowledge 旧读窗口消费；M3 切 model_channels 后由 ChannelSnapshot 取代，收尾任务删除
 class ModelKeySnapshot(ContractModel):
     key_id: UUID
     model_name: str = Field(min_length=1)
@@ -195,7 +196,8 @@ class PublicModelBindingSnapshot(ContractModel):
 
 class ResolvedModelConfig(ContractModel):
     model_config_id: UUID
-    key_id: UUID | None
+    key_id: UUID | None  # v1 遗留：旧 usage 回写用，M3 渠道化后废弃
+    channel_id: UUID | None = None  # v2：命中渠道 id（usage 事件 / 编排追踪）
     tenant_id: UUID
     provider: ModelProvider
     model_type: ModelType
@@ -270,3 +272,45 @@ def normalize_runtime_flags(
         json_output = False
 
     return deep_thinking, thinking_budget_tokens, json_output
+
+
+class ChannelSource:
+    """渠道来源（中性措辞，不带企业概念）：租户自管 / 平台代管。"""
+    MANUAL = "manual"
+    PLATFORM = "platform"
+
+
+class ChannelSnapshot(ContractModel):
+    """渠道登记快照（registry/resolver 用；密文信封原样传递，解密收敛在 resolver 取凭据处）。
+
+    model_names == ()  = provider 级默认渠道，覆盖该 provider 全部未点名模型；
+    非空 = 点名渠道，仅匹配列出的模型名。点名态只看 model_names，与 api_base 无关。
+    """
+    id: UUID
+    tenant_id: UUID
+    provider: str
+    model_names: tuple[str, ...] = ()
+    api_base: str | None = None          # 执行端点属性，不参与覆盖匹配
+    credential_encrypted: str            # 信封 v{ver}:iv:tag:ct
+    credential_sha256: str
+    credential_masked: str
+    is_active: bool = True
+    priority: int = 0
+    cooldown_until_ms: int | None = None  # 熔断预留（阶段一恒空）
+    source: str = ChannelSource.MANUAL
+    extra: dict[str, JsonValue] = Field(default_factory=dict)
+    created_at_ms: int
+    updated_at_ms: int
+
+    @property
+    def is_provider_level(self) -> bool:
+        return not self.model_names
+
+    def covers(self, model_name: str) -> bool:
+        return self.is_provider_level or model_name in self.model_names
+
+
+class CompositeMember(BaseModel):
+    """组合模型成员声明（config JSON members[] 的序列化形状，spec §10.3）。"""
+    provider: str
+    model_name: str
