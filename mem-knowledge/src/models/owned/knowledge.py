@@ -126,6 +126,10 @@ class Knowledge(KnowledgeBase):
     def chunk_mode(self) -> int:
         """Return the legacy knowledge chunk policy state."""
 
+        # Legacy null configurations have no recorded chunk policy.
+        if self.parser_config is None:
+            return 0
+
         if (
             "auto_questions" not in self.parser_config
             and "parent_chunk_mode" not in self.parser_config

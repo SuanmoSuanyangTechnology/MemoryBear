@@ -52,7 +52,92 @@ def chunk_identity(chunk: DocumentChunk) -> tuple[Any, ...]:
 
 
 def candidate_identity(candidate: RetrievalCandidate) -> tuple[Any, ...]:
-    return chunk_identity(candidate.chunk)
+    return retrieval_identity(candidate.chunk, candidate.knowledge_id)
+
+
+def retrieval_identity(
+    chunk: DocumentChunk, knowledge_id: uuid.UUID | None = None,
+) -> tuple[Any, ...]:
+    """Keep unit identity until ranking; legacy candidates retain chunk identity."""
+
+    metadata = chunk.metadata or {}
+    if metadata.get("_unit_id"):
+        return (
+            "unit_id",
+            str(knowledge_id or metadata.get("knowledge_id") or ""),
+            metadata["_unit_id"],
+        )
+    return chunk_identity(chunk)
+
+
+def has_unit_candidates(candidates: Sequence[RetrievalCandidate]) -> bool:
+    return any((candidate.chunk.metadata or {}).get("_unit_id") for candidate in candidates)
+
+
+def _chunk_key(candidate: RetrievalCandidate) -> tuple[Any, ...]:
+    return (candidate.knowledge_id, *chunk_identity(candidate.chunk))
+
+
+def _return_chunk_key(candidate: RetrievalCandidate) -> tuple[Any, ...]:
+    metadata = candidate.chunk.metadata or {}
+    return_id = metadata.get("_return_chunk_id")
+    if metadata.get("_unit_id") and return_id:
+        return (candidate.knowledge_id, "doc_id", str(return_id))
+    return _chunk_key(candidate)
+
+
+def _rank_score(candidate: RetrievalCandidate) -> float:
+    return candidate.final_score if candidate.final_score is not None else _score(candidate.chunk)
+
+
+def collapse_ranked_candidates(
+    candidates: Sequence[RetrievalCandidate],
+) -> list[RetrievalCandidate]:
+    """Choose the highest-scoring unit of each return chunk after ranking."""
+
+    best: dict[tuple[Any, ...], RetrievalCandidate] = {}
+    for candidate in candidates:
+        key = _return_chunk_key(candidate)
+        if key not in best or _rank_score(candidate) > _rank_score(best[key]):
+            best[key] = candidate
+    return sorted(best.values(), key=_rank_score, reverse=True)
+
+
+def select_top_chunk_units(
+    candidates: Sequence[RetrievalCandidate], top_k: int,
+) -> list[RetrievalCandidate]:
+    """Limit distinct chunks while keeping their units for subsequent model stages."""
+
+    selected = {
+        _return_chunk_key(candidate) for candidate in collapse_ranked_candidates(candidates)[:top_k]
+    }
+    return [candidate for candidate in candidates if _return_chunk_key(candidate) in selected]
+
+
+def aggregate_chunk_channel_scores(
+    candidates: Sequence[RetrievalCandidate],
+) -> list[RetrievalCandidate]:
+    """Preserve pre-unitization weighted scoring without discarding unit identities."""
+
+    totals: dict[tuple[Any, ...], RetrievalCandidate] = {}
+    for candidate in candidates:
+        key = _chunk_key(candidate)
+        previous = totals.get(key, candidate)
+        totals[key] = replace(
+            previous,
+            semantic_score=_maximum(previous.semantic_score, candidate.semantic_score),
+            participle_score=_maximum(previous.participle_score, candidate.participle_score),
+            graph_score=_maximum(previous.graph_score, candidate.graph_score),
+        )
+    return [
+        replace(
+            candidate,
+            semantic_score=totals[_chunk_key(candidate)].semantic_score,
+            participle_score=totals[_chunk_key(candidate)].participle_score,
+            graph_score=totals[_chunk_key(candidate)].graph_score,
+        )
+        for candidate in candidates
+    ]
 
 
 def _maximum(left: float | None, right: float | None) -> float | None:
@@ -104,16 +189,23 @@ def materialize_candidates(
         if score is None:
             score = _score(candidate.chunk)
         chunk.metadata["score"] = score
+        if chunk.metadata.get("_unit_id"):
+            chunk.metadata["knowledge_id"] = str(candidate.knowledge_id)
         result.append(chunk)
     return result
 
 
 __all__ = [
+    "aggregate_chunk_channel_scores",
     "RetrievalChannel",
     "candidate_identity",
     "candidate_from_chunk",
     "chunk_identity",
+    "collapse_ranked_candidates",
     "deduplicate_candidates_first_win",
     "materialize_candidates",
     "merge_candidates",
+    "has_unit_candidates",
+    "retrieval_identity",
+    "select_top_chunk_units",
 ]

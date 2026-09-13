@@ -627,6 +627,10 @@ class KnowledgeGraphIndexPipeline:
             pageranks,
             ensure_valid=self._lock_guard.ensure_valid,
         )
+        # Publish the final writes before the next task acquires the knowledge lock.
+        self._lock_guard.ensure_valid()
+        await self._store.refresh_graph(runtime.graph_index_name)
+        self._lock_guard.ensure_valid()
 
     async def _embed_projections(
         self,

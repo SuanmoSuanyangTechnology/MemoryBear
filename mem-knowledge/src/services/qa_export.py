@@ -12,6 +12,7 @@ from typing import Any
 
 import aiofiles
 
+from ..rag.retrieval.elasticsearch_queries import build_chunk_record_filter
 from ..rag.vdb.field import Field
 from ..rag.vdb.pit_search import iter_async_search_after_hits
 
@@ -41,6 +42,7 @@ def _qa_query(kb_id: str, document_id: str | None = None) -> dict[str, Any]:
             }
         },
         {"term": {Field.KNOWLEDGE_ID.value: kb_id}},
+        build_chunk_record_filter(),
     ]
     if document_id is None:
         filters.append({"term": {"metadata.status": 1}})

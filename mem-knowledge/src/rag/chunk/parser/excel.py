@@ -1,18 +1,26 @@
 import copy
 import csv
 import io
+import logging
 from dataclasses import dataclass
 from datetime import date, datetime
 from io import BytesIO
 from pathlib import Path
 from typing import Any
+from zipfile import ZipFile
 
 import xlrd
+from lxml import etree
 from openpyxl import Workbook, load_workbook
 from openpyxl.utils import get_column_letter
 
 from ..tokenization import add_positions, find_codec, set_chunk_content
 from .base import DocumentParser
+
+LOGGER = logging.getLogger(__name__)
+_FILL_TYPE_ERROR = "expected <class 'openpyxl.styles.fills.Fill'>"
+_STYLES_PATH = "xl/styles.xml"
+_SPREADSHEET_NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
 
 EMPTY_MARKERS = {"", "/", "none", "null", "nan", "-"}
 
@@ -123,8 +131,59 @@ class StructuredExcelParser(DocumentParser):
             return self._csv_workbook(binary)
         if suffix == ".xls":
             return self._xls_workbook(binary)
-        stream = BytesIO(binary)
-        return load_workbook(stream, data_only=True)
+        try:
+            return load_workbook(BytesIO(binary), data_only=True)
+        except TypeError as exc:
+            if str(exc) != _FILL_TYPE_ERROR:
+                raise
+            repaired = self._repair_empty_fills(binary)
+            if repaired is None:
+                raise
+            repaired_binary, count = repaired
+            LOGGER.warning(
+                "Retrying Excel load after normalizing empty fills: filename=%s count=%d",
+                filename, count,
+            )
+            return load_workbook(BytesIO(repaired_binary), data_only=True)
+
+    @staticmethod
+    def _repair_empty_fills(binary: bytes) -> tuple[bytes, int] | None:
+        """Normalize only empty fill entries, preserving their IDs and all other members."""
+        with ZipFile(BytesIO(binary)) as source:
+            if _STYLES_PATH not in source.namelist():
+                return None
+            root = etree.fromstring(
+                source.read(_STYLES_PATH),
+                parser=etree.XMLParser(resolve_entities=False, no_network=True),
+            )
+            fills = root.find(f"{{{_SPREADSHEET_NS}}}fills")
+            if fills is None:
+                return None
+            count = 0
+            for fill in fills:
+                if (
+                    fill.tag == f"{{{_SPREADSHEET_NS}}}fill"
+                    and not fill.attrib
+                    and len(fill) == 0
+                    and not (fill.text or "").strip()
+                ):
+                    etree.SubElement(
+                        fill, f"{{{_SPREADSHEET_NS}}}patternFill", patternType="none"
+                    )
+                    count += 1
+            if not count:
+                return None
+            output = BytesIO()
+            with ZipFile(output, "w") as target:
+                target.comment = source.comment
+                for member in source.infolist():
+                    data = (
+                        etree.tostring(root, encoding="utf-8", xml_declaration=True)
+                        if member.filename == _STYLES_PATH
+                        else source.read(member)
+                    )
+                    target.writestr(member, data)
+            return output.getvalue(), count
 
     def _csv_workbook(self, binary: bytes):
         workbook = Workbook()

@@ -9,10 +9,15 @@ import time
 import uuid
 from dataclasses import dataclass
 
+from redbear_model import QWEN3_VL_EMBEDDING_DIMENSION, is_qwen3_vl_embedding
+from redbear_model.runtime import RedBearEmbeddings
+
 from ..models.owned import Document, Knowledge
 from ..models.references import Workspace
 from ..rag.models.chunk import DocumentChunk
+from ..rag.models.retrieval_unit import RetrievalUnitKind
 from ..rag.models.task_runtime import TaskModelFactory
+from ..rag.vdb.field import Field
 from ..rag.vdb.vector_store import TaskVectorStore
 from ..runtime import ProcessRuntime
 from ..tasks.observability import BusinessOutcome, TaskRun
@@ -318,10 +323,15 @@ def process_qa_import(
         error_code = "KB_QA_MODEL_INIT_FAILED"
         try:
             with run.stage("resolve_embedding"):
-                embeddings = TaskModelFactory(runtime).create_embeddings(
+                embedding_config = TaskModelFactory(runtime).resolve_embedding(
                     snapshot.embedding_id,
                     snapshot.tenant_id,
                 )
+                embeddings = RedBearEmbeddings(
+                    embedding_config,
+                    client_pool=runtime.model_runtime.pool,
+                )
+                multimodal = is_qwen3_vl_embedding(embedding_config)
         except Exception:
             raise _SafeQAImportError("QA model initialization failed") from None
 
@@ -332,6 +342,8 @@ def process_qa_import(
                     runtime.elasticsearch.sync_client(),
                     normalized_kb_id,
                     embeddings,
+                    structured_multimodal=multimodal,
+                    embedding_dimension=QWEN3_VL_EMBEDDING_DIMENSION if multimodal else None,
                 )
             sort_id = 0
             if not clear_parse_task:
@@ -358,7 +370,17 @@ def process_qa_import(
                 prepared_batches.append(
                     vector_store.prepare_chunks(chunks[start : start + batch_size])
                 )
-            if sum(batch.chunk_count for batch in prepared_batches) != len(chunks):
+            prepared_count = (
+                sum(
+                    action["_source"].get(Field.UNIT_KIND.value)
+                    == RetrievalUnitKind.CHUNK_RECORD.value
+                    for batch in prepared_batches
+                    for action in batch.actions
+                )
+                if multimodal
+                else sum(batch.chunk_count for batch in prepared_batches)
+            )
+            if prepared_count != len(chunks):
                 raise RuntimeError("Prepared chunk count does not match input count")
             if clear_parse_task:
                 with run.stage("delete_old_chunks"):

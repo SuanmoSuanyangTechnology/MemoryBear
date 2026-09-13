@@ -2,15 +2,25 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from redbear_model import ImageEmbeddingContent
 
 from ...api.schemas.rerank import RerankMode
-from ..models.chunk import DocumentChunk
-from .candidates import candidate_identity, chunk_identity, materialize_candidates
+from ..models.chunk import DocumentChunk, chunk_retrieval_content
+from .candidates import (
+    aggregate_chunk_channel_scores,
+    candidate_identity,
+    chunk_identity,
+    has_unit_candidates,
+    materialize_candidates,
+    retrieval_identity,
+    select_top_chunk_units,
+)
 from .models import ModelRuntimeSnapshot, RerankPlan, RetrievalCandidate
+from .weighted_scoring import keyword_similarities
 
 
 @dataclass(frozen=True)
@@ -40,7 +50,32 @@ class _WeightedScoreAdapter:
         candidates: Sequence[RetrievalCandidate],
         plan: RerankPlan,
     ) -> list[RetrievalCandidate]:
-        del query
+        if plan.recompute_keywords and plan.weights.participle_weight > 0:
+            if not isinstance(query, str):
+                raise ValueError("Weighted keyword scoring requires a text query")
+            # Sibling units sharing retrieval text count once in the keyword corpus.
+            corpus: dict[tuple, int] = {}
+            texts: list[str] = []
+            positions: list[int] = []
+            for candidate in candidates:
+                metadata = candidate.chunk.metadata or {}
+                text = chunk_retrieval_content(candidate.chunk)
+                if metadata.get("_unit_kind") == "text":
+                    unit_text = metadata.get("_unit_content")
+                    if isinstance(unit_text, str):
+                        text = unit_text
+                key = (candidate.knowledge_id, *chunk_identity(candidate.chunk), text)
+                if key not in corpus:
+                    corpus[key] = len(texts)
+                    texts.append(text)
+                positions.append(corpus[key])
+            keyword_scores = await asyncio.to_thread(keyword_similarities, query, texts)
+            candidates = [
+                replace(candidate, participle_score=keyword_scores[position])
+                for candidate, position in zip(candidates, positions, strict=True)
+            ]
+        if has_unit_candidates(candidates):
+            candidates = aggregate_chunk_channel_scores(candidates)
         ranked = [
             candidate.with_final_score(
                 plan.weights.semantic_weight * (candidate.semantic_score or 0.0)
@@ -84,7 +119,7 @@ class _ModelRerankAdapter:
         }
         result: list[RetrievalCandidate] = []
         for chunk in model_result.chunks:
-            identity = chunk_identity(chunk)
+            identity = retrieval_identity(chunk)
             candidate = candidates_by_identity.get(identity)
             if candidate is None:
                 continue
@@ -116,6 +151,7 @@ class RerankEngine:
         top_k: int,
         score_threshold: float,
     ) -> list[RetrievalCandidate]:
+        unit_ranking = has_unit_candidates(candidates)
         if plan.mode is RerankMode.WEIGHTED_SCORE:
             ranked = await self._weighted.rank(
                 query=query,
@@ -127,7 +163,7 @@ class RerankEngine:
                 query=query,
                 candidates=candidates,
                 plan=plan,
-                top_k=top_k,
+                top_k=len(candidates) if unit_ranking else top_k,
             )
         filtered = [
             candidate
@@ -135,6 +171,8 @@ class RerankEngine:
             if candidate.final_score is not None
             and candidate.final_score > score_threshold
         ]
+        if unit_ranking:
+            return select_top_chunk_units(filtered, top_k)
         return filtered[:top_k]
 
 

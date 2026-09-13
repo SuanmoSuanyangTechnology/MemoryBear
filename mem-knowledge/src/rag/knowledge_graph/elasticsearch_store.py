@@ -10,7 +10,7 @@ from elasticsearch import BadRequestError, NotFoundError
 
 from ...utils.datetime_utils import utcnow_naive
 from ..models.chunk import DocumentChunk
-from ..retrieval.elasticsearch_queries import raise_on_shard_failures
+from ..retrieval.elasticsearch_queries import build_chunk_record_filter, raise_on_shard_failures
 from ..vdb.pit_search import iter_async_search_after_hits
 from .models import (
     AffectedProjectionKeys,
@@ -141,7 +141,10 @@ class GraphElasticsearchStore:
         )
 
     async def refresh_graph(self, graph_index_name: str) -> None:
-        await self._client.indices.refresh(index=graph_index_name, ignore_unavailable=True)
+        result = await self._client.indices.refresh(
+            index=graph_index_name, ignore_unavailable=True
+        )
+        raise_on_shard_failures(result, "graph refresh")
 
     async def _collect_search_after_hits(
         self,
@@ -179,6 +182,7 @@ class GraphElasticsearchStore:
                         {"term": {"metadata.knowledge_id": knowledge_id}},
                         {"term": {"metadata.document_id": document_id}},
                         {"term": {"metadata.status": 1}},
+                        build_chunk_record_filter(),
                     ]
                 }
             },
@@ -1456,6 +1460,9 @@ class GraphElasticsearchStore:
         context: str,
         ensure_valid: Callable[[], None] | None,
     ) -> None:
+        self._ensure_valid(ensure_valid)
+        # delete_by_query refreshes after deletion, not before taking its search snapshot.
+        await self.refresh_graph(index_name)
         self._ensure_valid(ensure_valid)
         result = await self._client.delete_by_query(
             index=index_name,

@@ -36,6 +36,7 @@ class RerankPlan:
     weights: RerankWeightsSnapshot
     model: ModelRuntimeSnapshot | None
     compatibility_fallback: bool
+    recompute_keywords: bool = False
 
 
 @dataclass(frozen=True)
