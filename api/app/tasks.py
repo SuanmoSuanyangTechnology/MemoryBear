@@ -7101,3 +7101,28 @@ def scan_scene_summary_idle(
                 )
             except Exception as exc:
                 logger.warning("[SceneSummary] idle scanner lock release failed: %s", exc)
+
+
+@celery_app.task(
+    name="app.tasks.consume_model_usage",
+    bind=False,
+    ignore_result=False,
+    max_retries=0,
+    acks_late=False,
+    time_limit=60,
+    soft_time_limit=50,
+)
+def consume_model_usage_task() -> Dict[str, Any]:
+    """定时任务：消费 model:usage 用量事件落 model_usage_records（spec §13.2）。
+
+    每轮先领 idle > 60s 的遗留 pending，再按「批量 200 × 最多 20 批 / 10s」读新消息；
+    beat 周期由 settings.MODEL_USAGE_CONSUME_INTERVAL_SECONDS（默认 5s）驱动。
+    消费失败（Redis/PG 短暂不可用）不抛：消息留在 pending，下轮 XAUTOCLAIM 重领。
+    """
+    from app.services.usage_consumer import consume_model_usage
+
+    try:
+        return consume_model_usage()
+    except Exception as exc:
+        logger.warning(f"consume_model_usage 本轮失败（下轮重试）: {exc}", exc_info=True)
+        return {"status": "RETRY_LATER", "error": str(exc)}

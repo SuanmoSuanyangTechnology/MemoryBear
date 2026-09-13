@@ -565,17 +565,9 @@ async def convert_multi_agent_config_to_handoffs(
                             tenant_id=tenant_id,
                         )
                         if model_api_key:
-                            model_config = RedBearModelConfig(
-                                model_name=model_api_key.model_name,
-                                provider=model_api_key.provider,
-                                api_key=model_api_key.api_key,
-                                base_url=model_api_key.api_base,
-                                is_omni=model_api_key.is_omni,
-                                extra_params={
-                                    "temperature": 0.7,
-                                    "max_tokens": 2000,
-                                    "streaming": True
-                                }
+                            model_config = RedBearModelConfig.from_api_key(
+                                model_api_key,
+                                extra_params={"temperature": 0.7, "max_tokens": 2000, "streaming": True},
                             )
                             logger.debug(f"Agent {agent_name} 使用模型: {model_api_key.model_name}")
                             await ModelApiKeyService.record_api_key_usage_bridge_async(db, model_api_key.id)

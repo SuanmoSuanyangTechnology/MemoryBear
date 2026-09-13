@@ -9,6 +9,8 @@ description = "Shared RedBear model contracts, resolution, and provider runtime"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "pydantic>=2.12,<3",
+    "cryptography>=43",
+    "sqlalchemy>=2.0,<3",
 ]
 
 [project.optional-dependencies]

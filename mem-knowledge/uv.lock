@@ -1671,7 +1671,9 @@ name = "redbear-model"
 version = "0.1.0"
 source = { directory = "../packages/redbear-model" }
 dependencies = [
+    { name = "cryptography" },
     { name = "pydantic" },
+    { name = "sqlalchemy" },
 ]
 
 [package.optional-dependencies]
@@ -1689,6 +1691,7 @@ all = [
 
 [package.metadata]
 requires-dist = [
+    { name = "cryptography", specifier = ">=43" },
     { name = "dashscope", marker = "extra == 'all'", specifier = ">=1.25,<2" },
     { name = "dashscope", marker = "extra == 'dashscope'", specifier = ">=1.25,<2" },
     { name = "httpx", marker = "extra == 'all'", specifier = ">=0.28,<1" },
@@ -1708,6 +1711,7 @@ requires-dist = [
     { name = "langchain-openai", marker = "extra == 'all'", specifier = ">=1.0,<2" },
     { name = "langchain-openai", marker = "extra == 'runtime'", specifier = ">=1.0,<2" },
     { name = "pydantic", specifier = ">=2.12,<3" },
+    { name = "sqlalchemy", specifier = ">=2.0,<3" },
     { name = "volcengine-python-sdk", extras = ["ark"], marker = "extra == 'all'", specifier = ">=5.0.19,<6" },
     { name = "volcengine-python-sdk", extras = ["ark"], marker = "extra == 'generation'", specifier = ">=5.0.19,<6" },
 ]

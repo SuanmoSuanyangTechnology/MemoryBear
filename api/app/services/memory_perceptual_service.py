@@ -263,16 +263,7 @@ class MemoryPerceptualService:
             )
         llm = None
         if model_config:
-            llm = RedBearLLM(
-                RedBearModelConfig(
-                    model_name=model_config.model_name,
-                    provider=model_config.provider,
-                    api_key=model_config.api_key,
-                    base_url=model_config.api_base,
-                    is_omni=model_config.is_omni,
-                    capability=model_config.capability,
-                )
-            )
+            llm = RedBearLLM(RedBearModelConfig.from_api_key(model_config))
         return llm, model_config
 
     async def generate_perceptual_memory(
@@ -317,7 +308,10 @@ class MemoryPerceptualService:
                 api_base=model_config.api_base,
                 is_omni=model_config.is_omni,
                 capability=model_config.capability,
-                model_type=ModelType.LLM
+                model_type=ModelType.LLM,
+                tenant_id=model_config.tenant_id,
+                model_config_id=model_config.model_config_id,
+                channel_id=model_config.channel_id,
             )
 
         # 用 DB：文件预处理（本地文件需查 FileMetadata 取文件名）

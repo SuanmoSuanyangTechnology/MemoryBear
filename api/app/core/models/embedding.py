@@ -13,7 +13,15 @@ from app.core.alert_metric_bridge import (
 from app.core.config import settings
 from app.core.models.base import RedBearModelConfig, get_provider_embedding_class, RedBearModelFactory
 from app.core.models.network_retry import network_retry
+from app.core.usage_bridge import (
+    report_usage_failure,
+    report_usage_failure_async,
+    report_usage_success,
+    report_usage_success_async,
+)
 from app.models.models_model import ModelProvider
+
+_USAGE_CAPABILITY = "embedding"
 
 
 class RedBearEmbeddings(Embeddings):
@@ -38,11 +46,15 @@ class RedBearEmbeddings(Embeddings):
             @network_retry
             def _call():
                 return call()
-            return _call()
+            result = _call()
         except Exception as exc:
             report_model_gateway_failure(self._config, operation, exc, started)
+            report_usage_failure(self._config, _USAGE_CAPABILITY, operation, exc, started)
             raise
         report_model_gateway_success(self._config, operation, started)
+        report_usage_success(
+            self._config, _USAGE_CAPABILITY, operation, started, result=result
+        )
         return result
 
     async def _observed_async_call(self, operation: str, call):
@@ -51,13 +63,19 @@ class RedBearEmbeddings(Embeddings):
             @network_retry
             async def _call():
                 return await call()
-            return await _call()
+            result = await _call()
         except Exception as exc:
             await report_model_gateway_failure_async(
                 self._config, operation, exc, started
             )
+            await report_usage_failure_async(
+                self._config, _USAGE_CAPABILITY, operation, exc, started
+            )
             raise
         await report_model_gateway_success_async(self._config, operation, started)
+        await report_usage_success_async(
+            self._config, _USAGE_CAPABILITY, operation, started, result=result
+        )
         return result
 
     @staticmethod

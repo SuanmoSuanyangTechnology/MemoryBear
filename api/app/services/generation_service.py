@@ -62,13 +62,7 @@ class GenerationService:
             raise BusinessException("没有可用的 API Key", code=BizCode.NOT_FOUND)
         
         # 创建配置
-        config = RedBearModelConfig(
-            model_name=api_key_info.model_name,
-            provider=api_key_info.provider,
-            api_key=api_key_info.api_key,
-            base_url=api_key_info.api_base,
-            extra_params=api_key_info.config or {}
-        )
+        config = RedBearModelConfig.from_api_key(api_key_info, extra_params=api_key_info.config or {})
         
         # 生成图片
         generator = RedBearImageGenerator(config)
@@ -117,13 +111,7 @@ class GenerationService:
             raise BusinessException("没有可用的 API Key", code=BizCode.NOT_FOUND)
         
         # 创建配置
-        config = RedBearModelConfig(
-            model_name=api_key_info.model_name,
-            provider=api_key_info.provider,
-            api_key=api_key_info.api_key,
-            base_url=api_key_info.api_base,
-            extra_params=api_key_info.config or {}
-        )
+        config = RedBearModelConfig.from_api_key(api_key_info, extra_params=api_key_info.config or {})
         
         # 生成视频
         generator = RedBearVideoGenerator(config)
@@ -162,13 +150,7 @@ class GenerationService:
             raise BusinessException("没有可用的 API Key", code=BizCode.NOT_FOUND)
         
         # 创建配置
-        config = RedBearModelConfig(
-            model_name=api_key_info.model_name,
-            provider=api_key_info.provider,
-            api_key=api_key_info.api_key,
-            base_url=api_key_info.api_base,
-            extra_params=api_key_info.config or {}
-        )
+        config = RedBearModelConfig.from_api_key(api_key_info, extra_params=api_key_info.config or {})
         
         # 查询任务状态
         generator = RedBearVideoGenerator(config)

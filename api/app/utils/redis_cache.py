@@ -485,6 +485,31 @@ async def invalidate_runtime_model_info_async(model_id: Any) -> int:
     return await invalidate_cache(pattern=f"runtime_model_info:{model_id}:*")
 
 
+def invalidate_runtime_model_info_batch(
+    model_ids: Iterable[Any], tenant_id: Any | None = None
+) -> int:
+    """批量清除若干模型配置的运行时缓存（渠道变更影响面反查后调用，单次 DEL）。
+
+    tenant_id 已知时精确删该租户键，并附带删 `:_` 变体（防御 tenant=None 写入的旧键）；
+    未知时只删 `:_`。不经 SCAN，写路径高频调用安全。
+    """
+    keys: list[str] = []
+    seen: set[str] = set()
+    for model_id in model_ids:
+        candidates = (
+            [f"runtime_model_info:{model_id}:{tenant_id}", f"runtime_model_info:{model_id}:_"]
+            if tenant_id is not None
+            else [f"runtime_model_info:{model_id}:_"]
+        )
+        for key in candidates:
+            if key not in seen:
+                seen.add(key)
+                keys.append(key)
+    if not keys:
+        return 0
+    return get_thread_safe_sync_redis().delete(*keys)
+
+
 # Explicit-key cache-aside helpers used by database read caches.
 CACHE_MISS = object()
 WORKSPACE_MODEL_PUBLIC_VERSION_KEY = "cache:workspace-model-options:public-version:v1"

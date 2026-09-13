@@ -370,6 +370,9 @@ class SharedChatService:
             thinking_budget_tokens=model_parameters.get("thinking_budget_tokens"),
             json_output=model_parameters.get("json_output", False),
             capability=api_key_obj.capability,
+            tenant_id=api_key_obj.tenant_id,
+            model_config_id=api_key_obj.model_config_id,
+            channel_id=api_key_obj.channel_id,
         )
 
         # 加载历史消息
@@ -588,6 +591,9 @@ class SharedChatService:
                 thinking_budget_tokens=model_parameters.get("thinking_budget_tokens"),
                 json_output=model_parameters.get("json_output", False),
                 capability=api_key_obj.capability or [],
+                tenant_id=api_key_obj.tenant_id,
+                model_config_id=api_key_obj.model_config_id,
+                channel_id=api_key_obj.channel_id,
             )
 
             # 加载历史消息

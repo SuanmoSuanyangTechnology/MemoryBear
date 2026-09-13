@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import uuid
 
 from pydantic import SecretStr
@@ -15,12 +16,13 @@ from redbear_model import (
     ModelType,
     PublicModelBindingSnapshot,
 )
+from redbear_model.crypto import AESGCMEnvCipher
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from ..bootstrap import get_settings
-from ..models.references import ModelApiKey, ModelConfig, TenantSpeedBearBinding
+from ..models.references import ModelApiKey, ModelChannel, ModelConfig
 from ..models.references.model_registry import model_config_api_key_association
 from ..utils.datetime_utils import to_timestamp_ms
 
@@ -41,7 +43,7 @@ def _config_snapshot(config: ModelConfig) -> ModelConfigSnapshot:
         tenant_id=config.tenant_id,
         provider=ModelProvider(config.provider),
         model_type=ModelType(config.type),
-        display_name=config.name,
+        name=config.name,
         is_active=config.is_active,
         is_public=config.is_public,
         load_balance_strategy=LoadBalanceStrategy(
@@ -85,18 +87,43 @@ def _active_keys_query(model_config_id: uuid.UUID):
     )
 
 
+def _platform_channel_query(tenant_id: uuid.UUID):
+    """平台代管 speedbear 渠道（仅 source=platform 且活跃行，最早登记优先）。"""
+    return (
+        select(ModelChannel)
+        .where(
+            ModelChannel.tenant_id == tenant_id,
+            ModelChannel.provider == ModelProvider.SPEEDBEAR.value,
+            ModelChannel.source == "platform",
+            ModelChannel.is_active.is_(True),
+        )
+        .order_by(ModelChannel.created_at.asc(), ModelChannel.id.asc())
+    )
+
+
+def _decrypt_credential(channel: ModelChannel) -> str:
+    """渠道密文解密（AAD=provider:tenant_id，与 ChannelService 写入侧一致）。"""
+    raw_key = get_settings().model_credentials_key.get_secret_value().strip()
+    if not raw_key:
+        raise RuntimeError("MODEL_CREDENTIALS_KEY is not set (base64 32B master key)")
+    cipher = AESGCMEnvCipher(base64.b64decode(raw_key))
+    return cipher.decrypt(
+        channel.credential_encrypted, aad=f"{channel.provider}:{channel.tenant_id}"
+    )
+
+
 def _public_binding_snapshot(
-    binding: TenantSpeedBearBinding | None,
+    channel: ModelChannel | None,
     tenant_id: uuid.UUID,
     provider: ModelProvider,
     speedbear_base_url: str,
 ) -> PublicModelBindingSnapshot | None:
-    if binding is None:
+    if channel is None:
         return None
     return PublicModelBindingSnapshot(
         tenant_id=tenant_id,
         provider=provider,
-        api_key=SecretStr(binding.gateway_api_key),
+        api_key=SecretStr(_decrypt_credential(channel)),
         base_url=f"{speedbear_base_url.rstrip('/')}/api/v1",
     )
 
@@ -134,11 +161,7 @@ class SyncSQLModelRegistry(ModelRegistryRepository):
     ) -> PublicModelBindingSnapshot | None:
         if provider is not ModelProvider.SPEEDBEAR:
             return None
-        result = self.db.execute(
-            select(TenantSpeedBearBinding).where(
-                TenantSpeedBearBinding.tenant_id == tenant_id
-            )
-        )
+        result = self.db.execute(_platform_channel_query(tenant_id))
         return _public_binding_snapshot(
             result.scalars().first(),
             tenant_id,
@@ -187,11 +210,7 @@ class AsyncSQLModelRegistry:
     ) -> PublicModelBindingSnapshot | None:
         if provider is not ModelProvider.SPEEDBEAR:
             return None
-        result = await self.db.execute(
-            select(TenantSpeedBearBinding).where(
-                TenantSpeedBearBinding.tenant_id == tenant_id
-            )
-        )
+        result = await self.db.execute(_platform_channel_query(tenant_id))
         return _public_binding_snapshot(
             result.scalars().first(),
             tenant_id,

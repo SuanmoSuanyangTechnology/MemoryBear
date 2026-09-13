@@ -10,6 +10,7 @@ from langchain_core.documents import Document
 from app.core.config import settings
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
+from app.core.usage_context import bind_usage
 from app.core.models import (
     RedBearEmbeddings,
     RedBearLLM,
@@ -115,13 +116,8 @@ class KnowledgeRetrievalService:
     ) -> RedBearModelConfig:
         """Map a request-local snapshot to the shared model configuration."""
 
-        return RedBearModelConfig(
-            model_name=snapshot.model_name,
-            provider=snapshot.provider,
-            api_key=snapshot.api_key,
-            base_url=snapshot.api_base,
-            capability=list(snapshot.capability),
-            is_omni=snapshot.is_omni,
+        return RedBearModelConfig.from_api_key(
+            snapshot,
             extra_params=dict(extra_params or {}),
         )
 
@@ -228,6 +224,9 @@ class KnowledgeRetrievalService:
         return fields
 
     @classmethod
+    @bind_usage(
+        "rag_service", "principal.current_workspace_id", only_if_unbound=True
+    )
     async def retrieve_async(
         cls,
         request: KnowledgeRetrievalRequest,

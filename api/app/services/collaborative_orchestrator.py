@@ -457,7 +457,10 @@ class CollaborativeOrchestrator:
                 "api_base": api_key_config.api_base,
                 "is_omni": api_key_config.is_omni,
                 "model_parameters": config_data.get("model_parameters", {}),
-                "api_key_id": api_key_config.id
+                "api_key_id": api_key_config.id,
+                "tenant_id": api_key_config.tenant_id,
+                "model_config_id": api_key_config.model_config_id,
+                "channel_id": api_key_config.channel_id,
             }
             
         except ValueError:
@@ -517,13 +520,9 @@ class CollaborativeOrchestrator:
                 extra_params["tools"] = tools
                 extra_params["tool_choice"] = "auto"
             
-            model_config = RedBearModelConfig(
-                model_name=agent_config["model_name"],
-                provider=agent_config["provider"],
-                api_key=agent_config["api_key"],
-                base_url=agent_config.get("api_base"),
-                is_omni=agent_config.get("is_omni", False),
-                extra_params=extra_params
+            model_config = RedBearModelConfig.from_api_key(
+                agent_config,
+                extra_params=extra_params,
             )
             
             # 创建 LLM 实例

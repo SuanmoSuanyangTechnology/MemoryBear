@@ -685,19 +685,17 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
                     is_omni=api_key_obj.is_omni,
                     model_type=ModelType.LLM,
                     capability=api_key_obj.capability or [],
+                    tenant_id=api_key_obj.tenant_id,
+                    model_config_id=api_key_obj.model_config_id,
+                    channel_id=api_key_obj.channel_id,
                 ),
                 api_key_obj.id,
             )
 
         def build_llm(model_info: ModelInfo, *, streaming: bool, max_tokens: int) -> RedBearLLM:
             return RedBearLLM(
-                RedBearModelConfig(
-                    model_name=model_info.model_name,
-                    provider=model_info.provider,
-                    api_key=model_info.api_key,
-                    base_url=model_info.api_base,
-                    is_omni=model_info.is_omni,
-                    capability=model_info.capability,
+                RedBearModelConfig.from_api_key(
+                    model_info,
                     extra_params={
                         "temperature": 0.2 if not streaming else 0.7,
                         "max_tokens": max_tokens,

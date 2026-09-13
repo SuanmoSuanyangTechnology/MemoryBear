@@ -2,6 +2,9 @@
 
 from .contracts import (
     QWEN3_VL_EMBEDDING_DIMENSION,
+    ChannelSnapshot,
+    ChannelSource,
+    CompositeMember,
     EmbeddingContent,
     EmbeddingPurpose,
     EmbeddingRequest,
@@ -22,7 +25,16 @@ from .contracts import (
     SupportedImageMediaType,
     TextEmbeddingContent,
 )
+from .composite import (
+    CompositeCandidate,
+    CompositeMemberConfig,
+    composite_candidate_chain,
+    resolve_composite_candidates,
+)
+from .crypto import AESGCMEnvCipher, CredentialCipher, credential_sha256
 from .errors import (
+    ChannelSwitchExhaustedError,
+    CredentialDecryptError,
     InvalidProviderResponseError,
     ModelAccessDeniedError,
     ModelConfigInactiveError,
@@ -30,24 +42,60 @@ from .errors import (
     ModelCredentialNotFoundError,
     ModelUsageRecordError,
     MultimodalInputLimitError,
+    NoAvailableChannelError,
     ProviderDependencyMissingError,
     PublicCredentialUnavailableError,
     RedBearModelError,
+    SpeedbearChannelMissingError,
     UnsupportedModelProviderError,
     UnsupportedMultimodalModelError,
 )
+from .orchestration import (
+    is_switchable_channel_error,
+    is_terminal_channel_error,
+    is_transient_channel_error,
+    run_with_channel_fallback,
+    run_with_channel_fallback_async,
+)
 from .ports import AsyncModelRegistryRepository, ModelRegistryRepository
 from .providers.dashscope import is_qwen3_vl_embedding, is_qwen3_vl_reranker
+from .registry import (
+    AsyncSQLChannelRegistry,
+    ChannelSnapshotCache,
+    RegistrySQLSource,
+    SyncSQLChannelRegistry,
+)
 from .resolver import (
+    match_channel_candidates,
+    match_platform_speedbear_channels,
+    order_channel_candidates,
     record_model_usage,
     record_model_usage_async,
+    resolve_from_channel_pool,
     resolve_model,
     resolve_model_async,
 )
+from .telemetry import (
+    NoOpUsagePublisher,
+    UsagePublisher,
+    publish_usage_safely,
+)
+from .usage import UsageEvent, UsageStatus
 
 __all__ = [
     "QWEN3_VL_EMBEDDING_DIMENSION",
+    "AESGCMEnvCipher",
     "AsyncModelRegistryRepository",
+    "AsyncSQLChannelRegistry",
+    "ChannelSnapshot",
+    "ChannelSnapshotCache",
+    "ChannelSource",
+    "ChannelSwitchExhaustedError",
+    "CompositeCandidate",
+    "CompositeMember",
+    "CompositeMemberConfig",
+    "CredentialCipher",
+    "CredentialDecryptError",
     "EmbeddingContent",
     "EmbeddingPurpose",
     "EmbeddingRequest",
@@ -68,22 +116,43 @@ __all__ = [
     "ModelType",
     "ModelUsageRecordError",
     "MultimodalInputLimitError",
+    "NoAvailableChannelError",
+    "NoOpUsagePublisher",
     "ProviderDependencyMissingError",
     "PublicCredentialUnavailableError",
     "PublicModelBindingSnapshot",
     "RedBearModelError",
+    "RegistrySQLSource",
     "RerankCandidateView",
     "RerankQuery",
     "RerankScore",
     "ResolvedModelConfig",
+    "SpeedbearChannelMissingError",
     "SupportedImageMediaType",
+    "SyncSQLChannelRegistry",
     "TextEmbeddingContent",
     "UnsupportedModelProviderError",
     "UnsupportedMultimodalModelError",
+    "UsageEvent",
+    "UsagePublisher",
+    "UsageStatus",
+    "composite_candidate_chain",
+    "credential_sha256",
     "is_qwen3_vl_embedding",
     "is_qwen3_vl_reranker",
+    "is_switchable_channel_error",
+    "is_terminal_channel_error",
+    "is_transient_channel_error",
+    "match_channel_candidates",
+    "match_platform_speedbear_channels",
+    "order_channel_candidates",
+    "publish_usage_safely",
     "record_model_usage",
     "record_model_usage_async",
+    "resolve_composite_candidates",
+    "resolve_from_channel_pool",
     "resolve_model",
     "resolve_model_async",
+    "run_with_channel_fallback",
+    "run_with_channel_fallback_async",
 ]

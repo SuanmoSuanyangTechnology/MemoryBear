@@ -7,7 +7,8 @@ from .file_model import File
 from .file_metadata_model import FileMetadata
 from .generic_file_model import GenericFile
 from .models_model import ModelConfig, ModelProvider, ModelType, ModelApiKey, ModelBase, LoadBalanceStrategy, \
-    ModelCapability
+    ModelCapability, ModelChannel
+from .model_usage_record import ModelUsageRecord
 from .memory_short_model import ShortTermMemory, LongTermMemory
 from .knowledgeshare_model import KnowledgeShare
 from .mcp_market_model import McpMarket
@@ -67,6 +68,8 @@ __all__ = [
     "ModelProvider",
     "ModelType",
     "ModelApiKey",
+    "ModelChannel",
+    "ModelUsageRecord",
     "KnowledgeShare",
     "McpMarket",
     "McpMarketConfig",

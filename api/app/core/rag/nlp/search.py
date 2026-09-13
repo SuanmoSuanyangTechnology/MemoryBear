@@ -329,12 +329,7 @@ def rerank(
         apiConfig = ModelApiKeyService.get_available_api_key(db, reranker_id, tenant_id=tenant_id)
         if not apiConfig:
             raise ValueError("模型配置缺少 API Key")
-        reranker = RedBearRerank(RedBearModelConfig(
-            model_name=apiConfig.model_name,
-            provider=apiConfig.provider,
-            api_key=apiConfig.api_key,
-            base_url=apiConfig.api_base
-        ))
+        reranker = RedBearRerank(RedBearModelConfig.from_api_key(apiConfig))
         # Convert to LangChain Document object
         documents = [
             Document(

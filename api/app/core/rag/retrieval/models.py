@@ -109,6 +109,9 @@ class ModelRuntimeSnapshot:
     capability: tuple[str, ...] = ()
     is_omni: bool = False
     model_type: str | None = None
+    tenant_id: str | None = None
+    model_config_id: str | None = None
+    channel_id: str | None = None
 
     @classmethod
     def from_api_key(
@@ -124,6 +127,9 @@ class ModelRuntimeSnapshot:
             capability=tuple(api_key.capability or ()),
             is_omni=bool(api_key.is_omni),
             model_type=model_type if model_type is not None else getattr(api_key, "model_type", None),
+            tenant_id=getattr(api_key, "tenant_id", None),
+            model_config_id=getattr(api_key, "model_config_id", None),
+            channel_id=getattr(api_key, "channel_id", None),
         )
 
 

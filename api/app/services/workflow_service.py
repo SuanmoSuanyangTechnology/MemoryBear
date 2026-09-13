@@ -36,6 +36,7 @@ from app.core.workflow.triggers import (
 from app.core.error_codes import BizCode
 from app.core.config import settings
 from app.core.exceptions import BusinessException
+from app.core.usage_context import bind_usage
 from app.core.workflow.adapters.registry import PlatformAdapterRegistry
 from app.core.workflow.executor import execute_workflow, execute_workflow_stream
 from app.core.workflow.nodes.enums import NodeType
@@ -969,14 +970,7 @@ class WorkflowService:
                 return None
 
             from app.core.models.base import RedBearModelConfig
-            config = RedBearModelConfig(
-                model_name=api_key_obj.model_name,
-                provider=api_key_obj.provider,
-                api_key=api_key_obj.api_key,
-                base_url=api_key_obj.api_base or None,
-                timeout=60,
-                max_retries=3,
-            )
+            config = RedBearModelConfig.from_api_key(api_key_obj, timeout=60, max_retries=3)
 
             return service.find_best_match(
                 query=message,
@@ -1000,8 +994,6 @@ class WorkflowService:
             from app.core.models.base import RedBearModelConfig
             from app.models.annotation_model import AppAnnotation, AppAnnotationHitLog, AppAnnotationSetting
             from app.models.models_model import (
-                LoadBalanceStrategy,
-                ModelApiKey,
                 ModelConfig,
                 ModelProvider,
             )
@@ -1046,7 +1038,6 @@ class WorkflowService:
 
                 result = await db.execute(
                     select(ModelConfig)
-                    .options(selectinload(ModelConfig.api_keys))
                     .where(ModelConfig.id == model_config_id)
                     .limit(1)
                 )
@@ -1054,9 +1045,9 @@ class WorkflowService:
                 if not model_cfg or not model_cfg.is_active:
                     return None
 
-                api_key_obj: ModelApiKey | None = None
-                if ModelApiKeyService._is_public_speedbear_model(model_cfg):
-                    from premium.platform_admin.speedbear_model import TenantSpeedBearBinding
+                # 公共 speedbear config 归属系统租户，需按 app 所属租户取渠道
+                tenant_id = None
+                if model_cfg.provider == ModelProvider.SPEEDBEAR and model_cfg.is_public:
                     result = await db.execute(
                         select(Workspace.tenant_id)
                         .join(App, App.workspace_id == Workspace.id)
@@ -1066,36 +1057,12 @@ class WorkflowService:
                     tenant_id = result.scalar_one_or_none()
                     if not tenant_id:
                         return None
-                    result = await db.execute(
-                        select(TenantSpeedBearBinding)
-                        .where(TenantSpeedBearBinding.tenant_id == tenant_id)
-                        .limit(1)
-                    )
-                    binding = result.scalar_one_or_none()
-                    if not binding:
-                        return None
-                    from app.core.config import settings
 
-                    api_key_obj = ModelApiKey(
-                        model_name=model_cfg.name,
-                        provider=ModelProvider.SPEEDBEAR,
-                        api_key=binding.gateway_api_key,
-                        api_base=f"{settings.SPEEDBEAR_BASE_URL.rstrip('/')}/api/v1",
-                        capability=model_cfg.capability,
-                        is_omni=model_cfg.is_omni,
-                    )
-                else:
-                    api_keys = [key for key in model_cfg.api_keys if key.is_active]
-                    if not api_keys:
-                        return None
-                    if model_cfg.load_balance_strategy == LoadBalanceStrategy.ROUND_ROBIN:
-                        api_key_obj = min(
-                            api_keys,
-                            key=lambda key: (int(key.usage_count or "0"), key.last_used_at or datetime.datetime.min),
-                        )
-                    else:
-                        api_key_obj = api_keys[0]
-
+                api_key_obj = await ModelApiKeyService.get_available_api_key_async(
+                    db,
+                    model_cfg.id,
+                    tenant_id=tenant_id,
+                )
                 if not api_key_obj:
                     return None
 
@@ -1107,16 +1074,12 @@ class WorkflowService:
                     "provider": api_key_obj.provider,
                     "api_key": api_key_obj.api_key,
                     "api_base": api_key_obj.api_base,
+                    "tenant_id": api_key_obj.tenant_id,
+                    "model_config_id": api_key_obj.model_config_id,
+                    "channel_id": api_key_obj.channel_id,
                 }
 
-            config = RedBearModelConfig(
-                model_name=api_key_data["model_name"],
-                provider=api_key_data["provider"],
-                api_key=api_key_data["api_key"],
-                base_url=api_key_data["api_base"] or None,
-                timeout=60,
-                max_retries=3,
-            )
+            config = RedBearModelConfig.from_api_key(api_key_data, timeout=60, max_retries=3)
 
             # Embedding clients are synchronous; keep them off the async event loop.
             query_embedding = await asyncio.to_thread(
@@ -6388,6 +6351,7 @@ class WorkflowService:
 
     # ==================== 工作流执行 ====================
 
+    @bind_usage("app", "app_id")
     async def run(
             self,
             app_id: uuid.UUID,
@@ -6912,6 +6876,7 @@ class WorkflowService:
                 message=f"工作流执行失败: {str(e)}"
             )
 
+    @bind_usage("app", "app_id")
     async def run_stream(
             self,
             app_id: uuid.UUID,

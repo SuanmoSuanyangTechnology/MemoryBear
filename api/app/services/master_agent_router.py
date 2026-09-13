@@ -394,15 +394,7 @@ class MasterAgentRouter:
             extra_params = {"temperature": temperature, "max_tokens": max_tokens}
 
             # 创建 RedBearModelConfig
-            model_config = RedBearModelConfig(
-                model_name=api_key_config.model_name,
-                provider=api_key_config.provider,
-                api_key=api_key_config.api_key,
-                base_url=api_key_config.api_base,
-                is_omni=api_key_config.is_omni,
-                capability=api_key_config.capability,
-                extra_params = extra_params
-            )
+            model_config = RedBearModelConfig.from_api_key(api_key_config, extra_params=extra_params)
 
             # 创建 LLM 实例
             llm = RedBearLLM(model_config, type=ModelType.CHAT)

@@ -22,6 +22,7 @@ from app.core.memory.pipelines.forgetting_pipeline import ForgettingPipeline
 from app.core.memory.pipelines.memory_read import ReadPipeLine
 from app.core.memory.pipelines.pilot_write_pipeline import PilotWriteResult
 from app.core.memory.pipelines.write_pipeline import WriteResult
+from app.core.usage_context import bind_usage
 from app.db import get_db_read, get_async_db_context
 from app.services.memory_config_service import MemoryConfigService
 
@@ -139,6 +140,7 @@ class MemoryService:
         return await refresh_user_card_tags(end_user_id, workspace_id)
 
     @staticmethod
+    @bind_usage("memory_service", "workspace_id", only_if_unbound=True)
     async def ingest_agent_messages(
         conversation_id: str,
         messages: List[Any],
@@ -168,6 +170,7 @@ class MemoryService:
         )
 
     @staticmethod
+    @bind_usage("memory_service", "workspace_id", only_if_unbound=True)
     async def ingest_workflow_messages(
         messages: List[dict],
         conversation_id: str,
@@ -188,6 +191,7 @@ class MemoryService:
         )
 
     @staticmethod
+    @bind_usage("memory_service", "workspace_id", only_if_unbound=True)
     async def dispatch_api_service_async(
         messages: List[dict],
         end_user_id: str,
@@ -206,6 +210,7 @@ class MemoryService:
         )
 
     @staticmethod
+    @bind_usage("memory_service", "workspace_id", only_if_unbound=True)
     async def dispatch_mcp_write(
         message: str,
         end_user_id: str,

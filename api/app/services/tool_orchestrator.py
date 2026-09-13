@@ -215,16 +215,11 @@ class ToolOrchestrator:
         react_system_prompt = orchestrator.build_react_system_prompt(system_prompt)
 
         _react_llm = RedBearLLM(
-            RedBearModelConfig(
-                model_name=api_key_config["model_name"],
-                provider=api_key_config.get("provider", "openai"),
-                api_key=api_key_config["api_key"],
-                base_url=api_key_config.get("api_base"),
-                capability=api_key_config.get("capability", []),
-                is_omni=api_key_config.get("is_omni", False),
+            RedBearModelConfig.from_api_key(
+                api_key_config,
                 deep_thinking=effective_params.get("deep_thinking", False),
                 thinking_budget_tokens=effective_params.get("thinking_budget_tokens"),
-                extra_params={"temperature": effective_params.get("temperature", 0.7)}
+                extra_params={"temperature": effective_params.get("temperature", 0.7)},
             ),
             type=model_config.type if hasattr(model_config, 'type') else model_config.model_type
         )

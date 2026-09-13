@@ -68,14 +68,7 @@ async def _generate_embedding(
     if not api_key_obj:
         return None
 
-    config = RedBearModelConfig(
-        model_name=api_key_obj.model_name,
-        provider=api_key_obj.provider,
-        api_key=api_key_obj.api_key,
-        base_url=api_key_obj.api_base or None,
-        timeout=60,
-        max_retries=3,
-    )
+    config = RedBearModelConfig.from_api_key(api_key_obj, timeout=60, max_retries=3)
     return AnnotationService(db).generate_embedding(text, config)
 
 

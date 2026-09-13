@@ -219,6 +219,9 @@ class AgentNode(BaseNode):
                 provider=api_config.provider,
                 is_omni=api_config.is_omni,
                 capability=api_config.capability,
+                tenant_id=api_config.tenant_id,
+                model_config_id=api_config.model_config_id,
+                channel_id=api_config.channel_id,
             )
 
     async def _load_model_info_async(self, model_id: uuid.UUID, variable_pool: VariablePool) -> ModelInfo:
@@ -488,6 +491,9 @@ class AgentNode(BaseNode):
             stop=extra_params.get("stop"),
             extra_headers=extra_params.get("default_headers"),
             capability=model_info.capability,
+            tenant_id=model_info.tenant_id,
+            model_config_id=model_info.model_config_id,
+            channel_id=model_info.channel_id,
         )
 
         return agent, message, history, strategy

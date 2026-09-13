@@ -808,6 +808,8 @@ class MemoryConfigService:
             "timeout": settings.LLM_TIMEOUT,
             "max_retries": settings.LLM_MAX_RETRIES,
             "is_omni": api_config.is_omni,
+            "tenant_id": api_config.tenant_id,
+            "channel_id": api_config.channel_id,
         }
 
     def get_embedder_config(self, embedding_id: str, tenant_id: UUID | None = None) -> dict:
@@ -848,6 +850,8 @@ class MemoryConfigService:
             "type": config.type,
             "timeout": 120.0,
             "max_retries": 5,
+            "tenant_id": api_config.tenant_id,
+            "channel_id": api_config.channel_id,
         }
 
     @staticmethod

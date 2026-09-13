@@ -128,6 +128,8 @@ celery_app.conf.update(
         'app.tasks.do_layer2_dedup_full_scan': {'queue': 'reflection_tasks'},
         'app.tasks.scan_reflection_retry': {'queue': 'periodic_tasks'},
         'app.tasks.regenerate_memory_cache': {'queue': 'periodic_tasks'},
+        # 用量事件消费（M4，spec §13.2）：轻量周期任务，与 beat 扫描器同队
+        'app.tasks.consume_model_usage': {'queue': 'periodic_tasks'},
 
         # GDS 拓扑分数：scan 在 periodic 扫描，计算在 memory_heavy 执行
         'app.tasks.scan_gds_topology_score': {'queue': 'periodic_tasks'},
@@ -414,6 +416,16 @@ class NoCatchupSchedule(schedule):
     def is_due(self, last_run_at):
         is_due, next_time = super().is_due(last_run_at)
         return min(is_due, 1), next_time
+
+
+# 用量事件消费（M4，spec §13.2）：常驻轻量消费，NoCatchup 防止 Beat 重启后追赶补跑历史窗口
+celery_app.conf.beat_schedule["consume-model-usage"] = {
+    "task": "app.tasks.consume_model_usage",
+    "schedule": NoCatchupSchedule(
+        run_every=timedelta(seconds=settings.MODEL_USAGE_CONSUME_INTERVAL_SECONDS)
+    ),
+    "options": {"queue": "periodic_tasks", "expires": 55},
+}
 
 
 if _HAS_NOTIFICATION_TASKS:

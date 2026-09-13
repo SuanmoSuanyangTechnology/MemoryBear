@@ -352,14 +352,7 @@ class MemoryAgentService:
             from app.models.models_model import ModelType
 
             llm = RedBearLLM(
-                RedBearModelConfig(
-                    model_name=model_config["model_name"],
-                    provider=model_config["provider"],
-                    api_key=model_config["api_key"],
-                    base_url=model_config["base_url"],
-                    is_omni=model_config["is_omni"],
-                    capability=model_config["capability"],
-                ),
+                RedBearModelConfig.from_api_key(model_config),
                 type=ModelType.CHAT
             )
 

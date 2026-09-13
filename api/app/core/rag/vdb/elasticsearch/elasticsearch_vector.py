@@ -92,6 +92,9 @@ class ModelApiKeyRuntimeConfig:
     provider: str
     api_key: str
     api_base: str | None
+    tenant_id: str | None = None
+    model_config_id: str | None = None
+    channel_id: str | None = None
 
     @classmethod
     def from_api_key(cls, api_key: ModelApiKey) -> "ModelApiKeyRuntimeConfig":
@@ -100,6 +103,9 @@ class ModelApiKeyRuntimeConfig:
             provider=api_key.provider,
             api_key=api_key.api_key,
             api_base=api_key.api_base,
+            tenant_id=getattr(api_key, "tenant_id", None),
+            model_config_id=getattr(api_key, "model_config_id", None),
+            channel_id=getattr(api_key, "channel_id", None),
         )
 
 
@@ -110,20 +116,14 @@ class ElasticSearchVector(BaseVector):
         super().__init__(index_name.lower())
 
         # 初始化 Embedding 模型（自动支持火山引擎多模态）
-        self.embeddings = RedBearEmbeddings(RedBearModelConfig(
-            model_name=embedding_config.model_name,
-            provider=embedding_config.provider,
-            api_key=embedding_config.api_key,
-            base_url=embedding_config.api_base
-        ))
+        self.embeddings = RedBearEmbeddings(
+            RedBearModelConfig.from_api_key(embedding_config)
+        )
         self.is_multimodal_embedding = self.embeddings.is_multimodal_supported()
 
-        self.reranker = RedBearRerank(RedBearModelConfig(
-            model_name=reranker_config.model_name,
-            provider=reranker_config.provider,
-            api_key=reranker_config.api_key,
-            base_url=reranker_config.api_base
-        ))
+        self.reranker = RedBearRerank(
+            RedBearModelConfig.from_api_key(reranker_config)
+        )
         # 使用外部传入的共享客户端
         self._client = client
 

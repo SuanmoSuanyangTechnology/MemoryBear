@@ -26,10 +26,6 @@ from redbear_model.providers.bedrock import (
     build_bedrock_params,
     load_bedrock_chat_class,
 )
-from redbear_model.providers.dashscope import (
-    build_dashscope_params,
-    load_dashscope_chat_class,
-)
 from redbear_model.providers.ollama import build_ollama_params, load_ollama_llm_class
 from redbear_model.providers.openai import (
     CompatibleChatOpenAI,
@@ -72,9 +68,7 @@ class StructResponse:
                 for block in content:
                     if not isinstance(block, dict):
                         continue
-                    if block.get("type") == "text":
-                        parts.append(block.get("text") or "")
-                    elif block.get("text"):
+                    if block.get("type") == "text" or block.get("text"):
                         parts.append(block.get("text") or "")
                 return "".join(parts)
             return str(content) if content else ""
@@ -186,12 +180,11 @@ def _create_provider_model(
         ModelProvider.GPUSTACK,
         ModelProvider.SPEEDBEAR,
         ModelProvider.VOLCANO,
-    } or (provider is ModelProvider.DASHSCOPE and config.is_omni):
+        ModelProvider.DASHSCOPE,
+    }:
         return CompatibleChatOpenAI(
             **build_openai_compatible_params(config, pool.get_http_clients())
         )
-    if provider is ModelProvider.DASHSCOPE:
-        return load_dashscope_chat_class()(**build_dashscope_params(config))
     if provider is ModelProvider.OLLAMA:
         return load_ollama_llm_class()(**build_ollama_params(config))
     if provider is ModelProvider.BEDROCK:

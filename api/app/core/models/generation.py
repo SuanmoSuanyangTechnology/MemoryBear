@@ -15,6 +15,7 @@ from app.core.alert_metric_bridge import (
 from app.core.models.base import RedBearModelConfig
 from app.core.exceptions import BusinessException
 from app.core.error_codes import BizCode
+from app.core.usage_bridge import report_usage_failure, report_usage_success
 from app.models.models_model import ModelProvider
 
 
@@ -40,6 +41,7 @@ def _get_optimize_prompt_options(**kwargs):
 
 class _ObservedGenerator:
     _config: RedBearModelConfig
+    _usage_capability: str = "image"
 
     def _observed_call(self, operation: str, call):
         started = time.perf_counter()
@@ -47,13 +49,21 @@ class _ObservedGenerator:
             result = call()
         except Exception as exc:
             report_model_gateway_failure(self._config, operation, exc, started)
+            report_usage_failure(
+                self._config, self._usage_capability, operation, exc, started
+            )
             raise
         report_model_gateway_success(self._config, operation, started)
+        report_usage_success(
+            self._config, self._usage_capability, operation, started, result=result
+        )
         return result
 
 
 class RedBearImageGenerator(_ObservedGenerator):
     """图片生成模型封装"""
+
+    _usage_capability = "image"
     
     def __init__(self, config: RedBearModelConfig):
         self._config = config
@@ -177,6 +187,8 @@ class RedBearImageGenerator(_ObservedGenerator):
 
 class RedBearVideoGenerator(_ObservedGenerator):
     """视频生成模型封装"""
+
+    _usage_capability = "video"
     
     def __init__(self, config: RedBearModelConfig):
         self._config = config

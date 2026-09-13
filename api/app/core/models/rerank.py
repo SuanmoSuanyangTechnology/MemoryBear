@@ -9,7 +9,10 @@ from app.core.alert_metric_bridge import (
 )
 from app.core.models.base import RedBearModelConfig, get_provider_rerank_class, RedBearModelFactory
 from app.core.models.network_retry import network_retry
+from app.core.usage_bridge import report_usage_failure, report_usage_success
 from app.models import ModelProvider
+
+_USAGE_CAPABILITY = "rerank"
 
 
 _DEFAULT_JINA_RERANK_URL = "https://api.jina.ai/v1/rerank"
@@ -109,10 +112,13 @@ class RedBearRerank(BaseDocumentCompressor):
         provider = self._config.provider.lower()
         started = time.perf_counter()
         try:
-            return self._rerank_with_retry(documents, query, top_n, provider)
+            result = self._rerank_with_retry(documents, query, top_n, provider)
         except Exception as exc:
             report_model_gateway_failure(self._config, "rerank", exc, started)
+            report_usage_failure(self._config, _USAGE_CAPABILITY, "rerank", exc, started)
             raise
+        report_usage_success(self._config, _USAGE_CAPABILITY, "rerank", started, result=result)
+        return result
 
     @staticmethod
     def _dashscope_response_value(response: Any, key: str, default: Any = None) -> Any:

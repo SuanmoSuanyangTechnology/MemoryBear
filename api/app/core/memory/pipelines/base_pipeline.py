@@ -20,15 +20,7 @@ class ModelClientMixin(ABC):
     ) -> RedBearLLM:
         api_config = ModelApiKeyService.get_available_api_key(db, model_id, tenant_id=tenant_id)
         return RedBearLLM(
-            RedBearModelConfig(
-                model_name=api_config.model_name,
-                provider=api_config.provider,
-                capability=api_config.capability,
-                api_key=api_config.api_key,
-                base_url=api_config.api_base,
-                is_omni=api_config.is_omni,
-                extra_params=extra_params or {},
-            )
+            RedBearModelConfig.from_api_key(api_config, extra_params=extra_params or {})
         )
 
     @staticmethod
@@ -38,26 +30,12 @@ class ModelClientMixin(ABC):
         tenant_id: uuid.UUID,
     ) -> RedBearEmbeddings:
         api_config = ModelApiKeyService.get_available_api_key(db, model_id, tenant_id=tenant_id)
-        return RedBearEmbeddings(
-            RedBearModelConfig(
-                model_name=api_config.model_name,
-                provider=api_config.provider,
-                api_key=api_config.api_key,
-                base_url=api_config.api_base,
-            )
-        )
+        return RedBearEmbeddings(RedBearModelConfig.from_api_key(api_config))
 
     @staticmethod
     def get_rerank_client(db: Session, model_id: uuid.UUID, tenant_id: uuid.UUID) -> RedBearRerank:
         api_config = ModelApiKeyService.get_available_api_key(db, model_id, tenant_id=tenant_id)
-        return RedBearRerank(
-            RedBearModelConfig(
-                model_name=api_config.model_name,
-                provider=api_config.provider,
-                api_key=api_config.api_key,
-                base_url=api_config.api_base,
-            )
-        )
+        return RedBearRerank(RedBearModelConfig.from_api_key(api_config))
 
     # ── Async variants ──────────────────────────────────────────
 
@@ -65,14 +43,7 @@ class ModelClientMixin(ABC):
     async def _build_client_async(db: AsyncSession, model_id: uuid.UUID, tenant_id: uuid.UUID, client_cls: type):
         """通用异步 client 构建：拉取 API key，组装 RedBearModelConfig，实例化 client_cls。"""
         api_config = await ModelApiKeyService.get_available_api_key_async(db, model_id, tenant_id=tenant_id)
-        config = RedBearModelConfig(
-            model_name=api_config.model_name,
-            provider=api_config.provider,
-            capability=api_config.capability,
-            api_key=api_config.api_key,
-            base_url=api_config.api_base,
-            is_omni=api_config.is_omni,
-        )
+        config = RedBearModelConfig.from_api_key(api_config)
         return client_cls(config)
 
     @staticmethod

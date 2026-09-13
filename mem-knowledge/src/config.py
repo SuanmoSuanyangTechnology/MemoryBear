@@ -138,6 +138,12 @@ class KnowledgeSettings(BaseSettings):
         default=SecretStr(""),
         validation_alias="SPEEDBEAR_AUTH_KEY",
     )
+    # 渠道凭据主密钥（base64 32B，与 core/api 同一把）：platform 渠道凭据解密用，
+    # AAD = provider:tenant_id（M5 起 speedbear 公共凭据落 model_channels 密文）
+    model_credentials_key: SecretStr = Field(
+        default=SecretStr(""),
+        validation_alias="MODEL_CREDENTIALS_KEY",
+    )
     llm_timeout: float = Field(default=120.0, gt=0, validation_alias="LLM_TIMEOUT")
     llm_max_retries: int = Field(default=2, ge=0, validation_alias="LLM_MAX_RETRIES")
     embedding_batch_size: int = Field(

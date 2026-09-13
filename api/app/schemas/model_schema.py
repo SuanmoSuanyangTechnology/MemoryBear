@@ -1,13 +1,10 @@
-from pydantic import BaseModel, Field, field_serializer, field_validator, ConfigDict
+from pydantic import BaseModel, Field, field_serializer, ConfigDict
 from typing import Optional, List, Dict, Any
 import datetime
 import uuid
 
 from app.core.utils.datetime_utils import to_timestamp_ms
 from app.models.models_model import ModelProvider, ModelType, LoadBalanceStrategy
-from app.core.logging_config import get_business_logger
-
-schema_logger = get_business_logger()
 
 
 # ModelConfig Schemas
@@ -27,35 +24,39 @@ class ModelConfigBase(BaseModel):
     model_id: Optional[uuid.UUID] = Field(None, description="基础模型ID")
 
 
-class ApiKeyCreateNested(BaseModel):
-    """用于在创建模型时内嵌创建API Key的Schema"""
-    model_name: Optional[str] = Field(None, description="模型实际名称", max_length=255)
-    description: Optional[str] = Field(None, description="备注")
-    provider: Optional[str] = Field(None, description="API Key提供商")
+class ApiKeyRegister(BaseModel):
+    """模型域登记凭据（provider/model_name 由服务端按 config 读）"""
     api_key: str = Field(..., description="API密钥", max_length=500)
     api_base: Optional[str] = Field(None, description="API基础URL", max_length=500)
-    capability: Optional[List[str]] = Field(None, description="模型能力列表")
-    is_omni: Optional[bool] = Field(None, description="是否为Omni模型")
-    config: Optional[Dict[str, Any]] = Field({}, description="API Key特定配置")
-    priority: str = Field("1", description="优先级", max_length=10)
+    remark: Optional[str] = Field(None, description="备注", max_length=255)
+    priority: int = Field(0, description="优先级（大者优先）")
 
 
 class ModelConfigCreate(ModelConfigBase):
-    """创建模型配置Schema"""
-    api_keys: Optional[List[ApiKeyCreateNested]] = Field(None, description="同时创建的API Key配置")
-    skip_validation: Optional[bool] = Field(False, description="是否跳过配置验证")
+    """创建自定义模型Schema（内嵌 credential：创建即登记点名渠道，单接口原子完成）
+
+    自定义模型不经模型广场添加，provider 级渠道不保证可用，因此凭据必填并
+    在创建时做活体验证；验证失败拒绝创建（零落库）。
+    """
+    credential: ApiKeyRegister = Field(..., description="模型凭据（必填，创建时活体验证）")
+
+
+class CompositeMemberSpec(BaseModel):
+    """组合成员声明：以 (provider, model_name) 定位租户内成员 config。"""
+    provider: str = Field(..., min_length=1, max_length=64, description="成员模型供应商")
+    model_name: str = Field(..., min_length=1, max_length=255, description="成员模型名称")
 
 
 class CompositeModelCreate(BaseModel):
     """创建组合模型Schema"""
-    name: str = Field(..., description="组合模型名称", max_length=255)
+    name: str = Field(..., description="组合模型名称（别名，真实调用名在成员声明）", max_length=255)
     type: Optional[ModelType] = Field(None, description="模型类型")
     logo: Optional[str] = Field(None, description="模型logo图片URL", max_length=255)
     description: Optional[str] = Field(None, description="模型描述")
     config: Optional[Dict[str, Any]] = Field({}, description="模型配置参数")
     is_active: bool = Field(True, description="是否激活")
     is_public: bool = Field(False, description="是否公开")
-    api_key_ids: List[uuid.UUID] = Field(..., description="绑定的API Key ID列表")
+    members: Optional[List[CompositeMemberSpec]] = Field(None, description="组合成员列表（(provider, model_name) 声明）")
     load_balance_strategy: Optional[str] = Field(default=LoadBalanceStrategy.NONE.value, description="负载均衡策略")
 
 
@@ -74,166 +75,111 @@ class ModelConfigUpdate(BaseModel):
 
 
 class ModelConfig(ModelConfigBase):
-    """模型配置Schema"""
+    """模型配置Schema
+
+    `is_available` = 渠道候选探测结果（列表/详情计算；None = 本响应未探测）；
+    `members` = 组合成员摘要（声明序；非组合为空）。凭据列表走 `GET /{model_id}/apikeys`。
+    """
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
     created_at: datetime.datetime
     updated_at: datetime.datetime
-    api_keys: List["ModelApiKey"] = []
     is_deprecated: bool = False
+    is_available: Optional[bool] = None
+    members: List[CompositeMemberSpec] = []
 
     @classmethod
     def model_validate(cls, obj, **kwargs):
         instance = super().model_validate(obj, **kwargs)
         if hasattr(obj, "model_base") and obj.model_base is not None:
             instance.is_deprecated = bool(obj.model_base.is_deprecated)
+        if getattr(obj, "is_composite", False):
+            instance.members = _parse_member_specs(getattr(obj, "config", None))
         return instance
-
-    @staticmethod
-    def mask_api_key(key: str, prefix: int = 4, suffix: int = 4) -> str:
-        if not key or len(key) <= prefix + suffix:
-            return "*" * len(key)
-        return key[:prefix] + "*" * (len(key) - prefix - suffix) + key[-suffix:]
-
-    @field_validator("api_keys", mode="after")
-    @classmethod
-    def filter_active_api_keys(cls, api_keys: List["ModelApiKey"]) -> List["ModelApiKey"]:
-        return [key for key in api_keys if key.is_active]
 
     @field_serializer("created_at", when_used="json")
     def _serialize_created_at(self, dt: datetime.datetime | None):
         return to_timestamp_ms(dt)
 
-    @field_serializer("api_keys", when_used="json")
-    def _serialize_api_keys(self, api_keys: List["ModelApiKey"]):
-        result = []
-        for api_key in api_keys:
-            data = api_key.model_dump()
-            data["api_key"] = self.mask_api_key(api_key.api_key)
-            result.append(data)
-        return result
-
     @field_serializer("updated_at", when_used="json")
     def _serialize_updated_at(self, dt: datetime.datetime):
         return to_timestamp_ms(dt)
 
 
-# ModelApiKey Schemas
-class ModelApiKeyCreateByProvider(BaseModel):
-    """基于供应商创建API Key Schema"""
-    provider: ModelProvider = Field(..., description="API Key提供商")
-    api_key: str = Field(..., description="API密钥", max_length=500)
-    api_base: Optional[str] = Field(None, description="API基础URL", max_length=500)
-    description: Optional[str] = Field(None, description="备注")
-    capability: Optional[List[str]] = Field(None, description="模型能力列表")
-    is_omni: Optional[bool] = Field(None, description="是否为Omni模型")
-    config: Optional[Dict[str, Any]] = Field({}, description="API Key特定配置")
-    is_active: bool = Field(True, description="是否激活")
-    priority: str = Field("1", description="优先级", max_length=10)
-    model_config_ids: Optional[List[uuid.UUID]] = Field(None, description="关联的模型配置ID列表")
+def _parse_member_specs(config: Dict[str, Any] | None) -> List[CompositeMemberSpec]:
+    """组合 config JSON members[] → 声明摘要（脏项跳过，与运行期 parse_members 同口径）。"""
+    raw = (config or {}).get("members")
+    if not isinstance(raw, list):
+        return []
+    specs: List[CompositeMemberSpec] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        provider = item.get("provider")
+        model_name = item.get("model_name")
+        if not isinstance(provider, str) or not provider:
+            continue
+        if not isinstance(model_name, str) or not model_name:
+            continue
+        specs.append(CompositeMemberSpec(provider=provider, model_name=model_name))
+    return specs
 
 
-class ModelApiKeyBase(BaseModel):
-    """API Key基础Schema"""
-    model_name: str = Field(..., description="模型实际名称", max_length=255)
-    description: Optional[str] = Field(None, description="备注")
-    provider: ModelProvider = Field(..., description="API Key提供商")
-    api_key: str = Field(..., description="API密钥", max_length=500)
-    api_base: Optional[str] = Field(None, description="API基础URL", max_length=500)
-    capability: Optional[List[str]] = Field(None, description="模型能力列表")
-    is_omni: Optional[bool] = Field(None, description="是否为Omni模型")
-    config: Optional[Dict[str, Any]] = Field({}, description="API Key特定配置")
-    is_active: bool = Field(True, description="是否激活")
-    priority: str = Field("1", description="优先级", max_length=10)
+class ApiKeyItem(BaseModel):
+    """凭据条目（脱敏；模型域候选与 Provider 域列表共用，id = 渠道 id）"""
+    model_config = ConfigDict(from_attributes=True, extra="ignore")
 
-
-class ModelApiKeyCreate(ModelApiKeyBase):
-    """创建API Key Schema"""
-    model_config_ids: Optional[List[uuid.UUID]] = Field(None, description="关联的模型配置ID列表")
-
-
-class ModelApiKeyUpdate(BaseModel):
-    """更新API Key Schema"""
-    model_name: Optional[str] = Field(None, description="模型实际名称", max_length=255)
-    provider: Optional[ModelProvider] = Field(None, description="API Key提供商")
-    api_key: Optional[str] = Field(None, description="API密钥", max_length=500)
-    api_base: Optional[str] = Field(None, description="API基础URL", max_length=500)
-    capability: Optional[List[str]] = Field(None, description="模型能力列表")
-    is_omni: Optional[bool] = Field(None, description="是否为Omni模型")
-    config: Optional[Dict[str, Any]] = Field(None, description="API Key特定配置")
-    is_active: Optional[bool] = Field(None, description="是否激活")
-    priority: Optional[str] = Field(None, description="优先级", max_length=10)
-
-
-class ModelApiKey(ModelApiKeyBase):
-    """API Key Schema"""
     id: uuid.UUID
-    usage_count: str
-    last_used_at: Optional[datetime.datetime]
-    created_at: datetime.datetime
-    updated_at: datetime.datetime
-    model_configs: Any = Field(default=None, exclude=True)
-    model_config_ids: List[uuid.UUID] = Field(default_factory=list, description="关联的模型配置ID列表")
+    provider: str
+    credential_masked: str
+    is_provider_level: bool = False
+    model_names: List[str] = Field(default_factory=list, description="点名覆盖集（空 = 供应商公共）")
+    api_base: Optional[str] = None
+    is_active: bool = True
+    priority: int = 0
+    source: str = "manual"
+    remark: Optional[str] = None
+    created_at_ms: Optional[int] = None
+    updated_at_ms: Optional[int] = None
 
-    def model_post_init(self, __context: Any) -> None:
-        """实例化后强制提取 model_configs 的ID到 model_config_ids"""
-        # 如果手动传入了 model_config_ids，不覆盖
-        if self.model_config_ids and len(self.model_config_ids) > 0:
-            return
 
-        # 从 model_configs 提取ID（只提取与 model_name 相同的非组合模型）
-        if self.model_configs is not None:
-            try:
-                # 情况1：ORM 对象列表（SQLAlchemy 关联）
-                if hasattr(self.model_configs, '__iter__') and not isinstance(self.model_configs, dict):
-                    self.model_config_ids = [
-                        mc.id for mc in self.model_configs
-                        if hasattr(mc, 'id')
-                           and not getattr(mc, 'is_composite', False)
-                           and getattr(mc, 'name', None) == self.model_name
-                    ]
-                # 情况2：字典列表
-                elif isinstance(self.model_configs, list):
-                    self.model_config_ids = [
-                        mc['id'] if isinstance(mc, dict) else mc.id
-                        for mc in self.model_configs
-                        if ((isinstance(mc, dict)
-                             and 'id' in mc
-                             and not mc.get('is_composite', False)
-                             and mc.get('name') == self.model_name) or
-                            (hasattr(mc, 'id')
-                             and not getattr(mc, 'is_composite', False)
-                             and getattr(mc, 'name', None) == self.model_name))
-                    ]
-            except Exception as e:
-                schema_logger.warning(f"提取 model_config_ids 失败：{e}")
-                self.model_config_ids = []
+class ProviderApiKeyCreate(ApiKeyRegister):
+    """Provider 域登记公共凭据（provider 级 [] 渠道，覆盖该供应商全部未点名模型）
 
-    model_config = ConfigDict(
-        from_attributes=True,  # 支持从 ORM 解析
-        arbitrary_types_allowed=True,  # 允许任意类型（ORM 对象）
-        populate_by_name=True,  # 按属性名匹配字段
-        validate_assignment=True  # 确保赋值触发校验
+    公共渠道固定使用供应商公共端点（运行时按 llm/embedding/rerank 能力区分），
+    不接受 api_base；本地提供商无公共端点不可登记。自定义端点请改在模型域
+    按模型登记（或编辑点名渠道）。
+    """
+    provider: ModelProvider = Field(..., description="API Key提供商")
+    api_base: Optional[str] = Field(
+        None,
+        description="不接受：公共渠道按能力使用供应商公共端点（传非空值将 400）",
+        max_length=500,
     )
 
-    @field_serializer("created_at", when_used="json")
-    def _serialize_created_at(self, dt: datetime.datetime):
-        return to_timestamp_ms(dt)
 
-    @field_serializer("updated_at", when_used="json")
-    def _serialize_updated_at(self, dt: datetime.datetime):
-        return to_timestamp_ms(dt)
+class ProviderApiKeyUpdate(BaseModel):
+    """渠道属性更新（Provider 域公共渠道与模型域点名渠道共用）
 
-    @field_serializer("last_used_at", when_used="json")
-    def _serialize_last_used_at(self, dt: datetime.datetime):
-        return to_timestamp_ms(dt)
+    省略 = 不改；api_base/remark 显式 null = 清空；priority/is_active 显式 null 视为省略；
+    api_key 非空 = 重填凭据（重加密）。model_names 不可改。
+    """
+    priority: Optional[int] = Field(None, description="优先级（大者优先）")
+    remark: Optional[str] = Field(None, description="备注", max_length=255)
+    api_base: Optional[str] = Field(
+        None,
+        description="API基础URL（仅点名渠道；公共渠道传非空值将 400；null 清空）",
+        max_length=500,
+    )
+    is_active: Optional[bool] = Field(None, description="渠道启停")
+    api_key: Optional[str] = Field(None, description="重填凭据", max_length=500)
 
 
 class ModelConfigQuery(BaseModel):
     """模型配置查询Schema"""
     type: Optional[List[ModelType]] = Field(None, description="模型类型筛选（支持多个）")
-    provider: Optional[ModelProvider] = Field(None, description="提供商筛选(通过API Key)")
+    provider: Optional[ModelProvider] = Field(None, description="提供商筛选（按模型配置的 provider）")
     capability: Optional[List[str]] = Field(None, description="能力筛选（支持多个）")
     is_active: Optional[bool] = Field(None, description="激活状态筛选")
     is_public: Optional[bool] = Field(None, description="公开状态筛选")
@@ -246,7 +192,7 @@ class ModelConfigQuery(BaseModel):
 class ModelConfigQueryNew(BaseModel):
     """模型配置查询Schema"""
     type: Optional[List[ModelType]] = Field(None, description="模型类型筛选（支持多个）")
-    provider: Optional[ModelProvider] = Field(None, description="提供商筛选(通过API Key)")
+    provider: Optional[ModelProvider] = Field(None, description="提供商筛选（按模型配置的 provider）")
     is_active: Optional[bool] = Field(None, description="激活状态筛选")
     is_public: Optional[bool] = Field(None, description="公开状态筛选")
     is_composite: Optional[bool] = Field(None, description="组合模型筛选")
@@ -260,17 +206,6 @@ class ModelMarketplace(BaseModel):
     rerank_models: List[ModelConfig] = []
     total_count: int
     active_count: int
-
-
-# 统计信息Schema
-class ModelStats(BaseModel):
-    """模型统计信息Schema"""
-    total_models: int
-    active_models: int
-    llm_count: int
-    embedding_count: int
-    rerank_count: int
-    provider_stats: Dict[str, int]
 
 
 # 验证模型配置Schema
@@ -358,7 +293,10 @@ class ModelInfo(BaseModel):
     model_name: str = Field(..., description="模型名称")
     provider: str = Field(..., description="模型提供商")
     api_key: str = Field(..., description="API密钥")
-    api_base: str = Field(..., description="API基础URL")
+    api_base: Optional[str] = Field(None, description="API基础URL；空=使用提供商默认地址")
     is_omni: bool = Field(default=False, description="是否为omni模型")
     model_type: ModelType = Field(..., description="模型类型")
     capability: List[str] = Field(default_factory=list, description="模型能力列表")
+    tenant_id: Optional[str] = Field(None, description="用量归属：租户ID")
+    model_config_id: Optional[str] = Field(None, description="用量归属：模型配置ID")
+    channel_id: Optional[str] = Field(None, description="用量归属：渠道ID")

@@ -165,14 +165,18 @@ class ModelApiKey(ReferenceBase):
     priority = Column(String, default="1", comment="priority")
 
 
-class TenantSpeedBearBinding(ReferenceBase):
-    """Minimal read-only projection of the Platform tenant credential binding."""
+class ModelChannel(ReferenceBase):
+    """Minimal read-only projection of a model channel row (M5：平台代管凭据落表处）。"""
 
-    __tablename__ = "tenant_speedbear_bindings"
+    __tablename__ = "model_channels"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
     tenant_id = Column(UUID(as_uuid=True), nullable=False, index=True)
-    gateway_api_key = Column(Text, nullable=False)
+    provider = Column(String(50), nullable=False)
+    source = Column(String(20), nullable=False, default="manual")
+    credential_encrypted = Column(Text, nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime, default=utcnow_naive, comment="created at")
 
 
 class ModelBase(ReferenceBase):
