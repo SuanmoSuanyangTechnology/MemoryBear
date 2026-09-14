@@ -34,6 +34,8 @@ _MODEL_REFERENCE_FIELDS = (
     "reranker_id",
     "llm_id",
     "image2text_id",
+    "audio2text_id",
+    "video2text_id",
 )
 
 
@@ -168,15 +170,15 @@ async def _validate_model_references(
 ) -> None:
     model_ids = list(
         dict.fromkeys(
-            source[field_name]
+            source.get(field_name)
             for field_name in _MODEL_REFERENCE_FIELDS
-            if source[field_name] is not None
+            if source.get(field_name) is not None
         )
     )
     models = await ReferenceRepository.get_model_configs(db, model_ids)
     models_by_id = {model.id: model for model in models}
     for field_name in _MODEL_REFERENCE_FIELDS:
-        model_id = source[field_name]
+        model_id = source.get(field_name)
         if model_id is None:
             continue
         model = models_by_id.get(model_id)
@@ -186,6 +188,7 @@ async def _validate_model_references(
             or not _is_model_visible(model, tenant_id)
         ):
             raise _model_unavailable(field_name)
+    await knowledge_service.validate_media_model_references(db, source, tenant_id)
 
 
 def _build_knowledge_values(
@@ -213,6 +216,8 @@ def _build_knowledge_values(
         "reranker_id": source["reranker_id"],
         "llm_id": source["llm_id"],
         "image2text_id": source["image2text_id"],
+        "audio2text_id": source.get("audio2text_id"),
+        "video2text_id": source.get("video2text_id"),
         "doc_num": 0,
         "chunk_num": 0,
         "parser_id": source["parser_id"],

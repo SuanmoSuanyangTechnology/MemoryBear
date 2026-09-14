@@ -4,6 +4,7 @@ import uuid
 from enum import StrEnum
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     Column,
     DateTime,
@@ -15,7 +16,7 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
-from sqlalchemy.dialects.postgresql import ARRAY, JSON, UUID
+from sqlalchemy.dialects.postgresql import ARRAY, JSON, JSONB, UUID
 
 from ...utils.datetime_utils import utcnow_naive
 from .base import ReferenceBase
@@ -28,6 +29,7 @@ class ModelType(StrEnum):
     RERANK = "rerank"
     IMAGE = "image"
     VIDEO = "video"
+    ASR = "asr"
 
 
 class ModelProvider(StrEnum):
@@ -174,6 +176,14 @@ class ModelChannel(ReferenceBase):
     tenant_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     provider = Column(String(50), nullable=False)
     source = Column(String(20), nullable=False, default="manual")
+    model_names = Column(JSONB, nullable=False)
+    api_base = Column(String(512), nullable=True)
+    credential_sha256 = Column(String(64), nullable=False)
+    credential_masked = Column(String(255), nullable=False)
+    priority = Column(Integer, nullable=False)
+    cooldown_until_ms = Column(BigInteger, nullable=True)
+    extra = Column(JSONB, nullable=False)
+    updated_at = Column(DateTime, nullable=True)
     credential_encrypted = Column(Text, nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime, default=utcnow_naive, comment="created at")

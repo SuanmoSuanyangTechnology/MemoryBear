@@ -7,6 +7,7 @@ import uuid
 
 from pydantic import SecretStr
 from redbear_model import (
+    ChannelSnapshot,
     LoadBalanceStrategy,
     ModelCapability,
     ModelConfigSnapshot,
@@ -101,13 +102,16 @@ def _platform_channel_query(tenant_id: uuid.UUID):
     )
 
 
-def _decrypt_credential(channel: ModelChannel) -> str:
-    """渠道密文解密（AAD=provider:tenant_id，与 ChannelService 写入侧一致）。"""
+def credential_cipher() -> AESGCMEnvCipher:
+    """Use the existing host credential key for channel resolution."""
     raw_key = get_settings().model_credentials_key.get_secret_value().strip()
     if not raw_key:
         raise RuntimeError("MODEL_CREDENTIALS_KEY is not set (base64 32B master key)")
-    cipher = AESGCMEnvCipher(base64.b64decode(raw_key))
-    return cipher.decrypt(
+    return AESGCMEnvCipher(base64.b64decode(raw_key))
+
+
+def _decrypt_credential(channel: ModelChannel) -> str:
+    return credential_cipher().decrypt(
         channel.credential_encrypted, aad=f"{channel.provider}:{channel.tenant_id}"
     )
 
@@ -125,6 +129,27 @@ def _public_binding_snapshot(
         provider=provider,
         api_key=SecretStr(_decrypt_credential(channel)),
         base_url=f"{speedbear_base_url.rstrip('/')}/api/v1",
+    )
+
+
+def _channel_snapshot(channel: ModelChannel) -> ChannelSnapshot:
+    return ChannelSnapshot(
+        id=channel.id, tenant_id=channel.tenant_id, provider=channel.provider,
+        model_names=tuple(channel.model_names or ()), api_base=channel.api_base,
+        credential_encrypted=channel.credential_encrypted,
+        credential_sha256=channel.credential_sha256, credential_masked=channel.credential_masked,
+        priority=channel.priority, cooldown_until_ms=channel.cooldown_until_ms,
+        extra=dict(channel.extra or {}), source=channel.source, is_active=channel.is_active,
+        created_at_ms=to_timestamp_ms(channel.created_at) or 0,
+        updated_at_ms=to_timestamp_ms(channel.updated_at) or 0,
+    )
+
+
+def _active_channel_query(tenant_id: uuid.UUID, provider: str):
+    return select(ModelChannel).where(
+        ModelChannel.tenant_id == tenant_id,
+        ModelChannel.provider == provider,
+        ModelChannel.is_active.is_(True),
     )
 
 
@@ -168,6 +193,10 @@ class SyncSQLModelRegistry(ModelRegistryRepository):
             provider,
             self.speedbear_base_url,
         )
+
+    def list_active_channels(self, tenant_id: uuid.UUID, provider: str) -> list[ChannelSnapshot]:
+        result = self.db.execute(_active_channel_query(tenant_id, provider))
+        return [_channel_snapshot(row) for row in result.scalars().all()]
 
     def record_key_usage(self, key_id: uuid.UUID) -> None:
         del key_id
@@ -217,6 +246,12 @@ class AsyncSQLModelRegistry:
             provider,
             self.speedbear_base_url,
         )
+
+    async def list_active_channels(
+        self, tenant_id: uuid.UUID, provider: str,
+    ) -> list[ChannelSnapshot]:
+        result = await self.db.execute(_active_channel_query(tenant_id, provider))
+        return [_channel_snapshot(row) for row in result.scalars().all()]
 
     async def record_key_usage(self, key_id: uuid.UUID) -> None:
         del key_id

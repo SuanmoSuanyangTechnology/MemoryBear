@@ -26,6 +26,8 @@ KNOWLEDGE_MODEL_SLOTS = {
     "reranker_id": "rerank",
     "llm_id": "llm",
     "image2text_id": "image2text",
+    "audio2text_id": "audio2text",
+    "video2text_id": "video2text",
 }
 KNOWLEDGE_STATUS_SOFT_DELETED = 2
 

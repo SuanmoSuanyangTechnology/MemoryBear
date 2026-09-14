@@ -64,7 +64,12 @@ from ..dependencies import (
 from ..schemas.chunk import KnowledgeRetrievalSource
 from ..schemas.common import SuccessEnvelope, fail, success
 from ..schemas.file import KBBatchDownloadRequest
-from ..schemas.knowledge import KnowledgeCreate, KnowledgeUpdate, project_public_knowledge_data
+from ..schemas.knowledge import (
+    KnowledgeCreate,
+    KnowledgeUpdate,
+    project_public_knowledge_data,
+    without_manager_media_fields,
+)
 
 router = APIRouter(prefix="/knowledges", tags=["knowledges"])
 
@@ -300,6 +305,8 @@ async def create_knowledge(
     runtime: Annotated[ProcessRuntime, Depends(get_runtime)],
     source: Annotated[KnowledgeRetrievalSource, Depends(get_source)],
 ) -> SuccessEnvelope[dict[str, Any]]:
+    if source is KnowledgeRetrievalSource.EXTERNAL_API:
+        create_data = without_manager_media_fields(create_data)
     async with runtime.database.async_session() as db:
         knowledge = await knowledge_service.create_knowledge(db, create_data, principal)
         data = await knowledge_service.knowledge_to_data(db, knowledge)
@@ -389,6 +396,8 @@ async def update_knowledge(
     runtime: Annotated[ProcessRuntime, Depends(get_runtime)],
     source: Annotated[KnowledgeRetrievalSource, Depends(get_source)],
 ) -> SuccessEnvelope[dict[str, Any]]:
+    if source is KnowledgeRetrievalSource.EXTERNAL_API:
+        update_data = without_manager_media_fields(update_data)
     async with runtime.database.async_session() as db:
         plan = await knowledge_service.prepare_knowledge_update(
             db,
