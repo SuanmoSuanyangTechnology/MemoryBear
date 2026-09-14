@@ -58,18 +58,7 @@ const DocumentDetails: FC = () => {
   const [parserMode, setParserMode] = useState(0);
   const insertModalRef = useRef<InsertModalRef>(null);
   const isManualRefreshRef = useRef(false);
-  
-  // Early return if no documentId
-  if (!documentId) {
-    return (
-      <Flex align="center" justify="center" gap={16} vertical className="rb:h-full!">
-        <div className="rb:text-gray-500">{t('knowledgeBase.documentIdRequired')}</div>
-        <Button type="primary" onClick={() => navigate(-1)}>
-          {t('common.back')}
-        </Button>
-      </Flex>
-    );
-  }
+  const [isParentChildMode, setIsParentChildMode] = useState<undefined | boolean>(false);
   
   useEffect(() => {
     if (documentId) {
@@ -86,12 +75,13 @@ const DocumentDetails: FC = () => {
 
   // Load chunk list when document is loaded and progress === 1
   useEffect(() => {
+    if (!documentId) return
     if (document && document.progress === 1 && !isManualRefreshRef.current) {
       ChunkList();
     }
     // Reset flag
     isManualRefreshRef.current = false;
-  }, [document]);
+  }, [document, documentId]);
 
   // Listen to keywords changes and re-search
   useEffect(() => {
@@ -100,8 +90,19 @@ const DocumentDetails: FC = () => {
       setChunkList([]); // Clear list
       ChunkList(1, false); // Reload first page
     }
-  }, [keywords]);
+  }, [keywords, documentId]);
 
+  // Early return if no documentId
+  if (!documentId) {
+    return (
+      <Flex align="center" justify="center" gap={16} vertical className="rb:h-full!">
+        <div className="rb:text-gray-500">{t('knowledgeBase.documentIdRequired')}</div>
+        <Button type="primary" onClick={() => navigate(-1)}>
+          {t('common.back')}
+        </Button>
+      </Flex>
+    );
+  }
 
   const handleCopy = (value?: string) => {
     if (!value) return
@@ -124,7 +125,7 @@ const DocumentDetails: FC = () => {
       },
       {
         key: 'file_name',
-        label: t('knowledgeBase.fileName') || '文件名',
+        label: t('knowledgeBase.fileName'),
         value: <span onClick={() => handleCopy(doc.file_name ?? '-')}>
           {doc.file_name ?? '-'}
           <span
@@ -134,33 +135,32 @@ const DocumentDetails: FC = () => {
       },
       {
         key: 'status',
-        label: t('knowledgeBase.status') || '进度',
+        label: t('knowledgeBase.status'),
         value: doc.progress === 1 ? t('knowledgeBase.progressComplete') : t('knowledgeBase.progressing') ?? '-',
       },
       {
         key: 'chunk_num',
-        label: t('knowledgeBase.chunk_num') || '分块数量',
+        label: t('knowledgeBase.chunk_num'),
         value: doc.chunk_num ?? 0,
       },
       {
         key: 'parser_id',
-        label: t('knowledgeBase.processingMode') || '处理模式',
+        label: t('knowledgeBase.processingMode'),
         value: doc.parser_id ?? '-',
       },
       {
         key: 'created_at',
-        label: t('knowledgeBase.created_at') || '创建时间',
+        label: t('knowledgeBase.created_at'),
         value: formatDateTime(doc.created_at, 'YYYY-MM-DD HH:mm:ss'),
       },
       {
         key: 'updated_at',
-        label: t('knowledgeBase.updated_at') || '更新时间',
+        label: t('knowledgeBase.updated_at'),
         value: formatDateTime(doc.updated_at, 'YYYY-MM-DD HH:mm:ss'),
       },
     ].filter((item) => item.value !== null && item.value !== undefined && item.value !== '');
   };
 
-  const [isParentChildMode, setIsParentChildMode] = useState<undefined | boolean>(false);
   const fetchDocumentDetail = async () => {
     if (!documentId) return;
     setLoading(true);
@@ -232,14 +232,14 @@ const DocumentDetails: FC = () => {
       setTotal(response.page?.total ?? 0);
     } catch (error) {
       console.error('Failed to fetch document details:', error);
-      message.error(t('common.loadFailed') || '加载失败');
+      message.error(t('common.loadFailed'));
     } finally {
       setChunkLoading(false);
     }
   };
 
   const refreshChunks = () => {
-    let nextPage = 1;
+    const nextPage = 1;
     setPage(nextPage);
     ChunkList(nextPage);
   }
@@ -270,7 +270,7 @@ const DocumentDetails: FC = () => {
   };
   const handleInsert = (parentChunkId?: string) => {
     if (!documentId) {
-      message.error(t('knowledgeBase.documentIdRequired') || '文档ID不能为空');
+      message.error(t('knowledgeBase.documentIdRequired'));
       return;
     }
     insertModalRef.current?.handleOpen(documentId, undefined, undefined, parentChunkId);
@@ -453,17 +453,17 @@ const DocumentDetails: FC = () => {
               onSearch={handleSearch}
               defaultValue={keywords}
             />
-            <Button type='primary' onClick={handleAdjustmentParameter}>{t('knowledgeBase.adjustmentParameter') || '调整参数'}</Button>
-            <Button type="primary" onClick={() => handleInsert()}>{t('knowledgeBase.insert') || '插入'}</Button>
+            <Button type='primary' onClick={handleAdjustmentParameter}>{t('knowledgeBase.adjustmentParameter')}</Button>
+            <Button type="primary" onClick={() => handleInsert()}>{t('knowledgeBase.insert')}</Button>
           </Flex>
         </Flex>
       </Flex>
 
       {/* Content area */}
-      <Flex className="rb:h-full rb:flex-1 rb:overflow-hidden rb:bg-white rb:rounded-xl rb:border rb:border-[#DFE4ED]">
+      <Flex className="rb:h-full rb:flex-1 rb:overflow-hidden rb:bg-white rb:rounded-xl rb-border">
         {/* Left: Document info */}
         <Flex vertical className='rb:w-80 rb:h-full! rb:overflow-hidden'>
-          <div className='rb:h-full rb:border-r rb:border-[#DFE4ED] rb:p-4 rb:overflow-y-auto'>
+          <div className='rb:h-full rb-border-r rb:p-4 rb:overflow-y-auto'>
             <DocumentMetadata 
               documentId={documentId} 
               knowledgeBaseId={knowledgeBaseId || ''}
@@ -485,7 +485,7 @@ const DocumentDetails: FC = () => {
           className="rb:flex-1 rb:bg-white rb:rounded-lg rb:p-4 rb:overflow-y-auto"
         >
           <h2 className="rb:text-lg rb:font-medium rb:mb-4">
-            {t('knowledgeBase.chunkList') || '分块列表'}
+            {t('knowledgeBase.chunkList')}
           </h2>
           <RecallTestResult 
             refresh={refreshChunks}
