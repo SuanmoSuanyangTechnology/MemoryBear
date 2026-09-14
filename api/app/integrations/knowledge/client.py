@@ -8,6 +8,7 @@ import logging
 import time
 from collections.abc import AsyncIterator
 from typing import Any
+from uuid import UUID
 
 import httpx
 from fastapi import Request
@@ -20,7 +21,7 @@ from app.schemas.knowledge_retrieval_schema import (
 )
 
 from .call_profile import CallProfile
-from .contracts import KnowledgeCallContext
+from .contracts import KnowledgeCallContext, KnowledgeRetrievalSource
 from .errors import (
     KnowledgeProtocolError,
     KnowledgeServiceError,
@@ -32,6 +33,32 @@ from .transport import KnowledgeHttpTransport
 logger = logging.getLogger(__name__)
 _REQUEST_RERANK_WIRE_FIELDS = ("rerank_id", "rerank_mode", "rerank_weights")
 _KNOWLEDGE_BASE_RERANK_WIRE_FIELDS = ("rerank_mode", "rerank_weights")
+
+
+def _external_knowledge_write_body(
+    body: bytes, method: str, path: str, context: KnowledgeCallContext,
+) -> bytes:
+    """Preserve previously ignored manager-only fields before upstream validation."""
+    if context.source is not KnowledgeRetrievalSource.EXTERNAL_API:
+        return body
+    is_create = method == "POST" and path == "/internal/v1/knowledge"
+    is_update = False
+    if method == "PUT" and path.startswith("/internal/v1/"):
+        try:
+            UUID(path.removeprefix("/internal/v1/"))
+            is_update = True
+        except ValueError:
+            pass
+    if not (is_create or is_update):
+        return body
+    try:
+        data = json.loads(body)
+    except ValueError:
+        return body
+    fields = {"audio2text_id", "video2text_id"}
+    if not isinstance(data, dict) or not fields.intersection(data):
+        return body
+    return json.dumps({key: value for key, value in data.items() if key not in fields}).encode()
 
 
 def _retrieval_wire_payload(
@@ -137,6 +164,8 @@ class KnowledgeServiceClient:
         else:
             body = await request.body()
             if body:
+                body = _external_knowledge_write_body(body, request.method, path, context)
+                headers.pop("content-length", None)
                 send_kwargs["content"] = body
         upstream = await self._transport.send(
             method=request.method,

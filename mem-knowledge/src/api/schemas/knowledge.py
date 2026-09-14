@@ -79,6 +79,8 @@ class KnowledgeBase(BaseModel):
     reranker_id: uuid.UUID | None = None
     llm_id: uuid.UUID | None = None
     image2text_id: uuid.UUID | None = None
+    audio2text_id: uuid.UUID | None = None
+    video2text_id: uuid.UUID | None = None
     doc_num: int | None = None
     chunk_num: int | None = None
     parser_id: str | None = None
@@ -101,6 +103,8 @@ class KnowledgeUpdate(BaseModel):
     reranker_id: uuid.UUID | None = Field(None)
     llm_id: uuid.UUID | None = Field(None)
     image2text_id: uuid.UUID | None = Field(None)
+    audio2text_id: uuid.UUID | None = Field(None)
+    video2text_id: uuid.UUID | None = Field(None)
     doc_num: int | None = Field(None)
     chunk_num: int | None = Field(None)
     parser_id: str | None = Field(None)
@@ -118,6 +122,8 @@ class Knowledge(KnowledgeBase):
     reranker: ModelConfigSummary | None = None
     llm: ModelConfigSummary | None = None
     image2text: ModelConfigSummary | None = None
+    audio2text: ModelConfigSummary | None = None
+    video2text: ModelConfigSummary | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -126,7 +132,16 @@ class Knowledge(KnowledgeBase):
         return to_timestamp_ms(value)
 
 
-PUBLIC_KNOWLEDGE_MODEL_FIELDS = frozenset({"embedding", "reranker", "llm", "image2text"})
+def without_manager_media_fields(data: KnowledgeCreate | KnowledgeUpdate):
+    """Keep previously ignored media selectors out of external API writes."""
+    return type(data).model_validate(data.model_dump(
+        exclude_unset=True, exclude={"audio2text_id", "video2text_id"},
+    ))
+
+
+PUBLIC_KNOWLEDGE_MODEL_FIELDS = frozenset(
+    {"embedding", "reranker", "llm", "image2text", "audio2text", "video2text"}
+)
 PUBLIC_MODEL_FORBIDDEN_FIELDS = frozenset({"api_keys", "api_key", "api_base", "config"})
 
 
