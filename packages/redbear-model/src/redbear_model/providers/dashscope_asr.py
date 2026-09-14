@@ -8,6 +8,7 @@ import json
 import re
 import socket
 import time
+import zlib
 from contextlib import closing
 from decimal import Decimal
 from urllib.parse import quote, urlsplit
@@ -46,7 +47,6 @@ from redbear_model.runtime.client_pool import ModelClientPool
 ASR_MODEL_NAME = "qwen3-asr-flash-filetrans"
 _DEFAULT_BASE = "https://dashscope.aliyuncs.com/api/v1"
 _MAX_REDIRECTS = 3
-_READ_CHUNK_BYTES = 65_536
 _IDENTIFIER = re.compile(r"[A-Za-z0-9_.:-]{1,128}\Z")
 
 
@@ -118,9 +118,63 @@ def _result_request(url: str, timeout: dict[str, float]) -> httpx.Request:
     return httpx.Request(
         "GET",
         original.copy_with(host=address),
-        headers={"Host": original.netloc.decode("ascii"), "Connection": "close"},
+        headers={
+            "Host": original.netloc.decode("ascii"),
+            "Connection": "close",
+            "Accept-Encoding": "identity",
+        },
         extensions={"timeout": timeout, "sni_hostname": original.host},
     )
+
+
+class _ResponseBody:
+    """Bound decoded bytes without buffering network reads or gzip expansion."""
+
+    def __init__(self, encoding: str, limit: int, operation: str):
+        self.limit = limit
+        self.operation = operation
+        self.data = bytearray()
+        encoding = encoding.strip().lower()
+        if encoding not in {"", "identity", "gzip", "deflate"}:
+            raise InvalidProviderResponseError(
+                operation, "unsupported content encoding"
+            )
+        self.decoder = (
+            zlib.decompressobj(
+                16 + zlib.MAX_WBITS if encoding == "gzip" else zlib.MAX_WBITS
+            )
+            if encoding in {"gzip", "deflate"}
+            else None
+        )
+
+    def feed(self, data: bytes) -> None:
+        try:
+            while data:
+                if self.decoder is None:
+                    decoded, data = data, b""
+                else:
+                    decoded = self.decoder.decompress(
+                        data, self.limit - len(self.data) + 1
+                    )
+                    data = self.decoder.unconsumed_tail
+                    if self.decoder.unused_data:
+                        raise InvalidProviderResponseError(
+                            self.operation, "trailing compressed data"
+                        )
+                if len(self.data) + len(decoded) > self.limit:
+                    raise MediaOutputLimitError(self.operation)
+                self.data.extend(decoded)
+        except zlib.error:
+            raise InvalidProviderResponseError(
+                self.operation, "invalid compressed response"
+            ) from None
+
+    def finish(self) -> bytes:
+        if self.decoder is not None and not self.decoder.eof:
+            raise InvalidProviderResponseError(
+                self.operation, "truncated compressed response"
+            )
+        return bytes(self.data)
 
 
 class DashScopeASRAdapter:
@@ -165,7 +219,10 @@ class DashScopeASRAdapter:
     def _request(
         self, method: str, path: str, deadline: float, payload=None
     ) -> httpx.Request:
-        headers = {"Authorization": f"Bearer {self._config.api_key.get_secret_value()}"}
+        headers = {
+            "Authorization": f"Bearer {self._config.api_key.get_secret_value()}",
+            "Accept-Encoding": "identity",
+        }
         if method == "POST":
             headers["X-DashScope-Async"] = "enable"
         return httpx.Request(
@@ -194,28 +251,44 @@ class DashScopeASRAdapter:
         return payload
 
     def _read(self, response: httpx.Response, deadline: float, operation: str) -> dict:
-        body = bytearray()
-        for chunk in response.iter_bytes(chunk_size=_READ_CHUNK_BYTES):
+        loaded = response.is_stream_consumed
+        body = _ResponseBody(
+            "" if loaded else response.headers.get("content-encoding", ""),
+            self._options.max_result_bytes,
+            operation,
+        )
+        chunks = (response.content,) if loaded else response.iter_raw()
+        for chunk in chunks:
             self._timeout(deadline)
-            if len(body) + len(chunk) > self._options.max_result_bytes:
-                raise MediaOutputLimitError(operation)
-            body.extend(chunk)
+            body.feed(chunk)
         self._timeout(deadline)
-        return self._decode(bytes(body), response.status_code, operation)
+        result = self._decode(body.finish(), response.status_code, operation)
+        self._timeout(deadline)
+        return result
 
     async def _aread(
         self, response: httpx.Response, deadline: float, operation: str
     ) -> dict:
-        body = bytearray()
-        async for chunk in response.aiter_bytes(chunk_size=_READ_CHUNK_BYTES):
-            self._timeout(deadline)
-            if len(body) + len(chunk) > self._options.max_result_bytes:
-                raise MediaOutputLimitError(operation)
-            body.extend(chunk)
-        self._timeout(deadline)
-        return await asyncio.to_thread(
-            self._decode, bytes(body), response.status_code, operation
+        loaded = response.is_stream_consumed
+        body = _ResponseBody(
+            "" if loaded else response.headers.get("content-encoding", ""),
+            self._options.max_result_bytes,
+            operation,
         )
+        if loaded:
+            self._timeout(deadline)
+            await asyncio.to_thread(body.feed, response.content)
+        else:
+            async for chunk in response.aiter_raw():
+                self._timeout(deadline)
+                await asyncio.to_thread(body.feed, chunk)
+        self._timeout(deadline)
+        decoded = await asyncio.to_thread(body.finish)
+        result = await asyncio.to_thread(
+            self._decode, decoded, response.status_code, operation
+        )
+        self._timeout(deadline)
+        return result
 
     @staticmethod
     def _network_error(operation: str, exc: httpx.HTTPError) -> MediaProviderError:
@@ -236,6 +309,10 @@ class DashScopeASRAdapter:
                 )
             ) as response:
                 return self._read(response, deadline, operation)
+        except MediaCallTimeoutError:
+            if operation == "asr.submit":
+                raise ModelSubmissionUncertainError(operation) from None
+            raise
         except httpx.HTTPError as exc:
             raise self._network_error(operation, exc) from None
 
@@ -253,6 +330,10 @@ class DashScopeASRAdapter:
                 return await self._aread(response, deadline, operation)
             finally:
                 await response.aclose()
+        except MediaCallTimeoutError:
+            if operation == "asr.submit":
+                raise ModelSubmissionUncertainError(operation) from None
+            raise
         except httpx.HTTPError as exc:
             raise self._network_error(operation, exc) from None
 
