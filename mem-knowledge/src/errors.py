@@ -16,6 +16,14 @@ type PublicScalar = str | int | float | bool
 MAX_PUBLIC_PARAM_LENGTH = 200
 
 
+def public_text(value: str) -> str:
+    """Bound an already-authorized display label without changing the error contract."""
+    return "".join(
+        " " if ord(char) < 32 or ord(char) == 127 else char
+        for char in value[:MAX_PUBLIC_PARAM_LENGTH]
+    )
+
+
 @dataclass(frozen=True)
 class ErrorDefinition:
     """One cause's wire contract and allowed public parameter types."""
@@ -57,6 +65,141 @@ _DEFINITIONS = {
     "KB_HTTP_TIMEOUT": ErrorDefinition(504, False, 504, "http"),
     "KB_RETRIEVAL_REQUEST_INVALID": ErrorDefinition(400, False, 400, "http"),
     "KB_RERANK_CONFIG_INVALID": ErrorDefinition(400, False, 400, "http"),
+    "KB_BUILTIN_METADATA_FIELD_UNKNOWN": ErrorDefinition(400, False, 400, "http"),
+    "KB_BUILTIN_METADATA_OPERATOR_UNSUPPORTED": ErrorDefinition(400, False, 400, "http"),
+    "KB_CHILD_PARENT_ID_REQUIRED": ErrorDefinition(400, False, 400, "http"),
+    "KB_CHUNK_BATCH_LIMIT": ErrorDefinition(400, False, 400, "http", {"max_count": int}),
+    "KB_CHUNK_NOT_FOUND": ErrorDefinition(404, False, 404, "http"),
+    "KB_DOCUMENT_CHUNK_MODE_CHANGE_FORBIDDEN": ErrorDefinition(400, False, 400, "http"),
+    "KB_DOCUMENT_NOT_FOUND": ErrorDefinition(404, False, 404, "http"),
+    "KB_DOCUMENT_PARSER_CONFIG_INVALID": ErrorDefinition(400, False, 400, "http"),
+    "KB_EMBEDDING_MODEL_UNAVAILABLE": ErrorDefinition(400, False, 400, "http"),
+    "KB_EXTERNAL_ID_EXISTS": ErrorDefinition(400, False, 1001, "business"),
+    "KB_FEISHU_AUTH_INVALID": ErrorDefinition(200, False, 2001, "business"),
+    "KB_FILE_NOT_FOUND": ErrorDefinition(404, False, 404, "http"),
+    "KB_FILE_STORAGE_KEY_MISSING": ErrorDefinition(404, False, 404, "http"),
+    "KB_FILTER_LOGIC_INVALID": ErrorDefinition(400, False, 400, "http"),
+    "KB_GRAPH_CONFIG_INVALID": ErrorDefinition(400, False, 400, "http"),
+    "KB_GRAPH_ENTITY_TYPES_UNAVAILABLE": ErrorDefinition(400, False, 400, "http"),
+    "KB_GRAPH_NOT_ENABLED": ErrorDefinition(400, False, 400, "http"),
+    "KB_IMAGE_BASE64_INVALID": ErrorDefinition(400, False, 400, "http"),
+    "KB_IMAGE_CONTENT_EMPTY": ErrorDefinition(400, False, 400, "http"),
+    "KB_IMAGE_DATA_URI_INVALID": ErrorDefinition(400, False, 400, "http"),
+    "KB_IMAGE_DIMENSIONS_INVALID": ErrorDefinition(400, False, 400, "http"),
+    "KB_IMAGE_DIMENSIONS_LIMIT": ErrorDefinition(400, False, 400, "http"),
+    "KB_IMAGE_INVALID": ErrorDefinition(400, False, 400, "http"),
+    "KB_IMAGE_MEDIA_TYPE_MISMATCH": ErrorDefinition(400, False, 400, "http"),
+    "KB_IMAGE_MEDIA_TYPE_UNSUPPORTED": ErrorDefinition(400, False, 400, "http"),
+    "KB_IMAGE_SIZE_LIMIT": ErrorDefinition(400, False, 400, "http"),
+    "KB_JSON_DOCUMENT_INVALID": ErrorDefinition(400, False, 400, "http"),
+    "KB_KNOWLEDGE_COPY_BUILTIN_METADATA_INVALID": ErrorDefinition(400, False, 400, "http"),
+    "KB_KNOWLEDGE_COPY_METADATA_BUILTIN_CONFLICT": ErrorDefinition(
+        400, False, 400, "http", {"field_name": str}
+    ),
+    "KB_KNOWLEDGE_COPY_METADATA_FIELD_INVALID": ErrorDefinition(
+        400, False, 400, "http", {"field_name": str}
+    ),
+    "KB_KNOWLEDGE_COPY_METADATA_TENANT_INVALID": ErrorDefinition(400, False, 400, "http"),
+    "KB_KNOWLEDGE_COPY_MODEL_UNAVAILABLE": ErrorDefinition(
+        400, False, 400, "http", {"model_field": str}
+    ),
+    "KB_KNOWLEDGE_COPY_PARENT_INVALID": ErrorDefinition(400, False, 400, "http"),
+    "KB_KNOWLEDGE_COPY_PARSER_CONFIG_INVALID": ErrorDefinition(400, False, 400, "http"),
+    "KB_KNOWLEDGE_COPY_PERMISSION_UNSUPPORTED": ErrorDefinition(400, False, 400, "http"),
+    "KB_KNOWLEDGE_COPY_TYPE_UNSUPPORTED": ErrorDefinition(400, False, 400, "http"),
+    "KB_KNOWLEDGE_CREATOR_NOT_FOUND": ErrorDefinition(500, False, 10001, "internal"),
+    "KB_KNOWLEDGE_DOWNLOAD_EMPTY": ErrorDefinition(404, False, 404, "http"),
+    "KB_KNOWLEDGE_NAME_EXISTS": ErrorDefinition(400, False, 400, "http", {"knowledge_name": str}),
+    "KB_KNOWLEDGE_NOT_FOUND": ErrorDefinition(404, False, 404, "http"),
+    "KB_KNOWLEDGE_PARSER_CONFIG_INVALID": ErrorDefinition(400, False, 400, "http"),
+    "KB_KNOWLEDGE_SHARE_NOT_FOUND": ErrorDefinition(404, False, 404, "http"),
+    "KB_KNOWLEDGE_SHARE_REFERENCE_INCOMPLETE": ErrorDefinition(500, False, 10001, "internal"),
+    "KB_METADATA_BATCH_KNOWLEDGE_MISMATCH": ErrorDefinition(400, False, 9104, "business"),
+    "KB_METADATA_BUILTIN_NAME_CONFLICT": ErrorDefinition(
+        400, False, 1001, "business", {"field_name": str}
+    ),
+    "KB_METADATA_DEFINITION_ID_MISSING": ErrorDefinition(400, False, 400, "http"),
+    "KB_METADATA_FIELD_EXISTS": ErrorDefinition(409, False, 5001, "business", {"field_name": str}),
+    "KB_METADATA_FIELD_UNDEFINED": ErrorDefinition(
+        400, False, 1001, "business", {"field_name": str}
+    ),
+    "KB_METADATA_FIELD_UNKNOWN": ErrorDefinition(400, False, 400, "http", {"field_name": str}),
+    "KB_METADATA_OPERATOR_UNSUPPORTED": ErrorDefinition(400, False, 400, "http"),
+    "KB_METADATA_RESOURCE_NOT_FOUND": ErrorDefinition(400, False, 4006, "business"),
+    "KB_METADATA_TIME_INVALID": ErrorDefinition(400, False, 400, "http"),
+    "KB_METADATA_VALIDATION_ERROR": ErrorDefinition(400, False, 1001, "business"),
+    "KB_METADATA_VALUE_TYPE_MISMATCH": ErrorDefinition(
+        400, False, 1001, "business", {"field_name": str, "expected_type": str}
+    ),
+    "KB_MODEL_CONFIG_NOT_FOUND": ErrorDefinition(404, False, 404, "http"),
+    "KB_MODEL_CREDENTIAL_UNAVAILABLE": ErrorDefinition(400, False, 400, "http"),
+    "KB_PARENT_CHILD_CHUNK_TYPE_REQUIRED": ErrorDefinition(400, False, 400, "http"),
+    "KB_PARENT_CHILD_MODE_DISABLED": ErrorDefinition(400, False, 400, "http"),
+    "KB_PARENT_FOLDER_NOT_FOUND": ErrorDefinition(404, False, 404, "http"),
+    "KB_PARENT_KNOWLEDGE_NOT_FOUND": ErrorDefinition(404, False, 404, "http"),
+    "KB_PARSER_CONFIG_OBJECT_REQUIRED": ErrorDefinition(400, False, 400, "http"),
+    "KB_PREVIEW_FILE_TYPE_UNSUPPORTED": ErrorDefinition(
+        400, False, 400, "http", {"file_type": str}
+    ),
+    "KB_QA_EXPORT_EMPTY": ErrorDefinition(404, False, 404, "http"),
+    "KB_QA_IMPORT_FILE_EMPTY": ErrorDefinition(400, False, 400, "http"),
+    "KB_QA_IMPORT_FILE_TYPE_UNSUPPORTED": ErrorDefinition(400, False, 400, "http"),
+    "KB_SELECTED_FILES_STORAGE_KEY_MISSING": ErrorDefinition(404, False, 404, "http"),
+    "KB_SOURCE_KNOWLEDGE_NOT_FOUND": ErrorDefinition(404, False, 404, "http"),
+    "KB_STORAGE_FILE_NOT_FOUND": ErrorDefinition(404, False, 404, "http"),
+    "KB_TARGET_WORKSPACE_NOT_FOUND": ErrorDefinition(404, False, 404, "http"),
+    "KB_TENANT_VISION_MODEL_NOT_AVAILABLE": ErrorDefinition(500, False, 10001, "internal"),
+    "KB_UPLOAD_CONTENT_EMPTY": ErrorDefinition(400, False, 400, "http"),
+    "KB_UPLOAD_CONTENT_SIZE_LIMIT": ErrorDefinition(400, False, 400, "http"),
+    "KB_UPLOAD_FILE_EMPTY": ErrorDefinition(400, False, 400, "http"),
+    "KB_UPLOAD_FILE_SIZE_LIMIT": ErrorDefinition(400, False, 400, "http"),
+    "KB_VISION_MODEL_OUTPUT_EMPTY": ErrorDefinition(400, False, 400, "http"),
+    "KB_VISION_MODEL_UNAVAILABLE": ErrorDefinition(400, False, 400, "http"),
+    "KB_WORKSPACE_EMBEDDING_MODEL_NOT_CONFIGURED": ErrorDefinition(500, False, 10001, "internal"),
+    "KB_WORKSPACE_LLM_MODEL_NOT_CONFIGURED": ErrorDefinition(500, False, 10001, "internal"),
+    "KB_WORKSPACE_NOT_FOUND": ErrorDefinition(500, False, 10001, "internal"),
+    "KB_WORKSPACE_RERANK_MODEL_NOT_CONFIGURED": ErrorDefinition(500, False, 10001, "internal"),
+    "KB_YUQUE_AUTH_INVALID": ErrorDefinition(200, False, 2001, "business"),
+    "KB_GRAPH_DISABLED": ErrorDefinition(400, False, 400, "http"),
+    "KB_GRAPH_PIPELINE_MISMATCH": ErrorDefinition(400, False, 400, "http"),
+    "KB_IMAGE_AUTO_METADATA_UNSUPPORTED": ErrorDefinition(400, False, 400, "http"),
+    "KB_IMAGE_EMBEDDING_MODEL_UNSUPPORTED": ErrorDefinition(400, False, 400, "http"),
+    "KB_IMAGE_GLOBAL_RERANK_MODEL_UNSUPPORTED": ErrorDefinition(400, False, 400, "http"),
+    "KB_IMAGE_HYBRID_RERANK_REQUIRED": ErrorDefinition(400, False, 400, "http"),
+    "KB_IMAGE_PARTICIPLE_UNSUPPORTED": ErrorDefinition(400, False, 400, "http"),
+    "KB_IMAGE_RERANK_MODEL_UNSUPPORTED": ErrorDefinition(400, False, 400, "http"),
+    "KB_IMAGE_TARGET_CONFIG_UNSUPPORTED": ErrorDefinition(400, False, 400, "http"),
+    "KB_IMAGE_WEIGHTED_GLOBAL_RERANK_UNSUPPORTED": ErrorDefinition(400, False, 400, "http"),
+    "KB_MODEL_PROVIDER_RESPONSE_INVALID": ErrorDefinition(502, False, 10001, "internal"),
+    "KB_RETRIEVAL_EMBEDDING_MODEL_NOT_CONFIGURED": ErrorDefinition(400, False, 400, "http"),
+    "KB_RETRIEVAL_GRAPH_LLM_NOT_CONFIGURED": ErrorDefinition(400, False, 400, "http"),
+    "KB_RETRIEVAL_MODEL_CHANNEL_EXHAUSTED": ErrorDefinition(400, True, 400, "http"),
+    "KB_RETRIEVAL_MODEL_CHANNEL_UNAVAILABLE": ErrorDefinition(400, True, 400, "http"),
+    "KB_RETRIEVAL_MODEL_CREDENTIAL_INVALID": ErrorDefinition(400, False, 400, "http"),
+    "KB_RETRIEVAL_MODEL_CREDENTIAL_UNAVAILABLE": ErrorDefinition(400, False, 400, "http"),
+    "KB_RETRIEVAL_MODEL_INACTIVE": ErrorDefinition(400, False, 400, "http"),
+    "KB_RETRIEVAL_MODEL_NOT_FOUND": ErrorDefinition(400, False, 400, "http"),
+    "KB_RETRIEVAL_RERANK_MODEL_NOT_CONFIGURED": ErrorDefinition(400, False, 400, "http"),
+    "KB_RETRIEVAL_TEXT_QUERY_REQUIRED": ErrorDefinition(400, False, 400, "http"),
+    "KB_STORAGE_CONFIG_INVALID": ErrorDefinition(500, False, 10001, "internal"),
+    "KB_STORAGE_DELETE_FAILED": ErrorDefinition(500, False, 10001, "internal"),
+    "KB_STORAGE_DELETE_TIMEOUT": ErrorDefinition(500, True, 10001, "internal"),
+    "KB_STORAGE_DOWNLOAD_FAILED": ErrorDefinition(500, False, 10001, "internal"),
+    "KB_STORAGE_DOWNLOAD_TIMEOUT": ErrorDefinition(500, True, 10001, "internal"),
+    "KB_STORAGE_UPLOAD_FAILED": ErrorDefinition(500, False, 10001, "internal"),
+    "KB_STORAGE_UPLOAD_TIMEOUT": ErrorDefinition(500, True, 10001, "internal"),
+    "KB_WEIGHTED_RERANK_EMBEDDING_MISMATCH": ErrorDefinition(400, False, 400, "http"),
+    "KB_WEIGHTED_RERANK_GRAPH_UNSUPPORTED": ErrorDefinition(400, False, 400, "http"),
+    "KB_WEIGHTED_RERANK_REQUIRES_HYBRID": ErrorDefinition(400, False, 400, "http"),
+    "KB_STORAGE_OPERATION_FAILED": ErrorDefinition(500, False, 10001, "internal"),
+    "KB_MULTIMODAL_EMBEDDING_CONNECTION_FAILED": ErrorDefinition(502, True, 10001, "internal"),
+    "KB_MULTIMODAL_EMBEDDING_RATE_LIMITED": ErrorDefinition(502, True, 10001, "internal"),
+    "KB_MULTIMODAL_EMBEDDING_RESPONSE_INVALID": ErrorDefinition(502, False, 10001, "internal"),
+    "KB_MULTIMODAL_EMBEDDING_TIMEOUT": ErrorDefinition(502, True, 10001, "internal"),
+    "KB_MULTIMODAL_RERANK_CONNECTION_FAILED": ErrorDefinition(502, True, 10001, "internal"),
+    "KB_MULTIMODAL_RERANK_RATE_LIMITED": ErrorDefinition(502, True, 10001, "internal"),
+    "KB_MULTIMODAL_RERANK_RESPONSE_INVALID": ErrorDefinition(502, False, 10001, "internal"),
+    "KB_MULTIMODAL_RERANK_TIMEOUT": ErrorDefinition(502, True, 10001, "internal"),
 }
 
 ERROR_DEFINITIONS: Mapping[str, ErrorDefinition] = MappingProxyType(_DEFINITIONS)
@@ -72,7 +215,8 @@ def valid_params(code: str, params: Mapping[str, PublicScalar]) -> bool:
         if type(value) is not expected_type:
             return False
         if isinstance(value, str) and (
-            len(value) > MAX_PUBLIC_PARAM_LENGTH or any(ord(char) < 32 for char in value)
+            len(value) > MAX_PUBLIC_PARAM_LENGTH
+            or any(ord(char) < 32 or ord(char) == 127 for char in value)
         ):
             return False
         if isinstance(value, float) and not math.isfinite(value):
@@ -81,7 +225,7 @@ def valid_params(code: str, params: Mapping[str, PublicScalar]) -> bool:
 
 
 class KnowledgeError(Exception):
-    """Untranslated cause and safe parameters; old task constructors stay compatible."""
+    """Untranslated cause; the catalog alone defines its wire contract."""
 
     def __init__(
         self,
@@ -89,28 +233,45 @@ class KnowledgeError(Exception):
         code: str,
         message: str | None = None,
         params: Mapping[str, PublicScalar] | None = None,
-        status_code: int | None = None,
-        retryable: bool | None = None,
-        response_code: int | None = None,
-        response_style: ErrorResponseStyle | None = None,
     ) -> None:
-        # Never retain a provider message as public text or exception string.
+        # Excluded task callers still use exception text in progress messages.
+        # Preserve that legacy argument; HTTP rendering only uses code and params.
         supplied = dict(params or {})
         if not valid_params(code, supplied):
             logger.error("Knowledge error definition invalid")
-            code, supplied = "KB_INTERNAL_ERROR", {}
-            status_code = response_code = response_style = retryable = None
-        definition = ERROR_DEFINITIONS[code]
-        super().__init__(str(code))
-        self.code = str(code)
-        self.params = MappingProxyType(supplied)
-        self.message = str(code)  # Source compatibility for excluded task consumers.
-        self.status_code = definition.status_code if status_code is None else status_code
-        self.retryable = definition.retryable if retryable is None else retryable
-        self.response_code = definition.response_code if response_code is None else response_code
-        self.response_style = (
-            definition.response_style if response_style is None else response_style
-        )
+            code, supplied, message = "KB_INTERNAL_ERROR", {}, None
+        self._legacy_message = message
+        super().__init__(message if message is not None else str(code))
+        self._code = str(code)
+        self._params = MappingProxyType(supplied)
+
+    @property
+    def code(self) -> str:
+        return self._code
+
+    @property
+    def params(self) -> Mapping[str, PublicScalar]:
+        return self._params
+
+    @property
+    def message(self) -> str:
+        return self._legacy_message if self._legacy_message is not None else self.code
+
+    @property
+    def status_code(self) -> int:
+        return ERROR_DEFINITIONS[self.code].status_code
+
+    @property
+    def response_code(self) -> int:
+        return ERROR_DEFINITIONS[self.code].response_code
+
+    @property
+    def retryable(self) -> bool:
+        return ERROR_DEFINITIONS[self.code].retryable
+
+    @property
+    def response_style(self) -> ErrorResponseStyle:
+        return ERROR_DEFINITIONS[self.code].response_style
 
     @classmethod
     def from_code(
@@ -119,15 +280,5 @@ class KnowledgeError(Exception):
         message: str | None = None,
         *,
         params: Mapping[str, PublicScalar] | None = None,
-        status_code: int | None = None,
-        response_code: int | None = None,
-        response_style: ErrorResponseStyle | None = None,
     ) -> KnowledgeError:
-        return cls(
-            code=code,
-            message=message,
-            params=params,
-            status_code=status_code,
-            response_code=response_code,
-            response_style=response_style,
-        )
+        return cls(code=code, message=message, params=params)

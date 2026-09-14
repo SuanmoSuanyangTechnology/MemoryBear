@@ -69,11 +69,10 @@ async def commit_evidence_pipeline(
     )
     knowledge = result.scalars().first()
     if knowledge is None:
-        raise KnowledgeError.from_code("KB_RESOURCE_NOT_FOUND", "Knowledge resource not found")
+        raise KnowledgeError.from_code("KB_KNOWLEDGE_NOT_FOUND")
     if not is_graph_enabled(knowledge.parser_config):
         raise KnowledgeError.from_code(
-            "KB_VALIDATION_ERROR",
-            "knowledge graph is not enabled",
+            "KB_GRAPH_NOT_ENABLED",
         )
     knowledge.parser_config = set_graph_pipeline_for_migration(
         knowledge.parser_config,
@@ -100,7 +99,7 @@ async def delete_graph(knowledge: Any, dispatcher: Any) -> str:
 async def rebuild_graph(knowledge: Any, store: Any, dispatcher: Any) -> str:
     del store
     if not is_graph_enabled(knowledge.parser_config):
-        raise KnowledgeError.from_code("KB_VALIDATION_ERROR", "knowledge graph is not enabled")
+        raise KnowledgeError.from_code("KB_GRAPH_NOT_ENABLED")
     return await dispatcher.send(
         "app.core.rag.tasks.rebuild_evidence_graph_knowledge",
         args=[str(knowledge.id)],
