@@ -131,8 +131,9 @@ const MultiKeyConfigModal = forwardRef<MultiKeyConfigModalRef, MultiKeyConfigMod
             setLoading(false)
           });
       })
-      .catch((err) => {
-        console.log('err', err)
+      .catch(() => {
+        // Form errors may contain credentials and signed validation URLs.
+        setLoading(false)
       });
   }
   /** Delete API key */

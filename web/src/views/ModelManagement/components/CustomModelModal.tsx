@@ -167,8 +167,9 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
           handleUpdate(formData)
         }
       })
-      .catch((err) => {
-        console.log('err', err)
+      .catch(() => {
+        // Form errors may contain credentials and signed validation URLs.
+        setLoading(false)
       });
   }
 
