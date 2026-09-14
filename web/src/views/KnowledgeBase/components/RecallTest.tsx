@@ -5,7 +5,7 @@ import {
   useState,
   useMemo,
 } from 'react';
-import { Button, Flex, Form, Input, InputNumber, Select, Switch } from 'antd';
+import { Button, Flex, Form, Input, InputNumber, Select, Switch, App } from 'antd';
 import { useTranslation } from 'react-i18next';
 import clsx from 'clsx';
 import { useParams } from 'react-router-dom'
@@ -30,6 +30,7 @@ interface RetrievalModeOption {
 
 const RecallTest = () => {
   const [form] = Form.useForm();
+  const { message } = App.useApp();
   const { t } = useTranslation();
   const [data, setData] = useState<RecallTestData[]>([]);
   const { knowledgeBaseId } = useParams()
@@ -163,6 +164,16 @@ const RecallTest = () => {
         reranker_id,
         rerank_weights,
       }) => {
+        const hasQuery = typeof query === 'string' && query.trim().length > 0;
+        const hasImage = supportsImage && Boolean(image);
+
+        if (!hasQuery && !hasImage) {
+          const messageKey = supportsImage
+            ? 'knowledgeBase.queryOrImageRequired'
+            : 'knowledgeBase.queryRequired';
+          message.warning(t(messageKey));
+          return;
+        }
         image = supportsImage ? image : undefined;
         const params: RecallTestParams = {
           query: image
