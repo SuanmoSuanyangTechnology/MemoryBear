@@ -688,6 +688,7 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
                     tenant_id=api_key_obj.tenant_id,
                     model_config_id=api_key_obj.model_config_id,
                     channel_id=api_key_obj.channel_id,
+                    failover_plan=api_key_obj.failover_plan,
                 ),
                 api_key_obj.id,
             )

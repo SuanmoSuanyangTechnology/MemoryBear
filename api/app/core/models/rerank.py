@@ -3,11 +3,18 @@ from typing import Any, Dict, List, Optional, Sequence, Union
 from copy import deepcopy
 from langchain_core.documents import BaseDocumentCompressor, Document
 from langchain_core.callbacks import Callbacks
+from redbear_model import ResolvedModelConfig
 from app.core.alert_metric_bridge import (
     report_model_gateway_failure,
     report_model_gateway_success,
 )
 from app.core.models.base import RedBearModelConfig, get_provider_rerank_class, RedBearModelFactory
+from app.core.models.failover import (
+    FailoverStats,
+    attempt_config,
+    is_initial_candidate,
+    run_plan,
+)
 from app.core.models.network_retry import network_retry
 from app.core.usage_bridge import report_usage_failure, report_usage_success
 from app.models import ModelProvider
@@ -102,6 +109,16 @@ class RedBearRerank(BaseDocumentCompressor):
             compressed.append(doc_copy)
         return compressed
 
+    def _attempt_target(self, resolved: ResolvedModelConfig) -> tuple[Any, RedBearModelConfig]:
+        """本次候选的（模型实例, 配置）：首候选沿用现实例，换渠道后按候选重建。
+
+        dashscope 分支直接读配置的 model_name/api_key，故配置须随候选走。
+        """
+        if is_initial_candidate(self._config, resolved):
+            return self._model, self._config
+        config = attempt_config(self._config, resolved)
+        return self._create_model(config), config
+
     def rerank(
             self,
             documents: Sequence[Union[str, Document, dict]],
@@ -109,15 +126,34 @@ class RedBearRerank(BaseDocumentCompressor):
             *,
             top_n: Optional[int] = -1,
     ) -> List[Dict[str, Any]]:
-        provider = self._config.provider.lower()
         started = time.perf_counter()
+        stats = FailoverStats()
+        plan = self._config.failover_plan
         try:
-            result = self._rerank_with_retry(documents, query, top_n, provider)
+            if plan is None:
+                result = self._rerank_with_retry(documents, query, top_n)
+            else:
+                outcome = run_plan(
+                    plan,
+                    invoke=lambda resolved: self._rerank_attempt(
+                        documents, query, top_n, *self._attempt_target(resolved)
+                    ),
+                    stats=stats,
+                )
+                result = outcome.result
         except Exception as exc:
-            report_model_gateway_failure(self._config, "rerank", exc, started)
-            report_usage_failure(self._config, _USAGE_CAPABILITY, "rerank", exc, started)
+            attrib = stats.attribution_config(self._config)
+            report_model_gateway_failure(attrib, "rerank", exc, started)
+            report_usage_failure(
+                attrib, _USAGE_CAPABILITY, "rerank", exc, started,
+                attempts=stats.counted(),
+            )
             raise
-        report_usage_success(self._config, _USAGE_CAPABILITY, "rerank", started, result=result)
+        # 成功路径保持既有语义（仅 usage 事件，不触发网关恢复探测）
+        report_usage_success(
+            stats.attribution_config(self._config), _USAGE_CAPABILITY, "rerank", started,
+            result=result, attempts=stats.counted(), fallback=stats.switched,
+        )
         return result
 
     @staticmethod
@@ -162,6 +198,7 @@ class RedBearRerank(BaseDocumentCompressor):
             documents: Sequence[Union[str, Document, dict]],
             query: str,
             top_n: int,
+            config: RedBearModelConfig,
     ) -> List[Dict[str, Any]]:
         """直接解析 DashScope 响应，避免第三方适配器掩盖供应商错误。"""
         from dashscope import TextReRank
@@ -179,12 +216,12 @@ class RedBearRerank(BaseDocumentCompressor):
             else self._model.top_n
         )
         response = TextReRank.call(
-            model=self._config.model_name,
+            model=config.model_name,
             query=query,
             documents=normalized_documents,
             top_n=effective_top_n,
             return_documents=False,
-            api_key=self._config.api_key,
+            api_key=config.api_key,
         )
 
         status_code = self._dashscope_response_value(response, "status_code")
@@ -229,12 +266,23 @@ class RedBearRerank(BaseDocumentCompressor):
             documents: Sequence[Union[str, Document, dict]],
             query: str,
             top_n: int,
-            provider: str,
     ) -> List[Dict[str, Any]]:
+        """无换渠道 plan 的既有路径（网络重试由装饰器承担）。"""
+        return self._rerank_attempt(documents, query, top_n, self._model, self._config)
+
+    def _rerank_attempt(
+            self,
+            documents: Sequence[Union[str, Document, dict]],
+            query: str,
+            top_n: int,
+            model: Any,
+            config: RedBearModelConfig,
+    ) -> List[Dict[str, Any]]:
+        provider = config.provider.lower()
         if provider in _JINA_RERANK_PROVIDERS:
             from langchain_community.document_compressors import JinaRerank
-            model_instance: JinaRerank = self._model
+            model_instance: JinaRerank = model
             return model_instance.rerank(documents=documents, query=query, top_n=top_n)
         if provider == ModelProvider.DASHSCOPE:
-            return self._rerank_with_dashscope(documents, query, top_n)
+            return self._rerank_with_dashscope(documents, query, top_n, config)
         raise ValueError(f"不支持的模型提供商: {provider}")

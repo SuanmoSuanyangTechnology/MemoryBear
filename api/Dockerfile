@@ -1,3 +1,9 @@
+# MemoryBear api 镜像
+# 构建 context = core 仓库根（含 packages/、api/；应用文件以 api/ 前缀 COPY）：
+#
+#   docker build -f api/Dockerfile -t redbear-mem-open:latest .
+#   海外构建加 --build-arg NEED_MIRROR=0
+
 FROM python:3.12-slim
 USER root
 SHELL ["/bin/bash", "-c"]
@@ -5,8 +11,6 @@ SHELL ["/bin/bash", "-c"]
 ARG NEED_MIRROR=1
 
 WORKDIR /code
-
-# Build from the repository root; application files use the api/ prefix.
 
 # 1. Download dependencies through download_deps.py: python download_deps.py --china-mirrors
 # 2. Copy models
@@ -65,6 +69,9 @@ ENV PATH=/root/.local/bin:$PATH
 
 
 # 5. install dependencies from uv.lock file
+# 本地路径依赖（pyproject [tool.uv.sources]）：uv sync 前必须就位，否则 --locked 解析失败；
+# uv.lock 位于 /code，../packages/redbear-model 即 /packages/redbear-model
+COPY packages/redbear-model /packages/redbear-model
 COPY api/pyproject.toml /code/pyproject.toml
 COPY api/uv.lock /code/uv.lock
 COPY api/app /code/app

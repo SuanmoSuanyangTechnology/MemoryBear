@@ -171,6 +171,10 @@ class ModelApiKey(BaseModel):
     model_config_id = None
     channel_id = None
 
+    # 请求内换渠道计划（spec §11.2）：非映射类属、不落库/不序列化，
+    # 由 ModelApiKeyService 在返回运行时壳时挂载，消费方透传给 RedBearModelConfig
+    failover_plan = None
+
     # 关联关系
     model_configs = relationship(
         "ModelConfig",

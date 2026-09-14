@@ -139,7 +139,7 @@ class ChannelService:
     ) -> tuple[ModelChannel, str]:
         """登记 provider 公共 key（model_names=[]，覆盖该 provider 全部未点名模型）。
 
-        api_base 恒 NULL（运行时按能力选择公共端点，本地提供商由上层拦截）；
+        api_base 恒 NULL（运行时使用 provider 公共基地址，本地提供商由上层拦截）；
         同幂等键已存在：点名渠道 → 原地升级为 provider 级（覆盖集扩展为全量，
         返回 "upgraded"）；已 provider 级 → merged（no-op）；否则新建。
         合并/升级均不覆盖既有行的其余属性（remark/priority/extra）。

@@ -35,6 +35,7 @@ from app.utils.redis_cache import (invalidate_workspace_model_options, get_json_
 
 from redbear_model import (
     CredentialDecryptError,
+    FailoverPlan,
     ModelConfigInactiveError,
     RedBearModelError,
     ResolvedModelConfig,
@@ -44,10 +45,10 @@ from redbear_model import (
 from app.services.channel_registry import (
     candidate_channels_batch_sync,
     candidate_channels_sync,
-    resolve_composite_async,
-    resolve_composite_sync,
-    resolve_config_async,
-    resolve_config_sync,
+    resolve_composite_plan_async,
+    resolve_composite_plan_sync,
+    resolve_config_plan_async,
+    resolve_config_plan_sync,
 )
 from app.services.channel_service import ChannelService
 from app.services.model_impact_service import collect_model_impact
@@ -60,6 +61,22 @@ logger = get_business_logger()
 # 渠道解析开关（M3 切流）：off=纯旧路径 / prefer=v2 优先+旧兜底 / only=纯 v2
 # off 档保留 speedbear 公共模型绑定表旧读分支（回滚兜底）；prefer/only 一律走渠道解析
 _RESOLUTION_MODES = ("off", "prefer", "only")
+
+# 连接类故障标记：命中即按"网络不可达/超时"归类，而非密钥或参数问题。
+# 覆盖 openai SDK（APITimeoutError/APIConnectionError）、httpx（Connect/ReadTimeout、
+# ConnectError）、requests 与 botocore（Max retries exceeded / EndpointConnectionError）。
+_CONNECTIVITY_ERROR_MARKERS = (
+    "timeout",
+    "timed out",
+    "connecterror",
+    "connection error",
+    "connection refused",
+    "connection reset",
+    "max retries exceeded",
+    "name resolution",
+    "network is unreachable",
+    "no route to host",
+)
 _resolution_fallback_hits = 0
 
 
@@ -231,7 +248,7 @@ def _require_supported_api_base(
     api_base: Optional[str],
     model_type: str,
 ) -> None:
-    """运行时不读取 api_base 的组合，只允许留空或官方公共端点。"""
+    """运行时不读取自定义 api_base 的组合，只允许留空或官方基地址。"""
     error = validate_api_base_against_default(provider, api_base, model_type)
     if error:
         raise BusinessException(error, BizCode.INVALID_PARAMETER)
@@ -357,34 +374,60 @@ class ModelConfigService:
         model_id: uuid.UUID,
         tenant_id: uuid.UUID | None = None,
     ) -> ModelInfo:
-        """统一获取运行时模型信息（异步），带 Redis 缓存"""
-        cache_key = f"runtime_model_info:{model_id}:{tenant_id or '_'}"
-        cached = await get_json_async(cache_key)
-        if cached is not CACHE_MISS and isinstance(cached, dict):
-            return ModelInfo(**cached)
+        """统一获取运行时模型信息（异步）。
 
-        model = await ModelConfigService.get_model_by_id_async(
+        缓存只承载非密字段（model_type，300s）；凭据每次现解（spec §7：解密收敛在
+        resolver 取凭据处，明文不进跨请求缓存）。旧格式（含 api_key）缓存不采信。
+        """
+        if tenant_id is None:
+            # 无租户上下文（如变量池缺失）时显式退化为 config 自身租户，与解析层兜底语义一致
+            model_row = await ModelConfigService.get_model_by_id_async(db, model_id, tenant_id=None)
+            tenant_id = model_row.tenant_id
+        cache_key = f"runtime_model_info:{model_id}:{tenant_id}"
+        cached = await get_json_async(cache_key)
+        cached_model_type: ModelType | None = None
+        if (
+            cached is not CACHE_MISS
+            and isinstance(cached, dict)
+            and "api_key" not in cached
+            and isinstance(cached.get("model_type"), str)
+        ):
+            try:
+                cached_model_type = ModelType(cached["model_type"])
+            except ValueError:
+                cached_model_type = None
+
+        api_key = await ModelApiKeyService.get_available_api_key_async(
             db,
             model_id,
             tenant_id=tenant_id,
         )
-        if not model.is_active:
-            raise BusinessException(
-                "当前模型未启用，请在模型配置中确认 API Key 和 URL 已配置后启用模型",
-                BizCode.MODEL_CONFIG_INVALID,
-            )
-
-        api_key = await ModelApiKeyService.get_available_api_key_async(
-            db,
-            model.id,
-            tenant_id=tenant_id,
-        )
         if not api_key:
+            # 冷路径补全错误语义（模型不存在/已弃用/未启用/缺少凭据）
+            model = await ModelConfigService.get_model_by_id_async(
+                db,
+                model_id,
+                tenant_id=tenant_id,
+            )
+            if not model.is_active:
+                raise BusinessException(
+                    "当前模型未启用，请在模型配置中确认 API Key 和 URL 已配置后启用模型",
+                    BizCode.MODEL_CONFIG_INVALID,
+                )
             raise BusinessException("模型配置缺少 API Key", BizCode.INVALID_PARAMETER)
 
-        result = ModelInfo(
+        if cached_model_type is None:
+            model = await ModelConfigService.get_model_by_id_async(
+                db,
+                model_id,
+                tenant_id=tenant_id,
+            )
+            cached_model_type = ModelType(model.type)
+            await set_json_async(cache_key, {"model_type": cached_model_type.value}, ttl=300)
+
+        return ModelInfo(
             model_name=api_key.model_name,
-            model_type=ModelType(model.type),
+            model_type=cached_model_type,
             api_key=api_key.api_key,
             api_base=api_key.api_base,
             provider=api_key.provider,
@@ -393,9 +436,8 @@ class ModelConfigService:
             tenant_id=api_key.tenant_id,
             model_config_id=api_key.model_config_id,
             channel_id=api_key.channel_id,
+            failover_plan=api_key.failover_plan,
         )
-        await set_json_async(cache_key, result.model_dump(mode="json"), ttl=300)
-        return result
 
     @staticmethod
     def get_model_list(db: Session, query: ModelConfigQuery, tenant_id: uuid.UUID | None = None) -> PageData:
@@ -709,6 +751,20 @@ class ModelConfigService:
                     error_message = f"验证失败: {error_message}"
             elif "AuthenticationError" in error_type or "authentication" in error_message.lower():
                 error_message = "认证失败: API Key 无效或已过期"
+            elif any(
+                marker in f"{error_type} {error_message}".lower()
+                for marker in _CONNECTIVITY_ERROR_MARKERS
+            ):
+                # 报错时必须给出实际请求地址，否则无法区分"密钥错"与"网络不通"
+                address = (
+                    (api_base or "").strip()
+                    or get_default_provider_api_base(provider)
+                    or "默认端点"
+                )
+                error_message = (
+                    f"连接失败: 无法访问 {address}（连接超时或网络不可达），"
+                    f"请检查网络连通性，或为该模型配置代理/网关地址（API Base URL）"
+                )
             elif "RateLimitError" in error_type or "rate limit" in error_message.lower():
                 error_message = "请求频率限制: 已超过 API 调用限制"
             elif "InvalidRequestError" in error_type or "invalid request" in error_message.lower():
@@ -995,15 +1051,22 @@ class ModelApiKeyService:
         return api_key
 
     @staticmethod
-    def _runtime_api_key_from_resolved(resolved: ResolvedModelConfig) -> ModelApiKey:
+    def _runtime_api_key_from_resolved(
+        resolved: ResolvedModelConfig,
+        *,
+        failover_plan: FailoverPlan | None = None,
+    ) -> ModelApiKey:
         """ResolvedModelConfig → 瞬时 ModelApiKey 兼容壳（不落库；id=channel_id）。
 
         调用方只消费 .model_name/.api_key/.api_base/.provider/.is_omni/.capability
         与 .id（usage 计数），形状与旧路径一致。
 
-        渠道 api_base 为空（provider 级渠道）时按能力级公共端点物化（llm 与
-        embedding/rerank 的公共端点不同，dashscope 尤甚），与 RedBearModelConfig
-        的补默认语义一致；本地部署 provider 无默认地址，保持空并由下游明确报错。
+        渠道 api_base 为空（provider 级渠道）时物化 provider 公共基地址（dashscope
+        原生 SDK 组合在运行期再剥离为 /api/v1），与 RedBearModelConfig 的补默认
+        语义一致；本地部署 provider 无默认地址，保持空并由下游明确报错。
+
+        failover_plan：请求内换渠道计划（spec §11.2），非映射类属瞬时挂载，
+        不落库/不序列化；门面消费后自取（无 plan 时保持既有单候选行为）。
         """
         key = ModelApiKey(
             id=resolved.channel_id,
@@ -1015,6 +1078,7 @@ class ModelApiKeyService:
             capability=[str(item) for item in resolved.capabilities],
             is_omni=resolved.is_omni,
         )
+        key.failover_plan = failover_plan
         return ModelApiKeyService._stamp_usage_attribution(
             key, resolved.tenant_id, resolved.model_config_id, resolved.channel_id
         )
@@ -1117,9 +1181,13 @@ class ModelApiKeyService:
     def get_available_api_key(
         db: Session,
         model_config_id: uuid.UUID,
-        tenant_id: uuid.UUID | None = None,
+        tenant_id: uuid.UUID,
     ) -> Optional[ModelApiKey]:
-        """获取可用的API Key（渠道解析开关 off/prefer/only，返回形状与旧路径一致）"""
+        """获取可用的API Key（渠道解析开关 off/prefer/only，返回形状与旧路径一致）。
+
+        tenant_id 必填：租户边界在 resolver `_validate_config_access` 校验，省略等于
+        按 config 自身租户解析，禁止隐式跨租户（审计 §2.3 收紧项）。
+        """
         model_config = ModelConfigRepository.get_by_id(db, model_config_id)
         if not model_config:
             return None
@@ -1131,9 +1199,9 @@ class ModelApiKeyService:
         if mode != "off":
             try:
                 if model_config.is_composite:
-                    resolved = resolve_composite_sync(db, model_config, tenant_id=tenant_id)
+                    outcome = resolve_composite_plan_sync(db, model_config, tenant_id=tenant_id)
                 else:
-                    resolved = resolve_config_sync(
+                    outcome = resolve_config_plan_sync(
                         db, model_config.id, tenant_id=tenant_id, config_row=model_config
                     )
             except ModelConfigInactiveError:
@@ -1163,7 +1231,11 @@ class ModelApiKeyService:
                     return None
                 _record_resolution_fallback(model_config.id, exc)
             else:
-                return None if resolved is None else ModelApiKeyService._runtime_api_key_from_resolved(resolved)
+                if outcome is None:
+                    return None
+                return ModelApiKeyService._runtime_api_key_from_resolved(
+                    outcome.resolved, failover_plan=outcome.plan
+                )
 
         if mode == "off" and ModelApiKeyService._is_public_speedbear_model(model_config):
             speedbear_key = ModelApiKeyService._build_speedbear_runtime_api_key(
@@ -1184,9 +1256,9 @@ class ModelApiKeyService:
     async def get_available_api_key_async(
         db: AsyncSession,
         model_config_id: uuid.UUID,
-        tenant_id: uuid.UUID | None = None,
+        tenant_id: uuid.UUID,
     ) -> Optional[ModelApiKey]:
-        """Async version of get_available_api_key."""
+        """Async version of get_available_api_key（tenant_id 必填，语义同 sync 版）。"""
         model_config = await ModelConfigRepository.get_by_id_async(db, model_config_id)
         if not model_config:
             return None
@@ -1198,9 +1270,9 @@ class ModelApiKeyService:
         if mode != "off":
             try:
                 if model_config.is_composite:
-                    resolved = await resolve_composite_async(db, model_config, tenant_id=tenant_id)
+                    outcome = await resolve_composite_plan_async(db, model_config, tenant_id=tenant_id)
                 else:
-                    resolved = await resolve_config_async(
+                    outcome = await resolve_config_plan_async(
                         db, model_config.id, tenant_id=tenant_id, config_row=model_config
                     )
             except ModelConfigInactiveError:
@@ -1230,7 +1302,11 @@ class ModelApiKeyService:
                     return None
                 _record_resolution_fallback(model_config.id, exc)
             else:
-                return None if resolved is None else ModelApiKeyService._runtime_api_key_from_resolved(resolved)
+                if outcome is None:
+                    return None
+                return ModelApiKeyService._runtime_api_key_from_resolved(
+                    outcome.resolved, failover_plan=outcome.plan
+                )
 
         if mode == "off" and ModelApiKeyService._is_public_speedbear_model(model_config):
             speedbear_key = await ModelApiKeyService._build_speedbear_runtime_api_key_async(
@@ -1251,7 +1327,7 @@ class ModelApiKeyService:
     async def get_available_api_key_bridge_async(
         db: Session | AsyncSession,
         model_config_id: uuid.UUID,
-        tenant_id: uuid.UUID | None = None,
+        tenant_id: uuid.UUID,
     ) -> Optional[ModelApiKey]:
         if isinstance(db, AsyncSession):
             return await ModelApiKeyService.get_available_api_key_async(
