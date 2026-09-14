@@ -4,7 +4,7 @@
  * Allows filtering by type and configuring API keys
  */
 
-import { useState, useImperativeHandle, forwardRef, useRef, useMemo } from 'react';
+import { useState, useImperativeHandle, forwardRef, useRef, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button, Switch, Row, Col, Tooltip, Flex } from 'antd'
 import clsx from 'clsx';
@@ -42,26 +42,35 @@ const ModelListDetail = forwardRef<ModelListDetailRef, ModelListDetailProps>(({ 
   const [list, setList] = useState<ModelListItem[]>([])
   const multiKeyConfigModalRef = useRef<MultiKeyConfigModalRef>(null)
   const [loading, setLoading] = useState(false)
-  const [type, setType] = useState<string | undefined | null>(null)
+  const [type, setType] = useState<string | undefined>(undefined)
 
   /** Open drawer with provider model data */
   const handleOpen = (vo: ProviderModelItem) => {
-    setType(null)
+    setType(undefined)
     setOpen(true)
-    getData(vo)
+    setData(vo)
   }
 
+  useEffect(() => {
+    if (!open) return
+    setType(query?.type)
+  }, [open, query?.type])
+
+  useEffect(() => {
+    if (!open) return
+    getData()
+  }, [open, type, data.provider])
+
   /** Fetch model data for provider */
-  const getData = (vo: ProviderModelItem) => {
-    if (!vo.provider) return
+  const getData = () => {
+    if (!data.provider) return
   
     getModelNewList({
-      provider: vo.provider,
-      ...query,
+      provider: data.provider,
+      type,
     })
       .then(res => {
         const response = res as ProviderModelItem[]
-        setData(response[0])
         setList(response[0].models)
       })
   }
@@ -74,14 +83,14 @@ const ModelListDetail = forwardRef<ModelListDetailRef, ModelListDetailProps>(({ 
     setLoading(true)
     updateModelStatus(vo.id, { is_active: !vo.is_active })
       .finally(() => {
-        getData(data)
+        getData()
         setLoading(false)
       })
   }
 
   /** Close drawer */
   const handleClose = () => {
-    setType(null)
+    setType(undefined)
     setOpen(false)
     refresh?.()
     multiKeyConfigModalRef.current?.handleClose()
@@ -89,7 +98,7 @@ const ModelListDetail = forwardRef<ModelListDetailRef, ModelListDetailProps>(({ 
   }
   /** Refresh model list */
   const handleRefresh = () => {
-    getData(data)
+    getData()
   }
   /** Handle type filter change */
   const handleTypeChange = (value: string) => {
@@ -101,12 +110,6 @@ const ModelListDetail = forwardRef<ModelListDetailRef, ModelListDetailProps>(({ 
     handleOpen,
     handleRefresh,
   }));
-
-  /** Filter models by selected type */
-  const filterList = useMemo(() => {
-    if (!type) return list
-    return list.filter(vo => vo.type === type)
-  }, [type, list])
 
   return (
     <RbDrawer
@@ -128,10 +131,10 @@ const ModelListDetail = forwardRef<ModelListDetailRef, ModelListDetailProps>(({ 
           />
         </Col>
       </Row>
-      {filterList.length === 0 
+      {list.length === 0 
         ? <PageEmpty />
         : <div className="rb:grid rb:grid-cols-2 rb:gap-4 rb:mt-3">
-          {filterList.map(item => (
+          {list.map(item => (
             <RbCard
               key={item.id}
               title={item.name}

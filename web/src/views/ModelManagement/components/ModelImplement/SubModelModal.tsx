@@ -73,7 +73,7 @@ const SubModelModal = forwardRef<SubModelModalRef, SubModelModalProps>(({
         .then(res => {
           const response = res as ProviderModelItem[]
           const list = response[0]?.models || []
-          setModelList(list)
+          setModelList(list.filter(item => item.type === type))
 
           if (groupedByProvider?.[provider]?.length) {
             form.setFieldsValue({

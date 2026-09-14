@@ -74,7 +74,6 @@ const tabKeys = ['square', 'list', 'group']
         groupRef.current?.getList()
         break
       case 'list':
-        console.log('isEdit', isEdit)
         if (isEdit) {
           modelListRef.current?.modelListDetailRefresh?.()
         } else {
