@@ -300,12 +300,19 @@ class _DeadlineTransport(httpx.BaseTransport):
         self.state = state
         self.response = None
 
+    def _check_deadline(self):
+        try:
+            self.state.check_time()
+        except MediaCallTimeoutError:
+            # The SDK recognizes HTTP timeout types during response setup.
+            raise httpx.ReadTimeout("Video call deadline exceeded") from None
+
     def handle_request(self, request: httpx.Request) -> httpx.Response:
-        self.state.check_time()
+        self._check_deadline()
         self.response = self.client.send(
             request, stream=True, auth=None, follow_redirects=False
         )
-        self.state.check_time()
+        self._check_deadline()
         return httpx.Response(
             self.response.status_code,
             headers=self.response.headers,
