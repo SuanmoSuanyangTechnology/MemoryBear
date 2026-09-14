@@ -9,8 +9,10 @@ from fastapi import FastAPI, Request
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from mem_storage import StorageError
 from starlette.exceptions import HTTPException
 
+from ..error_mapping import map_storage_error
 from ..errors import KnowledgeError
 from ..i18n import normalize_locale, resolve_locale, translate
 from ..request_logging import request_route_template
@@ -86,6 +88,17 @@ def render_error(request: Request, error: KnowledgeError) -> JSONResponse:
 
 
 def register_error_handlers(application: FastAPI) -> None:
+    @application.exception_handler(StorageError)
+    async def storage_error_handler(request: Request, exc: StorageError):
+        error = map_storage_error(exc)
+        logger.warning(
+            "Knowledge storage failed internal_code=%s route=%s trace_id=%s",
+            error.code,
+            request_route_template(request.scope),
+            getattr(request.state, "trace_id", get_trace_id()),
+        )
+        return render_error(request, error)
+
     @application.exception_handler(RequestValidationError)
     async def validation_error_handler(request: Request, exc: RequestValidationError):
         logger.warning(

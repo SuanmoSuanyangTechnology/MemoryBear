@@ -43,11 +43,7 @@ async def _require_knowledge(
 ) -> None:
     if await knowledge_service.get_knowledge(db, knowledge_id, principal) is None:
         raise KnowledgeError.from_code(
-            "KB_RESOURCE_NOT_FOUND",
-            "知识库 不存在",
-            status_code=400,
-            response_code=4006,
-            response_style="business",
+            "KB_METADATA_RESOURCE_NOT_FOUND",
         )
 
 

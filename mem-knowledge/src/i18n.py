@@ -67,8 +67,7 @@ def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
     return result
 
 
-@lru_cache(maxsize=1)
-def load_catalogs(directory: Path | None = None) -> Mapping[str, Mapping[str, str]]:
+def _read_catalogs(directory: Path | None) -> Mapping[str, Mapping[str, str]]:
     """Load resources at startup; reject corrupt deployments before serving requests."""
     source = directory if directory is not None else files(__package__).joinpath("locales")
     catalogs = {}
@@ -95,6 +94,16 @@ def load_catalogs(directory: Path | None = None) -> Mapping[str, Mapping[str, st
     except (OSError, TypeError, ValueError) as exc:
         raise ValueError("Invalid knowledge translation resources") from exc
     return MappingProxyType(catalogs)
+
+
+@lru_cache(maxsize=1)
+def _package_catalogs() -> Mapping[str, Mapping[str, str]]:
+    return _read_catalogs(None)
+
+
+def load_catalogs(directory: Path | None = None) -> Mapping[str, Mapping[str, str]]:
+    """Keep production resources resident, independently of deployment validation."""
+    return _package_catalogs() if directory is None else _read_catalogs(directory)
 
 
 def translate(

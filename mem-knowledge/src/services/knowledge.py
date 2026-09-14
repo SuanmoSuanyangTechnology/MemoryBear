@@ -19,7 +19,7 @@ from ..api.schemas.knowledge import (
     ModelConfigSummary,
     UserSummary,
 )
-from ..errors import KnowledgeError
+from ..errors import KnowledgeError, public_text
 from ..models.owned import Knowledge, KnowledgeType, PermissionType
 from ..models.references import ModelBase, ModelConfig, User
 from ..rag.knowledge_graph.config import GraphPipeline, is_graph_enabled
@@ -57,22 +57,19 @@ def knowledge_snapshot(knowledge: Knowledge) -> KnowledgeSnapshot:
     )
 
 
-def _not_found(message: str = "Knowledge resource not found") -> KnowledgeError:
-    return KnowledgeError.from_code("KB_RESOURCE_NOT_FOUND", message)
+def _not_found(code: str = "KB_KNOWLEDGE_NOT_FOUND") -> KnowledgeError:
+    return KnowledgeError.from_code(code)
 
 
-def _conflict(message: str) -> KnowledgeError:
+def _conflict(knowledge_name: str) -> KnowledgeError:
     return KnowledgeError.from_code(
-        "KB_CONFLICT",
-        message,
-        status_code=400,
-        response_code=400,
-        response_style="http",
+        "KB_KNOWLEDGE_NAME_EXISTS",
+        params={"knowledge_name": public_text(knowledge_name)},
     )
 
 
-def _reference_not_found(message: str) -> KnowledgeError:
-    return KnowledgeError.from_code("KB_REFERENCE_NOT_FOUND", message)
+def _reference_not_found(code: str) -> KnowledgeError:
+    return KnowledgeError.from_code(code)
 
 
 def _as_uuid(value: object) -> uuid.UUID:
@@ -152,7 +149,7 @@ async def knowledge_to_data(
 ) -> dict[str, Any]:
     user = await ReferenceRepository.get_user(db, knowledge.created_by)
     if user is None:
-        raise _reference_not_found("Knowledge creator does not exist")
+        raise _reference_not_found("KB_KNOWLEDGE_CREATOR_NOT_FOUND")
     current_workspace = None
     if user.current_workspace_id is not None:
         current_workspace = await ReferenceRepository.get_workspace(
@@ -365,39 +362,35 @@ async def _prepare_knowledge_create(
         knowledge.name,
         workspace_id,
     ):
-        raise _conflict(f"The knowledge base name already exists: {knowledge.name}")
+        raise _conflict(knowledge.name)
     if knowledge.external_id and await knowledge_repository.get_knowledge_by_external_id_async(
         db,
         knowledge.external_id,
         workspace_id,
     ):
         raise KnowledgeError.from_code(
-            "KB_CONFLICT",
-            f"external_id already exists in this workspace: {knowledge.external_id}",
-            status_code=400,
-            response_code=1001,
-            response_style="business",
+            "KB_EXTERNAL_ID_EXISTS",
         )
 
     workspace = await ReferenceRepository.get_workspace(db, workspace_id)
     if workspace is None:
-        raise _reference_not_found("Workspace does not exist")
+        raise _reference_not_found("KB_WORKSPACE_NOT_FOUND")
     if knowledge.embedding_id is None:
         if not workspace.embedding:
-            raise _reference_not_found("Workspace embedding model is not configured")
+            raise _reference_not_found("KB_WORKSPACE_EMBEDDING_MODEL_NOT_CONFIGURED")
         knowledge.embedding_id = _as_uuid(workspace.embedding)
     if knowledge.reranker_id is None:
         if not workspace.rerank:
-            raise _reference_not_found("Workspace rerank model is not configured")
+            raise _reference_not_found("KB_WORKSPACE_RERANK_MODEL_NOT_CONFIGURED")
         knowledge.reranker_id = _as_uuid(workspace.rerank)
     if knowledge.llm_id is None:
         if not workspace.llm:
-            raise _reference_not_found("Workspace LLM model is not configured")
+            raise _reference_not_found("KB_WORKSPACE_LLM_MODEL_NOT_CONFIGURED")
         knowledge.llm_id = _as_uuid(workspace.llm)
     if knowledge.image2text_id is None:
         model = await ReferenceRepository.get_latest_vision_model(db, workspace.tenant_id)
         if model is None:
-            raise _reference_not_found("No vision model is available for the tenant")
+            raise _reference_not_found("KB_TENANT_VISION_MODEL_NOT_AVAILABLE")
         knowledge.image2text_id = model.id
     return knowledge
 
@@ -411,7 +404,7 @@ async def create_knowledge(
     if requested_parent_id and requested_parent_id != principal.workspace_id:
         parent = await get_knowledge(db, requested_parent_id, principal)
         if parent is None:
-            raise _not_found("The parent knowledge base does not exist or access is denied")
+            raise _not_found("KB_PARENT_KNOWLEDGE_NOT_FOUND")
     knowledge = await _prepare_knowledge_create(
         db,
         create_data,
@@ -489,14 +482,14 @@ async def prepare_knowledge_update(
         if parent_id is not None and parent_id != principal.workspace_id:
             parent = await get_knowledge(db, parent_id, principal)
             if parent is None:
-                raise _not_found("The parent knowledge base does not exist or access is denied")
+                raise _not_found("KB_PARENT_KNOWLEDGE_NOT_FOUND")
     if "name" in update_dict and update_dict["name"] != knowledge.name:
         if await knowledge_repository.get_knowledge_by_name_async(
             db,
             update_dict["name"],
             principal.workspace_id,
         ):
-            raise _conflict(f"The knowledge base name already exists: {update_dict['name']}")
+            raise _conflict(update_dict["name"])
     graph_enabled_before = None
     if "parser_config" in update_dict:
         try:
@@ -507,8 +500,7 @@ async def prepare_knowledge_update(
             )
         except ValueError as exc:
             raise KnowledgeError.from_code(
-                "KB_VALIDATION_ERROR",
-                str(exc),
+                "KB_KNOWLEDGE_PARSER_CONFIG_INVALID",
             ) from exc
     embedding_changed = (
         "embedding_id" in update_dict and update_dict["embedding_id"] != knowledge.embedding_id
