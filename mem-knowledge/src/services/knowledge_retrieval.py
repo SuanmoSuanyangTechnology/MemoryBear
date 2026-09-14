@@ -374,6 +374,10 @@ class KnowledgeRetrievalService:
                     timings=timings,
                     log_id=log_id,
                 )
+                result = await cls._complete_weighted_target_scores(
+                    runtime, store, request, target, result, document_ids,
+                    global_rerank=preparation.global_rerank, timings=timings,
+                )
                 return index, result
 
         tasks = [
@@ -530,8 +534,11 @@ class KnowledgeRetrievalService:
                     text_query,
                     full_text_options,
                 )
-                chunks = collapse_units_to_chunks(unit_candidates)
-                chunks = await store.resolve_parent_chunks(chunks, target.index_name)
+                if global_rerank is not None and global_rerank.mode is RerankMode.WEIGHTED_SCORE:
+                    chunks = [cls._unit_to_chunk(candidate) for candidate in unit_candidates]
+                else:
+                    chunks = collapse_units_to_chunks(unit_candidates)
+                    chunks = await store.resolve_parent_chunks(chunks, target.index_name)
             else:
                 chunks = await store.search_by_full_text(text_query, full_text_options)
             cls._log_target_done(
@@ -779,37 +786,6 @@ class KnowledgeRetrievalService:
             )
         finally:
             cls._record_timing(timings, "local_rerank_ms", local_rerank_started_at)
-        if weighted_semantics and query_vector is not None:
-            missing = [candidate for candidate in ranked if candidate.semantic_score is None]
-            if missing:
-                scoring_started_at = time.perf_counter()
-                try:
-                    score_units = is_qwen3_vl_embedding(target.embedding.resolved)
-                    score_candidates = (
-                        store.score_units_by_vector
-                        if score_units
-                        else store.score_candidates_by_vector
-                    )
-                    scores = await score_candidates(
-                        query_vector, [candidate.chunk for candidate in missing], vector_options
-                    )
-                finally:
-                    cls._record_timing(timings, "es_vector_ms", scoring_started_at)
-                ranked = [
-                    replace(
-                        candidate,
-                        semantic_score=scores.get(
-                            str(
-                                (candidate.chunk.metadata or {}).get(
-                                    "_unit_id" if score_units else "doc_id"
-                                ) or ""
-                            ), 0.0
-                        ),
-                    )
-                    if candidate.semantic_score is None
-                    else candidate
-                    for candidate in ranked
-                ]
         cls._log_target_done(
             target,
             len(vector_chunks),
@@ -824,7 +800,84 @@ class KnowledgeRetrievalService:
             candidates=tuple(ranked),
             entities=tuple(graph_result.entities),
             relationships=tuple(graph_result.relationships),
+            query_vector=tuple(query_vector) if query_vector is not None else None,
         )
+
+    @classmethod
+    async def _complete_weighted_target_scores(
+        cls,
+        runtime: ProcessRuntime,
+        store: AsyncElasticSearchRetrieval,
+        request: KnowledgeRetrievalRequest,
+        target: RetrievalTarget,
+        result: TargetRetrievalResult,
+        document_ids: list[str] | None,
+        *,
+        global_rerank: RerankPlan | None,
+        timings: RetrievalTimings | None = None,
+    ) -> TargetRetrievalResult:
+        """Complete selected candidates after every local retrieval path."""
+        if (
+            global_rerank is None
+            or global_rerank.mode is not RerankMode.WEIGHTED_SCORE
+            or global_rerank.weights.semantic_weight == 0
+        ):
+            return result
+        missing = [c for c in result.candidates if c.semantic_score is None]
+        if not missing:
+            return result
+        query = request.query_text
+        if query is None:
+            raise KnowledgeError.from_code(
+                "KB_VALIDATION_ERROR", "Weighted scoring requires a text query"
+            )
+        vector = result.query_vector
+        if vector is None:
+            if target.embedding.resolved is None:
+                raise KnowledgeError.from_code(
+                    "KB_MODEL_UNAVAILABLE", "Embedding model is unavailable"
+                )
+            started_at = time.perf_counter()
+            try:
+                embedding = RedBearEmbeddings(
+                    target.embedding.resolved, client_pool=runtime.model_runtime.pool
+                )
+                vector = tuple(normalize_vector(await embedding.aembed_query(query)))
+            finally:
+                cls._record_timing(timings, "embedding_ms", started_at)
+        multimodal = is_qwen3_vl_embedding(target.embedding.resolved)
+
+        def score_key(candidate: RetrievalCandidate) -> tuple[str, str]:
+            metadata = candidate.chunk.metadata or {}
+            unit_id = metadata.get("_unit_id") if multimodal else None
+            if unit_id:
+                return "unit", str(unit_id)
+            chunk_id = metadata.get("_chunk_id") if multimodal else None
+            return "chunk", str(chunk_id or metadata.get("doc_id") or "")
+
+        scores: dict[tuple[str, str], float] = {}
+        options = cls._search_options(request, target, document_ids, len(missing), None)
+        started_at = time.perf_counter()
+        try:
+            for kind in ("unit", "chunk"):
+                group = [c for c in missing if score_key(c)[0] == kind]
+                if not group:
+                    continue
+                if kind == "unit":
+                    scorer = store.score_units_by_vector
+                elif multimodal:
+                    scorer = store.score_chunk_units_by_vector
+                else:
+                    scorer = store.score_candidates_by_vector
+                values = await scorer(vector, [c.chunk for c in group], options)
+                scores.update({score_key(c): values.get(score_key(c)[1], 0.0) for c in group})
+        finally:
+            cls._record_timing(timings, "es_vector_ms", started_at)
+        return replace(result, candidates=tuple(
+            replace(c, semantic_score=scores[score_key(c)])
+            if c.semantic_score is None else c
+            for c in result.candidates
+        ))
 
     @classmethod
     async def _embed_image_query(

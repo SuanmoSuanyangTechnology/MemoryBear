@@ -175,6 +175,7 @@ class TargetRetrievalResult:
     candidates: tuple[RetrievalCandidate, ...]
     entities: tuple[Any, ...] = ()
     relationships: tuple[Any, ...] = ()
+    query_vector: tuple[float, ...] | None = field(default=None, repr=False)
 
 
 __all__ = [

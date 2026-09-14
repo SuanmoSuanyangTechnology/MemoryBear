@@ -777,8 +777,6 @@ class KnowledgeRetrievalPreparation:
             cls._validate_weighted_target(target)
         if global_mode is not RerankMode.WEIGHTED_SCORE:
             return
-        for target in targets:
-            cls._validate_weighted_params(target.params, allow_graph_retrieval=True)
         embedding_spaces = {
             cls._embedding_space_key(target.embedding) for target in targets
         }
@@ -797,32 +795,25 @@ class KnowledgeRetrievalPreparation:
         global_mode: RerankMode | None,
     ) -> None:
         for ref, selection in zip(refs, local_selections, strict=True):
-            if (
-                selection[0] is not RerankMode.WEIGHTED_SCORE
-                and global_mode is not RerankMode.WEIGHTED_SCORE
-            ):
+            # Only local weighted fusion requires hybrid recall. Global fusion
+            # scores candidates from any supported local text retrieval mode.
+            if selection[0] is not RerankMode.WEIGHTED_SCORE:
                 continue
             params = cls._build_retrieval_params(request, ref.config)
-            cls._validate_weighted_params(
-                params,
-                allow_graph_retrieval=selection[0] is not RerankMode.WEIGHTED_SCORE,
-            )
+            cls._validate_weighted_params(params)
 
     @staticmethod
     def _validate_weighted_target(target: RetrievalTarget) -> None:
         KnowledgeRetrievalPreparation._validate_weighted_params(target.params)
 
     @staticmethod
-    def _validate_weighted_params(
-        params: RetrievalParams, *, allow_graph_retrieval: bool = False
-    ) -> None:
+    def _validate_weighted_params(params: RetrievalParams) -> None:
         if params.retrieve_type is not RetrieveType.HYBRID:
             raise KnowledgeError.from_code(
                 "KB_VALIDATION_ERROR",
                 "Weighted rerank requires hybrid retrieval",
             )
-        # Global fusion scores the candidates already selected by local model rerank.
-        if params.enable_graph_retrieval and not allow_graph_retrieval:
+        if params.enable_graph_retrieval:
             raise KnowledgeError.from_code(
                 "KB_VALIDATION_ERROR",
                 "Weighted rerank does not support graph retrieval",
