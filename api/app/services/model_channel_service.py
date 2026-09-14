@@ -321,7 +321,8 @@ class ChannelApiKeyService:
         """登记 provider 级公共凭据（model_names=[]）。
 
         api_base 恒 NULL：运行时按能力使用公共端点（本地提供商无公共端点，禁登记）。
-        无锚点模型名故不做活体验证；同幂等键已存在 → merged（不覆盖既有属性）。
+        无锚点模型名故不做活体验证；同幂等键命中同凭据点名行 → 原地升级为 provider
+        级（"upgraded"，覆盖集扩展为该供应商全部未点名模型）；已 provider 级 → merged。
         """
         provider = _provider_value(data.provider)
         if provider == ModelProvider.COMPOSITE.value:
