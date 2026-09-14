@@ -243,34 +243,36 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
         >
           <Input.TextArea placeholder={t('common.pleaseEnter')} />
         </Form.Item>
-        <Form.Item
-          name={['credential', "api_key"]}
-          label={t('modelNew.api_key')}
-          rules={[{ required: true, message: t('common.inputPlaceholder', { title: t('modelNew.api_key') }) }]}
-        >
-          <Input.Password placeholder={t('common.pleaseEnter')} />
-        </Form.Item>
+        {!isEdit && <>
+          <Form.Item
+            name={['credential', "api_key"]}
+            label={t('modelNew.api_key')}
+            rules={[{ required: true, message: t('common.inputPlaceholder', { title: t('modelNew.api_key') }) }]}
+          >
+            <Input.Password placeholder={t('common.pleaseEnter')} />
+          </Form.Item>
 
-        <Form.Item
-          name={['credential', "api_base"]}
-          label={t('modelNew.api_base')}
-        >
-          <Input placeholder="https://api.example.com/v1" />
-        </Form.Item>
+          <Form.Item
+            name={['credential', "api_base"]}
+            label={t('modelNew.api_base')}
+          >
+            <Input placeholder="https://api.example.com/v1" />
+          </Form.Item>
 
-        <Form.Item
-          name={['credential', "priority"]}
-          label={t('modelNew.priority')}
-        >
-          <InputNumber placeholder={t('common.pleaseEnter')} className="rb:w-full!" />
-        </Form.Item>
+          <Form.Item
+            name={['credential', "priority"]}
+            label={t('modelNew.priority')}
+          >
+            <InputNumber placeholder={t('common.pleaseEnter')} className="rb:w-full!" />
+          </Form.Item>
 
-        <Form.Item
-          name={['credential', "remark"]}
-          label={t('modelNew.remark')}
-        >
-          <Input.TextArea placeholder={t('common.pleaseEnter')} />
-        </Form.Item>
+          <Form.Item
+            name={['credential', "remark"]}
+            label={t('modelNew.remark')}
+          >
+            <Input.TextArea placeholder={t('common.pleaseEnter')} />
+          </Form.Item>
+        </>}
 
         {['llm', 'chat'].includes(modelType as string) &&
           <Row gutter={16}>

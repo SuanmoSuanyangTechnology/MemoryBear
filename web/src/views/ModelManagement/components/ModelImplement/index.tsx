@@ -45,12 +45,12 @@ const ModelImplement: FC<ModelImplementProps> = ({ type, value, onChange }) => {
   /** Delete model implementation */
   const handleDelete = (vo: any) => {
     modal.confirm({
-      title: t('common.confirmDeleteDesc', { name: [vo.model_name, vo.api_key].join(' / ') }),
+      title: t('common.confirmDeleteDesc', { name: vo.model_name }),
       okText: t('common.delete'),
       cancelText: t('common.cancel'),
       okType: 'danger',
       onOk: () => {
-        onChange?.(value?.filter((item: any) => item.id !== vo.id))
+        onChange?.(value?.filter((item: any) => item.model_name !== vo.model_name))
       }
     })
   }
@@ -90,9 +90,9 @@ const ModelImplement: FC<ModelImplementProps> = ({ type, value, onChange }) => {
       <Flex vertical gap={12} className="rb:mt-2!">
         {!value || value.length === 0
         ? <Empty size={88} />
-          : value.map((item: any) => {
+          : value.map((item: any, index) => {
           return (
-            <Flex key={item.id} align="center" justify="space-between" className="rb:bg-gray-100 rb:rounded-lg rb:p-3!">
+            <Flex key={index} align="center" justify="space-between" className="rb:bg-gray-100 rb:rounded-lg rb:p-3!">
               <Flex gap={8} align="center">
                 <div className="rb:font-medium">
                   {item.model_name}
