@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, field_serializer, ConfigDict
+from pydantic import BaseModel, Field, field_serializer, ConfigDict, SecretStr
 from typing import Optional, List, Dict, Any
 import datetime
 import uuid
@@ -30,6 +30,7 @@ class ApiKeyRegister(BaseModel):
     api_base: Optional[str] = Field(None, description="API基础URL", max_length=500)
     remark: Optional[str] = Field(None, description="备注", max_length=255)
     priority: int = Field(0, description="优先级（大者优先）")
+    test_media_url: SecretStr | None = Field(None, repr=False, exclude=True, description="仅供本次验证的媒体 URL")
 
 
 class ModelConfigCreate(ModelConfigBase):
@@ -86,6 +87,7 @@ class ModelConfig(ModelConfigBase):
     created_at: datetime.datetime
     updated_at: datetime.datetime
     is_deprecated: bool = False
+    validation_stage: str | None = None
     is_available: Optional[bool] = None
     members: List[CompositeMemberSpec] = []
 
@@ -133,6 +135,7 @@ class ApiKeyItem(BaseModel):
     id: uuid.UUID
     provider: str
     credential_masked: str
+    validation_stage: str | None = None
     is_provider_level: bool = False
     model_names: List[str] = Field(default_factory=list, description="点名覆盖集（空 = 供应商公共）")
     api_base: Optional[str] = None
@@ -217,9 +220,11 @@ class ModelValidateRequest(BaseModel):
     api_base: Optional[str] = Field(None, description="API基础URL")
     model_type: Optional[ModelType] = Field(ModelType.LLM, description="模型类型")
     test_message: Optional[str] = Field("Hello", description="测试消息")
+    test_media_url: SecretStr | None = Field(None, repr=False, exclude=True, description="仅供本次验证的媒体 URL")
 
 
 class ModelValidateResponse(BaseModel):
+    validation_stage: str | None = Field(None, description="submitted 仅受理；completed 已完成")
     """验证模型配置响应"""
     valid: bool = Field(..., description="是否有效")
     message: str = Field(..., description="验证消息")

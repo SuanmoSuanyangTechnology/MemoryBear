@@ -7,7 +7,7 @@ import uuid
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.db import get_db
-from app.dependencies import get_current_user
+from app.dependencies import get_current_user, get_current_user_async, CurrentUserSnapshot
 from app.models.models_model import ModelProvider, ModelType, LoadBalanceStrategy
 from app.models.user_model import User
 from app.repositories.model_repository import ModelConfigRepository
@@ -298,7 +298,7 @@ def get_model_by_id(
 async def create_model(
     model_data: model_schema.ModelConfigCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: CurrentUserSnapshot = Depends(get_current_user_async)
 ):
     """
     创建自定义模型
@@ -319,7 +319,10 @@ async def create_model(
         # 将ORM对象转换为Pydantic模型
         result = model_schema.ModelConfig.model_validate(result_orm)
         
-        return success(data=result, msg="模型配置创建成功")
+        msg = "模型配置创建成功"
+        if result.validation_stage == "submitted":
+            msg += "；请求受理验证通过，尚未验证转录完成或音频内容"
+        return success(data=result, msg=msg)
     except Exception as e:
         api_logger.error(f"创建模型配置失败: {model_data.name} - {str(e)}")
         raise
@@ -613,7 +616,7 @@ async def create_model_api_key(
     model_id: uuid.UUID,
     api_key_data: model_schema.ApiKeyRegister,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: CurrentUserSnapshot = Depends(get_current_user_async)
 ):
     """
     为模型登记点名凭据（provider/真实模型名由服务端按模型配置读取）
@@ -631,6 +634,8 @@ async def create_model_api_key(
             created_by=current_user.id,
         )
         msg = "凭据登记成功" if action == "created" else "凭据已存在（合并到既有渠道）"
+        if result.validation_stage == "submitted":
+            msg += "；请求受理验证通过，尚未验证转录完成或音频内容"
         api_logger.info(f"模型凭据登记完成: model_id={model_id} action={action}")
         return success(data=result, msg=msg)
     except Exception as e:
@@ -670,7 +675,7 @@ def unbind_model_api_key(
 async def validate_model_config(
     validate_data: model_schema.ModelValidateRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: CurrentUserSnapshot = Depends(get_current_user_async)
 ):
     """
     验证模型配置是否有效
@@ -690,7 +695,8 @@ async def validate_model_config(
         api_key=validate_data.api_key,
         api_base=validate_data.api_base,
         model_type=validate_data.model_type,
-        test_message=validate_data.test_message
+        test_message=validate_data.test_message,
+        test_media_url=validate_data.test_media_url,
     )
     
     return success(data=model_schema.ModelValidateResponse(**result), msg="验证完成")

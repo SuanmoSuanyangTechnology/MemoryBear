@@ -12,6 +12,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import math
 import uuid
 
@@ -34,9 +35,11 @@ from app.services.channel_registry import (
 )
 from app.services.channel_service import ChannelService, describe_channel
 from app.services.model_service import (
+    _DASHSCOPE_VIDEO_MODEL,
     ModelConfigService,
     _require_api_base_for_local_provider,
     _require_supported_api_base,
+    is_media_validation_model,
 )
 
 
@@ -199,6 +202,50 @@ class ChannelApiKeyService:
         return [model_schema.ApiKeyItem.model_validate(describe_channel(row)) for row in rows]
 
     @staticmethod
+    def _media_key_snapshot(model_id: uuid.UUID, tenant_id: uuid.UUID) -> dict | None:
+        from app.db import get_db_context
+
+        with get_db_context() as db:
+            config = ChannelApiKeyService._config(db, model_id, tenant_id)
+            if not is_media_validation_model(config.provider, config.name):
+                return None
+            if config.model_base and config.model_base.is_deprecated:
+                raise BusinessException("模型已停用或废弃", BizCode.INVALID_PARAMETER)
+            if config.name == _DASHSCOPE_VIDEO_MODEL and "video" not in (config.capability or []):
+                raise BusinessException("模型缺少视频理解能力", BizCode.INVALID_PARAMETER)
+            return {"provider": _provider_value(config.provider), "name": config.name,
+                    "type": config.type, "capability": list(config.capability or []),
+                    "is_omni": config.is_omni, "is_active": config.is_active}
+
+    @staticmethod
+    def _register_media_key(model_id, tenant_id, created_by, data, snapshot, stage):
+        from app.db import get_db_context
+
+        with get_db_context() as db:
+            try:
+                config = ChannelApiKeyService._config(db, model_id, tenant_id)
+                if (config.is_active != snapshot["is_active"]
+                        or (config.model_base and config.model_base.is_deprecated)
+                        or config.name != snapshot["name"]
+                        or _provider_value(config.provider) != snapshot["provider"]
+                        or config.type != snapshot["type"]
+                        or list(config.capability or []) != snapshot["capability"]):
+                    raise BusinessException("验证期间模型配置已变更，请重新验证", BizCode.INVALID_PARAMETER)
+                row, action = ChannelService(db).register_for_model(
+                    provider=snapshot["provider"], tenant_id=tenant_id,
+                    model_name=snapshot["name"], api_key=data["api_key"], api_base=data["api_base"],
+                    remark=data["remark"], priority=data["priority"], created_by=created_by,
+                )
+                db.commit()
+                db.refresh(row)
+                item = model_schema.ApiKeyItem.model_validate(describe_channel(row))
+                item.validation_stage = stage
+                return item, action
+            except Exception:
+                db.rollback()
+                raise
+
+    @staticmethod
     async def add_model_key(
         db: Session,
         model_id: uuid.UUID,
@@ -211,6 +258,22 @@ class ChannelApiKeyService:
         同凭据同端点已存在时幂等合并：provider 级渠道吸收为 no-op、点名渠道并入覆盖集。
         活体验证与旧路径一致（登记前试调一次，失败 400）。
         """
+        snapshot = await asyncio.to_thread(ChannelApiKeyService._media_key_snapshot, model_id, tenant_id)
+        if snapshot is not None:
+            _require_api_base_for_local_provider(snapshot["provider"], data.api_base)
+            _require_supported_api_base(snapshot["provider"], data.api_base, snapshot["type"])
+            validation = await ModelConfigService.validate_model_config(
+                db=None, model_name=snapshot["name"], provider=snapshot["provider"],
+                api_key=data.api_key, api_base=data.api_base, model_type=snapshot["type"],
+                is_omni=snapshot["is_omni"], capability=snapshot["capability"],
+                test_media_url=data.test_media_url,
+            )
+            if not validation["valid"]:
+                raise BusinessException(validation["error"], BizCode.INVALID_PARAMETER)
+            return await asyncio.to_thread(
+                ChannelApiKeyService._register_media_key, model_id, tenant_id,
+                created_by, data.model_dump(), snapshot, validation["validation_stage"],
+            )
         model_config = ChannelApiKeyService._config(db, model_id, tenant_id)
         provider = _provider_value(model_config.provider)
         _require_api_base_for_local_provider(provider, data.api_base)
