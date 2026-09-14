@@ -15,7 +15,8 @@ import UploadImages from '@/components/Upload/UploadImages'
 import { updateCustomModel, addCustomModel, modelTypeUrl, getModelProviderList } from '@/api/models'
 import { getFileLink } from '@/api/fileStorage'
 import { validateSquareImage, stringRegExp } from '@/utils/validator'
-import { formatModelType } from '../utils'
+import MediaValidationField from './MediaValidationField';
+import { formatModelType, getValidationMediaType } from '../utils'
 
 /**
  * Custom model modal component
@@ -32,6 +33,9 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
   const [loading, setLoading] = useState(false)
   const [abortController, setAbortController] = useState<AbortController | null>(null)
   const modelType = Form.useWatch(['type'], form);
+  const modelName = Form.useWatch(['name'], form);
+  const provider = Form.useWatch(['provider'], form);
+  const validationMediaType = isEdit ? undefined : getValidationMediaType(provider, modelName);
   const isOmni = Form.useWatch(['is_omni'], form);
   const isThinking = Form.useWatch(['is_thinking'], form);
   const thinkingOnly = Form.useWatch(['thinking_only'], form);
@@ -101,7 +105,7 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
     res.then(() => {
       refresh?.(isEdit)
       handleClose()
-      message.success(isEdit ? t('common.updateSuccess') : t('common.createSuccess'))
+      message.success(validationMediaType === 'audio' ? t('modelNew.asrSubmitted') : isEdit ? t('common.updateSuccess') : t('common.createSuccess'))
     })
       .catch(() => {
         setLoading(false)
@@ -243,6 +247,7 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
         >
           <Input.TextArea placeholder={t('common.pleaseEnter')} />
         </Form.Item>
+        <MediaValidationField mediaType={validationMediaType} name={['credential', 'test_media_url']} />
         <Form.Item
           name={['credential', "api_key"]}
           label={t('modelNew.api_key')}

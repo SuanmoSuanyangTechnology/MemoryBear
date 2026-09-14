@@ -404,6 +404,8 @@ const Private: FC = () => {
       embedding_id: knowledgeBase.embedding_id,
       llm_id: knowledgeBase.llm_id,
       image2text_id: knowledgeBase.image2text_id,
+      audio2text_id: knowledgeBase.audio2text_id,
+      video2text_id: knowledgeBase.video2text_id,
       reranker_id: knowledgeBase.reranker_id,
       permission_id: knowledgeBase.permission_id,
       type: knowledgeBase.type,

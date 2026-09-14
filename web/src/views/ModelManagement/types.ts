@@ -189,6 +189,7 @@ export interface KeyConfigModalForm {
  * Multi-key configuration form data
  */
 export interface MultiKeyForm {
+  test_media_url?: string;
   /** Model config ID */
   model_config_id?: string;
   /** Model name */
@@ -283,6 +284,7 @@ export interface CustomModelForm {
   function_call?: boolean;
   capability?: Capability[];
   credential: {
+    test_media_url?: string;
     api_key: string;
     api_base?: string;
     remark?: string;
@@ -318,6 +320,7 @@ export interface BaseRef {
 
 export type Capability = 'vision' | 'audio' | 'video' | 'thinking' | 'thinking_only' | 'json_output' | 'function_call';
 export interface Model {
+  is_available?: boolean | null;
   name: string;
   type: string;
   logo: string;

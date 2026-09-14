@@ -7,7 +7,9 @@ export interface KnowledgeBaseFormData {
   avatar?: string; // 头像
   embedding_id?: string; // 嵌入模型ID
   llm_id?: string; // LLM模型ID
-  image2text_id?: string; // 图片转文本模型ID
+  image2text_id?: string | null;
+  audio2text_id?: string | null;
+  video2text_id?: string | null; // 图片转文本模型ID
   reranker_id?: string; // 重排模型ID
   chat_id?: string; // 聊天模型ID
   permission_id?: string; // 权限ID
@@ -37,7 +39,9 @@ export interface KnowledgeBase {
   parser_config?: ParserConfig; // 解析器配置
   embedding_id?: string;
   llm_id?: string;
-  image2text_id?: string;
+  image2text_id?: string | null;
+  audio2text_id?: string | null;
+  video2text_id?: string | null;
   reranker_id?: string;
   permission_id?: string;
   type: string;
@@ -328,7 +332,9 @@ export interface KnowledgeBaseListItem extends KnowledgeBase {
   embedding?: Model;
   reranker?: Model;
   llm?: Model;
-  image2text?: Model;
+  image2text?: Model | null;
+  audio2text?: Model | null;
+  video2text?: Model | null;
   _expanded?: boolean;
   children?: KnowledgeBaseListItem[];
 }

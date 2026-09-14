@@ -90,6 +90,14 @@ export const model = {
       bedrock: "Bedrock"
     },
     modelNew: {
+      testAudioUrl: '测试音频 URL',
+      testVideoUrl: '测试视频 URL',
+      mediaUrlRequired: '请输入本次验证使用的媒体 URL',
+      mediaUrlInvalid: '请输入有效的 HTTP 或 HTTPS URL',
+      asrValidationHint: '添加密钥将调用模型提交音频任务。通过仅表示请求已受理，不表示转录完成或音频内容已验证。URL 不保存。',
+      videoValidationHint: '添加密钥将调用模型理解测试视频，完整返回文本后才通过验证。URL 不保存。',
+      asrSubmitted: '密钥已保存，请求受理验证通过；转录尚未完成。',
+
       group: '模型组合',
       list: '模型列表',
       square: '模型广场',

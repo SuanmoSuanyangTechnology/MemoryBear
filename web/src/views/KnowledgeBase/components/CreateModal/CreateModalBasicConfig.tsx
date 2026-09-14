@@ -6,6 +6,7 @@ import SliderInput from '@/components/SliderInput';
 import { stringRegExp } from '@/utils/validator';
 import type { KnowledgeBaseFormData } from '@/views/KnowledgeBase/types';
 import type { Model } from '@/views/ModelManagement/types';
+import { OPTIONAL_MEDIA_TYPES } from './mediaModels';
 import { MODEL_TYPE_CONFIG } from './useCreateModalModels';
 
 const { TextArea } = Input;
@@ -29,6 +30,7 @@ const CreateModalBasicConfig = ({
 }: CreateModalBasicConfigProps) => {
   const { t } = useTranslation();
   const form = Form.useFormInstance<KnowledgeBaseFormData>();
+  const selectedValues = Form.useWatch([], form);
   const thirdPartyPlatform = Form.useWatch(['parser_config', '_third_party_platform'], form) || 'yuque';
 
   return (
@@ -174,18 +176,24 @@ const CreateModalBasicConfig = ({
         const fieldKey = modelTypeConfig?.fieldKey || `${normalizedType}_id`;
         const options = customModels[modelTypeConfig?.modelType || type] || [];
 
+        const selectedId = selectedValues?.[fieldKey as keyof KnowledgeBaseFormData];
+        const unavailable = typeof selectedId === 'string' && !options.some((model) => model.id === selectedId);
+        const optional = OPTIONAL_MEDIA_TYPES.includes(normalizedType);
         return (
           <Form.Item
             key={type}
             name={fieldKey as keyof KnowledgeBaseFormData}
             label={`${t(`knowledgeBase.createForm.${fieldKey}`)} model`}
-            rules={[{ required: true, message: t('knowledgeBase.createForm.modelRequired') }]}
+            rules={[{ required: !optional, message: t('knowledgeBase.createForm.modelRequired') }]}
+            getValueFromEvent={(value) => optional ? value ?? null : value}
+            extra={optional && !options.length ? t('knowledgeBase.createForm.noMediaModels') : undefined}
           >
             <ModelSelect
               placeholder={t(`knowledgeBase.createForm.${fieldKey}`)}
               isAutoFetch={false}
               initialData={options}
-              allowClear={false}
+              allowClear={optional}
+              {...(unavailable ? { labelRender: () => `${selectedId} (${t('knowledgeBase.createForm.modelUnavailable')})` } : {})}
               onChange={(value) => onModelChange(value, type)}
             />
           </Form.Item>

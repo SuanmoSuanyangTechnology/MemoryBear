@@ -90,6 +90,14 @@ export const model = {
       bedrock: "Bedrock",
     },
     modelNew: {
+      testAudioUrl: 'Test audio URL',
+      testVideoUrl: 'Test video URL',
+      mediaUrlRequired: 'Enter a media URL for this validation',
+      mediaUrlInvalid: 'Enter a valid HTTP or HTTPS URL',
+      asrValidationHint: 'Adding credentials calls the model to submit an audio task. Acceptance does not confirm completed transcription or validated audio content. The URL is not saved.',
+      videoValidationHint: 'Adding credentials calls the model to understand this video. Validation requires a complete text response. The URL is not saved.',
+      asrSubmitted: 'Credentials saved. Request acceptance validated; transcription is not yet complete.',
+
       group: 'Model Group',
       list: 'Model List',
       square: 'Model Plaza',

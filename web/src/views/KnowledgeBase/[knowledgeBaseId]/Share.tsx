@@ -124,6 +124,18 @@ const Share: FC = () => {
         icon: kbModelIcon,
       },
       {
+        key: 'audio2text_id',
+        label: t('knowledgeBase.audio2text_id') + ' ' + 'model',
+        value: data.audio2text?.name ?? '-',
+        icon: kbModelIcon,
+      },
+      {
+        key: 'video2text_id',
+        label: t('knowledgeBase.video2text_id') + ' ' + 'model',
+        value: data.video2text?.name ?? '-',
+        icon: kbModelIcon,
+      },
+      {
         key: 'updated_at',
         label: t('knowledgeBase.last_at'),
         value: formatDateTime(data.updated_at, 'YYYY-MM-DD HH:mm:ss'),

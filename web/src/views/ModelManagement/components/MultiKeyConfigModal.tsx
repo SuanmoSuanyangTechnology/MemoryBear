@@ -16,6 +16,9 @@ import {
   updateProviderApiKeys,
 } from '@/api/models'
 
+import { getValidationMediaType } from '../utils';
+import MediaValidationField from './MediaValidationField';
+
 type Model = ModelListItem | ProviderModelItem
 
 interface ProviderApiKey {
@@ -48,6 +51,8 @@ const MultiKeyConfigModal = forwardRef<MultiKeyConfigModalRef, MultiKeyConfigMod
   const [abortController, setAbortController] = useState<AbortController | null>(null)
   const [currentProvider, setCurrentProvider] = useState<Provider | null>(null)
   const [apiKeys, setApiKeys] = useState<ProviderApiKey[]>([])
+
+  const validationMediaType = source === 'provider' ? undefined : getValidationMediaType(model.provider, (model as ModelListItem).name);
 
   /** Close modal and refresh parent */
   const handleClose = () => {
@@ -119,7 +124,7 @@ const MultiKeyConfigModal = forwardRef<MultiKeyConfigModalRef, MultiKeyConfigMod
         request
           .then(() => {
             form.resetFields();
-            message.success(t('common.saveSuccess'))
+            message.success(t(validationMediaType === 'audio' ? 'modelNew.asrSubmitted' : 'common.saveSuccess'))
             getApiKeys((model as ModelListItem).id, currentProvider)
           })
           .finally(() => {
@@ -186,6 +191,7 @@ const MultiKeyConfigModal = forwardRef<MultiKeyConfigModalRef, MultiKeyConfigMod
         form={form}
         layout="vertical"
       >
+        <MediaValidationField mediaType={validationMediaType} />
         <Form.Item
           name="api_key"
           label={t('modelNew.api_key')}

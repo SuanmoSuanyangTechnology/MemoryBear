@@ -17,6 +17,7 @@ import type {
   KnowledgeBaseFormData,
   KnowledgeBaseListItem,
 } from '@/views/KnowledgeBase/types';
+import { serializeOptionalMediaModels } from './mediaModels';
 import CreateModalBasicConfig from './CreateModalBasicConfig';
 import CreateModalKnowledgeGraphConfig from './CreateModalKnowledgeGraphConfig';
 import useCreateModalModels, { MODEL_TYPE_CONFIG } from './useCreateModalModels';
@@ -104,6 +105,8 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({ refreshTa
       form.resetFields();
       const defaults: Partial<KnowledgeBaseFormData> = {
         permission_id: 'Private',
+        audio2text_id: null,
+        video2text_id: null,
         type: type || currentType,
       };
       form.setFieldsValue(defaults);
@@ -111,6 +114,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({ refreshTa
     }
 
     const baseValues: Partial<KnowledgeBaseFormData> = {
+      ...serializeOptionalMediaModels(record),
       name: record.name,
       description: record.description,
       permission_id: record.permission_id || 'Private',
@@ -175,6 +179,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({ refreshTa
           const saveType = originalType === 'rebuild' ? currentType : formValues.type || currentType;
           const payload: KnowledgeBaseFormData = {
             ...formValues,
+            ...(saveType !== 'Folder' ? serializeOptionalMediaModels(formValues) : {}),
             type: saveType,
             permission_id: formValues.permission_id || 'Private',
             parent_id: datasets?.parent_id || undefined,

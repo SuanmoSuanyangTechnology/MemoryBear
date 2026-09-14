@@ -70,8 +70,17 @@ export const getListLogoUrl = (provider?: string, logo?: string) => {
 }
 
 export const formatModelType = (type: OptionType['value']) => {
+  if (type === 'asr') return 'ASR';
   if (type === 'llm') {
     return 'LLM'
   }
   return type.charAt(0).toUpperCase() + type.slice(1)
 }
+
+/** Media samples are used only for the registration validation request. */
+export const getValidationMediaType = (provider?: string, name?: string): 'audio' | 'video' | undefined => {
+  if (provider?.toLowerCase() !== 'dashscope') return undefined;
+  if (name === 'qwen3-asr-flash-filetrans') return 'audio';
+  if (name === 'qwen3.5-omni-plus-2026-03-15') return 'video';
+  return undefined;
+};
