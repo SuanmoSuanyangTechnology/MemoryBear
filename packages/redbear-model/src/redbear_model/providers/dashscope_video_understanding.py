@@ -274,6 +274,50 @@ class _Collector:
         )
 
 
+class _DeadlineStream(httpx.SyncByteStream):
+    """Check the total budget even when the SDK consumes no complete SSE event."""
+
+    def __init__(self, response: httpx.Response, state: _Collector):
+        self.response = response
+        self.state = state
+
+    def __iter__(self):
+        self.state.check_time()
+        for chunk in self.response.stream:
+            self.state.check_time()
+            yield chunk
+            self.state.check_time()
+
+    def close(self):
+        self.response.close()
+
+
+class _DeadlineTransport(httpx.BaseTransport):
+    """Delegate to a borrowed pool while owning only the current response."""
+
+    def __init__(self, client: httpx.Client, state: _Collector):
+        self.client = client
+        self.state = state
+        self.response = None
+
+    def handle_request(self, request: httpx.Request) -> httpx.Response:
+        self.state.check_time()
+        self.response = self.client.send(
+            request, stream=True, auth=None, follow_redirects=False
+        )
+        self.state.check_time()
+        return httpx.Response(
+            self.response.status_code,
+            headers=self.response.headers,
+            stream=_DeadlineStream(self.response, self.state),
+            extensions=self.response.extensions,
+        )
+
+    def close(self):
+        if self.response is not None:
+            self.response.close()
+
+
 class DashScopeVideoUnderstandingAdapter:
     def __init__(
         self,
@@ -286,11 +330,13 @@ class DashScopeVideoUnderstandingAdapter:
         self.pool = client_pool
         self.options = options or MediaCallOptions()
 
-    def _call(self, request, collector):
+    def _call(self, request, collector, *, sync_client=None):
         if not isinstance(request, VideoUnderstandingRequest):
             raise TypeError("A VideoUnderstandingRequest is required")
         clients = self.pool.get_http_clients()
         params = build_openai_compatible_params(self.config, clients)
+        if sync_client is not None:
+            params["http_client"] = sync_client
         remaining = self.options.call_timeout_ms / 1000 - (
             time.perf_counter() - collector.started
         )
@@ -331,14 +377,18 @@ class DashScopeVideoUnderstandingAdapter:
         state = _Collector("video.invoke", self.options)
         failure = None
         try:
-            chat, messages, kwargs = self._call(request, state)
-            stream = chat.stream(messages, **kwargs)
-            try:
-                for chunk in stream:
-                    state.consume(chunk)
-            finally:
-                stream.close()
-            return state.result()
+            transport = _DeadlineTransport(self.pool.get_http_clients().sync, state)
+            with httpx.Client(transport=transport, trust_env=False) as scoped_client:
+                chat, messages, kwargs = self._call(
+                    request, state, sync_client=scoped_client
+                )
+                stream = chat.stream(messages, **kwargs)
+                try:
+                    for chunk in stream:
+                        state.consume(chunk)
+                finally:
+                    stream.close()
+                return state.result()
         except Exception as exc:  # noqa: BLE001 - redact SDK/transport failures
             failure = state.error(exc)
         raise failure from None
