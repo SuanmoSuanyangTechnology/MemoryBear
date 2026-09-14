@@ -499,12 +499,19 @@ class RedBearModelFactory:
                     params[key] = provider_specific[key]
 
             # 解析 API key (格式: access_key_id:secret_access_key)
-            if config.api_key and ":" in config.api_key:
-                access_key_id, secret_access_key = config.api_key.split(":", 1)
+            if config.api_key:
+                access_key_id, _, secret_access_key = config.api_key.partition(":")
+                access_key_id = access_key_id.strip()
+                secret_access_key = secret_access_key.strip()
+                if not access_key_id or not secret_access_key:
+                    raise BusinessException(
+                        "Bedrock 凭据格式错误：API Key 应为 "
+                        "access_key_id:secret_access_key（英文半角冒号分隔），"
+                        "请检查是否只填了 Access Key ID、漏填了 secret，或误用了中文冒号",
+                        BizCode.INVALID_PARAMETER,
+                    )
                 params["aws_access_key_id"] = access_key_id
                 params["aws_secret_access_key"] = secret_access_key
-            elif config.api_key:
-                params["aws_access_key_id"] = config.api_key
 
             # 设置 region
             if config.base_url:
