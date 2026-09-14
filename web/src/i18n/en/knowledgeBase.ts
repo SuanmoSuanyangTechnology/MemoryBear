@@ -66,6 +66,8 @@ export const knowledgeBase = {
       chunk_num: 'Total data Size',
       adjustmentParameter:'Adjustment parameter',
       testQuestionPlaceholder: 'Please enter the question you want to test, for example, what are the main functions of the product…',
+      queryOrImageRequired: 'Please enter a test question or upload an image',
+      queryRequired: 'Please enter a test question',
       loadSampleQuestions: 'Load sample questions',
       recallTestUnStart: 'Start testing knowledge base recall',
       recallTestUnStartSubTitle: 'Input the test question above and click the "Start Test" button to view the recall results',

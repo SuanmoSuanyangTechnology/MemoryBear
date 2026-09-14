@@ -66,6 +66,8 @@ export const knowledgeBase = {
       chunk_num: '数据总量',
       adjustmentParameter: '调整参数',
       testQuestionPlaceholder: '请输入您想测试的问题，例如，产品的主要功能是什么…',
+      queryOrImageRequired: '请输入测试问题或上传图片',
+      queryRequired: '请输入测试问题',
       loadSampleQuestions: '加载示例问题',
       recallTestUnStart: '开始测试知识库召回',
       recallTestUnStartSubTitle: '在上方输入测试问题并点击"开始测试"按钮查看召回结果',
