@@ -211,6 +211,42 @@ export const useBreadcrumbManager = (options?: BreadcrumbOptions) => {
       customBreadcrumbs = [
         ...breadcrumbsWithClick,
         
+        /** Add knowledge base folder path */
+        ...breadcrumbPath.knowledgeBaseFolderPath.map((folder, index) => ({
+          id: 0,
+          parent: 0,
+          code: null,
+          label: folder.name,
+          i18nKey: null,
+          path: null,
+          enable: true,
+          display: true,
+          level: 0,
+          sort: 0,
+          icon: null,
+          iconActive: null,
+          menuDesc: null,
+          deleted: null,
+          updateTime: 0,
+          new_: null,
+          keepAlive: false,
+          master: null,
+          disposable: false,
+          appSystem: null,
+          subs: [],
+          onClick: (e?: React.MouseEvent) => {
+            e?.preventDefault();
+            e?.stopPropagation();
+            navigate('/knowledge-base', {
+              state: {
+                navigateToFolder: folder.id,
+                folderPath: breadcrumbPath.knowledgeBaseFolderPath.slice(0, index + 1),
+              },
+            });
+            return false;
+          },
+        })),
+        
         /** Add knowledge base name */
         ...(breadcrumbPath.knowledgeBase ? [{
           id: 0,
