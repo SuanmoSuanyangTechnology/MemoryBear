@@ -499,7 +499,7 @@ class Neo4jSearchService:
                 ),
             )
 
-        all_records = self._normalize_kw_scores(kw_results.items)
+        all_records = self._normalize_kw_scores(all_records)
 
         for r in all_records:
             cs = float(r.data.get("normalized_kw_score", 0))
