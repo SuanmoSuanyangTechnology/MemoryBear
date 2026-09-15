@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from collections.abc import Mapping
 
 from fastapi import FastAPI, Request
@@ -15,11 +14,10 @@ from starlette.exceptions import HTTPException
 from ..error_mapping import map_storage_error
 from ..errors import KnowledgeError
 from ..i18n import normalize_locale, resolve_locale, translate
-from ..request_logging import request_route_template
+from ..request_logging import log_request_failure, safe_failure_detail
 from ..trace import TRACE_ID_HEADER, get_trace_id
 from .schemas.common import fail
 
-logger = logging.getLogger(__name__)
 _HTTP_ERRORS = {
     400: "KB_VALIDATION_ERROR",
     401: "KB_HTTP_UNAUTHORIZED",
@@ -77,8 +75,25 @@ def _response(
     return response
 
 
-def render_error(request: Request, error: KnowledgeError) -> JSONResponse:
-    """Use one localized message for both public message fields."""
+def render_error(
+    request: Request,
+    error: KnowledgeError,
+    *,
+    exception: BaseException | None = None,
+    validation_errors: list[dict] | None = None,
+) -> JSONResponse:
+    """Log every business failure, including direct HTTP-200 failure responses."""
+    log_request_failure(
+        request,
+        status_code=error.status_code,
+        response_code=error.response_code,
+        error_code=error.code,
+        message=translate(error.code, "en", error.params),
+        params=dict(error.params),
+        retryable=error.retryable,
+        exception=exception if exception is not None else error,
+        validation_errors=validation_errors,
+    )
     return _response(
         request,
         status_code=error.status_code,
@@ -90,51 +105,44 @@ def render_error(request: Request, error: KnowledgeError) -> JSONResponse:
 def register_error_handlers(application: FastAPI) -> None:
     @application.exception_handler(StorageError)
     async def storage_error_handler(request: Request, exc: StorageError):
-        error = map_storage_error(exc)
-        logger.warning(
-            "Knowledge storage failed internal_code=%s route=%s trace_id=%s",
-            error.code,
-            request_route_template(request.scope),
-            getattr(request.state, "trace_id", get_trace_id()),
-        )
-        return render_error(request, error)
+        return render_error(request, map_storage_error(exc))
 
     @application.exception_handler(RequestValidationError)
     async def validation_error_handler(request: Request, exc: RequestValidationError):
-        logger.warning(
-            "Knowledge request validation failed route=%s trace_id=%s",
-            request_route_template(request.scope),
-            getattr(request.state, "trace_id", get_trace_id()),
-        )
         endpoint = request.scope.get("endpoint")
         identity = (getattr(endpoint, "__module__", ""), getattr(endpoint, "__name__", ""))
         code = _VALIDATION_CONTRACTS.get(identity)
         if code is None:
+            log_request_failure(
+                request,
+                status_code=422,
+                response_code=None,
+                error_code="KB_HTTP_VALIDATION_ERROR",
+                message="Request validation failed",
+                validation_errors=exc.errors(),
+            )
             return await request_validation_exception_handler(request, exc)
         if any(
             any(part in _RERANK_FIELDS for part in error.get("loc", ())) for error in exc.errors()
         ):
             code = "KB_RERANK_CONFIG_INVALID"
-        return render_error(request, KnowledgeError.from_code(code))
+        return render_error(request, KnowledgeError.from_code(code), validation_errors=exc.errors())
 
     @application.exception_handler(KnowledgeError)
     async def knowledge_error_handler(request: Request, exc: KnowledgeError):
-        logger.warning(
-            "Knowledge request failed internal_code=%s response_code=%s status=%s "
-            "route=%s trace_id=%s retryable=%s",
-            exc.code,
-            exc.response_code,
-            exc.status_code,
-            request_route_template(request.scope),
-            getattr(request.state, "trace_id", get_trace_id()),
-            exc.retryable,
-        )
         return render_error(request, exc)
 
     @application.exception_handler(HTTPException)
     async def http_error_handler(request: Request, exc: HTTPException):
-        # Framework details may contain arbitrary application or provider data.
         key = _HTTP_ERRORS.get(exc.status_code, "KB_INTERNAL_ERROR")
+        log_request_failure(
+            request,
+            status_code=exc.status_code,
+            response_code=exc.status_code,
+            error_code=key,
+            message=safe_failure_detail(exc.detail, translate(key, "en")),
+            exception=exc,
+        )
         return _response(
             request,
             status_code=exc.status_code,
@@ -145,5 +153,4 @@ def register_error_handlers(application: FastAPI) -> None:
 
     @application.exception_handler(Exception)
     async def unhandled_error_handler(request: Request, exc: Exception):
-        logger.exception("Unhandled knowledge service error type=%s", type(exc).__name__)
-        return render_error(request, KnowledgeError.from_code("KB_INTERNAL_ERROR"))
+        return render_error(request, KnowledgeError.from_code("KB_INTERNAL_ERROR"), exception=exc)
