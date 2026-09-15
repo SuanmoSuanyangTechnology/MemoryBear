@@ -367,6 +367,10 @@ class KnowledgeSettings(BaseSettings):
     # gateway（企业版双通道）需私有 enterprise-extensions 包，缺失即启动期报错——
     # 企业部署须显式设 KB_AUTH_MODE=gateway（外层仓库 k8s 已显式声明，不依赖默认值）
     kb_auth_mode: str = Field(default="direct", validation_alias="KB_AUTH_MODE")
+    kb_direct_jwt_verify_enabled: bool = Field(
+        default=True,
+        validation_alias="KB_DIRECT_JWT_VERIFY_ENABLED",
+    )
     kb_service_name: str = Field(default="kb", validation_alias="KB_SERVICE_NAME")
     kb_jwks_url: str | None = Field(default=None, validation_alias="KB_JWKS_URL")
     kb_secret: SecretStr | None = Field(default=None, validation_alias="KB_SECRET")
