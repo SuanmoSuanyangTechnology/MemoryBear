@@ -36,59 +36,36 @@ export const useNavigationBreadcrumbs = (source: 'space' | 'manage' = 'manage') 
     const pathMatches = (pattern: string, path: string): boolean => {
       const normalized = pattern[0] !== '/' ? '/' + pattern : pattern;
       if (normalized === path) return true;
-      if (normalized.includes(':')) {
-        const regex = new RegExp('^' + normalized.replace(/:[\\w-]+/g, '[^/]+') + '$');
-        return regex.test(path);
-      }
-      return false;
+
+      const regexPattern = normalized
+        .split('/')
+        .map(segment => (
+          segment.startsWith(':')
+            ? '[^/]+'
+            : segment.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+        ))
+        .join('/');
+
+      return new RegExp(`^${regexPattern}$`).test(path);
     };
 
     /**
-     * Recursively search menu tree, returns keyPath or null.
-     * keyPath format:
-     *  - 1-level: [path]
-     *  - 2-level: [subPath, parentId]
-     *  - 3-level: [subSubPath, subId, parentId]
+     * Recursively search the complete menu tree.
+     * The first item is the matched route pattern, followed by ancestor ids
+     * from the nearest parent to the root.
      */
-    /**
-     * parentId: the group's id when recursing into group subs
-     * keyPath format:
-     *  - 1-level: [path]
-     *  - 2-level: [subPath, parentId]
-     *  - 3-level: [subSubPath, subId, parentId]
-     */
-    const findKeyPath = (menuList: any[], groupId?: string): string[] | null => {
+    const findKeyPath = (menuList: any[], ancestorIds: string[] = []): string[] | null => {
       for (const menu of menuList) {
-        /** Group menus: recurse into subs, passing group id */
-        if (menu.type === 'group' && menu.subs?.length) {
-          const result = findKeyPath(menu.subs, `${menu.id}`);
-          if (result) return result;
-          continue;
-        }
+        const nextAncestorIds = [...ancestorIds, `${menu.id}`];
 
+        /** Prefer the deepest route when parent and child paths overlap. */
         if (menu.subs?.length) {
-          for (const sub of menu.subs) {
-            /** Check third-level subs */
-            if (sub.subs?.length) {
-              for (const subSub of sub.subs) {
-                if (subSub.path && pathMatches(subSub.path, currentPath)) {
-                  return [subSub.path, `${sub.id}`, `${menu.id}`];
-                }
-              }
-            }
-            /** Second-level match: sub is a leaf under menu */
-            if (sub.path && pathMatches(sub.path, currentPath)) {
-              /** If menu is inside a group, return 3-level: [subPath, menuId, groupId] */
-              return groupId
-                ? [sub.path, `${menu.id}`, groupId]
-                : [sub.path, `${menu.id}`];
-            }
-          }
+          const result = findKeyPath(menu.subs, nextAncestorIds);
+          if (result) return result;
         }
 
-        /** First-level / group-child match */
         if (menu.path && pathMatches(menu.path, currentPath)) {
-          return groupId ? [menu.path, groupId] : [menu.path];
+          return [menu.path, ...[...ancestorIds].reverse()];
         }
       }
       return null;
@@ -96,7 +73,6 @@ export const useNavigationBreadcrumbs = (source: 'space' | 'manage' = 'manage') 
 
     const keyPath = findKeyPath(menus);
 
-    console.log('keyPath', keyPath)
     if (keyPath) {
       updateBreadcrumbs(keyPath, source);
     }
