@@ -90,6 +90,9 @@ COPY --from=builder --chown=memknowledge:memknowledge \
     /code/mem-knowledge/.venv /code/mem-knowledge/.venv
 COPY --from=builder --chown=memknowledge:memknowledge \
     /code/mem-knowledge/src /code/mem-knowledge/src
+COPY --chown=memknowledge:memknowledge mem-knowledge/alembic.ini /code/mem-knowledge/alembic.ini
+COPY --chown=memknowledge:memknowledge mem-knowledge/migrations /code/mem-knowledge/migrations
+COPY --chown=memknowledge:memknowledge mem-knowledge/scripts/knowledge_migrations.py /code/mem-knowledge/scripts/knowledge_migrations.py
 COPY --from=builder --chown=memknowledge:memknowledge /opt/tika /opt/tika
 COPY --from=builder --chown=memknowledge:memknowledge \
     /opt/tiktoken-cache /opt/tiktoken-cache

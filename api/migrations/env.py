@@ -90,16 +90,29 @@ import_all_models_from_package('app.models') # <--- NEW CALL
 # ... etc.
 
 
-def include_object(obj, name, type_, reflected, compare_to):
-    """autogenerate 只对比老单体链自有表，避免把微服务同库自有表判为删除。
+# Keep this ownership list aligned in the core and enterprise API entrypoints.
+KNOWLEDGE_OWNED_TABLES = frozenset({
+    "knowledges",
+    "documents",
+    "files",
+    "knowledge_metadatas",
+    "knowledge_metadata_bindings",
+    "knowledge_shares",
+})
 
-    微服务独立迁移链与老单体链（alembic_version）共存于同一库：identity 链建
-    acl_rules/audit_logs（version_table=alembic_version_identity），老单体侧不做
-    过滤时，autogenerate 会把库中存在但不在 Base.metadata 的这些表生成 drop_table，
-    误执行即毁微服务数据。identity 侧已做对称过滤（identity-service/migrations/env.py）。
-    仅影响 autogenerate 对比；upgrade/downgrade 按脚本执行不受影响。
+
+def include_object(obj, name, type_, reflected, compare_to):
+    """Limit autogenerate to tables owned by the legacy API migration chain.
+
+    Knowledge tables belong to the knowledge migration chain, even while their
+    models remain in API metadata. Explicit exclusion also survives model removal.
+    Other microservice tables absent from this metadata remain excluded.
+    This callback does not prevent historical upgrade/downgrade scripts from
+    executing their explicit operations.
     """
     if type_ == "table":
+        if name in KNOWLEDGE_OWNED_TABLES:
+            return False
         return name in Base.metadata.tables
     return True
 

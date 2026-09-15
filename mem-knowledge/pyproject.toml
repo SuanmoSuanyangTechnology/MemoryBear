@@ -8,6 +8,7 @@ version = "0.1.0"
 description = "Independent MemoryBear knowledge service"
 requires-python = ">=3.12,<3.13"
 dependencies = [
+    "alembic>=1.13,<2",
     "asyncpg>=0.31,<1",
     "auth-sdk>=0.1",
     "amqp==5.3.1",
