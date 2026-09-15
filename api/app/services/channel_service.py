@@ -108,8 +108,9 @@ class ChannelService:
         """双层失效：进程内渠道快照缓存 + 受影响 config 的 Redis 运行时缓存。
 
         model_names=None → provider 级渠道（影响该 provider 全部 config）；
-        非 None → 仅 name ∈ model_names 的 config。突变 flush 后即失效，
-        调用方若最终回滚仅多一次缓存重查，无正确性风险。
+        非 None → 仅 name ∈ model_names 的 config。突变 flush 后即失效。
+        调用方若最终回滚：其间未做候选探测则仅多一次缓存重查；若探测已按未提交态
+        回填快照缓存，须自行再失效（见 model_channel_service 删除/解绑联动）。
         """
         from app.services.channel_registry import (  # 延迟导入：registry 反向依赖本模块 cipher
             affected_config_ids,

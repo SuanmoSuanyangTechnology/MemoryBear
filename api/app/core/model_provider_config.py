@@ -29,11 +29,26 @@ _NATIVE_SDK_BASE_ADDRESSES = {
     ModelProvider.DASHSCOPE.value: "https://dashscope.aliyuncs.com/api/v1",
 }
 
+# 标准校验模型表（provider 级密钥保存时活体探测的锚点，spec D3）：
+# 仅列低配、稳定在售的模型；上游退役报"模型不存在"时改这里一行即可（D7 不自动降级）。
+# 表外 provider 走租户模型兜底（model_channel_service._resolve_validation_anchor）。
+# 表项恒为 LLM（探测类型硬编码 ModelType.LLM.value；入表非 LLM 模型需同步改探测类型）。
+_VALIDATION_MODELS = {
+    ModelProvider.DASHSCOPE.value: "qwen-turbo",
+    ModelProvider.OPENAI.value: "gpt-4o-mini",
+}
+
 
 def is_local_deployment_provider(provider: ModelProvider | str) -> bool:
     """判断提供商是否必须使用用户部署的地址。"""
     provider_name = getattr(provider, "value", provider)
     return str(provider_name).lower() in _LOCAL_DEPLOYMENT_PROVIDERS
+
+
+def get_provider_validation_model(provider: ModelProvider | str) -> Optional[str]:
+    """返回该 provider 的标准校验模型名；不在表内返回 None（走租户模型兜底）。"""
+    provider_name = str(getattr(provider, "value", provider)).lower()
+    return _VALIDATION_MODELS.get(provider_name)
 
 
 def uses_custom_api_base(provider: ModelProvider | str, model_type: str) -> bool:
