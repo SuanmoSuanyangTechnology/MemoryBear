@@ -19,6 +19,7 @@ from redbear_model import (
     ImageEmbeddingContent,
     MultimodalInputLimitError,
     RerankCandidateView,
+    TextEmbeddingContent,
     is_qwen3_vl_embedding,
     is_qwen3_vl_reranker,
 )
@@ -1133,15 +1134,30 @@ class KnowledgeRetrievalService:
     ) -> ModelRerankResult:
         if top_k <= 0 or not chunks:
             return ModelRerankResult(chunks=(), used_fallback=False)
-        if isinstance(query, ImageEmbeddingContent):
+        if isinstance(query, ImageEmbeddingContent) or (
+            snapshot.resolved is not None and is_qwen3_vl_reranker(snapshot.resolved)
+        ):
             unit_candidates = cls._chunks_to_unit_candidates(chunks)
-            return await cls._rerank_multimodal_units(
-                runtime,
-                snapshot,
-                query,
-                unit_candidates,
-                top_k,
-            )
+            try:
+                return await cls._rerank_multimodal_units(
+                    runtime,
+                    snapshot,
+                    TextEmbeddingContent(text=query) if isinstance(query, str) else query,
+                    unit_candidates,
+                    top_k,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                if isinstance(query, ImageEmbeddingContent):
+                    raise
+                logger.warning(
+                    "Rerank failed; using retrieval order provider=%s error_type=%s",
+                    snapshot.provider,
+                    type(exc).__name__,
+                )
+                fallback = cls._apply_rerank_fallback(chunks, top_k)
+                return ModelRerankResult(chunks=tuple(fallback), used_fallback=True)
         if snapshot.resolved is None:
             fallback = cls._apply_rerank_fallback(chunks, top_k)
             return ModelRerankResult(chunks=tuple(fallback), used_fallback=True)
@@ -1283,7 +1299,11 @@ class KnowledgeRetrievalService:
                     ),
                     kind=RetrievalUnitKind(kind_raw),
                     asset_file_id=metadata.get("_asset_file_id"),
-                    content=unit_content if isinstance(unit_content, str) else chunk.page_content,
+                    content=(
+                        unit_content
+                        if isinstance(unit_content, str)
+                        else chunk_retrieval_content(chunk)
+                    ),
                     score=score,
                     chunk=chunk,
                 )
@@ -1295,7 +1315,7 @@ class KnowledgeRetrievalService:
         cls,
         runtime: ProcessRuntime,
         snapshot: ModelRuntimeSnapshot,
-        query: ImageEmbeddingContent,
+        query: TextEmbeddingContent | ImageEmbeddingContent,
         candidates: Sequence[UnitCandidate],
         top_k: int,
     ) -> ModelRerankResult:
@@ -1312,12 +1332,17 @@ class KnowledgeRetrievalService:
         ):
             raise KnowledgeError.from_code(
                 "KB_MODEL_UNAVAILABLE",
-                "Image query requires qwen3-vl rerank",
+                "Multimodal unit rerank requires qwen3-vl rerank",
             )
 
+        trimmed = select_units_for_rerank(
+            candidates,
+            max_text=_MAX_MULTIMODAL_RERANK_TEXT_VIEWS,
+            max_image=_MAX_MULTIMODAL_RERANK_IMAGE_VIEWS,
+        )
         asset_ids_by_kb: dict[uuid.UUID, list[str]] = {}
-        for candidate in candidates:
-            if not candidate.asset_file_id:
+        for candidate in trimmed:
+            if candidate.kind is not RetrievalUnitKind.IMAGE or not candidate.asset_file_id:
                 continue
             raw_kb_id = (candidate.chunk.metadata or {}).get("knowledge_id")
             try:
@@ -1335,12 +1360,6 @@ class KnowledgeRetrievalService:
                     phase="rerank",
                 )
             )
-
-        trimmed = select_units_for_rerank(
-            candidates,
-            max_text=_MAX_MULTIMODAL_RERANK_TEXT_VIEWS,
-            max_image=_MAX_MULTIMODAL_RERANK_IMAGE_VIEWS,
-        )
 
         views: list[RerankCandidateView] = []
         kept: list[UnitCandidate] = []
@@ -1414,8 +1433,14 @@ class KnowledgeRetrievalService:
             )
 
         ranked_units = sorted(scored_units, key=lambda unit: -unit.score)
+        ranked_chunks: list[DocumentChunk] = []
+        for unit in ranked_units[:top_k]:
+            # Preserve original identities, including legacy blocks without unit metadata.
+            chunk = unit.chunk.model_copy(deep=True)
+            chunk.metadata["score"] = unit.score
+            ranked_chunks.append(chunk)
         return ModelRerankResult(
-            chunks=tuple(cls._unit_to_chunk(unit) for unit in ranked_units[:top_k]),
+            chunks=tuple(ranked_chunks),
             used_fallback=False,
         )
 
