@@ -8,6 +8,7 @@ import uuid
 import math
 import time
 import asyncio
+from urllib.parse import urlparse
 
 from pydantic import SecretStr
 
@@ -76,6 +77,21 @@ _CONNECTIVITY_ERROR_MARKERS = (
     "name resolution",
     "network is unreachable",
     "no route to host",
+)
+
+# 认证类故障标记：openai SDK 以异常类名（AuthenticationError）暴露；dashscope 原生链路
+# （embedding 的 DashScopeEmbeddings 抛 ValueError、rerank 的 _dashscope_error_message 抛
+# RuntimeError）只带 "status_code: 401 \n code: InvalidApiKey \n message: ..." 文本，
+# 无专用异常类，故补文本标记。
+_AUTH_ERROR_MARKERS = (
+    "authentication",
+    "invalidapikey",
+    "invalid api-key",
+    "invalid api key",
+    "incorrect api key",
+    "invalid_api_key",
+    "status_code: 401",
+    "unauthorized",
 )
 _resolution_fallback_hits = 0
 
@@ -241,6 +257,51 @@ def _require_api_base_for_local_provider(provider: ModelProvider | str, api_base
             f"本地部署提供商 {getattr(provider, 'value', provider)} 必须配置 API Base URL",
             BizCode.INVALID_PARAMETER,
         )
+
+
+def _require_wellformed_api_base(
+    provider: ModelProvider | str,
+    api_base: Optional[str],
+    model_type: str | None = None,
+) -> None:
+    """非空 api_base 必须是 http(s):// 开头的完整地址（留空合法，走默认）。
+
+    bedrock 例外：其 api_base 承载 AWS region（如 us-east-1，映射 region_name），非 URL。
+    """
+    provider_name = str(getattr(provider, "value", provider)).lower()
+    if provider_name == ModelProvider.BEDROCK.value:
+        return
+    if not (isinstance(api_base, str) and api_base.strip()):
+        return
+    parsed = urlparse(api_base.strip())
+    if parsed.scheme in ("http", "https") and parsed.netloc:
+        return
+    default = get_default_provider_api_base(provider, model_type)
+    hint = f"；如需使用官方地址请留空（默认 {default}）" if default else ""
+    raise BusinessException(
+        f"API Base URL 格式不正确：需要以 http:// 或 https:// 开头的完整地址{hint}",
+        BizCode.INVALID_PARAMETER,
+    )
+
+
+def _require_wellformed_bedrock_credential(
+    provider: ModelProvider | str, api_key: Optional[str]
+) -> None:
+    """bedrock 的 api_key 约定为 access_key_id:secret_access_key（缺任一半，运行时
+    ChatBedrock 构造期抛 pydantic ValidationError，报错原文不可读，故提前拦截）。"""
+    provider_name = str(getattr(provider, "value", provider)).lower()
+    if provider_name != ModelProvider.BEDROCK.value:
+        return
+    if not (isinstance(api_key, str) and api_key.strip()):
+        return
+    access_key_id, sep, secret = api_key.strip().partition(":")
+    if sep and access_key_id.strip() and secret.strip():
+        return
+    raise BusinessException(
+        "Bedrock 的 API Key 格式不正确：需要按 access_key_id:secret_access_key 填写"
+        "（英文冒号分隔，两者都不可为空）",
+        BizCode.INVALID_PARAMETER,
+    )
 
 
 def _require_supported_api_base(
@@ -749,22 +810,43 @@ class ModelConfigService:
                     error_message = "访问被拒绝: 请检查 API 凭证和权限配置"
                 else:
                     error_message = f"验证失败: {error_message}"
-            elif "AuthenticationError" in error_type or "authentication" in error_message.lower():
+            elif any(
+                marker in f"{error_type} {error_message}".lower()
+                for marker in _AUTH_ERROR_MARKERS
+            ):
                 error_message = "认证失败: API Key 无效或已过期"
+            elif (
+                "aws_access_key_id" in error_message
+                and "aws_secret_access_key" in error_message
+            ):
+                # ChatBedrock/BedrockEmbeddings 构造期凭据不完整（pydantic 报错原文不可读）
+                error_message = (
+                    "认证失败: Bedrock 凭据不完整，API Key 需要按 "
+                    "access_key_id:secret_access_key 格式填写（英文冒号分隔）"
+                )
             elif any(
                 marker in f"{error_type} {error_message}".lower()
                 for marker in _CONNECTIVITY_ERROR_MARKERS
             ):
-                # 报错时必须给出实际请求地址，否则无法区分"密钥错"与"网络不通"
-                address = (
-                    (api_base or "").strip()
-                    or get_default_provider_api_base(provider)
-                    or "默认端点"
-                )
-                error_message = (
-                    f"连接失败: 无法访问 {address}（连接超时或网络不可达），"
-                    f"请检查网络连通性，或为该模型配置代理/网关地址（API Base URL）"
-                )
+                # 报错时必须给出实际请求地址，否则无法区分"密钥错"与"网络不通"；
+                # 按地址来源分文案：用户配置的地址 vs 官方公共端点（后者才引导配网关）
+                configured = (api_base or "").strip()
+                official = get_default_provider_api_base(provider)
+                if configured:
+                    error_message = (
+                        f"连接失败: 无法访问你配置的 API Base URL {configured}"
+                        f"（连接超时或网络不可达），请确认该地址正确且网络可达"
+                    )
+                    if official:
+                        error_message += (
+                            f"；如需改用官方公共端点，请清空 API Base URL（默认 {official}）"
+                        )
+                else:
+                    error_message = (
+                        f"连接失败: 无法访问官方公共端点 {official or '默认端点'}"
+                        f"（连接超时或网络不可达），请检查网络连通性，"
+                        f"或为该模型配置代理/网关地址（API Base URL）"
+                    )
             elif "RateLimitError" in error_type or "rate limit" in error_message.lower():
                 error_message = "请求频率限制: 已超过 API 调用限制"
             elif "InvalidRequestError" in error_type or "invalid request" in error_message.lower():
@@ -805,6 +887,8 @@ class ModelConfigService:
         provider = model_data.provider
         credential = model_data.credential
         _require_api_base_for_local_provider(provider, credential.api_base)
+        _require_wellformed_bedrock_credential(provider, credential.api_key)
+        _require_wellformed_api_base(provider, credential.api_base, model_data.type)
         _require_supported_api_base(provider, credential.api_base, model_data.type)
 
         validation_result = await ModelConfigService.validate_model_config(

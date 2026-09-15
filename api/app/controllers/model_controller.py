@@ -493,7 +493,7 @@ def list_provider_api_keys(
 
 
 @router.post("/provider/apikeys", response_model=ApiResponse)
-def create_provider_api_key(
+async def create_provider_api_key(
     api_key_data: model_schema.ProviderApiKeyCreate,
     response: Response,
     db: Session = Depends(get_db),
@@ -502,13 +502,14 @@ def create_provider_api_key(
     """
     登记供应商公共凭据（覆盖该供应商全部未点名模型）
 
+    登记前服务端自选锚点模型做一次活体验证，失败 400 零落库。
     同凭据同端点已存在时幂等合并（200，不覆盖既有属性）；命中同凭据点名行时
     原地升级为 provider 级（200，覆盖集扩展为全量）；新建 201。
     """
     api_logger.info(f"登记供应商公共凭据请求: provider={api_key_data.provider}, 用户: {current_user.username}")
 
     try:
-        result, action = ChannelApiKeyService.create_provider_key(
+        result, action = await ChannelApiKeyService.create_provider_key(
             db=db,
             data=api_key_data,
             tenant_id=current_user.tenant_id,
@@ -547,17 +548,20 @@ def get_provider_api_key(
 
 
 @router.put("/provider/apikeys/{apikey_id}", response_model=ApiResponse)
-def update_provider_api_key(
+async def update_provider_api_key(
     apikey_id: uuid.UUID,
     api_key_data: model_schema.ProviderApiKeyUpdate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """更新渠道凭据（属性 / 启停 / 重填凭据；model_names 不可改）"""
+    """更新渠道凭据（属性 / 启停 / 重填凭据；model_names 不可改）。
+
+    provider 级渠道重填 api_key 前先做活体验证，失败 400 零落库。
+    """
     api_logger.info(f"更新渠道凭据请求: apikey_id={apikey_id}, 用户: {current_user.username}")
 
     try:
-        result = ChannelApiKeyService.update_provider_key(
+        result = await ChannelApiKeyService.update_provider_key(
             db=db, apikey_id=apikey_id, data=api_key_data, tenant_id=current_user.tenant_id
         )
         return success(data=result, msg="渠道凭据更新成功")
