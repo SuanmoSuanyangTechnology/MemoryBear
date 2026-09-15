@@ -26,6 +26,8 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
 from .api.dependencies import Principal
+from .request_logging import log_request_failure, safe_failure_detail
+from .trace import TRACE_ID_HEADER
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +96,23 @@ def _load_gateway_auth(kb_auth: KbAuthConfig):
     return KbGatewayAuth(kb_auth)
 
 
+def _auth_error(
+    request: Request, status_code: int, detail: object, *, exception: BaseException | None = None,
+) -> JSONResponse:
+    """Record early rejections without changing authentication decisions."""
+    log_request_failure(
+        request, status_code=status_code, response_code=None,
+        error_code="AUTHENTICATION_REJECTED",
+        message=safe_failure_detail(detail, "Authentication rejected"),
+        exception=exception,
+        validation_errors=exception.errors() if isinstance(exception, ValidationError) else None,
+    )
+    return JSONResponse(
+        status_code=status_code, content={"detail": detail},
+        headers={TRACE_ID_HEADER: request.state.trace_id},
+    )
+
+
 class KbAuthMiddleware(BaseHTTPMiddleware):
     def __init__(self, app, kb_auth: KbAuthConfig) -> None:
         super().__init__(app)
@@ -136,13 +155,13 @@ class KbAuthMiddleware(BaseHTTPMiddleware):
         if auth.startswith("Bearer "):
             token = auth.removeprefix("Bearer ").strip()
             if self._verifier is None:
-                return JSONResponse(status_code=500, content={"detail": "auth misconfigured"})
+                return _auth_error(request, 500, "auth misconfigured")
             try:
                 # type 强校验=access：防 refresh token（同 SECRET_KEY、TTL 更长）访问
                 # 业务端点，对齐老单体 verify_token 默认语义与网关用户路径（4.2 步骤 1）
                 payload = await self._verifier.verify_jwt(token, token_type="access")
-            except Exception:
-                return JSONResponse(status_code=401, content={"detail": "invalid token"})
+            except Exception as exc:
+                return _auth_error(request, 401, "invalid token", exception=exc)
             try:
                 request.state.principal = Principal(
                     actor_id=payload.get("sub"),
@@ -153,29 +172,27 @@ class KbAuthMiddleware(BaseHTTPMiddleware):
             except ValidationError as exc:
                 # sub/tenant/workspace 非 UUID（external 用户 token 无租户语境）：
                 # 无法映射 kb 身份 → fail-closed
-                logger.warning("direct jwt principal invalid, rejecting: %s", exc)
-                return JSONResponse(status_code=401, content={"detail": "invalid token"})
+                return _auth_error(request, 401, "invalid token", exception=exc)
             return await call_next(request)
         api_key = request.headers.get("x-api-key")
         if api_key is not None:
             if self._api_key_verifier is None:
-                return JSONResponse(status_code=500, content={"detail": "auth misconfigured"})
+                return _auth_error(request, 500, "auth misconfigured")
             try:
                 claims = await self._api_key_verifier.verify(api_key)
-            except ApiKeyVerifyUnavailable:
-                return JSONResponse(status_code=401, content={"detail": "auth unavailable"})
+            except ApiKeyVerifyUnavailable as exc:
+                return _auth_error(request, 401, "auth unavailable", exception=exc)
             if claims is None:
-                return JSONResponse(status_code=401, content={"detail": "invalid api key"})
+                return _auth_error(request, 401, "invalid api key")
             try:
                 request.state.principal = Principal(
                     actor_id=claims.get("api_key_id"), actor_name=None,
                     tenant_id=claims.get("tenant_id"), workspace_id=claims.get("workspace_id"))
             except ValidationError as exc:
                 # identity claims 非 UUID/缺字段：无法映射 kb 身份 → fail-closed
-                logger.warning("direct api key claims invalid, rejecting: %s", exc)
-                return JSONResponse(status_code=401, content={"detail": "invalid api key"})
+                return _auth_error(request, 401, "invalid api key", exception=exc)
             return await call_next(request)
-        return JSONResponse(status_code=401, content={"detail": "missing credentials"})
+        return _auth_error(request, 401, "missing credentials")
 
     async def _gateway_dispatch(self, request: Request, call_next):
         """通道 1/2 判定委托企业处理器（判定逻辑在 enterprise_ext.kb.KbGatewayAuth）。
@@ -187,11 +204,9 @@ class KbAuthMiddleware(BaseHTTPMiddleware):
             ctx: UserContext | None = await self._gateway.authenticate(request)
         except HTTPException as exc:
             # 验签失败 401 / ACL 拒绝 403 / 配置缺失 500，按 SDK 语义原样返回
-            logger.warning("channel1 auth denied status=%s detail=%s", exc.status_code, exc.detail)
-            return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+            return _auth_error(request, exc.status_code, exc.detail, exception=exc)
         except Exception as exc:
-            logger.warning("channel1 auth failed: %s", exc)
-            return JSONResponse(status_code=401, content={"detail": "invalid token"})
+            return _auth_error(request, 401, "invalid token", exception=exc)
         if ctx is None:
             # 通道 2：老单体直连豁免（过渡态，NetworkPolicy 兜底受信来源）
             request.state.kb_legacy_proxy_authenticated = True
@@ -205,8 +220,7 @@ class KbAuthMiddleware(BaseHTTPMiddleware):
             )
         except ValidationError as exc:
             # sub 非用户 UUID（如 ak:* API Key token）：无法映射 kb 用户身份 → fail-closed
-            logger.warning("channel1 principal invalid, rejecting: %s", exc)
-            return JSONResponse(status_code=401, content={"detail": "invalid token"})
+            return _auth_error(request, 401, "invalid token", exception=exc)
         return await call_next(request)
 
     def _kill_switch_active(self) -> bool:
