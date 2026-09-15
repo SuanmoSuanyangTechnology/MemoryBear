@@ -147,14 +147,13 @@ class ApiKeyItem(BaseModel):
 class ProviderApiKeyCreate(ApiKeyRegister):
     """Provider 域登记公共凭据（provider 级 [] 渠道，覆盖该供应商全部未点名模型）
 
-    公共渠道固定使用供应商公共端点（运行时按 llm/embedding/rerank 能力区分），
-    不接受 api_base；本地提供商无公共端点不可登记。自定义端点请改在模型域
-    按模型登记（或编辑点名渠道）。
+    公共渠道固定使用供应商公共基地址，不接受 api_base；本地提供商无公共端点
+    不可登记。自定义端点请改在模型域按模型登记（或编辑点名渠道）。
     """
     provider: ModelProvider = Field(..., description="API Key提供商")
     api_base: Optional[str] = Field(
         None,
-        description="不接受：公共渠道按能力使用供应商公共端点（传非空值将 400）",
+        description="不接受：公共渠道使用供应商公共基地址（传非空值将 400）",
         max_length=500,
     )
 
@@ -300,3 +299,5 @@ class ModelInfo(BaseModel):
     tenant_id: Optional[str] = Field(None, description="用量归属：租户ID")
     model_config_id: Optional[str] = Field(None, description="用量归属：模型配置ID")
     channel_id: Optional[str] = Field(None, description="用量归属：渠道ID")
+    # 渠道换线计划随行透传（from_api_key 读取）；exclude 防序列化泄漏，拷贝丢失语义=退化单候选
+    failover_plan: Any = Field(default=None, exclude=True, repr=False)

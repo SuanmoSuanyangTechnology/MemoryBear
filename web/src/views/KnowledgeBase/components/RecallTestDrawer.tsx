@@ -1,4 +1,4 @@
-import { forwardRef, useImperativeHandle, useState, useRef, useLayoutEffect, useCallback } from 'react';
+import { forwardRef, useImperativeHandle, useState, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import RbDrawer from '@/components/RbDrawer';
 import type { RecallTestDrawerRef } from '@/views/KnowledgeBase/types';
@@ -7,17 +7,17 @@ import RecallTest from './RecallTest';
 const RecallTestDrawer = forwardRef<RecallTestDrawerRef>((_props,ref) => {
     const { t } = useTranslation();
     const [open, setOpen] = useState(false);
-    const recallTestRef = useRef<any>(null);
+    // const recallTestRef = useRef<any>(null);
     const pendingKbIdRef = useRef<string | undefined>(undefined);
     const shouldCallHandleOpenRef = useRef(false);
 
     // Call RecallTest's handleOpen method
-    const callRecallTestHandleOpen = useCallback(() => {
-        if (recallTestRef.current && shouldCallHandleOpenRef.current) {
-            recallTestRef.current.handleOpen(pendingKbIdRef.current);
-            shouldCallHandleOpenRef.current = false;
-        }
-    }, []);
+    // const callRecallTestHandleOpen = useCallback(() => {
+    //     if (recallTestRef.current && shouldCallHandleOpenRef.current) {
+    //         // recallTestRef.current.handleOpen(pendingKbIdRef.current);
+    //         shouldCallHandleOpenRef.current = false;
+    //     }
+    // }, []);
 
     const handleOpen = (kbId?: string) => {
         pendingKbIdRef.current = kbId;
@@ -26,19 +26,19 @@ const RecallTestDrawer = forwardRef<RecallTestDrawerRef>((_props,ref) => {
     }
 
     // When Drawer opens, try to call handleOpen
-    useLayoutEffect(() => {
-        if (open) {
-            callRecallTestHandleOpen();
-        }
-    }, [open, callRecallTestHandleOpen]);
+    // useLayoutEffect(() => {
+    //     if (open) {
+    //         callRecallTestHandleOpen();
+    //     }
+    // }, [open, callRecallTestHandleOpen]);
 
     // Use callback ref to ensure immediate call after component mount
-    const setRecallTestRef = useCallback((node: any) => {
-        recallTestRef.current = node;
-        if (open && shouldCallHandleOpenRef.current) {
-            callRecallTestHandleOpen();
-        }
-    }, [open, callRecallTestHandleOpen]);
+    // const setRecallTestRef = useCallback((node: any) => {
+    //     recallTestRef.current = node;
+    //     if (open && shouldCallHandleOpenRef.current) {
+    //         callRecallTestHandleOpen();
+    //     }
+    // }, [open, callRecallTestHandleOpen]);
 
     // Expose methods to parent component
     useImperativeHandle(ref, () => ({
@@ -52,7 +52,7 @@ const RecallTestDrawer = forwardRef<RecallTestDrawerRef>((_props,ref) => {
         onClose={() => setOpen(false)}
         width={1000}
     >
-      <RecallTest ref={setRecallTestRef} />
+      <RecallTest />
     </RbDrawer>
   );
 });

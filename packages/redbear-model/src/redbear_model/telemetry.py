@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import logging
+import threading
 import time
+from dataclasses import dataclass
 from typing import Protocol
 
 from .contracts import ResolvedModelConfig
@@ -127,14 +129,67 @@ def report_failure_safely(
         )
 
 
+@dataclass(frozen=True)
+class UsagePublishStats:
+    """进程内旁路计量计数（spec §13.2：publisher 失败仅本地计数 + 告警日志）。"""
+
+    published: int
+    failed: int
+
+
+class _UsagePublishCounter:
+    """线程安全进程内计数（worker 线程/事件循环线程都可能发射事件）。"""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._published = 0
+        self._failed = 0
+
+    def record_published(self) -> None:
+        with self._lock:
+            self._published += 1
+
+    def record_failed(self) -> None:
+        with self._lock:
+            self._failed += 1
+
+    def snapshot(self) -> UsagePublishStats:
+        with self._lock:
+            return UsagePublishStats(published=self._published, failed=self._failed)
+
+    def reset(self) -> None:
+        with self._lock:
+            self._published = 0
+            self._failed = 0
+
+
+_usage_publish_counter = _UsagePublishCounter()
+
+
+def usage_publish_stats() -> UsagePublishStats:
+    """读取旁路计量本地计数快照（只读，不重置）。"""
+    return _usage_publish_counter.snapshot()
+
+
+def reset_usage_publish_stats() -> None:
+    """重置本地计数（测试/进程重建用）。"""
+    _usage_publish_counter.reset()
+
+
 def publish_usage_safely(publisher: UsagePublisher, event: UsageEvent) -> None:
-    """旁路发布用量事件：任何异常仅告警日志，绝不抛回业务调用（spec §13.2）。"""
+    """旁路发布用量事件：任何异常仅本地计数 + 告警日志，绝不抛回业务调用（spec §13.2）。"""
     try:
         publisher.report_usage(event)
     except Exception:
+        _usage_publish_counter.record_failed()
+        stats = _usage_publish_counter.snapshot()
         logger.exception(
-            "Usage publishing failed for event=%s provider=%s model=%s",
+            "Usage publishing failed for event=%s provider=%s model=%s failed_total=%d published_total=%d",
             event.event_id,
             event.provider.value,
             event.model_name,
+            stats.failed,
+            stats.published,
         )
+    else:
+        _usage_publish_counter.record_published()

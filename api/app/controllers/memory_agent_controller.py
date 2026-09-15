@@ -135,7 +135,9 @@ async def file_update(
     """
     api_logger.info(f"File upload requested, file count: {len(files)}")
     config = ModelConfigService.get_model_by_id(db=db, model_id=model_id)
-    apiConfig: ModelApiKey = ModelApiKeyService.get_available_api_key(db, config.id)
+    apiConfig: ModelApiKey = ModelApiKeyService.get_available_api_key(
+        db, config.id, tenant_id=current_user.tenant_id
+    )
     if not apiConfig:
         return fail(BizCode.INVALID_PARAMETER, "模型配置缺少 API Key")
     file_content = []

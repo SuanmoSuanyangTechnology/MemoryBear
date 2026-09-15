@@ -5,6 +5,8 @@
 为 best-effort 提取（流式无聚合，记 0/NULL）。归属来自 RedBearModelConfig 的
 tenant_id/model_config_id/channel_id（中央构建器填充），业务归因来自
 `app.core.usage_context` 的 contextvar，request_id 复用请求 trace_id。
+换渠道门面另报 attempts（provider 调用次数）与 fallback（换渠道后成功 →
+FALLBACK_SUCCEEDED，spec §11.2），无 plan 路径维持 attempts=1 现状语义。
 """
 
 from __future__ import annotations
@@ -125,6 +127,8 @@ def _emit(
     exc: BaseException | None = None,
     stream: bool = False,
     result: Any = None,
+    attempts: int = _ATTEMPTS,
+    fallback: bool = False,
 ) -> None:
     try:
         tenant_id = _as_uuid(getattr(config, "tenant_id", None))
@@ -148,6 +152,8 @@ def _emit(
                 capability,
             )
             return
+        if fallback and status is UsageStatus.OK:
+            status = UsageStatus.FALLBACK_SUCCEEDED
         input_tokens, output_tokens = _extract_tokens(result) if result is not None else (0, 0)
         resource = get_usage_resource()
         try:
@@ -169,7 +175,7 @@ def _emit(
             latency_ms=latency_ms,
             status=status,
             error_type=None if exc is None else _truncate(type(exc).__name__, 64),
-            attempts=_ATTEMPTS,
+            attempts=max(1, attempts),
             request_id=_truncate(get_trace_id(), 64),
             resource_type=None if resource is None else _truncate(resource.resource_type, 32),
             resource_id=None if resource is None else _as_uuid(resource.resource_id),
@@ -188,10 +194,13 @@ def report_usage_success(
     *,
     stream: bool = False,
     result: Any = None,
+    attempts: int = _ATTEMPTS,
+    fallback: bool = False,
 ) -> None:
     _emit(
         config, capability, operation, started_at,
         status=UsageStatus.OK, stream=stream, result=result,
+        attempts=attempts, fallback=fallback,
     )
 
 
@@ -203,10 +212,11 @@ def report_usage_failure(
     started_at: float,
     *,
     stream: bool = False,
+    attempts: int = _ATTEMPTS,
 ) -> None:
     _emit(
         config, capability, operation, started_at,
-        status=UsageStatus.FAILED, exc=exc, stream=stream,
+        status=UsageStatus.FAILED, exc=exc, stream=stream, attempts=attempts,
     )
 
 
@@ -218,10 +228,12 @@ async def report_usage_success_async(
     *,
     stream: bool = False,
     result: Any = None,
+    attempts: int = _ATTEMPTS,
+    fallback: bool = False,
 ) -> None:
     await asyncio.to_thread(
         report_usage_success, config, capability, operation, started_at,
-        stream=stream, result=result,
+        stream=stream, result=result, attempts=attempts, fallback=fallback,
     )
 
 
@@ -233,8 +245,9 @@ async def report_usage_failure_async(
     started_at: float,
     *,
     stream: bool = False,
+    attempts: int = _ATTEMPTS,
 ) -> None:
     await asyncio.to_thread(
         report_usage_failure, config, capability, operation, exc, started_at,
-        stream=stream,
+        stream=stream, attempts=attempts,
     )

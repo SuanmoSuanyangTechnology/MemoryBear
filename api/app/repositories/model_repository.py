@@ -241,11 +241,11 @@ class ModelConfigRepository:
             if query.type:
                 type_values = list(query.type)
                 # 如果包含 chat 或 llm，则同时包含两者
-                if ModelType.CHAT in type_values or ModelType.LLM in type_values:
-                    if ModelType.CHAT not in type_values:
-                        type_values.append(ModelType.CHAT)
-                    if ModelType.LLM not in type_values:
-                        type_values.append(ModelType.LLM)
+                # if ModelType.CHAT in type_values or ModelType.LLM in type_values:
+                #     if ModelType.CHAT not in type_values:
+                #         type_values.append(ModelType.CHAT)
+                #     if ModelType.LLM not in type_values:
+                #         type_values.append(ModelType.LLM)
                 filters.append(ModelConfig.type.in_(type_values))
             
             if query.is_active is not None:

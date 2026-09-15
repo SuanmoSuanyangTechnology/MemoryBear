@@ -25,7 +25,8 @@ from pydantic import ValidationError
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
-from .api.dependencies import Principal
+from .api.dependencies import Principal, _principal_from_headers
+from .errors import KnowledgeError
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +62,8 @@ class KbAuthConfig:
     api_key_verify_url: str | None = None
     # httpx client 注入（测试用 MockTransport；None 时 verifier 自建）
     api_key_client: object | None = None
+    # Explicit direct-mode opt-out: trust identity headers instead of JWT claims.
+    direct_jwt_verify_enabled: bool = True
 
 
 def _is_single_file_download(path: str, method: str) -> bool:
@@ -98,6 +101,13 @@ class KbAuthMiddleware(BaseHTTPMiddleware):
     def __init__(self, app, kb_auth: KbAuthConfig) -> None:
         super().__init__(app)
         self._kb_auth = kb_auth
+        self._trust_direct_headers = (
+            kb_auth.auth_mode == "direct" and not kb_auth.direct_jwt_verify_enabled
+        )
+        if self._trust_direct_headers:
+            logger.warning(
+                "Direct JWT verification disabled; trusting caller-supplied X-KB identity headers"
+            )
         # direct 模式（非 gateway）：JWT 本地验签 verifier（HS256，社区版）。
         # gateway 模式的通道 1 验签/ACL 装配在企业处理器内（enterprise_ext.kb）。
         if kb_auth.auth_mode != "gateway" and kb_auth.secret is not None:
@@ -130,10 +140,19 @@ class KbAuthMiddleware(BaseHTTPMiddleware):
                 return await call_next(request)
         if self._kb_auth.auth_mode == "gateway":
             return await self._gateway_dispatch(request, call_next)
-        # direct（社区版）：不读 X-KB-* 头；JWT 本地验签 / API key 走 identity 集中
-        # 校验（评审稿 4.5.4 fail-closed）
+        # The opt-out never bypasses API key verification or grants legacy proxy trust.
+        api_key = request.headers.get("x-api-key")
+        if self._trust_direct_headers and api_key is None:
+            try:
+                request.state.principal = _principal_from_headers(request)
+            except KnowledgeError:
+                return JSONResponse(
+                    status_code=401, content={"detail": "invalid principal headers"}
+                )
+            return await call_next(request)
+        # Verified JWT claims remain authoritative unless the explicit opt-out is active.
         auth = request.headers.get("authorization", "")
-        if auth.startswith("Bearer "):
+        if auth.startswith("Bearer ") and not self._trust_direct_headers:
             token = auth.removeprefix("Bearer ").strip()
             if self._verifier is None:
                 return JSONResponse(status_code=500, content={"detail": "auth misconfigured"})
@@ -156,7 +175,6 @@ class KbAuthMiddleware(BaseHTTPMiddleware):
                 logger.warning("direct jwt principal invalid, rejecting: %s", exc)
                 return JSONResponse(status_code=401, content={"detail": "invalid token"})
             return await call_next(request)
-        api_key = request.headers.get("x-api-key")
         if api_key is not None:
             if self._api_key_verifier is None:
                 return JSONResponse(status_code=500, content={"detail": "auth misconfigured"})
