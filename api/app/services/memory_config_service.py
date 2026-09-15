@@ -8,7 +8,7 @@ This service eliminates code duplication between MemoryAgentService and MemorySt
 import asyncio
 import time
 import uuid
-from typing import Optional
+from typing import Any, Optional
 from uuid import UUID
 
 from sqlalchemy import select
@@ -320,7 +320,7 @@ class MemoryConfigService:
         """
         self.db = db
 
-    async def _validate_model_connectivity(
+    async def _resolve_model_credentials(
             self,
             model_id: str,
             model_type_label: str,
@@ -328,8 +328,11 @@ class MemoryConfigService:
             config_id: UUID,
             workspace_id: UUID | None,
             locale: str = "zh",
-    ) -> None:
-        """解析模型凭证并调用 validate_model_config 验证 API 连通性。
+    ) -> Any:
+        """串行解析模型配置与可用 API Key（仅 DB 查询）。
+
+        ``AsyncSession`` 不是并发安全的，本方法只执行 DB 查询，必须在单会话上
+        串行调用，不能放进 :func:`asyncio.gather` 与其它 DB 查询并发。
 
         Args:
             model_id: 模型配置 ID
@@ -339,9 +342,12 @@ class MemoryConfigService:
             workspace_id: 工作空间 ID（用于错误上下文）
             locale: 语言代码（zh / en），用于 i18n 错误消息
 
+        Returns:
+            ModelApiKey: 可用 API Key 配置
+
         Raises:
-            ModelNotFoundError: 模型不存在或没有可用 API 密钥
-            ModelInactiveError: API 连通性验证失败
+            ModelNotFoundError: 模型不存在
+            ModelInactiveError: 没有可用 API Key
         """
         from app.services.model_service import ModelConfigService as ModelSvc
         from app.services.model_service import ModelApiKeyService
@@ -374,7 +380,36 @@ class MemoryConfigService:
                           model_type=model_type_label, model_name=model_config.name),
             )
 
-        # 3. 实际 API 连通性验证
+        return api_key_config
+
+    async def _validate_model_connectivity(
+            self,
+            model_id: str,
+            model_type_label: str,
+            api_key_config: Any,
+            config_id: UUID,
+            workspace_id: UUID | None,
+            locale: str = "zh",
+    ) -> None:
+        """调用 validate_model_config 验证模型 API 连通性（纯 HTTP，不碰 DB）。
+
+        本方法不执行任何 DB 查询（``validate_model_config`` 内部忽略 db 参数），
+        因此可以安全地放进 :func:`asyncio.gather` 并发执行。
+
+        Args:
+            model_id: 模型配置 ID（用于错误上下文）
+            model_type_label: 模型类型标签（llm / embedding / rerank）
+            api_key_config: 已解析出的可用 API Key 配置
+            config_id: 记忆配置 ID（用于错误上下文）
+            workspace_id: 工作空间 ID（用于错误上下文）
+            locale: 语言代码（zh / en），用于 i18n 错误消息
+
+        Raises:
+            ModelInactiveError: API 连通性验证失败
+        """
+        from app.services.model_service import ModelConfigService as ModelSvc
+
+        # 实际 API 连通性验证
         result = await ModelSvc.validate_model_config(
             self.db,
             model_name=api_key_config.model_name,
@@ -456,16 +491,51 @@ class MemoryConfigService:
 
         _VALIDATE_AS_LLM = {"vision", "video", "audio", "reflection", "emotion"}
 
-        async def _validate_one(model_type: str, model_id: str, source: str) -> dict | None:
+        # 第一步：串行解析所有模型的 DB 凭据（AsyncSession 不能并发共享）
+        resolved: list[tuple[str, str, str, str, Any]] = []
+        for model_type, model_id, source in all_models:
+            if not model_id:
+                continue
             validate_type = "llm" if model_type in _VALIDATE_AS_LLM else model_type
             try:
-                await self._validate_model_connectivity(
+                api_key_config = await self._resolve_model_credentials(
                     model_id,
                     validate_type,
                     tenant_id,
                     config_id,
                     workspace_id,
-                    locale=locale
+                    locale=locale,
+                )
+            except ConfigurationError as e:
+                logger.warning(
+                    f"模型 {model_type} 解析失败: {e}",
+                    extra={"config_id": str(config_id), "model_type": model_type, "model_id": str(model_id)},
+                )
+                warnings.append({
+                    "model_type": model_type,
+                    "model_id": str(model_id),
+                    "source": source,
+                    "message": e.err_message,
+                })
+            else:
+                resolved.append((model_type, model_id, source, validate_type, api_key_config))
+
+        # 第二步：并发执行纯 HTTP 的连通性校验
+        async def _validate_http(
+                model_type: str,
+                model_id: str,
+                source: str,
+                validate_type: str,
+                api_key_config: Any,
+        ) -> dict | None:
+            try:
+                await self._validate_model_connectivity(
+                    model_id,
+                    validate_type,
+                    api_key_config,
+                    config_id,
+                    workspace_id,
+                    locale=locale,
                 )
                 return None
             except ConfigurationError as e:
@@ -475,13 +545,8 @@ class MemoryConfigService:
                 )
                 return {"model_type": model_type, "model_id": str(model_id), "source": source, "message": e.err_message}
 
-        tasks = [
-            _validate_one(model_type, model_id, source)
-            for model_type, model_id, source in all_models
-            if model_id
-        ]
-        if tasks:
-            results = await asyncio.gather(*tasks)
+        if resolved:
+            results = await asyncio.gather(*(_validate_http(*item) for item in resolved))
             warnings += [w for w in results if w is not None]
 
         result: dict = {
