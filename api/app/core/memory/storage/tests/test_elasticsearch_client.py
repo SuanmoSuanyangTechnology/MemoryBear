@@ -23,6 +23,7 @@ from app.core.memory.storage.provider.elasticsearch.client import (
     ElasticClient,
 )
 from app.core.memory.storage.provider.elasticsearch.serialization import (
+    MAX_TEXT_FIELD_LENGTH,
     normalize_elasticsearch_document,
     route_embedding_field,
 )
@@ -2283,3 +2284,22 @@ async def test_elastic_client_embedding_search_routes_to_dimension_field() -> No
     )
 
     assert fake.search_calls[0]["knn"]["field"] == "summary_embedding_1536"
+
+
+def test_normalize_document_truncates_oversized_string() -> None:
+    document = normalize_elasticsearch_document(
+        {"id": "x", "description": "a" * (MAX_TEXT_FIELD_LENGTH + 10)},
+        date_fields=set(),
+    )
+
+    assert len(document["description"]) == MAX_TEXT_FIELD_LENGTH
+    assert document["description"] == "a" * MAX_TEXT_FIELD_LENGTH
+
+
+def test_normalize_document_keeps_short_strings_unchanged() -> None:
+    document = normalize_elasticsearch_document(
+        {"id": "x", "description": "short"},
+        date_fields=set(),
+    )
+
+    assert document["description"] == "short"
