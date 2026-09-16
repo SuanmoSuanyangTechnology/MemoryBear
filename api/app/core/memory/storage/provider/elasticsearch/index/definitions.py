@@ -5,7 +5,12 @@ from app.core.memory.storage.enums import MemoryNodeLabel, MemoryNodeType
 
 INDEX_SHARD_COUNT = 5
 INDEX_ALIAS_SUFFIX = "_current"
-EMBEDDING_DIMS = 1024
+DEFAULT_EMBEDDING_DIMENSION = 1024
+EMBEDDING_DIMS = DEFAULT_EMBEDDING_DIMENSION  # backward-compatible alias
+# Supported embedding dimensions. The default keeps the un-suffixed field name
+# (e.g. ``summary_embedding``); every other dimension gets a suffixed field
+# (e.g. ``summary_embedding_1536``).
+EMBEDDING_DIMENSIONS: tuple[int, ...] = (768, 1024, 1536, 2048, 3072, 4096)
 
 FULLTEXT_FIELDS: dict[MemoryNodeLabel, tuple[str, ...]] = {
     MemoryNodeType.STATEMENT: ("statement",),
@@ -54,6 +59,21 @@ class IndexDefinition:
         return f"{self.name}{INDEX_ALIAS_SUFFIX}"
 
 
+def embedding_field_suffix(field: str, dimension: int) -> str:
+    """Return the dimension-suffixed field name for a non-default dimension."""
+    return f"{field}_{dimension}"
+
+
+def _dense_vector_mapping(dimension: int) -> dict[str, Any]:
+    """Build the dense_vector mapping for one embedding dimension."""
+    return {
+        "type": "dense_vector",
+        "dims": dimension,
+        "index": True,
+        "similarity": "cosine",
+    }
+
+
 def _index_definition(
         name: str,
         label: MemoryNodeLabel,
@@ -71,12 +91,15 @@ def _index_definition(
     }
     embedding_field = EMBEDDING_FIELDS.get(label)
     if embedding_field is not None:
-        properties[embedding_field] = {
-            "type": "dense_vector",
-            "dims": EMBEDDING_DIMS,
-            "index": True,
-            "similarity": "cosine",
-        }
+        properties[embedding_field] = _dense_vector_mapping(
+            DEFAULT_EMBEDDING_DIMENSION
+        )
+        for dimension in EMBEDDING_DIMENSIONS:
+            if dimension == DEFAULT_EMBEDDING_DIMENSION:
+                continue
+            properties[embedding_field_suffix(embedding_field, dimension)] = (
+                _dense_vector_mapping(dimension)
+            )
 
     prop.update(properties)
 
@@ -122,7 +145,7 @@ INDEX_DEFINITIONS: dict[MemoryNodeLabel, IndexDefinition] = {
     MemoryNodeType.ASSISTANT_PRUNED: _index_definition(
         "assistant_pruned",
         MemoryNodeType.ASSISTANT_PRUNED,
-        schema_version=2,
+        schema_version=3,
         generation=1,
         prop={
             "id": {"type": "keyword"},
@@ -138,7 +161,7 @@ INDEX_DEFINITIONS: dict[MemoryNodeLabel, IndexDefinition] = {
     MemoryNodeType.CHUNK: _index_definition(
         "chunk",
         MemoryNodeType.CHUNK,
-        schema_version=2,
+        schema_version=3,
         generation=1,
         prop={
             "id": {"type": "keyword"},
@@ -156,7 +179,7 @@ INDEX_DEFINITIONS: dict[MemoryNodeLabel, IndexDefinition] = {
     MemoryNodeType.COMMUNITY: _index_definition(
         "community",
         MemoryNodeType.COMMUNITY,
-        schema_version=2,
+        schema_version=3,
         generation=1,
         prop={
             "community_id": {"type": "keyword"},
@@ -184,7 +207,7 @@ INDEX_DEFINITIONS: dict[MemoryNodeLabel, IndexDefinition] = {
     MemoryNodeType.DIALOGUE: _index_definition(
         "dialogue",
         MemoryNodeType.DIALOGUE,
-        schema_version=2,
+        schema_version=3,
         generation=1,
         prop={
             "id": {"type": "keyword"},
@@ -205,7 +228,7 @@ INDEX_DEFINITIONS: dict[MemoryNodeLabel, IndexDefinition] = {
     MemoryNodeType.EXTRACTED_ENTITY: _index_definition(
         "extracted_entity",
         MemoryNodeType.EXTRACTED_ENTITY,
-        schema_version=2,
+        schema_version=3,
         generation=1,
         prop={
             "id": {"type": "keyword"},
@@ -241,7 +264,7 @@ INDEX_DEFINITIONS: dict[MemoryNodeLabel, IndexDefinition] = {
     MemoryNodeType.MEMORY_SUMMARY: _index_definition(
         "memory_summary",
         MemoryNodeType.MEMORY_SUMMARY,
-        schema_version=2,
+        schema_version=3,
         generation=1,
         prop={
             "id": {"type": "keyword"},
@@ -268,7 +291,7 @@ INDEX_DEFINITIONS: dict[MemoryNodeLabel, IndexDefinition] = {
     MemoryNodeType.PERCEPTUAL: _index_definition(
         "perceptual",
         MemoryNodeType.PERCEPTUAL,
-        schema_version=2,
+        schema_version=3,
         generation=1,
         prop={
             "id": {"type": "keyword"},
@@ -285,7 +308,7 @@ INDEX_DEFINITIONS: dict[MemoryNodeLabel, IndexDefinition] = {
     MemoryNodeType.SCENE_SUMMARY: _index_definition(
         "scene_summary",
         MemoryNodeType.SCENE_SUMMARY,
-        schema_version=1,
+        schema_version=2,
         generation=1,
         prop={
             "id": {"type": "keyword"},
@@ -306,7 +329,7 @@ INDEX_DEFINITIONS: dict[MemoryNodeLabel, IndexDefinition] = {
     MemoryNodeType.STATEMENT: _index_definition(
         "statement",
         MemoryNodeType.STATEMENT,
-        schema_version=2,
+        schema_version=3,
         generation=1,
         prop={
             "id": {"type": "keyword"},
@@ -365,6 +388,33 @@ def get_index_definition(label: MemoryNodeLabel) -> IndexDefinition:
 def get_index_name(label: MemoryNodeLabel) -> str:
     """Return the stable alias used by CRUD operations for a node type."""
     return get_index_definition(label).alias
+
+
+def is_vector_label(label: MemoryNodeLabel) -> bool:
+    """Return True when the label carries an embedding field."""
+    return label in EMBEDDING_FIELDS
+
+
+def get_embedding_field_name(label: MemoryNodeLabel, dimension: int) -> str:
+    """Resolve the dense_vector field name for one embedding dimension.
+
+    The default dimension keeps the un-suffixed field name; any other supported
+    dimension uses a ``{field}_{dimension}`` suffix.
+
+    :raises KeyError: when the label has no embedding field.
+    :raises ValueError: when ``dimension`` is not a supported dimension.
+    """
+    field = EMBEDDING_FIELDS.get(label)
+    if field is None:
+        raise KeyError(f"node type {label} has no embedding field")
+    if dimension == DEFAULT_EMBEDDING_DIMENSION:
+        return field
+    if dimension not in EMBEDDING_DIMENSIONS:
+        raise ValueError(
+            f"unsupported embedding dimension {dimension}; "
+            f"expected one of {EMBEDDING_DIMENSIONS}"
+        )
+    return embedding_field_suffix(field, dimension)
 
 
 def validate_definition_registry() -> None:
