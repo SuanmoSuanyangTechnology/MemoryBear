@@ -20,7 +20,6 @@ from app.core.logging_config import get_config_logger, get_logger
 from app.core.utils.datetime_utils import utcnow_naive
 from app.core.validators.memory_config_validators import (
     validate_and_resolve_model_id,
-    validate_and_resolve_model_id_async,
 )
 from app.i18n.service import t
 from app.models import Workspace, WorkspaceDefaultModelPreset
@@ -173,6 +172,102 @@ def _get_default_model_preset(db: Session):
         .filter(WorkspaceDefaultModelPreset.singleton_key == DEFAULT_PRESET_KEY)
         .first()
     )
+
+
+_MODEL_VALIDATION_SPECS = (
+    ("embedding", "embedding", True),
+    ("llm", "llm", True),
+    ("rerank", "rerank", False),
+    ("vision", "llm", False),
+    ("audio", "llm", False),
+    ("video", "llm", False),
+)
+
+
+async def _validate_models_batch_async(
+    db: AsyncSession,
+    models: dict,
+    tenant_id: Optional[UUID],
+    config_id: UUID,
+    workspace_id: UUID,
+) -> dict:
+    from sqlalchemy import or_
+
+    from app.core.validators.memory_config_validators import _parse_model_id
+    from app.models.models_model import ModelConfig
+
+    parsed: dict[str, Optional[UUID]] = {}
+    for key, model_type, required in _MODEL_VALIDATION_SPECS:
+        model_id_str = models[key]
+        if model_id_str is None or (isinstance(model_id_str, str) and not model_id_str.strip()):
+            if required:
+                raise InvalidConfigError(
+                    f"{model_type.title()} model ID is required",
+                    field_name=f"{model_type}_model_id",
+                    invalid_value=model_id_str,
+                    config_id=config_id,
+                    workspace_id=workspace_id,
+                )
+            parsed[key] = None
+        else:
+            parsed[key] = _parse_model_id(model_id_str, model_type, config_id, workspace_id)
+
+    ids_to_query = list(dict.fromkeys(u for u in parsed.values() if u is not None))
+    found: dict[str, ModelConfig] = {}
+    if ids_to_query:
+        query = select(ModelConfig).where(ModelConfig.id.in_(ids_to_query))
+        if tenant_id:
+            query = query.where(or_(ModelConfig.tenant_id == tenant_id, ModelConfig.is_public))
+        result = await db.execute(query)
+        found = {str(m.id): m for m in result.scalars().all()}
+
+    missed = [u for u in ids_to_query if str(u) not in found]
+    found_without_tenant: dict[str, ModelConfig] = {}
+    if missed:
+        result2 = await db.execute(select(ModelConfig).where(ModelConfig.id.in_(missed)))
+        found_without_tenant = {str(m.id): m for m in result2.scalars().all()}
+
+    out: dict[str, tuple[Optional[UUID], Optional[str]]] = {}
+    for key, model_type, _required in _MODEL_VALIDATION_SPECS:
+        model_uuid = parsed[key]
+        if model_uuid is None:
+            out[key] = (None, None)
+            continue
+
+        model = found.get(str(model_uuid))
+        if model is None:
+            model_without_tenant = found_without_tenant.get(str(model_uuid))
+            if model_without_tenant is not None:
+                raise ModelNotFoundError(
+                    model_id=model_uuid,
+                    model_type=model_type,
+                    config_id=config_id,
+                    workspace_id=workspace_id,
+                    message=(
+                        f"{model_type.title()} model {model_uuid} "
+                        f"({model_without_tenant.name}) belongs to a different tenant"
+                    ),
+                )
+            raise ModelNotFoundError(
+                model_id=model_uuid,
+                model_type=model_type,
+                config_id=config_id,
+                workspace_id=workspace_id,
+                message=f"{model_type.title()} model {model_uuid} not found",
+            )
+
+        if not model.is_active:
+            raise ModelInactiveError(
+                model_id=model_uuid,
+                model_name=model.name,
+                model_type=model_type,
+                config_id=config_id,
+                workspace_id=workspace_id,
+                message=f"{model_type.title()} model {model_uuid} ({model.name}) is inactive",
+            )
+        out[key] = (model_uuid, model.name)
+
+    return out
 
 
 async def _get_default_model_preset_async(db: AsyncSession):
@@ -740,45 +835,23 @@ class MemoryConfigService:
             preset = await _get_default_model_preset_async(self.db) if workspace.is_default_config else None
             models = _effective_workspace_models(workspace, preset)
 
-            # Step 2: validate all models + load ontology concurrently
             v_start = time.time()
-            (
-                (embedding_uuid, embedding_name),
-                (llm_uuid, llm_name),
-                (rerank_uuid, rerank_name),
-                (vision_uuid, vision_name),
-                (audio_uuid, audio_name),
-                (video_uuid, video_name),
-                ontology_class_infos,
-            ) = await asyncio.gather(
-                validate_and_resolve_model_id_async(
-                    models["embedding"], "embedding", self.db, workspace.tenant_id,
-                    required=True, config_id=memory_config_row.config_id, workspace_id=workspace.id,
-                ),
-                validate_and_resolve_model_id_async(
-                    models["llm"], "llm", self.db, workspace.tenant_id,
-                    required=True, config_id=memory_config_row.config_id, workspace_id=workspace.id,
-                ),
-                validate_and_resolve_model_id_async(
-                    models["rerank"], "rerank", self.db, workspace.tenant_id,
-                    required=False, config_id=memory_config_row.config_id, workspace_id=workspace.id,
-                ),
-                validate_and_resolve_model_id_async(
-                    models["vision"], "llm", self.db, workspace.tenant_id,
-                    required=False, config_id=memory_config_row.config_id, workspace_id=workspace.id,
-                ),
-                validate_and_resolve_model_id_async(
-                    models["audio"], "llm", self.db, workspace.tenant_id,
-                    required=False, config_id=memory_config_row.config_id, workspace_id=workspace.id,
-                ),
-                validate_and_resolve_model_id_async(
-                    models["video"], "llm", self.db, workspace.tenant_id,
-                    required=False, config_id=memory_config_row.config_id, workspace_id=workspace.id,
-                ),
-                _load_ontology_class_infos_async(self.db, memory_config_row.scene_id),
+            model_results = await _validate_models_batch_async(
+                self.db, models, workspace.tenant_id,
+                memory_config_row.config_id, workspace.id,
+            )
+            ontology_class_infos = await _load_ontology_class_infos_async(
+                self.db, memory_config_row.scene_id
             )
             v_time = time.time() - v_start
-            logger.info(f"[PERF] All model validations + ontology load: {v_time:.4f}s (concurrent)")
+            logger.info(f"[PERF] All model validations + ontology load: {v_time:.4f}s (batch)")
+
+            embedding_uuid, embedding_name = model_results["embedding"]
+            llm_uuid, llm_name = model_results["llm"]
+            rerank_uuid, rerank_name = model_results["rerank"]
+            vision_uuid, vision_name = model_results["vision"]
+            audio_uuid, audio_name = model_results["audio"]
+            video_uuid, video_name = model_results["video"]
 
             # Step 4: build the immutable MemoryConfig
             config = _build_memory_config(

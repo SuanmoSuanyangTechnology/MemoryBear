@@ -8,6 +8,7 @@ import Chat from '@/components/Chat'
 import PageScrollList, { type PageScrollListRef } from '@/components/PageScrollList'
 import type { ChatItem } from '@/components/Chat/types'
 import { getMemoryStages } from './constants'
+import { markIncompleteStagesFailed, markLastAssistantMessageFailed } from './state'
 import { parseStreamEvents, getStageIndex } from './stream'
 import type { LogItem, MemoryItem } from './types'
 import StageContent from './components/StageContent'
@@ -180,6 +181,11 @@ const MemoryConversation: FC = () => {
     parseStreamEvents(events).forEach(update => {
       if (update.sessionId) setSessionId(update.sessionId)
       if (update.log) updateLogs(update.log)
+      if (update.error) {
+        const errorMessage = update.error.message?.trim() || t('memoryConversation.serverError')
+        setChatData(previous => markLastAssistantMessageFailed(previous, errorMessage))
+        setLogs(previous => markIncompleteStagesFailed(previous, stageKeys))
+      }
       if (update.answer !== undefined) {
         setChatData(previous => {
           const last = previous[previous.length - 1]
@@ -244,16 +250,7 @@ const MemoryConversation: FC = () => {
           abort()
         }
       },
-    ).catch(() => {
-      if (generation !== requestGenerationRef.current) return
-      updateLogs({
-        type: 'final_answer',
-        stage: 'final_answer',
-        status: 'failed',
-        data: { reason: t('memoryConversation.serverError') },
-      })
-      message.error(t('memoryConversation.serverError'))
-    })
+    )
     .finally(() => {
       if (generation !== requestGenerationRef.current) return
       setLoading(false)
@@ -458,7 +455,7 @@ const MemoryConversation: FC = () => {
                         original_query: (logs[index-1]?.data as {original_query?: string})?.original_query,
                       }
                     } : logs[index]
-                    const canExpand = stageKey !== 'hybridRetrieval'
+                    const canExpand = stageKey !== 'hybridRetrieval' && log?.status !== 'failed'
                     const isOpen = canExpand && (expanded[index] ?? Boolean(log))
                     const statusKey = !log
                       ? loading

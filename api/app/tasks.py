@@ -2986,7 +2986,7 @@ def fast_write_message_task(
                 db.commit()
             if summary_claimed:
                 try:
-                    generate_scene_summary.apply_async(
+                    async_result = generate_scene_summary.apply_async(
                         kwargs={
                             "end_user_id": resolved_end_user_id,
                             "config_id": config_id,
@@ -2995,7 +2995,20 @@ def fast_write_message_task(
                             "close_reason": "SHIFTED",
                         }
                     )
+                    logger.info(
+                        "[SceneSummary] fastwrite task dispatched: scene_start=%s, "
+                        "close_before=%s, task_id=%s",
+                        scene_context.previous_shifted_message_id,
+                        scene_context.current_message_id,
+                        async_result.id,
+                    )
                 except Exception:
+                    logger.exception(
+                        "[SceneSummary] fastwrite task dispatch failed, releasing claim: "
+                        "scene_start=%s, close_before=%s",
+                        scene_context.previous_shifted_message_id,
+                        scene_context.current_message_id,
+                    )
                     with get_db_context() as db:
                         SceneBoundaryService.release_summary_claim(
                             db,

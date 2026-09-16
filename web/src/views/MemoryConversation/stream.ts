@@ -78,7 +78,7 @@ const normalizeEndOutput = (output: unknown): LogItem => {
     const rawQuestions = Array.isArray(record.data)
       ? record.data
       : [data.questions, data.items, data.results]
-        .find(value => Array.isArray(value)) || []
+        .find((value): value is unknown[] => Array.isArray(value)) ?? []
     const questions = rawQuestions
       .map(item => (
         typeof item === 'string'
@@ -200,6 +200,24 @@ export const parseStreamEvents = (events: SSEMessage[]): StreamUpdate[] => {
         }
         break
       }
+      case 'error':
+        updates.push({
+          error: {
+            request_id: typeof record.request_id === 'string' ? record.request_id : undefined,
+            code: typeof record.code === 'string' || typeof record.code === 'number'
+              ? record.code
+              : undefined,
+            message: typeof record.message === 'string' ? record.message : undefined,
+          },
+          log: {
+            ...asLog(payload, eventName),
+            type: 'final_answer',
+            stage: 'final_answer',
+            status: 'failed',
+          },
+          completed: true,
+        })
+        break
       case STREAM_EVENTS.END: {
         const outputs = Array.isArray(record.intermediate_outputs)
           ? record.intermediate_outputs
@@ -218,10 +236,13 @@ export const parseStreamEvents = (events: SSEMessage[]): StreamUpdate[] => {
         const answer = readText(payload)
         if (answer !== undefined) updates.push({ answer, appendAnswer: true })
         if (eventName.includes('error') || normalizeStatus(record.status) === 'failed') {
+          const failedStage = typeof record.stage === 'string'
+            ? record.stage || 'final_answer'
+            : 'final_answer'
           pushLog({
             ...asLog(payload, eventName),
-            type: record.stage || 'final_answer',
-            stage: record.stage || 'final_answer',
+            type: failedStage,
+            stage: failedStage,
           }, 'failed')
         } else if (eventName || record.stage || record.log || record.output || record.stage_data) {
           pushLog(asLog(payload, eventName), String(record.status || 'running'))
