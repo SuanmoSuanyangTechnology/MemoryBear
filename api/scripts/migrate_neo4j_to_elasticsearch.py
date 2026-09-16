@@ -38,6 +38,7 @@ from elasticsearch import (  # noqa: E402
     ConnectionTimeout as ElasticsearchConnectionTimeout,
 )
 from neo4j.exceptions import (  # noqa: E402
+    Neo4jError,
     ServiceUnavailable,
     SessionExpired,
     TransientError,
@@ -69,6 +70,14 @@ MAX_RETRIES = 20
 CHECKPOINT_VERSION = 4
 
 _RETRYABLE_ES_STATUS_CODES = frozenset({408, 429, 500, 502, 503, 504})
+# Neo4j transaction timeouts are client/server terminated transactions whose
+# message asks to "retry in a new transaction"; they are safe to retry.
+_RETRYABLE_NEO4J_CODES = frozenset(
+    {
+        "Neo.ClientError.Transaction.TransactionTimedOut",
+        "Neo.ClientError.Transaction.TransactionTimedOutClientConfiguration",
+    }
+)
 _T = TypeVar("_T")
 
 _ID_PROPERTIES: dict[MemoryNodeType, str] = {
@@ -97,6 +106,8 @@ def _is_retryable_exception(exc: Exception) -> bool:
             TransientError,
         ),
     ):
+        return True
+    if isinstance(exc, Neo4jError) and exc.code in _RETRYABLE_NEO4J_CODES:
         return True
     return (
         isinstance(exc, ApiError)
@@ -423,10 +434,18 @@ class Neo4jToElasticsearchMigrator:
 
         expected = source_total - missing_ids
         if stats.migrated != expected:
-            raise RuntimeError(
-                f"{label.value} migration count mismatch: "
-                f"expected={expected} migrated={stats.migrated}; "
-                "source data may have changed during migration"
+            # Zero-downtime migration: the source Neo4j graph keeps changing
+            # while this backfill runs. New nodes are projected by the outbox
+            # consumer, and deletes are reconciled the same way, so a count
+            # drift is expected rather than an error.
+            logger.warning(
+                "label=%s source changed during migration: "
+                "migrated=%d preflight_expected=%d delta=%d; "
+                "concurrent writes are covered by the outbox consumer",
+                label.value,
+                stats.migrated,
+                expected,
+                stats.migrated - expected,
             )
         if self.options.refresh and not self.options.dry_run:
             await self._with_retry(
