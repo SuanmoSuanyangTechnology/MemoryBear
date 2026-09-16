@@ -175,80 +175,22 @@ def _shared_validation_config(
 
 _DASHSCOPE_ASR_MODEL = "qwen3-asr-flash-filetrans"
 _DASHSCOPE_VIDEO_MODEL = "qwen3.5-omni-plus-2026-03-15"
-_MEDIA_VALIDATION_TIMEOUT_MS = 60_000
-_MEDIA_VALIDATION_VIDEO_PROMPT = "Describe this video briefly."
 
 
-def is_media_validation_model(provider: str, model_name: str) -> bool:
+def is_media_model(provider: str, model_name: str) -> bool:
     return _enum_value(provider) == "dashscope" and model_name in {
         _DASHSCOPE_ASR_MODEL, _DASHSCOPE_VIDEO_MODEL,
     }
 
 
-async def _validate_media_model(
-    *, model_name: str, provider: str, api_key: str, api_base: str | None,
-    model_type: str, capability: list | None, test_media_url: SecretStr | str | None,
-) -> dict[str, Any]:
-    from redbear_model import (
-        AudioTaskStatus,
-        AudioTranscriptionRequest,
-        MediaCallOptions,
-        VideoUnderstandingRequest,
-    )
-    from redbear_model.runtime.audio import RedBearAudioTranscriber
-    from redbear_model.runtime.video_understanding import RedBearVideoUnderstanding
-
-    started = time.time()
-    runtime = None
-    try:
-        if not test_media_url:
-            raise ValueError("test_media_url is required for media validation")
-        media_url = (test_media_url.get_secret_value()
-                     if isinstance(test_media_url, SecretStr) else test_media_url)
-        expected_types = {"asr"} if model_name == _DASHSCOPE_ASR_MODEL else {"llm", "chat"}
-        if _enum_value(model_type) not in expected_types:
-            raise ValueError("Media model type does not match its runtime")
-        capabilities = list(capability or [])
-        if model_name == _DASHSCOPE_VIDEO_MODEL and "video" not in capabilities:
-            capabilities.append("video")
-        config = _shared_validation_config(
-            model_name=model_name, provider=provider, api_key=api_key,
-            api_base=api_base, model_type=model_type, capability=capabilities,
-        )
-        options = MediaCallOptions(call_timeout_ms=_MEDIA_VALIDATION_TIMEOUT_MS)
-        if model_name == _DASHSCOPE_ASR_MODEL:
-            request = AudioTranscriptionRequest(file_url=media_url)
-            runtime = RedBearAudioTranscriber(config, options=options)
-            result = await runtime.asubmit(request)
-            if result.status not in {AudioTaskStatus.PENDING, AudioTaskStatus.RUNNING,
-                                     AudioTaskStatus.SUCCEEDED}:
-                raise ValueError("Audio submission was not accepted")
-            stage = "submitted"
-            message = "请求受理验证通过；尚未验证转录完成或音频内容"
-        else:
-            request = VideoUnderstandingRequest(video_url=media_url, prompt=_MEDIA_VALIDATION_VIDEO_PROMPT)
-            runtime = RedBearVideoUnderstanding(config, options=options)
-            result = await runtime.ainvoke(request)
-            if not result.text.strip() or result.finish_reason != "stop":
-                raise ValueError("Video understanding did not complete")
-            stage = "completed"
-            message = "视频理解验证通过"
-        return {"valid": True, "message": message, "response": None, "error": None,
-                "usage": result.usage.model_dump() if result.usage else None,
-                "elapsed_time": time.time() - started, "validation_stage": stage}
-    except Exception:  # noqa: BLE001 - redact all provider and transport error details.
-        # Provider errors and signed sample URLs must never enter API logs/responses.
-        error = ("test_media_url is required for media validation" if not test_media_url
-                 else "Media validation failed or submission is uncertain; no credential was saved")
-        return {"valid": False, "message": "媒体验证未通过", "response": None,
-                "error": error, "error_type": "MediaValidationError", "usage": None,
-                "elapsed_time": time.time() - started}
-    finally:
-        if runtime is not None:
-            try:
-                await runtime.aclose()
-            except Exception:  # noqa: BLE001 - cleanup errors may contain signed URLs.
-                raise RuntimeError("Media validation cleanup failed") from None
+def _require_media_model_configuration(
+    *, model_name: str, model_type: str, capability: list | None,
+) -> None:
+    expected_types = {"asr"} if model_name == _DASHSCOPE_ASR_MODEL else {"llm", "chat"}
+    if _enum_value(model_type) not in expected_types:
+        raise BusinessException("媒体模型类型与调用能力不匹配", BizCode.INVALID_PARAMETER)
+    if model_name == _DASHSCOPE_VIDEO_MODEL and "video" not in (capability or []):
+        raise BusinessException("模型缺少视频理解能力", BizCode.INVALID_PARAMETER)
 
 
 def _validation_image() -> "ImageEmbeddingContent":
@@ -649,7 +591,6 @@ class ModelConfigService:
         test_message: str = "Hello",
         is_omni: bool = False,
         capability: Optional[list] = None,
-        test_media_url: SecretStr | str | None = None,
     ) -> Dict[str, Any]:
         """验证模型配置是否有效
 
@@ -667,12 +608,16 @@ class ModelConfigService:
         Returns:
             Dict: 验证结果
         """
-        if is_media_validation_model(provider, model_name):
-            return await _validate_media_model(
-                model_name=model_name, provider=provider, api_key=api_key,
-                api_base=api_base, model_type=model_type, capability=capability,
-                test_media_url=test_media_url,
-            )
+        if is_media_model(provider, model_name):
+            return {
+                "valid": False,
+                "message": "媒体模型不支持配置时活体验证",
+                "response": None,
+                "elapsed_time": None,
+                "usage": None,
+                "error": "媒体模型将在实际调用时校验模型和凭据",
+                "error_type": "MediaValidationUnsupported",
+            }
         _ = db
         import traceback
 
@@ -966,7 +911,7 @@ class ModelConfigService:
 
     @staticmethod
     def _save_media_model(model_data: dict, credential: dict, tenant_id: uuid.UUID,
-                          created_by: uuid.UUID | None, stage: str) -> model_schema.ModelConfig:
+                          created_by: uuid.UUID | None) -> model_schema.ModelConfig:
         from app.db import get_db_context
 
         with get_db_context() as db:
@@ -985,7 +930,6 @@ class ModelConfigService:
                 db.commit()
                 db.refresh(model)
                 result = model_schema.ModelConfig.model_validate(model)
-                result.validation_stage = stage
                 cache_state = _model_option_cache_state(model)
             except Exception:
                 db.rollback()
@@ -999,21 +943,19 @@ class ModelConfigService:
     ) -> model_schema.ModelConfig:
         credential = model_data.credential
         _require_api_base_for_local_provider(model_data.provider, credential.api_base)
+        _require_wellformed_bedrock_credential(model_data.provider, credential.api_key)
+        _require_wellformed_api_base(model_data.provider, credential.api_base, model_data.type)
         _require_supported_api_base(model_data.provider, credential.api_base, model_data.type)
-        if model_data.name == _DASHSCOPE_VIDEO_MODEL and "video" not in model_data.capability:
-            raise BusinessException("模型缺少视频理解能力", BizCode.INVALID_PARAMETER)
+        _require_media_model_configuration(
+            model_name=model_data.name,
+            model_type=model_data.type,
+            capability=model_data.capability,
+        )
         snapshot = model_data.model_dump(exclude={"credential"})
         await asyncio.to_thread(ModelConfigService._check_media_model_name, snapshot, tenant_id)
-        validation = await ModelConfigService.validate_model_config(
-            db=None, model_name=model_data.name, provider=model_data.provider,
-            api_key=credential.api_key, api_base=credential.api_base, model_type=model_data.type,
-            capability=model_data.capability, test_media_url=credential.test_media_url,
-        )
-        if not validation["valid"]:
-            raise BusinessException(validation["error"], BizCode.INVALID_PARAMETER)
         return await asyncio.to_thread(
             ModelConfigService._save_media_model, snapshot, credential.model_dump(),
-            tenant_id, created_by, validation["validation_stage"],
+            tenant_id, created_by,
         )
 
     @staticmethod
@@ -1023,11 +965,12 @@ class ModelConfigService:
         tenant_id: uuid.UUID,
         created_by: uuid.UUID | None = None,
     ) -> ModelConfig | model_schema.ModelConfig:
-        """创建自定义模型：内嵌凭据活体验证通过后，config + 点名渠道单事务落库。
+        """创建自定义模型：config + 点名渠道单事务落库。
 
-        验证失败拒绝创建（零写入）；网络调用在事务外完成。
+        音视频理解模型登记时只校验配置结构，凭据在实际调用时验证；其他模型
+        仍在网络活体验证通过后写入。
         """
-        if is_media_validation_model(model_data.provider, model_data.name):
+        if is_media_model(model_data.provider, model_data.name):
             return await ModelConfigService._create_media_model(model_data, tenant_id, created_by)
         # 检查名称是否已存在（同租户内；先于任何网络调用）
         if ModelConfigRepository.get_by_name(db, model_data.name, provider=model_data.provider, tenant_id=tenant_id):

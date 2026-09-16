@@ -303,8 +303,8 @@ async def create_model(
     """
     创建自定义模型
 
-    - 内嵌 credential 必填：创建时以该凭据做活体验证，验证通过后 config 与点名渠道
-      单事务落库；验证失败拒绝创建（零写入）
+    - 内嵌 credential 必填：config 与点名渠道单事务落库
+    - 音视频理解模型在实际调用时校验凭据；其他模型仍在创建时做活体验证
     """
     api_logger.info(f"创建模型配置请求: {model_data.name}, 用户: {current_user.username}, tenant_id={current_user.tenant_id}")
 
@@ -319,10 +319,7 @@ async def create_model(
         # 将ORM对象转换为Pydantic模型
         result = model_schema.ModelConfig.model_validate(result_orm)
         
-        msg = "模型配置创建成功"
-        if result.validation_stage == "submitted":
-            msg += "；请求受理验证通过，尚未验证转录完成或音频内容"
-        return success(data=result, msg=msg)
+        return success(data=result, msg="模型配置创建成功")
     except Exception as e:
         api_logger.error(f"创建模型配置失败: {model_data.name} - {str(e)}")
         raise
@@ -630,7 +627,8 @@ async def create_model_api_key(
     """
     为模型登记点名凭据（provider/真实模型名由服务端按模型配置读取）
 
-    登记前会做一次活体验证；同凭据同端点已存在时幂等合并（公共渠道吸收为 no-op）。
+    音视频理解模型在实际调用时校验凭据；其他模型登记前做一次活体验证。
+    同凭据同端点已存在时幂等合并（公共渠道吸收为 no-op）。
     新建 201；幂等合并/吸收 200。
     """
     api_logger.info(f"登记模型凭据请求: model_id={model_id}, 用户: {current_user.username}")
@@ -646,8 +644,6 @@ async def create_model_api_key(
         if action != "created":
             response.status_code = status.HTTP_200_OK
         msg = "凭据登记成功" if action == "created" else "凭据已存在（合并到既有渠道）"
-        if result.validation_stage == "submitted":
-            msg += "；请求受理验证通过，尚未验证转录完成或音频内容"
         api_logger.info(f"模型凭据登记完成: model_id={model_id} action={action}")
         return success(data=result, msg=msg)
     except Exception as e:
@@ -708,9 +704,6 @@ async def validate_model_config(
         api_base=validate_data.api_base,
         model_type=validate_data.model_type,
         test_message=validate_data.test_message,
-        test_media_url=validate_data.test_media_url,
     )
     
     return success(data=model_schema.ModelValidateResponse(**result), msg="验证完成")
-
-
