@@ -15,7 +15,7 @@ import {
   getEpisodicDetail,
 } from '@/api/memory'
 import { formatDateTime } from '@/utils/format'
-import Tag from '@/components/Tag'
+import Tag, { type TagProps } from '@/components/Tag'
 import Empty from '@/components/Empty'
 
 /** Single episodic memory item returned by the overview API. */
@@ -50,8 +50,9 @@ interface EpisodicMemoryDetail {
 }
 
 /** Maps episodic type keys to Ant Design Tag color presets. */
-export const TAG_COLORS: Record<string, "processing" | "success" | "warning" | "error" | "default"> = {
+export const TAG_COLORS: Record<string, TagProps['color']> = {
   conversation: "processing",
+  dialogue: 'processing',
   project_work: "success",
   learning: "warning",
   decision: "warning",
@@ -182,11 +183,10 @@ const EpisodicDetail: FC = () => {
                     placeholder={t('common.pleaseSelect')}
                     options={[
                       { value: 'all', label: t('episodicDetail.allType') },
-                      { value: 'conversation', label: t('episodicDetail.conversation') },
-                      { value: 'project_work', label: t('episodicDetail.project_work') },
-                      { value: 'learning', label: t('episodicDetail.learning') },
-                      { value: 'decision', label: t('episodicDetail.decision') },
-                      { value: 'important_event', label: t('episodicDetail.important_event') },
+                      ...(Object.keys(TAG_COLORS).filter(key => key !== 'default').map(key => ({
+                        value: key,
+                        label: t(`episodicDetail.${key}`)
+                      }))),
                     ]}
                     className="rb:w-full"
                   />
