@@ -307,10 +307,11 @@ def _diagnose_unavailable_model(
     if not (is_tenant_model or is_public_speedbear):
         # 跨租户模型只返回请求中的模型 ID，不泄露名称、供应商或状态。
         return _model_issue(slot, reason="not_accessible", locale=locale, model_id=model_id)
-    if not model.is_active:
-        return _model_issue(slot, reason="inactive", **common)
+    # 弃用判定前置（D15⑦）：弃用是更具体的下线原因，优先于启用状态展示
     if getattr(model, "model_base", None) is not None and getattr(model.model_base, "is_deprecated", False):
         return _model_issue(slot, reason="deprecated", **common)
+    if not model.is_active:
+        return _model_issue(slot, reason="inactive", **common)
     return _model_issue(slot, reason="not_accessible", **common)
 
 

@@ -353,7 +353,7 @@ def _invalidate_model_base_caches(configs: Sequence[ModelConfig]) -> None:
 def _probe_availability(
     db: Session, rows: Sequence[ModelConfig], tenant_id: uuid.UUID | None
 ) -> dict[uuid.UUID, bool]:
-    """批量渠道可用性探测（列表页固定 ≤2 次查询）；tenant_id 缺失（公共目录）时不探测。"""
+    """批量渠道可用性探测（列表页固定 ≤3 次查询）；tenant_id 缺失（公共目录）时不探测。"""
     if tenant_id is None or not rows:
         return {}
     return {
@@ -362,11 +362,21 @@ def _probe_availability(
     }
 
 
+def _derived_available(model: ModelConfig, availability: dict[uuid.UUID, bool]) -> bool | None:
+    """派生可用性（D15③）：弃用恒 False；否则渠道候选探测结果；未探测为 None。"""
+    if model.model_base is not None and model.model_base.is_deprecated:
+        return False
+    return availability.get(model.id)
+
+
 def _with_availability(
     model: ModelConfig, availability: dict[uuid.UUID, bool]
 ) -> model_schema.ModelConfig:
     item = model_schema.ModelConfig.model_validate(model)
-    if model.id in availability:
+    if item.is_deprecated:
+        # D15：弃用派生封禁（不依赖探测，任意租户口径恒不可用）
+        item.is_available = False
+    elif model.id in availability:
         item.is_available = availability[model.id]
     return item
 
@@ -379,13 +389,15 @@ class ModelConfigService:
         db: Session, model_config: ModelConfig, tenant_id: uuid.UUID | None = None
     ) -> bool | None:
         """单模型渠道可用性（详情展示）；tenant_id 缺失时返回 None（未探测）。"""
+        if model_config.model_base is not None and model_config.model_base.is_deprecated:
+            return False
         if tenant_id is None:
             return None
         return bool(candidate_channels_sync(db, model_config, tenant_id=tenant_id))
 
     @staticmethod
     def get_model_by_id(db: Session, model_id: uuid.UUID, tenant_id: uuid.UUID | None = None) -> ModelConfig:
-        """根据ID获取模型配置"""
+        """运行时读数：弃用即拒（D15 读侧派生封禁）。"""
         model = ModelConfigRepository.get_by_id(db, model_id, tenant_id=tenant_id)
         if not model:
             raise BusinessException("模型配置不存在", BizCode.MODEL_NOT_FOUND)
@@ -397,20 +409,11 @@ class ModelConfigService:
         return model
 
     @staticmethod
-    async def get_model_by_id_async(
-            db: AsyncSession,
-            model_id: uuid.UUID,
-            tenant_id: uuid.UUID | None = None,
-    ) -> ModelConfig:
-        """Async version of get_model_by_id with the same availability checks."""
-        model = await ModelConfigRepository.get_by_id_async(db, model_id, tenant_id=tenant_id)
+    def get_model_detail(db: Session, model_id: uuid.UUID, tenant_id: uuid.UUID | None = None) -> ModelConfig:
+        """管理详情读数：弃用不拦截（D15②，响应带 is_deprecated 标记，前端置灰）。"""
+        model = ModelConfigRepository.get_by_id(db, model_id, tenant_id=tenant_id)
         if not model:
             raise BusinessException("模型配置不存在", BizCode.MODEL_NOT_FOUND)
-        if model.model_base and model.model_base.is_deprecated:
-            raise BusinessException(
-                f"模型 '{model.name}' 已弃用，请在模型配置中更换为其他模型",
-                BizCode.MODEL_DEPRECATED,
-            )
         return model
 
     @staticmethod
@@ -503,11 +506,25 @@ class ModelConfigService:
 
     @staticmethod
     def get_model_list(db: Session, query: ModelConfigQuery, tenant_id: uuid.UUID | None = None) -> PageData:
-        """获取模型配置列表（含渠道可用性：候选链非空 = True）"""
+        """获取模型配置列表（含渠道可用性：候选链非空 = True）。
+
+        `is_available` 置位时：全量取行 → 批量探测 → 派生过滤 → 内存分页
+        （选择器隐藏无渠道/已弃用模型，G1；租户模型量有界）。
+        """
         models, total = ModelConfigRepository.get_list(db, query, tenant_id=tenant_id)
-        pages = math.ceil(total / query.pagesize) if total > 0 else 0
 
         availability = _probe_availability(db, models, tenant_id)
+        if query.is_available is not None:
+            matched = [
+                model
+                for model in models
+                if _derived_available(model, availability) is query.is_available
+            ]
+            total = len(matched)
+            start = (query.page - 1) * query.pagesize
+            models = matched[start : start + query.pagesize]
+
+        pages = math.ceil(total / query.pagesize) if total > 0 else 0
         return PageData(
             page=PageMeta(
                 page=query.page,
@@ -1536,7 +1553,11 @@ class ModelBaseService:
         if not model_base:
             raise BusinessException("基础模型不存在", BizCode.MODEL_NOT_FOUND)
         configs = _model_base_configs(db, model_base_id)
-        impact = collect_model_impact(db, [config.id for config in configs])
+        impact = collect_model_impact(
+            db,
+            [config.id for config in configs],
+            base_pairs={(model_base.provider, model_base.name)},
+        )
         ModelBaseRepository.update(db, model_base_id, {"is_deprecated": True})
         db.commit()
         _invalidate_model_base_caches(configs)
@@ -1544,9 +1565,16 @@ class ModelBaseService:
 
     @staticmethod
     def add_model_from_plaza(db: Session, model_base_id: uuid.UUID, tenant_id: uuid.UUID) -> ModelConfig:
+        """广场添加基础模型；已下线（is_deprecated）拦截（G5，与前端置灰同口径）。"""
         model_base = ModelBaseRepository.get_by_id(db, model_base_id)
         if not model_base:
             raise BusinessException("基础模型不存在", BizCode.MODEL_NOT_FOUND)
+
+        if model_base.is_deprecated:
+            raise BusinessException(
+                f"模型 '{model_base.name}' 已下线，请选择其他模型",
+                BizCode.MODEL_DEPRECATED,
+            )
 
         if ModelBaseRepository.check_added_by_tenant(db, model_base_id, tenant_id):
             raise BusinessException("模型已添加", BizCode.DUPLICATE_NAME)

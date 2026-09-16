@@ -58,9 +58,9 @@ from redbear_model import (
 )
 from sqlalchemy import select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
-from app.models.models_model import ModelChannel, ModelConfig
+from app.models.models_model import ModelBase, ModelChannel, ModelConfig
 from app.services.channel_service import cipher_from_env
 from app.services.usage_load import channel_loads_async, channel_loads_sync
 
@@ -311,18 +311,58 @@ def parse_members(config: dict | None) -> list[tuple[str, str]]:
     return parsed
 
 
+@dataclass(frozen=True)
+class _MemberIndex:
+    """成员解析索引（D15④）：config 行 + 已弃用 pair 集合，供 `_composite_members` 单点剔除。"""
+
+    rows: dict[tuple[str, str], ModelConfig]
+    deprecated_pairs: frozenset[tuple[str, str]]
+
+    def is_deprecated(self, pair: tuple[str, str]) -> bool:
+        """有同租户 config 的按该行 base 判（base 缺失 = 自定义模型，无弃用标记）；
+        无 config 的合成成员按 (provider, name) 查 model_bases。"""
+        row = self.rows.get(pair)
+        if row is not None:
+            base = getattr(row, "model_base", None)
+            return base is not None and base.is_deprecated
+        return pair in self.deprecated_pairs
+
+
+def _deprecated_base_pairs_sync(
+    db: Session, pairs: Sequence[tuple[str, str]]
+) -> frozenset[tuple[str, str]]:
+    """声明 pair 中已弃用/下线的 model_bases（合成成员唯一权威来源；单查询）。"""
+    stmt = select(ModelBase.provider, ModelBase.name).where(
+        ModelBase.is_deprecated.is_(True),
+        tuple_(ModelBase.provider, ModelBase.name).in_(list(pairs)),
+    )
+    return frozenset((row[0], row[1]) for row in db.execute(stmt).all())
+
+
+async def _deprecated_base_pairs_async(
+    db: AsyncSession, pairs: Sequence[tuple[str, str]]
+) -> frozenset[tuple[str, str]]:
+    stmt = select(ModelBase.provider, ModelBase.name).where(
+        ModelBase.is_deprecated.is_(True),
+        tuple_(ModelBase.provider, ModelBase.name).in_(list(pairs)),
+    )
+    result = await db.execute(stmt)
+    return frozenset((row[0], row[1]) for row in result.all())
+
+
 def _member_configs_sync(
     db: Session,
     tenant_id: uuid.UUID,
     pairs: Sequence[tuple[str, str]],
-) -> dict[tuple[str, str], ModelConfig]:
-    """成员 config 批量解析（单查询）：本租户 + 非组合。
+) -> _MemberIndex:
+    """成员解析索引批量查询（两查询：config 行 + 弃用 pair）：本租户 + 非组合。
 
     不看 `config.is_active`（成员可用性由渠道与凭据活跃决定）；同 (provider, name)
-    多行时优先启用、较新者，与写路径校验同口径。
+    多行时优先启用、较新者，与写路径校验同口径。弃用成员剔除见 `_composite_members`。
     """
     stmt = (
         select(ModelConfig)
+        .options(joinedload(ModelConfig.model_base))
         .where(
             ModelConfig.tenant_id == tenant_id,
             ModelConfig.is_composite.is_(False),
@@ -336,16 +376,19 @@ def _member_configs_sync(
     index: dict[tuple[str, str], ModelConfig] = {}
     for row in db.execute(stmt).scalars().all():
         index.setdefault((row.provider, row.name), row)
-    return index
+    return _MemberIndex(
+        rows=index, deprecated_pairs=_deprecated_base_pairs_sync(db, pairs)
+    )
 
 
 async def _member_configs_async(
     db: AsyncSession,
     tenant_id: uuid.UUID,
     pairs: Sequence[tuple[str, str]],
-) -> dict[tuple[str, str], ModelConfig]:
+) -> _MemberIndex:
     stmt = (
         select(ModelConfig)
+        .options(joinedload(ModelConfig.model_base))
         .where(
             ModelConfig.tenant_id == tenant_id,
             ModelConfig.is_composite.is_(False),
@@ -360,7 +403,9 @@ async def _member_configs_async(
     index: dict[tuple[str, str], ModelConfig] = {}
     for row in result.scalars().all():
         index.setdefault((row.provider, row.name), row)
-    return index
+    return _MemberIndex(
+        rows=index, deprecated_pairs=await _deprecated_base_pairs_async(db, pairs)
+    )
 
 
 def _synthesized_member(
@@ -397,18 +442,23 @@ def _synthesized_member(
 def _composite_members(
     composite: ModelConfigSnapshot,
     tenant_id: uuid.UUID,
-    rows: dict[tuple[str, str], ModelConfig],
+    index: _MemberIndex,
     pairs: Sequence[tuple[str, str]],
 ) -> list[CompositeMemberConfig]:
     """成员声明 → CompositeMemberConfig（声明顺序）：有同租户 config 用其快照，缺失按声明合成。
 
-    成员快照的 model_config_id 统一归到组合 id（usage 归因口径 = 调用入口 config，spec §13.1
+    弃用成员在解析期单点剔除（D15④，声明保留可逆）：config 行以 `model_base` 为准，
+    无 config 的合成成员按 (provider, name) 查 model_bases。成员快照的 model_config_id
+    统一归到组合 id（usage 归因口径 = 调用入口 config，spec §13.1
     `config_id` 注释）：真实成员配置与合成成员一致，命中成员身份留在事件的
     provider/model_name/channel_id 供应面快照里（§5.2）。
     """
     members: list[CompositeMemberConfig] = []
     for pair in pairs:
-        row = rows.get(pair)
+        if index.is_deprecated(pair):
+            logger.warning("composite member deprecated, skipped: %s/%s", pair[0], pair[1])
+            continue
+        row = index.rows.get(pair)
         snapshot = SOURCE.config_snapshot(row) if row is not None else _synthesized_member(
             composite, tenant_id, pair
         )
@@ -464,7 +514,9 @@ def resolve_composite_plan_sync(
         composite, effective_tenant, _member_configs_sync(db, effective_tenant, pairs), pairs
     )
     if not members:
-        raise _composite_unresolvable(composite, "composite members unresolved (nested/invalid provider)")
+        raise _composite_unresolvable(
+            composite, "composite members unresolved (deprecated/nested/invalid provider)"
+        )
     channels = SyncSQLChannelRegistry(db, SOURCE, cache=_shared_cache).get_active_channels(
         effective_tenant, provider=None
     )
@@ -506,7 +558,9 @@ async def resolve_composite_plan_async(
         composite, effective_tenant, await _member_configs_async(db, effective_tenant, pairs), pairs
     )
     if not members:
-        raise _composite_unresolvable(composite, "composite members unresolved (nested/invalid provider)")
+        raise _composite_unresolvable(
+            composite, "composite members unresolved (deprecated/nested/invalid provider)"
+        )
     channels = (
         await AsyncSQLChannelRegistry(db, SOURCE, cache=_shared_cache).get_active_channels(
             effective_tenant, provider=None
@@ -556,15 +610,18 @@ def _single_candidate_chain(
 def _composite_candidate_chain(
     composite: ModelConfigSnapshot,
     tenant_id: uuid.UUID,
-    rows: dict[tuple[str, str], ModelConfig],
+    index: _MemberIndex,
     pairs: Sequence[tuple[str, str]],
     pool: Sequence[ChannelSnapshot],
     loads: dict[uuid.UUID, int] | None = None,
 ) -> list[ChannelSnapshot]:
-    """组合候选链：成员声明 × 成员内有序渠道链展平，按渠道 id 去重（展示/探测口径）。"""
+    """组合候选链：成员声明 × 成员内有序渠道链展平，按渠道 id 去重（展示/探测口径）。
+
+    成员集合与运行期一致（弃用成员已剔除，D15④），故可用性探测/详情候选与轮换同源。
+    """
     chain: list[ChannelSnapshot] = []
     seen: set[uuid.UUID] = set()
-    for member in _composite_members(composite, tenant_id, rows, pairs):
+    for member in _composite_members(composite, tenant_id, index, pairs):
         candidates = match_channel_candidates(member.config, pool, model_name=member.model_name)
         for channel in order_channel_candidates(
             candidates, model_name=member.model_name, loads=loads
@@ -595,8 +652,8 @@ def candidate_channels_sync(
         if not pairs:
             return []
         pool = registry.get_active_channels(effective_tenant, provider=None)
-        rows = _member_configs_sync(db, effective_tenant, pairs)
-        return _composite_candidate_chain(config, effective_tenant, rows, pairs, pool, loads)
+        index = _member_configs_sync(db, effective_tenant, pairs)
+        return _composite_candidate_chain(config, effective_tenant, index, pairs, pool, loads)
     pool = registry.get_active_channels(effective_tenant, provider=config.provider)
     return _single_candidate_chain(config, pool, loads)
 
@@ -616,8 +673,8 @@ async def candidate_channels_async(
         if not pairs:
             return []
         pool = await registry.get_active_channels(effective_tenant, provider=None)
-        rows = await _member_configs_async(db, effective_tenant, pairs)
-        return _composite_candidate_chain(config, effective_tenant, rows, pairs, pool, loads)
+        index = await _member_configs_async(db, effective_tenant, pairs)
+        return _composite_candidate_chain(config, effective_tenant, index, pairs, pool, loads)
     pool = await registry.get_active_channels(effective_tenant, provider=config.provider)
     return _single_candidate_chain(config, pool, loads)
 
@@ -627,7 +684,7 @@ def candidate_channels_batch_sync(
     config_rows: Sequence[ModelConfig],
     tenant_id: uuid.UUID,
 ) -> dict[uuid.UUID, list[ChannelSnapshot]]:
-    """批量候选探测（列表页专用）：固定上限两次查询（全量活跃池 + 成员 config 索引）。
+    """批量候选探测（列表页专用）：固定上限三次查询（全量活跃池 + 成员 config/弃用 pair）。
 
     普通模型按 provider 在内存匹配（池含全部 provider），组合复用同一成员索引；
     租户语义 = 调用方（effective_tenant），与 resolve_* 的 tenant_id 参数一致。
@@ -643,8 +700,10 @@ def candidate_channels_batch_sync(
     for row in config_rows:
         if row.is_composite:
             composite_pairs.update(parse_members(row.config))
-    member_rows = (
-        _member_configs_sync(db, tenant_id, sorted(composite_pairs)) if composite_pairs else {}
+    member_index = (
+        _member_configs_sync(db, tenant_id, sorted(composite_pairs))
+        if composite_pairs
+        else _MemberIndex(rows={}, deprecated_pairs=frozenset())
     )
 
     result: dict[uuid.UUID, list[ChannelSnapshot]] = {}
@@ -653,7 +712,7 @@ def candidate_channels_batch_sync(
         if config.provider is ModelProvider.COMPOSITE:
             pairs = parse_members(row.config)
             result[row.id] = (
-                _composite_candidate_chain(config, tenant_id, member_rows, pairs, pool, loads)
+                _composite_candidate_chain(config, tenant_id, member_index, pairs, pool, loads)
                 if pairs
                 else []
             )

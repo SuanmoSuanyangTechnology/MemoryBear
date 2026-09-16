@@ -2,7 +2,7 @@ import uuid
 from collections.abc import Sequence
 from typing import List, Optional, Dict, Any, Tuple
 
-from sqlalchemy import and_, or_, desc, select, tuple_
+from sqlalchemy import and_, case, or_, desc, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session, joinedload
 
@@ -175,31 +175,6 @@ class ModelConfigRepository:
             raise
 
     @staticmethod
-    def list_active_tenant_provider_models(
-        db: Session, *, provider: str, tenant_id: uuid.UUID
-    ) -> List[ModelConfig]:
-        """删 provider 凭据联动的受影响集：本租户 + 同供应商 + 启用中 + 非组合。
-
-        与其余列表查询不同：**不含** is_public 分支（公开模型归属平台租户，其启用态是
-        跨租户共享目录，不随单个租户的渠道删除联动）。探测口径见
-        model_channel_service._auto_disable_unresolvable。
-        """
-        db_logger.debug(f"查询渠道删除受影响模型: provider={provider}, tenant_id={tenant_id}")
-        try:
-            stmt = select(ModelConfig).where(
-                ModelConfig.tenant_id == tenant_id,
-                ModelConfig.provider == provider,
-                ModelConfig.is_active.is_(True),
-                ModelConfig.is_composite.is_(False),
-            )
-            rows = list(db.execute(stmt).scalars().all())
-            db_logger.debug(f"渠道删除受影响模型查询成功: 数量={len(rows)}")
-            return rows
-        except Exception as e:
-            db_logger.error(f"查询渠道删除受影响模型失败: provider={provider} - {str(e)}")
-            raise
-
-    @staticmethod
     def get_list(db: Session, query: ModelConfigQuery, tenant_id: uuid.UUID | None = None) -> Tuple[List[ModelConfig], int]:
         """获取模型配置列表"""
         db_logger.debug(f"查询模型配置列表: {query.model_dump()}, tenant_id={tenant_id}")
@@ -256,6 +231,12 @@ class ModelConfigRepository:
 
             if filters:
                 base_query = base_query.filter(and_(*filters))
+
+            # is_available 过滤需探测派生（SQL 不可达）：全量取行，过滤+分页由服务层内存完成
+            if query.is_available is not None:
+                models = base_query.order_by(desc(ModelConfig.created_at)).all()
+                db_logger.debug(f"模型配置列表全量查询（is_available 过滤）: 行数={len(models)}")
+                return models, len(models)
 
             # 获取总数
             total = base_query.count()
@@ -583,8 +564,23 @@ class ModelBaseRepository:
         q = db.query(ModelBase)
         if filters:
             q = q.filter(and_(*filters))
-        
-        return q.order_by(ModelBase.add_count.desc(), ModelBase.created_at.desc()).all()
+
+        # 广场排序（G4/D13.9）：未下线优先 → 接口族分组 → 组内热度 → 新旧兜底；
+        # type_rank 次序与 model_channel_service._TYPE_RANK 一致（chat 为存量口径），else 6 为预留位
+        type_rank = case(
+            (ModelBase.type.in_([ModelType.LLM.value, ModelType.CHAT.value]), 1),
+            (ModelBase.type == ModelType.EMBEDDING.value, 2),
+            (ModelBase.type == ModelType.RERANK.value, 3),
+            (ModelBase.type == ModelType.IMAGE.value, 4),
+            (ModelBase.type == ModelType.VIDEO.value, 5),
+            else_=6,
+        )
+        return q.order_by(
+            ModelBase.is_deprecated.asc(),
+            type_rank.asc(),
+            ModelBase.add_count.desc(),
+            ModelBase.created_at.desc().nullslast(),
+        ).all()
 
     @staticmethod
     def create(db: Session, data: dict) -> 'ModelBase':

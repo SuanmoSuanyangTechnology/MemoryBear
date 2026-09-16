@@ -1,12 +1,12 @@
 """wire 面词域翻译层（Task 13 §15.1）：对外 apikey 词域 ↔ model_channels 渠道。
 
 - 模型域 `/{model_id}/apikeys`：模型级（点名）渠道列表（含停用，启停/编辑/解绑的管理面；
-  非运行期候选链，不透出公共备援）、登记点名凭据、解绑（解绑后候选链为空的自有启用模型
-  置停用——公开不联动，维持"启用 ⟹ 有可用渠道"不变式，2026-09-15 决策；组合模型不走登记/解绑，
-  仅列表按成员声明序展开）
+  非运行期候选链，不透出公共备援）、登记点名凭据、解绑（2026-09-16 治理批次 G：解绑/删凭据
+  不再联动停用模型——`is_active` 仅用户显式操作；无渠道模型靠 `is_available=false` 从选择器
+  隐藏；组合模型不走登记/解绑，仅列表按成员声明序展开）
 - Provider 域 `/provider/apikeys`：provider 级公共凭据列表/登记（model_names=[]，覆盖该
   供应商全部未点名模型）、渠道属性维护（model_names 不可改）、凭据删除（影响面前置提示，
-  前端弹确认；删除后候选链为空的自有启用模型（公开不联动）同事务置停用）
+  前端弹确认；不联动模型启停——治理批次 G）
 - 对外只见 `credential_masked`；明文只进不出（加密落地在 ChannelService，本层不触密文）
 - 租户归属强校验：越租户按 404 处理，不泄漏资源存在性
 - 事务边界在本层（ChannelService 只 flush）；可用性探测只读不解密
@@ -16,7 +16,6 @@ from __future__ import annotations
 import logging
 import math
 import uuid
-from collections.abc import Sequence
 from dataclasses import dataclass
 
 from redbear_model import ChannelSource
@@ -36,7 +35,6 @@ from app.repositories.model_repository import ModelConfigRepository
 from app.schemas import model_schema
 from app.schemas.response_schema import PageData, PageMeta
 from app.services.channel_registry import (
-    candidate_channels_batch_sync,
     candidate_channels_sync,
     invalidate_channel_cache,
     parse_members,
@@ -44,8 +42,6 @@ from app.services.channel_registry import (
 from app.services.channel_service import ChannelService, describe_channel
 from app.services.model_service import (
     ModelConfigService,
-    _invalidate_model_option_states,
-    _model_option_cache_state,
     _require_api_base_for_local_provider,
     _require_supported_api_base,
     _require_wellformed_api_base,
@@ -208,44 +204,6 @@ def _named_channels_for_members(
     return ordered
 
 
-def _auto_disable_unresolvable(
-    db: Session, rows: Sequence[ModelConfig], tenant_id: uuid.UUID
-) -> list[tuple[uuid.UUID | None, bool]]:
-    """删除/解绑联动（2026-09-15）：候选链解析为空的在启用自有非公开模型置停用（不 commit）。
-
-    判据与启用预检（`assert_enableable`）同一口径：candidate_channels_* 非空 = 可解析；
-    单模型走单探测，多条走批量探测（固定 ≤2 查询）。公开模型（is_public，含租户自有）
-    启用态是跨租户共享目录，租户侧渠道变动不联动。返回被停用模型的工作空间选项缓存态
-    （`_model_option_cache_state`），调用方 commit 后失效；空列表 = 无联动。
-    """
-    owned = [
-        row for row in rows if row.is_active and not row.is_public and row.tenant_id == tenant_id
-    ]
-    if not owned:
-        return []
-    if len(owned) == 1:
-        probe = {
-            owned[0].id: bool(candidate_channels_sync(db, owned[0], tenant_id=tenant_id))
-        }
-    else:
-        probe = {
-            row_id: bool(chain)
-            for row_id, chain in candidate_channels_batch_sync(db, owned, tenant_id).items()
-        }
-    states: list[tuple[uuid.UUID | None, bool]] = []
-    for row in owned:
-        if not probe.get(row.id):
-            row.is_active = False
-            states.append(_model_option_cache_state(row))
-            logger.info(
-                "联动停用模型配置: model_config_id=%s tenant_id=%s provider=%s（删除/解绑后候选链为空）",
-                row.id,
-                tenant_id,
-                _provider_value(row.provider),
-            )
-    return states
-
-
 class ChannelApiKeyService:
     """模型域 / Provider 域 wire 编排（apikey ↔ 渠道词域翻译）。"""
 
@@ -278,7 +236,15 @@ class ChannelApiKeyService:
         口径；候选为空时引导绑定（租户不能自助登记，通用"补充 API Key"文案会误导）。
         候选为空但存在覆盖渠道（未按 is_active 过滤）时判为"全部停用"（CHANNEL_DISABLED），
         与"从未登记"区分。禁用不校验（关闭永远放行）。
+
+        弃用模型（model_bases.is_deprecated）任何情况下不可启用（2026-09-16 治理批次 G：
+        下游已下线的模型重启用无意义；恢复 is_deprecated=false 即自动放行）。
         """
+        if model_config.model_base is not None and model_config.model_base.is_deprecated:
+            raise BusinessException(
+                "模型已弃用或已下线，无法启用",
+                BizCode.MODEL_DEPRECATED,
+            )
         if model_config.is_composite:
             if not parse_members(model_config.config):
                 raise BusinessException(
@@ -394,8 +360,8 @@ class ChannelApiKeyService:
     ) -> dict:
         """解绑：点名渠道移除该模型名（点名为空自动删凭据）。
 
-        解绑确有移除（unbound）且候选链随之为空时，同事务停用该自有启用模型
-        （2026-09-15 决策：维持"启用 ⟹ 有可用渠道"不变式；公开模型不联动）。
+        2026-09-16 治理批次 G：不再联动停用模型——删渠道/解绑后模型保持启用，
+        无渠道模型由 `is_available=false` 从选择器隐藏（`is_active` 仅用户显式操作）。
         返回体不变。
         """
         model_config = ChannelApiKeyService._config(db, model_id, tenant_id)
@@ -412,19 +378,14 @@ class ChannelApiKeyService:
                 f"该凭据未绑定模型 {model_config.name}", BizCode.INVALID_PARAMETER
             )
 
-        states: list[tuple[uuid.UUID | None, bool]] = []
         try:
             unbound, deleted = ChannelService(db).unbind_model(row.id, model_config.name)
-            if unbound:
-                states = _auto_disable_unresolvable(db, [model_config], tenant_id)
             db.commit()
         except Exception:
-            # 探测可能已用删除后状态回填渠道快照缓存；回滚后须再失效，防 ≤TTL 的错判
+            # 解绑可能已改渠道快照缓存；回滚后须再失效，防 ≤TTL 的错判
             db.rollback()
             invalidate_channel_cache(row.tenant_id, _provider_value(row.provider))
             raise
-        if states:
-            _invalidate_model_option_states(*states)
         return {
             "id": str(row.id),
             "model_name": model_config.name,
@@ -601,27 +562,19 @@ class ChannelApiKeyService:
     def delete_provider_key(db: Session, apikey_id: uuid.UUID, tenant_id: uuid.UUID) -> bool:
         """删凭据本体（不可恢复）；影响面（覆盖模型清单）由列表/详情前置提示。
 
-        删除后（2026-09-15 决策）：该租户该供应商下候选链解析为空的启用模型同事务置停用
-        （维持"启用 ⟹ 有可用渠道"不变式；公开模型不联动）。
+        2026-09-16 治理批次 G：不再联动停用模型——删除后无渠道模型由 `is_available=false`
+        从选择器隐藏（`is_active` 仅用户显式操作）。
         """
         row = ChannelApiKeyService._owned_channel(db, apikey_id, tenant_id)
         provider = _provider_value(row.provider)
-        states: list[tuple[uuid.UUID | None, bool]] = []
         try:
             deleted = ChannelService(db).delete(apikey_id)
-            if deleted:
-                affected = ModelConfigRepository.list_active_tenant_provider_models(
-                    db, provider=provider, tenant_id=tenant_id
-                )
-                states = _auto_disable_unresolvable(db, affected, tenant_id)
             db.commit()
         except Exception:
-            # 探测可能已用删除后状态回填渠道快照缓存；回滚后须再失效，防 ≤TTL 的错判
+            # 删除可能已改渠道快照缓存；回滚后须再失效，防 ≤TTL 的错判
             db.rollback()
             invalidate_channel_cache(tenant_id, provider)
             raise
-        if states:
-            _invalidate_model_option_states(*states)
         return deleted
 
 
