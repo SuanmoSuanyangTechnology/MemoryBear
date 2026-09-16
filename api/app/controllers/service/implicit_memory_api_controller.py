@@ -23,28 +23,38 @@ def _handle_implicit_memory_error(
     operation: str,
     end_user_id: str,
 ) -> dict:
-    """按api端隐性记忆 Controller 的规则映射业务异常。"""
+    """返回固定错误提示；异常详情记录到日志"""
     error_context = f"user_id={end_user_id}"
 
     if isinstance(exc, ValueError):
         error_text = str(exc).lower()
         if "user" in error_text and "not found" in error_text:
-            logger.warning("Invalid user ID for %s: %s", operation, error_context)
-            return fail(BizCode.INVALID_USER_ID, "无效的用户ID", str(exc))
+            logger.warning(
+                "Invalid user ID for %s: %s", operation, error_context, exc_info=True
+            )
+            return fail(BizCode.INVALID_USER_ID, "无效的用户ID")
         if "insufficient" in error_text or "no data" in error_text:
-            logger.warning("Insufficient data for %s: %s", operation, error_context)
-            return fail(BizCode.INSUFFICIENT_DATA, "数据不足，无法进行分析", str(exc))
+            logger.warning(
+                "Insufficient data for %s: %s", operation, error_context, exc_info=True
+            )
+            return fail(BizCode.INSUFFICIENT_DATA, "数据不足，无法进行分析")
 
-        logger.warning("Invalid parameters for %s: %s", operation, error_context)
-        return fail(BizCode.INVALID_FILTER_PARAMS, "无效的参数", str(exc))
+        logger.warning(
+            "Invalid parameters for %s: %s", operation, error_context, exc_info=True
+        )
+        return fail(BizCode.INVALID_FILTER_PARAMS, "无效的参数")
 
     if isinstance(exc, KeyError):
-        logger.warning("Missing required data for %s: %s", operation, error_context)
-        return fail(BizCode.INSUFFICIENT_DATA, "缺少必要的数据", str(exc))
+        logger.warning(
+            "Missing required data for %s: %s", operation, error_context, exc_info=True
+        )
+        return fail(BizCode.INSUFFICIENT_DATA, "缺少必要的数据")
 
     if isinstance(exc, (ConnectionError, TimeoutError)):
-        logger.error("Service unavailable for %s: %s", operation, error_context)
-        return fail(BizCode.SERVICE_UNAVAILABLE, "服务暂时不可用", str(exc))
+        logger.error(
+            "Service unavailable for %s: %s", operation, error_context, exc_info=True
+        )
+        return fail(BizCode.SERVICE_UNAVAILABLE, "服务暂时不可用")
 
     error_text = str(exc).lower()
     if "analysis" in error_text or "llm" in error_text:
@@ -54,7 +64,7 @@ def _handle_implicit_memory_error(
             error_context,
             exc_info=True,
         )
-        return fail(BizCode.ANALYSIS_FAILED, "分析处理失败", str(exc))
+        return fail(BizCode.ANALYSIS_FAILED, "分析处理失败")
 
     if "storage" in error_text or "database" in error_text:
         logger.error(
@@ -63,7 +73,7 @@ def _handle_implicit_memory_error(
             error_context,
             exc_info=True,
         )
-        return fail(BizCode.PROFILE_STORAGE_ERROR, "数据存储失败", str(exc))
+        return fail(BizCode.PROFILE_STORAGE_ERROR, "数据存储失败")
 
     logger.error(
         "Unexpected error for %s: %s",
@@ -71,7 +81,7 @@ def _handle_implicit_memory_error(
         error_context,
         exc_info=True,
     )
-    return fail(BizCode.INTERNAL_ERROR, f"{operation}失败", str(exc))
+    return fail(BizCode.INTERNAL_ERROR, f"{operation}失败")
 
 
 @router.get("", response_model=ApiResponse)
