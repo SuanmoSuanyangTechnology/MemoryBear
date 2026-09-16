@@ -35,8 +35,6 @@ from ..rag.chunk.router import FileTypeRouter
 from ..rag.chunk.token_utils import num_tokens_from_string, truncate
 from ..rag.knowledge_graph import GraphPipeline, is_graph_enabled, resolve_graph_pipeline
 from ..rag.models.chunk import DocumentChunk
-from ..rag.models.media import QWenCV as MediaQWenCV
-from ..rag.models.media import QWenSeq2txt
 from ..rag.models.media_runtime import (
     AudioTranscriptionChunkModel,
     VideoUnderstandingChunkModel,
@@ -288,28 +286,28 @@ def _build_vision_model(
 ):
     factory = TaskModelFactory(runtime)
     if _AUDIO_PATTERN.search(snapshot.file_name):
-        if snapshot.audio2text_id is not None:
-            transcriber = factory.create_audio_transcriber(
-                snapshot.audio2text_id,
-                snapshot.tenant_id,
-            )
-            return AudioTranscriptionChunkModel(
-                transcriber,
-                _media_file_url(runtime, file_key, snapshot.source_file_name),
-            )
-        return QWenSeq2txt(lang="Chinese")
+        if snapshot.audio2text_id is None:
+            raise RuntimeError("audio2text_id model config is unavailable")
+        transcriber = factory.create_audio_transcriber(
+            snapshot.audio2text_id,
+            snapshot.tenant_id,
+        )
+        return AudioTranscriptionChunkModel(
+            transcriber,
+            _media_file_url(runtime, file_key, snapshot.source_file_name),
+        )
     if _VIDEO_PATTERN.search(snapshot.file_name):
-        if snapshot.video2text_id is not None:
-            video_runtime = factory.create_video_understanding(
-                snapshot.video2text_id,
-                snapshot.tenant_id,
-            )
-            return VideoUnderstandingChunkModel(
-                video_runtime,
-                _media_file_url(runtime, file_key, snapshot.source_file_name),
-                lang="Chinese",
-            )
-        return MediaQWenCV(lang="Chinese")
+        if snapshot.video2text_id is None:
+            raise RuntimeError("video2text_id model config is unavailable")
+        video_runtime = factory.create_video_understanding(
+            snapshot.video2text_id,
+            snapshot.tenant_id,
+        )
+        return VideoUnderstandingChunkModel(
+            video_runtime,
+            _media_file_url(runtime, file_key, snapshot.source_file_name),
+            lang="Chinese",
+        )
     needs_image_model = (
         bool(_DIRECT_IMAGE_PATTERN.search(snapshot.file_name))
         and is_direct_image_vision_enabled(snapshot.parser_config)
