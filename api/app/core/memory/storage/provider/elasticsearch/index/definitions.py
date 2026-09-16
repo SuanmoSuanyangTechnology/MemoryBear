@@ -40,6 +40,7 @@ EMBEDDING_FIELDS: dict[MemoryNodeLabel, str] = {
     MemoryNodeType.PERCEPTUAL: "summary_embedding",
     MemoryNodeType.DIALOGUE: "dialog_embedding",
     MemoryNodeType.ASSISTANT_PRUNED: "text_embedding",
+    MemoryNodeType.USER_SOURCE: "text_embedding",
 }
 
 
@@ -358,7 +359,7 @@ INDEX_DEFINITIONS: dict[MemoryNodeLabel, IndexDefinition] = {
     MemoryNodeType.USER_SOURCE: _index_definition(
         "user_source",
         MemoryNodeType.USER_SOURCE,
-        schema_version=2,
+        schema_version=3,
         generation=1,
         prop={
             "id": {"type": "keyword"},
