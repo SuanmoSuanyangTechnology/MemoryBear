@@ -6,21 +6,27 @@ from fastapi import APIRouter, Body, Depends, Query, Request
 from sqlalchemy.orm import Session
 
 from app.controllers import end_user_controller
-from app.core.api_key_auth import require_api_key_self_db
-from app.core.api_key_utils import get_current_user_snapshot_from_api_key_async
+from app.core.api_key_auth import get_current_api_key_auth, require_api_key_self_db
+from app.core.api_key_utils import (
+    datetime_to_timestamp,
+    get_current_user_snapshot_from_api_key_async,
+    validate_end_user_in_workspace_async,
+)
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
 from app.core.quota_manager import report_quota_change
 from app.core.quota_stub import check_end_user_quota
-from app.core.response_utils import success
+from app.core.response_utils import fail, success
 from app.db import get_db_context, get_async_db_context, get_db
 from app.models.workspace_model import Workspace
+from app.repositories.end_user_info_repository import EndUserInfoRepository
 from app.repositories.end_user_repository import EndUserRepository
 from app.schemas.api_key_schema import ApiKeyAuth
 from app.schemas.end_user_info_schema import EndUserInfoUpdate
 from app.schemas.end_user_schema import EndUserIdentityUpdate
 from app.schemas.memory_api_schema import CreateEndUserRequest, CreateEndUserResponse
+from app.schemas.response_schema import ApiResponse
 from app.services.memory_config_service import MemoryConfigService
 
 router = APIRouter(prefix="/end_user", tags=["V1 - End User API"])
@@ -201,25 +207,75 @@ async def get_end_user_mapping(
     )
 
 
-@router.get("/info")
+@router.get("/info", response_model=ApiResponse)
 @require_api_key_self_db(scopes=["memory"])
 async def get_end_user_info(
     request: Request,
     end_user_id: str,
-    api_key_auth: ApiKeyAuth = None,
 ):
     """
     Get end user info.
 
     Retrieves the info record (aliases, meta_data, etc.) for the specified end user.
-    Delegates to the manager-side controller for shared logic.
+    Uses the same query and field filtering rules as the manager-side API.
     """
+    api_key_auth = get_current_api_key_auth()
     async with get_async_db_context() as auth_db:
-        current_user = await get_current_user_snapshot_from_api_key_async(auth_db, api_key_auth)
-    return await end_user_controller.get_end_user_info(
-        end_user_id=end_user_id,
-        current_user=current_user,
-    )
+        end_user = await validate_end_user_in_workspace_async(
+            auth_db,
+            end_user_id,
+            api_key_auth.workspace_id,
+        )
+        info_record = await EndUserInfoRepository(
+            auth_db
+        ).get_end_user_info_async(end_user.id)
+
+        if not info_record:
+            return fail(
+                BizCode.USER_NOT_FOUND,
+                "终端用户信息记录不存在",
+                "终端用户信息记录不存在",
+            )
+
+        top_fields = ("other_name", "aliases")
+        meta_fields = (
+            "relations",
+            "goals",
+            "core_facts",
+            "interests",
+            "traits",
+            "beliefs_or_stances",
+            "anchors",
+            "events",
+        )
+        always_include = {"other_name"}
+        max_visible = 6
+
+        raw_meta = info_record.meta_data or {}
+        candidates = (
+            [(field, getattr(info_record, field, None), True) for field in top_fields]
+            + [(field, raw_meta.get(field), False) for field in meta_fields]
+        )
+
+        selected_top = {}
+        filtered_meta = {}
+        for field, value, is_top in candidates:
+            if len(selected_top) + len(filtered_meta) >= max_visible:
+                break
+            if not value and field not in always_include:
+                continue
+            (selected_top if is_top else filtered_meta)[field] = value
+
+        response_data = {
+            "end_user_info_id": str(info_record.id),
+            "end_user_id": str(info_record.end_user_id),
+            **selected_top,
+            "meta_data": filtered_meta,
+            "created_at": datetime_to_timestamp(info_record.created_at),
+            "updated_at": datetime_to_timestamp(info_record.updated_at),
+        }
+
+    return success(data=response_data, msg="查询成功")
 
 
 @router.post("/info/update")
