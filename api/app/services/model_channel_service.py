@@ -351,7 +351,7 @@ class ChannelApiKeyService:
                 return None
             if config.model_base and config.model_base.is_deprecated:
                 raise BusinessException("模型已停用或废弃", BizCode.INVALID_PARAMETER)
-            _require_asr_model_configuration(config.type)
+            _require_asr_model_configuration(config.provider, config.type)
             return {"provider": _provider_value(config.provider), "name": config.name,
                     "type": config.type, "capability": list(config.capability or []),
                     "is_active": config.is_active}

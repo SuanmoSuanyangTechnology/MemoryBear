@@ -177,9 +177,11 @@ def is_asr_model(model_type: str) -> bool:
     return _enum_value(model_type) == "asr"
 
 
-def _require_asr_model_configuration(model_type: str) -> None:
+def _require_asr_model_configuration(provider: str, model_type: str) -> None:
     if not is_asr_model(model_type):
         raise BusinessException("ASR 模型类型不匹配", BizCode.INVALID_PARAMETER)
+    if _enum_value(provider) != "dashscope":
+        raise BusinessException("ASR 模型当前仅支持 DashScope", BizCode.INVALID_PARAMETER)
 
 
 def _validation_image() -> "ImageEmbeddingContent":
@@ -935,7 +937,7 @@ class ModelConfigService:
         _require_wellformed_bedrock_credential(model_data.provider, credential.api_key)
         _require_wellformed_api_base(model_data.provider, credential.api_base, model_data.type)
         _require_supported_api_base(model_data.provider, credential.api_base, model_data.type)
-        _require_asr_model_configuration(model_data.type)
+        _require_asr_model_configuration(model_data.provider, model_data.type)
         snapshot = model_data.model_dump(exclude={"credential"})
         await asyncio.to_thread(ModelConfigService._check_asr_model_name, snapshot, tenant_id)
         return await asyncio.to_thread(
