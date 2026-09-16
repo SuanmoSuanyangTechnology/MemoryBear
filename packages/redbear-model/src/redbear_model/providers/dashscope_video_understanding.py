@@ -12,7 +12,6 @@ from langchain_core.messages import AIMessageChunk, HumanMessage
 from openai import APIConnectionError, APITimeoutError
 
 from redbear_model.contracts import (
-    ModelCapability,
     ModelProvider,
     ModelType,
     ResolvedModelConfig,
@@ -39,7 +38,6 @@ from redbear_model.providers.openai import (
 )
 from redbear_model.runtime.client_pool import ModelClientPool
 
-_MODEL = "qwen3.5-omni-plus-2026-03-15"
 _ALLOWED_PARAMS = {
     "temperature",
     "max_tokens",
@@ -79,8 +77,6 @@ def _isolated_config(config: ResolvedModelConfig) -> ResolvedModelConfig:
     if (
         config.provider is not ModelProvider.DASHSCOPE
         or config.model_type not in {ModelType.LLM, ModelType.CHAT}
-        or config.model_name != _MODEL
-        or ModelCapability.VIDEO not in config.capabilities
     ):
         raise UnsupportedMultimodalModelError("video understanding")
     if (
@@ -117,7 +113,6 @@ def _isolated_config(config: ResolvedModelConfig) -> ResolvedModelConfig:
             "base_url": urlunsplit(
                 (parsed.scheme, parsed.netloc, "/compatible-mode/v1", "", "")
             ),
-            "capabilities": (ModelCapability.VIDEO,),
             "runtime": config.runtime.model_copy(update={"max_retries": 0}),
         },
     )

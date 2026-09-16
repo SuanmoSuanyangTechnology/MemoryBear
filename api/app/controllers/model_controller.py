@@ -304,7 +304,7 @@ async def create_model(
     创建自定义模型
 
     - 内嵌 credential 必填：config 与点名渠道单事务落库
-    - 音视频理解模型在实际调用时校验凭据；其他模型仍在创建时做活体验证
+    - ASR 模型在实际调用时校验凭据；其他模型仍在创建时做活体验证
     """
     api_logger.info(f"创建模型配置请求: {model_data.name}, 用户: {current_user.username}, tenant_id={current_user.tenant_id}")
 
@@ -627,7 +627,7 @@ async def create_model_api_key(
     """
     为模型登记点名凭据（provider/真实模型名由服务端按模型配置读取）
 
-    音视频理解模型在实际调用时校验凭据；其他模型登记前做一次活体验证。
+    ASR 模型在实际调用时校验凭据；其他模型登记前做一次活体验证。
     同凭据同端点已存在时幂等合并（公共渠道吸收为 no-op）。
     新建 201；幂等合并/吸收 200。
     """

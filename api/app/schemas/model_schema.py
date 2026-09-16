@@ -36,7 +36,7 @@ class ModelConfigCreate(ModelConfigBase):
     """创建自定义模型Schema（内嵌 credential：创建即登记点名渠道，单接口原子完成）
 
     自定义模型不经模型广场添加，provider 级渠道不保证可用，因此凭据必填。
-    音视频理解模型在实际调用时校验凭据，其他模型在创建时做活体验证。
+    ASR 模型在实际调用时校验凭据，其他模型在创建时做活体验证。
     """
     credential: ApiKeyRegister = Field(..., description="模型凭据（必填）")
 

@@ -8,7 +8,6 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
 
-from redbear_model import RedBearModelError, match_channel_candidates
 from sqlalchemy import or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
@@ -24,14 +23,12 @@ from ..errors import KnowledgeError
 from ..models.owned import Knowledge, KnowledgeType, PermissionType
 from ..models.references import ModelBase, ModelConfig, User
 from ..rag.knowledge_graph.config import GraphPipeline, is_graph_enabled
-from ..rag.models.task_runtime import MEDIA_MODEL_FIELDS, validate_media_model_kind
 from ..rag.parser_config import (
     normalize_knowledge_parser_config_update,
     set_graph_pipeline_for_migration,
 )
 from ..repositories import knowledge as knowledge_repository
 from ..repositories.knowledge_share import get_knowledgeshare_by_id_async
-from ..repositories.model_registry import AsyncSQLModelRegistry, _config_snapshot
 from ..repositories.reference import ReferenceRepository
 from ..utils.datetime_utils import utcnow_naive
 
@@ -353,34 +350,6 @@ async def get_knowledge(
     )
 
 
-async def validate_media_model_references(
-    db: AsyncSession, values: dict[str, Any], tenant_id: uuid.UUID,
-) -> None:
-    """Validate new media selections without calling or decrypting a provider key."""
-    for field in MEDIA_MODEL_FIELDS:
-        model_id = values.get(field)
-        if model_id is None:
-            continue
-        model = await ReferenceRepository.get_model_config(db, model_id)
-        if (model is None or not model.is_active
-                or (model.tenant_id != tenant_id and model.is_public is not True)):
-            raise _reference_not_found(f"Media model is unavailable: {field}")
-        if model.model_id is not None:
-            base = await ReferenceRepository.get_model_base(db, model.model_id)
-            if base is None or base.is_deprecated:
-                raise _reference_not_found(f"Media model is deprecated or missing: {field}")
-        try:
-            config = _config_snapshot(model)
-            validate_media_model_kind(config, field)
-        except (ValueError, RedBearModelError) as exc:
-            raise _reference_not_found(f"Media model does not support {field}") from exc
-        channels = await AsyncSQLModelRegistry(db).list_active_channels(
-            tenant_id, config.provider.value,
-        )
-        if not match_channel_candidates(config, channels, model_name=config.name):
-            raise _reference_not_found(f"Media model has no active credential channel: {field}")
-
-
 async def _prepare_knowledge_create(
     db: AsyncSession,
     create_data: KnowledgeCreate,
@@ -433,7 +402,6 @@ async def _prepare_knowledge_create(
         model = await ReferenceRepository.get_latest_vision_model(db, workspace.tenant_id)
         if model is not None:
             knowledge.image2text_id = model.id
-    await validate_media_model_references(db, knowledge.model_dump(), principal.tenant_id)
     return knowledge
 
 
@@ -519,10 +487,6 @@ async def prepare_knowledge_update(
     if knowledge is None:
         raise _not_found()
     update_dict = update_data.model_dump(exclude_unset=True)
-    await validate_media_model_references(db, {
-        field: value for field, value in update_dict.items()
-        if field in MEDIA_MODEL_FIELDS and value != getattr(knowledge, field)
-    }, principal.tenant_id)
     if "parent_id" in update_dict:
         parent_id = update_dict["parent_id"]
         if parent_id is not None and parent_id != principal.workspace_id:
@@ -571,10 +535,6 @@ async def apply_knowledge_update(
     knowledge = await get_knowledge(db, plan.knowledge_id, principal)
     if knowledge is None:
         raise _not_found()
-    await validate_media_model_references(db, {
-        field: value for field, value in plan.update_fields.items()
-        if field in MEDIA_MODEL_FIELDS and value != getattr(knowledge, field)
-    }, principal.tenant_id)
     if plan.embedding_changed:
         from ..repositories.document import stage_reset_documents_progress_by_kb_id_async
 

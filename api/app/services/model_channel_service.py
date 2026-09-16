@@ -47,12 +47,12 @@ from app.services.model_service import (
     ModelConfigService,
     _invalidate_model_option_states,
     _model_option_cache_state,
-    _require_media_model_configuration,
+    _require_asr_model_configuration,
     _require_api_base_for_local_provider,
     _require_supported_api_base,
     _require_wellformed_api_base,
     _require_wellformed_bedrock_credential,
-    is_media_model,
+    is_asr_model,
 )
 
 logger = logging.getLogger(__name__)
@@ -342,26 +342,22 @@ class ChannelApiKeyService:
         return [model_schema.ApiKeyItem.model_validate(describe_channel(row)) for row in rows]
 
     @staticmethod
-    def _media_key_snapshot(model_id: uuid.UUID, tenant_id: uuid.UUID) -> dict | None:
+    def _asr_key_snapshot(model_id: uuid.UUID, tenant_id: uuid.UUID) -> dict | None:
         from app.db import get_db_context
 
         with get_db_context() as db:
             config = ChannelApiKeyService._config(db, model_id, tenant_id)
-            if not is_media_model(config.provider, config.name):
+            if not is_asr_model(config.type):
                 return None
             if config.model_base and config.model_base.is_deprecated:
                 raise BusinessException("模型已停用或废弃", BizCode.INVALID_PARAMETER)
-            _require_media_model_configuration(
-                model_name=config.name,
-                model_type=config.type,
-                capability=config.capability,
-            )
+            _require_asr_model_configuration(config.type)
             return {"provider": _provider_value(config.provider), "name": config.name,
                     "type": config.type, "capability": list(config.capability or []),
                     "is_active": config.is_active}
 
     @staticmethod
-    def _register_media_key(model_id, tenant_id, created_by, data, snapshot):
+    def _register_asr_key(model_id, tenant_id, created_by, data, snapshot):
         from app.db import get_db_context
 
         with get_db_context() as db:
@@ -397,17 +393,17 @@ class ChannelApiKeyService:
         """给模型登记点名凭据（真实调用名 = config.name，组合 name 是别名不走本域）。
 
         同凭据同端点已存在时幂等合并：provider 级渠道吸收为 no-op、点名渠道并入覆盖集。
-        音视频理解模型登记时只校验配置结构，凭据在实际调用时验证；其他模型
+        ASR 模型登记时只校验配置结构，凭据在实际调用时验证；其他模型
         仍在登记前试调一次，失败返回 400。
         """
-        snapshot = await asyncio.to_thread(ChannelApiKeyService._media_key_snapshot, model_id, tenant_id)
+        snapshot = await asyncio.to_thread(ChannelApiKeyService._asr_key_snapshot, model_id, tenant_id)
         if snapshot is not None:
             _require_api_base_for_local_provider(snapshot["provider"], data.api_base)
             _require_wellformed_bedrock_credential(snapshot["provider"], data.api_key)
             _require_wellformed_api_base(snapshot["provider"], data.api_base, snapshot["type"])
             _require_supported_api_base(snapshot["provider"], data.api_base, snapshot["type"])
             return await asyncio.to_thread(
-                ChannelApiKeyService._register_media_key, model_id, tenant_id,
+                ChannelApiKeyService._register_asr_key, model_id, tenant_id,
                 created_by, data.model_dump(), snapshot,
             )
         model_config = ChannelApiKeyService._config(db, model_id, tenant_id)

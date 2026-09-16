@@ -44,7 +44,6 @@ from redbear_model.media_contracts import (
 from redbear_model.providers.dashscope import resolve_dashscope_native_base_address
 from redbear_model.runtime.client_pool import ModelClientPool
 
-ASR_MODEL_NAME = "qwen3-asr-flash-filetrans"
 _DEFAULT_BASE = "https://dashscope.aliyuncs.com/api/v1"
 _MAX_REDIRECTS = 3
 _IDENTIFIER = re.compile(r"[A-Za-z0-9_.:-]{1,128}\Z")
@@ -187,10 +186,7 @@ class DashScopeASRAdapter:
     ):
         if config.provider is not ModelProvider.DASHSCOPE:
             raise UnsupportedModelProviderError(config.provider.value)
-        if (
-            config.model_type is not ModelType.ASR
-            or config.model_name != ASR_MODEL_NAME
-        ):
+        if config.model_type is not ModelType.ASR:
             raise UnsupportedMultimodalModelError("audio transcription")
         self._base = _base_address(config.base_url)
         self._config = config

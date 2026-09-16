@@ -173,24 +173,13 @@ def _shared_validation_config(
     )
 
 
-_DASHSCOPE_ASR_MODEL = "qwen3-asr-flash-filetrans"
-_DASHSCOPE_VIDEO_MODEL = "qwen3.5-omni-plus-2026-03-15"
+def is_asr_model(model_type: str) -> bool:
+    return _enum_value(model_type) == "asr"
 
 
-def is_media_model(provider: str, model_name: str) -> bool:
-    return _enum_value(provider) == "dashscope" and model_name in {
-        _DASHSCOPE_ASR_MODEL, _DASHSCOPE_VIDEO_MODEL,
-    }
-
-
-def _require_media_model_configuration(
-    *, model_name: str, model_type: str, capability: list | None,
-) -> None:
-    expected_types = {"asr"} if model_name == _DASHSCOPE_ASR_MODEL else {"llm", "chat"}
-    if _enum_value(model_type) not in expected_types:
-        raise BusinessException("媒体模型类型与调用能力不匹配", BizCode.INVALID_PARAMETER)
-    if model_name == _DASHSCOPE_VIDEO_MODEL and "video" not in (capability or []):
-        raise BusinessException("模型缺少视频理解能力", BizCode.INVALID_PARAMETER)
+def _require_asr_model_configuration(model_type: str) -> None:
+    if not is_asr_model(model_type):
+        raise BusinessException("ASR 模型类型不匹配", BizCode.INVALID_PARAMETER)
 
 
 def _validation_image() -> "ImageEmbeddingContent":
@@ -608,14 +597,14 @@ class ModelConfigService:
         Returns:
             Dict: 验证结果
         """
-        if is_media_model(provider, model_name):
+        if is_asr_model(model_type):
             return {
                 "valid": False,
-                "message": "媒体模型不支持配置时活体验证",
+                "message": "ASR 模型不支持配置时活体验证",
                 "response": None,
                 "elapsed_time": None,
                 "usage": None,
-                "error": "媒体模型将在实际调用时校验模型和凭据",
+                "error": "ASR 模型将在实际调用时校验模型和凭据",
                 "error_type": "MediaValidationUnsupported",
             }
         _ = db
@@ -900,7 +889,7 @@ class ModelConfigService:
             }
 
     @staticmethod
-    def _check_media_model_name(model_data: dict, tenant_id: uuid.UUID) -> None:
+    def _check_asr_model_name(model_data: dict, tenant_id: uuid.UUID) -> None:
         from app.db import get_db_context
 
         with get_db_context() as db:
@@ -910,8 +899,8 @@ class ModelConfigService:
                 raise BusinessException("模型名称已存在", BizCode.DUPLICATE_NAME)
 
     @staticmethod
-    def _save_media_model(model_data: dict, credential: dict, tenant_id: uuid.UUID,
-                          created_by: uuid.UUID | None) -> model_schema.ModelConfig:
+    def _save_asr_model(model_data: dict, credential: dict, tenant_id: uuid.UUID,
+                        created_by: uuid.UUID | None) -> model_schema.ModelConfig:
         from app.db import get_db_context
 
         with get_db_context() as db:
@@ -938,7 +927,7 @@ class ModelConfigService:
         return result
 
     @staticmethod
-    async def _create_media_model(
+    async def _create_asr_model(
         model_data: ModelConfigCreate, tenant_id: uuid.UUID, created_by: uuid.UUID | None,
     ) -> model_schema.ModelConfig:
         credential = model_data.credential
@@ -946,15 +935,11 @@ class ModelConfigService:
         _require_wellformed_bedrock_credential(model_data.provider, credential.api_key)
         _require_wellformed_api_base(model_data.provider, credential.api_base, model_data.type)
         _require_supported_api_base(model_data.provider, credential.api_base, model_data.type)
-        _require_media_model_configuration(
-            model_name=model_data.name,
-            model_type=model_data.type,
-            capability=model_data.capability,
-        )
+        _require_asr_model_configuration(model_data.type)
         snapshot = model_data.model_dump(exclude={"credential"})
-        await asyncio.to_thread(ModelConfigService._check_media_model_name, snapshot, tenant_id)
+        await asyncio.to_thread(ModelConfigService._check_asr_model_name, snapshot, tenant_id)
         return await asyncio.to_thread(
-            ModelConfigService._save_media_model, snapshot, credential.model_dump(),
+            ModelConfigService._save_asr_model, snapshot, credential.model_dump(),
             tenant_id, created_by,
         )
 
@@ -967,11 +952,11 @@ class ModelConfigService:
     ) -> ModelConfig | model_schema.ModelConfig:
         """创建自定义模型：config + 点名渠道单事务落库。
 
-        音视频理解模型登记时只校验配置结构，凭据在实际调用时验证；其他模型
+        ASR 模型登记时只校验配置结构，凭据在实际调用时验证；其他模型
         仍在网络活体验证通过后写入。
         """
-        if is_media_model(model_data.provider, model_data.name):
-            return await ModelConfigService._create_media_model(model_data, tenant_id, created_by)
+        if is_asr_model(model_data.type):
+            return await ModelConfigService._create_asr_model(model_data, tenant_id, created_by)
         # 检查名称是否已存在（同租户内；先于任何网络调用）
         if ModelConfigRepository.get_by_name(db, model_data.name, provider=model_data.provider, tenant_id=tenant_id):
             raise BusinessException("模型名称已存在", BizCode.DUPLICATE_NAME)

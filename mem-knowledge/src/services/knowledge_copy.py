@@ -37,6 +37,12 @@ _MODEL_REFERENCE_FIELDS = (
     "audio2text_id",
     "video2text_id",
 )
+_VALIDATED_MODEL_REFERENCE_FIELDS = (
+    "embedding_id",
+    "reranker_id",
+    "llm_id",
+    "image2text_id",
+)
 
 
 def choose_copy_name(source_name: str, occupied_names: set[str]) -> str:
@@ -171,13 +177,13 @@ async def _validate_model_references(
     model_ids = list(
         dict.fromkeys(
             source.get(field_name)
-            for field_name in _MODEL_REFERENCE_FIELDS
+            for field_name in _VALIDATED_MODEL_REFERENCE_FIELDS
             if source.get(field_name) is not None
         )
     )
     models = await ReferenceRepository.get_model_configs(db, model_ids)
     models_by_id = {model.id: model for model in models}
-    for field_name in _MODEL_REFERENCE_FIELDS:
+    for field_name in _VALIDATED_MODEL_REFERENCE_FIELDS:
         model_id = source.get(field_name)
         if model_id is None:
             continue
@@ -188,7 +194,6 @@ async def _validate_model_references(
             or not _is_model_visible(model, tenant_id)
         ):
             raise _model_unavailable(field_name)
-    await knowledge_service.validate_media_model_references(db, source, tenant_id)
 
 
 def _build_knowledge_values(
