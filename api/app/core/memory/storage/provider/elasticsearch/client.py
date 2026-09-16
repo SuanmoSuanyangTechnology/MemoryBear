@@ -88,7 +88,16 @@ def _normalize_document(
         for field, mapping in properties.items()
         if isinstance(mapping, Mapping) and mapping.get("type") == "date"
     }
-    document = normalize_elasticsearch_document(value, date_fields=date_fields)
+    text_fields = {
+        field
+        for field, mapping in properties.items()
+        if isinstance(mapping, Mapping) and mapping.get("type") == "text"
+    }
+    document = normalize_elasticsearch_document(
+        value,
+        date_fields=date_fields,
+        text_fields=text_fields,
+    )
     return route_embedding_field(document, label)
 
 

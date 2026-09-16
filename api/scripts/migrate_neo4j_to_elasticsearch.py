@@ -279,6 +279,9 @@ class Neo4jToElasticsearchMigrator:
         self._date_fields_by_label: dict[
             MemoryNodeType, frozenset[str]
         ] = {}
+        self._text_fields_by_label: dict[
+            MemoryNodeType, frozenset[str]
+        ] = {}
         for migration_label, definition in INDEX_DEFINITIONS.items():
             properties = definition.mappings.get("properties", {})
             self._date_fields_by_label[migration_label] = frozenset(
@@ -286,6 +289,12 @@ class Neo4jToElasticsearchMigrator:
                 for field, mapping in properties.items()
                 if isinstance(mapping, Mapping)
                 and mapping.get("type") == "date"
+            )
+            self._text_fields_by_label[migration_label] = frozenset(
+                field
+                for field, mapping in properties.items()
+                if isinstance(mapping, Mapping)
+                and mapping.get("type") == "text"
             )
 
     async def _with_retry(
@@ -564,6 +573,7 @@ class Neo4jToElasticsearchMigrator:
         document = normalize_elasticsearch_document(
             source,
             date_fields=self._date_fields_by_label[label],
+            text_fields=self._text_fields_by_label[label],
         )
         document = route_embedding_field(document, label)
         id_property = _ID_PROPERTIES.get(label, "id")

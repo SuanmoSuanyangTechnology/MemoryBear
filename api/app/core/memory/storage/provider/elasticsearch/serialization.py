@@ -56,11 +56,14 @@ def normalize_elasticsearch_document(
         value: Mapping[str, Any],
         *,
         date_fields: Collection[str],
+        text_fields: Collection[str],
 ) -> dict[str, Any]:
     """Normalize one document and clear blank values for mapped date fields.
 
-    Oversized strings are truncated to :data:`MAX_TEXT_FIELD_LENGTH` so a single
-    runaway field cannot stall a bulk request or Elasticsearch's analysis.
+    Oversized ``text`` fields are truncated to :data:`MAX_TEXT_FIELD_LENGTH` so
+    a single runaway field cannot stall Elasticsearch's cjk analysis. Keyword
+    and identifier fields (``id``, ``end_user_id``, ``run_id``, ...) are left
+    untouched so their identity is never rewritten before indexing.
     """
     document = _normalize_elasticsearch_value(value)
     if not isinstance(document, dict):
@@ -73,9 +76,13 @@ def normalize_elasticsearch_document(
             and not item.strip()
         ):
             item = None
-        elif isinstance(item, str) and len(item) > MAX_TEXT_FIELD_LENGTH:
+        elif (
+            field in text_fields
+            and isinstance(item, str)
+            and len(item) > MAX_TEXT_FIELD_LENGTH
+        ):
             logger.warning(
-                "Elasticsearch field '%s' exceeds %d chars (%d); truncating",
+                "Elasticsearch text field '%s' exceeds %d chars (%d); truncating",
                 field,
                 MAX_TEXT_FIELD_LENGTH,
                 len(item),
