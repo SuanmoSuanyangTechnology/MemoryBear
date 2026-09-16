@@ -132,13 +132,6 @@ class Knowledge(KnowledgeBase):
         return to_timestamp_ms(value)
 
 
-def without_manager_media_fields(data: KnowledgeCreate | KnowledgeUpdate):
-    """Keep previously ignored media selectors out of external API writes."""
-    return type(data).model_validate(data.model_dump(
-        exclude_unset=True, exclude={"audio2text_id", "video2text_id"},
-    ))
-
-
 PUBLIC_KNOWLEDGE_MODEL_FIELDS = frozenset(
     {"embedding", "reranker", "llm", "image2text", "audio2text", "video2text"}
 )
