@@ -34,7 +34,7 @@ _NATIVE_SDK_BASE_ADDRESSES = {
 # 表外 provider 走租户模型兜底（model_channel_service._resolve_validation_anchor）。
 # 表项恒为 LLM（探测类型硬编码 ModelType.LLM.value；入表非 LLM 模型需同步改探测类型）。
 _VALIDATION_MODELS = {
-    ModelProvider.DASHSCOPE.value: "qwen-turbo",
+    ModelProvider.DASHSCOPE.value: "qwen3.5-flash",
     ModelProvider.OPENAI.value: "gpt-4o-mini",
 }
 
