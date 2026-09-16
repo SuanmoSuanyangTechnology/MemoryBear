@@ -3,11 +3,11 @@
 from typing import Optional
 import uuid
 
-from fastapi import APIRouter, Depends, Request, Query
+from fastapi import APIRouter, Body, Depends, Request, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.controllers import knowledge_controller
-from app.core.api_key_auth import get_current_api_key_auth, require_api_key_self_db
+from app.core.api_key_auth import require_api_key_self_db
 from app.core.logging_config import get_business_logger
 from app.core.response_utils import success
 from app.db import get_async_db
@@ -122,13 +122,21 @@ async def get_knowledges(
 @route_through_knowledge_service(source=KnowledgeRetrievalSource.EXTERNAL_API)
 async def create_knowledge(
     request: Request,
-    create_data: knowledge_schema.KnowledgeCreate,
+    api_key_auth: ApiKeyAuth = None,
     db: AsyncSession = Depends(get_async_db),
+    name: str = Body(..., description="KB name"),
+    audio2text_id: uuid.UUID | None = Body(
+        None, description="Audio transcription model config ID",
+    ),
+    video2text_id: uuid.UUID | None = Body(
+        None, description="Video understanding model config ID",
+    ),
 ):
     """
     create knowledge
     """
-    api_key_auth = get_current_api_key_auth()
+    body = await request.json()
+    create_data = knowledge_schema.KnowledgeCreate(**body)
     # 0. Obtain the creator of the api key
     api_key = await api_key_service.ApiKeyService.get_api_key_async(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
     current_user = get_api_key_request_user(api_key, api_key_auth)
@@ -167,10 +175,18 @@ async def get_knowledge(
 async def update_knowledge(
     knowledge_id: uuid.UUID,
     request: Request,
-    update_data: knowledge_schema.KnowledgeUpdate,
+    api_key_auth: ApiKeyAuth = None,
     db: AsyncSession = Depends(get_async_db),
+    name: str = Body(None, description="KB name (optional)"),
+    audio2text_id: uuid.UUID | None = Body(
+        None, description="Audio transcription model config ID (null clears)",
+    ),
+    video2text_id: uuid.UUID | None = Body(
+        None, description="Video understanding model config ID (null clears)",
+    ),
 ):
-    api_key_auth = get_current_api_key_auth()
+    body = await request.json()
+    update_data = knowledge_schema.KnowledgeUpdate(**body)
     # 0. Obtain the creator of the api key
     api_key = await api_key_service.ApiKeyService.get_api_key_async(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
     current_user = get_api_key_request_user(api_key, api_key_auth)
