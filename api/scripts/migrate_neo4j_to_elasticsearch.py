@@ -53,6 +53,7 @@ from app.core.memory.storage.provider.elasticsearch.index import (  # noqa: E402
 )
 from app.core.memory.storage.provider.elasticsearch.serialization import (  # noqa: E402
     normalize_elasticsearch_document,
+    route_embedding_field,
 )
 from app.core.memory.storage.provider.neo4j.client import Neo4jClient  # noqa: E402
 
@@ -545,6 +546,7 @@ class Neo4jToElasticsearchMigrator:
             source,
             date_fields=self._date_fields_by_label[label],
         )
+        document = route_embedding_field(document, label)
         id_property = _ID_PROPERTIES.get(label, "id")
         node_id = document.get(id_property)
         if node_id is None or not str(node_id).strip():

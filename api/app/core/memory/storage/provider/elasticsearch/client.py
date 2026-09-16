@@ -39,10 +39,12 @@ from app.core.memory.storage.provider.elasticsearch.index import (
 from app.core.memory.storage.provider.elasticsearch.index.definitions import (
     EMBEDDING_FIELDS,
     FULLTEXT_FIELDS,
+    get_embedding_field_name,
     get_index_definition,
 )
 from app.core.memory.storage.provider.elasticsearch.serialization import (
     normalize_elasticsearch_document,
+    route_embedding_field,
 )
 from app.core.utils.datetime_utils import to_iso_z, utcnow
 
@@ -86,7 +88,8 @@ def _normalize_document(
         for field, mapping in properties.items()
         if isinstance(mapping, Mapping) and mapping.get("type") == "date"
     }
-    return normalize_elasticsearch_document(value, date_fields=date_fields)
+    document = normalize_elasticsearch_document(value, date_fields=date_fields)
+    return route_embedding_field(document, label)
 
 
 def _validate_search_limit(limit: int) -> None:
@@ -475,18 +478,6 @@ class ElasticClient(BaseClient):
         if not specs:
             return []
 
-        embedding_fields: list[str] = []
-        for spec in specs:
-            self.verify_label(spec.label)
-            embedding_field = EMBEDDING_FIELDS.get(spec.label)
-            if embedding_field is None:
-                raise UnsupportedQueryError(
-                    self.name,
-                    spec.label,
-                    "embedding",
-                )
-            embedding_fields.append(embedding_field)
-
         _validate_search_limit(limit)
         query_vector = _normalize_query_vector(embed)
         vector_norm = math.hypot(*query_vector)
@@ -497,6 +488,20 @@ class ElasticClient(BaseClient):
                 StorageReadResult(backend=self.name)
                 for _ in specs
             ]
+
+        dimension = len(query_vector)
+        embedding_fields: list[str] = []
+        for spec in specs:
+            self.verify_label(spec.label)
+            if spec.label not in EMBEDDING_FIELDS:
+                raise UnsupportedQueryError(
+                    self.name,
+                    spec.label,
+                    "embedding",
+                )
+            embedding_fields.append(
+                get_embedding_field_name(spec.label, dimension)
+            )
 
         num_candidates = min(
             MAX_SEARCH_LIMIT,
@@ -667,8 +672,7 @@ class ElasticClient(BaseClient):
             projection: NodeProjection | None = None,
     ) -> StorageReadResult:
         self.verify_label(label)
-        embedding_field = EMBEDDING_FIELDS.get(label)
-        if embedding_field is None:
+        if label not in EMBEDDING_FIELDS:
             raise UnsupportedQueryError(self.name, label, "embedding")
         _validate_search_limit(limit)
         query_vector = _normalize_query_vector(embed)
@@ -677,6 +681,7 @@ class ElasticClient(BaseClient):
             raise ValueError("embedding query vector norm must be finite")
         if vector_norm == 0:
             return StorageReadResult(backend=self.name)
+        embedding_field = get_embedding_field_name(label, len(query_vector))
 
         source_options, source_required = _compile_search_source_options(
             projection
