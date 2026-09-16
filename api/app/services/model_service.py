@@ -37,6 +37,7 @@ from app.utils.redis_cache import (invalidate_workspace_model_options, get_json_
 from redbear_model import (
     CredentialDecryptError,
     FailoverPlan,
+    ModelConfigDeprecatedError,
     ModelConfigInactiveError,
     RedBearModelError,
     ResolvedModelConfig,
@@ -1308,7 +1309,7 @@ class ModelApiKeyService:
                     outcome = resolve_config_plan_sync(
                         db, model_config.id, tenant_id=tenant_id, config_row=model_config
                     )
-            except ModelConfigInactiveError:
+            except (ModelConfigInactiveError, ModelConfigDeprecatedError):
                 return None
             except SpeedbearChannelMissingError as exc:
                 raise BusinessException(
@@ -1379,7 +1380,7 @@ class ModelApiKeyService:
                     outcome = await resolve_config_plan_async(
                         db, model_config.id, tenant_id=tenant_id, config_row=model_config
                     )
-            except ModelConfigInactiveError:
+            except (ModelConfigInactiveError, ModelConfigDeprecatedError):
                 return None
             except SpeedbearChannelMissingError as exc:
                 raise BusinessException(

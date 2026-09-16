@@ -113,6 +113,7 @@ def _config_snapshot(row: ModelConfig) -> ModelConfigSnapshot:
         name=row.name,
         is_active=row.is_active,
         is_public=row.is_public,
+        is_deprecated=bool(row.model_base and row.model_base.is_deprecated),
         load_balance_strategy=LoadBalanceStrategy(
             row.load_balance_strategy or LoadBalanceStrategy.NONE
         ),
@@ -147,6 +148,7 @@ SOURCE = RegistrySQLSource(
     channel_mapper=ModelChannel,
     config_snapshot=_config_snapshot,
     channel_snapshot=_channel_snapshot,
+    config_load_options=(joinedload(ModelConfig.model_base),),
 )
 
 

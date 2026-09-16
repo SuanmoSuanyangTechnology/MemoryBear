@@ -1,8 +1,8 @@
 """用量事件契约：对齐主 spec §13.1 冻结 JSON schema（事件入 Stream，消费落 model_usage_records）。
 
 capability 值词汇依 `2026-09-09-model-contract-v2-design.md` §1#3/§3 = 归一化 ModelType
-接口族值（llm/embedding/rerank/image/video），chat 别名归一为 llm——事件写值永不落
-"chat"，阶段 2 删除 ModelType.CHAT 后本模块归一分支随删，持久契约零迁移。
+接口族值（llm/embedding/rerank/image/video）——`"chat"` 输入由 `ModelType._missing_`
+读侧归一为 llm，事件写值永不落 "chat"，持久契约零迁移。
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ import uuid
 from enum import StrEnum
 from uuid import UUID
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, model_validator
 
 from ..contracts import ContractModel, ModelProvider, ModelType
 
@@ -48,14 +48,6 @@ class UsageEvent(ContractModel):
     request_id: str | None = None  # 宿主链路 id
     resource_type: str | None = None  # 宿主业务归因（agent/workflow/kb/...），模型域不解释
     resource_id: UUID | None = None
-
-    @field_validator("capability")
-    @classmethod
-    def normalize_capability(cls, value: ModelType) -> ModelType:
-        """chat → llm 别名归一（contract-v2 §1#3）；阶段 2 删除 ModelType.CHAT 时本分支随删。"""
-        if value is ModelType.CHAT:
-            return ModelType.LLM
-        return value
 
     @model_validator(mode="after")
     def normalize_error_type(self):

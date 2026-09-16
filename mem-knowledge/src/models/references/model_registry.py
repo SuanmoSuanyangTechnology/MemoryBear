@@ -17,6 +17,7 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, JSON, JSONB, UUID
+from sqlalchemy.orm import relationship
 
 from ...utils.datetime_utils import utcnow_naive
 from .base import ReferenceBase
@@ -127,6 +128,9 @@ class ModelConfig(ReferenceBase):
         default=LoadBalanceStrategy.NONE,
         server_default=LoadBalanceStrategy.NONE,
     )
+
+    # 只读投影：快照构建派生 is_deprecated（无写语义，故无 core ORM 的 back_populates/cascade）
+    model_base = relationship("ModelBase")
 
 
 class ModelApiKey(ReferenceBase):

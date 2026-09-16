@@ -27,7 +27,7 @@ from redbear_model import (
 from redbear_model.crypto import AESGCMEnvCipher, CredentialCipher
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from ..bootstrap import get_settings
 from ..models.references import ModelChannel, ModelConfig
@@ -63,6 +63,7 @@ def _config_snapshot(config: ModelConfig) -> ModelConfigSnapshot:
         name=config.name,
         is_active=config.is_active,
         is_public=config.is_public,
+        is_deprecated=bool(config.model_base and config.model_base.is_deprecated),
         load_balance_strategy=LoadBalanceStrategy(
             config.load_balance_strategy or LoadBalanceStrategy.NONE
         ),
@@ -98,6 +99,8 @@ SOURCE = RegistrySQLSource(
     channel_mapper=ModelChannel,
     config_snapshot=_config_snapshot,
     channel_snapshot=_channel_snapshot,
+    # async 路径禁懒加载：投影读 model_base 弃用态必须同批 eager load
+    config_load_options=(joinedload(ModelConfig.model_base),),
 )
 
 

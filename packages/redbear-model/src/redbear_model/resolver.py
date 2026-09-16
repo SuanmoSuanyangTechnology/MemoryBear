@@ -23,6 +23,7 @@ from .crypto import CredentialCipher
 from .errors import (
     CredentialDecryptError,
     ModelAccessDeniedError,
+    ModelConfigDeprecatedError,
     ModelConfigInactiveError,
     ModelConfigNotFoundError,
     ModelCredentialNotFoundError,
@@ -38,6 +39,8 @@ def _validate_config_access(
     config: ModelConfigSnapshot,
     tenant_id: UUID,
 ) -> None:
+    if config.is_deprecated:
+        raise ModelConfigDeprecatedError(config.model_config_id)
     if not config.is_active:
         raise ModelConfigInactiveError(config.model_config_id)
     if config.tenant_id != tenant_id and not config.is_public:

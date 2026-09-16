@@ -20,16 +20,33 @@ from pydantic import (
 logger = logging.getLogger(__name__)
 
 
+class ContractModel(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+
 class ModelType(StrEnum):
+    """接口族：调用协议/适配器形态，只含已接入事实（契约 v2：原 llm + chat 合并）。"""
+
     LLM = "llm"
-    CHAT = "chat"
     EMBEDDING = "embedding"
     RERANK = "rerank"
     IMAGE = "image"
     VIDEO = "video"
+    # deprecated（2a 别名窗口，2e 删除）：原独立值 "chat"，仅存量数据仍持该字符串
+    CHAT = "llm"
+
+    @classmethod
+    def _missing_(cls, value: object) -> ModelType | None:
+        """存量 `"chat"` 字符串读侧归一为 LLM（DB/YAML/事件永久兼容层）。"""
+        if isinstance(value, str) and value.lower() == "chat":
+            return cls.LLM
+        return None
 
 
 class ModelCapability(StrEnum):
+    """deprecated（2a 起别名窗口，2e 删除）：能力混装集合，拆为 `input_modalities` /
+    `output_modalities` / `ModelFeature` 三侧；本类仅在旧列读取窗口内保留。"""
+
     VISION = "vision"
     AUDIO = "audio"
     VIDEO = "video"
@@ -37,6 +54,48 @@ class ModelCapability(StrEnum):
     THINKING_ONLY = "thinking_only"
     JSON_OUTPUT = "json_output"
     FUNCTION_CALL = "function_call"
+
+
+class Modality(StrEnum):
+    TEXT = "text"
+    IMAGE = "image"
+    AUDIO = "audio"
+    VIDEO = "video"
+
+
+class ModelFeature(StrEnum):
+    """功能开关（原 ModelCapability 功能侧；模态侧移出到 input/output_modalities）。"""
+
+    THINKING = "thinking"             # 可开关：请求侧 deep_thinking=false 生效
+    THINKING_ONLY = "thinking_only"   # 恒开不可关：禁止下发关闭参数；thinking_budget 不可配
+    JSON_OUTPUT = "json_output"
+    FUNCTION_CALL = "function_call"
+
+
+class CompositeMember(BaseModel):
+    """组合模型成员声明（config JSON members[] 的序列化形状，spec §10.3）。"""
+    provider: str
+    model_name: str
+
+
+class ModelProfile(ContractModel):
+    """模型能力描述（ModelConfig / ModelBase 快照侧，frozen；契约 v2 单一能力载体）。"""
+
+    model_id: UUID
+    tenant_id: UUID | None                     # model_bases 无租户（广场全局目录），base 侧为 None
+    type: ModelType
+    input_modalities: tuple[Modality, ...]     # 显式非空，恒含 text
+    output_modalities: tuple[Modality, ...]    # 显式非空；生成族 (image,)/(video,) 不含 text
+    features: tuple[ModelFeature, ...] = ()
+    members: tuple[CompositeMember, ...] = ()  # 仅 provider="composite" 时非空
+
+    @model_validator(mode="after")
+    def validate_modalities(self) -> ModelProfile:
+        if not self.input_modalities or Modality.TEXT not in self.input_modalities:
+            raise ValueError("input_modalities must be non-empty and contain text")
+        if not self.output_modalities:
+            raise ValueError("output_modalities must not be empty")
+        return self
 
 
 class ModelProvider(StrEnum):
@@ -54,10 +113,6 @@ class ModelProvider(StrEnum):
 class LoadBalanceStrategy(StrEnum):
     ROUND_ROBIN = "round_robin"
     NONE = "none"
-
-
-class ContractModel(BaseModel):
-    model_config = ConfigDict(frozen=True, extra="forbid")
 
 
 QWEN3_VL_EMBEDDING_DIMENSION = 2048
@@ -165,6 +220,7 @@ class ModelConfigSnapshot(ContractModel):
     name: str = Field(min_length=1)  # 解析锚点名：非组合 config 的 name 即真实调用名（组合模型调用名在 members 声明）
     is_active: bool
     is_public: bool
+    is_deprecated: bool = False  # 模型下线（model_bases.is_deprecated 派生）：解析期拒止，见 D15⑥
     load_balance_strategy: LoadBalanceStrategy = LoadBalanceStrategy.NONE
     capabilities: tuple[ModelCapability, ...] = ()
     is_omni: bool = False
@@ -308,9 +364,3 @@ class ChannelSnapshot(ContractModel):
 
     def covers(self, model_name: str) -> bool:
         return self.is_provider_level or model_name in self.model_names
-
-
-class CompositeMember(BaseModel):
-    """组合模型成员声明（config JSON members[] 的序列化形状，spec §10.3）。"""
-    provider: str
-    model_name: str
