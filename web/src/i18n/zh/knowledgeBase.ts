@@ -340,6 +340,8 @@ export const knowledgeBase = {
         image2text_id: '视觉模型',
         chat_id: '对话模型',
         reranker_id: '重排序模型',
+        audio2text_id: '音频模型',
+        video2text_id: '视频模型',
         permission_id: '权限',
         type: '类型',
         status: '状态',

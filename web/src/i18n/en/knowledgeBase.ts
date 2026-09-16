@@ -340,6 +340,8 @@ export const knowledgeBase = {
         image2text_id: 'Visual',
         chat_id: 'Chat',
         reranker_id: 'Rerank',
+        audio2text_id: 'Audio',
+        video2text_id: 'Video',
         permission_id: 'Permission',
         type: 'Type',
         status: 'Status',
