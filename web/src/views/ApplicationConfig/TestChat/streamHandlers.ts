@@ -4,6 +4,8 @@ import type { ChatItem } from '@/components/Chat/types'
 import type { SSEMessage } from '@/utils/stream'
 import { getFileStatusById } from '@/api/fileStorage'
 import type { NodeData } from './type'
+import { createClusterStreamProcessor } from '../utils/clusterStream'
+import { mapLastVersion } from '@/components/Chat/utils/messageVersions'
 import {
   addRunStartMessage,
   addRunEndMessage,
@@ -229,4 +231,49 @@ export const createWorkflowStreamHandler = (deps: WorkflowStreamDeps) => {
       }
     })
   }
+}
+
+export interface ClusterStreamDeps {
+  conversationId: string | null;
+  setConversationId: (id: string) => void;
+  setChatList: SetChatList;
+  setLoading: (loading: boolean) => void;
+  setStreamLoading: (loading: boolean) => void;
+  streamLoadingRef: MutableRefObject<boolean>;
+}
+
+/** Adapts the shared cluster event processor to TestChat's versioned message list. */
+export const createTestClusterStreamHandler = (deps: ClusterStreamDeps) => {
+  const {
+    conversationId, setConversationId, setChatList,
+    setLoading, setStreamLoading, streamLoadingRef,
+  } = deps
+
+  return createClusterStreamProcessor({
+    updateAssistant: updater => {
+      setChatList(prev => mapLastVersion(prev, message =>
+        message.role === 'assistant' ? updater(message) : message,
+      ))
+    },
+    appendAssistantContent: content => {
+      if (content) setChatList(prev => appendAssistantMessage(prev, content))
+    },
+    applyMessageId: id => {
+      setChatList(prev => applyMessageId(prev, id))
+    },
+    applyUserMessageId: id => {
+      setChatList(prev => applyUserMessageId(prev, id))
+    },
+    syncConversationId: id => {
+      if (id && conversationId !== id) setConversationId(id)
+    },
+    finishStreaming: () => {
+      streamLoadingRef.current = false
+      setStreamLoading(false)
+      setLoading(false)
+    },
+    applyLegacyEmpty: messageLength => {
+      setChatList(prev => applyErrorMessage(prev, messageLength))
+    },
+  })
 }

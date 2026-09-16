@@ -144,14 +144,14 @@ const LogDetailModal = forwardRef<LogDetailModalRef, { source: string; appType: 
     <RbModal
       title={<>
         {data.title}
-        <div className="rb:text-[#5B6167] rb:leading-4.5 rb:text-[12px]">{formatDateTime(data.created_at, 'YYYY.MM')} - {formatDateTime(data.updated_at, 'YYYY.MM')}</div>
+        <div className="rb:text-gray-600 rb:leading-4.5 rb:text-[12px]">{formatDateTime(data.created_at, 'YYYY.MM')} - {formatDateTime(data.updated_at, 'YYYY.MM')}</div>
       </>}
       open={visible}
       onCancel={handleClose}
       footer={null}
       width={1000}
     >
-      <Flex justify={isPureWorkflow ? 'end' :"space-between"} align="center" className="rb:bg-[#F6F6F6] rb:rounded-lg rb:py-2.5! rb:pr-2.5! rb:pl-3.25!">
+      <Flex justify={isPureWorkflow ? 'end' :"space-between"} align="center" className="rb:bg-gray-100 rb:rounded-lg rb:py-2.5! rb:pr-2.5! rb:pl-3.25!">
         {isPureWorkflow ? null : t('workingDetail.conversationStream')}
         <Button className="rb:h-6!" onClick={getDetail}>{t('workingDetail.refresh')}</Button>
       </Flex>
