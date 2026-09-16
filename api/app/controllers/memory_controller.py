@@ -9,10 +9,9 @@
 import uuid
 
 from fastapi import APIRouter, Depends, Header
-from fastapi.encoders import jsonable_encoder
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import StreamingResponse
 
-from app.core.error_codes import BizCode, HTTP_MAPPING
+from app.core.error_codes import BizCode
 from app.core.language_utils import get_language_from_header
 from app.core.logging_config import get_api_logger
 from app.core.memory.memory_service import MemoryService
@@ -22,12 +21,14 @@ from app.dependencies import cur_workspace_access_guard, cur_workspace_access_gu
 from app.repositories import knowledge_repository
 from app.repositories.end_user_repository import EndUserRepository
 from app.schemas.memory_agent_schema import StorageType, UserInput, Write_UserInput
+from app.schemas.memory_config_schema import ModelInactiveError, ModelNotFoundError
 from app.schemas.response_schema import ApiResponse
 from app.services import workspace_service
 from app.services.end_user_service import EndUserService
 from app.services.memory_agent_service import MemoryAgentService
 from app.services.memory_config_service import MemoryConfigService
 from app.services.memory_validation_service import MemoryValidationService
+from app.utils.sse_utils import format_sse_message
 
 DEFAULT_STORAGE_TYPE = "neo4j"
 USER_RAG_MEMORY_KNOWLEDGE_NAME = "USER_RAG_MERORY"  # 注：原拼写保留，历史遗留
@@ -167,7 +168,7 @@ async def write_server_async(
 async def read_server(
         user_input: UserInput,
         current_user: CurrentUserSnapshot = Depends(get_current_user_async)
-) -> StreamingResponse | JSONResponse:
+) -> StreamingResponse:
     """
     记忆验证读取接口：请求保持不变，响应改为 SSE。
 
@@ -178,12 +179,40 @@ async def read_server(
     - "5": Express
     """
     request_id = str(uuid.uuid4())
+
+    def _error_stream(message: str) -> StreamingResponse:
+        async def _stream():
+            yield format_sse_message("error", {
+                "request_id": request_id,
+                "code": BizCode.MEMORY_READ_FAILED,
+                "message": message,
+            })
+
+        return StreamingResponse(
+            _stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
     try:
-        # 开流前完成参数和服务初始化，失败时仍返回普通 JSON 错误。
+        # 开流前完成参数和服务初始化，失败时统一返回 SSE error 事件。
         validation_service = await MemoryValidationService.create(
             user_input,
             request_id=request_id,
         )
+    except (ModelInactiveError, ModelNotFoundError) as e:
+        api_logger.error(
+            "Unable to initialize memory read: request_id=%s, end_user=%s, error=%s",
+            request_id,
+            user_input.end_user_id,
+            str(e),
+            exc_info=True,
+        )
+        return _error_stream(f"{e.context.get('model_type')}模型不可用")
     except Exception as error:
         api_logger.error(
             "Unable to initialize memory read: request_id=%s, end_user=%s, error=%s",
@@ -192,11 +221,7 @@ async def read_server(
             str(error),
             exc_info=True,
         )
-        error_data = fail(BizCode.MEMORY_READ_FAILED, "回复对话消息失败")
-        return JSONResponse(
-            status_code=HTTP_MAPPING[BizCode.MEMORY_READ_FAILED],
-            content=jsonable_encoder(error_data),
-        )
+        return _error_stream("回复对话消息失败")
 
     api_logger.info(
         "Read service stream started: request_id=%s, group=%s, backend=%s, session_id=%s",
