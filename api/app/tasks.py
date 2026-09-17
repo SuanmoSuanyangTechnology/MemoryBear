@@ -4012,6 +4012,9 @@ def sync_all_end_user_memory_counts(self) -> Dict[str, Any]:
 def write_total_memory_task(workspace_id: str) -> Dict[str, Any]:
     """定时任务：查询工作空间下所有宿主的记忆总量并写入数据库
 
+    记忆总量取自 end_users.memory_count 汇总（与记忆总量接口、全量统计任务同一聚合口径），
+    不再扫描 Neo4j。
+
     Args:
         workspace_id: 工作空间ID
 
@@ -4020,92 +4023,42 @@ def write_total_memory_task(workspace_id: str) -> Dict[str, Any]:
     """
     start_time = time.time()
 
-    async def _run() -> Dict[str, Any]:
-        from app.models.app_model import App
-        from app.repositories.end_user_repository import EndUserRepository
-        from app.repositories.memory_increment_repository import MemoryIncrementRepository
-        from app.repositories.neo4j.neo4j_connector import Neo4jConnector
-        from app.services.memory_storage_service import search_all_batch
+    from app.repositories.end_user_repository import EndUserRepository
+    from app.repositories.memory_increment_repository import MemoryIncrementRepository
 
+    try:
         workspace_uuid = uuid.UUID(workspace_id)
 
-        # --- Session A：查询 apps + end_users，立即关闭 ---
-        has_apps = False
-        end_user_id_list: list[str] = []
+        # --- 单 session：聚合活跃宿主记忆量 → 写入统计结果 ---
         with get_db_context() as db:
-            apps = db.query(App).filter(
-                App.workspace_id == workspace_uuid,
-                App.is_active.is_(True)
-            ).all()
-            has_apps = len(apps) > 0
+            # 无活跃宿主时不在返回中，按 (0, 0) 处理
+            total_num, end_user_count = (
+                EndUserRepository(db)
+                .get_memory_count_stats_by_workspace_ids([workspace_uuid])
+                .get(workspace_uuid, (0, 0))
+            )
 
-            if has_apps:
-                end_user_repo = EndUserRepository(db)
-                end_users = end_user_repo.get_end_users_by_workspace(workspace_uuid)
-                end_user_id_list = [str(eu.id) for eu in end_users]
-
-        # 没有 app 时直接写入 0
-        if not has_apps:
-            with get_db_context() as db:
-                memory_increment = MemoryIncrementRepository(db).write_memory_increment(
-                    workspace_id=workspace_uuid,
-                    total_num=0
-                )
-                return {
-                    "status": "SUCCESS",
-                    "workspace_id": workspace_id,
-                    "total_num": 0,
-                    "end_user_count": 0,
-                    "memory_increment_id": str(memory_increment.id),
-                    "created_at": to_iso_z(memory_increment.created_at),
-                }
-
-        # --- Neo4j 查询：用独立 connector 避免跨 loop 问题 ---
-        connector = Neo4jConnector()
-        try:
-            batch_result = await search_all_batch(end_user_id_list, connector=connector)
-        finally:
-            await connector.close()
-
-        total_num = sum(batch_result.values())
-        end_user_details = [
-            {"end_user_id": uid, "total": batch_result.get(uid, 0)}
-            for uid in end_user_id_list
-        ]
-
-        # --- Session B：写入统计结果 ---
-        with get_db_context() as db:
-            memory_increment = MemoryIncrementRepository(db).write_memory_increment(
+            # 返回值即客户端生成的内存增量主键与时间戳，无需再访问已过期的 ORM 属性
+            increment_id, increment_created_at = MemoryIncrementRepository(db).write_memory_increment(
                 workspace_id=workspace_uuid,
                 total_num=total_num
             )
 
-            return {
-                "status": "SUCCESS",
-                "workspace_id": workspace_id,
-                "total_num": total_num,
-                "end_user_count": len(end_user_id_list),
-                "end_user_details": end_user_details,
-                "memory_increment_id": str(memory_increment.id),
-                "created_at": to_iso_z(memory_increment.created_at),  # 这样返回字符串是否正确
-            }
-
-    try:
-        # 尝试获取现有事件循环，如果不存在则创建新的（与 write_all_workspaces_memory_task 一致，
-        # 避免 asyncio.run 每次新建并关闭 loop，导致进程内共享 Neo4j driver 跨 loop 复用报错）
-        loop = set_asyncio_event_loop()
-
-        result = loop.run_until_complete(_run())
-        elapsed_time = time.time() - start_time
-        result["elapsed_time"] = elapsed_time
-        return result
+        return {
+            "status": "SUCCESS",
+            "workspace_id": workspace_id,
+            "total_num": total_num,
+            "end_user_count": end_user_count,
+            "memory_increment_id": str(increment_id),
+            "created_at": to_iso_z(increment_created_at),
+            "elapsed_time": time.time() - start_time,
+        }
     except Exception as e:
-        elapsed_time = time.time() - start_time
         return {
             "status": "FAILURE",
             "error": str(e),
             "workspace_id": workspace_id,
-            "elapsed_time": elapsed_time,
+            "elapsed_time": time.time() - start_time,
         }
 
 
@@ -4123,31 +4076,33 @@ def write_all_workspaces_memory_task(self) -> Dict[str, Any]:
 
     此任务会：
     1. 查询所有活跃的工作空间
-    2. 对每个工作空间统计记忆总量
+    2. 汇总每个工作空间活跃宿主的 memory_count 作为记忆总量
     3. 将统计结果写入 memory_increments 表
 
-    改造说明：拆分 DB session 与 Neo4j 查询，避免 PG 连接在 Neo4j I/O 期间空占。
+    改造说明：记忆总量改为聚合 end_users.memory_count（与记忆总量接口同源），
+    不再逐空间扫描 Neo4j，避免全图扫描与结果集全量物化带来的耗时与内存开销。
 
     Returns:
         包含任务执行结果的字典
     """
     start_time = time.time()
 
-    async def _run() -> Dict[str, Any]:
-        from app.models.app_model import App
-        from app.models.workspace_model import Workspace
-        from app.repositories.end_user_repository import EndUserRepository
-        from app.repositories.memory_increment_repository import MemoryIncrementRepository
-        from app.repositories.neo4j.neo4j_connector import Neo4jConnector
-        from app.services.memory_storage_service import search_all_batch
+    from app.models.workspace_model import Workspace
+    from app.repositories.end_user_repository import EndUserRepository
+    from app.repositories.memory_increment_repository import MemoryIncrementRepository
 
-        # --- 短 session：获取活跃 workspace 列表后立即关闭 ---
-        workspace_list: list[dict] = []
+    try:
+        # --- 短 session：获取活跃 workspace 列表 + 记忆总量聚合，随后立即关闭 ---
         with get_db_context() as db:
             workspaces = db.query(Workspace.id, Workspace.name).filter(
                 Workspace.is_active.is_(True)
             ).all()
             workspace_list = [{"id": workspace.id, "name": workspace.name} for workspace in workspaces]
+
+            # {workspace_id: (memory_total, host_count)}；列表为空时仓库侧短路返回 {}
+            stats_by_workspace: dict = EndUserRepository(db).get_memory_count_stats_by_workspace_ids(
+                [workspace_info["id"] for workspace_info in workspace_list]
+            )
 
         if not workspace_list:
             logger.warning("没有找到活跃的工作空间")
@@ -4155,80 +4110,58 @@ def write_all_workspaces_memory_task(self) -> Dict[str, Any]:
                 "status": "SUCCESS",
                 "message": "没有找到活跃的工作空间",
                 "workspace_count": 0,
-                "workspace_results": []
+                "workspace_results": [],
+                "elapsed_time": time.time() - start_time,
+                "task_id": self.request.id,
             }
 
         logger.info(f"开始统计 {len(workspace_list)} 个工作空间的记忆增量")
         results: list[dict] = []
 
-        # 独立 Neo4j connector：绑定当前 loop，避免跨 loop 问题
-        connector = Neo4jConnector()
-        try:
-            # 逐 workspace 处理，每轮独立短 session
-            for workspace_info in workspace_list:
-                workspace_id = workspace_info["id"]
-                workspace_name = workspace_info["name"]
+        # 逐 workspace 处理，每轮独立短 session
+        for workspace_info in workspace_list:
+            workspace_id = workspace_info["id"]
+            workspace_name = workspace_info["name"]
 
-                try:
-                    logger.info(f"开始处理工作空间: {workspace_name} (ID: {workspace_id})")
+            try:
+                logger.info(f"开始处理工作空间: {workspace_name} (ID: {workspace_id})")
 
-                    # --- Session A：判断是否有活跃 app + 获取 end_users → 关闭 ---
-                    end_user_id_list: list[str] = []
-                    with get_db_context() as db:
-                        has_apps = (
-                                db.query(App.id)
-                                .filter(App.workspace_id == workspace_id, App.is_active.is_(True))
-                                .first()
-                                is not None
-                        )
-                        if has_apps:
-                            end_users = EndUserRepository(db).get_end_users_by_workspace(workspace_id)
-                            end_user_id_list = [str(eu.id) for eu in end_users]
+                # 无活跃宿主时按 0 处理
+                total_num, end_user_count = stats_by_workspace.get(workspace_id, (0, 0))
 
-                    # 无 app 或无 end_user → 直接写 0，跳过 Neo4j 调用
-                    if not has_apps or not end_user_id_list:
-                        total_num = 0
-                    else:
-                        # --- Neo4j 查询：无 PG 连接占用 ---
-                        batch_result = await search_all_batch(end_user_id_list, connector=connector)
-                        total_num = sum(batch_result.values())
-
-                    # --- Session B：写入统计结果 ---
-                    with get_db_context() as db:
-                        memory_increment = MemoryIncrementRepository(db).write_memory_increment(
-                            workspace_id=workspace_id,
-                            total_num=total_num,
-                        )
-                        # 在 session 内提取标量，避免 detached 访问
-                        increment_id = str(memory_increment.id)
-                        increment_created_at = to_iso_z(memory_increment.created_at)
-
-                    results.append({
-                        "workspace_id": str(workspace_id),
-                        "workspace_name": workspace_name,
-                        "status": "SUCCESS",
-                        "total_num": total_num,
-                        "end_user_count": len(end_user_id_list),
-                        "memory_increment_id": increment_id,
-                        "created_at": increment_created_at,
-                    })
-                    logger.info(
-                        f"工作空间 {workspace_name} 统计完成: 总量={total_num}, 用户数={len(end_user_id_list)}"
+                # --- Session：写入统计结果 ---
+                # 每个 workspace 独立 session：单空间写入失败不会污染 session、影响其余空间
+                with get_db_context() as db:
+                    # 返回值即客户端生成的内存增量主键与时间戳，无需再访问已过期的 ORM 属性
+                    increment_id, increment_created_at = MemoryIncrementRepository(db).write_memory_increment(
+                        workspace_id=workspace_id,
+                        total_num=total_num,
                     )
 
-                except Exception as e:
-                    # 单 workspace 失败不影响其他 workspace
-                    logger.error(f"处理工作空间 {workspace_name} (ID: {workspace_id}) 失败: {e}")
-                    results.append({
-                        "workspace_id": str(workspace_id),
-                        "workspace_name": workspace_name,
-                        "status": "FAILURE",
-                        "error": str(e),
-                        "total_num": 0,
-                        "end_user_count": 0,
-                    })
-        finally:
-            await connector.close()
+                results.append({
+                    "workspace_id": str(workspace_id),
+                    "workspace_name": workspace_name,
+                    "status": "SUCCESS",
+                    "total_num": total_num,
+                    "end_user_count": end_user_count,
+                    "memory_increment_id": str(increment_id),
+                    "created_at": to_iso_z(increment_created_at),
+                })
+                logger.info(
+                    f"工作空间 {workspace_name} 统计完成: 总量={total_num}, 用户数={end_user_count}"
+                )
+
+            except Exception as e:
+                # 单 workspace 失败不影响其他 workspace
+                logger.error(f"处理工作空间 {workspace_name} (ID: {workspace_id}) 失败: {e}")
+                results.append({
+                    "workspace_id": str(workspace_id),
+                    "workspace_name": workspace_name,
+                    "status": "FAILURE",
+                    "error": str(e),
+                    "total_num": 0,
+                    "end_user_count": 0,
+                })
 
         total_memory = sum(r.get("total_num", 0) for r in results)
         success_count = sum(1 for r in results if r["status"] == "SUCCESS")
@@ -4240,24 +4173,14 @@ def write_all_workspaces_memory_task(self) -> Dict[str, Any]:
             "success_count": success_count,
             "total_memory": total_memory,
             "workspace_results": results,
+            "elapsed_time": time.time() - start_time,
+            "task_id": self.request.id,
         }
-
-    try:
-        # 尝试获取现有事件循环，如果不存在则创建新的
-        loop = set_asyncio_event_loop()
-
-        result = loop.run_until_complete(_run())
-        elapsed_time = time.time() - start_time
-        result["elapsed_time"] = elapsed_time
-        result["task_id"] = self.request.id
-
-        return result
     except Exception as e:
-        elapsed_time = time.time() - start_time
         return {
             "status": "FAILURE",
             "error": str(e),
-            "elapsed_time": elapsed_time,
+            "elapsed_time": time.time() - start_time,
             "task_id": self.request.id
         }
 
