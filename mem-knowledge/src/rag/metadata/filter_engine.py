@@ -9,7 +9,7 @@ from typing import Any
 from sqlalchemy import DateTime, and_, exists, func, literal, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ...errors import KnowledgeError
+from ...errors import KnowledgeError, public_text
 from ...models.owned import Document, KnowledgeMetadataBinding
 from ...utils.datetime_utils import parse_metadata_time_to_utc_naive
 from .builtin_resolver import BuiltinFieldResolver
@@ -36,7 +36,7 @@ class FilterGroup:
     def __post_init__(self) -> None:
         logic = self.logic.strip().upper()
         if logic not in {"AND", "OR"}:
-            raise KnowledgeError.from_code("KB_VALIDATION_ERROR", "Filter logic must be AND or OR")
+            raise KnowledgeError.from_code("KB_FILTER_LOGIC_INVALID")
         object.__setattr__(self, "logic", logic)
 
 
@@ -62,8 +62,8 @@ class MetadataFilterEngine:
                 field_def = metadata_defs.get(condition.field)
                 if field_def is None:
                     raise KnowledgeError.from_code(
-                        "KB_VALIDATION_ERROR",
-                        f"Unknown metadata field: {condition.field}",
+                        "KB_METADATA_FIELD_UNKNOWN",
+                        params={"field_name": public_text(condition.field)},
                     )
                 if field_def.get("is_builtin"):
                     expression = self._builtin_expression(condition)
@@ -89,7 +89,7 @@ class MetadataFilterEngine:
     def _custom_expression(self, condition: FilterCondition, field_def: dict) -> Any:
         metadata_id = field_def.get("id")
         if metadata_id is None:
-            raise KnowledgeError.from_code("KB_VALIDATION_ERROR", "Metadata definition has no id")
+            raise KnowledgeError.from_code("KB_METADATA_DEFINITION_ID_MISSING")
         binding_exists = exists().where(
             and_(
                 KnowledgeMetadataBinding.knowledge_id == Document.kb_id,
@@ -103,7 +103,7 @@ class MetadataFilterEngine:
             return binding_exists
         strategy = self.strategies.get(str(field_def.get("type")))
         if strategy is None or not strategy.supports(condition.operator):
-            raise KnowledgeError.from_code("KB_VALIDATION_ERROR", "Unsupported metadata operator")
+            raise KnowledgeError.from_code("KB_METADATA_OPERATOR_UNSUPPORTED")
         return and_(
             binding_exists, strategy.apply(condition.field, condition.operator, condition.value)
         )
@@ -112,7 +112,7 @@ class MetadataFilterEngine:
     def _builtin_expression(condition: FilterCondition) -> Any:
         field = BuiltinFieldResolver.resolve(condition.field)
         if field is None:
-            raise KnowledgeError.from_code("KB_VALIDATION_ERROR", "Unknown builtin metadata field")
+            raise KnowledgeError.from_code("KB_BUILTIN_METADATA_FIELD_UNKNOWN")
         column = getattr(Document, field.mapping)
         operator = condition.operator
         value = condition.value
@@ -160,7 +160,7 @@ class MetadataFilterEngine:
                 if operator == "after":
                     return func.date_trunc("minute", column) > func.date_trunc("minute", value_expr)
         raise KnowledgeError.from_code(
-            "KB_VALIDATION_ERROR", "Unsupported builtin metadata operator"
+            "KB_BUILTIN_METADATA_OPERATOR_UNSUPPORTED"
         )
 
 

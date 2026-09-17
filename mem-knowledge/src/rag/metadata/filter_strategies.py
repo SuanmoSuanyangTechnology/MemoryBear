@@ -12,8 +12,8 @@ from ...models.owned import Document
 from ...utils.datetime_utils import parse_metadata_time_to_utc_naive
 
 
-def _invalid(message: str) -> KnowledgeError:
-    return KnowledgeError.from_code("KB_VALIDATION_ERROR", message)
+def _invalid(code: str) -> KnowledgeError:
+    return KnowledgeError.from_code(code)
 
 
 def _escape_like(value: Any) -> str:
@@ -72,7 +72,7 @@ class StringFilterStrategy(FilterStrategy):
                 return col.in_([str(item) for item in values])
             case "not_in":
                 return ~col.in_([str(item) for item in values])
-        raise _invalid(f"Unsupported metadata operator: {operator}")
+        raise _invalid("KB_METADATA_OPERATOR_UNSUPPORTED")
 
 
 class NumberFilterStrategy(FilterStrategy):
@@ -99,7 +99,7 @@ class NumberFilterStrategy(FilterStrategy):
                 return raw.is_(None)
             case "not_empty":
                 return raw.is_not(None)
-        raise _invalid(f"Unsupported metadata operator: {operator}")
+        raise _invalid("KB_METADATA_OPERATOR_UNSUPPORTED")
 
 
 class TimeFilterStrategy(FilterStrategy):
@@ -112,7 +112,7 @@ class TimeFilterStrategy(FilterStrategy):
         if operator in {"eq", "before", "after"}:
             parsed = parse_metadata_time_to_utc_naive(value)
             if parsed is None:
-                raise _invalid("Invalid metadata time value")
+                raise _invalid("KB_METADATA_TIME_INVALID")
         value_expr = literal(parsed, DateTime) if parsed else None
         match operator:
             case "eq":
@@ -125,7 +125,7 @@ class TimeFilterStrategy(FilterStrategy):
                 return raw.is_(None)
             case "not_empty":
                 return raw.is_not(None)
-        raise _invalid(f"Unsupported metadata operator: {operator}")
+        raise _invalid("KB_METADATA_OPERATOR_UNSUPPORTED")
 
 
 __all__ = ["NumberFilterStrategy", "StringFilterStrategy", "TimeFilterStrategy", "_escape_like"]

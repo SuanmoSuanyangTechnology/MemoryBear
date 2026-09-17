@@ -90,7 +90,7 @@ async def get_knowledgeshare(
     async with runtime.database.async_session() as db:
         share = await share_service.get_share(db, knowledgeshare_id, principal)
         if share is None:
-            raise share_service._not_found("Knowledge share does not exist")
+            raise share_service._not_found("KB_KNOWLEDGE_SHARE_NOT_FOUND")
         data = await share_service.share_to_data(db, share)
     return _success(
         request,

@@ -11,7 +11,7 @@ from io import BytesIO
 from pathlib import Path
 from typing import Any
 
-from ...errors import KnowledgeError
+from ...errors import KnowledgeError, public_text
 from ..models.chunk import ChildDocumentChunk, DocumentChunk
 from .token_utils import get_encoder
 
@@ -76,8 +76,7 @@ def _extract_text(filename: str, binary: bytes) -> str:
             return "\n".join(_flatten_json(json.loads(_decode_text(binary))))
         except json.JSONDecodeError as exc:
             raise KnowledgeError.from_code(
-                "KB_VALIDATION_ERROR",
-                "Invalid JSON document",
+                "KB_JSON_DOCUMENT_INVALID",
             ) from exc
     if suffix in {".html", ".htm"}:
         from bs4 import BeautifulSoup
@@ -112,8 +111,8 @@ def _extract_text(filename: str, binary: bytes) -> str:
     }:
         return _decode_text(binary)
     raise KnowledgeError.from_code(
-        "KB_VALIDATION_ERROR",
-        f"Preview parser is unavailable for file type: {suffix or 'unknown'}",
+        "KB_PREVIEW_FILE_TYPE_UNSUPPORTED",
+        params={"file_type": public_text(suffix or "unknown")},
     )
 
 

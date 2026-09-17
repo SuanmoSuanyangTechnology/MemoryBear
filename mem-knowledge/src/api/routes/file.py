@@ -177,9 +177,9 @@ async def upload_file(
 ) -> SuccessEnvelope[dict[str, Any]]:
     contents = await file.read()
     if not contents:
-        raise KnowledgeError.from_code("KB_VALIDATION_ERROR", "The file is empty")
+        raise KnowledgeError.from_code("KB_UPLOAD_FILE_EMPTY")
     if len(contents) > runtime.settings.max_file_size:
-        raise KnowledgeError.from_code("KB_VALIDATION_ERROR", "File size exceeds limit")
+        raise KnowledgeError.from_code("KB_UPLOAD_FILE_SIZE_LIMIT")
     file_name = file.filename or ""
     file_ext = os.path.splitext(file_name)[1].lower()
     outcome = await _persist_upload(
@@ -211,9 +211,9 @@ async def custom_text(
 ) -> SuccessEnvelope[dict[str, Any]]:
     content = create_data.content.encode("utf-8")
     if not content:
-        raise KnowledgeError.from_code("KB_VALIDATION_ERROR", "The content is empty")
+        raise KnowledgeError.from_code("KB_UPLOAD_CONTENT_EMPTY")
     if len(content) > runtime.settings.max_file_size:
-        raise KnowledgeError.from_code("KB_VALIDATION_ERROR", "Content size exceeds limit")
+        raise KnowledgeError.from_code("KB_UPLOAD_CONTENT_SIZE_LIMIT")
     outcome = await _persist_upload(
         runtime,
         principal,
@@ -248,7 +248,6 @@ async def get_file(
             }:
                 raise KnowledgeError.from_code(
                     "KB_PRINCIPAL_INVALID",
-                    "Knowledge principal is required",
                 )
             file = await file_service.get_public_file(db, file_id)
         else:
@@ -260,7 +259,7 @@ async def get_file(
     if qa_spec is not None:
         export = await _qa_export(runtime, qa_spec)
         if export is None:
-            raise file_service._not_found("QA document has no exportable content")
+            raise file_service._not_found("KB_QA_EXPORT_EMPTY")
         return StreamingResponse(
             iter_export_file(export.path),
             media_type=export.media_type,
@@ -273,7 +272,7 @@ async def get_file(
         )
     file_key, file_name = snapshot
     if not file_key:
-        raise file_service._not_found("File has no storage key")
+        raise file_service._not_found("KB_FILE_STORAGE_KEY_MISSING")
     media_type = mimetypes.guess_type(file_name)[0] or "application/octet-stream"
     return StreamingResponse(
         KnowledgeFileStorage(runtime.storage).download_stream(file_key),
@@ -301,10 +300,10 @@ async def batch_download_files(
         )
         files = list(result.scalars().all())
         if len(files) != len(requested_ids):
-            raise file_service._not_found("File does not exist or access is denied")
+            raise file_service._not_found("KB_FILE_NOT_FOUND")
         files = [file for file in files if file.file_key]
         if not files:
-            raise file_service._not_found("Selected files have no storage key")
+            raise file_service._not_found("KB_SELECTED_FILES_STORAGE_KEY_MISSING")
         specs = [await file_service.get_qa_export_spec(db, file) for file in files]
         snapshots = [file_service.stored_file_snapshot(file) for file in files]
     qa_exports = {}

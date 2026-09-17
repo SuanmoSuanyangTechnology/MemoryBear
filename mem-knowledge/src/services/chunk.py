@@ -40,8 +40,8 @@ from .multimodal_image import resolve_storage_images_async
 logger = logging.getLogger(__name__)
 
 
-def _not_found(message: str = "Chunk resource not found") -> KnowledgeError:
-    return KnowledgeError.from_code("KB_RESOURCE_NOT_FOUND", message)
+def _not_found(code: str = "KB_CHUNK_NOT_FOUND") -> KnowledgeError:
+    return KnowledgeError.from_code(code)
 
 
 @dataclass(frozen=True)
@@ -69,7 +69,7 @@ async def get_chunk_document_snapshot(
 ) -> ChunkDocumentSnapshot:
     knowledge = await knowledge_service.get_knowledge(db, knowledge_id, principal)
     if knowledge is None:
-        raise _not_found("Knowledge resource not found")
+        raise _not_found("KB_KNOWLEDGE_NOT_FOUND")
     document = await document_service.get_document(
         db,
         document_id,
@@ -77,14 +77,14 @@ async def get_chunk_document_snapshot(
         knowledge_id,
     )
     if document is None:
-        raise _not_found("Document resource not found")
+        raise _not_found("KB_DOCUMENT_NOT_FOUND")
     file_key = None
     if include_file:
         file = await file_service.get_file(db, document.file_id, principal, knowledge_id)
         if file is None:
-            raise _not_found("File resource not found")
+            raise _not_found("KB_FILE_NOT_FOUND")
         if not file.file_key:
-            raise _not_found("File has no storage key (legacy data not migrated)")
+            raise _not_found("KB_FILE_STORAGE_KEY_MISSING")
         file_key = file.file_key
     return ChunkDocumentSnapshot(
         knowledge_id=knowledge.id,
@@ -108,19 +108,16 @@ def validate_chunk_create(
     if parent_child_mode:
         if create_data.chunk_type not in {ChunkType.PARENT, ChunkType.CHILD}:
             raise KnowledgeError.from_code(
-                "KB_VALIDATION_ERROR",
-                "父子分块模式下仅允许创建 parent 或 child 类型块",
+                "KB_PARENT_CHILD_CHUNK_TYPE_REQUIRED",
             )
         if create_data.chunk_type is ChunkType.CHILD and not create_data.parent_id:
             raise KnowledgeError.from_code(
-                "KB_VALIDATION_ERROR",
-                "创建子块时必须提供 parent_id",
+                "KB_CHILD_PARENT_ID_REQUIRED",
             )
         return
     if create_data.chunk_type in {ChunkType.PARENT, ChunkType.CHILD}:
         raise KnowledgeError.from_code(
-            "KB_VALIDATION_ERROR",
-            "当前文档未启用父子分块模式，不允许创建 parent/child 类型块",
+            "KB_PARENT_CHILD_MODE_DISABLED",
         )
 
 
@@ -394,8 +391,7 @@ async def resolve_embedding_config(
 ) -> ResolvedModelConfig:
     if snapshot.embedding_id is None:
         raise KnowledgeError.from_code(
-            "KB_MODEL_UNAVAILABLE",
-            "Embedding model config is unavailable",
+            "KB_EMBEDDING_MODEL_UNAVAILABLE",
         )
     try:
         return await resolve_model_async(
@@ -405,8 +401,7 @@ async def resolve_embedding_config(
         )
     except Exception as exc:
         raise KnowledgeError.from_code(
-            "KB_MODEL_UNAVAILABLE",
-            "Embedding model config is unavailable",
+            "KB_EMBEDDING_MODEL_UNAVAILABLE",
         ) from exc
 
 
@@ -417,11 +412,7 @@ async def resolve_vision_config(
 ) -> ResolvedModelConfig:
     if snapshot.image2text_id is None:
         raise KnowledgeError.from_code(
-            "KB_MODEL_UNAVAILABLE",
-            "image2text model config is unavailable",
-            status_code=400,
-            response_code=400,
-            response_style="http",
+            "KB_VISION_MODEL_UNAVAILABLE",
         )
     try:
         return await resolve_model_async(
@@ -431,11 +422,7 @@ async def resolve_vision_config(
         )
     except Exception as exc:
         raise KnowledgeError.from_code(
-            "KB_MODEL_UNAVAILABLE",
-            "No available image2text api key found",
-            status_code=400,
-            response_code=400,
-            response_style="http",
+            "KB_VISION_MODEL_UNAVAILABLE",
         ) from exc
 
 
@@ -505,8 +492,7 @@ async def preview_with_vision(
     text = _message_text(response)
     if not text:
         raise KnowledgeError.from_code(
-            "KB_MODEL_UNAVAILABLE",
-            "Image-to-text model returned empty content",
+            "KB_VISION_MODEL_OUTPUT_EMPTY",
         )
     return [
         DocumentChunk(
