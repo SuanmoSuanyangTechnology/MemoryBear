@@ -98,7 +98,14 @@ async def update_prediction_config(
         )
         if data is None:
             return fail(BizCode.MEMORY_CONFIG_NOT_FOUND, "配置不存在或无权访问")
-    await invalidate_cache(prefix=f"memory_config:{payload.config_id}")
+    try:
+        await invalidate_cache(prefix=f"memory_config:{payload.config_id}")
+    except Exception:
+        api_logger.exception(
+            "Prediction configuration was saved but cache invalidation failed: "
+            "config_id=%s",
+            payload.config_id,
+        )
     return success(data=data, msg="更新成功")
 
 
