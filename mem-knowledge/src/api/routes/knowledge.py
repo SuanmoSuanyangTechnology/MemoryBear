@@ -64,7 +64,11 @@ from ..dependencies import (
 from ..schemas.chunk import KnowledgeRetrievalSource
 from ..schemas.common import SuccessEnvelope, fail, success
 from ..schemas.file import KBBatchDownloadRequest
-from ..schemas.knowledge import KnowledgeCreate, KnowledgeUpdate, project_public_knowledge_data
+from ..schemas.knowledge import (
+    KnowledgeCreate,
+    KnowledgeUpdate,
+    project_public_knowledge_data,
+)
 
 router = APIRouter(prefix="/knowledges", tags=["knowledges"])
 

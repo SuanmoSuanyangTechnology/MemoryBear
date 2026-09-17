@@ -174,6 +174,37 @@ def _shared_validation_config(
     )
 
 
+def is_asr_model(model_type: str) -> bool:
+    return _enum_value(model_type) == "asr"
+
+
+def _require_asr_model_configuration(provider: str, model_type: str) -> None:
+    if not is_asr_model(model_type):
+        raise BusinessException("ASR 模型类型不匹配", BizCode.INVALID_PARAMETER)
+    if _enum_value(provider) != "dashscope":
+        raise BusinessException("ASR 模型当前仅支持 DashScope", BizCode.INVALID_PARAMETER)
+
+
+def _require_asr_api_base(api_base: str | None) -> None:
+    from redbear_model.providers.dashscope_asr import (
+        resolve_dashscope_asr_base_address,
+    )
+
+    try:
+        resolve_dashscope_asr_base_address(api_base)
+    except ValueError:
+        raise BusinessException(
+            "ASR API Base URL 必须是 DashScope 根路径：/api/v1、"
+            "/compatible-mode/v1 或 /compatible-api/v1",
+            BizCode.INVALID_PARAMETER,
+        ) from None
+
+
+def _reject_asr_composite(model_type: ModelType | str | None) -> None:
+    if model_type is not None and is_asr_model(model_type):
+        raise BusinessException("ASR 模型暂不支持组合配置", BizCode.INVALID_PARAMETER)
+
+
 def _validation_image() -> "ImageEmbeddingContent":
     from redbear_model import ImageEmbeddingContent
 
@@ -571,7 +602,7 @@ class ModelConfigService:
         model_type: str = "llm",
         test_message: str = "Hello",
         is_omni: bool = False,
-        capability: Optional[list] = None
+        capability: Optional[list] = None,
     ) -> Dict[str, Any]:
         """验证模型配置是否有效
 
@@ -589,6 +620,16 @@ class ModelConfigService:
         Returns:
             Dict: 验证结果
         """
+        if is_asr_model(model_type):
+            return {
+                "valid": False,
+                "message": "ASR 模型不支持配置时活体验证",
+                "response": None,
+                "elapsed_time": None,
+                "usage": None,
+                "error": "ASR 模型将在实际调用时校验模型和凭据",
+                "error_type": "MediaValidationUnsupported",
+            }
         _ = db
         import traceback
 
@@ -873,16 +914,75 @@ class ModelConfigService:
             }
 
     @staticmethod
+    def _check_asr_model_name(model_data: dict, tenant_id: uuid.UUID) -> None:
+        from app.db import get_db_context
+
+        with get_db_context() as db:
+            if ModelConfigRepository.get_by_name(
+                db, model_data["name"], provider=model_data["provider"], tenant_id=tenant_id,
+            ):
+                raise BusinessException("模型名称已存在", BizCode.DUPLICATE_NAME)
+
+    @staticmethod
+    def _save_asr_model(model_data: dict, credential: dict, tenant_id: uuid.UUID,
+                        created_by: uuid.UUID | None) -> model_schema.ModelConfig:
+        from app.db import get_db_context
+
+        with get_db_context() as db:
+            try:
+                if ModelConfigRepository.get_by_name(
+                    db, model_data["name"], provider=model_data["provider"], tenant_id=tenant_id,
+                ):
+                    raise BusinessException("模型名称已存在", BizCode.DUPLICATE_NAME)
+                model = ModelConfigRepository.create(db, {**model_data, "tenant_id": tenant_id})
+                ChannelService(db).register_for_model(
+                    provider=model_data["provider"], tenant_id=tenant_id,
+                    model_name=model_data["name"], api_key=credential["api_key"],
+                    api_base=credential["api_base"], remark=credential["remark"],
+                    priority=credential["priority"], created_by=created_by,
+                )
+                db.commit()
+                db.refresh(model)
+                result = model_schema.ModelConfig.model_validate(model)
+                cache_state = _model_option_cache_state(model)
+            except Exception:
+                db.rollback()
+                raise
+        _invalidate_model_option_states(cache_state)
+        return result
+
+    @staticmethod
+    async def _create_asr_model(
+        model_data: ModelConfigCreate, tenant_id: uuid.UUID, created_by: uuid.UUID | None,
+    ) -> model_schema.ModelConfig:
+        credential = model_data.credential
+        _require_api_base_for_local_provider(model_data.provider, credential.api_base)
+        _require_wellformed_bedrock_credential(model_data.provider, credential.api_key)
+        _require_wellformed_api_base(model_data.provider, credential.api_base, model_data.type)
+        _require_asr_model_configuration(model_data.provider, model_data.type)
+        _require_asr_api_base(credential.api_base)
+        _require_supported_api_base(model_data.provider, credential.api_base, model_data.type)
+        snapshot = model_data.model_dump(exclude={"credential"})
+        await asyncio.to_thread(ModelConfigService._check_asr_model_name, snapshot, tenant_id)
+        return await asyncio.to_thread(
+            ModelConfigService._save_asr_model, snapshot, credential.model_dump(),
+            tenant_id, created_by,
+        )
+
+    @staticmethod
     async def create_model(
         db: Session,
         model_data: ModelConfigCreate,
         tenant_id: uuid.UUID,
         created_by: uuid.UUID | None = None,
-    ) -> ModelConfig:
-        """创建自定义模型：内嵌凭据活体验证通过后，config + 点名渠道单事务落库。
+    ) -> ModelConfig | model_schema.ModelConfig:
+        """创建自定义模型：config + 点名渠道单事务落库。
 
-        验证失败拒绝创建（零写入）；网络调用在事务外完成。
+        ASR 模型登记时只校验配置结构，凭据在实际调用时验证；其他模型
+        仍在网络活体验证通过后写入。
         """
+        if is_asr_model(model_data.type):
+            return await ModelConfigService._create_asr_model(model_data, tenant_id, created_by)
         # 检查名称是否已存在（同租户内；先于任何网络调用）
         if ModelConfigRepository.get_by_name(db, model_data.name, provider=model_data.provider, tenant_id=tenant_id):
             raise BusinessException("模型名称已存在", BizCode.DUPLICATE_NAME)
@@ -1023,6 +1123,7 @@ class ModelConfigService:
     async def create_composite_model(db: Session, model_data: model_schema.CompositeModelCreate,
                                      tenant_id: uuid.UUID) -> ModelConfig:
         """创建组合模型"""
+        _reject_asr_composite(model_data.type)
         if ModelConfigRepository.get_by_name(db, model_data.name, provider=ModelProvider.COMPOSITE,
                                              tenant_id=tenant_id):
             raise BusinessException("模型名称已存在", BizCode.DUPLICATE_NAME)
@@ -1060,15 +1161,16 @@ class ModelConfigService:
         existing_model = ModelConfigRepository.get_by_id(db, model_id, tenant_id=tenant_id)
         if not existing_model:
             raise BusinessException("模型配置不存在", BizCode.MODEL_NOT_FOUND)
+
+        if not existing_model.is_composite:
+            raise BusinessException("该模型不是组合模型", BizCode.INVALID_PARAMETER)
+        _reject_asr_composite(existing_model.type)
         old_cache_state = _model_option_cache_state(existing_model)
 
         if model_data.name and model_data.name != existing_model.name:
             if ModelConfigRepository.get_by_name(db, model_data.name, provider=existing_model.provider,
                                                  tenant_id=tenant_id):
                 raise BusinessException("模型名称已存在", BizCode.DUPLICATE_NAME)
-
-        if not existing_model.is_composite:
-            raise BusinessException("该模型不是组合模型", BizCode.INVALID_PARAMETER)
 
         members = ModelConfigService._resolve_composite_members(model_data)
         # 组合类型不可变更（controller 已拒 type），校验锚定既有 type

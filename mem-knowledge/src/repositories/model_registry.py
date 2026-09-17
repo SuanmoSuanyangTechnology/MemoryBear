@@ -122,6 +122,11 @@ def _channel_cipher() -> CredentialCipher:
     return AESGCMEnvCipher(base64.b64decode(raw_key))
 
 
+def credential_cipher() -> CredentialCipher:
+    """Build the host cipher used by channel-based media model resolution."""
+    return _channel_cipher()
+
+
 def _decrypt_credential(channel, cipher: CredentialCipher) -> str:
     """渠道密文解密（AAD=provider:tenant_id，与 ChannelService 写入侧一致）。"""
     return cipher.decrypt(
@@ -225,6 +230,12 @@ class SyncSQLModelRegistry(ModelRegistryRepository):
         )
         return _keys_from_channels(config, _ordered_candidates(config, channels))
 
+    def list_active_channels(
+        self, tenant_id: uuid.UUID, provider: str,
+    ) -> list[ChannelSnapshot]:
+        """Return encrypted channel snapshots for reference validation only."""
+        return self._channels.get_active_channels(tenant_id, provider=provider)
+
     def get_public_binding(
         self,
         tenant_id: uuid.UUID,
@@ -275,6 +286,12 @@ class AsyncSQLModelRegistry:
         )
         return _keys_from_channels(config, _ordered_candidates(config, channels))
 
+    async def list_active_channels(
+        self, tenant_id: uuid.UUID, provider: str,
+    ) -> list[ChannelSnapshot]:
+        """Return encrypted channel snapshots for reference validation only."""
+        return await self._channels.get_active_channels(tenant_id, provider=provider)
+
     async def get_public_binding(
         self,
         tenant_id: uuid.UUID,
@@ -296,4 +313,4 @@ class AsyncSQLModelRegistry:
         raise RuntimeError("Knowledge reference repositories are read-only")
 
 
-__all__ = ["AsyncSQLModelRegistry", "SyncSQLModelRegistry"]
+__all__ = ["AsyncSQLModelRegistry", "SyncSQLModelRegistry", "credential_cipher"]

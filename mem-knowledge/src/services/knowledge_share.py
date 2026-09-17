@@ -114,6 +114,8 @@ async def create_share(
         reranker_id=source.reranker_id,
         llm_id=source.llm_id,
         image2text_id=source.image2text_id,
+        audio2text_id=source.audio2text_id,
+        video2text_id=source.video2text_id,
         doc_num=source.doc_num,
         chunk_num=source.chunk_num,
         parser_id=source.parser_id,

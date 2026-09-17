@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from typing import TYPE_CHECKING
 from uuid import UUID
+
+if TYPE_CHECKING:
+    from .media_contracts import AudioTaskRef, MediaUsage
 
 
 def _status_code(value: object) -> int | None:
@@ -38,6 +42,58 @@ def is_provider_rate_limit_error(exc: BaseException) -> bool:
 
 class RedBearModelError(Exception):
     """Base class for public model errors."""
+
+
+class MediaProviderError(RedBearModelError):
+    """Safe media failure context, never raw provider messages or URLs."""
+
+    summary = "Media provider request failed"
+
+    def __init__(
+        self,
+        operation: str,
+        *,
+        status_code: int | None = None,
+        provider_code: str | None = None,
+        provider_request_id: str | None = None,
+        usage: MediaUsage | None = None,
+        task_ref: AudioTaskRef | None = None,
+    ):
+        self.operation = operation
+        self.status_code = status_code
+        self.provider_code = provider_code
+        self.provider_request_id = provider_request_id
+        self.usage = usage
+        self.task_ref = task_ref
+        super().__init__(f"{self.summary}: {operation}")
+
+
+class ModelSubmissionUncertainError(MediaProviderError):
+    summary = "Media submission may have been accepted; do not automatically resubmit"
+
+
+class ModelTaskNotReadyError(MediaProviderError):
+    summary = "Media task is not ready"
+
+
+class ModelTaskFailedError(MediaProviderError):
+    summary = "Media task failed or is unknown"
+
+
+class IncompleteModelOutputError(MediaProviderError):
+    summary = "Media output did not finish successfully"
+
+
+class EmptyModelOutputError(MediaProviderError):
+    summary = "Video model returned empty text"
+
+
+class MediaOutputLimitError(MediaProviderError):
+    summary = "Media output exceeds the local response limit"
+
+
+class MediaCallTimeoutError(MediaProviderError):
+    summary = "Media call exceeded its timeout"
 
 
 class InvalidProviderResponseError(RedBearModelError):

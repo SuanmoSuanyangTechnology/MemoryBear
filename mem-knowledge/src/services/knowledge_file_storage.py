@@ -37,6 +37,18 @@ class KnowledgeFileStorage:
     async def download(self, file_key: str) -> bytes:
         return await (await self._manager.backend()).download(file_key)
 
+    async def get_signed_url(
+        self,
+        file_key: str,
+        expires: int = 3600,
+        file_name: str | None = None,
+    ) -> str | None:
+        return await (await self._manager.backend()).get_signed_url(
+            file_key,
+            expires=expires,
+            file_name=file_name,
+        )
+
     async def download_stream(
         self,
         file_key: str,

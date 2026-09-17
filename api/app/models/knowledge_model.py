@@ -61,6 +61,10 @@ class Knowledge(Base):
                     comment="default llm model ID")
     image2text_id = Column(UUID(as_uuid=True), ForeignKey('model_configs.id', ondelete="SET NULL"), nullable=True,
                            comment="default image2text model ID")
+    audio2text_id = Column(UUID(as_uuid=True), ForeignKey('model_configs.id', ondelete="SET NULL"), nullable=True,
+                           comment="audio transcription model ID")
+    video2text_id = Column(UUID(as_uuid=True), ForeignKey('model_configs.id', ondelete="SET NULL"), nullable=True,
+                           comment="video understanding model ID")
     doc_num = Column(Integer, default=0, comment="doc num")
     chunk_num = Column(Integer, default=0, comment="chunk num")
     parser_id = Column(String, index=True, default="naive", comment="default parser ID")
@@ -79,6 +83,9 @@ class Knowledge(Base):
     reranker = relationship("ModelConfig", foreign_keys=[reranker_id], uselist=False, backref="reranker")
     llm = relationship("ModelConfig", foreign_keys=[llm_id], uselist=False, backref="llm")
     image2text = relationship("ModelConfig", foreign_keys=[image2text_id], uselist=False, backref="image2text")
+
+    audio2text = relationship("ModelConfig", foreign_keys=[audio2text_id], uselist=False)
+    video2text = relationship("ModelConfig", foreign_keys=[video2text_id], uselist=False)
 
     @property
     def is_folder(self) -> bool:

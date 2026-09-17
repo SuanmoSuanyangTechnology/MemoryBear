@@ -42,6 +42,8 @@ _SHARE_MIRRORED_MODEL_FIELDS = (
     ("reranker_id", "reranker"),
     ("llm_id", "llm"),
     ("image2text_id", "image2text"),
+    ("audio2text_id", "audio2text"),
+    ("video2text_id", "video2text"),
 )
 _SHARED_STATUS_UPDATE_FIELDS = frozenset({"status"})
 _SHARED_STATUS_VALUES = frozenset({1, 2})
@@ -172,6 +174,8 @@ async def knowledge_to_data(
             knowledge.reranker_id,
             knowledge.llm_id,
             knowledge.image2text_id,
+            knowledge.audio2text_id,
+            knowledge.video2text_id,
         )
         if model_id is not None
     ]
@@ -444,11 +448,10 @@ async def _prepare_knowledge_create(
         if not workspace.llm:
             raise _reference_not_found("Workspace LLM model is not configured")
         knowledge.llm_id = _as_uuid(workspace.llm)
-    if knowledge.image2text_id is None:
+    if "image2text_id" not in create_data.model_fields_set:
         model = await ReferenceRepository.get_latest_vision_model(db, workspace.tenant_id)
-        if model is None:
-            raise _reference_not_found("No vision model is available for the tenant")
-        knowledge.image2text_id = model.id
+        if model is not None:
+            knowledge.image2text_id = model.id
     return knowledge
 
 
