@@ -898,7 +898,6 @@ async def test_elastic_client_get_node_uses_filter_projection_and_sort() -> None
         {
             "index": get_index_name(MemoryNodeType.EXTRACTED_ENTITY),
             "keep_alive": PIT_KEEP_ALIVE,
-            "allow_partial_search_results": False,
         }
     ]
     assert fake.search_calls == [
@@ -909,6 +908,7 @@ async def test_elastic_client_get_node_uses_filter_projection_and_sort() -> None
             "size": SEARCH_BATCH_SIZE,
             "source_includes": ["id", "status"],
             "sort": [{"score": "desc"}, {"_shard_doc": "asc"}],
+            "allow_partial_search_results": False,
             "pit": {"id": "pit-1", "keep_alive": PIT_KEEP_ALIVE},
         }
     ]
@@ -1335,6 +1335,84 @@ async def test_ensure_index_refuses_generation_downgrade(
 
     assert fake.indices.aliases[original.alias] == current_index
     assert len(fake.indices.create_calls) == create_count
+
+
+async def test_ensure_index_allows_schema_version_downgrade_when_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    label = TEST_INDEX_LABEL
+    original = get_index_definition(label)
+    fake = _FakeElasticsearch()
+    monkeypatch.setitem(
+        INDEX_DEFINITIONS,
+        label,
+        replace(original, schema_version=2),
+    )
+    await ensure_index(_as_elasticsearch(fake), label)
+    current_index = fake.indices.aliases[original.alias]
+    create_count = len(fake.indices.create_calls)
+    alias_update_count = len(fake.indices.update_aliases_calls)
+    monkeypatch.setitem(INDEX_DEFINITIONS, label, original)
+    monkeypatch.setattr(settings, "ES_ALLOW_DOWNGRADE", True)
+
+    assert await ensure_index(_as_elasticsearch(fake), label) is False
+
+    assert fake.indices.aliases[original.alias] == current_index
+    assert len(fake.indices.create_calls) == create_count
+    assert fake.indices.put_mapping_calls == []
+    assert len(fake.indices.update_aliases_calls) == alias_update_count
+    assert fake.indices.write_blocks == {}
+
+
+async def test_ensure_index_allows_generation_downgrade_when_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    label = TEST_INDEX_LABEL
+    original = get_index_definition(label)
+    fake = _FakeElasticsearch()
+    monkeypatch.setitem(
+        INDEX_DEFINITIONS,
+        label,
+        replace(original, generation=2),
+    )
+    await ensure_index(_as_elasticsearch(fake), label)
+    current_index = fake.indices.aliases[original.alias]
+    create_count = len(fake.indices.create_calls)
+    alias_update_count = len(fake.indices.update_aliases_calls)
+    monkeypatch.setitem(INDEX_DEFINITIONS, label, original)
+    monkeypatch.setattr(settings, "ES_ALLOW_DOWNGRADE", True)
+
+    assert await ensure_index(_as_elasticsearch(fake), label) is False
+
+    assert fake.indices.aliases[original.alias] == current_index
+    assert len(fake.indices.create_calls) == create_count
+    assert len(fake.indices.update_aliases_calls) == alias_update_count
+    assert fake.reindex_calls == []
+    assert fake.indices.write_blocks == {}
+
+
+async def test_ensure_index_downgrade_override_skips_mapping_validation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The escape hatch must not fall through to validate_index on a newer index."""
+    label = TEST_INDEX_LABEL
+    original = get_index_definition(label)
+    fake = _FakeElasticsearch()
+    monkeypatch.setitem(
+        INDEX_DEFINITIONS,
+        label,
+        replace(original, schema_version=2),
+    )
+    await ensure_index(_as_elasticsearch(fake), label)
+    current_index = fake.indices.aliases[original.alias]
+    monkeypatch.setitem(INDEX_DEFINITIONS, label, original)
+    monkeypatch.setattr(settings, "ES_ALLOW_DOWNGRADE", True)
+    # Dropping a field the definition requires would make validate_index fail.
+    fake.indices.mappings[current_index]["properties"].pop("embedding")
+
+    assert await ensure_index(_as_elasticsearch(fake), label) is False
+
+    assert fake.indices.aliases[original.alias] == current_index
 
 
 async def test_migration_lock_release_failure_preserves_reindex_error(
