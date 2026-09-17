@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import time
+from pathlib import Path
 
 from celery.signals import (
     celeryd_after_setup,
@@ -16,6 +17,7 @@ from celery.signals import (
     worker_process_init,
     worker_process_shutdown,
     worker_ready,
+    worker_shutdown,
     worker_shutting_down,
 )
 from celery.signals import (
@@ -29,6 +31,13 @@ from ..runtime import reset_worker_runtime_after_fork, shutdown_worker_runtime_s
 from . import document, evidence_graph, legacy_compat, qa_import
 from .celery_app import celery_app
 from .observability import record_task_prerun, reset_observability_after_fork
+from .worker_health import (
+    WorkerPhase,
+    build_worker_state,
+    remove_worker_state_if_owned,
+    transition_worker_state,
+    write_worker_state,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +68,68 @@ def _active_queue_names(app: object) -> set[str]:
     return set(consume_from)
 
 
+def _health_state_file() -> Path:
+    return get_settings().kb_worker_health_state_file
+
+
+def _log_health_state_failure(
+    *,
+    event: str,
+    phase: WorkerPhase,
+    error: Exception,
+) -> None:
+    try:
+        role = get_settings().kb_process_role
+    except Exception:
+        role = "unknown"
+    logger.warning(
+        "event=%s role=%s pid=%s phase=%s error_type=%s",
+        event,
+        role,
+        os.getpid(),
+        phase,
+        type(error).__name__,
+    )
+
+
+def _publish_initial_health_state(*, role: str, queues: set[str]) -> None:
+    try:
+        state = build_worker_state(
+            role=role,
+            queues=queues,
+            phase=WorkerPhase.STARTING,
+        )
+        write_worker_state(_health_state_file(), state)
+    except Exception as error:
+        _log_health_state_failure(
+            event="kb_worker_health_state_write_failed",
+            phase=WorkerPhase.STARTING,
+            error=error,
+        )
+
+
+def _transition_health_state(phase: WorkerPhase) -> None:
+    try:
+        transition_worker_state(_health_state_file(), phase)
+    except Exception as error:
+        _log_health_state_failure(
+            event="kb_worker_health_state_transition_failed",
+            phase=phase,
+            error=error,
+        )
+
+
+def _remove_health_state() -> None:
+    try:
+        remove_worker_state_if_owned(_health_state_file())
+    except Exception as error:
+        _log_health_state_failure(
+            event="kb_worker_health_state_cleanup_failed",
+            phase=WorkerPhase.STOPPING,
+            error=error,
+        )
+
+
 @celeryd_after_setup.connect
 def validate_worker_configuration(
     *,
@@ -81,6 +152,7 @@ def validate_worker_configuration(
             sender,
         )
         raise SystemExit(78) from None
+    _publish_initial_health_state(role=role, queues=queues)
 
 
 @celery_setup_logging.connect
@@ -96,6 +168,7 @@ def handle_worker_ready(sender: object, **kwargs: object) -> None:
     """Report the resolved runtime shape once the consumer is ready."""
 
     del kwargs
+    _transition_health_state(WorkerPhase.READY)
     app = getattr(sender, "app", celery_app)
     queue_names = sorted(_active_queue_names(app))
     controller = getattr(sender, "controller", None)
@@ -124,6 +197,7 @@ def handle_worker_shutting_down(
     """Report why the worker main process is stopping."""
 
     del kwargs
+    _transition_health_state(WorkerPhase.STOPPING)
     logger.info(
         "event=kb_worker_shutdown_requested role=%s hostname=%s main_pid=%s "
         "signal=%s mode=%s exitcode=%s active_tasks=%s",
@@ -135,6 +209,17 @@ def handle_worker_shutting_down(
         exitcode,
         len(active_requests),
     )
+
+
+@worker_shutdown.connect
+def handle_worker_shutdown(
+    sender: object | None = None,
+    **kwargs: object,
+) -> None:
+    """Remove local health state owned by the exiting worker main process."""
+
+    del sender, kwargs
+    _remove_health_state()
 
 
 @worker_process_init.connect
@@ -270,6 +355,7 @@ __all__ = [
     "qa_import",
     "WorkerConfigurationError",
     "handle_task_postrun",
+    "handle_worker_shutdown",
     "handle_worker_shutting_down",
     "validate_worker_configuration",
     "validate_worker_role_queues",
