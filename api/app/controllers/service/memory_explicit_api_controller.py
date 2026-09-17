@@ -1,6 +1,7 @@
 """API Key authenticated v1 queries for explicit memory."""
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, Query, Request, status
+from fastapi.responses import JSONResponse
 
 from app.core.api_key_auth import get_current_api_key_auth, require_api_key_self_db
 from app.core.api_key_utils import (
@@ -27,7 +28,7 @@ router = APIRouter(
 async def get_semantic_memory_list(
     request: Request,
     end_user_id: str = Query(..., description="终端用户ID"),
-) -> dict:
+) -> dict | JSONResponse:
     """Query semantic memories through the shared explicit-memory service."""
     api_key_auth = get_current_api_key_auth()
 
@@ -51,4 +52,7 @@ async def get_semantic_memory_list(
             exc,
             exc_info=True,
         )
-        return fail(BizCode.INTERNAL_ERROR, "语义记忆列表查询失败")
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content=fail(BizCode.INTERNAL_ERROR, "语义记忆列表查询失败"),
+        )
