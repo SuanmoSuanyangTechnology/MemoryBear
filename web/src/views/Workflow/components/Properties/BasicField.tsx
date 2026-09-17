@@ -57,6 +57,24 @@ const BasicField: FC<BasicFieldProps> = ({ configKey: key, config }) => {
     }
   }
 
+  const handleSelectChange = (value: string) => {
+    if (data.type !== 'agent' || key !== 'mode') return
+
+    if (value === 'inline') {
+      form.setFieldValue('reference', undefined)
+      return
+    }
+
+    const reference = form.getFieldValue('reference')
+    form.setFieldValue('reference', {
+      app_id: reference?.app_id,
+      release_policy: reference?.release_policy ?? 'current',
+      ...(reference?.release_policy === 'pinned' && reference?.release_id
+        ? { release_id: reference.release_id }
+        : {}),
+    })
+  }
+
   return (
     <>
     <Form.Item
@@ -64,7 +82,7 @@ const BasicField: FC<BasicFieldProps> = ({ configKey: key, config }) => {
       name={key === 'long_term_memory' ? [key, 'enable'] : key}
       label={key === 'vision_input'
         ? undefined : key === 'parallel_count'
-          ? <span className="rb:text-[10px] rb:text-[#5B6167] rb:leading-3.5 rb:-mb-1!">{t(`workflow.config.${selectedNode?.data?.type}.${key}`)}</span>
+          ? <span className="rb:text-[10px] rb:text-gray-600 rb:leading-3.5 rb:-mb-1!">{t(`workflow.config.${selectedNode?.data?.type}.${key}`)}</span>
           : t(`workflow.config.${selectedNode?.data?.type}.${key}`)
       }
       tooltip={config.tip ? t(config.tip) : undefined}
@@ -89,6 +107,7 @@ const BasicField: FC<BasicFieldProps> = ({ configKey: key, config }) => {
         ? <Select
           options={config.needTranslation ? (config.options || []).map(vo => ({ ...vo, label: t(vo.label) })) : config.options}
           placeholder={t('common.pleaseSelect')}
+          onChange={handleSelectChange}
         />
         : config.type === 'inputNumber'
           ? <InputNumber
@@ -143,7 +162,7 @@ const BasicField: FC<BasicFieldProps> = ({ configKey: key, config }) => {
             }
             if (config.onFilterVariableType) {
               const types = config.onFilterVariableType as string[];
-              let list: Suggestion[] = []
+              const list: Suggestion[] = []
               baseVariableList.forEach((variable) => {
                 if (variable.children?.length) {
                   const filteredChildren = variable.children.filter((c: Suggestion) => types.includes(c.dataType));
