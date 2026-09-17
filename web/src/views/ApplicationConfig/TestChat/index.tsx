@@ -53,7 +53,11 @@ import {
   removeMessageById,
   buildVersionMessages,
 } from '@/components/Chat/utils/messageVersions'
-import { createAgentStreamHandler, createWorkflowStreamHandler } from './streamHandlers'
+import {
+  createAgentStreamHandler,
+  createTestClusterStreamHandler,
+  createWorkflowStreamHandler,
+} from './streamHandlers'
 
 const TestChat: FC<TestChatProps> = ({
   application,
@@ -79,6 +83,7 @@ const TestChat: FC<TestChatProps> = ({
   const abortRef = useRef<(() => void) | null>(null)
 
   const isWorkflow = !!application?.type.includes('workflow')
+  const isCluster = application?.type === 'multi_agent'
 
   useEffect(() => {
     getVariables()
@@ -152,67 +157,61 @@ const TestChat: FC<TestChatProps> = ({
       config,
     })(data)
 
-  const handleSend = (msg?: string) => {
-    if (loading || !application || !((message && message?.trim() !== '') || (msg && msg?.trim() !== ''))) return
+  type SendMode = 'agent' | 'cluster' | 'workflow'
+
+  const handleSendByMode = (mode: SendMode, msg?: string) => {
+    const sendMessage = msg || message
+    if (loading || !application || !sendMessage?.trim()) return
+
     const { files, isCanSend, params } = resolveSendParams()
     if (!isCanSend) return
 
-    setChatList(prev => addUserMessage(prev, (msg || message) as string, files))
+    setChatList(prev => addUserMessage(prev, sendMessage, files))
+    setChatList(prev => addAssistantMessage(prev, application.type))
     setMessage(undefined)
     toolbarRef.current?.setFiles([])
     setFileList([])
-    setChatList(prev => addAssistantMessage(prev, application?.type))
     streamLoadingRef.current = true
     setStreamLoading(true)
     setLoading(true)
 
-    draftRun(
-      application.id,
-      formatParams((msg || message) as string, conversationId, files, params),
-      handleStreamMessage,
-      (abort) => { abortRef.current = abort }
-    )
-      .catch(() => {
-        setChatList(prev => applyErrorMessage(prev, 0))
-        setLoading(false)
-      })
-      .finally(() => {
-        setLoading(false)
-        streamLoadingRef.current = false
-        setStreamLoading(false)
-      })
-  }
-
-  const handleWorkflowSend = (msg?: string) => {
-    if (loading || !application || !((message && message?.trim() !== '') || (msg && msg?.trim() !== ''))) return
-    const { files, isCanSend, params } = resolveSendParams()
-    if (!isCanSend) return
-
-    setLoading(true)
-    setChatList(prev => addUserMessage(prev, (msg || message) as string, files))
-    setChatList(prev => addAssistantMessage(prev, application?.type))
-    toolbarRef.current?.setFiles([])
-    setFileList([])
-    setMessage(undefined)
-    setStreamLoading(true)
-    streamLoadingRef.current = true
+    const streamHandler = mode === 'workflow'
+      ? handleWorkflowStreamMessage
+      : mode === 'cluster'
+        ? createTestClusterStreamHandler({
+          conversationId,
+          setConversationId,
+          setChatList,
+          setLoading,
+          setStreamLoading,
+          streamLoadingRef,
+        })
+        : handleStreamMessage
 
     draftRun(
       application.id,
-      formatParams((msg || message) as string, conversationId, files, params),
-      handleWorkflowStreamMessage,
-      (abort) => { abortRef.current = abort }
+      formatParams(sendMessage, conversationId, files, params),
+      streamHandler,
+      (abort) => { abortRef.current = abort },
     )
       .catch((error) => {
-        const errorInfo = JSON.parse(error.message)
-        setChatList(prev => applyWorkflowSendError(prev, errorInfo.error))
+        if (mode === 'workflow') {
+          const errorInfo = JSON.parse(error.message)
+          setChatList(prev => applyWorkflowSendError(prev, errorInfo.error))
+          return
+        }
+        setChatList(prev => applyErrorMessage(prev, 0))
       })
       .finally(() => {
         setLoading(false)
-        setStreamLoading(false)
         streamLoadingRef.current = false
+        setStreamLoading(false)
       })
   }
+
+  const handleSend = (msg?: string) => handleSendByMode('agent', msg)
+  const handleClusterSend = (msg?: string) => handleSendByMode('cluster', msg)
+  const handleWorkflowSend = (msg?: string) => handleSendByMode('workflow', msg)
 
   useEffect(() => {
     if (!Object.keys(audioStatusMap).length) return
@@ -345,9 +344,8 @@ const TestChat: FC<TestChatProps> = ({
       })
     }
   }, [features?.opening_statement, variables])
-  console.log('chatList', chatList)
-
-  const isSupportTools = application?.type && ['workflow', 'agent'].includes(application?.type)
+  const isSupportTools = application?.type && ['workflow', 'agent'].includes(application.type)
+  const isSupportRuntime = Boolean(isSupportTools || isCluster)
 
   return (
     <div className="rb:w-250 rb:mx-auto rb:h-full">
@@ -367,7 +365,7 @@ const TestChat: FC<TestChatProps> = ({
           streamLoading={streamLoading}
           loading={loading}
           onChange={setMessage}
-          onSend={isWorkflow ? handleWorkflowSend : handleSend}
+          onSend={isWorkflow ? handleWorkflowSend : isCluster ? handleClusterSend : handleSend}
           fileList={fileList}
           fileChange={(list) => {
             setFileList(list || [])
@@ -375,7 +373,7 @@ const TestChat: FC<TestChatProps> = ({
           }}
           labelFormat={(item) => item.role === 'user' ? t('application.you') : dayjs(item.created_at).locale('en').format('MMMM D, YYYY [at] h:mm A')}
           // errorDesc={t('application.ReplyException')}
-          renderRuntime={isSupportTools ? (item, index) => <Runtime item={item} index={index} source={application.type} /> : undefined}
+          renderRuntime={isSupportRuntime && application?.type ? (item, index) => <Runtime item={item} index={index} source={application.type} /> : undefined}
           handleInterventionActionClick={handleInterventionActionClick}
           isSupportTools={isSupportTools}
           isAlwaysShowAssistantTools={isSupportTools}

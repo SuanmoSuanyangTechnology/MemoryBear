@@ -126,10 +126,10 @@ const Private: FC = () => {
 
   useEffect(() => {
     if (knowledgeBaseId) {
-      let url = `/documents/${knowledgeBaseId}/documents`;
+      const url = `/documents/${knowledgeBaseId}/documents`;
       setTableApi(url);
       fetchKnowledgeBaseDetail(knowledgeBaseId);
-      
+
       // Immediately set base breadcrumbs to ensure other page breadcrumbs are not displayed
       updateBreadcrumbs({
         knowledgeBaseFolderPath,
@@ -141,7 +141,7 @@ const Private: FC = () => {
         documentFolderPath: folderPath,
       });
     }
-  }, [knowledgeBaseId]);
+  }, [knowledgeBaseId, knowledgeBaseFolderPath]);
 
   // Update breadcrumbs
   useEffect(() => {
@@ -303,7 +303,7 @@ const Private: FC = () => {
       parent_id: String(keys[0]),
       _timestamp: Date.now() // Add timestamp to ensure query object changes
     })
-    let url = `/documents/${knowledgeBaseId}/documents`;
+    const url = `/documents/${knowledgeBaseId}/documents`;
     
     setTableApi(url);
     setParentId(String(keys[0]))
@@ -316,10 +316,6 @@ const Private: FC = () => {
     setFolderPath(path);
   };
 
-  // Handle tree node expand
-  const onExpand = (_expandedKeys: React.Key[], _info: any) => {
-    // No special handling needed when expanding nodes
-  };
   // create / import list
   const createItems: MenuProps['items'] = [
     {
@@ -819,7 +815,6 @@ const Private: FC = () => {
           className="customTree"
           style={{ background: 'transparent' }}
           onSelect={onSelect}
-          onExpand={onExpand}
           knowledgeBaseId={knowledgeBaseId ?? ''}
           refreshKey={folderTreeRefreshKey}
           onRootLoad={handleRootTreeLoad}

@@ -59,12 +59,22 @@ async def _generate_embedding(
     db: AsyncSession,
     model_config_id: uuid.UUID,
     text: str,
+    tenant_id: Optional[uuid.UUID],
 ):
-    """加载 Embedding 模型配置并生成向量。"""
+    """加载 Embedding 模型配置并生成向量。tenant_id 来自 API Key 认证的工作空间归属。"""
     from app.core.models.base import RedBearModelConfig
     from app.services.model_service import ModelApiKeyService
 
-    api_key_obj = await ModelApiKeyService.get_available_api_key_async(db, model_config_id)
+    if tenant_id is None:
+        logger.warning(
+            "跳过 Embedding 生成：API Key 认证信息缺少租户上下文 (model_config_id=%s)",
+            model_config_id,
+        )
+        return None
+
+    api_key_obj = await ModelApiKeyService.get_available_api_key_async(
+        db, model_config_id, tenant_id=tenant_id
+    )
     if not api_key_obj:
         return None
 
@@ -129,7 +139,9 @@ async def create_annotation(
     embedding = None
     try:
         if setting.model_config_id:
-            embedding = await _generate_embedding(db, setting.model_config_id, payload.question)
+            embedding = await _generate_embedding(
+                db, setting.model_config_id, payload.question, api_key_auth.tenant_id
+            )
     except Exception as e:
         logger.warning(f"生成Embedding失败，继续创建标注: {e}")
 
@@ -251,7 +263,9 @@ async def update_annotation(
     if payload.question:
         try:
             if setting.model_config_id:
-                embedding = await _generate_embedding(db, setting.model_config_id, payload.question)
+                embedding = await _generate_embedding(
+                    db, setting.model_config_id, payload.question, api_key_auth.tenant_id
+                )
         except Exception as e:
             logger.warning(f"重新生成Embedding失败: {e}")
 

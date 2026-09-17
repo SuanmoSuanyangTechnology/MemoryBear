@@ -89,46 +89,41 @@ export const useMenu = create<MenuState>((set, get) => ({
   updateBreadcrumbs: (paths, source) => {
     const { allMenus } = get()
     const menus = allMenus[source] || []
-    let result: MenuItem[] = []
+    const result: MenuItem[] = []
 
-    /** Flatten group menus so top-level items are always real menu entries */
-    const flatMenus = menus.flatMap(m => m.type === 'group' ? (m.subs || []) : [m]);
-
-    const findById = (list: MenuItem[], id: string) => list.find(m => `${m.id}` === id);
-    /** Find menu by id in both original menus and flatMenus (handles group ids) */
-    const findMenuById = (id: string) => findById(menus, id) || findById(flatMenus, id);
     const pathMatches = (pattern: string, path: string) => {
-      const n = pattern[0] !== '/' ? '/' + pattern : pattern;
-      if (n === path) return true;
-      if (n.includes(':')) return new RegExp('^' + n.replace(/:[\w-]+/g, '[^/]+') + '$').test(path);
-      return false;
+      const normalized = pattern[0] !== '/' ? '/' + pattern : pattern;
+      if (normalized === path) return true;
+
+      const regexPattern = normalized
+        .split('/')
+        .map(segment => (
+          segment.startsWith(':')
+            ? '[^/]+'
+            : segment.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+        ))
+        .join('/');
+
+      return new RegExp(`^${regexPattern}$`).test(path);
     };
 
-    if (paths.length === 3) {
-      /** Three-level: [subSubPath, subId, menuId] */
-      const matchedMenu = findMenuById(paths[2]);
-      if (matchedMenu?.subs) {
-        const matchedSub = findById(matchedMenu.subs, paths[1]);
-        if (matchedSub?.subs) {
-          const matchedSubSub = matchedSub.subs.find(s => s.path === paths[0] || pathMatches(s.path || '', paths[0]));
-          if (matchedSubSub) {
-            result = [
-              { ...matchedMenu, subs: null },
-              { ...matchedSub, subs: null },
-              { ...matchedSubSub, subs: null }
-            ];
-          }
-        }
-      }
-    } else {
-      const matchedMenu = flatMenus.find(m => m.path === paths[0] || `${m.id}` === paths[1]);
-      if (matchedMenu) {
-        let matchedSubMenu: MenuItem | undefined;
-        if (paths.length > 1 && matchedMenu.subs?.length) {
-          matchedSubMenu = matchedMenu.subs.find(m => m.path === paths[0]);
-        }
-        result = [{ ...matchedMenu, subs: null }, matchedSubMenu].filter(Boolean) as MenuItem[];
-      }
+    /** Rebuild the breadcrumb from a route pattern and an arbitrary-depth ancestor id chain. */
+    const ancestorIds = paths.slice(1).reverse();
+    let currentLevel = menus;
+
+    for (const id of ancestorIds) {
+      const matchedAncestor = currentLevel.find(menu => `${menu.id}` === id);
+      if (!matchedAncestor) break;
+
+      result.push({ ...matchedAncestor, subs: null });
+      currentLevel = matchedAncestor.subs || [];
+    }
+
+    const matchedRoute = currentLevel.find(menu => (
+      menu.path === paths[0] || pathMatches(menu.path || '', paths[0])
+    ));
+    if (matchedRoute) {
+      result.push({ ...matchedRoute, subs: null });
     }
 
     const allBreadcrumbs = { ...get().allBreadcrumbs, [source]: result }

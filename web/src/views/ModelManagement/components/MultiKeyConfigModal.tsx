@@ -5,7 +5,7 @@
  */
 
 import { forwardRef, useImperativeHandle, useState } from 'react';
-import { Form, Input, App, Button, Flex, Switch, Space, InputNumber } from 'antd';
+import { Form, Input, App, Button, Flex, Space, InputNumber } from 'antd';
 import { useTranslation } from 'react-i18next';
 
 import type { ModelListItem, ProviderModelItem, MultiKeyForm, MultiKeyConfigModalRef, MultiKeyConfigModalProps, Provider } from '../types';
@@ -13,7 +13,6 @@ import RbModal from '@/components/RbModal'
 import {
   getModelApiKeys, addModelApiKey, deleteModelApiKey, getModelProviderList,
   getProviderApiKeys, createProviderApiKeys, deleteProviderApiKeys,
-  updateProviderApiKeys,
 } from '@/api/models'
 
 type Model = ModelListItem | ProviderModelItem
@@ -141,15 +140,6 @@ const MultiKeyConfigModal = forwardRef<MultiKeyConfigModalRef, MultiKeyConfigMod
         getApiKeys((model as ModelListItem).id, currentProvider)
       })
   }
-  const handleChangeStatus = (checked: boolean, api_key_id: string) => {
-    if (source !== 'provider' || !api_key_id) return
-
-    updateProviderApiKeys(api_key_id, { is_active: checked })
-    .then(() => {
-      message.success(t('common.operateSuccess'))
-      getApiKeys((model as ModelListItem).id, currentProvider)
-    })
-  }
 
   /** Expose methods to parent component */
   useImperativeHandle(ref, () => ({
@@ -175,7 +165,6 @@ const MultiKeyConfigModal = forwardRef<MultiKeyConfigModalRef, MultiKeyConfigMod
               </div>
 
               <Space size={12}>
-                {source === 'provider' && <Switch checked={key.is_active} onChange={(checked) => handleChangeStatus(checked, key.id)} />}
                 <Button type="primary" danger ghost onClick={() => handleDelete(key.id)}>{t('common.remove')}</Button>
               </Space>
             </Flex>

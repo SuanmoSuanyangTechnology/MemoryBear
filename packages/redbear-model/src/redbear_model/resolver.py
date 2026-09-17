@@ -323,6 +323,80 @@ def build_resolved_from_channel(
     )
 
 
+def ordered_channel_candidates(
+    config: ModelConfigSnapshot,
+    channels: Sequence[ChannelSnapshot],
+    *,
+    tenant_id: UUID,
+    model_name: str | None = None,
+    loads: Mapping[UUID, int] | None = None,
+    validate_access: bool = True,
+) -> list[ChannelSnapshot]:
+    """§10.1/§11.1 有序候选链（纯函数）：access 校验 + 分支匹配 + 选路排序，空链不抛。
+
+    speedbear 公共 config 走平台渠道候选（不收窄 model_names），其余按 provider 相等 +
+    覆盖集命中（锚点名 = 显式 model_name or config.name）；组合 config 无单渠道链
+    （成员编排在 composite 模块），直接拒绝。宿主 failover plan 构建消费整链；
+    validate_access=False 供探测路径复用（inactive 不报错，空链自解释）。
+    """
+    if validate_access:
+        _validate_config_access(config, tenant_id)
+    anchor = model_name or config.name
+    if config.provider is ModelProvider.COMPOSITE:
+        raise NoAvailableChannelError(
+            config.model_config_id,
+            str(config.provider),
+            anchor,
+            "composite config resolves via member orchestration only",
+        )
+    if config.provider is ModelProvider.SPEEDBEAR and config.is_public:
+        candidates = match_platform_speedbear_channels(channels)
+    else:
+        candidates = match_channel_candidates(config, channels, model_name=anchor)
+    return order_channel_candidates(candidates, model_name=anchor, loads=loads)
+
+
+def resolve_and_chain_from_pool(
+    config: ModelConfigSnapshot,
+    channels: Sequence[ChannelSnapshot],
+    *,
+    tenant_id: UUID,
+    cipher: CredentialCipher,
+    model_name: str | None = None,
+    runtime_options: ModelRuntimeOptions | None = None,
+    loads: Mapping[UUID, int] | None = None,
+) -> tuple[ResolvedModelConfig, list[ChannelSnapshot]]:
+    """v2 解析门面（整链版）：返回 (首个候选 resolved, 有序整链)——failover 宿主一次拿齐。
+
+    错误与 resolve_from_channel_pool 同形（speedbear 公共空链 → SpeedbearChannelMissingError，
+    其余空链 → NoAvailableChannelError）；首候选解密失败照旧抛 CredentialDecryptError
+    （请求内换渠道由编排层顺延，不在此跳过）。
+    """
+    anchor = model_name or config.name
+    ordered = ordered_channel_candidates(
+        config, channels, tenant_id=tenant_id, model_name=model_name, loads=loads
+    )
+    if not ordered:
+        if config.provider is ModelProvider.SPEEDBEAR and config.is_public:
+            raise SpeedbearChannelMissingError(config.model_config_id, tenant_id)
+        raise NoAvailableChannelError(
+            config.model_config_id,
+            str(config.provider),
+            anchor,
+        )
+    return (
+        build_resolved_from_channel(
+            config,
+            ordered[0],
+            tenant_id=tenant_id,
+            model_name=anchor,
+            cipher=cipher,
+            runtime_options=runtime_options,
+        ),
+        ordered,
+    )
+
+
 def resolve_from_channel_pool(
     config: ModelConfigSnapshot,
     channels: Sequence[ChannelSnapshot],
@@ -336,35 +410,16 @@ def resolve_from_channel_pool(
     """v2 解析门面（M3 宿主把 resolve_model 内部切到这里）。
 
     锚点名 = 显式 model_name（组合编排传成员声明名）or config.name（普通模型真实调用名）。
-    组合 config 无单渠道解析（成员编排在 orchestration），直接命中此处视为调用方错误。
+    组合 config 无单渠道解析（成员编排在 composite 模块），直接命中此处视为调用方错误。
+    委托 resolve_and_chain_from_pool 取首元素（错误类型/入参不变）。
     """
-    _validate_config_access(config, tenant_id)
-    anchor = model_name or config.name
-    if config.provider is ModelProvider.COMPOSITE:
-        raise NoAvailableChannelError(
-            config.model_config_id,
-            str(config.provider),
-            anchor,
-            "composite config resolves via member orchestration only",
-        )
-    if config.provider is ModelProvider.SPEEDBEAR and config.is_public:
-        candidates = match_platform_speedbear_channels(channels)
-        if not candidates:
-            raise SpeedbearChannelMissingError(config.model_config_id, tenant_id)
-    else:
-        candidates = match_channel_candidates(config, channels, model_name=anchor)
-        if not candidates:
-            raise NoAvailableChannelError(
-                config.model_config_id,
-                str(config.provider),
-                anchor,
-            )
-    ordered = order_channel_candidates(candidates, model_name=anchor, loads=loads)
-    return build_resolved_from_channel(
+    resolved, _chain = resolve_and_chain_from_pool(
         config,
-        ordered[0],
+        channels,
         tenant_id=tenant_id,
-        model_name=anchor,
         cipher=cipher,
+        model_name=model_name,
         runtime_options=runtime_options,
+        loads=loads,
     )
+    return resolved

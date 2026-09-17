@@ -162,6 +162,7 @@ class ParameterExtractorNode(BaseNode):
                 tenant_id=api_config.tenant_id,
                 model_config_id=api_config.model_config_id,
                 channel_id=api_config.channel_id,
+                failover_plan=api_config.failover_plan,
             )
 
     def _build_llm_from_model_info(self, model_info: ModelInfo) -> RedBearLLM:

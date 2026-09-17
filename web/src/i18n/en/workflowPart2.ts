@@ -109,6 +109,7 @@ export const workflowPart2 = {
         'trigger.cron': 'Cron Expression',
         'agent.model': 'Model',
         'agent.system_prompt': 'Instruction',
+        'agent.reference': 'Agent reference configuration',
         'agent.message': 'Query',
         'human-intervention.delivery_method': 'Delivery Method',
         'human-intervention.actions': 'Actions',

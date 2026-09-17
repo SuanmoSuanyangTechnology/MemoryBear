@@ -6,6 +6,7 @@ import { nodeLibrary } from '../../constant'
 import HumanIntervention from './HumanIntervention'
 import ListOperator from './ListOperator'
 import Trigger from './Trigger'
+import Agent from './Agent'
 import HttpRequest from './HttpRequest'
 import ToolConfig from './ToolConfig'
 import JinjaRender from './JinjaRender'
@@ -151,6 +152,8 @@ const SettingBody: FC = () => {
             ? <Trigger
               key={data.id || 'trigger'}
             />
+            : selectedNode?.data?.type === 'agent'
+            ? <Agent key={data.id || 'agent'} />
             : selectedNode?.data?.type === 'http-request'
             ? <HttpRequest
               options={variableList}

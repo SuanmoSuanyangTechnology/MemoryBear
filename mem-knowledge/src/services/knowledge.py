@@ -28,7 +28,10 @@ from ..rag.parser_config import (
     set_graph_pipeline_for_migration,
 )
 from ..repositories import knowledge as knowledge_repository
-from ..repositories.knowledge_share import get_knowledgeshare_by_id_async
+from ..repositories.knowledge_share import (
+    get_knowledgeshare_by_id_async,
+    get_knowledgeshare_by_target_kb_id_in_source_workspace_async,
+)
 from ..repositories.reference import ReferenceRepository
 from ..utils.datetime_utils import utcnow_naive
 
@@ -40,6 +43,8 @@ _SHARE_MIRRORED_MODEL_FIELDS = (
     ("llm_id", "llm"),
     ("image2text_id", "image2text"),
 )
+_SHARED_STATUS_UPDATE_FIELDS = frozenset({"status"})
+_SHARED_STATUS_VALUES = frozenset({1, 2})
 
 
 @dataclass(frozen=True)
@@ -346,6 +351,51 @@ async def get_knowledge(
     )
 
 
+def _is_shared_status_update(update_fields: dict[str, Any]) -> bool:
+    return (
+        update_fields.keys() == _SHARED_STATUS_UPDATE_FIELDS
+        and update_fields.get("status") in _SHARED_STATUS_VALUES
+    )
+
+
+async def _resolve_knowledge_update_target(
+    db: AsyncSession,
+    knowledge_id: uuid.UUID,
+    update_fields: dict[str, Any],
+    principal: Principal,
+) -> Knowledge | None:
+    knowledge = await get_knowledge(db, knowledge_id, principal)
+    if knowledge is not None:
+        return knowledge
+    if not _is_shared_status_update(update_fields):
+        return None
+
+    share = await get_knowledgeshare_by_target_kb_id_in_source_workspace_async(
+        db,
+        knowledge_id,
+        principal.workspace_id,
+    )
+    if share is None or share.target_kb_id != knowledge_id:
+        return None
+
+    source = await knowledge_repository.get_knowledge_by_id_in_workspace_async(
+        db,
+        share.source_kb_id,
+        principal.workspace_id,
+    )
+    if source is None:
+        return None
+
+    target = await knowledge_repository.get_knowledge_by_id_async(db, knowledge_id)
+    if (
+        target is None
+        or target.workspace_id != share.target_workspace_id
+        or target.permission_id != PermissionType.Share
+    ):
+        return None
+    return target
+
+
 async def _prepare_knowledge_create(
     db: AsyncSession,
     create_data: KnowledgeCreate,
@@ -480,10 +530,15 @@ async def prepare_knowledge_update(
     update_data: KnowledgeUpdate,
     principal: Principal,
 ) -> KnowledgeUpdatePlan:
-    knowledge = await get_knowledge(db, knowledge_id, principal)
+    update_dict = update_data.model_dump(exclude_unset=True)
+    knowledge = await _resolve_knowledge_update_target(
+        db,
+        knowledge_id,
+        update_dict,
+        principal,
+    )
     if knowledge is None:
         raise _not_found()
-    update_dict = update_data.model_dump(exclude_unset=True)
     if "parent_id" in update_dict:
         parent_id = update_dict["parent_id"]
         if parent_id is not None and parent_id != principal.workspace_id:
@@ -529,7 +584,12 @@ async def apply_knowledge_update(
     plan: KnowledgeUpdatePlan,
     principal: Principal,
 ) -> KnowledgeMutationOutcome:
-    knowledge = await get_knowledge(db, plan.knowledge_id, principal)
+    knowledge = await _resolve_knowledge_update_target(
+        db,
+        plan.knowledge_id,
+        plan.update_fields,
+        principal,
+    )
     if knowledge is None:
         raise _not_found()
     if plan.embedding_changed:

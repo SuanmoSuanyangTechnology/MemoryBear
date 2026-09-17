@@ -149,6 +149,21 @@ class ModelChannelRepository:
         )
         return result.rowcount > 0
 
+    def promote_to_provider_level(self, channel_id: uuid.UUID) -> bool:
+        """点名渠道 → provider 级：model_names 置空（单语句整体替换，无读改写）。
+
+        '[]' 守卫：已是 provider 级的行 no-op（防并发/重复升级）。
+        """
+        result = self.db.execute(
+            update(ModelChannel)
+            .where(
+                ModelChannel.id == channel_id,
+                ModelChannel.model_names != text("'[]'::jsonb"),
+            )
+            .values(model_names=[], updated_at=utcnow_naive())
+        )
+        return result.rowcount > 0
+
     def unbind_model_name(self, channel_id: uuid.UUID, model_name: str) -> bool:
         """移除点名渠道中的模型名（单语句重建去元素，无读改写）。
 

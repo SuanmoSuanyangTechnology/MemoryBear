@@ -150,6 +150,7 @@ class KnowledgeRetrievalPreparation:
                 db,
                 single_request,
                 principal,
+                require_chunks=False,
             )
             if not resolved:
                 raise KnowledgeError.from_code(
@@ -378,6 +379,8 @@ class KnowledgeRetrievalPreparation:
         db: AsyncSession,
         request: KnowledgeRetrievalRequest | RetrievalPolicyRequest,
         principal: Principal,
+        *,
+        require_chunks: bool = True,
     ) -> list[_KnowledgeRef]:
         requested = list(request.kb_ids)
         ex_ids = getattr(request, "ex_ids", None)
@@ -418,7 +421,11 @@ class KnowledgeRetrievalPreparation:
                 continue
             config = explicit.get(knowledge_id)
             if knowledge.permission_id == PermissionType.Private:
-                append(await cls._expand_folder(db, knowledge, config, explicit, set()))
+                append(
+                    await cls._expand_folder(
+                        db, knowledge, config, explicit, set(), require_chunks=require_chunks
+                    )
+                )
                 continue
             if knowledge.permission_id != PermissionType.Share:
                 continue
@@ -434,7 +441,11 @@ class KnowledgeRetrievalPreparation:
                 )
                 source = source_result.scalars().first()
                 if source is not None:
-                    append(await cls._expand_folder(db, source, config, explicit, set()))
+                    append(
+                        await cls._expand_folder(
+                            db, source, config, explicit, set(), require_chunks=require_chunks
+                        )
+                    )
         return refs
 
     @classmethod
@@ -445,11 +456,14 @@ class KnowledgeRetrievalPreparation:
         inherited_config: KnowledgeBaseConfig | None,
         explicit: dict[uuid.UUID, KnowledgeBaseConfig],
         visited: set[uuid.UUID],
+        *,
+        require_chunks: bool = True,
     ) -> list[_KnowledgeRef]:
         if not knowledge.is_active:
             return []
         config = explicit.get(knowledge.id) or inherited_config
-        if knowledge.is_retrievable_leaf:
+        # Model capabilities are independent of whether documents have produced chunks.
+        if not knowledge.is_folder and (not require_chunks or knowledge.is_retrievable_leaf):
             return [_KnowledgeRef(knowledge, config)]
         if not knowledge.is_folder or knowledge.id in visited:
             return []
@@ -463,7 +477,11 @@ class KnowledgeRetrievalPreparation:
         )
         refs = []
         for child in result.scalars().all():
-            refs.extend(await cls._expand_folder(db, child, config, explicit, visited))
+            refs.extend(
+                await cls._expand_folder(
+                    db, child, config, explicit, visited, require_chunks=require_chunks
+                )
+            )
         return refs
 
     @classmethod
@@ -759,8 +777,6 @@ class KnowledgeRetrievalPreparation:
             cls._validate_weighted_target(target)
         if global_mode is not RerankMode.WEIGHTED_SCORE:
             return
-        for target in targets:
-            cls._validate_weighted_target(target)
         embedding_spaces = {
             cls._embedding_space_key(target.embedding) for target in targets
         }
@@ -779,10 +795,9 @@ class KnowledgeRetrievalPreparation:
         global_mode: RerankMode | None,
     ) -> None:
         for ref, selection in zip(refs, local_selections, strict=True):
-            if (
-                selection[0] is not RerankMode.WEIGHTED_SCORE
-                and global_mode is not RerankMode.WEIGHTED_SCORE
-            ):
+            # Only local weighted fusion requires hybrid recall. Global fusion
+            # scores candidates from any supported local text retrieval mode.
+            if selection[0] is not RerankMode.WEIGHTED_SCORE:
                 continue
             params = cls._build_retrieval_params(request, ref.config)
             cls._validate_weighted_params(params)

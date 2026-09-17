@@ -22,16 +22,20 @@ _DEFAULT_API_BASES = {
     ModelProvider.VOLCANO.value: "https://ark.cn-beijing.volces.com/api/v3",
 }
 
-# 能力级公共端点：同一提供商按模型类型走不同公共地址时覆盖 provider 默认值。
-# dashscope embedding/rerank 走原生 SDK（SDK 内部按 task 拼 /api/v1/services/...），
-# llm 走 OpenAI 兼容模式（compatible-mode/v1），故仅此两项有差异。
-_CAPABILITY_API_BASES = {
-    (ModelProvider.DASHSCOPE.value, "embedding"): (
-        "https://dashscope.aliyuncs.com/api/v1/services/embeddings/text-embedding/text-embedding"
-    ),
-    (ModelProvider.DASHSCOPE.value, "rerank"): (
-        "https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank"
-    ),
+# 原生 SDK 基地址：dashscope embedding/rerank 的 SDK 会在 base_address 之后
+# 自行拼接 /services/{task_group}/{task}/{function}，故用户只能给基地址；
+# 完整服务端点会二次拼接服务路径（404），仅在此白名单中额外放行原生基地址。
+_NATIVE_SDK_BASE_ADDRESSES = {
+    ModelProvider.DASHSCOPE.value: "https://dashscope.aliyuncs.com/api/v1",
+}
+
+# 标准校验模型表（provider 级密钥保存时活体探测的锚点，spec D3）：
+# 仅列低配、稳定在售的模型；上游退役报"模型不存在"时改这里一行即可（D7 不自动降级）。
+# 表外 provider 走租户模型兜底（model_channel_service._resolve_validation_anchor）。
+# 表项恒为 LLM（探测类型硬编码 ModelType.LLM.value；入表非 LLM 模型需同步改探测类型）。
+_VALIDATION_MODELS = {
+    ModelProvider.DASHSCOPE.value: "qwen-turbo",
+    ModelProvider.OPENAI.value: "gpt-4o-mini",
 }
 
 
@@ -41,11 +45,17 @@ def is_local_deployment_provider(provider: ModelProvider | str) -> bool:
     return str(provider_name).lower() in _LOCAL_DEPLOYMENT_PROVIDERS
 
 
-def uses_custom_api_base(provider: ModelProvider | str, model_type: str) -> bool:
-    """判断该组合在运行时是否真正读取 api_base。
+def get_provider_validation_model(provider: ModelProvider | str) -> Optional[str]:
+    """返回该 provider 的标准校验模型名；不在表内返回 None（走租户模型兜底）。"""
+    provider_name = str(getattr(provider, "value", provider)).lower()
+    return _VALIDATION_MODELS.get(provider_name)
 
-    仅 dashscope 的 embedding/rerank 走原生 SDK（endpoint 由 SDK 内部按 task 决定，
-    填任何自定义地址都不会生效）；dashscope 的 llm 自兼容模式统一后读取 base_url。
+
+def uses_custom_api_base(provider: ModelProvider | str, model_type: str) -> bool:
+    """判断该组合在运行时是否真正读取自定义 api_base。
+
+    仅 dashscope 的 embedding/rerank 走原生 SDK（base_address 之后由 SDK 按 task
+    拼服务路径，只接受官方基地址）；dashscope 的 llm 自兼容模式统一后读取 base_url。
     """
     provider_name = str(getattr(provider, "value", provider)).lower()
     type_name = str(getattr(model_type, "value", model_type)).lower()
@@ -61,7 +71,7 @@ def validate_api_base_against_default(
     api_base: Optional[str],
     model_type: str,
 ) -> Optional[str]:
-    """对运行时不读取 api_base 的组合，限制其只能留空或填官方公共端点。
+    """对运行时不读取自定义 api_base 的组合，限制其只能留空或填官方基地址。
 
     Returns:
         Optional[str]: None 表示通过；否则为可直接展示给用户的错误原因。
@@ -73,10 +83,12 @@ def validate_api_base_against_default(
     if not value:
         return None
 
+    provider_name = str(getattr(provider, "value", provider)).lower()
     accepted = []
     for default in (
         get_default_provider_api_base(provider),
         get_default_provider_api_base(provider, model_type),
+        _NATIVE_SDK_BASE_ADDRESSES.get(provider_name),
     ):
         if default and str(default) not in accepted:
             accepted.append(str(default))
@@ -84,28 +96,22 @@ def validate_api_base_against_default(
     if any(normalized == item.rstrip("/").lower() for item in accepted):
         return None
 
-    provider_name = getattr(provider, "value", provider)
-    defaults = " 或 ".join(accepted) if accepted else "官方公共端点"
+    defaults = " 或 ".join(accepted) if accepted else "官方基地址"
     return (
-        f"{provider_name} 的 {model_type} 模型通过原生 SDK 调用，不会使用自定义 "
-        f"API Base URL；请留空或填写官方公共端点 {defaults}"
+        f"{provider_name} 的 {model_type} 模型通过原生 SDK 调用，不支持自定义 "
+        f"API Base URL；请留空或填写官方基地址 {defaults}"
     )
 
 
 def get_default_provider_api_base(
     provider: ModelProvider | str, model_type: ModelType | str | None = None
 ) -> Optional[str]:
-    """返回云端提供商的公共端点；本地提供商没有默认地址。
+    """返回云端提供商的公共基地址；本地提供商没有默认地址。
 
-    model_type 给定时优先返回能力级公共端点（如 dashscope 的 embedding/rerank
-    走原生 SDK 的 /api/v1/services/... 地址而非 compatible-mode）。
+    model_type 保留仅为调用方兼容（dashscope 全类型统一 compatible-mode，原生
+    SDK 组合运行时会剥离为 /api/v1 基地址）。
     """
     provider_name = str(getattr(provider, "value", provider)).lower()
-    if model_type is not None:
-        type_name = str(getattr(model_type, "value", model_type)).lower()
-        capability_base = _CAPABILITY_API_BASES.get((provider_name, type_name))
-        if capability_base:
-            return capability_base
     if provider_name == ModelProvider.SPEEDBEAR.value:
         return f"{settings.SPEEDBEAR_BASE_URL.rstrip('/')}/api/v1"
     return _DEFAULT_API_BASES.get(provider_name)

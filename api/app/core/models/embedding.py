@@ -1,9 +1,10 @@
 import asyncio
 import time
-from typing import Any, Dict, List, Union
+from typing import Any, Callable, Dict, List, Union
 
 from langchain_core.embeddings import Embeddings
 
+from redbear_model import ResolvedModelConfig
 from app.core.alert_metric_bridge import (
     report_model_gateway_failure,
     report_model_gateway_failure_async,
@@ -12,6 +13,13 @@ from app.core.alert_metric_bridge import (
 )
 from app.core.config import settings
 from app.core.models.base import RedBearModelConfig, get_provider_embedding_class, RedBearModelFactory
+from app.core.models.failover import (
+    FailoverStats,
+    attempt_config,
+    is_initial_candidate,
+    run_plan,
+    run_plan_async,
+)
 from app.core.models.network_retry import network_retry
 from app.core.usage_bridge import (
     report_usage_failure,
@@ -22,6 +30,9 @@ from app.core.usage_bridge import (
 from app.models.models_model import ModelProvider
 
 _USAGE_CAPABILITY = "embedding"
+
+# 调用回调：收（本次候选客户端/模型，本次候选配置）——换渠道后模型名/api_key 均可能变
+_ClientCall = Callable[[Any, RedBearModelConfig], Any]
 
 
 class RedBearEmbeddings(Embeddings):
@@ -40,41 +51,79 @@ class RedBearEmbeddings(Embeddings):
             self._model = self._create_model(config)
             self._client = None
 
-    def _observed_call(self, operation: str, call):
+    def _attempt_target(self, resolved: ResolvedModelConfig) -> tuple[Any, RedBearModelConfig]:
+        """本次候选的（客户端/模型, 配置）：首候选沿用现实例，换渠道后按候选重建。"""
+        if is_initial_candidate(self._config, resolved):
+            return (self._client if self._is_volcano else self._model), self._config
+        config = attempt_config(self._config, resolved)
+        if config.provider.lower() == ModelProvider.VOLCANO:
+            return self._create_volcano_client(config), config
+        return self._create_model(config), config
+
+    def _observed_call(self, operation: str, call: _ClientCall):
         started = time.perf_counter()
+        stats = FailoverStats()
+        plan = self._config.failover_plan
         try:
-            @network_retry
-            def _call():
-                return call()
-            result = _call()
+            if plan is None:
+                @network_retry
+                def _call():
+                    return call(self._client if self._is_volcano else self._model, self._config)
+                result = _call()
+            else:
+                outcome = run_plan(
+                    plan,
+                    invoke=lambda resolved: call(*self._attempt_target(resolved)),
+                    stats=stats,
+                )
+                result = outcome.result
         except Exception as exc:
-            report_model_gateway_failure(self._config, operation, exc, started)
-            report_usage_failure(self._config, _USAGE_CAPABILITY, operation, exc, started)
+            attrib = stats.attribution_config(self._config)
+            report_model_gateway_failure(attrib, operation, exc, started)
+            report_usage_failure(
+                attrib, _USAGE_CAPABILITY, operation, exc, started,
+                attempts=stats.counted(),
+            )
             raise
-        report_model_gateway_success(self._config, operation, started)
+        attrib = stats.attribution_config(self._config)
+        report_model_gateway_success(attrib, operation, started)
         report_usage_success(
-            self._config, _USAGE_CAPABILITY, operation, started, result=result
+            attrib, _USAGE_CAPABILITY, operation, started, result=result,
+            attempts=stats.counted(), fallback=stats.switched,
         )
         return result
 
-    async def _observed_async_call(self, operation: str, call):
+    async def _observed_async_call(self, operation: str, call: _ClientCall):
         started = time.perf_counter()
+        stats = FailoverStats()
+        plan = self._config.failover_plan
         try:
-            @network_retry
-            async def _call():
-                return await call()
-            result = await _call()
+            if plan is None:
+                @network_retry
+                async def _call():
+                    target = self._client if self._is_volcano else self._model
+                    return await call(target, self._config)
+                result = await _call()
+            else:
+                async def _invoke(resolved: ResolvedModelConfig) -> Any:
+                    target, attempt_cfg = self._attempt_target(resolved)
+                    return await call(target, attempt_cfg)
+
+                outcome = await run_plan_async(plan, invoke=_invoke, stats=stats)
+                result = outcome.result
         except Exception as exc:
-            await report_model_gateway_failure_async(
-                self._config, operation, exc, started
-            )
+            attrib = stats.attribution_config(self._config)
+            await report_model_gateway_failure_async(attrib, operation, exc, started)
             await report_usage_failure_async(
-                self._config, _USAGE_CAPABILITY, operation, exc, started
+                attrib, _USAGE_CAPABILITY, operation, exc, started,
+                attempts=stats.counted(),
             )
             raise
-        await report_model_gateway_success_async(self._config, operation, started)
+        attrib = stats.attribution_config(self._config)
+        await report_model_gateway_success_async(attrib, operation, started)
         await report_usage_success_async(
-            self._config, _USAGE_CAPABILITY, operation, started, result=result
+            attrib, _USAGE_CAPABILITY, operation, started, result=result,
+            attempts=stats.counted(), fallback=stats.switched,
         )
         return result
 
@@ -92,7 +141,8 @@ class RedBearEmbeddings(Embeddings):
             ModelProvider.SPEEDBEAR,
         ]:
             import httpx
-            timeout = httpx.Timeout(timeout=config.timeout, connect=60.0)
+            # 连接超时跟随调用预算（上限 60s），短预算场景（如配置验证）快速失败
+            timeout = httpx.Timeout(timeout=config.timeout, connect=min(config.timeout, 60.0))
             params = {
                 "model": config.model_name,
                 "base_url": config.base_url,
@@ -132,9 +182,9 @@ class RedBearEmbeddings(Embeddings):
         if self._is_volcano:
             contents = [{"type": "text", "text": text} for text in texts]
 
-            def invoke():
-                response = self._client.multimodal_embeddings.create(
-                    model=self._config.model_name,
+            def invoke(client, config):
+                response = client.multimodal_embeddings.create(
+                    model=config.model_name,
                     input=contents,
                     encoding_format="float"
                 )
@@ -142,7 +192,7 @@ class RedBearEmbeddings(Embeddings):
 
             return self._observed_call("embed_documents", invoke)
         return self._observed_call(
-            "embed_documents", lambda: self._model.embed_documents(texts)
+            "embed_documents", lambda client, config: client.embed_documents(texts)
         )
 
     def embed_query(self, text: str) -> List[float]:
@@ -150,14 +200,14 @@ class RedBearEmbeddings(Embeddings):
         if self._is_volcano:
             result = self.embed_documents([text])
             return result[0] if result else []
-        return self._observed_call("embed_query", lambda: self._model.embed_query(text))
+        return self._observed_call("embed_query", lambda client, config: client.embed_query(text))
 
     async def aembed_documents(self, texts: list[str]) -> list[list[float]]:
         """批量文本向量化（异步）"""
         if self._is_volcano:
             return await asyncio.to_thread(self.embed_documents, texts)
         return await self._observed_async_call(
-            "aembed_documents", lambda: self._model.aembed_documents(texts)
+            "aembed_documents", lambda client, config: client.aembed_documents(texts)
         )
 
     async def aembed_query(self, text: str) -> List[float]:
@@ -166,7 +216,7 @@ class RedBearEmbeddings(Embeddings):
             result = await self.aembed_documents([text])
             return result[0] if result else []
         return await self._observed_async_call(
-            "aembed_query", lambda: self._model.aembed_query(text)
+            "aembed_query", lambda client, config: client.aembed_query(text)
         )
     
     # ==================== 多模态扩展方法 ====================
@@ -194,24 +244,24 @@ class RedBearEmbeddings(Embeddings):
                 f"多模态 Embedding 仅支持火山引擎，当前 provider: {self._config.provider}"
             )
         
-        def invoke():
-            response = self._client.multimodal_embeddings.create(
-                model=self._config.model_name,
+        def invoke(client, config):
+            response = client.multimodal_embeddings.create(
+                model=config.model_name,
                 input=contents,
                 **kwargs
             )
             return [response.data.embedding]
 
         return self._observed_call("embed_multimodal", invoke)
-    
+
     async def aembed_multimodal(
         self,
         contents: List[Dict[str, Any]],
         **kwargs
     ) -> List[List[float]]:
         """异步多模态向量化"""
-        # 火山引擎 SDK 暂不支持异步，使用同步方法
-        return self.embed_multimodal(contents, **kwargs)
+        # 火山引擎 SDK 暂不支持异步：同步调用移出事件循环（不得在 async 内直调同步阻塞）
+        return await asyncio.to_thread(self.embed_multimodal, contents, **kwargs)
     
     def embed_text(self, text: str, **kwargs) -> List[float]:
         """文本向量化（便捷方法）"""

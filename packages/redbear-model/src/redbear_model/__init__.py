@@ -30,6 +30,7 @@ from .composite import (
     CompositeMemberConfig,
     composite_candidate_chain,
     resolve_composite_candidates,
+    resolve_composite_head,
 )
 from .crypto import AESGCMEnvCipher, CredentialCipher, credential_sha256
 from .errors import (
@@ -51,9 +52,16 @@ from .errors import (
     UnsupportedMultimodalModelError,
 )
 from .orchestration import (
+    FailoverCandidate,
+    FailoverPlan,
+    FallbackOutcome,
     is_switchable_channel_error,
     is_terminal_channel_error,
     is_transient_channel_error,
+    run_candidate_fallback,
+    run_candidate_fallback_async,
+    run_failover_plan,
+    run_failover_plan_async,
     run_with_channel_fallback,
     run_with_channel_fallback_async,
 )
@@ -69,16 +77,21 @@ from .resolver import (
     match_channel_candidates,
     match_platform_speedbear_channels,
     order_channel_candidates,
+    ordered_channel_candidates,
     record_model_usage,
     record_model_usage_async,
+    resolve_and_chain_from_pool,
     resolve_from_channel_pool,
     resolve_model,
     resolve_model_async,
 )
 from .telemetry import (
     NoOpUsagePublisher,
+    UsagePublishStats,
     UsagePublisher,
     publish_usage_safely,
+    reset_usage_publish_stats,
+    usage_publish_stats,
 )
 from .usage import UsageEvent, UsageStatus
 
@@ -100,6 +113,9 @@ __all__ = [
     "EmbeddingPurpose",
     "EmbeddingRequest",
     "EmbeddingResult",
+    "FailoverCandidate",
+    "FailoverPlan",
+    "FallbackOutcome",
     "ImageEmbeddingContent",
     "InvalidProviderResponseError",
     "LoadBalanceStrategy",
@@ -134,6 +150,7 @@ __all__ = [
     "UnsupportedModelProviderError",
     "UnsupportedMultimodalModelError",
     "UsageEvent",
+    "UsagePublishStats",
     "UsagePublisher",
     "UsageStatus",
     "composite_candidate_chain",
@@ -146,13 +163,22 @@ __all__ = [
     "match_channel_candidates",
     "match_platform_speedbear_channels",
     "order_channel_candidates",
+    "ordered_channel_candidates",
     "publish_usage_safely",
     "record_model_usage",
     "record_model_usage_async",
+    "reset_usage_publish_stats",
+    "resolve_and_chain_from_pool",
     "resolve_composite_candidates",
+    "resolve_composite_head",
     "resolve_from_channel_pool",
     "resolve_model",
     "resolve_model_async",
+    "run_candidate_fallback",
+    "run_candidate_fallback_async",
+    "run_failover_plan",
+    "run_failover_plan_async",
     "run_with_channel_fallback",
     "run_with_channel_fallback_async",
+    "usage_publish_stats",
 ]

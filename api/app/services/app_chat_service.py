@@ -645,6 +645,7 @@ class AppChatService:
             tenant_id=api_key_obj.tenant_id,
             model_config_id=api_key_obj.model_config_id,
             channel_id=api_key_obj.channel_id,
+            failover_plan=api_key_obj.failover_plan,
         )
 
         # 加载历史消息（包含开场白）
@@ -834,6 +835,7 @@ class AppChatService:
                 tenant_id=api_key_obj.tenant_id,
                 model_config_id=api_key_obj.model_config_id,
                 channel_id=api_key_obj.channel_id,
+                failover_plan=api_key_obj.failover_plan,
                 context_query=message,
                 context_base_text=system_prompt + "\n" + str(history) + "\n" + message,
                 context_evidence_loader=load_annotation_context,
@@ -1230,6 +1232,7 @@ class AppChatService:
                 tenant_id=api_key_obj.tenant_id,
                 model_config_id=api_key_obj.model_config_id,
                 channel_id=api_key_obj.channel_id,
+                failover_plan=api_key_obj.failover_plan,
             )
 
             # 加载历史消息（包含开场白）
@@ -1400,6 +1403,7 @@ class AppChatService:
                     tenant_id=api_key_obj.tenant_id,
                     model_config_id=api_key_obj.model_config_id,
                     channel_id=api_key_obj.channel_id,
+                    failover_plan=api_key_obj.failover_plan,
                     context_query=message,
                     context_base_text=system_prompt + "\n" + str(history) + "\n" + message,
                     context_evidence_loader=load_annotation_context,
