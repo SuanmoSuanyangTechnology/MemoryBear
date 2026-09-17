@@ -1,6 +1,7 @@
 """多 Agent 编排器 - Master Agent 作为决策中心"""
 import uuid
 import time
+import json
 import asyncio
 import inspect
 from typing import Dict, Any, List, Optional, AsyncIterator, Tuple
@@ -15,10 +16,43 @@ from app.services.conversation_state_manager import ConversationStateManager
 from app.core.exceptions import BusinessException, ResourceNotFoundException
 from app.core.error_codes import BizCode
 from app.core.logging_config import get_business_logger
+from app.core.utils.datetime_utils import utcnow_naive
 from app.repositories.tool_repository import ToolRepository
 from app.services.model_service import ModelApiKeyService
 
 logger = get_business_logger()
+
+# 集群运行中"可观测事件"白名单：这些事件没有 content，会被子 Agent 事件解析循环
+# 当成"非内容事件"丢弃，导致运行中面板拿不到轨迹 / 派发收尾。
+# 只放真正驱动 UI 的四个事件：轨迹快照（agent_log/agent_log_final）+ 区块建/收
+# （agent_dispatch/agent_complete）。tool_start/tool_end 不转发 —— agent_log 的
+# trace 里已含 tool_calls，重复转发只是徒增 SSE 流量。
+# 其余事件（尤其 sub_usage）保持原样过滤，避免改变既有的 token 汇总口径。
+_CLUSTER_OBSERVABILITY_EVENTS = frozenset({
+    "agent_log",
+    "agent_log_final",
+    "agent_dispatch",
+    "agent_complete",
+})
+
+# 子运行（子 Agent / handoffs）自己的 start / end 属于"子运行生命周期"，不是集群会话事件。
+# 若原样透传给上层会同时踩两个坑：
+#  1) 一次集群会话出现两个 start、两个 end，上层（前端/外部 App API）无法按 start…end 界定一轮；
+#  2) 子运行 start 里的 message_id / user_message_id 是 run_stream 内部 uuid4 生成的临时 id
+#     （子运行 skip_save，不落库），前端 applyModelMessageId 会用它顶掉集群气泡的真实 id，
+#     导致复制/重新生成/反馈等按 message_id 定位的动作指向一条不存在的消息。
+# 子运行的可见性由 agent_log / agent_dispatch / agent_complete 承担，与白名单路径保持一致。
+_SUB_RUN_LIFECYCLE_EVENTS = frozenset({"start", "end"})
+
+
+def _sse_event_name(event: str) -> Optional[str]:
+    """取 SSE 字符串的 event 名（解析失败返回 None）。"""
+    if not isinstance(event, str) or not event.startswith("event:"):
+        return None
+    try:
+        return event.split("event:", 1)[1].split("\n", 1)[0].strip() or None
+    except Exception:
+        return None
 
 
 class MultiAgentOrchestrator:
@@ -50,6 +84,14 @@ class MultiAgentOrchestrator:
         self.master_model_config = None
         self.router = None
 
+        # ── 集群执行归属（多 Agent 日志）────────────────────────────────
+        # 主（编排）Agent 的 execution id：子 Agent 落库时作为 parent_execution_id。
+        # 用实例属性承载而不是逐调用点传参 —— _execute_sub_agent_stream 有 4 个调用点、
+        # _execute_sub_agent 有 10 个，逐个加参数必然漏改（上次流式路径漏传炸过外键）。
+        self.current_execution_id: Optional[uuid.UUID] = None
+        self.current_conversation_id: Optional[uuid.UUID] = None
+        self._master_started_at: Optional[float] = None
+
     @staticmethod
     async def _maybe_await(value):
         if inspect.isawaitable(value):
@@ -60,6 +102,260 @@ class MultiAgentOrchestrator:
         if self.db is None:
             return None
         return await self._maybe_await(self.db.get(model, identity))
+
+    # ──────────────────────────────────────────────────────────────────
+    # 多 Agent 日志：主执行记录的生命周期
+    # ──────────────────────────────────────────────────────────────────
+
+    async def _ensure_master_execution(
+        self,
+        conversation_id: Optional[uuid.UUID],
+        message_id: Optional[uuid.UUID] = None,
+    ) -> Optional[uuid.UUID]:
+        """为主（编排）Agent 建一条 agent_executions 记录。
+
+        多 Agent 会话此前**完全没有** execution 记录（app_chat_service 直接调 orchestrator，
+        只入队消息落库），日志详情里的节点无处挂载，子 Agent 也找不到 parent。
+        这里统一补上；子 Agent 落库时以它的 id 作为 parent_execution_id。
+
+        为什么创建时不写 message_id：本轮 assistant 消息由 BatchPersistQueue 异步落库
+        （晚于本方法执行），此刻 messages 行还不存在，直接写会触发 FK 违例并把整条
+        观测链路降级掉。message_id 改由 app_chat_service 在消息落库后
+        （batch 内 save_messages 之后）回填 —— 见 PersistTask "link_agent_execution_message"。
+
+        观测失败不阻断对话：任何异常只记 warning，current_execution_id 保持 None
+        （此时子 Agent 以 parent_execution_id=None 落库，详情侧按"同会话 + 时序就近"兜底）。
+        """
+        self.current_conversation_id = conversation_id
+        self._master_started_at = time.time()
+        if self.db is None or not getattr(self.config, "app_id", None) or not conversation_id:
+            return None
+        try:
+            from app.services.draft_run_service import AgentRunService
+
+            conv_uuid = conversation_id if isinstance(conversation_id, uuid.UUID) else uuid.UUID(str(conversation_id))
+            svc = AgentRunService(self.db)
+            self.current_execution_id = await svc._create_agent_execution_async(
+                app_id=self.config.app_id,
+                conversation_id=conv_uuid,
+                # 主 Agent 拿不到 agent_configs.id：config.master_agent_id 本身就是 release id
+                agent_config_id=None,
+                started_at=utcnow_naive(),
+                model_name=(self.master_model_config.name if self.master_model_config else "") or "",
+                provider=None,
+                agent_role="master",
+                parent_execution_id=None,
+                orchestration_mode=self._normalized_mode,
+                release_id=self.config.master_agent_id,
+                agent_name=self.config.master_agent_name or "主编排",
+                message_id=None,
+            )
+            logger.info(
+                "集群主执行记录已创建",
+                extra={
+                    "execution_id": str(self.current_execution_id),
+                    "conversation_id": str(conv_uuid),
+                    "mode": self._normalized_mode,
+                    "pending_message_id": str(message_id) if message_id else None,
+                },
+            )
+        except Exception as e:
+            # 观测链路故障不影响对话
+            self.current_execution_id = None
+            logger.warning(f"创建集群主执行记录失败（已降级，不影响对话）: {e}")
+        return self.current_execution_id
+
+    async def _finalize_master_execution(
+        self,
+        status: str = "completed",
+        elapsed_time: Optional[float] = None,
+        token_usage: Optional[dict] = None,
+        error_message: Optional[str] = None,
+    ) -> None:
+        """收尾主 execution 记录；失败同样只记 warning。"""
+        execution_id = self.current_execution_id
+        if execution_id is None or self.db is None:
+            return
+        try:
+            from app.services.draft_run_service import AgentRunService
+
+            svc = AgentRunService(self.db)
+            await svc._update_agent_execution_completed_async(
+                execution_id=execution_id,
+                steps=[],
+                status=status,
+                elapsed_time=elapsed_time,
+                token_usage=token_usage,
+                error_message=error_message,
+            )
+        except Exception as e:
+            logger.warning(f"收尾集群主执行记录失败（已降级）: {e}")
+
+    @staticmethod
+    def _parse_sse_event(event: str) -> Tuple[Optional[str], Dict[str, Any]]:
+        """解析 SSE 字符串为 (事件名, data)。解析失败返回 (None, {})，调用方按"透传"处理。"""
+        try:
+            name = None
+            for line in event.splitlines():
+                if line.startswith("event:"):
+                    name = line[len("event:"):].strip()
+                elif line.startswith("data:"):
+                    payload = json.loads(line[len("data:"):].strip())
+                    return name, payload if isinstance(payload, dict) else {}
+            return name, {}
+        except Exception:
+            return None, {}
+
+    async def _open_collaboration_activation(
+        self,
+        agent_configs: Dict[str, Any],
+        agent_key: Optional[str],
+        display_name: Optional[str],
+        message: str,
+    ) -> Tuple[Optional[uuid.UUID], Dict[str, Any]]:
+        """协作模式：按"节点激活"开一条子 Agent 执行记录。
+
+        协作模式主链路是 handoffs_service（LangGraph handoff），**不经过**
+        AgentRunService.run_stream，所以不会自动产生子执行记录，必须在此手动补。
+        同一 Agent 多次激活 → 多行，execution_id 各不相同。
+        """
+        info = agent_configs.get(agent_key or "", {}) or {}
+        meta = {
+            "execution_id": None,
+            "agent_id": info.get("agent_id") or agent_key,
+            "agent_name": display_name or info.get("name") or agent_key,
+            "parent_execution_id": str(self.current_execution_id) if self.current_execution_id else None,
+            "orchestration_mode": self._normalized_mode,
+            "task": (message or "")[:500],
+        }
+        if self.db is None or not getattr(self.config, "app_id", None) or not self.current_conversation_id:
+            return None, meta
+        try:
+            from app.services.draft_run_service import AgentRunService
+
+            release_id = None
+            raw_agent_id = info.get("agent_id")
+            if raw_agent_id:
+                try:
+                    release_id = raw_agent_id if isinstance(raw_agent_id, uuid.UUID) else uuid.UUID(str(raw_agent_id))
+                except (ValueError, TypeError):
+                    release_id = None
+
+            svc = AgentRunService(self.db)
+            execution_id = await svc._create_agent_execution_async(
+                app_id=self.config.app_id,
+                conversation_id=self.current_conversation_id,
+                agent_config_id=None,
+                started_at=utcnow_naive(),
+                model_name="",
+                provider=None,
+                agent_role="sub",
+                parent_execution_id=self.current_execution_id,
+                orchestration_mode=self._normalized_mode,
+                release_id=release_id,
+                agent_name=meta["agent_name"],
+                agent_id=str(info.get("agent_id") or agent_key) if (info.get("agent_id") or agent_key) else None,
+                # 与主管模式同口径：把激活时收到的任务落进 meta_data，
+                # 详情页的"输入"因此不依赖 steps 的形态（steps 里虽也有 head，但统一走 meta.task 更稳）
+                task=meta["task"],
+            )
+            meta["execution_id"] = str(execution_id)
+            return execution_id, meta
+        except Exception as e:
+            logger.warning(f"协作模式子 Agent 记录创建失败（已降级，不影响对话）: {e}")
+            return None, meta
+
+    async def _close_collaboration_activation(
+        self,
+        execution_id: Optional[uuid.UUID],
+        status: str,
+        elapsed_time: Optional[float] = None,
+        token_usage: Optional[dict] = None,
+        error_message: Optional[str] = None,
+        steps: Optional[list] = None,
+    ) -> None:
+        """协作模式：收尾一条子 Agent 激活记录。
+
+        steps 由调用方按激活粒度组装（该 Agent 的输入/产出 + 它发起的 handoff），
+        因为协作模式没有 AgentTraceRecorder 的 trace，steps 就是它的"调用链明细"。
+        """
+        if execution_id is None or self.db is None:
+            return
+        try:
+            from app.services.draft_run_service import AgentRunService
+
+            svc = AgentRunService(self.db)
+            await svc._update_agent_execution_completed_async(
+                execution_id=execution_id,
+                steps=steps or [],
+                status=status,
+                elapsed_time=elapsed_time,
+                token_usage=token_usage,
+                error_message=error_message,
+            )
+        except Exception as e:
+            logger.warning(f"协作模式子 Agent 记录收尾失败（已降级）: {e}")
+
+    def _sub_event_meta(self, agent_id: Optional[str], agent_name: Optional[str]) -> Dict[str, Any]:
+        """运行中子 Agent 事件的归属字段。
+
+        不含 execution_id：子执行记录由 run_stream 内部创建，编排层在此刻还不知道 id；
+        前端先按 agent_id/agent_name 绑定区块，随后由 agent_dispatch / agent_complete
+        里携带的 execution_id 回填（协作模式同一 Agent 多次激活时，execution_id 是唯一键）。
+        """
+        return {
+            "agent_id": agent_id,
+            "agent_name": agent_name,
+            "parent_execution_id": str(self.current_execution_id) if self.current_execution_id else None,
+            "orchestration_mode": self._normalized_mode,
+        }
+
+    def _inject_agent_meta(self, event: str, meta: Dict[str, Any]) -> str:
+        """向 SSE 事件的 data 注入 Agent 归属字段，事件名与事件类型保持不变。
+
+        只改 `data:` 行（json.loads → setdefault → json.dumps），`event:` 行与结尾空行原样保留；
+        用 setdefault 保证不覆盖事件自带的同名字段（例如 handoffs 的 agent_name）。
+        """
+        if not isinstance(event, str) or "data:" not in event:
+            return event
+        try:
+            head, _, payload = event.partition("data:")
+            data = json.loads(payload.strip())
+            if not isinstance(data, dict):
+                return event
+            for k, v in (meta or {}).items():
+                if v is not None:
+                    data.setdefault(k, v)
+            return f"{head}data: {json.dumps(data, ensure_ascii=False)}\n\n"
+        except Exception:
+            return event
+
+    def _sub_agent_message_event(
+        self,
+        agent_id: Optional[str],
+        agent_name: Optional[str],
+        content: str,
+        **extra: Any,
+    ) -> str:
+        """子 Agent 正文事件（**聚合下发**：整段正文一次发出，不再逐 token 分片）。
+
+        正文在子 Agent 运行期间只做累积，等该 Agent 跑完再发一次。理由：
+        1) 该事件无增量语义 —— 消费方拿到分片除了拼接别无用途，一次集群会话
+           却因此多出成百上千个事件；
+        2) 运行中面板的"实时观感"由 `agent_log` 轨迹快照承担（每轮 llm/tool 结束
+           各推一份全量快照），与 `sub_agent_message` 无关；
+        3) 前端 `streamHandlers.ts` 本就不消费该事件，改动对 UI 无影响。
+
+        每次仍需 new 事件（同一 Agent 多次被调用时内容不同），
+        故按"一次执行一次事件"的粒度发出。
+        """
+        payload: Dict[str, Any] = {
+            "content": content,
+            "agent_id": agent_id,
+            "agent_name": agent_name,
+        }
+        payload.update({k: v for k, v in (extra or {}).items() if v is not None})
+        return self._format_sse_event("sub_agent_message", payload)
 
     @classmethod
     async def create(cls, db: Session | AsyncSession | None, config: MultiAgentConfig) -> "MultiAgentOrchestrator":
@@ -147,7 +443,8 @@ class MultiAgentOrchestrator:
         web_search: bool = True,
         memory: bool = True,
         storage_type: str = '',
-        user_rag_memory_id: str = ''
+        user_rag_memory_id: str = '',
+        message_id: Optional[uuid.UUID] = None
     ):
         """执行多 Agent 任务（流式返回）
 
@@ -161,6 +458,7 @@ class MultiAgentOrchestrator:
             memory: 是否启用记忆功能
             storage_type: 存储类型
             user_rag_memory_id: 用户 RAG 记忆 ID
+            message_id: 本轮 assistant 消息 ID（写入主执行记录，供日志详情按消息挂载节点）
 
         Yields:
             SSE 格式的事件流
@@ -175,6 +473,9 @@ class MultiAgentOrchestrator:
                 "message_length": len(message)
             }
         )
+
+        # 主执行记录：子 Agent 记录需要它作为 parent，日志详情也需要它来挂载节点
+        await self._ensure_master_execution(conversation_id, message_id)
 
         try:
             # 发送开始事件
@@ -234,11 +535,18 @@ class MultiAgentOrchestrator:
                 }
             )
 
+            await self._finalize_master_execution(status="completed", elapsed_time=time.time() - start_time)
+
         except Exception as e:
             logger.error(
                 "多 Agent 任务执行失败（流式）",
                 extra={"error": str(e), "mode": self._normalized_mode},
                 exc_info=True
+            )
+            await self._finalize_master_execution(
+                status="failed",
+                elapsed_time=time.time() - start_time,
+                error_message=str(e)[:2000],
             )
             # 发送错误事件
             yield self._format_sse_event("error", {
@@ -254,7 +562,8 @@ class MultiAgentOrchestrator:
         variables: Optional[Dict[str, Any]] = None,
         use_llm_routing: bool = True,
         web_search: bool = False,
-        memory: bool = True
+        memory: bool = True,
+        message_id: Optional[uuid.UUID] = None
     ) -> Dict[str, Any]:
         """执行多 Agent 任务（基于 Master Agent 决策）
 
@@ -264,6 +573,7 @@ class MultiAgentOrchestrator:
             user_id: 用户 ID
             variables: 变量参数
             use_llm_routing: 是否使用 LLM 路由（保留参数，实际总是使用 Master Agent）
+            message_id: 本轮 assistant 消息 ID（写入主执行记录）
 
         Returns:
             执行结果
@@ -278,15 +588,23 @@ class MultiAgentOrchestrator:
             }
         )
 
+        await self._ensure_master_execution(conversation_id, message_id)
+
         try:
             # Collaboration 模式：使用 handoffs_service
             if self._normalized_mode == OrchestrationMode.COLLABORATION:
-                return await self._execute_collaboration_mode(
+                collab_result = await self._execute_collaboration_mode(
                     message,
                     conversation_id,
                     user_id,
                     variables
                 )
+                await self._finalize_master_execution(
+                    status="completed",
+                    elapsed_time=time.time() - start_time,
+                    token_usage=(collab_result or {}).get("usage"),
+                )
+                return collab_result
 
             # Supervisor 模式：由 Master Agent 统一调度
             # 1. Master Agent 分析任务并做出决策
@@ -350,6 +668,16 @@ class MultiAgentOrchestrator:
                 }
             )
 
+            await self._finalize_master_execution(
+                status="completed",
+                elapsed_time=elapsed_time,
+                token_usage={
+                    "prompt_tokens": 0,
+                    "completion_tokens": 0,
+                    "total_tokens": total_tokens
+                },
+            )
+
             return {
                 "message": final_result,
                 "conversation_id": sub_conversation_id,
@@ -368,6 +696,11 @@ class MultiAgentOrchestrator:
             logger.error(
                 "多 Agent 任务执行失败",
                 extra={"error": str(e)}
+            )
+            await self._finalize_master_execution(
+                status="failed",
+                elapsed_time=time.time() - start_time,
+                error_message=str(e)[:2000],
             )
             raise
 
@@ -681,23 +1014,24 @@ class MultiAgentOrchestrator:
                                 data_line = event.split("data: ", 1)[1].strip()
                                 data = json.loads(data_line)
 
-                                # 提取内容
+                                # 提取内容：只累积，不下发（聚合后一次性发出）
                                 if "content" in data:
-                                    content = data["content"]
-                                    result_content += content
-
-                                    # 转换为子 Agent 专用事件，带上 agent 信息
-                                    yield self._format_sse_event("sub_agent_message", {
-                                        "content": content,
-                                        "agent_id": agent_id,
-                                        "agent_name": agent_name,
-                                        "sub_question": sub_question
-                                    })
+                                    result_content += data["content"]
+                                elif _sse_event_name(event) in _CLUSTER_OBSERVABILITY_EVENTS:
+                                    # 集群可观测事件（工具时序 / 轨迹快照 / 派发收尾）没有 content，
+                                    # 必须原样透传并补归属，否则运行中面板看不到子 Agent 的调用链
+                                    yield self._inject_agent_meta(event, self._sub_event_meta(agent_id, agent_name))
                             except Exception:
                                 pass
                         else:
                             # 非 data 事件直接转发
                             yield event
+
+                    # 子 Agent 正文聚合下发（本 Agent 跑完才发，全文一次到达）
+                    if result_content:
+                        yield self._sub_agent_message_event(
+                            agent_id, agent_name, result_content, sub_question=sub_question
+                        )
 
                     results.append({
                         "agent_id": agent_id,
@@ -755,19 +1089,23 @@ class MultiAgentOrchestrator:
                     user_id
                 ):
                     if event_type == "content":
-                        # 累积结果
+                        # 累积结果（不下发，等该 Agent done 时聚合发出）
                         result_contents[agent_id] += content
 
-                        # 实时返回
-                        yield self._format_sse_event("sub_agent_message", {
-                            "content": content,
-                            "agent_id": agent_id,
-                            "agent_name": agent_name,
-                            "sub_question": agent_info_map[agent_id]["sub_question"]
-                        })
+                    elif event_type == "raw":
+                        # 子 Agent 可观测事件（工具 / 轨迹 / 派发收尾）：原样透传
+                        yield content
 
                     elif event_type == "done":
-                        # Agent 完成
+                        # Agent 完成：先聚合下发正文（全文一次到达），再收尾
+                        if result_contents[agent_id]:
+                            yield self._sub_agent_message_event(
+                                agent_id,
+                                agent_name,
+                                result_contents[agent_id],
+                                sub_question=agent_info_map[agent_id]["sub_question"],
+                            )
+
                         results.append({
                             "agent_id": agent_id,
                             "agent_name": agent_name,
@@ -781,6 +1119,14 @@ class MultiAgentOrchestrator:
 
                     elif event_type == "error":
                         logger.error(f"Agent {agent_name} 执行失败: {content}")
+                        # 失败前已生成的部分正文仍要交付，否则聚合后彻底不可见
+                        if result_contents.get(agent_id):
+                            yield self._sub_agent_message_event(
+                                agent_id,
+                                agent_name,
+                                result_contents[agent_id],
+                                sub_question=agent_info_map[agent_id]["sub_question"],
+                            )
         else:
             # 其他协作模式（sequential/parallel/hierarchical）
             if collaboration_strategy == "parallel" and execution_mode == "parallel":
@@ -834,19 +1180,23 @@ class MultiAgentOrchestrator:
                     user_id
                 ):
                     if event_type == "content":
-                        # 累积结果
+                        # 累积结果（不下发，等该 Agent done 时聚合发出）
                         result_contents[agent_id] += content
 
-                        # 实时返回
-                        yield self._format_sse_event("sub_agent_message", {
-                            "content": content,
-                            "agent_id": agent_id,
-                            "agent_name": agent_name,
-                            "role": agent_info_map[agent_id]["role"]
-                        })
+                    elif event_type == "raw":
+                        # 子 Agent 可观测事件（工具 / 轨迹 / 派发收尾）：原样透传
+                        yield content
 
                     elif event_type == "done":
-                        # Agent 完成
+                        # Agent 完成：先聚合下发正文（全文一次到达），再收尾
+                        if result_contents[agent_id]:
+                            yield self._sub_agent_message_event(
+                                agent_id,
+                                agent_name,
+                                result_contents[agent_id],
+                                role=agent_info_map[agent_id]["role"],
+                            )
+
                         results.append({
                             "agent_id": agent_id,
                             "agent_name": agent_name,
@@ -861,6 +1211,14 @@ class MultiAgentOrchestrator:
 
                     elif event_type == "error":
                         logger.error(f"Agent {agent_name} 执行失败: {content}")
+                        # 失败前已生成的部分正文仍要交付，否则聚合后彻底不可见
+                        if result_contents.get(agent_id):
+                            yield self._sub_agent_message_event(
+                                agent_id,
+                                agent_name,
+                                result_contents[agent_id],
+                                role=agent_info_map[agent_id]["role"],
+                            )
             else:
                 # 顺序协作或层级协作 - 串行流式执行
                 logger.info(f"使用串行流式执行（{collaboration_strategy}）")
@@ -893,23 +1251,24 @@ class MultiAgentOrchestrator:
                                 data_line = event.split("data: ", 1)[1].strip()
                                 data = json.loads(data_line)
 
-                                # 提取内容
+                                # 提取内容：只累积，不下发（聚合后一次性发出）
                                 if "content" in data:
-                                    content = data["content"]
-                                    result_content += content
-
-                                    # 转换为子 Agent 专用事件，带上 agent 信息
-                                    yield self._format_sse_event("sub_agent_message", {
-                                        "content": content,
-                                        "agent_id": agent_id,
-                                        "agent_name": agent_name,
-                                        "role": agent_info.get("role", "secondary")
-                                    })
+                                    result_content += data["content"]
+                                elif _sse_event_name(event) in _CLUSTER_OBSERVABILITY_EVENTS:
+                                    # 同 decomposition 分支：可观测事件原样透传 + 补归属
+                                    yield self._inject_agent_meta(event, self._sub_event_meta(agent_id, agent_name))
                             except:
                                 pass
                         else:
                             # 非 data 事件直接转发
                             yield event
+
+                    # 子 Agent 正文聚合下发（本 Agent 跑完才发，全文一次到达）
+                    if result_content:
+                        yield self._sub_agent_message_event(
+                            agent_id, agent_name, result_content,
+                            role=agent_info.get("role", "secondary"),
+                        )
 
                     results.append({
                         "agent_id": agent_id,
@@ -923,25 +1282,19 @@ class MultiAgentOrchestrator:
                     })
 
         # 3. 智能整合结果
-        merge_mode = self.config.execution_config.get("result_merge_mode", "smart")
-        # merge_mode = "master"
+        # 默认 master：由 Master Agent **流式**生成最终答案，前端主气泡逐 token 增长。
+        # smart 是"不调用模型"的快速档（纯拼接），仅在下述情况兜底，但同样按块流式推送，
+        # 保证任何路径都不会把整篇内容一次砸给前端（否则主气泡表现为"一坨突然出现"）。
+        merge_mode = self.config.execution_config.get("result_merge_mode", "master")
         # 智能判断是否需要整合
         need_merge = self._should_merge_results(results, collaboration_strategy)
 
         if not need_merge:
-            # 不需要整合：用户已经看到所有内容了
-            logger.info("跳过整合阶段（用户已看到所有 Agent 输出）")
-            # 输出 message 事件，将 sub_agent_message 的内容汇总输出
-            if results:
-                all_content = ""
-                for result in results:
-                    msg = result.get("result", {}).get("message", "")
-                    if msg:
-                        all_content += msg + "\n\n"
-                if all_content:
-                    yield self._format_sse_event("message", {
-                        "content": all_content.strip()
-                    })
+            # 不需要 LLM 整合：用户已经在各自区块看到全部输出，
+            # 这里只把汇总内容按块补进主气泡（不调用模型）
+            logger.info("跳过 Master 整合阶段（直接汇总各 Agent 输出）")
+            async for event in self._smart_merge_results_stream(results, collaboration_strategy):
+                yield event
         elif merge_mode == "master" and len(results) > 1:
             # Master Agent 流式整合
             logger.info("开始 Master Agent 流式整合")
@@ -963,12 +1316,10 @@ class MultiAgentOrchestrator:
                     yield event
             except Exception as e:
                 logger.error(f"Master Agent 流式整合失败，降级到 smart 模式: {str(e)}")
-                final_response = self._smart_merge_results(results, collaboration_strategy)
-                yield self._format_sse_event("message", {
-                    "content": final_response
-                })
+                async for event in self._smart_merge_results_stream(results, collaboration_strategy):
+                    yield event
         else:
-            # Smart 模式：快速整合
+            # Smart 模式：不调用模型的快速整合（仍按块流式，避免主气泡一坨出现）
             logger.info("使用 Smart 模式整合")
 
             yield self._format_sse_event("merge_start", {
@@ -976,13 +1327,8 @@ class MultiAgentOrchestrator:
                 "agent_count": len(results)
             })
 
-            final_response = self._smart_merge_results(results, collaboration_strategy)
-
-            # 只有在需要时才发送整合结果
-            if final_response and final_response != "":
-                yield self._format_sse_event("message", {
-                    "content": final_response
-                })
+            async for event in self._smart_merge_results_stream(results, collaboration_strategy):
+                yield event
 
     async def _execute_supervisor_stream(
         self,
@@ -1103,8 +1449,15 @@ class MultiAgentOrchestrator:
                 except:
                     pass
 
-            # 直接透传所有事件（包括 sub_usage），累加统一由上层处理
-            yield event
+            # 子运行生命周期事件（start/end）不透传：否则上层会看到两个 start / 两个 end，
+            # 且子运行的临时 message_id 会顶掉集群气泡的真实 id（详见 _SUB_RUN_LIFECYCLE_EVENTS）。
+            if _sse_event_name(event) in _SUB_RUN_LIFECYCLE_EVENTS:
+                continue
+
+            # 其余事件直接透传（包括 sub_usage），累加统一由上层处理；
+            # 顺手补上 Agent 归属（只补缺失字段，不覆盖事件自带同名字段），
+            # 供运行中面板把事件分流到对应的子 Agent 区块。
+            yield self._inject_agent_meta(event, self._sub_event_meta(agent_id, agent_info.get("name")))
 
         # 6. 如果有会话 ID，发送一个包含它的事件
         if sub_conversation_id:
@@ -1297,6 +1650,27 @@ class MultiAgentOrchestrator:
             "conversation_id": result.get("conversation_id") if result else None  # 保存会话 ID
         }
 
+    def _resolve_agent_identity(self, agent_config) -> Dict[str, Any]:
+        """由 AgentConfigProxy 反查 sub_agents 里的 agent_id，并给出落库用的 owner 信息。
+
+        子 Agent 的 agent_config 是 AgentConfigProxy（_load_agent_async 构造），
+        它的 id 就是 app_releases.id —— 不能写进 agent_config_id（FK→agent_configs.id），
+        所以统一走 release_id；agent_name 用于 meta_data.agent_name 与详情页 node_name。
+        """
+        release_id = getattr(agent_config, "id", None)
+        agent_name = getattr(agent_config, "name", None)
+        agent_id = None
+        for key, data in (self.sub_agents or {}).items():
+            cfg = data.get("config")
+            if cfg is agent_config or (
+                cfg is not None and str(getattr(cfg, "id", "")) == str(release_id or "")
+            ):
+                agent_id = key
+                break
+        if not agent_name and agent_id:
+            agent_name = (self.sub_agents.get(agent_id, {}).get("info", {}) or {}).get("name") or agent_id
+        return {"release_id": release_id, "agent_name": agent_name, "agent_id": agent_id}
+
     async def _execute_sub_agent_stream(
         self,
         agent_config: AgentConfig,
@@ -1332,6 +1706,8 @@ class MultiAgentOrchestrator:
             )
 
         # 流式执行 Agent
+        # 归属信息由实例属性（current_execution_id）+ 本地反查得到，
+        # 而不在 10 个调用点逐个加参数 —— 加参数必然漏改（流式路径曾因此炸外键）。
         draft_service = AgentRunService(self.db)
         async for event in draft_service.run_stream(
             agent_config=agent_config,
@@ -1345,7 +1721,10 @@ class MultiAgentOrchestrator:
             user_rag_memory_id=user_rag_memory_id,
             web_search=web_search,
             memory=memory,
-            sub_agent=True
+            sub_agent=True,
+            parent_execution_id=self.current_execution_id,
+            orchestration_mode=self._normalized_mode,
+            execution_owner=self._resolve_agent_identity(agent_config),
         ):
             yield event
 
@@ -1398,7 +1777,10 @@ class MultiAgentOrchestrator:
             memory=memory,
             storage_type=storage_type,
             user_rag_memory_id=user_rag_memory_id,
-            sub_agent=True
+            sub_agent=True,
+            parent_execution_id=self.current_execution_id,
+            orchestration_mode=self._normalized_mode,
+            execution_owner=self._resolve_agent_identity(agent_config),
         )
 
         return result
@@ -1545,15 +1927,165 @@ class MultiAgentOrchestrator:
             # 4. 使用 handoffs_service 的流式聊天
             conv_id = str(conversation_id) if conversation_id else None
 
+            # 协作模式不经过 AgentRunService，子 Agent 记录按"节点激活"补：
+            # 收到 agent 事件开一条 sub 记录，下一个 agent / end / error 到达时收尾上一条。
+            # 同一 Agent 多次激活 → 多行、execution_id 各不相同。
+            active_execution_id = None
+            active_agent_key = None
+            active_started_at = 0.0
+            active_tokens = 0
+            # 协作模式没有 AgentTraceRecorder 的 trace，按激活粒度手工累积"调用链明细"：
+            # 该 Agent 收到的任务 / 流式产出的文本 / 它发起的 handoff。
+            active_task = message
+            active_text = ""
+            active_steps: list = []
+            pending_task = None
+
+            def _activation_steps(status: str, agent_name: Optional[str]) -> list:
+                """把一次激活折叠成 steps：首项是它自己的输入/产出，其后是它发起的 handoff。"""
+                head = {
+                    "step_id": f"collab_{active_execution_id}",
+                    "node_type": "agent",
+                    "node_name": agent_name or active_agent_key,
+                    "status": status,
+                    "input": active_task,
+                    "output": active_text,
+                }
+                return [head, *active_steps]
+
             async for event in handoffs_service.chat_stream(
                 message=message,
                 conversation_id=conv_id
             ):
-                # handoffs_service 返回的已经是 SSE 格式，直接 yield
-                yield event
+                event_name, event_data = self._parse_sse_event(event)
+
+                # Agent 切换：先收尾上一条激活，再开新的
+                if event_name == "agent":
+                    if active_execution_id is not None:
+                        closing_info = agent_configs.get(active_agent_key or "", {}) or {}
+                        yield self._format_sse_event("agent_complete", {
+                            "execution_id": str(active_execution_id),
+                            "agent_id": closing_info.get("agent_id"),
+                            "agent_name": closing_info.get("name"),
+                            "status": "completed",
+                            "output": active_text,
+                            "elapsed_time": time.time() - active_started_at,
+                            "token_usage": {"total_tokens": active_tokens},
+                        })
+                        await self._close_collaboration_activation(
+                            active_execution_id,
+                            "completed",
+                            time.time() - active_started_at,
+                            token_usage={"total_tokens": active_tokens},
+                            steps=_activation_steps("completed", closing_info.get("name")),
+                        )
+                        active_execution_id = None
+
+                    active_agent_key = event_data.get("agent")
+                    active_started_at = time.time()
+                    active_tokens = 0
+                    active_text = ""
+                    active_steps = []
+                    # 被 handoff 转过来的任务：优先用上一条激活写下的 unhandled_question
+                    active_task = pending_task or message
+                    pending_task = None
+                    active_execution_id, meta = await self._open_collaboration_activation(
+                        agent_configs,
+                        active_agent_key,
+                        event_data.get("agent_name"),
+                        active_task,
+                    )
+                    yield self._format_sse_event("agent_dispatch", meta)
+                    yield self._inject_agent_meta(event, meta)
+                    continue
+
+                if event_name == "sub_usage":
+                    active_tokens += int(event_data.get("total_tokens") or 0)
+                elif event_name == "message":
+                    active_text += event_data.get("content") or ""
+                elif event_name == "handoff":
+                    # handoff 归属"发起方"这次激活：它转出给谁、为什么转、待解决什么问题
+                    active_steps.append({
+                        "step_id": f"handoff_{active_execution_id}_{len(active_steps)}",
+                        "node_type": "handoff",
+                        "node_name": f"→ {event_data.get('to_name') or event_data.get('to')}",
+                        "status": "completed",
+                        "input": {
+                            "from": event_data.get("from"),
+                            "reason": event_data.get("reason"),
+                            "your_answer": event_data.get("your_answer"),
+                        },
+                        "output": {"unhandled_question": event_data.get("unhandled_question")},
+                    })
+                    pending_task = event_data.get("unhandled_question") or active_task
+
+                # 归属注入：只补 data 里缺失的字段，事件名与其它字段原样保留
+                if active_execution_id is not None:
+                    active_info = agent_configs.get(active_agent_key or "", {}) or {}
+                    event = self._inject_agent_meta(event, {
+                        "execution_id": str(active_execution_id),
+                        "agent_id": active_info.get("agent_id") or active_agent_key,
+                        "agent_name": active_info.get("name") or active_agent_key,
+                        "parent_execution_id": str(self.current_execution_id) if self.current_execution_id else None,
+                        "orchestration_mode": self._normalized_mode,
+                    })
+                elif event_name == "end":
+                    # 整轮结束却没有激活记录（降级场景）：只补编排模式，便于前端识别
+                    event = self._inject_agent_meta(event, {
+                        "orchestration_mode": self._normalized_mode,
+                    })
+
+                # handoffs 自己的 end 属于"协作运行生命周期"，不是集群会话事件：
+                # 集群级 end 由 execute_stream 在模式分支之后统一发出，这里不透传，
+                # 否则上层会看到两个 end（且第二个 end 已经把外层消息收过尾了）。
+                if event_name != "end":
+                    yield event
+
+                if event_name in ("end", "error") and active_execution_id is not None:
+                    final_status = "completed" if event_name == "end" else "failed"
+                    final_info = agent_configs.get(active_agent_key or "", {}) or {}
+                    yield self._format_sse_event("agent_complete", {
+                        "execution_id": str(active_execution_id),
+                        "agent_id": final_info.get("agent_id"),
+                        "agent_name": final_info.get("name"),
+                        "status": final_status,
+                        "output": active_text,
+                        "elapsed_time": time.time() - active_started_at,
+                        "token_usage": {"total_tokens": active_tokens},
+                    })
+                    await self._close_collaboration_activation(
+                        active_execution_id,
+                        final_status,
+                        time.time() - active_started_at,
+                        token_usage={"total_tokens": active_tokens},
+                        error_message=(str(event_data.get("error"))[:2000] if event_name == "error" else None),
+                        steps=_activation_steps(final_status, final_info.get("name")),
+                    )
+                    active_execution_id = None
 
         except Exception as e:
             logger.error(f"Collaboration 模式执行失败: {str(e)}", exc_info=True)
+            # 收尾可能仍处于"激活中"的子 Agent 记录，避免状态永远停在 running
+            # （异常若发生在激活变量定义之前，NameError 一并被吞掉）
+            try:
+                if active_execution_id is not None:
+                    yield self._format_sse_event("agent_complete", {
+                        "execution_id": str(active_execution_id),
+                        "agent_name": (agent_configs.get(active_agent_key or "", {}) or {}).get("name"),
+                        "status": "failed",
+                        "output": active_text,
+                        "elapsed_time": time.time() - active_started_at,
+                        "token_usage": {"total_tokens": active_tokens},
+                    })
+                    await self._close_collaboration_activation(
+                        active_execution_id,
+                        "failed",
+                        time.time() - active_started_at,
+                        token_usage={"total_tokens": active_tokens},
+                        error_message=str(e)[:2000],
+                    )
+            except Exception:
+                pass
             yield self._format_sse_event("error", {
                 "error": str(e),
                 "timestamp": time.time()
@@ -2383,6 +2915,57 @@ class MultiAgentOrchestrator:
             # 默认使用智能整合
             return self._smart_merge_results(results, strategy)
 
+    # smart 整合的分块大小（字符）。smart 不经过模型，没有天然 token 节奏，
+    # 按块推送是为了让主气泡逐步增长，而不是整篇一次性出现。
+    _SMART_MERGE_CHUNK_CHARS = 240
+
+    @staticmethod
+    def _chunk_text(text: str, max_chars: int):
+        """把长文本切成块：段落优先，超长段落再按长度硬切。
+
+        用于 smart（拼接）路径的流式输出。空文本不产出任何块。
+        """
+        if not text:
+            return
+        buf = ""
+        for para in text.split("\n\n"):
+            piece = para + "\n\n"
+            if len(buf) + len(piece) <= max_chars:
+                buf += piece
+                continue
+            if buf:
+                yield buf
+                buf = ""
+            while len(piece) > max_chars:
+                yield piece[:max_chars]
+                piece = piece[max_chars:]
+            buf = piece
+        if buf:
+            yield buf
+
+    async def _smart_merge_results_stream(
+        self,
+        results: List[Dict[str, Any]],
+        strategy: str
+    ):
+        """smart 拼接结果的流式版本（不调用模型）。
+
+        作为兜底路径使用：Master 整合不可用（未配置模型 / 无可用 API Key /
+        调用异常）或 `result_merge_mode="smart"` 时，把拼接结果按块逐条 yield，
+        避免主气泡出现"一坨突然出现"的观感。
+
+        Yields:
+            SSE 格式的 message 事件
+        """
+        final_response = self._smart_merge_results(results, strategy)
+        if not final_response:
+            logger.warning("smart 整合结果为空，不输出 message 事件")
+            return
+        for chunk in self._chunk_text(final_response, self._SMART_MERGE_CHUNK_CHARS):
+            yield self._format_sse_event("message", {"content": chunk})
+            # 让出事件循环：确保每个块独立 flush，前端能逐块渲染
+            await asyncio.sleep(0)
+
     def _smart_merge_results(
         self,
         results: List[Dict[str, Any]],
@@ -2522,6 +3105,31 @@ class MultiAgentOrchestrator:
 
         return "未获取到有效结果"
 
+    def _resolve_merge_params(self) -> Dict[str, Any]:
+        """Master 整合阶段的生成参数。
+
+        - max_tokens：读 `execution_config.merge_max_tokens`（默认 8192）。
+          历史上写死 2000，长报告的整合结果会被截断，而整合输出正是用户看到的最终答案。
+        - temperature：跟随多 Agent 配置的 model_parameters，未配置时 0.7。
+        """
+        mp = self.model_parameters
+
+        def _get(key: str, default: Any) -> Any:
+            if mp is None:
+                return default
+            val = mp.get(key, default) if isinstance(mp, dict) else getattr(mp, key, default)
+            return default if val is None else val
+
+        try:
+            max_tokens = int(self.config.execution_config.get("merge_max_tokens", 8192))
+        except (TypeError, ValueError, AttributeError):
+            max_tokens = 8192
+
+        return {
+            "temperature": _get("temperature", 0.7),
+            "max_tokens": max_tokens,
+        }
+
     async def _master_merge_results(
         self,
         results: List[Dict[str, Any]],
@@ -2648,9 +3256,13 @@ class MultiAgentOrchestrator:
             )
 
             # 创建 RedBearModelConfig
+            _merge_params = self._resolve_merge_params()
             model_config = RedBearModelConfig.from_api_key(
                 api_key_config,
-                extra_params={"temperature": 0.7, "max_tokens": 2000},
+                extra_params={
+                    "temperature": _merge_params["temperature"],
+                    "max_tokens": _merge_params["max_tokens"],
+                },
             )
 
             # 创建 LLM 实例
@@ -2790,9 +3402,9 @@ class MultiAgentOrchestrator:
             # 获取 Master Agent 的模型配置
             default_model_config_id = self.config.default_model_config_id
             if not default_model_config_id:
-                logger.warning("没有配置 Master Agent，使用简单整合")
-                final_response = self._smart_merge_results(results, strategy)
-                yield self._format_sse_event("message", {"content": final_response})
+                logger.warning("没有配置 Master Agent，降级为 smart 拼接（分块流式）")
+                async for _evt in self._smart_merge_results_stream(results, strategy):
+                    yield _evt
                 return
 
             # 获取 API Key 配置
@@ -2811,9 +3423,9 @@ class MultiAgentOrchestrator:
             )
 
             if not api_key_config:
-                logger.warning("Master Agent 没有可用的 API Key，使用简单整合")
-                final_response = self._smart_merge_results(results, strategy)
-                yield self._format_sse_event("message", {"content": final_response})
+                logger.warning("Master Agent 没有可用的 API Key，降级为 smart 拼接（分块流式）")
+                async for _evt in self._smart_merge_results_stream(results, strategy):
+                    yield _evt
                 return
 
             logger.info(
@@ -2825,9 +3437,16 @@ class MultiAgentOrchestrator:
             )
 
             # 创建 RedBearModelConfig（启用流式）
+            # max_tokens 走 execution_config.merge_max_tokens（默认 8192）：
+            # 写死 2000 会把长报告的整合结果截断，而整合输出正是用户看到的最终答案。
+            _merge_params = self._resolve_merge_params()
             model_config = RedBearModelConfig.from_api_key(
                 api_key_config,
-                extra_params={"temperature": 0.7, "max_tokens": 2000, "streaming": True},
+                extra_params={
+                    "temperature": _merge_params["temperature"],
+                    "max_tokens": _merge_params["max_tokens"],
+                    "streaming": True,
+                },
             )
 
             # 创建 LLM 实例
@@ -2867,20 +3486,25 @@ class MultiAgentOrchestrator:
                 logger.info(f"Master Agent 流式整合完成，共 {chunk_count} 个 chunks")
 
             except AttributeError as e:
-                # 如果底层模型不支持流式，降级到非流式
-                logger.warning(f"底层模型不支持流式，降级到非流式: {str(e)}")
+                # 底层模型不支持 astream：退回一次性调用，但结果仍按块推送，
+                # 避免主气泡"一坨突然出现"
+                logger.warning(f"底层模型不支持流式，降级为分块输出: {str(e)}")
                 response = await llm.ainvoke(merge_prompt)
                 if hasattr(response, 'content'):
                     content = response.content
                 else:
                     content = str(response)
-                yield self._format_sse_event("message", {"content": content})
+                if not isinstance(content, str):
+                    content = str(content)
+                for chunk in self._chunk_text(content, self._SMART_MERGE_CHUNK_CHARS):
+                    yield self._format_sse_event("message", {"content": chunk})
+                    await asyncio.sleep(0)
 
         except Exception as e:
-            logger.error(f"Master Agent 流式整合失败: {str(e)}")
-            # 降级到智能整合
-            final_response = self._smart_merge_results(results, strategy)
-            yield self._format_sse_event("message", {"content": final_response})
+            logger.error(f"Master Agent 流式整合失败，降级为 smart 拼接: {str(e)}")
+            # 降级到 smart 拼接，同样按块流式输出
+            async for _evt in self._smart_merge_results_stream(results, strategy):
+                yield _evt
 
     def _should_merge_results(
         self,
@@ -2948,6 +3572,14 @@ class MultiAgentOrchestrator:
 
                             if "content" in data:
                                 yield (agent_id, agent_name, "content", data["content"])
+                            elif _sse_event_name(event) in _CLUSTER_OBSERVABILITY_EVENTS:
+                                # 并行执行时事件交错，必须带上 agent 归属再交给上层分流
+                                yield (
+                                    agent_id,
+                                    agent_name,
+                                    "raw",
+                                    self._inject_agent_meta(event, self._sub_event_meta(agent_id, agent_name)),
+                                )
                         except:
                             pass
 

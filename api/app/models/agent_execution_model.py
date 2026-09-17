@@ -82,6 +82,45 @@ class AgentExecution(Base):
     # ]
     steps = Column(JSONB, nullable=False, default=list)
 
+    # Agent 执行轨迹（AgentTraceRecorder.to_dict 快照）
+    # {
+    #   "meta": {...},
+    #   "iterations": [
+    #     {"llm": {model, input, output, reasoning_content, tokens, elapsed_time},
+    #      "tool_calls": [{tool_name, tool_input, tool_output, ...}]}
+    #   ]
+    # }
+    # 结构与工作流智能体节点 output_data 里的 agent_log 同构：
+    # 子 Agent 折叠成 node_type='agent' + agent_log=<本字段> 的节点后，
+    # 前端 Runtime.tsx 可直接渲染成工作流智能体节点同款（ROUND / llm / tool_calls）。
+    # 本轮仅多 Agent 集群的子 Agent 执行写入；单 Agent 应用为 NULL。
+    agent_log = Column(
+        JSONB,
+        nullable=True,
+        comment="Agent 执行轨迹（AgentTraceRecorder.to_dict 快照：{meta, iterations:[{llm, tool_calls}]}）"
+    )
+
+    # ── 多 Agent 集群编排归属 ──────────────────────────────────────────
+    parent_execution_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("agent_executions.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+        comment="父执行 ID（子 Agent 指向主 Agent 的执行记录；主 Agent 与普通执行为 NULL）"
+    )
+    agent_role = Column(
+        String(20),
+        nullable=False,
+        server_default="master",
+        index=True,
+        comment="执行角色: master（主 Agent）| sub（子 Agent）"
+    )
+    orchestration_mode = Column(
+        String(20),
+        nullable=True,
+        comment="编排模式: supervisor（主管）| collaboration（协作）；非集群执行时为 NULL"
+    )
+
     # 整体状态
     status = Column(String(20), nullable=False, default="running", index=True)
     # 可选值：running, completed, failed

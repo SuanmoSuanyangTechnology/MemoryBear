@@ -534,7 +534,13 @@ class MultiAgentService:
                         pass
             else:
                 yield event
-                if "data:" in event:
+                # 落库正文只认集群级的 `message` 事件（按事件名判定）。
+                # 子 Agent 的正文走 `sub_agent_message`：若一并累加，落库的 assistant
+                # 正文会比界面显示多出一份重复内容（刷新后主气泡变长）。
+                _event_name = ""
+                if event.startswith("event:"):
+                    _event_name = event[6:].split("\n", 1)[0].strip()
+                if _event_name == "message" and "data:" in event:
                     try:
                         data_line = event.split("data: ", 1)[1].strip()
                         data = json.loads(data_line)
