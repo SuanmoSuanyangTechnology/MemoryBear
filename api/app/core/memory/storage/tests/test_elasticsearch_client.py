@@ -23,7 +23,9 @@ from app.core.memory.storage.provider.elasticsearch.client import (
     ElasticClient,
 )
 from app.core.memory.storage.provider.elasticsearch.serialization import (
+    MAX_TEXT_FIELD_LENGTH,
     normalize_elasticsearch_document,
+    route_embedding_field,
 )
 from app.core.memory.storage.provider.elasticsearch.config import (
     build_elasticsearch_client_config,
@@ -34,8 +36,11 @@ from app.core.memory.storage.provider.elasticsearch.index import (
     ensure_indices,
 )
 from app.core.memory.storage.provider.elasticsearch.index.definitions import (
+    DEFAULT_EMBEDDING_DIMENSION,
+    EMBEDDING_DIMENSIONS,
     INDEX_DEFINITIONS,
     INDEX_SHARD_COUNT,
+    get_embedding_field_name,
     get_index_definition,
     get_index_name,
 )
@@ -518,17 +523,17 @@ def test_elasticsearch_index_definitions_are_explicit_and_unique() -> None:
 
     expected_versions = {
         MemoryNodeType.ASSISTANT_ORIGINAL: (2, 1),
-        MemoryNodeType.ASSISTANT_PRUNED: (2, 1),
-        MemoryNodeType.CHUNK: (2, 1),
-        MemoryNodeType.COMMUNITY: (2, 1),
+        MemoryNodeType.ASSISTANT_PRUNED: (3, 1),
+        MemoryNodeType.CHUNK: (3, 1),
+        MemoryNodeType.COMMUNITY: (3, 1),
         MemoryNodeType.CONVERSATION: (2, 1),
-        MemoryNodeType.DIALOGUE: (2, 1),
-        MemoryNodeType.EXTRACTED_ENTITY: (2, 1),
-        MemoryNodeType.MEMORY_SUMMARY: (2, 1),
-        MemoryNodeType.PERCEPTUAL: (2, 1),
-        MemoryNodeType.SCENE_SUMMARY: (1, 1),
-        MemoryNodeType.STATEMENT: (2, 1),
-        MemoryNodeType.USER_SOURCE: (2, 1),
+        MemoryNodeType.DIALOGUE: (3, 1),
+        MemoryNodeType.EXTRACTED_ENTITY: (3, 1),
+        MemoryNodeType.MEMORY_SUMMARY: (3, 1),
+        MemoryNodeType.PERCEPTUAL: (3, 1),
+        MemoryNodeType.SCENE_SUMMARY: (2, 1),
+        MemoryNodeType.STATEMENT: (3, 1),
+        MemoryNodeType.USER_SOURCE: (3, 1),
     }
     production_labels = tuple(MemoryNodeType)
     production_definitions = [
@@ -591,6 +596,13 @@ def test_elasticsearch_index_definitions_are_explicit_and_unique() -> None:
                 "index": True,
                 "similarity": "cosine",
             }
+            for dimension in EMBEDDING_DIMENSIONS:
+                assert properties[get_embedding_field_name(label, dimension)] == {
+                    "type": "dense_vector",
+                    "dims": dimension,
+                    "index": True,
+                    "similarity": "cosine",
+                }
 
     assert len({id(item) for item in registered_definitions}) == registered_count
     assert len(
@@ -711,7 +723,9 @@ def test_elasticsearch_document_normalization() -> None:
         "metadata": {"statement": ""},
     }
 
-    assert normalize_elasticsearch_document(value, date_fields=set()) == {
+    assert normalize_elasticsearch_document(
+        value, date_fields=set(), text_fields=set()
+    ) == {
         "created_at": "2026-01-01T00:00:00Z",
         "embedding": [1, 2.5],
         "metadata": {"statement": ""},
@@ -723,6 +737,7 @@ def test_elasticsearch_document_normalization() -> None:
             "statement": "",
         },
         date_fields={"valid_at", "invalid_at"},
+        text_fields=set(),
     ) == {
         "valid_at": None,
         "invalid_at": None,
@@ -736,7 +751,9 @@ def test_elasticsearch_document_normalization() -> None:
     )
     for invalid in invalid_documents:
         with pytest.raises(ValueError):
-            normalize_elasticsearch_document(invalid, date_fields=set())
+            normalize_elasticsearch_document(
+                invalid, date_fields=set(), text_fields=set()
+            )
 
 
 async def test_elastic_client_save_and_update_node() -> None:
@@ -1672,7 +1689,7 @@ async def test_elastic_client_embedding_search_uses_knn_prefilter_and_score() ->
     result = await client.search_by_embedding(
         MemoryNodeType.STATEMENT,
         NodeFilter.eq("end_user_id", "user-1"),
-        [0.1, 0.2, 0.3],
+        [0.1] * DEFAULT_EMBEDDING_DIMENSION,
         2,
         projection=NodeProjection.of(
             "id",
@@ -1685,7 +1702,7 @@ async def test_elastic_client_embedding_search_uses_knn_prefilter_and_score() ->
             "index": get_index_name(MemoryNodeType.STATEMENT),
             "knn": {
                 "field": "statement_embedding",
-                "query_vector": [0.1, 0.2, 0.3],
+                "query_vector": [0.1] * DEFAULT_EMBEDDING_DIMENSION,
                 "k": 2,
                 "num_candidates": 100,
                 "filter": {
@@ -1718,7 +1735,7 @@ async def test_elastic_client_embedding_search_does_not_add_unrequested_score() 
     result = await client.search_by_embedding(
         MemoryNodeType.CHUNK,
         NodeFilter.eq("end_user_id", "user-1"),
-        [1.0, 0.0],
+        [0.1] * DEFAULT_EMBEDDING_DIMENSION,
         1,
     )
 
@@ -1951,7 +1968,7 @@ async def test_elastic_client_embedding_msearch_uses_knn_and_transforms_score() 
 
     results = await client.search_many_by_embedding(
         specs,
-        [0.1, 0.2],
+        [0.1] * DEFAULT_EMBEDDING_DIMENSION,
         2,
     )
 
@@ -1964,7 +1981,7 @@ async def test_elastic_client_embedding_msearch_uses_knn_and_transforms_score() 
     assert searches[1] == {
         "knn": {
             "field": "statement_embedding",
-            "query_vector": [0.1, 0.2],
+            "query_vector": [0.1] * DEFAULT_EMBEDDING_DIMENSION,
             "k": 2,
             "num_candidates": 100,
             "filter": {
@@ -2192,7 +2209,7 @@ async def test_elastic_client_search_propagates_response_failures() -> None:
         await client.search_by_embedding(
             MemoryNodeType.STATEMENT,
             NodeFilter.eq("id", "node-1"),
-            [1.0],
+            [0.1] * DEFAULT_EMBEDDING_DIMENSION,
             1,
         )
 
@@ -2211,3 +2228,97 @@ async def test_elastic_client_search_rejects_missing_requested_score() -> None:
             1,
             projection=NodeProjection.of("id", "score"),
         )
+
+
+def test_route_embedding_field_keeps_default_dimension() -> None:
+    document = {
+        "id": "c1",
+        "summary_embedding": [0.0] * DEFAULT_EMBEDDING_DIMENSION,
+    }
+
+    result = route_embedding_field(document, MemoryNodeType.COMMUNITY)
+
+    assert result["summary_embedding"] == [0.0] * DEFAULT_EMBEDDING_DIMENSION
+    assert "summary_embedding_1536" not in result
+
+
+def test_route_embedding_field_moves_non_default_dimension() -> None:
+    document = {"id": "c1", "summary_embedding": [0.0] * 1536}
+
+    route_embedding_field(document, MemoryNodeType.COMMUNITY)
+
+    assert document["summary_embedding_1536"] == [0.0] * 1536
+    assert document["summary_embedding"] is None
+
+
+def test_route_embedding_field_keeps_null_vector() -> None:
+    document = {"id": "c1", "summary_embedding": None}
+
+    route_embedding_field(document, MemoryNodeType.COMMUNITY)
+
+    assert document["summary_embedding"] is None
+    assert "summary_embedding_1536" not in document
+
+
+def test_route_embedding_field_rejects_unknown_dimension() -> None:
+    document = {"id": "c1", "summary_embedding": [0.0] * 1000}
+
+    with pytest.raises(ValueError, match="unsupported embedding dimension"):
+        route_embedding_field(document, MemoryNodeType.COMMUNITY)
+
+
+def test_route_embedding_field_ignores_non_vector_label() -> None:
+    document = {"id": "c1", "content": "hello"}
+
+    result = route_embedding_field(document, MemoryNodeType.CONVERSATION)
+
+    assert result == document
+
+
+async def test_elastic_client_embedding_search_routes_to_dimension_field() -> None:
+    fake = _FakeElasticsearch()
+    fake.search_result = {"hits": {"hits": []}}
+    client = ElasticClient()
+    client.client = _as_elasticsearch(fake)
+
+    await client.search_by_embedding(
+        MemoryNodeType.COMMUNITY,
+        NodeFilter.eq("end_user_id", "user-1"),
+        [0.1] * 1536,
+        1,
+    )
+
+    assert fake.search_calls[0]["knn"]["field"] == "summary_embedding_1536"
+
+
+def test_normalize_document_truncates_oversized_text_field() -> None:
+    document = normalize_elasticsearch_document(
+        {"id": "x", "description": "a" * (MAX_TEXT_FIELD_LENGTH + 10)},
+        date_fields=set(),
+        text_fields={"description"},
+    )
+
+    assert len(document["description"]) == MAX_TEXT_FIELD_LENGTH
+    assert document["description"] == "a" * MAX_TEXT_FIELD_LENGTH
+
+
+def test_normalize_document_keeps_short_strings_unchanged() -> None:
+    document = normalize_elasticsearch_document(
+        {"id": "x", "description": "short"},
+        date_fields=set(),
+        text_fields={"description"},
+    )
+
+    assert document["description"] == "short"
+
+
+def test_normalize_document_does_not_truncate_keyword_identifier() -> None:
+    oversized_id = "id-" + "a" * (MAX_TEXT_FIELD_LENGTH + 10)
+    document = normalize_elasticsearch_document(
+        {"id": oversized_id, "description": "short"},
+        date_fields=set(),
+        text_fields={"description"},
+    )
+
+    assert document["id"] == oversized_id
+    assert document["description"] == "short"

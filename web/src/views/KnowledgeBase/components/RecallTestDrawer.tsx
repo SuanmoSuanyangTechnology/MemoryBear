@@ -51,6 +51,7 @@ const RecallTestDrawer = forwardRef<RecallTestDrawerRef>((_props,ref) => {
         open={open}
         onClose={() => setOpen(false)}
         width={1000}
+        destroyOnHidden={true}
     >
       <RecallTest />
     </RbDrawer>
