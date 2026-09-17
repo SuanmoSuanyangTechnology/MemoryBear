@@ -13,6 +13,16 @@ from .contracts import KnowledgeCallContext
 
 
 class KnowledgeRetriever(Protocol):
+    async def retrieval_policy(
+        self,
+        *,
+        kb_ids: list[str],
+        context: KnowledgeCallContext,
+        rerank_id: str | None = None,
+    ) -> dict[str, frozenset[str]]:
+        """Return the query modalities supported by each retrieval mode."""
+        raise NotImplementedError
+
     async def retrieve(
         self,
         request: KnowledgeRetrievalRequest,

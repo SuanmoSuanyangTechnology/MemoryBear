@@ -297,7 +297,11 @@ class OpenAIFormatStrategy(MultimodalFormatStrategy):
 
 # Provider 到策略的映射
 PROVIDER_STRATEGIES = {
-    "dashscope": DashScopeFormatStrategy,
+    # dashscope 全量模型已统一 OpenAI 兼容协议（ChatTongyi 原生协议退役，见
+    # core/models/base.py:get_provider_llm_class）。原生的
+    # {"type": "image", "image": url} 会被兼容端点以 400 invalid_value 拒绝，
+    # 必须产出 OpenAI 格式（type=text/image_url/video_url）。
+    "dashscope": OpenAIFormatStrategy,
     "bedrock": BedrockFormatStrategy,
     "anthropic": BedrockFormatStrategy,
     "openai": OpenAIFormatStrategy,
@@ -403,15 +407,16 @@ class MultimodalService:
         if not files:
             return []
 
-        # 获取对应的策略
-        # dashscope 的 omni 模型使用 OpenAI 兼容格式
-        if self.provider == "dashscope" and self.is_omni:
+        # 获取对应的策略：已统一走 OpenAI 兼容协议的 provider（dashscope/volcano/
+        # openai/minimax/...）都必须产出 OpenAI 多模态格式。is_omni 不再参与判定——
+        # ChatTongyi 原生协议退役后，原生 {"type": "image", ...} 只会被兼容端点以
+        # 400 invalid_value 拒绝（见 core/models/base.py:get_provider_llm_class）。
+        strategy_class = PROVIDER_STRATEGIES.get(self.provider)
+        if not strategy_class:
+            logger.warning(
+                f"未找到 provider '{self.provider}' 的策略，使用 OpenAI 兼容格式"
+            )
             strategy_class = OpenAIFormatStrategy
-        else:
-            strategy_class = PROVIDER_STRATEGIES.get(self.provider)
-            if not strategy_class:
-                logger.warning(f"未找到 provider '{self.provider}' 的策略，使用默认策略")
-                strategy_class = DashScopeFormatStrategy
 
         result = []
         for idx, file in enumerate(files):

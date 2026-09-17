@@ -35,7 +35,7 @@ from app.services.annotation_service import AnnotationService
 from app.services.conversation_service import ConversationService
 from app.services.context_engine_manager import ContextEngineManager
 from app.core.config import settings
-from app.services.draft_run_service import AgentRunService
+from app.services.draft_run_service import AgentRunService, build_uploaded_images_manifest
 from app.services.model_service import ModelApiKeyService
 from app.services.multi_agent_orchestrator import MultiAgentOrchestrator
 from app.services.multimodal_service import MultimodalService
@@ -694,6 +694,8 @@ class AppChatService:
 
         # 处理多模态文件
         processed_files = None
+        # 仅用于发给 LLM 的用户消息（追加本轮图片清单），不污染入库原文 message
+        llm_message = message
         if files:
             multimodal_service = MultimodalService(self.db, model_info)
             fu_config = features_config.get("file_upload", {})
@@ -706,6 +708,14 @@ class AppChatService:
                 workspace_id=workspace_id,
             )
             logger.info(f"处理了 {len(processed_files)} 个文件")
+            for tool in tools:
+                set_uploaded_files = getattr(tool, "set_uploaded_files", None)
+                if callable(set_uploaded_files):
+                    set_uploaded_files(files)
+            # 在发给 LLM 的用户消息中列出本轮图片及编号，供模型按需显式触发图片检索
+            image_manifest, _ = build_uploaded_images_manifest(files)
+            if image_manifest:
+                llm_message = f"{message}\n\n{image_manifest}"
             if doc_img_recognition and ModelCapability.VISION in (api_key_obj.capability or []) and any(
                 f.type == FileType.DOCUMENT for f in files
             ):
@@ -874,7 +884,7 @@ class AppChatService:
             try:
                 # 调用 Agent（支持多模态）
                 result = await agent.chat(
-                    message=message,
+                    message=llm_message,
                     history=history,
                     context=None,
                     files=processed_files
@@ -1277,6 +1287,8 @@ class AppChatService:
 
             # 处理多模态文件
             processed_files = None
+            # 仅用于发给 LLM 的用户消息（追加本轮图片清单），不污染入库原文 message
+            llm_message = message
             if files:
                 multimodal_service = MultimodalService(self.db, model_info)
                 fu_config = features_config.get("file_upload", {})
@@ -1289,6 +1301,14 @@ class AppChatService:
                     workspace_id=workspace_id,
                 )
                 logger.info(f"处理了 {len(processed_files)} 个文件")
+                for tool in tools:
+                    set_uploaded_files = getattr(tool, "set_uploaded_files", None)
+                    if callable(set_uploaded_files):
+                        set_uploaded_files(files)
+                # 在发给 LLM 的用户消息中列出本轮图片及编号，供模型按需显式触发图片检索
+                image_manifest, _ = build_uploaded_images_manifest(files)
+                if image_manifest:
+                    llm_message = f"{message}\n\n{image_manifest}"
                 if doc_img_recognition and ModelCapability.VISION in (api_key_obj.capability or []) and any(
                     f.type == FileType.DOCUMENT for f in files
                 ):
@@ -1419,7 +1439,7 @@ class AppChatService:
                         )
 
                 _chunk_stream = agent.chat_stream(
-                    message=message,
+                    message=llm_message,
                     history=history,
                     context=None,
                     files=processed_files,

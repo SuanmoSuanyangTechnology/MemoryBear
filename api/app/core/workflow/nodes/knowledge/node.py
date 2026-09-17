@@ -95,13 +95,48 @@ class KnowledgeRetrievalNode(BaseNode):
                 }
         return {"citations": citations, "process": process}
 
+    def _resolve_image_query(self, variable_pool: VariablePool) -> str | None:
+        """解析 image_query 变量引用为首张图片的 URL。
+
+        仅支持纯变量引用（``{{...}}``），类型为 file 或 array[file]；数组取第一张
+        图片。变量不存在、非纯引用、无图片或 URL 为空时返回 None。
+        """
+        image_template = (self._get_typed_config().image_query or "").strip()
+        if not image_template:
+            return None
+        pure_ref = _PURE_VARIABLE_PATTERN.match(image_template)
+        if not pure_ref or not variable_pool.has(image_template):
+            logger.warning(
+                "knowledge node image_query must be a pure file-variable reference: %r",
+                image_template,
+            )
+            return None
+        value = variable_pool.get_value(image_template, strict=False)
+        candidates = value if isinstance(value, list) else [value]
+        for candidate in candidates:
+            if isinstance(candidate, dict):
+                file_type = candidate.get("type") or candidate.get("origin_file_type")
+                image_url = candidate.get("url")
+            else:
+                file_type = getattr(candidate, "type", None) or getattr(candidate, "origin_file_type", None)
+                image_url = getattr(candidate, "url", None)
+            if (
+                str(getattr(file_type, "value", file_type) or "").startswith("image")
+                and isinstance(image_url, str)
+                and image_url
+            ):
+                return image_url
+        return None
+
     def _extract_input(self, state: WorkflowState, variable_pool: VariablePool) -> dict[str, Any]:
         cfg = self._get_typed_config()
-        # 复用 execute() 中的渲染逻辑，保证 input 记录的是变量解析后的真实值，
-        # 而非原始模板 {{xxx}}，与 assigner / LLM 等节点的展示约定保持一致。
         rendered_filters = self._render_filter_variables(cfg.metadata_filters, variable_pool)
+        image_url = self._resolve_image_query(variable_pool)
         return {
-            "query": self._render_template(cfg.query, variable_pool),
+            # 二选一：image_query 命中图片时记录图片模态，否则记录文本 query 渲染值
+            "query": {"modality": "image", "content": image_url} if image_url
+            else self._render_template(cfg.query, variable_pool),
+            "image_query": cfg.image_query,
             "knowledge_bases": [kb_config.model_dump(mode="json") for kb_config in cfg.knowledge_bases],
             "metadata_filter_mode": cfg.metadata_filter_mode.value,
             "metadata_filters": rendered_filters and {
@@ -109,6 +144,7 @@ class KnowledgeRetrievalNode(BaseNode):
                 "conditions": [{"field": c.field, "operator": c.operator, "value": c.value, "value_type": c.value_type} for c in rendered_filters.conditions],
             },
         }
+
 
     def _render_filter_variables(
         self,
@@ -353,8 +389,9 @@ class KnowledgeRetrievalNode(BaseNode):
                 "_metadata_filter_result": {"mode": "disabled", "status": "skipped"},
             }
 
-        # 1. Render query template
-        query = self._render_template(self.typed_config.query, variable_pool)
+        # 1. query 与 image_query 二选一：image_query 解析到图片时走图片检索
+        image_url = self._resolve_image_query(variable_pool)
+        query = "" if image_url else self._render_template(self.typed_config.query, variable_pool)
 
         # 2. Pre-render variable templates in metadata filter conditions
         rendered_filters = self._render_filter_variables(
@@ -362,8 +399,9 @@ class KnowledgeRetrievalNode(BaseNode):
         )
 
         # 2.5 auto 模式：节点层用配置好的模型 + 参数，提取出源数据过滤条件（list[FilterGroup]，配置层类型）
+        # 图片检索没有文本 query，跳过基于 LLM 的自动过滤。
         auto_filter_groups: list | None = None
-        if self.typed_config.metadata_filter_mode == MetadataFilterMode.AUTO:
+        if not image_url and self.typed_config.metadata_filter_mode == MetadataFilterMode.AUTO:
             auto_filter_groups = await self._extract_auto_filter_groups_async(query, variable_pool)
 
         # 3. Construct KnowledgeRetrievalRequest
@@ -384,8 +422,9 @@ class KnowledgeRetrievalNode(BaseNode):
             else 0
         )
 
+        # 图片模式下文本 query 为空，先用占位构建，检索前由 image_query 替换
         request = KnowledgeRetrievalRequest(
-            query=query,
+            query=query or " ",
             source=KnowledgeRetrievalSource.WORKFLOW,
             kb_ids=kb_ids,
             knowledge_bases=self.typed_config.knowledge_bases,
@@ -413,10 +452,34 @@ class KnowledgeRetrievalNode(BaseNode):
             source=KnowledgeRetrievalSource.WORKFLOW,
             trace_id=uuid.uuid4().hex,
         )
-        result = await get_knowledge_retriever().retrieve(
-            request,
-            context,
-        )
+        retriever = get_knowledge_retriever()
+        if image_url:
+            from app.integrations.knowledge.retrieval_policy import (
+                build_image_retrieval_query,
+                image_retrieval_supported,
+            )
+
+            if not await image_retrieval_supported(
+                retriever,
+                kb_ids=[str(kb_id) for kb_id in kb_ids],
+                retrieve_type=first_kb.retrieve_type,
+                context=context,
+                rerank_id=str(self.typed_config.reranker_id) if self.typed_config.reranker_id else None,
+                rerank_mode=self.typed_config.rerank_mode,
+                enable_graph_retrieval=enable_graph_retrieval,
+            ):
+                raise BusinessException(
+                    "当前知识库/检索模式不支持图片检索，请改用文本 query 或更换支持多模态检索的知识库",
+                    BizCode.INVALID_PARAMETER,
+                )
+            image_query = await build_image_retrieval_query(image_url)
+            if image_query is None:
+                raise BusinessException(
+                    "图片检索失败：无法下载或编码 image_query 指向的图片",
+                    BizCode.INVALID_PARAMETER,
+                )
+            request = request.model_copy(update={"query": image_query})
+        result = await retriever.retrieve(request, context)
 
         # 5. Assemble return format
         chunks = result.chunks

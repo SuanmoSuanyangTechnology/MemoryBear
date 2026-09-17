@@ -95,7 +95,52 @@ def _snapshot_message(message: Message) -> SimpleNamespace:
 
 class KnowledgeRetrievalInput(BaseModel):
     """知识库检索工具输入参数"""
-    query: str = Field(description="需要检索的问题或关键词")
+    query: str = Field(
+        default="",
+        description=(
+            "文本形式的检索问题或关键词。仅当用户提出了独立的文字问题/关键词时填写；"
+            "当用户要求“按这张图/用图片检索相似内容”且没有额外文字问题时，本字段留空，"
+            "只通过 image_refs 传图片，切勿把图片中能看到的文字 OCR 出来填到这里。"
+        ),
+    )
+    image_refs: list[int] = Field(
+        default_factory=list,
+        description=(
+            "需要按图片内容检索时，填写用户消息中列出的本轮上传图片编号（从 1 开始）。"
+            "仅在用户明确要求按图片检索知识库时填写；纯文本问题留空。"
+        ),
+    )
+
+
+def _extract_image_urls(files: list[FileInput] | list[dict[str, Any]] | None) -> list[str]:
+    """按上传顺序提取本轮图片文件的 URL（仅图片且 URL 非空）。"""
+    urls: list[str] = []
+    for file in files or []:
+        if isinstance(file, dict):
+            file_type, url = file.get("type"), file.get("url")
+            name = file.get("name")
+        else:
+            file_type, url, name = file.type, file.url, getattr(file, "name", None)
+        if str(file_type) == FileType.IMAGE.value and isinstance(url, str) and url:
+            urls.append(url)
+    return urls
+
+
+def build_uploaded_images_manifest(
+    files: list[FileInput] | list[dict[str, Any]] | None,
+) -> tuple[str, list[str]]:
+    """构造注入用户消息的本轮图片清单，并返回与编号一致的有序 URL 白名单。
+
+    返回 (manifest_text, image_urls)；无图片时返回 ("", [])。
+    """
+    image_urls = _extract_image_urls(files)
+    if not image_urls:
+        return "", []
+    lines = ["本轮用户上传了以下图片，可在需要按图片内容检索知识库时，"
+             "通过知识库检索工具的 image_refs 参数传入对应编号："]
+    for index, url in enumerate(image_urls, start=1):
+        lines.append(f"[图片{index}] {url}")
+    return "\n".join(lines), image_urls
 
 
 class WebSearchInput(BaseModel):
@@ -155,16 +200,15 @@ async def _retrieve_chunks_via_standard(
         app_id: uuid.UUID | str | None,
         workspace_id: uuid.UUID | str | None,
         source: KnowledgeRetrievalSource,
+        image_urls: list[str] | None = None,
+        image_stats: dict[str, Any] | None = None,
 ) -> list:
-    """标准化知识库检索：走 KnowledgeRetriever + KnowledgeRetrievalRequest。
+    """Retrieve text and, when explicitly supported, attached image queries.
 
-    读取 agent 的 ``knowledge_retrieval`` 配置（top_k / similarity_threshold /
-    retrieve_type / reranker_id）。由于
-    KnowledgeRetrievalRequest 只携带一组检索参数，这里沿用工作流知识库节点的约定，
-    用第一个 KB 的参数作为全局默认；缺失值回落到 schema 默认值。
+    当传入 ``image_stats`` 时，函数会原地回填图片检索的执行计数
+    （requested/encoded/succeeded/failed），供调用方向模型反馈失败原因。
     """
     knowledge_bases = (kb_config or {}).get("knowledge_bases", []) or []
-    # 单一过滤源:有 kb_id 的 KB 才会进入请求,request_kbs 与 kb_ids 强一致
     valid_kbs = [kb for kb in knowledge_bases if kb.get("kb_id")]
     kb_ids = [kb["kb_id"] for kb in valid_kbs]
     if not kb_ids:
@@ -197,14 +241,11 @@ async def _retrieve_chunks_via_standard(
         except (ValueError, AttributeError):
             rerank_id = None
 
-    # 分词检索不使用 vector_similarity_weight，其他检索类型从配置读取
-    if retrieve_type == RetrieveType.PARTICIPLE:
-        vector_similarity_weight = None
-    else:
-        vector_similarity_weight = _as_float(first_kb.get("vector_similarity_weight"), 0.5)
-
-    # 混合检索下，按第一个 KB 的开关设置请求级图谱检索兜底
-    # （每个 KB 显式配置的 enable_graph_retrieval 仍会在检索层按 KB 覆盖生效）
+    vector_similarity_weight = (
+        None
+        if retrieve_type == RetrieveType.PARTICIPLE
+        else _as_float(first_kb.get("vector_similarity_weight"), 0.5)
+    )
     enable_graph_retrieval = (
         1
         if (
@@ -213,18 +254,14 @@ async def _retrieve_chunks_via_standard(
         )
         else 0
     )
-
-    # 透传与 kb_ids 同源的 KB 配置,避免重复过滤导致漂移
-    # 配置了全局重排模型时，reranker_top_k 决定最终重排保留数量；
-    # 未配置重排时继续沿用第一个知识库的 top_k 作为请求级默认值。
     request_top_k = (
         _as_int(kb_config.get("reranker_top_k"), 10)
         if rerank_id is not None
         else _as_int(first_kb.get("top_k"), 3)
     )
 
-    request = KnowledgeRetrievalRequest(
-        query=query,
+    # query 与图片请求共用的参数；query 单独按模态构造
+    request_kwargs: dict[str, Any] = dict(
         source=source,
         kb_ids=[uuid.UUID(kid) for kid in kb_ids],
         knowledge_bases=valid_kbs,
@@ -237,16 +274,91 @@ async def _retrieve_chunks_via_standard(
         rerank_weights=kb_config.get("rerank_weights"),
         enable_graph_retrieval=enable_graph_retrieval,
     )
-
     context = await build_app_knowledge_context(
         app_id,
         source=source,
         trace_id=uuid.uuid4().hex,
         expected_workspace_id=workspace_id,
     )
-    result = await get_knowledge_retriever().retrieve(request, context)
+    retriever = get_knowledge_retriever()
+    # query 留空且带图片时为“纯以图搜图”：跳过文本检索，避免图片中可见文字主导召回
+    results: list = []
+    if (query or "").strip():
+        text_request = KnowledgeRetrievalRequest(query=query, **request_kwargs)
+        results = list((await retriever.retrieve(text_request, context)).chunks)
 
-    return result.chunks
+    image_diagnostics: dict[str, Any] = {"requested": 0, "encoded": 0, "succeeded": 0, "failed": 0}
+    if image_urls:
+        from app.integrations.knowledge.retrieval_policy import (
+            build_image_retrieval_query,
+            image_retrieval_supported,
+        )
+
+        unique_image_urls = list(dict.fromkeys(image_urls))
+        image_diagnostics["requested"] = len(unique_image_urls)
+        logger.info(
+            "知识库图片检索开始 kb_ids=%s retrieve_type=%s image_count=%s",
+            kb_ids, retrieve_type.value, len(unique_image_urls),
+        )
+        supported = await image_retrieval_supported(
+            retriever,
+            kb_ids=[str(kb_id) for kb_id in kb_ids],
+            retrieve_type=retrieve_type,
+            context=context,
+            rerank_id=str(rerank_id) if rerank_id else None,
+            rerank_mode=kb_config.get("rerank_mode"),
+            enable_graph_retrieval=enable_graph_retrieval,
+        )
+        if not supported:
+            # fail-closed：策略不支持/不可用时明确记录，避免图片检索被静默丢弃
+            image_diagnostics["failed"] = len(unique_image_urls)
+            logger.warning(
+                "知识库图片检索被策略拒绝（不支持模态或策略服务不可用）kb_ids=%s "
+                "retrieve_type=%s rerank_mode=%s graph=%s",
+                kb_ids, retrieve_type.value, kb_config.get("rerank_mode"),
+                enable_graph_retrieval,
+            )
+        else:
+            for image_url in unique_image_urls:
+                image_query = await build_image_retrieval_query(image_url)
+                if image_query is None:
+                    image_diagnostics["failed"] += 1
+                    logger.warning("知识库图片检索跳过：图片下载/编码失败 url=%s", image_url[:200])
+                    continue
+                image_diagnostics["encoded"] += 1
+                image_request = KnowledgeRetrievalRequest(query=image_query, **request_kwargs)
+                try:
+                    image_chunks = (await retriever.retrieve(image_request, context)).chunks
+                    image_diagnostics["succeeded"] += 1
+                    logger.info(
+                        "知识库图片检索命中 url=%s chunks=%s",
+                        image_url[:200], len(image_chunks),
+                    )
+                    results.extend(image_chunks)
+                except Exception as image_exc:
+                    image_diagnostics["failed"] += 1
+                    # 单张图片检索失败不应丢弃已成功的文本检索结果
+                    logger.warning(
+                        "知识库图片检索失败: %s",
+                        image_exc,
+                        extra={"error": str(image_exc), "error_type": type(image_exc).__name__},
+                    )
+        logger.info("知识库图片检索结束 %s", image_diagnostics)
+        if image_stats is not None:
+            image_stats.update(image_diagnostics)
+
+    seen_chunk_ids: set[str] = set()
+    unique_results = []
+    for chunk in results:
+        metadata = getattr(chunk, "metadata", {}) or {}
+        chunk_id = str(metadata.get("chunk_id") or metadata.get("id") or "")
+        if chunk_id and chunk_id in seen_chunk_ids:
+            continue
+        if chunk_id:
+            seen_chunk_ids.add(chunk_id)
+        unique_results.append(chunk)
+    return unique_results
+
 
 
 def create_knowledge_retrieval_tool(
@@ -259,6 +371,7 @@ def create_knowledge_retrieval_tool(
         source: KnowledgeRetrievalSource,
         citations_collector: Optional[List[Citation]] = None,
         kb_names: Optional[List[Dict]] = None,
+        uploaded_files: Optional[List[FileInput]] = None,
 ):
     """从知识库中检索相关信息。当用户的问题需要参考知识库、文档或历史记录时，使用此工具进行检索。
 
@@ -276,27 +389,95 @@ def create_knowledge_retrieval_tool(
         检索到的相关知识内容
     """
     logger.info(f"创建知识库检索工具，用户：{user_id}")
+    # 本轮上传图片的有序白名单（1-based 编号 -> URL），仅允许模型引用这些图片
+    image_urls: list[str] = []
+
+    def set_uploaded_files(files: list[FileInput] | list[dict[str, Any]] | None) -> None:
+        """Record current-turn image URLs that the model may reference by index."""
+        image_urls[:] = [
+            url
+            for file in files or []
+            for file_type, url in [
+                (
+                    file.get("type") if isinstance(file, dict) else file.type,
+                    file.get("url") if isinstance(file, dict) else file.url,
+                )
+            ]
+            if str(file_type) == FileType.IMAGE.value and isinstance(url, str) and url
+        ]
+
+    set_uploaded_files(uploaded_files)
 
     @tool(args_schema=KnowledgeRetrievalInput)
-    async def knowledge_retrieval_tool(query: str) -> str:
-        """从知识库中检索相关信息。当用户的问题需要参考知识库、文档或历史记录时，使用此工具进行检索。
+    async def knowledge_retrieval_tool(query: str = "", image_refs: list[int] | None = None) -> str:
+        """从知识库中检索相关信息。当用户的问题需要参考知识库、文档或历史记录时使用。
 
-        Args:
-            query: 需要检索的问题或关键词
+        参数说明：
+        - query: 文本形式的检索问题或关键词，可留空。仅当用户提出了独立的文字问题或
+          关键词时才填写；绝不要把图片 URL、链接、base64 放进 query。
+          当用户只要求“按这张图/用图片去知识库检索相似内容”而没有额外文字问题时，
+          query 必须留空，只传 image_refs；尤其不要把图片中能看到的标题/文字
+          OCR 或转写出来填进 query，否则会变成文本检索而非以图搜图。
+        - image_refs: 当且仅当用户要求“按图片/用这张图去知识库检索相似内容”时填写。
+          取值为用户消息中“[图片N]”清单里的编号 N（整数，从 1 开始），可传多个。
+          纯文本问题、或用户未要求按图检索时，留空或传空列表，切勿臆造编号。
+          例如用户消息含“[图片1] https://...”，且要求按图检索，则传 image_refs=[1]，
+          此时 query 留空。
+
+        query 与 image_refs 至少要有一个非空。
 
         Returns:
             检索到的相关知识内容
         """
 
         try:
-
+            # 仅检索模型显式选择、且属于本轮上传白名单的图片，杜绝任意 URL
+            selected_image_urls: list[str] = []
+            if image_refs:
+                if not image_urls:
+                    # 模型给了编号，但本轮没有可用图片白名单（时序/非图片上传问题）
+                    logger.warning(
+                        "知识库工具收到 image_refs=%s 但本轮图片白名单为空，忽略图片检索",
+                        image_refs,
+                    )
+                for ref in image_refs:
+                    if isinstance(ref, bool) or not isinstance(ref, int):
+                        logger.warning("知识库工具 image_refs 含非整数编号，已忽略: %r", ref)
+                        continue
+                    if 1 <= ref <= len(image_urls):
+                        selected_image_urls.append(image_urls[ref - 1])
+                    else:
+                        logger.warning(
+                            "知识库工具 image_refs 编号越界: ref=%s 本轮图片数=%s",
+                            ref, len(image_urls),
+                        )
+            query = (query or "").strip()
+            logger.info(
+                "知识库工具检索 query=%r image_refs=%s 选中图片数=%s",
+                query[:120], image_refs, len(selected_image_urls),
+            )
+            if not query and not selected_image_urls:
+                # 两个检索入口都为空：无法检索，明确告知模型补全参数
+                return "检索失败：query 与 image_refs 不能同时为空。请提供文字问题，或在用户要求按图检索时传入有效图片编号。"
+            image_stats: dict[str, Any] = {}
             retrieve_chunks_result = await _retrieve_chunks_via_standard(
                 query,
                 kb_config,
                 app_id=app_id,
                 workspace_id=workspace_id,
                 source=source,
+                image_urls=selected_image_urls,
+                image_stats=image_stats,
             )
+            # 模型显式请求了图片检索，但所有图片都没检索成功：给出明确反馈，
+            # 避免模型在没有图片证据时假装已按图检索
+            image_failure_notice = ""
+            if image_stats.get("requested", 0) > 0 and image_stats.get("succeeded", 0) == 0:
+                image_failure_notice = (
+                    "\n\n注意：本次按图片检索未成功执行（图片暂不可下载/编码，或知识库当前不支持图片模态），"
+                    "以上仅为文本检索结果（如有）。请不要声称已根据图片内容检索，请提示用户稍后重试或改用文字描述。"
+                )
+                logger.warning("知识库图片检索全部失败 image_stats=%s", image_stats)
             if retrieve_chunks_result:
                 retrieval_knowledge = [i.page_content for i in retrieve_chunks_result]
                 context = '\n\n'.join(retrieval_knowledge)
@@ -356,18 +537,22 @@ def create_knowledge_retrieval_tool(
                     ) for chunk in retrieve_chunks_result if chunk.page_content
                 ]
 
-                return f"检索到以下相关信息：\n\n{context}"
+                return f"检索到以下相关信息：\n\n{context}{image_failure_notice}"
             else:
                 knowledge_retrieval_tool._last_sources = []
                 knowledge_retrieval_tool._context_evidence = []
-                logger.warning("知识库检索未找到结果")
+                logger.warning("知识库检索未找到结果 image_stats=%s", image_stats)
+                if image_failure_notice:
+                    return "未找到相关信息。" + image_failure_notice.strip()
                 return "未找到相关信息"
         except Exception as e:
             knowledge_retrieval_tool._context_evidence = []
             logger.error("知识库检索失败", extra={"error": str(e), "error_type": type(e).__name__})
             return f"检索失败: {str(e)}"
 
-    # 挂载工具元数据，供 Agent 执行记录使用
+    # Keep the current turn's files mutable after the tool is constructed.
+    object.__setattr__(knowledge_retrieval_tool, "set_uploaded_files", set_uploaded_files)
+    # 挂载工具元数据，供 Agent 执行记录使用及沙箱序列化使用。
     knowledge_retrieval_tool._tool_meta = {
         "tool_type": "knowledge_retrieval",
         "sources": [{"id": item["id"], "name": item["name"], "knowledge_name": item["name"]} for item in (kb_names or [])],
@@ -1410,6 +1595,8 @@ class AgentRunService:
             # 6. 处理多模态文件
             processed_files = None
             has_doc_with_images = False
+            # 仅用于发给 LLM 的用户消息（追加本轮图片清单），不污染入库原文 message
+            llm_message = message
             if files:
                 provider = api_key_config.get("provider", "openai")
                 multimodal_service = MultimodalService(self.db, model_info)
@@ -1422,6 +1609,15 @@ class AgentRunService:
                     workspace_id=workspace_id
                 )
                 logger.info(f"处理了 {len(processed_files)} 个文件，provider={provider}")
+                # 将本轮上传文件（含图片 URL）回注给知识库工具，作为可被模型引用的白名单
+                for tool in tools:
+                    set_uploaded_files = getattr(tool, "set_uploaded_files", None)
+                    if callable(set_uploaded_files):
+                        set_uploaded_files(files)
+                # 在发给 LLM 的用户消息中列出本轮图片及编号，供模型按需显式触发图片检索
+                image_manifest, _ = build_uploaded_images_manifest(files)
+                if image_manifest:
+                    llm_message = f"{message}\n\n{image_manifest}"
                 capability = api_key_config.get("capability", [])
                 has_doc_with_images = (
                     doc_img_recognition
@@ -1452,7 +1648,7 @@ class AgentRunService:
                 system_prompt, orchestrator_node_executions = await ToolOrchestrator.create_and_run(
                     tools=tools,
                     system_prompt=system_prompt,
-                    message=message,
+                    message=llm_message,
                     history=history,
                     api_key_config=api_key_config,
                     model_config=model_config,
@@ -1518,7 +1714,7 @@ class AgentRunService:
 
             # 8. 调用 Agent（支持多模态）
             result = await agent.chat(
-                message=message,
+                message=llm_message,
                 history=history,
                 context=context,
                 files=processed_files
@@ -1888,6 +2084,8 @@ class AgentRunService:
             # 6. 处理多模态文件
             processed_files = None
             has_doc_with_images = False
+            # 仅用于发给 LLM 的用户消息（追加本轮图片清单），不污染入库原文 message
+            llm_message = message
             if files:
                 provider = api_key_config.get("provider", "openai")
                 multimodal_service = MultimodalService(self.db, model_info)
@@ -1900,6 +2098,15 @@ class AgentRunService:
                     workspace_id=workspace_id
                 )
                 logger.info(f"处理了 {len(processed_files)} 个文件，provider={provider}")
+                # 将本轮上传文件（含图片 URL）回注给知识库工具，作为可被模型引用的白名单
+                for tool in tools:
+                    set_uploaded_files = getattr(tool, "set_uploaded_files", None)
+                    if callable(set_uploaded_files):
+                        set_uploaded_files(files)
+                # 在发给 LLM 的用户消息中列出本轮图片及编号，供模型按需显式触发图片检索
+                image_manifest, _ = build_uploaded_images_manifest(files)
+                if image_manifest:
+                    llm_message = f"{message}\n\n{image_manifest}"
                 capability = api_key_config.get("capability", [])
                 has_doc_with_images = (
                     doc_img_recognition
@@ -1930,7 +2137,7 @@ class AgentRunService:
                 system_prompt, orchestrator_node_executions = await ToolOrchestrator.create_and_run(
                     tools=tools,
                     system_prompt=system_prompt,
-                    message=message,
+                    message=llm_message,
                     history=history,
                     api_key_config=api_key_config,
                     model_config=model_config,
@@ -2069,7 +2276,7 @@ class AgentRunService:
                 _chunk_stream = _sandbox_stream
             else:
                 _chunk_stream = agent.chat_stream(
-                    message=message,
+                    message=llm_message,
                     history=history,
                     context=context,
                     files=processed_files

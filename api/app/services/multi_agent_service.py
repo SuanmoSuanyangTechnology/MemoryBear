@@ -36,6 +36,11 @@ def convert_uuids_to_str(obj: Any) -> Any:
     """
     if isinstance(obj, uuid.UUID):
         return str(obj)
+    elif isinstance(obj, str):
+        # PostgreSQL 的 text/jsonb 禁止 NUL(U+0000)。节点输出（如知识检索回传的
+        # chunk 原文）可能混入该字符，原样入库即抛 UntranslatableCharacterError
+        # (22P05 unsupported Unicode escape sequence)。本函数用于写库前净化。
+        return obj.replace("\x00", "") if "\x00" in obj else obj
     elif isinstance(obj, dict):
         return {k: convert_uuids_to_str(v) for k, v in obj.items()}
     elif isinstance(obj, list):
