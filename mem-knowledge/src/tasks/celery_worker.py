@@ -92,18 +92,23 @@ def _log_health_state_failure(
     )
 
 
-def _publish_initial_health_state(*, role: str, queues: set[str]) -> None:
+def _publish_health_state(
+    *,
+    role: str,
+    queues: set[str],
+    phase: WorkerPhase,
+) -> None:
     try:
         state = build_worker_state(
             role=role,
             queues=queues,
-            phase=WorkerPhase.STARTING,
+            phase=phase,
         )
         write_worker_state(_health_state_file(), state)
     except Exception as error:
         _log_health_state_failure(
             event="kb_worker_health_state_write_failed",
-            phase=WorkerPhase.STARTING,
+            phase=phase,
             error=error,
         )
 
@@ -152,7 +157,11 @@ def validate_worker_configuration(
             sender,
         )
         raise SystemExit(78) from None
-    _publish_initial_health_state(role=role, queues=queues)
+    _publish_health_state(
+        role=role,
+        queues=queues,
+        phase=WorkerPhase.STARTING,
+    )
 
 
 @celery_setup_logging.connect
@@ -168,15 +177,21 @@ def handle_worker_ready(sender: object, **kwargs: object) -> None:
     """Report the resolved runtime shape once the consumer is ready."""
 
     del kwargs
-    _transition_health_state(WorkerPhase.READY)
     app = getattr(sender, "app", celery_app)
-    queue_names = sorted(_active_queue_names(app))
+    queues = _active_queue_names(app)
+    queue_names = sorted(queues)
     controller = getattr(sender, "controller", None)
     pool = getattr(controller, "pool", None)
+    role = get_settings().kb_process_role
+    _publish_health_state(
+        role=role,
+        queues=queues,
+        phase=WorkerPhase.READY,
+    )
     logger.info(
         "event=kb_worker_ready role=%s hostname=%s main_pid=%s queues=%s "
         "pool=%s concurrency=%s prefetch_multiplier=%s",
-        get_settings().kb_process_role,
+        role,
         getattr(sender, "hostname", "unknown"),
         os.getpid(),
         ",".join(queue_names),

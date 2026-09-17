@@ -40,6 +40,7 @@ CELERY_GLOBAL_OPTIONS_WITH_VALUE = frozenset(
         "--app",
         "-b",
         "--broker",
+        "--result-backend",
         "--config",
         "--loader",
         "--workdir",
