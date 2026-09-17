@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import uuid
 from typing import TYPE_CHECKING
 
 from app.core.memory.llm_tools.openai_client import OpenAIClient
@@ -29,80 +28,6 @@ class MemoryClientFactory:
         self._db = db
         self._config_service = MemoryConfigService(db)
         self._tenant_id = tenant_id
-
-    def get_legacy_llm_client(self, llm_id: str, tenant_id=None) -> OpenAIClient:
-        """Create an LLM client using only ``model_api_keys.api_key``.
-
-        Args:
-            llm_id: Model configuration UUID.
-            tenant_id: Tenant allowed to use the model configuration.
-
-        Returns:
-            An LLM client initialized from an active legacy API key.
-
-        Raises:
-            ValueError: If the model or its legacy API key is unavailable.
-        """
-        from app.services.model_service import ModelApiKeyService, ModelConfigService
-
-        resolved_tenant_id = tenant_id or self._tenant_id
-        try:
-            model_id = uuid.UUID(str(llm_id))
-            model_config = ModelConfigService.get_model_by_id(
-                self._db,
-                model_id,
-                tenant_id=resolved_tenant_id,
-            )
-            api_config = ModelApiKeyService.get_available_legacy_api_key(
-                self._db,
-                model_id,
-                tenant_id=resolved_tenant_id,
-            )
-        except Exception as exc:
-            raise ValueError(f"Invalid LLM ID '{llm_id}': {exc}") from exc
-        if api_config is None:
-            raise ValueError(f"LLM '{llm_id}' has no active model_api_keys credential")
-        return OpenAIClient(
-            RedBearModelConfig.from_api_key(api_config),
-            type_=model_config.type,
-        )
-
-    def get_legacy_embedder_client(self, embedding_id: str, tenant_id=None):
-        """Create an embedder client using only ``model_api_keys.api_key``.
-
-        Args:
-            embedding_id: Embedding model configuration UUID.
-            tenant_id: Tenant allowed to use the model configuration.
-
-        Returns:
-            An embedder client initialized from an active legacy API key.
-
-        Raises:
-            ValueError: If the model or its legacy API key is unavailable.
-        """
-        from app.core.memory.llm_tools.openai_embedder import OpenAIEmbedderClient
-        from app.services.model_service import ModelApiKeyService, ModelConfigService
-
-        resolved_tenant_id = tenant_id or self._tenant_id
-        try:
-            model_id = uuid.UUID(str(embedding_id))
-            ModelConfigService.get_model_by_id(
-                self._db,
-                model_id,
-                tenant_id=resolved_tenant_id,
-            )
-            api_config = ModelApiKeyService.get_available_legacy_api_key(
-                self._db,
-                model_id,
-                tenant_id=resolved_tenant_id,
-            )
-        except Exception as exc:
-            raise ValueError(f"Invalid embedding ID '{embedding_id}': {exc}") from exc
-        if api_config is None:
-            raise ValueError(
-                f"Embedding model '{embedding_id}' has no active model_api_keys credential"
-            )
-        return OpenAIEmbedderClient(RedBearModelConfig.from_api_key(api_config))
 
     def get_llm_client(self, llm_id: str, tenant_id=None) -> OpenAIClient:
         """Get LLM client by model ID."""
