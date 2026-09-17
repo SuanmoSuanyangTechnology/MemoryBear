@@ -268,7 +268,7 @@ class FastWritePipeline:
         - text 为空 → 返回 None。
         - 懒加载 embedder：与正路径 WritePipeline 一致，通过 ModelClientMixin.get_embedding_client
           用 memory_config.embedding_model_id / tenant_id 构造，保证向量空间一致。
-        - 完整文本单次 aembed_query（不做前置截断）。
+        - 完整文本作为 document 单次 aembed_documents（不做前置截断）。
         - 硬上限 EMBED_TIMEOUT_SEC：底层 client 的 max_retries * timeout 可能突破 celery
           任务超时；用 asyncio.wait_for 兜底，超时即视为失败降级。
         - 失败降级：任何异常（含超时）记录 warning 日志（含 text_len）并返回 None，不重试。
@@ -288,10 +288,11 @@ class FastWritePipeline:
                         self.memory_config.tenant_id,
                     )
 
-            return await asyncio.wait_for(
-                self._embedder.aembed_query(text),
+            embeddings = await asyncio.wait_for(
+                self._embedder.aembed_documents([text]),
                 timeout=self.EMBED_TIMEOUT_SEC,
             )
+            return embeddings[0] if embeddings else None
         except asyncio.TimeoutError:
             logger.warning(
                 "[FastWrite] embedding timed out, degrading to None: text_len=%s, "
