@@ -1180,6 +1180,7 @@ class AgentRunService:
             source: str = "",
             history: Optional[List[Dict[str, str]]] = None,
             skip_save: bool = False,
+            stateless: bool = False,
             execution_mode: Literal["in_process", "sandbox"] = "in_process",
     ) -> Dict[str, Any]:
         """执行试运行（使用 LangChain Agent）
@@ -1200,11 +1201,17 @@ class AgentRunService:
             files: 多模态文件列表（可选）
             history: 外部传入的历史消息（可选，用于重新生成场景）
             skip_save: 是否跳过保存消息（用于重新生成场景）
+            stateless: 是否以无会话、无消息持久化方式执行子 Agent
             execution_mode: 执行模式 (in_process / sandbox)
 
         Returns:
             Dict: 包含 AI 回复和元数据的字典
         """
+        if stateless and (not sub_agent or not skip_save):
+            raise ValueError("stateless 模式必须与 sub_agent=True、skip_save=True 一起使用")
+        if stateless and history is None:
+            history = []
+
         start_time = time.time()
         user_message_id = uuid.uuid4()
         assistant_message_id = uuid.uuid4()
@@ -1268,7 +1275,7 @@ class AgentRunService:
                     user_id,
                     app_id=agent_config.app_id,
                     workspace_id=workspace_id,
-                    source=KnowledgeRetrievalSource.DRAFT,
+                    source=KnowledgeRetrievalSource.AGENT if sub_agent else KnowledgeRetrievalSource.DRAFT,
                 ),
                 self.load_memory_config(memory_config, user_id, workspace_id, storage_type, user_rag_memory_id)
                 if memory else None,
@@ -1306,19 +1313,23 @@ class AgentRunService:
             elif isinstance(memory_result, Exception):
                 logger.warning("load_memory_config failed: %s", memory_result)
 
-            # 5. 处理会话ID（创建或验证），新会话时写入开场白
-            is_new_conversation = not conversation_id
-            opening, suggested_questions = None, None
-            if not sub_agent:
-                opening, suggested_questions = self._get_opening_statement(features_config, is_new_conversation, variables)
-            conversation_id = await self._ensure_conversation(
-                conversation_id=conversation_id,
-                app_id=agent_config.app_id,
-                workspace_id=workspace_id,
-                user_id=user_id,
-                opening_statement=opening,
-                suggested_questions=suggested_questions
-            )
+            # 5. 处理会话ID。stateless 子调用显式跳过会话创建与验证。
+            if not stateless:
+                is_new_conversation = not conversation_id
+                opening, suggested_questions = None, None
+                if not sub_agent:
+                    opening, suggested_questions = self._get_opening_statement(
+                        features_config, is_new_conversation, variables
+                    )
+                conversation_id = await self._ensure_conversation(
+                    conversation_id=conversation_id,
+                    app_id=agent_config.app_id,
+                    workspace_id=workspace_id,
+                    user_id=user_id,
+                    sub_agent=sub_agent,
+                    opening_statement=opening,
+                    suggested_questions=suggested_questions,
+                )
 
             # 检查标注命中
             if not sub_agent:
@@ -1659,6 +1670,7 @@ class AgentRunService:
             source: str = "",
             history: Optional[List[Dict[str, str]]] = None,
             skip_save: bool = False,
+            stateless: bool = False,
             user_message_id: Optional[uuid.UUID] = None,
             execution_mode: Literal["in_process", "sandbox"] = "in_process",
 
@@ -1679,6 +1691,11 @@ class AgentRunService:
         Yields:
             str: SSE 格式的事件数据
         """
+        if stateless and (not sub_agent or not skip_save):
+            raise ValueError("stateless 模式必须与 sub_agent=True、skip_save=True 一起使用")
+        if stateless and history is None:
+            history = []
+
         tools_config: dict | list | None = agent_config.tools
         skills_config: dict | None = agent_config.skills
         knowledge_retrieval_config: dict | None = agent_config.knowledge_retrieval
@@ -1704,10 +1721,9 @@ class AgentRunService:
         try:
             # 1. 获取 API Key 配置
             api_key_config = await self._get_api_key(model_config.id, tenant_id=tenant_id)
-            if not sub_agent:
+            if sub_agent:
                 variables = self.prepare_variables(variables, agent_config.variables)
             else:
-                # FIXME: subagent input valid
                 variables = variables or {}
 
             # 2. 合并模型参数
@@ -1737,7 +1753,7 @@ class AgentRunService:
                     user_id,
                     app_id=agent_config.app_id,
                     workspace_id=workspace_id,
-                    source=KnowledgeRetrievalSource.DRAFT,
+                    source=KnowledgeRetrievalSource.AGENT if sub_agent else KnowledgeRetrievalSource.DRAFT,
                 ),
                 self.load_memory_config(memory_config, user_id, workspace_id, storage_type, user_rag_memory_id)
                 if memory else None,
@@ -1775,20 +1791,23 @@ class AgentRunService:
             elif isinstance(memory_result, Exception):
                 logger.warning("load_memory_config failed: %s", memory_result)
 
-            # 5. 处理会话ID（创建或验证），新会话时写入开场白
-            is_new_conversation = not conversation_id
-            opening, suggested_questions = None, None
-            if not sub_agent:
-                opening, suggested_questions = self._get_opening_statement(features_config, is_new_conversation, variables)
-            conversation_id = await self._ensure_conversation(
-                conversation_id=conversation_id,
-                app_id=agent_config.app_id,
-                workspace_id=workspace_id,
-                user_id=user_id,
-                sub_agent=sub_agent,
-                opening_statement=opening,
-                suggested_questions=suggested_questions
-            )
+            # 5. 处理会话ID。stateless 子调用显式跳过会话创建与验证。
+            if not stateless:
+                is_new_conversation = not conversation_id
+                opening, suggested_questions = None, None
+                if not sub_agent:
+                    opening, suggested_questions = self._get_opening_statement(
+                        features_config, is_new_conversation, variables
+                    )
+                conversation_id = await self._ensure_conversation(
+                    conversation_id=conversation_id,
+                    app_id=agent_config.app_id,
+                    workspace_id=workspace_id,
+                    user_id=user_id,
+                    sub_agent=sub_agent,
+                    opening_statement=opening,
+                    suggested_questions=suggested_questions,
+                )
 
             # 检查标注命中
             if not sub_agent:
@@ -2182,7 +2201,9 @@ class AgentRunService:
                 "conversation_id": conversation_id,
                 "message_id": message_id,
                 "elapsed_time": elapsed_time,
-                "message_length": len(full_content)
+                "message_length": len(full_content),
+                "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": total_tokens},
+                "citations": filtered_citations,
             }
             if not sub_agent:
                 end_data["suggested_questions"] = suggested_questions
@@ -2198,7 +2219,6 @@ class AgentRunService:
                         logger.warning(f"TTS任务异常: {e}")
                         audio_status = "failed"
                 end_data["audio_status"] = audio_status if stream_audio_url else None
-                end_data["citations"] = filtered_citations
             yield self._format_sse_event("end", end_data)
 
             logger.info(
