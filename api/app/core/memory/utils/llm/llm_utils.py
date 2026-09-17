@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from typing import TYPE_CHECKING
 
 from app.core.memory.llm_tools.openai_client import OpenAIClient
@@ -25,7 +23,6 @@ class MemoryClientFactory:
 
     def __init__(self, db: Session, tenant_id=None):
         from app.services.memory_config_service import MemoryConfigService
-        self._db = db
         self._config_service = MemoryConfigService(db)
         self._tenant_id = tenant_id
 
