@@ -75,7 +75,7 @@ export const workflowPart2 = {
         'llm.messages': '提示词',
         'llm.vision_input': '视觉变量',
         'end.output': '回复',
-        'knowledge-retrieval.query': '查询变量',
+        'knowledge-retrieval.query': '查询/图片变量必须一个有值',
         'knowledge-retrieval.knowledge_retrieval': '知识库',
         'parameter-extractor.model_id': '模型',
         'parameter-extractor.text': '输入变量',

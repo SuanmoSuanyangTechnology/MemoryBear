@@ -174,7 +174,7 @@ export function useFilteredVariableList(
 
       return filteredList;
     }
-    if (nodeType === 'knowledge-retrieval') {
+    if (nodeType === 'knowledge-retrieval' && key === 'query') {
       const allList = addParentIterationVars(variableList);
       const filteredList: Suggestion[] = []
 
@@ -182,16 +182,32 @@ export function useFilteredVariableList(
         if (variable.dataType === 'string') {
           filteredList.push(variable)
         } else if (variable.dataType === 'file') {
-          filteredList.push({
-            ...variable,
-            children: variable.children.filter((child: Suggestion) => child.dataType === 'string')
-          })
+          // Recursively filter string children from file type
+          const filteredFile = filterChildrenWithTypes([variable], ['string'])[0];
+          if (filteredFile) {
+            filteredList.push(filteredFile);
+          }
         } else if (variable.children && variable.children?.length > 0) {
           // Recursively handle other types with children
           const filteredVar = filterChildrenWithTypes([variable], ['string'])[0];
           if (filteredVar) {
             filteredList.push(filteredVar);
           }
+        }
+      })
+
+      return filteredList
+    }
+    if (nodeType === 'knowledge-retrieval' && key === 'image_query') {
+      const allList = addParentIterationVars(variableList);
+      const filteredList: Suggestion[] = []
+
+      allList.forEach(variable => {
+        if (variable.dataType === 'file') {
+          filteredList.push({
+            ...variable,
+            children: []
+          })
         }
       })
 

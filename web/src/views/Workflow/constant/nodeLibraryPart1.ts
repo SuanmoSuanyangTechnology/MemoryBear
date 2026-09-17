@@ -285,7 +285,9 @@ export const nodeLibraryPart1: NodeLibrary[] = [
         config: {
           query: {
             type: 'variableList',
-            required: true,
+          },
+          image_query: {
+            type: 'variableList',
           },
           knowledge_retrieval: {
             type: 'knowledge',
