@@ -19,7 +19,8 @@ import type {
 } from '@/views/KnowledgeBase/types';
 import CreateModalBasicConfig from './CreateModalBasicConfig';
 import CreateModalKnowledgeGraphConfig from './CreateModalKnowledgeGraphConfig';
-import useCreateModalModels, { MODEL_TYPE_CONFIG } from './useCreateModalModels';
+import useCreateModalModels from './useCreateModalModels';
+import { baseModelFields } from '../../constants'
 
 const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({ refreshTable }, ref) => {
   const { t } = useTranslation();
@@ -33,7 +34,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({ refreshTa
   const [generatingEntityTypes, setGeneratingEntityTypes] = useState(false);
   const [isRebuildMode, setIsRebuildMode] = useState(false);
   const [originalType, setOriginalType] = useState<string>('');
-  const { customModels, dynamicTypeList, getTypeList, resetModelInfo } = useCreateModalModels({
+  const { customModels, getTypeList, resetModelInfo } = useCreateModalModels({
     form,
     datasets,
     visible,
@@ -290,7 +291,9 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({ refreshTa
 
   const handleChange = (_value: string, type: string) => {
     if (datasets?.id && type.toLowerCase() === 'embedding') {
-      const fieldKey = MODEL_TYPE_CONFIG[type.toLowerCase()].fieldKey;
+      console.log('datasets', datasets)
+      const name = baseModelFields.find(item => item.name)?.name;
+      const fieldKey = `${name}_id`;
       const previousValue = (datasets as any)[fieldKey];
       modal.confirm({
         title: t('common.updateWarning'),
@@ -329,7 +332,6 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({ refreshTa
         <CreateModalBasicConfig
           isEditing={!!datasets?.id}
           currentType={currentType}
-          dynamicTypeList={dynamicTypeList}
           customModels={customModels}
           onModelChange={handleChange}
         />

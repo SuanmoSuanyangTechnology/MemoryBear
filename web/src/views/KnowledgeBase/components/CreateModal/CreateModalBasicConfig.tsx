@@ -6,7 +6,7 @@ import SliderInput from '@/components/SliderInput';
 import { stringRegExp } from '@/utils/validator';
 import type { KnowledgeBaseFormData } from '@/views/KnowledgeBase/types';
 import type { Model } from '@/views/ModelManagement/types';
-import { MODEL_TYPE_CONFIG } from './useCreateModalModels';
+import { baseModelFields } from '../../constants'
 
 const { TextArea } = Input;
 
@@ -15,7 +15,6 @@ type KnowledgeBaseType = 'General' | 'Web' | 'Third-party' | 'Folder';
 interface CreateModalBasicConfigProps {
   isEditing: boolean;
   currentType: KnowledgeBaseType;
-  dynamicTypeList: string[];
   customModels: Record<string, Model[]>;
   onModelChange: (value: string, type: string) => void;
 }
@@ -23,7 +22,6 @@ interface CreateModalBasicConfigProps {
 const CreateModalBasicConfig = ({
   isEditing,
   currentType,
-  dynamicTypeList,
   customModels,
   onModelChange,
 }: CreateModalBasicConfigProps) => {
@@ -168,25 +166,22 @@ const CreateModalBasicConfig = ({
         </>
       )}
 
-      {currentType !== 'Folder' && dynamicTypeList.map((type) => {
-        const normalizedType = (type || '').toLowerCase();
-        const modelTypeConfig = MODEL_TYPE_CONFIG[normalizedType];
-        const fieldKey = modelTypeConfig?.fieldKey || `${normalizedType}_id`;
-        const options = customModels[modelTypeConfig?.modelType || type] || [];
+      {currentType !== 'Folder' && baseModelFields.map((item) => {
+        const fieldKey = `${item.name}_id`;
 
         return (
           <Form.Item
-            key={type}
+            key={item.name}
             name={fieldKey as keyof KnowledgeBaseFormData}
             label={`${t(`knowledgeBase.createForm.${fieldKey}`)} model`}
-            rules={[{ required: true, message: t('knowledgeBase.createForm.modelRequired') }]}
+            rules={[{ required: item.required, message: t('knowledgeBase.createForm.modelRequired') }]}
           >
             <ModelSelect
               placeholder={t(`knowledgeBase.createForm.${fieldKey}`)}
               isAutoFetch={false}
-              initialData={options}
+              initialData={customModels[item.type]}
               allowClear={false}
-              onChange={(value) => onModelChange(value, type)}
+              onChange={(value) => onModelChange(value, item.type)}
             />
           </Form.Item>
         );
