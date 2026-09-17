@@ -29,6 +29,43 @@ def _capability_predicate(value: str):
     return ModelConfig.capability.contains([value])
 
 
+def _model_type_rank(column):
+    """类型展示序（/models、/models/new、model_plaza 同序）：llm/chat 同序（chat 为存量
+    归一口径）→ embedding → rerank → image → video → 表外预留 6。"""
+    return case(
+        (column.in_([ModelType.LLM.value, ModelType.CHAT.value]), 1),
+        (column == ModelType.EMBEDDING.value, 2),
+        (column == ModelType.RERANK.value, 3),
+        (column == ModelType.IMAGE.value, 4),
+        (column == ModelType.VIDEO.value, 5),
+        else_=6,
+    )
+
+
+def _model_config_display_order():
+    """模型配置列表展示序（/models、/models/new 一致）：
+    未弃用优先 → 启用优先（未启用但可用紧随其后的位置）→ 类型序 → created_at 新者优先。
+
+    弃用态在 model_bases（组合行 model_id 空 → 子查询 NULL → 非弃用）。
+    """
+    deprecated_rank = case(
+        (
+            select(ModelBase.is_deprecated)
+            .where(ModelBase.id == ModelConfig.model_id)
+            .scalar_subquery()
+            .is_(True),
+            1,
+        ),
+        else_=0,
+    )
+    return (
+        deprecated_rank.asc(),
+        ModelConfig.is_active.desc(),
+        _model_type_rank(ModelConfig.type).asc(),
+        ModelConfig.created_at.desc().nullslast(),
+    )
+
+
 class ModelConfigRepository:
     """模型配置Repository"""
 
@@ -238,7 +275,7 @@ class ModelConfigRepository:
 
             # is_available 过滤需探测派生（SQL 不可达）：全量取行，过滤+分页由服务层内存完成
             if query.is_available is not None:
-                models = base_query.order_by(desc(ModelConfig.created_at)).all()
+                models = base_query.order_by(*_model_config_display_order()).all()
                 db_logger.debug(f"模型配置列表全量查询（is_available 过滤）: 行数={len(models)}")
                 return models, len(models)
 
@@ -246,7 +283,7 @@ class ModelConfigRepository:
             total = base_query.count()
 
             # 分页查询
-            models = base_query.order_by(desc(ModelConfig.created_at)).offset(
+            models = base_query.order_by(*_model_config_display_order()).offset(
                 (query.page - 1) * query.pagesize
             ).limit(query.pagesize).all()
 
@@ -310,11 +347,9 @@ class ModelConfigRepository:
             # 获取总数
             total = base_query.count()
 
-            # 同 (provider, name) 多行取 canonical 行（§13.1 同名口径：展示行 = 运行期命中行）
-            query_results = base_query.order_by(
-                ModelConfig.is_active.desc(),
-                ModelConfig.created_at.desc().nullslast(),
-            ).all()
+            # 展示序兼 canonical 选取（§13.1 同名口径：展示行 = 运行期命中行）：
+            # 未弃用 → 启用 → 类型序 → 新者，排序首行即 canonical
+            query_results = base_query.order_by(*_model_config_display_order()).all()
 
             provider_groups: Dict[str, List[ModelConfig]] = {}
             seen_keys: set = set()
@@ -569,19 +604,10 @@ class ModelBaseRepository:
         if filters:
             q = q.filter(and_(*filters))
 
-        # 广场排序（G4/D13.9）：未下线优先 → 接口族分组 → 组内热度 → 新旧兜底；
-        # type_rank 次序与 model_channel_service._TYPE_RANK 一致（chat 为存量口径），else 6 为预留位
-        type_rank = case(
-            (ModelBase.type.in_([ModelType.LLM.value, ModelType.CHAT.value]), 1),
-            (ModelBase.type == ModelType.EMBEDDING.value, 2),
-            (ModelBase.type == ModelType.RERANK.value, 3),
-            (ModelBase.type == ModelType.IMAGE.value, 4),
-            (ModelBase.type == ModelType.VIDEO.value, 5),
-            else_=6,
-        )
+        # 广场排序（G4/D13.9）：未下线优先 → 接口族分组 → 组内热度 → 新旧兜底
         return q.order_by(
             ModelBase.is_deprecated.asc(),
-            type_rank.asc(),
+            _model_type_rank(ModelBase.type).asc(),
             ModelBase.add_count.desc(),
             ModelBase.created_at.desc().nullslast(),
         ).all()
