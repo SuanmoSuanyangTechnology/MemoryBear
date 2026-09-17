@@ -169,6 +169,7 @@ export const workflowPart1 = {
         },
         'knowledge-retrieval': {
           query: '查询变量',
+          image_query: '图片变量',
           knowledge_retrieval: '知识库',
           recallConfig: '召回测试',
           addKnowledge: '添加知识库',

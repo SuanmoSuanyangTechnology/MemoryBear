@@ -131,6 +131,11 @@ function validateNode(type: string, config: Record<string, any>): CheckError[] {
     if (isInvalid) errors.push({ key: specialKey, message: '' })
   })
 
+  // knowledge-retrieval: query and image_query cannot both be empty
+  if (type === 'knowledge-retrieval' && isEmpty(get('query')) && isEmpty(get('image_query'))) {
+    errors.push({ key: 'knowledge-retrieval.query', message: '' })
+  }
+
   // llm: vision_input required when vision is enabled
   if (type === 'llm' || type === 'question-classifier') {
     const vision = get('vision')
