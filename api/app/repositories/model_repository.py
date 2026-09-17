@@ -10,12 +10,23 @@ from app.core.utils.datetime_utils import utcnow_naive
 from app.core.logging_config import get_db_logger
 from app.models.models_model import ModelConfig, ModelApiKey, ModelType, ModelBase
 from app.schemas.model_schema import (
-    ModelConfigUpdate,
     ModelConfigQuery, ModelConfigQueryNew
 )
 
 # 获取数据库专用日志器
 db_logger = get_db_logger()
+
+# 旧 capability 筛选值 → 新列谓词（2d 迁移兼容；未知值回退冻结旧列，2e 随列删）
+_CAPABILITY_MODALITY_MAP = {"vision": "image", "audio": "audio", "video": "video"}
+_CAPABILITY_FEATURE_VALUES = {"thinking", "thinking_only", "json_output", "function_call"}
+
+
+def _capability_predicate(value: str):
+    if value in _CAPABILITY_MODALITY_MAP:
+        return ModelConfig.input_modalities.contains([_CAPABILITY_MODALITY_MAP[value]])
+    if value in _CAPABILITY_FEATURE_VALUES:
+        return ModelConfig.features.contains([value])
+    return ModelConfig.capability.contains([value])
 
 
 class ModelConfigRepository:
@@ -204,8 +215,9 @@ class ModelConfigRepository:
                         type_values.append(ModelType.LLM)
                 filters.append(ModelConfig.type.in_(type_values))
 
+            # 能力筛选：旧值逐项映射新列谓词（多值 AND）；未知值回退旧列
             if query.capability:
-                filters.append(ModelConfig.capability.contains(query.capability))
+                filters.extend(_capability_predicate(value) for value in query.capability)
 
             if query.is_active is not None:
                 filters.append(ModelConfig.is_active == query.is_active)
@@ -417,24 +429,23 @@ class ModelConfigRepository:
             raise
 
     @staticmethod
-    def update(db: Session, model_id: uuid.UUID, model_data: ModelConfigUpdate, tenant_id: uuid.UUID | None = None) -> Optional[ModelConfig]:
-        """更新模型配置"""
+    def update(db: Session, model_id: uuid.UUID, update_data: dict, tenant_id: uuid.UUID | None = None) -> Optional[ModelConfig]:
+        """更新模型配置（update_data 由服务层构造：含三新列换算，见 model_service._config_update_payload）"""
         db_logger.debug(f"更新模型配置: model_id={model_id}, tenant_id={tenant_id}")
-        
+
         try:
             query = db.query(ModelConfig).filter(ModelConfig.id == model_id)
-            
+
             # 添加租户过滤（只能更新本租户的模型）
             if tenant_id:
                 query = query.filter(ModelConfig.tenant_id == tenant_id)
-            
+
             db_model = query.first()
             if not db_model:
                 db_logger.warning(f"模型配置不存在或无权限: model_id={model_id}")
                 return None
-            
+
             # 更新字段
-            update_data = model_data.model_dump(exclude_unset=True)
             for field, value in update_data.items():
                 setattr(db_model, field, value)
             

@@ -54,6 +54,9 @@ class ModelConfigSummary(BaseModel):
     load_balance_strategy: str | None = LoadBalanceStrategy.NONE.value
     capability: list[str] = Field(default_factory=list)
     is_omni: bool = False
+    input_modalities: list[str] | None = None
+    output_modalities: list[str] | None = None
+    features: list[str] | None = None
     model_id: uuid.UUID | None = None
     created_at: datetime.datetime
     updated_at: datetime.datetime

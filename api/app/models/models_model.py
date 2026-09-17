@@ -102,13 +102,19 @@ class ModelConfig(BaseModel):
     name = Column(String, nullable=False, comment="模型显示名称")
     provider = Column(String, nullable=False, comment="供应商", server_default=ModelProvider.COMPOSITE)
     type = Column(String, nullable=False, index=True, comment="模型类型")
-    is_composite = Column(Boolean, default=False, server_default="true", nullable=False, comment="是否为组合模型")
+    is_composite = Column(Boolean, default=False, server_default="false", nullable=False, comment="是否为组合模型")
     description = Column(String, comment="模型描述")
     
     # 模型配置参数
     capability = Column(ARRAY(String), default=list, nullable=False, server_default=text("'{}'::varchar[]"),
                         comment="模型能力列表（如['vision', 'audio', 'video', 'thinking']）")
     is_omni = Column(Boolean, default=False, nullable=False, server_default="false", comment="是否为Omni模型（使用特殊API调用）")
+    input_modalities = Column(ARRAY(String), default=list, nullable=False, server_default=text("'{}'::varchar[]"),
+                              comment="输入模态（如['text','image','audio','video']）")
+    output_modalities = Column(ARRAY(String), default=list, nullable=False, server_default=text("'{}'::varchar[]"),
+                               comment="输出模态（如['text','image','audio']）")
+    features = Column(ARRAY(String), default=list, nullable=False, server_default=text("'{}'::varchar[]"),
+                      comment="能力特征（如['thinking','json_output','function_call']）")
     config = Column(JSON, comment="模型配置参数")
     # - temperature : 控制生成文本的随机性。值越高，输出越随机、越有创造性；值越低，输出越确定、越保守。
     # - top_p : 一种替代 temperature 的采样方法，控制模型从概率最高的词中选择的范围。
@@ -205,6 +211,12 @@ class ModelBase(Base):
     capability = Column(ARRAY(String), default=list, nullable=False, server_default=text("'{}'::varchar[]"),
                         comment="模型能力列表（如['vision', 'audio', 'video']）")
     is_omni = Column(Boolean, default=False, nullable=False, server_default="false", comment="是否为Omni模型（使用特殊API调用）")
+    input_modalities = Column(ARRAY(String), default=list, nullable=False, server_default=text("'{}'::varchar[]"),
+                              comment="输入模态（如['text','image','audio','video']）")
+    output_modalities = Column(ARRAY(String), default=list, nullable=False, server_default=text("'{}'::varchar[]"),
+                               comment="输出模态（如['text','image','audio']）")
+    features = Column(ARRAY(String), default=list, nullable=False, server_default=text("'{}'::varchar[]"),
+                      comment="能力特征（如['thinking','json_output','function_call']）")
 
     # 关联关系
     configs = relationship("ModelConfig", back_populates="model_base", cascade="all, delete-orphan")

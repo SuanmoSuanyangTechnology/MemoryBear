@@ -55,11 +55,14 @@ def _config_snapshot(config: ModelConfig) -> ModelConfigSnapshot:
         load_balance_strategy=LoadBalanceStrategy(
             config.load_balance_strategy or LoadBalanceStrategy.NONE
         ),
-        profile=ModelProfile.from_legacy_fields(
+        profile=ModelProfile.from_stored_fields(
             model_id=config.id,
             tenant_id=config.tenant_id,
             type=config.type,
             provider=config.provider,
+            input_modalities=config.input_modalities or (),
+            output_modalities=config.output_modalities or (),
+            features=config.features or (),
             capabilities=config.capability or (),
             is_omni=bool(config.is_omni),
         ),

@@ -54,6 +54,13 @@ from app.services.channel_registry import (
 )
 from app.services.channel_service import ChannelService
 from app.services.model_impact_service import collect_model_impact
+from app.services.model_profile_view import (
+    legacy_view,
+    normalize_type,
+    wire_model_base,
+    wire_model_config,
+    write_columns,
+)
 
 if TYPE_CHECKING:
     from redbear_model import ImageEmbeddingContent
@@ -372,13 +379,53 @@ def _derived_available(model: ModelConfig, availability: dict[uuid.UUID, bool]) 
 def _with_availability(
     model: ModelConfig, availability: dict[uuid.UUID, bool]
 ) -> model_schema.ModelConfig:
-    item = model_schema.ModelConfig.model_validate(model)
+    item = wire_model_config(model)
     if item.is_deprecated:
         # D15：弃用派生封禁（不依赖探测，任意租户口径恒不可用）
         item.is_available = False
     elif model.id in availability:
         item.is_available = availability[model.id]
     return item
+
+
+_ABILITY_FIELDS = {
+    "type",
+    "provider",
+    "capability",
+    "is_omni",
+    "input_modalities",
+    "output_modalities",
+    "features",
+}
+
+
+def _config_update_payload(model_data: ModelConfigUpdate, existing_model: ModelConfig) -> Dict[str, Any]:
+    """更新请求 → ORM 更新 dict（type 归一 + 三新列换算，旧列停写）。
+
+    未提交的能力维度以 `existing_model` 派生视图补齐（`PUT {is_omni:false}` 不清空其余）；
+    请求未触达能力字段时三列不重写（存量行保持原样，避免无谓写入）。
+    """
+    fields_set = model_data.model_fields_set
+    payload = model_data.model_dump(
+        exclude_unset=True,
+        exclude={"capability", "is_omni", "input_modalities", "output_modalities", "features"},
+    )
+    if "type" in fields_set:
+        payload["type"] = normalize_type(model_data.type)
+    if fields_set & _ABILITY_FIELDS:
+        payload.update(
+            write_columns(
+                row_type=model_data.type if "type" in fields_set else None,
+                provider=model_data.provider if "provider" in fields_set else None,
+                capability=model_data.capability if "capability" in fields_set else None,
+                is_omni=model_data.is_omni if "is_omni" in fields_set else None,
+                input_modalities=model_data.input_modalities if "input_modalities" in fields_set else None,
+                output_modalities=model_data.output_modalities if "output_modalities" in fields_set else None,
+                features=model_data.features if "features" in fields_set else None,
+                fallback_row=existing_model,
+            )
+        )
+    return payload
 
 
 class ModelConfigService:
@@ -927,9 +974,30 @@ class ModelConfigService:
                 f"模型配置验证失败: {validation_result['error']}", BizCode.INVALID_PARAMETER
             )
 
-        model_config_data = model_data.model_dump(exclude={"credential"})
-        # 添加租户ID
+        model_config_data = model_data.model_dump(
+            exclude={
+                "credential",
+                "capability",
+                "is_omni",
+                "input_modalities",
+                "output_modalities",
+                "features",
+            }
+        )
+        # 添加租户ID；type 归一（chat→llm）+ 三新列换算（旧列停写）
         model_config_data["tenant_id"] = tenant_id
+        model_config_data["type"] = normalize_type(model_data.type)
+        model_config_data.update(
+            write_columns(
+                row_type=model_data.type,
+                provider=provider,
+                capability=model_data.capability,
+                is_omni=model_data.is_omni,
+                input_modalities=model_data.input_modalities,
+                output_modalities=model_data.output_modalities,
+                features=model_data.features,
+            )
+        )
 
         try:
             model = ModelConfigRepository.create(db, model_config_data)
@@ -965,7 +1033,9 @@ class ModelConfigService:
                                                  tenant_id=tenant_id):
                 raise BusinessException("模型名称已存在", BizCode.DUPLICATE_NAME)
 
-        model = ModelConfigRepository.update(db, model_id, model_data, tenant_id=tenant_id)
+        model = ModelConfigRepository.update(
+            db, model_id, _config_update_payload(model_data, existing_model), tenant_id=tenant_id
+        )
 
         db.commit()
         db.refresh(model)
@@ -1047,18 +1117,21 @@ class ModelConfigService:
         members = ModelConfigService._resolve_composite_members(model_data)
         ModelConfigService._validate_composite_members(db, tenant_id, members, model_data.type)
 
-        # 创建组合模型（空成员不得悬于启用态）
+        # 创建组合模型（空成员不得悬于启用态）；别名容器不虚报能力（三列固定最小集）
         model_config_data = {
             "tenant_id": tenant_id,
             "name": model_data.name,
-            "type": model_data.type,
+            "type": normalize_type(model_data.type),
             "logo": model_data.logo,
             "description": model_data.description,
             "provider": ModelProvider.COMPOSITE,
             "config": ModelConfigService._composite_config(model_data.config, members),
             "is_active": model_data.is_active and bool(members),
             "is_public": model_data.is_public,
-            "is_composite": True
+            "is_composite": True,
+            "input_modalities": ["text"],
+            "output_modalities": ["text"],
+            "features": [],
         }
         if "load_balance_strategy" in model_data.model_fields_set:
             model_config_data["load_balance_strategy"] = model_data.load_balance_strategy
@@ -1094,6 +1167,10 @@ class ModelConfigService:
         # 更新基本信息（空成员不得悬于启用态）
         existing_model.name = model_data.name
         # existing_model.type = model_data.type
+        # 别名容器三列固定最小集（与创建同口径；不回读 members 能力）
+        existing_model.input_modalities = ["text"]
+        existing_model.output_modalities = ["text"]
+        existing_model.features = []
         existing_model.logo = model_data.logo
         existing_model.description = model_data.description
         existing_model.config = ModelConfigService._composite_config(model_data.config, members)
@@ -1235,13 +1312,14 @@ class ModelApiKeyService:
                 BizCode.AGENT_CONFIG_MISSING,
             )
 
+        capabilities, is_omni = legacy_view(model_config)
         return ModelApiKey(
             model_name=model_config.name,
             provider=ModelProvider.SPEEDBEAR,
             api_key=binding.gateway_api_key,
             api_base=f"{settings.SPEEDBEAR_BASE_URL.rstrip('/')}/api/v1",
-            capability=model_config.capability,
-            is_omni=model_config.is_omni,
+            capability=capabilities,
+            is_omni=is_omni,
         )
 
     @staticmethod
@@ -1273,13 +1351,14 @@ class ModelApiKeyService:
                 BizCode.AGENT_CONFIG_MISSING,
             )
 
+        capabilities, is_omni = legacy_view(model_config)
         return ModelApiKey(
             model_name=model_config.name,
             provider=ModelProvider.SPEEDBEAR,
             api_key=binding.gateway_api_key,
             api_base=f"{settings.SPEEDBEAR_BASE_URL.rstrip('/')}/api/v1",
-            capability=model_config.capability,
-            is_omni=model_config.is_omni,
+            capability=capabilities,
+            is_omni=is_omni,
         )
 
     @staticmethod
@@ -1501,7 +1580,7 @@ class ModelBaseService:
 
         provider_groups = {}
         for m in models:
-            model_dict = model_schema.ModelBase.model_validate(m).model_dump()
+            model_dict = wire_model_base(m).model_dump()
             if tenant_id:
                 model_dict['is_added'] = m.id in added_ids
 
@@ -1527,14 +1606,49 @@ class ModelBaseService:
         existing = ModelBaseRepository.get_by_name_and_provider(db, data.name, data.provider)
         if existing:
             raise BusinessException("模型已存在", BizCode.DUPLICATE_NAME)
-        model_base = ModelBaseRepository.create(db, data.model_dump())
+        create_data = data.model_dump(
+            exclude={"capability", "is_omni", "input_modalities", "output_modalities", "features"}
+        )
+        create_data["type"] = normalize_type(data.type)
+        create_data.update(
+            write_columns(
+                row_type=data.type,
+                provider=data.provider,
+                capability=data.capability,
+                is_omni=data.is_omni,
+                input_modalities=data.input_modalities,
+                output_modalities=data.output_modalities,
+                features=data.features,
+            )
+        )
+        model_base = ModelBaseRepository.create(db, create_data)
         db.commit()
         db.refresh(model_base)
         return model_base
 
     @staticmethod
     def update_model_base(db: Session, model_base_id: uuid.UUID, data: model_schema.ModelBaseUpdate):
-        payload = data.model_dump(exclude_unset=True)
+        raw = data.model_dump(exclude_unset=True)
+        fields_set = set(raw.keys())
+        payload = {key: value for key, value in raw.items() if key not in _ABILITY_FIELDS}
+        if "type" in fields_set:
+            payload["type"] = normalize_type(raw["type"])
+        if fields_set & _ABILITY_FIELDS:
+            existing = ModelBaseRepository.get_by_id(db, model_base_id)
+            if not existing:
+                raise BusinessException("基础模型不存在", BizCode.MODEL_NOT_FOUND)
+            payload.update(
+                write_columns(
+                    row_type=raw.get("type") if "type" in fields_set else None,
+                    provider=raw.get("provider") if "provider" in fields_set else None,
+                    capability=raw.get("capability") if "capability" in fields_set else None,
+                    is_omni=raw.get("is_omni") if "is_omni" in fields_set else None,
+                    input_modalities=raw.get("input_modalities") if "input_modalities" in fields_set else None,
+                    output_modalities=raw.get("output_modalities") if "output_modalities" in fields_set else None,
+                    features=raw.get("features") if "features" in fields_set else None,
+                    fallback_row=existing,
+                )
+            )
         model_base = ModelBaseRepository.update(db, model_base_id, payload)
         if not model_base:
             raise BusinessException("基础模型不存在", BizCode.MODEL_NOT_FOUND)
@@ -1585,14 +1699,20 @@ class ModelBaseService:
             "tenant_id": tenant_id,
             "name": model_base.name,
             "provider": model_base.provider,
-            "type": model_base.type,
+            "type": normalize_type(model_base.type),
             "logo": model_base.logo,
             "description": model_base.description,
-            "capability": model_base.capability,
-            "is_omni": model_base.is_omni,
             "is_active": False,
-            "is_composite": False
+            "is_composite": False,
         }
+        # 三新列从 base 复制（base 新列空则旧列派生；旧列停写）
+        model_config_data.update(
+            write_columns(
+                row_type=model_base.type,
+                provider=model_base.provider,
+                fallback_row=model_base,
+            )
+        )
         model_config = ModelConfigRepository.create(db, model_config_data)
         ModelBaseRepository.increment_add_count(db, model_base_id)
         db.commit()

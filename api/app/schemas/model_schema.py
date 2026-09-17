@@ -19,8 +19,11 @@ class ModelConfigBase(BaseModel):
     is_active: bool = Field(True, description="是否激活")
     is_public: bool = Field(False, description="是否公开")
     load_balance_strategy: Optional[str] = Field(LoadBalanceStrategy.NONE.value, description="负载均衡策略")
-    capability: List[str] = Field(default_factory=list, description="模型能力列表")
-    is_omni: bool = Field(False, description="是否为Omni模型")
+    capability: List[str] = Field(default_factory=list, description="模型能力列表（旧列视图，2e 下线）")
+    is_omni: bool = Field(False, description="是否为Omni模型（旧列视图，2e 下线）")
+    input_modalities: Optional[List[str]] = Field(None, description="输入模态（如['text','image']；缺省由旧字段派生）")
+    output_modalities: Optional[List[str]] = Field(None, description="输出模态（如['text','audio']；缺省由旧字段派生）")
+    features: Optional[List[str]] = Field(None, description="能力特征（如['thinking']；缺省由旧字段派生）")
     model_id: Optional[uuid.UUID] = Field(None, description="基础模型ID")
 
 
@@ -70,8 +73,11 @@ class ModelConfigUpdate(BaseModel):
     config: Optional[Dict[str, Any]] = Field(None, description="模型配置参数")
     is_active: Optional[bool] = Field(None, description="是否激活")
     is_public: Optional[bool] = Field(None, description="是否公开")
-    capability: Optional[List[str]] = Field(None, description="模型能力列表")
-    is_omni: Optional[bool] = Field(None, description="是否为Omni模型")
+    capability: Optional[List[str]] = Field(None, description="模型能力列表（旧列视图，2e 下线）")
+    is_omni: Optional[bool] = Field(None, description="是否为Omni模型（旧列视图，2e 下线）")
+    input_modalities: Optional[List[str]] = Field(None, description="输入模态（新口径；缺省由旧字段派生）")
+    output_modalities: Optional[List[str]] = Field(None, description="输出模态（新口径；缺省由旧字段派生）")
+    features: Optional[List[str]] = Field(None, description="能力特征（新口径；缺省由旧字段派生）")
 
 
 class ModelConfig(ModelConfigBase):
@@ -88,6 +94,10 @@ class ModelConfig(ModelConfigBase):
     is_deprecated: bool = False
     is_available: Optional[bool] = None
     members: List[CompositeMemberSpec] = []
+    # 响应侧恒输出（由 profile 派生，见 model_profile_view.wire_model_config）
+    input_modalities: List[str] = []
+    output_modalities: List[str] = []
+    features: List[str] = []
 
     @classmethod
     def model_validate(cls, obj, **kwargs):
@@ -247,6 +257,9 @@ class ModelBaseCreate(BaseModel):
     tags: List[str] = Field(default_factory=list, description="模型标签")
     capability: List[str] = Field(default_factory=list, description="模型能力列表（如['vision', 'audio', 'video']）")
     is_omni: bool = Field(False, description="是否为Omni模型")
+    input_modalities: Optional[List[str]] = Field(None, description="输入模态（新口径；缺省由旧字段派生）")
+    output_modalities: Optional[List[str]] = Field(None, description="输出模态（新口径；缺省由旧字段派生）")
+    features: Optional[List[str]] = Field(None, description="能力特征（新口径；缺省由旧字段派生）")
 
 
 class ModelBaseUpdate(BaseModel):
@@ -261,6 +274,9 @@ class ModelBaseUpdate(BaseModel):
     tags: Optional[List[str]] = Field(None, description="模型标签")
     capability: Optional[List[str]] = Field(None, description="模型能力列表")
     is_omni: Optional[bool] = Field(None, description="是否为Omni模型")
+    input_modalities: Optional[List[str]] = Field(None, description="输入模态（新口径；缺省由旧字段派生）")
+    output_modalities: Optional[List[str]] = Field(None, description="输出模态（新口径；缺省由旧字段派生）")
+    features: Optional[List[str]] = Field(None, description="能力特征（新口径；缺省由旧字段派生）")
 
 
 class ModelBase(BaseModel):
@@ -279,6 +295,10 @@ class ModelBase(BaseModel):
     add_count: int
     capability: List[str] = []
     is_omni: bool = False
+    # 响应侧恒输出（profile 派生，见 model_profile_view.wire_model_base）
+    input_modalities: List[str] = []
+    output_modalities: List[str] = []
+    features: List[str] = []
 
 
 class ModelBaseQuery(BaseModel):

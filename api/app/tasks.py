@@ -276,12 +276,8 @@ def _load_graph_task_state(
 
 
 def _build_evidence_index_pipeline(runtime, client, lock_guard):
-    llm_type = (
-        ModelType.CHAT
-        if runtime.llm.model_type == ModelType.CHAT.value
-        else ModelType.LLM
-    )
-    llm = RedBearLLM(build_model_config(runtime.llm), type=llm_type)
+    # 2d-1 迁移后 chat 行已归一为 llm，运行时按 LLM 适配器族构造
+    llm = RedBearLLM(build_model_config(runtime.llm), type=ModelType.LLM)
     embedding = RedBearEmbeddings(build_model_config(runtime.embedding))
     extractor = LLMEntityRelationExtractor(
         llm,

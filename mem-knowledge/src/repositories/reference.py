@@ -99,7 +99,7 @@ class ReferenceRepository:
                     ),
                 ),
                 ModelConfig.type.in_([ModelType.CHAT.value, ModelType.LLM.value]),
-                ModelConfig.capability.contains(["vision"]),
+                ModelConfig.input_modalities.contains(["image"]),
                 ModelConfig.is_active.is_(True),
             )
             .order_by(ModelConfig.created_at.desc())

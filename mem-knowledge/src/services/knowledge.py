@@ -8,6 +8,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
 
+from redbear_model import ModelProfile
 from sqlalchemy import or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
@@ -126,6 +127,19 @@ def _model_summary(
     model: ModelConfig,
     model_base: ModelBase | None,
 ) -> ModelConfigSummary:
+    # 三新列为权威源，capability/is_omni 按 profile 派生（与 core 侧读口径一致）
+    profile = ModelProfile.from_stored_fields(
+        model_id=model.id,
+        tenant_id=model.tenant_id,
+        type=model.type,
+        provider=model.provider,
+        input_modalities=model.input_modalities or (),
+        output_modalities=model.output_modalities or (),
+        features=model.features or (),
+        capabilities=model.capability or (),
+        is_omni=bool(model.is_omni),
+    )
+    capabilities, is_omni = profile.legacy_capability_view(model.provider)
     return ModelConfigSummary(
         id=model.id,
         name=model.name,
@@ -137,8 +151,11 @@ def _model_summary(
         is_active=model.is_active,
         is_public=model.is_public,
         load_balance_strategy=model.load_balance_strategy,
-        capability=model.capability or [],
-        is_omni=model.is_omni,
+        capability=[str(capability.value) for capability in capabilities],
+        is_omni=is_omni,
+        input_modalities=[str(modality.value) for modality in profile.input_modalities],
+        output_modalities=[str(modality.value) for modality in profile.output_modalities],
+        features=[str(feature.value) for feature in profile.features],
         model_id=model.model_id,
         created_at=model.created_at,
         updated_at=model.updated_at,

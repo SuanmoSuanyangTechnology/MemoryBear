@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.logging_config import get_logger
+from app.services.model_profile_view import legacy_view
 
 logger = get_logger(__name__)
 
@@ -88,7 +89,11 @@ class E2BAgentAdapter:
             conversation_id = sandbox_payload.get("runtime_env", {}).get("conversation_id", conversation_id)
             execution_id = sandbox_payload.get("runtime_env", {}).get("execution_id", execution_id)
         else:
-            # Build sandbox-compatible configs
+            # Build sandbox-compatible configs（payload 键位不动，2d-4 沙箱模板批收敛）
+            if model_config is not None:
+                orm_capabilities, orm_is_omni = legacy_view(model_config)
+            else:
+                orm_capabilities, orm_is_omni = [], False
             sandbox_agent_config = {
                 "system_prompt": system_prompt or getattr(agent_config, "system_prompt", ""),
                 "tools": tools_serialized or self._serialize_tools(agent_config),
@@ -115,8 +120,8 @@ class E2BAgentAdapter:
                 "thinking_budget_tokens": getattr(model_config, "thinking_budget_tokens", None),
                 "json_output": getattr(model_config, "json_output", False),
                 "enable_search": getattr(model_config, "enable_search", False),
-                "is_omni": api_key_config.get("is_omni", False) or getattr(model_config, "is_omni", False),
-                "capability": api_key_config.get("capability") or getattr(model_config, "capability", None) or [],
+                "is_omni": api_key_config.get("is_omni", False) or orm_is_omni,
+                "capability": api_key_config.get("capability") or orm_capabilities or [],
                 "extra_headers": getattr(model_config, "extra_headers", None),
                 "concurrency": getattr(model_config, "concurrency", 5),
             }

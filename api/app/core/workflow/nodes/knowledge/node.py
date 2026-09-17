@@ -25,6 +25,7 @@ from app.schemas.knowledge_retrieval_schema import KnowledgeRetrievalRequest
 from app.services.knowledge_metadata_service import KnowledgeMetadataService
 from app.services.knowledge_retrieval_preparation import KnowledgeRetrievalPreparation
 from app.services.metadata_auto_filter_service import MetadataAutoFilterService
+from app.services.model_profile_view import legacy_view
 from app.services.model_service import ModelApiKeyService, ModelConfigService
 
 logger = logging.getLogger(__name__)
@@ -206,16 +207,17 @@ class KnowledgeRetrievalNode(BaseNode):
             )
             if not api_key:
                 raise BusinessException("模型配置缺少 API Key", BizCode.INVALID_PARAMETER)
+            fallback_capabilities, fallback_is_omni = legacy_view(model_config)
             model = ModelRuntimeSnapshot(
                 model_name=api_key.model_name,
                 provider=api_key.provider or model_config.provider,
                 api_key=api_key.api_key,
                 api_base=api_key.api_base,
-                capability=tuple(api_key.capability or model_config.capability or ()),
+                capability=tuple(api_key.capability or fallback_capabilities),
                 is_omni=(
                     api_key.is_omni
                     if api_key.is_omni is not None
-                    else bool(model_config.is_omni)
+                    else fallback_is_omni
                 ),
                 model_type=model_config.type,
                 tenant_id=api_key.tenant_id,

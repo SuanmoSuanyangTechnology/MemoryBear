@@ -40,6 +40,7 @@ from app.services.channel_registry import (
     parse_members,
 )
 from app.services.channel_service import ChannelService, describe_channel
+from app.services.model_profile_view import legacy_view
 from app.services.model_service import (
     ModelConfigService,
     _require_api_base_for_local_provider,
@@ -136,11 +137,12 @@ def _resolve_validation_anchor(
     )
     if picked is None:
         return None
+    capabilities, is_omni = legacy_view(picked)
     return _ValidationAnchor(
         name=picked.name,
         type=_provider_value(picked.type),
-        is_omni=bool(picked.is_omni),
-        capability=picked.capability,
+        is_omni=is_omni,
+        capability=capabilities,
     )
 
 
@@ -324,6 +326,7 @@ class ChannelApiKeyService:
         _require_wellformed_api_base(provider, data.api_base, model_config.type)
         _require_supported_api_base(provider, data.api_base, model_config.type)
 
+        validate_capabilities, validate_is_omni = legacy_view(model_config)
         validation_result = await ModelConfigService.validate_model_config(
             db=db,
             model_name=model_config.name,
@@ -332,8 +335,8 @@ class ChannelApiKeyService:
             api_base=data.api_base,
             model_type=model_config.type,
             test_message="Hello",
-            is_omni=model_config.is_omni,
-            capability=model_config.capability,
+            is_omni=validate_is_omni,
+            capability=validate_capabilities,
         )
         if not validation_result["valid"]:
             raise BusinessException(

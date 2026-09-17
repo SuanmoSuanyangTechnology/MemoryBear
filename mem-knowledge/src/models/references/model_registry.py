@@ -119,6 +119,27 @@ class ModelConfig(ReferenceBase):
         server_default="false",
         comment="omni model",
     )
+    input_modalities = Column(
+        ARRAY(String),
+        default=list,
+        nullable=False,
+        server_default=text("'{}'::varchar[]"),
+        comment="输入模态（如['text','image','audio','video']）",
+    )
+    output_modalities = Column(
+        ARRAY(String),
+        default=list,
+        nullable=False,
+        server_default=text("'{}'::varchar[]"),
+        comment="输出模态（如['text','image','audio']）",
+    )
+    features = Column(
+        ARRAY(String),
+        default=list,
+        nullable=False,
+        server_default=text("'{}'::varchar[]"),
+        comment="能力特征（如['thinking','json_output','function_call']）",
+    )
     config = Column(JSON, comment="model configuration")
     is_public = Column(Boolean, default=False, nullable=False, comment="public model")
     load_balance_strategy = Column(

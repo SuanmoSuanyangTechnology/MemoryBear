@@ -111,14 +111,17 @@ def _profile_members(row: ModelConfig) -> tuple[CompositeMember, ...]:
 def to_profile(row: ModelConfig) -> ModelProfile:
     """ORM 行 → 契约 profile（读侧唯一构造点，spec §13.5）。
 
-    2b 阶段由旧列派生（`from_legacy_fields`：chat→llm 归一、capability→三字段换算、
-    is_omni 按 provider 参与 output 例外）；2d 新增列后在其上叠"新列非空取新列"分支。
+    两态（`from_stored_fields`）：三新列非空 = 新口径行只读新列；为空回退旧列换算
+    （回滚窗口旧镜像写入行）；chat→llm 归一、未知枚举跳过在包内收敛。
     """
-    return ModelProfile.from_legacy_fields(
+    return ModelProfile.from_stored_fields(
         model_id=row.id,
         tenant_id=row.tenant_id,
         type=row.type,
         provider=row.provider,
+        input_modalities=getattr(row, "input_modalities", None) or (),
+        output_modalities=getattr(row, "output_modalities", None) or (),
+        features=getattr(row, "features", None) or (),
         capabilities=row.capability or (),
         is_omni=bool(row.is_omni),
         members=_profile_members(row),

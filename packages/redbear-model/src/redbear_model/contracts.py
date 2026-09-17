@@ -93,6 +93,74 @@ _MODALITY_CAPABILITIES = (
 )
 
 
+def legacy_capability_columns(
+    *,
+    type: ModelType | str,
+    provider: ModelProvider | str,
+    capabilities: Sequence[ModelCapability | str] = (),
+    is_omni: bool = False,
+) -> tuple[tuple[Modality, ...], tuple[Modality, ...], tuple[ModelFeature, ...]]:
+    """旧列（`type`/`capability`/`is_omni`）→ 三新列（spec §13.4 换算口径，2d backfill 同源）。
+
+    未知 capability 值跳过；`is_omni` 仅 provider=dashscope 参与 output 例外（含 audio）。
+    deprecated（2a–2d 兼容窗口，2e 随 ModelCapability 删）。
+    """
+    model_type = ModelType(type)
+    parsed = []
+    for value in capabilities:
+        try:
+            parsed.append(ModelCapability(value))
+        except ValueError:
+            continue
+    values = set(parsed)
+    input_modalities = [Modality.TEXT]
+    for modality, capability in _MODALITY_CAPABILITIES:
+        if capability in values:
+            input_modalities.append(modality)
+    if model_type in (ModelType.IMAGE, ModelType.VIDEO):
+        output_modalities = [Modality(model_type.value)]
+    else:
+        output_modalities = [Modality.TEXT]
+    if is_omni and provider == ModelProvider.DASHSCOPE:
+        output_modalities = [Modality.TEXT, Modality.AUDIO]
+    return (
+        tuple(input_modalities),
+        tuple(output_modalities),
+        tuple(
+            feature
+            for feature, capability in _FEATURE_CAPABILITIES.items()
+            if capability in values
+        ),
+    )
+
+
+def _parse_modalities(
+    values: Sequence[Modality | str],
+    model_id: UUID,
+    label: str,
+) -> list[Modality]:
+    parsed = []
+    for value in values:
+        try:
+            parsed.append(Modality(value))
+        except ValueError:
+            logger.warning("unknown %s %r dropped for model %s", label, value, model_id)
+    return parsed
+
+
+def _parse_features(
+    values: Sequence[ModelFeature | str],
+    model_id: UUID,
+) -> list[ModelFeature]:
+    parsed = []
+    for value in values:
+        try:
+            parsed.append(ModelFeature(value))
+        except ValueError:
+            logger.warning("unknown feature %r dropped for model %s", value, model_id)
+    return parsed
+
+
 class ModelProfile(ContractModel):
     """模型能力描述（ModelConfig / ModelBase 快照侧，frozen；契约 v2 单一能力载体）。"""
 
@@ -129,35 +197,77 @@ class ModelProfile(ContractModel):
         未知 capability 值跳过；`is_omni` 仅 provider=dashscope 参与 output 例外（含 audio）。
         deprecated（2a–2d 兼容窗口，2e 随 ModelCapability 删）。
         """
+        input_modalities, output_modalities, features = legacy_capability_columns(
+            type=type,
+            provider=provider,
+            capabilities=capabilities,
+            is_omni=is_omni,
+        )
+        return cls(
+            model_id=model_id,
+            tenant_id=tenant_id,
+            type=ModelType(type),
+            input_modalities=input_modalities,
+            output_modalities=output_modalities,
+            features=features,
+            members=tuple(members),
+        )
+
+    @classmethod
+    def from_stored_fields(
+        cls,
+        *,
+        model_id: UUID,
+        tenant_id: UUID | None,
+        type: ModelType | str,
+        provider: ModelProvider | str,
+        input_modalities: Sequence[Modality | str] = (),
+        output_modalities: Sequence[Modality | str] = (),
+        features: Sequence[ModelFeature | str] = (),
+        capabilities: Sequence[ModelCapability | str] = (),
+        is_omni: bool = False,
+        members: Sequence[CompositeMember] = (),
+    ) -> ModelProfile:
+        """存储行列 → profile 两态（spec §13.4）：
+
+        `input_modalities` 非空 = 新口径行 → 只读三新列（output 为空按 type 定基补齐，
+        未知枚举值跳过并 warning）；为空 → 回退旧列换算（回滚窗口旧镜像写入行，旧列为其唯一事实源）。
+        """
         model_type = ModelType(type)
-        parsed = []
-        for value in capabilities:
-            try:
-                parsed.append(ModelCapability(value))
-            except ValueError:
-                continue
-        values = set(parsed)
-        input_modalities = [Modality.TEXT]
-        for modality, capability in _MODALITY_CAPABILITIES:
-            if capability in values:
-                input_modalities.append(modality)
-        if model_type in (ModelType.IMAGE, ModelType.VIDEO):
-            output_modalities = [Modality(model_type.value)]
-        else:
-            output_modalities = [Modality.TEXT]
-        if is_omni and provider == ModelProvider.DASHSCOPE:
-            output_modalities = [Modality.TEXT, Modality.AUDIO]
+        if not input_modalities:
+            input_modalities, output_modalities, features = legacy_capability_columns(
+                type=model_type,
+                provider=provider,
+                capabilities=capabilities,
+                is_omni=is_omni,
+            )
+            return cls(
+                model_id=model_id,
+                tenant_id=tenant_id,
+                type=model_type,
+                input_modalities=input_modalities,
+                output_modalities=output_modalities,
+                features=features,
+                members=tuple(members),
+            )
+
+        parsed_input = _parse_modalities(input_modalities, model_id, "input modality")
+        if not parsed_input:
+            logger.warning("input modalities all unknown for model %s; defaulting to text", model_id)
+            parsed_input = [Modality.TEXT]
+        parsed_output = _parse_modalities(output_modalities, model_id, "output modality")
+        if not parsed_output:
+            if model_type in (ModelType.IMAGE, ModelType.VIDEO):
+                parsed_output = [Modality(model_type.value)]
+            else:
+                parsed_output = [Modality.TEXT]
         return cls(
             model_id=model_id,
             tenant_id=tenant_id,
             type=model_type,
-            input_modalities=tuple(input_modalities),
-            output_modalities=tuple(output_modalities),
-            features=tuple(
-                feature
-                for feature, capability in _FEATURE_CAPABILITIES.items()
-                if capability in values
-            ),
+            input_modalities=tuple(parsed_input),
+            output_modalities=tuple(parsed_output),
+            features=tuple(_parse_features(features, model_id)),
             members=tuple(members),
         )
 

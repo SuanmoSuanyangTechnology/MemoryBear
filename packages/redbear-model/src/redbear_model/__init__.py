@@ -27,6 +27,7 @@ from .contracts import (
     ResolvedModelConfig,
     SupportedImageMediaType,
     TextEmbeddingContent,
+    legacy_capability_columns,
 )
 from .composite import (
     CompositeCandidate,
@@ -168,6 +169,7 @@ __all__ = [
     "is_switchable_channel_error",
     "is_terminal_channel_error",
     "is_transient_channel_error",
+    "legacy_capability_columns",
     "match_channel_candidates",
     "match_platform_speedbear_channels",
     "order_channel_candidates",

@@ -16,6 +16,7 @@ from app.core.response_utils import success, fail
 from app.schemas.response_schema import ApiResponse, PageData
 from app.services.model_service import ModelConfigService, ModelBaseService
 from app.services.model_channel_service import ChannelApiKeyService
+from app.services.model_profile_view import wire_model_base, wire_model_config
 from app.services.model_impact_service import collect_model_impact
 from app.core.logging_config import get_api_logger
 from app.core.quota_stub import check_model_quota, check_model_activation_quota
@@ -216,7 +217,7 @@ def get_model_base_by_id(
     """获取基础模型详情"""
     
     result = ModelBaseService.get_model_base_by_id(db=db, model_base_id=model_base_id)
-    return success(data=model_schema.ModelBase.model_validate(result), msg="基础模型获取成功")
+    return success(data=wire_model_base(result), msg="基础模型获取成功")
 
 
 @router.post("/model_plaza", response_model=ApiResponse)
@@ -228,7 +229,7 @@ def create_model_base(
     """创建基础模型"""
     
     result = ModelBaseService.create_model_base(db=db, data=data)
-    return success(data=model_schema.ModelBase.model_validate(result), msg="基础模型创建成功")
+    return success(data=wire_model_base(result), msg="基础模型创建成功")
 
 
 @router.put("/model_plaza/{model_base_id}", response_model=ApiResponse)
@@ -245,7 +246,7 @@ def update_model_base(
         raise BusinessException("不允许更改模型类型和供应商", BizCode.INVALID_PARAMETER)
     
     result = ModelBaseService.update_model_base(db=db, model_base_id=model_base_id, data=data)
-    return success(data=model_schema.ModelBase.model_validate(result), msg="基础模型更新成功")
+    return success(data=wire_model_base(result), msg="基础模型更新成功")
 
 
 @router.delete("/model_plaza/{model_base_id}", response_model=ApiResponse)
@@ -269,7 +270,7 @@ def add_model_from_plaza(
     """从模型广场添加模型到模型列表"""
     
     result = ModelBaseService.add_model_from_plaza(db=db, model_base_id=model_base_id, tenant_id=current_user.tenant_id)
-    return success(data=model_schema.ModelConfig.model_validate(result), msg="模型添加成功")
+    return success(data=wire_model_config(result), msg="模型添加成功")
 
 
 @router.get("/{model_id}", response_model=ApiResponse)
@@ -289,7 +290,7 @@ def get_model_by_id(
         api_logger.info(f"模型配置获取成功: {result_orm.name}")
         
         # 将ORM对象转换为Pydantic模型
-        result_pydantic = model_schema.ModelConfig.model_validate(result_orm)
+        result_pydantic = wire_model_config(result_orm)
         result_pydantic.is_available = ModelConfigService.is_model_available(
             db, result_orm, current_user.tenant_id
         )
@@ -323,7 +324,7 @@ async def create_model(
         api_logger.info(f"模型配置创建成功: {result_orm.name} (ID: {result_orm.id})")
         
         # 将ORM对象转换为Pydantic模型
-        result = model_schema.ModelConfig.model_validate(result_orm)
+        result = wire_model_config(result_orm)
         
         return success(data=result, msg="模型配置创建成功")
     except Exception as e:
@@ -351,7 +352,7 @@ async def create_composite_model(
         result_orm = await ModelConfigService.create_composite_model(db=db, model_data=model_data, tenant_id=current_user.tenant_id)
         api_logger.info(f"组合模型创建成功: {result_orm.name} (ID: {result_orm.id})")
         
-        result = model_schema.ModelConfig.model_validate(result_orm)
+        result = wire_model_config(result_orm)
         return success(data=result, msg="组合模型创建成功")
     except Exception as e:
         api_logger.error(f"创建组合模型失败: {model_data.name} - {str(e)}")
@@ -375,7 +376,7 @@ async def update_composite_model(
         result_orm = await ModelConfigService.update_composite_model(db=db, model_id=model_id, model_data=model_data, tenant_id=current_user.tenant_id)
         api_logger.info(f"组合模型更新成功: {result_orm.name} (ID: {model_id})")
         
-        result = model_schema.ModelConfig.model_validate(result_orm)
+        result = wire_model_config(result_orm)
         return success(data=result, msg="组合模型更新成功")
     except Exception as e:
         api_logger.error(f"更新组合模型失败: model_id={model_id} - {str(e)}")
@@ -449,7 +450,7 @@ def update_model(
         api_logger.info(f"模型配置更新成功: {result_orm.name} (ID: {model_id})")
         
         # 将ORM对象转换为Pydantic模型
-        result_pydantic = model_schema.ModelConfig.model_validate(result_orm)
+        result_pydantic = wire_model_config(result_orm)
         
         return success(data=result_pydantic, msg="模型配置更新成功")
     except Exception as e:

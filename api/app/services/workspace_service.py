@@ -3,6 +3,7 @@ import secrets
 import uuid
 from typing import List, Optional
 
+from redbear_model import Modality
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session, joinedload
@@ -14,7 +15,7 @@ from app.core.exceptions import BusinessException, PermissionDeniedException
 from app.core.logging_config import get_business_logger
 from app.core.utils.datetime_utils import utcnow_naive
 from app.models.memory_config_model import MemoryConfig as MemoryConfigModel
-from app.models.models_model import ModelCapability, ModelConfig, ModelProvider, ModelType
+from app.models.models_model import ModelConfig, ModelProvider, ModelType
 from app.models.user_model import User
 from app.models.workspace_model import (
     InviteStatus,
@@ -39,6 +40,7 @@ from app.schemas.workspace_schema import (
 from app.i18n import t
 from app.invalidation_notify import notify_user_async, notify_user_sync
 from app.services.memory_config_service import MemoryConfigService
+from app.services.model_profile_view import profile_of
 from app.services.session_service import SessionService
 from app.utils.redis_cache import (
     CACHE_MISS,
@@ -59,12 +61,18 @@ _REQUIRED_WORKSPACE_MODEL_SLOTS = ("llm", "embedding", "rerank")
 
 
 def _serialize_model_option(model: ModelConfig) -> dict:
+    profile = profile_of(model)
+    capabilities, _ = profile.legacy_capability_view(model.provider)
     return {
         "id": str(model.id),
         "name": model.name,
         "provider": getattr(model.provider, "value", model.provider),
         "type": getattr(model.type, "value", model.type),
-        "capability": [getattr(item, "value", item) for item in (model.capability or [])],
+        # capability 为派生视图（前端未改期间兼容）；三新列为新口径直读
+        "capability": [str(item) for item in capabilities],
+        "input_modalities": [str(item) for item in profile.input_modalities],
+        "output_modalities": [str(item) for item in profile.output_modalities],
+        "features": [str(item) for item in profile.features],
         "logo": model.logo,
         "is_public": bool(model.is_public),
         # 弃用标记存放在基础模型（model_bases）上，与 ModelConfig schema 的派生方式保持一致
@@ -106,7 +114,6 @@ def _get_public_speedbear_models(db: Session) -> list[ModelConfig]:
 
 def _slot_matches_model(slot: str, model: ModelConfig) -> bool:
     model_type = str(model.type)
-    capability = set(model.capability or [])
 
     if slot == "llm":
         return model_type in {ModelType.LLM.value, ModelType.CHAT.value}
@@ -114,12 +121,13 @@ def _slot_matches_model(slot: str, model: ModelConfig) -> bool:
         return model_type == ModelType.EMBEDDING.value
     if slot == "rerank":
         return model_type == ModelType.RERANK.value
+    # 模态槽位按 profile 输入模态判定（旧列停写后派生视图为新+旧两态同源）
     if slot == "vision":
-        return ModelCapability.VISION.value in capability
+        return Modality.IMAGE in profile_of(model).input_modalities
     if slot == "audio":
-        return ModelCapability.AUDIO.value in capability
+        return Modality.AUDIO in profile_of(model).input_modalities
     if slot == "video":
-        return ModelCapability.VIDEO.value in capability
+        return Modality.VIDEO in profile_of(model).input_modalities
     return False
 
 
@@ -582,7 +590,7 @@ async def _validate_workspace_slot_runtime(
     if slot == "image2text":
         matches_slot = (
             str(model_config.type) in {ModelType.LLM.value, ModelType.CHAT.value}
-            and ModelCapability.VISION.value in set(model_config.capability or [])
+            and Modality.IMAGE in profile_of(model_config).input_modalities
         )
     else:
         matches_slot = _slot_matches_model(slot, model_config)
