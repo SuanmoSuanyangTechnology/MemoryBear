@@ -107,7 +107,7 @@ export function useFilteredVariableList(
         return null;
       })() : null;
 
-      let filteredList = variableList.filter(variable => !['boolean', 'object', 'array[boolean]'].includes(variable.dataType));
+      const filteredList = variableList.filter(variable => !['boolean', 'object', 'array[boolean]'].includes(variable.dataType));
 
       // If this LLM node is a child of iteration/loop, ensure parent variables are included
       if (parentLoopNode) {
@@ -176,17 +176,16 @@ export function useFilteredVariableList(
     }
     if (nodeType === 'knowledge-retrieval') {
       const allList = addParentIterationVars(variableList);
-      let filteredList: Suggestion[] = []
+      const filteredList: Suggestion[] = []
 
       allList.forEach(variable => {
         if (variable.dataType === 'string') {
           filteredList.push(variable)
         } else if (variable.dataType === 'file') {
-          // Recursively filter string children from file type
-          const filteredFile = filterChildrenWithTypes([variable], ['string'])[0];
-          if (filteredFile) {
-            filteredList.push(filteredFile);
-          }
+          filteredList.push({
+            ...variable,
+            children: variable.children.filter((child: Suggestion) => child.dataType === 'string')
+          })
         } else if (variable.children && variable.children?.length > 0) {
           // Recursively handle other types with children
           const filteredVar = filterChildrenWithTypes([variable], ['string'])[0];
@@ -202,7 +201,7 @@ export function useFilteredVariableList(
       || (nodeType === 'question-classifier' && ['input_variable', 'categories'].includes(key as string))
     ) {
       const allList = addParentIterationVars(variableList);
-      let filteredList: Suggestion[] = []
+      const filteredList: Suggestion[] = []
       allList.forEach(variable => {
         if (variable.dataType === 'string') {
           filteredList.push(variable)
@@ -228,7 +227,7 @@ export function useFilteredVariableList(
       || nodeType === 'human-intervention'
     ) {
       const allList = addParentIterationVars(variableList);
-      let filteredList: Suggestion[] = []
+      const filteredList: Suggestion[] = []
       allList.forEach(variable => {
         if (['string', 'number'].includes(variable.dataType)) {
           filteredList.push(variable)
@@ -251,12 +250,11 @@ export function useFilteredVariableList(
     }
     if (nodeType === 'memory-read') {
       const allList = addParentIterationVars(variableList);
-      let filteredList: Suggestion[] = []
+      const filteredList: Suggestion[] = []
       allList.forEach(variable => {
         if (variable.dataType === 'string') {
           filteredList.push(variable)
-        } else if (variable.dataType === 'file') {
-        } else if (variable.children && variable.children?.length > 0) {
+        } else if (variable.dataType !== 'file' && variable.children && variable.children?.length > 0) {
           // Recursively handle other types with children
           const filteredVar = filterChildrenWithTypes([variable], ['string'])[0];
           if (filteredVar) {
@@ -268,7 +266,7 @@ export function useFilteredVariableList(
     }
     if (nodeType === 'memory-write') {
       const allList = addParentIterationVars(variableList);
-      let filteredList: Suggestion[] = []
+      const filteredList: Suggestion[] = []
       allList.forEach(variable => {
         if (['string', 'array[file]'].includes(variable.dataType)) {
           filteredList.push(variable)
@@ -291,7 +289,7 @@ export function useFilteredVariableList(
 
     if ((nodeType === 'iteration' && key === 'output')) {
       if (!selectedNode) return [];
-      let filteredList = variableList.filter(variable => variable.value.includes('sys.') || variable.nodeData?.type === 'var-aggregator')
+      const filteredList = variableList.filter(variable => variable.value.includes('sys.') || variable.nodeData?.type === 'var-aggregator')
       const childVariables = getChildNodeVariables(selectedNode, graphRef);
       const existingKeys = new Set(filteredList.map(v => v.key));
       childVariables.forEach(v => {
@@ -305,7 +303,7 @@ export function useFilteredVariableList(
     }
     if (nodeType === 'loop' && key === 'condition') {
       if (!selectedNode) return [];
-      let filteredList = addParentIterationVars(variableList).filter(variable => variable.nodeData.type !== 'loop');
+      const filteredList = addParentIterationVars(variableList).filter(variable => variable.nodeData.type !== 'loop');
 
       const childVariables = getChildNodeVariables(selectedNode, graphRef);
       const existingKeys = new Set(filteredList.map(v => v.key));
@@ -324,7 +322,7 @@ export function useFilteredVariableList(
 
     if ((nodeType === 'if-else' && key === 'cases')) {
       const allList = addParentIterationVars(variableList);
-      let filteredList: Suggestion[] = []
+      const filteredList: Suggestion[] = []
       allList.forEach(variable => {
         if (variable.dataType === 'file') {
           filteredList.push({
@@ -347,7 +345,7 @@ export function useFilteredVariableList(
     }
 
     // For all other node types, add parent iteration variables if applicable
-    let baseList = variableList;
+    const baseList = variableList;
     return addParentIterationVars(baseList);
   };
 
