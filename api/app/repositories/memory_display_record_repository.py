@@ -8,7 +8,7 @@ import uuid
 from datetime import datetime
 from typing import List, Optional, Tuple
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
@@ -29,7 +29,7 @@ class MemoryDisplayRecordRepository:
         self,
         records: List[MemoryDisplayRecord],
     ) -> int:
-        """事务批量插入写入展示记录。
+        """在调用方持有的事务中批量插入写入展示记录。
 
         使用 ON CONFLICT DO NOTHING 实现幂等写入，
         避免重试场景下的唯一约束冲突。
@@ -58,6 +58,7 @@ class MemoryDisplayRecordRepository:
                 "score": r.score,
                 "rank": r.rank,
                 "search_mode": r.search_mode,
+                "query": r.query,
                 "occurred_at": r.occurred_at,
             })
 
@@ -67,14 +68,33 @@ class MemoryDisplayRecordRepository:
         )
 
         result = self.db.execute(stmt)
-        self.db.commit()
 
         inserted = result.rowcount
         logger.info(
             f"[MemoryDisplayRecord] 批量插入完成: "
             f"attempted={len(records)}, inserted={inserted}"
         )
-        return inserted
+        return inserted or 0
+
+    def delete_fast_dialogues(
+        self,
+        *,
+        end_user_id: uuid.UUID,
+        dialogue_id: str,
+    ) -> int:
+        """条件删除全部 Fast Dialogue 活动，不提交事务。"""
+        if not dialogue_id:
+            raise ValueError("dialogue_id cannot be blank")
+
+        result = self.db.execute(
+            delete(MemoryDisplayRecord).where(
+                MemoryDisplayRecord.end_user_id == end_user_id,
+                MemoryDisplayRecord.operation == "WRITE",
+                MemoryDisplayRecord.memory_id == dialogue_id,
+                MemoryDisplayRecord.memory_type == "dialogue",
+            )
+        )
+        return result.rowcount or 0
 
     def query_written_paginated(
         self,
