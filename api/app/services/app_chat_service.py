@@ -38,7 +38,12 @@ from app.core.config import settings
 from app.services.draft_run_service import AgentRunService
 from app.services.model_service import ModelApiKeyService
 from app.services.multi_agent_orchestrator import MultiAgentOrchestrator
-from app.services.multimodal_service import MultimodalService
+from app.services.multimodal_service import (
+    MultimodalService,
+    deserialize_file_reference,
+    sanitize_processed_files_for_history,
+    serialize_file_reference,
+)
 from app.services.workflow_service import WorkflowService
 from app.models.file_metadata_model import FileMetadata
 from app.services.tool_orchestrator import ToolOrchestrator
@@ -703,16 +708,16 @@ class AppChatService:
                 files,
                 document_image_recognition=doc_img_recognition,
                 workspace_id=workspace_id,
+                file_upload_config=fu_config if isinstance(fu_config, dict) else None,
             )
             logger.info(f"处理了 {len(processed_files)} 个文件")
             if doc_img_recognition and ModelCapability.VISION in (api_key_obj.capability or []) and any(
                 f.type == FileType.DOCUMENT for f in files
             ):
                 system_prompt += (
-                    "\n\n文档文字中包含图片位置标记如 [图片 第2页 第1张]: <img src=\"url\"...>，"
-                    "请在回答中用 Markdown 格式 ![图片描述](url) 展示对应图片。"
-                    "重要：图片 URL 中包含 UUID（如 /storage/permanent/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx），"
-                    "必须将 src 属性的值原封不动复制到 Markdown 的括号中，不得增删任何字符。"
+                    "\n\n文档文字中可能包含图片位置标记如 [图片 第2页 第1张]。"
+                    "对应图片已作为独立视觉输入提供，请结合位置标记和视觉内容理解文档；"
+                    "不要在回答中输出任何文件地址、存储路径或内部标识。"
                 )
 
         # 情绪感知回复：等待识别结果 → 成功则写缓存并注入「固定原则+本轮策略」；失败/未命中则提示词原样不动。
@@ -958,17 +963,11 @@ class AppChatService:
                     if meta:
                         name = name or meta.file_name
                         size = size or meta.file_size
-                human_meta["files"].append({
-                    "type": f.type,
-                    "url": f.url,
-                    "name": name,
-                    "size": size,
-                    "file_type": f.file_type,
-                })
+                human_meta["files"].append(serialize_file_reference(f, name=name, size=size))
 
         if processed_files:
             human_meta["history_files"] = {
-                "content": processed_files,
+                "content": sanitize_processed_files_for_history(processed_files),
                 "provider": api_key_obj.provider,
                 "is_omni": api_key_obj.is_omni
             }
@@ -1284,16 +1283,16 @@ class AppChatService:
                     files,
                     document_image_recognition=doc_img_recognition,
                     workspace_id=workspace_id,
+                    file_upload_config=fu_config if isinstance(fu_config, dict) else None,
                 )
                 logger.info(f"处理了 {len(processed_files)} 个文件")
                 if doc_img_recognition and ModelCapability.VISION in (api_key_obj.capability or []) and any(
                     f.type == FileType.DOCUMENT for f in files
                 ):
                     system_prompt += (
-                        "\n\n文档文字中包含图片位置标记如 [图片 第2页 第1张]: <img src=\"url\"...>，"
-                        "请在回答中用 Markdown 格式 ![图片描述](url) 展示对应图片。"
-                        "重要：图片 URL 中包含 UUID（如 /storage/permanent/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx），"
-                        "必须将 src 属性的值原封不动复制到 Markdown 的括号中，不得增删任何字符。"
+                        "\n\n文档文字中可能包含图片位置标记如 [图片 第2页 第1张]。"
+                        "对应图片已作为独立视觉输入提供，请结合位置标记和视觉内容理解文档；"
+                        "不要在回答中输出任何文件地址、存储路径或内部标识。"
                     )
 
             # 情绪感知回复：等待识别结果 → 成功则写缓存并注入「固定原则+本轮策略」；失败/未命中则提示词原样不动。
@@ -1584,16 +1583,10 @@ class AppChatService:
                         if meta:
                             name = name or meta.file_name
                             size = size or meta.file_size
-                    human_meta["files"].append({
-                        "type": f.type,
-                        "url": f.url,
-                        "name": name,
-                        "size": size,
-                        "file_type": f.file_type,
-                    })
+                    human_meta["files"].append(serialize_file_reference(f, name=name, size=size))
             if processed_files:
                 human_meta["history_files"] = {
-                    "content": processed_files,
+                    "content": sanitize_processed_files_for_history(processed_files),
                     "provider": _api_key_provider,
                     "is_omni": _api_key_is_omni
                 }
@@ -2248,14 +2241,7 @@ class AppChatService:
                 files = []
                 for f in meta_files:
                     try:
-                        file_input = FileInput(
-                            type=f.get("type", "document"),
-                            transfer_method=TransferMethod.REMOTE_URL if f.get("url") else TransferMethod.LOCAL_FILE,
-                            url=f.get("url"),
-                            file_type=f.get("file_type"),
-                            name=f.get("name"),
-                            size=f.get("size"),
-                        )
+                        file_input = deserialize_file_reference(f)
                         files.append(file_input)
                     except Exception as e:
                         logger.warning(f"转换文件信息失败: {e}")
@@ -2385,14 +2371,7 @@ class AppChatService:
                 files = []
                 for f in meta_files:
                     try:
-                        file_input = FileInput(
-                            type=f.get("type", "document"),
-                            transfer_method=TransferMethod.REMOTE_URL if f.get("url") else TransferMethod.LOCAL_FILE,
-                            url=f.get("url"),
-                            file_type=f.get("file_type"),
-                            name=f.get("name"),
-                            size=f.get("size"),
-                        )
+                        file_input = deserialize_file_reference(f)
                         files.append(file_input)
                     except Exception as e:
                         logger.warning(f"转换文件信息失败: {e}")

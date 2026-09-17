@@ -49,7 +49,12 @@ from app.services.langchain_tool_server import Search
 from app.services.memory_config_service import MemoryConfigService
 from app.services.model_parameter_merger import ModelParameterMerger
 from app.services.model_service import ModelApiKeyService
-from app.services.multimodal_service import MultimodalService
+from app.services.multimodal_service import (
+    MultimodalService,
+    deserialize_file_reference,
+    sanitize_processed_files_for_history,
+    serialize_file_reference,
+)
 from app.services.tool_orchestrator import ToolOrchestrator
 from app.services.context_assembler import (
     ContextEvidence,
@@ -1429,7 +1434,8 @@ class AgentRunService:
                 doc_img_recognition = isinstance(fu_config, dict) and fu_config.get("document_image_recognition", False)
                 processed_files = await multimodal_service.process_files(
                     files, document_image_recognition=doc_img_recognition,
-                    workspace_id=workspace_id
+                    workspace_id=workspace_id,
+                    file_upload_config=fu_config if isinstance(fu_config, dict) else None,
                 )
                 logger.info(f"处理了 {len(processed_files)} 个文件，provider={provider}")
                 capability = api_key_config.get("capability", [])
@@ -1440,10 +1446,9 @@ class AgentRunService:
                 )
             if has_doc_with_images:
                 system_prompt += (
-                    "\n\n文档文字中包含图片位置标记如 [图片 第2页 第1张]: <img src=\"url\"...>，"
-                    "请在回答中用 Markdown 格式 ![图片描述](url) 展示对应图片。"
-                    "重要：图片 URL 中包含 UUID（如 /storage/permanent/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx），"
-                    "必须将 src 属性的值原封不动复制到 Markdown 的括号中，不得增删任何字符。"
+                    "\n\n文档文字中可能包含图片位置标记如 [图片 第2页 第1张]。"
+                    "对应图片已作为独立视觉输入提供，请结合位置标记和视觉内容理解文档；"
+                    "不要在回答中输出任何文件地址、存储路径或内部标识。"
                 )
 
             # 7. 根据模型能力选择执行路径
@@ -1913,7 +1918,8 @@ class AgentRunService:
                 doc_img_recognition = isinstance(fu_config, dict) and fu_config.get("document_image_recognition", False)
                 processed_files = await multimodal_service.process_files(
                     files, document_image_recognition=doc_img_recognition,
-                    workspace_id=workspace_id
+                    workspace_id=workspace_id,
+                    file_upload_config=fu_config if isinstance(fu_config, dict) else None,
                 )
                 logger.info(f"处理了 {len(processed_files)} 个文件，provider={provider}")
                 capability = api_key_config.get("capability", [])
@@ -1924,10 +1930,9 @@ class AgentRunService:
                 )
             if has_doc_with_images:
                 system_prompt += (
-                    "\n\n文档文字中包含图片位置标记如 [图片 第2页 第1张]: <img src=\"url\"...>，"
-                    "请在回答中用 Markdown 格式 ![图片描述](url) 展示对应图片。"
-                    "重要：图片 URL 中包含 UUID（如 /storage/permanent/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx），"
-                    "必须将 src 属性的值原封不动复制到 Markdown 的括号中，不得增删任何字符。"
+                    "\n\n文档文字中可能包含图片位置标记如 [图片 第2页 第1张]。"
+                    "对应图片已作为独立视觉输入提供，请结合位置标记和视觉内容理解文档；"
+                    "不要在回答中输出任何文件地址、存储路径或内部标识。"
                 )
 
             # 7. 根据模型能力选择执行路径
@@ -2942,18 +2947,12 @@ class AgentRunService:
                         if meta:
                             name = name or meta[0]
                             size = size or meta[1]
-                    human_meta["files"].append({
-                        "type": f.type,
-                        "url": f.url,
-                        "file_type": f.file_type,
-                        "name": name,
-                        "size": size
-                    })
+                    human_meta["files"].append(serialize_file_reference(f, name=name, size=size))
 
             # 保存 history_files，包含 provider 和 is_omni 信息
             if processed_files:
                 human_meta["history_files"] = {
-                    "content": processed_files,
+                    "content": sanitize_processed_files_for_history(processed_files),
                     "provider": provider,
                     "is_omni": is_omni
                 }
@@ -4430,14 +4429,7 @@ class AgentRunService:
                 files = []
                 for f in meta_files:
                     try:
-                        file_input = FileInput(
-                            type=f.get("type", "document"),
-                            transfer_method=TransferMethod.REMOTE_URL if f.get("url") else TransferMethod.LOCAL_FILE,
-                            url=f.get("url"),
-                            file_type=f.get("file_type"),
-                            name=f.get("name"),
-                            size=f.get("size"),
-                        )
+                        file_input = deserialize_file_reference(f)
                         files.append(file_input)
                     except Exception as e:
                         logger.warning(f"转换文件信息失败: {e}")
@@ -4562,14 +4554,7 @@ class AgentRunService:
                 files = []
                 for f in meta_files:
                     try:
-                        file_input = FileInput(
-                            type=f.get("type", "document"),
-                            transfer_method=TransferMethod.REMOTE_URL if f.get("url") else TransferMethod.LOCAL_FILE,
-                            url=f.get("url"),
-                            file_type=f.get("file_type"),
-                            name=f.get("name"),
-                            size=f.get("size"),
-                        )
+                        file_input = deserialize_file_reference(f)
                         files.append(file_input)
                     except Exception as e:
                         logger.warning(f"转换文件信息失败: {e}")

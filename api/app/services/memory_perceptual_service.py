@@ -5,7 +5,6 @@ from urllib.parse import urlparse, unquote
 
 import json_repair
 import langid
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.utils.datetime_utils import to_timestamp_ms
@@ -14,7 +13,7 @@ from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
 from app.core.models import RedBearLLM, RedBearModelConfig
 from app.db import get_db_context, get_db_read
-from app.models import FileMetadata, ModelApiKey, ModelType
+from app.models import ModelApiKey, ModelType
 from app.models.memory_perceptual_model import PerceptualType, FileStorageService
 from app.models.prompt_optimizer_model import RoleType
 from app.repositories.end_user_repository import get_end_user_by_id
@@ -290,6 +289,7 @@ class MemoryPerceptualService:
             _PerceptualSnapshot | None（两种模式统一返回内存快照）
         """
         # 用 DB：解析 tenant_id + 取模型配置。ModelApiKey 出块即废，块内固化成 ModelInfo。
+        workspace_id = None
         with get_db_read() as db:
             if persist:
                 end_user = get_end_user_by_id(db, end_user_id)
@@ -297,6 +297,7 @@ class MemoryPerceptualService:
                 workspace = get_workspace_by_id(db, workspace_id)
                 tenant_id = workspace.tenant_id
             else:
+                workspace_id = memory_config.workspace_id
                 tenant_id = memory_config.tenant_id
             llm, model_config = self._get_mutlimodal_client(db, file.type, memory_config, tenant_id)
             if model_config is None or llm is None:
@@ -314,10 +315,11 @@ class MemoryPerceptualService:
                 channel_id=model_config.channel_id,
             )
 
-        # 用 DB：文件预处理（本地文件需查 FileMetadata 取文件名）
+        # 用 DB：文件预处理（本地文件通过 workspace/tenant 范围水合）。
         with get_db_read() as db:
             file_message = await MultimodalService(db, api_config).process_files(
-                files=[file]
+                files=[file],
+                workspace_id=workspace_id,
             )
         if not file_message:
             business_logger.warning(f"Unsupported file type {file}, model capability: {api_config.capability}")
@@ -360,24 +362,14 @@ class MemoryPerceptualService:
         else:
             raise ValueError(f"Unexcept Model Output Type: {result.content}")
         content = json_repair.repair_json(final_output, return_objects=True)
-        path = urlparse(file.url).path
-        filename = os.path.basename(path)
-        filename = unquote(filename)
-        file_ext = os.path.splitext(filename)[1]
-        try:
-            file_id = uuid.UUID(filename)
-            stmt = select(FileMetadata).where(
-                FileMetadata.id == file_id
-            )
-            # 用 DB：回查本地文件真实名称（远程文件 filename 不是 UUID，走不到这）
-            with get_db_read() as db:
-                file_obj = db.execute(stmt).scalar_one_or_none()
+        filename = file.name or ""
+        if not filename and file.url:
+            path = urlparse(file.url).path
+            filename = unquote(os.path.basename(path))
+        if not filename:
+            filename = f"attachment_{file.upload_file_id or uuid.uuid4()}"
 
-                if file_obj:
-                    filename = file_obj.file_name
-                    file_ext = file_obj.file_ext
-        except ValueError:
-            business_logger.debug(f"Remote file, file_id={filename}")
+        file_ext = os.path.splitext(filename)[1]
         if not file_ext:
             if file.type == FileType.AUDIO:
                 file_ext = ".mp3"
@@ -388,6 +380,10 @@ class MemoryPerceptualService:
             elif file.type == FileType.IMAGE:
                 file_ext = ".jpg"
             filename += file_ext
+
+        # 沿用调用方已解析的永久下载 URL：查重（get_by_url）与前端展示都依赖它；
+        # 该 URL 不会进入模型请求，出站由 MultimodalService 按可达性判定改为内联字节。
+        file_path = file.url or ""
         file_content = {
             "keywords": content.get("keywords", []),
             "topic": content.get("topic"),
@@ -413,7 +409,7 @@ class MemoryPerceptualService:
                 id=None,
                 end_user_id=end_user_id,
                 perceptual_type=PerceptualType.trans_from_file_type(file.type),
-                file_path=file.url,
+                file_path=file_path,
                 file_name=filename,
                 file_ext=file_ext,
                 summary=content.get("summary", ""),
@@ -428,7 +424,7 @@ class MemoryPerceptualService:
             memory = MemoryPerceptualRepository(db).create_perceptual_memory(
                 end_user_id=uuid.UUID(end_user_id),
                 perceptual_type=PerceptualType.trans_from_file_type(file.type),
-                file_path=file.url,
+                file_path=file_path,
                 file_name=filename,
                 file_ext=file_ext,
                 summary=content.get('summary', ""),
