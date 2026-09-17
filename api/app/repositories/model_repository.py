@@ -2,7 +2,7 @@ import uuid
 from collections.abc import Sequence
 from typing import List, Optional, Dict, Any, Tuple
 
-from sqlalchemy import and_, case, or_, desc, select, tuple_
+from sqlalchemy import and_, case, or_, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session, joinedload
 

@@ -478,6 +478,15 @@ class ElasticClient(BaseClient):
         if not specs:
             return []
 
+        for spec in specs:
+            self.verify_label(spec.label)
+            if spec.label not in EMBEDDING_FIELDS:
+                raise UnsupportedQueryError(
+                    self.name,
+                    spec.label,
+                    "embedding",
+                )
+
         _validate_search_limit(limit)
         query_vector = _normalize_query_vector(embed)
         vector_norm = math.hypot(*query_vector)
@@ -490,18 +499,9 @@ class ElasticClient(BaseClient):
             ]
 
         dimension = len(query_vector)
-        embedding_fields: list[str] = []
-        for spec in specs:
-            self.verify_label(spec.label)
-            if spec.label not in EMBEDDING_FIELDS:
-                raise UnsupportedQueryError(
-                    self.name,
-                    spec.label,
-                    "embedding",
-                )
-            embedding_fields.append(
-                get_embedding_field_name(spec.label, dimension)
-            )
+        embedding_fields = [
+            get_embedding_field_name(spec.label, dimension) for spec in specs
+        ]
 
         num_candidates = min(
             MAX_SEARCH_LIMIT,
