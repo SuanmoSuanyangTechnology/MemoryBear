@@ -162,8 +162,29 @@ export const nodeLibraryPart1: NodeLibrary[] = [
       },
       { type: "agent", icon: 'rb:bg-[url("@/assets/images/workflow/agent.svg")]',
         config: {
+          mode: {
+            type: 'select',
+            options: [
+              { label: 'workflow.config.agent.inlineMode', value: 'inline' },
+              { label: 'workflow.config.agent.referenceMode', value: 'reference' },
+            ],
+            needTranslation: true,
+            defaultValue: 'inline',
+            required: true,
+          },
+          reference: {
+            type: 'agentReference',
+            defaultValue: {
+              release_policy: 'current',
+            },
+            dependsOn: 'mode',
+            dependsOnValue: 'reference',
+            required: true,
+          },
           strategy: {
             type: 'select',
+            dependsOn: 'mode',
+            dependsOnValue: 'inline',
             options: [
               { label: 'ReAct', value: 'react' },
               { label: 'FunctionCalling', value: 'function_calling' },
@@ -173,6 +194,8 @@ export const nodeLibraryPart1: NodeLibrary[] = [
           },
           model: {
             type: 'define',
+            dependsOn: 'mode',
+            dependsOnValue: 'inline',
             defaultValue: Object.entries(modelConfig).reduce((acc, [key, value]) => {
               acc[key] = value.defaultValue;
               return acc;
@@ -181,16 +204,19 @@ export const nodeLibraryPart1: NodeLibrary[] = [
           },
           tools: {
             type: 'toolList',
+            dependsOn: 'mode',
+            dependsOnValue: 'inline',
             defaultValue: [],
           },
           system_prompt: {
             type: 'messageEditor',
+            dependsOn: 'mode',
+            dependsOnValue: 'inline',
             isArray: false,
             titleVariant: 'borderless',
             placeholder: 'workflow.config.parameter-extractor.promptPlaceholder',
             required: true,
           },
-
           context: {
             type: 'variableList',
             placeholder: 'workflow.config.llm.contextPlaceholder'
@@ -202,8 +228,22 @@ export const nodeLibraryPart1: NodeLibrary[] = [
             placeholder: 'workflow.config.parameter-extractor.promptPlaceholder',
             required: true,
           },
+          variable_mapping: {
+            type: 'agentVariableMapping',
+            defaultValue: [],
+            dependsOn: 'mode',
+            dependsOnValue: 'reference',
+          },
+          files: {
+            type: 'variableList',
+            onFilterVariableType: ['file', 'array[file]'],
+            dependsOn: 'mode',
+            dependsOnValue: 'reference',
+          },
           max_iterations: {
             type: 'slider',
+            dependsOn: 'mode',
+            dependsOnValue: 'inline',
             min: 1,
             max: 10,
             step: 1,
@@ -211,6 +251,8 @@ export const nodeLibraryPart1: NodeLibrary[] = [
           },
           memory: {
             type: 'memoryConfig',
+            dependsOn: 'mode',
+            dependsOnValue: 'inline',
             needMsg: false,
             defaultValue: {
               enable: false,
@@ -220,9 +262,13 @@ export const nodeLibraryPart1: NodeLibrary[] = [
           },
           knowledge_retrieval: {
             type: 'knowledge',
+            dependsOn: 'mode',
+            dependsOnValue: 'inline',
           },
           long_term_memory: {
             type: 'switch',
+            dependsOn: 'mode',
+            dependsOnValue: 'inline',
             defaultValue: {
               enable: false
             }

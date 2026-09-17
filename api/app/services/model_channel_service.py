@@ -13,6 +13,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import math
 import uuid
@@ -47,9 +48,12 @@ from app.services.model_service import (
     _invalidate_model_option_states,
     _model_option_cache_state,
     _require_api_base_for_local_provider,
+    _require_asr_api_base,
+    _require_asr_model_configuration,
     _require_supported_api_base,
     _require_wellformed_api_base,
     _require_wellformed_bedrock_credential,
+    is_asr_model,
 )
 
 logger = logging.getLogger(__name__)
@@ -339,6 +343,47 @@ class ChannelApiKeyService:
         return [model_schema.ApiKeyItem.model_validate(describe_channel(row)) for row in rows]
 
     @staticmethod
+    def _asr_key_snapshot(model_id: uuid.UUID, tenant_id: uuid.UUID) -> dict | None:
+        from app.db import get_db_context
+
+        with get_db_context() as db:
+            config = ChannelApiKeyService._config(db, model_id, tenant_id)
+            if not is_asr_model(config.type):
+                return None
+            if config.model_base and config.model_base.is_deprecated:
+                raise BusinessException("模型已停用或废弃", BizCode.INVALID_PARAMETER)
+            _require_asr_model_configuration(config.provider, config.type)
+            return {"provider": _provider_value(config.provider), "name": config.name,
+                    "type": config.type, "capability": list(config.capability or []),
+                    "is_active": config.is_active}
+
+    @staticmethod
+    def _register_asr_key(model_id, tenant_id, created_by, data, snapshot):
+        from app.db import get_db_context
+
+        with get_db_context() as db:
+            try:
+                config = ChannelApiKeyService._config(db, model_id, tenant_id)
+                if (config.is_active != snapshot["is_active"]
+                        or (config.model_base and config.model_base.is_deprecated)
+                        or config.name != snapshot["name"]
+                        or _provider_value(config.provider) != snapshot["provider"]
+                        or config.type != snapshot["type"]
+                        or list(config.capability or []) != snapshot["capability"]):
+                    raise BusinessException("登记期间模型配置已变更，请重试", BizCode.INVALID_PARAMETER)
+                row, action = ChannelService(db).register_for_model(
+                    provider=snapshot["provider"], tenant_id=tenant_id,
+                    model_name=snapshot["name"], api_key=data["api_key"], api_base=data["api_base"],
+                    remark=data["remark"], priority=data["priority"], created_by=created_by,
+                )
+                db.commit()
+                db.refresh(row)
+                return model_schema.ApiKeyItem.model_validate(describe_channel(row)), action
+            except Exception:
+                db.rollback()
+                raise
+
+    @staticmethod
     async def add_model_key(
         db: Session,
         model_id: uuid.UUID,
@@ -349,8 +394,20 @@ class ChannelApiKeyService:
         """给模型登记点名凭据（真实调用名 = config.name，组合 name 是别名不走本域）。
 
         同凭据同端点已存在时幂等合并：provider 级渠道吸收为 no-op、点名渠道并入覆盖集。
-        活体验证与旧路径一致（登记前试调一次，失败 400）。
+        ASR 模型登记时只校验配置结构，凭据在实际调用时验证；其他模型
+        仍在登记前试调一次，失败返回 400。
         """
+        snapshot = await asyncio.to_thread(ChannelApiKeyService._asr_key_snapshot, model_id, tenant_id)
+        if snapshot is not None:
+            _require_api_base_for_local_provider(snapshot["provider"], data.api_base)
+            _require_wellformed_bedrock_credential(snapshot["provider"], data.api_key)
+            _require_wellformed_api_base(snapshot["provider"], data.api_base, snapshot["type"])
+            _require_asr_api_base(data.api_base)
+            _require_supported_api_base(snapshot["provider"], data.api_base, snapshot["type"])
+            return await asyncio.to_thread(
+                ChannelApiKeyService._register_asr_key, model_id, tenant_id,
+                created_by, data.model_dump(), snapshot,
+            )
         model_config = ChannelApiKeyService._config(db, model_id, tenant_id)
         provider = _provider_value(model_config.provider)
         _require_api_base_for_local_provider(provider, data.api_base)

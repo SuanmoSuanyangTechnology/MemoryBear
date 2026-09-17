@@ -93,8 +93,8 @@ class FileDeletionPlan:
     derived_storage_keys: tuple[str, ...]
 
 
-def _not_found(message: str = "File resource not found") -> KnowledgeError:
-    return KnowledgeError.from_code("KB_RESOURCE_NOT_FOUND", message)
+def _not_found(code: str = "KB_FILE_NOT_FOUND") -> KnowledgeError:
+    return KnowledgeError.from_code(code)
 
 
 def file_to_data(file: File) -> dict[str, Any]:
@@ -135,7 +135,7 @@ async def require_parent_folder(
         return
     parent = await get_file(db, parent_id, principal, kb_id)
     if parent is None or parent.file_ext != "folder":
-        raise _not_found("Parent folder does not exist")
+        raise KnowledgeError.from_code("KB_PARENT_FOLDER_NOT_FOUND")
 
 
 async def list_files(
@@ -151,7 +151,7 @@ async def list_files(
     keywords: str | None,
 ) -> tuple[int, list[dict[str, Any]]]:
     if await knowledge_service.get_knowledge(db, kb_id, principal) is None:
-        raise _not_found("Knowledge resource not found")
+        raise KnowledgeError.from_code("KB_KNOWLEDGE_NOT_FOUND")
     await require_parent_folder(db, kb_id, parent_id, principal)
     filters = [File.kb_id == kb_id, File.file_role == FILE_ROLE_SOURCE]
     if parent_id:
@@ -177,7 +177,7 @@ async def create_folder(
     principal: Principal,
 ) -> File:
     if await knowledge_service.get_knowledge(db, kb_id, principal) is None:
-        raise _not_found("Knowledge resource not found")
+        raise KnowledgeError.from_code("KB_KNOWLEDGE_NOT_FOUND")
     await require_parent_folder(db, kb_id, parent_id, principal)
     return await file_repository.create_file_async(
         db,
@@ -226,7 +226,7 @@ async def upload_content(
     del content_type
     knowledge = await knowledge_service.get_knowledge(db, kb_id, principal)
     if knowledge is None:
-        raise _not_found("Knowledge resource not found")
+        raise KnowledgeError.from_code("KB_KNOWLEDGE_NOT_FOUND")
     try:
         normalized_parser_config = normalize_document_parser_config(
             parser_config
@@ -234,7 +234,7 @@ async def upload_content(
             else _document_parser_config(knowledge, inherit=inherit_parser_config)
         )
     except (ValueError, GraphPipelineConfigError) as exc:
-        raise KnowledgeError.from_code("KB_VALIDATION_ERROR", str(exc)) from exc
+        raise KnowledgeError.from_code("KB_DOCUMENT_PARSER_CONFIG_INVALID") from exc
     await require_parent_folder(db, kb_id, parent_id, principal)
     file_id = uuid.uuid4()
     return UploadPlan(
@@ -259,9 +259,9 @@ async def persist_uploaded_content(
     """Revalidate ownership and atomically persist a planned upload."""
 
     if plan.created_by != principal.actor_id:
-        raise _not_found("Knowledge resource not found")
+        raise KnowledgeError.from_code("KB_KNOWLEDGE_NOT_FOUND")
     if await knowledge_service.get_knowledge(db, plan.kb_id, principal) is None:
-        raise _not_found("Knowledge resource not found")
+        raise KnowledgeError.from_code("KB_KNOWLEDGE_NOT_FOUND")
     await require_parent_folder(db, plan.kb_id, plan.parent_id, principal)
     try:
         db_file = await file_repository.add_file_async(
@@ -334,7 +334,7 @@ async def prepare_file_deletion(
 ) -> FileDeletionPlan:
     target = await get_file(db, file_id, principal)
     if target is None:
-        raise _not_found()
+        raise KnowledgeError.from_code("KB_FILE_NOT_FOUND")
     files = [target]
     if target.file_ext == "folder":
         result = await db.execute(
@@ -405,7 +405,7 @@ async def update_file(
 ) -> File:
     file = await get_file(db, file_id, principal)
     if file is None:
-        raise _not_found()
+        raise KnowledgeError.from_code("KB_FILE_NOT_FOUND")
     update_fields = update_data.model_dump(exclude_unset=True)
     if "parent_id" in update_fields:
         await require_parent_folder(db, file.kb_id, update_fields["parent_id"], principal)

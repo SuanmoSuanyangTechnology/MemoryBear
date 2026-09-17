@@ -316,22 +316,14 @@ class KnowledgeSettings(BaseSettings):
         default="",
         validation_alias="FILE_LOCAL_SERVER_URL",
     )
-    qwen3_omni_api_key: SecretStr = Field(
-        default=SecretStr(""),
-        validation_alias="QWEN3_OMNI_API_KEY",
-    )
-    qwen3_omni_model_name: str = Field(
-        default="qwen3-omni-flash",
-        validation_alias="QWEN3_OMNI_MODEL_NAME",
-    )
-    qwen3_omni_base_url: str = Field(
-        default="https://dashscope.aliyuncs.com/compatible-mode/v1",
-        validation_alias="QWEN3_OMNI_BASE_URL",
-    )
     kb_health_probe_timeout_seconds: float = Field(
         default=3.0,
         gt=0,
         validation_alias="KB_HEALTH_PROBE_TIMEOUT_SECONDS",
+    )
+    kb_worker_health_state_file: Path = Field(
+        default=Path("/tmp/mem-knowledge-worker-health.json"),
+        validation_alias="KB_WORKER_HEALTH_STATE_FILE",
     )
     kb_worker_prefetch_multiplier: int = Field(
         default=1,
@@ -452,6 +444,8 @@ class KnowledgeSettings(BaseSettings):
                 "KB_TASK_SOFT_TIME_LIMIT_SECONDS must be less than "
                 "KB_TASK_TIME_LIMIT_SECONDS"
             )
+        if not self.kb_worker_health_state_file.is_absolute():
+            raise ValueError("KB_WORKER_HEALTH_STATE_FILE must be absolute")
         return self
 
     @property

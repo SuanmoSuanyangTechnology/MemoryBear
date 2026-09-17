@@ -27,6 +27,7 @@ class ModelType(StrEnum):
     RERANK = "rerank"
     IMAGE = "image"
     VIDEO = "video"
+    ASR = "asr"
 
 
 class ModelCapability(StrEnum):

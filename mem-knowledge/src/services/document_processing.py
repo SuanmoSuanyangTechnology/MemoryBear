@@ -35,8 +35,10 @@ from ..rag.chunk.router import FileTypeRouter
 from ..rag.chunk.token_utils import num_tokens_from_string, truncate
 from ..rag.knowledge_graph import GraphPipeline, is_graph_enabled, resolve_graph_pipeline
 from ..rag.models.chunk import DocumentChunk
-from ..rag.models.media import QWenCV as MediaQWenCV
-from ..rag.models.media import QWenSeq2txt
+from ..rag.models.media_runtime import (
+    AudioTranscriptionChunkModel,
+    VideoUnderstandingChunkModel,
+)
 from ..rag.models.task_runtime import TaskModelFactory
 from ..rag.models.vision import QWenCV as ImageQWenCV
 from ..rag.vdb.vector_store import TaskVectorStore
@@ -52,6 +54,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_PARSE_TO_PAGE = 100_000
 NON_VECTORIZED_CHUNK_TYPES = {"source", "parent"}
+MEDIA_SIGNED_URL_EXPIRES_SECONDS = 3600
 _AUDIO_PATTERN = re.compile(
     r"\.(da|wave|wav|mp3|aac|flac|ogg|aiff|au|midi|wma|"
     r"realaudio|vqf|oggvorbis|ape?)$",
@@ -107,6 +110,8 @@ class ParseDocumentSnapshot:
     embedding_id: uuid.UUID | None
     llm_id: uuid.UUID | None
     image2text_id: uuid.UUID | None
+    audio2text_id: uuid.UUID | None
+    video2text_id: uuid.UUID | None
 
 
 @dataclass(frozen=True)
@@ -160,6 +165,8 @@ def _load_snapshot(
             embedding_id=knowledge.embedding_id,
             llm_id=knowledge.llm_id,
             image2text_id=knowledge.image2text_id,
+            audio2text_id=knowledge.audio2text_id,
+            video2text_id=knowledge.video2text_id,
         )
 
 
@@ -254,11 +261,53 @@ def _estimate_pages(file_name: str, file_binary: bytes) -> int | None:
         return None
 
 
-def _build_vision_model(runtime: ProcessRuntime, snapshot: ParseDocumentSnapshot):
+def _media_file_url(
+    runtime: ProcessRuntime,
+    file_key: str,
+    file_name: str,
+) -> str:
+    storage = KnowledgeFileStorage(runtime.storage)
+    url = runtime.run_async(
+        lambda: storage.get_signed_url(
+            file_key,
+            expires=MEDIA_SIGNED_URL_EXPIRES_SECONDS,
+            file_name=file_name,
+        )
+    )
+    if not url:
+        raise RuntimeError("Selected media model requires an externally accessible file URL")
+    return url
+
+
+def _build_vision_model(
+    runtime: ProcessRuntime,
+    snapshot: ParseDocumentSnapshot,
+    file_key: str,
+):
+    factory = TaskModelFactory(runtime)
     if _AUDIO_PATTERN.search(snapshot.file_name):
-        return QWenSeq2txt(lang="Chinese")
+        if snapshot.audio2text_id is None:
+            raise RuntimeError("audio2text_id model config is unavailable")
+        transcriber = factory.create_audio_transcriber(
+            snapshot.audio2text_id,
+            snapshot.tenant_id,
+        )
+        return AudioTranscriptionChunkModel(
+            transcriber,
+            _media_file_url(runtime, file_key, snapshot.source_file_name),
+        )
     if _VIDEO_PATTERN.search(snapshot.file_name):
-        return MediaQWenCV(lang="Chinese")
+        if snapshot.video2text_id is None:
+            raise RuntimeError("video2text_id model config is unavailable")
+        video_runtime = factory.create_video_understanding(
+            snapshot.video2text_id,
+            snapshot.tenant_id,
+        )
+        return VideoUnderstandingChunkModel(
+            video_runtime,
+            _media_file_url(runtime, file_key, snapshot.source_file_name),
+            lang="Chinese",
+        )
     needs_image_model = (
         bool(_DIRECT_IMAGE_PATTERN.search(snapshot.file_name))
         and is_direct_image_vision_enabled(snapshot.parser_config)
@@ -285,6 +334,7 @@ def _build_vision_model(runtime: ProcessRuntime, snapshot: ParseDocumentSnapshot
 def _preflight_document(
     runtime: ProcessRuntime,
     snapshot: ParseDocumentSnapshot,
+    file_key: str,
 ) -> ParseDocumentPreflight:
     factory = TaskModelFactory(runtime)
     auto_questions_topn = int(snapshot.parser_config.get("auto_questions", 0) or 0)
@@ -294,7 +344,7 @@ def _preflight_document(
             raise RuntimeError("llm model config is unavailable")
         chat_model = factory.create_llm(snapshot.llm_id, snapshot.tenant_id)
 
-    vision_model = _build_vision_model(runtime, snapshot)
+    vision_model = _build_vision_model(runtime, snapshot, file_key)
     if snapshot.embedding_id is None:
         raise ValueError(f"embedding_id config error: {snapshot.knowledge_id}")
     embedding_config = factory.resolve_embedding(
@@ -755,7 +805,7 @@ def process_document(
         document_label = snapshot.file_name or str(normalized_document_id)
         _mark_running(runtime, normalized_document_id, progress_lines)
         with run.stage("preflight"):
-            preflight = _preflight_document(runtime, snapshot)
+            preflight = _preflight_document(runtime, snapshot, file_key)
         if _should_abort(runtime, normalized_document_id):
             raise _ParseAborted
 

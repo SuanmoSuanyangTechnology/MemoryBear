@@ -37,6 +37,7 @@ class ModelType(StrEnum):
     CHAT = "chat"
     EMBEDDING = "embedding"
     RERANK = "rerank"
+    ASR = "asr"
     # TTS = "tts"
     # SPEECH2TEXT = "speech2text"
     IMAGE = "image"

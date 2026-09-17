@@ -329,6 +329,41 @@ class EndUserRepository:
             db_logger.error(f"查询工作空间 {workspace_id} 下终端用户时出错: {str(e)}")
             raise
 
+    def get_memory_count_stats_by_workspace_ids(
+        self, workspace_ids: List[uuid.UUID]
+    ) -> dict:
+        """批量统计多个 workspace 下活跃宿主的 memory_count 之和与宿主数。
+
+        与记忆总量接口同源（读 end_users.memory_count），避免逐空间扫描 Neo4j。
+
+        Returns:
+            dict: {workspace_id: (memory_total, host_count)}
+                  未出现的 workspace 表示没有活跃宿主，由调用方按 (0, 0) 处理
+        """
+        if not workspace_ids:
+            return {}
+        try:
+            result = self.db.execute(
+                select(
+                    EndUser.workspace_id,
+                    func.coalesce(func.sum(EndUser.memory_count), 0),
+                    func.count(EndUser.id),
+                )
+                .where(
+                    EndUser.workspace_id.in_(workspace_ids),
+                    EndUser.is_active.is_(True),
+                )
+                .group_by(EndUser.workspace_id)
+            )
+            # coalesce/count 已保证非空，直接取整；wid/total/hosts 与 select 列一一对应
+            stats = {wid: (int(total), int(hosts)) for wid, total, hosts in result.all()}
+            db_logger.info(f"成功统计 {len(stats)} 个工作空间的记忆总量")
+            return stats
+        except Exception as e:
+            self.db.rollback()
+            db_logger.error(f"批量统计工作空间记忆总量时出错: {str(e)}")
+            raise
+
     def get_temporary_end_users_count_by_workspace(
             self,
             workspace_id: uuid.UUID,
