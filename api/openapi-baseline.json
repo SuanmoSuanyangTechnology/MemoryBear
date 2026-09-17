@@ -899,6 +899,165 @@
         }
       }
     },
+    "/v1/memory/emotion-memory/tags": {
+      "post": {
+        "tags": [
+          "V1 - Emotion Stats API"
+        ],
+        "summary": "Get Emotion Tags",
+        "description": "Query emotion tags through the shared analytics service.",
+        "operationId": "get_emotion_tags_v1_memory_emotion_memory_tags_post",
+        "parameters": [
+          {
+            "name": "X-Language-Type",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "title": "X-Language-Type"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmotionTagsRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/memory/emotion-memory/wordcloud": {
+      "post": {
+        "tags": [
+          "V1 - Emotion Stats API"
+        ],
+        "summary": "Get Emotion Wordcloud",
+        "description": "Query emotion wordcloud through the shared analytics service.",
+        "operationId": "get_emotion_wordcloud_v1_memory_emotion_memory_wordcloud_post",
+        "parameters": [
+          {
+            "name": "X-Language-Type",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "title": "X-Language-Type"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmotionWordcloudRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/memory/emotion-memory/health": {
+      "post": {
+        "tags": [
+          "V1 - Emotion Stats API"
+        ],
+        "summary": "Get Emotion Health",
+        "description": "Query emotion health through the shared analytics service.",
+        "operationId": "get_emotion_health_v1_memory_emotion_memory_health_post",
+        "parameters": [
+          {
+            "name": "X-Language-Type",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "title": "X-Language-Type"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmotionHealthRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/memory/emotion-memory/query_emotion_overview": {
       "get": {
         "tags": [
@@ -3781,6 +3940,59 @@
         }
       }
     },
+    "/v1/memory/analytics/hot_memory_tags": {
+      "get": {
+        "tags": [
+          "V1 - Memory API"
+        ],
+        "summary": "Get Hot Memory Tags Api",
+        "description": "查询 API Key 绑定空间下的热门记忆标签（实时聚合，无缓存）。\n\n空间由 API Key 绑定、不接受外部指定，杜绝跨空间越权。数据源为\nend_users.memory_tags，按文本精确匹配合并，frequency 为采用该 tag 的\n终端用户数。返回 data=[{\"name\", \"frequency\"}]，与管理端接口一致。",
+        "operationId": "get_hot_memory_tags_api_v1_memory_analytics_hot_memory_tags_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 10,
+              "title": "Limit"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiKeyAuth"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/end_user/create": {
       "post": {
         "tags": [
@@ -4637,6 +4849,97 @@
         }
       }
     },
+    "/v1/memory_config/read_config_scene": {
+      "get": {
+        "tags": [
+          "V1 - Memory Config API"
+        ],
+        "summary": "Read Config Scene",
+        "description": "Get Scene boundary and SceneSummary config for a specific memory config.\n\nRequires API Key with 'memory' scope.\nOnly configs belonging to the authorized workspace can be queried.",
+        "operationId": "read_config_scene_v1_memory_config_read_config_scene_get",
+        "parameters": [
+          {
+            "name": "config_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "config_id",
+              "title": "Config Id"
+            },
+            "description": "config_id"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiKeyAuth"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/memory_config/update_config_scene": {
+      "put": {
+        "tags": [
+          "V1 - Memory Config API"
+        ],
+        "summary": "Update Config Scene",
+        "description": "Update Scene boundary and SceneSummary config (full update).\n\nAll configuration fields are required.\nRequires API Key with 'memory' scope.\nOnly configs belonging to the authorized workspace can be updated.",
+        "operationId": "update_config_scene_v1_memory_config_update_config_scene_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_update_config_scene_v1_memory_config_update_config_scene_put"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/memory/analytics/graph_data": {
       "get": {
         "tags": [
@@ -5247,25 +5550,180 @@
         }
       }
     },
+    "/v1/dashboard/total_memory_count": {
+      "get": {
+        "tags": [
+          "V1 - Dashboard API"
+        ],
+        "summary": "Get Workspace Total Memory Count",
+        "description": "Query the total memory count within the workspace bound to the API Key.\n\nThe workspace is determined by the API Key and is not accepted as input, to\nprevent cross-workspace access. The response shape matches the manager-side\n`GET /dashboard/total_memory_count`: data contains total_memory_count /\nhost_count / details.\n\nReturns:\n    ApiResponse: total memory count",
+        "operationId": "get_workspace_total_memory_count_v1_dashboard_total_memory_count_get",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiKeyAuth"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/dashboard/end_user_memory_counts": {
+      "post": {
+        "tags": [
+          "V1 - Dashboard API"
+        ],
+        "summary": "Get End User Memory Counts",
+        "description": "Batch query end users' memory counts within the workspace bound to the API Key.\n\nThe workspace is determined by the API Key and is NOT accepted as input; any\n`workspace_id` in the request body is ignored to prevent cross-workspace access.\nReads `end_users.memory_count`; ids not belonging to the workspace or inactive\ntrigger a validation error (no partial results).\n\nReturns:\n    ApiResponse: {\"total\": int, \"items\": [{end_user_id, other_name, memory_count}]}",
+        "operationId": "get_end_user_memory_counts_v1_dashboard_end_user_memory_counts_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EndUserMemoryCountsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/dashboard/memory_increment_daily": {
+      "get": {
+        "tags": [
+          "V1 - Dashboard API"
+        ],
+        "summary": "Get Memory Increment Daily",
+        "description": "Daily memory increments within the workspace bound to the API Key.\n\nThe workspace is determined by the API Key and is not accepted as input. Same-day\nmultiple rows resolve to the latest `created_at` row. `items[].date` is the UTC\nmidnight (00:00:00.000) millisecond timestamp of the representative day.\n\nReturns:\n    ApiResponse: {\"items\": [{date, total_num}]}",
+        "operationId": "get_memory_increment_daily_v1_dashboard_memory_increment_daily_get",
+        "parameters": [
+          {
+            "name": "start_time",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "description": "Start time in ms (UTC, inclusive)",
+              "title": "Start Time"
+            },
+            "description": "Start time in ms (UTC, inclusive)"
+          },
+          {
+            "name": "end_time",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "description": "End time in ms (UTC, inclusive)",
+              "title": "End Time"
+            },
+            "description": "End time in ms (UTC, inclusive)"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiKeyAuth"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/memory-display/written": {
       "get": {
         "tags": [
           "V1 - Memory Display API"
         ],
         "summary": "Get Written Memories",
-        "description": "获取写入展示记录列表\n\n返回指定用户的写入记忆展示记录，按 occurred_at 倒序分页。\n\nmemory_type 始终返回稳定英文枚举，由前端负责展示文案映射；name 和\ncontent 保持记忆生成时的原始语言，不受 X-Language-Type 影响。",
+        "description": "获取写入展示记录列表\n\n- 传 end_user_id：返回指定用户的写入记忆展示记录；\n- 不传 end_user_id：返回 API Key 所属工作空间的全部写入记录（空间级），\n  每项额外携带 end_user_id 字段区分归属。\n\n统一按 occurred_at 倒序分页。memory_type 始终返回稳定英文枚举，由前端\n负责展示文案映射；name 和 content 保持记忆生成时的原始语言，不受\nX-Language-Type 影响。",
         "operationId": "get_written_memories_v1_memory_display_written_get",
         "parameters": [
           {
             "name": "end_user_id",
             "in": "query",
-            "required": true,
+            "required": false,
             "schema": {
-              "type": "string",
-              "description": "终端用户 ID",
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "终端用户 ID；不传则查询整个工作空间",
               "title": "End User Id"
             },
-            "description": "终端用户 ID"
+            "description": "终端用户 ID；不传则查询整个工作空间"
           },
           {
             "name": "page",
@@ -5293,6 +5751,42 @@
               "title": "Pagesize"
             },
             "description": "每页数量"
+          },
+          {
+            "name": "start_time",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "起始时间（毫秒 UTC，闭区间）",
+              "title": "Start Time"
+            },
+            "description": "起始时间（毫秒 UTC，闭区间）"
+          },
+          {
+            "name": "end_time",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "结束时间（毫秒 UTC，闭区间）",
+              "title": "End Time"
+            },
+            "description": "结束时间（毫秒 UTC，闭区间）"
           }
         ],
         "requestBody": {
@@ -5309,7 +5803,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse"
+                }
               }
             }
           },
@@ -5332,19 +5828,26 @@
           "V1 - Memory Display API"
         ],
         "summary": "Get Retrieved Memories",
-        "description": "获取读取展示记录列表。",
+        "description": "获取读取展示记录列表。\n\n- 传 end_user_id：返回指定用户的读取展示卡片；\n- 不传 end_user_id：返回 API Key 所属工作空间的全部读取卡片（空间级），\n  每项额外携带 end_user_id 字段区分归属。",
         "operationId": "get_retrieved_memories_v1_memory_display_retrieved_get",
         "parameters": [
           {
             "name": "end_user_id",
             "in": "query",
-            "required": true,
+            "required": false,
             "schema": {
-              "type": "string",
-              "description": "终端用户 ID",
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "终端用户 ID；不传则查询整个工作空间",
               "title": "End User Id"
             },
-            "description": "终端用户 ID"
+            "description": "终端用户 ID；不传则查询整个工作空间"
           },
           {
             "name": "page",
@@ -5372,6 +5875,42 @@
               "title": "Pagesize"
             },
             "description": "每页数量"
+          },
+          {
+            "name": "start_time",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "起始时间（毫秒 UTC，闭区间）",
+              "title": "Start Time"
+            },
+            "description": "起始时间（毫秒 UTC，闭区间）"
+          },
+          {
+            "name": "end_time",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "结束时间（毫秒 UTC，闭区间）",
+              "title": "End Time"
+            },
+            "description": "结束时间（毫秒 UTC，闭区间）"
           }
         ],
         "requestBody": {
@@ -5388,7 +5927,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse"
+                }
               }
             }
           },
@@ -5411,19 +5952,26 @@
           "V1 - Memory Display API"
         ],
         "summary": "Get Engine Display Cards",
-        "description": "获取引擎动态展示卡片列表\n\n按\"指定时区下的自然日 + 引擎类型\"聚合事件并返回卡片。\n\nengine_type 始终返回 EXTRACTION、CROSS_MODAL 或 EMOTION，\n由前端负责展示文案映射；X-Language-Type 仅控制 name/content 文案。\n\n聚合边界必须在服务端确定，因此 X-Timezone 为必传请求头，\n前端统一传全局时区设置（useI18n().timeZone），\n保证卡片的聚合日期与前端展示 occurred_at 时使用的时区一致。",
+        "description": "获取引擎动态展示卡片列表\n\n- 传 end_user_id：返回指定用户的引擎卡片；\n- 不传 end_user_id：返回 API Key 所属工作空间的全部引擎卡片（空间级，\n  仍按用户维度拆分），每张卡片额外携带 end_user_id。\n\n按\"指定时区下的自然日 + 引擎类型\"聚合事件并返回卡片。engine_type 始终返回\nEXTRACTION、CROSS_MODAL 或 EMOTION，由前端负责展示文案映射；X-Language-Type\n仅控制 name/content 文案。\n\n聚合边界必须在服务端确定，因此 X-Timezone 为必传请求头，\n前端统一传全局时区设置（useI18n().timeZone），\n保证卡片的聚合日期与前端展示 occurred_at 时使用的时区一致。",
         "operationId": "get_engine_display_cards_v1_memory_display_engines_get",
         "parameters": [
           {
             "name": "end_user_id",
             "in": "query",
-            "required": true,
+            "required": false,
             "schema": {
-              "type": "string",
-              "description": "终端用户 ID",
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "终端用户 ID；不传则查询整个工作空间",
               "title": "End User Id"
             },
-            "description": "终端用户 ID"
+            "description": "终端用户 ID；不传则查询整个工作空间"
           },
           {
             "name": "page",
@@ -5451,6 +5999,42 @@
               "title": "Pagesize"
             },
             "description": "每页数量"
+          },
+          {
+            "name": "start_time",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "起始时间（毫秒 UTC，闭区间）",
+              "title": "Start Time"
+            },
+            "description": "起始时间（毫秒 UTC，闭区间）"
+          },
+          {
+            "name": "end_time",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "结束时间（毫秒 UTC，闭区间）",
+              "title": "End Time"
+            },
+            "description": "结束时间（毫秒 UTC，闭区间）"
           },
           {
             "name": "X-Timezone",
@@ -5494,7 +6078,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse"
+                }
               }
             }
           },
@@ -5517,19 +6103,26 @@
           "V1 - Memory Display API"
         ],
         "summary": "Get All Memory Display",
-        "description": "获取写入、读取和引擎动态的统一时间线。",
+        "description": "获取写入、读取和引擎动态的统一时间线。\n\n- 传 end_user_id：指定用户的统一时间线；\n- 不传 end_user_id：API Key 所属工作空间的统一时间线（空间级），\n  每项额外携带 end_user_id 区分归属。",
         "operationId": "get_all_memory_display_v1_memory_display_all_get",
         "parameters": [
           {
             "name": "end_user_id",
             "in": "query",
-            "required": true,
+            "required": false,
             "schema": {
-              "type": "string",
-              "description": "终端用户 ID",
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "终端用户 ID；不传则查询整个工作空间",
               "title": "End User Id"
             },
-            "description": "终端用户 ID"
+            "description": "终端用户 ID；不传则查询整个工作空间"
           },
           {
             "name": "page",
@@ -5569,6 +6162,42 @@
               "title": "Include Engines"
             },
             "description": "是否包含引擎动态卡片"
+          },
+          {
+            "name": "start_time",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "起始时间（毫秒 UTC，闭区间）",
+              "title": "Start Time"
+            },
+            "description": "起始时间（毫秒 UTC，闭区间）"
+          },
+          {
+            "name": "end_time",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "结束时间（毫秒 UTC，闭区间）",
+              "title": "End Time"
+            },
+            "description": "结束时间（毫秒 UTC，闭区间）"
           },
           {
             "name": "X-Timezone",
@@ -5613,6 +6242,117 @@
             "content": {
               "application/json": {
                 "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/memory/explicit-memory/semantics": {
+      "get": {
+        "tags": [
+          "V1 - Explicit Memory API"
+        ],
+        "summary": "Get Semantic Memory List",
+        "description": "Query semantic memories through the shared explicit-memory service.",
+        "operationId": "get_semantic_memory_list_v1_memory_explicit_memory_semantics_get",
+        "parameters": [
+          {
+            "name": "end_user_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "终端用户ID",
+              "title": "End User Id"
+            },
+            "description": "终端用户ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/memory/value-ranking/permanent-memories": {
+      "get": {
+        "tags": [
+          "V1 - Memory Value Ranking API"
+        ],
+        "summary": "List Permanent Memories",
+        "description": "Query the shared value-ranking service using the API Key workspace.",
+        "operationId": "list_permanent_memories_v1_memory_value_ranking_permanent_memories_get",
+        "parameters": [
+          {
+            "name": "end_user_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "End User Id"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "pagesize",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 20,
+              "title": "Pagesize"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermanentMemoryListApiResponse"
+                }
               }
             }
           },
@@ -6845,45 +7585,8 @@
         "title": "ApiKeyCreate",
         "description": "创建 API Key"
       },
-      "ApiKeyCreateNested": {
+      "ApiKeyRegister": {
         "properties": {
-          "model_name": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 255
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Model Name",
-            "description": "模型实际名称"
-          },
-          "description": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Description",
-            "description": "备注"
-          },
-          "provider": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Provider",
-            "description": "API Key提供商"
-          },
           "api_key": {
             "type": "string",
             "maxLength": 500,
@@ -6903,61 +7606,32 @@
             "title": "Api Base",
             "description": "API基础URL"
           },
-          "capability": {
+          "remark": {
             "anyOf": [
               {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
+                "type": "string",
+                "maxLength": 255
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Capability",
-            "description": "模型能力列表"
-          },
-          "is_omni": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Is Omni",
-            "description": "是否为Omni模型"
-          },
-          "config": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Config",
-            "description": "API Key特定配置",
-            "default": {}
+            "title": "Remark",
+            "description": "备注"
           },
           "priority": {
-            "type": "string",
-            "maxLength": 10,
+            "type": "integer",
             "title": "Priority",
-            "description": "优先级",
-            "default": "1"
+            "description": "优先级（大者优先）",
+            "default": 0
           }
         },
         "type": "object",
         "required": [
           "api_key"
         ],
-        "title": "ApiKeyCreateNested",
-        "description": "用于在创建模型时内嵌创建API Key的Schema"
+        "title": "ApiKeyRegister",
+        "description": "模型域登记凭据（provider/model_name 由服务端按 config 读）"
       },
       "ApiKeyType": {
         "type": "string",
@@ -7567,6 +8241,23 @@
         "type": "object",
         "title": "Body_chat_v1_app_chat_post"
       },
+      "Body_copy_knowledge_api_knowledges__knowledge_id__copy_post": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          }
+        },
+        "type": "object",
+        "title": "Body_copy_knowledge_api_knowledges__knowledge_id__copy_post"
+      },
       "Body_create_chunk_v1_chunks__kb_id___document_id__chunk_post": {
         "properties": {
           "api_key_auth": {
@@ -8130,6 +8821,20 @@
         },
         "type": "object",
         "title": "Body_update_config_reflection_v1_memory_config_update_config_reflection_put"
+      },
+      "Body_update_config_scene_v1_memory_config_update_config_scene_put": {
+        "properties": {
+          "api_key_auth": {
+            "$ref": "#/components/schemas/ApiKeyAuth"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "description": "Request body"
+          }
+        },
+        "type": "object",
+        "title": "Body_update_config_scene_v1_memory_config_update_config_scene_put"
       },
       "Body_update_document_v1_documents__document_id__put": {
         "properties": {
@@ -8941,13 +9646,38 @@
         "title": "ClassUpdateRequest",
         "description": "类型更新请求模型\n\n用于更新已有本体类型信息。\n\nAttributes:\n    class_name: 类型名称，可选，1-200字符\n    class_description: 类型描述，可选\n\nExamples:\n    >>> request = ClassUpdateRequest(\n    ...     class_name=\"更新后的类型名称\",\n    ...     class_description=\"更新后的描述\"\n    ... )"
       },
+      "CompositeMemberSpec": {
+        "properties": {
+          "provider": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Provider",
+            "description": "成员模型供应商"
+          },
+          "model_name": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Model Name",
+            "description": "成员模型名称"
+          }
+        },
+        "type": "object",
+        "required": [
+          "provider",
+          "model_name"
+        ],
+        "title": "CompositeMemberSpec",
+        "description": "组合成员声明：以 (provider, model_name) 定位租户内成员 config。"
+      },
       "CompositeModelCreate": {
         "properties": {
           "name": {
             "type": "string",
             "maxLength": 255,
             "title": "Name",
-            "description": "组合模型名称"
+            "description": "组合模型名称（别名，真实调用名在成员声明）"
           },
           "type": {
             "anyOf": [
@@ -9011,14 +9741,20 @@
             "description": "是否公开",
             "default": false
           },
-          "api_key_ids": {
-            "items": {
-              "type": "string",
-              "format": "uuid"
-            },
-            "type": "array",
-            "title": "Api Key Ids",
-            "description": "绑定的API Key ID列表"
+          "members": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/CompositeMemberSpec"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Members",
+            "description": "组合成员列表（(provider, model_name) 声明）"
           },
           "load_balance_strategy": {
             "anyOf": [
@@ -9036,8 +9772,7 @@
         },
         "type": "object",
         "required": [
-          "name",
-          "api_key_ids"
+          "name"
         ],
         "title": "CompositeModelCreate",
         "description": "创建组合模型Schema"
@@ -10502,6 +11237,24 @@
         ],
         "title": "EndUserInfoUpdate",
         "description": "更新终端用户信息请求模型"
+      },
+      "EndUserMemoryCountsRequest": {
+        "properties": {
+          "end_user_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "End User Ids",
+            "description": "终端用户 ID 数组，单次上限 200"
+          }
+        },
+        "type": "object",
+        "required": [
+          "end_user_ids"
+        ],
+        "title": "EndUserMemoryCountsRequest",
+        "description": "终端用户记忆量批量查询请求体。\n\n- ``end_user_ids``：终端用户 ID 数组，单次上限 200；合法性（UUID/数量）在\n  controller 层校验并以业务错误码返回，避免直接抛 422。\n\n空间不作为入参：管理端与对外接口均以「调用方自身绑定空间」为准（管理端为当前\n会话空间，对外为 API Key 绑定空间），不接受外部指定 workspace_id，避免跨空间越权。"
       },
       "EnvironmentVariableDefinition": {
         "properties": {
@@ -12870,367 +13623,6 @@
         ],
         "title": "MetadataFilterMode"
       },
-      "ModelApiKeyCreate": {
-        "properties": {
-          "model_name": {
-            "type": "string",
-            "maxLength": 255,
-            "title": "Model Name",
-            "description": "模型实际名称"
-          },
-          "description": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Description",
-            "description": "备注"
-          },
-          "provider": {
-            "$ref": "#/components/schemas/ModelProvider",
-            "description": "API Key提供商"
-          },
-          "api_key": {
-            "type": "string",
-            "maxLength": 500,
-            "title": "Api Key",
-            "description": "API密钥"
-          },
-          "api_base": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 500
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Api Base",
-            "description": "API基础URL"
-          },
-          "capability": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Capability",
-            "description": "模型能力列表"
-          },
-          "is_omni": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Is Omni",
-            "description": "是否为Omni模型"
-          },
-          "config": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Config",
-            "description": "API Key特定配置",
-            "default": {}
-          },
-          "is_active": {
-            "type": "boolean",
-            "title": "Is Active",
-            "description": "是否激活",
-            "default": true
-          },
-          "priority": {
-            "type": "string",
-            "maxLength": 10,
-            "title": "Priority",
-            "description": "优先级",
-            "default": "1"
-          },
-          "model_config_ids": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string",
-                  "format": "uuid"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Model Config Ids",
-            "description": "关联的模型配置ID列表"
-          }
-        },
-        "type": "object",
-        "required": [
-          "model_name",
-          "provider",
-          "api_key"
-        ],
-        "title": "ModelApiKeyCreate",
-        "description": "创建API Key Schema"
-      },
-      "ModelApiKeyCreateByProvider": {
-        "properties": {
-          "provider": {
-            "$ref": "#/components/schemas/ModelProvider",
-            "description": "API Key提供商"
-          },
-          "api_key": {
-            "type": "string",
-            "maxLength": 500,
-            "title": "Api Key",
-            "description": "API密钥"
-          },
-          "api_base": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 500
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Api Base",
-            "description": "API基础URL"
-          },
-          "description": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Description",
-            "description": "备注"
-          },
-          "capability": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Capability",
-            "description": "模型能力列表"
-          },
-          "is_omni": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Is Omni",
-            "description": "是否为Omni模型"
-          },
-          "config": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Config",
-            "description": "API Key特定配置",
-            "default": {}
-          },
-          "is_active": {
-            "type": "boolean",
-            "title": "Is Active",
-            "description": "是否激活",
-            "default": true
-          },
-          "priority": {
-            "type": "string",
-            "maxLength": 10,
-            "title": "Priority",
-            "description": "优先级",
-            "default": "1"
-          },
-          "model_config_ids": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string",
-                  "format": "uuid"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Model Config Ids",
-            "description": "关联的模型配置ID列表"
-          }
-        },
-        "type": "object",
-        "required": [
-          "provider",
-          "api_key"
-        ],
-        "title": "ModelApiKeyCreateByProvider",
-        "description": "基于供应商创建API Key Schema"
-      },
-      "ModelApiKeyUpdate": {
-        "properties": {
-          "model_name": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 255
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Model Name",
-            "description": "模型实际名称"
-          },
-          "provider": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ModelProvider"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "API Key提供商"
-          },
-          "api_key": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 500
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Api Key",
-            "description": "API密钥"
-          },
-          "api_base": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 500
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Api Base",
-            "description": "API基础URL"
-          },
-          "capability": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Capability",
-            "description": "模型能力列表"
-          },
-          "is_omni": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Is Omni",
-            "description": "是否为Omni模型"
-          },
-          "config": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Config",
-            "description": "API Key特定配置"
-          },
-          "is_active": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Is Active",
-            "description": "是否激活"
-          },
-          "priority": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 10
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Priority",
-            "description": "优先级"
-          }
-        },
-        "type": "object",
-        "title": "ModelApiKeyUpdate",
-        "description": "更新API Key Schema"
-      },
       "ModelBaseCreate": {
         "properties": {
           "name": {
@@ -13604,43 +13996,20 @@
             "title": "Model Id",
             "description": "基础模型ID"
           },
-          "api_keys": {
-            "anyOf": [
-              {
-                "items": {
-                  "$ref": "#/components/schemas/ApiKeyCreateNested"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Api Keys",
-            "description": "同时创建的API Key配置"
-          },
-          "skip_validation": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Skip Validation",
-            "description": "是否跳过配置验证",
-            "default": false
+          "credential": {
+            "$ref": "#/components/schemas/ApiKeyRegister",
+            "description": "模型凭据（必填，创建时活体验证）"
           }
         },
         "type": "object",
         "required": [
           "name",
           "type",
-          "provider"
+          "provider",
+          "credential"
         ],
         "title": "ModelConfigCreate",
-        "description": "创建模型配置Schema"
+        "description": "创建自定义模型Schema（内嵌 credential：创建即登记点名渠道，单接口原子完成）\n\n自定义模型不经模型广场添加，provider 级渠道不保证可用，因此凭据必填并\n在创建时做活体验证；验证失败拒绝创建（零落库）。"
       },
       "ModelConfigUpdate": {
         "properties": {
@@ -14932,6 +15301,129 @@
         ],
         "title": "PromptSaveRequest"
       },
+      "ProviderApiKeyCreate": {
+        "properties": {
+          "api_key": {
+            "type": "string",
+            "maxLength": 500,
+            "title": "Api Key",
+            "description": "API密钥"
+          },
+          "api_base": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Base",
+            "description": "不接受：公共渠道按能力使用供应商公共端点（传非空值将 400）"
+          },
+          "remark": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Remark",
+            "description": "备注"
+          },
+          "priority": {
+            "type": "integer",
+            "title": "Priority",
+            "description": "优先级（大者优先）",
+            "default": 0
+          },
+          "provider": {
+            "$ref": "#/components/schemas/ModelProvider",
+            "description": "API Key提供商"
+          }
+        },
+        "type": "object",
+        "required": [
+          "api_key",
+          "provider"
+        ],
+        "title": "ProviderApiKeyCreate",
+        "description": "Provider 域登记公共凭据（provider 级 [] 渠道，覆盖该供应商全部未点名模型）\n\n公共渠道固定使用供应商公共端点（运行时按 llm/embedding/rerank 能力区分），\n不接受 api_base；本地提供商无公共端点不可登记。自定义端点请改在模型域\n按模型登记（或编辑点名渠道）。"
+      },
+      "ProviderApiKeyUpdate": {
+        "properties": {
+          "priority": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Priority",
+            "description": "优先级（大者优先）"
+          },
+          "remark": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Remark",
+            "description": "备注"
+          },
+          "api_base": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Base",
+            "description": "API基础URL（仅点名渠道；公共渠道传非空值将 400；null 清空）"
+          },
+          "is_active": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Active",
+            "description": "渠道启停"
+          },
+          "api_key": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key",
+            "description": "重填凭据"
+          }
+        },
+        "type": "object",
+        "title": "ProviderApiKeyUpdate",
+        "description": "渠道属性更新（Provider 域公共渠道与模型域点名渠道共用）\n\n省略 = 不改；api_base/remark 显式 null = 清空；priority/is_active 显式 null 视为省略；\napi_key 非空 = 重填凭据（重加密）。model_names 不可改。"
+      },
       "PublishRequest": {
         "properties": {
           "version_name": {
@@ -15414,6 +15906,69 @@
         ],
         "title": "RoutingRule",
         "description": "路由规则"
+      },
+      "SceneConfigUpdate": {
+        "properties": {
+          "config_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Config Id"
+          },
+          "scene_threshold": {
+            "type": "number",
+            "maximum": 0.95,
+            "minimum": 0.5,
+            "title": "Scene Threshold",
+            "default": 0.8
+          },
+          "scene_history_window_size": {
+            "type": "integer",
+            "maximum": 4.0,
+            "minimum": 1.0,
+            "title": "Scene History Window Size",
+            "default": 4
+          },
+          "scene_min_turns": {
+            "type": "integer",
+            "maximum": 10.0,
+            "minimum": 0.0,
+            "title": "Scene Min Turns",
+            "default": 2
+          },
+          "scene_max_turns": {
+            "type": "integer",
+            "maximum": 100.0,
+            "minimum": 5.0,
+            "title": "Scene Max Turns",
+            "default": 10
+          },
+          "scene_idle_timeout_seconds": {
+            "type": "integer",
+            "maximum": 2592000.0,
+            "minimum": 60.0,
+            "title": "Scene Idle Timeout Seconds",
+            "default": 86400
+          },
+          "scene_min_chars_to_summary": {
+            "type": "integer",
+            "maximum": 200.0,
+            "minimum": 0.0,
+            "title": "Scene Min Chars To Summary",
+            "default": 0
+          },
+          "time_decay_penalty": {
+            "type": "number",
+            "maximum": 0.2,
+            "minimum": 0.0,
+            "title": "Time Decay Penalty",
+            "default": 0.1
+          }
+        },
+        "type": "object",
+        "required": [
+          "config_id"
+        ],
+        "title": "SceneConfigUpdate"
       },
       "SceneCreateRequest": {
         "properties": {
