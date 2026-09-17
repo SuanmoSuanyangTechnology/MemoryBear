@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.core.utils.datetime_utils import utcnow_naive
 from app.core.logging_config import get_db_logger
-from app.models.models_model import ModelConfig, ModelApiKey, ModelType, ModelBase
+from app.models.models_model import ModelConfig, ModelApiKey, ModelType, ModelBase, ModelProvider
 from app.schemas.model_schema import (
     ModelConfigQuery, ModelConfigQueryNew
 )
@@ -16,7 +16,7 @@ from app.schemas.model_schema import (
 # 获取数据库专用日志器
 db_logger = get_db_logger()
 
-# 旧 capability 筛选值 → 新列谓词（2d 迁移兼容；未知值回退冻结旧列，2e 随列删）
+# 旧 capability 筛选值 → 新列谓词（2d 迁移兼容；未知值回退冻结旧列，M10 随列删）
 _CAPABILITY_MODALITY_MAP = {"vision": "image", "audio": "audio", "video": "video"}
 _CAPABILITY_FEATURE_VALUES = {"thinking", "thinking_only", "json_output", "function_call"}
 
@@ -171,7 +171,7 @@ class ModelConfigRepository:
                 .options(joinedload(ModelConfig.model_base))
                 .where(
                     ModelConfig.provider == provider,
-                    ModelConfig.is_composite.is_(False),
+                    ModelConfig.provider != ModelProvider.COMPOSITE,
                     or_(
                         ModelConfig.tenant_id == tenant_id,
                         ModelConfig.is_public,
@@ -203,17 +203,9 @@ class ModelConfigRepository:
                     )
                 )
 
-            # 支持多个 type 值（使用 IN 查询）
-            # 兼容 chat 和 llm 类型：如果查询包含其中一个，则同时匹配两者
+            # 支持多个 type 值（使用 IN 查询；13.2 归一后精确匹配，不再 chat↔llm 扩张）
             if query.type:
-                type_values = list(query.type)
-                # 如果包含 chat 或 llm，则同时包含两者
-                if ModelType.CHAT in type_values or ModelType.LLM in type_values:
-                    if ModelType.CHAT not in type_values:
-                        type_values.append(ModelType.CHAT)
-                    if ModelType.LLM not in type_values:
-                        type_values.append(ModelType.LLM)
-                filters.append(ModelConfig.type.in_(type_values))
+                filters.append(ModelConfig.type.in_(list(query.type)))
 
             # 能力筛选：旧值逐项映射新列谓词（多值 AND）；未知值回退旧列
             if query.capability:
@@ -284,17 +276,9 @@ class ModelConfigRepository:
                     )
                 )
             
-            # 支持多个 type 值（使用 IN 查询）
-            # 兼容 chat 和 llm 类型：如果查询包含其中一个，则同时匹配两者
+            # 支持多个 type 值（使用 IN 查询；13.2 归一后精确匹配，不再 chat↔llm 扩张）
             if query.type:
-                type_values = list(query.type)
-                # 如果包含 chat 或 llm，则同时包含两者
-                # if ModelType.CHAT in type_values or ModelType.LLM in type_values:
-                #     if ModelType.CHAT not in type_values:
-                #         type_values.append(ModelType.CHAT)
-                #     if ModelType.LLM not in type_values:
-                #         type_values.append(ModelType.LLM)
-                filters.append(ModelConfig.type.in_(type_values))
+                filters.append(ModelConfig.type.in_(list(query.type)))
             
             if query.is_active is not None:
                 filters.append(ModelConfig.is_active == query.is_active)
@@ -303,7 +287,10 @@ class ModelConfigRepository:
                 filters.append(ModelConfig.is_public == query.is_public)
 
             if query.is_composite is not None:
-                filters.append(ModelConfig.is_composite == query.is_composite)
+                composite_predicate = ModelConfig.provider == ModelProvider.COMPOSITE
+                filters.append(
+                    composite_predicate if query.is_composite else ~composite_predicate
+                )
             
             if query.provider:
                 filters.append(ModelConfig.provider == query.provider)
@@ -323,14 +310,20 @@ class ModelConfigRepository:
             # 获取总数
             total = base_query.count()
 
-            query_results = base_query.order_by(desc(ModelConfig.created_at)).all()
+            # 同 (provider, name) 多行取 canonical 行（§13.1 同名口径：展示行 = 运行期命中行）
+            query_results = base_query.order_by(
+                ModelConfig.is_active.desc(),
+                ModelConfig.created_at.desc().nullslast(),
+            ).all()
 
             provider_groups: Dict[str, List[ModelConfig]] = {}
+            seen_keys: set = set()
             for model_config in query_results:
-                provider = model_config.provider
-                if provider not in provider_groups:
-                    provider_groups[provider] = []
-                provider_groups[provider].append(model_config)
+                key = (model_config.provider, model_config.name)
+                if key in seen_keys:
+                    continue
+                seen_keys.add(key)
+                provider_groups.setdefault(model_config.provider, []).append(model_config)
             
             db_logger.debug(
                 f"模型配置列表查询成功: 总数={total}, "
@@ -364,7 +357,7 @@ class ModelConfigRepository:
             if is_active:
                 query = query.filter(ModelConfig.is_active)
 
-            query = query.filter(ModelConfig.is_composite == False)
+            query = query.filter(ModelConfig.provider != ModelProvider.COMPOSITE)
 
             models = query.order_by(ModelConfig.created_at.desc()).all()
             db_logger.debug(f"根据类型查询模型配置成功: 数量={len(models)}")
@@ -394,7 +387,7 @@ class ModelConfigRepository:
                 select(ModelConfig)
                 .where(
                     ModelConfig.tenant_id == tenant_id,
-                    ModelConfig.is_composite.is_(False),
+                    ModelConfig.provider != ModelProvider.COMPOSITE,
                     tuple_(ModelConfig.provider, ModelConfig.name).in_(list(provider_names)),
                 )
                 .order_by(
@@ -507,7 +500,7 @@ class ModelConfigRepository:
                         ModelConfig.is_public
                     ),
                     ModelConfig.provider == provider,
-                    ~ModelConfig.is_composite
+                    ModelConfig.provider != ModelProvider.COMPOSITE
                 )
             ).all()
 
@@ -618,7 +611,7 @@ class ModelBaseRepository:
         if any(k in data for k in ['name', 'description', 'logo']):
             db.query(ModelConfig).filter(
                 ModelConfig.model_id == model_base_id,
-                ModelConfig.is_composite == False
+                ModelConfig.provider != ModelProvider.COMPOSITE
             ).update({
                 k: v for k, v in data.items() 
                 if k in ['name', 'description', 'logo']

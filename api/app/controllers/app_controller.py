@@ -104,7 +104,7 @@ def _build_agent_config_from_release(*, release, real_config_id, created_at):
 
 
 def _build_model_config_snapshot(source):
-    from app.models import ModelConfig
+    from app.models import ModelConfig, ModelProvider
 
     snapshot = ModelConfig(
         id=source.id,
@@ -114,7 +114,7 @@ def _build_model_config_snapshot(source):
         name=source.name,
         provider=source.provider,
         type=source.type,
-        is_composite=source.is_composite,
+        is_composite=source.provider == ModelProvider.COMPOSITE,
         description=source.description,
         capability=copy.deepcopy(source.capability),
         is_omni=source.is_omni,

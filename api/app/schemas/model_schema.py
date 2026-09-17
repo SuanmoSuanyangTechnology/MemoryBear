@@ -104,7 +104,7 @@ class ModelConfig(ModelConfigBase):
         instance = super().model_validate(obj, **kwargs)
         if hasattr(obj, "model_base") and obj.model_base is not None:
             instance.is_deprecated = bool(obj.model_base.is_deprecated)
-        if getattr(obj, "is_composite", False):
+        if getattr(obj, "provider", None) == ModelProvider.COMPOSITE:
             instance.members = _parse_member_specs(getattr(obj, "config", None))
         return instance
 

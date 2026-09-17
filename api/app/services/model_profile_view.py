@@ -6,7 +6,7 @@
 - 读侧遗留壳与响应层经 `legacy_view` / `wire_model_config` / `wire_model_base`：旧字段由 profile
   派生输出（wire 双输出窗口，前端未改期间保持逐位兼容），三新列直读
 - 行替身（SimpleNamespace）容错：新列属性一律 `getattr(..., None)`，旧列属性缺失按空/false
-- 旧列（capability/is_omni）停写冻结，2e 随列删除清理
+- 旧列（capability/is_omni）停写冻结，删除并入 M10（Task19 gate）
 """
 from __future__ import annotations
 
@@ -79,6 +79,39 @@ def legacy_view(row: Any) -> tuple[list[str], bool]:
     profile = profile_of(row)
     capabilities, is_omni = profile.legacy_capability_view(getattr(row, "provider", None))
     return _enum_str(capabilities), bool(is_omni)
+
+
+def profile_columns(row: Any) -> dict[str, list[str]]:
+    """行 → 契约 v2 三列视图（新列非空读新列，空回退旧列派生；payload/wire 同源口径）。"""
+    profile = profile_of(row)
+    return {
+        "input_modalities": _enum_str(profile.input_modalities),
+        "output_modalities": _enum_str(profile.output_modalities),
+        "features": _enum_str(profile.features),
+    }
+
+
+def columns_from_legacy(
+    *,
+    provider: str | None,
+    capabilities: Sequence[str] | None = None,
+    is_omni: bool = False,
+) -> dict[str, list[str]]:
+    """旧字段视图 → 契约 v2 三列（无 ORM 行的 payload 场景；有行一律用 `profile_columns`）。
+
+    沙箱 payload 的 agent/workflow 执行恒为 LLM 族，故 type 固定 `llm`。
+    """
+    derived_input, derived_output, derived_features = legacy_capability_columns(
+        type=HostModelType.LLM.value,
+        provider=provider,
+        capabilities=capabilities or (),
+        is_omni=is_omni,
+    )
+    return {
+        "input_modalities": _enum_str(derived_input),
+        "output_modalities": _enum_str(derived_output),
+        "features": _enum_str(derived_features),
+    }
 
 
 def _require_valid_new_columns(

@@ -394,7 +394,7 @@ def _member_configs_sync(
         .options(joinedload(ModelConfig.model_base))
         .where(
             ModelConfig.tenant_id == tenant_id,
-            ModelConfig.is_composite.is_(False),
+            ModelConfig.provider != ModelProvider.COMPOSITE,
             tuple_(ModelConfig.provider, ModelConfig.name).in_(list(pairs)),
         )
         .order_by(
@@ -420,7 +420,7 @@ async def _member_configs_async(
         .options(joinedload(ModelConfig.model_base))
         .where(
             ModelConfig.tenant_id == tenant_id,
-            ModelConfig.is_composite.is_(False),
+            ModelConfig.provider != ModelProvider.COMPOSITE,
             tuple_(ModelConfig.provider, ModelConfig.name).in_(list(pairs)),
         )
         .order_by(

@@ -327,7 +327,7 @@ def _scan_model_configs(db, names: set[str]) -> tuple[dict[str, dict], list[dict
     命中配置 {config_id(str): {"tenant_id", "name", "names": set[str]}} 作为反查入口，
     仅供 _scan_business_refs 使用，不单独出行（无业务引用的配置无迁移影响）。
     """
-    from app.models.models_model import ModelConfig
+    from app.models.models_model import ModelConfig, ModelProvider
 
     hits: dict[str, dict] = {}
     for row in (
@@ -343,7 +343,7 @@ def _scan_model_configs(db, names: set[str]) -> tuple[dict[str, dict], list[dict
     entries: list[dict] = []
     for row in (
         db.query(ModelConfig.id, ModelConfig.tenant_id, ModelConfig.name, ModelConfig.config)
-        .filter(ModelConfig.is_composite.is_(True))
+        .filter(ModelConfig.provider == ModelProvider.COMPOSITE)
         .all()
     ):
         raw = (row.config or {}).get("members") if isinstance(row.config, dict) else None

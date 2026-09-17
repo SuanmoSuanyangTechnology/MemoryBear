@@ -215,7 +215,7 @@ class ChannelApiKeyService:
         model_config = ModelConfigRepository.get_by_id(db, model_id, tenant_id=tenant_id)
         if not model_config:
             raise BusinessException("模型配置不存在", BizCode.MODEL_NOT_FOUND)
-        if model_config.is_composite:
+        if model_config.provider == ModelProvider.COMPOSITE:
             raise BusinessException(
                 "组合模型不支持直接登记凭据；请为成员模型登记，或在 Provider 域登记公共凭据",
                 BizCode.INVALID_PARAMETER,
@@ -247,7 +247,7 @@ class ChannelApiKeyService:
                 "模型已弃用或已下线，无法启用",
                 BizCode.MODEL_DEPRECATED,
             )
-        if model_config.is_composite:
+        if model_config.provider == ModelProvider.COMPOSITE:
             if not parse_members(model_config.config):
                 raise BusinessException(
                     "组合模型缺少成员，无法启用", BizCode.INVALID_PARAMETER
@@ -296,7 +296,7 @@ class ChannelApiKeyService:
         if not model_config:
             raise BusinessException("模型配置不存在", BizCode.MODEL_NOT_FOUND)
         rows = ChannelService(db).list_tenant(tenant_id=tenant_id)
-        if model_config.is_composite:
+        if model_config.provider == ModelProvider.COMPOSITE:
             rows = _named_channels_for_members(rows, parse_members(model_config.config))
         else:
             rows = _named_channels_for_model(

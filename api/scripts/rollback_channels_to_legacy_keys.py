@@ -21,7 +21,8 @@
     （model_name=成员名）——正向时旧表无 [] 形态，反向按语义展开，报告列示。
 - key 行字段：api_key=reveal、api_base=渠道原值（provider 级 NULL）、
   description=remark、priority=str(渠道 priority)（正向映射之逆）、
-  capability/is_omni 取锚点 config、is_active 对齐渠道（软停用 → 旧行停用，
+  capability/is_omni 取锚点 config 派生视图（新列优先，旧列停写冻结）、
+  is_active 对齐渠道（软停用 → 旧行停用，
   spec §5.3；既有行恰为同凭据时做一次对齐更新并报告，不产生重复行）。
 - 幂等：按（明文, provider, api_base, model_name）四元组精确匹配既有行 →
   复用并补 association；同 (provider, api_base, model_name) 但明文不同 →
@@ -120,6 +121,7 @@ def _analyze(db) -> tuple[list[KeyPlan], dict]:
     )
     from app.services.channel_registry import parse_members
     from app.services.channel_service import ChannelService
+    from app.services.model_profile_view import legacy_view
 
     channels = list(db.execute(select(ModelChannel)).scalars())
     configs = list(db.execute(select(ModelConfig)).scalars())
@@ -137,7 +139,7 @@ def _analyze(db) -> tuple[list[KeyPlan], dict]:
     composites: list = []     # [(组合 config, [(provider, member_name)])]
     member_index: dict = {}   # (tenant, provider, member_name) -> [组合 config]
     for row in configs:
-        if row.is_composite:
+        if row.provider == "composite":
             pairs = parse_members(row.config)
             composites.append((row, pairs))
             for provider, name in pairs:
@@ -217,8 +219,8 @@ def _analyze(db) -> tuple[list[KeyPlan], dict]:
                     comp = anchors[0][0]
                     peer = by_pn.get((comp.tenant_id, ch.provider, name))
                     anchor_cfg = peer[0] if peer else comp
-                plan.capability = list(anchor_cfg.capability or [])
-                plan.is_omni = bool(anchor_cfg.is_omni)
+                # 旧列停写后锚点能力取派生视图（新列优先，空则旧列回退）
+                plan.capability, plan.is_omni = legacy_view(anchor_cfg)
             elif bool(ch.is_active) and not plan.is_active:
                 plan.is_active = True  # 跨租户同凭据：活跃语义取并（任一活跃即可用）
             if ch.priority != int(plan.priority or 0) and "priority 跨渠道不一致" not in plan.notes:

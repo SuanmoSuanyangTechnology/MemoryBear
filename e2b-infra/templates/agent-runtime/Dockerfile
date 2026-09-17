@@ -19,6 +19,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY e2b-infra/templates/agent-runtime/requirements-runtime.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt && rm /tmp/requirements.txt
 
+# Install shared model package (api/app imports redbear_model; deps already in requirements-runtime)
+COPY packages/redbear-model /packages/redbear-model
+RUN pip install --no-cache-dir /packages/redbear-model
+
 # Copy the full api/app source (workflow nodes need it)
 COPY api/app /app/app
 

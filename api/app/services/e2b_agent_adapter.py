@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.logging_config import get_logger
-from app.services.model_profile_view import legacy_view
+from app.services.model_profile_view import columns_from_legacy, legacy_view, profile_columns
 
 logger = get_logger(__name__)
 
@@ -89,11 +89,18 @@ class E2BAgentAdapter:
             conversation_id = sandbox_payload.get("runtime_env", {}).get("conversation_id", conversation_id)
             execution_id = sandbox_payload.get("runtime_env", {}).get("execution_id", execution_id)
         else:
-            # Build sandbox-compatible configs（payload 键位不动，2d-4 沙箱模板批收敛）
+            # Build sandbox-compatible configs（2d-4：旧键派生 + 契约 v2 三列双写；
+            # 模板侧迁移前旧键为准，新键供迁移后直读，旧镜像忽略未知键）
             if model_config is not None:
                 orm_capabilities, orm_is_omni = legacy_view(model_config)
+                orm_columns = profile_columns(model_config)
             else:
                 orm_capabilities, orm_is_omni = [], False
+                orm_columns = columns_from_legacy(
+                    provider=api_key_config.get("provider", "openai"),
+                    capabilities=api_key_config.get("capability") or [],
+                    is_omni=bool(api_key_config.get("is_omni", False)),
+                )
             sandbox_agent_config = {
                 "system_prompt": system_prompt or getattr(agent_config, "system_prompt", ""),
                 "tools": tools_serialized or self._serialize_tools(agent_config),
@@ -122,6 +129,9 @@ class E2BAgentAdapter:
                 "enable_search": getattr(model_config, "enable_search", False),
                 "is_omni": api_key_config.get("is_omni", False) or orm_is_omni,
                 "capability": api_key_config.get("capability") or orm_capabilities or [],
+                "input_modalities": orm_columns["input_modalities"],
+                "output_modalities": orm_columns["output_modalities"],
+                "features": orm_columns["features"],
                 "extra_headers": getattr(model_config, "extra_headers", None),
                 "concurrency": getattr(model_config, "concurrency", 5),
             }

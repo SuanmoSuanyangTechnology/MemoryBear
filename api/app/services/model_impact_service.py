@@ -20,7 +20,7 @@ from app.models.app_model import App
 from app.models.app_release_model import AppRelease
 from app.models.knowledge_model import Knowledge
 from app.models.memory_config_model import MemoryConfig
-from app.models.models_model import ModelConfig
+from app.models.models_model import ModelConfig, ModelProvider
 from app.models.multi_agent_model import MultiAgentConfig
 from app.models.workflow_model import WorkflowConfig
 from app.models.workspace_model import Workspace, WorkspaceDefaultModelPreset
@@ -386,7 +386,7 @@ def _composite_member_items(db: Session, base_pairs: set[tuple[str, str]]) -> li
     rows = (
         db.query(ModelConfig.id, ModelConfig.name, ModelConfig.config)
         .filter(
-            ModelConfig.is_composite.is_(True),
+            ModelConfig.provider == ModelProvider.COMPOSITE,
             or_(*[ModelConfig.config.cast(Text).like(f"%{name}%") for name in names]),
         )
         .order_by(ModelConfig.name)

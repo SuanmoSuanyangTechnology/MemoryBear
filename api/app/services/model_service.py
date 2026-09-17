@@ -1128,7 +1128,6 @@ class ModelConfigService:
             "config": ModelConfigService._composite_config(model_data.config, members),
             "is_active": model_data.is_active and bool(members),
             "is_public": model_data.is_public,
-            "is_composite": True,
             "input_modalities": ["text"],
             "output_modalities": ["text"],
             "features": [],
@@ -1157,7 +1156,7 @@ class ModelConfigService:
                                                  tenant_id=tenant_id):
                 raise BusinessException("模型名称已存在", BizCode.DUPLICATE_NAME)
 
-        if not existing_model.is_composite:
+        if existing_model.provider != ModelProvider.COMPOSITE:
             raise BusinessException("该模型不是组合模型", BizCode.INVALID_PARAMETER)
 
         members = ModelConfigService._resolve_composite_members(model_data)
@@ -1382,7 +1381,7 @@ class ModelApiKeyService:
         mode = resolution_mode()
         if mode != "off":
             try:
-                if model_config.is_composite:
+                if model_config.provider == ModelProvider.COMPOSITE:
                     outcome = resolve_composite_plan_sync(db, model_config, tenant_id=tenant_id)
                 else:
                     outcome = resolve_config_plan_sync(
@@ -1453,7 +1452,7 @@ class ModelApiKeyService:
         mode = resolution_mode()
         if mode != "off":
             try:
-                if model_config.is_composite:
+                if model_config.provider == ModelProvider.COMPOSITE:
                     outcome = await resolve_composite_plan_async(db, model_config, tenant_id=tenant_id)
                 else:
                     outcome = await resolve_config_plan_async(
@@ -1703,7 +1702,6 @@ class ModelBaseService:
             "logo": model_base.logo,
             "description": model_base.description,
             "is_active": False,
-            "is_composite": False,
         }
         # 三新列从 base 复制（base 新列空则旧列派生；旧列停写）
         model_config_data.update(
