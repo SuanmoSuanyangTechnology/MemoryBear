@@ -414,7 +414,9 @@ def evaluate_probe(
     if not command_is_celery_worker(command):
         return _failed_probe(probe, "not_celery_worker", state=state)
 
-    if probe in {"startup", "ready"} and state.phase is not WorkerPhase.READY:
+    if probe == "startup" and state.phase is WorkerPhase.STOPPING:
+        return _failed_probe(probe, "worker_not_ready", state=state)
+    if probe == "ready" and state.phase is not WorkerPhase.READY:
         return _failed_probe(probe, "worker_not_ready", state=state)
     return ProbeResult(probe=probe, ok=True, reason="ok", role=state.role, pid=state.pid)
 
