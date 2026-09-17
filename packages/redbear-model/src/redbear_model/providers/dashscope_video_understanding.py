@@ -32,6 +32,7 @@ from redbear_model.media_contracts import (
     VideoUnderstandingRequest,
     VideoUnderstandingResult,
 )
+from redbear_model.providers._sync_deadline import run_with_timeout
 from redbear_model.providers.openai import (
     CompatibleChatOpenAI,
     build_openai_compatible_params,
@@ -154,8 +155,13 @@ class _Collector:
         self.usage = MediaUsage()
 
     def check_time(self):
-        if time.perf_counter() - self.started >= self.options.call_timeout_ms / 1000:
+        if self.remaining() <= 0:
             raise MediaCallTimeoutError(self.operation, usage=self.usage)
+
+    def remaining(self) -> float:
+        return self.options.call_timeout_ms / 1000 - (
+            time.perf_counter() - self.started
+        )
 
     def consume(self, chunk):
         self.check_time()
@@ -378,8 +384,9 @@ class DashScopeVideoUnderstandingAdapter:
     def invoke(self, request: VideoUnderstandingRequest) -> VideoUnderstandingResult:
         state = _Collector("video.invoke", self.options)
         failure = None
-        try:
-            transport = _DeadlineTransport(self.pool.get_http_clients().sync, state)
+        transport = _DeadlineTransport(self.pool.get_http_clients().sync, state)
+
+        def invoke_sync() -> VideoUnderstandingResult:
             with httpx.Client(transport=transport, trust_env=False) as scoped_client:
                 chat, messages, kwargs = self._call(
                     request, state, sync_client=scoped_client
@@ -391,6 +398,14 @@ class DashScopeVideoUnderstandingAdapter:
                 finally:
                     stream.close()
                 return state.result()
+
+        try:
+            return run_with_timeout(
+                invoke_sync,
+                state.remaining(),
+                lambda: MediaCallTimeoutError("video.invoke", usage=state.usage),
+                transport.close,
+            )
         except Exception as exc:  # noqa: BLE001 - redact SDK/transport failures
             failure = state.error(exc)
         raise failure from None

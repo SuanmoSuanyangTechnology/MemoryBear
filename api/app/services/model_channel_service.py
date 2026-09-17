@@ -47,8 +47,9 @@ from app.services.model_service import (
     ModelConfigService,
     _invalidate_model_option_states,
     _model_option_cache_state,
-    _require_asr_model_configuration,
     _require_api_base_for_local_provider,
+    _require_asr_api_base,
+    _require_asr_model_configuration,
     _require_supported_api_base,
     _require_wellformed_api_base,
     _require_wellformed_bedrock_credential,
@@ -401,6 +402,7 @@ class ChannelApiKeyService:
             _require_api_base_for_local_provider(snapshot["provider"], data.api_base)
             _require_wellformed_bedrock_credential(snapshot["provider"], data.api_key)
             _require_wellformed_api_base(snapshot["provider"], data.api_base, snapshot["type"])
+            _require_asr_api_base(data.api_base)
             _require_supported_api_base(snapshot["provider"], data.api_base, snapshot["type"])
             return await asyncio.to_thread(
                 ChannelApiKeyService._register_asr_key, model_id, tenant_id,

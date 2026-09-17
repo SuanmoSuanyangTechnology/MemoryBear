@@ -9,7 +9,6 @@ import re
 import socket
 import time
 import zlib
-from contextlib import closing
 from decimal import Decimal
 from urllib.parse import quote, urlsplit
 
@@ -41,6 +40,7 @@ from redbear_model.media_contracts import (
     TranscriptWord,
     validate_media_url,
 )
+from redbear_model.providers._sync_deadline import run_with_timeout
 from redbear_model.providers.dashscope import resolve_dashscope_native_base_address
 from redbear_model.runtime.client_pool import ModelClientPool
 
@@ -53,7 +53,8 @@ def _safe_identifier(value: object) -> str | None:
     return value if isinstance(value, str) and _IDENTIFIER.fullmatch(value) else None
 
 
-def _base_address(value: str | None) -> str:
+def resolve_dashscope_asr_base_address(value: str | None) -> str:
+    """Validate and normalize a DashScope ASR API root without network I/O."""
     value = value or _DEFAULT_BASE
     validate_media_url(value)
     parsed = urlsplit(value)
@@ -188,7 +189,7 @@ class DashScopeASRAdapter:
             raise UnsupportedModelProviderError(config.provider.value)
         if config.model_type is not ModelType.ASR:
             raise UnsupportedMultimodalModelError("audio transcription")
-        self._base = _base_address(config.base_url)
+        self._base = resolve_dashscope_asr_base_address(config.base_url)
         self._config = config
         self._pool = client_pool
         self._options = options
@@ -197,9 +198,7 @@ class DashScopeASRAdapter:
         return time.monotonic() + self._options.call_timeout_ms / 1000
 
     def _timeout(self, deadline: float) -> dict[str, float]:
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            raise MediaCallTimeoutError("asr")
+        remaining = self._remaining(deadline)
         clients = self._pool.get_http_clients()
         limits = clients.timeout.as_dict() if clients.timeout is not None else {}
         return {
@@ -211,6 +210,13 @@ class DashScopeASRAdapter:
                 (key, limits.get(key)) for key in ("connect", "read", "write", "pool")
             )
         }
+
+    @staticmethod
+    def _remaining(deadline: float, operation: str = "asr") -> float:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise MediaCallTimeoutError(operation)
+        return remaining
 
     def _request(
         self, method: str, path: str, deadline: float, payload=None
@@ -295,16 +301,33 @@ class DashScopeASRAdapter:
         return MediaProviderError(operation)
 
     def _send(self, request: httpx.Request, deadline: float, operation: str) -> dict:
-        try:
-            with closing(
-                self._pool.get_http_clients().sync.send(
-                    request,
-                    stream=True,
-                    auth=None,
-                    follow_redirects=False,
-                )
-            ) as response:
+        active_response: list[httpx.Response] = []
+
+        def send_and_read() -> dict:
+            response = self._pool.get_http_clients().sync.send(
+                request,
+                stream=True,
+                auth=None,
+                follow_redirects=False,
+            )
+            active_response.append(response)
+            try:
                 return self._read(response, deadline, operation)
+            finally:
+                response.close()
+                active_response.clear()
+
+        def close_response() -> None:
+            if active_response:
+                active_response[0].close()
+
+        try:
+            return run_with_timeout(
+                send_and_read,
+                self._remaining(deadline, operation),
+                lambda: MediaCallTimeoutError(operation),
+                close_response,
+            )
         except MediaCallTimeoutError:
             if operation == "asr.submit":
                 raise ModelSubmissionUncertainError(operation) from None
@@ -489,14 +512,21 @@ class DashScopeASRAdapter:
 
     def _download(self, url: str, deadline: float) -> dict:
         for hop in range(_MAX_REDIRECTS + 1):
-            request = _result_request(url, self._timeout(deadline))
-            request.extensions["timeout"] = self._timeout(deadline)
-            try:
-                with closing(
-                    self._pool.get_http_clients().sync.send(
-                        request, stream=True, auth=None, follow_redirects=False
-                    )
-                ) as response:
+            current_url = url
+            active_response: list[httpx.Response] = []
+
+            def download_hop(
+                current_url: str = current_url,
+                hop: int = hop,
+                active_response: list[httpx.Response] = active_response,
+            ) -> tuple[dict | None, str | None]:
+                request = _result_request(current_url, self._timeout(deadline))
+                request.extensions["timeout"] = self._timeout(deadline)
+                response = self._pool.get_http_clients().sync.send(
+                    request, stream=True, auth=None, follow_redirects=False
+                )
+                active_response.append(response)
+                try:
                     if response.is_redirect:
                         if hop == _MAX_REDIRECTS or not response.headers.get(
                             "location"
@@ -504,9 +534,35 @@ class DashScopeASRAdapter:
                             raise MediaProviderError(
                                 "asr.download", status_code=response.status_code
                             )
-                        url = str(httpx.URL(url).join(response.headers["location"]))
-                        continue
-                    return self._read(response, deadline, "asr.download")
+                        return None, str(
+                            httpx.URL(current_url).join(response.headers["location"])
+                        )
+                    return self._read(response, deadline, "asr.download"), None
+                finally:
+                    response.close()
+                    active_response.clear()
+
+            def close_response(
+                active_response: list[httpx.Response] = active_response,
+            ) -> None:
+                if active_response:
+                    active_response[0].close()
+
+            try:
+                payload, redirect_url = run_with_timeout(
+                    download_hop,
+                    self._remaining(deadline, "asr.download"),
+                    lambda: MediaCallTimeoutError("asr.download"),
+                    close_response,
+                )
+                if redirect_url is not None:
+                    url = redirect_url
+                    continue
+                if payload is None:
+                    raise InvalidProviderResponseError(
+                        "asr.download", "missing download payload"
+                    )
+                return payload
             except httpx.HTTPError as exc:
                 raise self._network_error("asr.download", exc) from None
         raise MediaProviderError("asr.download")

@@ -184,6 +184,26 @@ def _require_asr_model_configuration(provider: str, model_type: str) -> None:
         raise BusinessException("ASR 模型当前仅支持 DashScope", BizCode.INVALID_PARAMETER)
 
 
+def _require_asr_api_base(api_base: str | None) -> None:
+    from redbear_model.providers.dashscope_asr import (
+        resolve_dashscope_asr_base_address,
+    )
+
+    try:
+        resolve_dashscope_asr_base_address(api_base)
+    except ValueError:
+        raise BusinessException(
+            "ASR API Base URL 必须是 DashScope 根路径：/api/v1、"
+            "/compatible-mode/v1 或 /compatible-api/v1",
+            BizCode.INVALID_PARAMETER,
+        ) from None
+
+
+def _reject_asr_composite(model_type: ModelType | str | None) -> None:
+    if model_type is not None and is_asr_model(model_type):
+        raise BusinessException("ASR 模型暂不支持组合配置", BizCode.INVALID_PARAMETER)
+
+
 def _validation_image() -> "ImageEmbeddingContent":
     from redbear_model import ImageEmbeddingContent
 
@@ -936,8 +956,9 @@ class ModelConfigService:
         _require_api_base_for_local_provider(model_data.provider, credential.api_base)
         _require_wellformed_bedrock_credential(model_data.provider, credential.api_key)
         _require_wellformed_api_base(model_data.provider, credential.api_base, model_data.type)
-        _require_supported_api_base(model_data.provider, credential.api_base, model_data.type)
         _require_asr_model_configuration(model_data.provider, model_data.type)
+        _require_asr_api_base(credential.api_base)
+        _require_supported_api_base(model_data.provider, credential.api_base, model_data.type)
         snapshot = model_data.model_dump(exclude={"credential"})
         await asyncio.to_thread(ModelConfigService._check_asr_model_name, snapshot, tenant_id)
         return await asyncio.to_thread(
@@ -1099,6 +1120,7 @@ class ModelConfigService:
     async def create_composite_model(db: Session, model_data: model_schema.CompositeModelCreate,
                                      tenant_id: uuid.UUID) -> ModelConfig:
         """创建组合模型"""
+        _reject_asr_composite(model_data.type)
         if ModelConfigRepository.get_by_name(db, model_data.name, provider=ModelProvider.COMPOSITE,
                                              tenant_id=tenant_id):
             raise BusinessException("模型名称已存在", BizCode.DUPLICATE_NAME)
@@ -1136,15 +1158,16 @@ class ModelConfigService:
         existing_model = ModelConfigRepository.get_by_id(db, model_id, tenant_id=tenant_id)
         if not existing_model:
             raise BusinessException("模型配置不存在", BizCode.MODEL_NOT_FOUND)
+
+        if not existing_model.is_composite:
+            raise BusinessException("该模型不是组合模型", BizCode.INVALID_PARAMETER)
+        _reject_asr_composite(existing_model.type)
         old_cache_state = _model_option_cache_state(existing_model)
 
         if model_data.name and model_data.name != existing_model.name:
             if ModelConfigRepository.get_by_name(db, model_data.name, provider=existing_model.provider,
                                                  tenant_id=tenant_id):
                 raise BusinessException("模型名称已存在", BizCode.DUPLICATE_NAME)
-
-        if not existing_model.is_composite:
-            raise BusinessException("该模型不是组合模型", BizCode.INVALID_PARAMETER)
 
         members = ModelConfigService._resolve_composite_members(model_data)
         # 组合类型不可变更（controller 已拒 type），校验锚定既有 type
