@@ -34,11 +34,13 @@ from app.schemas.memory_storage_schema import (
     ForgettingConfigResponse,
     ForgettingConfigUpdateRequest,
 )
+from app.schemas.memory_api_schema import PredictionConfigUpdateRequest
 from app.schemas.response_schema import ApiResponse
 from app.schemas.scene_memory_schema import SceneConfig, SceneConfigUpdate
 from app.services.emotion_config_service import EmotionConfigService
 from app.services.memory_forget_service import MemoryForgetService
 from app.services.memory_storage_service import DataConfigService
+from app.services.prediction_config_service import PredictionConfigService
 from app.utils.config_utils import resolve_config_id, resolve_config_id_async
 
 api_logger = get_api_logger()
@@ -50,6 +52,54 @@ router = APIRouter(
     prefix="/memory_config",
     tags=["Memory Config"],
 )
+
+
+@router.get("/read_config_prediction", response_model=ApiResponse)
+async def read_prediction_config(
+    config_id: UUID,
+    current_user: CurrentUserSnapshot = Depends(get_current_user_async),
+) -> dict:
+    """Read the prediction-engine settings for one workspace configuration."""
+    workspace_id = current_user.current_workspace_id
+    if workspace_id is None:
+        return fail(
+            BizCode.INVALID_PARAMETER,
+            "请先切换到一个工作空间",
+            "current_workspace_id is None",
+        )
+    async with get_async_db_context() as db:
+        data = await PredictionConfigService(db).get(config_id, workspace_id)
+        if data is None:
+            return fail(BizCode.MEMORY_CONFIG_NOT_FOUND, "配置不存在或无权访问")
+        return success(data=data, msg="查询成功")
+
+
+@router.post("/update_config_prediction", response_model=ApiResponse)
+async def update_prediction_config(
+    payload: PredictionConfigUpdateRequest,
+    current_user: CurrentUserSnapshot = Depends(get_current_user_async),
+) -> dict:
+    """Save the complete prediction-engine configuration for one workspace."""
+    from app.utils.redis_cache import invalidate_cache
+
+    workspace_id = current_user.current_workspace_id
+    if workspace_id is None:
+        return fail(
+            BizCode.INVALID_PARAMETER,
+            "请先切换到一个工作空间",
+            "current_workspace_id is None",
+        )
+    values = payload.model_dump(exclude={"config_id"})
+    async with get_async_db_context() as db:
+        data = await PredictionConfigService(db).update(
+            payload.config_id,
+            workspace_id,
+            values,
+        )
+        if data is None:
+            return fail(BizCode.MEMORY_CONFIG_NOT_FOUND, "配置不存在或无权访问")
+    await invalidate_cache(prefix=f"memory_config:{payload.config_id}")
+    return success(data=data, msg="更新成功")
 
 
 # ==================== 读取类 ====================

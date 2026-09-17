@@ -388,6 +388,13 @@ def _build_memory_config(
         # Pipeline config: Emotion extraction
         emotion_enabled=bool(
             memory_config_row.emotion_enabled) if memory_config_row.emotion_enabled is not None else False,
+        # Prediction engine
+        prediction_candidate_limit=int(memory_config_row.prediction_candidate_limit),
+        prediction_participant_limit=int(memory_config_row.prediction_participant_limit),
+        prediction_max_steps=int(memory_config_row.prediction_max_steps),
+        prediction_recall_limit=int(memory_config_row.prediction_recall_limit),
+        prediction_min_valid_memory_count=int(memory_config_row.prediction_min_valid_memory_count),
+        prediction_embedding_min_similarity=float(memory_config_row.prediction_embedding_min_similarity),
         # Ontology scene association
         scene_id=memory_config_row.scene_id,
         ontology_class_infos=ontology_class_infos,

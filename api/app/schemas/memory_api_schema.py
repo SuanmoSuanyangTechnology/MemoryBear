@@ -131,6 +131,36 @@ class ConfigUpdateRequest(BaseModel):
         if not v or not v.strip():
             raise ValueError("config_id is required and cannot be empty")
         return v.strip()
+
+
+class PredictionConfigUpdateRequest(BaseModel):
+    """Full update payload for prediction-engine configuration."""
+
+    config_id: uuid.UUID
+    prediction_candidate_limit: int = Field(gt=0)
+    prediction_participant_limit: int = Field(gt=0)
+    prediction_max_steps: int = Field(ge=1, le=6)
+    prediction_recall_limit: int = Field(gt=0)
+    prediction_min_valid_memory_count: int = Field(gt=0)
+    prediction_embedding_min_similarity: float = Field(ge=0.0, le=1.0)
+
+    @field_validator("prediction_participant_limit")
+    @classmethod
+    def validate_participant_limit(cls, value: int, info) -> int:
+        """Require the participant limit not to exceed the candidate limit."""
+        candidate_limit = info.data.get("prediction_candidate_limit")
+        if candidate_limit is not None and value > candidate_limit:
+            raise ValueError("prediction_participant_limit 不能大于 prediction_candidate_limit")
+        return value
+
+    @field_validator("prediction_min_valid_memory_count")
+    @classmethod
+    def validate_minimum_memory_count(cls, value: int, info) -> int:
+        """Require the minimum valid count not to exceed the recall limit."""
+        recall_limit = info.data.get("prediction_recall_limit")
+        if recall_limit is not None and value > recall_limit:
+            raise ValueError("prediction_min_valid_memory_count 不能大于 prediction_recall_limit")
+        return value
     
 class ConfigUpdateExtractedRequest(BaseModel):
     """Request schema for updating memory config extracted parameters.
