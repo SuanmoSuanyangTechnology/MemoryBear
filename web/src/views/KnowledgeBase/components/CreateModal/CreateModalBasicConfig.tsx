@@ -180,7 +180,7 @@ const CreateModalBasicConfig = ({
               placeholder={t(`knowledgeBase.createForm.${fieldKey}`)}
               isAutoFetch={false}
               initialData={customModels[item.type]}
-              allowClear={false}
+              allowClear={true}
               onChange={(value) => onModelChange(value, item.type)}
             />
           </Form.Item>
