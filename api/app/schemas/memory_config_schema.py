@@ -452,6 +452,9 @@ class MemoryConfig(BaseModel):
     prediction_recall_limit: int = 20
     prediction_min_valid_memory_count: int = 3
     prediction_embedding_min_similarity: float = 0.7
+    # Pipeline config: Coding Agent preference extension
+    preference_engine_enabled: bool = False
+    preference_custom_keywords: tuple[str, ...] = ()
 
     # Ontology scene association
     scene_id: Optional[UUID] = None

@@ -14,10 +14,10 @@ from app.core.api_key_auth import require_api_key_self_db
 from app.core.api_key_utils import get_current_user_snapshot_from_api_key_async
 from app.core.error_codes import BizCode
 from app.core.logging_config import get_business_logger
+from app.core.response_utils import fail, success
 from app.db import get_async_db_context, get_db_context
 from app.repositories.memory_config_repository import MemoryConfigRepository
 from app.schemas.api_key_schema import ApiKeyAuth
-from app.schemas.scene_memory_schema import SceneConfigUpdate
 from app.schemas.memory_api_schema import (
     ConfigUpdateExtractedRequest,
     ConfigUpdateRequest,
@@ -33,6 +33,8 @@ from app.schemas.memory_storage_schema import (
     ConfigParamsCreate,
 )
 from app.schemas.memory_storage_schema import ForgettingConfigUpdateRequest
+from app.schemas.preference_config_schema import PreferenceConfigUpdate
+from app.schemas.scene_memory_schema import SceneConfigUpdate
 from app.utils.config_utils import resolve_config_id_async
 
 router = APIRouter(prefix="/memory_config", tags=["V1 - Memory Config API"])
@@ -546,3 +548,57 @@ async def update_config_scene(
             payload=payload, current_user=current_user
         )
     )
+
+
+@router.get("/read_config_preference")
+@require_api_key_self_db(scopes=["memory"])
+async def read_config_preference(
+    request: Request,
+    config_id: str = Query(..., description="config_id"),
+    api_key_auth: ApiKeyAuth = None,
+):
+    """Read a workspace-owned Coding Agent preference config."""
+    try:
+        resolved_id = uuid.UUID(config_id)
+    except ValueError:
+        return fail(BizCode.INVALID_PARAMETER, "无效的配置ID")
+
+    from app.services.memory_config_service import MemoryConfigService
+
+    async with get_async_db_context() as auth_db:
+        try:
+            data = await MemoryConfigService(auth_db).read_preference_config_async(
+                config_id=resolved_id,
+                workspace_id=api_key_auth.workspace_id,
+            )
+            return success(data=data.model_dump(mode="json"), msg="查询成功")
+        except LookupError:
+            return fail(BizCode.MEMORY_CONFIG_NOT_FOUND, "配置不存在或无权访问")
+
+
+@router.put("/update_config_preference")
+@require_api_key_self_db(scopes=["memory"])
+async def update_config_preference(
+    request: Request,
+    api_key_auth: ApiKeyAuth = None,
+    message: str = Body(None, description="Request body"),
+):
+    """Update a workspace-owned Coding Agent preference config."""
+    payload = PreferenceConfigUpdate(**(await request.json()))
+
+    from app.services.memory_config_service import MemoryConfigService
+
+    async with get_async_db_context() as auth_db:
+        try:
+            data = await MemoryConfigService(auth_db).update_preference_config_async(
+                payload=payload,
+                workspace_id=api_key_auth.workspace_id,
+                operator=f"api_key:{api_key_auth.api_key_id}",
+            )
+            return success(data=data.model_dump(mode="json"), msg="更新成功")
+        except ValueError as exc:
+            await auth_db.rollback()
+            return fail(BizCode.INVALID_PARAMETER, "偏好配置参数错误", str(exc))
+        except LookupError:
+            await auth_db.rollback()
+            return fail(BizCode.MEMORY_CONFIG_NOT_FOUND, "配置不存在或无权访问")
