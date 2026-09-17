@@ -67,6 +67,7 @@ export const detail = {
       this_week: '本周',
       this_month: '本月',
       conversation: "对话",
+      dialogue: '原始对话',
       project_work: "项目/工作",
       learning: "学习",
       decision: "决策",

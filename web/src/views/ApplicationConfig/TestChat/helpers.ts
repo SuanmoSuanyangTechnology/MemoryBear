@@ -114,7 +114,7 @@ export const addAssistantMessage = (prev: ChatList, type?: string): ChatList => 
     role: 'assistant',
     content: '',
     created_at: Date.now(),
-    subContent: type?.includes('workflow') ? [] : undefined,
+    subContent: type?.includes('workflow') || type === 'multi_agent' ? [] : undefined,
   },
 ]
 
