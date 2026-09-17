@@ -343,7 +343,7 @@ export function useFilteredVariableList(
       return variableList.filter(variable => variable.dataType !== 'secret');
     }
     if (nodeType === 'agent' && key === 'context') {
-      return variableList.filter(variable => variable.dataType === 'array[object]');
+      return variableList.filter(variable => ['string', 'object', 'array[string]', 'array[object]'].includes(variable.dataType));
     }
 
     // For all other node types, add parent iteration variables if applicable

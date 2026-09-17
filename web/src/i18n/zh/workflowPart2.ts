@@ -109,6 +109,7 @@ export const workflowPart2 = {
         'trigger.cron': 'Cron 表达式',
         'agent.model': '模型',
         'agent.system_prompt': '指令',
+        'agent.reference': 'Agent 引用配置',
         'agent.message': '查询',
         'human-intervention.delivery_method': '提交方式',
         'human-intervention.actions': '用户操作',

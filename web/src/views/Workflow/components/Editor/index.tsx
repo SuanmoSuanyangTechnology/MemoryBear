@@ -95,14 +95,14 @@ const Editor: FC<LexicalEditorProps> =({
   }
 
   // Lexical editor configuration — must be stable (never recreated)
-  const initialConfig = useMemo(() => ({
+  const initialConfig = {
     namespace: 'AutocompleteEditor',
     theme,
     nodes: [VariableNode, FormFieldNode],
     onError: (error: Error) => {
       console.error(error);
     },
-  }), []);
+  }
 
   // Calculate minimum height based on type and size
   const minheight = useMemo(() => {
@@ -130,7 +130,7 @@ const Editor: FC<LexicalEditorProps> =({
   return (
     <LexicalComposer initialConfig={initialConfig}>
       <FormFieldProvider 
-        updateFormFields={updateFormFields || ((_) => {})} 
+        updateFormFields={updateFormFields || (() => {})} 
         formFields={formFields}
         options={options}
       >
@@ -156,7 +156,7 @@ const Editor: FC<LexicalEditorProps> =({
             }
             placeholder={
               <div
-                className="rb:absolute rb:rounded-lg rb:pointer-none"
+                className="rb:absolute rb:rounded-lg rb:pointer-events-none"
                 style={{
                   minHeight: placeHolderMinheight,
                   top: variant === 'outlined' ? '6px' : type === 'input' ? '6px' : '2px',
