@@ -638,9 +638,6 @@ class KnowledgeRetrievalPreparation:
             provider=resolved.provider.value,
             api_key=resolved.api_key.get_secret_value(),
             api_base=resolved.base_url,
-            capability=tuple(capability.value for capability in resolved.capabilities),
-            is_omni=resolved.is_omni,
-            model_type=resolved.model_type.value,
             resolved=resolved,
         )
 

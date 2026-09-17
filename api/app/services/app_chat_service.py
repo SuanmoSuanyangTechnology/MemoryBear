@@ -658,7 +658,6 @@ class AppChatService:
                 system_prompt=system_prompt,
                 current_input=message,
                 current_provider=api_key_obj.provider,
-                current_is_omni=api_key_obj.is_omni,
                 legacy_max_history=settings.AGENT_MAX_HISTORY,
                 model_config_id=config.default_model_config_id,
             )
@@ -670,7 +669,6 @@ class AppChatService:
                     conversation_id=conversation_id,
                     max_history=settings.AGENT_MAX_HISTORY,
                     current_provider=api_key_obj.provider,
-                    current_is_omni=api_key_obj.is_omni
                 )
 
         # 如果是新会话且有开场白，作为第一条 assistant 消息写入数据库
@@ -689,7 +687,6 @@ class AppChatService:
                     conversation_id=conversation_id,
                     max_history=settings.AGENT_MAX_HISTORY,
                     current_provider=api_key_obj.provider,
-                    current_is_omni=api_key_obj.is_omni
                 )
 
         # 处理多模态文件
@@ -972,7 +969,6 @@ class AppChatService:
             human_meta["history_files"] = {
                 "content": processed_files,
                 "provider": api_key_obj.provider,
-                "is_omni": api_key_obj.is_omni
             }
 
         if audio_url:
@@ -1005,7 +1001,6 @@ class AppChatService:
                     features=features_config,
                     conversation_id=conversation_id,
                     current_provider=api_key_obj.provider,
-                    current_is_omni=api_key_obj.is_omni,
                     legacy_max_history=settings.AGENT_MAX_HISTORY,
                     model_config_id=config.default_model_config_id,
                 )
@@ -1245,7 +1240,6 @@ class AppChatService:
                     system_prompt=system_prompt,
                     current_input=message,
                     current_provider=api_key_obj.provider,
-                    current_is_omni=api_key_obj.is_omni,
                     legacy_max_history=settings.AGENT_MAX_HISTORY,
                     model_config_id=config.default_model_config_id,
                 )
@@ -1257,7 +1251,6 @@ class AppChatService:
                         conversation_id=conversation_id,
                         max_history=settings.AGENT_MAX_HISTORY,
                         current_provider=api_key_obj.provider,
-                        current_is_omni=api_key_obj.is_omni
                     )
 
             # 新会话开场白先拼到内存 history，避免首包前写库+回查。
@@ -1429,7 +1422,6 @@ class AppChatService:
             _api_key_id = api_key_obj.id
             _api_key_model_name = api_key_obj.model_name
             _api_key_provider = api_key_obj.provider
-            _api_key_is_omni = api_key_obj.is_omni
             # 预读 _release_id，避免 LLM 推理结束后重新获取 DB 连接
             from app.models.app_model import App
             _app_obj = await self._db_get(App, config.app_id)
@@ -1599,7 +1591,6 @@ class AppChatService:
                 human_meta["history_files"] = {
                     "content": processed_files,
                     "provider": _api_key_provider,
-                    "is_omni": _api_key_is_omni
                 }
 
             all_node_executions = [
@@ -1680,7 +1671,6 @@ class AppChatService:
                             "conversation_id": str(conversation_id),
                             "features_config": features_config,
                             "api_key_provider": _api_key_provider,
-                            "api_key_is_omni": _api_key_is_omni,
                             "model_config_id": str(config.default_model_config_id) if config.default_model_config_id else None,
                         },
                     ))

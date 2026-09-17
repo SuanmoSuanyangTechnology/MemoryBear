@@ -11,9 +11,9 @@ from .contracts import (
     ChannelSnapshot,
     ChannelSource,
     LoadBalanceStrategy,
-    ModelCapability,
     ModelConfigSnapshot,
     ModelKeySnapshot,
+    ModelProfile,
     ModelProvider,
     ModelRuntimeOptions,
     PublicModelBindingSnapshot,
@@ -33,6 +33,7 @@ from .errors import (
     SpeedbearChannelMissingError,
 )
 from .ports import AsyncModelRegistryRepository, ModelRegistryRepository
+from .runtime.flags import normalize_runtime_flags
 
 
 def _validate_config_access(
@@ -84,14 +85,18 @@ def _build_resolved(
     model_name: str,
     api_key: SecretStr,
     base_url: str | None,
-    capabilities: tuple[ModelCapability, ...],
-    is_omni: bool,
+    profile: ModelProfile,
     params: dict,
     runtime_options: ModelRuntimeOptions | None,
     channel_id: UUID | None = None,
 ) -> ResolvedModelConfig:
-    deep_thinking, thinking_budget, json_output = _runtime_flags(
-        params,
+    deep_thinking, thinking_budget, json_output = _runtime_flags(params)
+    deep_thinking, thinking_budget, json_output = normalize_runtime_flags(
+        profile.features,
+        deep_thinking,
+        thinking_budget,
+        json_output,
+        model_name,
     )
     return ResolvedModelConfig(
         model_config_id=config.model_config_id,
@@ -99,17 +104,34 @@ def _build_resolved(
         channel_id=channel_id,
         tenant_id=tenant_id,
         provider=provider,
-        model_type=config.model_type,
         model_name=model_name,
         api_key=api_key,
         base_url=base_url,
-        capabilities=capabilities,
-        is_omni=is_omni,
+        profile=profile,
         deep_thinking=deep_thinking,
         thinking_budget_tokens=thinking_budget,
         json_output=json_output,
         provider_params=params,
         runtime=runtime_options or ModelRuntimeOptions(),
+    )
+
+
+def _profile_with_key_facts(
+    config: ModelConfigSnapshot,
+    key: ModelKeySnapshot,
+) -> ModelProfile:
+    """v1 key 侧能力事实（旧表遗留）覆盖 config：key 无事实时恒复用 config.profile。"""
+    if not key.capabilities and not key.is_omni:
+        return config.profile
+    capabilities, is_omni = config.profile.legacy_capability_view(config.provider)
+    return ModelProfile.from_legacy_fields(
+        model_id=config.profile.model_id,
+        tenant_id=config.profile.tenant_id,
+        type=config.profile.type,
+        provider=key.provider,
+        capabilities=key.capabilities or capabilities,
+        is_omni=key.is_omni or is_omni,
+        members=config.profile.members,
     )
 
 
@@ -127,8 +149,7 @@ def _build_from_key(
         model_name=key.model_name,
         api_key=key.api_key,
         base_url=key.base_url,
-        capabilities=key.capabilities or config.capabilities,
-        is_omni=key.is_omni or config.is_omni,
+        profile=_profile_with_key_facts(config, key),
         params=dict(key.config or config.config),
         runtime_options=runtime_options,
     )
@@ -148,11 +169,11 @@ def _build_from_binding(
         model_name=config.name,
         api_key=binding.api_key,
         base_url=binding.base_url,
-        capabilities=config.capabilities,
-        is_omni=config.is_omni,
+        profile=config.profile,
         params={},
         runtime_options=runtime_options,
     )
+
 
 def resolve_model(
     repository: ModelRegistryRepository,
@@ -319,8 +340,7 @@ def build_resolved_from_channel(
         model_name=model_name,
         api_key=SecretStr(plaintext),
         base_url=channel.api_base,
-        capabilities=config.capabilities,
-        is_omni=config.is_omni,
+        profile=config.profile,
         params=dict(config.config),
         runtime_options=runtime_options,
     )

@@ -12,6 +12,7 @@ _EXPORTS = {
     "RedBearLLM": (".llm", "RedBearLLM"),
     "StructResponse": (".llm", "StructResponse"),
     "RedBearRerank": (".rerank", "RedBearRerank"),
+    "normalize_runtime_flags": (".flags", "normalize_runtime_flags"),
 }
 
 __all__ = [
@@ -22,6 +23,7 @@ __all__ = [
     "RedBearRerank",
     "RedBearVideoGenerator",
     "StructResponse",
+    "normalize_runtime_flags",
 ]
 
 

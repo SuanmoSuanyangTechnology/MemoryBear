@@ -566,6 +566,11 @@ class AppDslService:
             ):
                 q = q.filter(ModelConfig.type == ref_type)
 
+            q = q.order_by(
+                ModelConfig.is_active.desc(),
+                ModelConfig.created_at.desc().nullslast(),
+            )
+
             # 同名配置存在时优先使用目标租户自有模型，再回退到公共模型。
             m = q.filter(ModelConfig.tenant_id == tenant_id).first()
             if not m:

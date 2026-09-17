@@ -38,14 +38,14 @@ from redbear_model import (
     AsyncSQLChannelRegistry,
     ChannelSnapshot,
     ChannelSnapshotCache,
+    CompositeMember,
     CompositeMemberConfig,
     FailoverCandidate,
     FailoverPlan,
     LoadBalanceStrategy,
-    ModelCapability,
     ModelConfigSnapshot,
+    ModelProfile,
     ModelProvider,
-    ModelType,
     NoAvailableChannelError,
     RegistrySQLSource,
     ResolvedModelConfig,
@@ -90,18 +90,39 @@ def _normalize_tenant_id(tenant_id: uuid.UUID | str | None) -> uuid.UUID | None:
     return uuid.UUID(str(tenant_id))
 
 
-def _capabilities(values: list[str] | None) -> tuple[ModelCapability, ...]:
-    result = []
-    for value in values or []:
-        try:
-            result.append(ModelCapability(value))
-        except ValueError:
-            continue
-    return tuple(result)
-
-
 def _created_ms(value) -> int:
     return int(value.timestamp() * 1000) if value is not None else 0
+
+
+def _profile_members(row: ModelConfig) -> tuple[CompositeMember, ...]:
+    """组合声明装配（provider=composite 才解析 members[]，其余恒空）。"""
+    try:
+        provider = ModelProvider(row.provider)
+    except ValueError:
+        return ()
+    if provider is not ModelProvider.COMPOSITE:
+        return ()
+    return tuple(
+        CompositeMember(provider=member_provider, model_name=model_name)
+        for member_provider, model_name in parse_members(row.config)
+    )
+
+
+def to_profile(row: ModelConfig) -> ModelProfile:
+    """ORM 行 → 契约 profile（读侧唯一构造点，spec §13.5）。
+
+    2b 阶段由旧列派生（`from_legacy_fields`：chat→llm 归一、capability→三字段换算、
+    is_omni 按 provider 参与 output 例外）；2d 新增列后在其上叠"新列非空取新列"分支。
+    """
+    return ModelProfile.from_legacy_fields(
+        model_id=row.id,
+        tenant_id=row.tenant_id,
+        type=row.type,
+        provider=row.provider,
+        capabilities=row.capability or (),
+        is_omni=bool(row.is_omni),
+        members=_profile_members(row),
+    )
 
 
 def _config_snapshot(row: ModelConfig) -> ModelConfigSnapshot:
@@ -109,7 +130,6 @@ def _config_snapshot(row: ModelConfig) -> ModelConfigSnapshot:
         model_config_id=row.id,
         tenant_id=row.tenant_id,
         provider=ModelProvider(row.provider),
-        model_type=ModelType(row.type),
         name=row.name,
         is_active=row.is_active,
         is_public=row.is_public,
@@ -117,8 +137,7 @@ def _config_snapshot(row: ModelConfig) -> ModelConfigSnapshot:
         load_balance_strategy=LoadBalanceStrategy(
             row.load_balance_strategy or LoadBalanceStrategy.NONE
         ),
-        capabilities=_capabilities(row.capability),
-        is_omni=row.is_omni,
+        profile=to_profile(row),
         config=dict(row.config or {}),
     )
 
@@ -313,6 +332,11 @@ def parse_members(config: dict | None) -> list[tuple[str, str]]:
     return parsed
 
 
+def _member_pairs(config: ModelConfigSnapshot) -> list[tuple[str, str]]:
+    """组合成员声明 pairs：读自 profile.members（单一来源，与展示/探测/运行期同口径）。"""
+    return [(member.provider, member.model_name) for member in config.profile.members]
+
+
 @dataclass(frozen=True)
 class _MemberIndex:
     """成员解析索引（D15④）：config 行 + 已弃用 pair 集合，供 `_composite_members` 单点剔除。"""
@@ -434,10 +458,15 @@ def _synthesized_member(
         model_config_id=composite.model_config_id,
         tenant_id=tenant_id,
         provider=provider,
-        model_type=composite.model_type,
         name=pair[1],
         is_active=True,
         is_public=False,
+        profile=ModelProfile.from_legacy_fields(
+            model_id=composite.model_config_id,
+            tenant_id=tenant_id,
+            type=composite.profile.type,
+            provider=provider,
+        ),
     )
 
 
@@ -468,7 +497,12 @@ def _composite_members(
             continue
         if snapshot.model_config_id != composite.model_config_id:
             snapshot = snapshot.model_copy(
-                update={"model_config_id": composite.model_config_id}
+                update={
+                    "model_config_id": composite.model_config_id,
+                    "profile": snapshot.profile.model_copy(
+                        update={"model_id": composite.model_config_id}
+                    ),
+                }
             )
         members.append(CompositeMemberConfig(config=snapshot, model_name=pair[1]))
     return members
@@ -509,7 +543,7 @@ def resolve_composite_plan_sync(
     """组合解析 + 换渠道计划（sync）：取首个可解密候选，计划链自该位切片。"""
     effective_tenant = _normalize_tenant_id(tenant_id) or config_row.tenant_id
     composite = SOURCE.config_snapshot(config_row)
-    pairs = parse_members(config_row.config)
+    pairs = _member_pairs(composite)
     if not pairs:
         raise _composite_unresolvable(composite, "composite config declares no members")
     members = _composite_members(
@@ -553,7 +587,7 @@ async def resolve_composite_plan_async(
     """组合解析 + 换渠道计划（async，GC#11：异步链路禁止 sync session）。"""
     effective_tenant = _normalize_tenant_id(tenant_id) or config_row.tenant_id
     composite = SOURCE.config_snapshot(config_row)
-    pairs = parse_members(config_row.config)
+    pairs = _member_pairs(composite)
     if not pairs:
         raise _composite_unresolvable(composite, "composite config declares no members")
     members = _composite_members(
@@ -650,7 +684,7 @@ def candidate_channels_sync(
     registry = SyncSQLChannelRegistry(db, SOURCE, cache=_shared_cache)
     loads = channel_loads_sync(db, effective_tenant)
     if config.provider is ModelProvider.COMPOSITE:
-        pairs = parse_members(config_row.config)
+        pairs = _member_pairs(config)
         if not pairs:
             return []
         pool = registry.get_active_channels(effective_tenant, provider=None)
@@ -671,7 +705,7 @@ async def candidate_channels_async(
     registry = AsyncSQLChannelRegistry(db, SOURCE, cache=_shared_cache)
     loads = await channel_loads_async(db, effective_tenant)
     if config.provider is ModelProvider.COMPOSITE:
-        pairs = parse_members(config_row.config)
+        pairs = _member_pairs(config)
         if not pairs:
             return []
         pool = await registry.get_active_channels(effective_tenant, provider=None)
@@ -698,10 +732,11 @@ def candidate_channels_batch_sync(
         tenant_id, provider=None
     )
     loads = channel_loads_sync(db, tenant_id)
+    snapshots = {row.id: SOURCE.config_snapshot(row) for row in config_rows}
     composite_pairs: set[tuple[str, str]] = set()
-    for row in config_rows:
-        if row.is_composite:
-            composite_pairs.update(parse_members(row.config))
+    for config in snapshots.values():
+        if config.provider is ModelProvider.COMPOSITE:
+            composite_pairs.update(_member_pairs(config))
     member_index = (
         _member_configs_sync(db, tenant_id, sorted(composite_pairs))
         if composite_pairs
@@ -710,9 +745,9 @@ def candidate_channels_batch_sync(
 
     result: dict[uuid.UUID, list[ChannelSnapshot]] = {}
     for row in config_rows:
-        config = SOURCE.config_snapshot(row)
+        config = snapshots[row.id]
         if config.provider is ModelProvider.COMPOSITE:
-            pairs = parse_members(row.config)
+            pairs = _member_pairs(config)
             result[row.id] = (
                 _composite_candidate_chain(config, tenant_id, member_index, pairs, pool, loads)
                 if pairs
@@ -761,4 +796,5 @@ __all__ = [
     "resolve_config_plan_async",
     "resolve_config_plan_sync",
     "resolve_config_sync",
+    "to_profile",
 ]

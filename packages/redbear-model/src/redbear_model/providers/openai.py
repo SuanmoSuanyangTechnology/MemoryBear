@@ -9,7 +9,7 @@ from langchain_core.outputs import ChatGenerationChunk, ChatResult
 from langchain_openai import ChatOpenAI
 
 from redbear_model.contracts import (
-    ModelCapability,
+    ModelFeature,
     ModelProvider,
     ResolvedModelConfig,
 )
@@ -159,8 +159,8 @@ def build_openai_compatible_params(
     if provider_params.get("streaming"):
         params["stream_usage"] = True
 
-    capabilities = set(config.capabilities)
-    if ModelCapability.THINKING in capabilities:
+    features = set(config.profile.features)
+    if ModelFeature.THINKING in features:
         if config.provider is ModelProvider.VOLCANO:
             params.setdefault("extra_body", {})["thinking"] = {
                 "type": "enabled" if config.deep_thinking else "disabled"
@@ -184,7 +184,7 @@ def build_openai_compatible_params(
         dict,
     )
     thinking_conflict = (
-        ModelCapability.THINKING in capabilities and config.deep_thinking
+        ModelFeature.THINKING in features and config.deep_thinking
     )
     if should_send_json and not thinking_conflict:
         params.setdefault("model_kwargs", {})["response_format"] = _response_format(

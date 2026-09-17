@@ -81,15 +81,16 @@ def attempt_config(base: RedBearModelConfig, resolved: ResolvedModelConfig) -> R
         for key, value in (resolved.provider_params or {}).items()
         if key not in _ATTEMPT_PARAM_EXCLUDES
     }
+    capabilities, is_omni = resolved.profile.legacy_capability_view(resolved.provider)
     return base.model_copy(
         update={
             "model_name": resolved.model_name,
             "provider": str(resolved.provider),
             "api_key": resolved.api_key.get_secret_value(),
             "base_url": resolved.base_url
-            or get_default_provider_api_base(resolved.provider, resolved.model_type),
-            "capability": [str(item) for item in resolved.capabilities],
-            "is_omni": resolved.is_omni,
+            or get_default_provider_api_base(resolved.provider, resolved.profile.type),
+            "capability": [str(item) for item in capabilities],
+            "is_omni": is_omni,
             "deep_thinking": resolved.deep_thinking,
             "thinking_budget_tokens": resolved.thinking_budget_tokens,
             "json_output": resolved.json_output,

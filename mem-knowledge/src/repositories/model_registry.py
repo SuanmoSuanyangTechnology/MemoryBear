@@ -12,12 +12,11 @@ from redbear_model import (
     ChannelSnapshot,
     ChannelSnapshotCache,
     LoadBalanceStrategy,
-    ModelCapability,
     ModelConfigSnapshot,
     ModelKeySnapshot,
+    ModelProfile,
     ModelProvider,
     ModelRegistryRepository,
-    ModelType,
     PublicModelBindingSnapshot,
     RegistrySQLSource,
     SyncSQLChannelRegistry,
@@ -40,16 +39,6 @@ logger = logging.getLogger(__name__)
 _CHANNEL_CACHE = ChannelSnapshotCache(ttl_ms=60_000)
 
 
-def _capabilities(values: list[str] | None) -> tuple[ModelCapability, ...]:
-    result = []
-    for value in values or []:
-        try:
-            result.append(ModelCapability(value))
-        except ValueError:
-            continue
-    return tuple(result)
-
-
 def _created_ms(value) -> int:
     return int(value.timestamp() * 1000) if value is not None else 0
 
@@ -59,7 +48,6 @@ def _config_snapshot(config: ModelConfig) -> ModelConfigSnapshot:
         model_config_id=config.id,
         tenant_id=config.tenant_id,
         provider=ModelProvider(config.provider),
-        model_type=ModelType(config.type),
         name=config.name,
         is_active=config.is_active,
         is_public=config.is_public,
@@ -67,8 +55,14 @@ def _config_snapshot(config: ModelConfig) -> ModelConfigSnapshot:
         load_balance_strategy=LoadBalanceStrategy(
             config.load_balance_strategy or LoadBalanceStrategy.NONE
         ),
-        capabilities=_capabilities(config.capability),
-        is_omni=config.is_omni,
+        profile=ModelProfile.from_legacy_fields(
+            model_id=config.id,
+            tenant_id=config.tenant_id,
+            type=config.type,
+            provider=config.provider,
+            capabilities=config.capability or (),
+            is_omni=bool(config.is_omni),
+        ),
         config=dict(config.config or {}),
     )
 

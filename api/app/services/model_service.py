@@ -145,9 +145,7 @@ def _shared_validation_config(
     model_type: str,
     capability: list | None,
 ) -> "ResolvedModelConfig":
-    from redbear_model import (
-        ModelCapability as SharedModelCapability,
-    )
+    from redbear_model import ModelProfile as SharedModelProfile
     from redbear_model import (
         ModelProvider as SharedModelProvider,
     )
@@ -155,21 +153,22 @@ def _shared_validation_config(
         ModelRuntimeOptions,
         ResolvedModelConfig,
     )
-    from redbear_model import (
-        ModelType as SharedModelType,
-    )
 
+    shared_provider = SharedModelProvider(_enum_value(provider))
     return ResolvedModelConfig(
         model_config_id=_MODEL_VALIDATION_CONFIG_ID,
         key_id=_MODEL_VALIDATION_KEY_ID,
         tenant_id=_MODEL_VALIDATION_TENANT_ID,
-        provider=SharedModelProvider(_enum_value(provider)),
-        model_type=SharedModelType(_enum_value(model_type)),
+        provider=shared_provider,
         model_name=model_name,
         api_key=SecretStr(api_key),
         base_url=api_base,
-        capabilities=tuple(
-            SharedModelCapability(_enum_value(item)) for item in (capability or [])
+        profile=SharedModelProfile.from_legacy_fields(
+            model_id=_MODEL_VALIDATION_CONFIG_ID,
+            tenant_id=_MODEL_VALIDATION_TENANT_ID,
+            type=_enum_value(model_type),
+            provider=shared_provider,
+            capabilities=tuple(_enum_value(item) for item in (capability or [])),
         ),
         runtime=ModelRuntimeOptions(timeout_s=10.0, max_retries=0),
     )
@@ -1173,15 +1172,16 @@ class ModelApiKeyService:
         failover_plan：请求内换渠道计划（spec §11.2），非映射类属瞬时挂载，
         不落库/不序列化；门面消费后自取（无 plan 时保持既有单候选行为）。
         """
+        capabilities, is_omni = resolved.profile.legacy_capability_view(resolved.provider)
         key = ModelApiKey(
             id=resolved.channel_id,
             model_name=resolved.model_name,
             provider=str(resolved.provider),
             api_key=resolved.api_key.get_secret_value(),
             api_base=resolved.base_url
-            or get_default_provider_api_base(resolved.provider, resolved.model_type),
-            capability=[str(item) for item in resolved.capabilities],
-            is_omni=resolved.is_omni,
+            or get_default_provider_api_base(resolved.provider, resolved.profile.type),
+            capability=[str(item) for item in capabilities],
+            is_omni=is_omni,
         )
         key.failover_plan = failover_plan
         return ModelApiKeyService._stamp_usage_attribution(

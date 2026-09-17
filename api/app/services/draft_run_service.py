@@ -1391,7 +1391,6 @@ class AgentRunService:
                     system_prompt=system_prompt,
                     current_input=message,
                     current_provider=api_key_config.get("provider"),
-                    current_is_omni=api_key_config.get("is_omni", False),
                     legacy_max_history=settings.AGENT_MAX_HISTORY,
                     model_config_id=model_config.id,
                 )
@@ -1403,7 +1402,6 @@ class AgentRunService:
                         conversation_id=conversation_id,
                         max_history=settings.AGENT_MAX_HISTORY,
                         current_provider=api_key_config.get("provider"),
-                        current_is_omni=api_key_config.get("is_omni", False)
                     )
             # 否则使用外部传入的历史（用于重新生成场景）
 
@@ -1567,14 +1565,12 @@ class AgentRunService:
                     audio_url=audio_url,
                     citations=filtered_citations,
                     provider=api_key_config.get("provider"),
-                    is_omni=api_key_config.get("is_omni", False)
                 )
                 if used_context_engine and not skip_save:
                     _ctx_kwargs = dict(
                         features=features_config,
                         conversation_id=uuid.UUID(conversation_id),
                         current_provider=api_key_config.get("provider"),
-                        current_is_omni=api_key_config.get("is_omni", False),
                         legacy_max_history=settings.AGENT_MAX_HISTORY,
                         model_config_id=model_config.id,
                     )
@@ -1870,7 +1866,6 @@ class AgentRunService:
                     system_prompt=system_prompt,
                     current_input=message,
                     current_provider=api_key_config.get("provider"),
-                    current_is_omni=api_key_config.get("is_omni", False),
                     legacy_max_history=settings.AGENT_MAX_HISTORY,
                     model_config_id=model_config.id,
                 )
@@ -1882,7 +1877,6 @@ class AgentRunService:
                         conversation_id=conversation_id,
                         max_history=settings.AGENT_MAX_HISTORY,
                         current_provider=api_key_config.get("provider"),
-                        current_is_omni=api_key_config.get("is_omni", False)
                     )
 
             # 6. 处理多模态文件
@@ -2155,14 +2149,12 @@ class AgentRunService:
                     audio_url=stream_audio_url,
                     citations=filtered_citations,
                     provider=api_key_config.get("provider"),
-                    is_omni=api_key_config.get("is_omni", False)
                 )
                 if used_context_engine and not skip_save:
                     _ctx_kwargs = dict(
                         features=features_config,
                         conversation_id=uuid.UUID(conversation_id),
                         current_provider=api_key_config.get("provider"),
-                        current_is_omni=api_key_config.get("is_omni", False),
                         legacy_max_history=settings.AGENT_MAX_HISTORY,
                         model_config_id=_model_config_id,
                     )
@@ -2729,7 +2721,6 @@ class AgentRunService:
             conversation_id: str,
             max_history: int = 10,
             current_provider: Optional[str] = None,
-            current_is_omni: Optional[bool] = None
     ) -> List[Dict[str, str]]:
         """加载会话历史消息，并根据当前模型配置处理多模态文件
 
@@ -2737,7 +2728,6 @@ class AgentRunService:
             conversation_id: 会话ID
             max_history: 最大历史消息数量
             current_provider: 当前模型的provider
-            current_is_omni: 当前模型的is_omni
 
         Returns:
             List[Dict]: 历史消息列表
@@ -2768,12 +2758,11 @@ class AgentRunService:
             for msg in messages:
                 history_files = msg["meta_data"].get("history_files", {})
 
-                has_files = bool(history_files and current_provider and current_is_omni is not None)
+                has_files = bool(history_files and current_provider)
                 if has_files:
                     stored_provider = history_files.get("provider")
-                    stored_is_omni = history_files.get("is_omni")
 
-                    if stored_provider != current_provider or stored_is_omni != current_is_omni:
+                    if stored_provider != current_provider:
                         continue
 
                     content = [{"type": "text", "text": msg["content"]}]
@@ -2873,7 +2862,6 @@ class AgentRunService:
             audio_url: Optional[str] = None,
             citations: Optional[List[Any]] = None,
             provider: Optional[str] = None,
-            is_omni: Optional[bool] = None,
             message_id: Optional[uuid.UUID] = None,
             user_message_id: Optional[uuid.UUID] = None
     ) -> Optional[str]:
@@ -2891,7 +2879,6 @@ class AgentRunService:
             audio_url: 音频URL
             citations: 引用来源列表
             provider: 模型供应商
-            is_omni: 是否为全模态模型
 
         Returns:
             Optional[str]: 助手消息ID
@@ -2935,12 +2922,11 @@ class AgentRunService:
                         "size": size
                     })
 
-            # 保存 history_files，包含 provider 和 is_omni 信息
+            # 保存 history_files，包含 provider 信息
             if processed_files:
                 human_meta["history_files"] = {
                     "content": processed_files,
                     "provider": provider,
-                    "is_omni": is_omni
                 }
 
             parent_message_id = await self._get_last_current_assistant_id_async(conv_uuid)
