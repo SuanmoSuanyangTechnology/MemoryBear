@@ -654,15 +654,6 @@ class LangChainAgent:
         Returns:
             List[Dict]: 消息内容列表
         """
-        # 根据 provider 使用不同的文本格式
-        # if (self.provider.lower() in [ModelProvider.BEDROCK, ModelProvider.OPENAI, ModelProvider.XINFERENCE,
-        #                               ModelProvider.GPUSTACK] or (
-        #         self.provider.lower() == ModelProvider.DASHSCOPE and self.is_omni)):
-        #     # Anthropic/Bedrock/Xinference/Gpustack/Openai: {"type": "text", "text": "..."}
-        #     content_parts = [{"type": "text", "text": text}]
-        # else:
-        #     # 通义千问等: {"text": "..."}
-        #     content_parts = [{"type": "text", "text": text}]
         content_parts = [{"type": "text", "text": text}]
 
         # 添加文件内容

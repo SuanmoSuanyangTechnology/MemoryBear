@@ -382,7 +382,6 @@ class AgentNode(BaseNode):
             config=params,
             capability=model_info.capability or [],
             provider=model_info.provider or "",
-            is_omni=model_info.is_omni,
         )
         if param_warnings:
             for warning in param_warnings:
@@ -455,7 +454,7 @@ class AgentNode(BaseNode):
                 logger.warning(f"Node {self.node_id}: extra_headers JSON parse failed: {e}")
 
         extra_params, strip_warnings = strip_unsupported_llm_params(
-            extra_params, model_info.provider or "", model_info.is_omni
+            extra_params, model_info.provider or ""
         )
         if strip_warnings:
             for warning in strip_warnings:

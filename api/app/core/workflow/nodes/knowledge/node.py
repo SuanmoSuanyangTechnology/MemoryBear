@@ -292,7 +292,6 @@ class KnowledgeRetrievalNode(BaseNode):
         options, strip_warnings = strip_unsupported_llm_params(
             options,
             model.provider,
-            model.is_omni,
         )
         for warning in strip_warnings:
             logger.warning(

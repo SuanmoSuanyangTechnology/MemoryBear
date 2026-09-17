@@ -499,7 +499,6 @@ _MULTIMODAL_COMPATIBLE_PROVIDERS = frozenset({
 def strip_unsupported_llm_params(
         extra_params: dict[str, Any],
         provider: str,
-        is_omni: bool = False,  # 过渡保留：DashScope 协议已统一，阶段 2 清理
 ) -> tuple[dict[str, Any], list[str]]:
     """Strip provider-unsupported parameters from extra_params.
 
@@ -537,7 +536,6 @@ def validate_llm_param_constraints(
     config: LLMNodeConfig,
     capability: list[str],
     provider: str,
-    is_omni: bool = False,
 ) -> list[str]:
     """校验 LLM 节点参数设置是否受模型能力或提供商支持限制。
 
@@ -548,7 +546,6 @@ def validate_llm_param_constraints(
         config: LLM 节点配置（含各参数的 enable/value 开关）
         capability: 模型能力列表（如 ['thinking', 'json_output']）
         provider: 模型提供商（如 'openai', 'dashscope'）
-        is_omni: 是否为 Omni 模型（影响 DashScope 参数路由）
 
     Returns:
         警告消息列表，无问题时返回空列表

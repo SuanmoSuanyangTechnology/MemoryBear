@@ -568,7 +568,6 @@ class LLMNode(BaseNode):
             config=self.typed_config,
             capability=model_info.capability or [],
             provider=model_info.provider or "",
-            is_omni=model_info.is_omni,
         )
         if param_warnings:
             for w in param_warnings:
@@ -658,7 +657,7 @@ class LLMNode(BaseNode):
 
         # Strip provider-unsupported parameters so they never reach the API call
         extra_params, strip_warnings = strip_unsupported_llm_params(
-            extra_params, model_info.provider or "", model_info.is_omni
+            extra_params, model_info.provider or ""
         )
         if strip_warnings:
             for w in strip_warnings:

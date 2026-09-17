@@ -55,7 +55,6 @@ class LLMClient(ABC):
         self.base_url = self.config.base_url
         self.max_retries = self.config.max_retries
         self.timeout = self.config.timeout
-        self.is_omni = self.config.is_omni
         self.capability = self.config.capability
 
         logger.debug(

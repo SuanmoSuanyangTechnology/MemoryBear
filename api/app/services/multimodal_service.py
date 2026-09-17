@@ -4,7 +4,7 @@
 处理图片、文档等多模态文件，转换为 LLM 可用的格式
 
 支持的 Provider:
-- DashScope (通义千问): 支持 URL 格式
+- DashScope (通义千问): OpenAI 兼容模式内容格式（image_url / video_url / input_audio）
 - Bedrock/Anthropic: 仅支持 base64 格式
 - OpenAI: 支持 URL 和 base64 格式
 """
@@ -81,54 +81,6 @@ class MultimodalFormatStrategy(ABC):
     async def format_video(self, url: str) -> tuple[bool, Dict[str, Any]]:
         """格式化视频"""
         pass
-
-
-class DashScopeFormatStrategy(MultimodalFormatStrategy):
-    """通义千问策略"""
-
-    async def format_image(self, url: str, content: bytes | None = None) -> tuple[bool, Dict[str, Any]]:
-        """通义千问图片格式：{"type": "image", "image": "url"}"""
-        return True, {
-            "type": "image",
-            "image": url
-        }
-
-    async def format_document(self, file_name: str, text: str) -> tuple[bool, Dict[str, Any]]:
-        """通义千问文档格式"""
-        return True, {
-            "type": "text",
-            "text": f"<document name=\"{file_name}\">\n文档内容：\n{text}\n</document>"
-        }
-
-    async def format_audio(
-            self,
-            file_type: str,
-            url: str,
-            content: bytes | None = None,
-            transcription: Optional[str] = None
-    ) -> tuple[bool, Dict[str, Any]]:
-        """
-        通义千问音频格式
-        - 原生支持: qwen-audio 系列
-        - 其他模型: 需要转录为文本
-        """
-        if transcription:
-            return True, {
-                "type": "text",
-                "text": f"<audio url=\"{url}\">\ntext_transcription:{transcription}\n</audio>"
-            }
-        # 通义千问音频格式：{"type": "audio", "audio": "url"}
-        return True, {
-            "type": "audio",
-            "audio": url
-        }
-
-    async def format_video(self, url: str) -> tuple[bool, Dict[str, Any]]:
-        """通义千问视频格式（qwen-vl 系列原生支持）"""
-        return True, {
-            "type": "video",
-            "video": url
-        }
 
 
 class BedrockFormatStrategy(MultimodalFormatStrategy):
@@ -297,7 +249,7 @@ class OpenAIFormatStrategy(MultimodalFormatStrategy):
 
 # Provider 到策略的映射
 PROVIDER_STRATEGIES = {
-    "dashscope": DashScopeFormatStrategy,
+    "dashscope": OpenAIFormatStrategy,
     "bedrock": BedrockFormatStrategy,
     "anthropic": BedrockFormatStrategy,
     "openai": OpenAIFormatStrategy,
@@ -315,7 +267,6 @@ class MultimodalService:
         db (Session): Database session.
         model_api_key (str): API key for the model provider.
         provider (str): Name of the model provider.
-        is_omni (bool): Indicates whether the model supports full multimodal capability.
         capability (list): Capability configuration of the model.
         audio_api_key (str | None): API key used for audio transcription.
         enable_audio_transcription (bool): Whether audio transcription is enabled.
@@ -342,7 +293,6 @@ class MultimodalService:
         if self.api_config is not None:
             self.model_api_key = api_config.api_key
             self.provider = api_config.provider.lower()
-            self.is_omni = api_config.is_omni
             self.capability = api_config.capability
         self.audio_api_key = audio_api_key
         self.enable_audio_transcription = enable_audio_transcription
@@ -404,14 +354,10 @@ class MultimodalService:
             return []
 
         # 获取对应的策略
-        # dashscope 的 omni 模型使用 OpenAI 兼容格式
-        if self.provider == "dashscope" and self.is_omni:
+        strategy_class = PROVIDER_STRATEGIES.get(self.provider)
+        if not strategy_class:
+            logger.warning(f"未找到 provider '{self.provider}' 的策略，使用默认策略")
             strategy_class = OpenAIFormatStrategy
-        else:
-            strategy_class = PROVIDER_STRATEGIES.get(self.provider)
-            if not strategy_class:
-                logger.warning(f"未找到 provider '{self.provider}' 的策略，使用默认策略")
-                strategy_class = DashScopeFormatStrategy
 
         result = []
         for idx, file in enumerate(files):

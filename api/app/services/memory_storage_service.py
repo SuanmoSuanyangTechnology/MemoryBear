@@ -815,7 +815,6 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
                         "classified": classify_llm_error(
                             e,
                             provider=model_info.provider,
-                            is_omni=model_info.is_omni,
                         ),
                     }
                 response_text = "".join(
@@ -959,7 +958,6 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
                 classified = classify_llm_error(
                     e,
                     provider=final_model_info.provider,
-                    is_omni=final_model_info.is_omni,
                 )
                 yield format_sse_message(
                     "error",
