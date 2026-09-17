@@ -82,7 +82,8 @@ _CONNECTIVITY_ERROR_MARKERS = (
 # 认证类故障标记：openai SDK 以异常类名（AuthenticationError）暴露；dashscope 原生链路
 # （embedding 的 DashScopeEmbeddings 抛 ValueError、rerank 的 _dashscope_error_message 抛
 # RuntimeError）只带 "status_code: 401 \n code: InvalidApiKey \n message: ..." 文本，
-# 无专用异常类，故补文本标记。
+# 无专用异常类，故补文本标记；qwen3-vl 多模态适配器（redbear_model）同带
+# "status_code: <code>"（见该包 dashscope_multimodal_embedding/rerank 适配器）。
 _AUTH_ERROR_MARKERS = (
     "authentication",
     "invalidapikey",
@@ -793,31 +794,33 @@ class ModelConfigService:
                 }
 
         except Exception as e:
-            # 提取详细的错误信息
+            # 分类匹配一律基于原始异常文本（raw）：VL 链路的展示文案被统一覆盖为
+            # 通用提示，若用覆盖后的 error_message 匹配会吞掉鉴权/连接等标记。
+            raw_error_message = str(e)
             error_message = (
                 "Qwen3-VL 模型验证失败"
                 if is_qwen3_vl_request
-                else str(e)
+                else raw_error_message
             )
             error_type = type(e).__name__
             # 特殊处理常见的错误类型
-            if "unsupported countries" in error_message.lower() or "unsupported region" in error_message.lower():
+            if "unsupported countries" in raw_error_message.lower() or "unsupported region" in raw_error_message.lower():
                 # 区域/国家限制（适用于所有提供商）
                 error_message = "区域限制: 该模型在当前区域或国家/地区不可用，请检查提供商的服务区域限制"
-            elif "ValidationException" in error_type or "ValidationException" in error_message:
+            elif "ValidationException" in error_type or "ValidationException" in raw_error_message:
                 # 其他验证错误
-                if "access denied" in error_message.lower():
+                if "access denied" in raw_error_message.lower():
                     error_message = "访问被拒绝: 请检查 API 凭证和权限配置"
                 else:
-                    error_message = f"验证失败: {error_message}"
+                    error_message = f"验证失败: {raw_error_message}"
             elif any(
-                marker in f"{error_type} {error_message}".lower()
+                marker in f"{error_type} {raw_error_message}".lower()
                 for marker in _AUTH_ERROR_MARKERS
             ):
                 error_message = "认证失败: API Key 无效或已过期"
             elif (
-                "aws_access_key_id" in error_message
-                and "aws_secret_access_key" in error_message
+                "aws_access_key_id" in raw_error_message
+                and "aws_secret_access_key" in raw_error_message
             ):
                 # ChatBedrock/BedrockEmbeddings 构造期凭据不完整（pydantic 报错原文不可读）
                 error_message = (
@@ -825,7 +828,7 @@ class ModelConfigService:
                     "access_key_id:secret_access_key 格式填写（英文冒号分隔）"
                 )
             elif any(
-                marker in f"{error_type} {error_message}".lower()
+                marker in f"{error_type} {raw_error_message}".lower()
                 for marker in _CONNECTIVITY_ERROR_MARKERS
             ):
                 # 报错时必须给出实际请求地址，否则无法区分"密钥错"与"网络不通"；
@@ -847,11 +850,11 @@ class ModelConfigService:
                         f"（连接超时或网络不可达），请检查网络连通性，"
                         f"或为该模型配置代理/网关地址（API Base URL）"
                     )
-            elif "RateLimitError" in error_type or "rate limit" in error_message.lower():
+            elif "RateLimitError" in error_type or "rate limit" in raw_error_message.lower():
                 error_message = "请求频率限制: 已超过 API 调用限制"
-            elif "InvalidRequestError" in error_type or "invalid request" in error_message.lower():
-                error_message = f"无效请求: {error_message}"
-            elif "model_copy" in error_message:
+            elif "InvalidRequestError" in error_type or "invalid request" in raw_error_message.lower():
+                error_message = f"无效请求: {raw_error_message}"
+            elif "model_copy" in raw_error_message:
                 error_message = "模型消息格式错误: 请确保使用正确的模型类型（LLM/Chat）"
 
             # 记录详细错误日志
