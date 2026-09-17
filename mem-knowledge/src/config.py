@@ -321,6 +321,10 @@ class KnowledgeSettings(BaseSettings):
         gt=0,
         validation_alias="KB_HEALTH_PROBE_TIMEOUT_SECONDS",
     )
+    kb_worker_health_state_file: Path = Field(
+        default=Path("/tmp/mem-knowledge-worker-health.json"),
+        validation_alias="KB_WORKER_HEALTH_STATE_FILE",
+    )
     kb_worker_prefetch_multiplier: int = Field(
         default=1,
         ge=1,
@@ -440,6 +444,8 @@ class KnowledgeSettings(BaseSettings):
                 "KB_TASK_SOFT_TIME_LIMIT_SECONDS must be less than "
                 "KB_TASK_TIME_LIMIT_SECONDS"
             )
+        if not self.kb_worker_health_state_file.is_absolute():
+            raise ValueError("KB_WORKER_HEALTH_STATE_FILE must be absolute")
         return self
 
     @property
