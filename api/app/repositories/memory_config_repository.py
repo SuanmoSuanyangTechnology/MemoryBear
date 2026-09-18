@@ -578,7 +578,8 @@ class MemoryConfigRepository:
             return None
         for field, value in values.items():
             setattr(config, field, value)
-        await self.db.flush()
+        await self.db.commit()
+        await self.db.refresh(config)
         return config
 
     async def get_by_workspace_and_config_name_async(

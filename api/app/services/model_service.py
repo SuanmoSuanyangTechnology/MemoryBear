@@ -1182,34 +1182,6 @@ class ModelApiKeyService:
         return api_keys[0]
 
     @staticmethod
-    def get_available_legacy_api_key(
-        db: Session,
-        model_config_id: uuid.UUID,
-        tenant_id: uuid.UUID,
-    ) -> Optional[ModelApiKey]:
-        """Return an active key from ``model_api_keys`` without channel resolution.
-
-        The model configuration must be active and visible to ``tenant_id``. This
-        method deliberately never reads or falls back to ``model_channels``.
-        """
-        model_config = ModelConfigRepository.get_by_id(
-            db,
-            model_config_id,
-            tenant_id=tenant_id,
-        )
-        if model_config is None or not model_config.is_active:
-            return None
-
-        legacy_key = ModelApiKeyService._select_legacy_key(model_config)
-        if legacy_key is None:
-            return None
-        return ModelApiKeyService._stamp_usage_attribution(
-            legacy_key,
-            tenant_id,
-            model_config.id,
-        )
-
-    @staticmethod
     def _is_public_speedbear_model(model_config: ModelConfig) -> bool:
         return (
             model_config.provider == ModelProvider.SPEEDBEAR

@@ -24,7 +24,6 @@ class PredictionConfigService:
 
     def __init__(self, db: AsyncSession) -> None:
         """Initialize the service with an asynchronous database session."""
-        self._db = db
         self._repository = MemoryConfigRepository(db)
 
     @staticmethod
@@ -59,6 +58,4 @@ class PredictionConfigService:
             config_id, values
         )
         assert config is not None
-        await self._db.commit()
-        await self._db.refresh(config)
         return self.serialize(config)
