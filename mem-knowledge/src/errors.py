@@ -50,6 +50,7 @@ _DEFINITIONS = {
     "KB_TASK_DISPATCH_FAILED": ErrorDefinition(500, True, 10001, "internal"),
     "KB_STORAGE_UNAVAILABLE": ErrorDefinition(500, True, 10001, "internal"),
     "KB_SEARCH_UNAVAILABLE": ErrorDefinition(500, True, 10001, "internal"),
+    "KB_EMBEDDING_SERVICE_UNAVAILABLE": ErrorDefinition(502, True, 10001, "internal"),
     "KB_MODEL_UNAVAILABLE": ErrorDefinition(400, False, 400, "http"),
     "KB_MULTIMODAL_INPUT_LIMIT": ErrorDefinition(400, False, 400, "http"),
     "KB_MULTIMODAL_EMBEDDING_FAILED": ErrorDefinition(502, True, 10001, "internal"),

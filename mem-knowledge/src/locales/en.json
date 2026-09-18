@@ -8,6 +8,7 @@
   "KB_TASK_DISPATCH_FAILED": "Task submission could not be confirmed. Check the task status before submitting again.",
   "KB_STORAGE_UNAVAILABLE": "File storage is unavailable. Please try again later.",
   "KB_SEARCH_UNAVAILABLE": "The knowledge index operation failed. Please try again later.",
+  "KB_EMBEDDING_SERVICE_UNAVAILABLE": "The embedding service is temporarily unavailable. Please try again later.",
   "KB_MODEL_UNAVAILABLE": "The model is unavailable. Check its configuration or select another model.",
   "KB_MULTIMODAL_INPUT_LIMIT": "The multimodal input exceeds the model limit. Reduce the input size.",
   "KB_MULTIMODAL_EMBEDDING_FAILED": "Image embedding failed. Check the model service and retry.",

@@ -10,9 +10,11 @@ from collections.abc import Sequence
 from dataclasses import replace
 from enum import Enum
 from functools import partial
+from http import HTTPStatus
 from typing import Any
 
 from langchain_core.documents import Document as LangChainDocument
+from openai import APIStatusError
 from redbear_model import (
     EmbeddingPurpose,
     EmbeddingRequest,
@@ -127,6 +129,10 @@ class _TimedElasticSearchRetrieval(AsyncElasticSearchRetrieval):
         embedding_started_at = time.perf_counter()
         try:
             vector = normalize_vector(await embedding.aembed_query(query))
+        except APIStatusError as exc:
+            if exc.status_code != HTTPStatus.SERVICE_UNAVAILABLE:
+                raise
+            raise KnowledgeError.from_code("KB_EMBEDDING_SERVICE_UNAVAILABLE") from exc
         finally:
             _record_elapsed(self._timings, "embedding_ms", embedding_started_at)
         return await self.search_by_query_vector(vector, options)
