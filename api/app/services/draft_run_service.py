@@ -49,7 +49,12 @@ from app.services.langchain_tool_server import Search
 from app.services.memory_config_service import MemoryConfigService
 from app.services.model_parameter_merger import ModelParameterMerger
 from app.services.model_service import ModelApiKeyService
-from app.services.multimodal_service import MultimodalService
+from app.services.multimodal_service import (
+    MultimodalService,
+    deserialize_file_reference,
+    sanitize_processed_files_for_history,
+    serialize_file_reference,
+)
 from app.services.tool_orchestrator import ToolOrchestrator
 from app.services.context_assembler import (
     ContextEvidence,
@@ -1232,6 +1237,7 @@ class AgentRunService:
             source: str = "",
             history: Optional[List[Dict[str, str]]] = None,
             skip_save: bool = False,
+            stateless: bool = False,
             execution_mode: Literal["in_process", "sandbox"] = "in_process",
             parent_execution_id: Optional[uuid.UUID] = None,
             orchestration_mode: Optional[str] = None,
@@ -1255,6 +1261,7 @@ class AgentRunService:
             files: 多模态文件列表（可选）
             history: 外部传入的历史消息（可选，用于重新生成场景）
             skip_save: 是否跳过保存消息（用于重新生成场景）
+            stateless: 是否以无会话、无消息持久化方式执行子 Agent
             execution_mode: 执行模式 (in_process / sandbox)
             parent_execution_id: 集群编排中父（主）Agent 的执行 ID；sub_agent=True 时由编排器透传
             orchestration_mode: 编排模式 supervisor / collaboration（仅集群场景）
@@ -1263,6 +1270,11 @@ class AgentRunService:
         Returns:
             Dict: 包含 AI 回复和元数据的字典
         """
+        if stateless and (not sub_agent or not skip_save):
+            raise ValueError("stateless 模式必须与 sub_agent=True、skip_save=True 一起使用")
+        if stateless and history is None:
+            history = []
+
         start_time = time.time()
         user_message_id = uuid.uuid4()
         assistant_message_id = uuid.uuid4()
@@ -1329,7 +1341,7 @@ class AgentRunService:
                     user_id,
                     app_id=agent_config.app_id,
                     workspace_id=workspace_id,
-                    source=KnowledgeRetrievalSource.DRAFT,
+                    source=KnowledgeRetrievalSource.AGENT if sub_agent else KnowledgeRetrievalSource.DRAFT,
                 ),
                 self.load_memory_config(memory_config, user_id, workspace_id, storage_type, user_rag_memory_id)
                 if memory else None,
@@ -1367,19 +1379,23 @@ class AgentRunService:
             elif isinstance(memory_result, Exception):
                 logger.warning("load_memory_config failed: %s", memory_result)
 
-            # 5. 处理会话ID（创建或验证），新会话时写入开场白
-            is_new_conversation = not conversation_id
-            opening, suggested_questions = None, None
-            if not sub_agent:
-                opening, suggested_questions = self._get_opening_statement(features_config, is_new_conversation, variables)
-            conversation_id = await self._ensure_conversation(
-                conversation_id=conversation_id,
-                app_id=agent_config.app_id,
-                workspace_id=workspace_id,
-                user_id=user_id,
-                opening_statement=opening,
-                suggested_questions=suggested_questions
-            )
+            # 5. 处理会话ID。stateless 子调用显式跳过会话创建与验证。
+            if not stateless:
+                is_new_conversation = not conversation_id
+                opening, suggested_questions = None, None
+                if not sub_agent:
+                    opening, suggested_questions = self._get_opening_statement(
+                        features_config, is_new_conversation, variables
+                    )
+                conversation_id = await self._ensure_conversation(
+                    conversation_id=conversation_id,
+                    app_id=agent_config.app_id,
+                    workspace_id=workspace_id,
+                    user_id=user_id,
+                    sub_agent=sub_agent,
+                    opening_statement=opening,
+                    suggested_questions=suggested_questions,
+                )
 
             # 检查标注命中
             if not sub_agent:
@@ -1480,7 +1496,8 @@ class AgentRunService:
                 doc_img_recognition = isinstance(fu_config, dict) and fu_config.get("document_image_recognition", False)
                 processed_files = await multimodal_service.process_files(
                     files, document_image_recognition=doc_img_recognition,
-                    workspace_id=workspace_id
+                    workspace_id=workspace_id,
+                    file_upload_config=fu_config if isinstance(fu_config, dict) else None,
                 )
                 logger.info(f"处理了 {len(processed_files)} 个文件，provider={provider}")
                 capability = api_key_config.get("capability", [])
@@ -1491,10 +1508,9 @@ class AgentRunService:
                 )
             if has_doc_with_images:
                 system_prompt += (
-                    "\n\n文档文字中包含图片位置标记如 [图片 第2页 第1张]: <img src=\"url\"...>，"
-                    "请在回答中用 Markdown 格式 ![图片描述](url) 展示对应图片。"
-                    "重要：图片 URL 中包含 UUID（如 /storage/permanent/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx），"
-                    "必须将 src 属性的值原封不动复制到 Markdown 的括号中，不得增删任何字符。"
+                    "\n\n文档文字中可能包含图片位置标记如 [图片 第2页 第1张]。"
+                    "对应图片已作为独立视觉输入提供，请结合位置标记和视觉内容理解文档；"
+                    "不要在回答中输出任何文件地址、存储路径或内部标识。"
                 )
 
             # 7. 根据模型能力选择执行路径
@@ -1739,6 +1755,7 @@ class AgentRunService:
             source: str = "",
             history: Optional[List[Dict[str, str]]] = None,
             skip_save: bool = False,
+            stateless: bool = False,
             user_message_id: Optional[uuid.UUID] = None,
             execution_mode: Literal["in_process", "sandbox"] = "in_process",
             parent_execution_id: Optional[uuid.UUID] = None,
@@ -1765,6 +1782,11 @@ class AgentRunService:
         Yields:
             str: SSE 格式的事件数据
         """
+        if stateless and (not sub_agent or not skip_save):
+            raise ValueError("stateless 模式必须与 sub_agent=True、skip_save=True 一起使用")
+        if stateless and history is None:
+            history = []
+
         tools_config: dict | list | None = agent_config.tools
         skills_config: dict | None = agent_config.skills
         knowledge_retrieval_config: dict | None = agent_config.knowledge_retrieval
@@ -1797,10 +1819,9 @@ class AgentRunService:
         try:
             # 1. 获取 API Key 配置
             api_key_config = await self._get_api_key(model_config.id, tenant_id=tenant_id)
-            if not sub_agent:
+            if sub_agent:
                 variables = self.prepare_variables(variables, agent_config.variables)
             else:
-                # FIXME: subagent input valid
                 variables = variables or {}
 
             # 2. 合并模型参数
@@ -1830,7 +1851,7 @@ class AgentRunService:
                     user_id,
                     app_id=agent_config.app_id,
                     workspace_id=workspace_id,
-                    source=KnowledgeRetrievalSource.DRAFT,
+                    source=KnowledgeRetrievalSource.AGENT if sub_agent else KnowledgeRetrievalSource.DRAFT,
                 ),
                 self.load_memory_config(memory_config, user_id, workspace_id, storage_type, user_rag_memory_id)
                 if memory else None,
@@ -1868,20 +1889,23 @@ class AgentRunService:
             elif isinstance(memory_result, Exception):
                 logger.warning("load_memory_config failed: %s", memory_result)
 
-            # 5. 处理会话ID（创建或验证），新会话时写入开场白
-            is_new_conversation = not conversation_id
-            opening, suggested_questions = None, None
-            if not sub_agent:
-                opening, suggested_questions = self._get_opening_statement(features_config, is_new_conversation, variables)
-            conversation_id = await self._ensure_conversation(
-                conversation_id=conversation_id,
-                app_id=agent_config.app_id,
-                workspace_id=workspace_id,
-                user_id=user_id,
-                sub_agent=sub_agent,
-                opening_statement=opening,
-                suggested_questions=suggested_questions
-            )
+            # 5. 处理会话ID。stateless 子调用显式跳过会话创建与验证。
+            if not stateless:
+                is_new_conversation = not conversation_id
+                opening, suggested_questions = None, None
+                if not sub_agent:
+                    opening, suggested_questions = self._get_opening_statement(
+                        features_config, is_new_conversation, variables
+                    )
+                conversation_id = await self._ensure_conversation(
+                    conversation_id=conversation_id,
+                    app_id=agent_config.app_id,
+                    workspace_id=workspace_id,
+                    user_id=user_id,
+                    sub_agent=sub_agent,
+                    opening_statement=opening,
+                    suggested_questions=suggested_questions,
+                )
 
             # 检查标注命中
             if not sub_agent:
@@ -1988,7 +2012,8 @@ class AgentRunService:
                 doc_img_recognition = isinstance(fu_config, dict) and fu_config.get("document_image_recognition", False)
                 processed_files = await multimodal_service.process_files(
                     files, document_image_recognition=doc_img_recognition,
-                    workspace_id=workspace_id
+                    workspace_id=workspace_id,
+                    file_upload_config=fu_config if isinstance(fu_config, dict) else None,
                 )
                 logger.info(f"处理了 {len(processed_files)} 个文件，provider={provider}")
                 capability = api_key_config.get("capability", [])
@@ -1999,10 +2024,9 @@ class AgentRunService:
                 )
             if has_doc_with_images:
                 system_prompt += (
-                    "\n\n文档文字中包含图片位置标记如 [图片 第2页 第1张]: <img src=\"url\"...>，"
-                    "请在回答中用 Markdown 格式 ![图片描述](url) 展示对应图片。"
-                    "重要：图片 URL 中包含 UUID（如 /storage/permanent/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx），"
-                    "必须将 src 属性的值原封不动复制到 Markdown 的括号中，不得增删任何字符。"
+                    "\n\n文档文字中可能包含图片位置标记如 [图片 第2页 第1张]。"
+                    "对应图片已作为独立视觉输入提供，请结合位置标记和视觉内容理解文档；"
+                    "不要在回答中输出任何文件地址、存储路径或内部标识。"
                 )
 
             # 7. 根据模型能力选择执行路径
@@ -2326,7 +2350,9 @@ class AgentRunService:
                 "conversation_id": conversation_id,
                 "message_id": message_id,
                 "elapsed_time": elapsed_time,
-                "message_length": len(full_content)
+                "message_length": len(full_content),
+                "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": total_tokens},
+                "citations": filtered_citations,
             }
             if sub_agent:
                 # 子 Agent 完成事件：携带 execution_id / token，前端据此收尾对应区块
@@ -2345,7 +2371,6 @@ class AgentRunService:
                         logger.warning(f"TTS任务异常: {e}")
                         audio_status = "failed"
                 end_data["audio_status"] = audio_status if stream_audio_url else None
-                end_data["citations"] = filtered_citations
             yield self._format_sse_event("end", end_data)
 
             logger.info(
@@ -3083,18 +3108,12 @@ class AgentRunService:
                         if meta:
                             name = name or meta[0]
                             size = size or meta[1]
-                    human_meta["files"].append({
-                        "type": f.type,
-                        "url": f.url,
-                        "file_type": f.file_type,
-                        "name": name,
-                        "size": size
-                    })
+                    human_meta["files"].append(serialize_file_reference(f, name=name, size=size))
 
             # 保存 history_files，包含 provider 和 is_omni 信息
             if processed_files:
                 human_meta["history_files"] = {
-                    "content": processed_files,
+                    "content": sanitize_processed_files_for_history(processed_files),
                     "provider": provider,
                     "is_omni": is_omni
                 }
@@ -4571,14 +4590,7 @@ class AgentRunService:
                 files = []
                 for f in meta_files:
                     try:
-                        file_input = FileInput(
-                            type=f.get("type", "document"),
-                            transfer_method=TransferMethod.REMOTE_URL if f.get("url") else TransferMethod.LOCAL_FILE,
-                            url=f.get("url"),
-                            file_type=f.get("file_type"),
-                            name=f.get("name"),
-                            size=f.get("size"),
-                        )
+                        file_input = deserialize_file_reference(f)
                         files.append(file_input)
                     except Exception as e:
                         logger.warning(f"转换文件信息失败: {e}")
@@ -4703,14 +4715,7 @@ class AgentRunService:
                 files = []
                 for f in meta_files:
                     try:
-                        file_input = FileInput(
-                            type=f.get("type", "document"),
-                            transfer_method=TransferMethod.REMOTE_URL if f.get("url") else TransferMethod.LOCAL_FILE,
-                            url=f.get("url"),
-                            file_type=f.get("file_type"),
-                            name=f.get("name"),
-                            size=f.get("size"),
-                        )
+                        file_input = deserialize_file_reference(f)
                         files.append(file_input)
                     except Exception as e:
                         logger.warning(f"转换文件信息失败: {e}")

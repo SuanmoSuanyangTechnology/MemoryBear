@@ -7,6 +7,7 @@
 """
 
 import uuid
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -122,6 +123,23 @@ class AgentModelConfig(BaseModel):
     )
 
 
+class AgentReferenceConfig(BaseModel):
+    """已发布 Agent 应用引用。"""
+
+    app_id: uuid.UUID = Field(..., description="被引用的 Agent 应用 ID")
+    release_policy: Literal["current", "pinned"] = Field(
+        default="pinned",
+        description="版本策略：current 跟随当前发布版本，pinned 固定版本",
+    )
+    release_id: uuid.UUID | None = Field(default=None, description="固定的 AppRelease ID")
+
+    @model_validator(mode="after")
+    def validate_release(self):
+        if self.release_policy == "pinned" and self.release_id is None:
+            raise ValueError("固定版本模式必须提供 release_id")
+        return self
+
+
 class AgentNodeConfig(BaseNodeConfig):
     """Agent 节点配置
 
@@ -130,14 +148,16 @@ class AgentNodeConfig(BaseNodeConfig):
 
     @model_validator(mode="before")
     @classmethod
-    def migrate_flattened_knowledge_retrieval(cls, value):
-        """兼容早期前端将 Agent 知识库配置错误展开到节点根级的工作流。"""
-        if not isinstance(value, dict) or value.get("knowledge_retrieval") is not None:
-            return value
-        if "knowledge_bases" not in value:
+    def migrate_legacy_config(cls, value):
+        """迁移旧版 Agent 节点配置。"""
+        if not isinstance(value, dict):
             return value
 
         migrated = dict(value)
+        # 引用 Agent 现在始终继承父工作流的完整文本轮次；兼容已保存的旧字段。
+        migrated.pop("history_mode", None)
+
+        # 嵌套配置优先；仍需清理根级旧字段，避免触发 extra="forbid"。
         knowledge_config = {
             key: migrated.pop(key)
             for key in (
@@ -151,8 +171,19 @@ class AgentNodeConfig(BaseNodeConfig):
             )
             if key in migrated
         }
-        migrated["knowledge_retrieval"] = knowledge_config
+        if migrated.get("knowledge_retrieval") is None and "knowledge_bases" in knowledge_config:
+            migrated["knowledge_retrieval"] = knowledge_config
         return migrated
+
+    # 节点来源模式。缺省 inline，保证历史工作流无需迁移。
+    mode: Literal["inline", "reference"] = Field(
+        default="inline",
+        description="Agent 配置来源：inline 节点内嵌配置，reference 引用已发布 Agent 应用",
+    )
+    reference: AgentReferenceConfig | None = Field(
+        default=None,
+        description="已发布 Agent 应用引用；mode=reference 时必填",
+    )
 
     # 模型选择（复用 LLM 节点的 model 选择模式）
     model: AgentModelConfig = Field(
@@ -175,6 +206,15 @@ class AgentNodeConfig(BaseNodeConfig):
     context: str = Field(
         default="",
         description="注入 Agent 输入的工作流上下文变量，如 '{{sys.message}}'"
+    )
+
+    variable_mapping: dict[str, Any] | list[dict[str, Any]] = Field(
+        default_factory=dict,
+        description="引用 Agent 的应用变量映射；完整变量选择器保留原始值类型",
+    )
+    files: str | None = Field(
+        default=None,
+        description="引用 Agent 的文件或文件数组变量选择器，如 '{{sys.files}}'",
     )
 
     # 工具选择
@@ -250,10 +290,26 @@ class AgentNodeConfig(BaseNodeConfig):
                 name="param_warnings",
                 type=VariableType.ARRAY_STRING,
                 description="Model parameter warnings"
+            ),
+            VariableDefinition(
+                name="citations",
+                type=VariableType.ARRAY_OBJECT,
+                description="引用 Agent 的知识库引用来源",
+            ),
+            VariableDefinition(
+                name="reference_meta",
+                type=VariableType.OBJECT,
+                description="实际执行的 Agent 应用与发布版本信息",
             )
         ],
         description="输出变量定义（自动生成，通常不需要修改）"
     )
+
+    @model_validator(mode="after")
+    def validate_reference_mode(self):
+        if self.mode == "reference" and self.reference is None:
+            raise ValueError("引用模式必须提供 reference 配置")
+        return self
 
     class Config:
         extra = "forbid"
