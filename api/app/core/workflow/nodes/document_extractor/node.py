@@ -187,14 +187,18 @@ class DocExtractorNode(BaseNode):
                                 image_file_objects.append(FileObject(
                                     type=FileType.IMAGE,
                                     url=url,
-                                    transfer_method=TransferMethod.REMOTE_URL,
+                                    # 标注 local_file：下游多模态出站按可达性判定改为内联字节，
+                                    # 不把内网永久 URL 交给模型回拉。
+                                    transfer_method=TransferMethod.LOCAL_FILE,
                                     origin_file_type=f"image/{ext}",
                                     file_id=str(file_id),
                                     name=f"p{page}_i{index}",
                                     mime_type=f"image/{ext}",
                                     is_file=True,
                                 ).model_dump())
-                                text = text + f"\n{placeholder}: <img src=\"{url}\" data-url=\"{url}\">"
+                                # 正文只保留位置标记；图片已作为独立视觉输入提供，
+                                # 内网 URL 属于展示层，不得进入模型上下文。
+                                text = text + f"\n{placeholder}"
                             except Exception as e:
                                 logger.error(f"Node {self.node_id}: failed to save image {placeholder}: {e}")
 

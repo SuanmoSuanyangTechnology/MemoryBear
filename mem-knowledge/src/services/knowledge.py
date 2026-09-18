@@ -132,7 +132,7 @@ async def _inherit_workspace_media_models(
 ) -> None:
     pending: dict[str, uuid.UUID] = {}
     for field_name, workspace_field in _WORKSPACE_MEDIA_MODEL_FIELDS.items():
-        if field_name in create_data.model_fields_set:
+        if getattr(create_data, field_name) is not None:
             continue
         raw_model_id = getattr(workspace, workspace_field, None)
         if raw_model_id is None:

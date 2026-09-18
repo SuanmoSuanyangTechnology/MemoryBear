@@ -95,13 +95,63 @@ class KnowledgeRetrievalNode(BaseNode):
                 }
         return {"citations": citations, "process": process}
 
+    def _resolve_image_query(self, variable_pool: VariablePool) -> str | None:
+        """解析 image_query 变量引用为首张图片的 URL。
+
+        仅支持纯变量引用（``{{...}}``），类型为 file 或 array[file]；数组取第一张
+        图片。变量不存在、非纯引用、无图片或 URL 为空时返回 None。
+        """
+        image_template = (self._get_typed_config().image_query or "").strip()
+        if not image_template:
+            return None
+        pure_ref = _PURE_VARIABLE_PATTERN.match(image_template)
+        if not pure_ref:
+            logger.warning(
+                "knowledge node image_query 非纯变量引用（必须形如 {{node.x.images}}）: %r",
+                image_template,
+            )
+            return None
+        if not variable_pool.has(image_template):
+            logger.warning(
+                "knowledge node image_query 变量在变量池中不存在: %r", image_template,
+            )
+            return None
+        value = variable_pool.get_value(image_template, strict=False)
+        candidates = value if isinstance(value, list) else [value]
+        logger.info(
+            "knowledge node image_query 解析 template=%r 候选数=%d 样本=%r",
+            image_template,
+            len(candidates),
+            candidates[0] if candidates else None,
+        )
+        for candidate in candidates:
+            if isinstance(candidate, dict):
+                file_type = candidate.get("type") or candidate.get("origin_file_type")
+                image_url = candidate.get("url")
+            else:
+                file_type = getattr(candidate, "type", None) or getattr(candidate, "origin_file_type", None)
+                image_url = getattr(candidate, "url", None)
+            if (
+                str(getattr(file_type, "value", file_type) or "").startswith("image")
+                and isinstance(image_url, str)
+                and image_url
+            ):
+                return image_url
+        logger.warning(
+            "knowledge node image_query 变量中未找到带 URL 的图片项: %r value=%r",
+            image_template, value,
+        )
+        return None
+
     def _extract_input(self, state: WorkflowState, variable_pool: VariablePool) -> dict[str, Any]:
         cfg = self._get_typed_config()
-        # 复用 execute() 中的渲染逻辑，保证 input 记录的是变量解析后的真实值，
-        # 而非原始模板 {{xxx}}，与 assigner / LLM 等节点的展示约定保持一致。
         rendered_filters = self._render_filter_variables(cfg.metadata_filters, variable_pool)
+        image_url = self._resolve_image_query(variable_pool)
         return {
-            "query": self._render_template(cfg.query, variable_pool),
+            # 二选一：image_query 命中图片时记录图片模态，否则记录文本 query 渲染值
+            "query": {"modality": "image", "content": image_url} if image_url
+            else self._render_template(cfg.query, variable_pool),
+            "image_query": cfg.image_query,
             "knowledge_bases": [kb_config.model_dump(mode="json") for kb_config in cfg.knowledge_bases],
             "metadata_filter_mode": cfg.metadata_filter_mode.value,
             "metadata_filters": rendered_filters and {
@@ -109,6 +159,7 @@ class KnowledgeRetrievalNode(BaseNode):
                 "conditions": [{"field": c.field, "operator": c.operator, "value": c.value, "value_type": c.value_type} for c in rendered_filters.conditions],
             },
         }
+
 
     def _render_filter_variables(
         self,
@@ -353,20 +404,27 @@ class KnowledgeRetrievalNode(BaseNode):
                 "_metadata_filter_result": {"mode": "disabled", "status": "skipped"},
             }
 
-        # 1. Render query template
-        query = self._render_template(self.typed_config.query, variable_pool)
+        # 1. query 与 image_query 二选一：image_query 解析到图片时走图片检索
+        image_url = self._resolve_image_query(variable_pool)
+        query = "" if image_url else self._render_template(self.typed_config.query, variable_pool)
+
+        # image_query 已配置但运行期未解析到图片（变量不存在/为空/非图片），且文本 query 也为空：
+        # 明确报错，避免用空 query 构造请求触发难懂的 pydantic 校验错误
+        if not image_url and not (query or "").strip():
+            image_template = (self.typed_config.image_query or "").strip()
+            if image_template:
+                raise BusinessException(
+                    f"image_query 未解析到可用图片：{image_template}。"
+                    "请确认上游已传入文件/图片变量（如 sys.files），且数组中包含图片。",
+                    BizCode.INVALID_PARAMETER,
+                )
 
         # 2. Pre-render variable templates in metadata filter conditions
         rendered_filters = self._render_filter_variables(
             self.typed_config.metadata_filters, variable_pool
         )
 
-        # 2.5 auto 模式：节点层用配置好的模型 + 参数，提取出源数据过滤条件（list[FilterGroup]，配置层类型）
-        auto_filter_groups: list | None = None
-        if self.typed_config.metadata_filter_mode == MetadataFilterMode.AUTO:
-            auto_filter_groups = await self._extract_auto_filter_groups_async(query, variable_pool)
-
-        # 3. Construct KnowledgeRetrievalRequest
+        # 3. 解析检索公共参数
         first_kb = self.typed_config.knowledge_bases[0]
         kb_ids = [kb.kb_id for kb in self.typed_config.knowledge_bases]
 
@@ -375,7 +433,7 @@ class KnowledgeRetrievalNode(BaseNode):
             vector_similarity_weight = None
         else:
             vector_similarity_weight = first_kb.vector_similarity_weight
-        
+
         # 混合检索下是否叠加图谱检索路由：请求级取第一个 KB 的配置作为兜底，
         # 每个 KB 显式配置的 enable_graph_retrieval 仍会在检索层按 KB 覆盖生效
         enable_graph_retrieval = (
@@ -384,8 +442,56 @@ class KnowledgeRetrievalNode(BaseNode):
             else 0
         )
 
+        # 4. Resolve the application owner before calling the selected adapter.
+        context = await build_app_knowledge_context(
+            self.workflow_config.get("app_id"),
+            source=KnowledgeRetrievalSource.WORKFLOW,
+            trace_id=uuid.uuid4().hex,
+        )
+        retriever = get_knowledge_retriever()
+
+        # 5. 确定最终 query 与元数据过滤。请求模型要求 query 非空（strip 后），
+        #    因此图片模式必须先把图片编码成 data URI（非空）再构造请求，不能用空白占位。
+        metadata_filters: list = []
+        if image_url:
+            from app.integrations.knowledge.retrieval_policy import (
+                build_image_retrieval_query,
+                image_retrieval_supported,
+            )
+
+            if not await image_retrieval_supported(
+                retriever,
+                kb_ids=[str(kb_id) for kb_id in kb_ids],
+                retrieve_type=first_kb.retrieve_type,
+                context=context,
+                rerank_id=str(self.typed_config.reranker_id) if self.typed_config.reranker_id else None,
+                rerank_mode=self.typed_config.rerank_mode,
+                enable_graph_retrieval=enable_graph_retrieval,
+            ):
+                raise BusinessException(
+                    "当前知识库/检索模式不支持图片检索，请改用文本 query 或更换支持多模态检索的知识库",
+                    BizCode.INVALID_PARAMETER,
+                )
+            # 图片检索没有文本 query，跳过基于 LLM 的自动/元数据过滤
+            final_query = await build_image_retrieval_query(image_url)
+            if final_query is None:
+                raise BusinessException(
+                    "图片检索失败：无法下载或编码 image_query 指向的图片",
+                    BizCode.INVALID_PARAMETER,
+                )
+        else:
+            final_query = query
+            # auto 模式：节点层用配置好的模型 + 参数提取源数据过滤条件（list[FilterGroup]）
+            if self.typed_config.metadata_filter_mode == MetadataFilterMode.AUTO:
+                metadata_filters = (
+                    await self._extract_auto_filter_groups_async(query, variable_pool)
+                ) or []
+            elif rendered_filters:
+                metadata_filters = [rendered_filters]
+
+        # 6. 构造检索请求（此时 query 必为非空：图片 data URI 或渲染后的文本）
         request = KnowledgeRetrievalRequest(
-            query=query,
+            query=final_query,
             source=KnowledgeRetrievalSource.WORKFLOW,
             kb_ids=kb_ids,
             knowledge_bases=self.typed_config.knowledge_bases,
@@ -398,25 +504,12 @@ class KnowledgeRetrievalNode(BaseNode):
             rerank_mode=self.typed_config.rerank_mode,
             rerank_weights=self.typed_config.rerank_weights,
             metadata_filter_mode=self.typed_config.metadata_filter_mode,
-            metadata_filters=(
-                auto_filter_groups
-                if self.typed_config.metadata_filter_mode == MetadataFilterMode.AUTO
-                else ([rendered_filters] if rendered_filters else [])
-            ),
+            metadata_filters=metadata_filters,
         )
         if self.typed_config.metadata_filter_mode == MetadataFilterMode.AUTO:
             request.mark_metadata_filters_resolved()
 
-        # 4. Resolve the application owner before calling the selected adapter.
-        context = await build_app_knowledge_context(
-            self.workflow_config.get("app_id"),
-            source=KnowledgeRetrievalSource.WORKFLOW,
-            trace_id=uuid.uuid4().hex,
-        )
-        result = await get_knowledge_retriever().retrieve(
-            request,
-            context,
-        )
+        result = await retriever.retrieve(request, context)
 
         # 5. Assemble return format
         chunks = result.chunks

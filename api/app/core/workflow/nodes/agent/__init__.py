@@ -3,6 +3,7 @@
 from app.core.workflow.nodes.agent.node import AgentNode
 from app.core.workflow.nodes.agent.config import (
     AgentNodeConfig,
+    AgentReferenceConfig,
     AgentErrorHandleConfig,
     ToolSelector,
 )
@@ -10,6 +11,7 @@ from app.core.workflow.nodes.agent.config import (
 __all__ = [
     "AgentNode",
     "AgentNodeConfig",
+    "AgentReferenceConfig",
     "AgentErrorHandleConfig",
     "ToolSelector",
 ]

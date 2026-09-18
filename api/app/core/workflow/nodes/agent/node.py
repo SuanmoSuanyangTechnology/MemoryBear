@@ -28,14 +28,16 @@ from app.core.workflow.nodes.agent.config import AgentNodeConfig
 from app.core.workflow.nodes.base_node import BaseNode
 from app.core.workflow.nodes.enums import HttpErrorHandle
 from app.core.workflow.nodes.llm.config import strip_unsupported_llm_params, validate_llm_param_constraints
-from app.core.workflow.variable.base_variable import VariableType
+from app.core.workflow.variable.base_variable import FileObject, VariableType
 from app.db import get_async_db_context, get_db_read
 from app.integrations.knowledge.contracts import KnowledgeRetrievalSource
 from app.models import ModelCapability, ModelType
 from app.models.workspace_model import Workspace
+from app.schemas.app_schema import FileInput, TransferMethod
 from app.schemas.model_schema import ModelInfo
 from app.services.context_engine_manager import ContextEngineManager
 from app.services.model_service import ModelConfigService
+from app.services.published_agent_runner import PublishedAgentRunner
 from app.services.tool_service import ToolService
 
 logger = logging.getLogger(__name__)
@@ -68,6 +70,8 @@ class AgentNode(BaseNode):
         self._rendered_message: str = ""
         self._rendered_context: str = ""
         self._param_warnings: list[str] = []
+        self._citations: list[dict[str, Any]] = []
+        self._reference_meta: dict[str, Any] = {}
 
     def _output_types(self) -> dict[str, VariableType]:
         return {
@@ -78,6 +82,8 @@ class AgentNode(BaseNode):
             "files": VariableType.ARRAY_FILE,
             "json": VariableType.ARRAY_OBJECT,
             "param_warnings": VariableType.ARRAY_STRING,
+            "citations": VariableType.ARRAY_OBJECT,
+            "reference_meta": VariableType.OBJECT,
         }
 
     # ------------------------------------------------------------------
@@ -160,6 +166,7 @@ class AgentNode(BaseNode):
                     app_id=self.workflow_config.get("app_id"),
                     workspace_id=workspace_id,
                     source=KnowledgeRetrievalSource.AGENT,
+                    uploaded_files=variable_pool.get_value("{{sys.files}}", strict=False),
                 )
                 if kb_tool:
                     langchain_tools.append(kb_tool)
@@ -501,6 +508,248 @@ class AgentNode(BaseNode):
         return agent, message, history, strategy
 
     # ------------------------------------------------------------------
+    # 已发布 Agent 应用引用模式
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _is_exact_selector(value: str) -> bool:
+        value = value.strip()
+        return value.startswith("{{") and value.endswith("}}") and value.count("{{") == 1
+
+    def _resolve_reference_variables(self, variable_pool: VariablePool) -> dict[str, Any]:
+        variables: dict[str, Any] = {}
+        raw_mapping = self.typed_config.variable_mapping or {}
+        if isinstance(raw_mapping, list):
+            mapping = {
+                str(item.get("name")): item.get("value")
+                for item in raw_mapping
+                if isinstance(item, dict) and item.get("name")
+            }
+        else:
+            mapping = raw_mapping
+        for name, binding in mapping.items():
+            if isinstance(binding, str) and self._is_exact_selector(binding):
+                variables[name] = variable_pool.get_value(binding, default=None, strict=False)
+            elif isinstance(binding, str):
+                variables[name] = self._render_template(binding, variable_pool, strict=False)
+            else:
+                variables[name] = self._resolve_config(binding, variable_pool)
+        return variables
+
+    @staticmethod
+    def _to_file_input(value: FileObject | dict[str, Any]) -> FileInput:
+        if isinstance(value, FileObject):
+            data = value.model_dump(exclude={"content_cache"})
+            content = value.get_content()
+        else:
+            data = dict(value)
+            content = data.pop("content", None)
+
+        file_id = data.get("file_id") or data.get("upload_file_id")
+        transfer_method = data.get("transfer_method") or (
+            "local_file" if file_id else "remote_url"
+        )
+        file_input = FileInput(
+            type=data.get("type"),
+            transfer_method=TransferMethod(transfer_method),
+            upload_file_id=file_id,
+            url=data.get("url") or None,
+            file_type=data.get("origin_file_type") or data.get("mime_type"),
+            name=data.get("name"),
+            size=data.get("size"),
+        )
+        if content:
+            file_input.set_content(content)
+        return file_input
+
+    def _resolve_reference_files(self, variable_pool: VariablePool) -> list[FileInput]:
+        selector = self.typed_config.files
+        if not selector:
+            return []
+        if self._is_exact_selector(selector):
+            value = variable_pool.get_value(selector, default=[], strict=False)
+        else:
+            value = variable_pool.get_value(self._selector_to_literal(selector), default=[], strict=False)
+
+        values = value if isinstance(value, list) else [value]
+        result: list[FileInput] = []
+        for item in values:
+            if isinstance(item, FileObject):
+                result.append(self._to_file_input(item))
+            elif isinstance(item, dict) and (
+                item.get("is_file") or item.get("file_id") or item.get("upload_file_id") or item.get("url")
+            ):
+                result.append(self._to_file_input(item))
+            elif item is not None:
+                logger.warning("节点 %s: 忽略无效的引用 Agent 文件输入: %r", self.node_id, item)
+        return result
+
+    def _build_reference_history(
+        self,
+        state: WorkflowState,
+        current_message: str,
+    ) -> list[dict[str, str]]:
+        history: list[dict[str, str]] = []
+        for item in deepcopy(state.get("messages", [])):
+            if not isinstance(item, dict):
+                continue
+            role = item.get("role")
+            content = item.get("content")
+            if role in ("user", "assistant") and isinstance(content, str):
+                history.append({"role": role, "content": content})
+
+        # 恢复或重试路径可能已把本轮 user 放进 state；引用 Agent 会单独接收
+        # current_message，因此先防御性去重，再只保留以 assistant 结束的完整历史。
+        if history and history[-1]["role"] == "user" and history[-1]["content"] == current_message:
+            history.pop()
+        while history and history[-1]["role"] != "assistant":
+            history.pop()
+        return history[-20:]
+
+    def _prepare_reference_inputs(
+        self,
+        state: WorkflowState,
+        variable_pool: VariablePool,
+    ) -> tuple[str, dict[str, Any], list[FileInput], list[dict[str, str]]]:
+        context = self._resolve_context(variable_pool)
+        message_template = self.typed_config.message or ""
+        if context.strip() and "{{context}}" in message_template:
+            message_template = self._inject_context(message_template, context)
+            message = self._render_template(message_template, variable_pool, strict=False)
+        else:
+            message = self._render_template(message_template, variable_pool, strict=False)
+            message = self._inject_context(message, context)
+        self._rendered_message = message
+        self._rendered_context = context
+        return (
+            message,
+            self._resolve_reference_variables(variable_pool),
+            self._resolve_reference_files(variable_pool),
+            self._build_reference_history(state, message),
+        )
+
+    def _reference_runtime_context(self, variable_pool: VariablePool) -> tuple[uuid.UUID, str | None]:
+        workspace_id = self.get_variable("sys.workspace_id", variable_pool, strict=False)
+        if not workspace_id:
+            raise BusinessException("引用 Agent 执行缺少 workspace_id", BizCode.WORKSPACE_NO_ACCESS)
+        user_id = self.get_variable("sys.user_id", variable_pool, strict=False)
+        return uuid.UUID(str(workspace_id)), str(user_id) if user_id else None
+
+    async def _execute_reference(
+        self,
+        state: WorkflowState,
+        variable_pool: VariablePool,
+    ) -> dict[str, Any]:
+        reference = self.typed_config.reference
+        message, variables, files, history = self._prepare_reference_inputs(state, variable_pool)
+        workspace_id, user_id = self._reference_runtime_context(variable_pool)
+        result = await PublishedAgentRunner().run(
+            app_id=reference.app_id,
+            release_policy=reference.release_policy,
+            release_id=reference.release_id,
+            workspace_id=workspace_id,
+            user_id=user_id,
+            message=message,
+            variables=variables,
+            files=files,
+            history=history,
+            storage_type=state.get("memory_storage_type"),
+            user_rag_memory_id=state.get("user_rag_memory_id"),
+        )
+        content = result.get("message", "")
+        reasoning_content = result.get("reasoning_content") or ""
+        usage = result.get("usage") or {}
+        self._citations = result.get("citations") or []
+        self._reference_meta = result.get("reference_meta") or {}
+        return {
+            "llm_result": AIMessage(
+                content=content,
+                response_metadata={"token_usage": usage, "reasoning_content": reasoning_content or None},
+            ),
+            "branch_signal": "SUCCESS",
+            "reasoning_content": reasoning_content,
+            "citations": self._citations,
+            "reference_meta": self._reference_meta,
+            "param_warnings": [],
+        }
+
+    async def _execute_reference_stream(
+        self,
+        state: WorkflowState,
+        variable_pool: VariablePool,
+    ):
+        reference = self.typed_config.reference
+        message, variables, files, history = self._prepare_reference_inputs(state, variable_pool)
+        workspace_id, user_id = self._reference_runtime_context(variable_pool)
+        full_response = ""
+        full_reasoning = ""
+        usage: dict[str, Any] = {}
+        agent_log: dict[str, Any] = {}
+        reasoning_done_sent = False
+
+        async for event in PublishedAgentRunner().run_stream(
+            app_id=reference.app_id,
+            release_policy=reference.release_policy,
+            release_id=reference.release_id,
+            workspace_id=workspace_id,
+            user_id=user_id,
+            message=message,
+            variables=variables,
+            files=files,
+            history=history,
+            storage_type=state.get("memory_storage_type"),
+            user_rag_memory_id=state.get("user_rag_memory_id"),
+        ):
+            event_type = event.get("type")
+            data = event.get("data") or {}
+            if event_type == "message":
+                chunk = data.get("content", "")
+                if chunk:
+                    if full_reasoning and not reasoning_done_sent:
+                        reasoning_done_sent = True
+                        yield {"__final__": False, "chunk": "", "done": True, "field": "reasoning_content"}
+                    full_response += chunk
+                    yield {"__final__": False, "chunk": chunk, "field": "output"}
+            elif event_type == "reasoning":
+                chunk = data.get("content", "")
+                if chunk:
+                    full_reasoning += chunk
+                    yield {"__final__": False, "chunk": chunk, "field": "reasoning_content"}
+            elif event_type == "tool_start":
+                self._emit_tool_event("agent_tool_start", data)
+            elif event_type == "tool_end":
+                self._emit_tool_event("agent_tool_end", data)
+            elif event_type == "tool_error":
+                self._emit_tool_event("agent_tool_error", data)
+            elif event_type == "agent_log":
+                agent_log = data.get("data") or data
+                self._emit_agent_log_event(agent_log)
+            elif event_type == "sub_usage":
+                usage = {"total_tokens": data.get("total_tokens", 0)}
+            elif event_type == "end":
+                usage = data.get("usage") or usage
+                self._citations = data.get("citations") or []
+                self._reference_meta = data.get("reference_meta") or {}
+
+        if full_reasoning and not reasoning_done_sent:
+            yield {"__final__": False, "chunk": "", "done": True, "field": "reasoning_content"}
+        yield {"__final__": False, "chunk": "", "done": True, "field": "output"}
+        yield {
+            "__final__": True,
+            "result": {
+                "llm_result": AIMessage(
+                    content=full_response,
+                    response_metadata={"token_usage": usage, "reasoning_content": full_reasoning or None},
+                ),
+                "branch_signal": "SUCCESS",
+                "reasoning_content": full_reasoning,
+                "agent_log": agent_log,
+                "citations": self._citations,
+                "reference_meta": self._reference_meta,
+                "param_warnings": [],
+            },
+        }
+
+    # ------------------------------------------------------------------
     # 非流式执行
     # ------------------------------------------------------------------
     async def execute(self, state: WorkflowState, variable_pool: VariablePool) -> dict[str, Any]:
@@ -508,6 +757,10 @@ class AgentNode(BaseNode):
         self.typed_config = AgentNodeConfig(**self.config)
 
         try:
+            if self.typed_config.mode == "reference":
+                logger.info("节点 %s 开始执行已发布 Agent 引用（非流式）", self.node_id)
+                return await self._execute_reference(state, variable_pool)
+
             agent, message, history, strategy = await self._prepare_agent(state, variable_pool, stream=False)
 
             logger.info(f"节点 {self.node_id} 开始执行 Agent（非流式，策略={strategy}）")
@@ -562,6 +815,12 @@ class AgentNode(BaseNode):
         self.typed_config = AgentNodeConfig(**self.config)
 
         try:
+            if self.typed_config.mode == "reference":
+                logger.info("节点 %s 开始执行已发布 Agent 引用（流式）", self.node_id)
+                async for item in self._execute_reference_stream(state, variable_pool):
+                    yield item
+                return
+
             agent, message, history, strategy = await self._prepare_agent(state, variable_pool, stream=True)
 
             logger.info(f"节点 {self.node_id} 开始执行 Agent（流式，策略={strategy}）")
@@ -719,6 +978,20 @@ class AgentNode(BaseNode):
     # 输出 / 输入提取
     # ------------------------------------------------------------------
     def _extract_input(self, state: WorkflowState, variable_pool: VariablePool) -> dict[str, Any]:
+        if self.config.get("mode", "inline") == "reference":
+            reference = self.config.get("reference") or {}
+            return {
+                "message": self._rendered_message,
+                "context": self._rendered_context,
+                "variables": self._resolve_config(self.config.get("variable_mapping") or {}, variable_pool),
+                "config": {
+                    "mode": "reference",
+                    "app_id": str(reference.get("app_id")) if reference.get("app_id") else None,
+                    "release_policy": reference.get("release_policy"),
+                    "release_id": str(reference.get("release_id")) if reference.get("release_id") else None,
+                },
+            }
+
         model_config = self.config.get("model") if isinstance(self.config.get("model"), dict) else {}
         model_id = model_config.get("model_id") or self.config.get("model_id")
         return {
@@ -741,6 +1014,10 @@ class AgentNode(BaseNode):
             extra = {"process": process}
             if isinstance(business_result, dict) and business_result.get("agent_log"):
                 extra["agent_log"] = business_result.get("agent_log")
+            if isinstance(business_result, dict) and business_result.get("citations"):
+                extra["citations"] = business_result.get("citations")
+            if isinstance(business_result, dict) and business_result.get("reference_meta"):
+                extra["reference_meta"] = business_result.get("reference_meta")
             return extra
         return {}
 
@@ -760,6 +1037,8 @@ class AgentNode(BaseNode):
                 "files": business_result.get("files") or [],
                 "json": business_result.get("json") or [],
                 "param_warnings": business_result.get("param_warnings") or [],
+                "citations": business_result.get("citations") or [],
+                "reference_meta": business_result.get("reference_meta") or {},
             }
             return result
         if isinstance(business_result, AIMessage):
@@ -771,6 +1050,8 @@ class AgentNode(BaseNode):
                 "files": [],
                 "json": [],
                 "param_warnings": [],
+                "citations": [],
+                "reference_meta": {},
             }
         return {
             "output": str(business_result),
