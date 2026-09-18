@@ -794,6 +794,14 @@ class MultimodalService:
         present_limits = [
             inline_limits[f.type] for f in files if f.type in inline_limits
         ]
+        # 文档图片识别会把文档内嵌图片以内联字节出站；纯文档请求本身不含图片
+        # 类型，预算会被算成 0 导致提取出的图片全部被跳过，这里按图片上限补预算。
+        if (
+                document_image_recognition
+                and ModelCapability.VISION in self.capability
+                and any(f.type == FileType.DOCUMENT for f in files)
+        ):
+            present_limits.append(inline_limits[FileType.IMAGE])
         inline_total_limit = max(present_limits, default=0) * 2
 
         # 获取对应的策略
