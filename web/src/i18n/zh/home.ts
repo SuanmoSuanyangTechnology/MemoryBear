@@ -130,6 +130,8 @@ export const home = {
       dynamicWeightEngine: '记忆价值动态权重引擎',
       associationEngine: '跨模态记忆关联联想引擎',
       consolidationEvolutionEngine: '长期固化演进引擎',
+      predictionEngine: '记忆预测推演引擎',
+      predictionProgress: '预测推演流程',
     },
     dashboard: {
       total_models: '可用模型总数',
