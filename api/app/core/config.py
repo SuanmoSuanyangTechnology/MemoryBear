@@ -117,6 +117,12 @@ class Settings:
     ELASTICSEARCH_REQUEST_TIMEOUT: int = int(os.getenv("ELASTICSEARCH_REQUEST_TIMEOUT", "100000"))
     ELASTICSEARCH_RETRY_ON_TIMEOUT: bool = os.getenv("ELASTICSEARCH_RETRY_ON_TIMEOUT", "True").lower() == "true"
     ELASTICSEARCH_MAX_RETRIES: int = int(os.getenv("ELASTICSEARCH_MAX_RETRIES", "10"))
+    # 允许本进程索引定义低于线上版本时继续启动（默认关闭，仅供回滚等旧代码连新索引的场景）。
+    # 开启后，线上 `_meta.redbear_memory_storage` 的 schema_version/generation 高于本进程配置时
+    # 不再报 "refusing automatic downgrade"，而是直接复用线上索引（不重建、不改 mapping）。
+    # 风险：本进程 mapping 可能落后于线上，新字段会按 dynamic_template 落为 keyword，
+    # 类型已变更的字段检索/写入可能失败；正式环境应保持关闭。
+    ES_ALLOW_DOWNGRADE: bool = os.getenv("ES_ALLOW_DOWNGRADE", "false").lower() == "true"
 
     # Memory storage read backend（记忆存储读取后端，BackendFactory.get_read_client 使用）
     # 可选值: ELASTIC / NEO4J；加载时统一去除空白并转为大写，非法值在工厂初始化时快速失败

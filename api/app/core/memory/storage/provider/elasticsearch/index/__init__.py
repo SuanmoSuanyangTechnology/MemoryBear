@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from collections.abc import Mapping
 from copy import deepcopy
 from enum import StrEnum
@@ -9,6 +10,7 @@ from elasticsearch import AsyncElasticsearch
 from elastic_transport import ObjectApiResponse
 
 from app.aioRedis import get_thread_safe_redis
+from app.core.config import settings
 from app.core.memory.storage.enums import MemoryNodeLabel
 from app.core.memory.storage.provider.elasticsearch.index.definitions import (
     INDEX_ALIAS_SUFFIX,
@@ -36,6 +38,8 @@ __all__ = [
     "get_index_name",
     "validate_index",
 ]
+
+logger = logging.getLogger(__name__)
 
 INDEX_SCHEMA_META_KEY = "redbear_memory_storage"
 MIGRATION_WAIT_TIMEOUT_SECONDS = 300.0
@@ -396,6 +400,39 @@ def _legacy_index_name(definition: IndexDefinition) -> str:
     return definition.name
 
 
+def _allow_downgrade() -> bool:
+    """Return True when an older definition may run against a newer index.
+
+    Disabled by default. When ``ES_ALLOW_DOWNGRADE`` is enabled, an index whose
+    ``schema_version``/``generation`` is newer than the configured definition is
+    accepted as-is instead of failing initialization: no physical index is
+    created, no mapping is patched, no alias is switched, and the strict
+    ``validate_index`` comparison is intentionally skipped for that index. This
+    only exists to let an older release start against an already migrated
+    cluster; the older definition may still miss fields the live index has.
+    """
+    return bool(settings.ES_ALLOW_DOWNGRADE)
+
+
+def _newer_than_definition(
+    current_schema_version: int,
+    current_generation: int,
+    definition: IndexDefinition,
+) -> str | None:
+    """Describe how the live index is newer than the definition, if it is."""
+    if current_generation > definition.generation:
+        return (
+            f"generation {current_generation}, newer than configured generation "
+            f"{definition.generation}"
+        )
+    if current_schema_version > definition.schema_version:
+        return (
+            f"schema version {current_schema_version}, newer than configured "
+            f"schema version {definition.schema_version}"
+        )
+    return None
+
+
 async def _get_update_action(
     client: AsyncElasticsearch,
     label: MemoryNodeLabel,
@@ -416,18 +453,23 @@ async def _get_update_action(
             f"Elasticsearch alias '{definition.alias}' points to label "
             f"{current_label!r}, expected {label.name!r}"
         )
-    if current_generation > definition.generation:
-        raise RuntimeError(
-            f"Elasticsearch index '{current_index}' has generation "
-            f"{current_generation}, newer than configured generation "
-            f"{definition.generation}; refusing automatic downgrade"
+    newer_than_definition = _newer_than_definition(
+        current_schema_version, current_generation, definition
+    )
+    if newer_than_definition is not None:
+        if not _allow_downgrade():
+            raise RuntimeError(
+                f"Elasticsearch index '{current_index}' has "
+                f"{newer_than_definition}; refusing automatic downgrade"
+            )
+        logger.warning(
+            "Elasticsearch index '%s' has %s; ES_ALLOW_DOWNGRADE is enabled, "
+            "using the existing index as-is without validating it against the "
+            "configured definition",
+            current_index,
+            newer_than_definition,
         )
-    if current_schema_version > definition.schema_version:
-        raise RuntimeError(
-            f"Elasticsearch index '{current_index}' has schema version "
-            f"{current_schema_version}, newer than configured schema version "
-            f"{definition.schema_version}; refusing automatic downgrade"
-        )
+        return IndexUpdateAction.CURRENT
     if current_generation < definition.generation:
         return IndexUpdateAction.REINDEX
     if current_schema_version < definition.schema_version:
