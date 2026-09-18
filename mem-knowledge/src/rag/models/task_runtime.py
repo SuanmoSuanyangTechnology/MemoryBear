@@ -5,12 +5,26 @@ from __future__ import annotations
 import uuid
 from typing import TYPE_CHECKING
 
-from redbear_model import ResolvedModelConfig, resolve_model
+from redbear_model import (
+    ModelConfigNotFoundError,
+    ResolvedModelConfig,
+    resolve_from_channel_pool,
+    resolve_model,
+)
 
-from ...repositories.model_registry import SyncSQLModelRegistry
+from ...repositories.model_registry import (
+    AsyncSQLModelRegistry,
+    SyncSQLModelRegistry,
+    credential_cipher,
+)
 
 if TYPE_CHECKING:
-    from redbear_model.runtime import RedBearEmbeddings, RedBearLLM
+    from redbear_model.runtime import (
+        RedBearAudioTranscriber,
+        RedBearEmbeddings,
+        RedBearLLM,
+        RedBearVideoUnderstanding,
+    )
 
     from ...runtime import ProcessRuntime
 
@@ -53,6 +67,64 @@ class TaskModelFactory:
         tenant_id: uuid.UUID,
     ) -> ResolvedModelConfig:
         return self.resolve_config(model_config_id, tenant_id)
+
+    def _resolve_media(
+        self, model_config_id: uuid.UUID, tenant_id: uuid.UUID,
+    ) -> ResolvedModelConfig:
+        if model_config_id is None:
+            raise ValueError("Media model ID is required")
+        with self._runtime.database.sync_session() as session:
+            registry = SyncSQLModelRegistry(session)
+            config = registry.get_model_config(model_config_id, tenant_id)
+            if config is None:
+                raise ModelConfigNotFoundError(model_config_id)
+            channels = registry.list_active_channels(tenant_id, config.provider.value)
+            return resolve_from_channel_pool(
+                config, channels, tenant_id=tenant_id, cipher=credential_cipher(),
+            )
+
+    async def _aresolve_media(
+        self, model_config_id: uuid.UUID, tenant_id: uuid.UUID,
+    ) -> ResolvedModelConfig:
+        if model_config_id is None:
+            raise ValueError("Media model ID is required")
+        async with self._runtime.database.async_session() as session:
+            registry = AsyncSQLModelRegistry(session)
+            config = await registry.get_model_config(model_config_id, tenant_id)
+            if config is None:
+                raise ModelConfigNotFoundError(model_config_id)
+            channels = await registry.list_active_channels(tenant_id, config.provider.value)
+            return resolve_from_channel_pool(
+                config, channels, tenant_id=tenant_id, cipher=credential_cipher(),
+            )
+
+    def create_audio_transcriber(
+        self, model_config_id: uuid.UUID, tenant_id: uuid.UUID,
+    ) -> RedBearAudioTranscriber:
+        from redbear_model.runtime import RedBearAudioTranscriber
+        config = self._resolve_media(model_config_id, tenant_id)
+        return RedBearAudioTranscriber(config, client_pool=self._runtime.model_runtime.pool)
+
+    async def acreate_audio_transcriber(
+        self, model_config_id: uuid.UUID, tenant_id: uuid.UUID,
+    ) -> RedBearAudioTranscriber:
+        from redbear_model.runtime import RedBearAudioTranscriber
+        config = await self._aresolve_media(model_config_id, tenant_id)
+        return RedBearAudioTranscriber(config, client_pool=self._runtime.model_runtime.pool)
+
+    def create_video_understanding(
+        self, model_config_id: uuid.UUID, tenant_id: uuid.UUID,
+    ) -> RedBearVideoUnderstanding:
+        from redbear_model.runtime import RedBearVideoUnderstanding
+        config = self._resolve_media(model_config_id, tenant_id)
+        return RedBearVideoUnderstanding(config, client_pool=self._runtime.model_runtime.pool)
+
+    async def acreate_video_understanding(
+        self, model_config_id: uuid.UUID, tenant_id: uuid.UUID,
+    ) -> RedBearVideoUnderstanding:
+        from redbear_model.runtime import RedBearVideoUnderstanding
+        config = await self._aresolve_media(model_config_id, tenant_id)
+        return RedBearVideoUnderstanding(config, client_pool=self._runtime.model_runtime.pool)
 
     def create_embeddings(
         self,

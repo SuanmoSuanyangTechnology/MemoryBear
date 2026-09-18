@@ -39,11 +39,10 @@ def validate_qa_upload(
     suffix = "." + filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
     if suffix not in QA_EXTENSIONS:
         raise KnowledgeError.from_code(
-            "KB_VALIDATION_ERROR",
-            "Only CSV (.csv) or Excel (.xlsx/.xls) files are supported",
+            "KB_QA_IMPORT_FILE_TYPE_UNSUPPORTED",
         )
     if require_non_empty and not content:
-        raise KnowledgeError.from_code("KB_VALIDATION_ERROR", "QA import file is empty")
+        raise KnowledgeError.from_code("KB_QA_IMPORT_FILE_EMPTY")
     return suffix
 
 

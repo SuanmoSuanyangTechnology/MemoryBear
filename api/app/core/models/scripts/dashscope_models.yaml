@@ -1339,3 +1339,24 @@ models:
   - 多模态
   - agent-thought
   logo: dashscope
+
+- name: qwen3-asr-flash-filetrans
+  type: asr
+  provider: dashscope
+  description: 异步音频文件转录
+  is_deprecated: false
+  is_official: true
+  capability: [audio]
+  is_omni: false
+  tags: [音频转录]
+  logo: dashscope
+- name: qwen3.5-omni-plus-2026-03-15
+  type: llm
+  provider: dashscope
+  description: 视频声画理解，输出文本
+  is_deprecated: false
+  is_official: true
+  capability: [video, audio, vision]
+  is_omni: true
+  tags: [视频理解]
+  logo: dashscope

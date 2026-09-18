@@ -90,8 +90,12 @@ class DashScopeMultimodalEmbeddingAdapter:
         )
         if is_dashscope_multimodal_input_limit(response):
             raise MultimodalInputLimitError("embedding")
-        if _value(response, "status_code") != 200:
-            raise InvalidProviderResponseError("embedding", "non-success status")
+        status_code = _value(response, "status_code")
+        if status_code != 200:
+            # 透出状态码：上游按 "status_code: 401" 文本标记区分鉴权失败与其他 4xx
+            raise InvalidProviderResponseError(
+                "embedding", f"non-success status (status_code: {status_code})"
+            )
         output = _value(response, "output")
         embeddings = _value(output, "embeddings")
         if not isinstance(embeddings, Sequence) or isinstance(embeddings, (str, bytes)):

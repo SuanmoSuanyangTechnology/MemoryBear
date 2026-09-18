@@ -1394,6 +1394,7 @@ class AgentRunService:
                 tenant_id=api_key_config.get("tenant_id"),
                 model_config_id=api_key_config.get("model_config_id"),
                 channel_id=api_key_config.get("channel_id"),
+                failover_plan=api_key_config.get("failover_plan"),
             )
 
             # 6. 加载历史消息（包含开场白）
@@ -1494,6 +1495,7 @@ class AgentRunService:
                 tenant_id=api_key_config.get("tenant_id"),
                 model_config_id=api_key_config.get("model_config_id"),
                 channel_id=api_key_config.get("channel_id"),
+                failover_plan=api_key_config.get("failover_plan"),
                 context_query=message,
                 context_base_text=system_prompt + "\n" + str(history) + "\n" + message,
                 context_evidence_loader=load_annotation_context,
@@ -1879,6 +1881,7 @@ class AgentRunService:
                 tenant_id=api_key_config.get("tenant_id"),
                 model_config_id=api_key_config.get("model_config_id"),
                 channel_id=api_key_config.get("channel_id"),
+                failover_plan=api_key_config.get("failover_plan"),
             )
 
             # 6. 加载历史消息
@@ -2007,6 +2010,7 @@ class AgentRunService:
                     tenant_id=api_key_config.get("tenant_id"),
                     model_config_id=api_key_config.get("model_config_id"),
                     channel_id=api_key_config.get("channel_id"),
+                    failover_plan=api_key_config.get("failover_plan"),
                     context_query=message,
                     context_base_text=system_prompt + "\n" + str(history) + "\n" + message,
                     context_evidence_loader=load_annotation_context,
@@ -2607,6 +2611,7 @@ class AgentRunService:
                 "tenant_id": api_key.tenant_id,
                 "model_config_id": api_key.model_config_id,
                 "channel_id": api_key.channel_id,
+                "failover_plan": api_key.failover_plan,
             }
 
     async def _ensure_conversation(

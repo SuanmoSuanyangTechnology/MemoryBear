@@ -67,6 +67,7 @@ class FastWritePipeline:
         # 懒加载底层能力，首次使用时初始化
         self._embedder = None
         self._storage_service = None
+        self._neo4j_connector = None
 
     async def run(
         self,
@@ -160,7 +161,13 @@ class FastWritePipeline:
                         emotion_result=emotion_result,
                     )
                     dialog_id = await self._persist(node)
-                    s.metadata(dialog_id=dialog_id)
+                    activity_saved = await self._project_fast_dialogue_activity(
+                        dialog_id
+                    )
+                    s.metadata(
+                        dialog_id=dialog_id,
+                        activity_saved=activity_saved,
+                    )
 
                 return {
                     "status": "success",
@@ -261,7 +268,7 @@ class FastWritePipeline:
         - text 为空 → 返回 None。
         - 懒加载 embedder：与正路径 WritePipeline 一致，通过 ModelClientMixin.get_embedding_client
           用 memory_config.embedding_model_id / tenant_id 构造，保证向量空间一致。
-        - 完整文本单次 aembed_query（不做前置截断）。
+        - 完整文本作为 document 单次 aembed_documents（不做前置截断）。
         - 硬上限 EMBED_TIMEOUT_SEC：底层 client 的 max_retries * timeout 可能突破 celery
           任务超时；用 asyncio.wait_for 兜底，超时即视为失败降级。
         - 失败降级：任何异常（含超时）记录 warning 日志（含 text_len）并返回 None，不重试。
@@ -281,10 +288,11 @@ class FastWritePipeline:
                         self.memory_config.tenant_id,
                     )
 
-            return await asyncio.wait_for(
-                self._embedder.aembed_query(text),
+            embeddings = await asyncio.wait_for(
+                self._embedder.aembed_documents([text]),
                 timeout=self.EMBED_TIMEOUT_SEC,
             )
+            return embeddings[0] if embeddings else None
         except asyncio.TimeoutError:
             logger.warning(
                 "[FastWrite] embedding timed out, degrading to None: text_len=%s, "
@@ -465,18 +473,80 @@ class FastWritePipeline:
                 )
                 await asyncio.sleep(0.1 * (attempt + 1))
 
-    async def _cleanup(self) -> None:
-        """关闭当前 fast write 独占的 storage service 及 Neo4j driver。"""
-        if self._storage_service is None:
-            return
+    async def _project_fast_dialogue_activity(self, dialogue_id: str) -> bool:
+        """回查一次 Neo4j 权威快照，并尽力投影 Fast 活动到 PG。"""
         try:
-            await self._storage_service.close()
-        except Exception as e:
-            logger.warning(
-                "[FastWrite] failed to close storage service: "
-                "end_user_id=%s, error=%s",
-                self.end_user_id,
-                e,
+            from app.repositories.neo4j.dialog_repository import DialogRepository
+            from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+            from app.services.memory_display_record_service import (
+                MemoryDisplayRecordService,
             )
-        finally:
-            self._storage_service = None
+
+            if self._neo4j_connector is None:
+                self._neo4j_connector = Neo4jConnector()
+            snapshot = await DialogRepository(
+                self._neo4j_connector
+            ).get_dialogue_activity_snapshot(
+                dialogue_id=dialogue_id,
+                end_user_id=self.end_user_id,
+            )
+            if (
+                snapshot is None
+                or snapshot.id != dialogue_id
+                or snapshot.write_mode != "fast"
+                or not snapshot.content.strip()
+            ):
+                logger.info(
+                    "[FastWrite] skip activity projection: dialogue_id=%s, "
+                    "end_user_id=%s, snapshot_mode=%s",
+                    dialogue_id,
+                    self.end_user_id,
+                    snapshot.write_mode if snapshot is not None else None,
+                )
+                return False
+
+            return await MemoryDisplayRecordService.save_fast_dialogue(
+                end_user_id=self.end_user_id,
+                dialogue_id=snapshot.id,
+                content=snapshot.content,
+                occurred_at=snapshot.created_at,
+                workspace_id=self.memory_config.workspace_id,
+            )
+        except Exception as exc:
+            logger.warning(
+                "[FastWrite] activity projection failed (Neo4j result retained): "
+                "dialogue_id=%s, end_user_id=%s, error=%s",
+                dialogue_id,
+                self.end_user_id,
+                exc,
+                exc_info=True,
+            )
+            return False
+
+    async def _cleanup(self) -> None:
+        """关闭当前 fast write 独占的 storage service 及快照查询连接。"""
+        if self._storage_service is not None:
+            try:
+                await self._storage_service.close()
+            except Exception as e:
+                logger.warning(
+                    "[FastWrite] failed to close storage service: "
+                    "end_user_id=%s, error=%s",
+                    self.end_user_id,
+                    e,
+                )
+            finally:
+                self._storage_service = None
+
+        if self._neo4j_connector is not None:
+            try:
+                await self._neo4j_connector.close()
+            except Exception as e:
+                logger.warning(
+                    "[FastWrite] failed to close snapshot connector: "
+                    "end_user_id=%s, error=%s",
+                    self.end_user_id,
+                    e,
+                )
+            finally:
+                self._neo4j_connector = None

@@ -52,7 +52,9 @@ class MemoryDisplayRecord(Base):
     operation_id = Column(UUID(as_uuid=True), nullable=False)
     operation = Column(String(16), nullable=False)  # "WRITE" or "RETRIEVE"
     # 以下三列仅 WRITE 使用，RETRIEVE 存 NULL
-    memory_id = Column(String(64), nullable=True)
+    # 当前展示快照对应的 Neo4j 节点业务 ID。Fast Write 使用确定性的
+    # Dialogue.id，长度可能超过原 MemorySummary.id 的 64 字符上限。
+    memory_id = Column(String(255), nullable=True)
     memory_type = Column(String(32), nullable=True)
     name = Column(String(255), nullable=True)
     content = Column(Text, nullable=False)

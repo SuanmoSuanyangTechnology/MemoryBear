@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..api.dependencies import Principal
 from ..api.schemas.common import SuccessEnvelope
 from ..api.schemas.knowledge_metadata import KnowledgeMetadataCreate
-from ..errors import KnowledgeError
+from ..errors import KnowledgeError, public_text
 from ..models.owned import Knowledge, KnowledgeType, PermissionType
 from ..models.references import ModelConfig
 from ..rag.knowledge_graph import (
@@ -30,6 +30,14 @@ from . import knowledge as knowledge_service
 from .knowledge_metadata import KnowledgeMetadataService
 
 _MODEL_REFERENCE_FIELDS = (
+    "embedding_id",
+    "reranker_id",
+    "llm_id",
+    "image2text_id",
+    "audio2text_id",
+    "video2text_id",
+)
+_VALIDATED_MODEL_REFERENCE_FIELDS = (
     "embedding_id",
     "reranker_id",
     "llm_id",
@@ -62,25 +70,27 @@ def copy_parser_config(source_config: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
-def _validation(message: str) -> KnowledgeError:
-    return KnowledgeError.from_code("KB_VALIDATION_ERROR", message)
+def _validation(
+    code: str,
+    params: dict[str, str] | None = None,
+) -> KnowledgeError:
+    return KnowledgeError.from_code(code, params=params)
 
 
 def _resource_not_found() -> KnowledgeError:
     return KnowledgeError.from_code(
-        "KB_RESOURCE_NOT_FOUND",
-        "Knowledge resource not found",
+        "KB_KNOWLEDGE_NOT_FOUND",
     )
 
 
-def _principal_invalid(message: str) -> KnowledgeError:
-    return KnowledgeError.from_code("KB_PRINCIPAL_INVALID", message)
+def _principal_invalid() -> KnowledgeError:
+    return KnowledgeError.from_code("KB_PRINCIPAL_INVALID")
 
 
 def _model_unavailable(field_name: str) -> KnowledgeError:
     return KnowledgeError.from_code(
-        "KB_MODEL_UNAVAILABLE",
-        f"Source model reference is unavailable: {field_name}",
+        "KB_KNOWLEDGE_COPY_MODEL_UNAVAILABLE",
+        params={"model_field": public_text(field_name)},
     )
 
 
@@ -94,7 +104,7 @@ async def _validate_principal_references(
         or workspace.is_active is not True
         or workspace.tenant_id != principal.tenant_id
     ):
-        raise _principal_invalid("Invalid knowledge workspace principal")
+        raise _principal_invalid()
 
     user = await ReferenceRepository.get_user(db, principal.actor_id)
     if (
@@ -102,18 +112,18 @@ async def _validate_principal_references(
         or user.is_active is not True
         or user.tenant_id != principal.tenant_id
     ):
-        raise _principal_invalid("Invalid knowledge actor principal")
+        raise _principal_invalid()
 
 
 def _validate_source(source: dict[str, Any]) -> None:
     if source["status"] not in (0, 1):
         raise _resource_not_found()
     if source["type"] != KnowledgeType.General:
-        raise _validation("Only general knowledge bases can be copied")
+        raise _validation("KB_KNOWLEDGE_COPY_TYPE_UNSUPPORTED")
     if source["permission_id"] != PermissionType.Private:
-        raise _validation("Only private knowledge bases can be copied")
+        raise _validation("KB_KNOWLEDGE_COPY_PERMISSION_UNSUPPORTED")
     if source["builtin_metadata_enabled"] not in (0, 1):
-        raise _validation("Source builtin metadata setting is invalid")
+        raise _validation("KB_KNOWLEDGE_COPY_BUILTIN_METADATA_INVALID")
 
 
 async def _resolve_copy_parent_id(
@@ -135,7 +145,7 @@ async def _resolve_copy_parent_id(
         or parent.type != KnowledgeType.FOLDER
         or parent.status != 1
     ):
-        raise _validation("Source parent folder is invalid")
+        raise _validation("KB_KNOWLEDGE_COPY_PARENT_INVALID")
     return parent.id
 
 
@@ -145,16 +155,22 @@ def _validate_metadata_fields(
 ) -> None:
     for field in metadata_fields:
         if field["tenant_id"] != tenant_id:
-            raise _validation("Source metadata field tenant is invalid")
+            raise _validation("KB_KNOWLEDGE_COPY_METADATA_TENANT_INVALID")
         name = field["name"]
         if name in KnowledgeMetadataService.BUILTIN_FIELD_NAMES:
-            raise _validation(f"Source metadata field conflicts with builtin field: {name}")
+            raise _validation(
+                "KB_KNOWLEDGE_COPY_METADATA_BUILTIN_CONFLICT",
+                {"field_name": public_text(name)},
+            )
         try:
             KnowledgeMetadataCreate.model_validate(
                 {"name": name, "type": field["type"]}
             )
         except ValidationError as exc:
-            raise _validation(f"Source metadata field is invalid: {name}") from exc
+            raise _validation(
+                "KB_KNOWLEDGE_COPY_METADATA_FIELD_INVALID",
+                {"field_name": public_text(name)},
+            ) from exc
 
 
 def _is_model_visible(model: ModelConfig, tenant_id: uuid.UUID) -> bool:
@@ -168,15 +184,15 @@ async def _validate_model_references(
 ) -> None:
     model_ids = list(
         dict.fromkeys(
-            source[field_name]
-            for field_name in _MODEL_REFERENCE_FIELDS
-            if source[field_name] is not None
+            source.get(field_name)
+            for field_name in _VALIDATED_MODEL_REFERENCE_FIELDS
+            if source.get(field_name) is not None
         )
     )
     models = await ReferenceRepository.get_model_configs(db, model_ids)
     models_by_id = {model.id: model for model in models}
-    for field_name in _MODEL_REFERENCE_FIELDS:
-        model_id = source[field_name]
+    for field_name in _VALIDATED_MODEL_REFERENCE_FIELDS:
+        model_id = source.get(field_name)
         if model_id is None:
             continue
         model = models_by_id.get(model_id)
@@ -213,6 +229,8 @@ def _build_knowledge_values(
         "reranker_id": source["reranker_id"],
         "llm_id": source["llm_id"],
         "image2text_id": source["image2text_id"],
+        "audio2text_id": source.get("audio2text_id"),
+        "video2text_id": source.get("video2text_id"),
         "doc_num": 0,
         "chunk_num": 0,
         "parser_id": source["parser_id"],
@@ -281,16 +299,14 @@ async def copy_knowledge_configuration(
         try:
             parser_config = copy_parser_config(source["parser_config"])
         except ValueError as exc:
-            raise _validation(str(exc)) from exc
+            raise _validation("KB_KNOWLEDGE_COPY_PARSER_CONFIG_INVALID") from exc
 
         copy_name = (name or "").strip()
         if copy_name:
             if await knowledge_repository.get_knowledge_by_name_async(
                 db, copy_name, principal.workspace_id
             ):
-                raise knowledge_service._conflict(
-                    f"The knowledge base name already exists: {copy_name}"
-                )
+                raise knowledge_service._conflict(copy_name)
         else:
             occupied_names = await knowledge_repository.get_knowledge_copy_names_async(
                 db,
@@ -332,7 +348,6 @@ async def copy_knowledge_configuration(
         await db.rollback()
         raise KnowledgeError.from_code(
             "KB_DATABASE_UNAVAILABLE",
-            "Knowledge database operation failed",
         ) from exc
     except BaseException:
         await db.rollback()

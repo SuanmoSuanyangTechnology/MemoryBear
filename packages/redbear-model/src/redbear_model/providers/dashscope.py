@@ -33,6 +33,9 @@ def is_qwen3_vl_reranker(config: ResolvedModelConfig) -> bool:
     )
 
 
+_SERVICE_PATH_MARKER = "/api/v1/services/"
+
+
 def resolve_dashscope_native_base_address(base_url: str | None) -> str | None:
     if base_url is None:
         return None
@@ -40,6 +43,10 @@ def resolve_dashscope_native_base_address(base_url: str | None) -> str | None:
     for suffix in ("/compatible-mode/v1", "/compatible-api/v1"):
         if normalized.endswith(suffix):
             return f"{normalized[: -len(suffix)]}/api/v1"
+    # 历史配置曾写入完整服务端点：SDK 会在其后二次拼接服务路径（404），截断回基地址
+    marker = normalized.find(_SERVICE_PATH_MARKER)
+    if marker != -1:
+        return normalized[: marker + len("/api/v1")]
     return normalized
 
 

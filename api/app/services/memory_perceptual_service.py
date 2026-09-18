@@ -313,6 +313,7 @@ class MemoryPerceptualService:
                 tenant_id=model_config.tenant_id,
                 model_config_id=model_config.model_config_id,
                 channel_id=model_config.channel_id,
+                failover_plan=model_config.failover_plan,
             )
 
         # 用 DB：文件预处理（本地文件通过 workspace/tenant 范围水合）。

@@ -80,12 +80,12 @@ def select_units_for_rerank(
     ``max_image`` by score. A warning is logged whenever anything is dropped.
     """
 
-    text = [c for c in candidates if c.kind is RetrievalUnitKind.TEXT]
-    image = [c for c in candidates if c.kind is RetrievalUnitKind.IMAGE]
+    text = [(i, c) for i, c in enumerate(candidates) if c.kind is RetrievalUnitKind.TEXT]
+    image = [(i, c) for i, c in enumerate(candidates) if c.kind is RetrievalUnitKind.IMAGE]
     if len(text) <= max_text and len(image) <= max_image:
         return list(candidates)
-    kept_text = sorted(text, key=lambda c: -_finite(c.score))[:max_text]
-    kept_image = sorted(image, key=lambda c: -_finite(c.score))[:max_image]
+    kept_text = sorted(text, key=lambda item: -_finite(item[1].score))[:max_text]
+    kept_image = sorted(image, key=lambda item: -_finite(item[1].score))[:max_image]
     logger.warning(
         "event=kb_multimodal_rerank_units_trimmed "
         "text_before=%s text_after=%s image_before=%s image_after=%s",
@@ -94,8 +94,9 @@ def select_units_for_rerank(
         len(image),
         len(kept_image),
     )
-    kept_ids = {c.unit_id for c in (*kept_text, *kept_image)}
-    return [c for c in candidates if c.unit_id in kept_ids]
+    # Unit IDs can repeat across knowledge bases; select exact input positions.
+    kept_positions = {i for i, _ in (*kept_text, *kept_image)}
+    return [c for i, c in enumerate(candidates) if i in kept_positions]
 
 
 __all__ = ["UnitCandidate", "collapse_units_to_chunks", "select_units_for_rerank"]

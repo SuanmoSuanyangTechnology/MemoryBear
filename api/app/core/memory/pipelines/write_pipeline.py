@@ -578,7 +578,7 @@ class WritePipeline:
                                     from app.services.memory_display_record_service import (
                                         MemoryDisplayRecordService,
                                     )
-                                    await MemoryDisplayRecordService.save_written(
+                                    await MemoryDisplayRecordService.replace_dialogue_with_summaries(
                                         summaries=summaries,
                                         end_user_id=self.end_user_id,
                                         workspace_id=self.memory_config.workspace_id,

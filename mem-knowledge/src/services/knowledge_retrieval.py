@@ -19,6 +19,7 @@ from redbear_model import (
     ImageEmbeddingContent,
     MultimodalInputLimitError,
     RerankCandidateView,
+    TextEmbeddingContent,
     is_qwen3_vl_embedding,
     is_qwen3_vl_reranker,
 )
@@ -32,6 +33,7 @@ from ..api.schemas.knowledge_retrieval import (
     KnowledgeRetrievalResult,
 )
 from ..api.schemas.rerank import RerankMode
+from ..error_mapping import map_multimodal_error
 from ..errors import KnowledgeError
 from ..rag.chunk.token_utils import num_tokens_from_string
 from ..rag.knowledge_graph.config import GraphPipeline
@@ -374,6 +376,10 @@ class KnowledgeRetrievalService:
                     timings=timings,
                     log_id=log_id,
                 )
+                result = await cls._complete_weighted_target_scores(
+                    runtime, store, request, target, result, document_ids,
+                    global_rerank=preparation.global_rerank, timings=timings,
+                )
                 return index, result
 
         tasks = [
@@ -520,8 +526,7 @@ class KnowledgeRetrievalService:
         if target_type is RetrieveType.PARTICIPLE:
             if text_query is None:
                 raise KnowledgeError.from_code(
-                    "KB_VALIDATION_ERROR",
-                    "Image query does not support participle retrieval",
+                    "KB_IMAGE_PARTICIPLE_UNSUPPORTED",
                 )
             if is_qwen3_vl_embedding(target.embedding.resolved):
                 # Multimodal KB stores units: full-text hits text units only,
@@ -530,8 +535,11 @@ class KnowledgeRetrievalService:
                     text_query,
                     full_text_options,
                 )
-                chunks = collapse_units_to_chunks(unit_candidates)
-                chunks = await store.resolve_parent_chunks(chunks, target.index_name)
+                if global_rerank is not None and global_rerank.mode is RerankMode.WEIGHTED_SCORE:
+                    chunks = [cls._unit_to_chunk(candidate) for candidate in unit_candidates]
+                else:
+                    chunks = collapse_units_to_chunks(unit_candidates)
+                    chunks = await store.resolve_parent_chunks(chunks, target.index_name)
             else:
                 chunks = await store.search_by_full_text(text_query, full_text_options)
             cls._log_target_done(
@@ -558,7 +566,6 @@ class KnowledgeRetrievalService:
         if target.embedding.resolved is None:
             raise KnowledgeError.from_code(
                 "KB_MODEL_UNAVAILABLE",
-                "Embedding model is unavailable",
             )
         embedding = RedBearEmbeddings(
             target.embedding.resolved,
@@ -592,8 +599,7 @@ class KnowledgeRetrievalService:
             else:
                 if text_query is None:
                     raise KnowledgeError.from_code(
-                        "KB_VALIDATION_ERROR",
-                        "Text query content is unavailable",
+                        "KB_RETRIEVAL_TEXT_QUERY_REQUIRED",
                     )
                 if is_qwen3_vl_embedding(target.embedding.resolved):
                     # Keep unit identity for any subsequent global ranking stage.
@@ -657,8 +663,7 @@ class KnowledgeRetrievalService:
         else:
             if text_query is None:
                 raise KnowledgeError.from_code(
-                    "KB_VALIDATION_ERROR",
-                    "Text query content is unavailable",
+                    "KB_RETRIEVAL_TEXT_QUERY_REQUIRED",
                 )
             multimodal_kb = is_qwen3_vl_embedding(target.embedding.resolved)
 
@@ -779,37 +784,6 @@ class KnowledgeRetrievalService:
             )
         finally:
             cls._record_timing(timings, "local_rerank_ms", local_rerank_started_at)
-        if weighted_semantics and query_vector is not None:
-            missing = [candidate for candidate in ranked if candidate.semantic_score is None]
-            if missing:
-                scoring_started_at = time.perf_counter()
-                try:
-                    score_units = is_qwen3_vl_embedding(target.embedding.resolved)
-                    score_candidates = (
-                        store.score_units_by_vector
-                        if score_units
-                        else store.score_candidates_by_vector
-                    )
-                    scores = await score_candidates(
-                        query_vector, [candidate.chunk for candidate in missing], vector_options
-                    )
-                finally:
-                    cls._record_timing(timings, "es_vector_ms", scoring_started_at)
-                ranked = [
-                    replace(
-                        candidate,
-                        semantic_score=scores.get(
-                            str(
-                                (candidate.chunk.metadata or {}).get(
-                                    "_unit_id" if score_units else "doc_id"
-                                ) or ""
-                            ), 0.0
-                        ),
-                    )
-                    if candidate.semantic_score is None
-                    else candidate
-                    for candidate in ranked
-                ]
         cls._log_target_done(
             target,
             len(vector_chunks),
@@ -824,7 +798,84 @@ class KnowledgeRetrievalService:
             candidates=tuple(ranked),
             entities=tuple(graph_result.entities),
             relationships=tuple(graph_result.relationships),
+            query_vector=tuple(query_vector) if query_vector is not None else None,
         )
+
+    @classmethod
+    async def _complete_weighted_target_scores(
+        cls,
+        runtime: ProcessRuntime,
+        store: AsyncElasticSearchRetrieval,
+        request: KnowledgeRetrievalRequest,
+        target: RetrievalTarget,
+        result: TargetRetrievalResult,
+        document_ids: list[str] | None,
+        *,
+        global_rerank: RerankPlan | None,
+        timings: RetrievalTimings | None = None,
+    ) -> TargetRetrievalResult:
+        """Complete selected candidates after every local retrieval path."""
+        if (
+            global_rerank is None
+            or global_rerank.mode is not RerankMode.WEIGHTED_SCORE
+            or global_rerank.weights.semantic_weight == 0
+        ):
+            return result
+        missing = [c for c in result.candidates if c.semantic_score is None]
+        if not missing:
+            return result
+        query = request.query_text
+        if query is None:
+            raise KnowledgeError.from_code(
+                "KB_VALIDATION_ERROR", "Weighted scoring requires a text query"
+            )
+        vector = result.query_vector
+        if vector is None:
+            if target.embedding.resolved is None:
+                raise KnowledgeError.from_code(
+                    "KB_MODEL_UNAVAILABLE", "Embedding model is unavailable"
+                )
+            started_at = time.perf_counter()
+            try:
+                embedding = RedBearEmbeddings(
+                    target.embedding.resolved, client_pool=runtime.model_runtime.pool
+                )
+                vector = tuple(normalize_vector(await embedding.aembed_query(query)))
+            finally:
+                cls._record_timing(timings, "embedding_ms", started_at)
+        multimodal = is_qwen3_vl_embedding(target.embedding.resolved)
+
+        def score_key(candidate: RetrievalCandidate) -> tuple[str, str]:
+            metadata = candidate.chunk.metadata or {}
+            unit_id = metadata.get("_unit_id") if multimodal else None
+            if unit_id:
+                return "unit", str(unit_id)
+            chunk_id = metadata.get("_chunk_id") if multimodal else None
+            return "chunk", str(chunk_id or metadata.get("doc_id") or "")
+
+        scores: dict[tuple[str, str], float] = {}
+        options = cls._search_options(request, target, document_ids, len(missing), None)
+        started_at = time.perf_counter()
+        try:
+            for kind in ("unit", "chunk"):
+                group = [c for c in missing if score_key(c)[0] == kind]
+                if not group:
+                    continue
+                if kind == "unit":
+                    scorer = store.score_units_by_vector
+                elif multimodal:
+                    scorer = store.score_chunk_units_by_vector
+                else:
+                    scorer = store.score_candidates_by_vector
+                values = await scorer(vector, [c.chunk for c in group], options)
+                scores.update({score_key(c): values.get(score_key(c)[1], 0.0) for c in group})
+        finally:
+            cls._record_timing(timings, "es_vector_ms", started_at)
+        return replace(result, candidates=tuple(
+            replace(c, semantic_score=scores[score_key(c)])
+            if c.semantic_score is None else c
+            for c in result.candidates
+        ))
 
     @classmethod
     async def _embed_image_query(
@@ -844,15 +895,9 @@ class KnowledgeRetrievalService:
         except asyncio.CancelledError:
             raise
         except MultimodalInputLimitError as exc:
-            raise KnowledgeError.from_code(
-                "KB_MULTIMODAL_INPUT_LIMIT",
-                "Image embedding input exceeds the model limit",
-            ) from exc
+            raise map_multimodal_error(exc, operation="embedding") from exc
         except Exception as exc:
-            raise KnowledgeError.from_code(
-                "KB_MULTIMODAL_EMBEDDING_FAILED",
-                "Image embedding failed",
-            ) from exc
+            raise map_multimodal_error(exc, operation="embedding") from exc
         finally:
             cls._record_timing(timings, "embedding_ms", embedding_started_at)
         logger.info(
@@ -1080,15 +1125,30 @@ class KnowledgeRetrievalService:
     ) -> ModelRerankResult:
         if top_k <= 0 or not chunks:
             return ModelRerankResult(chunks=(), used_fallback=False)
-        if isinstance(query, ImageEmbeddingContent):
+        if isinstance(query, ImageEmbeddingContent) or (
+            snapshot.resolved is not None and is_qwen3_vl_reranker(snapshot.resolved)
+        ):
             unit_candidates = cls._chunks_to_unit_candidates(chunks)
-            return await cls._rerank_multimodal_units(
-                runtime,
-                snapshot,
-                query,
-                unit_candidates,
-                top_k,
-            )
+            try:
+                return await cls._rerank_multimodal_units(
+                    runtime,
+                    snapshot,
+                    TextEmbeddingContent(text=query) if isinstance(query, str) else query,
+                    unit_candidates,
+                    top_k,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                if isinstance(query, ImageEmbeddingContent):
+                    raise
+                logger.warning(
+                    "Rerank failed; using retrieval order provider=%s error_type=%s",
+                    snapshot.provider,
+                    type(exc).__name__,
+                )
+                fallback = cls._apply_rerank_fallback(chunks, top_k)
+                return ModelRerankResult(chunks=tuple(fallback), used_fallback=True)
         if snapshot.resolved is None:
             fallback = cls._apply_rerank_fallback(chunks, top_k)
             return ModelRerankResult(chunks=tuple(fallback), used_fallback=True)
@@ -1230,7 +1290,11 @@ class KnowledgeRetrievalService:
                     ),
                     kind=RetrievalUnitKind(kind_raw),
                     asset_file_id=metadata.get("_asset_file_id"),
-                    content=unit_content if isinstance(unit_content, str) else chunk.page_content,
+                    content=(
+                        unit_content
+                        if isinstance(unit_content, str)
+                        else chunk_retrieval_content(chunk)
+                    ),
                     score=score,
                     chunk=chunk,
                 )
@@ -1242,7 +1306,7 @@ class KnowledgeRetrievalService:
         cls,
         runtime: ProcessRuntime,
         snapshot: ModelRuntimeSnapshot,
-        query: ImageEmbeddingContent,
+        query: TextEmbeddingContent | ImageEmbeddingContent,
         candidates: Sequence[UnitCandidate],
         top_k: int,
     ) -> ModelRerankResult:
@@ -1258,13 +1322,17 @@ class KnowledgeRetrievalService:
             or not is_qwen3_vl_reranker(snapshot.resolved)
         ):
             raise KnowledgeError.from_code(
-                "KB_MODEL_UNAVAILABLE",
-                "Image query requires qwen3-vl rerank",
+                "KB_IMAGE_RERANK_MODEL_UNSUPPORTED",
             )
 
+        trimmed = select_units_for_rerank(
+            candidates,
+            max_text=_MAX_MULTIMODAL_RERANK_TEXT_VIEWS,
+            max_image=_MAX_MULTIMODAL_RERANK_IMAGE_VIEWS,
+        )
         asset_ids_by_kb: dict[uuid.UUID, list[str]] = {}
-        for candidate in candidates:
-            if not candidate.asset_file_id:
+        for candidate in trimmed:
+            if candidate.kind is not RetrievalUnitKind.IMAGE or not candidate.asset_file_id:
                 continue
             raw_kb_id = (candidate.chunk.metadata or {}).get("knowledge_id")
             try:
@@ -1282,12 +1350,6 @@ class KnowledgeRetrievalService:
                     phase="rerank",
                 )
             )
-
-        trimmed = select_units_for_rerank(
-            candidates,
-            max_text=_MAX_MULTIMODAL_RERANK_TEXT_VIEWS,
-            max_image=_MAX_MULTIMODAL_RERANK_IMAGE_VIEWS,
-        )
 
         views: list[RerankCandidateView] = []
         kept: list[UnitCandidate] = []
@@ -1338,22 +1400,15 @@ class KnowledgeRetrievalService:
         except asyncio.CancelledError:
             raise
         except MultimodalInputLimitError as exc:
-            raise KnowledgeError.from_code(
-                "KB_MULTIMODAL_INPUT_LIMIT",
-                "Multimodal rerank input exceeds the model limit",
-            ) from exc
+            raise map_multimodal_error(exc, operation="rerank") from exc
         except Exception as exc:
-            raise KnowledgeError.from_code(
-                "KB_MULTIMODAL_RERANK_FAILED",
-                "Multimodal rerank failed",
-            ) from exc
+            raise map_multimodal_error(exc, operation="rerank") from exc
 
         scored_units: list[UnitCandidate] = []
         for score in scores:
             if score.input_index < 0 or score.input_index >= len(kept):
                 raise KnowledgeError.from_code(
-                    "KB_MULTIMODAL_RERANK_FAILED",
-                    "Multimodal rerank returned an invalid index",
+                    "KB_MULTIMODAL_RERANK_RESPONSE_INVALID",
                 )
             unit = kept[score.input_index]
             scored_units.append(
@@ -1361,8 +1416,14 @@ class KnowledgeRetrievalService:
             )
 
         ranked_units = sorted(scored_units, key=lambda unit: -unit.score)
+        ranked_chunks: list[DocumentChunk] = []
+        for unit in ranked_units[:top_k]:
+            # Preserve original identities, including legacy blocks without unit metadata.
+            chunk = unit.chunk.model_copy(deep=True)
+            chunk.metadata["score"] = unit.score
+            ranked_chunks.append(chunk)
         return ModelRerankResult(
-            chunks=tuple(cls._unit_to_chunk(unit) for unit in ranked_units[:top_k]),
+            chunks=tuple(ranked_chunks),
             used_fallback=False,
         )
 
@@ -1722,8 +1783,7 @@ class KnowledgeRetrievalService:
             return None
         if request.metadata_filter_mode is MetadataFilterMode.AUTO:
             raise KnowledgeError.from_code(
-                "KB_VALIDATION_ERROR",
-                "Image query does not support automatic metadata filters",
+                "KB_IMAGE_AUTO_METADATA_UNSUPPORTED",
             )
         validated = validate_image_data_uri(normalized.content)
         return ImageEmbeddingContent(
@@ -1745,49 +1805,57 @@ class KnowledgeRetrievalService:
                 RetrieveType.HYBRID,
             } or target.params.enable_graph_retrieval:
                 raise KnowledgeError.from_code(
-                    "KB_VALIDATION_ERROR",
-                    "Image query target configuration is not supported",
+                    "KB_IMAGE_TARGET_CONFIG_UNSUPPORTED",
                 )
             if (
                 target.embedding.resolved is None
                 or not is_qwen3_vl_embedding(target.embedding.resolved)
             ):
                 raise KnowledgeError.from_code(
-                    "KB_MODEL_UNAVAILABLE",
-                    "Image query requires qwen3-vl embedding",
+                    "KB_IMAGE_EMBEDDING_MODEL_UNSUPPORTED",
                 )
             if target.params.retrieve_type is RetrieveType.HYBRID:
                 local_plan = target.params.local_rerank
                 if local_plan is None or local_plan.mode is RerankMode.WEIGHTED_SCORE:
                     raise KnowledgeError.from_code(
-                        "KB_VALIDATION_ERROR",
-                        "Image hybrid requires model rerank mode",
+                        "KB_IMAGE_HYBRID_RERANK_REQUIRED",
                     )
                 if (
                     local_plan.model is None
                     or local_plan.model.resolved is None
                     or not is_qwen3_vl_reranker(local_plan.model.resolved)
                 ):
+                    request_error_code = getattr(
+                        preparation,
+                        "request_reranker_error_code",
+                        None,
+                    )
+                    if request_error_code is not None:
+                        raise KnowledgeError.from_code(request_error_code)
                     raise KnowledgeError.from_code(
-                        "KB_MODEL_UNAVAILABLE",
-                        "Image hybrid requires qwen3-vl rerank",
+                        "KB_IMAGE_RERANK_MODEL_UNSUPPORTED",
                     )
         global_plan = preparation.global_rerank
         if global_plan is None:
             return
         if global_plan.mode is RerankMode.WEIGHTED_SCORE:
             raise KnowledgeError.from_code(
-                "KB_VALIDATION_ERROR",
-                "Image query does not support weighted global rerank",
+                "KB_IMAGE_WEIGHTED_GLOBAL_RERANK_UNSUPPORTED",
             )
         if (
             global_plan.model is None
             or global_plan.model.resolved is None
             or not is_qwen3_vl_reranker(global_plan.model.resolved)
         ):
+            request_error_code = getattr(
+                preparation,
+                "request_reranker_error_code",
+                None,
+            )
+            if request_error_code is not None:
+                raise KnowledgeError.from_code(request_error_code)
             raise KnowledgeError.from_code(
-                "KB_MODEL_UNAVAILABLE",
-                "Image query global rerank requires qwen3-vl rerank",
+                "KB_IMAGE_GLOBAL_RERANK_MODEL_UNSUPPORTED",
             )
 
     @classmethod

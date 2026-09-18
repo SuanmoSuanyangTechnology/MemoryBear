@@ -125,6 +125,20 @@ async def create_knowledge(
     api_key_auth: ApiKeyAuth = None,
     db: AsyncSession = Depends(get_async_db),
     name: str = Body(..., description="KB name"),
+    audio2text_id: uuid.UUID | None = Body(
+        None,
+        description=(
+            "Audio transcription model config ID "
+            "(omitted inherits the workspace audio model; null disables it)"
+        ),
+    ),
+    video2text_id: uuid.UUID | None = Body(
+        None,
+        description=(
+            "Video understanding model config ID "
+            "(omitted inherits the workspace video model; null disables it)"
+        ),
+    ),
 ):
     """
     create knowledge
@@ -172,6 +186,12 @@ async def update_knowledge(
     api_key_auth: ApiKeyAuth = None,
     db: AsyncSession = Depends(get_async_db),
     name: str = Body(None, description="KB name (optional)"),
+    audio2text_id: uuid.UUID | None = Body(
+        None, description="Audio transcription model config ID (null clears)",
+    ),
+    video2text_id: uuid.UUID | None = Body(
+        None, description="Video understanding model config ID (null clears)",
+    ),
 ):
     body = await request.json()
     update_data = knowledge_schema.KnowledgeUpdate(**body)

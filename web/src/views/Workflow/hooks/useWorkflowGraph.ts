@@ -11,7 +11,7 @@ import { register as registerReactShape } from '@antv/x6-react-shape';
 import type { PortMetadata } from '@antv/x6/lib/model/port';
 import { App } from 'antd';
 import { useEffect, useRef, useState, createElement } from 'react';
-import type { RefObject, Dispatch, SetStateAction, MutableRefObject, DragEvent } from 'react';
+import type { DragEvent } from 'react';
 import { createRoot } from 'react-dom/client';
 import { useTranslation } from 'react-i18next';
 import { useParams } from 'react-router-dom';
@@ -21,90 +21,14 @@ import { getWorkflowConfig, saveWorkflowConfig } from '@/api/application';
 import { useUser } from '@/store/user';
 import type { FeaturesConfigForm } from '@/views/ApplicationConfig/types';
 import { conditionNodeHeight, conditionNodeItemHeight, conditionNodePortItemArgsY, defaultAbsolutePortGroups, defaultPortItems, edgeAttrs, edgeHoverTool, edge_color, edge_selected_color, edge_width, graphNodeLibrary, nodeLibrary, nodeRegisterLibrary, nodeWidth, notesConfig, portAttrs, portItemArgsY, portMarkup, portTextAttrs, unknownNode, hasErrorHandleNodes } from '../constant';
-import type { ChatVariable, EnvVariable, HistoryRecord, NodeProperties, WorkflowConfig } from '../types';
-import { calcConditionNodeTotalHeight, getConditionNodeCasePortY } from '../utils';
+import type { ChatVariable, EnvVariable, HistoryRecord, NodeProperties, WorkflowConfig,
+  UseWorkflowGraphProps, UseWorkflowGraphReturn,
+} from '../types';
+import { calcConditionNodeTotalHeight, getConditionNodeCasePortY, isSafari } from '../utils';
+import { normalizeAgentConfig } from '../utils/normalizeAgentConfig';
 import { useWorkflowStore } from '@/store/workflow';
-import type { Application } from '@/views/ApplicationManagement/types'
 import type { Memory } from '@/views/MemoryManagement/types'
 import { getMemoryConfigList } from '@/api/memory'
-
-const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
-
-/**
- * Props for useWorkflowGraph hook
- */
-export interface UseWorkflowGraphProps {
-  /** Reference to the main graph container element */
-  containerRef: RefObject<HTMLDivElement>;
-  /** Reference to the minimap container element */
-  miniMapRef: RefObject<HTMLDivElement>;
-  /** Application type */
-  appType?: Application['type'];
-  setRunOpen: Dispatch<SetStateAction<boolean>>;
-}
-
-/**
- * Return type for useWorkflowGraph hook
- */
-export interface UseWorkflowGraphReturn {
-  /** Current workflow configuration */
-  config: WorkflowConfig | null;
-  /** Function to update workflow configuration */
-  setConfig: Dispatch<SetStateAction<WorkflowConfig | null>>;
-  /** Reference to the X6 graph instance */
-  graphRef: MutableRefObject<Graph | undefined>;
-  /** Currently selected node */
-  selectedNode: Node | null;
-  /** Function to update selected node */
-  setSelectedNode: Dispatch<SetStateAction<Node | null>>;
-  /** Current zoom level of the graph */
-  zoomLevel: number;
-  /** Function to update zoom level */
-  setZoomLevel: Dispatch<SetStateAction<number>>;
-  /** Whether hand/pan mode is enabled */
-  isHandMode: boolean;
-  /** Function to toggle hand mode */
-  setIsHandMode: Dispatch<SetStateAction<boolean>>;
-  /** Handler for dropping nodes onto canvas */
-  onDrop: (event: DragEvent) => void;
-  /** Handler for clicking blank canvas area */
-  blankClick: () => void;
-  /** Handler for delete keyboard event */
-  deleteEvent: () => boolean | void;
-  /** Handler for copy keyboard event */
-  copyEvent: () => boolean | void;
-  /** Handler for paste keyboard event */
-  parseEvent: () => boolean | void;
-  /** Whether undo is available */
-  canUndo: boolean;
-  /** Whether redo is available */
-  canRedo: boolean;
-  /** Undo last action */
-  undo: () => void;
-  /** Redo last undone action */
-  redo: () => void;
-  /** Function to save workflow configuration */
-  handleSave: (flag?: boolean) => Promise<unknown>;
-  /** Chat variables for workflow */
-  chatVariables: ChatVariable[];
-  /** Function to update chat variables */
-  setChatVariables: Dispatch<SetStateAction<ChatVariable[]>>;
-
-  envVariables: EnvVariable[];
-  setEnvVariables: Dispatch<SetStateAction<EnvVariable[]>>;
-
-  handleAddNotes: () => void;
-  handleSaveFeaturesConfig: (value: FeaturesConfigForm) => void;
-  features?: FeaturesConfigForm;
-  /** Get start node output variable list (user-defined + system variables) */
-  getStartNodeVariables: () => Array<{ name: string; type: string; readonly?: boolean }>;
-  nodeClick: ({ node }: { node: Node }) => void;
-  /** All recorded history operations */
-  historyRecords: HistoryRecord[];
-  /** Clear history records */
-  clearHistoryRecords: () => void;
-  activeMemoryConfig?: Memory | null;
-}
 
 /**
  * Custom hook for managing workflow graph
@@ -243,7 +167,7 @@ export const useWorkflowGraph = ({
     if (nodes.length) {
       const nodeList = nodes.map(node => {
         const { id, type, name, position, config = {} } = node
-        let nodeLibraryConfig: NodeProperties | undefined = [...nodeLibrary, { nodes: [unknownNode, notesConfig] }]
+        let nodeLibraryConfig: NodeProperties = [...nodeLibrary, { nodes: [unknownNode, notesConfig] }]
           .flatMap(category => category.nodes)
           .find(n => n.type === type) as NodeProperties || unknownNode
         nodeLibraryConfig = JSON.parse(JSON.stringify({ ...nodeLibraryConfig, config: nodeLibraryConfig.config || {} }))
@@ -300,6 +224,15 @@ export const useWorkflowGraph = ({
               } catch {
                 nodeLibraryConfig.config[key].defaultValue = config[key]
               }
+            } else if (type === 'agent' && key === 'reference' && config[key] && nodeLibraryConfig.config?.[key]) {
+              const reference = config[key] as Record<string, unknown>
+              nodeLibraryConfig.config[key].defaultValue = {
+                ...reference,
+                release_policy: reference.release_policy ?? 'current',
+              }
+            } else if (type === 'agent' && key === 'variable_mapping' && config[key] && !Array.isArray(config[key]) && nodeLibraryConfig.config?.[key]) {
+              nodeLibraryConfig.config[key].defaultValue = Object.entries(config[key] as Record<string, unknown>)
+                .map(([name, value]) => ({ name, value }))
             } else if (nodeLibraryConfig.config && nodeLibraryConfig.config[key] && typeof config[key] !== 'undefined') {
               nodeLibraryConfig.config[key].defaultValue = config[key]
             }
@@ -1792,14 +1725,14 @@ export const useWorkflowGraph = ({
                 }
               } else if (key === 'memory' && data.config[key] && 'defaultValue' in data.config[key]) {
                 const { messages, ...rest } = data.config[key].defaultValue
-                let memoryMessage = { role: 'USER', content: data.config[key].defaultValue.messages }
+                const memoryMessage = { role: 'USER', content: data.config[key].defaultValue.messages }
                 itemConfig = {
                   ...itemConfig,
-                  messages: data.type === 'llm' && rest.enable ? [...itemConfig.messages, memoryMessage] : itemConfig.messages,
+                  messages: data.type === 'llm' && rest.enable ? [...messages, memoryMessage] : itemConfig.messages,
                   memory: { ...rest },
                 }
               } else if (data.config[key] && 'defaultValue' in data.config[key] && key === 'group_variables') {
-                let group_variables = data.config.group.defaultValue ? {} : data.config[key].defaultValue
+                const group_variables = data.config.group.defaultValue ? {} : data.config[key].defaultValue
                 if (data.config.group.defaultValue) {
                   data.config[key].defaultValue.map((vo: any) => {
                     group_variables[vo.key] = vo.value
@@ -1807,9 +1740,9 @@ export const useWorkflowGraph = ({
                 }
                 itemConfig[key] = group_variables
               } else if (data.config[key] && 'defaultValue' in data.config[key] && key === 'group_type') {
-                let group = data.config.group.defaultValue
-                let group_type = group ? {} : data.config[key].defaultValue
-                let group_variables = data.config.group_variables.defaultValue
+                const group = data.config.group.defaultValue
+                const group_type = group ? {} : data.config[key].defaultValue
+                const group_variables = data.config.group_variables.defaultValue
 
                 if (group) {
                   group_variables.forEach((item: any, index: number) => {
@@ -1860,6 +1793,10 @@ export const useWorkflowGraph = ({
                 itemConfig[key] = data.config[key].defaultValue
               }
             })
+          }
+
+          if (data.type === 'agent') {
+            itemConfig = normalizeAgentConfig(itemConfig)
           }
 
           return {

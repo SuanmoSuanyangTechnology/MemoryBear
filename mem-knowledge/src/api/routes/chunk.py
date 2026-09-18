@@ -77,8 +77,7 @@ async def get_preview_chunks(
         binary = await KnowledgeFileStorage(runtime.storage).download(snapshot.file_key or "")
     except Exception as exc:
         raise KnowledgeError.from_code(
-            "KB_RESOURCE_NOT_FOUND",
-            "File not found in storage",
+            "KB_STORAGE_FILE_NOT_FOUND",
         ) from exc
     parsed = await chunk_service.preview_with_vision(
         runtime,
@@ -236,8 +235,8 @@ async def create_chunks_batch(
 ) -> SuccessEnvelope[list[dict[str, Any]]]:
     if len(batch_data.items) > runtime.settings.max_chunk_batch_size:
         raise KnowledgeError.from_code(
-            "KB_VALIDATION_ERROR",
-            f"Batch size exceeds limit: max {runtime.settings.max_chunk_batch_size}",
+            "KB_CHUNK_BATCH_LIMIT",
+            params={"max_count": runtime.settings.max_chunk_batch_size},
         )
     async with runtime.database.async_session() as db:
         snapshot = await chunk_service.get_chunk_document_snapshot(

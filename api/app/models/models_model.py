@@ -37,11 +37,37 @@ class ModelType(StrEnum):
     CHAT = "chat"
     EMBEDDING = "embedding"
     RERANK = "rerank"
+    ASR = "ASR"
     # TTS = "tts"
     # SPEECH2TEXT = "speech2text"
     IMAGE = "image"
     # AUDIO = "audio"
     VIDEO = "video"
+
+    @classmethod
+    def _missing_(cls, value):
+        if isinstance(value, str) and value.lower() == "asr":
+            return cls.ASR
+        return None
+
+    @classmethod
+    def __get_pydantic_json_schema__(cls, core_schema, handler):
+        schema = handler(core_schema)
+        schema["enum"] = list(dict.fromkeys([*schema.get("enum", []), "asr"]))
+        return schema
+
+
+def model_type_storage_values(model_types) -> list[str]:
+    """Return canonical DB values plus legacy aliases needed during rollout."""
+    values: list[str] = []
+    for model_type in model_types:
+        canonical = ModelType(model_type).value
+        for value in (
+            (canonical, "asr") if canonical == ModelType.ASR.value else (canonical,)
+        ):
+            if value not in values:
+                values.append(value)
+    return values
 
 
 class ModelCapability(StrEnum):
@@ -170,6 +196,10 @@ class ModelApiKey(BaseModel):
     tenant_id = None
     model_config_id = None
     channel_id = None
+
+    # 请求内换渠道计划（spec §11.2）：非映射类属、不落库/不序列化，
+    # 由 ModelApiKeyService 在返回运行时壳时挂载，消费方透传给 RedBearModelConfig
+    failover_plan = None
 
     # 关联关系
     model_configs = relationship(

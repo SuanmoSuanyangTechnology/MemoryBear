@@ -248,6 +248,7 @@ class LangChainAgent:
             tenant_id: Optional[str] = None,  # 用量归属：租户
             model_config_id: Optional[str] = None,  # 用量归属：模型配置
             channel_id: Optional[str] = None,  # 用量归属：渠道
+            failover_plan: Optional[Any] = None,  # 请求内换渠道计划（spec §11.2）
             tool_call_limit: int = 1,  # 每个工具的最大调用次数（防止模型陷入工具循环）
             context_evidence: Optional[List[Any]] = None,
             context_query: str = "",
@@ -363,6 +364,7 @@ class LangChainAgent:
             json_output=json_output,
             extra_params=extra_params
         )
+        model_config.bind_failover_plan(failover_plan)
 
         self.llm = RedBearLLM(model_config, type=ModelType.CHAT)
         self._wrap_tools_with_external_context()

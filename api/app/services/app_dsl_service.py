@@ -16,7 +16,7 @@ from app.models.appshare_model import AppShare
 from app.models.app_release_model import AppRelease
 from app.models.knowledge_model import Knowledge
 from app.models.knowledgeshare_model import KnowledgeShare
-from app.models.models_model import ModelConfig
+from app.models.models_model import ModelConfig, ModelType
 from app.models.tool_model import ToolConfig as ToolConfigModel
 from app.models.skill_model import Skill
 from app.models.workflow_model import WorkflowConfig
@@ -196,7 +196,12 @@ class AppDslService:
         if not kr:
             return kr
         kbs = [{**kb, "_ref": self._kb_ref(kb.get("kb_id"))} for kb in kr.get("knowledge_bases", [])]
-        return {**kr, "knowledge_bases": kbs}
+        enriched = {**kr, "knowledge_bases": kbs}
+        reranker_id = enriched.get("reranker_id")
+        if reranker_id:
+            enriched["reranker_ref"] = self._model_ref(reranker_id)
+            enriched.pop("reranker_id", None)
+        return enriched
 
     def _enrich_tools(self, tools: list) -> list:
         return [{**t, "_ref": self._tool_ref(t.get("tool_id"))} for t in (tools or [])]
@@ -208,15 +213,35 @@ class AppDslService:
         for node in (nodes or []):
             node_type = node.get("type")
             config = dict(node.get("config") or {})
-            
+
             if node_type in (NodeType.LLM.value, NodeType.QUESTION_CLASSIFIER.value, NodeType.PARAMETER_EXTRACTOR.value):
                 model_id = config.get("model_id")
                 if model_id:
                     config["model_ref"] = self._model_ref(model_id)
                     del config["model_id"]
+            elif node_type == NodeType.AGENT.value:
+                model = dict(config.get("model") or {})
+                model_id = model.get("model_id")
+                if model_id:
+                    model["model_ref"] = self._model_ref(model_id)
+                    model.pop("model_id", None)
+                    config["model"] = model
+
+                knowledge_retrieval = config.get("knowledge_retrieval")
+                if knowledge_retrieval:
+                    config["knowledge_retrieval"] = self._enrich_knowledge_retrieval(knowledge_retrieval)
+                elif config.get("reranker_id"):
+                    # 兼容早期前端将知识库配置展开到 Agent 节点根级的布局
+                    config["reranker_ref"] = self._model_ref(config["reranker_id"])
+                    config.pop("reranker_id", None)
+            elif node_type == NodeType.KNOWLEDGE_RETRIEVAL.value:
+                reranker_id = config.get("reranker_id")
+                if reranker_id:
+                    config["reranker_ref"] = self._model_ref(reranker_id)
+                    config.pop("reranker_id", None)
             elif node_type in (NodeType.MEMORY_READ.value, NodeType.MEMORY_WRITE.value):
                 config.pop("config_id", None)
-            
+
             enriched_nodes.append({**node, "config": config})
         return enriched_nodes
 
@@ -372,7 +397,9 @@ class AppDslService:
                 system_prompt=cfg.get("system_prompt"),
                 model_parameters=cfg.get("model_parameters"),
                 default_model_config_id=self._resolve_model(cfg.get("default_model_config_ref"), tenant_id, warnings),
-                knowledge_retrieval=self._resolve_knowledge_retrieval(cfg.get("knowledge_retrieval"), workspace_id, warnings),
+                knowledge_retrieval=self._resolve_knowledge_retrieval(
+                    cfg.get("knowledge_retrieval"), workspace_id, tenant_id, warnings
+                ),
                 memory=self._resolve_memory(cfg.get("memory"), workspace_id, warnings),
                 variables=cfg.get("variables", []),
                 tools=self._resolve_tools(cfg.get("tools", []), tenant_id, warnings),
@@ -494,7 +521,13 @@ class AppDslService:
             counter += 1
         return f"{name}({counter})"
 
-    def _resolve_model(self, ref: Optional[dict], tenant_id: uuid.UUID, warnings: list) -> Optional[uuid.UUID]:
+    def _resolve_model(
+        self,
+        ref: Optional[dict],
+        tenant_id: uuid.UUID,
+        warnings: list,
+        allowed_types: set[str] | None = None,
+    ) -> Optional[str]:
         if not ref:
             return None
         from sqlalchemy import or_
@@ -503,11 +536,14 @@ class AppDslService:
         if model_id:
             try:
                 model_uuid = uuid.UUID(str(model_id))
-                m = self.db.query(ModelConfig).filter(
+                filters = [
                     ModelConfig.id == model_uuid,
                     ModelConfig.is_active.is_(True),
                     tenant_filter,
-                ).first()
+                ]
+                if allowed_types:
+                    filters.append(ModelConfig.type.in_(allowed_types))
+                m = self.db.query(ModelConfig).filter(*filters).first()
                 if m:
                     return str(m.id)
             except (ValueError, AttributeError):
@@ -519,11 +555,21 @@ class AppDslService:
                 ModelConfig.name == model_name,
                 ModelConfig.is_active.is_(True)
             )
+            if allowed_types:
+                q = q.filter(ModelConfig.type.in_(allowed_types))
             if ref.get("provider"):
                 q = q.filter(ModelConfig.provider == ref["provider"])
-            if ref.get("type"):
-                q = q.filter(ModelConfig.type == ref["type"])
-            m = q.first()
+            ref_type = ref.get("type")
+            compatible_llm_types = {ModelType.LLM.value, ModelType.CHAT.value}
+            if ref_type and not (
+                allowed_types == compatible_llm_types and ref_type in compatible_llm_types
+            ):
+                q = q.filter(ModelConfig.type == ref_type)
+
+            # 同名配置存在时优先使用目标租户自有模型，再回退到公共模型。
+            m = q.filter(ModelConfig.tenant_id == tenant_id).first()
+            if not m:
+                m = q.filter(ModelConfig.is_public.is_(True)).first()
             if m:
                 return str(m.id)
             warnings.append(f"模型 '{model_name}' 未匹配，已置空，请导入后手动配置")
@@ -632,6 +678,56 @@ class AppDslService:
             result.append(entry)
         return result
 
+    def _resolve_imported_model(
+        self,
+        model_id,
+        model_ref,
+        tenant_id: uuid.UUID,
+        allowed_types: set[str],
+    ) -> Optional[str]:
+        """解析 DSL 中的模型引用，兼容新 ref 格式和旧版裸 ID。"""
+        ref = model_ref if isinstance(model_ref, dict) else None
+        if ref is None and model_id:
+            if isinstance(model_id, dict):
+                ref = model_id
+            else:
+                try:
+                    uuid.UUID(str(model_id))
+                    ref = {"id": str(model_id)}
+                except (ValueError, AttributeError):
+                    ref = {"name": str(model_id)}
+        return self._resolve_model(ref, tenant_id, [], allowed_types=allowed_types)
+
+    def _resolve_reranker_config(
+        self,
+        config: dict,
+        tenant_id: uuid.UUID,
+        warnings: list,
+        label: str,
+    ) -> dict:
+        """校验知识检索配置中的 Rerank 模型，并移除仅用于 DSL 的引用字段。"""
+        resolved = dict(config or {})
+        reranker_ref = resolved.pop("reranker_ref", None)
+        reranker_id = resolved.get("reranker_id")
+        if not reranker_ref and not reranker_id:
+            return resolved
+
+        resolved_id = self._resolve_imported_model(
+            reranker_id,
+            reranker_ref,
+            tenant_id,
+            {ModelType.RERANK.value},
+        )
+        resolved["reranker_id"] = resolved_id
+        if not resolved_id:
+            model_label = (
+                reranker_ref.get("name") or reranker_ref.get("id")
+                if isinstance(reranker_ref, dict)
+                else reranker_id
+            )
+            warnings.append(f"[{label}] Rerank 模型 '{model_label}' 未匹配或类型不正确，已置空，请导入后手动配置")
+        return resolved
+
     def _resolve_kb_entries(
         self,
         knowledge_bases: list,
@@ -645,24 +741,27 @@ class AppDslService:
             kb_id = kb.get("kb_id")
             if not kb_id:
                 continue
-            kb_ref = {}
-            if isinstance(kb_id, str):
-                try:
-                    uuid.UUID(kb_id)
-                    kb_ref["id"] = kb_id
-                except ValueError:
+            kb_ref = kb.get("_ref")
+            if not isinstance(kb_ref, dict):
+                kb_ref = {}
+                if isinstance(kb_id, str):
+                    try:
+                        uuid.UUID(kb_id)
+                        kb_ref["id"] = kb_id
+                    except ValueError:
+                        kb_ref["name"] = kb_id
+                else:
                     kb_ref["name"] = kb_id
-            else:
-                kb_ref["name"] = kb_id
             resolved_id = self._resolve_kb(kb_ref, workspace_id, [])
             if resolved_id:
-                resolved_kbs.append({**kb, "kb_id": resolved_id})
+                entry = {k: v for k, v in kb.items() if k != "_ref"}
+                resolved_kbs.append({**entry, "kb_id": resolved_id})
             else:
                 warnings.append(f"[{node_label}] 知识库 '{kb_id}' 未匹配，已移除，请导入后手动配置")
         return resolved_kbs
 
     def _resolve_workflow_nodes(self, nodes: list, tenant_id: uuid.UUID, workspace_id: uuid.UUID, warnings: list) -> list:
-        """解析工作流节点中的工具ID和知识库ID，匹配不到则清空配置"""
+        """解析工作流节点中的工具、知识库和模型引用，匹配不到则清空配置。"""
         resolved_nodes = []
         for node in nodes:
             node_type = node.get("type")
@@ -695,21 +794,51 @@ class AppDslService:
                 config["knowledge_bases"] = self._resolve_kb_entries(
                     config.get("knowledge_bases") or [], workspace_id, warnings, node_label
                 )
+                config = self._resolve_reranker_config(config, tenant_id, warnings, node_label)
             elif node_type == NodeType.AGENT.value:
-                # Agent 节点内置知识库检索工具：清理不属于当前工作空间的知识库引用
+                model = dict(config.get("model") or {})
+                model_ref = model.pop("model_ref", None)
+                model_id = model.get("model_id")
+                if model_ref or model_id:
+                    resolved_model_id = self._resolve_imported_model(
+                        model_id,
+                        model_ref,
+                        tenant_id,
+                        {ModelType.LLM.value, ModelType.CHAT.value},
+                    )
+                    model["model_id"] = resolved_model_id
+                    if not resolved_model_id:
+                        model_label = (
+                            model_ref.get("name") or model_ref.get("id")
+                            if isinstance(model_ref, dict)
+                            else model_id
+                        )
+                        warnings.append(
+                            f"[{node_label}] 智能体模型 '{model_label}' 未匹配或类型不正确，"
+                            "已置空，请导入后手动配置"
+                        )
+                    config["model"] = model
+
+                # Agent 节点内置知识库检索工具：清理知识库并校验 Rerank 模型
                 knowledge_retrieval = config.get("knowledge_retrieval")
-                if knowledge_retrieval and knowledge_retrieval.get("knowledge_bases"):
-                    config["knowledge_retrieval"] = {
-                        **knowledge_retrieval,
-                        "knowledge_bases": self._resolve_kb_entries(
-                            knowledge_retrieval["knowledge_bases"], workspace_id, warnings, node_label
-                        ),
-                    }
+                if knowledge_retrieval:
+                    resolved_knowledge_retrieval = dict(knowledge_retrieval)
+                    resolved_knowledge_retrieval["knowledge_bases"] = self._resolve_kb_entries(
+                        resolved_knowledge_retrieval.get("knowledge_bases") or [],
+                        workspace_id,
+                        warnings,
+                        node_label,
+                    )
+                    config["knowledge_retrieval"] = self._resolve_reranker_config(
+                        resolved_knowledge_retrieval, tenant_id, warnings, node_label
+                    )
+
                 # 兼容早期前端将知识库配置展开到节点根级的布局
                 if config.get("knowledge_bases"):
                     config["knowledge_bases"] = self._resolve_kb_entries(
                         config["knowledge_bases"], workspace_id, warnings, node_label
                     )
+                config = self._resolve_reranker_config(config, tenant_id, warnings, node_label)
             elif node_type in (NodeType.LLM.value, NodeType.QUESTION_CLASSIFIER.value, NodeType.PARAMETER_EXTRACTOR.value):
                 model_ref = config.get("model_ref") or config.get("model_id")
                 if model_ref:
@@ -748,7 +877,13 @@ class AppDslService:
             resolved_nodes.append({**node, "config": config})
         return resolved_nodes
 
-    def _resolve_knowledge_retrieval(self, kr: Optional[dict], workspace_id: uuid.UUID, warnings: list) -> Optional[dict]:
+    def _resolve_knowledge_retrieval(
+        self,
+        kr: Optional[dict],
+        workspace_id: uuid.UUID,
+        tenant_id: uuid.UUID,
+        warnings: list,
+    ) -> Optional[dict]:
         if not kr:
             return kr
         resolved_kbs = []
@@ -760,7 +895,10 @@ class AppDslService:
                 continue
             entry["kb_id"] = resolved_id
             resolved_kbs.append(entry)
-        return {k: v for k, v in kr.items() if k != "knowledge_bases"} | {"knowledge_bases": resolved_kbs}
+        resolved = {k: v for k, v in kr.items() if k != "knowledge_bases"} | {
+            "knowledge_bases": resolved_kbs
+        }
+        return self._resolve_reranker_config(resolved, tenant_id, warnings, "Agent 应用知识库配置")
 
     def _resolve_memory(self, memory: Optional[dict], workspace_id: uuid.UUID, warnings: list) -> Optional[dict]:
         if not memory:

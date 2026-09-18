@@ -875,6 +875,23 @@ class AsyncElasticSearchRetrieval:
             unit_scoring=True,
         )
 
+    async def score_chunk_units_by_vector(
+        self,
+        query_vector: Sequence[float],
+        chunks: Sequence[DocumentChunk],
+        options: RetrievalSearchOptions,
+    ) -> dict[str, float]:
+        """Score graph source chunks by their own units, never parent siblings."""
+        chunk_ids = {
+            str(metadata.get("_chunk_id") or metadata.get("doc_id"))
+            for chunk in chunks
+            if (metadata := chunk.metadata or {}).get("_chunk_id") or metadata.get("doc_id")
+        }
+        return await self._score_sources_by_vector(
+            query_vector, {chunk_id: {chunk_id} for chunk_id in chunk_ids}, options,
+            unit_scoring=True, collapse_chunk_units=True,
+        )
+
     async def _score_sources_by_vector(
         self,
         query_vector: Sequence[float],
@@ -882,12 +899,16 @@ class AsyncElasticSearchRetrieval:
         options: RetrievalSearchOptions,
         *,
         unit_scoring: bool = False,
+        collapse_chunk_units: bool = False,
     ) -> dict[str, float]:
         ids = sorted({source for sources in source_ids.values() for source in sources})
         scores = dict.fromkeys(source_ids, 0.0)
         if not ids or options.document_ids_include == ():
             return scores
-        identity_field = Field.UNIT_ID.value if unit_scoring else Field.DOC_ID.value
+        identity_field = (
+            Field.CHUNK_ID.value if collapse_chunk_units
+            else Field.UNIT_ID.value if unit_scoring else Field.DOC_ID.value
+        )
         filters = (
             build_unit_filter_clauses(options.file_names_filter, options.document_ids_include)
             if unit_scoring
@@ -902,13 +923,14 @@ class AsyncElasticSearchRetrieval:
             query=build_vector_script_query(query_vector, filters),
             source_includes=[identity_field],
             allow_partial_search_results=False,
+            **({"collapse": {"field": identity_field}} if collapse_chunk_units else {}),
         )
         self._raise_on_failed_response(response, "candidate vector scoring")
         by_id: dict[str, float] = {}
         for hit in (response.get("hits") or {}).get("hits", []):
             source = hit.get("_source") or {}
             doc_id = str(
-                source.get(Field.UNIT_ID.value) if unit_scoring
+                source.get(identity_field) if unit_scoring
                 else (source.get("metadata") or {}).get("doc_id")
             )
             score = float(hit["_score"]) / 2

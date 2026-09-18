@@ -48,12 +48,6 @@ export const getKnowledgeBaseDocumentParseTypeList = async () => {
   const response = await request.get(`/knowledges/parsertype`);
   return response as any[];
 };
-
-//获取模型类型
-export const getModelTypeList = async () => {
-    const response = await request.get(`/models/type`);
-    return response as any[];
-};
 // 获取模型列表
 export const getModelList = async (pageInfo: PageRequest, types?: string[]) => {
   const response = await request.get(`/models`, { ...pageInfo, type: types?.join(','), is_active: true });
