@@ -139,13 +139,13 @@ export const configList: ConfigVo[] = [
             meaning: 'intelligentSemanticPruningFunctionDesc',
           },
           // Intelligent semantic pruning scene
-          // {
-          //   label: 'intelligentSemanticPruningScene',
-          //   variableName: 'pruning_scene',
-          //   control: 'text',
-          //   type: 'enum',
-          //   meaning: 'intelligentSemanticPruningSceneDesc',
-          // },
+          {
+            label: 'intelligentSemanticPruningScene',
+            variableName: 'pruning_scene',
+            control: 'text',
+            type: 'enum',
+            meaning: 'intelligentSemanticPruningSceneDesc',
+          },
           // Intelligent semantic pruning threshold
           {
             label: 'intelligentSemanticPruningThreshold',
