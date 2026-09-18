@@ -48,6 +48,10 @@ const BasicField: FC<BasicFieldProps> = ({ configKey: key, config }) => {
   const handleChangeVariableList = (_value: string, option: any, changeKey: string) => {
     if (selectedNode?.data?.type === 'iteration' && changeKey === 'output') {
       form.setFieldValue('output_type', option?.dataType)
+    } else if (selectedNode?.data?.type === 'knowledge-retrieval' && changeKey === 'query') {
+      form.setFieldValue('image_query', undefined)
+    } else if (selectedNode?.data?.type === 'knowledge-retrieval' && changeKey === 'image_query') {
+      form.setFieldValue('query', undefined)
     }
   }
 

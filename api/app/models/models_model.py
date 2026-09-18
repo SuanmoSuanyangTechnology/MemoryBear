@@ -37,12 +37,37 @@ class ModelType(StrEnum):
     CHAT = "chat"
     EMBEDDING = "embedding"
     RERANK = "rerank"
-    ASR = "asr"
+    ASR = "ASR"
     # TTS = "tts"
     # SPEECH2TEXT = "speech2text"
     IMAGE = "image"
     # AUDIO = "audio"
     VIDEO = "video"
+
+    @classmethod
+    def _missing_(cls, value):
+        if isinstance(value, str) and value.lower() == "asr":
+            return cls.ASR
+        return None
+
+    @classmethod
+    def __get_pydantic_json_schema__(cls, core_schema, handler):
+        schema = handler(core_schema)
+        schema["enum"] = list(dict.fromkeys([*schema.get("enum", []), "asr"]))
+        return schema
+
+
+def model_type_storage_values(model_types) -> list[str]:
+    """Return canonical DB values plus legacy aliases needed during rollout."""
+    values: list[str] = []
+    for model_type in model_types:
+        canonical = ModelType(model_type).value
+        for value in (
+            (canonical, "asr") if canonical == ModelType.ASR.value else (canonical,)
+        ):
+            if value not in values:
+                values.append(value)
+    return values
 
 
 class ModelCapability(StrEnum):

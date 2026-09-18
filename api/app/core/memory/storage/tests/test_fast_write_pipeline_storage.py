@@ -53,6 +53,22 @@ def _pipeline(storage_service) -> _FastPipelineStub:
     return _FastPipelineStub(storage_service)
 
 
+async def test_fast_write_embeds_dialogue_as_document() -> None:
+    embedder = Mock()
+    embedder.aembed_documents = AsyncMock(return_value=[[0.1, 0.2]])
+    embedder.aembed_query = AsyncMock(
+        side_effect=AssertionError("dialogue content must not use query embedding")
+    )
+    pipeline = FastWritePipeline(Mock(), "user-1")
+    pipeline._embedder = embedder
+
+    result = await pipeline._embed("hello")
+
+    assert result == [0.1, 0.2]
+    embedder.aembed_documents.assert_awaited_once_with(["hello"])
+    embedder.aembed_query.assert_not_awaited()
+
+
 async def test_fast_write_persists_dialogue_via_save_memory_graph() -> None:
     storage = Mock()
     storage.save_memory_graph = AsyncMock(return_value=GraphWriteResult(

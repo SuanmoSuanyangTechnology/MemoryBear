@@ -169,6 +169,7 @@ export const workflowPart1 = {
         },
         'knowledge-retrieval': {
           query: 'Query Variable',
+          image_query: 'Image Variable',
           knowledge_retrieval: 'Knowledge Base',
           recallConfig: 'Recall Test',
           addKnowledge: 'Add Knowledge Base',

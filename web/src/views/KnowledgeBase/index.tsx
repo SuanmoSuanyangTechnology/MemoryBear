@@ -15,9 +15,10 @@ import CreateModal from './components/CreateModal'
 import RbCard from '@/components/RbCard/Card'
 import SearchInput from '@/components/SearchInput'
 import Empty from '@/components/Empty'
-import { getKnowledgeBaseList, getModelList, getModelTypeList, deleteKnowledgeBase, getKnowledgeBaseTypeList } from '@/api/knowledgeBase'
+import { getKnowledgeBaseList, getModelList, deleteKnowledgeBase, getKnowledgeBaseTypeList } from '@/api/knowledgeBase'
 import copy from 'copy-to-clipboard'
 import CopyModal, { type CopyModalRef } from './components/CopyModal';
+import { baseModelFields } from './constants';
 
 import InfiniteScroll from 'react-infinite-scroll-component';
 
@@ -41,7 +42,6 @@ const KnowledgeBaseManagement: FC = () => {
     orderby:'created_at',
     desc:true,
   })
-  const [modelTypes, setModelTypes] = useState<string[]>([]);
   const [modelMenus, setModelMenus] = useState<Record<string, ModelMenuInfo>>({});
   const [knowledgeBaseTypes, setKnowledgeBaseTypes] = useState<string[]>([]);
   const modelListCache = useRef<Record<string, string>>({});
@@ -181,24 +181,6 @@ const KnowledgeBaseManagement: FC = () => {
       },
     }));
   }, [knowledgeBaseTypes, t, handleCreate]);
-  const typeToFieldKey = (type: string) => {
-    const normalized = (type || '').toLowerCase();
-    switch (normalized) {
-      case 'embedding':
-        return 'embedding_id';
-      case 'llm':
-        return 'llm_id';
-      case 'image2text':
-        return 'image2text_id';
-      case 'rerank':
-      case 'reranker':
-        return 'reranker_id';
-      case 'chat':
-        return 'chat_id';
-      default:
-        return `${normalized}_id`;
-    }
-  };
   const formatData = (data: KnowledgeBaseListItem) => {
     const keys: (keyof KnowledgeBaseListItem)[] = ['permission_id','type']
     return keys.map(key => ({
@@ -209,15 +191,6 @@ const KnowledgeBaseManagement: FC = () => {
         : String(data[key] || '-'),
     }))
   }
-  const fetchModelTypes = async () => {
-    try {
-      const response = await getModelTypeList();
-      setModelTypes(Array.isArray(response) ? [...response.filter(type => type !== 'chat'),'image2text'] : []);
-    } catch (error) {
-      console.error('Failed to fetch model types:', error);
-      setModelTypes([]);
-    }
-  };
   const fetchModelList = async () => { 
     try {
       const response = await getModelList({ page: 1, pagesize: 100 }, ['llm', 'embedding', 'rerank', 'chat']);
@@ -252,26 +225,26 @@ const KnowledgeBaseManagement: FC = () => {
   const buildModelMenuForItem = (item: KnowledgeBaseListItem): ModelMenuInfo | null => {
     const entries: { menuItem: NonNullable<MenuProps['items']>[number]; summary: string }[] = [];
     const record = item as unknown as Record<string, unknown>;
-    for (const type of modelTypes) {
-      const curType = type === 'rerank' ? 'reranker' : type;
-      const fieldKey = typeToFieldKey(curType);
-      const modelId = record[fieldKey] as string | undefined;
-      if (!modelId) continue;
-      const modelName = getModelNameById(modelId);
-      if (!modelName) continue;
-      const typeLabel = t(`knowledgeBase.createForm.${fieldKey}`) || t(`knowledgeBase.${fieldKey}`) || type;
-      entries.push({
-        menuItem: {
-          key: `${fieldKey}_${modelId}`,
-          label: (
-            <span className="rb:text-gray-500 rb:text-[12px]">
-              {typeLabel}: {modelName}
-            </span>
-          ),
-        },
-        summary: `${typeLabel}: ${modelName}`,
-      });
-    }
+    baseModelFields.map(item => {
+      const fieldKey = `${item.name}_id`
+      const modelId = record[fieldKey] as string
+      const modelName = modelId ? getModelNameById(modelId) : undefined;
+      if (modelName) {
+        const typeLabel = t(`knowledgeBase.createForm.${fieldKey}`) || t(`knowledgeBase.${fieldKey}`) || item.type;
+
+        entries.push({
+          menuItem: {
+            key: `${fieldKey}_${modelId}`,
+            label: (
+              <span className="rb:text-gray-500 rb:text-[12px]">
+                {typeLabel}: {modelName}
+              </span>
+            ),
+          },
+          summary: `${typeLabel}: ${modelName}`,
+        });
+      }
+    })
     if (!entries.length) {
       return null;
     }
@@ -304,7 +277,6 @@ const KnowledgeBaseManagement: FC = () => {
   };
 
   const fetchData = async (pageNum: number = 1, isLoadMore: boolean = false) => {
-    if (!modelTypes.length) return;
     if (loading) return;
     
     console.log('fetchData called:', {
@@ -533,15 +505,12 @@ const KnowledgeBaseManagement: FC = () => {
   }, [location.state, navigate]);
 
   useEffect(() => {
-    fetchModelTypes();
     fetchKnowledgeBaseTypes();
     fetchModelList();
   }, [])
   useEffect(() => {
-    if (modelTypes.length) {
-      fetchData(1, false);
-    }
-  }, [modelTypes, query.parent_id, query.keywords, query.orderby, query.desc])
+    fetchData(1, false);
+  }, [query.parent_id, query.keywords, query.orderby, query.desc])
   const handleCopy = (value: string) => {
     copy(value)
     messageApi.success(t('common.copySuccess'))

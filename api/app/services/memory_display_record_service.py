@@ -10,11 +10,18 @@
 
 import logging
 import uuid
+from datetime import datetime
 from typing import List
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.utils.datetime_utils import parse_timestamp_to_utc_naive, to_timestamp_ms, utcnow_naive
+from app.core.utils.datetime_utils import (
+    as_utc_aware,
+    convert_neo4j_datetime_to_python,
+    parse_timestamp_to_utc_naive,
+    to_timestamp_ms,
+    utcnow_naive,
+)
 from app.repositories.end_user_repository import EndUserRepository
 from app.repositories.memory_display_record_repository import (
     MemoryDisplayRecordRepository,
@@ -24,6 +31,19 @@ logger = logging.getLogger(__name__)
 
 # 最大重试次数（当前 Service 调用内）
 _MAX_RETRIES = 2
+
+def _as_uuid(value: uuid.UUID | str | None) -> uuid.UUID | None:
+    if value is None:
+        return None
+    if isinstance(value, uuid.UUID):
+        return value
+    return uuid.UUID(str(value))
+
+
+def _as_naive_utc(value) -> datetime | None:
+    parsed = convert_neo4j_datetime_to_python(value)
+    aware = as_utc_aware(parsed)
+    return aware.replace(tzinfo=None) if aware is not None else None
 
 
 class MemoryDisplayRecordService:
@@ -81,47 +101,160 @@ class MemoryDisplayRecordService:
         return items, total
 
     @staticmethod
-    async def save_written(
-        summaries: list,
+    async def save_fast_dialogue(
+        *,
         end_user_id: str,
-        workspace_id: uuid.UUID | None = None,
-    ) -> None:
-        """将成功写入 Neo4j 的 MemorySummary 同步保存为 PG 展示记录。
-
-        在 PG 写入前生成一个 operation_id，同批所有 Summary 共用该值。
-        校验 memory_type 非空后批量写入。
-
-        Args:
-            summaries: 成功写入 Neo4j 的 MemorySummaryNode 列表
-            end_user_id: 终端用户 ID
-            workspace_id: 终端用户所属工作空间 ID（UUID），冗余入库支撑空间级查询。
-                缺省时置 NULL，不影响主写入流程。
-        """
-        if not summaries:
-            return
+        dialogue_id: str,
+        content: str,
+        occurred_at: datetime,
+        workspace_id: uuid.UUID | str | None = None,
+    ) -> bool:
+        """保存已由 Neo4j 回查确认的 Fast Dialogue 活动。"""
+        normalized_content = str(content or "")
+        if not dialogue_id or not normalized_content.strip():
+            logger.warning(
+                "[MemoryDisplayRecord] 非法 Fast Dialogue 快照，跳过: "
+                "end_user_id=%s, dialogue_id=%s",
+                end_user_id,
+                dialogue_id,
+            )
+            return False
 
         try:
-            end_user_uuid = uuid.UUID(end_user_id)
+            end_user_uuid = _as_uuid(end_user_id)
+            workspace_uuid = _as_uuid(workspace_id)
         except (ValueError, AttributeError, TypeError):
             logger.warning(
-                f"[MemoryDisplayRecord] 无法将 end_user_id 转为 UUID: {end_user_id}"
+                "[MemoryDisplayRecord] Fast Dialogue 用户或工作空间 UUID 非法: "
+                "end_user_id=%s, workspace_id=%s",
+                end_user_id,
+                workspace_id,
             )
-            return
+            return False
+
+        normalized_occurred_at = _as_naive_utc(occurred_at)
+        if end_user_uuid is None or normalized_occurred_at is None:
+            return False
 
         from app.db import get_db_context
         from app.models.memory_display_record_model import MemoryDisplayRecord
 
-        # 过滤 memory_type 为空的 summary
+        operation_id = uuid.uuid4()
+        record = MemoryDisplayRecord(
+            id=uuid.uuid4(),
+            end_user_id=end_user_uuid,
+            workspace_id=workspace_uuid,
+            operation_id=operation_id,
+            operation="WRITE",
+            memory_id=dialogue_id,
+            memory_type="dialogue",
+            name="用户对话原文",
+            content=normalized_content,
+            score=None,
+            rank=None,
+            search_mode=None,
+            query=None,
+            occurred_at=normalized_occurred_at,
+        )
+
+        last_error = None
+        for attempt in range(_MAX_RETRIES):
+            try:
+                with get_db_context() as db:
+                    repo = MemoryDisplayRecordRepository(db)
+                    inserted = repo.bulk_insert_written([record])
+                    db.commit()
+                logger.info(
+                    "[MemoryDisplayRecord] Fast Dialogue 活动已确认: "
+                    "end_user_id=%s, dialogue_id=%s, operation_id=%s, inserted=%s",
+                    end_user_id,
+                    dialogue_id,
+                    operation_id,
+                    inserted,
+                )
+                return True
+            except Exception as exc:
+                last_error = exc
+                logger.warning(
+                    "[MemoryDisplayRecord] Fast Dialogue PG 写入失败 "
+                    "(attempt %s/%s): %s",
+                    attempt + 1,
+                    _MAX_RETRIES,
+                    exc,
+                    exc_info=True,
+                )
+
+        logger.error(
+            "[MemoryDisplayRecord] Fast Dialogue PG 写入重试耗尽: "
+            "end_user_id=%s, dialogue_id=%s, error=%s",
+            end_user_id,
+            dialogue_id,
+            last_error,
+        )
+        return False
+
+    @staticmethod
+    async def replace_dialogue_with_summaries(
+        summaries: list,
+        end_user_id: str,
+        workspace_id: uuid.UUID | None = None,
+    ) -> bool:
+        """在同一事务中用已落图的 Summary 替换 Fast Dialogue 活动。"""
+        if not summaries:
+            return False
+
+        try:
+            end_user_uuid = _as_uuid(end_user_id)
+            workspace_uuid = _as_uuid(workspace_id)
+        except (ValueError, AttributeError, TypeError):
+            logger.warning(
+                f"[MemoryDisplayRecord] 无法将 end_user_id 转为 UUID: {end_user_id}"
+            )
+            return False
+
+        from app.db import get_db_context
+        from app.models.memory_display_record_model import MemoryDisplayRecord
+
         valid_summaries = [
             s for s in summaries
-            if s.memory_type and str(s.memory_type).strip()
+            if getattr(s, "memory_type", None)
+            and str(s.memory_type).strip()
         ]
 
         if not valid_summaries:
             logger.debug(
                 "[MemoryDisplayRecord] 所有 Summary 的 memory_type 为空，跳过 PG 写入"
             )
-            return
+            return False
+
+        dialog_ids = {
+            str(getattr(summary, "dialog_id", "") or "").strip()
+            for summary in valid_summaries
+        }
+        if len(dialog_ids) != 1:
+            logger.error(
+                "[MemoryDisplayRecord] Summary 批次 dialog_id 不一致，保留 Dialogue: %s",
+                sorted(dialog_ids),
+            )
+            return False
+        dialogue_id = next(iter(dialog_ids))
+        if not dialogue_id:
+            logger.error(
+                "[MemoryDisplayRecord] Summary dialog_id 为空，保留 Dialogue",
+            )
+            return False
+
+        if any(
+            str(getattr(summary, "end_user_id", "")) != str(end_user_id)
+            for summary in valid_summaries
+        ):
+            logger.error(
+                "[MemoryDisplayRecord] Summary 批次包含其它用户，保留 Dialogue: "
+                "end_user_id=%s, dialogue_id=%s",
+                end_user_id,
+                dialogue_id,
+            )
+            return False
 
         # 批内按 memory_id 去重，保留首次出现（dict 保序）。
         # 唯一约束 uq_memory_display_records_user_op_memory 配合
@@ -132,46 +265,60 @@ class MemoryDisplayRecordService:
             dedup_map.setdefault(s.id, s)
         deduped = list(dedup_map.values())
 
-        # 生成 operation_id（同批共用）
         operation_id = uuid.uuid4()
-        now = utcnow_naive()
-
-        # 组装 PG 记录
-        records = []
-        for s in deduped:
-            # 标题兜底
-            name = s.name if s.name and str(s.name).strip() else f"记忆_{s.id[:8]}"
-
-            record = MemoryDisplayRecord(
-                id=uuid.uuid4(),
-                end_user_id=end_user_uuid,
-                workspace_id=workspace_id,
-                operation_id=operation_id,
-                operation="WRITE",
-                memory_id=s.id,
-                memory_type=str(s.memory_type).strip(),
-                name=str(name).strip(),
-                content=s.content or "",
-                score=None,
-                rank=None,
-                search_mode=None,
-                occurred_at=now,
-            )
-            records.append(record)
-
-        # 有限重试写入 PG
         last_error = None
         for attempt in range(_MAX_RETRIES):
             try:
                 with get_db_context() as db:
                     repo = MemoryDisplayRecordRepository(db)
-                    repo.bulk_insert_written(records)
+                    repo.delete_fast_dialogues(
+                        end_user_id=end_user_uuid,
+                        dialogue_id=dialogue_id,
+                    )
+                    occurred_at = (
+                        _as_naive_utc(getattr(deduped[0], "created_at", None))
+                        or utcnow_naive()
+                    )
+
+                    records = []
+                    for summary in deduped:
+                        name = (
+                            summary.name
+                            if summary.name and str(summary.name).strip()
+                            else f"记忆_{summary.id[:8]}"
+                        )
+                        records.append(
+                            MemoryDisplayRecord(
+                                id=uuid.uuid4(),
+                                end_user_id=end_user_uuid,
+                                workspace_id=workspace_uuid,
+                                operation_id=operation_id,
+                                operation="WRITE",
+                                memory_id=summary.id,
+                                memory_type=str(summary.memory_type).strip(),
+                                name=str(name).strip(),
+                                content=summary.content or "",
+                                score=None,
+                                rank=None,
+                                search_mode=None,
+                                query=None,
+                                occurred_at=occurred_at,
+                            )
+                        )
+
+                    inserted = repo.bulk_insert_written(records)
+                    db.commit()
                 logger.info(
-                    f"[MemoryDisplayRecord] PG 写入成功: "
-                    f"end_user_id={end_user_id}, operation_id={operation_id}, "
-                    f"count={len(records)}"
+                    "[MemoryDisplayRecord] Dialogue 已替换为 Summary: "
+                    "end_user_id=%s, dialogue_id=%s, operation_id=%s, "
+                    "count=%s, inserted=%s",
+                    end_user_id,
+                    dialogue_id,
+                    operation_id,
+                    len(records),
+                    inserted,
                 )
-                return
+                return True
             except Exception as e:
                 last_error = e
                 logger.warning(
@@ -179,9 +326,25 @@ class MemoryDisplayRecordService:
                     exc_info=True,
                 )
 
-        # 所有重试耗尽，只记录错误，不抛出异常
         logger.error(
-            f"[MemoryDisplayRecord] PG 写入在 {_MAX_RETRIES} 次尝试后仍失败: "
-            f"end_user_id={end_user_id}, operation_id={operation_id}, "
-            f"error={last_error}"
+            "[MemoryDisplayRecord] Dialogue 替换重试耗尽，原活动保持不变: "
+            "end_user_id=%s, dialogue_id=%s, operation_id=%s, error=%s",
+            end_user_id,
+            dialogue_id,
+            operation_id,
+            last_error,
+        )
+        return False
+
+    @staticmethod
+    async def save_written(
+        summaries: list,
+        end_user_id: str,
+        workspace_id: uuid.UUID | None = None,
+    ) -> bool:
+        """兼容旧调用名；实际执行 Dialogue → Summary 事务替换。"""
+        return await MemoryDisplayRecordService.replace_dialogue_with_summaries(
+            summaries=summaries,
+            end_user_id=end_user_id,
+            workspace_id=workspace_id,
         )

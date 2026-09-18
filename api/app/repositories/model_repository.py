@@ -8,7 +8,13 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.core.utils.datetime_utils import utcnow_naive
 from app.core.logging_config import get_db_logger
-from app.models.models_model import ModelConfig, ModelApiKey, ModelType, ModelBase
+from app.models.models_model import (
+    ModelApiKey,
+    ModelBase,
+    ModelConfig,
+    ModelType,
+    model_type_storage_values,
+)
 from app.schemas.model_schema import (
     ModelConfigUpdate,
     ModelConfigQuery, ModelConfigQueryNew
@@ -227,7 +233,9 @@ class ModelConfigRepository:
                         type_values.append(ModelType.CHAT)
                     if ModelType.LLM not in type_values:
                         type_values.append(ModelType.LLM)
-                filters.append(ModelConfig.type.in_(type_values))
+                filters.append(
+                    ModelConfig.type.in_(model_type_storage_values(type_values))
+                )
 
             if query.capability:
                 filters.append(ModelConfig.capability.contains(query.capability))
@@ -301,7 +309,9 @@ class ModelConfigRepository:
                 #         type_values.append(ModelType.CHAT)
                 #     if ModelType.LLM not in type_values:
                 #         type_values.append(ModelType.LLM)
-                filters.append(ModelConfig.type.in_(type_values))
+                filters.append(
+                    ModelConfig.type.in_(model_type_storage_values(type_values))
+                )
             
             if query.is_active is not None:
                 filters.append(ModelConfig.is_active == query.is_active)
@@ -358,7 +368,7 @@ class ModelConfigRepository:
         try:
             query = db.query(ModelConfig).options(
                 joinedload(ModelConfig.model_base),
-            ).filter(ModelConfig.type.in_([t.value for t in model_types]))
+            ).filter(ModelConfig.type.in_(model_type_storage_values(model_types)))
 
             if tenant_id:
                 query = query.filter(
@@ -567,7 +577,9 @@ class ModelBaseRepository:
         
         filters = []
         if query.type:
-            filters.append(ModelBase.type == query.type)
+            filters.append(
+                ModelBase.type.in_(model_type_storage_values([query.type]))
+            )
         if query.provider:
             filters.append(ModelBase.provider == query.provider)
         if query.is_official is not None:

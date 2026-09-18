@@ -75,7 +75,7 @@ export const workflowPart2 = {
         'llm.messages': 'Messages',
         'llm.vision_input': 'Vision Variable',
         'end.output': 'Output',
-        'knowledge-retrieval.query': 'Query Variable',
+        'knowledge-retrieval.query': 'At least one of the query and image variables must have a value',
         'knowledge-retrieval.knowledge_retrieval': 'Knowledge bases',
         'parameter-extractor.model_id': 'Model',
         'parameter-extractor.text': 'Input variable',

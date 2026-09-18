@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, field_serializer, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
 from typing import Optional, List, Dict, Any
 import datetime
 import uuid
@@ -276,6 +276,13 @@ class ModelBase(BaseModel):
     add_count: int
     capability: List[str] = []
     is_omni: bool = False
+
+    @field_validator("type", mode="before")
+    @classmethod
+    def canonicalize_asr_type(cls, value):
+        if isinstance(value, str) and value.lower() == "asr":
+            return ModelType.ASR.value
+        return value
 
 
 class ModelBaseQuery(BaseModel):
