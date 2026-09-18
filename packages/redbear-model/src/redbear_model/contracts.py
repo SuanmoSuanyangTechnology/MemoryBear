@@ -34,11 +34,17 @@ class ModelType(StrEnum):
     IMAGE = "image"
     VIDEO = "video"
     ASR = "ASR"
+    # deprecated（2a 别名窗口，2e 删除）：原独立值 "chat"，仅存量数据仍持该字符串
+    CHAT = "llm"
 
     @classmethod
-    def _missing_(cls, value):
-        if isinstance(value, str) and value.lower() == "asr":
-            return cls.ASR
+    def _missing_(cls, value: object) -> ModelType | None:
+        """存量字符串读侧归一：`"chat"` → LLM（DB/YAML/事件兼容层）；`"asr"` → ASR（大小写容忍）。"""
+        if isinstance(value, str):
+            if value.lower() == "chat":
+                return cls.LLM
+            if value.lower() == "asr":
+                return cls.ASR
         return None
 
 
@@ -165,15 +171,15 @@ class ModelProfile(ContractModel):
     model_id: UUID
     tenant_id: UUID | None                     # model_bases 无租户（广场全局目录），base 侧为 None
     type: ModelType
-    input_modalities: tuple[Modality, ...]     # 显式非空，恒含 text
+    input_modalities: tuple[Modality, ...]     # 显式非空（text 非必需；存量迁移兜底以 text 起步）
     output_modalities: tuple[Modality, ...]    # 显式非空；生成族 (image,)/(video,) 不含 text
     features: tuple[ModelFeature, ...] = ()
     members: tuple[CompositeMember, ...] = ()  # 仅 provider="composite" 时非空
 
     @model_validator(mode="after")
     def validate_modalities(self) -> ModelProfile:
-        if not self.input_modalities or Modality.TEXT not in self.input_modalities:
-            raise ValueError("input_modalities must be non-empty and contain text")
+        if not self.input_modalities:
+            raise ValueError("input_modalities must not be empty")
         if not self.output_modalities:
             raise ValueError("output_modalities must not be empty")
         return self
