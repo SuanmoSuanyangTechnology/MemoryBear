@@ -6,7 +6,8 @@ import SliderInput from '@/components/SliderInput';
 import { stringRegExp } from '@/utils/validator';
 import type { KnowledgeBaseFormData } from '@/views/KnowledgeBase/types';
 import type { Model } from '@/views/ModelManagement/types';
-import { baseModelFields } from '../../constants'
+import { baseModelFields, multimodalModelFields } from '../../constants'
+import RbAlert from '@/components/RbAlert';
 
 const { TextArea } = Input;
 
@@ -165,27 +166,62 @@ const CreateModalBasicConfig = ({
           )}
         </>
       )}
+      {currentType !== 'Folder' && <>
+        {baseModelFields.map((item) => {
+          const fieldKey = `${item.name}_id` as const;
 
-      {currentType !== 'Folder' && baseModelFields.map((item) => {
-        const fieldKey = `${item.name}_id`;
+          return (
+            <Form.Item
+              key={item.name}
+              name={fieldKey}
+              label={`${t(`knowledgeBase.createForm.${fieldKey}`)} model`}
+              rules={[{ required: item.required, message: t('knowledgeBase.createForm.modelRequired') }]}
+            >
+              <ModelSelect
+                placeholder={t(`knowledgeBase.createForm.${fieldKey}`)}
+                isAutoFetch={false}
+                initialData={customModels[item.type]}
+                allowClear={true}
+                onChange={(value) => {
+                  if (value === undefined || value === null) {
+                    form.setFieldValue(fieldKey, null)
+                  }
+                  onModelChange(value, item.type)
+                }}
+              />
+            </Form.Item>
+          );
+        })}
 
-        return (
-          <Form.Item
-            key={item.name}
-            name={fieldKey as keyof KnowledgeBaseFormData}
-            label={`${t(`knowledgeBase.createForm.${fieldKey}`)} model`}
-            rules={[{ required: item.required, message: t('knowledgeBase.createForm.modelRequired') }]}
-          >
-            <ModelSelect
-              placeholder={t(`knowledgeBase.createForm.${fieldKey}`)}
-              isAutoFetch={false}
-              initialData={customModels[item.type]}
-              allowClear={true}
-              onChange={(value) => onModelChange(value, item.type)}
-            />
-          </Form.Item>
-        );
-      })}
+        <RbAlert className="rb:mb-3!">
+          {t('knowledgeBase.createForm.multimodalModel')}
+        </RbAlert>
+        {multimodalModelFields.map((item) => {
+          const fieldKey = `${item.name}_id` as const;
+
+          return (
+            <Form.Item
+              key={item.name}
+              name={fieldKey}
+              label={`${t(`knowledgeBase.createForm.${fieldKey}`)} model`}
+              rules={[{ required: item.required, message: t('knowledgeBase.createForm.modelRequired') }]}
+            >
+              <ModelSelect
+                placeholder={t(`knowledgeBase.createForm.${fieldKey}`)}
+                isAutoFetch={false}
+                initialData={customModels[item.type]}
+                allowClear={true}
+                onChange={(value) => {
+                  if (value === undefined || value === null) {
+                    form.setFieldValue(fieldKey, null)
+                  }
+                  onModelChange(value, item.type)
+                }}
+              />
+            </Form.Item>
+          );
+        })}
+      </>}
     </>
   );
 };

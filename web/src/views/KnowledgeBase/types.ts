@@ -5,12 +5,12 @@ export interface KnowledgeBaseFormData {
   name?: string; // 知识库名称
   description?: string; // 描述
   avatar?: string; // 头像
-  embedding_id?: string; // 嵌入模型ID
-  llm_id?: string; // LLM模型ID
-  image2text_id?: string; // 图片转文本模型ID
-  reranker_id?: string; // 重排模型ID
-  audio2text_id?: string; // 音频模型ID
-  video2text_id?: string; // 视频模型ID
+  embedding_id?: string | null; // 嵌入模型ID
+  llm_id?: string | null; // LLM模型ID
+  image2text_id?: string | null; // 图片转文本模型ID
+  reranker_id?: string | null; // 重排模型ID
+  audio2text_id?: string | null; // 音频模型ID
+  video2text_id?: string | null; // 视频模型ID
   chat_id?: string; // 聊天模型ID
   permission_id?: string; // 权限ID
   parent_id?: string; // 父ID
@@ -437,10 +437,6 @@ export interface SpaceItem {
   is_active: boolean; // 是否启用
 }
 
-// 分享空item
-export interface ShareSpaceItem{
-
-}
 // 分享  to 空间
 export interface ShareSpaceModalRef{
   handleOpen: (kb_id?: string,knowledgeBase?: KnowledgeBase | null, spaceIds?:string) => void;
