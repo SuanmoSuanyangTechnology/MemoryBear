@@ -750,7 +750,7 @@ class PreferenceNode(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
-    preference_id: str
+    id: str
     end_user_id: str
     domain: str
     subject: str

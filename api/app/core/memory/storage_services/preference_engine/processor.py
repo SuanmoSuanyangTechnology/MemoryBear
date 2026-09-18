@@ -6,7 +6,12 @@ import logging
 from collections import defaultdict
 from typing import Any
 
-from app.repositories.neo4j.preference_repository import PreferenceRepository
+from app.core.memory.storage.custom.preference import (
+    create_preference_if_absent,
+    get_preference,
+    update_preference,
+)
+from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 
 from .keyword_gate import match_preference_keywords
 from .models import (
@@ -32,13 +37,13 @@ class PreferenceProcessor:
         memory_config: Any,
         end_user_id: str,
         llm_client: Any,
-        connector: Any,
+        connector: Neo4jConnector,
     ):
         self.memory_config = memory_config
         self.end_user_id = end_user_id
         self.ontology = load_preference_ontology("coding")
         self.runner = PreferencePromptRunner(llm_client, self.ontology)
-        self.repository = PreferenceRepository(connector)
+        self.connector = connector
 
     async def run(
         self,
@@ -108,14 +113,16 @@ class PreferenceProcessor:
             PreferenceItem(mode=item.mode, preference_text=item.preference_text)
             for item in incoming
         ]
-        node = await self.repository.get(
+        node = await get_preference(
+            self.connector,
             end_user_id=self.end_user_id,
             domain=self.ontology.domain,
             subject=subject,
             situation_key=situation_key,
         )
         if node is None:
-            node, created = await self.repository.create_if_absent(
+            node, created = await create_preference_if_absent(
+                self.connector,
                 end_user_id=self.end_user_id,
                 domain=self.ontology.domain,
                 subject=subject,
@@ -144,7 +151,7 @@ class PreferenceProcessor:
 
         if not changed:
             return 0, 0, noop_item_count
-        saved = await self.repository.update(node, working)
+        saved = await update_preference(self.connector, node, working)
         if saved is None:
             logger.warning(
                 "[Preference] node disappeared before update end_user_id=%s "

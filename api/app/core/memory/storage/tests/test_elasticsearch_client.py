@@ -527,6 +527,7 @@ def test_elasticsearch_index_definitions_are_explicit_and_unique() -> None:
         MemoryNodeType.CHUNK: (3, 1),
         MemoryNodeType.COMMUNITY: (3, 1),
         MemoryNodeType.CONVERSATION: (2, 1),
+<<<<<<< HEAD
         MemoryNodeType.DIALOGUE: (3, 1),
         MemoryNodeType.EXTRACTED_ENTITY: (3, 1),
         MemoryNodeType.MEMORY_SUMMARY: (3, 1),
@@ -534,6 +535,16 @@ def test_elasticsearch_index_definitions_are_explicit_and_unique() -> None:
         MemoryNodeType.SCENE_SUMMARY: (2, 1),
         MemoryNodeType.STATEMENT: (3, 1),
         MemoryNodeType.USER_SOURCE: (3, 1),
+=======
+        MemoryNodeType.DIALOGUE: (2, 1),
+        MemoryNodeType.EXTRACTED_ENTITY: (2, 1),
+        MemoryNodeType.MEMORY_SUMMARY: (2, 1),
+        MemoryNodeType.PERCEPTUAL: (2, 1),
+        MemoryNodeType.PREFERENCE: (1, 1),
+        MemoryNodeType.SCENE_SUMMARY: (1, 1),
+        MemoryNodeType.STATEMENT: (2, 1),
+        MemoryNodeType.USER_SOURCE: (2, 1),
+>>>>>>> dd8785ed7 (feat(memory):add Preference Outbox and ES projection)
     }
     production_labels = tuple(MemoryNodeType)
     production_definitions = [

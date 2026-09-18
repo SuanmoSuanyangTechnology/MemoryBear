@@ -30,7 +30,8 @@ RETURN elementId(n) AS element_id,
        n.content AS content,
        n.statement AS statement,
        n.text AS text,
-       n.name AS name
+       n.name AS name,
+       n.preference_text_all AS preference_text_all
 """
 
 
@@ -88,6 +89,7 @@ async def resolve_manual_delete_target(
         or row.get("statement")
         or row.get("text")
         or row.get("name")
+        or row.get("preference_text_all")
         or ""
     )
     return ManualDeleteTarget(
