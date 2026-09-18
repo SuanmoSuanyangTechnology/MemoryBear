@@ -86,7 +86,7 @@ class ImageChunkPipeline(ChunkPipeline):
             blocks=blocks,
             merge_strategy="blocks",
             structured_markdown_stream=True,
-            direct_image_vision_mode=mode,
+            direct_image_vision_mode=mode if ctx.vision_model is not None else None,
             direct_image_has_ocr_text=has_ocr_text,
         )
 
