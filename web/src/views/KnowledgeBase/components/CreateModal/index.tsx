@@ -20,7 +20,7 @@ import type {
 import CreateModalBasicConfig from './CreateModalBasicConfig';
 import CreateModalKnowledgeGraphConfig from './CreateModalKnowledgeGraphConfig';
 import useCreateModalModels from './useCreateModalModels';
-import { baseModelFields } from '../../constants'
+import { baseModelFields, multimodalModelFields } from '../../constants'
 
 const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({ refreshTable }, ref) => {
   const { t } = useTranslation();
@@ -292,7 +292,7 @@ const CreateModal = forwardRef<CreateModalRef, CreateModalRefProps>(({ refreshTa
   const handleChange = (_value: string, type: string) => {
     if (datasets?.id && type.toLowerCase() === 'embedding') {
       console.log('datasets', datasets)
-      const name = baseModelFields.find(item => item.name)?.name;
+      const name = [...baseModelFields, ...multimodalModelFields].find(item => item.name)?.name;
       const fieldKey = `${name}_id`;
       const previousValue = (datasets as any)[fieldKey];
       modal.confirm({
