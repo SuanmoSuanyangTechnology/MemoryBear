@@ -103,7 +103,11 @@ class AgentExecution(Base):
     # ── 多 Agent 集群编排归属 ──────────────────────────────────────────
     parent_execution_id = Column(
         UUID(as_uuid=True),
-        ForeignKey("agent_executions.id", ondelete="SET NULL"),
+        ForeignKey(
+            "agent_executions.id",
+            name="agent_executions_parent_execution_id_fkey",
+            ondelete="SET NULL",
+        ),
         nullable=True,
         index=True,
         comment="父执行 ID（子 Agent 指向主 Agent 的执行记录；主 Agent 与普通执行为 NULL）"
