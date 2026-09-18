@@ -10,11 +10,9 @@ from collections.abc import Sequence
 from dataclasses import replace
 from enum import Enum
 from functools import partial
-from http import HTTPStatus
 from typing import Any
 
 from langchain_core.documents import Document as LangChainDocument
-from openai import APIStatusError
 from redbear_model import (
     EmbeddingPurpose,
     EmbeddingRequest,
@@ -35,7 +33,7 @@ from ..api.schemas.knowledge_retrieval import (
     KnowledgeRetrievalResult,
 )
 from ..api.schemas.rerank import RerankMode
-from ..error_mapping import map_multimodal_error
+from ..error_mapping import map_multimodal_error, map_text_embedding_error
 from ..errors import KnowledgeError
 from ..rag.chunk.token_utils import num_tokens_from_string
 from ..rag.knowledge_graph.config import GraphPipeline
@@ -128,13 +126,15 @@ class _TimedElasticSearchRetrieval(AsyncElasticSearchRetrieval):
     ) -> list[DocumentChunk]:
         embedding_started_at = time.perf_counter()
         try:
-            vector = normalize_vector(await embedding.aembed_query(query))
-        except APIStatusError as exc:
-            if exc.status_code != HTTPStatus.SERVICE_UNAVAILABLE:
+            embedding_result = await embedding.aembed_query(query)
+        except Exception as exc:
+            mapped = map_text_embedding_error(exc)
+            if mapped is None or mapped is exc:
                 raise
-            raise KnowledgeError.from_code("KB_EMBEDDING_SERVICE_UNAVAILABLE") from exc
+            raise mapped from exc
         finally:
             _record_elapsed(self._timings, "embedding_ms", embedding_started_at)
+        vector = normalize_vector(embedding_result)
         return await self.search_by_query_vector(vector, options)
 
     async def search_by_query_vector(

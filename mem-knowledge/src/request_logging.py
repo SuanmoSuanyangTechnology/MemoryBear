@@ -32,6 +32,7 @@ def request_route_template(scope: Scope) -> str:
     return route_path
 
 
+DEPENDENCY_FAILURE_RESPONSE_CODE = 10001
 MAX_FAILURE_FIELDS = 20
 MAX_FAILURE_VALUE_LENGTH = 1200
 _SENSITIVE_FIELDS = ("password", "secret", "token", "authorization", "api_key", "api-key", "cookie")
@@ -187,12 +188,13 @@ def log_request_failure(
             if len(nodes) > 1:
                 context["cause_type"] = type(nodes[1]).__name__
                 context["cause_message"] = _bounded(nodes[1])
+    dependency_failure = status_code >= 500 or response_code == DEPENDENCY_FAILURE_RESPONSE_CODE
     with_stack = (
-        exception is not None and not sensitive_chain and (status_code >= 500 or len(nodes) > 1)
+        exception is not None and not sensitive_chain and (dependency_failure or len(nodes) > 1)
     )
     try:
         logger.log(
-            logging.ERROR if status_code >= 500 else logging.WARNING,
+            logging.ERROR if dependency_failure else logging.WARNING,
             "request_failed %s",
             json.dumps(context, ensure_ascii=False, default=str),
             exc_info=(type(exception), exception, exception.__traceback__) if with_stack else None,
