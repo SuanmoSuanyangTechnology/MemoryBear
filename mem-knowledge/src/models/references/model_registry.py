@@ -4,6 +4,7 @@ import uuid
 from enum import StrEnum
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     Column,
     DateTime,
@@ -15,7 +16,7 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
-from sqlalchemy.dialects.postgresql import ARRAY, JSON, UUID
+from sqlalchemy.dialects.postgresql import ARRAY, JSON, JSONB, UUID
 
 from ...utils.datetime_utils import utcnow_naive
 from .base import ReferenceBase
@@ -28,6 +29,13 @@ class ModelType(StrEnum):
     RERANK = "rerank"
     IMAGE = "image"
     VIDEO = "video"
+    ASR = "ASR"
+
+    @classmethod
+    def _missing_(cls, value):
+        if isinstance(value, str) and value.lower() == "asr":
+            return cls.ASR
+        return None
 
 
 class ModelProvider(StrEnum):
@@ -166,17 +174,35 @@ class ModelApiKey(ReferenceBase):
 
 
 class ModelChannel(ReferenceBase):
-    """Minimal read-only projection of a model channel row (M5：平台代管凭据落表处）。"""
+    """Read-only projection of a model channel row (M5 起平台/租户凭据落表处).
+
+    列集与 core `ModelChannel` 对齐：渠道池投影需要覆盖匹配与排序字段
+    （model_names/priority/created_at），另带凭据指纹/掩码供 ChannelSnapshot 构造。
+    """
 
     __tablename__ = "model_channels"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
     tenant_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     provider = Column(String(50), nullable=False)
-    source = Column(String(20), nullable=False, default="manual")
+    model_names = Column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
+    )
+    api_base = Column(String(512), nullable=True)
     credential_encrypted = Column(Text, nullable=False)
+    credential_sha256 = Column(String(64), nullable=False, server_default="")
+    credential_masked = Column(String(255), nullable=False, server_default="")
+    priority = Column(Integer, nullable=False, default=0, server_default="0")
+    cooldown_until_ms = Column(BigInteger, nullable=True)
+    source = Column(String(20), nullable=False, default="manual")
+    extra = Column(
+        JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb")
+    )
     is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime, default=utcnow_naive, comment="created at")
+    updated_at = Column(
+        DateTime, default=utcnow_naive, onupdate=utcnow_naive, comment="updated at"
+    )
 
 
 class ModelBase(ReferenceBase):

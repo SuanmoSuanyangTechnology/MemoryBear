@@ -244,6 +244,71 @@
             "level": 1,
             "sort": 0,
             "subs": null
+          },
+          {
+            "id": 215,
+            "parent": 21,
+            "code": "dynamicWeightEngine",
+            "label": "记忆价值动态权重引擎",
+            "i18nKey": "menu.dynamicWeightEngine",
+            "path": "/memory-engine/dynamic-weight-engine/:id",
+            "enable": true,
+            "display": false,
+            "level": 1,
+            "sort": 0,
+            "subs": null
+          },
+          {
+            "id": 216,
+            "parent": 21,
+            "code": "associationEngine",
+            "label": "跨模态记忆关联联想引擎",
+            "i18nKey": "menu.associationEngine",
+            "path": "/memory-engine/association-engine/:id",
+            "enable": true,
+            "display": false,
+            "level": 1,
+            "sort": 0,
+            "subs": null
+          },
+          {
+            "id": 217,
+            "parent": 21,
+            "code": "consolidationEvolutionEngine",
+            "label": "长期固化演进引擎",
+            "i18nKey": "menu.consolidationEvolutionEngine",
+            "path": "/memory-engine/consolidation-evolution-engine/:id",
+            "enable": true,
+            "display": false,
+            "level": 1,
+            "sort": 0,
+            "subs": null
+          },
+          {
+            "id": 218,
+            "parent": 21,
+            "code": "predictionEngine",
+            "label": "长期固化演进引擎",
+            "i18nKey": "menu.predictionEngine",
+            "path": "/memory-engine/prediction-engine/:id",
+            "enable": true,
+            "display": false,
+            "level": 1,
+            "sort": 0,
+            "subs": null
+          },
+          {
+            "id": 219,
+            "parent": 21,
+            "code": "predictionProgress",
+            "label": "长期固化演进引擎",
+            "i18nKey": "menu.predictionProgress",
+            "path": "/memory-engine/prediction-progress/:id",
+            "enable": true,
+            "display": false,
+            "level": 1,
+            "sort": 0,
+            "subs": null
           }
         ]
       },

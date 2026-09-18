@@ -1,19 +1,17 @@
 import {
-  forwardRef,
   useEffect,
-  useImperativeHandle,
   useLayoutEffect,
   useRef,
   useState,
   useMemo,
 } from 'react';
-import { Button, Flex, Form, Input, InputNumber, Select, Switch } from 'antd';
+import { Button, Flex, Form, Input, InputNumber, Select, Switch, App } from 'antd';
 import { useTranslation } from 'react-i18next';
 import clsx from 'clsx';
+import { useParams } from 'react-router-dom'
 
 import type {
   RecallTestData,
-  RecallTestDrawerRef,
   RecallTestParams,
   RetrievalPolicy,
 } from '@/views/KnowledgeBase/types';
@@ -30,12 +28,12 @@ interface RetrievalModeOption {
   value: string;
 }
 
-const RecallTest = forwardRef<RecallTestDrawerRef>((props, ref) => {
-  void props;
+const RecallTest = () => {
   const [form] = Form.useForm();
+  const { message } = App.useApp();
   const { t } = useTranslation();
   const [data, setData] = useState<RecallTestData[]>([]);
-  const [knowledgeBaseId, setKnowledgeBaseId] = useState<string>('');
+  const { knowledgeBaseId } = useParams()
   const [loading, setLoading] = useState(false);
   const layoutContainerRef = useRef<HTMLDivElement>(null);
   const [isWideLayout, setIsWideLayout] = useState(false);
@@ -128,16 +126,15 @@ const RecallTest = forwardRef<RecallTestDrawerRef>((props, ref) => {
       });
   };
 
-  const handleOpen = (kbId?: string) => {
-    const nextKnowledgeBaseId = kbId || '';
-    setKnowledgeBaseId(nextKnowledgeBaseId);
+  useEffect(() => {
+    const nextKnowledgeBaseId = knowledgeBaseId || '';
     setRetrievalPolicy({});
     form.resetFields();
     setData([]);
     // Ensure form field is also set to default value
     form.setFieldsValue({ retrieve_type: 'hybrid', rerank_mode: 'reranking_model' });
     getRetrievalPolicy(nextKnowledgeBaseId);
-  };
+  }, [knowledgeBaseId])
 
   const fetchData = (params: RecallTestParams) => {
     if (loading) return;
@@ -167,6 +164,16 @@ const RecallTest = forwardRef<RecallTestDrawerRef>((props, ref) => {
         reranker_id,
         rerank_weights,
       }) => {
+        const hasQuery = typeof query === 'string' && query.trim().length > 0;
+        const hasImage = supportsImage && Boolean(image);
+
+        if (!hasQuery && !hasImage) {
+          const messageKey = supportsImage
+            ? 'knowledgeBase.queryOrImageRequired'
+            : 'knowledgeBase.queryRequired';
+          message.warning(t(messageKey));
+          return;
+        }
         image = supportsImage ? image : undefined;
         const params: RecallTestParams = {
           query: image
@@ -191,18 +198,12 @@ const RecallTest = forwardRef<RecallTestDrawerRef>((props, ref) => {
               }
             : {}),
         };
-        console.log('RecallTest - params:', params);
         fetchData(params);
       })
       .catch((error) => {
         console.error('Form validation failed:', error);
       });
   };
-
-  // Expose methods to parent component
-  useImperativeHandle(ref, () => ({
-    handleOpen,
-  }));
 
   const handleChangeRerankMode = (value: string | null | undefined) => {
     if (value === 'reranking_model') {
@@ -452,6 +453,6 @@ const RecallTest = forwardRef<RecallTestDrawerRef>((props, ref) => {
       </div>
     </div>
   );
-});
+}
 
 export default RecallTest;

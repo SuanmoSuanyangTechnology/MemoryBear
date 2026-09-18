@@ -19,8 +19,8 @@ from ..utils.datetime_utils import to_timestamp_ms
 from . import knowledge as knowledge_service
 
 
-def _not_found(message: str) -> KnowledgeError:
-    return KnowledgeError.from_code("KB_RESOURCE_NOT_FOUND", message)
+def _not_found(code: str) -> KnowledgeError:
+    return KnowledgeError.from_code(code)
 
 
 async def share_to_data(
@@ -38,8 +38,7 @@ async def share_to_data(
     shared_user = await ReferenceRepository.get_user(db, share.shared_by)
     if target_knowledge is None or target_workspace is None or shared_user is None:
         raise KnowledgeError.from_code(
-            "KB_REFERENCE_NOT_FOUND",
-            "Knowledge share reference is incomplete",
+            "KB_KNOWLEDGE_SHARE_REFERENCE_INCOMPLETE",
         )
     target_data = await knowledge_service.knowledge_to_data(db, target_knowledge)
     user_data = knowledge_service._user_summary(shared_user, None).model_dump(mode="json")
@@ -71,7 +70,7 @@ async def list_shares(
 ) -> tuple[int, list[dict[str, Any]]]:
     source = await knowledge_service.get_knowledge(db, kb_id, principal)
     if source is None:
-        raise _not_found("Source knowledge does not exist")
+        raise _not_found("KB_SOURCE_KNOWLEDGE_NOT_FOUND")
     filters = [
         KnowledgeShare.source_workspace_id == principal.workspace_id,
         KnowledgeShare.source_kb_id == kb_id,
@@ -97,10 +96,10 @@ async def create_share(
         create_data.target_workspace_id,
     )
     if target_workspace is None:
-        raise _not_found("Target workspace does not exist")
+        raise _not_found("KB_TARGET_WORKSPACE_NOT_FOUND")
     source = await knowledge_service.get_knowledge(db, create_data.source_kb_id, principal)
     if source is None:
-        raise _not_found("Source knowledge does not exist")
+        raise _not_found("KB_SOURCE_KNOWLEDGE_NOT_FOUND")
     mirrored = KnowledgeCreate(
         workspace_id=create_data.target_workspace_id,
         created_by=principal.actor_id,
@@ -114,6 +113,8 @@ async def create_share(
         reranker_id=source.reranker_id,
         llm_id=source.llm_id,
         image2text_id=source.image2text_id,
+        audio2text_id=source.audio2text_id,
+        video2text_id=source.video2text_id,
         doc_num=source.doc_num,
         chunk_num=source.chunk_num,
         parser_id=source.parser_id,
@@ -152,7 +153,7 @@ async def delete_share(
 ) -> None:
     share = await get_share(db, share_id, principal)
     if share is None:
-        raise _not_found("Knowledge share does not exist")
+        raise _not_found("KB_KNOWLEDGE_SHARE_NOT_FOUND")
     await knowledge_repository.delete_knowledge_by_id_async(db, share.target_kb_id)
     await share_repository.delete_knowledgeshare_by_id_in_source_workspace_async(
         db,

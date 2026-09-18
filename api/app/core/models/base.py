@@ -11,7 +11,9 @@ from langchain_core.embeddings import Embeddings
 from langchain_core.language_models import BaseLLM
 from langchain_ollama import OllamaLLM
 from langchain_openai import ChatOpenAI, OpenAI
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, PrivateAttr, field_validator, model_validator
+
+from redbear_model import FailoverPlan
 
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
@@ -102,6 +104,19 @@ class RedBearModelConfig(BaseModel):
     tenant_id: Optional[str] = None
     model_config_id: Optional[str] = None
     channel_id: Optional[str] = None
+
+    # 请求内换渠道计划（spec §11.2）：私有属性，不进 model_fields/model_dump/repr；
+    # 由 from_api_key 从运行期 key 壳透传（壳缺键 → None，兼容旧壳）
+    _failover_plan: FailoverPlan | None = PrivateAttr(default=None)
+
+    @property
+    def failover_plan(self) -> FailoverPlan | None:
+        return self._failover_plan
+
+    def bind_failover_plan(self, plan: FailoverPlan | None) -> "RedBearModelConfig":
+        """直构路径（LangChainAgent 等）挂载请求内换渠道计划，语义同 from_api_key 壳透传。"""
+        self._failover_plan = plan
+        return self
 
     @field_validator("tenant_id", "model_config_id", "channel_id", mode="before")
     @classmethod
@@ -197,7 +212,8 @@ class RedBearModelConfig(BaseModel):
         壳可为解析壳/speedbear/legacy 的运行期 ModelApiKey、ModelInfo、snapshot
         或 dict 快照；`overrides` 为调用点特有参数（timeout/max_retries/
         extra_params 等），同名覆盖。tenant/model_config/channel 缺失即 None
-        （用量事件侧跳过/NULL，语义与中央构建器一致）。
+        （用量事件侧跳过/NULL，语义与中央构建器一致）；failover_plan 同随行
+        （旧壳/拷贝丢失 → None，退化为单候选）。
         """
         data: Dict[str, Any] = {
             "model_name": _shell_field(api_key_obj, "model_name"),
@@ -219,7 +235,9 @@ class RedBearModelConfig(BaseModel):
             raise ValueError(f"from_api_key: 壳缺少必需字段 {', '.join(missing)}")
         data["provider"] = str(data["provider"])
         data.update(overrides)
-        return cls(**data)
+        config = cls(**data)
+        config._failover_plan = _shell_field(api_key_obj, "failover_plan")
+        return config
 
 
 def _map_budget_to_reasoning_effort(budget_tokens: Optional[int]) -> Optional[str]:
@@ -298,9 +316,11 @@ class RedBearModelFactory:
         if provider == ModelProvider.DASHSCOPE:
             if not config.base_url:
                 config.base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+            # 连接超时跟随调用预算（上限 60s）：短预算场景（如配置验证 timeout=10）
+            # 不应在连接阶段独占 60s 才失败
             timeout_config = httpx.Timeout(
                 timeout=config.timeout,
-                connect=60.0,
+                connect=min(config.timeout, 60.0),
                 read=config.timeout,
                 write=60.0,
                 pool=10.0,
@@ -364,7 +384,7 @@ class RedBearModelFactory:
             # 这样可以分别控制连接超时和读取超时
             timeout_config = httpx.Timeout(
                 timeout=config.timeout,  # 总超时时间
-                connect=60.0,  # 连接超时：60秒（足够建立 TCP 连接）
+                connect=min(config.timeout, 60.0),  # 连接超时跟随调用预算（上限 60 秒）
                 read=config.timeout,  # 读取超时：使用配置的超时时间
                 write=60.0,  # 写入超时：60秒
                 pool=10.0,  # 连接池超时：10秒
@@ -479,12 +499,19 @@ class RedBearModelFactory:
                     params[key] = provider_specific[key]
 
             # 解析 API key (格式: access_key_id:secret_access_key)
-            if config.api_key and ":" in config.api_key:
-                access_key_id, secret_access_key = config.api_key.split(":", 1)
+            if config.api_key:
+                access_key_id, _, secret_access_key = config.api_key.partition(":")
+                access_key_id = access_key_id.strip()
+                secret_access_key = secret_access_key.strip()
+                if not access_key_id or not secret_access_key:
+                    raise BusinessException(
+                        "Bedrock 凭据格式错误：API Key 应为 "
+                        "access_key_id:secret_access_key（英文半角冒号分隔），"
+                        "请检查是否只填了 Access Key ID、漏填了 secret，或误用了中文冒号",
+                        BizCode.INVALID_PARAMETER,
+                    )
                 params["aws_access_key_id"] = access_key_id
                 params["aws_secret_access_key"] = secret_access_key
-            elif config.api_key:
-                params["aws_access_key_id"] = config.api_key
 
             # 设置 region
             if config.base_url:

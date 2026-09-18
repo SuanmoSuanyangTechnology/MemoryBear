@@ -257,7 +257,7 @@ export const getExplicitMemory = (end_user_id: string) => {
   return request.post(`/memory/explicit-memory/overview`, { end_user_id })
 }
 
-export type EpisodicMemoryType = "conversation" | "project_work" | "learning" | "decision" | "important_event"
+export type EpisodicMemoryType = "conversation" | "dialogue" | "project_work" | "learning" | "decision" | "important_event"
 export interface EpisodicMemoryQuery {
   end_user_id?: string;
   page?: number;

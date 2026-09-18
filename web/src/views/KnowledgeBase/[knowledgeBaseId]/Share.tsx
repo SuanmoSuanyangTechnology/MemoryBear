@@ -1,9 +1,9 @@
-import { useEffect, useState, useRef, type FC } from 'react';
+import { useEffect, useState, type FC } from 'react';
 import { useParams, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Popover, Flex, Spin } from 'antd';
 
-import type { KnowledgeBaseListItem, RecallTestDrawerRef } from '@/views/KnowledgeBase/types';
+import type { KnowledgeBaseListItem } from '@/views/KnowledgeBase/types';
 import RecallTest from '../components/RecallTest';
 import InfoPanel, { type InfoItem } from '../components/InfoPanel';
 import shareUserIcon from '@/assets/images/knowledgeBase/share-user.png';
@@ -28,35 +28,34 @@ const Share: FC = () => {
   const knowledgeBaseId = params.knowledgeBaseId;
   const [loading, setLoading] = useState(false);
   const [knowledgeBase, setKnowledgeBase] = useState<KnowledgeBaseListItem | null>(null);
-  const recallTestRef = useRef<RecallTestDrawerRef>(null);
   const [infoItems, setInfoItems] = useState<InfoItem[]>([]);
   const [knowledgeBaseFolderPath, setKnowledgeBaseFolderPath] = useState<BreadcrumbItem[]>([]);
   const { updateBreadcrumbs } = useBreadcrumbManager({
     breadcrumbType: 'detail'
   });
-  useEffect(() => {
-    console.log('Share.tsx - useParams result:', params);
-    console.log('Share.tsx - knowledgeBaseId:', knowledgeBaseId);
-    console.log('Share.tsx - typeof knowledgeBaseId:', typeof knowledgeBaseId);
+  // useEffect(() => {
+  //   console.log('Share.tsx - useParams result:', params);
+  //   console.log('Share.tsx - knowledgeBaseId:', knowledgeBaseId);
+  //   console.log('Share.tsx - typeof knowledgeBaseId:', typeof knowledgeBaseId);
     
-    if (knowledgeBaseId) {
-      fetchKnowledgeBaseDetail(knowledgeBaseId);
-      // Use callback ref to ensure recall test is ready before calling methods
-      const tryOpen = (retries = 5) => {
-        if (recallTestRef.current) {
-          recallTestRef.current.handleOpen(knowledgeBaseId);
-        } else if (retries > 0) {
-          // Retry with a short delay until the ref is ready
-          setTimeout(() => tryOpen(retries - 1), 50);
-        } else {
-          console.warn('Share.tsx - recallTestRef is still null after retries');
-        }
-      };
-      tryOpen();
-    } else {
-      console.warn('Share.tsx - knowledgeBaseId is undefined or empty');
-    }
-  }, [knowledgeBaseId]);
+  //   if (knowledgeBaseId) {
+  //     fetchKnowledgeBaseDetail(knowledgeBaseId);
+  //     // Use callback ref to ensure recall test is ready before calling methods
+  //     const tryOpen = (retries = 5) => {
+  //       if (recallTestRef.current) {
+  //         recallTestRef.current.handleOpen(knowledgeBaseId);
+  //       } else if (retries > 0) {
+  //         // Retry with a short delay until the ref is ready
+  //         setTimeout(() => tryOpen(retries - 1), 50);
+  //       } else {
+  //         console.warn('Share.tsx - recallTestRef is still null after retries');
+  //       }
+  //     };
+  //     tryOpen();
+  //   } else {
+  //     console.warn('Share.tsx - knowledgeBaseId is undefined or empty');
+  //   }
+  // }, [knowledgeBaseId]);
 
   // Update breadcrumbs
   useEffect(() => {
@@ -124,6 +123,18 @@ const Share: FC = () => {
         icon: kbModelIcon,
       },
       {
+        key: 'audio2text_id',
+        label: t('knowledgeBase.audio2text_id') + ' ' + 'model',
+        value: data.audio2text?.name ?? '-',
+        icon: kbModelIcon,
+      },
+      {
+        key: 'video2text_id',
+        label: t('knowledgeBase.video2text_id') + ' ' + 'model',
+        value: data.video2text?.name ?? '-',
+        icon: kbModelIcon,
+      },
+      {
         key: 'updated_at',
         label: t('knowledgeBase.last_at'),
         value: formatDateTime(data.updated_at, 'YYYY-MM-DD HH:mm:ss'),
@@ -135,6 +146,11 @@ const Share: FC = () => {
       return item.value !== null && item.value !== undefined && item.value !== '';
     });
   }
+
+  useEffect(() => {
+    if (!knowledgeBaseId) return
+    fetchKnowledgeBaseDetail(knowledgeBaseId)
+  }, [knowledgeBaseId])
   const fetchKnowledgeBaseDetail = (id: string) => {
     setLoading(true);
     getKnowledgeBaseDetail(id)
@@ -209,7 +225,7 @@ const Share: FC = () => {
             <span className='rb:text-gray-500 rb:text-xs'>{t('knowledgeBase.recallTestDescription')}</span>
           </Flex>
           <div className='rb:flex-1 rb:min-h-0'>
-            <RecallTest  ref={recallTestRef} />
+            <RecallTest />
           </div>
         </Flex>
         {/* <div className='rb:w-80 rb:border rb:overflow-y-auto rb:border-[#DFE4ED] rb:bg-white rb:rounded-xl rb:p-4'>

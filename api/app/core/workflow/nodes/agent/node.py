@@ -222,6 +222,7 @@ class AgentNode(BaseNode):
                 tenant_id=api_config.tenant_id,
                 model_config_id=api_config.model_config_id,
                 channel_id=api_config.channel_id,
+                failover_plan=api_config.failover_plan,
             )
 
     async def _load_model_info_async(self, model_id: uuid.UUID, variable_pool: VariablePool) -> ModelInfo:
@@ -494,6 +495,7 @@ class AgentNode(BaseNode):
             tenant_id=model_info.tenant_id,
             model_config_id=model_info.model_config_id,
             channel_id=model_info.channel_id,
+            failover_plan=model_info.failover_plan,
         )
 
         return agent, message, history, strategy

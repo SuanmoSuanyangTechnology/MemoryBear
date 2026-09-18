@@ -73,7 +73,7 @@ const SubModelModal = forwardRef<SubModelModalRef, SubModelModalProps>(({
         .then(res => {
           const response = res as ProviderModelItem[]
           const list = response[0]?.models || []
-          setModelList(list)
+          setModelList(list.filter(item => item.type === type))
 
           if (groupedByProvider?.[provider]?.length) {
             form.setFieldsValue({
@@ -121,7 +121,7 @@ const SubModelModal = forwardRef<SubModelModalRef, SubModelModalProps>(({
         <Form.Item 
           name="model_names"
           label={t('modelNew.modelList')}
-          rules={[{ required: true, message: t('common.selectPlaceholder', { title: t('modelNew.model_names') }) }]}
+          rules={[{ required: true, message: t('common.selectPlaceholder', { title: t('modelNew.modelList') }) }]}
         >
           <Select
             placeholder={t('common.pleaseSelect')}

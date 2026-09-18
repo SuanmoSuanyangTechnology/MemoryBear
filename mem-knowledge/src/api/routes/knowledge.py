@@ -61,22 +61,19 @@ from ..dependencies import (
     get_source,
     require_knowledge_copy_principal,
 )
+from ..error_handlers import render_error
 from ..schemas.chunk import KnowledgeRetrievalSource
-from ..schemas.common import SuccessEnvelope, fail, success
+from ..schemas.common import SuccessEnvelope, success
 from ..schemas.file import KBBatchDownloadRequest
-from ..schemas.knowledge import KnowledgeCreate, KnowledgeUpdate, project_public_knowledge_data
+from ..schemas.knowledge import (
+    KnowledgeCreate,
+    KnowledgeUpdate,
+    project_public_knowledge_data,
+)
 
 router = APIRouter(prefix="/knowledges", tags=["knowledges"])
 
 logger = logging.getLogger(__name__)
-
-_MODEL_UNAVAILABLE_STATUS_REASONS = {
-    401: "Invalid API key for the selected model",
-    403: "The selected model API key is not authorized",
-    404: "The selected model is not available from the provider",
-    429: "The selected model is currently rate limited",
-}
-
 
 def _provider_status_code(exc: BaseException) -> int | None:
     pending: list[BaseException] = [exc]
@@ -101,22 +98,6 @@ def _provider_status_code(exc: BaseException) -> int | None:
             if isinstance(wrapped, BaseException):
                 pending.append(wrapped)
     return None
-
-
-def _model_unavailable_reason(exc: BaseException) -> str:
-    status_code = _provider_status_code(exc)
-    if status_code in _MODEL_UNAVAILABLE_STATUS_REASONS:
-        return _MODEL_UNAVAILABLE_STATUS_REASONS[status_code]
-    error_type = type(exc).__name__.lower()
-    if "timeout" in error_type:
-        return "The selected model request timed out"
-    if "connection" in error_type:
-        return "Unable to connect to the selected model provider"
-    if "validation" in error_type:
-        return "The selected model returned an invalid response"
-    if status_code is not None:
-        return f"The selected model provider rejected the request (HTTP {status_code})"
-    return "The selected model is unavailable"
 
 
 def _success(
@@ -171,29 +152,20 @@ async def get_knowledge_graph_entity_types(
             )
         except ModelConfigNotFoundError as exc:
             raise KnowledgeError.from_code(
-                "KB_RESOURCE_NOT_FOUND",
-                "Model config does not exist",
-                status_code=404,
-                response_code=404,
-                response_style="http",
+                "KB_MODEL_CONFIG_NOT_FOUND",
             ) from exc
         except (
             ModelCredentialNotFoundError,
             PublicCredentialUnavailableError,
         ) as exc:
             raise KnowledgeError.from_code(
-                "KB_MODEL_UNAVAILABLE",
-                "No available API key for the selected model",
-                status_code=400,
-                response_code=400,
-                response_style="http",
+                "KB_MODEL_CREDENTIAL_UNAVAILABLE",
             ) from exc
     try:
         result = await graph_service.graph_entity_types(runtime, resolved, scenario)
     except KnowledgeError:
         raise
     except Exception as exc:
-        reason = _model_unavailable_reason(exc)
         logger.warning(
             "Graph entity type model unavailable llm_id=%s error_type=%s "
             "provider_status=%s",
@@ -201,7 +173,7 @@ async def get_knowledge_graph_entity_types(
             type(exc).__name__,
             _provider_status_code(exc),
         )
-        raise KnowledgeError.from_code("KB_MODEL_UNAVAILABLE", reason) from exc
+        raise KnowledgeError.from_code("KB_GRAPH_ENTITY_TYPES_UNAVAILABLE") from exc
     return _success(
         request,
         result,
@@ -219,10 +191,9 @@ async def check_yuque_auth(
     async with YuqueAPIClient(yuque_user_id, yuque_token) as client:
         repositories = await client.get_user_repos()
     if not repositories:
-        return fail(
-            2001,
-            msg="auth yuque info failed",
-            error="user_id or token is incorrect",
+        return render_error(
+            request,
+            KnowledgeError.from_code("KB_YUQUE_AUTH_INVALID"),
         )
     return _success(request, msg="Successfully auth yuque info")
 
@@ -241,10 +212,9 @@ async def check_feishu_auth(
             recursive=True,
         )
     if not files:
-        return fail(
-            2001,
-            msg="auth feishu info failed",
-            error="app_id or app_secret or feishu_folder_token is incorrect",
+        return render_error(
+            request,
+            KnowledgeError.from_code("KB_FEISHU_AUTH_INVALID"),
         )
     return _success(request, msg="Successfully auth feishu info")
 
@@ -499,7 +469,7 @@ async def get_knowledge_graph(
         )
         data = await graph_service.get_graph(snapshot, store)
     except ValueError as exc:
-        raise KnowledgeError.from_code("KB_VALIDATION_ERROR", str(exc)) from exc
+        raise KnowledgeError.from_code("KB_GRAPH_CONFIG_INVALID") from exc
     return _success(
         request,
         data,
@@ -551,7 +521,7 @@ async def rebuild_knowledge_graph(
                 principal.workspace_id,
             )
         except ValueError as exc:
-            raise KnowledgeError.from_code("KB_VALIDATION_ERROR", str(exc)) from exc
+            raise KnowledgeError.from_code("KB_GRAPH_CONFIG_INVALID") from exc
 
     redis = await runtime.redis.client()
     proposed_task_id = str(uuid.uuid4())
@@ -649,7 +619,7 @@ async def kb_batch_download(
         )
         files = list(result.scalars().all())
         if not files:
-            raise file_service._not_found("Knowledge has no downloadable files")
+            raise file_service._not_found("KB_KNOWLEDGE_DOWNLOAD_EMPTY")
         specs = [await file_service.get_qa_export_spec(db, file) for file in files]
         snapshots = [file_service.stored_file_snapshot(file) for file in files]
         knowledge_name = knowledge.name

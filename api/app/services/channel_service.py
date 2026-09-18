@@ -72,9 +72,10 @@ def describe_channel(row: ModelChannel) -> dict:
 class ChannelService:
     """model_channels 登记原语（同步 Session）。
 
-    provider 恒为真实供应商（不允许 composite）；点名渠道 model_names 恒非空、
-    无退化为 [] 的路径；幂等合并键 (provider, tenant_id, api_base,
-    credential_sha256) 由 DB 唯一约束兜底（api_base 空 = provider 默认端点）。
+    provider 恒为真实供应商（不允许 composite）；点名渠道 model_names 恒非空
+    （清空即删行），[] 仅 Provider 域登记产生——同凭据点名行命中时原地升级；
+    幂等合并键 (provider, tenant_id, api_base, credential_sha256) 由 DB 唯一约束
+    兜底（api_base 空 = provider 默认端点）。
     """
 
     def __init__(self, db: Session):
@@ -107,8 +108,9 @@ class ChannelService:
         """双层失效：进程内渠道快照缓存 + 受影响 config 的 Redis 运行时缓存。
 
         model_names=None → provider 级渠道（影响该 provider 全部 config）；
-        非 None → 仅 name ∈ model_names 的 config。突变 flush 后即失效，
-        调用方若最终回滚仅多一次缓存重查，无正确性风险。
+        非 None → 仅 name ∈ model_names 的 config。突变 flush 后即失效。
+        调用方若最终回滚：其间未做候选探测则仅多一次缓存重查；若探测已按未提交态
+        回填快照缓存，须自行再失效（见 model_channel_service 删除/解绑联动）。
         """
         from app.services.channel_registry import (  # 延迟导入：registry 反向依赖本模块 cipher
             affected_config_ids,
@@ -138,9 +140,11 @@ class ChannelService:
     ) -> tuple[ModelChannel, str]:
         """登记 provider 公共 key（model_names=[]，覆盖该 provider 全部未点名模型）。
 
-        api_base 恒 NULL（运行时按能力选择公共端点，本地提供商由上层拦截）；
-        同幂等键已存在 → merged（不覆盖既有行属性，仅返回既有渠道）；
-        否则新建。返回 (channel, "created" | "merged")。
+        api_base 恒 NULL（运行时使用 provider 公共基地址，本地提供商由上层拦截）；
+        同幂等键已存在：点名渠道 → 原地升级为 provider 级（覆盖集扩展为全量，
+        返回 "upgraded"）；已 provider 级 → merged（no-op）；否则新建。
+        合并/升级均不覆盖既有行的其余属性（remark/priority/extra）。
+        返回 (channel, "created" | "merged" | "upgraded")。
         """
         if provider == "composite":
             raise ValueError("composite is a config shape, not a channel provider")
@@ -153,6 +157,14 @@ class ChannelService:
             provider=provider, tenant_id=tenant_id, api_base=api_base, credential_sha256=sha
         )
         if exist is not None:
+            # 守卫返回 False = 并发下已被升级/删除；按现状返回，失效由写方负责
+            if exist.model_names and self.repo.promote_to_provider_level(exist.id):
+                # 同凭据点名行命中（唯一约束只允许单行）：Provider 域意图优先，原地升级
+                self.db.refresh(exist)
+                self._invalidate_runtime(
+                    tenant_id=tenant_id, provider=provider, model_names=None
+                )
+                return exist, "upgraded"
             return exist, "merged"
         encrypted, _, masked = self._protect(provider, tenant_id, api_key)
         row = self.repo.create(

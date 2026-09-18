@@ -120,8 +120,8 @@ def resolve_composite_candidates(
 ) -> list[ResolvedModelConfig]:
     """候选链逐个解密，返回可用有序列表（坏凭据跳过不阻断，全败 → NoAvailableChannelError）。
 
-    返回项的 model_config_id 为**成员 config id**（命中成员身份）；组合身份在宿主层
-    已知，M4 usage 事件若需组合维度再扩契约字段。loads 为渠道滚动窗口用量（宿主派生）。
+    返回项的 model_config_id 取自传入的成员快照——usage 归因口径由宿主决定（组合入口
+    统一改写为组合 id，见宿主 channel_registry）。loads 为渠道滚动窗口用量（宿主派生）。
     """
     chain = composite_candidate_chain(
         composite, members, channel_pool, tenant_id=tenant_id, loads=loads
@@ -156,3 +156,48 @@ def resolve_composite_candidates(
             "all composite member channels failed credential decryption",
         )
     return resolved
+
+
+def resolve_composite_head(
+    composite: ModelConfigSnapshot,
+    members: Sequence[CompositeMemberConfig],
+    channel_pool: Sequence[ChannelSnapshot],
+    *,
+    tenant_id: UUID,
+    cipher: CredentialCipher,
+    loads: Mapping[UUID, int] | None = None,
+) -> tuple[ResolvedModelConfig, list[CompositeCandidate]]:
+    """首个可解密候选及其后有序切片（failover plan 构建用）。
+
+    保持 resolve_composite_candidates 的「首个可解密」壳语义，但不预解整链：仅自链头
+    逐个解密到首个成功为止，返回 (该 resolved, 自该位的候选切片)，故切片头部恒等于
+    实际首发渠道。坏凭据跳过不阻断（warning）；全败 → NoAvailableChannelError（同文案）。
+    """
+    chain = composite_candidate_chain(
+        composite, members, channel_pool, tenant_id=tenant_id, loads=loads
+    )
+    for index, candidate in enumerate(chain):
+        try:
+            resolved = build_resolved_from_channel(
+                candidate.member,
+                candidate.channel,
+                tenant_id=tenant_id,
+                model_name=candidate.model_name,
+                cipher=cipher,
+            )
+        except CredentialDecryptError as exc:
+            logger.warning(
+                "composite %s member %s channel %s credential decrypt failed: %s",
+                composite.model_config_id,
+                candidate.model_name,
+                candidate.channel.id,
+                exc,
+            )
+            continue
+        return resolved, chain[index:]
+    raise NoAvailableChannelError(
+        composite.model_config_id,
+        str(composite.provider),
+        composite.name,
+        "all composite member channels failed credential decryption",
+    )

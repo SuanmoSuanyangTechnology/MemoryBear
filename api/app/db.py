@@ -1,12 +1,16 @@
-import os
+import asyncio
 import logging
+import traceback
 from contextlib import contextmanager, asynccontextmanager
 from typing import Generator, AsyncGenerator
-from sqlalchemy import create_engine, text
-from sqlalchemy.orm import Session, sessionmaker
+
+from sqlalchemy import create_engine, text, event
+from sqlalchemy.exc import DisconnectionError
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
-from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import Session, sessionmaker, declarative_base
+
 from app.core.config import settings
+from app.core.trace import get_trace_id
 
 SQLALCHEMY_DATABASE_URL = f"postgresql://{settings.DB_USER}:{settings.DB_PASSWORD}@{settings.DB_HOST}:{settings.DB_PORT}/{settings.DB_NAME}"
 ASYNC_DATABASE_URL = f"postgresql+asyncpg://{settings.DB_USER}:{settings.DB_PASSWORD}@{settings.DB_HOST}:{settings.DB_PORT}/{settings.DB_NAME}"
@@ -91,6 +95,67 @@ AsyncSessionLocal = async_sessionmaker(
 )
 
 
+def _driver_conn(dbapi_connection):
+    return (
+            getattr(dbapi_connection, "driver_connection", None)
+            or getattr(dbapi_connection, "_connection", None)
+    )
+
+
+@event.listens_for(async_engine.sync_engine, "checkout")
+def _asyncpg_checkout(dbapi_connection, connection_record, connection_proxy):
+    driver = _driver_conn(dbapi_connection)
+    if driver is None:
+        return
+
+    if getattr(driver, "is_in_transaction", lambda: False)():
+        logger.error(
+            "[DB_POOL_DIRTY_CHECKOUT] "
+            "asyncpg connection is already in transaction "
+            "conn_id=%s previous_trace_id=%s "
+            "previous_checkout_stack=%s",
+            id(driver),
+            connection_record.info.get("checkout_trace_id"),
+            connection_record.info.get("checkout_stack"),
+        )
+
+        connection_record.invalidate(
+            Exception("dirty asyncpg connection on checkout")
+        )
+        raise DisconnectionError("dirty asyncpg connection on checkout")
+
+    connection_record.info["checkout_trace_id"] = get_trace_id()
+    connection_record.info["checkout_stack"] = "".join(
+        traceback.format_stack(limit=20)
+    )
+
+
+@event.listens_for(async_engine.sync_engine, "checkin")
+def _asyncpg_checkin(dbapi_connection, connection_record):
+    if dbapi_connection is None:
+        return
+
+    driver = _driver_conn(dbapi_connection)
+    if driver is None:
+        return
+
+    is_in_transaction = getattr(
+        driver, "is_in_transaction", lambda: False
+    )()
+
+    if is_in_transaction:
+        logger.error(
+            "[DB_POOL_DIRTY_CHECKIN] "
+            "returning dirty asyncpg connection to pool "
+            "conn_id=%s checkout_trace_id=%s "
+            "checkout_stack=%s checkin_stack=%s",
+            id(driver),
+            connection_record.info.get("checkout_trace_id"),
+            connection_record.info.get("checkout_stack"),
+            "".join(traceback.format_stack(limit=20)),
+        )
+
+
 async def get_async_db() -> AsyncGenerator[AsyncSession, None]:
     """FastAPI Depends 专用，async 路由使用"""
     async with AsyncSessionLocal() as session:
@@ -103,12 +168,18 @@ async def get_async_db_context() -> AsyncGenerator[AsyncSession, None]:
     async with AsyncSessionLocal() as session:
         try:
             yield session
-        except Exception:
-            await session.rollback()
-            raise
         finally:
             if session.in_transaction():
-                await session.rollback()
+                rollback_task = asyncio.create_task(session.rollback())
+                try:
+                    await asyncio.shield(rollback_task)
+                except asyncio.CancelledError:
+                    await rollback_task
+                    raise
+                except Exception:
+                    logger.exception("Failed to rollback database session")
+
+            await session.close()
 
 
 # ==================== 连接池监控 ====================
@@ -122,8 +193,8 @@ def get_pool_status():
         "checked_out": pool.checkedout(),
         "overflow": pool.overflow(),
         "total": pool.size() + pool.overflow(),
-        "usage_percent": round(pool.checkedout() / (pool.size() + pool.overflow()) * 100, 2) if (
-            pool.size() + pool.overflow()) > 0 else 0
+        "usage_percent": round(pool.checkedout() / (pool.size() + pool.overflow()) * 100, 2)
+        if (pool.size() + pool.overflow()) > 0 else 0
     }
 
 
@@ -136,6 +207,6 @@ def get_async_pool_status():
         "checked_out": pool.checkedout(),
         "overflow": pool.overflow(),
         "total": pool.size() + pool.overflow(),
-        "usage_percent": round(pool.checkedout() / (pool.size() + pool.overflow()) * 100, 2) if (
-            pool.size() + pool.overflow()) > 0 else 0,
+        "usage_percent": round(pool.checkedout() / (pool.size() + pool.overflow()) * 100, 2)
+        if (pool.size() + pool.overflow()) > 0 else 0,
     }

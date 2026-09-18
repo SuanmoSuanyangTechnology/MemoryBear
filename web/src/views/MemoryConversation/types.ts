@@ -39,11 +39,18 @@ export type StreamPayload = Partial<{
   [key: string]: unknown
 }
 
+export interface StreamErrorPayload {
+  request_id?: string
+  code?: string | number
+  message?: string
+}
+
 export interface StreamUpdate {
   answer?: string
   appendAnswer?: boolean
   sessionId?: string
   log?: LogItem
+  error?: StreamErrorPayload
   completed?: boolean
 }
 

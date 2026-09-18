@@ -1145,6 +1145,7 @@ class GraphElasticsearchStore:
             {"terms": {"metadata.doc_id": list(source_chunk_ids)}},
             {"term": {"metadata.knowledge_id": knowledge_id}},
             {"term": {"metadata.status": 1}},
+            build_chunk_record_filter(),
         ]
         if allowed_document_ids is not None:
             if not allowed_document_ids:

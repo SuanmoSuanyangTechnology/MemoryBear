@@ -127,6 +127,11 @@ export const home = {
       upgradePackage: 'Upgrade Package',
       account: 'Account Center',
       brainMemory: 'Brain-Inspired Memory Flow',
+      dynamicWeightEngine: 'Memory Value Dynamic Weight Engine',
+      associationEngine: 'Cross-modal Memory Association Engine',
+      consolidationEvolutionEngine: 'Long-term Consolidation Evolution Engine',
+      predictionEngine: 'Memory Prediction Workbench',
+      predictionProgress: 'Prediction Process',
     },
     dashboard: {
       total_models: 'Available Models',
