@@ -111,7 +111,10 @@ def _workspace_media_model_is_compatible(
             and "vision" in capabilities
         )
     if field_name == "audio2text_id":
-        return provider == ModelProvider.DASHSCOPE.value and model_type == ModelType.ASR.value
+        return (
+            provider == ModelProvider.DASHSCOPE.value
+            and model_type == _enum_value(ModelType.ASR)
+        )
     if field_name == "video2text_id":
         return (
             provider == ModelProvider.DASHSCOPE.value

@@ -12,7 +12,14 @@ from urllib.parse import urlparse
 
 from pydantic import SecretStr
 
-from app.models.models_model import ModelConfig, ModelApiKey, ModelType, LoadBalanceStrategy, ModelProvider
+from app.models.models_model import (
+    LoadBalanceStrategy,
+    ModelApiKey,
+    ModelCapability,
+    ModelConfig,
+    ModelProvider,
+    ModelType,
+)
 from app.repositories.model_repository import ModelConfigRepository, ModelApiKeyRepository, ModelBaseRepository
 from app.schemas import model_schema
 from app.schemas.model_schema import (
@@ -175,7 +182,21 @@ def _shared_validation_config(
 
 
 def is_asr_model(model_type: str) -> bool:
-    return _enum_value(model_type) == "asr"
+    return _enum_value(model_type) == _enum_value(ModelType.ASR)
+
+
+def _canonical_model_type_and_capabilities(
+    model_type: ModelType | str,
+    capabilities: list[str] | None,
+) -> tuple[str, list[str]]:
+    canonical_type = ModelType(model_type).value
+    normalized_capabilities = list(dict.fromkeys(capabilities or []))
+    if (
+        canonical_type == ModelType.ASR.value
+        and ModelCapability.AUDIO.value not in normalized_capabilities
+    ):
+        normalized_capabilities.append(ModelCapability.AUDIO.value)
+    return canonical_type, normalized_capabilities
 
 
 def _require_asr_model_configuration(provider: str, model_type: str) -> None:
@@ -982,6 +1003,16 @@ class ModelConfigService:
         仍在网络活体验证通过后写入。
         """
         if is_asr_model(model_data.type):
+            canonical_type, capabilities = _canonical_model_type_and_capabilities(
+                model_data.type,
+                model_data.capability,
+            )
+            model_data = model_data.model_copy(
+                update={
+                    "type": ModelType(canonical_type),
+                    "capability": capabilities,
+                }
+            )
             return await ModelConfigService._create_asr_model(model_data, tenant_id, created_by)
         # 检查名称是否已存在（同租户内；先于任何网络调用）
         if ModelConfigRepository.get_by_name(db, model_data.name, provider=model_data.provider, tenant_id=tenant_id):
@@ -1611,17 +1642,33 @@ class ModelBaseService:
         existing = ModelBaseRepository.get_by_name_and_provider(db, data.name, data.provider)
         if existing:
             raise BusinessException("模型已存在", BizCode.DUPLICATE_NAME)
-        model_base = ModelBaseRepository.create(db, data.model_dump())
+        payload = data.model_dump()
+        payload["type"], payload["capability"] = _canonical_model_type_and_capabilities(
+            data.type,
+            data.capability,
+        )
+        model_base = ModelBaseRepository.create(db, payload)
         db.commit()
         db.refresh(model_base)
         return model_base
 
     @staticmethod
     def update_model_base(db: Session, model_base_id: uuid.UUID, data: model_schema.ModelBaseUpdate):
-        payload = data.model_dump(exclude_unset=True)
-        model_base = ModelBaseRepository.update(db, model_base_id, payload)
-        if not model_base:
+        existing = ModelBaseRepository.get_by_id(db, model_base_id)
+        if not existing:
             raise BusinessException("基础模型不存在", BizCode.MODEL_NOT_FOUND)
+        payload = data.model_dump(exclude_unset=True)
+        effective_type = payload.get("type", existing.type)
+        effective_capabilities = payload.get("capability", existing.capability)
+        canonical_type, capabilities = _canonical_model_type_and_capabilities(
+            effective_type,
+            effective_capabilities,
+        )
+        if "type" in payload or canonical_type == ModelType.ASR.value:
+            payload["type"] = canonical_type
+        if "capability" in payload or canonical_type == ModelType.ASR.value:
+            payload["capability"] = capabilities
+        model_base = ModelBaseRepository.update(db, model_base_id, payload)
         db.commit()
         db.refresh(model_base)
         if "is_deprecated" in payload:
@@ -1653,15 +1700,19 @@ class ModelBaseService:
         if ModelBaseRepository.check_added_by_tenant(db, model_base_id, tenant_id):
             raise BusinessException("模型已添加", BizCode.DUPLICATE_NAME)
 
+        canonical_type, capabilities = _canonical_model_type_and_capabilities(
+            model_base.type,
+            model_base.capability,
+        )
         model_config_data = {
             "model_id": model_base_id,
             "tenant_id": tenant_id,
             "name": model_base.name,
             "provider": model_base.provider,
-            "type": model_base.type,
+            "type": canonical_type,
             "logo": model_base.logo,
             "description": model_base.description,
-            "capability": model_base.capability,
+            "capability": capabilities,
             "is_omni": model_base.is_omni,
             "is_active": False,
             "is_composite": False
