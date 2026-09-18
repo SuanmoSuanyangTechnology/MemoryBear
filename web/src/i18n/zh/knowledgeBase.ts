@@ -342,6 +342,7 @@ export const knowledgeBase = {
         reranker_id: '重排序模型',
         audio2text_id: '音频模型',
         video2text_id: '视频模型',
+        multimodalModel: '多模态模型未配置时继承空间配置模型',
         permission_id: '权限',
         type: '类型',
         status: '状态',
