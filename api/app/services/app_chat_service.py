@@ -1923,6 +1923,8 @@ class AppChatService:
             orchestrator = await MultiAgentOrchestrator.create(self.db, config)
 
             # 3. 流式执行任务
+            # message_id 下传：主执行记录据此带上本轮 assistant message_id，
+            # 日志详情无需再依赖"时序就近"兜底即可把子 Agent 节点挂到该消息下。
             async for event in orchestrator.execute_stream(
                     message=message,
                     conversation_id=conversation_id,
@@ -1932,7 +1934,8 @@ class AppChatService:
                     web_search=web_search,  # 网络搜索参数
                     memory=memory,  # 记忆功能参数
                     storage_type=storage_type,
-                    user_rag_memory_id=user_rag_memory_id
+                    user_rag_memory_id=user_rag_memory_id,
+                    message_id=message_id
             ):
                 # 拦截 sub_usage 事件，累加 token
                 if "event: sub_usage" in event:
@@ -1945,8 +1948,14 @@ class AppChatService:
                             pass
                 else:
                     yield event
-                    # 尝试提取内容（用于保存）
-                    if "data:" in event:
+                    # 累加主气泡正文：只认集群级的 `message` 事件。
+                    # 子 Agent 的正文走 `sub_agent_message`（已在各自区块展示），
+                    # 若一并累加，落库的 assistant 正文会比界面显示多出一份重复内容，
+                    # 刷新后主气泡会变长。
+                    _event_name = ""
+                    if event.startswith("event:"):
+                        _event_name = event[6:].split("\n", 1)[0].strip()
+                    if _event_name == "message" and "data:" in event:
                         try:
                             data_line = event.split("data: ", 1)[1].strip()
                             data = json.loads(data_line)
@@ -1980,6 +1989,20 @@ class AppChatService:
                 },
             ))
             save_messages_enqueued = True
+
+            # 主执行记录的 message_id 回填：记录在流式开始时就已创建（子 Agent 记录
+            # 需要它作为 parent 外键），当时本轮 assistant message 还没落库，写 message_id
+            # 会 FK 违例。这里登记在 save_messages 之后，由 persist 队列在消息提交后回填，
+            # 使日志详情能精确按 message 挂载节点（而不是靠时序就近兜底）。
+            _master_execution_id = getattr(orchestrator, "current_execution_id", None)
+            if _master_execution_id is not None:
+                await BatchPersistQueue.enqueue(PersistTask(
+                    task_type="link_agent_execution_message",
+                    args={
+                        "execution_id": str(_master_execution_id),
+                        "message_id": str(message_id),
+                    },
+                ))
 
             logger.info(
                 "多 Agent 流式聊天完成",

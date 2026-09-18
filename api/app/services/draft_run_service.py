@@ -65,6 +65,29 @@ from app.core.memory.emotion.emotion_resolver import (
 logger = get_business_logger()
 
 
+def _as_uuid(value: Any) -> Optional[uuid.UUID]:
+    """把可能带脏值的 UUID 入参归一为 UUID 或 None。
+
+    背景：发布快照（app_releases.config）由 `multi_agent_config_to_dict` 序列化，
+    历史版本会把 NULL 的 master_agent_id 写成字面量字符串 "None"；回读后再写进
+    UUID 列会触发 asyncpg `DataError: invalid UUID 'None'`，在观测路径上表现为
+    "集群主执行记录创建失败（已降级）"，主记录整体消失（2026-09-14）。
+
+    这里只在唯一写入口做一次归一，既修根因数据，也保证任何来源的脏值都不会
+    再把整条观测链路打掉。非法串同样降级为 None —— 观测数据缺失远好过对话失败。
+    """
+    if value is None or isinstance(value, uuid.UUID):
+        return value
+    text = str(value).strip()
+    if not text or text.lower() in {"none", "null", "nil", "undefined"}:
+        return None
+    try:
+        return uuid.UUID(text)
+    except (ValueError, AttributeError, TypeError):
+        logger.warning(f"agent_executions 写入时丢弃非法 UUID 入参: {value!r}")
+        return None
+
+
 def _snapshot_annotations(annotations: List[AppAnnotation]) -> List[SimpleNamespace]:
     """Detach annotation values before an embedding calculation runs in a worker thread."""
     return [SimpleNamespace(
@@ -556,21 +579,47 @@ class AgentRunService:
             started_at: datetime.datetime,
             model_name: str,
             provider: Optional[str],
+            agent_role: str = "master",
+            parent_execution_id: Optional[uuid.UUID] = None,
+            orchestration_mode: Optional[str] = None,
+            release_id: Optional[uuid.UUID] = None,
+            agent_name: Optional[str] = None,
+            agent_id: Optional[str] = None,
+            message_id: Optional[uuid.UUID] = None,
+            task: Optional[str] = None,
     ) -> uuid.UUID:
+        """创建 Agent 执行记录（running）。
+
+        多 Agent 集群场景下：
+        - 主 Agent 的 execution 由编排器创建（agent_role="master"）；
+        - 子 Agent 由 AgentRunService 自身创建（agent_role="sub" + parent_execution_id）。
+
+        注意：集群子 Agent 的 agent_config 是 AgentConfigProxy，其 id 是 release.id
+        （见 _load_agent_async），而 agent_config_id 的外键指向 agent_configs.id，
+        直接写会外键失败 —— 因此子 Agent 通过 release_id 落库，agent_config_id=None。
+        """
         async with get_async_db_context() as db:
             execution = AgentExecution(
                 app_id=app_id,
                 conversation_id=conversation_id,
-                message_id=None,
-                agent_config_id=agent_config_id,
-                release_id=None,
+                message_id=_as_uuid(message_id),
+                agent_config_id=_as_uuid(agent_config_id),
+                release_id=_as_uuid(release_id),
                 triggered_by=None,
                 steps=[],
                 status="running",
                 started_at=started_at,
+                agent_role=agent_role,
+                parent_execution_id=_as_uuid(parent_execution_id),
+                orchestration_mode=orchestration_mode,
                 meta_data={
                     "model": model_name,
                     "provider": provider,
+                    "agent_name": agent_name,
+                    "agent_id": agent_id,
+                    # 子 Agent 收到的任务（log 详情页的"输入"）；与 agent_dispatch 事件的
+                    # task 同源、同截断长度，保证运行中面板与详情页展示一致。
+                    "task": task,
                 },
             )
             db.add(execution)
@@ -588,6 +637,7 @@ class AgentRunService:
             token_usage: Optional[dict] = None,
             error_message: Optional[str] = None,
             message_id: Optional[uuid.UUID] = None,
+            agent_log: Optional[dict] = None,
     ) -> None:
         async with get_async_db_context() as db:
             result = await db.execute(
@@ -608,6 +658,8 @@ class AgentRunService:
                 record.error_message = error_message
             if message_id is not None:
                 record.message_id = message_id
+            if agent_log is not None:
+                record.agent_log = agent_log
 
             await db.commit()
 
@@ -1181,6 +1233,9 @@ class AgentRunService:
             history: Optional[List[Dict[str, str]]] = None,
             skip_save: bool = False,
             execution_mode: Literal["in_process", "sandbox"] = "in_process",
+            parent_execution_id: Optional[uuid.UUID] = None,
+            orchestration_mode: Optional[str] = None,
+            execution_owner: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """执行试运行（使用 LangChain Agent）
 
@@ -1201,6 +1256,9 @@ class AgentRunService:
             history: 外部传入的历史消息（可选，用于重新生成场景）
             skip_save: 是否跳过保存消息（用于重新生成场景）
             execution_mode: 执行模式 (in_process / sandbox)
+            parent_execution_id: 集群编排中父（主）Agent 的执行 ID；sub_agent=True 时由编排器透传
+            orchestration_mode: 编排模式 supervisor / collaboration（仅集群场景）
+            execution_owner: {"release_id": UUID, "agent_name": str}，规避 AgentConfigProxy.id 外键坑
 
         Returns:
             Dict: 包含 AI 回复和元数据的字典
@@ -1213,6 +1271,9 @@ class AgentRunService:
         knowledge_retrieval_config: dict | None = agent_config.knowledge_retrieval
         memory_config: dict | None = agent_config.memory
         features_config: dict = agent_config.features or {}
+        # 集群子 Agent 的执行轨迹（AgentTraceRecorder 快照），由 agent.chat() 返回的 agent_log 取得
+        _trace: Optional[dict] = None
+        agent_execution_id: Optional[uuid.UUID] = None
 
         # 从 features 中读取功能开关（优先级高于参数默认值）
         web_search_feature = features_config.get("web_search", {})
@@ -1505,15 +1566,26 @@ class AgentRunService:
             )
 
             # 创建 Agent 执行记录（running 状态）
+            # skip_save=True 仅表示"不落会话消息"（重新生成场景由调用方自己保存），
+            # 不表示"不落执行轨迹" —— 集群子 Agent 也必须留痕，否则日志无处可查。
             agent_execution_id = None
-            if not sub_agent and not skip_save:
+            if not skip_save:
                 agent_execution_id = await self._create_agent_execution_async(
                     app_id=agent_config.app_id,
                     conversation_id=uuid.UUID(conversation_id) if isinstance(conversation_id, str) else conversation_id,
-                    agent_config_id=agent_config.id,
-                    started_at=datetime.datetime.fromtimestamp(start_time),
+                    # 子 Agent 的 agent_config 是 AgentConfigProxy，其 id 是 release.id，
+                    # 不能写进 agent_config_id（FK→agent_configs.id），改走 release_id
+                    agent_config_id=None if sub_agent else agent_config.id,
+                    started_at=utcnow_naive(),
                     model_name=api_key_config["model_name"],
                     provider=api_key_config.get("provider"),
+                    agent_role="sub" if sub_agent else "master",
+                    parent_execution_id=parent_execution_id,
+                    orchestration_mode=orchestration_mode,
+                    release_id=(execution_owner or {}).get("release_id"),
+                    agent_name=(execution_owner or {}).get("agent_name"),
+                    agent_id=(execution_owner or {}).get("agent_id"),
+                    task=message[:500] if sub_agent else None,
                 )
 
             # 8. 调用 Agent（支持多模态）
@@ -1523,6 +1595,9 @@ class AgentRunService:
                 context=context,
                 files=processed_files
             )
+            # agent.chat() 的返回值里已带 agent_log（trace.finalize 快照）
+            if isinstance(result, dict) and result.get("agent_log"):
+                _trace = result.get("agent_log")
 
             elapsed_time = time.time() - start_time
 
@@ -1585,13 +1660,15 @@ class AgentRunService:
 
             # 11. 更新 Agent 执行记录为 completed
             node_executions = result.get("node_executions", [])
-            if not sub_agent and not skip_save:
+            if agent_execution_id is not None:
                 await self._update_agent_execution_completed_async(
                     execution_id=agent_execution_id,
                     steps=orchestrator_node_executions + node_executions,
                     status="completed",
                     elapsed_time=elapsed_time,
                     token_usage=result.get("usage"),
+                    # 仅集群子 Agent 落 trace（单 Agent 应用的执行轨迹仍走 steps，不改变既有存储量）
+                    agent_log=_trace if sub_agent else None,
                 )
 
             response = {
@@ -1627,7 +1704,7 @@ class AgentRunService:
         except Exception as e:
             logger.error("LangChain Agent 调用失败", extra={"error": str(e), "error_type": type(e).__name__})
             # 更新 Agent 执行记录为 failed
-            if not sub_agent and not skip_save:
+            if agent_execution_id is not None:
                 try:
                     elapsed_time = time.time() - start_time
                     await self._update_agent_execution_completed_async(
@@ -1636,6 +1713,7 @@ class AgentRunService:
                         status="failed",
                         elapsed_time=elapsed_time,
                         error_message=str(e)[:2000],
+                        agent_log=_trace if sub_agent else None,
                     )
                 except Exception:
                     pass
@@ -1663,6 +1741,9 @@ class AgentRunService:
             skip_save: bool = False,
             user_message_id: Optional[uuid.UUID] = None,
             execution_mode: Literal["in_process", "sandbox"] = "in_process",
+            parent_execution_id: Optional[uuid.UUID] = None,
+            orchestration_mode: Optional[str] = None,
+            execution_owner: Optional[Dict[str, Any]] = None,
 
     ) -> AsyncGenerator[str, None]:
         """执行试运行（流式返回，使用 LangChain Agent）
@@ -1677,6 +1758,9 @@ class AgentRunService:
             variables: 自定义变量参数值
             history: 外部传入的历史消息（可选，用于重新生成场景）
             skip_save: 是否跳过保存消息
+            parent_execution_id: 集群编排中父（主）Agent 的执行 ID；sub_agent=True 时由编排器透传
+            orchestration_mode: 编排模式 supervisor / collaboration（仅集群场景）
+            execution_owner: {"release_id": UUID, "agent_name": str}，规避 AgentConfigProxy.id 外键坑
 
         Yields:
             str: SSE 格式的事件数据
@@ -1702,6 +1786,13 @@ class AgentRunService:
         # 支持外部传入 user_message_id（多模型对比时预生成并随 model_start 回传前端）
         user_message_id = user_message_id or uuid.uuid4()
         assistant_message_id = uuid.uuid4()
+        # 集群子 Agent 的执行轨迹（AgentTraceRecorder 快照）：agent_log_final 优先，agent_log 兜底
+        _trace: Optional[dict] = None
+        _agent_execution_id: Optional[uuid.UUID] = None
+        # 异常兜底：except 分支要写 failed 记录，这些局部变量必须已定义
+        orchestrator_node_executions: list = []
+        node_executions: list = []
+        total_tokens = 0
 
         try:
             # 1. 获取 API Key 配置
@@ -2030,16 +2121,37 @@ class AgentRunService:
                 })
 
             # 创建 Agent 执行记录（running 状态）
-            _agent_execution_id = None
-            if not sub_agent and not skip_save:
+            # skip_save=True 仅表示"不落会话消息"（重新生成场景由调用方保存），不表示"不落执行轨迹"。
+            if not skip_save:
                 _agent_execution_id = await self._create_agent_execution_async(
                     app_id=agent_config.app_id,
                     conversation_id=uuid.UUID(conversation_id) if isinstance(conversation_id, str) else conversation_id,
-                    agent_config_id=agent_config.id,
-                    started_at=datetime.datetime.fromtimestamp(start_time),
+                    # 子 Agent 的 agent_config 是 AgentConfigProxy，其 id 是 release.id，
+                    # 不能写进 agent_config_id（FK→agent_configs.id），改走 release_id
+                    agent_config_id=None if sub_agent else agent_config.id,
+                    started_at=utcnow_naive(),
                     model_name=api_key_config["model_name"],
                     provider=api_key_config.get("provider"),
+                    agent_role="sub" if sub_agent else "master",
+                    parent_execution_id=parent_execution_id,
+                    orchestration_mode=orchestration_mode,
+                    release_id=(execution_owner or {}).get("release_id"),
+                    agent_name=(execution_owner or {}).get("agent_name"),
+                    agent_id=(execution_owner or {}).get("agent_id"),
+                    task=message[:500] if sub_agent else None,
                 )
+
+            # 子 Agent 派发事件：此刻 execution_id 才存在，前端据此先建区块再收数据。
+            # 事件类型是新增的（不改任何既有事件名），老前端忽略未知事件即可。
+            if sub_agent and _agent_execution_id is not None:
+                yield self._format_sse_event("agent_dispatch", {
+                    "execution_id": str(_agent_execution_id),
+                    "agent_id": (execution_owner or {}).get("agent_id"),
+                    "agent_name": (execution_owner or {}).get("agent_name"),
+                    "parent_execution_id": str(parent_execution_id) if parent_execution_id else None,
+                    "orchestration_mode": orchestration_mode,
+                    "task": message[:500],
+                })
 
             # close() 前把后续还会用到的 ORM 属性读成普通值，防止 close 后触发 DetachedInstanceError
             _app_id = agent_config.app_id
@@ -2090,7 +2202,15 @@ class AgentRunService:
                 elif isinstance(chunk, dict) and chunk.get("type") == "tool_error":
                     yield self._format_sse_event("tool_error", {"step_id": chunk.get("step_id"), "name": chunk["name"], "error": chunk.get("error")})
                 elif isinstance(chunk, dict) and chunk.get("type") == "agent_log":
+                    # 增量快照：终态未到时先兜底（中途异常也能留下可查的轨迹）
+                    if _trace is None and isinstance(chunk.get("data"), dict):
+                        _trace = chunk.get("data")
                     yield self._format_sse_event("agent_log", chunk)
+                elif isinstance(chunk, dict) and chunk.get("type") == "agent_log_final":
+                    # 终态快照优先；SSE 行为与此前"通用分支透传"完全一致
+                    if isinstance(chunk.get("data"), dict):
+                        _trace = chunk.get("data")
+                    yield self._format_sse_event("agent_log_final", chunk)
                 elif isinstance(chunk, dict):
                     event_type = str(chunk.get("type") or "unknown")
                     yield self._format_sse_event(event_type, chunk)
@@ -2125,7 +2245,11 @@ class AgentRunService:
             await self._record_api_key_usage_async(api_key_config.get("api_key_id"))
 
             if sub_agent:
-                yield self._format_sse_event("sub_usage", {"total_tokens": total_tokens})
+                # 带上 execution_id：编排层/前端据此把"先建的区块"与真实子执行记录对上
+                yield self._format_sse_event("sub_usage", {
+                    "total_tokens": total_tokens,
+                    "execution_id": str(_agent_execution_id) if _agent_execution_id else None,
+                })
 
             # 过滤 citations（只调用一次）
             filtered_citations = self._filter_citations(features_config, citations_collector)
@@ -2172,14 +2296,30 @@ class AgentRunService:
                     asyncio.create_task(_run_after_turn())
 
             # 11.5 更新 Agent 执行记录为 completed
-            if not sub_agent and not skip_save:
+            if _agent_execution_id is not None:
                 await self._update_agent_execution_completed_async(
                     execution_id=_agent_execution_id,
                     steps=orchestrator_node_executions + node_executions,
                     status="completed",
                     elapsed_time=elapsed_time,
                     token_usage={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": total_tokens},
+                    # 仅集群子 Agent 落 trace（单 Agent 应用的执行轨迹仍走 steps，不改变既有存储量）
+                    agent_log=_trace if sub_agent else None,
                 )
+
+            # 子 Agent 收尾事件：前端据此把对应区块标记完成（携带耗时/token/最终产出）。
+            # `output` 必须带上：运行中面板的"输出"没有别的数据源（子运行的正文走
+            # sub_agent_message，前端不消费），缺了就只剩一个空 `{}`。
+            if sub_agent:
+                yield self._format_sse_event("agent_complete", {
+                    "execution_id": str(_agent_execution_id) if _agent_execution_id else None,
+                    "agent_id": (execution_owner or {}).get("agent_id"),
+                    "agent_name": (execution_owner or {}).get("agent_name"),
+                    "status": "completed",
+                    "output": full_content,
+                    "elapsed_time": elapsed_time,
+                    "token_usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": total_tokens},
+                })
 
             # 12. 发送结束事件（包含 suggested_questions、audio_url 和 audio_status）
             end_data: Dict[str, Any] = {
@@ -2188,6 +2328,9 @@ class AgentRunService:
                 "elapsed_time": elapsed_time,
                 "message_length": len(full_content)
             }
+            if sub_agent:
+                # 子 Agent 完成事件：携带 execution_id / token，前端据此收尾对应区块
+                end_data["execution_id"] = str(_agent_execution_id) if _agent_execution_id else None
             if not sub_agent:
                 end_data["suggested_questions"] = suggested_questions
                 end_data["audio_url"] = stream_audio_url
@@ -2265,18 +2408,31 @@ class AgentRunService:
                 except Exception:
                     pass
             # 更新 Agent 执行记录为 failed
-            if not sub_agent and not skip_save:
+            if _agent_execution_id is not None:
                 try:
                     elapsed_time = time.time() - start_time
                     await self._update_agent_execution_completed_async(
                         execution_id=_agent_execution_id,
-                        steps=node_executions if 'node_executions' in dir() else [],
+                        steps=orchestrator_node_executions + node_executions,
                         status="failed",
                         elapsed_time=elapsed_time,
                         error_message=json.dumps(compact_error, ensure_ascii=False)[:2000],
+                        agent_log=_trace if sub_agent else None,
                     )
                 except Exception:
                     pass
+            # 子 Agent 失败也发收尾事件，避免前端区块永久停在 running
+            # （output 带已产出的部分内容，便于判断"死在哪儿"）
+            if sub_agent:
+                yield self._format_sse_event("agent_complete", {
+                    "execution_id": str(_agent_execution_id) if _agent_execution_id else None,
+                    "agent_id": (execution_owner or {}).get("agent_id"),
+                    "agent_name": (execution_owner or {}).get("agent_name"),
+                    "status": "failed",
+                    "output": full_content,
+                    "elapsed_time": time.time() - start_time,
+                    "token_usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": total_tokens},
+                })
             # 发送错误事件
             yield self._format_sse_event("error", {
                 "error": compact_error,
