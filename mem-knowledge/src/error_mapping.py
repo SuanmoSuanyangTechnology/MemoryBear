@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Iterator
+from functools import lru_cache
 from http import HTTPStatus
 from typing import Literal
 
@@ -104,13 +105,30 @@ def _exception_matches(
     return any(isinstance(item, types) for item in _exception_chain(exc))
 
 
+@lru_cache(maxsize=1)
+def _ark_embedding_errors() -> tuple[tuple[type[BaseException], ...], ...]:
+    """Load optional Ark SDK types only when classifying a provider failure."""
+    try:
+        from volcenginesdkarkruntime._exceptions import (
+            ArkAPIConnectionError,
+            ArkAPIStatusError,
+            ArkAPITimeoutError,
+        )
+    except ImportError:
+        return (), (), ()
+    return (ArkAPITimeoutError,), (ArkAPIConnectionError,), (ArkAPIStatusError,)
+
+
 def map_text_embedding_error(exc: BaseException) -> KnowledgeError | None:
     """Classify known provider failures; leave unknown program errors untouched."""
     if isinstance(exc, KnowledgeError):
         return exc
+    ark_timeouts, ark_connections, ark_statuses = _ark_embedding_errors()
     for cause in _exception_chain(exc):
         if isinstance(
-            cause, (APITimeoutError, TimeoutError, httpx.TimeoutException, requests.Timeout)
+            cause,
+            (APITimeoutError, TimeoutError, httpx.TimeoutException, requests.Timeout)
+            + ark_timeouts,
         ):
             return _with_cause("KB_EMBEDDING_TIMEOUT", exc)
         if isinstance(
@@ -121,10 +139,13 @@ def map_text_embedding_error(exc: BaseException) -> KnowledgeError | None:
                 httpx.NetworkError,
                 httpx.RemoteProtocolError,
                 requests.ConnectionError,
-            ),
+            )
+            + ark_connections,
         ):
             return _with_cause("KB_EMBEDDING_CONNECTION_FAILED", exc)
-        if isinstance(cause, (APIStatusError, httpx.HTTPStatusError, requests.HTTPError)):
+        if isinstance(
+            cause, (APIStatusError, httpx.HTTPStatusError, requests.HTTPError) + ark_statuses
+        ):
             response = getattr(cause, "response", None)
             status = getattr(cause, "status_code", None) or getattr(response, "status_code", None)
             if status == HTTPStatus.TOO_MANY_REQUESTS:
