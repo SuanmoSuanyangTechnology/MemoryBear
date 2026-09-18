@@ -105,14 +105,25 @@ class KnowledgeRetrievalNode(BaseNode):
         if not image_template:
             return None
         pure_ref = _PURE_VARIABLE_PATTERN.match(image_template)
-        if not pure_ref or not variable_pool.has(image_template):
+        if not pure_ref:
             logger.warning(
-                "knowledge node image_query must be a pure file-variable reference: %r",
+                "knowledge node image_query 非纯变量引用（必须形如 {{node.x.images}}）: %r",
                 image_template,
+            )
+            return None
+        if not variable_pool.has(image_template):
+            logger.warning(
+                "knowledge node image_query 变量在变量池中不存在: %r", image_template,
             )
             return None
         value = variable_pool.get_value(image_template, strict=False)
         candidates = value if isinstance(value, list) else [value]
+        logger.info(
+            "knowledge node image_query 解析 template=%r 候选数=%d 样本=%r",
+            image_template,
+            len(candidates),
+            candidates[0] if candidates else None,
+        )
         for candidate in candidates:
             if isinstance(candidate, dict):
                 file_type = candidate.get("type") or candidate.get("origin_file_type")
@@ -126,6 +137,10 @@ class KnowledgeRetrievalNode(BaseNode):
                 and image_url
             ):
                 return image_url
+        logger.warning(
+            "knowledge node image_query 变量中未找到带 URL 的图片项: %r value=%r",
+            image_template, value,
+        )
         return None
 
     def _extract_input(self, state: WorkflowState, variable_pool: VariablePool) -> dict[str, Any]:
@@ -393,18 +408,23 @@ class KnowledgeRetrievalNode(BaseNode):
         image_url = self._resolve_image_query(variable_pool)
         query = "" if image_url else self._render_template(self.typed_config.query, variable_pool)
 
+        # image_query 已配置但运行期未解析到图片（变量不存在/为空/非图片），且文本 query 也为空：
+        # 明确报错，避免用空 query 构造请求触发难懂的 pydantic 校验错误
+        if not image_url and not (query or "").strip():
+            image_template = (self.typed_config.image_query or "").strip()
+            if image_template:
+                raise BusinessException(
+                    f"image_query 未解析到可用图片：{image_template}。"
+                    "请确认上游已传入文件/图片变量（如 sys.files），且数组中包含图片。",
+                    BizCode.INVALID_PARAMETER,
+                )
+
         # 2. Pre-render variable templates in metadata filter conditions
         rendered_filters = self._render_filter_variables(
             self.typed_config.metadata_filters, variable_pool
         )
 
-        # 2.5 auto 模式：节点层用配置好的模型 + 参数，提取出源数据过滤条件（list[FilterGroup]，配置层类型）
-        # 图片检索没有文本 query，跳过基于 LLM 的自动过滤。
-        auto_filter_groups: list | None = None
-        if not image_url and self.typed_config.metadata_filter_mode == MetadataFilterMode.AUTO:
-            auto_filter_groups = await self._extract_auto_filter_groups_async(query, variable_pool)
-
-        # 3. Construct KnowledgeRetrievalRequest
+        # 3. 解析检索公共参数
         first_kb = self.typed_config.knowledge_bases[0]
         kb_ids = [kb.kb_id for kb in self.typed_config.knowledge_bases]
 
@@ -413,7 +433,7 @@ class KnowledgeRetrievalNode(BaseNode):
             vector_similarity_weight = None
         else:
             vector_similarity_weight = first_kb.vector_similarity_weight
-        
+
         # 混合检索下是否叠加图谱检索路由：请求级取第一个 KB 的配置作为兜底，
         # 每个 KB 显式配置的 enable_graph_retrieval 仍会在检索层按 KB 覆盖生效
         enable_graph_retrieval = (
@@ -422,30 +442,6 @@ class KnowledgeRetrievalNode(BaseNode):
             else 0
         )
 
-        # 图片模式下文本 query 为空，先用占位构建，检索前由 image_query 替换
-        request = KnowledgeRetrievalRequest(
-            query=query or " ",
-            source=KnowledgeRetrievalSource.WORKFLOW,
-            kb_ids=kb_ids,
-            knowledge_bases=self.typed_config.knowledge_bases,
-            similarity_threshold=first_kb.similarity_threshold,
-            vector_similarity_weight=vector_similarity_weight,
-            top_k=self.typed_config.reranker_top_k or first_kb.top_k,
-            retrieve_type=first_kb.retrieve_type,
-            enable_graph_retrieval=enable_graph_retrieval,
-            rerank_id=self.typed_config.reranker_id,
-            rerank_mode=self.typed_config.rerank_mode,
-            rerank_weights=self.typed_config.rerank_weights,
-            metadata_filter_mode=self.typed_config.metadata_filter_mode,
-            metadata_filters=(
-                auto_filter_groups
-                if self.typed_config.metadata_filter_mode == MetadataFilterMode.AUTO
-                else ([rendered_filters] if rendered_filters else [])
-            ),
-        )
-        if self.typed_config.metadata_filter_mode == MetadataFilterMode.AUTO:
-            request.mark_metadata_filters_resolved()
-
         # 4. Resolve the application owner before calling the selected adapter.
         context = await build_app_knowledge_context(
             self.workflow_config.get("app_id"),
@@ -453,6 +449,10 @@ class KnowledgeRetrievalNode(BaseNode):
             trace_id=uuid.uuid4().hex,
         )
         retriever = get_knowledge_retriever()
+
+        # 5. 确定最终 query 与元数据过滤。请求模型要求 query 非空（strip 后），
+        #    因此图片模式必须先把图片编码成 data URI（非空）再构造请求，不能用空白占位。
+        metadata_filters: list = []
         if image_url:
             from app.integrations.knowledge.retrieval_policy import (
                 build_image_retrieval_query,
@@ -472,13 +472,43 @@ class KnowledgeRetrievalNode(BaseNode):
                     "当前知识库/检索模式不支持图片检索，请改用文本 query 或更换支持多模态检索的知识库",
                     BizCode.INVALID_PARAMETER,
                 )
-            image_query = await build_image_retrieval_query(image_url)
-            if image_query is None:
+            # 图片检索没有文本 query，跳过基于 LLM 的自动/元数据过滤
+            final_query = await build_image_retrieval_query(image_url)
+            if final_query is None:
                 raise BusinessException(
                     "图片检索失败：无法下载或编码 image_query 指向的图片",
                     BizCode.INVALID_PARAMETER,
                 )
-            request = request.model_copy(update={"query": image_query})
+        else:
+            final_query = query
+            # auto 模式：节点层用配置好的模型 + 参数提取源数据过滤条件（list[FilterGroup]）
+            if self.typed_config.metadata_filter_mode == MetadataFilterMode.AUTO:
+                metadata_filters = (
+                    await self._extract_auto_filter_groups_async(query, variable_pool)
+                ) or []
+            elif rendered_filters:
+                metadata_filters = [rendered_filters]
+
+        # 6. 构造检索请求（此时 query 必为非空：图片 data URI 或渲染后的文本）
+        request = KnowledgeRetrievalRequest(
+            query=final_query,
+            source=KnowledgeRetrievalSource.WORKFLOW,
+            kb_ids=kb_ids,
+            knowledge_bases=self.typed_config.knowledge_bases,
+            similarity_threshold=first_kb.similarity_threshold,
+            vector_similarity_weight=vector_similarity_weight,
+            top_k=self.typed_config.reranker_top_k or first_kb.top_k,
+            retrieve_type=first_kb.retrieve_type,
+            enable_graph_retrieval=enable_graph_retrieval,
+            rerank_id=self.typed_config.reranker_id,
+            rerank_mode=self.typed_config.rerank_mode,
+            rerank_weights=self.typed_config.rerank_weights,
+            metadata_filter_mode=self.typed_config.metadata_filter_mode,
+            metadata_filters=metadata_filters,
+        )
+        if self.typed_config.metadata_filter_mode == MetadataFilterMode.AUTO:
+            request.mark_metadata_filters_resolved()
+
         result = await retriever.retrieve(request, context)
 
         # 5. Assemble return format
