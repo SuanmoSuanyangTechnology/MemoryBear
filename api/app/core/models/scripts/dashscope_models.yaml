@@ -1341,7 +1341,7 @@ models:
   logo: dashscope
 
 - name: qwen3-asr-flash-filetrans
-  type: ASR
+  type: asr
   provider: dashscope
   description: 异步音频文件转录
   is_deprecated: false
@@ -1351,7 +1351,7 @@ models:
   tags: [音频转录]
   logo: dashscope
 - name: qwen-audio-3.0-asr-flash
-  type: ASR
+  type: asr
   provider: dashscope
   description: 非实时大模型语音识别，支持多语种和方言，可转写5分钟以内的音频并输出文本
   is_deprecated: false
