@@ -126,10 +126,18 @@ async def create_knowledge(
     db: AsyncSession = Depends(get_async_db),
     name: str = Body(..., description="KB name"),
     audio2text_id: uuid.UUID | None = Body(
-        None, description="Audio transcription model config ID",
+        None,
+        description=(
+            "Audio transcription model config ID "
+            "(omitted inherits the workspace audio model; null disables it)"
+        ),
     ),
     video2text_id: uuid.UUID | None = Body(
-        None, description="Video understanding model config ID",
+        None,
+        description=(
+            "Video understanding model config ID "
+            "(omitted inherits the workspace video model; null disables it)"
+        ),
     ),
 ):
     """

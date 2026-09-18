@@ -21,7 +21,7 @@ from ..api.schemas.knowledge import (
 )
 from ..errors import KnowledgeError, public_text
 from ..models.owned import Knowledge, KnowledgeType, PermissionType
-from ..models.references import ModelBase, ModelConfig, User
+from ..models.references import ModelBase, ModelConfig, ModelProvider, ModelType, User
 from ..rag.knowledge_graph.config import GraphPipeline, is_graph_enabled
 from ..rag.parser_config import (
     normalize_knowledge_parser_config_update,
@@ -47,6 +47,11 @@ _SHARE_MIRRORED_MODEL_FIELDS = (
 )
 _SHARED_STATUS_UPDATE_FIELDS = frozenset({"status"})
 _SHARED_STATUS_VALUES = frozenset({1, 2})
+_WORKSPACE_MEDIA_MODEL_FIELDS = {
+    "image2text_id": "vision",
+    "audio2text_id": "audio",
+    "video2text_id": "video",
+}
 
 
 @dataclass(frozen=True)
@@ -81,6 +86,86 @@ def _reference_not_found(code: str) -> KnowledgeError:
 
 def _as_uuid(value: object) -> uuid.UUID:
     return value if isinstance(value, uuid.UUID) else uuid.UUID(str(value))
+
+
+def _enum_value(value: object) -> str:
+    return str(getattr(value, "value", value)).lower()
+
+
+def _workspace_media_model_is_compatible(
+    field_name: str,
+    model: ModelConfig,
+    tenant_id: uuid.UUID,
+) -> bool:
+    provider = _enum_value(model.provider)
+    model_type = _enum_value(model.type)
+    capabilities = {_enum_value(item) for item in (model.capability or [])}
+    accessible = model.tenant_id == tenant_id or (
+        provider == ModelProvider.SPEEDBEAR.value and bool(model.is_public)
+    )
+    if not bool(model.is_active) or not accessible:
+        return False
+    if field_name == "image2text_id":
+        return (
+            model_type in {ModelType.LLM.value, ModelType.CHAT.value}
+            and "vision" in capabilities
+        )
+    if field_name == "audio2text_id":
+        return provider == ModelProvider.DASHSCOPE.value and model_type == ModelType.ASR.value
+    if field_name == "video2text_id":
+        return (
+            provider == ModelProvider.DASHSCOPE.value
+            and model_type in {ModelType.LLM.value, ModelType.CHAT.value}
+            and "video" in capabilities
+        )
+    return False
+
+
+async def _inherit_workspace_media_models(
+    db: AsyncSession,
+    create_data: KnowledgeCreate,
+    knowledge: KnowledgeCreate,
+    workspace,
+) -> None:
+    pending: dict[str, uuid.UUID] = {}
+    for field_name, workspace_field in _WORKSPACE_MEDIA_MODEL_FIELDS.items():
+        if field_name in create_data.model_fields_set:
+            continue
+        raw_model_id = getattr(workspace, workspace_field, None)
+        if raw_model_id is None:
+            continue
+        try:
+            pending[field_name] = _as_uuid(raw_model_id)
+        except (TypeError, ValueError, AttributeError):
+            logger.warning(
+                "Skip invalid workspace media model reference: workspace_id=%s field=%s",
+                workspace.id,
+                workspace_field,
+            )
+
+    if not pending:
+        return
+
+    models = await ReferenceRepository.get_model_configs(
+        db,
+        list(dict.fromkeys(pending.values())),
+    )
+    models_by_id = {model.id: model for model in models}
+    for field_name, model_id in pending.items():
+        model = models_by_id.get(model_id)
+        if model is not None and _workspace_media_model_is_compatible(
+            field_name,
+            model,
+            workspace.tenant_id,
+        ):
+            setattr(knowledge, field_name, model_id)
+            continue
+        logger.warning(
+            "Skip incompatible workspace media model: workspace_id=%s field=%s model_id=%s",
+            workspace.id,
+            _WORKSPACE_MEDIA_MODEL_FIELDS[field_name],
+            model_id,
+        )
 
 
 def build_knowledge_list_filters(
@@ -441,10 +526,7 @@ async def _prepare_knowledge_create(
         if not workspace.llm:
             raise _reference_not_found("KB_WORKSPACE_LLM_MODEL_NOT_CONFIGURED")
         knowledge.llm_id = _as_uuid(workspace.llm)
-    if "image2text_id" not in create_data.model_fields_set:
-        model = await ReferenceRepository.get_latest_vision_model(db, workspace.tenant_id)
-        if model is not None:
-            knowledge.image2text_id = model.id
+    await _inherit_workspace_media_models(db, create_data, knowledge, workspace)
     return knowledge
 
 
