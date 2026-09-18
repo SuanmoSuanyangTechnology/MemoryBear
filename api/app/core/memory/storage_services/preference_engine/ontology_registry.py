@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
-_ONTOLOGY_PATH = Path(__file__).parent / "prompts" / "ontology_v2.json"
+_ONTOLOGY_PATH = Path(__file__).parent / "prompts" / "coding_preference_ontology.json"
 
 
 @dataclass(frozen=True)

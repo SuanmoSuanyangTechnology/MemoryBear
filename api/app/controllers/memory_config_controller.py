@@ -35,7 +35,7 @@ from app.schemas.memory_storage_schema import (
     ForgettingConfigUpdateRequest,
 )
 from app.schemas.memory_api_schema import PredictionConfigUpdateRequest
-from app.schemas.preference_config_schema import PreferenceConfigUpdate
+from app.schemas.memory_preference_config_schema import PreferenceConfigUpdate
 from app.schemas.response_schema import ApiResponse
 from app.schemas.scene_memory_schema import SceneConfig, SceneConfigUpdate
 from app.services.emotion_config_service import EmotionConfigService

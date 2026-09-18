@@ -33,7 +33,7 @@ from app.schemas.memory_storage_schema import (
     ConfigParamsCreate,
 )
 from app.schemas.memory_storage_schema import ForgettingConfigUpdateRequest
-from app.schemas.preference_config_schema import PreferenceConfigUpdate
+from app.schemas.memory_preference_config_schema import PreferenceConfigUpdate
 from app.schemas.scene_memory_schema import SceneConfigUpdate
 from app.utils.config_utils import resolve_config_id_async
 

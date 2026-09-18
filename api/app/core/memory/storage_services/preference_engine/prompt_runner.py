@@ -19,8 +19,12 @@ class PreferencePromptRunner:
     def __init__(self, llm_client: Any, ontology: PreferenceOntology):
         self.llm_client = llm_client
         self.ontology = ontology
-        self._p1 = Template((_PROMPT_DIR / "p1_v0.5.0.jinja2").read_text(encoding="utf-8"))
-        self._p2 = Template((_PROMPT_DIR / "p2_v0.4.1.jinja2").read_text(encoding="utf-8"))
+        self._p1 = Template(
+            (_PROMPT_DIR / "p1_identify_preferences.jinja2").read_text(encoding="utf-8")
+        )
+        self._p2 = Template(
+            (_PROMPT_DIR / "p2_plan_preference_update.jinja2").read_text(encoding="utf-8")
+        )
 
     async def identify(
         self,

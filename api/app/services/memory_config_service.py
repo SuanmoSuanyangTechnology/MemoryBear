@@ -438,7 +438,7 @@ class MemoryConfigService:
         from app.core.memory.storage_services.preference_engine.default_keywords import DEFAULT_PREFERENCE_KEYWORDS
         from app.core.memory.storage_services.preference_engine.keyword_gate import effective_keywords
         from app.repositories.memory_config_repository import MemoryConfigRepository
-        from app.schemas.preference_config_schema import PreferenceConfigResponse
+        from app.schemas.memory_preference_config_schema import PreferenceConfigResponse
 
         row = await MemoryConfigRepository(self.db).get_by_id_async(config_id)
         if row is None or str(row.workspace_id) != str(workspace_id):
