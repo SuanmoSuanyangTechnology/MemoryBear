@@ -98,6 +98,32 @@ class MemoryConfig(Base):
     emotion_extract_keywords = Column(Boolean, default=True, comment="是否提取情绪关键词")
     emotion_min_intensity = Column(Float, default=0.1, comment="最小情绪强度阈值")
     emotion_enable_subject = Column(Boolean, default=True, comment="是否启用主体分类")
+
+    # 预测推演引擎配置
+    prediction_candidate_limit = Column(
+        Integer, nullable=False, default=8, server_default="8",
+        comment="进入Actor选择池的非主角候选实体数量上限",
+    )
+    prediction_participant_limit = Column(
+        Integer, nullable=False, default=3, server_default="3",
+        comment="实际参与推演的非主角Actor数量上限",
+    )
+    prediction_max_steps = Column(
+        Integer, nullable=False, default=4, server_default="4",
+        comment="单次预测推演最大Step数",
+    )
+    prediction_recall_limit = Column(
+        Integer, nullable=False, default=20, server_default="20",
+        comment="合并筛选后最终入选的记忆数量上限",
+    )
+    prediction_min_valid_memory_count = Column(
+        Integer, nullable=False, default=3, server_default="3",
+        comment="允许进入EvidenceGate语义判断的最低记忆数量",
+    )
+    prediction_embedding_min_similarity = Column(
+        Float, nullable=False, default=0.7, server_default="0.7",
+        comment="Embedding召回最低余弦相似度",
+    )
     
     # 时间戳
     created_at = Column(DateTime, default=utcnow_naive, comment="创建时间")

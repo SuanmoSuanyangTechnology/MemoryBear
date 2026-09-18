@@ -445,6 +445,14 @@ class MemoryConfig(BaseModel):
     # Pipeline config: Emotion extraction
     emotion_enabled: bool = False
 
+    # Prediction engine
+    prediction_candidate_limit: int = 8
+    prediction_participant_limit: int = 3
+    prediction_max_steps: int = 4
+    prediction_recall_limit: int = 20
+    prediction_min_valid_memory_count: int = 3
+    prediction_embedding_min_similarity: float = 0.7
+
     # Ontology scene association
     scene_id: Optional[UUID] = None
     ontology_class_infos: list[dict] = Field(default_factory=list)
