@@ -85,6 +85,12 @@ class Knowledge(KnowledgeBase):
         nullable=True,
         comment="default image2text model ID",
     )
+    audio2text_id = Column(
+        UUID(as_uuid=True), nullable=True, comment="audio transcription model ID"
+    )
+    video2text_id = Column(
+        UUID(as_uuid=True), nullable=True, comment="video understanding model ID"
+    )
     doc_num = Column(Integer, default=0, comment="doc num")
     chunk_num = Column(Integer, default=0, comment="chunk num")
     parser_id = Column(String, index=True, default="naive", comment="default parser ID")

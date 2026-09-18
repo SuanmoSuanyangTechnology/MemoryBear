@@ -8,7 +8,6 @@ import os
 import tempfile
 from pathlib import Path
 
-from ...models.media import QWenCV, QWenSeq2txt
 from ..context import ChunkContext, ParseResult
 from ..tokenization import set_chunk_content
 from .base import ChunkPipeline
@@ -59,7 +58,9 @@ class AudioChunkPipeline(ChunkPipeline):
             with tempfile.NamedTemporaryFile(suffix=extension, delete=False) as temporary:
                 temporary.write(binary)
                 temporary_path = temporary.name
-            model = ctx.vision_model or QWenSeq2txt(lang=ctx.lang)
+            model = ctx.vision_model
+            if model is None:
+                raise RuntimeError("audio2text model config is unavailable")
             self._callback(ctx, 0.1, "Use media model to transcribe audio.")
             transcription, _tokens = model.transcription(temporary_path)
             document = copy.deepcopy(ctx.doc)
@@ -91,7 +92,9 @@ class PictureVideoChunkPipeline(ChunkPipeline):
             raise RuntimeError(f"Extension {extension} is not supported yet.")
         result = []
         try:
-            model = ctx.vision_model or QWenCV(lang=ctx.lang)
+            model = ctx.vision_model
+            if model is None:
+                raise RuntimeError("video2text model config is unavailable")
             answer, _tokens = model.chat(
                 system="",
                 history=[],

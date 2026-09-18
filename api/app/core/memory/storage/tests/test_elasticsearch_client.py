@@ -23,6 +23,7 @@ from app.core.memory.storage.provider.elasticsearch.client import (
     ElasticClient,
 )
 from app.core.memory.storage.provider.elasticsearch.serialization import (
+    MAX_TEXT_FIELD_LENGTH,
     normalize_elasticsearch_document,
     route_embedding_field,
 )
@@ -722,7 +723,9 @@ def test_elasticsearch_document_normalization() -> None:
         "metadata": {"statement": ""},
     }
 
-    assert normalize_elasticsearch_document(value, date_fields=set()) == {
+    assert normalize_elasticsearch_document(
+        value, date_fields=set(), text_fields=set()
+    ) == {
         "created_at": "2026-01-01T00:00:00Z",
         "embedding": [1, 2.5],
         "metadata": {"statement": ""},
@@ -734,6 +737,7 @@ def test_elasticsearch_document_normalization() -> None:
             "statement": "",
         },
         date_fields={"valid_at", "invalid_at"},
+        text_fields=set(),
     ) == {
         "valid_at": None,
         "invalid_at": None,
@@ -747,7 +751,9 @@ def test_elasticsearch_document_normalization() -> None:
     )
     for invalid in invalid_documents:
         with pytest.raises(ValueError):
-            normalize_elasticsearch_document(invalid, date_fields=set())
+            normalize_elasticsearch_document(
+                invalid, date_fields=set(), text_fields=set()
+            )
 
 
 async def test_elastic_client_save_and_update_node() -> None:
@@ -892,6 +898,7 @@ async def test_elastic_client_get_node_uses_filter_projection_and_sort() -> None
         {
             "index": get_index_name(MemoryNodeType.EXTRACTED_ENTITY),
             "keep_alive": PIT_KEEP_ALIVE,
+            "allow_partial_search_results": False,
         }
     ]
     assert fake.search_calls == [
@@ -903,7 +910,6 @@ async def test_elastic_client_get_node_uses_filter_projection_and_sort() -> None
             "source_includes": ["id", "status"],
             "sort": [{"score": "desc"}, {"_shard_doc": "asc"}],
             "pit": {"id": "pit-1", "keep_alive": PIT_KEEP_ALIVE},
-            "allow_partial_search_results": False,
         }
     ]
     assert fake.close_point_in_time_calls == [{"id": "pit-1"}]
@@ -2283,3 +2289,36 @@ async def test_elastic_client_embedding_search_routes_to_dimension_field() -> No
     )
 
     assert fake.search_calls[0]["knn"]["field"] == "summary_embedding_1536"
+
+
+def test_normalize_document_truncates_oversized_text_field() -> None:
+    document = normalize_elasticsearch_document(
+        {"id": "x", "description": "a" * (MAX_TEXT_FIELD_LENGTH + 10)},
+        date_fields=set(),
+        text_fields={"description"},
+    )
+
+    assert len(document["description"]) == MAX_TEXT_FIELD_LENGTH
+    assert document["description"] == "a" * MAX_TEXT_FIELD_LENGTH
+
+
+def test_normalize_document_keeps_short_strings_unchanged() -> None:
+    document = normalize_elasticsearch_document(
+        {"id": "x", "description": "short"},
+        date_fields=set(),
+        text_fields={"description"},
+    )
+
+    assert document["description"] == "short"
+
+
+def test_normalize_document_does_not_truncate_keyword_identifier() -> None:
+    oversized_id = "id-" + "a" * (MAX_TEXT_FIELD_LENGTH + 10)
+    document = normalize_elasticsearch_document(
+        {"id": oversized_id, "description": "short"},
+        date_fields=set(),
+        text_fields={"description"},
+    )
+
+    assert document["id"] == oversized_id
+    assert document["description"] == "short"

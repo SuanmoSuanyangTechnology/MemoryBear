@@ -7,50 +7,20 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import FastAPI, Request
-from fastapi.exception_handlers import request_validation_exception_handler
-from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
-from starlette.exceptions import HTTPException as StarletteHTTPException
+from fastapi import FastAPI
 
+from .api.error_handlers import register_error_handlers
 from .api.router import internal_v1_router
-from .api.schemas.common import ApiResponse, fail
+from .api.schemas.common import ApiResponse
 from .bootstrap import get_settings
 from .config import KnowledgeSettings
-from .errors import KnowledgeError
+from .i18n import load_catalogs
 from .logging import setup_logging
-from .request_logging import RequestLoggingFastAPI, request_route_template
+from .request_logging import RequestLoggingFastAPI
 from .runtime import ProcessRuntime
-from .trace import TRACE_ID_HEADER, TraceIdMiddleware, get_trace_id
+from .trace import TraceIdMiddleware
 
 logger = logging.getLogger(__name__)
-
-_HTTP_MESSAGES = {
-    "zh": {
-        400: "请求参数错误",
-        401: "未授权访问",
-        403: "没有权限访问",
-        404: "请求的资源不存在",
-        405: "不支持的请求方法",
-        409: "资源冲突",
-        422: "数据验证失败",
-        429: "请求过于频繁，请稍后再试",
-        500: "服务器内部错误",
-        503: "服务暂时不可用",
-    },
-    "en": {
-        400: "Bad request parameters",
-        401: "Unauthorized access",
-        403: "Access forbidden",
-        404: "Resource not found",
-        405: "Method not allowed",
-        409: "Resource conflict",
-        422: "Validation failed",
-        429: "Too many requests, please try again later",
-        500: "Internal server error",
-        503: "Service temporarily unavailable",
-    },
-}
 
 _LEGACY_ERROR_RESPONSES = {
     status_code: {
@@ -59,34 +29,12 @@ _LEGACY_ERROR_RESPONSES = {
     }
     for status_code in (400, 404, 409, 500)
 }
-_RERANK_VALIDATION_FIELDS = frozenset({"rerank_mode", "rerank_weights"})
-_RERANK_VALIDATION_MESSAGE = "Invalid rerank configuration"
-_RETRIEVAL_VALIDATION_MESSAGE = "Invalid retrieval request"
-
-
-def _request_language(request: Request) -> str:
-    requested = request.query_params.get("lang", "").lower()
-    if requested.startswith("en"):
-        return "en"
-    accepted = request.headers.get("Accept-Language", "").lower()
-    return "en" if accepted.startswith("en") else "zh"
-
-
-def _http_message(request: Request, status_code: int, detail: object) -> str:
-    language = _request_language(request)
-    return _HTTP_MESSAGES[language].get(status_code, str(detail))
-
-
-def _is_rerank_validation_error(exc: RequestValidationError) -> bool:
-    return any(
-        any(part in _RERANK_VALIDATION_FIELDS for part in error.get("loc", ()))
-        for error in exc.errors()
-    )
 
 
 def create_app(settings: KnowledgeSettings | None = None) -> FastAPI:
     """Construct the internal API without connecting to dependencies."""
 
+    load_catalogs()
     service_settings = settings or get_settings()
     setup_logging(service_settings)
     runtime = ProcessRuntime(service_settings)
@@ -136,126 +84,7 @@ def create_app(settings: KnowledgeSettings | None = None) -> FastAPI:
     )
     application.include_router(internal_v1_router)
 
-    @application.exception_handler(RequestValidationError)
-    async def request_validation_error_handler(
-        request: Request,
-        exc: RequestValidationError,
-    ) -> JSONResponse:
-        trace_id = getattr(request.state, "trace_id", get_trace_id())
-        route_path = request_route_template(request.scope)
-        validation_errors = [
-            {
-                "loc": str((tuple(error.get("loc", ())) or ("unknown",))[0]),
-                "type": str(error.get("type", "")),
-                "msg": "Request validation failed",
-            }
-            for error in exc.errors()
-        ]
-        logger.error(
-            "Knowledge request validation failed trace_id=%s method=%s path=%s "
-            "actor_id=%s tenant_id=%s workspace_id=%s source=%s errors=%s",
-            trace_id,
-            request.method,
-            route_path,
-            request.headers.get("X-KB-Actor-ID"),
-            request.headers.get("X-KB-Tenant-ID"),
-            request.headers.get("X-KB-Workspace-ID"),
-            request.headers.get("X-KB-Source"),
-            validation_errors,
-        )
-        if request.url.path.endswith("/chunks/retrieval"):
-            return JSONResponse(
-                status_code=400,
-                headers={TRACE_ID_HEADER: trace_id},
-                content=fail(
-                    code=400,
-                    msg=_http_message(request, 400, _RETRIEVAL_VALIDATION_MESSAGE),
-                    error=_RETRIEVAL_VALIDATION_MESSAGE,
-                ),
-            )
-        if _is_rerank_validation_error(exc):
-            return JSONResponse(
-                status_code=400,
-                headers={TRACE_ID_HEADER: trace_id},
-                content=fail(
-                    code=400,
-                    msg=_http_message(request, 400, _RERANK_VALIDATION_MESSAGE),
-                    error=_RERANK_VALIDATION_MESSAGE,
-                ),
-            )
-        return await request_validation_exception_handler(request, exc)
-
-    @application.exception_handler(KnowledgeError)
-    async def knowledge_error_handler(
-        request: Request,
-        exc: KnowledgeError,
-    ) -> JSONResponse:
-        trace_id = getattr(request.state, "trace_id", get_trace_id())
-        logger.warning(
-            "Knowledge request failed internal_code=%s response_code=%s status=%s"
-            " path=%s method=%s trace_id=%s retryable=%s",
-            exc.code,
-            exc.response_code,
-            exc.status_code,
-            request.url.path,
-            request.method,
-            trace_id,
-            exc.retryable,
-        )
-        if exc.response_style == "business":
-            message = exc.message
-            error = exc.message
-        elif exc.response_style == "internal":
-            message = _http_message(request, 500, exc.message)
-            error = message
-        else:
-            message = _http_message(request, exc.status_code, exc.message)
-            error = exc.message
-        return JSONResponse(
-            status_code=exc.status_code,
-            headers={TRACE_ID_HEADER: trace_id},
-            content=fail(
-                code=exc.response_code,
-                msg=message,
-                error=error,
-            ),
-        )
-
-    @application.exception_handler(StarletteHTTPException)
-    async def http_error_handler(
-        request: Request,
-        exc: StarletteHTTPException,
-    ) -> JSONResponse:
-        trace_id = getattr(request.state, "trace_id", get_trace_id())
-        return JSONResponse(
-            status_code=exc.status_code,
-            headers={TRACE_ID_HEADER: trace_id, **(exc.headers or {})},
-            content=fail(
-                code=exc.status_code,
-                msg=_http_message(request, exc.status_code, exc.detail),
-                error=exc.detail,
-            ),
-        )
-
-    @application.exception_handler(Exception)
-    async def unhandled_error_handler(
-        request: Request,
-        exc: Exception,
-    ) -> JSONResponse:
-        trace_id = getattr(request.state, "trace_id", get_trace_id())
-        logger.exception(
-            "Unhandled knowledge service error type=%s",
-            type(exc).__name__,
-        )
-        return JSONResponse(
-            status_code=500,
-            headers={TRACE_ID_HEADER: trace_id},
-            content=fail(
-                code=10001,
-                msg=_http_message(request, 500, exc),
-                error=_http_message(request, 500, exc),
-            ),
-        )
+    register_error_handlers(application)
 
     return application
 

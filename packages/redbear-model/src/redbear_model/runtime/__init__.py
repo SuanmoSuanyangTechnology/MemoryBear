@@ -5,6 +5,8 @@ from __future__ import annotations
 from importlib import import_module
 
 _EXPORTS = {
+    "RedBearVideoUnderstanding": (".video_understanding", "RedBearVideoUnderstanding"),
+    "RedBearAudioTranscriber": (".audio", "RedBearAudioTranscriber"),
     "RedBearEmbeddings": (".embedding", "RedBearEmbeddings"),
     "RedBearMultimodalEmbeddings": (".embedding", "RedBearMultimodalEmbeddings"),
     "RedBearImageGenerator": (".generation", "RedBearImageGenerator"),
@@ -16,12 +18,14 @@ _EXPORTS = {
 }
 
 __all__ = [
+    "RedBearAudioTranscriber",
     "RedBearEmbeddings",
     "RedBearImageGenerator",
     "RedBearLLM",
     "RedBearMultimodalEmbeddings",
     "RedBearRerank",
     "RedBearVideoGenerator",
+    "RedBearVideoUnderstanding",
     "StructResponse",
     "normalize_runtime_flags",
 ]

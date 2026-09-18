@@ -83,6 +83,10 @@ const specialValidators: Record<string, (val: any) => boolean> = {
   'code.output_variables': (val: any[]) => !Array.isArray(val) || !val.length,
   // jinja-render.mapping: if non-empty, every item must have a name
   'jinja-render.mapping': (val: any[]) => Array.isArray(val) && val.length > 0 && val.some(v => !v?.name || !v?.value),
+  // agent.reference: target app and release policy are required; pinned also requires a release
+  'agent.reference': (val: any) => !val?.app_id
+    || !['current', 'pinned'].includes(val?.release_policy)
+    || (val?.release_policy === 'pinned' && !val?.release_id),
 }
 
 function isEmpty(val: any): boolean {
@@ -115,12 +119,22 @@ function validateNode(type: string, config: Record<string, any>): CheckError[] {
 
   Object.entries(nodeConfig).forEach(([field, fieldConfig]) => {
     if (!fieldConfig?.required) return
+    if (fieldConfig.dependsOn) {
+      const dependencyValue = get(fieldConfig.dependsOn as string)
+        ?? (type === 'agent' && fieldConfig.dependsOn === 'mode' ? 'inline' : undefined)
+      if (dependencyValue !== fieldConfig.dependsOnValue) return
+    }
     const val = get(field)
     const specialKey = `${type}.${field}`
     const specialValidator = specialValidators[specialKey]
     const isInvalid = specialValidator ? specialValidator(val) : isEmpty(val)
     if (isInvalid) errors.push({ key: specialKey, message: '' })
   })
+
+  // knowledge-retrieval: query and image_query cannot both be empty
+  if (type === 'knowledge-retrieval' && isEmpty(get('query')) && isEmpty(get('image_query'))) {
+    errors.push({ key: 'knowledge-retrieval.query', message: '' })
+  }
 
   // llm: vision_input required when vision is enabled
   if (type === 'llm' || type === 'question-classifier') {

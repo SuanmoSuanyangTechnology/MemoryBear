@@ -401,6 +401,8 @@ const Private: FC = () => {
       llm_id: knowledgeBase.llm_id,
       image2text_id: knowledgeBase.image2text_id,
       reranker_id: knowledgeBase.reranker_id,
+      audio2text_id: knowledgeBase.audio2text_id,
+      video2text_id: knowledgeBase.video2text_id,
       permission_id: knowledgeBase.permission_id,
       type: knowledgeBase.type,
       status: checked ? 1 : 0,

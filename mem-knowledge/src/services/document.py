@@ -56,8 +56,8 @@ return 0
 """.strip()
 
 
-def _not_found(message: str = "Document resource not found") -> KnowledgeError:
-    return KnowledgeError.from_code("KB_RESOURCE_NOT_FOUND", message)
+def _not_found(code: str = "KB_DOCUMENT_NOT_FOUND") -> KnowledgeError:
+    return KnowledgeError.from_code(code)
 
 
 def document_to_data(document: Document) -> dict[str, Any]:
@@ -92,7 +92,7 @@ async def list_documents(
     document_ids: str | None,
 ) -> tuple[int, list[dict[str, Any]]]:
     if await knowledge_service.get_knowledge(db, kb_id, principal) is None:
-        raise _not_found("Knowledge resource not found")
+        raise KnowledgeError.from_code("KB_KNOWLEDGE_NOT_FOUND")
 
     filters = [Document.kb_id == kb_id, Document.status == 1]
     if parent_id is not None:
@@ -123,7 +123,7 @@ async def create_document(
     principal: Principal,
 ) -> Document:
     if await knowledge_service.get_knowledge(db, create_data.kb_id, principal) is None:
-        raise _not_found("Knowledge resource not found")
+        raise KnowledgeError.from_code("KB_KNOWLEDGE_NOT_FOUND")
     if (
         await file_service.get_file(
             db,
@@ -133,11 +133,11 @@ async def create_document(
         )
         is None
     ):
-        raise _not_found("File resource not found")
+        raise KnowledgeError.from_code("KB_FILE_NOT_FOUND")
     try:
         parser_config = normalize_document_parser_config(create_data.parser_config)
     except (ValueError, GraphPipelineConfigError) as exc:
-        raise KnowledgeError.from_code("KB_VALIDATION_ERROR", str(exc)) from exc
+        raise KnowledgeError.from_code("KB_DOCUMENT_PARSER_CONFIG_INVALID") from exc
     payload = create_data.model_copy(
         update={"created_by": principal.actor_id, "parser_config": parser_config}
     )
@@ -167,29 +167,28 @@ async def prepare_document_update(
 ) -> DocumentUpdatePlan:
     document = await get_document(db, document_id, principal)
     if document is None:
-        raise _not_found()
+        raise KnowledgeError.from_code("KB_DOCUMENT_NOT_FOUND")
     knowledge = await knowledge_service.get_knowledge(db, document.kb_id, principal)
     if knowledge is None:
-        raise _not_found("Knowledge resource not found")
+        raise KnowledgeError.from_code("KB_KNOWLEDGE_NOT_FOUND")
 
     update_fields = update_data.model_dump(exclude_unset=True)
     file_id = update_fields.get("file_id")
     if file_id is not None:
         if await file_service.get_file(db, file_id, principal, document.kb_id) is None:
-            raise _not_found("File resource not found")
+            raise KnowledgeError.from_code("KB_FILE_NOT_FOUND")
 
     graph_parser_config = dict(knowledge.parser_config or {})
     if "parser_config" in update_fields:
         parser_config = update_fields["parser_config"]
         if not isinstance(parser_config, dict):
             raise KnowledgeError.from_code(
-                "KB_VALIDATION_ERROR",
-                "parser_config must be an object",
+                "KB_PARSER_CONFIG_OBJECT_REQUIRED",
             )
         try:
             parser_config = normalize_document_parser_config(parser_config)
         except (ValueError, GraphPipelineConfigError) as exc:
-            raise KnowledgeError.from_code("KB_VALIDATION_ERROR", str(exc)) from exc
+            raise KnowledgeError.from_code("KB_DOCUMENT_PARSER_CONFIG_INVALID") from exc
         update_fields["parser_config"] = parser_config
         parent_child_mode = _uses_parent_child_mode(parser_config)
         chunk_mode = knowledge.chunk_mode
@@ -197,8 +196,7 @@ async def prepare_document_update(
             chunk_mode == 2 and not parent_child_mode
         ):
             raise KnowledgeError.from_code(
-                "KB_VALIDATION_ERROR",
-                "禁止变更分块模式",
+                "KB_DOCUMENT_CHUNK_MODE_CHANGE_FORBIDDEN",
             )
         if chunk_mode == 0:
             graph_parser_config.update(parser_config)
@@ -222,10 +220,10 @@ async def apply_document_update(
 ) -> Document:
     document = await get_document(db, plan.document_id, principal, plan.knowledge_id)
     if document is None:
-        raise _not_found()
+        raise KnowledgeError.from_code("KB_DOCUMENT_NOT_FOUND")
     knowledge = await knowledge_service.get_knowledge(db, plan.knowledge_id, principal)
     if knowledge is None:
-        raise _not_found("Knowledge resource not found")
+        raise KnowledgeError.from_code("KB_KNOWLEDGE_NOT_FOUND")
 
     parser_config = plan.update_fields.get("parser_config")
     if parser_config is not None and knowledge.chunk_mode == 0:
@@ -284,7 +282,6 @@ async def delete_document_search_data(
     if failures:
         raise KnowledgeError.from_code(
             "KB_SEARCH_UNAVAILABLE",
-            "Failed to delete document search data",
         )
     return int(result.get("deleted", 0))
 
@@ -421,10 +418,10 @@ async def prepare_document_deletion(
 ) -> DocumentDeletionSnapshot:
     document = await get_document(db, document_id, principal)
     if document is None:
-        raise _not_found()
+        raise KnowledgeError.from_code("KB_DOCUMENT_NOT_FOUND")
     knowledge = await knowledge_service.get_knowledge(db, document.kb_id, principal)
     if knowledge is None:
-        raise _not_found("Knowledge resource not found")
+        raise KnowledgeError.from_code("KB_KNOWLEDGE_NOT_FOUND")
 
     file_result = await db.execute(
         select(File).where(File.id == document.file_id, File.kb_id == document.kb_id)

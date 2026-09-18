@@ -88,7 +88,16 @@ def _normalize_document(
         for field, mapping in properties.items()
         if isinstance(mapping, Mapping) and mapping.get("type") == "date"
     }
-    document = normalize_elasticsearch_document(value, date_fields=date_fields)
+    text_fields = {
+        field
+        for field, mapping in properties.items()
+        if isinstance(mapping, Mapping) and mapping.get("type") == "text"
+    }
+    document = normalize_elasticsearch_document(
+        value,
+        date_fields=date_fields,
+        text_fields=text_fields,
+    )
     return route_embedding_field(document, label)
 
 
@@ -478,15 +487,6 @@ class ElasticClient(BaseClient):
         if not specs:
             return []
 
-        for spec in specs:
-            self.verify_label(spec.label)
-            if spec.label not in EMBEDDING_FIELDS:
-                raise UnsupportedQueryError(
-                    self.name,
-                    spec.label,
-                    "embedding",
-                )
-
         _validate_search_limit(limit)
         query_vector = _normalize_query_vector(embed)
         vector_norm = math.hypot(*query_vector)
@@ -499,9 +499,18 @@ class ElasticClient(BaseClient):
             ]
 
         dimension = len(query_vector)
-        embedding_fields = [
-            get_embedding_field_name(spec.label, dimension) for spec in specs
-        ]
+        embedding_fields: list[str] = []
+        for spec in specs:
+            self.verify_label(spec.label)
+            if spec.label not in EMBEDDING_FIELDS:
+                raise UnsupportedQueryError(
+                    self.name,
+                    spec.label,
+                    "embedding",
+                )
+            embedding_fields.append(
+                get_embedding_field_name(spec.label, dimension)
+            )
 
         num_candidates = min(
             MAX_SEARCH_LIMIT,

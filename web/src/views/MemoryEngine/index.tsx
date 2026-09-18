@@ -1,8 +1,12 @@
 import { type FC } from 'react'
 import { useParams } from 'react-router-dom'
-import { DynamicWeightEngine, AssociationEngine, ConsolidationEvolutionEngine } from '@redbear/memory-brick'
+import {
+    DynamicWeightEngine, AssociationEngine,
+    ConsolidationEvolutionEngine, PredictionEngineSettings, PredictionEngine,
+} from '@redbear/memory-brick'
 
 import { request } from '@/utils/request'
+import { handleSSE } from '@/utils/stream'
 import PrivateWrap from '@/components/PrivateWrap'
 
 const MemoryEngine: FC = () => {
@@ -16,6 +20,12 @@ const MemoryEngine: FC = () => {
   }
   if (type === 'consolidation-evolution-engine') {
       return <PrivateWrap>{() => <ConsolidationEvolutionEngine request={request} />}</PrivateWrap>
+  }
+  if (type === 'prediction-engine') {
+      return <PrivateWrap>{() => <PredictionEngineSettings request={request} />}</PrivateWrap>
+  }
+  if (type === 'prediction-progress') {
+      return <PrivateWrap>{() => <PredictionEngine handleSSE={handleSSE} />}</PrivateWrap>
   }
   return null
 }

@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, field_serializer, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
 from typing import Optional, List, Dict, Any
 import datetime
 import uuid
@@ -38,10 +38,10 @@ class ApiKeyRegister(BaseModel):
 class ModelConfigCreate(ModelConfigBase):
     """创建自定义模型Schema（内嵌 credential：创建即登记点名渠道，单接口原子完成）
 
-    自定义模型不经模型广场添加，provider 级渠道不保证可用，因此凭据必填并
-    在创建时做活体验证；验证失败拒绝创建（零落库）。
+    自定义模型不经模型广场添加，provider 级渠道不保证可用，因此凭据必填。
+    ASR 模型在实际调用时校验凭据，其他模型在创建时做活体验证。
     """
-    credential: ApiKeyRegister = Field(..., description="模型凭据（必填，创建时活体验证）")
+    credential: ApiKeyRegister = Field(..., description="模型凭据（必填）")
 
 
 class CompositeMemberSpec(BaseModel):
@@ -299,6 +299,13 @@ class ModelBase(BaseModel):
     input_modalities: List[str] = []
     output_modalities: List[str] = []
     features: List[str] = []
+
+    @field_validator("type", mode="before")
+    @classmethod
+    def canonicalize_asr_type(cls, value):
+        if isinstance(value, str) and value.lower() == "asr":
+            return ModelType.ASR.value
+        return value
 
 
 class ModelBaseQuery(BaseModel):

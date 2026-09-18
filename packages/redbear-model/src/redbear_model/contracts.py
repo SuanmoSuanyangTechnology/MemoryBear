@@ -33,14 +33,12 @@ class ModelType(StrEnum):
     RERANK = "rerank"
     IMAGE = "image"
     VIDEO = "video"
-    # deprecated（2a 别名窗口，2e 删除）：原独立值 "chat"，仅存量数据仍持该字符串
-    CHAT = "llm"
+    ASR = "ASR"
 
     @classmethod
-    def _missing_(cls, value: object) -> ModelType | None:
-        """存量 `"chat"` 字符串读侧归一为 LLM（DB/YAML/事件永久兼容层）。"""
-        if isinstance(value, str) and value.lower() == "chat":
-            return cls.LLM
+    def _missing_(cls, value):
+        if isinstance(value, str) and value.lower() == "asr":
+            return cls.ASR
         return None
 
 

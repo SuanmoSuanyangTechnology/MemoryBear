@@ -7,7 +7,7 @@ import uuid
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.db import get_db
-from app.dependencies import get_current_user
+from app.dependencies import get_current_user, get_current_user_async, CurrentUserSnapshot
 from app.models.models_model import ModelProvider, ModelType, LoadBalanceStrategy
 from app.models.user_model import User
 from app.repositories.model_repository import ModelConfigRepository
@@ -305,13 +305,13 @@ def get_model_by_id(
 async def create_model(
     model_data: model_schema.ModelConfigCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: CurrentUserSnapshot = Depends(get_current_user_async)
 ):
     """
     创建自定义模型
 
-    - 内嵌 credential 必填：创建时以该凭据做活体验证，验证通过后 config 与点名渠道
-      单事务落库；验证失败拒绝创建（零写入）
+    - 内嵌 credential 必填：config 与点名渠道单事务落库
+    - ASR 模型在实际调用时校验凭据；其他模型仍在创建时做活体验证
     """
     api_logger.info(f"创建模型配置请求: {model_data.name}, 用户: {current_user.username}, tenant_id={current_user.tenant_id}")
 
@@ -645,12 +645,13 @@ async def create_model_api_key(
     api_key_data: model_schema.ApiKeyRegister,
     response: Response,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: CurrentUserSnapshot = Depends(get_current_user_async)
 ):
     """
     为模型登记点名凭据（provider/真实模型名由服务端按模型配置读取）
 
-    登记前会做一次活体验证；同凭据同端点已存在时幂等合并（公共渠道吸收为 no-op）。
+    ASR 模型在实际调用时校验凭据；其他模型登记前做一次活体验证。
+    同凭据同端点已存在时幂等合并（公共渠道吸收为 no-op）。
     新建 201；幂等合并/吸收 200。
     """
     api_logger.info(f"登记模型凭据请求: model_id={model_id}, 用户: {current_user.username}")
@@ -705,7 +706,7 @@ def unbind_model_api_key(
 async def validate_model_config(
     validate_data: model_schema.ModelValidateRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: CurrentUserSnapshot = Depends(get_current_user_async)
 ):
     """
     验证模型配置是否有效
@@ -725,9 +726,7 @@ async def validate_model_config(
         api_key=validate_data.api_key,
         api_base=validate_data.api_base,
         model_type=validate_data.model_type,
-        test_message=validate_data.test_message
+        test_message=validate_data.test_message,
     )
     
     return success(data=model_schema.ModelValidateResponse(**result), msg="验证完成")
-
-

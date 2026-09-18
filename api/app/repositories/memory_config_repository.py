@@ -567,6 +567,21 @@ class MemoryConfigRepository:
             db_logger.error(f"根据ID查询记忆配置失败(异步): config_id={config_id} - {str(e)}")
             raise
 
+    async def update_prediction_config_async(
+        self,
+        config_id: uuid.UUID,
+        values: dict[str, int | float],
+    ) -> MemoryConfig | None:
+        """Update all supported prediction fields and return the tracked row."""
+        config = await self.get_by_id_async(config_id)
+        if config is None:
+            return None
+        for field, value in values.items():
+            setattr(config, field, value)
+        await self.db.commit()
+        await self.db.refresh(config)
+        return config
+
     async def get_by_workspace_and_config_name_async(
             self, workspace_id: uuid.UUID, config_name: str
     ) -> Optional[MemoryConfig]:

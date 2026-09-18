@@ -8,6 +8,10 @@ from dataclasses import dataclass, replace
 from typing import Any
 
 from redbear_model import (
+    ModelAccessDeniedError,
+    ModelConfigNotFoundError,
+    ModelConfigSnapshot,
+    ModelProvider,
     ResolvedModelConfig,
     is_qwen3_vl_embedding,
     is_qwen3_vl_reranker,
@@ -28,6 +32,7 @@ from ..api.schemas.chunk import (
 from ..api.schemas.knowledge_metadata import MetadataFilterMode
 from ..api.schemas.knowledge_retrieval import KnowledgeRetrievalRequest
 from ..api.schemas.rerank import RerankMode, RerankWeights
+from ..error_mapping import map_model_error
 from ..errors import KnowledgeError
 from ..models.owned import Knowledge, KnowledgeShare, PermissionType
 from ..rag.knowledge_graph.config import (
@@ -63,6 +68,44 @@ class _KnowledgeRef:
 class RetrievalPolicyModelTarget:
     embedding: ModelRuntimeSnapshot
     reranker: ModelRuntimeSnapshot | None
+
+
+@dataclass(frozen=True)
+class _RetrievalPreparationWithModelError(RetrievalPreparation):
+    request_reranker_error_code: str | None = None
+
+
+class _CachedConfigModelRegistry:
+    """Reuse the visibility snapshot when the shared resolver reads it again."""
+
+    def __init__(
+        self,
+        delegate: AsyncSQLModelRegistry,
+        config: ModelConfigSnapshot,
+    ) -> None:
+        self._delegate = delegate
+        self._config = config
+
+    async def get_model_config(
+        self,
+        model_config_id: uuid.UUID,
+        tenant_id: uuid.UUID,
+    ) -> ModelConfigSnapshot:
+        del model_config_id, tenant_id
+        return self._config
+
+    async def list_active_keys(self, model_config_id: uuid.UUID):
+        return await self._delegate.list_active_keys(model_config_id)
+
+    async def get_public_binding(
+        self,
+        tenant_id: uuid.UUID,
+        provider: ModelProvider,
+    ):
+        return await self._delegate.get_public_binding(tenant_id, provider)
+
+    async def record_key_usage(self, key_id: uuid.UUID) -> None:
+        await self._delegate.record_key_usage(key_id)
 
 
 def _supports_qwen3_vl_embedding(snapshot: ModelRuntimeSnapshot) -> bool:
@@ -130,10 +173,6 @@ def build_retrieval_policy(
     )
 
 
-def _model_unavailable(message: str) -> KnowledgeError:
-    return KnowledgeError.from_code("KB_MODEL_UNAVAILABLE", message)
-
-
 class KnowledgeRetrievalPreparation:
     @classmethod
     async def _resolve_policy_refs(
@@ -155,7 +194,6 @@ class KnowledgeRetrievalPreparation:
             if not resolved:
                 raise KnowledgeError.from_code(
                     "KB_RESOURCE_NOT_FOUND",
-                    "Knowledge resources were not found",
                 )
             for ref in resolved:
                 if ref.knowledge.id in seen:
@@ -175,25 +213,29 @@ class KnowledgeRetrievalPreparation:
         if not refs:
             raise KnowledgeError.from_code(
                 "KB_RESOURCE_NOT_FOUND",
-                "Knowledge resources were not found",
             )
         targets: list[RetrievalPolicyModelTarget] = []
         for ref in refs:
             knowledge = ref.knowledge
             if knowledge.embedding_id is None:
-                raise _model_unavailable("Knowledge embedding model is unavailable")
+                raise KnowledgeError.from_code(
+                    "KB_RETRIEVAL_EMBEDDING_MODEL_NOT_CONFIGURED"
+                )
             embedding = await cls._snapshot_model(
                 db,
                 knowledge.embedding_id,
                 principal.tenant_id,
             )
             if embedding is None:
-                raise _model_unavailable("Knowledge embedding model is unavailable")
-            reranker = await cls._snapshot_model(
-                db,
-                knowledge.reranker_id,
-                principal.tenant_id,
-            )
+                raise KnowledgeError.from_code("KB_MODEL_UNAVAILABLE")
+            try:
+                reranker = await cls._snapshot_model(
+                    db,
+                    knowledge.reranker_id,
+                    principal.tenant_id,
+                )
+            except KnowledgeError:
+                reranker = None
             targets.append(
                 RetrievalPolicyModelTarget(
                     embedding=embedding,
@@ -206,7 +248,7 @@ class KnowledgeRetrievalPreparation:
             principal.tenant_id,
         )
         if request.rerank_id is not None and request_reranker is None:
-            raise _model_unavailable("Request rerank model is unavailable")
+            raise KnowledgeError.from_code("KB_MODEL_UNAVAILABLE")
         return build_retrieval_policy(
             targets=tuple(targets),
             request_reranker=request_reranker,
@@ -275,11 +317,14 @@ class KnowledgeRetrievalPreparation:
             and not request.metadata_filters_resolved
             and common_metadata_defs
         ):
-            metadata_llm = await cls._snapshot_model(
-                db,
-                refs[0].knowledge.llm_id,
-                principal.tenant_id,
-            )
+            try:
+                metadata_llm = await cls._snapshot_model(
+                    db,
+                    refs[0].knowledge.llm_id,
+                    principal.tenant_id,
+                )
+            except KnowledgeError:
+                metadata_llm = None
         graph = await cls._build_graph_snapshot(db, request, principal, refs, targets)
         single_evidence_graph_target = (
             graph is not None
@@ -288,6 +333,7 @@ class KnowledgeRetrievalPreparation:
             and targets[0].params.retrieve_type is RetrieveType.Graph
         )
         request_reranker = None
+        request_reranker_error_code = None
         single_hybrid_uses_request_model = (
             request.rerank_id is not None
             and target_count == 1
@@ -304,11 +350,19 @@ class KnowledgeRetrievalPreparation:
             )
         )
         if request_model_required:
-            request_reranker = await cls._snapshot_model(
-                db,
-                request.rerank_id,
-                principal.tenant_id,
-            )
+            try:
+                request_reranker = await cls._snapshot_model(
+                    db,
+                    request.rerank_id,
+                    principal.tenant_id,
+                )
+            except KnowledgeError as exc:
+                request_reranker_error_code = exc.code
+                logger.warning(
+                    "Request rerank model resolution failed code=%s error_type=%s",
+                    exc.code,
+                    type(exc.__cause__ or exc).__name__,
+                )
         if single_hybrid_uses_request_model:
             local_plan = targets[0].params.local_rerank
             if local_plan is not None:
@@ -337,7 +391,7 @@ class KnowledgeRetrievalPreparation:
                     target_count > 1 and mode is RerankMode.WEIGHTED_SCORE
                 ),
             )
-        return RetrievalPreparation(
+        return _RetrievalPreparationWithModelError(
             targets=tuple(targets),
             tenant_id=principal.tenant_id,
             metadata_defs_by_kb=metadata_defs_by_kb,
@@ -346,6 +400,7 @@ class KnowledgeRetrievalPreparation:
             graph=graph,
             request_reranker=request_reranker,
             global_rerank=global_rerank,
+            request_reranker_error_code=request_reranker_error_code,
         )
 
     @classmethod
@@ -506,10 +561,12 @@ class KnowledgeRetrievalPreparation:
         local_mode, local_weights, _ = selection
         retrieve_type = cls._resolve_retrieve_type(request, ref.config)
         if knowledge.embedding_id is None:
-            raise _model_unavailable(f"embedding_id config error: {knowledge.id}")
+            raise KnowledgeError.from_code(
+                "KB_RETRIEVAL_EMBEDDING_MODEL_NOT_CONFIGURED"
+            )
         embedding = await cls._snapshot_model(db, knowledge.embedding_id, principal.tenant_id)
         if embedding is None:
-            raise _model_unavailable(f"No embedding api key found for knowledge {knowledge.id}")
+            raise KnowledgeError.from_code("KB_MODEL_UNAVAILABLE")
         reranker = None
         if cls._target_reranker_required(
             retrieve_type=retrieve_type,
@@ -520,16 +577,16 @@ class KnowledgeRetrievalPreparation:
             request_has_rerank_id=request.rerank_id is not None,
         ):
             if knowledge.reranker_id is None:
-                raise _model_unavailable(f"reranker_id config error: {knowledge.id}")
+                raise KnowledgeError.from_code(
+                    "KB_RETRIEVAL_RERANK_MODEL_NOT_CONFIGURED"
+                )
             reranker = await cls._snapshot_model(
                 db,
                 knowledge.reranker_id,
                 principal.tenant_id,
             )
             if reranker is None:
-                raise _model_unavailable(
-                    f"No reranker api key found for knowledge {knowledge.id}"
-                )
+                raise KnowledgeError.from_code("KB_MODEL_UNAVAILABLE")
         local_plan = RerankPlan(
             mode=local_mode,
             weights=local_weights,
@@ -577,16 +634,14 @@ class KnowledgeRetrievalPreparation:
             if not is_graph_enabled(knowledge.parser_config):
                 if target.params.retrieve_type is RetrieveType.Graph:
                     raise KnowledgeError.from_code(
-                        "KB_VALIDATION_ERROR",
-                        f"knowledge graph is disabled: {knowledge.id}",
+                        "KB_GRAPH_DISABLED",
                     )
                 continue
             try:
                 pipeline = resolve_graph_pipeline(knowledge.parser_config)
             except GraphPipelineConfigError as exc:
                 raise KnowledgeError.from_code(
-                    "KB_VALIDATION_ERROR",
-                    str(exc),
+                    "KB_GRAPH_CONFIG_INVALID",
                 ) from exc
             if (
                 target.params.retrieve_type is RetrieveType.HYBRID
@@ -595,7 +650,9 @@ class KnowledgeRetrievalPreparation:
                 continue
             llm = await cls._snapshot_model(db, knowledge.llm_id, principal.tenant_id)
             if llm is None:
-                raise _model_unavailable(f"No LLM api key found for knowledge {knowledge.id}")
+                raise KnowledgeError.from_code(
+                    "KB_RETRIEVAL_GRAPH_LLM_NOT_CONFIGURED"
+                )
             pipelines.add(pipeline)
             snapshots.append(
                 GraphTargetSnapshot(
@@ -612,8 +669,7 @@ class KnowledgeRetrievalPreparation:
             return None
         if len(pipelines) != 1:
             raise KnowledgeError.from_code(
-                "KB_VALIDATION_ERROR",
-                "all graph targets must use the same graph pipeline",
+                "KB_GRAPH_PIPELINE_MISMATCH",
             )
         return GraphRetrievalSnapshot(query_text, snapshots[0].pipeline, tuple(snapshots))
 
@@ -625,14 +681,26 @@ class KnowledgeRetrievalPreparation:
     ) -> ModelRuntimeSnapshot | None:
         if model_id is None:
             return None
+        registry = AsyncSQLModelRegistry(db)
+        try:
+            config = await registry.get_model_config(model_id, tenant_id)
+        except Exception as exc:
+            raise map_model_error(exc) from exc
+        if config is None:
+            exc = ModelConfigNotFoundError(model_id)
+            raise map_model_error(exc) from exc
+        visibility_proven = config.tenant_id == tenant_id or config.is_public
+        if not visibility_proven:
+            exc = ModelAccessDeniedError(model_id, tenant_id)
+            raise map_model_error(exc) from exc
         try:
             resolved: ResolvedModelConfig = await resolve_model_async(
-                AsyncSQLModelRegistry(db),
+                _CachedConfigModelRegistry(registry, config),
                 model_config_id=model_id,
                 tenant_id=tenant_id,
             )
-        except Exception:
-            return None
+        except Exception as exc:
+            raise map_model_error(exc, visibility_proven=True) from exc
         return ModelRuntimeSnapshot(
             model_name=resolved.model_name,
             provider=resolved.provider.value,
@@ -779,8 +847,7 @@ class KnowledgeRetrievalPreparation:
         }
         if len(embedding_spaces) > 1:
             raise KnowledgeError.from_code(
-                "KB_VALIDATION_ERROR",
-                "Weighted rerank requires matching embedding spaces",
+                "KB_WEIGHTED_RERANK_EMBEDDING_MISMATCH",
             )
 
     @classmethod
@@ -807,13 +874,11 @@ class KnowledgeRetrievalPreparation:
     def _validate_weighted_params(params: RetrievalParams) -> None:
         if params.retrieve_type is not RetrieveType.HYBRID:
             raise KnowledgeError.from_code(
-                "KB_VALIDATION_ERROR",
-                "Weighted rerank requires hybrid retrieval",
+                "KB_WEIGHTED_RERANK_REQUIRES_HYBRID",
             )
         if params.enable_graph_retrieval:
             raise KnowledgeError.from_code(
-                "KB_VALIDATION_ERROR",
-                "Weighted rerank does not support graph retrieval",
+                "KB_WEIGHTED_RERANK_GRAPH_UNSUPPORTED",
             )
 
     @staticmethod

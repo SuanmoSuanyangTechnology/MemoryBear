@@ -220,7 +220,7 @@ async def parse_documents(
         if file is None:
             raise file_service._not_found()
         if not file.file_key:
-            raise file_service._not_found("File has no storage key (legacy data not migrated)")
+            raise file_service._not_found("KB_FILE_STORAGE_KEY_MISSING")
         snapshot = document_service.ParseDocumentSnapshot(
             document_id=document.id,
             file_key=file.file_key,

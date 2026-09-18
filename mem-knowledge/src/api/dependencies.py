@@ -43,7 +43,6 @@ def _principal_from_headers(request: Request) -> Principal:
     except ValidationError as exc:
         raise KnowledgeError.from_code(
             "KB_PRINCIPAL_INVALID",
-            "Invalid knowledge principal headers",
         ) from exc
 
 
@@ -98,7 +97,6 @@ async def get_source(
     except ValueError as exc:
         raise KnowledgeError.from_code(
             "KB_PRINCIPAL_INVALID",
-            "Invalid knowledge source header",
         ) from exc
 
 

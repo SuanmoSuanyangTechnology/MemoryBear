@@ -84,20 +84,30 @@ class MemoryIncrementRepository:
         self, 
         workspace_id: uuid.UUID, 
         total_num: int
-    ) -> MemoryIncrement:
-        """写入内存增量"""
+    ) -> Tuple[uuid.UUID, datetime]:
+        """写入内存增量
+
+        主键与时间戳都在客户端生成后直接返回：commit 后 ORM 属性已过期
+        （expire_on_commit），再读 .id/.created_at 会多一次回查，因此这里既不
+        refresh 也不返回 ORM 对象。
+
+        Returns:
+            Tuple[uuid.UUID, datetime]: (memory_increment_id, created_at)
+        """
         try:
+            memory_increment_id = uuid.uuid4()
+            created_at = utcnow_naive()
             memory_increment = MemoryIncrement(
+                id=memory_increment_id,
                 workspace_id=workspace_id,
                 total_num=total_num,
-                created_at=utcnow_naive(),
+                created_at=created_at,
                 updated_at=utcnow_naive()
             )
             self.db.add(memory_increment)
             self.db.commit()
-            self.db.refresh(memory_increment)
             db_logger.info(f"成功写入内存增量: workspace_id={workspace_id}, total_num={total_num}")
-            return memory_increment
+            return memory_increment_id, created_at
         except Exception as e:
             db_logger.error(f"写入内存增量失败: workspace_id={workspace_id}, total_num={total_num} - {str(e)}")
             raise
