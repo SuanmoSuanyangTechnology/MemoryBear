@@ -61,7 +61,8 @@ class PersistTask:
     """Immutable description of a single persistence operation."""
 
     task_type: str
-    """One of: save_messages, save_agent_execution, record_usage, after_turn, save_failed_message."""
+    """One of: save_messages, save_agent_execution, save_node_executions,
+    link_agent_execution_message, record_usage, after_turn, save_failed_message."""
 
     args: dict[str, Any]
     """Keyword arguments for the handler that executes this task."""
@@ -612,9 +613,40 @@ async def _handle_save_node_executions(
         )
 
 
+async def _handle_link_agent_execution_message(
+    db: Any,
+    **kwargs: Any,
+) -> None:
+    """把已存在的 agent_execution 关联到刚落库的 assistant message。
+
+    多 Agent 集群的主执行记录在流式过程中就要创建（子 Agent 记录需要它作为
+    parent_execution_id 外键），而那一轮 assistant message 尚未落库 —— 建记录时
+    写 message_id 会直接 FK 违例。因此在本任务登记的消息落库之后再回填。
+
+    幂等：只更新仍为空 message_id 的记录，重复投递无副作用。
+    """
+    execution_id = _to_uuid(kwargs.get("execution_id"))
+    message_id = _to_uuid(kwargs.get("message_id"))
+    if execution_id is None or message_id is None:
+        return
+
+    from app.models.agent_execution_model import AgentExecution
+
+    result = await db.execute(
+        sa_select(AgentExecution).where(AgentExecution.id == execution_id)
+    )
+    record = result.scalars().first()
+    if record is None:
+        return
+    if record.message_id is None:
+        record.message_id = message_id
+        db.add(record)
+
+
 _TASK_HANDLERS: dict[str, Any] = {
     "save_agent_execution": _handle_save_agent_execution,
     "save_node_executions": _handle_save_node_executions,
+    "link_agent_execution_message": _handle_link_agent_execution_message,
     "record_usage": _handle_record_usage,
     "after_turn": _handle_after_turn,
 }

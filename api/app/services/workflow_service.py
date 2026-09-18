@@ -6257,8 +6257,27 @@ class WorkflowService:
         ]
 
     async def _get_history_info_async(self, conversation_id: uuid.UUID) -> tuple[dict, list] | None:
+        """读取会话历史，并在消息异步落库期间回退到已完成执行快照。"""
         conv_vars: dict[str, Any] = {}
+        execution_messages: list[dict[str, str]] = []
+        snapshot_execution_id: str | None = None
         from app.models import Message as MessageModel
+
+        def normalize_completed_messages(messages: Any) -> list[dict[str, str]]:
+            normalized: list[dict[str, str]] = []
+            if not isinstance(messages, list):
+                return normalized
+            for item in messages:
+                if not isinstance(item, dict):
+                    continue
+                role = item.get("role")
+                content = item.get("content")
+                # 文件会作为独立的 user 内容块出现；文本 user 仍保留在相邻消息中。
+                if role in ("user", "assistant") and isinstance(content, str):
+                    normalized.append({"role": role, "content": content})
+            while normalized and normalized[-1]["role"] != "assistant":
+                normalized.pop()
+            return normalized
 
         async with get_async_db_context() as db:
             result = await db.execute(
@@ -6270,12 +6289,27 @@ class WorkflowService:
                 .order_by(desc(WorkflowExecution.started_at))
                 .limit(10)
             )
-            for latest_execution in result.scalars():
-                if isinstance(latest_execution.output_data, dict):
-                    variables = latest_execution.output_data.get("variables", {}) or {}
-                    conv_vars = variables.get("conv", {}) if isinstance(variables, dict) else {}
-                    if conv_vars:
-                        break
+            executions = list(result.scalars().all())
+            latest_terminal = executions[0] if executions else None
+            if (
+                latest_terminal is not None
+                and latest_terminal.status == "completed"
+                and isinstance(latest_terminal.output_data, dict)
+            ):
+                execution_messages = normalize_completed_messages(
+                    latest_terminal.output_data.get("messages", [])
+                )
+                if execution_messages:
+                    snapshot_execution_id = str(latest_terminal.execution_id)
+
+            for latest_execution in executions:
+                if not isinstance(latest_execution.output_data, dict):
+                    continue
+                variables = latest_execution.output_data.get("variables", {}) or {}
+                candidate_vars = variables.get("conv", {}) if isinstance(variables, dict) else {}
+                if isinstance(candidate_vars, dict) and candidate_vars:
+                    conv_vars = candidate_vars
+                    break
 
             result = await db.execute(
                 select(MessageModel)
@@ -6287,12 +6321,26 @@ class WorkflowService:
                 .limit(1)
             )
             latest = result.scalar_one_or_none()
-            if not latest:
-                return None
+            persisted_messages: list[dict[str, str]] = []
+            persisted_execution_id: str | None = None
+            if latest:
+                persisted_messages = await self._trace_context_chain_async(db, latest)
+                if latest.role in ("user", "assistant"):
+                    persisted_messages.append({"role": latest.role, "content": latest.content})
+                persisted_messages = normalize_completed_messages(persisted_messages)
+                if latest.role == "assistant" and isinstance(latest.meta_data, dict):
+                    execution_id = latest.meta_data.get("execution_id")
+                    persisted_execution_id = str(execution_id) if execution_id else None
 
-            conv_messages = await self._trace_context_chain_async(db, latest)
-            if latest.role in ("user", "assistant"):
-                conv_messages.append({"role": latest.role, "content": latest.content})
+            # workflow_end 可能早于 BatchPersistQueue 提交消息。最新 completed 执行尚未
+            # 出现在 assistant.meta_data.execution_id 时，以其快照作为当前分支的完整历史；
+            # cancelled 快照不参与回退，避免把中间 assistant 当成完成回复。
+            if execution_messages and snapshot_execution_id != persisted_execution_id:
+                conv_messages = execution_messages
+            else:
+                conv_messages = persisted_messages
+            if not conv_messages and not conv_vars:
+                return None
             return conv_vars, conv_messages
 
 
@@ -7469,13 +7517,18 @@ class WorkflowService:
                             )
                         _lock_key = None
                     elif not _lock_degraded:
-                        # 锁获取成功，重新读变量（上一轮可能刚释放）
+                        # 锁获取成功后同时刷新变量和消息；上一轮可能刚完成并释放锁。
                         try:
                             refetched = await self._get_history_info_async(conversation_id_uuid)
                             if refetched:
-                                refetched_vars, _ = refetched
-                                if refetched_vars:
-                                    input_data["conv"] = refetched_vars
+                                refetched_vars, refetched_messages = refetched
+                                input_data["conv"] = refetched_vars
+                                input_data["conv_messages"] = refetched_messages
+                                init_message_length = len(refetched_messages)
+                                execution = await self._patch_execution_async(
+                                    execution.execution_id,
+                                    input_data=input_data,
+                                )
                         except Exception:
                             pass
 

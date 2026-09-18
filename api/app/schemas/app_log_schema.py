@@ -51,6 +51,9 @@ class AppLogConversation(BaseModel):
     created_at: datetime.datetime
     updated_at: datetime.datetime
 
+    # 多 Agent 集群：本会话产生的子 Agent 执行条数（非集群应用恒为 0）
+    sub_agent_count: int = 0
+
     @field_serializer("created_at", when_used="json")
     def _serialize_created_at(self, dt: datetime.datetime):
         return to_timestamp_ms(dt)
@@ -76,6 +79,29 @@ class AppLogNodeExecution(BaseModel):
     token_usage: Optional[Dict[str, Any]] = None
     meta: Optional[Dict[str, Any]] = None
 
+    # ── Agent 维度字段（多 Agent 集群；单 Agent 与工作流节点不填）────────
+    # 刻意建在 schema 上而不是塞进 meta：未来要按 Agent 过滤 / 统计 / 成本分摊时，
+    # 这是稳定契约，不会变成破坏性变更。字段全部可选，纯增量。
+    agent_id: Optional[str] = Field(default=None, description="子 Agent 在 sub_agents 中的 ID（协作模式可能重复）")
+    agent_name: Optional[str] = Field(default=None, description="子 Agent 名称")
+    execution_id: Optional[str] = Field(default=None, description="该次执行的 agent_executions.id")
+    parent_execution_id: Optional[str] = Field(default=None, description="主 Agent 的执行 ID")
+    depth: Optional[int] = Field(default=None, description="调用层级，主 Agent 为 0，直接子 Agent 为 1")
+    orchestration_mode: Optional[str] = Field(default=None, description="supervisor | collaboration")
+
+
+class AppLogAgentSummary(BaseModel):
+    """单次集群调用里的一个 Agent 浅层概览（B 入口，本轮前端不渲染）"""
+    execution_id: Optional[str] = None
+    agent_id: Optional[str] = None
+    agent_name: Optional[str] = None
+    role: str = "sub"
+    status: str = "completed"
+    elapsed_time: Optional[float] = None
+    token_usage: Optional[Dict[str, Any]] = None
+    tool_count: int = 0
+    iterations: int = 0
+
 
 class AppLogConversationDetail(AppLogConversation):
     """会话详情（包含消息列表）"""
@@ -85,6 +111,12 @@ class AppLogConversationDetail(AppLogConversation):
         default_factory=dict,
         description="人工介入信息：key=message_id，value={execution_id, status, interventions: [...]}，"
                     "结构与 /public/share/conversations/{conversation_id} 接口的 pending_intervention 一致",
+    )
+    # 每轮集群调用的浅层概览：key = assistant message_id。
+    # 供未来的集群概览卡 / 泳道视图直接消费；本轮后端填充、前端不渲染。
+    agent_execution_summary: Dict[str, List[AppLogAgentSummary]] = Field(
+        default_factory=dict,
+        description="按 assistant message_id 分组的集群 Agent 概览（execution_id/agent_name/role/status/耗时/token 等）",
     )
 
 

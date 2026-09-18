@@ -337,7 +337,10 @@ def multi_agent_config_to_dict(multi_agent_config) -> Dict[str, Any]:
     return {
         "id": str(multi_agent_config.id),
         "app_id": str(multi_agent_config.app_id),
-        "master_agent_id": str(multi_agent_config.master_agent_id),
+        # 必须显式判空：master_agent_id 可为 NULL（未配主 Agent 的集群应用），
+        # str(None) 会把字面量 "None" 写进发布快照，回读后写 UUID 列直接报
+        # asyncpg DataError（2026-09-14 集群主执行记录创建失败的根因）。
+        "master_agent_id": str(multi_agent_config.master_agent_id) if multi_agent_config.master_agent_id else None,
         "master_agent_name": multi_agent_config.master_agent_name,
         "orchestration_mode": multi_agent_config.orchestration_mode,
         "sub_agents": multi_agent_config.sub_agents,
