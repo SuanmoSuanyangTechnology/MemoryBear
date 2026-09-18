@@ -23,7 +23,12 @@ from app.core.utils.datetime_utils import (
     utcnow,
     utcnow_naive,
 )
-from app.core.workflow.node_cache import normalize_cache_value, WorkflowNodeCacheManager
+from app.core.workflow.node_cache import (
+    WorkflowNodeCacheManager,
+    normalize_cache_value,
+    sanitize_json_text,
+    sanitize_json_value,
+)
 from app.core.workflow.triggers import (
     build_schedule_now_payload,
     get_trigger_type,
@@ -2796,7 +2801,9 @@ class WorkflowService:
             fallback_execution_order: int,
             fallback_node_name: str | None = None,
     ) -> dict[str, Any]:
-        normalized = dict(node_data or {})
+        # 节点输出（如知识检索回传的 chunk 原文）可能含 NUL，jsonb 列无法存储，
+        # 入库前统一剥离，避免 asyncpg UntranslatableCharacterError(22P05)。
+        normalized = sanitize_json_value(dict(node_data or {}))
         now = utcnow_naive()
         completed_at = execution.completed_at or now
         elapsed_time = normalized.pop("elapsed_time", None)
@@ -2957,7 +2964,10 @@ class WorkflowService:
             run_id: str,
             debug_input_data: dict[str, Any] | None = None,
     ) -> WorkflowNodeExecution:
-        normalized_payload = self._normalize_single_node_payload(node_type, node_name, payload)
+        # 同上：单节点调试 payload 也直接落到 jsonb 列，先剥 NUL。
+        normalized_payload = sanitize_json_value(
+            self._normalize_single_node_payload(node_type, node_name, payload)
+        )
         now = utcnow_naive()
         elapsed_time = normalized_payload.get("elapsed_time")
         completed_at = now
@@ -3829,6 +3839,9 @@ class WorkflowService:
                     continue
                 if key == "output_data" and value is not None:
                     value = convert_uuids_to_str(value)
+                elif key == "error_message" and isinstance(value, str):
+                    # 节点报错可能内嵌 chunk 原文（含 NUL），text 列同样无法存储。
+                    value = sanitize_json_text(value)
                 setattr(execution, key, value)
 
             status = fields.get("status")

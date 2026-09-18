@@ -587,7 +587,11 @@ class OpenAIFormatStrategy(MultimodalFormatStrategy):
 
 # Provider 到策略的映射
 PROVIDER_STRATEGIES = {
-    "dashscope": DashScopeFormatStrategy,
+    # dashscope 全量模型已统一 OpenAI 兼容协议（ChatTongyi 原生协议退役，见
+    # core/models/base.py:get_provider_llm_class）。原生的
+    # {"type": "image", "image": url} 会被兼容端点以 400 invalid_value 拒绝，
+    # 必须产出 OpenAI 格式（type=text/image_url/video_url）。
+    "dashscope": OpenAIFormatStrategy,
     "bedrock": BedrockFormatStrategy,
     "anthropic": BedrockFormatStrategy,
     "openai": OpenAIFormatStrategy,
@@ -796,16 +800,16 @@ class MultimodalService:
         ]
         inline_total_limit = max(present_limits, default=0) * 2
 
-        # 获取对应的策略
-        # dashscope 全量模型均走 OpenAI 兼容端点（compatible-mode/v1），
-        # 多模态内容必须使用 image_url/input_audio 等 OpenAI 格式，与 is_omni 无关
-        if self.provider == "dashscope":
+        # 获取对应的策略：已统一走 OpenAI 兼容协议的 provider（dashscope/volcano/
+        # openai/minimax/...）都必须产出 OpenAI 多模态格式。is_omni 不再参与判定——
+        # ChatTongyi 原生协议退役后，原生 {"type": "image", ...} 只会被兼容端点以
+        # 400 invalid_value 拒绝（见 core/models/base.py:get_provider_llm_class）。
+        strategy_class = PROVIDER_STRATEGIES.get(self.provider)
+        if not strategy_class:
+            logger.warning(
+                f"未找到 provider '{self.provider}' 的策略，使用 OpenAI 兼容格式"
+            )
             strategy_class = OpenAIFormatStrategy
-        else:
-            strategy_class = PROVIDER_STRATEGIES.get(self.provider)
-            if not strategy_class:
-                logger.warning(f"未找到 provider '{self.provider}' 的策略，使用默认策略")
-                strategy_class = DashScopeFormatStrategy
 
         result = []
         inline_payload_size = 0

@@ -166,6 +166,7 @@ class AgentNode(BaseNode):
                     app_id=self.workflow_config.get("app_id"),
                     workspace_id=workspace_id,
                     source=KnowledgeRetrievalSource.AGENT,
+                    uploaded_files=variable_pool.get_value("{{sys.files}}", strict=False),
                 )
                 if kb_tool:
                     langchain_tools.append(kb_tool)
