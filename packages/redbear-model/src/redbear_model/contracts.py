@@ -27,7 +27,13 @@ class ModelType(StrEnum):
     RERANK = "rerank"
     IMAGE = "image"
     VIDEO = "video"
-    ASR = "asr"
+    ASR = "ASR"
+
+    @classmethod
+    def _missing_(cls, value):
+        if isinstance(value, str) and value.lower() == "asr":
+            return cls.ASR
+        return None
 
 
 class ModelCapability(StrEnum):
