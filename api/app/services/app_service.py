@@ -1952,6 +1952,73 @@ class AppService:
 
     # ==================== 应用发布管理 ====================
 
+    def _pin_workflow_agent_references(
+            self,
+            nodes: list[dict[str, Any]],
+            workspace_id: uuid.UUID,
+    ) -> list[dict[str, Any]]:
+        """校验 Agent 引用，并在工作流发布快照中固定到具体 AppRelease。"""
+        pinned_nodes = copy.deepcopy(nodes)
+        for node in pinned_nodes:
+            if node.get("type") != "agent":
+                continue
+            node_config = node.get("config") or {}
+            if node_config.get("mode", "inline") != "reference":
+                continue
+
+            reference = node_config.get("reference") or {}
+            try:
+                referenced_app_id = uuid.UUID(str(reference.get("app_id")))
+            except (TypeError, ValueError, AttributeError) as exc:
+                raise BusinessException(
+                    f"Agent 节点 {node.get('name') or node.get('id')} 缺少有效的引用应用",
+                    BizCode.CONFIG_MISSING,
+                    cause=exc,
+                )
+
+            referenced_app = self.db.get(App, referenced_app_id)
+            if not referenced_app or not referenced_app.is_active:
+                raise BusinessException("引用的 Agent 应用不存在或已停用", BizCode.APP_NOT_FOUND)
+            if referenced_app.workspace_id != workspace_id:
+                raise BusinessException(
+                    "第一阶段仅支持引用当前工作空间的 Agent 应用",
+                    BizCode.WORKSPACE_NO_ACCESS,
+                )
+            if referenced_app.type != AppType.AGENT:
+                raise BusinessException("引用的应用不是 Agent 类型", BizCode.APP_TYPE_NOT_SUPPORTED)
+            if referenced_app.status != AppStatus.ACTIVE:
+                raise BusinessException("引用的 Agent 应用尚未发布或已归档", BizCode.APP_NOT_PUBLISHED)
+
+            release_policy = reference.get("release_policy", "pinned")
+            effective_release_id = referenced_app.current_release_id if release_policy == "current" else reference.get("release_id")
+            try:
+                effective_release_uuid = uuid.UUID(str(effective_release_id))
+            except (TypeError, ValueError, AttributeError) as exc:
+                raise BusinessException("Agent 引用缺少有效发布版本", BizCode.RELEASE_NOT_FOUND, cause=exc)
+
+            referenced_release = self.db.get(AppRelease, effective_release_uuid)
+            if (
+                    not referenced_release
+                    or not referenced_release.is_active
+                    or referenced_release.app_id != referenced_app.id
+                    or referenced_release.type != AppType.AGENT
+            ):
+                raise BusinessException("Agent 发布版本不存在、已下线或归属错误", BizCode.RELEASE_NOT_FOUND)
+
+            release_config = referenced_release.config if isinstance(referenced_release.config, dict) else {}
+            release_features = release_config.get("features")
+            file_upload = release_features.get("file_upload") if isinstance(release_features, dict) else None
+            if not isinstance(file_upload, dict) or file_upload.get("enabled") is not True:
+                node_config.pop("files", None)
+
+            reference["app_id"] = str(referenced_app.id)
+            reference["release_policy"] = "pinned"
+            reference["release_id"] = str(referenced_release.id)
+            node_config["reference"] = reference
+            node["config"] = node_config
+
+        return pinned_nodes
+
     def publish(
             self,
             *,
@@ -2069,7 +2136,10 @@ class AppService:
 
             config = {
                 "id": str(workflow_cfg.id),
-                "nodes": workflow_cfg.nodes,
+                "nodes": self._pin_workflow_agent_references(
+                    workflow_cfg.nodes,
+                    app.workspace_id,
+                ),
                 "edges": workflow_cfg.edges,
                 "variables": workflow_cfg.variables,
                 "environment_variables": workflow_cfg.environment_variables or [],

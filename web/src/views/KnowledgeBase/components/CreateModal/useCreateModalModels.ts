@@ -3,7 +3,7 @@ import type { FormInstance } from 'antd';
 import { getCustomWorkspaceModels, getWorkspaceModels } from '@/api/workspaces';
 import type { KnowledgeBaseFormData, KnowledgeBaseListItem } from '@/views/KnowledgeBase/types';
 import type { Model } from '@/views/ModelManagement/types';
-import { baseModelFields } from '../../constants'
+import { baseModelFields, multimodalModelFields } from '../../constants'
 
 interface UseCreateModalModelsOptions {
   form: FormInstance<KnowledgeBaseFormData>;
@@ -21,7 +21,7 @@ const useCreateModalModels = ({ form, datasets, visible }: UseCreateModalModelsO
     if (datasets?.id) {
       const dynamicValues: Record<string, string> = {};
       const source = datasets as unknown as Record<string, unknown>;
-      baseModelFields.forEach((item) => {
+      [...baseModelFields, ...multimodalModelFields].forEach((item) => {
       const fieldKey = `${item.name}_id`;
         const fieldValue = source[fieldKey];
         if (typeof fieldValue === 'string') {
@@ -36,7 +36,7 @@ const useCreateModalModels = ({ form, datasets, visible }: UseCreateModalModelsO
     }
 
     const defaultValues: Record<string, string> = {};
-    baseModelFields.forEach((item) => {
+    [...baseModelFields, ...multimodalModelFields].forEach((item) => {
       const { type } = item;
       const fieldKey = `${item.name}_id`;
       const workspaceModelId = workspaceModels[type];

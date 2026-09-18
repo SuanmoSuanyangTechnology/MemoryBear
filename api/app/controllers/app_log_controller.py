@@ -20,6 +20,7 @@ from app.schemas.app_log_schema import (
 from app.schemas.response_schema import PageData, PageMeta
 from app.core.exceptions import BusinessException
 from app.core.error_codes import BizCode
+from app.models.app_model import AppType
 from app.services.app_service import AppService
 from app.services.app_log_service import AppLogService
 
@@ -69,6 +70,16 @@ def list_app_logs(
     )
 
     items = [AppLogConversation.model_validate(c) for c in conversations]
+
+    # 多 Agent 集群：列表页"子 Agent 数"。单 Agent / 工作流应用恒为 0（不做查询，避免噪音开销）。
+    if app.type == AppType.MULTI_AGENT and items:
+        counts = log_service.count_sub_agents_by_conversations([c.id for c in conversations])
+        if counts:
+            items = [
+                item.model_copy(update={"sub_agent_count": counts.get(str(item.id), 0)})
+                for item in items
+            ]
+
     meta = PageMeta(page=page, pagesize=pagesize, total=total, hasnext=(page * pagesize) < total)
 
     return success(data=PageData(page=meta, items=items))
@@ -194,11 +205,20 @@ def get_app_log_detail(
     # 聚合人工介入信息，结构与 /public/share/conversations/{conversation_id} 一致
     pending_intervention_map = log_service.build_pending_intervention_map(conversation_id)
 
+    # 多 Agent 集群：本轮集群调用的 Agent 浅层概览（B 入口，前端本轮不渲染）
+    agent_execution_summary = log_service.build_agent_execution_summary(node_executions_map)
+
+    base_data = base.model_dump()
+    if app.type == AppType.MULTI_AGENT:
+        counts = log_service.count_sub_agents_by_conversations([conversation.id])
+        base_data["sub_agent_count"] = counts.get(str(conversation.id), 0)
+
     detail = AppLogConversationDetail(
-        **base.model_dump(),
+        **base_data,
         messages=msg_list,
         node_executions_map=node_executions_map,
         pending_intervention=pending_intervention_map,
+        agent_execution_summary=agent_execution_summary,
     )
 
     return success(data=detail)

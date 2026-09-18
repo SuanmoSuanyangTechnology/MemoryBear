@@ -35,10 +35,15 @@ from app.services.annotation_service import AnnotationService
 from app.services.conversation_service import ConversationService
 from app.services.context_engine_manager import ContextEngineManager
 from app.core.config import settings
-from app.services.draft_run_service import AgentRunService
+from app.services.draft_run_service import AgentRunService, build_uploaded_images_manifest
 from app.services.model_service import ModelApiKeyService
 from app.services.multi_agent_orchestrator import MultiAgentOrchestrator
-from app.services.multimodal_service import MultimodalService
+from app.services.multimodal_service import (
+    MultimodalService,
+    deserialize_file_reference,
+    sanitize_processed_files_for_history,
+    serialize_file_reference,
+)
 from app.services.workflow_service import WorkflowService
 from app.models.file_metadata_model import FileMetadata
 from app.services.tool_orchestrator import ToolOrchestrator
@@ -692,6 +697,8 @@ class AppChatService:
 
         # 处理多模态文件
         processed_files = None
+        # 仅用于发给 LLM 的用户消息（追加本轮图片清单），不污染入库原文 message
+        llm_message = message
         if files:
             multimodal_service = MultimodalService(self.db, model_info)
             fu_config = features_config.get("file_upload", {})
@@ -702,16 +709,24 @@ class AppChatService:
                 files,
                 document_image_recognition=doc_img_recognition,
                 workspace_id=workspace_id,
+                file_upload_config=fu_config if isinstance(fu_config, dict) else None,
             )
             logger.info(f"处理了 {len(processed_files)} 个文件")
-            if doc_img_recognition and Modality.IMAGE in (api_key_obj.input_modalities or []) and any(
+            for tool in tools:
+                set_uploaded_files = getattr(tool, "set_uploaded_files", None)
+                if callable(set_uploaded_files):
+                    set_uploaded_files(files)
+            # 在发给 LLM 的用户消息中列出本轮图片及编号，供模型按需显式触发图片检索
+            image_manifest, _ = build_uploaded_images_manifest(files)
+            if image_manifest:
+                llm_message = f"{message}\n\n{image_manifest}"
+            if doc_img_recognition and ModelCapability.VISION in (api_key_obj.capability or []) and any(
                 f.type == FileType.DOCUMENT for f in files
             ):
                 system_prompt += (
-                    "\n\n文档文字中包含图片位置标记如 [图片 第2页 第1张]: <img src=\"url\"...>，"
-                    "请在回答中用 Markdown 格式 ![图片描述](url) 展示对应图片。"
-                    "重要：图片 URL 中包含 UUID（如 /storage/permanent/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx），"
-                    "必须将 src 属性的值原封不动复制到 Markdown 的括号中，不得增删任何字符。"
+                    "\n\n文档文字中可能包含图片位置标记如 [图片 第2页 第1张]。"
+                    "对应图片已作为独立视觉输入提供，请结合位置标记和视觉内容理解文档；"
+                    "不要在回答中输出任何文件地址、存储路径或内部标识。"
                 )
 
         # 情绪感知回复：等待识别结果 → 成功则写缓存并注入「固定原则+本轮策略」；失败/未命中则提示词原样不动。
@@ -877,7 +892,7 @@ class AppChatService:
             try:
                 # 调用 Agent（支持多模态）
                 result = await agent.chat(
-                    message=message,
+                    message=llm_message,
                     history=history,
                     context=None,
                     files=processed_files
@@ -963,17 +978,11 @@ class AppChatService:
                     if meta:
                         name = name or meta.file_name
                         size = size or meta.file_size
-                human_meta["files"].append({
-                    "type": f.type,
-                    "url": f.url,
-                    "name": name,
-                    "size": size,
-                    "file_type": f.file_type,
-                })
+                human_meta["files"].append(serialize_file_reference(f, name=name, size=size))
 
         if processed_files:
             human_meta["history_files"] = {
-                "content": processed_files,
+                "content": sanitize_processed_files_for_history(processed_files),
                 "provider": api_key_obj.provider,
             }
 
@@ -1277,6 +1286,8 @@ class AppChatService:
 
             # 处理多模态文件
             processed_files = None
+            # 仅用于发给 LLM 的用户消息（追加本轮图片清单），不污染入库原文 message
+            llm_message = message
             if files:
                 multimodal_service = MultimodalService(self.db, model_info)
                 fu_config = features_config.get("file_upload", {})
@@ -1287,16 +1298,24 @@ class AppChatService:
                     files,
                     document_image_recognition=doc_img_recognition,
                     workspace_id=workspace_id,
+                    file_upload_config=fu_config if isinstance(fu_config, dict) else None,
                 )
                 logger.info(f"处理了 {len(processed_files)} 个文件")
-                if doc_img_recognition and Modality.IMAGE in (api_key_obj.input_modalities or []) and any(
+                for tool in tools:
+                    set_uploaded_files = getattr(tool, "set_uploaded_files", None)
+                    if callable(set_uploaded_files):
+                        set_uploaded_files(files)
+                # 在发给 LLM 的用户消息中列出本轮图片及编号，供模型按需显式触发图片检索
+                image_manifest, _ = build_uploaded_images_manifest(files)
+                if image_manifest:
+                    llm_message = f"{message}\n\n{image_manifest}"
+                if doc_img_recognition and ModelCapability.VISION in (api_key_obj.capability or []) and any(
                     f.type == FileType.DOCUMENT for f in files
                 ):
                     system_prompt += (
-                        "\n\n文档文字中包含图片位置标记如 [图片 第2页 第1张]: <img src=\"url\"...>，"
-                        "请在回答中用 Markdown 格式 ![图片描述](url) 展示对应图片。"
-                        "重要：图片 URL 中包含 UUID（如 /storage/permanent/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx），"
-                        "必须将 src 属性的值原封不动复制到 Markdown 的括号中，不得增删任何字符。"
+                        "\n\n文档文字中可能包含图片位置标记如 [图片 第2页 第1张]。"
+                        "对应图片已作为独立视觉输入提供，请结合位置标记和视觉内容理解文档；"
+                        "不要在回答中输出任何文件地址、存储路径或内部标识。"
                     )
 
             # 情绪感知回复：等待识别结果 → 成功则写缓存并注入「固定原则+本轮策略」；失败/未命中则提示词原样不动。
@@ -1424,7 +1443,7 @@ class AppChatService:
                         )
 
                 _chunk_stream = agent.chat_stream(
-                    message=message,
+                    message=llm_message,
                     history=history,
                     context=None,
                     files=processed_files,
@@ -1592,16 +1611,10 @@ class AppChatService:
                         if meta:
                             name = name or meta.file_name
                             size = size or meta.file_size
-                    human_meta["files"].append({
-                        "type": f.type,
-                        "url": f.url,
-                        "name": name,
-                        "size": size,
-                        "file_type": f.file_type,
-                    })
+                    human_meta["files"].append(serialize_file_reference(f, name=name, size=size))
             if processed_files:
                 human_meta["history_files"] = {
-                    "content": processed_files,
+                    "content": sanitize_processed_files_for_history(processed_files),
                     "provider": _api_key_provider,
                 }
 
@@ -1925,6 +1938,8 @@ class AppChatService:
             orchestrator = await MultiAgentOrchestrator.create(self.db, config)
 
             # 3. 流式执行任务
+            # message_id 下传：主执行记录据此带上本轮 assistant message_id，
+            # 日志详情无需再依赖"时序就近"兜底即可把子 Agent 节点挂到该消息下。
             async for event in orchestrator.execute_stream(
                     message=message,
                     conversation_id=conversation_id,
@@ -1934,7 +1949,8 @@ class AppChatService:
                     web_search=web_search,  # 网络搜索参数
                     memory=memory,  # 记忆功能参数
                     storage_type=storage_type,
-                    user_rag_memory_id=user_rag_memory_id
+                    user_rag_memory_id=user_rag_memory_id,
+                    message_id=message_id
             ):
                 # 拦截 sub_usage 事件，累加 token
                 if "event: sub_usage" in event:
@@ -1947,8 +1963,14 @@ class AppChatService:
                             pass
                 else:
                     yield event
-                    # 尝试提取内容（用于保存）
-                    if "data:" in event:
+                    # 累加主气泡正文：只认集群级的 `message` 事件。
+                    # 子 Agent 的正文走 `sub_agent_message`（已在各自区块展示），
+                    # 若一并累加，落库的 assistant 正文会比界面显示多出一份重复内容，
+                    # 刷新后主气泡会变长。
+                    _event_name = ""
+                    if event.startswith("event:"):
+                        _event_name = event[6:].split("\n", 1)[0].strip()
+                    if _event_name == "message" and "data:" in event:
                         try:
                             data_line = event.split("data: ", 1)[1].strip()
                             data = json.loads(data_line)
@@ -1982,6 +2004,20 @@ class AppChatService:
                 },
             ))
             save_messages_enqueued = True
+
+            # 主执行记录的 message_id 回填：记录在流式开始时就已创建（子 Agent 记录
+            # 需要它作为 parent 外键），当时本轮 assistant message 还没落库，写 message_id
+            # 会 FK 违例。这里登记在 save_messages 之后，由 persist 队列在消息提交后回填，
+            # 使日志详情能精确按 message 挂载节点（而不是靠时序就近兜底）。
+            _master_execution_id = getattr(orchestrator, "current_execution_id", None)
+            if _master_execution_id is not None:
+                await BatchPersistQueue.enqueue(PersistTask(
+                    task_type="link_agent_execution_message",
+                    args={
+                        "execution_id": str(_master_execution_id),
+                        "message_id": str(message_id),
+                    },
+                ))
 
             logger.info(
                 "多 Agent 流式聊天完成",
@@ -2254,14 +2290,7 @@ class AppChatService:
                 files = []
                 for f in meta_files:
                     try:
-                        file_input = FileInput(
-                            type=f.get("type", "document"),
-                            transfer_method=TransferMethod.REMOTE_URL if f.get("url") else TransferMethod.LOCAL_FILE,
-                            url=f.get("url"),
-                            file_type=f.get("file_type"),
-                            name=f.get("name"),
-                            size=f.get("size"),
-                        )
+                        file_input = deserialize_file_reference(f)
                         files.append(file_input)
                     except Exception as e:
                         logger.warning(f"转换文件信息失败: {e}")
@@ -2391,14 +2420,7 @@ class AppChatService:
                 files = []
                 for f in meta_files:
                     try:
-                        file_input = FileInput(
-                            type=f.get("type", "document"),
-                            transfer_method=TransferMethod.REMOTE_URL if f.get("url") else TransferMethod.LOCAL_FILE,
-                            url=f.get("url"),
-                            file_type=f.get("file_type"),
-                            name=f.get("name"),
-                            size=f.get("size"),
-                        )
+                        file_input = deserialize_file_reference(f)
                         files.append(file_input)
                     except Exception as e:
                         logger.warning(f"转换文件信息失败: {e}")

@@ -90,7 +90,30 @@ class KnowledgeBase(BaseModel):
 
 
 class KnowledgeCreate(KnowledgeBase):
-    pass
+    image2text_id: uuid.UUID | None = Field(
+        None,
+        description=(
+            "Image understanding model config ID. A non-null value is used directly; "
+            "omitted or null inherits a compatible workspace vision model and remains "
+            "null when none is available."
+        ),
+    )
+    audio2text_id: uuid.UUID | None = Field(
+        None,
+        description=(
+            "Audio transcription model config ID. A non-null value is used directly; "
+            "omitted or null inherits a compatible workspace audio model and remains "
+            "null when none is available."
+        ),
+    )
+    video2text_id: uuid.UUID | None = Field(
+        None,
+        description=(
+            "Video understanding model config ID. A non-null value is used directly; "
+            "omitted or null inherits a compatible workspace video model and remains "
+            "null when none is available."
+        ),
+    )
 
 
 class KnowledgeUpdate(BaseModel):
