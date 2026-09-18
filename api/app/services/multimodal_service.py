@@ -35,7 +35,7 @@ from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
 from app.models.file_metadata_model import FileMetadata
-from app.models.models_model import ModelCapability
+from app.models.models_model import Modality
 from app.schemas.app_schema import FileInput, FileType, TransferMethod
 from app.schemas.model_schema import ModelInfo
 from app.services.audio_transcription_service import AudioTranscriptionService
@@ -293,7 +293,7 @@ class MultimodalService:
         if self.api_config is not None:
             self.model_api_key = api_config.api_key
             self.provider = api_config.provider.lower()
-            self.capability = api_config.capability
+            self.input_modalities = list(getattr(api_config, "input_modalities", None) or [])
         self.audio_api_key = audio_api_key
         self.enable_audio_transcription = enable_audio_transcription
 
@@ -365,7 +365,7 @@ class MultimodalService:
             if not file.url:
                 file.url = await self.get_file_url(file)
             try:
-                if file.type == FileType.IMAGE and ModelCapability.VISION in self.capability:
+                if file.type == FileType.IMAGE and Modality.IMAGE in self.input_modalities:
                     is_support, content = await self._process_image(file, strategy)
                     if is_support or include_processing_errors:
                         result.append(content)
@@ -376,7 +376,7 @@ class MultimodalService:
                         continue
                     result.append(content)
                     # 仅当开关开启且模型支持视觉时，才提取文档内嵌图片
-                    if document_image_recognition and ModelCapability.VISION in self.capability:
+                    if document_image_recognition and Modality.IMAGE in self.input_modalities:
                         img_infos = await self.extract_document_images(file)
                         tenant_id = await self._get_workspace_tenant_id(workspace_id)
                         img_result = []
@@ -404,11 +404,11 @@ class MultimodalService:
                             except Exception as img_err:
                                 logger.warning(f"文档图片处理失败: {img_err}")
                         result.extend(img_result)
-                elif file.type == FileType.AUDIO and "audio" in self.capability:
+                elif file.type == FileType.AUDIO and Modality.AUDIO in self.input_modalities:
                     is_support, content = await self._process_audio(file, strategy)
                     if is_support or include_processing_errors:
                         result.append(content)
-                elif file.type == FileType.VIDEO and "video" in self.capability:
+                elif file.type == FileType.VIDEO and Modality.VIDEO in self.input_modalities:
                     is_support, content = await self._process_video(file, strategy)
                     if is_support or include_processing_errors:
                         result.append(content)

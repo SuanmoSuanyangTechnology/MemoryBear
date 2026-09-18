@@ -116,8 +116,6 @@ def _build_model_config_snapshot(source):
         type=source.type,
         is_composite=source.provider == ModelProvider.COMPOSITE,
         description=source.description,
-        capability=copy.deepcopy(source.capability),
-        is_omni=source.is_omni,
         input_modalities=copy.deepcopy(getattr(source, "input_modalities", None) or []),
         output_modalities=copy.deepcopy(getattr(source, "output_modalities", None) or []),
         features=copy.deepcopy(getattr(source, "features", None) or []),

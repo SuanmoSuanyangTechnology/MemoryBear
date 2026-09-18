@@ -519,8 +519,9 @@ class MemoryConfigService:
             api_key=api_key_config.api_key,
             api_base=api_key_config.api_base,
             model_type=model_type_label,
-            is_omni=api_key_config.is_omni,
-            capability=api_key_config.capability,
+            input_modalities=list(api_key_config.input_modalities or []),
+            output_modalities=list(api_key_config.output_modalities or []),
+            features=list(api_key_config.features or []),
         )
 
         if not result.get("valid"):
@@ -946,13 +947,14 @@ class MemoryConfigService:
             "model_name": api_config.model_name,
             "provider": api_config.provider,
             "api_key": api_config.api_key,
-            "capability": api_config.capability,
             "base_url": api_config.api_base,
             "model_config_id": str(config.id),
             "type": config.type,
             "timeout": settings.LLM_TIMEOUT,
             "max_retries": settings.LLM_MAX_RETRIES,
-            "is_omni": api_config.is_omni,
+            "input_modalities": list(api_config.input_modalities or []),
+            "output_modalities": list(api_config.output_modalities or []),
+            "features": list(api_config.features or []),
             "tenant_id": api_config.tenant_id,
             "channel_id": api_config.channel_id,
         }

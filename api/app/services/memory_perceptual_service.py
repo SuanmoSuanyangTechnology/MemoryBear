@@ -306,8 +306,9 @@ class MemoryPerceptualService:
                 provider=model_config.provider,
                 api_key=model_config.api_key,
                 api_base=model_config.api_base,
-                is_omni=model_config.is_omni,
-                capability=model_config.capability,
+                input_modalities=[str(item) for item in (model_config.input_modalities or [])],
+                output_modalities=[str(item) for item in (model_config.output_modalities or [])],
+                features=[str(item) for item in (model_config.features or [])],
                 model_type=ModelType.LLM,
                 tenant_id=model_config.tenant_id,
                 model_config_id=model_config.model_config_id,
@@ -321,7 +322,7 @@ class MemoryPerceptualService:
                 files=[file]
             )
         if not file_message:
-            business_logger.warning(f"Unsupported file type {file}, model capability: {api_config.capability}")
+            business_logger.warning(f"Unsupported file type {file}, model input modalities: {api_config.input_modalities}")
             return None
         file_message = file_message[0]
         try:

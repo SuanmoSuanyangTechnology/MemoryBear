@@ -1,10 +1,30 @@
-from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
+from pydantic import BaseModel, Field, field_serializer, model_validator, ConfigDict, field_validator
 from typing import Optional, List, Dict, Any
 import datetime
 import uuid
 
 from app.core.utils.datetime_utils import to_timestamp_ms
 from app.models.models_model import ModelProvider, ModelType, LoadBalanceStrategy
+
+
+class RejectLegacyCapabilityFields:
+    """旧字段（capability/is_omni）下线守卫（2e-1）。
+
+    pydantic 默认 `extra="ignore"`：仅删字段会让旧字段被静默吞掉，用户以为提交生效。
+    请求类混入本守卫，显式提交旧字段即 422，提示迁移到契约 v2 三列。
+    """
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_legacy_capability_fields(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            legacy = [key for key in ("capability", "is_omni") if key in data]
+            if legacy:
+                raise ValueError(
+                    f"字段 {', '.join(sorted(legacy))} 已下线，"
+                    "请改用 input_modalities / output_modalities / features"
+                )
+        return data
 
 
 # ModelConfig Schemas
@@ -19,11 +39,9 @@ class ModelConfigBase(BaseModel):
     is_active: bool = Field(True, description="是否激活")
     is_public: bool = Field(False, description="是否公开")
     load_balance_strategy: Optional[str] = Field(LoadBalanceStrategy.NONE.value, description="负载均衡策略")
-    capability: List[str] = Field(default_factory=list, description="模型能力列表（旧列视图，2e 下线）")
-    is_omni: bool = Field(False, description="是否为Omni模型（旧列视图，2e 下线）")
-    input_modalities: Optional[List[str]] = Field(None, description="输入模态（如['text','image']；缺省由旧字段派生）")
-    output_modalities: Optional[List[str]] = Field(None, description="输出模态（如['text','audio']；缺省由旧字段派生）")
-    features: Optional[List[str]] = Field(None, description="能力特征（如['thinking']；缺省由旧字段派生）")
+    input_modalities: Optional[List[str]] = Field(None, description="输入模态（如['text','image']；缺省按 type/provider 定基）")
+    output_modalities: Optional[List[str]] = Field(None, description="输出模态（如['text','audio']；缺省按 type/provider 定基）")
+    features: Optional[List[str]] = Field(None, description="能力特征（如['thinking']；缺省为空）")
     model_id: Optional[uuid.UUID] = Field(None, description="基础模型ID")
 
 
@@ -35,13 +53,13 @@ class ApiKeyRegister(BaseModel):
     priority: int = Field(0, description="优先级（大者优先）")
 
 
-class ModelConfigCreate(ModelConfigBase):
+class ModelConfigCreate(ModelConfigBase, RejectLegacyCapabilityFields):
     """创建自定义模型Schema（内嵌 credential：创建即登记点名渠道，单接口原子完成）
 
-    自定义模型不经模型广场添加，provider 级渠道不保证可用，因此凭据必填。
-    ASR 模型在实际调用时校验凭据，其他模型在创建时做活体验证。
+    自定义模型不经模型广场添加，provider 级渠道不保证可用，因此凭据必填并
+    在创建时做活体验证；验证失败拒绝创建（零落库）。
     """
-    credential: ApiKeyRegister = Field(..., description="模型凭据（必填）")
+    credential: ApiKeyRegister = Field(..., description="模型凭据（必填，创建时活体验证）")
 
 
 class CompositeMemberSpec(BaseModel):
@@ -63,7 +81,7 @@ class CompositeModelCreate(BaseModel):
     load_balance_strategy: Optional[str] = Field(default=LoadBalanceStrategy.NONE.value, description="负载均衡策略")
 
 
-class ModelConfigUpdate(BaseModel):
+class ModelConfigUpdate(BaseModel, RejectLegacyCapabilityFields):
     """更新模型配置Schema"""
     name: Optional[str] = Field(None, description="模型显示名称", max_length=255)
     type: Optional[ModelType] = Field(None, description="模型类型")
@@ -73,11 +91,9 @@ class ModelConfigUpdate(BaseModel):
     config: Optional[Dict[str, Any]] = Field(None, description="模型配置参数")
     is_active: Optional[bool] = Field(None, description="是否激活")
     is_public: Optional[bool] = Field(None, description="是否公开")
-    capability: Optional[List[str]] = Field(None, description="模型能力列表（旧列视图，2e 下线）")
-    is_omni: Optional[bool] = Field(None, description="是否为Omni模型（旧列视图，2e 下线）")
-    input_modalities: Optional[List[str]] = Field(None, description="输入模态（新口径；缺省由旧字段派生）")
-    output_modalities: Optional[List[str]] = Field(None, description="输出模态（新口径；缺省由旧字段派生）")
-    features: Optional[List[str]] = Field(None, description="能力特征（新口径；缺省由旧字段派生）")
+    input_modalities: Optional[List[str]] = Field(None, description="输入模态（缺省保持现值；不得为空列表）")
+    output_modalities: Optional[List[str]] = Field(None, description="输出模态（缺省保持现值；不得为空列表）")
+    features: Optional[List[str]] = Field(None, description="能力特征（缺省保持现值）")
 
 
 class ModelConfig(ModelConfigBase):
@@ -189,7 +205,6 @@ class ModelConfigQuery(BaseModel):
     """模型配置查询Schema"""
     type: Optional[List[ModelType]] = Field(None, description="模型类型筛选（支持多个）")
     provider: Optional[ModelProvider] = Field(None, description="提供商筛选（按模型配置的 provider）")
-    capability: Optional[List[str]] = Field(None, description="能力筛选（支持多个）")
     is_active: Optional[bool] = Field(None, description="激活状态筛选")
     is_public: Optional[bool] = Field(None, description="公开状态筛选")
     is_available: Optional[bool] = Field(
@@ -246,7 +261,7 @@ ModelConfig.model_rebuild()
 
 
 # ModelBase Schemas
-class ModelBaseCreate(BaseModel):
+class ModelBaseCreate(BaseModel, RejectLegacyCapabilityFields):
     """创建基础模型Schema"""
     name: str = Field(..., description="模型唯一标识", max_length=255)
     type: ModelType = Field(..., description="模型类型")
@@ -255,14 +270,12 @@ class ModelBaseCreate(BaseModel):
     description: Optional[str] = Field(None, description="模型描述")
     is_official: bool = Field(True, description="是否供应商官方模型")
     tags: List[str] = Field(default_factory=list, description="模型标签")
-    capability: List[str] = Field(default_factory=list, description="模型能力列表（如['vision', 'audio', 'video']）")
-    is_omni: bool = Field(False, description="是否为Omni模型")
-    input_modalities: Optional[List[str]] = Field(None, description="输入模态（新口径；缺省由旧字段派生）")
-    output_modalities: Optional[List[str]] = Field(None, description="输出模态（新口径；缺省由旧字段派生）")
-    features: Optional[List[str]] = Field(None, description="能力特征（新口径；缺省由旧字段派生）")
+    input_modalities: Optional[List[str]] = Field(None, description="输入模态（缺省按 type/provider 定基）")
+    output_modalities: Optional[List[str]] = Field(None, description="输出模态（缺省按 type/provider 定基）")
+    features: Optional[List[str]] = Field(None, description="能力特征（缺省为空）")
 
 
-class ModelBaseUpdate(BaseModel):
+class ModelBaseUpdate(BaseModel, RejectLegacyCapabilityFields):
     """更新基础模型Schema"""
     name: Optional[str] = Field(None, description="模型唯一标识", max_length=255)
     type: Optional[ModelType] = Field(None, description="模型类型")
@@ -272,11 +285,9 @@ class ModelBaseUpdate(BaseModel):
     is_deprecated: Optional[bool] = Field(None, description="是否弃用")
     is_official: Optional[bool] = Field(None, description="是否供应商官方模型")
     tags: Optional[List[str]] = Field(None, description="模型标签")
-    capability: Optional[List[str]] = Field(None, description="模型能力列表")
-    is_omni: Optional[bool] = Field(None, description="是否为Omni模型")
-    input_modalities: Optional[List[str]] = Field(None, description="输入模态（新口径；缺省由旧字段派生）")
-    output_modalities: Optional[List[str]] = Field(None, description="输出模态（新口径；缺省由旧字段派生）")
-    features: Optional[List[str]] = Field(None, description="能力特征（新口径；缺省由旧字段派生）")
+    input_modalities: Optional[List[str]] = Field(None, description="输入模态（缺省保持现值；不得为空列表）")
+    output_modalities: Optional[List[str]] = Field(None, description="输出模态（缺省保持现值；不得为空列表）")
+    features: Optional[List[str]] = Field(None, description="能力特征（缺省保持现值）")
 
 
 class ModelBase(BaseModel):
@@ -293,8 +304,6 @@ class ModelBase(BaseModel):
     is_official: bool
     tags: List[str]
     add_count: int
-    capability: List[str] = []
-    is_omni: bool = False
     # 响应侧恒输出（profile 派生，见 model_profile_view.wire_model_base）
     input_modalities: List[str] = []
     output_modalities: List[str] = []
@@ -318,14 +327,15 @@ class ModelBaseQuery(BaseModel):
 
 
 class ModelInfo(BaseModel):
-    """模型信息Schema"""
+    """模型信息Schema（运行期壳；能力载体为契约 v2 三列）"""
     model_name: str = Field(..., description="模型名称")
     provider: str = Field(..., description="模型提供商")
     api_key: str = Field(..., description="API密钥")
     api_base: Optional[str] = Field(None, description="API基础URL；空=使用提供商默认地址")
-    is_omni: bool = Field(default=False, description="是否为omni模型")
     model_type: ModelType = Field(..., description="模型类型")
-    capability: List[str] = Field(default_factory=list, description="模型能力列表")
+    input_modalities: List[str] = Field(default_factory=list, description="输入模态（契约 v2）")
+    output_modalities: List[str] = Field(default_factory=list, description="输出模态（契约 v2）")
+    features: List[str] = Field(default_factory=list, description="能力特征（契约 v2）")
     tenant_id: Optional[str] = Field(None, description="用量归属：租户ID")
     model_config_id: Optional[str] = Field(None, description="用量归属：模型配置ID")
     channel_id: Optional[str] = Field(None, description="用量归属：渠道ID")

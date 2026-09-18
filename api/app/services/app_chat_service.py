@@ -24,7 +24,7 @@ from app.integrations.knowledge.contracts import KnowledgeRetrievalSource
 from app.models import (
     App,
     MultiAgentConfig, AgentConfig, ModelType, WorkflowConfig,
-    ModelCapability, AgentExecution, Message, Conversation)
+    Modality, ModelFeature, AgentExecution, Message, Conversation)
 from app.repositories.agent_execution_repository import AgentExecutionRepository
 from app.repositories.tool_repository import ToolRepository
 from app.schemas import DraftRunRequest
@@ -639,8 +639,9 @@ class AppChatService:
             provider=api_key_obj.provider,
             api_key=api_key_obj.api_key,
             api_base=api_key_obj.api_base,
-            capability=api_key_obj.capability,
-            is_omni=api_key_obj.is_omni,
+            input_modalities=[str(item) for item in (api_key_obj.input_modalities or [])],
+            output_modalities=[str(item) for item in (api_key_obj.output_modalities or [])],
+            features=[str(item) for item in (api_key_obj.features or [])],
             model_type=ModelType.LLM,
             tenant_id=api_key_obj.tenant_id,
             model_config_id=api_key_obj.model_config_id,
@@ -703,7 +704,7 @@ class AppChatService:
                 workspace_id=workspace_id,
             )
             logger.info(f"处理了 {len(processed_files)} 个文件")
-            if doc_img_recognition and ModelCapability.VISION in (api_key_obj.capability or []) and any(
+            if doc_img_recognition and Modality.IMAGE in (api_key_obj.input_modalities or []) and any(
                 f.type == FileType.DOCUMENT for f in files
             ):
                 system_prompt += (
@@ -721,20 +722,24 @@ class AppChatService:
         )
 
         # 弱模型：用 ReAct prompt 驱动多轮工具调用，将轨迹注入 system_prompt
-        capability = api_key_obj.capability or []
+        features = [str(item) for item in (api_key_obj.features or [])]
         orchestrator_node_executions = []
         _api_key_config = {
             "model_name": api_key_obj.model_name,
             "api_key": api_key_obj.api_key,
             "provider": api_key_obj.provider,
             "api_base": api_key_obj.api_base,
+            "input_modalities": [str(item) for item in (api_key_obj.input_modalities or [])],
+            "output_modalities": [str(item) for item in (api_key_obj.output_modalities or [])],
+            "features": features,
+            # 旧字段仅存于沙箱 payload 口径（e2b-infra 同批下线前冻结）
             "is_omni": api_key_obj.is_omni,
-            "capability": capability,
+            "capability": [str(item) for item in (api_key_obj.capability or [])],
             "tenant_id": api_key_obj.tenant_id,
             "model_config_id": api_key_obj.model_config_id,
             "channel_id": api_key_obj.channel_id,
         }
-        use_agent_mode = ModelCapability.FUNCTION_CALL in capability
+        use_agent_mode = ModelFeature.FUNCTION_CALL in features
         if not use_agent_mode and tools:
             system_prompt, orchestrator_node_executions = await ToolOrchestrator.create_and_run(
                 tools=tools,
@@ -820,7 +825,9 @@ class AppChatService:
                 api_key=api_key_obj.api_key,
                 provider=api_key_obj.provider,
                 api_base=api_key_obj.api_base,
-                is_omni=api_key_obj.is_omni,
+                input_modalities=[str(item) for item in (api_key_obj.input_modalities or [])],
+                output_modalities=[str(item) for item in (api_key_obj.output_modalities or [])],
+                features=features,
                 temperature=model_parameters.get("temperature", 0.7),
                 max_tokens=model_parameters.get("max_tokens", 2000),
                 system_prompt=system_prompt,
@@ -828,7 +835,6 @@ class AppChatService:
                 deep_thinking=model_parameters.get("deep_thinking", False),
                 thinking_budget_tokens=model_parameters.get("thinking_budget_tokens"),
                 json_output=model_parameters.get("json_output", False),
-                capability=capability,
                 tenant_id=api_key_obj.tenant_id,
                 model_config_id=api_key_obj.model_config_id,
                 channel_id=api_key_obj.channel_id,
@@ -1221,8 +1227,9 @@ class AppChatService:
                 provider=api_key_obj.provider,
                 api_key=api_key_obj.api_key,
                 api_base=api_key_obj.api_base,
-                capability=api_key_obj.capability,
-                is_omni=api_key_obj.is_omni,
+                input_modalities=[str(item) for item in (api_key_obj.input_modalities or [])],
+                output_modalities=[str(item) for item in (api_key_obj.output_modalities or [])],
+                features=[str(item) for item in (api_key_obj.features or [])],
                 model_type=ModelType.LLM,
                 tenant_id=api_key_obj.tenant_id,
                 model_config_id=api_key_obj.model_config_id,
@@ -1282,7 +1289,7 @@ class AppChatService:
                     workspace_id=workspace_id,
                 )
                 logger.info(f"处理了 {len(processed_files)} 个文件")
-                if doc_img_recognition and ModelCapability.VISION in (api_key_obj.capability or []) and any(
+                if doc_img_recognition and Modality.IMAGE in (api_key_obj.input_modalities or []) and any(
                     f.type == FileType.DOCUMENT for f in files
                 ):
                     system_prompt += (
@@ -1300,20 +1307,24 @@ class AppChatService:
             )
 
             # 弱模型：用 ReAct prompt 驱动多轮工具调用，将轨迹注入 system_prompt
-            capability = api_key_obj.capability or []
+            features = [str(item) for item in (api_key_obj.features or [])]
             orchestrator_node_executions = []
             _api_key_config = {
                 "model_name": api_key_obj.model_name,
                 "api_key": api_key_obj.api_key,
                 "provider": api_key_obj.provider,
                 "api_base": api_key_obj.api_base,
+                "input_modalities": [str(item) for item in (api_key_obj.input_modalities or [])],
+                "output_modalities": [str(item) for item in (api_key_obj.output_modalities or [])],
+                "features": features,
+                # 旧字段仅存于沙箱 payload 口径（e2b-infra 同批下线前冻结）
                 "is_omni": api_key_obj.is_omni,
-                "capability": capability,
+                "capability": [str(item) for item in (api_key_obj.capability or [])],
                 "tenant_id": api_key_obj.tenant_id,
                 "model_config_id": api_key_obj.model_config_id,
                 "channel_id": api_key_obj.channel_id,
             }
-            use_agent_mode = ModelCapability.FUNCTION_CALL in capability
+            use_agent_mode = ModelFeature.FUNCTION_CALL in features
             if not use_agent_mode and tools:
                 stage_context = memory_stage_capture() if execution_mode == "in_process" else nullcontext()
                 with stage_context:
@@ -1383,7 +1394,9 @@ class AppChatService:
                     api_key=api_key_obj.api_key,
                     provider=api_key_obj.provider,
                     api_base=api_key_obj.api_base,
-                    is_omni=api_key_obj.is_omni,
+                    input_modalities=[str(item) for item in (api_key_obj.input_modalities or [])],
+                    output_modalities=[str(item) for item in (api_key_obj.output_modalities or [])],
+                    features=features,
                     temperature=model_parameters.get("temperature", 0.7),
                     max_tokens=model_parameters.get("max_tokens", 2000),
                     system_prompt=system_prompt,
@@ -1392,7 +1405,6 @@ class AppChatService:
                     deep_thinking=model_parameters.get("deep_thinking", False),
                     thinking_budget_tokens=model_parameters.get("thinking_budget_tokens"),
                     json_output=model_parameters.get("json_output", False),
-                    capability=capability,
                     tenant_id=api_key_obj.tenant_id,
                     model_config_id=api_key_obj.model_config_id,
                     channel_id=api_key_obj.channel_id,

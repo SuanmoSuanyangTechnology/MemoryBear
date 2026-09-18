@@ -38,7 +38,7 @@ from app.models.annotation_model import AppAnnotation, AppAnnotationHitLog, AppA
 from app.models.appshare_model import AppShare
 from app.models.file_metadata_model import FileMetadata
 from app.models.knowledgeshare_model import KnowledgeShare
-from app.models.models_model import ModelCapability, ModelType
+from app.models.models_model import Modality, ModelFeature, ModelType
 from app.repositories.tool_repository import ToolRepository
 from app.schemas.app_schema import FileInput, Citation, FileType, TransferMethod
 from app.schemas.model_schema import ModelInfo
@@ -1372,8 +1372,9 @@ class AgentRunService:
                 provider=api_key_config["provider"],
                 api_key=api_key_config["api_key"],
                 api_base=api_key_config["api_base"],
-                capability=api_key_config["capability"],
-                is_omni=api_key_config["is_omni"],
+                input_modalities=list(api_key_config.get("input_modalities") or []),
+                output_modalities=list(api_key_config.get("output_modalities") or []),
+                features=list(api_key_config.get("features") or []),
                 model_type=model_config.type,
                 tenant_id=api_key_config.get("tenant_id"),
                 model_config_id=api_key_config.get("model_config_id"),
@@ -1420,10 +1421,10 @@ class AgentRunService:
                     workspace_id=workspace_id
                 )
                 logger.info(f"处理了 {len(processed_files)} 个文件，provider={provider}")
-                capability = api_key_config.get("capability", [])
+                input_modalities = api_key_config.get("input_modalities") or []
                 has_doc_with_images = (
                     doc_img_recognition
-                    and ModelCapability.VISION in capability
+                    and Modality.IMAGE in input_modalities
                     and any(f.type == FileType.DOCUMENT for f in files)
                 )
             if has_doc_with_images:
@@ -1435,7 +1436,7 @@ class AgentRunService:
                 )
 
             # 7. 根据模型能力选择执行路径
-            capability = api_key_config.get("capability", [])
+            features = api_key_config.get("features") or []
             async def load_annotation_context():
                 return await self._load_annotation_context_evidence(agent_config.app_id, message)
             system_prompt = append_external_context_rule(system_prompt)
@@ -1443,7 +1444,7 @@ class AgentRunService:
             system_prompt = await apply_emotion_detection(
                 system_prompt, emotion_detection, user_message_id, write_cache=False
             )
-            use_agent_mode = ModelCapability.FUNCTION_CALL in capability
+            use_agent_mode = ModelFeature.FUNCTION_CALL in features
             orchestrator_node_executions = []
             if not use_agent_mode and tools:
                 # 弱模型：用 ReAct prompt 驱动多轮工具调用，将轨迹注入 system_prompt
@@ -1465,7 +1466,9 @@ class AgentRunService:
                 api_key=api_key_config["api_key"],
                 provider=api_key_config.get("provider", "openai"),
                 api_base=api_key_config.get("api_base"),
-                is_omni=api_key_config.get("is_omni", False),
+                input_modalities=list(api_key_config.get("input_modalities") or []),
+                output_modalities=list(api_key_config.get("output_modalities") or []),
+                features=features,
                 temperature=effective_params.get("temperature", 0.7),
                 max_tokens=effective_params.get("max_tokens", 2000),
                 system_prompt=system_prompt,
@@ -1473,7 +1476,6 @@ class AgentRunService:
                 deep_thinking=effective_params.get("deep_thinking", False),
                 thinking_budget_tokens=effective_params.get("thinking_budget_tokens"),
                 json_output=effective_params.get("json_output", False),
-                capability=capability,
                 tenant_id=api_key_config.get("tenant_id"),
                 model_config_id=api_key_config.get("model_config_id"),
                 channel_id=api_key_config.get("channel_id"),
@@ -1847,8 +1849,9 @@ class AgentRunService:
                 provider=api_key_config["provider"],
                 api_key=api_key_config["api_key"],
                 api_base=api_key_config["api_base"],
-                capability=api_key_config["capability"],
-                is_omni=api_key_config["is_omni"],
+                input_modalities=list(api_key_config.get("input_modalities") or []),
+                output_modalities=list(api_key_config.get("output_modalities") or []),
+                features=list(api_key_config.get("features") or []),
                 model_type=model_config.type,
                 tenant_id=api_key_config.get("tenant_id"),
                 model_config_id=api_key_config.get("model_config_id"),
@@ -1894,10 +1897,10 @@ class AgentRunService:
                     workspace_id=workspace_id
                 )
                 logger.info(f"处理了 {len(processed_files)} 个文件，provider={provider}")
-                capability = api_key_config.get("capability", [])
+                input_modalities = api_key_config.get("input_modalities") or []
                 has_doc_with_images = (
                     doc_img_recognition
-                    and ModelCapability.VISION in capability
+                    and Modality.IMAGE in input_modalities
                     and any(f.type == FileType.DOCUMENT for f in files)
                 )
             if has_doc_with_images:
@@ -1909,7 +1912,7 @@ class AgentRunService:
                 )
 
             # 7. 根据模型能力选择执行路径
-            capability = api_key_config.get("capability", [])
+            features = api_key_config.get("features") or []
             async def load_annotation_context():
                 return await self._load_annotation_context_evidence(agent_config.app_id, message)
             system_prompt = append_external_context_rule(system_prompt)
@@ -1917,7 +1920,7 @@ class AgentRunService:
             system_prompt = await apply_emotion_detection(
                 system_prompt, emotion_detection, user_message_id, write_cache=False
             )
-            use_agent_mode = ModelCapability.FUNCTION_CALL in capability
+            use_agent_mode = ModelFeature.FUNCTION_CALL in features
             orchestrator_node_executions = []
             if not use_agent_mode and tools:
                 # 弱模型：用 ReAct prompt 驱动多轮工具调用，将轨迹注入 system_prompt
@@ -1967,7 +1970,9 @@ class AgentRunService:
                     api_key=api_key_config["api_key"],
                     provider=api_key_config.get("provider", "openai"),
                     api_base=api_key_config.get("api_base"),
-                    is_omni=api_key_config.get("is_omni", False),
+                    input_modalities=list(api_key_config.get("input_modalities") or []),
+                    output_modalities=list(api_key_config.get("output_modalities") or []),
+                    features=features,
                     temperature=effective_params.get("temperature", 0.7),
                     max_tokens=effective_params.get("max_tokens", 2000),
                     system_prompt=system_prompt,
@@ -1976,7 +1981,6 @@ class AgentRunService:
                     deep_thinking=effective_params.get("deep_thinking", False),
                     thinking_budget_tokens=effective_params.get("thinking_budget_tokens"),
                     json_output=effective_params.get("json_output", False),
-                    capability=capability,
                     tenant_id=api_key_config.get("tenant_id"),
                     model_config_id=api_key_config.get("model_config_id"),
                     channel_id=api_key_config.get("channel_id"),
@@ -2573,6 +2577,10 @@ class AgentRunService:
                 "api_key": api_key.api_key,
                 "api_base": api_key.api_base,
                 "api_key_id": api_key.id,
+                "input_modalities": list(getattr(api_key, "input_modalities", None) or []),
+                "output_modalities": list(getattr(api_key, "output_modalities", None) or []),
+                "features": list(getattr(api_key, "features", None) or []),
+                # 旧字段仅存于沙箱 payload 口径（e2b-infra 同批下线前冻结）
                 "is_omni": api_key.is_omni,
                 "capability": api_key.capability,
                 "tenant_id": api_key.tenant_id,

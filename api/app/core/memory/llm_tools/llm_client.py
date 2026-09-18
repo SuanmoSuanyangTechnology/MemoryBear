@@ -55,7 +55,6 @@ class LLMClient(ABC):
         self.base_url = self.config.base_url
         self.max_retries = self.config.max_retries
         self.timeout = self.config.timeout
-        self.capability = self.config.capability
 
         logger.debug(
             f"初始化 LLM 客户端: provider={self.provider}, "

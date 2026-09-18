@@ -19,13 +19,12 @@ from app.integrations.knowledge.context_factory import build_app_knowledge_conte
 from app.integrations.knowledge.contracts import KnowledgeRetrievalSource
 from app.integrations.knowledge.runtime import get_knowledge_retriever
 from app.schemas.chunk_schema import RetrieveType
-from app.models.models_model import ModelCapability, ModelType
+from app.models.models_model import ModelFeature, ModelType
 from app.schemas.knowledge_metadata_schema import FilterCondition, FilterGroup, MetadataFilterMode
 from app.schemas.knowledge_retrieval_schema import KnowledgeRetrievalRequest
 from app.services.knowledge_metadata_service import KnowledgeMetadataService
 from app.services.knowledge_retrieval_preparation import KnowledgeRetrievalPreparation
 from app.services.metadata_auto_filter_service import MetadataAutoFilterService
-from app.services.model_profile_view import legacy_view
 from app.services.model_service import ModelApiKeyService, ModelConfigService
 
 logger = logging.getLogger(__name__)
@@ -207,22 +206,19 @@ class KnowledgeRetrievalNode(BaseNode):
             )
             if not api_key:
                 raise BusinessException("模型配置缺少 API Key", BizCode.INVALID_PARAMETER)
-            fallback_capabilities, fallback_is_omni = legacy_view(model_config)
             model = ModelRuntimeSnapshot(
                 model_name=api_key.model_name,
                 provider=api_key.provider or model_config.provider,
                 api_key=api_key.api_key,
                 api_base=api_key.api_base,
-                capability=tuple(api_key.capability or fallback_capabilities),
-                is_omni=(
-                    api_key.is_omni
-                    if api_key.is_omni is not None
-                    else fallback_is_omni
-                ),
+                input_modalities=tuple(api_key.input_modalities or ()),
+                output_modalities=tuple(api_key.output_modalities or ()),
+                features=tuple(api_key.features or ()),
                 model_type=model_config.type,
                 tenant_id=api_key.tenant_id,
                 model_config_id=api_key.model_config_id,
                 channel_id=api_key.channel_id,
+                failover_plan=getattr(api_key, "failover_plan", None),
             )
 
         return (
@@ -267,10 +263,10 @@ class KnowledgeRetrievalNode(BaseNode):
                 params.response_format.enable
                 and params.response_format.value == "json_object"
             ))
-            and ModelCapability.JSON_OUTPUT in set(model.capability)
+            and ModelFeature.JSON_OUTPUT in set(model.features)
             and not (
                 params.thinking.enable
-                and ModelCapability.THINKING in set(model.capability)
+                and ModelFeature.THINKING in set(model.features)
             )
         ):
             options["response_format"] = {"type": "json_object"}

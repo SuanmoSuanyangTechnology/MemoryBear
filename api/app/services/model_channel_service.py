@@ -41,7 +41,7 @@ from app.services.channel_registry import (
     parse_members,
 )
 from app.services.channel_service import ChannelService, describe_channel
-from app.services.model_profile_view import legacy_view
+from app.services.model_profile_view import profile_columns
 from app.services.model_service import (
     ModelConfigService,
     _require_api_base_for_local_provider,
@@ -121,8 +121,9 @@ class _ValidationAnchor:
 
     name: str
     type: str
-    is_omni: bool
-    capability: list[str]
+    input_modalities: list[str]
+    output_modalities: list[str]
+    features: list[str]
 
 
 def _resolve_validation_anchor(
@@ -132,7 +133,11 @@ def _resolve_validation_anchor(
     standard = get_provider_validation_model(provider)
     if standard:
         return _ValidationAnchor(
-            name=standard, type=ModelType.LLM.value, is_omni=False, capability=[]
+            name=standard,
+            type=ModelType.LLM.value,
+            input_modalities=["text"],
+            output_modalities=["text"],
+            features=[],
         )
     picked = _pick_validation_anchor(
         ModelConfigRepository.list_validation_candidates(
@@ -141,12 +146,13 @@ def _resolve_validation_anchor(
     )
     if picked is None:
         return None
-    capabilities, is_omni = legacy_view(picked)
+    columns = profile_columns(picked)
     return _ValidationAnchor(
         name=picked.name,
         type=_provider_value(picked.type),
-        is_omni=is_omni,
-        capability=capabilities,
+        input_modalities=list(columns["input_modalities"]),
+        output_modalities=list(columns["output_modalities"]),
+        features=list(columns["features"]),
     )
 
 
@@ -172,8 +178,9 @@ async def _validate_provider_key(
         api_base=None,
         model_type=anchor.type,
         test_message="Hello",
-        is_omni=anchor.is_omni,
-        capability=anchor.capability,
+        input_modalities=anchor.input_modalities,
+        output_modalities=anchor.output_modalities,
+        features=anchor.features,
     )
     if not result["valid"]:
         raise BusinessException(
@@ -383,7 +390,7 @@ class ChannelApiKeyService:
         _require_wellformed_api_base(provider, data.api_base, model_config.type)
         _require_supported_api_base(provider, data.api_base, model_config.type)
 
-        validate_capabilities, validate_is_omni = legacy_view(model_config)
+        validate_columns = profile_columns(model_config)
         validation_result = await ModelConfigService.validate_model_config(
             db=db,
             model_name=model_config.name,
@@ -392,8 +399,9 @@ class ChannelApiKeyService:
             api_base=data.api_base,
             model_type=model_config.type,
             test_message="Hello",
-            is_omni=validate_is_omni,
-            capability=validate_capabilities,
+            input_modalities=list(validate_columns["input_modalities"]),
+            output_modalities=list(validate_columns["output_modalities"]),
+            features=list(validate_columns["features"]),
         )
         if not validation_result["valid"]:
             raise BusinessException(

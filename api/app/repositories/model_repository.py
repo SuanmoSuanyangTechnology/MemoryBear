@@ -16,18 +16,6 @@ from app.schemas.model_schema import (
 # 获取数据库专用日志器
 db_logger = get_db_logger()
 
-# 旧 capability 筛选值 → 新列谓词（2d 迁移兼容；未知值回退冻结旧列，M10 随列删）
-_CAPABILITY_MODALITY_MAP = {"vision": "image", "audio": "audio", "video": "video"}
-_CAPABILITY_FEATURE_VALUES = {"thinking", "thinking_only", "json_output", "function_call"}
-
-
-def _capability_predicate(value: str):
-    if value in _CAPABILITY_MODALITY_MAP:
-        return ModelConfig.input_modalities.contains([_CAPABILITY_MODALITY_MAP[value]])
-    if value in _CAPABILITY_FEATURE_VALUES:
-        return ModelConfig.features.contains([value])
-    return ModelConfig.capability.contains([value])
-
 
 def _model_type_rank(column):
     """类型展示序（/models、/models/new、model_plaza 同序）：llm/chat 同序（chat 为存量
@@ -243,10 +231,6 @@ class ModelConfigRepository:
             # 支持多个 type 值（使用 IN 查询；13.2 归一后精确匹配，不再 chat↔llm 扩张）
             if query.type:
                 filters.append(ModelConfig.type.in_(list(query.type)))
-
-            # 能力筛选：旧值逐项映射新列谓词（多值 AND）；未知值回退旧列
-            if query.capability:
-                filters.extend(_capability_predicate(value) for value in query.capability)
 
             if query.is_active is not None:
                 filters.append(ModelConfig.is_active == query.is_active)

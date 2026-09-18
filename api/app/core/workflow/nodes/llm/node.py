@@ -35,7 +35,7 @@ from app.models import ModelType
 from app.schemas.model_schema import ModelInfo
 from app.services.context_engine_manager import ContextEngineManager
 from app.services.model_service import ModelConfigService
-from app.models.models_model import ModelCapability, ModelProvider
+from app.models.models_model import Modality, ModelFeature, ModelProvider
 
 logger = logging.getLogger(__name__)
 
@@ -111,17 +111,17 @@ class LLMNode(BaseNode):
         return bool(normalize_json_output_fields(cls._config_value(config.get("json_output_fields"))))
 
     @staticmethod
-    def _supports_json_output(capability_set: set[str]) -> bool:
-        return ModelCapability.JSON_OUTPUT in capability_set
+    def _supports_json_output(feature_set: set[str]) -> bool:
+        return ModelFeature.JSON_OUTPUT in feature_set
 
     @staticmethod
     def _should_inject_json_prompt(
             json_output: bool,
             response_format_json: bool,
-            capability_set: set[str],
+            feature_set: set[str],
     ) -> bool:
         return json_output or (
-            response_format_json and ModelCapability.JSON_OUTPUT in capability_set
+            response_format_json and ModelFeature.JSON_OUTPUT in feature_set
         )
 
     def _json_output_fields(self) -> list[JsonOutputFieldConfig]:
@@ -566,7 +566,7 @@ class LLMNode(BaseNode):
 
         param_warnings = validate_llm_param_constraints(
             config=self.typed_config,
-            capability=model_info.capability or [],
+            features=model_info.features or [],
             provider=model_info.provider or "",
         )
         if param_warnings:
@@ -606,7 +606,7 @@ class LLMNode(BaseNode):
             self.typed_config.thinking.budget.enable and self.typed_config.thinking.budget.value is not None
         ) else None
 
-        capability_set = set(model_info.capability or [])
+        feature_set = set(model_info.features or [])
         json_output = bool(self.typed_config.json_output)
         response_format_json = (
             self.typed_config.response_format.enable and
@@ -615,12 +615,12 @@ class LLMNode(BaseNode):
 
         # response_format is an independent API option. It must not turn the
         # json_output switch on or off.
-        if response_format_json and ModelCapability.JSON_OUTPUT in capability_set:
+        if response_format_json and ModelFeature.JSON_OUTPUT in feature_set:
             extra_params["response_format"] = {"type": "json_object"}
 
         # If the model lacks JSON output capability, disable the json_output
         # switch. The warning is already produced by validation.
-        supports_json_output = self._supports_json_output(capability_set)
+        supports_json_output = self._supports_json_output(feature_set)
         if json_output and not supports_json_output:
             json_output = False
 
@@ -628,7 +628,7 @@ class LLMNode(BaseNode):
         inject_json_prompt = self._should_inject_json_prompt(
             json_output,
             response_format_json,
-            capability_set,
+            feature_set,
         )
         logger.info(
             f"节点 {self.node_id}: json_output={json_output}, "
@@ -637,8 +637,8 @@ class LLMNode(BaseNode):
             f"inject_json_prompt={inject_json_prompt}, "
             f"typed_config.json_output={self.typed_config.json_output}, "
             f"typed_config.structured_output={self.typed_config.structured_output}, "
-            f"capability={model_info.capability}, "
-            f"has_json_output={ModelCapability.JSON_OUTPUT in capability_set}, "
+            f"features={model_info.features}, "
+            f"has_json_output={ModelFeature.JSON_OUTPUT in feature_set}, "
             f"supports_json_output={supports_json_output}"
         )
         # 结构化输出（strict json_schema）由用户在 LLM 节点的"结构化输出"按钮控制；
@@ -667,15 +667,15 @@ class LLMNode(BaseNode):
         # Vision: only enable for providers whose LLM class accepts
         # OpenAI-style multimodal content format ([{type: text, text: ...}]).
         # DashScope now runs the OpenAI-compatible API for all models
-        # (ChatTongyi retired), but if the model itself declares the VISION
-        # capability we trust that flag and pass multimodal content through.
+        # (ChatTongyi retired), but if the model itself declares image input
+        # we trust that flag and pass multimodal content through.
         effective_vision = self.typed_config.vision
         if effective_vision:
             try:
                 provider_enum = ModelProvider(model_info.provider.lower())
             except ValueError:
                 provider_enum = None
-            has_vision_capability = ModelCapability.VISION in capability_set
+            has_vision_capability = Modality.IMAGE in set(model_info.input_modalities or [])
             is_compatible = (
                 provider_enum in _MULTIMODAL_COMPATIBLE_PROVIDERS
                 or has_vision_capability

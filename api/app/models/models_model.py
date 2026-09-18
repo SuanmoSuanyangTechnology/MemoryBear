@@ -37,7 +37,7 @@ class ModelType(StrEnum):
     CHAT = "chat"
     EMBEDDING = "embedding"
     RERANK = "rerank"
-    ASR = "ASR"
+    ASR = "asr"
     # TTS = "tts"
     # SPEECH2TEXT = "speech2text"
     IMAGE = "image"
@@ -57,24 +57,27 @@ class ModelType(StrEnum):
         return schema
 
 
-def model_type_storage_values(model_types) -> list[str]:
-    """Return canonical DB values plus legacy aliases needed during rollout."""
-    values: list[str] = []
-    for model_type in model_types:
-        canonical = ModelType(model_type).value
-        for value in (
-            (canonical, "asr") if canonical == ModelType.ASR.value else (canonical,)
-        ):
-            if value not in values:
-                values.append(value)
-    return values
-
-
 class ModelCapability(StrEnum):
-    """模型能力枚举"""
+    """deprecated（契约 v2 起拆为三列，读侧旧列兼容窗口内保留，M10 随列删）"""
     VISION = "vision"
     AUDIO = "audio"
     VIDEO = "video"
+    THINKING = "thinking"
+    THINKING_ONLY = "thinking_only"
+    JSON_OUTPUT = "json_output"
+    FUNCTION_CALL = "function_call"
+
+
+class Modality(StrEnum):
+    """模态（契约 v2 三列 input/output_modalities 值域，与 redbear-model 包同口径）"""
+    TEXT = "text"
+    IMAGE = "image"
+    AUDIO = "audio"
+    VIDEO = "video"
+
+
+class ModelFeature(StrEnum):
+    """能力特征（契约 v2 三列 features 值域，与 redbear-model 包同口径）"""
     THINKING = "thinking"
     THINKING_ONLY = "thinking_only"
     JSON_OUTPUT = "json_output"
@@ -202,6 +205,12 @@ class ModelApiKey(BaseModel):
     tenant_id = None
     model_config_id = None
     channel_id = None
+
+    # 能力载体（契约 v2 三列）：旧表无此列，运行时壳由 ModelApiKeyService 按 profile 填充，
+    # 非映射属性、不落库；消费方与 RedBearModelConfig 同口径读取
+    input_modalities = None
+    output_modalities = None
+    features = None
 
     # 请求内换渠道计划（spec §11.2）：非映射类属、不落库/不序列化，
     # 由 ModelApiKeyService 在返回运行时壳时挂载，消费方透传给 RedBearModelConfig

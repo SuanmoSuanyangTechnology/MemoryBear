@@ -57,6 +57,7 @@ from app.services.model_impact_service import collect_model_impact
 from app.services.model_profile_view import (
     legacy_view,
     normalize_type,
+    profile_columns,
     wire_model_base,
     wire_model_config,
     write_columns,
@@ -150,7 +151,9 @@ def _shared_validation_config(
     api_key: str,
     api_base: str | None,
     model_type: str,
-    capability: list | None,
+    input_modalities: list | None = None,
+    output_modalities: list | None = None,
+    features: list | None = None,
 ) -> "ResolvedModelConfig":
     from redbear_model import ModelProfile as SharedModelProfile
     from redbear_model import (
@@ -170,12 +173,14 @@ def _shared_validation_config(
         model_name=model_name,
         api_key=SecretStr(api_key),
         base_url=api_base,
-        profile=SharedModelProfile.from_legacy_fields(
+        profile=SharedModelProfile.from_stored_fields(
             model_id=_MODEL_VALIDATION_CONFIG_ID,
             tenant_id=_MODEL_VALIDATION_TENANT_ID,
             type=_enum_value(model_type),
             provider=shared_provider,
-            capabilities=tuple(_enum_value(item) for item in (capability or [])),
+            input_modalities=tuple(_enum_value(item) for item in (input_modalities or [])),
+            output_modalities=tuple(_enum_value(item) for item in (output_modalities or [])),
+            features=tuple(_enum_value(item) for item in (features or [])),
         ),
         runtime=ModelRuntimeOptions(timeout_s=10.0, max_retries=0),
     )
@@ -183,20 +188,6 @@ def _shared_validation_config(
 
 def is_asr_model(model_type: str) -> bool:
     return _enum_value(model_type) == _enum_value(ModelType.ASR)
-
-
-def _canonical_model_type_and_capabilities(
-    model_type: ModelType | str,
-    capabilities: list[str] | None,
-) -> tuple[str, list[str]]:
-    canonical_type = ModelType(model_type).value
-    normalized_capabilities = list(dict.fromkeys(capabilities or []))
-    if (
-        canonical_type == ModelType.ASR.value
-        and ModelCapability.AUDIO.value not in normalized_capabilities
-    ):
-        normalized_capabilities.append(ModelCapability.AUDIO.value)
-    return canonical_type, normalized_capabilities
 
 
 def _require_asr_model_configuration(provider: str, model_type: str) -> None:
@@ -436,8 +427,6 @@ def _with_availability(
 _ABILITY_FIELDS = {
     "type",
     "provider",
-    "capability",
-    "is_omni",
     "input_modalities",
     "output_modalities",
     "features",
@@ -447,23 +436,19 @@ _ABILITY_FIELDS = {
 def _config_update_payload(model_data: ModelConfigUpdate, existing_model: ModelConfig) -> Dict[str, Any]:
     """更新请求 → ORM 更新 dict（type 归一 + 三新列换算，旧列停写）。
 
-    未提交的能力维度以 `existing_model` 派生视图补齐（`PUT {is_omni:false}` 不清空其余）；
+    未提交的能力维度以 `existing_model` 派生视图补齐（单字段更新不清空其余维度）；
     请求未触达能力字段时三列不重写（存量行保持原样，避免无谓写入）。
     """
     fields_set = model_data.model_fields_set
     payload = model_data.model_dump(
         exclude_unset=True,
-        exclude={"capability", "is_omni", "input_modalities", "output_modalities", "features"},
+        exclude={"input_modalities", "output_modalities", "features"},
     )
     if "type" in fields_set:
         payload["type"] = normalize_type(model_data.type)
     if fields_set & _ABILITY_FIELDS:
         payload.update(
             write_columns(
-                row_type=model_data.type if "type" in fields_set else None,
-                provider=model_data.provider if "provider" in fields_set else None,
-                capability=model_data.capability if "capability" in fields_set else None,
-                is_omni=model_data.is_omni if "is_omni" in fields_set else None,
                 input_modalities=model_data.input_modalities if "input_modalities" in fields_set else None,
                 output_modalities=model_data.output_modalities if "output_modalities" in fields_set else None,
                 features=model_data.features if "features" in fields_set else None,
@@ -588,8 +573,9 @@ class ModelConfigService:
             api_key=api_key.api_key,
             api_base=api_key.api_base,
             provider=api_key.provider,
-            is_omni=api_key.is_omni,
-            capability=api_key.capability,
+            input_modalities=list(api_key.input_modalities or []),
+            output_modalities=list(api_key.output_modalities or []),
+            features=list(api_key.features or []),
             tenant_id=api_key.tenant_id,
             model_config_id=api_key.model_config_id,
             channel_id=api_key.channel_id,
@@ -679,8 +665,9 @@ class ModelConfigService:
         api_base: Optional[str] = None,
         model_type: str = "llm",
         test_message: str = "Hello",
-        is_omni: bool = False,
-        capability: Optional[list] = None,
+        input_modalities: Optional[list] = None,
+        output_modalities: Optional[list] = None,
+        features: Optional[list] = None,
     ) -> Dict[str, Any]:
         """验证模型配置是否有效
 
@@ -692,8 +679,9 @@ class ModelConfigService:
             api_base: API基础URL
             model_type: 模型类型 (llm/chat/embedding/rerank)
             test_message: 测试消息
-            is_omni: 是否为Omni模型
-            capability: 模型能力列表
+            input_modalities: 输入模态列表（契约 v2）
+            output_modalities: 输出模态列表（契约 v2）
+            features: 功能开关列表（契约 v2）
 
         Returns:
             Dict: 验证结果
@@ -741,18 +729,20 @@ class ModelConfigService:
                         "error": "API 未安装可选的 redbear-model 包，暂无法验证 Qwen3-VL 模型",
                         "error_type": "ModelRuntimeUnavailable",
                     }
-                validation_capability = list(capability or [])
-                if "vision" not in {
-                    _enum_value(item) for item in validation_capability
-                }:
-                    validation_capability.append("vision")
+                validation_input = [_enum_value(item) for item in (input_modalities or [])]
+                if "text" not in validation_input:
+                    validation_input.insert(0, "text")
+                if "image" not in validation_input:
+                    validation_input.append("image")
                 shared_config = _shared_validation_config(
                     model_name=model_name,
                     provider=provider_lower,
                     api_key=api_key,
                     api_base=api_base,
                     model_type=model_type_lower,
-                    capability=validation_capability,
+                    input_modalities=validation_input,
+                    output_modalities=output_modalities,
+                    features=features,
                 )
                 if is_qwen3_vl_embedding(shared_config):
                     return await _validate_qwen3_vl_embedding(
@@ -773,8 +763,9 @@ class ModelConfigService:
                 provider=provider,
                 api_key=api_key,
                 base_url=api_base,
-                is_omni=is_omni,
-                capability=capability,
+                input_modalities=[_enum_value(item) for item in (input_modalities or [])],
+                output_modalities=[_enum_value(item) for item in (output_modalities or [])],
+                features=[_enum_value(item) for item in (features or [])],
                 timeout=10.0,
                 max_retries=0,
             )
@@ -1041,6 +1032,16 @@ class ModelConfigService:
         _require_asr_api_base(credential.api_base)
         _require_supported_api_base(model_data.provider, credential.api_base, model_data.type)
         snapshot = model_data.model_dump(exclude={"credential"})
+        # 三新列按 ASR 实际模态定基（audio → text；旧列 capability/is_omni 停写）
+        snapshot.update(
+            write_columns(
+                row_type=model_data.type,
+                provider=model_data.provider,
+                input_modalities=model_data.input_modalities,
+                output_modalities=model_data.output_modalities,
+                features=model_data.features,
+            )
+        )
         await asyncio.to_thread(ModelConfigService._check_asr_model_name, snapshot, tenant_id)
         return await asyncio.to_thread(
             ModelConfigService._save_asr_model, snapshot, credential.model_dump(),
@@ -1060,16 +1061,6 @@ class ModelConfigService:
         仍在网络活体验证通过后写入。
         """
         if is_asr_model(model_data.type):
-            canonical_type, capabilities = _canonical_model_type_and_capabilities(
-                model_data.type,
-                model_data.capability,
-            )
-            model_data = model_data.model_copy(
-                update={
-                    "type": ModelType(canonical_type),
-                    "capability": capabilities,
-                }
-            )
             return await ModelConfigService._create_asr_model(model_data, tenant_id, created_by)
         # 检查名称是否已存在（同租户内；先于任何网络调用）
         if ModelConfigRepository.get_by_name(db, model_data.name, provider=model_data.provider, tenant_id=tenant_id):
@@ -1090,8 +1081,9 @@ class ModelConfigService:
             api_base=credential.api_base,
             model_type=model_data.type,
             test_message="Hello",
-            is_omni=model_data.is_omni,
-            capability=model_data.capability,
+            input_modalities=model_data.input_modalities,
+            output_modalities=model_data.output_modalities,
+            features=model_data.features,
         )
         if not validation_result["valid"]:
             raise BusinessException(
@@ -1101,8 +1093,6 @@ class ModelConfigService:
         model_config_data = model_data.model_dump(
             exclude={
                 "credential",
-                "capability",
-                "is_omni",
                 "input_modalities",
                 "output_modalities",
                 "features",
@@ -1115,8 +1105,6 @@ class ModelConfigService:
             write_columns(
                 row_type=model_data.type,
                 provider=provider,
-                capability=model_data.capability,
-                is_omni=model_data.is_omni,
                 input_modalities=model_data.input_modalities,
                 output_modalities=model_data.output_modalities,
                 features=model_data.features,
@@ -1360,6 +1348,15 @@ class ModelApiKeyService:
         return api_key
 
     @staticmethod
+    def _stamp_profile_columns(api_key: ModelApiKey, model_config: ModelConfig) -> ModelApiKey:
+        """旧表 key 行无三列：运行时壳按 config 行派生视图补齐（消费方统一读三列，非映射属性）。"""
+        columns = profile_columns(model_config)
+        api_key.input_modalities = list(columns["input_modalities"])
+        api_key.output_modalities = list(columns["output_modalities"])
+        api_key.features = list(columns["features"])
+        return api_key
+
+    @staticmethod
     def _runtime_api_key_from_resolved(
         resolved: ResolvedModelConfig,
         *,
@@ -1367,8 +1364,9 @@ class ModelApiKeyService:
     ) -> ModelApiKey:
         """ResolvedModelConfig → 瞬时 ModelApiKey 兼容壳（不落库；id=channel_id）。
 
-        调用方只消费 .model_name/.api_key/.api_base/.provider/.is_omni/.capability
-        与 .id（usage 计数），形状与旧路径一致。
+        能力载体为 profile 三列（.input_modalities/.output_modalities/.features）；
+        旧列 .capability/.is_omni 为派生视图（仅 e2b 沙箱 payload 等冻结消费面读取，
+        内部消费方一律读三列，M10 随旧列删）。
 
         渠道 api_base 为空（provider 级渠道）时物化 provider 公共基地址（dashscope
         原生 SDK 组合在运行期再剥离为 /api/v1），与 RedBearModelConfig 的补默认
@@ -1387,6 +1385,9 @@ class ModelApiKeyService:
             or get_default_provider_api_base(resolved.provider, resolved.profile.type),
             capability=[str(item) for item in capabilities],
             is_omni=is_omni,
+            input_modalities=[str(item) for item in resolved.profile.input_modalities],
+            output_modalities=[str(item) for item in resolved.profile.output_modalities],
+            features=[str(item) for item in resolved.profile.features],
         )
         key.failover_plan = failover_plan
         return ModelApiKeyService._stamp_usage_attribution(
@@ -1441,6 +1442,7 @@ class ModelApiKeyService:
             )
 
         capabilities, is_omni = legacy_view(model_config)
+        columns = profile_columns(model_config)
         return ModelApiKey(
             model_name=model_config.name,
             provider=ModelProvider.SPEEDBEAR,
@@ -1448,6 +1450,9 @@ class ModelApiKeyService:
             api_base=f"{settings.SPEEDBEAR_BASE_URL.rstrip('/')}/api/v1",
             capability=capabilities,
             is_omni=is_omni,
+            input_modalities=columns["input_modalities"],
+            output_modalities=columns["output_modalities"],
+            features=columns["features"],
         )
 
     @staticmethod
@@ -1480,6 +1485,7 @@ class ModelApiKeyService:
             )
 
         capabilities, is_omni = legacy_view(model_config)
+        columns = profile_columns(model_config)
         return ModelApiKey(
             model_name=model_config.name,
             provider=ModelProvider.SPEEDBEAR,
@@ -1487,6 +1493,9 @@ class ModelApiKeyService:
             api_base=f"{settings.SPEEDBEAR_BASE_URL.rstrip('/')}/api/v1",
             capability=capabilities,
             is_omni=is_omni,
+            input_modalities=columns["input_modalities"],
+            output_modalities=columns["output_modalities"],
+            features=columns["features"],
         )
 
     @staticmethod
@@ -1560,6 +1569,7 @@ class ModelApiKeyService:
         legacy_key = ModelApiKeyService._select_legacy_key(model_config)
         if legacy_key is None:
             return None
+        ModelApiKeyService._stamp_profile_columns(legacy_key, model_config)
         return ModelApiKeyService._stamp_usage_attribution(
             legacy_key, tenant_id, model_config.id
         )
@@ -1631,6 +1641,7 @@ class ModelApiKeyService:
         legacy_key = ModelApiKeyService._select_legacy_key(model_config)
         if legacy_key is None:
             return None
+        ModelApiKeyService._stamp_profile_columns(legacy_key, model_config)
         return ModelApiKeyService._stamp_usage_attribution(
             legacy_key, tenant_id, model_config.id
         )
@@ -1735,15 +1746,13 @@ class ModelBaseService:
         if existing:
             raise BusinessException("模型已存在", BizCode.DUPLICATE_NAME)
         create_data = data.model_dump(
-            exclude={"capability", "is_omni", "input_modalities", "output_modalities", "features"}
+            exclude={"input_modalities", "output_modalities", "features"}
         )
         create_data["type"] = normalize_type(data.type)
         create_data.update(
             write_columns(
                 row_type=data.type,
                 provider=data.provider,
-                capability=data.capability,
-                is_omni=data.is_omni,
                 input_modalities=data.input_modalities,
                 output_modalities=data.output_modalities,
                 features=data.features,
@@ -1767,10 +1776,6 @@ class ModelBaseService:
                 raise BusinessException("基础模型不存在", BizCode.MODEL_NOT_FOUND)
             payload.update(
                 write_columns(
-                    row_type=raw.get("type") if "type" in fields_set else None,
-                    provider=raw.get("provider") if "provider" in fields_set else None,
-                    capability=raw.get("capability") if "capability" in fields_set else None,
-                    is_omni=raw.get("is_omni") if "is_omni" in fields_set else None,
                     input_modalities=raw.get("input_modalities") if "input_modalities" in fields_set else None,
                     output_modalities=raw.get("output_modalities") if "output_modalities" in fields_set else None,
                     features=raw.get("features") if "features" in fields_set else None,

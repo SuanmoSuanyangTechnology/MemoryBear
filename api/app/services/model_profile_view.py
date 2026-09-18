@@ -15,7 +15,9 @@ from typing import Any
 
 from redbear_model import (
     CompositeMember,
+    Modality,
     ModelProfile,
+    ModelType as ContractModelType,
     legacy_capability_columns,
 )
 
@@ -118,19 +120,12 @@ def _require_valid_new_columns(
     input_modalities: Sequence[str] | None,
     output_modalities: Sequence[str] | None,
 ) -> None:
-    """显式新列落库前校验契约不变量（空 = 未迁移态，写侧不得伪造；input 恒含 text、output 非空）。"""
-    if input_modalities is not None:
-        values = {str(getattr(item, "value", item)) for item in input_modalities}
-        if not values:
-            raise BusinessException(
-                "input_modalities 不能为空列表（省略该字段即按旧字段派生）",
-                BizCode.INVALID_PARAMETER,
-            )
-        if "text" not in values:
-            raise BusinessException(
-                "input_modalities 必须包含 'text'",
-                BizCode.INVALID_PARAMETER,
-            )
+    """显式新列落库前校验契约不变量（空 = 未迁移态，写侧不得伪造；input/output 仅需非空）。"""
+    if input_modalities is not None and not list(input_modalities):
+        raise BusinessException(
+            "input_modalities 不能为空列表（省略该字段即按旧字段派生）",
+            BizCode.INVALID_PARAMETER,
+        )
     if output_modalities is not None and not list(output_modalities):
         raise BusinessException(
             "output_modalities 不能为空列表（省略该字段即按旧字段派生）",
@@ -142,8 +137,6 @@ def write_columns(
     *,
     row_type: Any = None,
     provider: str | None = None,
-    capability: Sequence[str] | None = None,
-    is_omni: bool | None = None,
     input_modalities: Sequence[str] | None = None,
     output_modalities: Sequence[str] | None = None,
     features: Sequence[str] | None = None,
@@ -151,41 +144,42 @@ def write_columns(
 ) -> dict[str, list[str]]:
     """请求字段 → 三新列（写路径单一换算点）。
 
-    - 新字段（非 None）优先直落，不做往返转换（经 `_require_valid_new_columns` 校验契约不变量）
-    - 缺省侧经包内 `legacy_capability_columns` 换算（旧字段 → 三列）
-    - 旧字段/new 字段双双缺省时以 `fallback_row` 的派生视图补齐（更新场景保持现值）
+    - 显式三列（非 None）优先直落，不做往返转换（经 `_require_valid_new_columns` 校验契约不变量）
+    - 缺省侧：update 场景取 `fallback_row` 的 profile 三列（保持现值，旧列存量经读侧兼容派生）；
+      create 场景按 type 定基（text / type 定基 output / 空 features）；ASR 族以实际模态定基
+      （audio → text），不走旧列换算的 text 基底（后者仅服务存量迁移）
     """
     _require_valid_new_columns(input_modalities, output_modalities)
-    resolved_type = row_type if row_type is not None else getattr(fallback_row, "type", None)
-    resolved_provider = provider if provider is not None else getattr(fallback_row, "provider", None)
-    if resolved_type is None:
-        raise ValueError("write_columns requires row_type or fallback_row")
-
     if fallback_row is not None:
-        fallback_capabilities, fallback_omni = legacy_view(fallback_row)
+        current = profile_columns(fallback_row)
     else:
-        fallback_capabilities, fallback_omni = [], False
-
-    derived_input, derived_output, derived_features = legacy_capability_columns(
-        type=resolved_type,
-        provider=resolved_provider,
-        capabilities=capability if capability is not None else fallback_capabilities,
-        is_omni=bool(is_omni) if is_omni is not None else fallback_omni,
-    )
+        resolved_type = row_type
+        if resolved_type is None:
+            raise ValueError("write_columns requires row_type or fallback_row")
+        derived_input, derived_output, derived_features = legacy_capability_columns(
+            type=resolved_type,
+            provider=provider,
+            capabilities=(),
+            is_omni=False,
+        )
+        if ContractModelType(resolved_type) is ContractModelType.ASR:
+            derived_input, derived_output = (Modality.AUDIO,), (Modality.TEXT,)
+        current = {
+            "input_modalities": _enum_str(derived_input),
+            "output_modalities": _enum_str(derived_output),
+            "features": _enum_str(derived_features),
+        }
     return {
-        "input_modalities": list(input_modalities) if input_modalities is not None else _enum_str(derived_input),
-        "output_modalities": list(output_modalities) if output_modalities is not None else _enum_str(derived_output),
-        "features": list(features) if features is not None else _enum_str(derived_features),
+        "input_modalities": list(input_modalities) if input_modalities is not None else current["input_modalities"],
+        "output_modalities": list(output_modalities) if output_modalities is not None else current["output_modalities"],
+        "features": list(features) if features is not None else current["features"],
     }
 
 
 def wire_model_config(row: Any) -> model_schema.ModelConfig:
-    """ModelConfig 行 → 响应 schema：旧字段由 profile 派生，三新列同源输出（双输出）。"""
+    """ModelConfig 行 → 响应 schema：三新列由 profile 派生（2e-1 起旧字段已从 wire 下线）。"""
     item = model_schema.ModelConfig.model_validate(row)
     profile = profile_of(row)
-    capabilities, is_omni = profile.legacy_capability_view(getattr(row, "provider", None))
-    item.capability = _enum_str(capabilities)
-    item.is_omni = bool(is_omni)
     item.input_modalities = _enum_str(profile.input_modalities)
     item.output_modalities = _enum_str(profile.output_modalities)
     item.features = _enum_str(profile.features)
@@ -193,12 +187,9 @@ def wire_model_config(row: Any) -> model_schema.ModelConfig:
 
 
 def wire_model_base(row: Any) -> model_schema.ModelBase:
-    """ModelBase 行 → 响应 schema（旧字段派生 + 三新列，口径同 `wire_model_config`）。"""
+    """ModelBase 行 → 响应 schema（三新列，口径同 `wire_model_config`）。"""
     item = model_schema.ModelBase.model_validate(row)
     profile = profile_of(row)
-    capabilities, is_omni = profile.legacy_capability_view(getattr(row, "provider", None))
-    item.capability = _enum_str(capabilities)
-    item.is_omni = bool(is_omni)
     item.input_modalities = _enum_str(profile.input_modalities)
     item.output_modalities = _enum_str(profile.output_modalities)
     item.features = _enum_str(profile.features)

@@ -62,14 +62,12 @@ _REQUIRED_WORKSPACE_MODEL_SLOTS = ("llm", "embedding", "rerank")
 
 def _serialize_model_option(model: ModelConfig) -> dict:
     profile = profile_of(model)
-    capabilities, _ = profile.legacy_capability_view(model.provider)
     return {
         "id": str(model.id),
         "name": model.name,
         "provider": getattr(model.provider, "value", model.provider),
         "type": getattr(model.type, "value", model.type),
-        # capability 为派生视图（前端未改期间兼容）；三新列为新口径直读
-        "capability": [str(item) for item in capabilities],
+        # 能力载体为契约 v2 三列（2e-1 起旧 capability 键已从载荷下线）
         "input_modalities": [str(item) for item in profile.input_modalities],
         "output_modalities": [str(item) for item in profile.output_modalities],
         "features": [str(item) for item in profile.features],
@@ -629,8 +627,9 @@ async def _validate_workspace_slot_runtime(
             api_key=api_key_config.api_key,
             api_base=api_key_config.api_base,
             model_type=validate_type,
-            is_omni=api_key_config.is_omni,
-            capability=api_key_config.capability,
+            input_modalities=list(api_key_config.input_modalities or []),
+            output_modalities=list(api_key_config.output_modalities or []),
+            features=list(api_key_config.features or []),
         )
     except Exception as exc:
         return _model_issue(

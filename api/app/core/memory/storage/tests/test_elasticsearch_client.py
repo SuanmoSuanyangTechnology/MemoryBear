@@ -898,7 +898,6 @@ async def test_elastic_client_get_node_uses_filter_projection_and_sort() -> None
         {
             "index": get_index_name(MemoryNodeType.EXTRACTED_ENTITY),
             "keep_alive": PIT_KEEP_ALIVE,
-            "allow_partial_search_results": False,
         }
     ]
     assert fake.search_calls == [
@@ -910,6 +909,7 @@ async def test_elastic_client_get_node_uses_filter_projection_and_sort() -> None
             "source_includes": ["id", "status"],
             "sort": [{"score": "desc"}, {"_shard_doc": "asc"}],
             "pit": {"id": "pit-1", "keep_alive": PIT_KEEP_ALIVE},
+            "allow_partial_search_results": False,
         }
     ]
     assert fake.close_point_in_time_calls == [{"id": "pit-1"}]

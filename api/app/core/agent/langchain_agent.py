@@ -224,7 +224,9 @@ class LangChainAgent:
             api_key: str,
             provider: str = "openai",
             api_base: Optional[str] = None,
-            is_omni: bool = False,
+            input_modalities: Optional[List[str]] = None,
+            output_modalities: Optional[List[str]] = None,
+            features: Optional[List[str]] = None,
             temperature: float = 0.7,
             max_tokens: int = 2000,
             system_prompt: Optional[str] = None,
@@ -244,7 +246,6 @@ class LangChainAgent:
             deep_thinking: bool = False,  # 是否启用深度思考模式
             thinking_budget_tokens: Optional[int] = None,  # 深度思考 token 预算
             json_output: bool = False,  # 是否强制 JSON 输出
-            capability: Optional[List[str]] = None,  # 模型能力列表，用于校验是否支持深度思考
             tenant_id: Optional[str] = None,  # 用量归属：租户
             model_config_id: Optional[str] = None,  # 用量归属：模型配置
             channel_id: Optional[str] = None,  # 用量归属：渠道
@@ -275,7 +276,6 @@ class LangChainAgent:
         self.provider = provider
         self.tools = tools or []
         self.streaming = streaming
-        self.is_omni = is_omni
         self.strategy = strategy
         self.tool_call_limit = tool_call_limit
         self._initial_context_evidence = list(context_evidence or [])
@@ -325,7 +325,7 @@ class LangChainAgent:
             f"auto_calculated={max_iterations is None}"
         )
 
-        # 创建 RedBearLLM，capability 校验由 RedBearModelConfig 统一处理
+        # 创建 RedBearLLM，features 校验由 RedBearModelConfig 统一处理
         extra_params: Dict[str, Any] = {
             "temperature": temperature,
             "max_tokens": max_tokens,
@@ -354,8 +354,9 @@ class LangChainAgent:
             provider=provider,
             api_key=api_key,
             base_url=api_base,
-            is_omni=is_omni,
-            capability=capability,
+            input_modalities=list(input_modalities or []),
+            output_modalities=list(output_modalities or []),
+            features=list(features or []),
             tenant_id=tenant_id,
             model_config_id=model_config_id,
             channel_id=channel_id,
