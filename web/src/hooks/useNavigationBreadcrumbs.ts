@@ -31,6 +31,13 @@ export const useNavigationBreadcrumbs = (source: 'space' | 'manage' = 'manage') 
 
   useEffect(() => {
     const currentPath = location.pathname;
+
+    // The knowledge base list manages its folder breadcrumbs itself.
+    // Rebuilding the same `space` breadcrumbs here would overwrite that folder path.
+    if (source === 'space' && currentPath === '/knowledge-base') {
+      return;
+    }
+
     const menus = allMenus[source] || [];
 
     const pathMatches = (pattern: string, path: string): boolean => {

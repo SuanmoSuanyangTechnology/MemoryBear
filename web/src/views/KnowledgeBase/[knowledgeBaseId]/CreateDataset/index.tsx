@@ -53,6 +53,8 @@ const CreateDataset = () => {
   const source = (locationState.source ?? 'local') as SourceType;
   const knowledgeBaseId = locationState.knowledgeBaseId || routeKnowledgeBaseId;
   const parentId = locationState.parentId;
+  const documentFolderPath = locationState.documentFolderPath;
+  const knowledgeBaseFolderPath = locationState.knowledgeBaseFolderPath;
   const initialIds = locationState.fileIds || locationState.fileId;
   const [current, setCurrent] = useState(stepIndexMap[locationState.startStep ?? 'selectFile']);
   const [fileIds, setFileIds] = useState<string[]>(initialIds ? (Array.isArray(initialIds) ? initialIds : [initialIds]) : []);
@@ -69,9 +71,12 @@ const CreateDataset = () => {
         refresh: true,
         timestamp: Date.now(),
         navigateToDocumentFolder: parentId !== knowledgeBaseId ? parentId : undefined,
+        documentFolderPath,
+        fromKnowledgeBaseList: true,
+        knowledgeBaseFolderPath,
       },
     });
-  }, [knowledgeBaseId, navigate, parentId]);
+  }, [documentFolderPath, knowledgeBaseFolderPath, knowledgeBaseId, navigate, parentId]);
 
   const { loading: pollingLoading, poll, start: startPolling } = useDocumentPolling({
     knowledgeBaseId,

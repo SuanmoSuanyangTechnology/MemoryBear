@@ -29,11 +29,24 @@ type ModelMenuInfo = {
   summary: string[];
 };
 
+type KnowledgeBaseNavigationState = {
+  navigateToFolder?: string;
+  folderPath?: BreadcrumbItem[];
+  resetToRoot?: boolean;
+};
+
 const KnowledgeBaseManagement: FC = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { modal, message: messageApi } = App.useApp()
   const location = useLocation();
+  const initialNavigationState = location.state as KnowledgeBaseNavigationState | null;
+  const initialFolderId = initialNavigationState?.resetToRoot
+    ? undefined
+    : initialNavigationState?.navigateToFolder;
+  const initialFolderPath = initialFolderId && initialNavigationState?.folderPath
+    ? initialNavigationState.folderPath
+    : [];
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<KnowledgeBaseListItem[]>([])
   const [page, setPage] = useState(1)
@@ -41,6 +54,7 @@ const KnowledgeBaseManagement: FC = () => {
   const [query, setQuery] = useState<ListQuery>({
     orderby:'created_at',
     desc:true,
+    parent_id: initialFolderId,
   })
   const [modelMenus, setModelMenus] = useState<Record<string, ModelMenuInfo>>({});
   const [knowledgeBaseTypes, setKnowledgeBaseTypes] = useState<string[]>([]);
@@ -69,7 +83,7 @@ const KnowledgeBaseManagement: FC = () => {
       }));
     }, [])
   });
-  const [folderPath, setFolderPath] = useState<BreadcrumbItem[]>([]);
+  const [folderPath, setFolderPath] = useState<BreadcrumbItem[]>(initialFolderPath);
   
   // 生成下拉菜单项（根据当前 item）
   const getOptMenuItems = (item: KnowledgeBaseListItem): MenuProps['items'] => {
@@ -473,11 +487,7 @@ const KnowledgeBaseManagement: FC = () => {
 
   // 处理从详情页返回的导航
   useEffect(() => {
-    const state = location.state as {
-      navigateToFolder?: string;
-      folderPath?: Array<{ id: string; name: string }>;
-      resetToRoot?: boolean;
-    } | null;
+    const state = location.state as KnowledgeBaseNavigationState | null;
     
     // 避免重复处理相同的状态
     if (state && state !== processedStateRef.current) {
