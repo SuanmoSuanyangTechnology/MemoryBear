@@ -83,7 +83,10 @@ const Private: FC = () => {
   });
   const [folderPath, setFolderPath] = useState<BreadcrumbItem[]>([]);
   const [selectedKeys, setSelectedKeys] = useState<React.Key[]>([]);
-  const [knowledgeBaseFolderPath, setKnowledgeBaseFolderPath] = useState<BreadcrumbItem[]>([]);
+  const [knowledgeBaseFolderPath, setKnowledgeBaseFolderPath] = useState<BreadcrumbItem[]>(() => {
+    const state = location.state as { knowledgeBaseFolderPath?: BreadcrumbItem[] } | null;
+    return state?.knowledgeBaseFolderPath ?? [];
+  });
   const fetchKnowledgeBaseDetail = async (id: string) => {
     setLoading(true);
     try {
@@ -161,8 +164,6 @@ const Private: FC = () => {
     
     if (state?.refresh) {
       tableRef.current?.loadData();
-      // Clear state to avoid repeated refresh
-      navigate(location.pathname, { replace: true, state: {} });
     }
     
     // If navigated from knowledge base list page, set knowledge base folder path
@@ -202,9 +203,6 @@ const Private: FC = () => {
       setTimeout(() => {
         tableRef.current?.loadData();
       }, 200);
-      
-      // Clear state to avoid repeated processing
-      navigate(location.pathname, { replace: true, state: {} });
     }
     
     // If returning from document details page, restore document folder path
@@ -235,6 +233,11 @@ const Private: FC = () => {
       setTimeout(() => {
         setAutoExpandPath([]);
       }, 2000);
+    }
+
+    // Consume navigation state only after all breadcrumb and folder paths are restored.
+    if (state && Object.keys(state).length > 0) {
+      navigate(location.pathname, { replace: true, state: {} });
     }
   }, [location.state, knowledgeBaseId, navigate, location.pathname]);
 
@@ -482,6 +485,7 @@ const Private: FC = () => {
         knowledgeBaseId,
         parentId: parentId ?? knowledgeBaseId,
         documentFolderPath: folderPath,
+        knowledgeBaseFolderPath,
         startStep: 'parameterSettings',
         fileId: targetFileId,
       },

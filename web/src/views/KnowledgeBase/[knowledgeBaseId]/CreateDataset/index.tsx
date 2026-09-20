@@ -49,7 +49,10 @@ const CreateDataset = () => {
   const location = useLocation();
   const { modal, message: messageApi } = App.useApp();
   const { knowledgeBaseId: routeKnowledgeBaseId } = useParams<{ knowledgeBaseId: string }>();
-  const locationState = (location.state ?? {}) as CreateDatasetLocationState;
+  const locationStateRef = useRef<CreateDatasetLocationState>(
+    (location.state ?? {}) as CreateDatasetLocationState,
+  );
+  const locationState = locationStateRef.current;
   const source = (locationState.source ?? 'local') as SourceType;
   const knowledgeBaseId = locationState.knowledgeBaseId || routeKnowledgeBaseId;
   const parentId = locationState.parentId;
@@ -162,7 +165,6 @@ const CreateDataset = () => {
 
   const saveParserSettings = async () => {
     const values = await form.validateFields();
-    console.log('values', values)
     if (
       values.processingMethod === 'directBlock' &&
       (!Number.isInteger(values.chunkOverlap) || values.chunkOverlap <= 0 || values.chunkOverlap >= values.blockSize)
@@ -231,7 +233,6 @@ const CreateDataset = () => {
   const onFileListChange = (fileList: UploadFile[]) => {
     setFileList(fileList);
   };
-  console.log('fileList', fileList);
 
   return (
     <Form form={form} initialValues={defaultValues} layout="vertical" component={false}>
