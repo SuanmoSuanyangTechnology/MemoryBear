@@ -56,6 +56,7 @@ export const activityIcons: Record<Exclude<ActivityType, 'all'>, typeof Database
 
 export const memoryTypeIcons: Record<MemoryType, typeof DatabaseOutlined> = {
   conversation: MessageOutlined,
+  dialogue: MessageOutlined,
   project_work: LaptopOutlined,
   learning: BookOutlined,
   decision: BulbOutlined,

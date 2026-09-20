@@ -7,12 +7,27 @@ Classes:
     DialogRepository: 对话仓储，管理DialogueNode的CRUD操作
 """
 
+from dataclasses import dataclass
 from typing import List, Optional, Dict
 from datetime import datetime
 
 from app.repositories.neo4j.base_neo4j_repository import BaseNeo4jRepository
 from app.core.memory.models.graph_models import DialogueNode
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+from app.core.utils.datetime_utils import (
+    as_utc_aware,
+    convert_neo4j_datetime_to_python,
+)
+
+
+@dataclass(frozen=True, slots=True)
+class DialogueActivitySnapshot:
+    """Neo4j 中用于 Fast 活动投影的 Dialogue 权威快照。"""
+
+    id: str
+    content: str
+    created_at: datetime
+    write_mode: str | None
 
 
 class DialogRepository(BaseNeo4jRepository[DialogueNode]):
@@ -52,6 +67,47 @@ class DialogRepository(BaseNeo4jRepository[DialogueNode]):
         
         return DialogueNode(**n)
     
+    async def get_dialogue_activity_snapshot(
+        self,
+        *,
+        dialogue_id: str,
+        end_user_id: str,
+    ) -> Optional[DialogueActivitySnapshot]:
+        """按业务 ID 和用户边界读取 Dialogue 活动快照。"""
+        records = await self.connector.execute_query(
+            """
+            MATCH (d:Dialogue {id: $dialogue_id, end_user_id: $end_user_id})
+            RETURN d.id AS id,
+                   d.content AS content,
+                   d.created_at AS created_at,
+                   d.write_mode AS write_mode
+            LIMIT 1
+            """,
+            dialogue_id=dialogue_id,
+            end_user_id=end_user_id,
+        )
+        if not records:
+            return None
+
+        record = records[0]
+        created_at = convert_neo4j_datetime_to_python(record.get("created_at"))
+        if created_at is None:
+            return None
+        occurred_at = as_utc_aware(created_at)
+        if occurred_at is None:
+            return None
+
+        return DialogueActivitySnapshot(
+            id=str(record.get("id") or ""),
+            content=str(record.get("content") or ""),
+            created_at=occurred_at.replace(tzinfo=None),
+            write_mode=(
+                str(record["write_mode"])
+                if record.get("write_mode") is not None
+                else None
+            ),
+        )
+
     async def find_by_end_user_id(self, end_user_id: str, limit: int = 100) -> List[DialogueNode]:
         """根据end_user_id查询对话
         

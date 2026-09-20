@@ -1339,3 +1339,64 @@ models:
   - 多模态
   - agent-thought
   logo: dashscope
+
+- name: qwen3-asr-flash-filetrans
+  type: asr
+  provider: dashscope
+  description: 异步音频文件转录
+  is_deprecated: false
+  is_official: true
+  capability: [audio]
+  is_omni: false
+  tags: [音频转录]
+  logo: dashscope
+- name: qwen-audio-3.0-asr-flash
+  type: asr
+  provider: dashscope
+  description: 非实时大模型语音识别，支持多语种和方言，可转写5分钟以内的音频并输出文本
+  is_deprecated: false
+  is_official: true
+  capability: [audio]
+  is_omni: false
+  tags: [音频转录]
+  logo: dashscope
+- name: qwen3.8-omni-flash
+  type: llm
+  provider: dashscope
+  description: 全模态模型，支持文本、图片、音频和视频输入及文本输出，支持深度思考和Function Calling
+  is_deprecated: false
+  is_official: true
+  capability: [vision, video, audio, thinking, function_call]
+  is_omni: true
+  tags: [大语言模型, 多模态模型, 视频理解]
+  logo: dashscope
+- name: qwen3.5-omni-plus
+  type: llm
+  provider: dashscope
+  description: 全模态模型，支持文本、图片、音频和视频输入，支持音视频理解、语音回复和Function Calling
+  is_deprecated: false
+  is_official: true
+  capability: [vision, video, audio, function_call]
+  is_omni: true
+  tags: [大语言模型, 多模态模型, 视频理解]
+  logo: dashscope
+- name: qwen3.5-omni-flash
+  type: llm
+  provider: dashscope
+  description: 高性价比全模态模型，支持文本、图片、音频和视频输入，支持音视频理解、语音回复和Function Calling
+  is_deprecated: false
+  is_official: true
+  capability: [vision, video, audio, function_call]
+  is_omni: true
+  tags: [大语言模型, 多模态模型, 视频理解]
+  logo: dashscope
+- name: qwen3-omni-flash
+  type: llm
+  provider: dashscope
+  description: 全模态模型，支持文本、图片、音频和视频输入，支持思考模式和Function Calling
+  is_deprecated: false
+  is_official: true
+  capability: [vision, video, audio, thinking, function_call]
+  is_omni: true
+  tags: [大语言模型, 多模态模型, 视频理解]
+  logo: dashscope

@@ -108,8 +108,9 @@ class ChannelService:
         """双层失效：进程内渠道快照缓存 + 受影响 config 的 Redis 运行时缓存。
 
         model_names=None → provider 级渠道（影响该 provider 全部 config）；
-        非 None → 仅 name ∈ model_names 的 config。突变 flush 后即失效，
-        调用方若最终回滚仅多一次缓存重查，无正确性风险。
+        非 None → 仅 name ∈ model_names 的 config。突变 flush 后即失效。
+        调用方若最终回滚：其间未做候选探测则仅多一次缓存重查；若探测已按未提交态
+        回填快照缓存，须自行再失效（见 model_channel_service 删除/解绑联动）。
         """
         from app.services.channel_registry import (  # 延迟导入：registry 反向依赖本模块 cipher
             affected_config_ids,
@@ -139,7 +140,7 @@ class ChannelService:
     ) -> tuple[ModelChannel, str]:
         """登记 provider 公共 key（model_names=[]，覆盖该 provider 全部未点名模型）。
 
-        api_base 恒 NULL（运行时按能力选择公共端点，本地提供商由上层拦截）；
+        api_base 恒 NULL（运行时使用 provider 公共基地址，本地提供商由上层拦截）；
         同幂等键已存在：点名渠道 → 原地升级为 provider 级（覆盖集扩展为全量，
         返回 "upgraded"）；已 provider 级 → merged（no-op）；否则新建。
         合并/升级均不覆盖既有行的其余属性（remark/priority/extra）。

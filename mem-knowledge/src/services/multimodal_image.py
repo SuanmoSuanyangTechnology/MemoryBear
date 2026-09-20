@@ -54,34 +54,34 @@ class FileAssetSnapshot:
     file_key: str
 
 
-def _validation_error(message: str) -> KnowledgeError:
-    return KnowledgeError.from_code("KB_VALIDATION_ERROR", message)
+def _validation_error(code: str) -> KnowledgeError:
+    return KnowledgeError.from_code(code)
 
 
-def _input_limit_error(message: str) -> KnowledgeError:
-    return KnowledgeError.from_code("KB_MULTIMODAL_INPUT_LIMIT", message)
+def _input_limit_error(code: str) -> KnowledgeError:
+    return KnowledgeError.from_code(code)
 
 
 def validate_image_data_uri(content: str) -> ValidatedImageData:
     header, separator, payload = content.partition(",")
     if not separator or not header.startswith("data:") or not header.endswith(";base64"):
-        raise _validation_error("Image query must be a Base64 data URI")
+        raise _validation_error("KB_IMAGE_DATA_URI_INVALID")
     media_type = header[5:-7]
     expected_format = _MEDIA_TYPE_TO_FORMAT.get(media_type)
     if expected_format is None:
-        raise _validation_error("Image query media type is not supported")
+        raise _validation_error("KB_IMAGE_MEDIA_TYPE_UNSUPPORTED")
     if not payload:
-        raise _validation_error("Image query content must not be empty")
+        raise _validation_error("KB_IMAGE_CONTENT_EMPTY")
     if len(payload) > MAX_BASE64_CHARACTERS:
-        raise _input_limit_error("Image query exceeds the 10 MiB limit")
+        raise _input_limit_error("KB_IMAGE_SIZE_LIMIT")
     try:
         binary = base64.b64decode(payload, validate=True)
     except (binascii.Error, ValueError) as exc:
-        raise _validation_error("Image query Base64 content is invalid") from exc
+        raise _validation_error("KB_IMAGE_BASE64_INVALID") from exc
     if not binary:
-        raise _validation_error("Image query content must not be empty")
+        raise _validation_error("KB_IMAGE_CONTENT_EMPTY")
     if len(binary) > MAX_IMAGE_BYTES:
-        raise _input_limit_error("Image query exceeds the 10 MiB limit")
+        raise _input_limit_error("KB_IMAGE_SIZE_LIMIT")
     try:
         with warnings.catch_warnings():
             warnings.simplefilter("error", Image.DecompressionBombWarning)
@@ -90,13 +90,13 @@ def validate_image_data_uri(content: str) -> ValidatedImageData:
                 actual_format = image.format
                 image.verify()
     except (Image.DecompressionBombError, Image.DecompressionBombWarning) as exc:
-        raise _input_limit_error("Image query dimensions exceed the safe limit") from exc
+        raise _input_limit_error("KB_IMAGE_DIMENSIONS_LIMIT") from exc
     except (UnidentifiedImageError, OSError, SyntaxError, ValueError) as exc:
-        raise _validation_error("Image query content is not a valid image") from exc
+        raise _validation_error("KB_IMAGE_INVALID") from exc
     if width < 1 or height < 1:
-        raise _validation_error("Image query dimensions must be positive")
+        raise _validation_error("KB_IMAGE_DIMENSIONS_INVALID")
     if actual_format != expected_format:
-        raise _validation_error("Image query media type does not match its content")
+        raise _validation_error("KB_IMAGE_MEDIA_TYPE_MISMATCH")
     return ValidatedImageData(
         media_type=media_type,
         data_uri=content,

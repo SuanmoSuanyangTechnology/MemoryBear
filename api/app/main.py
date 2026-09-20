@@ -13,6 +13,7 @@ from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from redbear_model import ChannelSwitchExhaustedError, NoAvailableChannelError
 
 # 管理端 API (JWT 认证)
 from app.controllers import manager_router
@@ -32,6 +33,7 @@ from app.integrations.knowledge.validation import (
     is_retrieval_request_validation_error,
     safe_retrieval_validation_response,
 )
+from app.core.models.failover import channel_error_to_business
 from app.core.models.scripts.loader import load_models
 from app.db import get_db_context
 
@@ -618,6 +620,13 @@ async def business_exception_handler(request: Request, exc: BusinessException):
         status_code=status_code,
         content=fail(code=biz_code.value, msg=filtered_message, error=filtered_message)
     )
+
+
+# 运行期渠道链异常（spec §11.2）：门面外漏的空链/耗尽 → 409 业务错误统一出口
+@app.exception_handler(NoAvailableChannelError)
+@app.exception_handler(ChannelSwitchExhaustedError)
+async def channel_failover_exception_handler(request: Request, exc: Exception):
+    return await business_exception_handler(request, channel_error_to_business(exc))
 
 
 @app.exception_handler(KnowledgeClientError)

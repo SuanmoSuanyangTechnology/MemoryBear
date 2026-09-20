@@ -21,6 +21,8 @@ class KnowledgeBase(BaseModel):
     reranker_id: uuid.UUID | None = None
     llm_id: uuid.UUID | None = None
     image2text_id: uuid.UUID | None = None
+    audio2text_id: uuid.UUID | None = None
+    video2text_id: uuid.UUID | None = None
     doc_num: int | None = None
     chunk_num: int | None = None
     parser_id: str | None = None
@@ -50,6 +52,8 @@ class KnowledgeUpdate(BaseModel):
     reranker_id: uuid.UUID | None = Field(None)
     llm_id: uuid.UUID | None = Field(None)
     image2text_id: uuid.UUID | None = Field(None)
+    audio2text_id: uuid.UUID | None = Field(None)
+    video2text_id: uuid.UUID | None = Field(None)
     doc_num: int | None = Field(None)
     chunk_num: int | None = Field(None)
     parser_id: str | None = Field(None)
@@ -86,6 +90,8 @@ class Knowledge(KnowledgeBase):
     reranker: Optional[ModelConfig] = None
     llm: Optional[ModelConfig] = None
     image2text: Optional[ModelConfig] = None
+    audio2text: Optional[ModelConfig] = None
+    video2text: Optional[ModelConfig] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -98,7 +104,9 @@ class Knowledge(KnowledgeBase):
         return to_timestamp_ms(dt)
 
 
-PUBLIC_KNOWLEDGE_MODEL_FIELDS = frozenset({"embedding", "reranker", "llm", "image2text"})
+PUBLIC_KNOWLEDGE_MODEL_FIELDS = frozenset(
+    {"embedding", "reranker", "llm", "image2text", "audio2text", "video2text"}
+)
 PUBLIC_MODEL_FORBIDDEN_FIELDS = frozenset({"api_keys", "api_key", "api_base", "config"})
 
 

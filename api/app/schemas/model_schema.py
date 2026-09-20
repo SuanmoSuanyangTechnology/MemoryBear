@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, field_serializer, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
 from typing import Optional, List, Dict, Any
 import datetime
 import uuid
@@ -35,10 +35,10 @@ class ApiKeyRegister(BaseModel):
 class ModelConfigCreate(ModelConfigBase):
     """创建自定义模型Schema（内嵌 credential：创建即登记点名渠道，单接口原子完成）
 
-    自定义模型不经模型广场添加，provider 级渠道不保证可用，因此凭据必填并
-    在创建时做活体验证；验证失败拒绝创建（零落库）。
+    自定义模型不经模型广场添加，provider 级渠道不保证可用，因此凭据必填。
+    ASR 模型在实际调用时校验凭据，其他模型在创建时做活体验证。
     """
-    credential: ApiKeyRegister = Field(..., description="模型凭据（必填，创建时活体验证）")
+    credential: ApiKeyRegister = Field(..., description="模型凭据（必填）")
 
 
 class CompositeMemberSpec(BaseModel):
@@ -147,14 +147,13 @@ class ApiKeyItem(BaseModel):
 class ProviderApiKeyCreate(ApiKeyRegister):
     """Provider 域登记公共凭据（provider 级 [] 渠道，覆盖该供应商全部未点名模型）
 
-    公共渠道固定使用供应商公共端点（运行时按 llm/embedding/rerank 能力区分），
-    不接受 api_base；本地提供商无公共端点不可登记。自定义端点请改在模型域
-    按模型登记（或编辑点名渠道）。
+    公共渠道固定使用供应商公共基地址，不接受 api_base；本地提供商无公共端点
+    不可登记。自定义端点请改在模型域按模型登记（或编辑点名渠道）。
     """
     provider: ModelProvider = Field(..., description="API Key提供商")
     api_base: Optional[str] = Field(
         None,
-        description="不接受：公共渠道按能力使用供应商公共端点（传非空值将 400）",
+        description="不接受：公共渠道使用供应商公共基地址（传非空值将 400）",
         max_length=500,
     )
 
@@ -278,6 +277,13 @@ class ModelBase(BaseModel):
     capability: List[str] = []
     is_omni: bool = False
 
+    @field_validator("type", mode="before")
+    @classmethod
+    def canonicalize_asr_type(cls, value):
+        if isinstance(value, str) and value.lower() == "asr":
+            return ModelType.ASR.value
+        return value
+
 
 class ModelBaseQuery(BaseModel):
     """基础模型查询Schema"""
@@ -300,3 +306,5 @@ class ModelInfo(BaseModel):
     tenant_id: Optional[str] = Field(None, description="用量归属：租户ID")
     model_config_id: Optional[str] = Field(None, description="用量归属：模型配置ID")
     channel_id: Optional[str] = Field(None, description="用量归属：渠道ID")
+    # 渠道换线计划随行透传（from_api_key 读取）；exclude 防序列化泄漏，拷贝丢失语义=退化单候选
+    failover_plan: Any = Field(default=None, exclude=True, repr=False)

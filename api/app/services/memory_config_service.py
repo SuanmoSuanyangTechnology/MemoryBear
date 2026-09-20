@@ -8,7 +8,7 @@ This service eliminates code duplication between MemoryAgentService and MemorySt
 import asyncio
 import time
 import uuid
-from typing import Optional
+from typing import Any, Optional
 from uuid import UUID
 
 from sqlalchemy import select
@@ -20,7 +20,6 @@ from app.core.logging_config import get_config_logger, get_logger
 from app.core.utils.datetime_utils import utcnow_naive
 from app.core.validators.memory_config_validators import (
     validate_and_resolve_model_id,
-    validate_and_resolve_model_id_async,
 )
 from app.i18n.service import t
 from app.models import Workspace, WorkspaceDefaultModelPreset
@@ -175,6 +174,102 @@ def _get_default_model_preset(db: Session):
     )
 
 
+_MODEL_VALIDATION_SPECS = (
+    ("embedding", "embedding", True),
+    ("llm", "llm", True),
+    ("rerank", "rerank", False),
+    ("vision", "llm", False),
+    ("audio", "llm", False),
+    ("video", "llm", False),
+)
+
+
+async def _validate_models_batch_async(
+    db: AsyncSession,
+    models: dict,
+    tenant_id: Optional[UUID],
+    config_id: UUID,
+    workspace_id: UUID,
+) -> dict:
+    from sqlalchemy import or_
+
+    from app.core.validators.memory_config_validators import _parse_model_id
+    from app.models.models_model import ModelConfig
+
+    parsed: dict[str, Optional[UUID]] = {}
+    for key, model_type, required in _MODEL_VALIDATION_SPECS:
+        model_id_str = models[key]
+        if model_id_str is None or (isinstance(model_id_str, str) and not model_id_str.strip()):
+            if required:
+                raise InvalidConfigError(
+                    f"{model_type.title()} model ID is required",
+                    field_name=f"{model_type}_model_id",
+                    invalid_value=model_id_str,
+                    config_id=config_id,
+                    workspace_id=workspace_id,
+                )
+            parsed[key] = None
+        else:
+            parsed[key] = _parse_model_id(model_id_str, model_type, config_id, workspace_id)
+
+    ids_to_query = list(dict.fromkeys(u for u in parsed.values() if u is not None))
+    found: dict[str, ModelConfig] = {}
+    if ids_to_query:
+        query = select(ModelConfig).where(ModelConfig.id.in_(ids_to_query))
+        if tenant_id:
+            query = query.where(or_(ModelConfig.tenant_id == tenant_id, ModelConfig.is_public))
+        result = await db.execute(query)
+        found = {str(m.id): m for m in result.scalars().all()}
+
+    missed = [u for u in ids_to_query if str(u) not in found]
+    found_without_tenant: dict[str, ModelConfig] = {}
+    if missed:
+        result2 = await db.execute(select(ModelConfig).where(ModelConfig.id.in_(missed)))
+        found_without_tenant = {str(m.id): m for m in result2.scalars().all()}
+
+    out: dict[str, tuple[Optional[UUID], Optional[str]]] = {}
+    for key, model_type, _required in _MODEL_VALIDATION_SPECS:
+        model_uuid = parsed[key]
+        if model_uuid is None:
+            out[key] = (None, None)
+            continue
+
+        model = found.get(str(model_uuid))
+        if model is None:
+            model_without_tenant = found_without_tenant.get(str(model_uuid))
+            if model_without_tenant is not None:
+                raise ModelNotFoundError(
+                    model_id=model_uuid,
+                    model_type=model_type,
+                    config_id=config_id,
+                    workspace_id=workspace_id,
+                    message=(
+                        f"{model_type.title()} model {model_uuid} "
+                        f"({model_without_tenant.name}) belongs to a different tenant"
+                    ),
+                )
+            raise ModelNotFoundError(
+                model_id=model_uuid,
+                model_type=model_type,
+                config_id=config_id,
+                workspace_id=workspace_id,
+                message=f"{model_type.title()} model {model_uuid} not found",
+            )
+
+        if not model.is_active:
+            raise ModelInactiveError(
+                model_id=model_uuid,
+                model_name=model.name,
+                model_type=model_type,
+                config_id=config_id,
+                workspace_id=workspace_id,
+                message=f"{model_type.title()} model {model_uuid} ({model.name}) is inactive",
+            )
+        out[key] = (model_uuid, model.name)
+
+    return out
+
+
 async def _get_default_model_preset_async(db: AsyncSession):
     """Fetch the singleton workspace default model preset (async)."""
     from app.services.workspace_service import DEFAULT_PRESET_KEY
@@ -293,6 +388,13 @@ def _build_memory_config(
         # Pipeline config: Emotion extraction
         emotion_enabled=bool(
             memory_config_row.emotion_enabled) if memory_config_row.emotion_enabled is not None else False,
+        # Prediction engine
+        prediction_candidate_limit=int(memory_config_row.prediction_candidate_limit),
+        prediction_participant_limit=int(memory_config_row.prediction_participant_limit),
+        prediction_max_steps=int(memory_config_row.prediction_max_steps),
+        prediction_recall_limit=int(memory_config_row.prediction_recall_limit),
+        prediction_min_valid_memory_count=int(memory_config_row.prediction_min_valid_memory_count),
+        prediction_embedding_min_similarity=float(memory_config_row.prediction_embedding_min_similarity),
         # Ontology scene association
         scene_id=memory_config_row.scene_id,
         ontology_class_infos=ontology_class_infos,
@@ -320,7 +422,7 @@ class MemoryConfigService:
         """
         self.db = db
 
-    async def _validate_model_connectivity(
+    async def _resolve_model_credentials(
             self,
             model_id: str,
             model_type_label: str,
@@ -328,8 +430,11 @@ class MemoryConfigService:
             config_id: UUID,
             workspace_id: UUID | None,
             locale: str = "zh",
-    ) -> None:
-        """解析模型凭证并调用 validate_model_config 验证 API 连通性。
+    ) -> Any:
+        """串行解析模型配置与可用 API Key（仅 DB 查询）。
+
+        ``AsyncSession`` 不是并发安全的，本方法只执行 DB 查询，必须在单会话上
+        串行调用，不能放进 :func:`asyncio.gather` 与其它 DB 查询并发。
 
         Args:
             model_id: 模型配置 ID
@@ -339,9 +444,12 @@ class MemoryConfigService:
             workspace_id: 工作空间 ID（用于错误上下文）
             locale: 语言代码（zh / en），用于 i18n 错误消息
 
+        Returns:
+            ModelApiKey: 可用 API Key 配置
+
         Raises:
-            ModelNotFoundError: 模型不存在或没有可用 API 密钥
-            ModelInactiveError: API 连通性验证失败
+            ModelNotFoundError: 模型不存在
+            ModelInactiveError: 没有可用 API Key
         """
         from app.services.model_service import ModelConfigService as ModelSvc
         from app.services.model_service import ModelApiKeyService
@@ -374,7 +482,36 @@ class MemoryConfigService:
                           model_type=model_type_label, model_name=model_config.name),
             )
 
-        # 3. 实际 API 连通性验证
+        return api_key_config
+
+    async def _validate_model_connectivity(
+            self,
+            model_id: str,
+            model_type_label: str,
+            api_key_config: Any,
+            config_id: UUID,
+            workspace_id: UUID | None,
+            locale: str = "zh",
+    ) -> None:
+        """调用 validate_model_config 验证模型 API 连通性（纯 HTTP，不碰 DB）。
+
+        本方法不执行任何 DB 查询（``validate_model_config`` 内部忽略 db 参数），
+        因此可以安全地放进 :func:`asyncio.gather` 并发执行。
+
+        Args:
+            model_id: 模型配置 ID（用于错误上下文）
+            model_type_label: 模型类型标签（llm / embedding / rerank）
+            api_key_config: 已解析出的可用 API Key 配置
+            config_id: 记忆配置 ID（用于错误上下文）
+            workspace_id: 工作空间 ID（用于错误上下文）
+            locale: 语言代码（zh / en），用于 i18n 错误消息
+
+        Raises:
+            ModelInactiveError: API 连通性验证失败
+        """
+        from app.services.model_service import ModelConfigService as ModelSvc
+
+        # 实际 API 连通性验证
         result = await ModelSvc.validate_model_config(
             self.db,
             model_name=api_key_config.model_name,
@@ -456,16 +593,51 @@ class MemoryConfigService:
 
         _VALIDATE_AS_LLM = {"vision", "video", "audio", "reflection", "emotion"}
 
-        async def _validate_one(model_type: str, model_id: str, source: str) -> dict | None:
+        # 第一步：串行解析所有模型的 DB 凭据（AsyncSession 不能并发共享）
+        resolved: list[tuple[str, str, str, str, Any]] = []
+        for model_type, model_id, source in all_models:
+            if not model_id:
+                continue
             validate_type = "llm" if model_type in _VALIDATE_AS_LLM else model_type
             try:
-                await self._validate_model_connectivity(
+                api_key_config = await self._resolve_model_credentials(
                     model_id,
                     validate_type,
                     tenant_id,
                     config_id,
                     workspace_id,
-                    locale=locale
+                    locale=locale,
+                )
+            except ConfigurationError as e:
+                logger.warning(
+                    f"模型 {model_type} 解析失败: {e}",
+                    extra={"config_id": str(config_id), "model_type": model_type, "model_id": str(model_id)},
+                )
+                warnings.append({
+                    "model_type": model_type,
+                    "model_id": str(model_id),
+                    "source": source,
+                    "message": e.err_message,
+                })
+            else:
+                resolved.append((model_type, model_id, source, validate_type, api_key_config))
+
+        # 第二步：并发执行纯 HTTP 的连通性校验
+        async def _validate_http(
+                model_type: str,
+                model_id: str,
+                source: str,
+                validate_type: str,
+                api_key_config: Any,
+        ) -> dict | None:
+            try:
+                await self._validate_model_connectivity(
+                    model_id,
+                    validate_type,
+                    api_key_config,
+                    config_id,
+                    workspace_id,
+                    locale=locale,
                 )
                 return None
             except ConfigurationError as e:
@@ -475,13 +647,8 @@ class MemoryConfigService:
                 )
                 return {"model_type": model_type, "model_id": str(model_id), "source": source, "message": e.err_message}
 
-        tasks = [
-            _validate_one(model_type, model_id, source)
-            for model_type, model_id, source in all_models
-            if model_id
-        ]
-        if tasks:
-            results = await asyncio.gather(*tasks)
+        if resolved:
+            results = await asyncio.gather(*(_validate_http(*item) for item in resolved))
             warnings += [w for w in results if w is not None]
 
         result: dict = {
@@ -675,45 +842,23 @@ class MemoryConfigService:
             preset = await _get_default_model_preset_async(self.db) if workspace.is_default_config else None
             models = _effective_workspace_models(workspace, preset)
 
-            # Step 2: validate all models + load ontology concurrently
             v_start = time.time()
-            (
-                (embedding_uuid, embedding_name),
-                (llm_uuid, llm_name),
-                (rerank_uuid, rerank_name),
-                (vision_uuid, vision_name),
-                (audio_uuid, audio_name),
-                (video_uuid, video_name),
-                ontology_class_infos,
-            ) = await asyncio.gather(
-                validate_and_resolve_model_id_async(
-                    models["embedding"], "embedding", self.db, workspace.tenant_id,
-                    required=True, config_id=memory_config_row.config_id, workspace_id=workspace.id,
-                ),
-                validate_and_resolve_model_id_async(
-                    models["llm"], "llm", self.db, workspace.tenant_id,
-                    required=True, config_id=memory_config_row.config_id, workspace_id=workspace.id,
-                ),
-                validate_and_resolve_model_id_async(
-                    models["rerank"], "rerank", self.db, workspace.tenant_id,
-                    required=False, config_id=memory_config_row.config_id, workspace_id=workspace.id,
-                ),
-                validate_and_resolve_model_id_async(
-                    models["vision"], "llm", self.db, workspace.tenant_id,
-                    required=False, config_id=memory_config_row.config_id, workspace_id=workspace.id,
-                ),
-                validate_and_resolve_model_id_async(
-                    models["audio"], "llm", self.db, workspace.tenant_id,
-                    required=False, config_id=memory_config_row.config_id, workspace_id=workspace.id,
-                ),
-                validate_and_resolve_model_id_async(
-                    models["video"], "llm", self.db, workspace.tenant_id,
-                    required=False, config_id=memory_config_row.config_id, workspace_id=workspace.id,
-                ),
-                _load_ontology_class_infos_async(self.db, memory_config_row.scene_id),
+            model_results = await _validate_models_batch_async(
+                self.db, models, workspace.tenant_id,
+                memory_config_row.config_id, workspace.id,
+            )
+            ontology_class_infos = await _load_ontology_class_infos_async(
+                self.db, memory_config_row.scene_id
             )
             v_time = time.time() - v_start
-            logger.info(f"[PERF] All model validations + ontology load: {v_time:.4f}s (concurrent)")
+            logger.info(f"[PERF] All model validations + ontology load: {v_time:.4f}s (batch)")
+
+            embedding_uuid, embedding_name = model_results["embedding"]
+            llm_uuid, llm_name = model_results["llm"]
+            rerank_uuid, rerank_name = model_results["rerank"]
+            vision_uuid, vision_name = model_results["vision"]
+            audio_uuid, audio_name = model_results["audio"]
+            video_uuid, video_name = model_results["video"]
 
             # Step 4: build the immutable MemoryConfig
             config = _build_memory_config(

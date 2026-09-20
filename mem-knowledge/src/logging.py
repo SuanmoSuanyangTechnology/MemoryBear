@@ -12,16 +12,27 @@ from .trace import get_trace_id
 
 _URL_CREDENTIAL = re.compile(r"(://[^:/\s]+:)[^@\s]+(@)")
 _SECRET_VALUE = re.compile(
-    r"(?i)\b(password|secret|token|api[_-]?key|authorization)"
-    r"(\s*(?:[=:]|\bis\b)\s*)([^\s,;]+)"
+    r"""(?ix)
+    (\b[a-z0-9_-]*(?:password|passwd|secret|token|api[_-]?key|authorization|cookie)[a-z0-9_-]*\b)
+    (["']?\s*(?:[=:]|\bis\b)\s*)
+    ("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|(?:Bearer|Basic)\s+[^\s,;"']+|[^\s,;"']+)
+    """
 )
+_BEARER_VALUE = re.compile(r"(?i)\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+")
 _configure_lock = threading.Lock()
 
 
 def redact_for_log(value: object) -> str:
     text = str(value)
     text = _URL_CREDENTIAL.sub(r"\1***\2", text)
-    return _SECRET_VALUE.sub(r"\1\2***", text)
+
+    def replace(match: re.Match[str]) -> str:
+        value = match.group(3)
+        masked = value[0] + "***" + value[0] if value[0] in "\"'" else "***"
+        return match.group(1) + match.group(2) + masked
+
+    text = _SECRET_VALUE.sub(replace, text)
+    return _BEARER_VALUE.sub(r"\1 ***", text)
 
 
 def _redact_argument(value: Any) -> Any:
@@ -45,10 +56,12 @@ class SensitiveDataFilter(logging.Filter):
     """Redact credentials before a record reaches a formatter."""
 
     def filter(self, record: logging.LogRecord) -> bool:
-        if isinstance(record.msg, str):
-            record.msg = redact_for_log(record.msg)
         if record.args:
             record.args = _redact_argument(record.args)
+        # Interpolate before redaction so masking password=%s cannot leave an
+        # unused argument and make the logging formatter drop the entire event.
+        record.msg = redact_for_log(record.getMessage())
+        record.args = ()
         return True
 
 
@@ -83,9 +96,7 @@ def setup_logging(settings: KnowledgeSettings) -> None:
         handler._kb_handler = True  # type: ignore[attr-defined]
         handler.setLevel(settings.kb_log_level)
         handler.setFormatter(
-            RedactingFormatter(
-                "%(asctime)s %(levelname)s [%(trace_id)s] %(name)s %(message)s"
-            )
+            RedactingFormatter("%(asctime)s %(levelname)s [%(trace_id)s] %(name)s %(message)s")
         )
         handler.addFilter(SensitiveDataFilter())
         handler.addFilter(TraceIdFilter())

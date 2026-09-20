@@ -1,7 +1,10 @@
 import type { Dispatch, SetStateAction, MutableRefObject } from 'react'
 
+import type { ChatItem } from '@/components/Chat/types'
 import type { ChatData } from '../../types'
 import type { SSEMessage } from '@/utils/stream'
+import { mapLastVersion } from '@/components/Chat/utils/messageVersions'
+import { createClusterStreamProcessor } from '../../utils/clusterStream'
 import { getFileStatusById } from '@/api/fileStorage'
 import {
   updateAssistantReasoningMessage,
@@ -229,43 +232,46 @@ interface ClusterStreamDeps {
   setConversationId: (id: string) => void;
 }
 
-/** Builds the SSE handler for the multi-agent cluster run. */
+/** Adapts the shared cluster event processor to the single-column chat state. */
 export const createClusterStreamHandler = (deps: ClusterStreamDeps) => {
   const { updateChatList, setLoading, compareLoadingRef, conversationId, setConversationId } = deps
-
-  const stopComparingSpinner = () => {
-    if (compareLoadingRef.current) compareLoadingRef.current = false
-  }
-  const syncConversationId = (conversation_id?: string) => {
-    if (conversation_id && conversationId !== conversation_id) setConversationId(conversation_id)
-  }
-
-  return (data: SSEMessage[]) => {
-    data.map(item => {
-      const { conversation_id, content, message_length, message_id } = item.data as { conversation_id: string, content: string, message_length: number, message_id?: string }
-
-      // Cluster runs a single column; capture its message id for message actions
-      if (message_id) updateChatList(prev => applyModelMessageId(prev, undefined, message_id))
-
-      switch (item.event) {
-        case 'start':
-          syncConversationId(conversation_id)
-          break
-        case 'message':
-          stopComparingSpinner()
-          updateChatList(prev => updateClusterAssistantMessage(prev, content))
-          syncConversationId(conversation_id)
-          break
-        case 'model_end':
-          stopComparingSpinner()
-          updateChatList(prev => updateClusterErrorAssistantMessage(prev, message_length))
-          break
-        case 'compare_end':
-          stopComparingSpinner()
-          updateChatList(prev => prev.map(chat => ({ ...chat, streamLoading: false })))
-          setLoading(false)
-          break
+  const updateAssistant = (updater: (message: ChatItem) => ChatItem) => {
+    updateChatList(prev => {
+      if (!prev[0]) return prev
+      const next = [...prev]
+      next[0] = {
+        ...next[0],
+        list: mapLastVersion(next[0].list || [], message =>
+          message.role === 'assistant' ? updater(message) : message,
+        ),
       }
+      return next
     })
   }
+
+  return createClusterStreamProcessor({
+    updateAssistant,
+    appendAssistantContent: content => {
+      updateChatList(prev => updateClusterAssistantMessage(prev, content))
+    },
+    applyMessageId: id => {
+      updateChatList(prev => applyModelMessageId(prev, undefined, id))
+    },
+    applyUserMessageId: id => {
+      updateChatList(prev => applyModelUserMessageId(prev, undefined, id))
+    },
+    syncConversationId: id => {
+      if (id && conversationId !== id) setConversationId(id)
+    },
+    stopInitialLoading: () => {
+      compareLoadingRef.current = false
+    },
+    finishStreaming: () => {
+      updateChatList(prev => prev.map(chat => ({ ...chat, streamLoading: false })))
+      setLoading(false)
+    },
+    applyLegacyEmpty: messageLength => {
+      updateChatList(prev => updateClusterErrorAssistantMessage(prev, messageLength))
+    },
+  })
 }

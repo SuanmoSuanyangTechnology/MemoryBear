@@ -8,6 +8,8 @@
 import { conditionNodePortItemArgsY, conditionNodeHeight } from './constant'
 import type { Application } from '@/views/ApplicationManagement/types';
 
+export const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+
 export const isSubExprSet = (sub: any) => {
   if (!sub?.key) return false;
   if (['not_empty', 'empty'].includes(sub?.operator)) return true;

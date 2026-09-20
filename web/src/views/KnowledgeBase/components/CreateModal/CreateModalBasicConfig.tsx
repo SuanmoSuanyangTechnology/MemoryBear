@@ -6,7 +6,8 @@ import SliderInput from '@/components/SliderInput';
 import { stringRegExp } from '@/utils/validator';
 import type { KnowledgeBaseFormData } from '@/views/KnowledgeBase/types';
 import type { Model } from '@/views/ModelManagement/types';
-import { MODEL_TYPE_CONFIG } from './useCreateModalModels';
+import { baseModelFields, multimodalModelFields } from '../../constants'
+import RbAlert from '@/components/RbAlert';
 
 const { TextArea } = Input;
 
@@ -15,7 +16,6 @@ type KnowledgeBaseType = 'General' | 'Web' | 'Third-party' | 'Folder';
 interface CreateModalBasicConfigProps {
   isEditing: boolean;
   currentType: KnowledgeBaseType;
-  dynamicTypeList: string[];
   customModels: Record<string, Model[]>;
   onModelChange: (value: string, type: string) => void;
 }
@@ -23,7 +23,6 @@ interface CreateModalBasicConfigProps {
 const CreateModalBasicConfig = ({
   isEditing,
   currentType,
-  dynamicTypeList,
   customModels,
   onModelChange,
 }: CreateModalBasicConfigProps) => {
@@ -167,30 +166,62 @@ const CreateModalBasicConfig = ({
           )}
         </>
       )}
+      {currentType !== 'Folder' && <>
+        {baseModelFields.map((item) => {
+          const fieldKey = `${item.name}_id` as const;
 
-      {currentType !== 'Folder' && dynamicTypeList.map((type) => {
-        const normalizedType = (type || '').toLowerCase();
-        const modelTypeConfig = MODEL_TYPE_CONFIG[normalizedType];
-        const fieldKey = modelTypeConfig?.fieldKey || `${normalizedType}_id`;
-        const options = customModels[modelTypeConfig?.modelType || type] || [];
+          return (
+            <Form.Item
+              key={item.name}
+              name={fieldKey}
+              label={`${t(`knowledgeBase.createForm.${fieldKey}`)} model`}
+              rules={[{ required: item.required, message: t('knowledgeBase.createForm.modelRequired') }]}
+            >
+              <ModelSelect
+                placeholder={t(`knowledgeBase.createForm.${fieldKey}`)}
+                isAutoFetch={false}
+                initialData={customModels[item.type]}
+                allowClear={true}
+                onChange={(value) => {
+                  if (value === undefined || value === null) {
+                    form.setFieldValue(fieldKey, null)
+                  }
+                  onModelChange(value, item.type)
+                }}
+              />
+            </Form.Item>
+          );
+        })}
 
-        return (
-          <Form.Item
-            key={type}
-            name={fieldKey as keyof KnowledgeBaseFormData}
-            label={`${t(`knowledgeBase.createForm.${fieldKey}`)} model`}
-            rules={[{ required: true, message: t('knowledgeBase.createForm.modelRequired') }]}
-          >
-            <ModelSelect
-              placeholder={t(`knowledgeBase.createForm.${fieldKey}`)}
-              isAutoFetch={false}
-              initialData={options}
-              allowClear={false}
-              onChange={(value) => onModelChange(value, type)}
-            />
-          </Form.Item>
-        );
-      })}
+        <RbAlert className="rb:mb-3!">
+          {t('knowledgeBase.createForm.multimodalModel')}
+        </RbAlert>
+        {multimodalModelFields.map((item) => {
+          const fieldKey = `${item.name}_id` as const;
+
+          return (
+            <Form.Item
+              key={item.name}
+              name={fieldKey}
+              label={`${t(`knowledgeBase.createForm.${fieldKey}`)} model`}
+              rules={[{ required: item.required, message: t('knowledgeBase.createForm.modelRequired') }]}
+            >
+              <ModelSelect
+                placeholder={t(`knowledgeBase.createForm.${fieldKey}`)}
+                isAutoFetch={false}
+                initialData={customModels[item.type]}
+                allowClear={true}
+                onChange={(value) => {
+                  if (value === undefined || value === null) {
+                    form.setFieldValue(fieldKey, null)
+                  }
+                  onModelChange(value, item.type)
+                }}
+              />
+            </Form.Item>
+          );
+        })}
+      </>}
     </>
   );
 };

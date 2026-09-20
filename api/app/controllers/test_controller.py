@@ -41,7 +41,7 @@ def test_llm(
         api_logger.error(f"模型ID {model_id} 不存在")
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="模型ID不存在")
     try:
-        apiConfig: ModelApiKey = ModelApiKeyService.get_available_api_key(db, config.id)
+        apiConfig: ModelApiKey = ModelApiKeyService.get_available_api_key(db, config.id, tenant_id=config.tenant_id)
         if not apiConfig:
             raise BusinessException("模型配置缺少 API Key", BizCode.INVALID_PARAMETER)
         llm = RedBearLLM(RedBearModelConfig.from_api_key(apiConfig), type=config.type)
@@ -71,7 +71,7 @@ def test_embedding(
         api_logger.error(f"模型ID {model_id} 不存在")
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="模型ID不存在")
 
-    apiConfig: ModelApiKey = ModelApiKeyService.get_available_api_key(db, config.id)
+    apiConfig: ModelApiKey = ModelApiKeyService.get_available_api_key(db, config.id, tenant_id=config.tenant_id)
     if not apiConfig:
         raise BusinessException("模型配置缺少 API Key", BizCode.INVALID_PARAMETER)
     model = RedBearEmbeddings(RedBearModelConfig.from_api_key(apiConfig))
@@ -102,7 +102,7 @@ def test_rerank(
         api_logger.error(f"模型ID {model_id} 不存在")
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="模型ID不存在")
 
-    apiConfig: ModelApiKey = ModelApiKeyService.get_available_api_key(db, config.id)
+    apiConfig: ModelApiKey = ModelApiKeyService.get_available_api_key(db, config.id, tenant_id=config.tenant_id)
     if not apiConfig:
         raise BusinessException("模型配置缺少 API Key", BizCode.INVALID_PARAMETER)
     model = RedBearRerank(RedBearModelConfig.from_api_key(apiConfig))

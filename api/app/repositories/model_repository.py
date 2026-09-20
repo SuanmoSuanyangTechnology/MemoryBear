@@ -8,7 +8,13 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.core.utils.datetime_utils import utcnow_naive
 from app.core.logging_config import get_db_logger
-from app.models.models_model import ModelConfig, ModelApiKey, ModelType, ModelBase
+from app.models.models_model import (
+    ModelApiKey,
+    ModelBase,
+    ModelConfig,
+    ModelType,
+    model_type_storage_values,
+)
 from app.schemas.model_schema import (
     ModelConfigUpdate,
     ModelConfigQuery, ModelConfigQueryNew
@@ -145,6 +151,61 @@ class ModelConfigRepository:
             raise
 
     @staticmethod
+    def list_validation_candidates(
+        db: Session, *, provider: str, tenant_id: uuid.UUID
+    ) -> List[ModelConfig]:
+        """provider 级密钥校验锚点候选：租户可见（本租户/公开）+ 同供应商 + 非组合。
+
+        D4 排序（非废弃优先 / 类型序 / created_at desc）在内存完成（租户模型量有界），
+        见 model_channel_service._pick_validation_anchor。
+        """
+        db_logger.debug(f"查询密钥校验锚点候选: provider={provider}, tenant_id={tenant_id}")
+        try:
+            stmt = (
+                select(ModelConfig)
+                .options(joinedload(ModelConfig.model_base))
+                .where(
+                    ModelConfig.provider == provider,
+                    ModelConfig.is_composite.is_(False),
+                    or_(
+                        ModelConfig.tenant_id == tenant_id,
+                        ModelConfig.is_public,
+                    ),
+                )
+            )
+            rows = list(db.execute(stmt).scalars().all())
+            db_logger.debug(f"密钥校验锚点候选查询成功: 数量={len(rows)}")
+            return rows
+        except Exception as e:
+            db_logger.error(f"查询密钥校验锚点候选失败: provider={provider} - {str(e)}")
+            raise
+
+    @staticmethod
+    def list_active_tenant_provider_models(
+        db: Session, *, provider: str, tenant_id: uuid.UUID
+    ) -> List[ModelConfig]:
+        """删 provider 凭据联动的受影响集：本租户 + 同供应商 + 启用中 + 非组合。
+
+        与其余列表查询不同：**不含** is_public 分支（公开模型归属平台租户，其启用态是
+        跨租户共享目录，不随单个租户的渠道删除联动）。探测口径见
+        model_channel_service._auto_disable_unresolvable。
+        """
+        db_logger.debug(f"查询渠道删除受影响模型: provider={provider}, tenant_id={tenant_id}")
+        try:
+            stmt = select(ModelConfig).where(
+                ModelConfig.tenant_id == tenant_id,
+                ModelConfig.provider == provider,
+                ModelConfig.is_active.is_(True),
+                ModelConfig.is_composite.is_(False),
+            )
+            rows = list(db.execute(stmt).scalars().all())
+            db_logger.debug(f"渠道删除受影响模型查询成功: 数量={len(rows)}")
+            return rows
+        except Exception as e:
+            db_logger.error(f"查询渠道删除受影响模型失败: provider={provider} - {str(e)}")
+            raise
+
+    @staticmethod
     def get_list(db: Session, query: ModelConfigQuery, tenant_id: uuid.UUID | None = None) -> Tuple[List[ModelConfig], int]:
         """获取模型配置列表"""
         db_logger.debug(f"查询模型配置列表: {query.model_dump()}, tenant_id={tenant_id}")
@@ -172,7 +233,9 @@ class ModelConfigRepository:
                         type_values.append(ModelType.CHAT)
                     if ModelType.LLM not in type_values:
                         type_values.append(ModelType.LLM)
-                filters.append(ModelConfig.type.in_(type_values))
+                filters.append(
+                    ModelConfig.type.in_(model_type_storage_values(type_values))
+                )
 
             if query.capability:
                 filters.append(ModelConfig.capability.contains(query.capability))
@@ -246,7 +309,9 @@ class ModelConfigRepository:
                 #         type_values.append(ModelType.CHAT)
                 #     if ModelType.LLM not in type_values:
                 #         type_values.append(ModelType.LLM)
-                filters.append(ModelConfig.type.in_(type_values))
+                filters.append(
+                    ModelConfig.type.in_(model_type_storage_values(type_values))
+                )
             
             if query.is_active is not None:
                 filters.append(ModelConfig.is_active == query.is_active)
@@ -303,7 +368,7 @@ class ModelConfigRepository:
         try:
             query = db.query(ModelConfig).options(
                 joinedload(ModelConfig.model_base),
-            ).filter(ModelConfig.type.in_([t.value for t in model_types]))
+            ).filter(ModelConfig.type.in_(model_type_storage_values(model_types)))
 
             if tenant_id:
                 query = query.filter(
@@ -512,7 +577,9 @@ class ModelBaseRepository:
         
         filters = []
         if query.type:
-            filters.append(ModelBase.type == query.type)
+            filters.append(
+                ModelBase.type.in_(model_type_storage_values([query.type]))
+            )
         if query.provider:
             filters.append(ModelBase.provider == query.provider)
         if query.is_official is not None:

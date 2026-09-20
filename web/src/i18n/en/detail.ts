@@ -67,6 +67,7 @@ export const detail = {
       this_week: 'This Week',
       this_month: 'This Month',
       conversation: "Conversation",
+      dialogue: 'Original Dialogue',
       project_work: "Project/Work",
       learning: "Learning",
       decision: "Decision",

@@ -93,10 +93,6 @@ DUPLICATE_PUBLIC_CLASS_ALLOWLIST: dict[tuple[str, tuple[str, ...]], str] = {
         "ParseDocumentSnapshot",
         ("services/document.py", "services/document_processing.py"),
     ): "API dispatch snapshot and Celery parsing snapshot are separate task-boundary payloads.",
-    (
-        "QWenCV",
-        ("rag/models/media.py", "rag/models/vision.py"),
-    ): "Media and image parser routes select distinct legacy-compatible model adapters.",
 }
 REMOVED_RUNTIME_MODULES = frozenset(
     {

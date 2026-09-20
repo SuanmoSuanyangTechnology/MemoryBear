@@ -24,8 +24,42 @@ DEFAULT_CACHEABLE_NODE_TYPES = {
 }
 
 
+def sanitize_json_text(value: str) -> str:
+    """剥离 PostgreSQL text/jsonb 无法表示的 NUL（U+0000）。
+
+    知识检索节点会把 ES 里的 chunk 原文回传（rag 节点 output.chunks），这些文本
+    来自 PDF/Office 解析，常混入 NUL 控制字符。PostgreSQL 的 jsonb/text 禁止
+    U+0000，写入即抛 asyncpg UntranslatableCharacterError（22P05 unsupported
+    Unicode escape sequence），表现为知识检索节点缓存/执行记录写入失败。
+
+    只剥离 NUL：换行、制表符等是合法字符（JSON 以 \\n 转义表示），保留不动，
+    以免破坏 chunk 正文的排版与引用展示。
+    """
+    return value.replace("\x00", "") if "\x00" in value else value
+
+
+def sanitize_json_value(value: Any) -> Any:
+    """递归剥离 JSON 值里的 NUL，结构与其余类型保持不变。
+
+    与 normalize_cache_value 的区别：不做任何类型强转（bytes/日期/自定义对象原样
+    返回），只保证 PostgreSQL 能接受，专供把节点输出原样写进 jsonb 列的路径使用，
+    不改变既有字段语义。
+    """
+    if isinstance(value, str):
+        return sanitize_json_text(value)
+    if isinstance(value, dict):
+        return {key: sanitize_json_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [sanitize_json_value(item) for item in value]
+    return value
+
+
 def normalize_cache_value(value: Any) -> Any:
-    if value is None or isinstance(value, (str, int, float, bool)):
+    if value is None:
+        return value
+    if isinstance(value, str):
+        return sanitize_json_text(value)
+    if isinstance(value, (int, float, bool)):
         return value
     if isinstance(value, bytes):
         return value.hex()

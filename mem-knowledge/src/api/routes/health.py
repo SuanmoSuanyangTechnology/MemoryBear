@@ -9,6 +9,7 @@ from collections.abc import Awaitable, Callable
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
+from ...request_logging import log_request_failure
 from ...runtime import ProcessRuntime
 from ..schemas.health import ComponentHealth, HealthResponse
 
@@ -65,9 +66,7 @@ async def ready(request: Request) -> HealthResponse | JSONResponse:
         runtime.elasticsearch.ping,
         runtime.storage.ping,
     )
-    results = await asyncio.gather(
-        *(_probe_component(probe, timeout_seconds) for probe in probes)
-    )
+    results = await asyncio.gather(*(_probe_component(probe, timeout_seconds) for probe in probes))
     components = dict(zip(names, results, strict=True))
     is_ready = all(component.status == "up" for component in results)
     response = HealthResponse(
@@ -81,6 +80,20 @@ async def ready(request: Request) -> HealthResponse | JSONResponse:
     )
     if is_ready:
         return response
+    log_request_failure(
+        request,
+        status_code=503,
+        response_code=None,
+        error_code="KNOWLEDGE_NOT_READY",
+        message="Knowledge dependencies are not ready",
+        params={
+            "components": {
+                name: component.model_dump(exclude_none=True)
+                for name, component in components.items()
+            }
+        },
+        retryable=True,
+    )
     return JSONResponse(
         status_code=503,
         content=response.model_dump(mode="json", exclude_none=True),

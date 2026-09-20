@@ -90,8 +90,12 @@ class DashScopeMultimodalRerankAdapter:
         )
         if is_dashscope_multimodal_input_limit(response):
             raise MultimodalInputLimitError("rerank")
-        if _value(response, "status_code") != 200:
-            raise InvalidProviderResponseError("rerank", "non-success status")
+        status_code = _value(response, "status_code")
+        if status_code != 200:
+            # 透出状态码：上游按 "status_code: 401" 文本标记区分鉴权失败与其他 4xx
+            raise InvalidProviderResponseError(
+                "rerank", f"non-success status (status_code: {status_code})"
+            )
         output = _value(response, "output")
         results = _value(output, "results")
         if not isinstance(results, Sequence) or isinstance(results, (str, bytes)):

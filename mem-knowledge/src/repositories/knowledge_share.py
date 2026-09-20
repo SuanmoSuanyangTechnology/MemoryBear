@@ -96,6 +96,20 @@ async def get_knowledgeshare_by_id_in_source_workspace_async(
     return result.scalars().first()
 
 
+async def get_knowledgeshare_by_target_kb_id_in_source_workspace_async(
+    db: AsyncSession,
+    target_kb_id: uuid.UUID,
+    source_workspace_id: uuid.UUID,
+) -> KnowledgeShare | None:
+    result = await db.execute(
+        select(KnowledgeShare).where(
+            KnowledgeShare.target_kb_id == target_kb_id,
+            KnowledgeShare.source_workspace_id == source_workspace_id,
+        )
+    )
+    return result.scalars().first()
+
+
 async def delete_knowledgeshare_by_id_async(
     db: AsyncSession,
     knowledgeshare_id: uuid.UUID,

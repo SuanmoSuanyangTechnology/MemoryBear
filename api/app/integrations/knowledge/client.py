@@ -198,6 +198,49 @@ class KnowledgeServiceClient:
             headers=self._transport.response_headers(upstream.headers),
         )
 
+    async def retrieval_policy(
+        self,
+        *,
+        kb_ids: list[str],
+        context: KnowledgeCallContext,
+        rerank_id: str | None = None,
+    ) -> dict[str, frozenset[str]]:
+        """Fetch supported query modalities from the knowledge service."""
+        payload: dict[str, Any] = {"kb_ids": kb_ids}
+        if rerank_id:
+            payload["rerank_id"] = rerank_id
+        headers = self._transport.request_headers(
+            {"Content-Type": "application/json"},
+            context,
+            CallProfile.JSON,
+        )
+        upstream = await self._transport.send(
+            method="POST",
+            url=self._transport.internal_url("/internal/v1/chunks/retrieval-policy"),
+            headers=headers,
+            profile=CallProfile.JSON,
+            content=json.dumps(payload, separators=(",", ":")).encode(),
+        )
+        try:
+            raw = await upstream.aread()
+            envelope = json.loads(raw)
+            if not isinstance(envelope, dict) or envelope.get("code") != 0:
+                raise KnowledgeProtocolError("Knowledge retrieval policy request failed")
+            data = envelope.get("data")
+            if not isinstance(data, dict):
+                raise KnowledgeProtocolError("Knowledge retrieval policy data is incompatible")
+            policy: dict[str, frozenset[str]] = {}
+            for retrieve_type, modalities in data.items():
+                if isinstance(retrieve_type, str) and isinstance(modalities, list):
+                    policy[retrieve_type] = frozenset(
+                        modality for modality in modalities if isinstance(modality, str)
+                    )
+            return policy
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise KnowledgeProtocolError("Knowledge retrieval policy is invalid") from exc
+        finally:
+            await upstream.aclose()
+
     async def retrieve(
         self,
         request: KnowledgeRetrievalRequest,

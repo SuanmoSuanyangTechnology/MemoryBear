@@ -4,7 +4,7 @@ export type ActivityFilter = 'all' | ActivityType;
 
 export type ActivityDateGroup = 'today' | 'yesterday' | 'earlier';
 
-export type MemoryType = 'conversation' | 'project_work' | 'learning' | 'decision' | 'important_event';
+export type MemoryType = 'conversation' | 'dialogue' | 'project_work' | 'learning' | 'decision' | 'important_event';
 
 export type EngineType = 'EXTRACTION' | 'CROSS_MODAL' | 'EMOTION';
 
