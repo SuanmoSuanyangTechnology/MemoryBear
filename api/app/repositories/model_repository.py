@@ -618,6 +618,15 @@ class ModelBaseRepository:
         ).first()
 
     @staticmethod
+    def get_by_name_provider_type(db: Session, name: str, provider: str, model_type: str) -> Optional['ModelBase']:
+        """广场收录判定（(name, provider, type) 三元组，供自定义模型入口守卫用）。"""
+        return db.query(ModelBase).filter(
+            ModelBase.name == name,
+            ModelBase.provider == provider,
+            ModelBase.type == model_type
+        ).first()
+
+    @staticmethod
     def update(db: Session, model_base_id: uuid.UUID, data: dict) -> Optional['ModelBase']:
         model_base = db.query(ModelBase).filter(ModelBase.id == model_base_id).first()
         if not model_base:

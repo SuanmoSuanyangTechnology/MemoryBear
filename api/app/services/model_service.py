@@ -225,6 +225,31 @@ def _reject_asr_composite(model_type: ModelType | str | None) -> None:
         raise BusinessException("ASR 模型暂不支持组合配置", BizCode.INVALID_PARAMETER)
 
 
+def _assert_plaza_entry_absent(
+    db: Session,
+    *,
+    name: str | None,
+    provider: str | None,
+    model_type: str | None,
+    source_base_id: uuid.UUID | None = None,
+) -> None:
+    """入口守卫：(name, provider, type) 命中广场未下线基础模型 → 引导走模型广场添加。
+
+    已下线（is_deprecated）放行——平台不再提供，允许自带渠道自建；
+    `source_base_id` 命中的 base 是本行来源（广场添加而来），不拦。
+    """
+    base = ModelBaseRepository.get_by_name_provider_type(
+        db, (name or "").strip(), provider, normalize_type(model_type)
+    )
+    if base is None or base.is_deprecated or base.id == source_base_id:
+        return
+    raise BusinessException(
+        f"模型 '{base.name}' 已收录在模型广场，请从模型广场添加",
+        BizCode.MODEL_AVAILABLE_IN_PLAZA,
+        context={"model_base_id": str(base.id)},
+    )
+
+
 def _validation_image() -> "ImageEmbeddingContent":
     from redbear_model import ImageEmbeddingContent
 
@@ -1102,6 +1127,10 @@ class ModelConfigService:
         ASR 模型登记时只校验配置结构，凭据在实际调用时验证；其他模型
         仍在网络活体验证通过后写入。
         """
+        # 广场已收录（同 name/provider/type 且未下线）→ 引导走广场添加，不再落重复自定义行
+        _assert_plaza_entry_absent(
+            db, name=model_data.name, provider=model_data.provider, model_type=model_data.type
+        )
         if is_asr_model(model_data.type):
             return await ModelConfigService._create_asr_model(model_data, tenant_id, created_by)
         # 检查名称是否已存在（同租户内；先于任何网络调用）
@@ -1186,6 +1215,23 @@ class ModelConfigService:
             if ModelConfigRepository.get_by_name(db, model_data.name, provider=existing_model.provider,
                                                  tenant_id=tenant_id):
                 raise BusinessException("模型名称已存在", BizCode.DUPLICATE_NAME)
+
+        # 标识三元组（name/provider/type）变化时才校验广场收录，避免误伤存量行与
+        # 广场来源行的普通编辑（改描述、切启用态等）
+        fields_set = model_data.model_fields_set
+        new_triple = (
+            model_data.name if "name" in fields_set else existing_model.name,
+            model_data.provider if "provider" in fields_set else existing_model.provider,
+            normalize_type(model_data.type) if "type" in fields_set else existing_model.type,
+        )
+        if new_triple != (existing_model.name, existing_model.provider, existing_model.type):
+            _assert_plaza_entry_absent(
+                db,
+                name=new_triple[0],
+                provider=new_triple[1],
+                model_type=new_triple[2],
+                source_base_id=existing_model.model_id,
+            )
 
         model = ModelConfigRepository.update(
             db, model_id, _config_update_payload(model_data, existing_model), tenant_id=tenant_id
