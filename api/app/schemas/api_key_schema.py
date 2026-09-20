@@ -50,6 +50,14 @@ class ApiKeyCreate(BaseModel):
                 raise ValueError(f"无效范围: {scope}")
         return v
 
+    @field_validator('user_id', mode='before')
+    @classmethod
+    def normalize_user_id(cls, v):
+        """user_id 可选；纯空白归一化为 None，避免创建 other_id 为空白的无效终端用户"""
+        if isinstance(v, str) and not v.strip():
+            return None
+        return v
+
     @model_validator(mode='after')
     def validate_type_constraints(self):
         if self.type == ApiKeyType.SERVICE:
