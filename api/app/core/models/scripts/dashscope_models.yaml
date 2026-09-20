@@ -1790,7 +1790,6 @@ models:
   is_deprecated: false
   is_official: true
   input_modalities:
-  - text
   - audio
   output_modalities:
   - text
@@ -1816,3 +1815,41 @@ models:
   tags:
   - 视频理解
   logo: dashscope
+- name: qwen-audio-3.0-asr-flash
+  type: asr
+  provider: dashscope
+  description: 非实时大模型语音识别，支持多语种和方言，可转写5分钟以内的音频并输出文本
+  is_deprecated: false
+  is_official: true
+  input_modalities:
+    - audio
+  output_modalities:
+    - text
+  features: [ ]
+  tags:
+    - 音频转录
+  logo: dashscope
+- name: qwen3.8-omni-flash
+  type: llm
+  provider: dashscope
+  description: 全模态模型，支持文本、图片、音频和视频输入及文本输出，支持深度思考和Function Calling
+  is_deprecated: false
+  is_official: true
+  input_modalities:
+    - text
+    - image
+    - audio
+    - video
+  output_modalities:
+    - text
+  features:
+    - thinking
+    - function_call
+    - json_output
+  tags:
+    - 视频理解
+    - 大语言模型
+    - 多模态模型
+  logo: dashscope
+
+

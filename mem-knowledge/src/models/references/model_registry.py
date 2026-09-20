@@ -30,7 +30,7 @@ class ModelType(StrEnum):
     RERANK = "rerank"
     IMAGE = "image"
     VIDEO = "video"
-    ASR = "ASR"
+    ASR = "asr"
 
     @classmethod
     def _missing_(cls, value):

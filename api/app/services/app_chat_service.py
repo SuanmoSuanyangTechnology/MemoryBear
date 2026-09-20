@@ -720,7 +720,7 @@ class AppChatService:
             image_manifest, _ = build_uploaded_images_manifest(files)
             if image_manifest:
                 llm_message = f"{message}\n\n{image_manifest}"
-            if doc_img_recognition and ModelCapability.VISION in (api_key_obj.capability or []) and any(
+            if doc_img_recognition and Modality.IMAGE in (api_key_obj.input_modalities or []) and any(
                 f.type == FileType.DOCUMENT for f in files
             ):
                 system_prompt += (
@@ -1309,7 +1309,7 @@ class AppChatService:
                 image_manifest, _ = build_uploaded_images_manifest(files)
                 if image_manifest:
                     llm_message = f"{message}\n\n{image_manifest}"
-                if doc_img_recognition and ModelCapability.VISION in (api_key_obj.capability or []) and any(
+                if doc_img_recognition and Modality.IMAGE in (api_key_obj.input_modalities or []) and any(
                     f.type == FileType.DOCUMENT for f in files
                 ):
                     system_prompt += (

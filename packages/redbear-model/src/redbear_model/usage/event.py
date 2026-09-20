@@ -1,7 +1,7 @@
 """用量事件契约：对齐主 spec §13.1 冻结 JSON schema（事件入 Stream，消费落 model_usage_records）。
 
 capability 值词汇依 `2026-09-09-model-contract-v2-design.md` §1#3/§3 = 归一化 ModelType
-接口族值（llm/embedding/rerank/image/video）——`"chat"` 输入由 `ModelType._missing_`
+接口族值（llm/embedding/rerank/image/video/asr）——`"chat"` 输入由 `ModelType._missing_`
 读侧归一为 llm，事件写值永不落 "chat"，持久契约零迁移。
 """
 

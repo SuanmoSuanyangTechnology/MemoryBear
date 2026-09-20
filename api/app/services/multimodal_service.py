@@ -755,12 +755,12 @@ class MultimodalService:
                 if file.type == FileType.VIDEO:
                     if file.upload_file_id:
                         await self._get_local_file_metadata(file.upload_file_id, workspace_id)
-                    if "video" in self.capability and include_processing_errors:
+                    if Modality.VIDEO in self.input_modalities and include_processing_errors:
                         result.append({
                             "type": "text",
                             "text": "[视频文件无法通过当前模型接口安全传输，请配置 provider Files API 后重试]",
                         })
-                    elif "video" not in self.capability:
+                    elif Modality.VIDEO not in self.input_modalities:
                         logger.warning(f"不支持的文件类型: {file.type}")
                     continue
 
