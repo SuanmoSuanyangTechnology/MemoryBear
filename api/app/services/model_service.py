@@ -1263,8 +1263,6 @@ class ModelConfigService:
         if not existing_model:
             raise BusinessException("模型配置不存在", BizCode.MODEL_NOT_FOUND)
 
-        if not existing_model.is_composite:
-            raise BusinessException("该模型不是组合模型", BizCode.INVALID_PARAMETER)
         _reject_asr_composite(existing_model.type)
         old_cache_state = _model_option_cache_state(existing_model)
 
