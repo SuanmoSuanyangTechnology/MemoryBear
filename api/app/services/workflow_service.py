@@ -10550,9 +10550,10 @@ class WorkflowService:
                 recovered_outputs = (recovered_state.values or {}).get("node_outputs", {})
                 if recovered_outputs:
                     import copy as _copy
+                    from app.core.utils.text_sanitize import sanitize_value
                     new_output_data = _copy.deepcopy(execution.output_data or {})
                     merged = new_output_data.setdefault("node_outputs", {})
-                    merged.update(recovered_outputs)
+                    merged.update(sanitize_value(recovered_outputs))
                     execution.output_data = new_output_data
             except Exception as recover_err:
                 logger.warning(f"Failed to recover state on resume error: {recover_err}")
