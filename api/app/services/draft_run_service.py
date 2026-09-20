@@ -45,6 +45,7 @@ from app.schemas.model_schema import ModelInfo
 from app.schemas.prompt_schema import PromptMessageRole, render_prompt_message
 from app.services.context_engine_manager import ContextEngineManager
 from app.services.annotation_service import AnnotationService
+from app.services.file_content_service import FileReference, resolve_image_retrieval_query
 from app.services.langchain_tool_server import Search
 from app.services.memory_config_service import MemoryConfigService
 from app.services.model_parameter_merger import ModelParameterMerger
@@ -140,35 +141,38 @@ class KnowledgeRetrievalInput(BaseModel):
     )
 
 
-def _extract_image_urls(files: list[FileInput] | list[dict[str, Any]] | None) -> list[str]:
-    """按上传顺序提取本轮图片文件的 URL（仅图片且 URL 非空）。"""
-    urls: list[str] = []
+def _extract_image_references(
+    files: list[FileInput] | list[dict[str, Any]] | None,
+) -> list[FileReference]:
+    """按上传顺序提取本轮图片文件的引用。
+
+    本地文件（transfer_method=local_file）只有 file_id、url 为空，远程图片只有 url；
+    两者都必须收进白名单，否则私有化部署下「以图搜图」会静默空转。
+    """
+    references: list[FileReference] = []
     for file in files or []:
-        if isinstance(file, dict):
-            file_type, url = file.get("type"), file.get("url")
-            name = file.get("name")
-        else:
-            file_type, url, name = file.type, file.url, getattr(file, "name", None)
-        if str(file_type) == FileType.IMAGE.value and isinstance(url, str) and url:
-            urls.append(url)
-    return urls
+        reference = FileReference.from_payload(file)
+        if reference is not None and reference.is_image and (reference.file_id or reference.url):
+            references.append(reference)
+    return references
 
 
 def build_uploaded_images_manifest(
     files: list[FileInput] | list[dict[str, Any]] | None,
-) -> tuple[str, list[str]]:
-    """构造注入用户消息的本轮图片清单，并返回与编号一致的有序 URL 白名单。
+) -> tuple[str, list[FileReference]]:
+    """构造注入用户消息的本轮图片清单，并返回与编号一致的有序图片引用白名单。
 
-    返回 (manifest_text, image_urls)；无图片时返回 ("", [])。
+    返回 (manifest_text, image_references)；无图片时返回 ("", [])。
+    清单里只给模型编号与名字：图片地址（尤其内网地址）对模型没有意义，也不该写进上下文。
     """
-    image_urls = _extract_image_urls(files)
-    if not image_urls:
+    image_references = _extract_image_references(files)
+    if not image_references:
         return "", []
     lines = ["本轮用户上传了以下图片，可在需要按图片内容检索知识库时，"
              "通过知识库检索工具的 image_refs 参数传入对应编号："]
-    for index, url in enumerate(image_urls, start=1):
-        lines.append(f"[图片{index}] {url}")
-    return "\n".join(lines), image_urls
+    for index, reference in enumerate(image_references, start=1):
+        lines.append(f"[图片{index}] {reference.name or reference.url or '本地图片'}")
+    return "\n".join(lines), image_references
 
 
 class WebSearchInput(BaseModel):
@@ -228,10 +232,13 @@ async def _retrieve_chunks_via_standard(
         app_id: uuid.UUID | str | None,
         workspace_id: uuid.UUID | str | None,
         source: KnowledgeRetrievalSource,
-        image_urls: list[str] | None = None,
+        image_references: list[FileReference] | None = None,
         image_stats: dict[str, Any] | None = None,
 ) -> list:
     """Retrieve text and, when explicitly supported, attached image queries.
+
+    图片引用由公共文件内容服务统一取字节：本地文件（只有 file_id）直读存储，
+    远程图片走 URL 下载，私有化部署下同样可用。
 
     当传入 ``image_stats`` 时，函数会原地回填图片检索的执行计数
     （requested/encoded/succeeded/failed），供调用方向模型反馈失败原因。
@@ -316,42 +323,58 @@ async def _retrieve_chunks_via_standard(
         results = list((await retriever.retrieve(text_request, context)).chunks)
 
     image_diagnostics: dict[str, Any] = {"requested": 0, "encoded": 0, "succeeded": 0, "failed": 0}
-    if image_urls:
-        from app.integrations.knowledge.retrieval_policy import (
-            build_image_retrieval_query,
-            image_retrieval_supported,
-        )
+    if image_references:
+        from app.integrations.knowledge.retrieval_policy import image_retrieval_supported
+        from app.services.image_retrieval_guard import check_image_retrieval
 
-        unique_image_urls = list(dict.fromkeys(image_urls))
-        image_diagnostics["requested"] = len(unique_image_urls)
+        available_references = [ref for ref in image_references if ref.locator]
+        # 按 locator 去重，保持首次出现顺序
+        unique_references = list({ref.locator: ref for ref in available_references}.values())
+        image_diagnostics["requested"] = len(unique_references)
         logger.info(
             "知识库图片检索开始 kb_ids=%s retrieve_type=%s image_count=%s",
-            kb_ids, retrieve_type.value, len(unique_image_urls),
+            kb_ids, retrieve_type.value, len(unique_references),
         )
-        supported = await image_retrieval_supported(
+        # 先按知识库侧的图片检索边界做本地前置校验，命中时给出与下游一致的具体原因。
+        # agent 场景不中断主流程：图片检索降级，原因随 diagnostics 反馈给模型。
+        rejection_reason = await check_image_retrieval(
+            kb_ids=kb_ids,
+            knowledge_bases=valid_kbs,
+            retrieve_type=retrieve_type,
+            rerank_id=rerank_id,
+            rerank_mode=kb_config.get("rerank_mode"),
+            enable_graph_retrieval=enable_graph_retrieval,
+            metadata_filter_mode=kb_config.get("metadata_filter_mode"),
+        )
+        if rejection_reason is None and not await image_retrieval_supported(
             retriever,
             kb_ids=[str(kb_id) for kb_id in kb_ids],
             retrieve_type=retrieve_type,
             context=context,
             rerank_id=str(rerank_id) if rerank_id else None,
-            rerank_mode=kb_config.get("rerank_mode"),
-            enable_graph_retrieval=enable_graph_retrieval,
-        )
-        if not supported:
+        ):
             # fail-closed：策略不支持/不可用时明确记录，避免图片检索被静默丢弃
-            image_diagnostics["failed"] = len(unique_image_urls)
+            rejection_reason = "当前知识库/检索模式不支持图片检索"
+        if rejection_reason is not None:
+            image_diagnostics["failed"] = len(unique_references)
+            image_diagnostics["reason"] = rejection_reason
             logger.warning(
-                "知识库图片检索被策略拒绝（不支持模态或策略服务不可用）kb_ids=%s "
-                "retrieve_type=%s rerank_mode=%s graph=%s",
-                kb_ids, retrieve_type.value, kb_config.get("rerank_mode"),
-                enable_graph_retrieval,
+                "知识库图片检索未执行 kb_ids=%s retrieve_type=%s reason=%s",
+                kb_ids, retrieve_type.value, rejection_reason,
             )
         else:
-            for image_url in unique_image_urls:
-                image_query = await build_image_retrieval_query(image_url)
+            for reference in unique_references:
+                # 本地文件直读存储字节编码，远程图片走 URL 下载，都不依赖模型侧可达性
+                image_query = await resolve_image_retrieval_query(
+                    reference,
+                    workspace_id=context.principal.workspace_id if context.principal else None,
+                    tenant_id=context.principal.tenant_id if context.principal else None,
+                )
                 if image_query is None:
                     image_diagnostics["failed"] += 1
-                    logger.warning("知识库图片检索跳过：图片下载/编码失败 url=%s", image_url[:200])
+                    logger.warning(
+                        "知识库图片检索跳过：图片读取/编码失败 locator=%s", reference.locator,
+                    )
                     continue
                 image_diagnostics["encoded"] += 1
                 image_request = KnowledgeRetrievalRequest(query=image_query, **request_kwargs)
@@ -359,8 +382,8 @@ async def _retrieve_chunks_via_standard(
                     image_chunks = (await retriever.retrieve(image_request, context)).chunks
                     image_diagnostics["succeeded"] += 1
                     logger.info(
-                        "知识库图片检索命中 url=%s chunks=%s",
-                        image_url[:200], len(image_chunks),
+                        "知识库图片检索命中 locator=%s chunks=%s",
+                        reference.locator, len(image_chunks),
                     )
                     results.extend(image_chunks)
                 except Exception as image_exc:
@@ -417,22 +440,13 @@ def create_knowledge_retrieval_tool(
         检索到的相关知识内容
     """
     logger.info(f"创建知识库检索工具，用户：{user_id}")
-    # 本轮上传图片的有序白名单（1-based 编号 -> URL），仅允许模型引用这些图片
-    image_urls: list[str] = []
+    # 本轮上传图片的有序白名单（1-based 编号 -> 图片引用），仅允许模型引用这些图片。
+    # 本地文件只有 file_id、url 为空，统一由公共文件内容服务取字节，不依赖 URL 可达。
+    image_references: list[FileReference] = []
 
     def set_uploaded_files(files: list[FileInput] | list[dict[str, Any]] | None) -> None:
-        """Record current-turn image URLs that the model may reference by index."""
-        image_urls[:] = [
-            url
-            for file in files or []
-            for file_type, url in [
-                (
-                    file.get("type") if isinstance(file, dict) else file.type,
-                    file.get("url") if isinstance(file, dict) else file.url,
-                )
-            ]
-            if str(file_type) == FileType.IMAGE.value and isinstance(url, str) and url
-        ]
+        """Record current-turn image references that the model may reference by index."""
+        image_references[:] = _extract_image_references(files)
 
     set_uploaded_files(uploaded_files)
 
@@ -449,8 +463,9 @@ def create_knowledge_retrieval_tool(
         - image_refs: 当且仅当用户要求“按图片/用这张图去知识库检索相似内容”时填写。
           取值为用户消息中“[图片N]”清单里的编号 N（整数，从 1 开始），可传多个。
           纯文本问题、或用户未要求按图检索时，留空或传空列表，切勿臆造编号。
-          例如用户消息含“[图片1] https://...”，且要求按图检索，则传 image_refs=[1]，
-          此时 query 留空。
+          例如用户消息含“[图片1] xxx.png”，且要求按图检索，则传 image_refs=[1]，
+          此时 query 留空。清单里的“[图片N]”后面可能是文件名或“本地图片”，
+          都不影响编号取值，不要据此推断图片能不能用。
 
         query 与 image_refs 至少要有一个非空。
 
@@ -459,10 +474,10 @@ def create_knowledge_retrieval_tool(
         """
 
         try:
-            # 仅检索模型显式选择、且属于本轮上传白名单的图片，杜绝任意 URL
-            selected_image_urls: list[str] = []
+            # 仅检索模型显式选择、且属于本轮上传白名单的图片，杜绝任意引用
+            selected_image_references: list[FileReference] = []
             if image_refs:
-                if not image_urls:
+                if not image_references:
                     # 模型给了编号，但本轮没有可用图片白名单（时序/非图片上传问题）
                     logger.warning(
                         "知识库工具收到 image_refs=%s 但本轮图片白名单为空，忽略图片检索",
@@ -472,19 +487,19 @@ def create_knowledge_retrieval_tool(
                     if isinstance(ref, bool) or not isinstance(ref, int):
                         logger.warning("知识库工具 image_refs 含非整数编号，已忽略: %r", ref)
                         continue
-                    if 1 <= ref <= len(image_urls):
-                        selected_image_urls.append(image_urls[ref - 1])
+                    if 1 <= ref <= len(image_references):
+                        selected_image_references.append(image_references[ref - 1])
                     else:
                         logger.warning(
                             "知识库工具 image_refs 编号越界: ref=%s 本轮图片数=%s",
-                            ref, len(image_urls),
+                            ref, len(image_references),
                         )
             query = (query or "").strip()
             logger.info(
                 "知识库工具检索 query=%r image_refs=%s 选中图片数=%s",
-                query[:120], image_refs, len(selected_image_urls),
+                query[:120], image_refs, len(selected_image_references),
             )
-            if not query and not selected_image_urls:
+            if not query and not selected_image_references:
                 # 两个检索入口都为空：无法检索，明确告知模型补全参数
                 return "检索失败：query 与 image_refs 不能同时为空。请提供文字问题，或在用户要求按图检索时传入有效图片编号。"
             image_stats: dict[str, Any] = {}
@@ -494,16 +509,21 @@ def create_knowledge_retrieval_tool(
                 app_id=app_id,
                 workspace_id=workspace_id,
                 source=source,
-                image_urls=selected_image_urls,
+                image_references=selected_image_references,
                 image_stats=image_stats,
             )
             # 模型显式请求了图片检索，但所有图片都没检索成功：给出明确反馈，
             # 避免模型在没有图片证据时假装已按图检索
             image_failure_notice = ""
             if image_stats.get("requested", 0) > 0 and image_stats.get("succeeded", 0) == 0:
+                # 前置校验/策略拒绝会带上具体原因，转述给模型，避免只提示"稍后重试"
+                failure_detail = str(image_stats.get("reason") or "").strip() or (
+                    "图片暂不可下载/编码，或知识库当前不支持图片模态"
+                )
                 image_failure_notice = (
-                    "\n\n注意：本次按图片检索未成功执行（图片暂不可下载/编码，或知识库当前不支持图片模态），"
-                    "以上仅为文本检索结果（如有）。请不要声称已根据图片内容检索，请提示用户稍后重试或改用文字描述。"
+                    f"\n\n注意：本次按图片检索未成功执行（{failure_detail}），"
+                    "以上仅为文本检索结果（如有）。请不要声称已根据图片内容检索，"
+                    "请提示用户按上述原因调整配置，或改用文字描述。"
                 )
                 logger.warning("知识库图片检索全部失败 image_stats=%s", image_stats)
             if retrieve_chunks_result:

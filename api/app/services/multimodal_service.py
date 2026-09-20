@@ -36,11 +36,13 @@ from app.core.config import settings
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
+from app.core.utils.text_sanitize import sanitize_text
 from app.models.file_metadata_model import FileMetadata
 from app.models.models_model import ModelCapability
 from app.schemas.app_schema import FileInput, FileType, FileUploadConfig, TransferMethod
 from app.schemas.model_schema import ModelInfo
 from app.services.audio_transcription_service import AudioTranscriptionService
+from app.services.file_content_service import extract_permanent_file_id
 from app.services.file_storage_service import FileStorageService
 
 logger = get_business_logger()
@@ -151,37 +153,14 @@ def serialize_file_reference(
     }
 
 
-_PERMANENT_PATH_MARKER = "/storage/permanent/"
-
-
 def _built_permanent_file_id(url: Any, *, any_host: bool = False) -> str | None:
     """识别本服务自铸的永久下载 URL，并取出其中的文件 ID。
 
-    any_host=False（URL 来自请求，不可信）：只认当前 FILE_LOCAL_SERVER_URL
-    前缀，避免任意公网 URL 被误判成本服务自有文件而触发服务端回拉（SSRF）。
-    any_host=True（URL 来自已持久化的消息元数据，可信）：额外接受路径形态，
-    这样域名/端口变更后旧消息里的永久 URL 仍能还原成文件 ID 由本服务自取字节。
+    判定实现已抽到公共文件内容服务（file_content_service.extract_permanent_file_id），
+    与知识库图片检索等消费点共用同一套口径，避免私有化部署下"URL 是否属于本服务"
+    的判断在各处慢慢分叉。
     """
-    if not isinstance(url, str):
-        return None
-    normalized_url = url.split("?", 1)[0]
-    configured_prefix = f"{settings.FILE_LOCAL_SERVER_URL.rstrip('/')}{_PERMANENT_PATH_MARKER}"
-    if normalized_url.startswith(configured_prefix):
-        candidate = normalized_url[len(configured_prefix):]
-    elif any_host:
-        path = urlparse(normalized_url).path
-        marker_index = path.rfind(_PERMANENT_PATH_MARKER)
-        if marker_index < 0:
-            return None
-        candidate = path[marker_index + len(_PERMANENT_PATH_MARKER):]
-    else:
-        return None
-
-    candidate = candidate.strip("/")
-    try:
-        return str(uuid.UUID(candidate))
-    except (TypeError, ValueError):
-        return None
+    return extract_permanent_file_id(url, trust_any_host=any_host)
 
 
 def _model_cannot_reach_url(url: Any) -> bool:
@@ -1272,8 +1251,22 @@ class MultimodalService:
                         parts.append('\t'.join('' if v is None else str(v) for v in row))
                 return '\n'.join(parts)
             except Exception as e:
-                logger.error(f"提取 xlsx 文本失败: {e}")
-                return f"[xlsx 提取失败: {str(e)}]"
+                # openpyxl 对不规范 styles.xml（如空 <fill/>）零容忍，会抛
+                # TypeError: expected <class 'openpyxl.styles.fills.Fill'>；
+                # calamine（Rust 实现，不解析 styles.xml）可正常读取此类文件
+                logger.warning(f"openpyxl 提取 xlsx 文本失败: {e}，尝试 calamine 降级读取")
+                try:
+                    from python_calamine import CalamineWorkbook
+                    cwb = CalamineWorkbook.from_filelike(io.BytesIO(file_content))
+                    parts = []
+                    for sheet_name in cwb.sheet_names:
+                        parts.append(f"[Sheet: {sheet_name}]")
+                        for row in cwb.get_sheet_by_name(sheet_name).to_python():
+                            parts.append('\t'.join('' if v is None else str(v) for v in row))
+                    return '\n'.join(parts)
+                except Exception as e_fallback:
+                    logger.error(f"提取 xlsx 文本失败: openpyxl({e}), calamine({e_fallback})")
+                    return f"[xlsx 提取失败: {str(e_fallback)}]"
 
         # xls（OLE2/BIFF 格式）
         try:
@@ -1359,19 +1352,22 @@ class MultimodalService:
         encoding = encoding.lower()
 
         # 2. 兼容常见中文编码
-        compatible_encodings = ["utf-8", "gbk", "gb18030", "gb2312", "ascii", "latin-1"]
+        # 注意：不能用 latin-1 兜底——它逐字节 1:1 映射且永不失败，会把
+        # ZIP/PDF 等二进制“成功”解码成含 NUL(\\x00) 的字符串，写入
+        # PostgreSQL 时触发 CharacterNotInRepertoireError。
+        compatible_encodings = ["utf-8", "gbk", "gb18030", "gb2312", "ascii"]
 
         # 3. 按优先级尝试解码
         for enc in [encoding] + compatible_encodings:
             if not enc:
                 continue
             try:
-                return file_content.decode(enc.strip())
+                return sanitize_text(file_content.decode(enc.strip()))
             except (UnicodeDecodeError, LookupError):
                 continue
 
-        # 终极兜底
-        return file_content.decode("utf-8", errors="replace")
+        # 终极兜底：非法字节替换为 U+FFFD，同时剥除 NUL
+        return sanitize_text(file_content.decode("utf-8", errors="replace"))
 
 
 def get_multimodal_service(db: Session) -> MultimodalService:
