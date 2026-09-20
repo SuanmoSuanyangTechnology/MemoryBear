@@ -23,22 +23,20 @@ from redbear_model import (
 
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
-from app.models.models_model import ModelType as HostModelType
+from app.models.models_model import LEGACY_CHAT_TYPE, ModelType as HostModelType
 from app.schemas import model_schema
 from app.services.channel_registry import parse_members
 
-_CHAT_VALUE = HostModelType.CHAT.value
-
 
 def normalize_type(value) -> str | None:
-    """类型值归一：宿主 `ModelType` 含独立 `CHAT="chat"` 且无 `_missing_`（与包内不同），
-    写路径显式 `'chat' → 'llm'`（大小写不敏感，兼容 DB/YAML 存量字符串）。"""
+    """类型值归一：`'chat' → 'llm'`（大小写不敏感，兼容 DB/YAML 存量字符串），结果统一小写。"""
     if value is None:
         return None
     raw = str(getattr(value, "value", value))
-    if raw.lower() == _CHAT_VALUE:
+    normalized = raw.lower()
+    if normalized == LEGACY_CHAT_TYPE:
         return HostModelType.LLM.value
-    return raw
+    return normalized
 
 
 def _enum_str(values: Sequence[Any] | None) -> list[str]:

@@ -34,7 +34,6 @@ class BaseModel(Base):
 class ModelType(StrEnum):
     """模型类型枚举"""
     LLM = "llm"
-    CHAT = "chat"
     EMBEDDING = "embedding"
     RERANK = "rerank"
     ASR = "asr"
@@ -46,8 +45,12 @@ class ModelType(StrEnum):
 
     @classmethod
     def _missing_(cls, value):
-        if isinstance(value, str) and value.lower() == "asr":
-            return cls.ASR
+        """存量字符串读侧归一：`"chat"` → LLM（DB/YAML 旧行兼容）；`"asr"` → ASR（大小写容忍）。"""
+        if isinstance(value, str):
+            if value.lower() == "chat":
+                return cls.LLM
+            if value.lower() == "asr":
+                return cls.ASR
         return None
 
     @classmethod
@@ -55,6 +58,13 @@ class ModelType(StrEnum):
         schema = handler(core_schema)
         schema["enum"] = list(dict.fromkeys([*schema.get("enum", []), "asr"]))
         return schema
+
+
+# 存量类型读侧兼容（2e：CHAT 成员已删；旧 YAML/旧镜像仍可能传/落 "chat"）：
+# 集合/SQL 比较一律用本常量，勿再引 ModelType.CHAT
+LEGACY_CHAT_TYPE = "chat"
+# LLM 族（含存量 chat）：集合判断 / SQL IN 共用；元组顺序即 SQL 字面量顺序
+LLM_FAMILY_TYPES = (ModelType.LLM.value, LEGACY_CHAT_TYPE)
 
 
 class ModelCapability(StrEnum):

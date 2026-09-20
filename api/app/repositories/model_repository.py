@@ -8,7 +8,14 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.core.utils.datetime_utils import utcnow_naive
 from app.core.logging_config import get_db_logger
-from app.models.models_model import ModelConfig, ModelApiKey, ModelType, ModelBase, ModelProvider
+from app.models.models_model import (
+    LLM_FAMILY_TYPES,
+    ModelConfig,
+    ModelApiKey,
+    ModelType,
+    ModelBase,
+    ModelProvider,
+)
 from app.schemas.model_schema import (
     ModelConfigQuery, ModelConfigQueryNew
 )
@@ -21,7 +28,7 @@ def _model_type_rank(column):
     """类型展示序（/models、/models/new、model_plaza 同序）：llm/chat 同序（chat 为存量
     归一口径）→ embedding → rerank → image → video → 表外预留 6。"""
     return case(
-        (column.in_([ModelType.LLM.value, ModelType.CHAT.value]), 1),
+        (column.in_(LLM_FAMILY_TYPES), 1),
         (column == ModelType.EMBEDDING.value, 2),
         (column == ModelType.RERANK.value, 3),
         (column == ModelType.IMAGE.value, 4),
@@ -357,13 +364,14 @@ class ModelConfigRepository:
 
     @staticmethod
     def get_by_type(db: Session, model_types: List[ModelType], tenant_id: uuid.UUID | None = None, is_active: bool = True) -> List[ModelConfig]:
-        """根据类型获取模型配置，支持多类型查询"""
-        db_logger.debug(f"根据类型查询模型配置: types={[t.value for t in model_types]}, tenant_id={tenant_id}, is_active={is_active}")
+        """根据类型获取模型配置，支持多类型查询（枚举成员或裸字符串值）"""
+        type_values = [str(getattr(t, "value", t)) for t in model_types]
+        db_logger.debug(f"根据类型查询模型配置: types={type_values}, tenant_id={tenant_id}, is_active={is_active}")
 
         try:
             query = db.query(ModelConfig).options(
                 joinedload(ModelConfig.model_base),
-            ).filter(ModelConfig.type.in_([t.value for t in model_types]))
+            ).filter(ModelConfig.type.in_(type_values))
 
             if tenant_id:
                 query = query.filter(

@@ -38,6 +38,7 @@ _REPO_CANDIDATES = [
     Path(__file__).resolve().parents[1] / ".env",   # core/api
 ]
 
+# 独立脚本不引 app 包：字面量与 app.models.models_model.LLM_FAMILY_TYPES 同口径
 _COMPATIBLE_TYPES = {"llm", "chat"}
 
 

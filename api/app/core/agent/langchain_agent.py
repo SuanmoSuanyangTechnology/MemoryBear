@@ -367,7 +367,7 @@ class LangChainAgent:
         )
         model_config.bind_failover_plan(failover_plan)
 
-        self.llm = RedBearLLM(model_config, type=ModelType.CHAT)
+        self.llm = RedBearLLM(model_config, type=ModelType.LLM)
         self._wrap_tools_with_external_context()
         # 从经过校验的 config 读取实际生效的能力开关
         self.deep_thinking = model_config.deep_thinking

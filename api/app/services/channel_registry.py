@@ -63,6 +63,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.models.models_model import ModelBase, ModelChannel, ModelConfig
 from app.services.channel_service import cipher_from_env
 from app.services.usage_load import channel_loads_async, channel_loads_sync
+from app.utils.redis_cache import invalidate_workspace_model_options
 
 _CHANNEL_CACHE_TTL_MS = 60_000
 _shared_cache = ChannelSnapshotCache(ttl_ms=_CHANNEL_CACHE_TTL_MS)
@@ -309,6 +310,8 @@ def invalidate_channel_cache(
 ) -> None:
     """写路径主动失效渠道快照缓存（同租户全量键一并失效，见包内缓存语义）。"""
     _shared_cache.invalidate(tenant_id, provider)
+    # workspace 模型候选按渠道可用性过滤，渠道态变更须同步失效（tenant_id 为空时 no-op）
+    invalidate_workspace_model_options((tenant_id,))
 
 
 def parse_members(config: dict | None) -> list[tuple[str, str]]:

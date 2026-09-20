@@ -3458,7 +3458,7 @@ class AgentRunService:
                     api_key_config,
                     extra_params={"temperature": 0.5, "max_tokens": 200},
                 ),
-                type=ModelType.CHAT
+                type=ModelType.LLM
             )
             prompt = (
                 f"根据以下AI回复，生成3个用户可能继续追问的简短问题，每行一个，不加序号：\n\n{assistant_message}"

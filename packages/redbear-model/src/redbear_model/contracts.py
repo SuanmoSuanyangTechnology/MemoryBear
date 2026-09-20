@@ -34,8 +34,6 @@ class ModelType(StrEnum):
     IMAGE = "image"
     VIDEO = "video"
     ASR = "asr"
-    # deprecated（2a 别名窗口，2e 删除）：原独立值 "chat"，仅存量数据仍持该字符串
-    CHAT = "llm"
 
     @classmethod
     def _missing_(cls, value: object) -> ModelType | None:

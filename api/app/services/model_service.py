@@ -3,7 +3,7 @@ from datetime import datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
-from typing import TYPE_CHECKING, List, Optional, Dict, Any, Sequence, Tuple
+from typing import TYPE_CHECKING, Iterable, List, Optional, Dict, Any, Sequence, Tuple
 import uuid
 import math
 import time
@@ -12,7 +12,15 @@ from urllib.parse import urlparse
 
 from pydantic import SecretStr
 
-from app.models.models_model import ModelConfig, ModelApiKey, ModelType, LoadBalanceStrategy, ModelProvider
+from app.models.models_model import (
+    LLM_FAMILY_TYPES,
+    ModelConfig,
+    ModelApiKey,
+    ModelType,
+    LoadBalanceStrategy,
+    ModelBase,
+    ModelProvider,
+)
 from app.repositories.model_repository import ModelConfigRepository, ModelApiKeyRepository, ModelBaseRepository
 from app.schemas import model_schema
 from app.schemas.model_schema import (
@@ -473,6 +481,40 @@ class ModelConfigService:
         return bool(candidate_channels_sync(db, model_config, tenant_id=tenant_id))
 
     @staticmethod
+    def assert_refs_publishable(db: Session, config_ids: Iterable[uuid.UUID]) -> None:
+        """发布门禁：引用的模型配置须处于启用且基础模型未下线状态。
+
+        单条批量查询（无 N+1）；一次聚合抛出，已下线优先于已禁用（D15⑦ 弃用判定前置）。
+        引用行不存在（已硬删/非法 id）不拦截，交由运行期报错。
+        """
+        ids = list(dict.fromkeys(config_ids))
+        if not ids:
+            return
+        rows = (
+            db.query(
+                ModelConfig.id,
+                ModelConfig.name,
+                ModelConfig.is_active,
+                ModelBase.is_deprecated,
+            )
+            .outerjoin(ModelBase, ModelBase.id == ModelConfig.model_id)
+            .filter(ModelConfig.id.in_(ids))
+            .all()
+        )
+        deprecated = [row.name for row in rows if row.is_deprecated]
+        disabled = [row.name for row in rows if not row.is_active]
+        if deprecated:
+            raise BusinessException(
+                f"以下模型已下线，请更换后再发布：{'、'.join(deprecated)}",
+                BizCode.MODEL_DEPRECATED,
+            )
+        if disabled:
+            raise BusinessException(
+                f"以下模型已禁用，请更换后再发布：{'、'.join(disabled)}",
+                BizCode.INVALID_PARAMETER,
+            )
+
+    @staticmethod
     def get_model_by_id(db: Session, model_id: uuid.UUID, tenant_id: uuid.UUID | None = None) -> ModelConfig:
         """运行时读数：弃用即拒（D15 读侧派生封禁）。"""
         model = ModelConfigRepository.get_by_id(db, model_id, tenant_id=tenant_id)
@@ -770,10 +812,10 @@ class ModelConfigService:
                 max_retries=0,
             )
 
-            # 根据模型类型选择不同的验证方式
-            if model_type_lower in ["llm", "chat"]:
-                # LLM/Chat 模型验证 - 统一使用字符串输入
-                llm = RedBearLLM(model_config, type=ModelType.LLM if model_type_lower == "llm" else ModelType.CHAT)
+            # 根据模型类型选择不同的验证方式（含存量 "chat" 归一口径）
+            if model_type_lower in LLM_FAMILY_TYPES:
+                # LLM 族模型验证 - 统一使用字符串输入
+                llm = RedBearLLM(model_config, type=ModelType.LLM)
                 response = await llm.ainvoke(test_message)
                 elapsed_time = time.time() - start_time
 
@@ -1188,7 +1230,7 @@ class ModelConfigService:
 
         rows = ModelConfigRepository.get_members_by_provider_names(db, tenant_id, members)
         request_type = str(model_type)
-        compatible_types = {ModelType.LLM.value, ModelType.CHAT.value}
+        compatible_types = LLM_FAMILY_TYPES
         for provider, model_name in members:
             if provider == ModelProvider.COMPOSITE.value:
                 raise BusinessException(

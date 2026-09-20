@@ -25,7 +25,6 @@ from .base import ReferenceBase
 
 class ModelType(StrEnum):
     LLM = "llm"
-    CHAT = "chat"
     EMBEDDING = "embedding"
     RERANK = "rerank"
     IMAGE = "image"
@@ -34,8 +33,12 @@ class ModelType(StrEnum):
 
     @classmethod
     def _missing_(cls, value):
-        if isinstance(value, str) and value.lower() == "asr":
-            return cls.ASR
+        """存量字符串读侧归一：`"chat"` → LLM（DB 旧行兼容）；`"asr"` → ASR（大小写容忍）。"""
+        if isinstance(value, str):
+            if value.lower() == "chat":
+                return cls.LLM
+            if value.lower() == "asr":
+                return cls.ASR
         return None
 
 

@@ -30,13 +30,13 @@ class OpenAIClient(LLMClient):
     - Langfuse 追踪（可选）
     """
 
-    def __init__(self, model_config: RedBearModelConfig, type_: str = "chat"):
+    def __init__(self, model_config: RedBearModelConfig, type_: str = "llm"):
         """
         初始化 OpenAI 客户端
 
         Args:
             model_config: 模型配置
-            type_: 模型类型，"chat" 或 "completion"
+            type_: 模型类型（透传给 RedBearLLM，调用协议实为 OpenAI 兼容 chat completions）
         """
         super().__init__(model_config)
 

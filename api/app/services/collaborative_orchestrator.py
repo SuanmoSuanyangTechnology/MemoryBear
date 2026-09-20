@@ -528,7 +528,7 @@ class CollaborativeOrchestrator:
             )
             
             # 创建 LLM 实例
-            llm = RedBearLLM(model_config, type=ModelType.CHAT)
+            llm = RedBearLLM(model_config, type=ModelType.LLM)
             
             # 调用 LLM
             response = await llm.ainvoke(messages)

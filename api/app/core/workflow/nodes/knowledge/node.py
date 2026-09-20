@@ -19,7 +19,7 @@ from app.integrations.knowledge.context_factory import build_app_knowledge_conte
 from app.integrations.knowledge.contracts import KnowledgeRetrievalSource
 from app.integrations.knowledge.runtime import get_knowledge_retriever
 from app.schemas.chunk_schema import RetrieveType
-from app.models.models_model import ModelFeature, ModelType
+from app.models.models_model import LLM_FAMILY_TYPES, ModelFeature, ModelType
 from app.schemas.knowledge_metadata_schema import FilterCondition, FilterGroup, MetadataFilterMode
 from app.schemas.knowledge_retrieval_schema import KnowledgeRetrievalRequest
 from app.services.knowledge_metadata_service import KnowledgeMetadataService
@@ -357,7 +357,7 @@ class KnowledgeRetrievalNode(BaseNode):
 
         common_metadata_defs, model, generation_options = prepared
         model_type = ModelType.LLM
-        if model.model_type in {ModelType.LLM.value, ModelType.CHAT.value}:
+        if str(model.model_type) in LLM_FAMILY_TYPES:
             model_type = ModelType(model.model_type)
         llm = RedBearLLM(
             RedBearModelConfig.from_api_key(model, extra_params=generation_options),

@@ -7,16 +7,16 @@ from app.core.utils.datetime_utils import to_timestamp_ms
 from app.models.models_model import ModelProvider, ModelType, LoadBalanceStrategy
 
 
-class RejectLegacyCapabilityFields:
-    """旧字段（capability/is_omni）下线守卫（2e-1）。
+class RejectLegacyModelFields:
+    """旧字段（capability/is_omni）与下线类型（type='chat'）守卫（2e）。
 
-    pydantic 默认 `extra="ignore"`：仅删字段会让旧字段被静默吞掉，用户以为提交生效。
-    请求类混入本守卫，显式提交旧字段即 422，提示迁移到契约 v2 三列。
+    pydantic 默认 `extra="ignore"`：仅删字段/成员会让旧值被静默吞掉，用户以为提交生效。
+    请求类混入本守卫，显式提交旧字段或 `type='chat'` 即 422，提示迁移到契约 v2。
     """
 
     @model_validator(mode="before")
     @classmethod
-    def _reject_legacy_capability_fields(cls, data: Any) -> Any:
+    def _reject_legacy_model_fields(cls, data: Any) -> Any:
         if isinstance(data, dict):
             legacy = [key for key in ("capability", "is_omni") if key in data]
             if legacy:
@@ -24,6 +24,9 @@ class RejectLegacyCapabilityFields:
                     f"字段 {', '.join(sorted(legacy))} 已下线，"
                     "请改用 input_modalities / output_modalities / features"
                 )
+            raw_type = data.get("type")
+            if isinstance(raw_type, str) and raw_type.lower() == "chat":
+                raise ValueError("type='chat' 已下线，请改用 type='llm'")
         return data
 
 
@@ -53,7 +56,7 @@ class ApiKeyRegister(BaseModel):
     priority: int = Field(0, description="优先级（大者优先）")
 
 
-class ModelConfigCreate(ModelConfigBase, RejectLegacyCapabilityFields):
+class ModelConfigCreate(ModelConfigBase, RejectLegacyModelFields):
     """创建自定义模型Schema（内嵌 credential：创建即登记点名渠道，单接口原子完成）
 
     自定义模型不经模型广场添加，provider 级渠道不保证可用，因此凭据必填并
@@ -68,7 +71,7 @@ class CompositeMemberSpec(BaseModel):
     model_name: str = Field(..., min_length=1, max_length=255, description="成员模型名称")
 
 
-class CompositeModelCreate(BaseModel):
+class CompositeModelCreate(BaseModel, RejectLegacyModelFields):
     """创建组合模型Schema"""
     name: str = Field(..., description="组合模型名称（别名，真实调用名在成员声明）", max_length=255)
     type: Optional[ModelType] = Field(None, description="模型类型")
@@ -81,7 +84,7 @@ class CompositeModelCreate(BaseModel):
     load_balance_strategy: Optional[str] = Field(default=LoadBalanceStrategy.NONE.value, description="负载均衡策略")
 
 
-class ModelConfigUpdate(BaseModel, RejectLegacyCapabilityFields):
+class ModelConfigUpdate(BaseModel, RejectLegacyModelFields):
     """更新模型配置Schema"""
     name: Optional[str] = Field(None, description="模型显示名称", max_length=255)
     type: Optional[ModelType] = Field(None, description="模型类型")
@@ -261,7 +264,7 @@ ModelConfig.model_rebuild()
 
 
 # ModelBase Schemas
-class ModelBaseCreate(BaseModel, RejectLegacyCapabilityFields):
+class ModelBaseCreate(BaseModel, RejectLegacyModelFields):
     """创建基础模型Schema"""
     name: str = Field(..., description="模型唯一标识", max_length=255)
     type: ModelType = Field(..., description="模型类型")
@@ -275,7 +278,7 @@ class ModelBaseCreate(BaseModel, RejectLegacyCapabilityFields):
     features: Optional[List[str]] = Field(None, description="能力特征（缺省为空）")
 
 
-class ModelBaseUpdate(BaseModel, RejectLegacyCapabilityFields):
+class ModelBaseUpdate(BaseModel, RejectLegacyModelFields):
     """更新基础模型Schema"""
     name: Optional[str] = Field(None, description="模型唯一标识", max_length=255)
     type: Optional[ModelType] = Field(None, description="模型类型")
@@ -311,9 +314,13 @@ class ModelBase(BaseModel):
 
     @field_validator("type", mode="before")
     @classmethod
-    def canonicalize_asr_type(cls, value):
-        if isinstance(value, str) and value.lower() == "asr":
-            return ModelType.ASR.value
+    def canonicalize_legacy_type(cls, value):
+        """`type` 为裸 str（非枚举），存量字符串读侧归一：asr 大小写、chat → llm。"""
+        if isinstance(value, str):
+            if value.lower() == "asr":
+                return ModelType.ASR.value
+            if value.lower() == "chat":
+                return ModelType.LLM.value
         return value
 
 

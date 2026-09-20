@@ -704,7 +704,7 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
                         "streaming": streaming,
                     },
                 ),
-                type=ModelType.CHAT,
+                type=ModelType.LLM,
             )
 
         try:
