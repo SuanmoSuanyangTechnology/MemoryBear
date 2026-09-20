@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Iterator
+from functools import lru_cache
+from http import HTTPStatus
 from typing import Literal
 
 import httpx
@@ -16,6 +18,7 @@ from mem_storage import (
     StorageError,
     StorageUploadError,
 )
+from openai import APIConnectionError, APIStatusError, APITimeoutError
 from redbear_model import (
     ChannelSwitchExhaustedError,
     CredentialDecryptError,
@@ -56,9 +59,7 @@ def map_model_error(
         return _with_cause("KB_RETRIEVAL_MODEL_NOT_FOUND", exc)
     if isinstance(exc, ModelConfigInactiveError):
         code = (
-            "KB_RETRIEVAL_MODEL_INACTIVE"
-            if visibility_proven
-            else "KB_RETRIEVAL_MODEL_NOT_FOUND"
+            "KB_RETRIEVAL_MODEL_INACTIVE" if visibility_proven else "KB_RETRIEVAL_MODEL_NOT_FOUND"
         )
         return _with_cause(code, exc)
     if isinstance(
@@ -94,11 +95,7 @@ def _exception_chain(exc: BaseException | None) -> Iterator[BaseException]:
 
 def _storage_cause_matches(exc: StorageError, types: tuple[type[BaseException], ...]) -> bool:
     causes = (exc.cause, exc.__cause__)
-    return any(
-        isinstance(cause, types)
-        for root in causes
-        for cause in _exception_chain(root)
-    )
+    return any(isinstance(cause, types) for root in causes for cause in _exception_chain(root))
 
 
 def _exception_matches(
@@ -106,6 +103,73 @@ def _exception_matches(
     types: tuple[type[BaseException], ...],
 ) -> bool:
     return any(isinstance(item, types) for item in _exception_chain(exc))
+
+
+@lru_cache(maxsize=1)
+def _ark_embedding_errors() -> tuple[tuple[type[BaseException], ...], ...]:
+    """Load optional Ark SDK types only when classifying a provider failure."""
+    try:
+        from volcenginesdkarkruntime._exceptions import (
+            ArkAPIConnectionError,
+            ArkAPIStatusError,
+            ArkAPITimeoutError,
+        )
+    except ImportError:
+        return (), (), ()
+    return (ArkAPITimeoutError,), (ArkAPIConnectionError,), (ArkAPIStatusError,)
+
+
+def map_text_embedding_error(exc: BaseException) -> KnowledgeError | None:
+    """Classify known provider failures; leave unknown program errors untouched."""
+    if isinstance(exc, KnowledgeError):
+        return exc
+    ark_timeouts, ark_connections, ark_statuses = _ark_embedding_errors()
+    for cause in _exception_chain(exc):
+        if isinstance(
+            cause,
+            (APITimeoutError, TimeoutError, httpx.TimeoutException, requests.Timeout)
+            + ark_timeouts,
+        ):
+            return _with_cause("KB_EMBEDDING_TIMEOUT", exc)
+        if isinstance(
+            cause,
+            (
+                APIConnectionError,
+                ConnectionError,
+                httpx.NetworkError,
+                httpx.RemoteProtocolError,
+                requests.ConnectionError,
+            )
+            + ark_connections,
+        ):
+            return _with_cause("KB_EMBEDDING_CONNECTION_FAILED", exc)
+        if isinstance(
+            cause, (APIStatusError, httpx.HTTPStatusError, requests.HTTPError) + ark_statuses
+        ):
+            response = getattr(cause, "response", None)
+            status = getattr(cause, "status_code", None) or getattr(response, "status_code", None)
+            if status == HTTPStatus.TOO_MANY_REQUESTS:
+                return _with_cause("KB_EMBEDDING_RATE_LIMITED", exc)
+            if status is not None and HTTPStatus.INTERNAL_SERVER_ERROR <= status <= 599:
+                return _with_cause("KB_EMBEDDING_SERVICE_UNAVAILABLE", exc)
+            return _with_cause("KB_EMBEDDING_REQUEST_FAILED", exc)
+        if isinstance(
+            cause,
+            (
+                ChannelSwitchExhaustedError,
+                NoAvailableChannelError,
+                CredentialDecryptError,
+                ModelCredentialNotFoundError,
+                PublicCredentialUnavailableError,
+                InvalidProviderResponseError,
+                ModelConfigNotFoundError,
+                ModelAccessDeniedError,
+                ModelConfigInactiveError,
+                MultimodalInputLimitError,
+            ),
+        ):
+            return map_model_error(cause)
+    return None
 
 
 def map_multimodal_error(
@@ -141,7 +205,7 @@ def map_multimodal_error(
 
 
 def map_storage_error(exc: StorageError | KnowledgeError) -> KnowledgeError:
-    """Keep storage failures on HTTP 500 while preserving safe retry metadata."""
+    """Classify storage business failures while preserving safe retry metadata."""
 
     if isinstance(exc, KnowledgeError):
         return exc
@@ -184,4 +248,9 @@ def map_storage_error(exc: StorageError | KnowledgeError) -> KnowledgeError:
     return _with_cause("KB_STORAGE_OPERATION_FAILED", exc)
 
 
-__all__ = ["map_model_error", "map_multimodal_error", "map_storage_error"]
+__all__ = [
+    "map_model_error",
+    "map_multimodal_error",
+    "map_storage_error",
+    "map_text_embedding_error",
+]
