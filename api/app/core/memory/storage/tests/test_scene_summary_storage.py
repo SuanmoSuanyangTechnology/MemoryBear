@@ -120,19 +120,13 @@ async def test_scene_summary_is_written_through_storage(monkeypatch) -> None:
     connector.close.assert_awaited_once_with()
 
 
-def test_outbox_constraint_migration_allows_scene_summary(monkeypatch) -> None:
+def test_outbox_label_constraint_is_removed_by_migration(monkeypatch) -> None:
     migration = import_module(
         "migrations.versions."
-        "d94f6b2a1c73_202609091200_add_scene_summary_outbox_label"
+        "c1a7e5d9b204_202609211800_drop_memory_outbox_label_constraint"
     )
     drop_constraint = Mock()
-    create_check_constraint = Mock()
     monkeypatch.setattr(migration.op, "drop_constraint", drop_constraint)
-    monkeypatch.setattr(
-        migration.op,
-        "create_check_constraint",
-        create_check_constraint,
-    )
 
     migration.upgrade()
 
@@ -141,5 +135,3 @@ def test_outbox_constraint_migration_allows_scene_summary(monkeypatch) -> None:
         "memory_storage_outbox_events",
         type_="check",
     )
-    expression = create_check_constraint.call_args.args[2]
-    assert "'SceneSummary'" in expression
