@@ -96,7 +96,7 @@ export const workflowPart1 = {
           messagesPlaceholder: 'Write prompts here, type "{" to insert variables, type "insert" to insert',
           vision: 'Vision',
           parameterSettings: 'Parameter Settings',
-          json_output: 'Support JSON formatted output',
+          json_output: 'JSON formatted output',
           enable_reasoning_content_extraction: 'Enable Reasoning Tag Separation',
           enable_reasoning_content_extraction_tip: 'Extract content from think tags and store it in the reasoning_content field.',
           top_p: 'Top P',

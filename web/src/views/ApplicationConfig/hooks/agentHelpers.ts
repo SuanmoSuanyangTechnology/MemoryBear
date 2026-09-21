@@ -4,6 +4,7 @@
  * lets the hook focus on orchestration.
  */
 import type { Config, MemoryConfig } from '../types'
+import { normalizeSavedAgent } from './modelContract'
 import type { Variable } from '../components/VariableList/types'
 import type { KnowledgeConfig, KnowledgeConfigForm } from '@/components/Knowledge/types'
 import type { Skill } from '@/views/Skills/types'
@@ -96,5 +97,5 @@ export function buildAgentSaveParams(data: Config, values: Config): Config {
     }
   }
 
-  return params
+  return normalizeSavedAgent(params)
 }

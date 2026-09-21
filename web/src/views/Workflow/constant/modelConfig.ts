@@ -3,7 +3,7 @@ export const modelConfig: Record<string, any> = {
   model_id: {
     type: 'define',
     required: true,
-    params: { type: 'llm,chat' }, // llm/chat
+    params: { type: 'llm' }, // llm/chat
     valueKey: 'id',
     labelKey: 'name',
   },

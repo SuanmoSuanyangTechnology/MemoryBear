@@ -96,7 +96,7 @@ export const workflowPart1 = {
           messagesPlaceholder: '在此处编写提示，输入“{”插入变量，输入“insert”插入',
           vision: '视觉',
           parameterSettings: '参数设置',
-          json_output: '支持JSON格式化输出',
+          json_output: 'JSON格式化输出',
           enable_reasoning_content_extraction: '启用推理标签分离',
           enable_reasoning_content_extraction_tip: '从think标签中提取内容，并将其存储在reasoning_content字段中。',
           top_p: 'Top P',

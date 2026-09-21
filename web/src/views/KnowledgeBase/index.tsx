@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useMemo, useCallback, type FC } from 'react';
+import { useEffect, useState, useRef, useMemo, useCallback, type FC, type ReactNode } from 'react';
 import { Button, Dropdown, Tooltip, App, Flex } from 'antd'
 import type { MenuProps } from 'antd';
 import { RightOutlined, DownOutlined } from '@ant-design/icons';
@@ -15,18 +15,26 @@ import CreateModal from './components/CreateModal'
 import RbCard from '@/components/RbCard/Card'
 import SearchInput from '@/components/SearchInput'
 import Empty from '@/components/Empty'
-import { getKnowledgeBaseList, getModelList, deleteKnowledgeBase, getKnowledgeBaseTypeList } from '@/api/knowledgeBase'
+import { getKnowledgeBaseList, deleteKnowledgeBase, getKnowledgeBaseTypeList } from '@/api/knowledgeBase'
+import { getModelList } from '@/api/models'
+import type { Model } from '@/views/ModelManagement/types'
 import copy from 'copy-to-clipboard'
 import CopyModal, { type CopyModalRef } from './components/CopyModal';
-import { baseModelFields } from './constants';
+import { baseModelFields, multimodalModelFields } from './constants';
+import ModelStatusTag from '@/components/ModelSelect/ModelStatusTag'
 
 import InfiniteScroll from 'react-infinite-scroll-component';
 
 import { useBreadcrumbManager, type BreadcrumbItem } from '@/hooks/useBreadcrumbManager';
 
+type ModelDisplayItem = {
+  key: string;
+  label: ReactNode;
+  disabled?: boolean;
+};
+
 type ModelMenuInfo = {
-  menu: NonNullable<MenuProps['items']>;
-  summary: string[];
+  menu: ModelDisplayItem[];
 };
 
 type KnowledgeBaseNavigationState = {
@@ -58,7 +66,7 @@ const KnowledgeBaseManagement: FC = () => {
   })
   const [modelMenus, setModelMenus] = useState<Record<string, ModelMenuInfo>>({});
   const [knowledgeBaseTypes, setKnowledgeBaseTypes] = useState<string[]>([]);
-  const modelListCache = useRef<Record<string, string>>({});
+  const modelListCache = useRef<Partial<Record<string, Model>>>({});
   const modalRef = useRef<CreateModalRef>(null)
   const processedStateRef = useRef<any>(null);
   const copyModalRef = useRef<CopyModalRef>(null)
@@ -205,22 +213,20 @@ const KnowledgeBaseManagement: FC = () => {
         : String(data[key] || '-'),
     }))
   }
-  const fetchModelList = async () => { 
-    try {
-      const response = await getModelList({ page: 1, pagesize: 100 }, ['llm', 'embedding', 'rerank', 'chat']);
-      // 缓存模型列表，建立 id -> name 的映射
-      if (response?.items && Array.isArray(response.items)) {
-        const cache: Record<string, string> = {};
-        response.items.forEach((model: any) => {
-          if (model.id && model.name) {
-            cache[model.id] = model.name;
-          }
-        });
-        modelListCache.current = cache;
-      }
-    } catch (error) {
-      console.error('Failed to fetch model list:', error);
-    }
+  const fetchModelList = () => { 
+    getModelList({ page: 1, pagesize: 100 })
+      .then(res => {
+        const response = res as { items: Model[] }
+        if (response?.items && Array.isArray(response.items)) {
+          const cache: Record<string, Model> = {};
+          response.items.forEach((model: any) => {
+            if (model.id && model.name) {
+              cache[model.id] = model;
+            }
+          });
+          modelListCache.current = cache;
+        }
+      })
   };
   const fetchKnowledgeBaseTypes = async () => {
     try {
@@ -231,18 +237,19 @@ const KnowledgeBaseManagement: FC = () => {
       setKnowledgeBaseTypes([]);
     }
   };
-  const getModelNameById = (id?: string | null) => {
-    if (!id) return '';
-    // 从模型列表缓存中获取模型名称
-    return modelListCache.current[id] || '';
+  const getModelById = (id?: string | null): Model | undefined => {
+    if (!id) return undefined;
+    // 从模型列表缓存中获取模型
+    return modelListCache.current[id];
   };
   const buildModelMenuForItem = (item: KnowledgeBaseListItem): ModelMenuInfo | null => {
-    const entries: { menuItem: NonNullable<MenuProps['items']>[number]; summary: string }[] = [];
+    const entries: { menuItem: ModelDisplayItem }[] = [];
     const record = item as unknown as Record<string, unknown>;
-    baseModelFields.map(item => {
+    [...baseModelFields, ...multimodalModelFields].map(item => {
       const fieldKey = `${item.name}_id`
       const modelId = record[fieldKey] as string
-      const modelName = modelId ? getModelNameById(modelId) : undefined;
+      const model = getModelById(modelId);
+      const modelName = model?.name
       if (modelName) {
         const typeLabel = t(`knowledgeBase.createForm.${fieldKey}`) || t(`knowledgeBase.${fieldKey}`) || item.type;
 
@@ -250,28 +257,24 @@ const KnowledgeBaseManagement: FC = () => {
           menuItem: {
             key: `${fieldKey}_${modelId}`,
             label: (
-              <span className="rb:text-gray-500 rb:text-[12px]">
-                {typeLabel}: {modelName}
-              </span>
+              <div className="rb:text-gray-500 rb:text-[12px]">
+                {typeLabel}: <span className="rb:text-gray-900">{modelName}</span> <ModelStatusTag model={model} />
+              </div>
             ),
           },
-          summary: `${typeLabel}: ${modelName}`,
         });
       }
     })
     if (!entries.length) {
       return null;
     }
-    const header: NonNullable<MenuProps['items']>[number] = {
+    const header: ModelDisplayItem = {
       key: 'header',
       label: (<span className='rb:font-medium'>{t('knowledgeBase.allModels')}</span>),
       disabled: true,
     };
-    const menuArray = [header, ...entries.map(({ menuItem }) => menuItem)] as NonNullable<MenuProps['items']>;
-    return {
-      menu: menuArray,
-      summary: entries.map(({ summary }) => summary),
-    };
+    const menuArray = [header, ...entries.map(({ menuItem }) => menuItem)];
+    return { menu: menuArray };
   };
   const buildModelMenus = (items: KnowledgeBaseListItem[], isLoadMore: boolean = false) => {
     const nextMenus: Record<string, ModelMenuInfo> = {};
@@ -624,7 +627,7 @@ const KnowledgeBaseManagement: FC = () => {
                                   }}
                                 >
                                   <span className="rb:truncate rb:flex-1 rb:text-gray-500">
-                                    {modelInfo.summary[0].split(':')[0]}:<span className="rb:text-gray-900">{modelInfo.summary[0].split(':').slice(1).join(':')}</span>
+                                    {modelInfo.menu.slice(1, 2).map(item => item?.label ? <div>{item?.label}</div> : null)}
                                   </span>
                                   <span className="rb:text-gray-400 rb:text-[10px]">
                                     {item._expanded ? <DownOutlined /> : <RightOutlined />}
@@ -632,11 +635,10 @@ const KnowledgeBaseManagement: FC = () => {
                                 </Flex>
                                 {item._expanded && (
                                   <Flex vertical gap={8} className="rb:text-[12px] rb:mt-2!">
-                                    {modelInfo.summary.slice(1).map((text, idx) => {
-                                      const [label, value] = text.split(':');
+                                    {modelInfo.menu.slice(2).map((text, idx) => {
                                       return (
                                         <div key={idx} className="rb:text-gray-500">
-                                          {label}:<span className="rb:text-gray-900">{value}</span>
+                                          {text?.label}
                                         </div>
                                       );
                                     })}
