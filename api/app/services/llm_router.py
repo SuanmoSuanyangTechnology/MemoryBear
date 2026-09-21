@@ -423,7 +423,7 @@ class LLMRouter:
             logger.debug(f"创建 LLM 实例 - Provider: {api_key_config.provider}, Model: {api_key_config.model_name}")
             
             # 创建 LLM 实例
-            llm = RedBearLLM(model_config, type=ModelType.CHAT)
+            llm = RedBearLLM(model_config, type=ModelType.LLM)
             
             # 调用模型
             response = await llm.ainvoke(prompt)

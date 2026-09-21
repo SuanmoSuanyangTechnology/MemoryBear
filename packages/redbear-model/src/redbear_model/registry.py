@@ -35,12 +35,15 @@ class RegistrySQLSource:
 
     config_snapshot(row) -> ModelConfigSnapshot
     channel_snapshot(row) -> ChannelSnapshot（含时间列→ms 换算；model_names list→tuple）
+    config_load_options：config 行加载选项（如 `(joinedload(ModelConfig.model_base),)`），
+    供投影函数读取关联行（模型下线标记）时免于逐行懒加载。
     """
 
     config_mapper: type
     channel_mapper: type
     config_snapshot: Callable[[Any], ModelConfigSnapshot]
     channel_snapshot: Callable[[Any], ChannelSnapshot]
+    config_load_options: tuple[Any, ...] = ()
 
 
 class ChannelSnapshotCache:
@@ -133,7 +136,9 @@ class SyncSQLChannelRegistry:
         mapper = self.source.config_mapper
         row = (
             self.db.execute(
-                select(mapper).where(mapper.id == config_id)
+                select(mapper)
+                .options(*self.source.config_load_options)
+                .where(mapper.id == config_id)
             )
             .scalars()
             .first()
@@ -179,7 +184,9 @@ class AsyncSQLChannelRegistry:
     async def get_config(self, config_id: UUID) -> ModelConfigSnapshot | None:
         mapper = self.source.config_mapper
         result = await self.db.execute(
-            select(mapper).where(mapper.id == config_id)
+            select(mapper)
+            .options(*self.source.config_load_options)
+            .where(mapper.id == config_id)
         )
         row = result.scalars().first()
         return None if row is None else self.source.config_snapshot(row)

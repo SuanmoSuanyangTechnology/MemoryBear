@@ -42,7 +42,8 @@ from app.repositories.workflow_repository import WorkflowConfigRepository
 from app.schemas import app_schema
 from app.schemas.workflow_schema import WorkflowConfigUpdate
 from app.services.agent_config_converter import AgentConfigConverter
-from app.services.model_service import ModelApiKeyService
+from app.services.model_impact_service import config_ref_ids
+from app.services.model_service import ModelApiKeyService, ModelConfigService
 from app.services.workflow_service import WorkflowService
 from app.utils.app_config_utils import model_parameters_to_dict
 from app.utils.redis_cache import delete_json, workflow_config_key
@@ -2019,6 +2020,19 @@ class AppService:
 
         return pinned_nodes
 
+    def _assert_publishable_models(
+            self,
+            config: dict[str, Any] | None,
+            default_model_config_id: uuid.UUID | None,
+    ) -> None:
+        """发布 / 回滚门禁：快照引用的模型须未禁用、未下线，命中即拒绝。
+
+        引用面 = 默认模型列 + 快照 JSON 内 model_id/reranker_id（非法 UUID 引用跳过）。
+        """
+        ModelConfigService.assert_refs_publishable(
+            self.db, config_ref_ids(config, default_model_config_id)
+        )
+
     def publish(
             self,
             *,
@@ -2155,6 +2169,9 @@ class AppService:
             logger.info(
                 "应用发布配置准备完成"
             )
+
+        # 草稿发布门禁：引用了已禁用/已下线模型 → 拒绝发布（2026-09-20）
+        self._assert_publishable_models(config, default_model_config_id)
 
         now = utcnow_naive()
         version = self._get_next_version(app_id)
@@ -2307,6 +2324,9 @@ class AppService:
                 extra={"app_id": str(app_id), "version": version}
             )
             raise ResourceNotFoundException("发布版本", f"app_id={app_id}, version={version}")
+
+        # 回滚门禁：目标版本快照引用已禁用/已下线模型 → 拒绝回滚（2026-09-20）
+        self._assert_publishable_models(release.config, release.default_model_config_id)
 
         app.current_release_id = release.id
         app.updated_at = utcnow_naive()

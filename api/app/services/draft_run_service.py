@@ -38,7 +38,7 @@ from app.models.annotation_model import AppAnnotation, AppAnnotationHitLog, AppA
 from app.models.appshare_model import AppShare
 from app.models.file_metadata_model import FileMetadata
 from app.models.knowledgeshare_model import KnowledgeShare
-from app.models.models_model import ModelCapability, ModelType
+from app.models.models_model import Modality, ModelFeature, ModelType
 from app.repositories.tool_repository import ToolRepository
 from app.schemas.app_schema import FileInput, Citation, FileType, TransferMethod
 from app.schemas.model_schema import ModelInfo
@@ -1654,8 +1654,9 @@ class AgentRunService:
                 provider=api_key_config["provider"],
                 api_key=api_key_config["api_key"],
                 api_base=api_key_config["api_base"],
-                capability=api_key_config["capability"],
-                is_omni=api_key_config["is_omni"],
+                input_modalities=list(api_key_config.get("input_modalities") or []),
+                output_modalities=list(api_key_config.get("output_modalities") or []),
+                features=list(api_key_config.get("features") or []),
                 model_type=model_config.type,
                 tenant_id=api_key_config.get("tenant_id"),
                 model_config_id=api_key_config.get("model_config_id"),
@@ -1673,7 +1674,6 @@ class AgentRunService:
                     system_prompt=system_prompt,
                     current_input=message,
                     current_provider=api_key_config.get("provider"),
-                    current_is_omni=api_key_config.get("is_omni", False),
                     legacy_max_history=settings.AGENT_MAX_HISTORY,
                     model_config_id=model_config.id,
                 )
@@ -1685,7 +1685,6 @@ class AgentRunService:
                         conversation_id=conversation_id,
                         max_history=settings.AGENT_MAX_HISTORY,
                         current_provider=api_key_config.get("provider"),
-                        current_is_omni=api_key_config.get("is_omni", False)
                     )
             # 否则使用外部传入的历史（用于重新生成场景）
 
@@ -1716,10 +1715,10 @@ class AgentRunService:
                 image_manifest, _ = build_uploaded_images_manifest(files)
                 if image_manifest:
                     llm_message = f"{message}\n\n{image_manifest}"
-                capability = api_key_config.get("capability", [])
+                input_modalities = api_key_config.get("input_modalities") or []
                 has_doc_with_images = (
                     doc_img_recognition
-                    and ModelCapability.VISION in capability
+                    and Modality.IMAGE in input_modalities
                     and any(f.type == FileType.DOCUMENT for f in files)
                 )
             if has_doc_with_images:
@@ -1730,7 +1729,7 @@ class AgentRunService:
                 )
 
             # 7. 根据模型能力选择执行路径
-            capability = api_key_config.get("capability", [])
+            features = api_key_config.get("features") or []
             async def load_annotation_context():
                 return await self._load_annotation_context_evidence(agent_config.app_id, message)
             system_prompt = append_external_context_rule(system_prompt)
@@ -1738,7 +1737,7 @@ class AgentRunService:
             system_prompt = await apply_emotion_detection(
                 system_prompt, emotion_detection, user_message_id, write_cache=False
             )
-            use_agent_mode = ModelCapability.FUNCTION_CALL in capability
+            use_agent_mode = ModelFeature.FUNCTION_CALL in features
             orchestrator_node_executions = []
             if not use_agent_mode and tools:
                 # 弱模型：用 ReAct prompt 驱动多轮工具调用，将轨迹注入 system_prompt
@@ -1760,7 +1759,9 @@ class AgentRunService:
                 api_key=api_key_config["api_key"],
                 provider=api_key_config.get("provider", "openai"),
                 api_base=api_key_config.get("api_base"),
-                is_omni=api_key_config.get("is_omni", False),
+                input_modalities=list(api_key_config.get("input_modalities") or []),
+                output_modalities=list(api_key_config.get("output_modalities") or []),
+                features=features,
                 temperature=effective_params.get("temperature", 0.7),
                 max_tokens=effective_params.get("max_tokens", 2000),
                 system_prompt=system_prompt,
@@ -1768,7 +1769,6 @@ class AgentRunService:
                 deep_thinking=effective_params.get("deep_thinking", False),
                 thinking_budget_tokens=effective_params.get("thinking_budget_tokens"),
                 json_output=effective_params.get("json_output", False),
-                capability=capability,
                 tenant_id=api_key_config.get("tenant_id"),
                 model_config_id=api_key_config.get("model_config_id"),
                 channel_id=api_key_config.get("channel_id"),
@@ -1874,14 +1874,12 @@ class AgentRunService:
                     audio_url=audio_url,
                     citations=filtered_citations,
                     provider=api_key_config.get("provider"),
-                    is_omni=api_key_config.get("is_omni", False)
                 )
                 if used_context_engine and not skip_save:
                     _ctx_kwargs = dict(
                         features=features_config,
                         conversation_id=uuid.UUID(conversation_id),
                         current_provider=api_key_config.get("provider"),
-                        current_is_omni=api_key_config.get("is_omni", False),
                         legacy_max_history=settings.AGENT_MAX_HISTORY,
                         model_config_id=model_config.id,
                     )
@@ -2182,8 +2180,9 @@ class AgentRunService:
                 provider=api_key_config["provider"],
                 api_key=api_key_config["api_key"],
                 api_base=api_key_config["api_base"],
-                capability=api_key_config["capability"],
-                is_omni=api_key_config["is_omni"],
+                input_modalities=list(api_key_config.get("input_modalities") or []),
+                output_modalities=list(api_key_config.get("output_modalities") or []),
+                features=list(api_key_config.get("features") or []),
                 model_type=model_config.type,
                 tenant_id=api_key_config.get("tenant_id"),
                 model_config_id=api_key_config.get("model_config_id"),
@@ -2201,7 +2200,6 @@ class AgentRunService:
                     system_prompt=system_prompt,
                     current_input=message,
                     current_provider=api_key_config.get("provider"),
-                    current_is_omni=api_key_config.get("is_omni", False),
                     legacy_max_history=settings.AGENT_MAX_HISTORY,
                     model_config_id=model_config.id,
                 )
@@ -2213,7 +2211,6 @@ class AgentRunService:
                         conversation_id=conversation_id,
                         max_history=settings.AGENT_MAX_HISTORY,
                         current_provider=api_key_config.get("provider"),
-                        current_is_omni=api_key_config.get("is_omni", False)
                     )
 
             # 6. 处理多模态文件
@@ -2234,6 +2231,7 @@ class AgentRunService:
                     file_upload_config=fu_config if isinstance(fu_config, dict) else None,
                 )
                 logger.info(f"处理了 {len(processed_files)} 个文件，provider={provider}")
+                input_modalities = api_key_config.get("input_modalities") or []
                 # 将本轮上传文件（含图片 URL）回注给知识库工具，作为可被模型引用的白名单
                 for tool in tools:
                     set_uploaded_files = getattr(tool, "set_uploaded_files", None)
@@ -2243,10 +2241,9 @@ class AgentRunService:
                 image_manifest, _ = build_uploaded_images_manifest(files)
                 if image_manifest:
                     llm_message = f"{message}\n\n{image_manifest}"
-                capability = api_key_config.get("capability", [])
                 has_doc_with_images = (
                     doc_img_recognition
-                    and ModelCapability.VISION in capability
+                    and Modality.IMAGE in input_modalities
                     and any(f.type == FileType.DOCUMENT for f in files)
                 )
             if has_doc_with_images:
@@ -2257,7 +2254,7 @@ class AgentRunService:
                 )
 
             # 7. 根据模型能力选择执行路径
-            capability = api_key_config.get("capability", [])
+            features = api_key_config.get("features") or []
             async def load_annotation_context():
                 return await self._load_annotation_context_evidence(agent_config.app_id, message)
             system_prompt = append_external_context_rule(system_prompt)
@@ -2265,7 +2262,7 @@ class AgentRunService:
             system_prompt = await apply_emotion_detection(
                 system_prompt, emotion_detection, user_message_id, write_cache=False
             )
-            use_agent_mode = ModelCapability.FUNCTION_CALL in capability
+            use_agent_mode = ModelFeature.FUNCTION_CALL in features
             orchestrator_node_executions = []
             if not use_agent_mode and tools:
                 # 弱模型：用 ReAct prompt 驱动多轮工具调用，将轨迹注入 system_prompt
@@ -2315,7 +2312,9 @@ class AgentRunService:
                     api_key=api_key_config["api_key"],
                     provider=api_key_config.get("provider", "openai"),
                     api_base=api_key_config.get("api_base"),
-                    is_omni=api_key_config.get("is_omni", False),
+                    input_modalities=list(api_key_config.get("input_modalities") or []),
+                    output_modalities=list(api_key_config.get("output_modalities") or []),
+                    features=features,
                     temperature=effective_params.get("temperature", 0.7),
                     max_tokens=effective_params.get("max_tokens", 2000),
                     system_prompt=system_prompt,
@@ -2324,7 +2323,6 @@ class AgentRunService:
                     deep_thinking=effective_params.get("deep_thinking", False),
                     thinking_budget_tokens=effective_params.get("thinking_budget_tokens"),
                     json_output=effective_params.get("json_output", False),
-                    capability=capability,
                     tenant_id=api_key_config.get("tenant_id"),
                     model_config_id=api_key_config.get("model_config_id"),
                     channel_id=api_key_config.get("channel_id"),
@@ -2530,14 +2528,12 @@ class AgentRunService:
                     audio_url=stream_audio_url,
                     citations=filtered_citations,
                     provider=api_key_config.get("provider"),
-                    is_omni=api_key_config.get("is_omni", False)
                 )
                 if used_context_engine and not skip_save:
                     _ctx_kwargs = dict(
                         features=features_config,
                         conversation_id=uuid.UUID(conversation_id),
                         current_provider=api_key_config.get("provider"),
-                        current_is_omni=api_key_config.get("is_omni", False),
                         legacy_max_history=settings.AGENT_MAX_HISTORY,
                         model_config_id=_model_config_id,
                     )
@@ -2989,6 +2985,10 @@ class AgentRunService:
                 "api_key": api_key.api_key,
                 "api_base": api_key.api_base,
                 "api_key_id": api_key.id,
+                "input_modalities": list(getattr(api_key, "input_modalities", None) or []),
+                "output_modalities": list(getattr(api_key, "output_modalities", None) or []),
+                "features": list(getattr(api_key, "features", None) or []),
+                # 旧字段仅存于沙箱 payload 口径（e2b-infra 同批下线前冻结）
                 "is_omni": api_key.is_omni,
                 "capability": api_key.capability,
                 "tenant_id": api_key.tenant_id,
@@ -3137,7 +3137,6 @@ class AgentRunService:
             conversation_id: str,
             max_history: int = 10,
             current_provider: Optional[str] = None,
-            current_is_omni: Optional[bool] = None
     ) -> List[Dict[str, str]]:
         """加载会话历史消息，并根据当前模型配置处理多模态文件
 
@@ -3145,7 +3144,6 @@ class AgentRunService:
             conversation_id: 会话ID
             max_history: 最大历史消息数量
             current_provider: 当前模型的provider
-            current_is_omni: 当前模型的is_omni
 
         Returns:
             List[Dict]: 历史消息列表
@@ -3176,12 +3174,11 @@ class AgentRunService:
             for msg in messages:
                 history_files = msg["meta_data"].get("history_files", {})
 
-                has_files = bool(history_files and current_provider and current_is_omni is not None)
+                has_files = bool(history_files and current_provider)
                 if has_files:
                     stored_provider = history_files.get("provider")
-                    stored_is_omni = history_files.get("is_omni")
 
-                    if stored_provider != current_provider or stored_is_omni != current_is_omni:
+                    if stored_provider != current_provider:
                         continue
 
                     content = [{"type": "text", "text": msg["content"]}]
@@ -3281,7 +3278,6 @@ class AgentRunService:
             audio_url: Optional[str] = None,
             citations: Optional[List[Any]] = None,
             provider: Optional[str] = None,
-            is_omni: Optional[bool] = None,
             message_id: Optional[uuid.UUID] = None,
             user_message_id: Optional[uuid.UUID] = None
     ) -> Optional[str]:
@@ -3299,7 +3295,6 @@ class AgentRunService:
             audio_url: 音频URL
             citations: 引用来源列表
             provider: 模型供应商
-            is_omni: 是否为全模态模型
 
         Returns:
             Optional[str]: 助手消息ID
@@ -3337,12 +3332,11 @@ class AgentRunService:
                             size = size or meta[1]
                     human_meta["files"].append(serialize_file_reference(f, name=name, size=size))
 
-            # 保存 history_files，包含 provider 和 is_omni 信息
+            # 保存 history_files，包含 provider 信息
             if processed_files:
                 human_meta["history_files"] = {
                     "content": sanitize_processed_files_for_history(processed_files),
                     "provider": provider,
-                    "is_omni": is_omni
                 }
 
             parent_message_id = await self._get_last_current_assistant_id_async(conv_uuid)
@@ -3484,7 +3478,7 @@ class AgentRunService:
                     api_key_config,
                     extra_params={"temperature": 0.5, "max_tokens": 200},
                 ),
-                type=ModelType.CHAT
+                type=ModelType.LLM
             )
             prompt = (
                 f"根据以下AI回复，生成3个用户可能继续追问的简短问题，每行一个，不加序号：\n\n{assistant_message}"

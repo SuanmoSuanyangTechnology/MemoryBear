@@ -12,12 +12,11 @@ from redbear_model import (
     ChannelSnapshot,
     ChannelSnapshotCache,
     LoadBalanceStrategy,
-    ModelCapability,
     ModelConfigSnapshot,
     ModelKeySnapshot,
+    ModelProfile,
     ModelProvider,
     ModelRegistryRepository,
-    ModelType,
     PublicModelBindingSnapshot,
     RegistrySQLSource,
     SyncSQLChannelRegistry,
@@ -27,7 +26,7 @@ from redbear_model import (
 from redbear_model.crypto import AESGCMEnvCipher, CredentialCipher
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from ..bootstrap import get_settings
 from ..models.references import ModelChannel, ModelConfig
@@ -40,16 +39,6 @@ logger = logging.getLogger(__name__)
 _CHANNEL_CACHE = ChannelSnapshotCache(ttl_ms=60_000)
 
 
-def _capabilities(values: list[str] | None) -> tuple[ModelCapability, ...]:
-    result = []
-    for value in values or []:
-        try:
-            result.append(ModelCapability(value))
-        except ValueError:
-            continue
-    return tuple(result)
-
-
 def _created_ms(value) -> int:
     return int(value.timestamp() * 1000) if value is not None else 0
 
@@ -59,15 +48,24 @@ def _config_snapshot(config: ModelConfig) -> ModelConfigSnapshot:
         model_config_id=config.id,
         tenant_id=config.tenant_id,
         provider=ModelProvider(config.provider),
-        model_type=ModelType(config.type),
         name=config.name,
         is_active=config.is_active,
         is_public=config.is_public,
+        is_deprecated=bool(config.model_base and config.model_base.is_deprecated),
         load_balance_strategy=LoadBalanceStrategy(
             config.load_balance_strategy or LoadBalanceStrategy.NONE
         ),
-        capabilities=_capabilities(config.capability),
-        is_omni=config.is_omni,
+        profile=ModelProfile.from_stored_fields(
+            model_id=config.id,
+            tenant_id=config.tenant_id,
+            type=config.type,
+            provider=config.provider,
+            input_modalities=config.input_modalities or (),
+            output_modalities=config.output_modalities or (),
+            features=config.features or (),
+            capabilities=config.capability or (),
+            is_omni=bool(config.is_omni),
+        ),
         config=dict(config.config or {}),
     )
 
@@ -98,6 +96,8 @@ SOURCE = RegistrySQLSource(
     channel_mapper=ModelChannel,
     config_snapshot=_config_snapshot,
     channel_snapshot=_channel_snapshot,
+    # async 路径禁懒加载：投影读 model_base 弃用态必须同批 eager load
+    config_load_options=(joinedload(ModelConfig.model_base),),
 )
 
 

@@ -14260,9 +14260,9 @@
         "type": "string",
         "enum": [
           "llm",
-          "chat",
           "embedding",
           "rerank",
+          "asr",
           "image",
           "video"
         ],

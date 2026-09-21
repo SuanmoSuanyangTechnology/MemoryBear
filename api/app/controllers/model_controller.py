@@ -16,6 +16,8 @@ from app.core.response_utils import success, fail
 from app.schemas.response_schema import ApiResponse, PageData
 from app.services.model_service import ModelConfigService, ModelBaseService
 from app.services.model_channel_service import ChannelApiKeyService
+from app.services.model_profile_view import wire_model_base, wire_model_config
+from app.services.model_impact_service import collect_model_impact
 from app.core.logging_config import get_api_logger
 from app.core.quota_stub import check_model_quota, check_model_activation_quota
 from app.core.model_provider_config import get_model_provider_metadata
@@ -61,10 +63,10 @@ def get_model_strategies():
 @router.get("", response_model=ApiResponse)
 def get_model_list(
         type: Optional[list[str]] = Query(None, description="模型类型筛选（支持多个，如 ?type=LLM 或 ?type=LLM,EMBEDDING）"),
-        capability: Optional[list[str]] = Query(None, description="能力筛选（支持多个，如 ?capability=vision 或 ?capability=vision, video）"),
         provider: Optional[model_schema.ModelProvider] = Query(None, description="提供商筛选(基于API Key)"),
         is_active: Optional[bool] = Query(None, description="激活状态筛选"),
         is_public: Optional[bool] = Query(None, description="公开状态筛选"),
+        is_available: Optional[bool] = Query(None, description="可用性筛选（已启用且未弃用且渠道候选非空）"),
         search: Optional[str] = Query(None, description="搜索关键词"),
         page: int = Query(1, ge=1, description="页码"),
         pagesize: int = Query(10, ge=1, le=100, description="每页数量"),
@@ -78,9 +80,12 @@ def get_model_list(
     - 单个：?type=LLM
     - 多个（逗号分隔）：?type=LLM,EMBEDDING
     - 多个（重复参数）：?type=LLM&type=EMBEDDING
+
+    is_available=true 时仅返回"已启用且未弃用且渠道候选非空"的模型（服务端全量探测后内存分页），
+    供选择器隐藏已禁用/已弃用/无渠道模型；is_deprecated 详情见响应字段。
     """
     api_logger.info(
-        f"获取模型配置列表请求: type={type}, provider={provider}, page={page}, pagesize={pagesize}, tenant_id={current_user.tenant_id}")
+        f"获取模型配置列表请求: type={type}, provider={provider}, is_available={is_available}, page={page}, pagesize={pagesize}, tenant_id={current_user.tenant_id}")
 
     try:
         # 解析 type 参数（支持逗号分隔）
@@ -94,23 +99,13 @@ def get_model_list(
             unique_flat_type = list(dict.fromkeys(flat_type))
             type_list = [ModelType(t.lower()) for t in unique_flat_type]
 
-        capability_list = []
-        if capability is not None:
-            flat_capability = []
-            for item in capability:
-                split_items = [c.strip() for c in item.split(',') if c.strip()]
-                flat_capability.extend(split_items)
-
-            unique_flat_capability = list(dict.fromkeys(flat_capability))
-            capability_list = unique_flat_capability
-
         api_logger.info(f"获取模型type_list: {type_list}")
         query = model_schema.ModelConfigQuery(
             type=type_list,
             provider=provider,
-            capability=capability_list,
             is_active=is_active,
             is_public=is_public,
+            is_available=is_available,
             search=search,
             page=page,
             pagesize=pagesize
@@ -132,6 +127,7 @@ def get_model_list_new(
     provider: Optional[model_schema.ModelProvider] = Query(None, description="提供商筛选(基于ModelConfig)"),
     is_active: Optional[bool] = Query(None, description="激活状态筛选"),
     is_public: Optional[bool] = Query(None, description="公开状态筛选"),
+    is_available: Optional[bool] = Query(None, description="可用性筛选（已启用且未弃用且渠道候选非空）"),
     search: Optional[str] = Query(None, description="搜索关键词"),
     is_composite: Optional[bool] = Query(None, description="组合模型筛选"),
     db: Session = Depends(get_db),
@@ -165,6 +161,7 @@ def get_model_list_new(
             provider=provider,
             is_active=is_active,
             is_public=is_public,
+            is_available=is_available,
             is_composite=is_composite,
             search=search
         )
@@ -210,7 +207,7 @@ def get_model_base_by_id(
     """获取基础模型详情"""
     
     result = ModelBaseService.get_model_base_by_id(db=db, model_base_id=model_base_id)
-    return success(data=model_schema.ModelBase.model_validate(result), msg="基础模型获取成功")
+    return success(data=wire_model_base(result), msg="基础模型获取成功")
 
 
 @router.post("/model_plaza", response_model=ApiResponse)
@@ -222,7 +219,7 @@ def create_model_base(
     """创建基础模型"""
     
     result = ModelBaseService.create_model_base(db=db, data=data)
-    return success(data=model_schema.ModelBase.model_validate(result), msg="基础模型创建成功")
+    return success(data=wire_model_base(result), msg="基础模型创建成功")
 
 
 @router.put("/model_plaza/{model_base_id}", response_model=ApiResponse)
@@ -239,7 +236,7 @@ def update_model_base(
         raise BusinessException("不允许更改模型类型和供应商", BizCode.INVALID_PARAMETER)
     
     result = ModelBaseService.update_model_base(db=db, model_base_id=model_base_id, data=data)
-    return success(data=model_schema.ModelBase.model_validate(result), msg="基础模型更新成功")
+    return success(data=wire_model_base(result), msg="基础模型更新成功")
 
 
 @router.delete("/model_plaza/{model_base_id}", response_model=ApiResponse)
@@ -263,7 +260,7 @@ def add_model_from_plaza(
     """从模型广场添加模型到模型列表"""
     
     result = ModelBaseService.add_model_from_plaza(db=db, model_base_id=model_base_id, tenant_id=current_user.tenant_id)
-    return success(data=model_schema.ModelConfig.model_validate(result), msg="模型添加成功")
+    return success(data=wire_model_config(result), msg="模型添加成功")
 
 
 @router.get("/{model_id}", response_model=ApiResponse)
@@ -273,17 +270,17 @@ def get_model_by_id(
     current_user: User = Depends(get_current_user)
 ):
     """
-    根据ID获取模型配置
+    根据ID获取模型配置（管理详情；弃用模型返回 200 并携带 is_deprecated 标记）
     """
     api_logger.info(f"获取模型配置请求: model_id={model_id}, tenant_id={current_user.tenant_id}")
-    
+
     try:
         api_logger.debug(f"开始获取模型配置: model_id={model_id}")
-        result_orm = ModelConfigService.get_model_by_id(db=db, model_id=model_id, tenant_id=current_user.tenant_id)
+        result_orm = ModelConfigService.get_model_detail(db=db, model_id=model_id, tenant_id=current_user.tenant_id)
         api_logger.info(f"模型配置获取成功: {result_orm.name}")
         
         # 将ORM对象转换为Pydantic模型
-        result_pydantic = model_schema.ModelConfig.model_validate(result_orm)
+        result_pydantic = wire_model_config(result_orm)
         result_pydantic.is_available = ModelConfigService.is_model_available(
             db, result_orm, current_user.tenant_id
         )
@@ -317,7 +314,7 @@ async def create_model(
         api_logger.info(f"模型配置创建成功: {result_orm.name} (ID: {result_orm.id})")
         
         # 将ORM对象转换为Pydantic模型
-        result = model_schema.ModelConfig.model_validate(result_orm)
+        result = wire_model_config(result_orm)
         
         return success(data=result, msg="模型配置创建成功")
     except Exception as e:
@@ -345,7 +342,7 @@ async def create_composite_model(
         result_orm = await ModelConfigService.create_composite_model(db=db, model_data=model_data, tenant_id=current_user.tenant_id)
         api_logger.info(f"组合模型创建成功: {result_orm.name} (ID: {result_orm.id})")
         
-        result = model_schema.ModelConfig.model_validate(result_orm)
+        result = wire_model_config(result_orm)
         return success(data=result, msg="组合模型创建成功")
     except Exception as e:
         api_logger.error(f"创建组合模型失败: {model_data.name} - {str(e)}")
@@ -369,7 +366,7 @@ async def update_composite_model(
         result_orm = await ModelConfigService.update_composite_model(db=db, model_id=model_id, model_data=model_data, tenant_id=current_user.tenant_id)
         api_logger.info(f"组合模型更新成功: {result_orm.name} (ID: {model_id})")
         
-        result = model_schema.ModelConfig.model_validate(result_orm)
+        result = wire_model_config(result_orm)
         return success(data=result, msg="组合模型更新成功")
     except Exception as e:
         api_logger.error(f"更新组合模型失败: model_id={model_id} - {str(e)}")
@@ -408,26 +405,42 @@ def update_model(
     current_user: User = Depends(get_current_user)
 ):
     """
-    更新模型配置（启用前做渠道可用性预检：无候选 409，组合成员为空 400）
+    更新模型配置（启用前做渠道可用性预检：无候选 409，组合成员为空 400；
+    显式禁用命中业务引用 409 + data.impact）
     """
     api_logger.info(f"更新模型配置请求: model_id={model_id}, 用户: {current_user.username}, tenant_id={current_user.tenant_id}")
 
     if model_data.type is not None or model_data.provider is not None:
         raise BusinessException("不允许更改模型类型和供应商", BizCode.INVALID_PARAMETER)
 
-    if model_data.is_active:
+    if model_data.is_active is not None:
         model_config = ModelConfigRepository.get_by_id(db, model_id, tenant_id=current_user.tenant_id)
         if not model_config:
             raise BusinessException("模型配置不存在", BizCode.MODEL_NOT_FOUND)
-        ChannelApiKeyService.assert_enableable(db, model_config, current_user.tenant_id)
-    
+        if model_data.is_active:
+            ChannelApiKeyService.assert_enableable(db, model_config, current_user.tenant_id)
+        elif model_config.is_active:
+            # 显式禁用（true→false 跃迁）引用门禁（D13②）：编辑已禁用模型不误拦
+            impact = collect_model_impact(db, [model_id])
+            if impact["total"] > 0:
+                api_logger.warning(f"模型被业务引用，拒绝禁用: model_id={model_id}, total={impact['total']}")
+                exc = BusinessException(
+                    f"模型正被 {impact['total']} 处业务引用，无法禁用",
+                    BizCode.RESOURCE_IN_USE,
+                    context={"impact": impact},
+                )
+                response = _model_in_use_response(exc)
+                if response is not None:
+                    return response
+                raise exc
+
     try:
         api_logger.debug(f"开始更新模型配置: model_id={model_id}")
         result_orm = ModelConfigService.update_model(db=db, model_id=model_id, model_data=model_data, tenant_id=current_user.tenant_id)
         api_logger.info(f"模型配置更新成功: {result_orm.name} (ID: {model_id})")
         
         # 将ORM对象转换为Pydantic模型
-        result_pydantic = model_schema.ModelConfig.model_validate(result_orm)
+        result_pydantic = wire_model_config(result_orm)
         
         return success(data=result_pydantic, msg="模型配置更新成功")
     except Exception as e:

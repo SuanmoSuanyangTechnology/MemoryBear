@@ -37,9 +37,18 @@ _BATCH_SIZE = 200
 _MAX_BATCHES_PER_RUN = 20
 _TIME_BUDGET_SECONDS = 10.0
 _RECLAIM_MIN_IDLE_MS = 60_000
-_CAPABILITIES = ("llm", "embedding", "rerank", "image", "video")
+_CAPABILITIES = ("llm", "embedding", "rerank", "image", "video", "asr")
 _STATUSES = ("ok", "fallback_succeeded", "failed")
-_REQUIRED_FIELDS = ("event_id", "ts_ms", "tenant_id", "config_id", "provider", "model_name")
+_REQUIRED_FIELDS = (
+    "event_id",
+    "ts_ms",
+    "tenant_id",
+    "config_id",
+    "provider",
+    "model_name",
+    "capability",
+    "status",
+)
 
 
 def _consumer_name() -> str:
@@ -89,7 +98,8 @@ def _row_from_payload(payload: str) -> dict[str, Any]:
     missing = [key for key in _REQUIRED_FIELDS if data.get(key) is None]
     if missing:
         raise ValueError(f"missing required fields: {','.join(missing)}")
-    capability = str(data["capability"])
+    # 大小写归一（枚举值恒小写，容忍外来大写形态）：落表统一小写口径，杜绝混行双值
+    capability = str(data["capability"]).lower()
     if capability not in _CAPABILITIES:
         raise ValueError(f"unknown capability {capability!r}")
     status = str(data["status"])

@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from app.core.workflow.nodes.base_config import BaseNodeConfig, VariableDefinition
 from app.core.workflow.nodes.enums import HttpErrorHandle
 from app.core.workflow.variable.base_variable import VariableType
-from app.models.models_model import ModelCapability, ModelProvider
+from app.models.models_model import ModelFeature, ModelProvider
 
 
 class MessageConfig(BaseModel):
@@ -435,15 +435,15 @@ class LLMNodeConfig(BaseNodeConfig):
         }
 
 
-_PARAM_CAPABILITY_REQUIREMENTS: dict[str, list[ModelCapability]] = {
-    "thinking": [ModelCapability.THINKING, ModelCapability.THINKING_ONLY],
-    "thinking_budget": [ModelCapability.THINKING],
-    "json_output": [ModelCapability.JSON_OUTPUT],
-    "structured_output": [ModelCapability.JSON_OUTPUT],
-    "response_format_json": [ModelCapability.JSON_OUTPUT],
+_PARAM_FEATURE_REQUIREMENTS: dict[str, list[ModelFeature]] = {
+    "thinking": [ModelFeature.THINKING, ModelFeature.THINKING_ONLY],
+    "thinking_budget": [ModelFeature.THINKING],
+    "json_output": [ModelFeature.JSON_OUTPUT],
+    "structured_output": [ModelFeature.JSON_OUTPUT],
+    "response_format_json": [ModelFeature.JSON_OUTPUT],
 }
 
-_PARAM_CAPABILITY_WARNINGS: dict[str, str] = {
+_PARAM_FEATURE_WARNINGS: dict[str, str] = {
     "thinking": "模型不具备思考能力，思考模式参数不会生效",
     "thinking_budget": "thinking_only 类型模型不支持思考长度限制，该参数不会生效",
     "thinking_budget_no_thinking": "模型不具备思考能力，思考长度限制参数不会生效",
@@ -499,7 +499,6 @@ _MULTIMODAL_COMPATIBLE_PROVIDERS = frozenset({
 def strip_unsupported_llm_params(
         extra_params: dict[str, Any],
         provider: str,
-        is_omni: bool = False,  # 过渡保留：DashScope 协议已统一，阶段 2 清理
 ) -> tuple[dict[str, Any], list[str]]:
     """Strip provider-unsupported parameters from extra_params.
 
@@ -535,9 +534,8 @@ def strip_unsupported_llm_params(
 
 def validate_llm_param_constraints(
     config: LLMNodeConfig,
-    capability: list[str],
+    features: list[str],
     provider: str,
-    is_omni: bool = False,
 ) -> list[str]:
     """校验 LLM 节点参数设置是否受模型能力或提供商支持限制。
 
@@ -546,16 +544,15 @@ def validate_llm_param_constraints(
 
     Args:
         config: LLM 节点配置（含各参数的 enable/value 开关）
-        capability: 模型能力列表（如 ['thinking', 'json_output']）
+        features: 模型能力特征列表（契约 v2，如 ['thinking', 'json_output']）
         provider: 模型提供商（如 'openai', 'dashscope'）
-        is_omni: 是否为 Omni 模型（影响 DashScope 参数路由）
 
     Returns:
         警告消息列表，无问题时返回空列表
     """
     warnings: list[str] = []
     provider_lower = provider.lower() if provider else ""
-    capability_set = set(capability) if capability else set()
+    feature_set = set(features) if features else set()
 
     try:
         provider_enum = ModelProvider(provider_lower)
@@ -564,31 +561,31 @@ def validate_llm_param_constraints(
 
     # --- 模型能力限制校验 ---
     if config.thinking.enable:
-        required = _PARAM_CAPABILITY_REQUIREMENTS["thinking"]
-        if not any(c in capability_set for c in required):
-            warnings.append(_PARAM_CAPABILITY_WARNINGS["thinking"])
+        required = _PARAM_FEATURE_REQUIREMENTS["thinking"]
+        if not any(c in feature_set for c in required):
+            warnings.append(_PARAM_FEATURE_WARNINGS["thinking"])
 
     if config.thinking.budget.enable:
-        required_budget = _PARAM_CAPABILITY_REQUIREMENTS["thinking_budget"]
-        if ModelCapability.THINKING_ONLY in capability_set:
-            warnings.append(_PARAM_CAPABILITY_WARNINGS["thinking_budget"])
-        elif not any(c in capability_set for c in required_budget):
-            warnings.append(_PARAM_CAPABILITY_WARNINGS["thinking_budget_no_thinking"])
+        required_budget = _PARAM_FEATURE_REQUIREMENTS["thinking_budget"]
+        if ModelFeature.THINKING_ONLY in feature_set:
+            warnings.append(_PARAM_FEATURE_WARNINGS["thinking_budget"])
+        elif not any(c in feature_set for c in required_budget):
+            warnings.append(_PARAM_FEATURE_WARNINGS["thinking_budget_no_thinking"])
 
     if config.json_output:
-        required = _PARAM_CAPABILITY_REQUIREMENTS["json_output"]
-        if not any(c in capability_set for c in required):
-            warnings.append(_PARAM_CAPABILITY_WARNINGS["json_output"])
+        required = _PARAM_FEATURE_REQUIREMENTS["json_output"]
+        if not any(c in feature_set for c in required):
+            warnings.append(_PARAM_FEATURE_WARNINGS["json_output"])
 
     if config.structured_output:
-        required = _PARAM_CAPABILITY_REQUIREMENTS["structured_output"]
-        if not any(c in capability_set for c in required):
-            warnings.append(_PARAM_CAPABILITY_WARNINGS["structured_output"])
+        required = _PARAM_FEATURE_REQUIREMENTS["structured_output"]
+        if not any(c in feature_set for c in required):
+            warnings.append(_PARAM_FEATURE_WARNINGS["structured_output"])
 
     if config.response_format.enable and config.response_format.value == "json_object":
-        required = _PARAM_CAPABILITY_REQUIREMENTS["response_format_json"]
-        if not any(c in capability_set for c in required):
-            warnings.append(_PARAM_CAPABILITY_WARNINGS["response_format_json"])
+        required = _PARAM_FEATURE_REQUIREMENTS["response_format_json"]
+        if not any(c in feature_set for c in required):
+            warnings.append(_PARAM_FEATURE_WARNINGS["response_format_json"])
 
     # --- 提供商支持限制校验 ---
     if provider_enum is None:

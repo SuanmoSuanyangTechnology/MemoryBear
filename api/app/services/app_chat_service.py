@@ -24,7 +24,7 @@ from app.integrations.knowledge.contracts import KnowledgeRetrievalSource
 from app.models import (
     App,
     MultiAgentConfig, AgentConfig, ModelType, WorkflowConfig,
-    ModelCapability, AgentExecution, Message, Conversation)
+    Modality, ModelFeature, AgentExecution, Message, Conversation)
 from app.repositories.agent_execution_repository import AgentExecutionRepository
 from app.repositories.tool_repository import ToolRepository
 from app.schemas import DraftRunRequest
@@ -644,8 +644,9 @@ class AppChatService:
             provider=api_key_obj.provider,
             api_key=api_key_obj.api_key,
             api_base=api_key_obj.api_base,
-            capability=api_key_obj.capability,
-            is_omni=api_key_obj.is_omni,
+            input_modalities=[str(item) for item in (api_key_obj.input_modalities or [])],
+            output_modalities=[str(item) for item in (api_key_obj.output_modalities or [])],
+            features=[str(item) for item in (api_key_obj.features or [])],
             model_type=ModelType.LLM,
             tenant_id=api_key_obj.tenant_id,
             model_config_id=api_key_obj.model_config_id,
@@ -663,7 +664,6 @@ class AppChatService:
                 system_prompt=system_prompt,
                 current_input=message,
                 current_provider=api_key_obj.provider,
-                current_is_omni=api_key_obj.is_omni,
                 legacy_max_history=settings.AGENT_MAX_HISTORY,
                 model_config_id=config.default_model_config_id,
             )
@@ -675,7 +675,6 @@ class AppChatService:
                     conversation_id=conversation_id,
                     max_history=settings.AGENT_MAX_HISTORY,
                     current_provider=api_key_obj.provider,
-                    current_is_omni=api_key_obj.is_omni
                 )
 
         # 如果是新会话且有开场白，作为第一条 assistant 消息写入数据库
@@ -694,7 +693,6 @@ class AppChatService:
                     conversation_id=conversation_id,
                     max_history=settings.AGENT_MAX_HISTORY,
                     current_provider=api_key_obj.provider,
-                    current_is_omni=api_key_obj.is_omni
                 )
 
         # 处理多模态文件
@@ -722,7 +720,7 @@ class AppChatService:
             image_manifest, _ = build_uploaded_images_manifest(files)
             if image_manifest:
                 llm_message = f"{message}\n\n{image_manifest}"
-            if doc_img_recognition and ModelCapability.VISION in (api_key_obj.capability or []) and any(
+            if doc_img_recognition and Modality.IMAGE in (api_key_obj.input_modalities or []) and any(
                 f.type == FileType.DOCUMENT for f in files
             ):
                 system_prompt += (
@@ -739,20 +737,24 @@ class AppChatService:
         )
 
         # 弱模型：用 ReAct prompt 驱动多轮工具调用，将轨迹注入 system_prompt
-        capability = api_key_obj.capability or []
+        features = [str(item) for item in (api_key_obj.features or [])]
         orchestrator_node_executions = []
         _api_key_config = {
             "model_name": api_key_obj.model_name,
             "api_key": api_key_obj.api_key,
             "provider": api_key_obj.provider,
             "api_base": api_key_obj.api_base,
+            "input_modalities": [str(item) for item in (api_key_obj.input_modalities or [])],
+            "output_modalities": [str(item) for item in (api_key_obj.output_modalities or [])],
+            "features": features,
+            # 旧字段仅存于沙箱 payload 口径（e2b-infra 同批下线前冻结）
             "is_omni": api_key_obj.is_omni,
-            "capability": capability,
+            "capability": [str(item) for item in (api_key_obj.capability or [])],
             "tenant_id": api_key_obj.tenant_id,
             "model_config_id": api_key_obj.model_config_id,
             "channel_id": api_key_obj.channel_id,
         }
-        use_agent_mode = ModelCapability.FUNCTION_CALL in capability
+        use_agent_mode = ModelFeature.FUNCTION_CALL in features
         if not use_agent_mode and tools:
             system_prompt, orchestrator_node_executions = await ToolOrchestrator.create_and_run(
                 tools=tools,
@@ -838,7 +840,9 @@ class AppChatService:
                 api_key=api_key_obj.api_key,
                 provider=api_key_obj.provider,
                 api_base=api_key_obj.api_base,
-                is_omni=api_key_obj.is_omni,
+                input_modalities=[str(item) for item in (api_key_obj.input_modalities or [])],
+                output_modalities=[str(item) for item in (api_key_obj.output_modalities or [])],
+                features=features,
                 temperature=model_parameters.get("temperature", 0.7),
                 max_tokens=model_parameters.get("max_tokens", 2000),
                 system_prompt=system_prompt,
@@ -846,7 +850,6 @@ class AppChatService:
                 deep_thinking=model_parameters.get("deep_thinking", False),
                 thinking_budget_tokens=model_parameters.get("thinking_budget_tokens"),
                 json_output=model_parameters.get("json_output", False),
-                capability=capability,
                 tenant_id=api_key_obj.tenant_id,
                 model_config_id=api_key_obj.model_config_id,
                 channel_id=api_key_obj.channel_id,
@@ -981,7 +984,6 @@ class AppChatService:
             human_meta["history_files"] = {
                 "content": sanitize_processed_files_for_history(processed_files),
                 "provider": api_key_obj.provider,
-                "is_omni": api_key_obj.is_omni
             }
 
         if audio_url:
@@ -1014,7 +1016,6 @@ class AppChatService:
                     features=features_config,
                     conversation_id=conversation_id,
                     current_provider=api_key_obj.provider,
-                    current_is_omni=api_key_obj.is_omni,
                     legacy_max_history=settings.AGENT_MAX_HISTORY,
                     model_config_id=config.default_model_config_id,
                 )
@@ -1235,8 +1236,9 @@ class AppChatService:
                 provider=api_key_obj.provider,
                 api_key=api_key_obj.api_key,
                 api_base=api_key_obj.api_base,
-                capability=api_key_obj.capability,
-                is_omni=api_key_obj.is_omni,
+                input_modalities=[str(item) for item in (api_key_obj.input_modalities or [])],
+                output_modalities=[str(item) for item in (api_key_obj.output_modalities or [])],
+                features=[str(item) for item in (api_key_obj.features or [])],
                 model_type=ModelType.LLM,
                 tenant_id=api_key_obj.tenant_id,
                 model_config_id=api_key_obj.model_config_id,
@@ -1254,7 +1256,6 @@ class AppChatService:
                     system_prompt=system_prompt,
                     current_input=message,
                     current_provider=api_key_obj.provider,
-                    current_is_omni=api_key_obj.is_omni,
                     legacy_max_history=settings.AGENT_MAX_HISTORY,
                     model_config_id=config.default_model_config_id,
                 )
@@ -1266,7 +1267,6 @@ class AppChatService:
                         conversation_id=conversation_id,
                         max_history=settings.AGENT_MAX_HISTORY,
                         current_provider=api_key_obj.provider,
-                        current_is_omni=api_key_obj.is_omni
                     )
 
             # 新会话开场白先拼到内存 history，避免首包前写库+回查。
@@ -1309,7 +1309,7 @@ class AppChatService:
                 image_manifest, _ = build_uploaded_images_manifest(files)
                 if image_manifest:
                     llm_message = f"{message}\n\n{image_manifest}"
-                if doc_img_recognition and ModelCapability.VISION in (api_key_obj.capability or []) and any(
+                if doc_img_recognition and Modality.IMAGE in (api_key_obj.input_modalities or []) and any(
                     f.type == FileType.DOCUMENT for f in files
                 ):
                     system_prompt += (
@@ -1326,20 +1326,24 @@ class AppChatService:
             )
 
             # 弱模型：用 ReAct prompt 驱动多轮工具调用，将轨迹注入 system_prompt
-            capability = api_key_obj.capability or []
+            features = [str(item) for item in (api_key_obj.features or [])]
             orchestrator_node_executions = []
             _api_key_config = {
                 "model_name": api_key_obj.model_name,
                 "api_key": api_key_obj.api_key,
                 "provider": api_key_obj.provider,
                 "api_base": api_key_obj.api_base,
+                "input_modalities": [str(item) for item in (api_key_obj.input_modalities or [])],
+                "output_modalities": [str(item) for item in (api_key_obj.output_modalities or [])],
+                "features": features,
+                # 旧字段仅存于沙箱 payload 口径（e2b-infra 同批下线前冻结）
                 "is_omni": api_key_obj.is_omni,
-                "capability": capability,
+                "capability": [str(item) for item in (api_key_obj.capability or [])],
                 "tenant_id": api_key_obj.tenant_id,
                 "model_config_id": api_key_obj.model_config_id,
                 "channel_id": api_key_obj.channel_id,
             }
-            use_agent_mode = ModelCapability.FUNCTION_CALL in capability
+            use_agent_mode = ModelFeature.FUNCTION_CALL in features
             if not use_agent_mode and tools:
                 stage_context = memory_stage_capture() if execution_mode == "in_process" else nullcontext()
                 with stage_context:
@@ -1409,7 +1413,9 @@ class AppChatService:
                     api_key=api_key_obj.api_key,
                     provider=api_key_obj.provider,
                     api_base=api_key_obj.api_base,
-                    is_omni=api_key_obj.is_omni,
+                    input_modalities=[str(item) for item in (api_key_obj.input_modalities or [])],
+                    output_modalities=[str(item) for item in (api_key_obj.output_modalities or [])],
+                    features=features,
                     temperature=model_parameters.get("temperature", 0.7),
                     max_tokens=model_parameters.get("max_tokens", 2000),
                     system_prompt=system_prompt,
@@ -1418,7 +1424,6 @@ class AppChatService:
                     deep_thinking=model_parameters.get("deep_thinking", False),
                     thinking_budget_tokens=model_parameters.get("thinking_budget_tokens"),
                     json_output=model_parameters.get("json_output", False),
-                    capability=capability,
                     tenant_id=api_key_obj.tenant_id,
                     model_config_id=api_key_obj.model_config_id,
                     channel_id=api_key_obj.channel_id,
@@ -1448,7 +1453,6 @@ class AppChatService:
             _api_key_id = api_key_obj.id
             _api_key_model_name = api_key_obj.model_name
             _api_key_provider = api_key_obj.provider
-            _api_key_is_omni = api_key_obj.is_omni
             # 预读 _release_id，避免 LLM 推理结束后重新获取 DB 连接
             from app.models.app_model import App
             _app_obj = await self._db_get(App, config.app_id)
@@ -1612,7 +1616,6 @@ class AppChatService:
                 human_meta["history_files"] = {
                     "content": sanitize_processed_files_for_history(processed_files),
                     "provider": _api_key_provider,
-                    "is_omni": _api_key_is_omni
                 }
 
             all_node_executions = [
@@ -1693,7 +1696,6 @@ class AppChatService:
                             "conversation_id": str(conversation_id),
                             "features_config": features_config,
                             "api_key_provider": _api_key_provider,
-                            "api_key_is_omni": _api_key_is_omni,
                             "model_config_id": str(config.default_model_config_id) if config.default_model_config_id else None,
                         },
                     ))

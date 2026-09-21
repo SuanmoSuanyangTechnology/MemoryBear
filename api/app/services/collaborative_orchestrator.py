@@ -455,7 +455,9 @@ class CollaborativeOrchestrator:
                 "provider": api_key_config.provider,
                 "api_key": api_key_config.api_key,
                 "api_base": api_key_config.api_base,
-                "is_omni": api_key_config.is_omni,
+                "input_modalities": list(api_key_config.input_modalities or []),
+                "output_modalities": list(api_key_config.output_modalities or []),
+                "features": list(api_key_config.features or []),
                 "model_parameters": config_data.get("model_parameters", {}),
                 "api_key_id": api_key_config.id,
                 "tenant_id": api_key_config.tenant_id,
@@ -526,7 +528,7 @@ class CollaborativeOrchestrator:
             )
             
             # 创建 LLM 实例
-            llm = RedBearLLM(model_config, type=ModelType.CHAT)
+            llm = RedBearLLM(model_config, type=ModelType.LLM)
             
             # 调用 LLM
             response = await llm.ainvoke(messages)

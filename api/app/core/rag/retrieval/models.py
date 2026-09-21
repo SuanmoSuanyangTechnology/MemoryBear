@@ -106,12 +106,14 @@ class ModelRuntimeSnapshot:
     provider: str
     api_key: str = field(repr=False)
     api_base: str | None = None
-    capability: tuple[str, ...] = ()
-    is_omni: bool = False
+    input_modalities: tuple[str, ...] = ()
+    output_modalities: tuple[str, ...] = ()
+    features: tuple[str, ...] = ()
     model_type: str | None = None
     tenant_id: str | None = None
     model_config_id: str | None = None
     channel_id: str | None = None
+    failover_plan: Any = field(default=None, repr=False)
 
     @classmethod
     def from_api_key(
@@ -124,12 +126,14 @@ class ModelRuntimeSnapshot:
             provider=api_key.provider,
             api_key=api_key.api_key,
             api_base=api_key.api_base,
-            capability=tuple(api_key.capability or ()),
-            is_omni=bool(api_key.is_omni),
+            input_modalities=tuple(getattr(api_key, "input_modalities", None) or ()),
+            output_modalities=tuple(getattr(api_key, "output_modalities", None) or ()),
+            features=tuple(getattr(api_key, "features", None) or ()),
             model_type=model_type if model_type is not None else getattr(api_key, "model_type", None),
             tenant_id=getattr(api_key, "tenant_id", None),
             model_config_id=getattr(api_key, "model_config_id", None),
             channel_id=getattr(api_key, "channel_id", None),
+            failover_plan=getattr(api_key, "failover_plan", None),
         )
 
 

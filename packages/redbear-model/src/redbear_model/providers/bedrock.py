@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from redbear_model.contracts import ModelCapability, ResolvedModelConfig
+from redbear_model.contracts import ModelFeature, ResolvedModelConfig
 from redbear_model.errors import ProviderDependencyMissingError
 
 BEDROCK_MODEL_MAPPING = {
@@ -144,7 +144,7 @@ def build_bedrock_params(config: ResolvedModelConfig) -> dict[str, Any]:
         dict,
     )
     thinking_conflict = (
-        ModelCapability.THINKING in config.capabilities and config.deep_thinking
+        ModelFeature.THINKING in config.profile.features and config.deep_thinking
     )
     if should_send_json and not thinking_conflict:
         response_format = config.provider_params.get("response_format")

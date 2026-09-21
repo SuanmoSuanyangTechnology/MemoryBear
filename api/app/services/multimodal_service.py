@@ -4,7 +4,7 @@
 处理图片、文档等多模态文件，转换为 LLM 可用的格式
 
 支持的 Provider:
-- DashScope (通义千问): 支持 URL 格式
+- DashScope (通义千问): OpenAI 兼容模式内容格式（image_url / video_url / input_audio）
 - Bedrock/Anthropic: 仅支持 base64 格式
 - OpenAI: 支持 URL 和 base64 格式
 """
@@ -38,7 +38,7 @@ from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
 from app.core.utils.text_sanitize import sanitize_text
 from app.models.file_metadata_model import FileMetadata
-from app.models.models_model import ModelCapability
+from app.models.models_model import Modality
 from app.schemas.app_schema import FileInput, FileType, FileUploadConfig, TransferMethod
 from app.schemas.model_schema import ModelInfo
 from app.services.audio_transcription_service import AudioTranscriptionService
@@ -340,68 +340,6 @@ class MultimodalFormatStrategy(ABC):
         pass
 
 
-class DashScopeFormatStrategy(MultimodalFormatStrategy):
-    """通义千问策略"""
-
-    async def format_image(self, url: str | None, content: bytes | None = None) -> tuple[bool, Dict[str, Any]]:
-        """通义千问图片格式：本地内容使用 Data URL，远程内容保留 URL。"""
-        image_source = _build_data_url(content, self.file.file_type, "image/jpeg") if content is not None else url
-        if not image_source:
-            return False, {"type": "text", "text": "[图片文件缺少可用内容]"}
-        return True, {
-            "type": "image",
-            "image": image_source,
-        }
-
-    async def format_document(self, file_name: str, text: str) -> tuple[bool, Dict[str, Any]]:
-        """通义千问文档格式"""
-        return True, {
-            "type": "text",
-            "text": f"<document name=\"{file_name}\">\n文档内容：\n{text}\n</document>",
-        }
-
-    async def format_audio(
-            self,
-            file_type: str,
-            url: str | None,
-            content: bytes | None = None,
-            transcription: Optional[str] = None,
-    ) -> tuple[bool, Dict[str, Any]]:
-        """
-        通义千问音频格式。
-
-        公网模型不能访问私有 OSS 时，本地音频以 Data URL 主动随请求传出；
-        DashScope HTTP API 支持该格式。
-        """
-        if transcription:
-            return True, {
-                "type": "text",
-                "text": f"[音频转录]\n{transcription}",
-            }
-
-        audio_source = _build_audio_data_url(content) if content is not None else url
-        if not audio_source:
-            return False, {"type": "text", "text": "[音频文件缺少可用内容]"}
-        return True, {
-            "type": "audio",
-            "audio": audio_source,
-        }
-
-    async def format_video(self, url: str | None, content: bytes | None = None) -> tuple[bool, Dict[str, Any]]:
-        """通义千问视频格式；本地视频需后续接入 provider Files API。"""
-        if content is not None:
-            return False, {
-                "type": "text",
-                "text": "[视频文件无法通过当前模型接口安全传输，请配置 provider Files API 后重试]",
-            }
-        if not url:
-            return False, {"type": "text", "text": "[视频文件缺少可用 URL]"}
-        return True, {
-            "type": "video",
-            "video": url,
-        }
-
-
 class BedrockFormatStrategy(MultimodalFormatStrategy):
     """Bedrock/Anthropic 策略"""
 
@@ -566,10 +504,6 @@ class OpenAIFormatStrategy(MultimodalFormatStrategy):
 
 # Provider 到策略的映射
 PROVIDER_STRATEGIES = {
-    # dashscope 全量模型已统一 OpenAI 兼容协议（ChatTongyi 原生协议退役，见
-    # core/models/base.py:get_provider_llm_class）。原生的
-    # {"type": "image", "image": url} 会被兼容端点以 400 invalid_value 拒绝，
-    # 必须产出 OpenAI 格式（type=text/image_url/video_url）。
     "dashscope": OpenAIFormatStrategy,
     "bedrock": BedrockFormatStrategy,
     "anthropic": BedrockFormatStrategy,
@@ -588,7 +522,6 @@ class MultimodalService:
         db (Session): Database session.
         model_api_key (str): API key for the model provider.
         provider (str): Name of the model provider.
-        is_omni (bool): Indicates whether the model supports full multimodal capability.
         capability (list): Capability configuration of the model.
         audio_api_key (str | None): API key used for audio transcription.
         enable_audio_transcription (bool): Whether audio transcription is enabled.
@@ -615,8 +548,7 @@ class MultimodalService:
         if self.api_config is not None:
             self.model_api_key = api_config.api_key
             self.provider = api_config.provider.lower()
-            self.is_omni = api_config.is_omni
-            self.capability = api_config.capability
+            self.input_modalities = list(getattr(api_config, "input_modalities", None) or [])
         self.audio_api_key = audio_api_key
         self.enable_audio_transcription = enable_audio_transcription
 
@@ -802,12 +734,12 @@ class MultimodalService:
                 if file.type == FileType.VIDEO:
                     if file.upload_file_id:
                         await self._get_local_file_metadata(file.upload_file_id, workspace_id)
-                    if "video" in self.capability and include_processing_errors:
+                    if Modality.VIDEO in self.input_modalities and include_processing_errors:
                         result.append({
                             "type": "text",
                             "text": "[视频文件无法通过当前模型接口安全传输，请配置 provider Files API 后重试]",
                         })
-                    elif "video" not in self.capability:
+                    elif Modality.VIDEO not in self.input_modalities:
                         logger.warning(f"不支持的文件类型: {file.type}")
                     continue
 
@@ -854,7 +786,7 @@ class MultimodalService:
 
             strategy = strategy_class(file)
             try:
-                if file.type == FileType.IMAGE and ModelCapability.VISION in self.capability:
+                if file.type == FileType.IMAGE and Modality.IMAGE in self.input_modalities:
                     is_support, content = await self._process_image(file, strategy)
                     if is_support or include_processing_errors:
                         result.append(content)
@@ -865,7 +797,7 @@ class MultimodalService:
                         continue
                     result.append(content)
                     # 仅当开关开启且模型支持视觉时，才提取文档内嵌图片
-                    if document_image_recognition and ModelCapability.VISION in self.capability:
+                    if document_image_recognition and Modality.IMAGE in self.input_modalities:
                         img_infos = await self.extract_document_images(file)
                         img_result = []
                         for img_info in img_infos:
@@ -902,11 +834,11 @@ class MultimodalService:
                             except Exception as img_err:
                                 logger.warning(f"文档图片处理失败: {img_err}")
                         result.extend(img_result)
-                elif file.type == FileType.AUDIO and "audio" in self.capability:
+                elif file.type == FileType.AUDIO and Modality.AUDIO in self.input_modalities:
                     is_support, content = await self._process_audio(file, strategy)
                     if is_support or include_processing_errors:
                         result.append(content)
-                elif file.type == FileType.VIDEO and "video" in self.capability:
+                elif file.type == FileType.VIDEO and Modality.VIDEO in self.input_modalities:
                     is_support, content = await self._process_video(file, strategy)
                     if is_support or include_processing_errors:
                         result.append(content)
