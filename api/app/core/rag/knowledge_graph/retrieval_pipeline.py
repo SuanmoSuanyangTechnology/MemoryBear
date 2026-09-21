@@ -26,7 +26,7 @@ from app.core.rag.knowledge_graph.query_plan_cache import GraphQueryPlanCache
 from app.core.rag.knowledge_graph.structured_output import (
     unwrap_structured_result,
 )
-from app.core.rag.models.chunk import DocumentChunk
+from app.schemas.knowledge_types import DocumentChunk
 from app.core.rag.retrieval.elasticsearch_queries import normalize_vector
 
 

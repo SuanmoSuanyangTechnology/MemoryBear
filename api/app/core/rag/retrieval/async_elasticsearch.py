@@ -8,7 +8,7 @@ from urllib.parse import urlparse
 from elasticsearch import AsyncElasticsearch
 
 from app.core.config import settings
-from app.core.rag.models.chunk import DocumentChunk
+from app.schemas.knowledge_types import DocumentChunk
 from app.core.rag.retrieval.elasticsearch_queries import (
     VECTOR_SEARCH_MODE_KNN,
     build_full_text_query,
@@ -23,7 +23,7 @@ from app.core.rag.retrieval.elasticsearch_queries import (
     resolve_vector_search_mode,
     vector_hits_to_chunks,
 )
-from app.core.rag.retrieval.models import (
+from app.integrations.knowledge.types import (
     RetrievalSearchOptions,
     RetrievalTimings,
 )

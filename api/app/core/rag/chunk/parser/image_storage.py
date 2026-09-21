@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from app.core.config import settings
-from app.core.rag.chunk.parser.mineru_v3_client import MinerUV3Image
+from app.core.tools.clients.mineru_v3 import MinerUV3Image
 from app.db import get_db_context
 from app.models.document_model import Document
 from app.models.file_model import FILE_ROLE_DERIVED_IMAGE, File

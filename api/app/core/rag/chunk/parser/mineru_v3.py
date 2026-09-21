@@ -13,7 +13,7 @@ from app.core.rag.chunk.parser.image_storage import (
     cleanup_mineru_v3_images,
     store_mineru_v3_image,
 )
-from app.core.rag.chunk.parser.mineru_v3_client import MinerUV3Client
+from app.core.tools.clients.mineru_v3 import MinerUV3Client
 from app.core.rag.chunk.parser.structured_markdown import StructMarkdownParser
 
 LOGGER = logging.getLogger(__name__)

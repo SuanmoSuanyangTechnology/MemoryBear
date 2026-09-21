@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
-from app.core.rag.retrieval.models import RetrievalPrincipal
+from app.integrations.knowledge.types import RetrievalPrincipal
 from app.db import get_async_db_context
 from app.dependencies import CurrentUserSnapshot, make_snapshot
 from app.integrations.knowledge.contracts import (
@@ -21,7 +21,7 @@ from app.models.user_model import User
 from app.models.workspace_model import Workspace, WorkspaceMember
 from app.repositories import workspace_repository
 from app.schemas.api_key_schema import ApiKeyAuth
-from app.services.knowledge_retrieval_service import KnowledgeRetrievalAccessDenied
+from app.integrations.knowledge.types import KnowledgeRetrievalAccessDenied
 
 
 class _CurrentWorkspaceGuardBypass:

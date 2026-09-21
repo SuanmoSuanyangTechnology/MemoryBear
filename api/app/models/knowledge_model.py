@@ -5,7 +5,7 @@ from sqlalchemy import Column, Integer, String, JSON, DateTime, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID
 from app.db import Base
 from app.core.utils.datetime_utils import utcnow_naive
-from app.core.rag.parser_config import build_default_knowledge_parser_config
+from app.core.knowledge_config import build_default_knowledge_parser_config
 from sqlalchemy.orm import relationship
 
 

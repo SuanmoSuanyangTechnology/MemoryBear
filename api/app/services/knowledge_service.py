@@ -15,7 +15,7 @@ from app.core.logging_config import get_business_logger
 from app.core.exceptions import BusinessException
 from app.core.error_codes import BizCode
 from app.models.models_model import ModelProvider, ModelType
-from app.core.rag.parser_config import normalize_new_knowledge_parser_config
+from app.core.knowledge_config import normalize_new_knowledge_parser_config
 
 business_logger = get_business_logger()
 

@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.controllers import chunk_controller
 from app.core.api_key_auth import get_current_api_key_auth, require_api_key_self_db
 from app.core.logging_config import get_business_logger
-from app.core.rag.models.chunk import QAChunk
+from app.schemas.knowledge_types import QAChunk
 from app.core.response_utils import success
 from app.db import get_async_db
 from app.integrations.knowledge.call_profile import CallProfile
@@ -20,7 +20,7 @@ from app.schemas.api_key_schema import ApiKeyAuth
 from app.schemas.response_schema import ApiResponse
 from app.services import api_key_service
 from app.services.file_storage_service import FileStorageService, get_file_storage_service
-from app.services.knowledge_retrieval_service import KnowledgeRetrievalAccessDenied
+from app.integrations.knowledge.types import KnowledgeRetrievalAccessDenied
 from app.services.rag_access_service import (
     get_api_key_request_user,
     get_api_key_retrieval_principal_async,

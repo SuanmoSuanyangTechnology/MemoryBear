@@ -1,4 +1,4 @@
-from app.core.rag.knowledge_graph.config import (
+from app.core.knowledge_graph_config import (
     GraphPipeline,
     GraphPipelineConfigError,
     is_graph_enabled,

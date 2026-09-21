@@ -16,7 +16,7 @@ from app.core.exceptions import (
     ValidationException,
 )
 from app.core.error_codes import BizCode
-from app.core.rag.metadata.builtin_resolver import BuiltinFieldResolver
+from app.services.knowledge_builtin_resolver import BuiltinFieldResolver
 from app.models.knowledge_metadata_model import KnowledgeMetadata, KnowledgeMetadataBinding
 from app.models.document_model import Document
 from app.repositories.knowledge_metadata_repository import KnowledgeMetadataRepository

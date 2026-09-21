@@ -5,11 +5,11 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import ClassVar
 
 from app.core.config import settings
-from app.core.rag.knowledge_graph.config import GraphPipeline
+from app.core.knowledge_graph_config import GraphPipeline
 from app.core.rag.llm.chat_model import Base
 from app.core.rag.llm.embedding_model import OpenAIEmbed
-from app.core.rag.models.chunk import DocumentChunk
-from app.core.rag.retrieval.models import (
+from app.schemas.knowledge_types import DocumentChunk
+from app.integrations.knowledge.types import (
     GraphRetrievalSnapshot,
     ModelRuntimeSnapshot,
     RetrievalTimings,

@@ -6,15 +6,15 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.rag.knowledge_graph.config import (
+from app.core.knowledge_graph_config import (
     GraphPipeline,
     GraphPipelineConfigError,
     is_graph_enabled,
     resolve_graph_pipeline,
 )
 from app.core.rag.metadata.filter_engine import FilterGroup as EngineFilterGroup, MetadataFilterEngine
-from app.core.rag.retrieval.exceptions import KnowledgeRetrievalConfigError
-from app.core.rag.retrieval.models import (
+from app.integrations.knowledge.config_errors import KnowledgeRetrievalConfigError
+from app.integrations.knowledge.types import (
     GraphRetrievalSnapshot,
     GraphTargetSnapshot,
     ModelRuntimeSnapshot,

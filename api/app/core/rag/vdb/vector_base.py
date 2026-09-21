@@ -3,7 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any
 
-from app.core.rag.models.chunk import DocumentChunk
+from app.schemas.knowledge_types import DocumentChunk
 
 
 class BaseVector(ABC):

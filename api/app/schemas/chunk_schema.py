@@ -4,7 +4,7 @@ from typing import Annotated, Literal, Union
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from app.core.rag.models.chunk import QAChunk
+from app.schemas.knowledge_types import QAChunk
 from app.integrations.knowledge.contracts import (
     KnowledgeRetrievalSource as KnowledgeRetrievalSource,
 )

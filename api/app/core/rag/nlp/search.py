@@ -16,7 +16,7 @@ from app.core.models.base import RedBearModelConfig
 from app.core.models import RedBearLLM, RedBearRerank
 from app.models.models_model import ModelApiKey
 from app.models import knowledge_model
-from app.core.rag.models.chunk import DocumentChunk
+from app.schemas.knowledge_types import DocumentChunk
 from app.repositories import knowledge_repository, knowledgeshare_repository
 from app.services.model_service import ModelConfigService
 from app.core.rag.vdb.elasticsearch.elasticsearch_vector import ElasticSearchVectorFactory

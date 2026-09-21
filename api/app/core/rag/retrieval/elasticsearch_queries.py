@@ -3,7 +3,7 @@ import os
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from app.core.rag.models.chunk import DocumentChunk
+from app.schemas.knowledge_types import DocumentChunk
 from app.core.rag.vdb.field import Field
 
 

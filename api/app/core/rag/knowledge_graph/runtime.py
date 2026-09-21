@@ -1,13 +1,13 @@
 import uuid
 
 from app.core.models import RedBearModelConfig
-from app.core.rag.knowledge_graph.config import (
+from app.core.knowledge_graph_config import (
     GraphPipelineConfigError,
     is_graph_enabled,
     require_graph_mapping,
 )
 from app.core.rag.knowledge_graph.models import GraphIndexRuntime
-from app.core.rag.retrieval.models import ModelRuntimeSnapshot
+from app.integrations.knowledge.types import ModelRuntimeSnapshot
 from app.core.rag.vdb.elasticsearch.elasticsearch_vector import (
     ElasticSearchVectorIndexOps,
 )

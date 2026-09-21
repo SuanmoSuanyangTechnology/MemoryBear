@@ -20,7 +20,7 @@ from app.core.rag.common import settings
 from app.core.rag.integrations.feishu.client import FeishuAPIClient
 from app.core.rag.integrations.yuque.client import YuqueAPIClient
 from app.core.rag.llm.chat_model import Base
-from app.core.rag.knowledge_graph.config import (
+from app.core.knowledge_graph_config import (
     GraphPipeline,
     GraphPipelineConfigError,
     is_graph_enabled,
@@ -33,7 +33,7 @@ from app.core.rag.knowledge_graph.dispatch import (
 from app.core.rag.knowledge_graph.elasticsearch_store import (
     GraphElasticsearchStore,
 )
-from app.core.rag.parser_config import normalize_knowledge_parser_config_update
+from app.core.knowledge_config import normalize_knowledge_parser_config_update
 from app.core.rag.nlp import rag_tokenizer, search
 from app.core.rag.prompts.generator import graph_entity_types
 from app.core.rag.retrieval.async_elasticsearch import (

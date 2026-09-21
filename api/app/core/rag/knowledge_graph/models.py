@@ -3,7 +3,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from app.core.rag.retrieval.models import ModelRuntimeSnapshot
+from app.integrations.knowledge.types import ModelRuntimeSnapshot
 
 
 class SourceChunk(BaseModel):

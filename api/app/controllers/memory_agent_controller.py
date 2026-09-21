@@ -8,7 +8,7 @@ from starlette.responses import StreamingResponse
 
 from app.core.error_codes import BizCode
 from app.core.logging_config import get_api_logger
-from app.core.rag.llm.cv_model import QWenCV
+from app.core.models.vision_compat import QWenCV
 from app.core.response_utils import fail, success
 from app.db import get_db
 from app.dependencies import get_current_user

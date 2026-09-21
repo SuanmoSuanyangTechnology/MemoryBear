@@ -17,7 +17,7 @@ from app.core.models import (
     RedBearModelConfig,
     RedBearRerank,
 )
-from app.core.rag.knowledge_graph.config import GraphPipeline
+from app.core.knowledge_graph_config import GraphPipeline
 from app.core.rag.knowledge_graph.elasticsearch_store import GraphElasticsearchStore
 from app.core.rag.knowledge_graph.models import (
     GraphIndexRuntime,
@@ -30,13 +30,13 @@ from app.core.rag.metadata.filter_engine import (
     FilterCondition as EngineFilterCondition,
     FilterGroup as EngineFilterGroup,
 )
-from app.core.rag.models.chunk import DocumentChunk, chunk_retrieval_content
+from app.schemas.knowledge_types import DocumentChunk, chunk_retrieval_content
 from app.core.rag.retrieval.async_elasticsearch import (
     AsyncElasticSearchRetrieval,
     AsyncElasticsearchClientProvider,
 )
 from app.core.rag.retrieval.graph_bridge import GraphRetrievalBridge
-from app.core.rag.retrieval.models import (
+from app.integrations.knowledge.types import (
     GraphTargetSnapshot,
     ModelRuntimeSnapshot,
     RetrievalParams,

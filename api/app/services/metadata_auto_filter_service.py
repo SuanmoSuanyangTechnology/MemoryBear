@@ -6,7 +6,7 @@ from typing import Any, Protocol
 import json_repair
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from app.core.rag.metadata.filter_engine import (
+from app.schemas.knowledge_filter_types import (
     FilterCondition as EngineFilterCondition,
     FilterGroup as EngineFilterGroup,
 )

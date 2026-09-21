@@ -4,7 +4,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from app.celery_app import celery_app
-from app.core.rag.knowledge_graph.config import (
+from app.core.knowledge_graph_config import (
     GraphPipeline,
     is_graph_enabled,
     resolve_graph_pipeline,

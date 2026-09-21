@@ -2,7 +2,7 @@ from collections import defaultdict
 from copy import deepcopy
 
 from app.core.rag.chunk.hierarchy import GroupedChildChunks, validate_parent_child_result
-from app.core.rag.models.chunk import DocumentChunk, ChildDocumentChunk
+from app.schemas.knowledge_types import DocumentChunk, ChildDocumentChunk
 
 
 def _clean_chunk_meta(chunk: dict, chunk_type: str, sort_id: int | None = None) -> dict:

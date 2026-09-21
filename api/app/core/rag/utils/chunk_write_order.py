@@ -1,4 +1,4 @@
-from app.core.rag.models.chunk import DocumentChunk
+from app.schemas.knowledge_types import DocumentChunk
 
 
 NON_VECTORIZED_CHUNK_TYPES = {"source", "parent"}

@@ -6,7 +6,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID
 from app.db import Base
 from app.core.utils.datetime_utils import utcnow_naive
-from app.core.rag.parser_config import build_default_document_parser_config
+from app.core.knowledge_config import build_default_document_parser_config
 
 
 def _parse_bool_config(value: Any) -> bool:

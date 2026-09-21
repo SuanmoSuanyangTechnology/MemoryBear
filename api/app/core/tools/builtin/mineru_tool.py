@@ -1,6 +1,6 @@
 """MinerU PDF 解析内置工具（MinerUV3Client 薄包装）。
 
-走仓内既有的 ``app.core.rag.chunk.parser.mineru_v3_client.MinerUV3Client``
+走仓内既有的 ``app.core.tools.clients.mineru_v3.MinerUV3Client``
 的异步 /tasks 协议（任务提交 → 轮询 → 拉取结果），与 RAG 解析管道同源,
 保证 agent / 工作流节点调用与 RAG 文档解析得到的 markdown 语义一致。
 
@@ -31,7 +31,7 @@ from typing import Any, Dict, List, Optional
 
 import requests
 
-from app.core.rag.chunk.parser.mineru_v3_client import MinerUV3Client, MinerUV3Image
+from app.core.tools.clients.mineru_v3 import MinerUV3Client, MinerUV3Image
 from app.core.tools.base import ToolParameter, ToolResult, ParameterType
 from app.core.tools.builtin.base import BuiltinTool
 

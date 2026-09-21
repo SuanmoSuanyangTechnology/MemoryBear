@@ -3,7 +3,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from app.core.rag.models.chunk import DocumentChunk
+from app.schemas.knowledge_types import DocumentChunk
 from app.integrations.knowledge.contracts import KnowledgeRetrievalSource
 from app.schemas.chunk_schema import (
     ImageRetrievalQuery,

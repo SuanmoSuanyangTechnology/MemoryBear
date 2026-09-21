@@ -53,7 +53,7 @@ from app.core.rag.chunk.parser.image_storage import cleanup_mineru_v3_images
 from app.core.rag.crawler.web_crawler import WebCrawler
 from app.core.rag.graphrag.general.index import init_graphrag, run_graphrag_for_kb
 from app.core.rag.graphrag.utils import get_llm_cache, set_llm_cache
-from app.core.rag.knowledge_graph.config import (
+from app.core.knowledge_graph_config import (
     GraphPipeline,
     GraphPipelineConfigError,
     is_graph_enabled,
@@ -76,7 +76,7 @@ from app.core.rag.knowledge_graph.runtime import (
     build_model_config,
     snapshot_graph_runtime,
 )
-from app.core.rag.parser_config import set_graph_pipeline_for_migration
+from app.core.knowledge_config import set_graph_pipeline_for_migration
 from app.core.rag.retrieval.async_elasticsearch import (
     build_async_elasticsearch_client_config,
 )
@@ -85,10 +85,10 @@ from app.core.rag.integrations.feishu.models import FileInfo
 from app.core.rag.integrations.yuque.client import YuqueAPIClient
 from app.core.rag.integrations.yuque.models import YuqueDocInfo
 from app.core.rag.llm.chat_model import Base
-from app.core.rag.llm.cv_model import QWenCV
+from app.core.models.vision_compat import QWenCV
 from app.core.rag.llm.embedding_model import OpenAIEmbed
 from app.core.rag.llm.sequence2txt_model import QWenSeq2txt
-from app.core.rag.models.chunk import DocumentChunk
+from app.schemas.knowledge_types import DocumentChunk
 from app.core.rag.prompts.generator import qa_proposal
 from app.core.rag.utils.chunk_write_order import (
     pop_vectorized_bootstrap_batch,

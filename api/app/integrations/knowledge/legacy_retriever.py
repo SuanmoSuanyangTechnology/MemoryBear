@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from app.core.rag.retrieval.models import RetrievalPrincipal
+from app.integrations.knowledge.types import RetrievalPrincipal
 from app.schemas.knowledge_retrieval_schema import (
     KnowledgeRetrievalRequest,
     KnowledgeRetrievalResult,

@@ -7,7 +7,7 @@ from typing import Any
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.models import RedBearLLM, RedBearModelConfig
-from app.core.rag.retrieval.models import ModelRuntimeSnapshot
+from app.integrations.knowledge.types import ModelRuntimeSnapshot
 from app.core.workflow.engine.state_manager import WorkflowState
 from app.core.workflow.engine.variable_pool import VariablePool
 from app.core.workflow.nodes.base_node import BaseNode
@@ -23,8 +23,7 @@ from app.models.models_model import ModelCapability, ModelType
 from app.schemas.knowledge_metadata_schema import FilterCondition, FilterGroup, MetadataFilterMode
 from app.schemas.knowledge_retrieval_schema import KnowledgeRetrievalRequest
 from app.services.file_content_service import FileReference, resolve_image_retrieval_query
-from app.services.knowledge_metadata_service import KnowledgeMetadataService
-from app.services.knowledge_retrieval_preparation import KnowledgeRetrievalPreparation
+from app.services.knowledge_filter_preparation import get_metadata_defs_for_filtering_async, get_common_metadata_defs
 from app.services.metadata_auto_filter_service import MetadataAutoFilterService
 from app.services.model_service import ModelApiKeyService, ModelConfigService
 
@@ -220,13 +219,13 @@ class KnowledgeRetrievalNode(BaseNode):
         cfg = self._get_typed_config()
         async with get_async_db_context() as db:
             metadata_defs_by_kb = {
-                kb.kb_id: await KnowledgeMetadataService.get_metadata_defs_for_filtering_async(
+                kb.kb_id: await get_metadata_defs_for_filtering_async(
                     db,
                     kb.kb_id,
                 )
                 for kb in cfg.knowledge_bases
             }
-            common_metadata_defs = KnowledgeRetrievalPreparation._get_common_metadata_defs(
+            common_metadata_defs = get_common_metadata_defs(
                 metadata_defs_by_kb,
             )
             if not common_metadata_defs:

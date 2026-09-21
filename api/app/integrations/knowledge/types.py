@@ -280,3 +280,7 @@ class RetrievalPreparation:
             "common_metadata_defs",
             _freeze_metadata_definitions(self.common_metadata_defs),
         )
+
+
+class KnowledgeRetrievalAccessDenied(Exception):
+    """Knowledge access was denied for the current principal."""

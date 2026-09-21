@@ -22,7 +22,7 @@ from app.core.rag.knowledge_graph.normalizer import (
     document_map_id,
     projection_id,
 )
-from app.core.rag.models.chunk import DocumentChunk
+from app.schemas.knowledge_types import DocumentChunk
 from app.core.rag.retrieval.elasticsearch_queries import raise_on_shard_failures
 from app.core.rag.vdb.elasticsearch.pit_search import iter_async_search_after_hits
 from app.core.rag.vdb.elasticsearch.response_validation import (

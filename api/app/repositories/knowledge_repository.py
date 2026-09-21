@@ -7,7 +7,7 @@ from app.models.knowledge_model import Knowledge, PermissionType
 from app.models.models_model import ModelConfig
 from app.schemas import knowledge_schema
 from app.core.logging_config import get_db_logger
-from app.core.rag.parser_config import (
+from app.core.knowledge_config import (
     build_default_knowledge_parser_config,
     normalize_new_knowledge_parser_config,
 )

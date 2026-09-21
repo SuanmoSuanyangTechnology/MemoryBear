@@ -49,7 +49,7 @@ from app.core.rag.vdb.elasticsearch.response_validation import (
     raise_on_search_response_failure,
 )
 from app.core.rag.vdb.vector_base import BaseVector
-from app.core.rag.models.chunk import DocumentChunk, chunk_retrieval_content
+from app.schemas.knowledge_types import DocumentChunk, chunk_retrieval_content
 
 logger = logging.getLogger(__name__)
 

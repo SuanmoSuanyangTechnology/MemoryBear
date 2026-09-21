@@ -17,9 +17,9 @@ from app.core.logging_config import get_api_logger
 from app.core.rag.chunk.hierarchy import GroupedChildChunks, validate_parent_child_result
 from app.core.rag.chunk.metadata import merge_parser_metadata
 from app.core.rag.knowledge_graph.dispatch import dispatch_document_graph_sync
-from app.core.rag.llm.cv_model import QWenCV
-from app.core.rag.models.chunk import DocumentChunk
-from app.core.rag.retrieval.models import RetrievalPrincipal
+from app.core.models.vision_compat import QWenCV
+from app.schemas.knowledge_types import DocumentChunk
+from app.integrations.knowledge.types import RetrievalPrincipal
 from app.core.rag.vdb.elasticsearch.elasticsearch_vector import ElasticSearchVectorFactory
 from app.core.quota_manager import report_quota_change
 from app.core.response_utils import success
@@ -33,7 +33,7 @@ from app.schemas.knowledge_retrieval_schema import KnowledgeRetrievalRequest
 from app.schemas.response_schema import ApiResponse
 from app.services import knowledge_service, document_service
 from app.services.file_storage_service import FileStorageService, get_file_storage_service, generate_kb_file_key
-from app.services.knowledge_retrieval_service import KnowledgeRetrievalAccessDenied
+from app.integrations.knowledge.types import KnowledgeRetrievalAccessDenied
 from app.services.model_service import ModelApiKeyService
 from app.core.rag.utils.preview_utils import _build_preview_hierarchy
 from app.core.utils.datetime_utils import to_timestamp_ms
