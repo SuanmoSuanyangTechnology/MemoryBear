@@ -66,7 +66,7 @@ def get_model_list(
         provider: Optional[model_schema.ModelProvider] = Query(None, description="提供商筛选(基于API Key)"),
         is_active: Optional[bool] = Query(None, description="激活状态筛选"),
         is_public: Optional[bool] = Query(None, description="公开状态筛选"),
-        is_available: Optional[bool] = Query(None, description="可用性筛选（未弃用且渠道候选非空）"),
+        is_available: Optional[bool] = Query(None, description="可用性筛选（已启用且未弃用且渠道候选非空）"),
         search: Optional[str] = Query(None, description="搜索关键词"),
         page: int = Query(1, ge=1, description="页码"),
         pagesize: int = Query(10, ge=1, le=100, description="每页数量"),
@@ -81,8 +81,8 @@ def get_model_list(
     - 多个（逗号分隔）：?type=LLM,EMBEDDING
     - 多个（重复参数）：?type=LLM&type=EMBEDDING
 
-    is_available=true 时仅返回"未弃用且渠道候选非空"的模型（服务端全量探测后内存分页），
-    供选择器隐藏已弃用/无渠道模型；is_deprecated 详情见响应字段。
+    is_available=true 时仅返回"已启用且未弃用且渠道候选非空"的模型（服务端全量探测后内存分页），
+    供选择器隐藏已禁用/已弃用/无渠道模型；is_deprecated 详情见响应字段。
     """
     api_logger.info(
         f"获取模型配置列表请求: type={type}, provider={provider}, is_available={is_available}, page={page}, pagesize={pagesize}, tenant_id={current_user.tenant_id}")
@@ -127,6 +127,7 @@ def get_model_list_new(
     provider: Optional[model_schema.ModelProvider] = Query(None, description="提供商筛选(基于ModelConfig)"),
     is_active: Optional[bool] = Query(None, description="激活状态筛选"),
     is_public: Optional[bool] = Query(None, description="公开状态筛选"),
+    is_available: Optional[bool] = Query(None, description="可用性筛选（已启用且未弃用且渠道候选非空）"),
     search: Optional[str] = Query(None, description="搜索关键词"),
     is_composite: Optional[bool] = Query(None, description="组合模型筛选"),
     db: Session = Depends(get_db),
@@ -160,6 +161,7 @@ def get_model_list_new(
             provider=provider,
             is_active=is_active,
             is_public=is_public,
+            is_available=is_available,
             is_composite=is_composite,
             search=search
         )

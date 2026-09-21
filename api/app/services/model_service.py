@@ -439,8 +439,10 @@ def _probe_availability(
 
 
 def _derived_available(model: ModelConfig, availability: dict[uuid.UUID, bool]) -> bool | None:
-    """派生可用性（D15③）：弃用恒 False；否则渠道候选探测结果；未探测为 None。"""
+    """派生可用性（D15③）：弃用/已禁用恒 False；否则渠道候选探测结果；未探测为 None。"""
     if model.model_base is not None and model.model_base.is_deprecated:
+        return False
+    if not model.is_active:
         return False
     return availability.get(model.id)
 
@@ -449,8 +451,8 @@ def _with_availability(
     model: ModelConfig, availability: dict[uuid.UUID, bool]
 ) -> model_schema.ModelConfig:
     item = wire_model_config(model)
-    if item.is_deprecated:
-        # D15：弃用派生封禁（不依赖探测，任意租户口径恒不可用）
+    if item.is_deprecated or not model.is_active:
+        # D15：弃用派生封禁（不依赖探测，任意租户口径恒不可用）；已禁用同口径
         item.is_available = False
     elif model.id in availability:
         item.is_available = availability[model.id]
@@ -500,6 +502,8 @@ class ModelConfigService:
     ) -> bool | None:
         """单模型渠道可用性（详情展示）；tenant_id 缺失时返回 None（未探测）。"""
         if model_config.model_base is not None and model_config.model_base.is_deprecated:
+            return False
+        if not model_config.is_active:
             return False
         if tenant_id is None:
             return None
@@ -654,7 +658,7 @@ class ModelConfigService:
         """获取模型配置列表（含渠道可用性：候选链非空 = True）。
 
         `is_available` 置位时：全量取行 → 批量探测 → 派生过滤 → 内存分页
-        （选择器隐藏无渠道/已弃用模型，G1；租户模型量有界）。
+        （选择器隐藏已禁用/无渠道/已弃用模型，G1；租户模型量有界）。
         """
         models, total = ModelConfigRepository.get_list(db, query, tenant_id=tenant_id)
 
@@ -694,6 +698,14 @@ class ModelConfigService:
 
         items = []
         for provider, models in provider_groups.items():
+            # `is_available` 置位时按派生可用性过滤（与 /models 同规则）；过滤空的分组整体移除
+            if query.is_available is not None:
+                models = [
+                    model for model in models
+                    if _derived_available(model, availability) is query.is_available
+                ]
+                if not models:
+                    continue
             # 验证每个模型并封装分组信息
             validated_models = [_with_availability(model, availability) for model in models]
             tags = list({model.type for model in validated_models})
