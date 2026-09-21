@@ -119,7 +119,7 @@
   "KB_IMAGE_HYBRID_RERANK_REQUIRED": "Image hybrid retrieval requires model reranking",
   "KB_IMAGE_PARTICIPLE_UNSUPPORTED": "Image retrieval does not support full-text retrieval mode",
   "KB_IMAGE_RERANK_MODEL_UNSUPPORTED": "The selected rerank model does not support image retrieval; select a compatible image rerank model",
-  "KB_IMAGE_TARGET_CONFIG_UNSUPPORTED": "The image retrieval target configuration is not supported",
+  "KB_IMAGE_TARGET_CONFIG_UNSUPPORTED": "Image retrieval only supports semantic and hybrid retrieval, and graph retrieval must be disabled",
   "KB_IMAGE_WEIGHTED_GLOBAL_RERANK_UNSUPPORTED": "Image retrieval does not support weighted global reranking",
   "KB_MODEL_PROVIDER_RESPONSE_INVALID": "The model service returned an invalid response",
   "KB_RETRIEVAL_EMBEDDING_MODEL_NOT_CONFIGURED": "The knowledge base has no embedding model configured",

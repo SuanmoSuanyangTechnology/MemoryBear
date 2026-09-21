@@ -59,7 +59,7 @@ logger = logging.getLogger(__name__)
 _IMAGE_BOUNDARY_MESSAGES: dict[str, str] = {
     "KB_IMAGE_AUTO_METADATA_UNSUPPORTED": "图片检索不支持自动元数据筛选",
     "KB_IMAGE_PARTICIPLE_UNSUPPORTED": "图片检索不支持全文检索模式",
-    "KB_IMAGE_TARGET_CONFIG_UNSUPPORTED": "图片检索目标配置不受支持",
+    "KB_IMAGE_TARGET_CONFIG_UNSUPPORTED": "图片检索仅支持语义检索和混合检索，且不能开启图谱召回",
     "KB_IMAGE_EMBEDDING_MODEL_UNSUPPORTED": "所选向量模型不支持图片检索，请选择兼容的图片向量模型",
     "KB_IMAGE_HYBRID_RERANK_REQUIRED": "图片混合检索需要模型重排",
     "KB_IMAGE_RERANK_MODEL_UNSUPPORTED": "所选重排模型不支持图片检索，请选择兼容的图片重排模型",
