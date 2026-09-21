@@ -6427,6 +6427,206 @@ def init_community_clustering_for_users(self, end_user_ids: List[str], workspace
     finally:
         _shutdown_loop_gracefully(loop)
 
+@celery_app.task(
+    name="app.tasks.init_community_clustering_for_users",
+    bind=True,
+    ignore_result=False,
+    max_retries=0,
+    acks_late=False,
+    time_limit=7200,  # 2小时硬超时
+    soft_time_limit=6900,
+)
+def init_community_clustering_for_users(self, end_user_ids: List[str], workspace_id: Optional[str] = None) -> Dict[
+    str, Any]:
+    """触发型任务：检查指定用户列表，对有 ExtractedEntity 但无 Community 节点的用户执行全量聚类。
+
+    由 /dashboard/end_users 接口触发，已有社区节点的用户直接跳过。
+    任务完成且所有用户数据均完整时，写入 Redis 标记，避免下次重复投递。
+
+    Args:
+        end_user_ids: 需要检查的用户 ID 列表
+        workspace_id: 工作空间 ID，用于完成标记
+
+    Returns:
+        包含任务执行结果的字典
+    """
+    start_time = time.time()
+
+    async def _run() -> Dict[str, Any]:
+        from app.core.logging_config import get_logger
+        from app.repositories.neo4j.community_repository import CommunityRepository
+        from app.core.memory.storage.custom import CommunityMutationWriter
+        from app.core.memory.storage.provider.neo4j.client import Neo4jClient
+        from app.repositories.neo4j.neo4j_connector import Neo4jConnector
+        from app.core.memory.storage_services.clustering_engine.label_propagation import LabelPropagationEngine
+
+        logger = get_logger(__name__)
+        logger.info(f"[CommunityCluster] 开始社区聚类补全任务，候选用户数: {len(end_user_ids)}")
+
+        initialized = 0
+        skipped = 0
+        failed = 0
+
+        connector = Neo4jConnector()
+        storage_client = None
+        try:
+            storage_client = await Neo4jClient.create()
+            repo = CommunityRepository(connector)
+            community_writer = CommunityMutationWriter(storage_client)
+            redis_client = get_thread_safe_sync_redis()
+
+            # 批量预取所有用户的 MemoryConfig（tenant 与 model_id 同源），避免循环内逐个查库。
+            # 加载失败的用户不存入 map，循环内检测到缺失时直接 skip。
+            user_config_map: Dict[str, Any] = {}
+            try:
+                with get_db_context() as db:
+                    from app.services.memory_agent_service import get_end_users_connected_configs_batch
+                    from app.services.memory_config_service import MemoryConfigService
+                    batch_configs = get_end_users_connected_configs_batch(end_user_ids, db)
+                    for uid, cfg_info in batch_configs.items():
+                        config_id = cfg_info.get("memory_config_id")
+                        if config_id:
+                            try:
+                                user_config_map[uid] = MemoryConfigService(db).load_memory_config(config_id=config_id)
+                            except Exception as e:
+                                logger.error(f"[CommunityCluster] 用户 {uid} 加载配置失败，将跳过: {e}")
+            except Exception as e:
+                logger.error(f"[CommunityCluster] 批量获取配置失败: {e}")
+
+            for requested_end_user_id in end_user_ids:
+                write_lock = None
+                end_user_id = requested_end_user_id
+                try:
+                    end_user_id, write_lock = _acquire_community_clustering_lock(
+                        requested_end_user_id,
+                        redis_client=redis_client,
+                        expire=7200,
+                    )
+
+                    # 配置加载失败的用户直接跳过
+                    memory_config = user_config_map.get(end_user_id)
+                    if not memory_config and end_user_id != requested_end_user_id:
+                        with get_db_context() as db:
+                            from app.services.memory_agent_service import (
+                                get_end_users_connected_configs_batch,
+                            )
+                            from app.services.memory_config_service import MemoryConfigService
+
+                            resolved_configs = get_end_users_connected_configs_batch(
+                                [end_user_id], db
+                            )
+                            config_info = resolved_configs.get(end_user_id) or {}
+                            resolved_config_id = config_info.get("memory_config_id")
+                            if resolved_config_id:
+                                memory_config = MemoryConfigService(db).load_memory_config(
+                                    config_id=resolved_config_id
+                                )
+                                user_config_map[end_user_id] = memory_config
+                    if not memory_config:
+                        failed += 1
+                        logger.warning(
+                            f"[CommunityCluster] 用户 {end_user_id} 无有效配置，跳过聚类"
+                        )
+                        continue
+
+                    # 已有社区节点时，检查是否存在属性不完整的节点
+                    has_communities = await repo.has_communities(end_user_id)
+                    if has_communities:
+                        incomplete_ids = await repo.get_incomplete_communities(
+                            end_user_id,
+                            check_embedding=bool(memory_config.embedding_model_id),
+                        )
+                        if not incomplete_ids:
+                            skipped += 1
+                            logger.debug(f"[CommunityCluster] 用户 {end_user_id} 社区节点均完整，跳过")
+                            continue
+
+                        # 对不完整的社区节点逐一补全元数据
+                        engine = LabelPropagationEngine(
+                            connector=connector,
+                            memory_config=memory_config,
+                            community_writer=community_writer,
+                        )
+                        logger.info(
+                            f"[CommunityCluster] 用户 {end_user_id} 发现 {len(incomplete_ids)} 个属性不完整的社区，开始补全"
+                        )
+                        patch_ok = 0
+                        patch_fail = 0
+                        for cid in incomplete_ids:
+                            try:
+                                await engine._generate_community_metadata(
+                                    [cid], end_user_id
+                                )
+                                patch_ok += 1
+                            except Exception as patch_err:
+                                patch_fail += 1
+                                logger.error(f"[CommunityCluster] 社区 {cid} 元数据补全失败: {patch_err}")
+                        logger.info(
+                            f"[CommunityCluster] 用户 {end_user_id} 社区补全完成: 成功={patch_ok}, 失败={patch_fail}"
+                        )
+                        initialized += 1
+                        continue
+
+                    # 检查是否有 ExtractedEntity 节点
+                    entities = await repo.get_all_entities(end_user_id)
+                    if not entities:
+                        skipped += 1
+                        logger.debug(f"[CommunityCluster] 用户 {end_user_id} 无实体节点，跳过")
+                        continue
+
+                    # 每个用户使用自己的 MemoryConfig（tenant 与 model_id 同源）
+                    engine = LabelPropagationEngine(
+                        connector=connector,
+                        memory_config=memory_config,
+                        community_writer=community_writer,
+                    )
+
+                    logger.info(
+                        f"[CommunityCluster] 用户 {end_user_id} 有 {len(entities)} 个实体，开始全量聚类，"
+                        f"llm_model_id={memory_config.llm_model_id}")
+                    await engine.full_clustering(end_user_id)
+                    initialized += 1
+                    logger.info(f"[CommunityCluster] 用户 {end_user_id} 聚类完成")
+
+                except Exception as e:
+                    failed += 1
+                    logger.error(f"[CommunityCluster] 用户 {end_user_id} 聚类失败: {e}")
+                finally:
+                    if write_lock is not None:
+                        write_lock.release()
+
+        finally:
+            try:
+                if storage_client is not None:
+                    await storage_client.close()
+            finally:
+                await connector.close()
+
+        logger.info(
+            f"[CommunityCluster] 任务完成: 初始化={initialized}, 跳过={skipped}, 失败={failed}"
+        )
+        return {
+            "status": "SUCCESS",
+            "initialized": initialized,
+            "skipped": skipped,
+            "failed": failed,
+        }
+
+    loop = set_asyncio_event_loop()
+    try:
+        result = loop.run_until_complete(_run())
+        # 全部失败（无初始化、无跳过）= 完全失败：raise → Celery FAILURE
+        if result["failed"] > 0 and result["initialized"] == 0 and result["skipped"] == 0:
+            raise RuntimeError(
+                f"all {result['failed']} users failed in community clustering"
+            )
+        result["elapsed_time"] = time.time() - start_time
+        result["task_id"] = self.request.id
+        return result
+    # 不再 catch 全局异常，直接冒出 → Celery FAILURE；
+    # 内层 _run() 中 connector.close() 已由 try/finally 保证释放。
+    finally:
+        _shutdown_loop_gracefully(loop)
 
 # ─── User Metadata Extraction Task ───────────────────────────────────────────
 
