@@ -163,7 +163,7 @@ RUN --mount=type=cache,id=apt-final,target=/var/cache/apt,sharing=locked \
     fi && \
     apt-get update && \
     apt-get install -y --no-install-recommends \
-        ca-certificates default-jre-headless libpq5 libgomp1 libjemalloc2 curl libmagic1 && \
+        ca-certificates openjdk-25-jre-headless libpq5 libgomp1 libjemalloc2 curl libmagic1 && \
     rm -rf /var/lib/apt/lists/*
 
 

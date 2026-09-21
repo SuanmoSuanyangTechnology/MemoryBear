@@ -21,7 +21,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN --mount=type=cache,id=mem_apt,target=/var/cache/apt,sharing=locked \
     apt-get update && \
     apt-get install -y --no-install-recommends \
-        ca-certificates default-jre-headless libmagic1 libjemalloc2 libgomp1 pipx git curl && \
+        ca-certificates openjdk-25-jre-headless libmagic1 libjemalloc2 libgomp1 pipx git curl && \
     rm -rf /var/lib/apt/lists/*
 
 RUN if [ "$NEED_MIRROR" == "1" ]; then \
