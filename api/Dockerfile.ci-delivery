@@ -1,0 +1,215 @@
+# Delivery-only variant derived from the CI Dockerfile recorded in Obsidian.
+# Requires feat/v0.4.7-delivery-slim sources; does not change the standard pipeline.
+# CI intentionally resolves from pyproject + pip-packages; /code/uv.lock records that resolution.
+# ============================================
+# MemoryBear API Dockerfile
+#
+# 构建 context 必须是项目根目录：
+#
+# 02dev-open-redbear-mem/
+# ├── packages/
+# │   └── redbear-model/
+# └── app/
+#     ├── pyproject.toml
+#     ├── pip-packages/
+#     ├── app/
+#     ├── migrations/
+#     ├── huggingface.co/
+#     ├── nltk_data/
+#     ├── alembic.ini
+#     └── Dockerfile.ci-delivery
+#
+# 构建：
+#
+# cd 02dev-open-redbear-mem
+# docker build \
+#   -f app/Dockerfile.ci-delivery \
+#   -t redbear-mem:latest .
+#
+# 国内构建：
+# docker build \
+#   --build-arg NEED_MIRROR=1 \
+#   -f app/Dockerfile.ci-delivery \
+#   -t redbear-mem:latest .
+#
+# 海外构建：
+# docker build \
+#   --build-arg NEED_MIRROR=0 \
+#   -f app/Dockerfile.ci-delivery \
+#   -t redbear-mem:latest .
+# ============================================
+
+
+# ============================================
+# Base
+# ============================================
+FROM harbor.rboa.redbearai.com/base/python:3.12-slim AS base
+
+USER root
+SHELL ["/bin/bash", "-c"]
+
+ARG NEED_MIRROR=1
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+WORKDIR /code
+
+
+# ============================================
+# Builder
+# 构建 Python 依赖
+# ============================================
+FROM base AS builder
+
+ARG NEED_MIRROR=1
+
+
+# ============================================
+# APT
+# ============================================
+RUN --mount=type=cache,id=apt-builder,target=/var/cache/apt,sharing=locked \
+    if [ "$NEED_MIRROR" = "1" ]; then \
+        sed -i \
+            -e 's|deb.debian.org|mirrors.aliyun.com|g' \
+            -e 's|security.debian.org|mirrors.aliyun.com/debian-security|g' \
+            /etc/apt/sources.list.d/debian.sources; \
+    fi && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+        build-essential \
+        python3-dev \
+        pipx \
+        git && \
+    rm -rf /var/lib/apt/lists/*
+
+
+# ============================================
+# 安装 uv
+# ============================================
+RUN pipx install uv
+
+ENV PATH=/root/.local/bin:$PATH
+
+
+# ============================================
+# Python / PyPI 国内源
+# ============================================
+ENV UV_INDEX_URL=https://mirrors.cloud.tencent.com/pypi/simple/
+ENV UV_EXTRA_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
+
+
+# ============================================
+# 关键：
+# redbear-model 是 pyproject.toml 的本地路径依赖
+#
+# pyproject.toml：
+#
+# [tool.uv.sources]
+# redbear-model = { path = "../packages/redbear-model" }
+#
+# 当前：
+# /code/pyproject.toml
+#
+# ../packages/redbear-model
+#          ↓
+# /packages/redbear-model
+# ============================================
+COPY packages/redbear-model /packages/redbear-model
+
+
+# ============================================
+# 只复制依赖描述
+# 最大化 Docker Cache 命中
+# ============================================
+COPY app/pyproject.toml /code/
+
+
+# ============================================
+# 本地 Python wheel
+# ============================================
+COPY app/pip-packages /opt/pip-packages
+
+
+# ============================================
+# 安装 Python 依赖
+# ============================================
+RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv,sharing=locked \
+    uv sync \
+        --no-dev \
+        --find-links /opt/pip-packages && \
+    uv pip list --python /code/.venv/bin/python --format json > /code/dependency-manifest.json && \
+    rm -rf /opt/pip-packages
+
+
+# ============================================
+# Final
+# ============================================
+FROM base AS final
+
+ARG NEED_MIRROR=1
+
+
+# ============================================
+# Runtime APT
+# ============================================
+RUN --mount=type=cache,id=apt-final,target=/var/cache/apt,sharing=locked \
+    if [ "$NEED_MIRROR" = "1" ]; then \
+        sed -i \
+            -e 's|deb.debian.org|mirrors.aliyun.com|g' \
+            -e 's|security.debian.org|mirrors.aliyun.com/debian-security|g' \
+            /etc/apt/sources.list.d/debian.sources; \
+    fi && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+        ca-certificates libpq5 libgomp1 libjemalloc2 curl libmagic1 && \
+    rm -rf /var/lib/apt/lists/*
+
+
+# ============================================
+# Python Virtual Environment
+# ============================================
+COPY --from=builder /code/.venv /code/.venv
+COPY --from=builder /code/uv.lock /code/uv.lock
+COPY --from=builder /code/dependency-manifest.json /code/dependency-manifest.json
+
+ENV PATH=/code/.venv/bin:$PATH
+
+
+# ============================================
+# 应用代码
+# ============================================
+COPY app/app /code/app
+COPY app/alembic.ini /code/alembic.ini
+COPY app/migrations /code/migrations
+
+
+# ============================================
+# ============================================
+
+
+
+
+# ============================================
+# ============================================
+
+
+# ============================================
+# ============================================
+
+
+
+# ============================================
+# tiktoken
+# ============================================
+COPY app/cl100k_base.tiktoken \
+    /code/res/9b5ad71b2ce5302211f9c61530b329a4922fc6a4
+
+
+# ============================================
+# Runtime
+# ============================================
+EXPOSE 8000
+
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -1,0 +1,17 @@
+# Local state is never part of delivery build inputs.
+.git
+**/.git
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/.venv
+**/.env
+**/.env.*
+.superpowers
+.codex
+.claude
+AGENTS.md
+.worktreeinclude
+docs
+tests
+**/tests
