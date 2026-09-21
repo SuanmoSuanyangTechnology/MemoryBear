@@ -531,6 +531,7 @@ def test_elasticsearch_index_definitions_are_explicit_and_unique() -> None:
         MemoryNodeType.EXTRACTED_ENTITY: (3, 1),
         MemoryNodeType.MEMORY_SUMMARY: (3, 1),
         MemoryNodeType.PERCEPTUAL: (3, 1),
+        MemoryNodeType.PREFERENCE: (1, 1),
         MemoryNodeType.SCENE_SUMMARY: (2, 1),
         MemoryNodeType.STATEMENT: (3, 1),
         MemoryNodeType.USER_SOURCE: (3, 1),

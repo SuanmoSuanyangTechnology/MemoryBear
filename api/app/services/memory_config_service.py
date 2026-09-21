@@ -395,6 +395,13 @@ def _build_memory_config(
         prediction_recall_limit=int(memory_config_row.prediction_recall_limit),
         prediction_min_valid_memory_count=int(memory_config_row.prediction_min_valid_memory_count),
         prediction_embedding_min_similarity=float(memory_config_row.prediction_embedding_min_similarity),
+        # Pipeline config: Coding Agent preference extension
+        preference_engine_enabled=bool(
+            getattr(memory_config_row, "preference_engine_enabled", False)
+        ),
+        preference_custom_keywords=tuple(
+            getattr(memory_config_row, "preference_custom_keywords", None) or []
+        ),
         # Ontology scene association
         scene_id=memory_config_row.scene_id,
         ontology_class_infos=ontology_class_infos,
@@ -421,6 +428,95 @@ class MemoryConfigService:
             db: SQLAlchemy database session
         """
         self.db = db
+
+    async def read_preference_config_async(
+        self,
+        *,
+        config_id: uuid.UUID,
+        workspace_id: uuid.UUID,
+    ):
+        from app.core.memory.storage_services.preference_engine.default_keywords import DEFAULT_PREFERENCE_KEYWORDS
+        from app.core.memory.storage_services.preference_engine.keyword_gate import effective_keywords
+        from app.repositories.memory_config_repository import MemoryConfigRepository
+        from app.schemas.memory_preference_config_schema import PreferenceConfigResponse
+
+        row = await MemoryConfigRepository(self.db).get_by_id_async(config_id)
+        if row is None or str(row.workspace_id) != str(workspace_id):
+            raise LookupError("memory config not found or not owned by workspace")
+        custom = list(row.preference_custom_keywords or [])
+        return PreferenceConfigResponse(
+            config_id=row.config_id,
+            preference_engine_enabled=bool(row.preference_engine_enabled),
+            default_keywords=list(DEFAULT_PREFERENCE_KEYWORDS),
+            custom_keywords=custom,
+            effective_keywords=effective_keywords(custom),
+        )
+
+    async def update_preference_config_async(
+        self,
+        *,
+        payload,
+        workspace_id: uuid.UUID,
+        operator: str,
+    ):
+        import unicodedata
+
+        from app.core.memory.storage_services.preference_engine.default_keywords import DEFAULT_PREFERENCE_KEYWORDS
+        from app.core.memory.storage_services.preference_engine.keyword_gate import normalize_keyword
+        from app.repositories.memory_config_repository import MemoryConfigRepository
+        from app.utils.redis_cache import invalidate_cache
+
+        def normalize_list(values: list[str] | None, field_name: str) -> list[str]:
+            normalized: list[str] = []
+            for value in values or []:
+                if not isinstance(value, str):
+                    raise ValueError(f"{field_name} must contain strings")
+                keyword = normalize_keyword(value)
+                if not keyword:
+                    raise ValueError(f"{field_name} contains an empty keyword")
+                if len(keyword) > 40:
+                    raise ValueError(f"{field_name} keyword exceeds 40 Unicode characters")
+                if any(unicodedata.category(char).startswith("C") for char in keyword):
+                    raise ValueError(f"{field_name} keyword contains control characters")
+                normalized.append(keyword)
+            if len(normalized) != len(set(normalized)):
+                raise ValueError(f"{field_name} contains normalized duplicates")
+            return normalized
+
+        custom_keywords = None
+        if payload.custom_keywords is not None:
+            custom_keywords = normalize_list(payload.custom_keywords, "custom_keywords")
+            default_set = {
+                normalize_keyword(item) for item in DEFAULT_PREFERENCE_KEYWORDS
+            }
+            custom_keywords = [
+                keyword for keyword in custom_keywords if keyword not in default_set
+            ]
+            if len(custom_keywords) > 100:
+                raise ValueError("a config can contain at most 100 custom keywords")
+
+        repository = MemoryConfigRepository(self.db)
+        row, before_enabled, actual_added, actual_removed = (
+            await repository.update_preference_config_async(
+                config_id=payload.config_id,
+                workspace_id=workspace_id,
+                preference_engine_enabled=payload.preference_engine_enabled,
+                custom_keywords=custom_keywords,
+            )
+        )
+        await self.db.commit()
+        await self.db.refresh(row)
+        logger.info(
+            "Preference config updated operator=%s config_id=%s enabled=%s->%s added=%s removed=%s updated_at=%s",
+            operator, row.config_id, before_enabled, bool(row.preference_engine_enabled),
+            actual_added, actual_removed, row.updated_at,
+        )
+        await invalidate_cache(prefix=f"memory_config:{row.config_id}")
+        await invalidate_cache(prefix=f"preference_keywords:{row.config_id}")
+        return await self.read_preference_config_async(
+            config_id=row.config_id,
+            workspace_id=workspace_id,
+        )
 
     async def _resolve_model_credentials(
             self,

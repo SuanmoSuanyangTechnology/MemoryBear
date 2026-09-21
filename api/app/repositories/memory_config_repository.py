@@ -581,6 +581,47 @@ class MemoryConfigRepository:
         await self.db.commit()
         await self.db.refresh(config)
         return config
+    async def update_preference_config_async(
+        self,
+        *,
+        config_id: uuid.UUID,
+        workspace_id: uuid.UUID,
+        preference_engine_enabled: bool | None,
+        custom_keywords: list[str] | None,
+    ) -> tuple[MemoryConfig, bool, list[str], list[str]]:
+        """Lock a config row and replace its custom preference keywords."""
+        stmt = (
+            select(MemoryConfig)
+            .where(
+                MemoryConfig.config_id == config_id,
+                MemoryConfig.workspace_id == workspace_id,
+            )
+            .with_for_update()
+        )
+        result = await self.db.execute(stmt)
+        row = result.scalar_one_or_none()
+        if row is None:
+            raise LookupError("memory config not found or not owned by workspace")
+
+        before_enabled = bool(row.preference_engine_enabled)
+        current = list(row.preference_custom_keywords or [])
+        actual_added: list[str] = []
+        actual_removed: list[str] = []
+        if custom_keywords is not None:
+            current_set = set(current)
+            replacement_set = set(custom_keywords)
+            actual_added = [
+                keyword for keyword in custom_keywords if keyword not in current_set
+            ]
+            actual_removed = [
+                keyword for keyword in current if keyword not in replacement_set
+            ]
+            row.preference_custom_keywords = custom_keywords
+
+        if preference_engine_enabled is not None:
+            row.preference_engine_enabled = preference_engine_enabled
+        await self.db.flush()
+        return row, before_enabled, actual_added, actual_removed
 
     async def get_by_workspace_and_config_name_async(
             self, workspace_id: uuid.UUID, config_name: str

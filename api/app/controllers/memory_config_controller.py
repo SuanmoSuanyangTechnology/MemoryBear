@@ -35,6 +35,7 @@ from app.schemas.memory_storage_schema import (
     ForgettingConfigUpdateRequest,
 )
 from app.schemas.memory_api_schema import PredictionConfigUpdateRequest
+from app.schemas.memory_preference_config_schema import PreferenceConfigUpdate
 from app.schemas.response_schema import ApiResponse
 from app.schemas.scene_memory_schema import SceneConfig, SceneConfigUpdate
 from app.services.emotion_config_service import EmotionConfigService
@@ -655,3 +656,52 @@ async def update_config_scene(
         data = SceneConfig.model_validate(row).model_dump(mode="json")
     await invalidate_cache(prefix=f"memory_config:{payload.config_id}")
     return success(data=data, msg="更新成功")
+
+
+@router.get("/read_config_preference", response_model=ApiResponse)
+async def read_config_preference(
+    config_id: UUID,
+    current_user: CurrentUserSnapshot = Depends(get_current_user_async),
+):
+    """Read the workspace-owned Coding Agent preference configuration."""
+    from app.services.memory_config_service import MemoryConfigService
+
+    workspace_id = current_user.current_workspace_id
+    if workspace_id is None:
+        return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间")
+    async with get_async_db_context() as db:
+        try:
+            data = await MemoryConfigService(db).read_preference_config_async(
+                config_id=config_id,
+                workspace_id=workspace_id,
+            )
+            return success(data=data.model_dump(mode="json"), msg="查询成功")
+        except LookupError:
+            return fail(BizCode.MEMORY_CONFIG_NOT_FOUND, "配置不存在或无权访问")
+
+
+@router.post("/update_config_preference", response_model=ApiResponse)
+async def update_config_preference(
+    payload: PreferenceConfigUpdate,
+    current_user: CurrentUserSnapshot = Depends(get_current_user_async),
+):
+    """Update custom preference keywords and/or the engine switch."""
+    from app.services.memory_config_service import MemoryConfigService
+
+    workspace_id = current_user.current_workspace_id
+    if workspace_id is None:
+        return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间")
+    async with get_async_db_context() as db:
+        try:
+            data = await MemoryConfigService(db).update_preference_config_async(
+                payload=payload,
+                workspace_id=workspace_id,
+                operator=str(current_user.id),
+            )
+            return success(data=data.model_dump(mode="json"), msg="更新成功")
+        except ValueError as exc:
+            await db.rollback()
+            return fail(BizCode.INVALID_PARAMETER, "偏好配置参数错误", str(exc))
+        except LookupError:
+            await db.rollback()
+            return fail(BizCode.MEMORY_CONFIG_NOT_FOUND, "配置不存在或无权访问")

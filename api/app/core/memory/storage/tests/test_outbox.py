@@ -195,6 +195,25 @@ async def test_current_source_wins_for_upsert_and_draft_delete(operation):
     check.assert_awaited_once()
 
 
+async def test_preference_projection_uses_standard_node_id():
+    item = replace(event(), label="Preference", node_id="preference-1")
+    source = {
+        "id": item.node_id,
+        "end_user_id": "user-1",
+        "preference_text": ["use type hints"],
+    }
+    neo = Mock(get_node=AsyncMock(return_value=read_result([source])))
+    es = Mock(save_node=AsyncMock(), delete_node=AsyncMock())
+
+    await project_event(item, neo, es, check_claim=AsyncMock())
+
+    assert neo.get_node.await_args.kwargs == {
+        "label": MemoryNodeType.PREFERENCE,
+        "node_filter": NodeFilter.eq("id", item.node_id),
+    }
+    assert es.save_node.await_args.args == (MemoryNodeType.PREFERENCE, source)
+
+
 async def test_delete_event_removes_document_without_rereading_source():
     item = replace(event(), operation="delete")
     neo = Mock(get_node=AsyncMock())

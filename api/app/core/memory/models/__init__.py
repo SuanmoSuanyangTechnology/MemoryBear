@@ -40,6 +40,7 @@ from app.core.memory.models.graph_models import (
     ChunkNode,
     ExtractedEntityNode,
     MemorySummaryNode,
+    PreferenceNode,
 )
 
 # Message and dialogue models
