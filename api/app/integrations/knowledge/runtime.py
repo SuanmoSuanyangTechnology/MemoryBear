@@ -113,3 +113,10 @@ def get_knowledge_route_proxy() -> KnowledgeRouteProxy | None:
 
 async def is_remote_knowledge_ready() -> bool:
     return await _runtime.ready()
+
+
+def get_knowledge_service_client():
+    """Return the initialized remote client for server-side knowledge calls."""
+    if not _runtime.enabled or _runtime._remote is None:
+        raise RuntimeError("Remote knowledge integration is not initialized")
+    return _runtime._remote

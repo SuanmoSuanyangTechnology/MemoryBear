@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import logging
 import time
 from collections.abc import AsyncIterator
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 from fastapi import Request
@@ -20,7 +21,7 @@ from app.schemas.knowledge_retrieval_schema import (
 )
 
 from .call_profile import CallProfile
-from .contracts import KnowledgeCallContext
+from .contracts import KnowledgeCallContext, KnowledgeJsonResponse
 from .errors import (
     KnowledgeProtocolError,
     KnowledgeServiceError,
@@ -108,6 +109,54 @@ class KnowledgeServiceClient:
                 transport=transport,
             )
         )
+
+    async def request_json(
+        self,
+        *,
+        method: Literal["GET", "POST", "PUT", "DELETE"],
+        path: str,
+        context: KnowledgeCallContext,
+        json_body: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> KnowledgeJsonResponse:
+        """Call a server-selected knowledge endpoint without a synthetic Request."""
+        if method not in {"GET", "POST", "PUT", "DELETE"}:
+            raise ValueError("Unsupported knowledge JSON method")
+        if not re.fullmatch(r"/internal/v1/knowledges/[A-Za-z0-9_-]+", path):
+            raise ValueError("Knowledge JSON path must identify an internal knowledge endpoint")
+        outgoing_headers = self._transport.request_headers(
+            headers or {}, context, CallProfile.JSON
+        )
+        content = None
+        if json_body is not None:
+            outgoing_headers["Content-Type"] = "application/json"
+            content = json.dumps(json_body, ensure_ascii=False).encode("utf-8")
+        response = await self._transport.send(
+            method=method,
+            url=self._transport.internal_url(path),
+            headers=outgoing_headers,
+            profile=CallProfile.JSON,
+            content=content,
+        )
+        try:
+            await response.aread()
+            try:
+                payload = response.json()
+            except ValueError as exc:
+                raise KnowledgeProtocolError("Knowledge service returned invalid JSON") from exc
+            if not isinstance(payload, dict):
+                raise KnowledgeProtocolError("Knowledge service JSON must be an object")
+            return KnowledgeJsonResponse(
+                status_code=response.status_code,
+                headers=self._transport.response_headers(response.headers),
+                payload=payload,
+            )
+        except httpx.TimeoutException as exc:
+            raise KnowledgeTimeoutError("Knowledge service response timed out") from exc
+        except httpx.RequestError as exc:
+            raise KnowledgeUnavailableError("Knowledge service response failed") from exc
+        finally:
+            await response.aclose()
 
     async def forward(
         self,

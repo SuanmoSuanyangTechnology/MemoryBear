@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 from uuid import UUID
+from typing import Any
 
 
 class KnowledgeRetrievalSource(StrEnum):
@@ -45,3 +46,12 @@ class KnowledgeContextError(ValueError):
 
 class KnowledgeConfigurationError(ValueError):
     """The remote knowledge integration configuration is invalid."""
+
+
+@dataclass(frozen=True)
+class KnowledgeJsonResponse:
+    """An upstream JSON response whose status must be handled by its caller."""
+
+    status_code: int
+    headers: dict[str, str]
+    payload: dict[str, Any]
