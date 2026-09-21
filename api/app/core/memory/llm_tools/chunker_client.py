@@ -10,11 +10,8 @@ import numpy as np
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 from chonkie import (
-    SemanticChunker,
     RecursiveChunker,
     RecursiveRules,
-    LateChunker,
-    NeuralChunker,
     SentenceChunker,
     TokenChunker,
 )
@@ -84,27 +81,6 @@ class LLMChunker:
             return []
 
 
-class HybridChunker:
-    """混合分块策略：先按结构分块，再按语义合并"""
-    def __init__(self, semantic_threshold: float = 0.8, base_chunk_size: int = 300):
-        self.semantic_threshold = semantic_threshold
-        self.base_chunk_size = base_chunk_size
-        self.base_chunker = TokenChunker(tokenizer="character", chunk_size=base_chunk_size)
-        self.semantic_chunker = SemanticChunker(threshold=semantic_threshold)
-
-    def __call__(self, text: str) -> List[Any]:
-        # 先用基础分块
-        base_chunks = self.base_chunker(text)
-
-        # 如果文本不长，直接返回基础分块
-        if len(base_chunks) <= 3:
-            return base_chunks
-
-        # 对基础分块进行语义合并
-        combined_text = " ".join([chunk.text for chunk in base_chunks])
-        return self.semantic_chunker(combined_text)
-
-
 class ChunkerClient:
     def __init__(self, chunker_config: ChunkerConfig, llm_client=None):
         self.chunker_config = chunker_config
@@ -132,40 +108,16 @@ class ChunkerClient:
                 chunk_size=self.chunk_size,
                 chunk_overlap=self.chunk_overlap,
             )
-        elif chunker_config.chunker_strategy == "SemanticChunker":
-            self.chunker = SemanticChunker(
-                embedding_model=self.embedding_model,
-                threshold=self.threshold,
-                chunk_size=self.chunk_size,
-                min_sentences=self.min_sentences,
-            )
         elif chunker_config.chunker_strategy == "RecursiveChunker":
             self.chunker = RecursiveChunker(
                 rules=RecursiveRules(),
                 min_characters_per_chunk=self.min_characters_per_chunk or 50,
                 chunk_size=self.chunk_size,
             )
-        elif chunker_config.chunker_strategy == "LateChunker":
-            self.chunker = LateChunker(
-                embedding_model=self.embedding_model,
-                chunk_size=self.chunk_size,
-                rules=RecursiveRules(),
-                min_characters_per_chunk=self.min_characters_per_chunk,
-            )
-        elif chunker_config.chunker_strategy == "NeuralChunker":
-            self.chunker = NeuralChunker(
-                model=self.embedding_model,
-                min_characters_per_chunk=self.min_characters_per_chunk,
-            )
         elif chunker_config.chunker_strategy == "LLMChunker":
             if not llm_client:
                 raise ValueError("LLMChunker requires an LLM client")
             self.chunker = LLMChunker(llm_client, self.chunk_size)
-        elif chunker_config.chunker_strategy == "HybridChunker":
-            self.chunker = HybridChunker(
-                semantic_threshold=self.threshold,
-                base_chunk_size=self.chunk_size,
-            )
         elif chunker_config.chunker_strategy == "SentenceChunker":
             self.chunker = SentenceChunker(
                 chunk_size=self.chunk_size,
