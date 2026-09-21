@@ -2,12 +2,6 @@
 **
 
 !api/
-!api/huggingface.co/
-!api/huggingface.co/**
-!api/nltk_data/
-!api/nltk_data/**
-!api/tika-server-standard-3.1.0.jar
-!api/tika-server-standard-3.1.0.jar.md5
 !api/cl100k_base.tiktoken
 !api/pyproject.toml
 !api/uv.lock

@@ -142,7 +142,7 @@ class Settings:
     )
 
     # Independent knowledge service routing
-    ENABLE_MEM_KNOWLEDGE: bool = os.getenv("ENABLE_MEM_KNOWLEDGE", "false").lower() == "true"
+    ENABLE_MEM_KNOWLEDGE: bool = os.getenv("ENABLE_MEM_KNOWLEDGE", "true").lower() == "true"
     MEM_KNOWLEDGE_BASE_URL: str = os.getenv("MEM_KNOWLEDGE_BASE_URL", "")
     MEM_KNOWLEDGE_CONNECT_TIMEOUT_SECONDS: float = float(
         os.getenv("MEM_KNOWLEDGE_CONNECT_TIMEOUT_SECONDS", "5")

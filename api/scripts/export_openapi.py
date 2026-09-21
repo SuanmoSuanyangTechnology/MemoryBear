@@ -76,10 +76,7 @@ def main():
          patch("neo4j.AsyncGraphDatabase.driver", return_value=neo4j_mock), \
          patch("redis.Redis", return_value=redis_mock), \
          patch("redis.StrictRedis", return_value=redis_mock):
-        ocr_patch = nullcontext() if args.isolated else patch.object(
-            import_module("app.core.rag.deepdoc.vision"), "OCR", return_value=MagicMock()
-        )
-        with ocr_patch:
+        with nullcontext():
             from app.main import app
             schema = app.openapi()
             if args.audit_output:
