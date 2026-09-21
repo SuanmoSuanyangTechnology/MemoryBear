@@ -1,3 +1,4 @@
+from app.core.memory.channel_policy import require_neo4j_memory
 import uuid
 from typing import List, Optional
 
@@ -147,26 +148,16 @@ async def get_workspace_end_users(
 
     api_logger.info(f"用户 {current_user.username} 请求获取工作空间 {workspace_id} 的宿主列表, 类型: {current_workspace_type}")
 
-    if current_workspace_type == "rag":
-        end_users_result = memory_dashboard_service.get_workspace_end_users_paginated_rag(
-            db=db,
-            workspace_id=workspace_id,
-            current_user=current_user,
-            page=page,
-            pagesize=pagesize,
-            keyword=keyword,
-            label=label,
-        )
-    else:
-        end_users_result = memory_dashboard_service.get_workspace_end_users_paginated(
-            db=db,
-            workspace_id=workspace_id,
-            current_user=current_user,
-            page=page,
-            pagesize=pagesize,
-            keyword=keyword,
-            label=label,
-        )
+    require_neo4j_memory(current_workspace_type)
+    end_users_result = memory_dashboard_service.get_workspace_end_users_paginated(
+        db=db,
+        workspace_id=workspace_id,
+        current_user=current_user,
+        page=page,
+        pagesize=pagesize,
+        keyword=keyword,
+        label=label,
+    )
 
     # 两种模式统一返回 [{"end_user": ORM, "memory_count"(仅RAG): int, "expire_time": datetime|None}]
     raw_items = end_users_result.get("items", [])
@@ -440,144 +431,17 @@ async def get_workspace_total_memory_count(
 
 
 # ======== RAG 数据统计 ========
-@router.get("/total_rag_count", response_model=ApiResponse)
-def get_workspace_total_rag_count(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    """
-    获取 rag 的总文档数、总chunk数、总知识库数量、总api调用数量
-    """
-    total_documents = memory_dashboard_service.get_rag_total_doc(db, current_user)
-    total_chunk = memory_dashboard_service.get_rag_total_chunk(db, current_user)
-    total_kb = memory_dashboard_service.get_rag_total_kb(db, current_user)
-    data = {
-        'total_documents':total_documents,
-        'total_chunk':total_chunk,
-        'total_kb':total_kb,
-        'total_api':1024
-    }
-    return success(data=data, msg="RAG相关数据获取成功")
-
-@router.get("/current_user_rag_total_num", response_model=ApiResponse)
-def get_current_user_rag_total_num(
-    end_user_id: str = Query(..., description="宿主ID"),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """
-    获取当前宿主的 RAG 的总chunk数量
-    """
-    total_chunk = memory_dashboard_service.get_current_user_total_chunk(end_user_id, db, current_user)
-    return success(data=total_chunk, msg="宿主RAG知识数据获取成功")
 
 
-@router.get("/rag_content", response_model=ApiResponse)
-def get_rag_content(
-    end_user_id: str = Query(..., description="宿主ID"),
-    page: int = Query(1, gt=0, description="页码，从1开始"),
-    pagesize: int = Query(15, gt=0, le=100, description="每页返回记录数"),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """
-    获取当前宿主知识库中的chunk内容（分页）
-    """
-    data = memory_dashboard_service.get_rag_content(end_user_id, page, pagesize, db, current_user)
-    return success(data=data, msg="宿主RAGchunk数据获取成功")
 
 
-@router.get("/chunk_summary_tag", response_model=ApiResponse)
-async def get_chunk_summary_tag(
-    end_user_id: str = Query(..., description="宿主ID"),
-    limit: int = Query(15, description="返回记录数"),
-    max_tags: int = Query(10, description="最大标签数量"),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """
-    读取RAG摘要、标签和人物形象（纯读库，不触发生成）。
-
-    返回格式：
-    {
-        "summary": "用户摘要",
-        "tags": [{"tag": "标签1", "frequency": 5}, ...],
-        "personas": ["产品设计师", ...],
-        "generated": true/false  // false表示尚未生产，请调用 /generate_rag_profile
-    }
-    """
-    api_logger.info(f"用户 {current_user.username} 读取宿主 {end_user_id} 的RAG摘要/标签/人物形象")
-
-    data = await memory_dashboard_service.get_chunk_summary_and_tags(
-        end_user_id=end_user_id,
-        limit=limit,
-        max_tags=max_tags,
-        db=db,
-        current_user=current_user
-    )
-
-    return success(data=data, msg="获取成功")
 
 
-@router.get("/chunk_insight", response_model=ApiResponse)
-async def get_chunk_insight(
-    end_user_id: str = Query(..., description="宿主ID"),
-    limit: int = Query(15, description="返回记录数"),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """
-    读取RAG洞察报告（纯读库，不触发生成）。
-
-    返回格式：
-    {
-        "insight": "总体概述",
-        "behavior_pattern": "行为模式",
-        "key_findings": "关键发现",
-        "growth_trajectory": "成长轨迹",
-        "generated": true/false  // false表示尚未生产，请调用 /generate_rag_profile
-    }
-    """
-    api_logger.info(f"用户 {current_user.username} 读取宿主 {end_user_id} 的RAG洞察")
-
-    data = await memory_dashboard_service.get_chunk_insight(
-        end_user_id=end_user_id,
-        limit=limit,
-        db=db,
-        current_user=current_user
-    )
-
-    return success(data=data, msg="获取成功")
 
 
-class GenerateRagProfileRequest(BaseModel):
-    end_user_id: str = Field(..., description="宿主ID")
-    limit: int = Field(15, description="参与生成的chunk数量上限")
-    max_tags: int = Field(10, description="最大标签数量")
 
 
-@router.post("/generate_rag_profile", response_model=ApiResponse)
-async def generate_rag_profile(
-    body: GenerateRagProfileRequest,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """
-    生产接口：为RAG存储模式的宿主全量重新生成完整画像并持久化到end_user表。
-    每次请求都会重新生成，覆盖已有数据。
-    """
-    api_logger.info(f"用户 {current_user.username} 触发RAG画像生产: end_user_id={body.end_user_id}")
 
-    data = await memory_dashboard_service.generate_rag_profile(
-        end_user_id=body.end_user_id,
-        limit=body.limit,
-        max_tags=body.max_tags,
-        db=db,
-        current_user=current_user,
-    )
-
-    api_logger.info(f"RAG画像生产完成: {data}")
-    return success(data=data, msg="RAG画像生产完成")
 
 
 @router.get("/dashboard_data", response_model=ApiResponse)
@@ -633,8 +497,7 @@ async def dashboard_data(
         workspace_id=workspace_id,
         user=current_user
     )
-    if storage_type is None:
-        storage_type = 'neo4j'
+    storage_type = require_neo4j_memory(storage_type)
     
     # 根据 storage_type 决定返回哪个数据对象
     # 如果是 'rag'，neo4j_data 为 null；否则 rag_data 为 null
@@ -692,47 +555,6 @@ async def dashboard_data(
             api_logger.info("成功获取neo4j_data")
         
         # 如果 storage_type 为 'rag'，获取 rag_data
-        elif storage_type == 'rag':
-            rag_data = {
-                "total_memory": None,
-                "total_app": None,
-                "total_knowledge": None,
-                "total_api_call": None
-            }
-            
-            # 1. 获取记忆总量（total_memory）—— rag 独有逻辑：查询 document 表的 chunk_num
-            try:
-                total_chunk = await memory_dashboard_service.get_rag_user_kb_total_chunk_async(db, current_user)
-                rag_data["total_memory"] = total_chunk
-                api_logger.info(f"成功获取RAG记忆总量: {total_chunk}")
-            except Exception as e:
-                api_logger.warning(f"获取RAG记忆总量失败: {str(e)}")
-            
-            # 2. 获取共享统计数据（total_app、total_knowledge、total_api_call）
-            common_stats = await memory_dashboard_service.get_dashboard_common_stats_async(db, workspace_id)
-            rag_data.update(common_stats)
-            api_logger.info(f"成功获取共享统计: app={common_stats['total_app']}, knowledge={common_stats['total_knowledge']}, api_call={common_stats['total_api_call']}")
-            
-            # 计算昨日对比
-            try:
-                changes = await memory_dashboard_service.get_dashboard_yesterday_changes_async(
-                    db=db,
-                    workspace_id=workspace_id,
-                    storage_type=storage_type,
-                    today_data=rag_data
-                )
-                rag_data.update(changes)
-            except Exception as e:
-                api_logger.warning(f"计算RAG昨日对比失败: {str(e)}")
-                rag_data.update({
-                    "total_memory_change": None,
-                    "total_app_change": None,
-                    "total_knowledge_change": None,
-                    "total_api_call_change": None,
-                })
-
-            result["rag_data"] = rag_data
-            api_logger.info("成功获取rag_data")
         
         api_logger.info("成功获取dashboard整合数据")
         return success(data=result, msg="Dashboard数据获取成功")

@@ -1,6 +1,7 @@
 """
 工作流服务层
 """
+from app.core.memory.channel_policy import require_neo4j_memory
 import datetime
 import asyncio
 import time
@@ -4882,20 +4883,7 @@ class WorkflowService:
             logger.warning(
                 f"Storage type not set for workspace {workspace_id}, using default: neo4j"
             )
-        if storage_type == "rag":
-            knowledge = knowledge_repository.get_knowledge_by_name(
-                db=self.db,
-                name="USER_RAG_MERORY",
-                workspace_id=workspace_id
-            )
-            if knowledge:
-                user_rag_memory_id = str(knowledge.id)
-            else:
-                logger.warning(
-                    f"No knowledge base named 'USER_RAG_MEMORY' found, "
-                    f"workspace_id: {workspace_id}, will use neo4j storage"
-                )
-                storage_type = 'neo4j'
+        require_neo4j_memory(storage_type)
         return storage_type, user_rag_memory_id
 
     async def _get_memory_store_info_async(self, workspace_id: uuid.UUID) -> tuple[str, str]:
@@ -4926,23 +4914,7 @@ class WorkflowService:
                     f"Storage type not set for workspace {workspace_id}, using default: neo4j"
                 )
 
-            if storage_type == "rag":
-                result = await db.execute(
-                    select(Knowledge.id).where(
-                        Knowledge.name == "USER_RAG_MERORY",
-                        Knowledge.workspace_id == workspace_id,
-                        Knowledge.status == 1,
-                    ).limit(1)
-                )
-                knowledge_id = result.scalar_one_or_none()
-                if knowledge_id:
-                    user_rag_memory_id = str(knowledge_id)
-                else:
-                    logger.warning(
-                        f"No knowledge base named 'USER_RAG_MEMORY' found, "
-                        f"workspace_id: {workspace_id}, will use neo4j storage"
-                    )
-                    storage_type = "neo4j"
+            require_neo4j_memory(storage_type)
 
         await set_json_async(cache_key, {
             "storage_type": storage_type,

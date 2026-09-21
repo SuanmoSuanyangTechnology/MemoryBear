@@ -1,3 +1,4 @@
+from app.core.memory.channel_policy import require_neo4j_memory
 import asyncio
 import json
 import os
@@ -2655,6 +2656,7 @@ def write_message_task(
     Returns:
         Dict containing status, result, elapsed_time, task_id
     """
+    require_neo4j_memory(storage_type)
     loop = set_asyncio_event_loop()
     # MCP 入口兼容：收到 messages 但无 target_message 时，转换为新格式
     if target_message is None and messages:
@@ -2684,24 +2686,6 @@ def write_message_task(
         )
 
     # RAG 存储类型走独立路径
-    if storage_type and storage_type.lower() == "rag":
-        try:
-            async def _rag_write():
-                from app.core.memory.memory_service import MemoryService
-                await MemoryService.write_messages_to_rag(
-                    messages=messages,
-                    end_user_id=resolved_end_user_id,
-                    user_rag_memory_id=user_rag_memory_id,
-                )
-
-            loop.run_until_complete(_rag_write())
-            return {"status": "SUCCESS", "result": "rag_write_complete", "task_id": self.request.id}
-        except Exception as e:
-            logger.error(f"[CELERY WRITE] RAG write failed: {e}", exc_info=True)
-            return {"status": "FAILURE", "error": str(e), "task_id": self.request.id}
-        finally:
-            if loop:
-                _shutdown_loop_gracefully(loop)
 
     # 新格式：直接调用 MemoryService.write()
     logger.info(

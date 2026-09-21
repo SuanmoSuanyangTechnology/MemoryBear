@@ -1,3 +1,4 @@
+from app.core.memory.channel_policy import require_neo4j_memory
 import hashlib
 import json
 import re
@@ -133,19 +134,7 @@ async def _prepare_public_memory_context_async(
         storage_type = "neo4j"
 
     user_rag_memory_id = ""
-    if storage_type == "rag":
-        knowledge = await knowledge_repository.get_knowledge_by_name_async(
-            db=db,
-            name="USER_RAG_MERORY",
-            workspace_id=workspace_id,
-        )
-        if knowledge:
-            user_rag_memory_id = str(knowledge.id)
-        else:
-            logger.warning(
-                f"未找到名为 'USER_RAG_MERORY' 的知识库，workspace_id: {workspace_id}，将使用 neo4j 存储"
-            )
-            storage_type = "neo4j"
+    require_neo4j_memory(storage_type)
 
     return storage_type, user_rag_memory_id
 
@@ -1531,13 +1520,7 @@ async def regenerate_message(
     if storage_type is None:
         storage_type = 'neo4j'
     user_rag_memory_id = ''
-    if storage_type == 'rag':
-        if workspace_id:
-            knowledge = knowledge_repository.get_knowledge_by_name(
-                db=db, name="USER_RAG_MERORY", workspace_id=workspace_id
-            )
-            if knowledge:
-                user_rag_memory_id = str(knowledge.id)
+    require_neo4j_memory(storage_type)
 
     if payload.stream:
         # 流式返回

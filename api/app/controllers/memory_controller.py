@@ -6,6 +6,7 @@
 路由前缀: /memory
 认证方式: JWT Token
 """
+from app.core.memory.channel_policy import require_neo4j_memory
 import uuid
 
 from fastapi import APIRouter, Depends, Header
@@ -18,7 +19,6 @@ from app.core.memory.memory_service import MemoryService
 from app.core.response_utils import fail, success
 from app.db import get_async_db_context
 from app.dependencies import cur_workspace_access_guard, cur_workspace_access_guard_self_db, get_current_user_async, CurrentUserSnapshot
-from app.repositories import knowledge_repository
 from app.repositories.end_user_repository import EndUserRepository
 from app.schemas.memory_agent_schema import StorageType, UserInput, Write_UserInput
 from app.schemas.memory_config_schema import ModelInactiveError, ModelNotFoundError
@@ -31,7 +31,6 @@ from app.services.memory_validation_service import MemoryValidationService
 from app.utils.sse_utils import format_sse_message
 
 DEFAULT_STORAGE_TYPE = "neo4j"
-USER_RAG_MEMORY_KNOWLEDGE_NAME = "USER_RAG_MERORY"  # 注：原拼写保留，历史遗留
 
 api_logger = get_api_logger()
 
@@ -64,12 +63,15 @@ async def write_server_async(
     language = get_language_from_header(language_type)
 
     storage_type = None
-    user_rag_memory_id = ''
     workspace_id = current_user.current_workspace_id
     # 跨渠道身份确认后的最终写入落点，默认与请求一致；命中归并时被覆盖为 target
     effective_end_user_id = user_input.end_user_id
     identity_data = None
     async with get_async_db_context() as db:
+        storage_type = await workspace_service.get_workspace_storage_type_async(
+            db=db, workspace_id=workspace_id, user=current_user
+        )
+        require_neo4j_memory(storage_type)
         # ── 跨渠道身份确认（仅在带标识时执行；不带/空串/纯空白则完全不碰身份字段）──
         if user_input.identity_features and user_input.identity_features.strip():
             clean_features = user_input.identity_features.strip()
@@ -109,35 +111,8 @@ async def write_server_async(
         api_logger.info(
             f"Async write service: workspace_id={workspace_id}, config_id={config_id}, language_type={language}")
 
-        # 获取 storage_type，如果为 None 则使用默认值
-        storage_type = await workspace_service.get_workspace_storage_type_async(
-            db=db,
-            workspace_id=workspace_id,
-            user=current_user
-        )
-        if storage_type is None: storage_type = DEFAULT_STORAGE_TYPE
-        if workspace_id:
-
-            knowledge = await knowledge_repository.get_knowledge_by_name_async(
-                db=db,
-                name=USER_RAG_MEMORY_KNOWLEDGE_NAME,
-                workspace_id=workspace_id
-            )
-            if knowledge: user_rag_memory_id = str(knowledge.id)
-        api_logger.info(f"Async write: storage_type={storage_type}, user_rag_memory_id={user_rag_memory_id}")
 
     try:
-        # ── RAG 路径：保持不变，直接拼接文本写向量库 ──
-        if storage_type and storage_type.lower() == StorageType.RAG.value:
-            messages_list = memory_agent_service.get_messages_list(user_input)
-            await MemoryService.write_messages_to_rag(
-                messages=messages_list,
-                end_user_id=effective_end_user_id,
-                user_rag_memory_id=user_rag_memory_id,
-            )
-            api_logger.info(f"RAG write completed for end_user={effective_end_user_id}")
-            return success(data=dict(identity_data) if identity_data else {}, msg="RAG 写入完成")
-
         # ── Neo4j 路径：通过 dispatcher 写入 ──
         workspace_id_str = str(current_user.current_workspace_id) if current_user.current_workspace_id else ""
         messages_list = memory_agent_service.get_messages_list(user_input)

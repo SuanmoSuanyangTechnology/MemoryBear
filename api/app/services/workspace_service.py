@@ -1,3 +1,4 @@
+from app.core.memory.channel_policy import require_neo4j_memory
 import hashlib
 import secrets
 import uuid
@@ -899,6 +900,7 @@ def _create_workspace_only(
 async def create_workspace(
         db: Session, workspace: WorkspaceCreate, user: User, language: str = "zh"
 ) -> Workspace:
+    require_neo4j_memory(workspace.storage_type)
     business_logger.info(
         f"创建工作空间: {workspace.name}, 创建者: {user.username}, "
         f"storage_type: {workspace.storage_type}"
@@ -1000,59 +1002,6 @@ async def create_workspace(
             # Don't fail workspace creation if default ontology initialization fails
             # The workspace can still function without default ontology scenes
 
-        # 如果 storage_type 是 "rag"，自动创建知识库
-        if workspace.storage_type == "rag":
-            business_logger.info(
-                f"检测到 storage_type 为 'rag'，开始为工作空间 "
-                f"{db_workspace.id} 创建知识库"
-            )
-            try:
-                from app.models.knowledge_model import KnowledgeType, PermissionType
-                from app.repositories import knowledge_repository
-                from app.schemas.knowledge_schema import KnowledgeCreate
-
-                # 创建知识库数据
-                knowledge_data = KnowledgeCreate(
-                    workspace_id=db_workspace.id,
-                    created_by=user.id,
-                    parent_id=db_workspace.id,
-                    name="USER_RAG_MERORY",
-                    description=f"工作空间 {workspace.name} 的默认知识库",
-                    avatar='',
-                    type=KnowledgeType.General,
-                    permission_id=PermissionType.Memory,
-                    embedding_id=embedding,
-                    reranker_id=rerank,
-                    llm_id=llm,
-                    image2text_id=llm,
-                    parser_config={
-                        "layout_recognize": "DeepDOC",
-                        "chunk_token_num": 256,
-                        "delimiter": "\n",
-                        "auto_keywords": 0,
-                        "auto_questions": 0,
-                        "html4excel": False
-                    }
-                )
-
-                # 直接使用 repository 创建知识库，避免 service 层的额外逻辑
-                db_knowledge = knowledge_repository.create_knowledge(
-                    db=db,
-                    knowledge=knowledge_data
-                )
-                business_logger.info(
-                    f"为工作空间 {db_workspace.id} 自动创建知识库成功: "
-                    f"{db_knowledge.name} (ID: {db_knowledge.id})"
-                )
-            except Exception as kb_error:
-                business_logger.error(
-                    f"为工作空间 {db_workspace.id} 创建知识库失败: {str(kb_error)}"
-                )
-                db.rollback()
-                raise BusinessException(
-                    f"工作空间创建成功，但知识库创建失败: {str(kb_error)}",
-                    BizCode.INTERNAL_ERROR
-                )
         memory_config_service = MemoryConfigService(db)
         config_id = memory_config_service.create_workspace_default_config(
             db_workspace,
@@ -1079,6 +1028,7 @@ async def create_workspace(
 def update_workspace(
         db: Session, workspace_id: uuid.UUID, workspace_in: WorkspaceUpdate, user: User
 ) -> Workspace:
+    require_neo4j_memory(workspace_in.storage_type)
     business_logger.info(f"更新工作空间: workspace_id={workspace_id}, 操作者: {user.username}")
 
     db_workspace = _check_workspace_admin_permission(db, workspace_id, user)

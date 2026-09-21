@@ -1,3 +1,4 @@
+from app.core.memory.channel_policy import require_neo4j_memory
 """基于分享链接的聊天服务"""
 import asyncio
 import json
@@ -625,6 +626,8 @@ class SharedChatService:
                 for msg in messages
             ]
 
+            require_neo4j_memory(storage_type)
+
             # 发送开始事件
             yield f"event: start\ndata: {json.dumps({'conversation_id': str(conversation.id)}, ensure_ascii=False)}\n\n"
 
@@ -888,14 +891,6 @@ class SharedChatService:
                 if workspace and workspace.storage_type:
                     storage_type = workspace.storage_type
 
-                # 获取 USER_RAG_MERORY 知识库 ID
-                knowledge = knowledge_repository.get_knowledge_by_name(
-                    db=self.db,
-                    name="USER_RAG_MERORY",
-                    workspace_id=workspace_id
-                )
-                if knowledge:
-                    user_rag_memory_id = str(knowledge.id)
             except Exception as e:
                 logger.warning(f"获取 storage_type 或 user_rag_memory_id 失败，使用默认值: {str(e)}")
 

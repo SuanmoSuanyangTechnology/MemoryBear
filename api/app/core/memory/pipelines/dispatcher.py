@@ -356,20 +356,6 @@ async def safe_push_fast_write(
 # ──────────────────────────────────────────────
 
 
-async def write_messages_to_rag(
-    messages: List[dict],
-    end_user_id: str,
-    user_rag_memory_id: str,
-) -> None:
-    """将 messages 拼接为文本并写入 RAG 存储。"""
-    from app.services.memory_konwledges_server import write_rag
-
-    message_text = "\n".join([
-        f"{(msg['role'] if isinstance(msg, dict) else msg.role)}: "
-        f"{(msg['content'] if isinstance(msg, dict) else msg.content)}"
-        for msg in messages
-    ])
-    await write_rag(end_user_id, message_text, user_rag_memory_id)
 
 
 # ──────────────────────────────────────────────

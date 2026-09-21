@@ -1,4 +1,5 @@
 """Agent 发现和调用工具"""
+from app.core.memory.channel_policy import require_neo4j_memory
 import uuid
 import time
 import datetime
@@ -153,34 +154,7 @@ def create_agent_invocation_tool(
         )
     
     # 2. 如果 storage_type 是 rag，获取知识库 ID
-    if storage_type == 'rag':
-        try:
-            knowledge = knowledge_repository.get_knowledge_by_name(
-                db=db,
-                name="USER_RAG_MEMORY",
-                workspace_id=workspace_id
-            )
-            if knowledge:
-                user_rag_memory_id = str(knowledge.id)
-                logger.debug(
-                    "获取 RAG 知识库成功",
-                    extra={
-                        "workspace_id": str(workspace_id),
-                        "knowledge_id": user_rag_memory_id
-                    }
-                )
-            else:
-                logger.warning(
-                    "未找到名为 'USER_RAG_MEMORY' 的知识库，将使用 neo4j 存储",
-                    extra={"workspace_id": str(workspace_id)}
-                )
-                storage_type = 'neo4j'
-        except Exception as e:
-            logger.warning(
-                "获取 RAG 知识库失败，将使用 neo4j 存储",
-                extra={"workspace_id": str(workspace_id), "error": str(e)}
-            )
-            storage_type = 'neo4j'
+    require_neo4j_memory(storage_type)
     
     if invocation_chain is None:
         invocation_chain = []

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from app.core.memory.channel_policy import require_neo4j_memory
 import asyncio
 import logging
 import time
@@ -17,7 +18,6 @@ from app.core.memory.read_services.generate_engine.query_preprocessor import Que
 from app.core.memory.read_services.generate_engine.retrieval_summary import RetrievalSummaryProcessor
 from app.core.memory.read_services.search_engine.content_search import (
     Neo4jSearchService,
-    RAGSearchService,
     HistorySearchService,
     MetaSearchService
 )
@@ -358,6 +358,7 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
             need_llm=True,
             enable_rerank: bool = False
     ):
+        require_neo4j_memory(self.ctx.storage_type)
         if self.ctx.storage_type == StorageType.NEO4J:
             if need_embedder and need_llm:
                 embedder, llm = await asyncio.gather(
@@ -385,8 +386,7 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
                 includes=includes,
                 on_error=self._record_retrieval_error,
             )
-        else:
-            return RAGSearchService(self.ctx)
+        raise ValueError("Unsupported memory storage type")
 
     async def _get_llm_client(self):
         """懒加载 LLM client：首次调用借短连接查 model API key，后续复用缓存。"""

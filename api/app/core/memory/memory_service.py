@@ -16,6 +16,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional
 from sqlalchemy.orm import Session
 
 from app.core.memory.enums import SearchStrategy, StorageType
+from app.core.memory.channel_policy import require_neo4j_memory
 from app.core.memory.models.message_models import DialogData
 from app.core.memory.models.service_models import LongTermMemoryInput, MemoryContext, MemorySearchResult
 from app.core.memory.pipelines.forgetting_pipeline import ForgettingPipeline
@@ -56,6 +57,7 @@ class MemoryService:
             language: str = "zh",
             draft=False
     ):
+        storage_type = require_neo4j_memory(storage_type)
         with get_db_read() as db:
             config_service = MemoryConfigService(db)
             memory_config = None
@@ -98,6 +100,7 @@ class MemoryService:
 
         All parameters mirror ``__init__``.
         """
+        storage_type = require_neo4j_memory(storage_type)
         instance = object.__new__(cls)
         async with get_async_db_context() as db:
             config_service = MemoryConfigService(db)
@@ -221,31 +224,21 @@ class MemoryService:
     ) -> str:
         """MCP 单条消息写入入口。
 
-        根据 storage_type 选择走 RAG 或 Neo4j 路径。
+        Dispatch through the supported Neo4j memory channel.
 
         Args:
             message: 用户消息内容
             end_user_id: 终端用户 ID
             config_id: 记忆配置 ID
             workspace_id: 工作空间 ID
-            storage_type: 存储类型 ("neo4j" | "rag")
+            storage_type: Storage type ("neo4j")
             dialog_at: 对话发生时间（ISO 8601）
 
         Returns:
-            派发的任务 msg_id（RAG 路径返回空字符串）
+            The dispatched task message ID
         """
-        from app.core.memory.pipelines.dispatcher import (
-            dispatch_mcp_write,
-            write_messages_to_rag,
-        )
-
-        if storage_type and storage_type.lower() == "rag":
-            await write_messages_to_rag(
-                messages=[{"role": "user", "content": message, "dialog_at": dialog_at}],
-                end_user_id=end_user_id,
-                user_rag_memory_id="",
-            )
-            return ""
+        require_neo4j_memory(storage_type)
+        from app.core.memory.pipelines.dispatcher import dispatch_mcp_write
 
         return await dispatch_mcp_write(
             message=message,
@@ -255,19 +248,6 @@ class MemoryService:
             dialog_at=dialog_at,
         )
 
-    @staticmethod
-    async def write_messages_to_rag(
-        messages: List[dict],
-        end_user_id: str,
-        user_rag_memory_id: str,
-    ) -> None:
-        """将 messages 写入 RAG 存储。"""
-        from app.core.memory.pipelines.dispatcher import write_messages_to_rag
-        await write_messages_to_rag(
-            messages=messages,
-            end_user_id=end_user_id,
-            user_rag_memory_id=user_rag_memory_id,
-        )
 
     @staticmethod
     async def dispatch_flush_conversation(conversation_id: str) -> int:

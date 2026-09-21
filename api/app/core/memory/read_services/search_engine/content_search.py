@@ -1,3 +1,4 @@
+from app.core.memory.channel_policy import require_neo4j_memory
 import asyncio
 import json
 import logging
@@ -57,10 +58,8 @@ from app.core.memory.storage.models.dto import StorageItem
 from app.core.memory.storage.service import get_storage_service
 from app.core.models import RedBearEmbeddings, RedBearLLM, RedBearRerank
 from app.core.models.llm import StructResponse
-from app.core.rag.nlp.search import knowledge_retrieval
 from app.db import get_async_db_context
 from app.models import Conversation, MemoryMessage
-from app.repositories import knowledge_repository
 from app.schemas.app_schema import FileInput, FileType, TransferMethod
 from app.utils.redis_cache import redis_cache
 
@@ -1062,89 +1061,6 @@ class Neo4jSearchService:
         return response.content if hasattr(response, 'content') else str(response)
 
 
-class RAGSearchService:
-    def __init__(self, ctx: MemoryContext):
-        self.ctx = ctx
-
-    async def keyword_search(self, query: str, limit: int = 10, **kwargs) -> MemorySearchResult:
-        """RAG 不支持纯全文检索，回退到 hybrid_search。"""
-        return await self.hybrid_search(query, limit)
-
-    async def get_kb_config(self, db: AsyncSession, limit: int) -> dict:
-        if self.ctx.user_rag_memory_id is None:
-            raise RuntimeError("Knowledge base ID not specified")
-        knowledge_config = await knowledge_repository.get_knowledge_by_id_async(
-            db,
-            knowledge_id=uuid.UUID(self.ctx.user_rag_memory_id)
-        )
-        if knowledge_config is None:
-            raise RuntimeError("Knowledge base not exist")
-        reranker_id = knowledge_config.reranker_id
-
-        return {
-            "knowledge_bases": [
-                {
-                    "kb_id": self.ctx.user_rag_memory_id,
-                    "similarity_threshold": 0.7,
-                    "vector_similarity_weight": 0.5,
-                    "top_k": limit,
-                    "retrieve_type": "participle"
-                }
-            ],
-            "merge_strategy": "weight",
-            "reranker_id": reranker_id,
-            "reranker_top_k": limit
-        }
-
-    async def hybrid_search(self, query: str, limit: int, **kwargs) -> MemorySearchResult:
-        try:
-            async with get_async_db_context() as db:
-                kb_config = await self.get_kb_config(db, limit)
-        except RuntimeError as e:
-            logger.error(f"[MemorySearch] get_kb_config error: {self.ctx.user_rag_memory_id} - {e}")
-            return MemorySearchResult(memories=[])
-        retrieve_chunks_result = knowledge_retrieval(query, kb_config, [self.ctx.end_user_id])
-        res = []
-        try:
-            for chunk in retrieve_chunks_result:
-                memory = Memory(
-                    content=chunk.page_content,
-                    query=query,
-                    score=chunk.metadata.get("score", 0.0),
-                    source=Neo4jNodeType.RAG,
-                    id=chunk.metadata.get("document_id"),
-                    data=chunk.metadata,
-                )
-                memory.retrieval_trace = build_score_trace(
-                    node_id=memory.id,
-                    node_type=Neo4jNodeType.RAG.value,
-                    final_score=memory.score,
-                    rank_basis="provider_score",
-                    backend="rag",
-                    matched_queries=[query],
-                )
-                res.append(memory)
-            res.sort(key=lambda x: x.score, reverse=True)
-            res = res[:limit]
-            return MemorySearchResult(
-                memories=res,
-                execution_trace=RetrievalExecutionTrace(
-                    backend="rag",
-                    keyword_status="skipped",
-                    semantic_status="completed",
-                    rerank_status="skipped",
-                    semantic_hit_count=len(res),
-                    raw_hit_count=len(res),
-                    merged_count=len(res),
-                ),
-            )
-        except RuntimeError as e:
-            logger.error(f"[MemorySearch] rag search error: {e}")
-            return MemorySearchResult(memories=[])
-
-    async def relation_search(self, query: str) -> MemorySearchResult:
-        logger.info("RAG does not support relation search")
-        return MemorySearchResult(memories=[])
 
 
 class HistorySearchService:
@@ -1205,18 +1121,16 @@ class MetaSearchService:
         self.ctx = ctx
 
     async def run(self) -> MemorySearchResult:
-        if self.ctx.storage_type == StorageType.RAG:
-            return MemorySearchResult(memories=[])
-        else:
-            end_user_id = self.ctx.end_user_id
-            user_meta = await get_user_metadata(end_user_id)
-            metadata = MetadataBuilder(user_meta)
-            memory = Memory(
-                score=1,
-                source=Neo4jNodeType.EXTRACTEDENTITY,
-                query='',
-                id=end_user_id,
-                content=metadata.content,
-                data=metadata.data,
-            )
-            return MemorySearchResult(memories=[memory])
+        require_neo4j_memory(self.ctx.storage_type)
+        end_user_id = self.ctx.end_user_id
+        user_meta = await get_user_metadata(end_user_id)
+        metadata = MetadataBuilder(user_meta)
+        memory = Memory(
+            score=1,
+            source=Neo4jNodeType.EXTRACTEDENTITY,
+            query='',
+            id=end_user_id,
+            content=metadata.content,
+            data=metadata.data,
+        )
+        return MemorySearchResult(memories=[memory])
