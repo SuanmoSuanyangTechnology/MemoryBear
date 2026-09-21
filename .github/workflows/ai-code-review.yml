@@ -1,0 +1,33 @@
+name: AI Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+# 同一 PR 连续 push 时取消上一次未完成的评审，避免重复消耗 token
+concurrency:
+  group: ai-code-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    # 仅评审本仓库分支发起的 PR：fork PR 无法读取 secrets，跳过以免失败
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - name: OpenCodeReview
+        uses: alibaba/open-code-review@v1.12.7
+        with:
+          # 复用现有的百炼密钥（OpenAI 兼容端点），无需新增 secret
+          llm_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+          llm_auth_token: ${{ secrets.DASHSCOPE_API_KEY }}
+          llm_model: qwen3.7-plus
+          llm_use_anthropic: "false"
+          language: Chinese
+          # 增量模式：只追加新发现，不重复评论已存在的问题
+          incremental: "true"
+          sticky_summary: "true"
