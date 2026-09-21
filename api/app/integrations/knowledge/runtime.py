@@ -10,7 +10,6 @@ from urllib.parse import urlparse
 from app.core.config import settings
 
 from .contracts import KnowledgeConfigurationError
-from .legacy_retriever import LegacyKnowledgeRetriever
 from .retriever import KnowledgeRetriever
 from .route_proxy import KnowledgeRouteProxy
 
@@ -43,8 +42,7 @@ class KnowledgeIntegrationRuntime:
         await self.close()
         self._enabled = bool(enabled)
         if not self._enabled:
-            self._retriever = LegacyKnowledgeRetriever()
-            return
+            raise KnowledgeConfigurationError("This delivery build requires ENABLE_MEM_KNOWLEDGE=true")
 
         parsed = urlparse(base_url)
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:

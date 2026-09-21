@@ -1,99 +1,44 @@
-"""RAG 服务接口 - 基于 API Key 认证"""
-
 from typing import Optional
 import uuid
-
 from fastapi import APIRouter, Body, Depends, Request, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from app.controllers import knowledge_controller
 from app.core.api_key_auth import require_api_key_self_db
-from app.core.logging_config import get_business_logger
-from app.core.response_utils import success
 from app.db import get_async_db
 from app.integrations.knowledge.contracts import KnowledgeRetrievalSource
 from app.integrations.knowledge.route_proxy import route_through_knowledge_service
-from app.models import knowledge_model
-from app.schemas import knowledge_schema
 from app.schemas.api_key_schema import ApiKeyAuth
 from app.schemas.response_schema import ApiResponse
-from app.services import api_key_service
-from app.services.rag_access_service import (
-    get_api_key_request_user,
-    unwrap_current_workspace_guard,
-)
+from app.integrations.knowledge.contracts import KnowledgeContextError
+router = APIRouter(prefix='/knowledges', tags=['V1 - RAG API'])
 
+@router.get('/knowledgetype', response_model=ApiResponse)
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.EXTERNAL_API, public=True)
+def get_knowledge_types(request: Request=None):
+    raise KnowledgeContextError('Knowledge route requires the remote service proxy')
 
-router = APIRouter(prefix="/knowledges", tags=["V1 - RAG API"])
-api_logger = get_business_logger()
-knowledge_controller = unwrap_current_workspace_guard(knowledge_controller)
+@router.get('/permissiontype', response_model=ApiResponse)
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.EXTERNAL_API, public=True)
+def get_permission_types(request: Request=None):
+    raise KnowledgeContextError('Knowledge route requires the remote service proxy')
 
+@router.get('/parsertype', response_model=ApiResponse)
+@route_through_knowledge_service(source=KnowledgeRetrievalSource.EXTERNAL_API, public=True)
+def get_parser_types(request: Request=None):
+    raise KnowledgeContextError('Knowledge route requires the remote service proxy')
 
-@router.get("/knowledgetype", response_model=ApiResponse)
-@route_through_knowledge_service(
-    source=KnowledgeRetrievalSource.EXTERNAL_API,
-    public=True,
-)
-def get_knowledge_types(request: Request = None):
-    return success(msg="Successfully obtained the knowledge type", data=list(knowledge_model.KnowledgeType))
-
-
-@router.get("/permissiontype", response_model=ApiResponse)
-@route_through_knowledge_service(
-    source=KnowledgeRetrievalSource.EXTERNAL_API,
-    public=True,
-)
-def get_permission_types(request: Request = None):
-    return success(msg="Successfully obtained the knowledge permission type", data=list(knowledge_model.PermissionType))
-
-
-@router.get("/parsertype", response_model=ApiResponse)
-@route_through_knowledge_service(
-    source=KnowledgeRetrievalSource.EXTERNAL_API,
-    public=True,
-)
-def get_parser_types(request: Request = None):
-    return success(msg="Successfully obtained the knowledge parser type", data=list(knowledge_model.ParserType))
-
-
-@router.get("/knowledge_graph_entity_types", response_model=ApiResponse)
-@require_api_key_self_db(scopes=["rag"])
+@router.get('/knowledge_graph_entity_types', response_model=ApiResponse)
+@require_api_key_self_db(scopes=['rag'])
 @route_through_knowledge_service(source=KnowledgeRetrievalSource.EXTERNAL_API)
-async def get_knowledge_graph_entity_types(
-    llm_id: uuid.UUID,
-    scenario: str,
-    request: Request,
-    api_key_auth: ApiKeyAuth = None,
-    db: AsyncSession = Depends(get_async_db),
-):
+async def get_knowledge_graph_entity_types(llm_id: uuid.UUID, scenario: str, request: Request, api_key_auth: ApiKeyAuth=None, db: AsyncSession=Depends(get_async_db)):
     """
     get knowledge graph entity types based on llm_id
     """
-    # 0. Obtain the creator of the api key
-    api_key = await api_key_service.ApiKeyService.get_api_key_async(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
-    current_user = get_api_key_request_user(api_key, api_key_auth)
+    raise KnowledgeContextError('Knowledge route requires the remote service proxy')
 
-    return await knowledge_controller.get_knowledge_graph_entity_types(llm_id=llm_id,
-                                                                       scenario=scenario,
-                                                                       db=db,
-                                                                       current_user=current_user)
-
-
-@router.get("/knowledges", response_model=ApiResponse)
-@require_api_key_self_db(scopes=["rag"])
+@router.get('/knowledges', response_model=ApiResponse)
+@require_api_key_self_db(scopes=['rag'])
 @route_through_knowledge_service(source=KnowledgeRetrievalSource.EXTERNAL_API)
-async def get_knowledges(
-    request: Request,
-    api_key_auth: ApiKeyAuth = None,
-    db: AsyncSession = Depends(get_async_db),
-    parent_id: Optional[uuid.UUID] = Query(None, description="parent folder id"),
-    page: int = Query(1, gt=0),  # Default: 1, which must be greater than 0
-    pagesize: int = Query(20, gt=0, le=100),  # Default: 20 items per page, maximum: 100 items
-    orderby: Optional[str] = Query(None, description="Sort fields, such as: created_at,updated_at"),
-    desc: Optional[bool] = Query(False, description="Is it descending order"),
-    keywords: Optional[str] = Query(None, description="Search keywords (knowledge base name)"),
-    kb_ids: Optional[str] = Query(None, description="Knowledge base ids, separated by commas")
-):
+async def get_knowledges(request: Request, api_key_auth: ApiKeyAuth=None, db: AsyncSession=Depends(get_async_db), parent_id: Optional[uuid.UUID]=Query(None, description='parent folder id'), page: int=Query(1, gt=0), pagesize: int=Query(20, gt=0, le=100), orderby: Optional[str]=Query(None, description='Sort fields, such as: created_at,updated_at'), desc: Optional[bool]=Query(False, description='Is it descending order'), keywords: Optional[str]=Query(None, description='Search keywords (knowledge base name)'), kb_ids: Optional[str]=Query(None, description='Knowledge base ids, separated by commas')):
     """
     Query the knowledge base list in pages
     - Support filtering by parent_id
@@ -101,262 +46,91 @@ async def get_knowledges(
     - Support dynamic sorting
     - Return paging metadata + file list
     """
-    # 0. Obtain the creator of the api key
-    api_key = await api_key_service.ApiKeyService.get_api_key_async(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
-    current_user = get_api_key_request_user(api_key, api_key_auth)
+    raise KnowledgeContextError('Knowledge route requires the remote service proxy')
 
-    response = await knowledge_controller.get_knowledges(parent_id=parent_id,
-                                                         page=page,
-                                                         pagesize=pagesize,
-                                                         orderby=orderby,
-                                                         desc=desc,
-                                                         keywords=keywords,
-                                                         kb_ids=kb_ids,
-                                                         db=db,
-                                                         current_user=current_user)
-    return knowledge_schema.project_public_knowledge(response)
-
-
-@router.post("/knowledge", response_model=ApiResponse)
-@require_api_key_self_db(scopes=["rag"])
+@router.post('/knowledge', response_model=ApiResponse)
+@require_api_key_self_db(scopes=['rag'])
 @route_through_knowledge_service(source=KnowledgeRetrievalSource.EXTERNAL_API)
-async def create_knowledge(
-    request: Request,
-    api_key_auth: ApiKeyAuth = None,
-    db: AsyncSession = Depends(get_async_db),
-    name: str = Body(..., description="KB name"),
-    audio2text_id: uuid.UUID | None = Body(
-        None,
-        description=(
-            "Audio transcription model config ID "
-            "(omitted or null inherits a compatible workspace audio model; "
-            "remains null when none is available)"
-        ),
-    ),
-    video2text_id: uuid.UUID | None = Body(
-        None,
-        description=(
-            "Video understanding model config ID "
-            "(omitted or null inherits a compatible workspace video model; "
-            "remains null when none is available)"
-        ),
-    ),
-):
+async def create_knowledge(request: Request, api_key_auth: ApiKeyAuth=None, db: AsyncSession=Depends(get_async_db), name: str=Body(..., description='KB name'), audio2text_id: uuid.UUID | None=Body(None, description='Audio transcription model config ID (omitted or null inherits a compatible workspace audio model; remains null when none is available)'), video2text_id: uuid.UUID | None=Body(None, description='Video understanding model config ID (omitted or null inherits a compatible workspace video model; remains null when none is available)')):
     """
     create knowledge
     """
-    body = await request.json()
-    create_data = knowledge_schema.KnowledgeCreate(**body)
-    # 0. Obtain the creator of the api key
-    api_key = await api_key_service.ApiKeyService.get_api_key_async(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
-    current_user = get_api_key_request_user(api_key, api_key_auth)
+    raise KnowledgeContextError('Knowledge route requires the remote service proxy')
 
-    response = await knowledge_controller.create_knowledge(create_data=create_data,
-                                                           db=db,
-                                                           current_user=current_user)
-    return knowledge_schema.project_public_knowledge(response)
-
-
-@router.get("/{knowledge_id}", response_model=ApiResponse)
-@require_api_key_self_db(scopes=["rag"])
+@router.get('/{knowledge_id}', response_model=ApiResponse)
+@require_api_key_self_db(scopes=['rag'])
 @route_through_knowledge_service(source=KnowledgeRetrievalSource.EXTERNAL_API)
-async def get_knowledge(
-    knowledge_id: uuid.UUID,
-    request: Request,
-    api_key_auth: ApiKeyAuth = None,
-    db: AsyncSession = Depends(get_async_db),
-):
+async def get_knowledge(knowledge_id: uuid.UUID, request: Request, api_key_auth: ApiKeyAuth=None, db: AsyncSession=Depends(get_async_db)):
     """
     Retrieve knowledge base information based on knowledge_id
     """
-    # 0. Obtain the creator of the api key
-    api_key = await api_key_service.ApiKeyService.get_api_key_async(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
-    current_user = get_api_key_request_user(api_key, api_key_auth)
+    raise KnowledgeContextError('Knowledge route requires the remote service proxy')
 
-    response = await knowledge_controller.get_knowledge(knowledge_id=knowledge_id,
-                                                        db=db,
-                                                        current_user=current_user)
-    return knowledge_schema.project_public_knowledge(response)
-
-
-@router.put("/{knowledge_id}", response_model=ApiResponse)
-@require_api_key_self_db(scopes=["rag"])
+@router.put('/{knowledge_id}', response_model=ApiResponse)
+@require_api_key_self_db(scopes=['rag'])
 @route_through_knowledge_service(source=KnowledgeRetrievalSource.EXTERNAL_API)
-async def update_knowledge(
-    knowledge_id: uuid.UUID,
-    request: Request,
-    api_key_auth: ApiKeyAuth = None,
-    db: AsyncSession = Depends(get_async_db),
-    name: str = Body(None, description="KB name (optional)"),
-    audio2text_id: uuid.UUID | None = Body(
-        None, description="Audio transcription model config ID (null clears)",
-    ),
-    video2text_id: uuid.UUID | None = Body(
-        None, description="Video understanding model config ID (null clears)",
-    ),
-):
-    body = await request.json()
-    update_data = knowledge_schema.KnowledgeUpdate(**body)
-    # 0. Obtain the creator of the api key
-    api_key = await api_key_service.ApiKeyService.get_api_key_async(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
-    current_user = get_api_key_request_user(api_key, api_key_auth)
+async def update_knowledge(knowledge_id: uuid.UUID, request: Request, api_key_auth: ApiKeyAuth=None, db: AsyncSession=Depends(get_async_db), name: str=Body(None, description='KB name (optional)'), audio2text_id: uuid.UUID | None=Body(None, description='Audio transcription model config ID (null clears)'), video2text_id: uuid.UUID | None=Body(None, description='Video understanding model config ID (null clears)')):
+    raise KnowledgeContextError('Knowledge route requires the remote service proxy')
 
-    response = await knowledge_controller.update_knowledge(knowledge_id=knowledge_id,
-                                                            update_data=update_data,
-                                                            db=db,
-                                                            current_user=current_user)
-    return knowledge_schema.project_public_knowledge(response)
-
-
-@router.delete("/{knowledge_id}", response_model=ApiResponse)
-@require_api_key_self_db(scopes=["rag"])
+@router.delete('/{knowledge_id}', response_model=ApiResponse)
+@require_api_key_self_db(scopes=['rag'])
 @route_through_knowledge_service(source=KnowledgeRetrievalSource.EXTERNAL_API)
-async def delete_knowledge(
-    knowledge_id: uuid.UUID,
-    request: Request,
-    api_key_auth: ApiKeyAuth = None,
-    db: AsyncSession = Depends(get_async_db),
-):
+async def delete_knowledge(knowledge_id: uuid.UUID, request: Request, api_key_auth: ApiKeyAuth=None, db: AsyncSession=Depends(get_async_db)):
     """
     Soft-delete knowledge base
     """
-    # 0. Obtain the creator of the api key
-    api_key = await api_key_service.ApiKeyService.get_api_key_async(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
-    current_user = get_api_key_request_user(api_key, api_key_auth)
+    raise KnowledgeContextError('Knowledge route requires the remote service proxy')
 
-    return await knowledge_controller.delete_knowledge(knowledge_id=knowledge_id,
-                                                       db=db,
-                                                       current_user=current_user)
-
-
-@router.get("/{knowledge_id}/knowledge_graph", response_model=ApiResponse)
-@require_api_key_self_db(scopes=["rag"])
+@router.get('/{knowledge_id}/knowledge_graph', response_model=ApiResponse)
+@require_api_key_self_db(scopes=['rag'])
 @route_through_knowledge_service(source=KnowledgeRetrievalSource.EXTERNAL_API)
-async def get_knowledge_graph(
-    knowledge_id: uuid.UUID,
-    request: Request,
-    api_key_auth: ApiKeyAuth = None,
-    db: AsyncSession = Depends(get_async_db),
-):
+async def get_knowledge_graph(knowledge_id: uuid.UUID, request: Request, api_key_auth: ApiKeyAuth=None, db: AsyncSession=Depends(get_async_db)):
     """
     Retrieve knowledge_graph base information based on knowledge_id
     """
-    # 0. Obtain the creator of the api key
-    api_key = await api_key_service.ApiKeyService.get_api_key_async(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
-    current_user = get_api_key_request_user(api_key, api_key_auth)
+    raise KnowledgeContextError('Knowledge route requires the remote service proxy')
 
-    return await knowledge_controller.get_knowledge_graph(knowledge_id=knowledge_id,
-                                                          db=db,
-                                                          current_user=current_user)
-
-
-@router.delete("/{knowledge_id}/knowledge_graph", response_model=ApiResponse)
-@require_api_key_self_db(scopes=["rag"])
+@router.delete('/{knowledge_id}/knowledge_graph', response_model=ApiResponse)
+@require_api_key_self_db(scopes=['rag'])
 @route_through_knowledge_service(source=KnowledgeRetrievalSource.EXTERNAL_API)
-async def delete_knowledge_graph(
-    knowledge_id: uuid.UUID,
-    request: Request,
-    api_key_auth: ApiKeyAuth = None,
-    db: AsyncSession = Depends(get_async_db),
-):
+async def delete_knowledge_graph(knowledge_id: uuid.UUID, request: Request, api_key_auth: ApiKeyAuth=None, db: AsyncSession=Depends(get_async_db)):
     """
     delete knowledge graph
     """
-    # 0. Obtain the creator of the api key
-    api_key = await api_key_service.ApiKeyService.get_api_key_async(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
-    current_user = get_api_key_request_user(api_key, api_key_auth)
+    raise KnowledgeContextError('Knowledge route requires the remote service proxy')
 
-    return await knowledge_controller.delete_knowledge_graph(knowledge_id=knowledge_id,
-                                                             db=db,
-                                                             current_user=current_user)
-
-
-@router.post("/{knowledge_id}/knowledge_graph", response_model=ApiResponse)
-@require_api_key_self_db(scopes=["rag"])
+@router.post('/{knowledge_id}/knowledge_graph', response_model=ApiResponse)
+@require_api_key_self_db(scopes=['rag'])
 @route_through_knowledge_service(source=KnowledgeRetrievalSource.EXTERNAL_API)
-async def rebuild_knowledge_graph(
-    knowledge_id: uuid.UUID,
-    request: Request,
-    api_key_auth: ApiKeyAuth = None,
-    db: AsyncSession = Depends(get_async_db),
-):
+async def rebuild_knowledge_graph(knowledge_id: uuid.UUID, request: Request, api_key_auth: ApiKeyAuth=None, db: AsyncSession=Depends(get_async_db)):
     """
     rebuild knowledge graph
     """
-    # 0. Obtain the creator of the api key
-    api_key = await api_key_service.ApiKeyService.get_api_key_async(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
-    current_user = get_api_key_request_user(api_key, api_key_auth)
+    raise KnowledgeContextError('Knowledge route requires the remote service proxy')
 
-    return await knowledge_controller.rebuild_knowledge_graph(knowledge_id=knowledge_id,
-                                                              db=db,
-                                                              current_user=current_user)
-
-
-@router.get("/check/yuque/auth", response_model=ApiResponse)
-@require_api_key_self_db(scopes=["rag"])
+@router.get('/check/yuque/auth', response_model=ApiResponse)
+@require_api_key_self_db(scopes=['rag'])
 @route_through_knowledge_service(source=KnowledgeRetrievalSource.EXTERNAL_API)
-async def check_yuque_auth(
-    yuque_user_id: str,
-    yuque_token: str,
-    request: Request,
-    api_key_auth: ApiKeyAuth = None,
-    db: AsyncSession = Depends(get_async_db),
-):
+async def check_yuque_auth(yuque_user_id: str, yuque_token: str, request: Request, api_key_auth: ApiKeyAuth=None, db: AsyncSession=Depends(get_async_db)):
     """
     check yuque auth info
     """
-    api_key = await api_key_service.ApiKeyService.get_api_key_async(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
-    current_user = get_api_key_request_user(api_key, api_key_auth)
+    raise KnowledgeContextError('Knowledge route requires the remote service proxy')
 
-    api_logger.info(f"check yuque auth info, username: {current_user.username}")
-
-    return await knowledge_controller.check_yuque_auth(yuque_user_id=yuque_user_id,
-                                                       yuque_token=yuque_token,
-                                                       db=db,
-                                                       current_user=current_user)
-
-
-@router.get("/check/feishu/auth", response_model=ApiResponse)
-@require_api_key_self_db(scopes=["rag"])
+@router.get('/check/feishu/auth', response_model=ApiResponse)
+@require_api_key_self_db(scopes=['rag'])
 @route_through_knowledge_service(source=KnowledgeRetrievalSource.EXTERNAL_API)
-async def check_feishu_auth(
-    feishu_app_id: str,
-    feishu_app_secret: str,
-    feishu_folder_token: str,
-    request: Request,
-    api_key_auth: ApiKeyAuth = None,
-    db: AsyncSession = Depends(get_async_db),
-):
+async def check_feishu_auth(feishu_app_id: str, feishu_app_secret: str, feishu_folder_token: str, request: Request, api_key_auth: ApiKeyAuth=None, db: AsyncSession=Depends(get_async_db)):
     """
     check feishu auth info
     """
-    api_key = await api_key_service.ApiKeyService.get_api_key_async(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
-    current_user = get_api_key_request_user(api_key, api_key_auth)
+    raise KnowledgeContextError('Knowledge route requires the remote service proxy')
 
-    api_logger.info(f"check feishu auth info, username: {current_user.username}")
-
-    return await knowledge_controller.check_feishu_auth(feishu_app_id=feishu_app_id,
-                                                        feishu_app_secret=feishu_app_secret,
-                                                        feishu_folder_token=feishu_folder_token,
-                                                        db=db,
-                                                        current_user=current_user)
-
-
-@router.post("/{knowledge_id}/sync", response_model=ApiResponse)
-@require_api_key_self_db(scopes=["rag"])
+@router.post('/{knowledge_id}/sync', response_model=ApiResponse)
+@require_api_key_self_db(scopes=['rag'])
 @route_through_knowledge_service(source=KnowledgeRetrievalSource.EXTERNAL_API)
-async def sync_knowledge(
-    knowledge_id: uuid.UUID,
-    request: Request,
-    api_key_auth: ApiKeyAuth = None,
-    db: AsyncSession = Depends(get_async_db),
-):
+async def sync_knowledge(knowledge_id: uuid.UUID, request: Request, api_key_auth: ApiKeyAuth=None, db: AsyncSession=Depends(get_async_db)):
     """
     sync knowledge base information based on knowledge_id
     """
-    api_key = await api_key_service.ApiKeyService.get_api_key_async(db, api_key_auth.api_key_id, api_key_auth.workspace_id)
-    current_user = get_api_key_request_user(api_key, api_key_auth)
-
-    return await knowledge_controller.sync_knowledge(knowledge_id=knowledge_id,
-                                                     db=db,
-                                                     current_user=current_user)
+    raise KnowledgeContextError('Knowledge route requires the remote service proxy')
