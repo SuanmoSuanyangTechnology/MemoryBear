@@ -16,19 +16,20 @@ export interface Query {
   type?: string;
   /** Model provider filter */
   provider?: string;
+  is_available?: boolean;
   /** Active status filter */
   is_active?: boolean;
   /** Public status filter */
   is_public?: boolean;
   /** Composite model filter */
   is_composite?: boolean;
+  is_deprecated?: boolean;
   /** Search keyword */
   search?: string;
   /** Page size */
   pagesize?: number;
   /** Page number */
   page?: number;
-  capability?: Capability;
 }
 
 /**
@@ -118,8 +119,9 @@ export interface ModelApiKey {
   updated_at: number;
   /** Associated model config IDs */
   model_config_ids: string[];
-  capability: Capability[];
-  is_omni?: boolean;
+  input_modalities: Modality[];
+  output_modalities: Modality[];
+  features: ModelFeature[];
 }
 
 /**
@@ -149,8 +151,9 @@ export interface ModelListItem {
   created_at: number;
   /** Update timestamp */
   updated_at: number;
-  capability?: string[];
-  is_omni?: boolean;
+  input_modalities?: Modality[];
+  output_modalities?: Modality[];
+  features?: ModelFeature[];
   is_deprecated: boolean;
   is_available: boolean;
   members: {
@@ -255,8 +258,9 @@ export interface ModelPlazaItem {
   add_count: number;
   /** Whether user has added this model */
   is_added: boolean;
-  capability?: string[];
-  is_omni?: boolean;
+  input_modalities?: Modality[];
+  output_modalities?: Modality[];
+  features?: ModelFeature[];
 }
 
 /**
@@ -276,12 +280,13 @@ export interface CustomModelForm {
   is_vision?: boolean;
   is_video?: boolean;
   is_audio?: boolean;
-  is_omni?: boolean;
   is_thinking?: boolean;
   thinking_only?: boolean;
   json_output?: boolean;
   function_call?: boolean;
-  capability?: Capability[];
+  input_modalities?: Modality[];
+  output_modalities?: Modality[];
+  features?: ModelFeature[];
   credential: {
     api_key: string;
     api_base?: string;
@@ -316,7 +321,8 @@ export interface BaseRef {
   modelListDetailRefresh?: () => void;
 }
 
-export type Capability = 'vision' | 'audio' | 'video' | 'thinking' | 'thinking_only' | 'json_output' | 'function_call';
+export type Modality = 'text' | 'image' | 'audio' | 'video';
+export type ModelFeature = 'thinking' | 'thinking_only' | 'json_output' | 'function_call';
 export interface Model {
   name: string;
   type: string;
@@ -324,11 +330,13 @@ export interface Model {
   description: string | null;
   provider: string;
   config: Record<string, unknown>;
-  is_active: boolean;
+  is_available?: boolean;
+  is_active?: boolean;
   is_public: boolean;
   load_balance_strategy: string;
-  capability: Capability[];
-  is_omni: boolean;
+  input_modalities: Modality[];
+  output_modalities: Modality[];
+  features: ModelFeature[];
   model_id: string | null;
   id: string;
   created_at: number;

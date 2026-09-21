@@ -19,6 +19,8 @@ import clsx from 'clsx'
 import Card from './components/Card'
 import type { ConfigForm, Variable } from './types'
 import { getMemoryExtractionConfig, updateMemoryExtractionConfig } from '@/api/memory'
+import { getCustomWorkspaceModels } from '@/api/workspaces'
+import type { Model } from '@/views/ModelManagement/types'
 import ChatContent from '@/components/Chat/ChatContent'
 import type { ChatItem } from '@/components/Chat/types'
 import { configList, modelConfigList } from './constant'
@@ -66,10 +68,28 @@ const MemoryExtractionEngine: FC = () => {
   const [loading, setLoading] = useState(false)
   const [iterationPeriodDisabled, setIterationPeriodDisabled] = useState(false)
   const [isDefault, setIsDefault] = useState(true)
+  const [customModels, setCustomModels] = useState<Record<string, Model[]>>({})
 
   /** Example conversation taken directly from the sample mock, split by language */
   const exampleMessages = useMemo<ChatItem[]>(() => getDebugChatMock(language),
   [language])
+
+  useEffect(() => {
+    let cancelled = false
+    getCustomWorkspaceModels()
+      .then(res => {
+        if (!cancelled) {
+          setCustomModels((res || {}) as Record<string, Model[]>)
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setCustomModels({})
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   useEffect(() => {
     document.title = [document.title.split(' - ')[0], t('memoryBear')].join(' - ')
@@ -192,7 +212,8 @@ const MemoryExtractionEngine: FC = () => {
                         className="rb:mb-0!"
                       >
                         <ModelSelect
-                          params={config.params}
+                          isAutoFetch={false}
+                          initialData={customModels[config.key.replace(/_id$/, '')]}
                           disabled={true}
                         />
                       </Form.Item>

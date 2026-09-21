@@ -55,68 +55,7 @@
         "display": true,
         "level": 2,
         "sort": 0,
-        "subs": [
-          {
-            "id": 131,
-            "parent": 13,
-            "code": "knowledgePrivate",
-            "label": "Private",
-            "i18nKey": "menu.knowledgePrivate",
-            "path": "/knowledge-base/:knowledgeBaseId/private",
-            "enable": true,
-            "display": false,
-            "level": 3,
-            "sort": 0,
-            "icon": null,
-            "iconActive": null,
-            "subs": null
-          },
-          {
-            "id": 132,
-            "parent": 13,
-            "code": "knowledgeShare",
-            "label": "Share",
-            "i18nKey": "menu.knowledgeShare",
-            "path": "/knowledge-base/:knowledgeBaseId/share",
-            "enable": true,
-            "display": false,
-            "level": 3,
-            "sort": 0,
-            "icon": null,
-            "iconActive": null,
-            "subs": null
-          },
-          {
-            "id": 133,
-            "parent": 13,
-            "code": "knowledgeCreateDataset",
-            "label": "CreateDataset",
-            "i18nKey": "menu.knowledgeCreateDataset",
-            "path": "/knowledge-base/:knowledgeBaseId/create-dataset",
-            "enable": true,
-            "display": false,
-            "level": 3,
-            "sort": 0,
-            "icon": null,
-            "iconActive": null,
-            "subs": null
-          },
-          {
-            "id": 134,
-            "parent": 13,
-            "code": "knowledgeDocumentDetails",
-            "label": "DocumentDetails",
-            "i18nKey": "menu.knowledgeDocumentDetails",
-            "path": "/knowledge-base/:knowledgeBaseId/DocumentDetails",
-            "enable": true,
-            "display": false,
-            "level": 3,
-            "sort": 0,
-            "icon": null,
-            "iconActive": null,
-            "subs": null
-          }
-        ]
+        "subs": []
       },
       {
         "id": 14,

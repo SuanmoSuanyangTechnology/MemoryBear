@@ -4,11 +4,11 @@
  * Supports logo upload, type/provider selection, and tagging
  */
 
-import { forwardRef, useEffect, useImperativeHandle, useState } from 'react';
-import { Form, Input, App, Checkbox, Button, Row, Col, Select, InputNumber } from 'antd';
+import { forwardRef, useImperativeHandle, useState } from 'react';
+import { Form, Input, App, Button, Select, InputNumber } from 'antd';
 import { useTranslation } from 'react-i18next';
 
-import type { CustomModelForm, ModelListItem, CustomModelModalRef, CustomModelModalProps, Capability, Provider } from '../types';
+import type { CustomModelForm, ModelListItem, CustomModelModalRef, CustomModelModalProps, Provider } from '../types';
 import RbModal from '@/components/RbModal'
 import CustomSelect from '@/components/CustomSelect'
 import UploadImages from '@/components/Upload/UploadImages'
@@ -31,21 +31,6 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
   const [form] = Form.useForm<CustomModelForm>();
   const [loading, setLoading] = useState(false)
   const [abortController, setAbortController] = useState<AbortController | null>(null)
-  const modelType = Form.useWatch(['type'], form);
-  const isOmni = Form.useWatch(['is_omni'], form);
-  const isThinking = Form.useWatch(['is_thinking'], form);
-  const thinkingOnly = Form.useWatch(['thinking_only'], form);
-
-  useEffect(() => {
-    if (isOmni) {
-      form.setFieldsValue({
-        is_vision: true,
-        is_video: true,
-        is_audio: true
-      })
-    }
-  }, [isOmni])
-
   /** Close modal and reset state */
   const handleClose = () => {
     abortController?.abort()
@@ -61,18 +46,13 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
     if (model) {
       setIsEdit(true);
       setModel(model);
-      const { capability, is_omni, ...rest} = model
+      const rest = model
       form.setFieldsValue({
         ...rest,
         logo: model.logo && model.logo.startsWith('http') ? { url: model.logo, uid: model.logo, status: 'done', name: 'logo' } : undefined,
-        is_omni,
-        is_vision: capability?.includes('vision') || false,
-        is_video: capability?.includes('video') || false,
-        is_audio: capability?.includes('audio') || false,
-        is_thinking: capability?.includes('thinking') || false,
-        json_output: capability?.includes('json_output') || false,
-        function_call: capability?.includes('function_call') || false,
-        thinking_only: capability?.includes('thinking_only') || false,
+        input_modalities: model.input_modalities,
+        output_modalities: model.output_modalities,
+        features: model.features,
       });
     } else {
       setIsEdit(false);
@@ -112,41 +92,14 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
     form
       .validateFields()
       .then((values) => {
-        const { logo, type, is_vision, is_video, is_audio, is_omni, is_thinking, thinking_only, json_output, function_call, ...rest } = values;
+        const { logo, type, ...rest } = values;
         const formData: CustomModelForm = {
           ...rest,
           type,
         }
-        if (!['embedding', 'rerank'].includes(type as string)) {
-          const capability: Capability[] = is_omni ? ["vision", "audio", 'video'] : []
-
-          if (!is_omni) {
-            if (is_vision) {
-              capability.push('vision')
-            }
-            if (is_audio) {
-              capability.push('audio')
-            }
-            if (is_video) {
-              capability.push('video')
-            }
-          }
-          if (is_thinking) {
-            capability.push('thinking')
-          }
-          if (thinking_only) {
-            capability.push('thinking_only')
-          }
-          if (json_output) {
-            capability.push('json_output')
-          }
-          if (function_call) {
-            capability.push('function_call')
-          }
-
-          formData.capability = capability
-          formData.is_omni = is_omni
-        }
+        formData.input_modalities = [...new Set(['text' as const, ...(values.input_modalities || [])])];
+        formData.output_modalities = [...new Set(values.output_modalities || [])];
+        formData.features = values.features || [];
 
         if (typeof logo === 'object' && logo?.response?.data.file_id) {
           getFileLink(logo?.response?.data.file_id)
@@ -274,50 +227,40 @@ const CustomModelModal = forwardRef<CustomModelModalRef, CustomModelModalProps>(
           </Form.Item>
         </>}
 
-        {['llm', 'chat'].includes(modelType as string) &&
-          <Row gutter={16}>
-            <Col span={24}>
-              <Form.Item name="is_omni" valuePropName="checked" className="rb:mb-2!">
-                <Checkbox>{t('modelNew.is_omni')}</Checkbox>
-              </Form.Item>
-            </Col>
-            <Col span={8}>
-              <Form.Item name="is_vision" valuePropName="checked" className="rb:mb-2!">
-                <Checkbox disabled={isOmni}>{t('modelNew.is_vision')}</Checkbox>
-              </Form.Item>
-            </Col>
-            <Col span={8}>
-              <Form.Item name="is_video" valuePropName="checked" className="rb:mb-2!">
-                <Checkbox disabled={isOmni}>{t('modelNew.is_video')}</Checkbox>
-              </Form.Item>
-            </Col>
-            <Col span={8}>
-              <Form.Item name="is_audio" valuePropName="checked" className="rb:mb-2!">
-                <Checkbox disabled={isOmni}>{t('modelNew.is_audio')}</Checkbox>
-              </Form.Item>
-            </Col>
-            <Col span={24}>
-              <Form.Item name="is_thinking" valuePropName="checked" className="rb:mb-0!">
-                <Checkbox disabled={thinkingOnly} onChange={() => form.setFieldValue('thinking_only', undefined)}>{t('modelNew.is_thinking')}</Checkbox>
-              </Form.Item>
-            </Col>
-            <Col span={24}>
-              <Form.Item name="thinking_only" valuePropName="checked" className="rb:mb-0!">
-                <Checkbox disabled={isThinking} onChange={() => form.setFieldValue('is_thinking', undefined)}>{t('modelNew.thinking_only')}</Checkbox>
-              </Form.Item>
-            </Col>
-            <Col span={24}>
-              <Form.Item name="json_output" valuePropName="checked" className="rb:mb-0!">
-                <Checkbox>{t('modelNew.json_output')}</Checkbox>
-              </Form.Item>
-            </Col>
-            <Col span={24}>
-              <Form.Item name="function_call" valuePropName="checked" className="rb:mb-0!">
-                <Checkbox>{t('modelNew.function_call')}</Checkbox>
-              </Form.Item>
-            </Col>
-          </Row>
-        }
+        {(['input_modalities', 'output_modalities'] as const).map(field => (
+          <Form.Item
+            key={field}
+            name={field}
+            label={t(`modelNew.${field}`)}
+            initialValue={field === 'input_modalities' ? ['text'] : undefined}
+            rules={[
+              { required: true, type: 'array', min: 1, message: t('common.selectPlaceholder', { title: t(`modelNew.${field}`) }) },
+            ]}
+          >
+            <Select
+              mode="multiple"
+              optionFilterProp="label"
+              placeholder={t('common.pleaseSelect')}
+              options={['text', 'image', 'audio', 'video'].map(value => ({
+                value,
+                label: t(`modelNew.${value}`),
+                disabled: field === 'input_modalities' && value === 'text'
+              }))}
+            />
+          </Form.Item>
+        ))}
+        <Form.Item name="features" label={t('modelNew.features')}>
+          <Select
+            mode="multiple"
+            allowClear
+            optionFilterProp="label"
+            placeholder={t('common.pleaseSelect')}
+            options={['thinking', 'thinking_only', 'json_output', 'function_call'].map(value => ({
+              value,
+              label: t(`modelNew.${value}`)
+            }))}
+          />
+        </Form.Item>
       </Form>
     </RbModal>
   );

@@ -65,11 +65,11 @@ const ModelConfigModal = forwardRef<ModelConfigModalRef, ModelConfigModalProps>(
   useEffect(() => {
     if (values?.[name] && options) {
       const model = options.find(item => item.id === values[name])
-      form.setFieldValue('capability', model?.capability || [])
+      form.setFieldValue('features', model?.features || [])
     } else {
-      form.setFieldValue('capability', [])
+      form.setFieldValue('features', [])
     }
-  }, [values?.[name], options])
+  }, [name, values?.[name], options])
 
   /** Close modal and reset form */
   const handleClose = () => {
@@ -108,10 +108,10 @@ const ModelConfigModal = forwardRef<ModelConfigModalRef, ModelConfigModalProps>(
   }
   /** Handle model selection change */
   const handleChange: SelectProps['onChange'] = (_value, option) => {
-    const model = option as Model
-    const isThinkingOnly = model.capability?.includes('thinking_only')
+    const model = option as Model | undefined
+    const isThinkingOnly = model?.features?.includes('thinking_only')
     const newValues: ModelConfigForm = {
-      capability: model?.capability || [],
+      features: model?.features || [],
       json_output: false,
       structured_output: false,
       thinking: {
@@ -166,13 +166,13 @@ const ModelConfigModal = forwardRef<ModelConfigModalRef, ModelConfigModalProps>(
           >
             <ModelSelect
               placeholder={t('common.pleaseSelect')}
-              params={{ type: 'llm,chat' }}
+              params={{ type: 'llm' }}
               className="rb:w-full!"
               onChange={handleChange}
               updateOptions={updateOptions}
             />
           </FormItem>
-          <FormItem name="capability" hidden />
+          <FormItem name="features" hidden />
 
           <div className="rb:font-medium rb:mb-4">{t('application.parameterConfig')}</div>
 
@@ -184,7 +184,7 @@ const ModelConfigModal = forwardRef<ModelConfigModalRef, ModelConfigModalProps>(
               const isHidden = field === 'structured_output'
                 ? !dependenceValue?.includes('json_output') || !json_output || hideStructuredOutputConfig
                 : dependence && !dependenceValue?.includes(field)
-              const isThinkingOnly = values?.capability?.includes('thinking_only')
+              const isThinkingOnly = values?.features?.includes('thinking_only')
 
               if (isHidden) {
                 return null
@@ -274,7 +274,7 @@ const ModelConfigModal = forwardRef<ModelConfigModalRef, ModelConfigModalProps>(
                       </Flex>
                     )
                     : !firstFieldConfigs.type
-                    ? (<div className={field === 'thinking' && !values?.capability?.includes('thinking_only') && !values?.capability?.includes('thinking') ? 'rb:hidden' : ''}>
+                    ? (<div className={field === 'thinking' && !values?.features?.includes('thinking_only') && !values?.features?.includes('thinking') ? 'rb:hidden' : ''}>
                       <Flex align="center" justify="space-between" wrap={false} gap={32}>
                         <Flex align="center" wrap={false} gap={8}
                           className={clsx({

@@ -10,7 +10,7 @@
  */
 
 import type { ConfigVo } from './types'
-import type { Capability } from '@/views/ModelManagement/types'
+import type { Modality } from '@/views/ModelManagement/types'
 
 
 /** Configuration list for memory extraction engine */
@@ -214,26 +214,29 @@ export const configList: ConfigVo[] = [
     ]
   }
 ]
-export const modelConfigList: { key: string; type: string; params: { type: string; capability?: Capability; }; }[] = [
+export const modelConfigList: { key: string; type: string; modality?: Modality; params: { type: string; }; }[] = [
   {
     key: 'llm_id',
     type: 'modelSelect',
-    params: { type: 'chat,llm' },
+    params: { type: 'llm' },
   },
   {
     key: 'vision_id',
     type: 'modelSelect',
-    params: { type: 'chat,llm', capability: 'vision' },
+    modality: 'image',
+    params: { type: 'llm' },
   },
   {
     key: 'audio_id',
     type: 'modelSelect',
-    params: { type: 'chat,llm', capability: 'audio' },
+    modality: 'audio',
+    params: { type: 'llm' },
   },
   {
     key: 'video_id',
     type: 'modelSelect',
-    params: { type: 'chat,llm', capability: 'video' },
+    modality: 'video',
+    params: { type: 'llm' },
   },
 ]
 

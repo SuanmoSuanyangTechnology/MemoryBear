@@ -33,7 +33,7 @@ from ..api.schemas.knowledge_retrieval import (
     KnowledgeRetrievalResult,
 )
 from ..api.schemas.rerank import RerankMode
-from ..error_mapping import map_multimodal_error
+from ..error_mapping import map_multimodal_error, map_text_embedding_error
 from ..errors import KnowledgeError
 from ..rag.chunk.token_utils import num_tokens_from_string
 from ..rag.knowledge_graph.config import GraphPipeline
@@ -105,6 +105,18 @@ def _record_elapsed(
     setattr(timings, field, getattr(timings, field) + elapsed_ms)
 
 
+async def _embed_text_query(embedding: Any, query: str) -> list[float]:
+    """Apply the same provider error contract to every text-query embedding path."""
+    try:
+        result = await embedding.aembed_query(query)
+    except Exception as exc:
+        mapped = map_text_embedding_error(exc)
+        if mapped is None or mapped is exc:
+            raise
+        raise mapped from exc
+    return normalize_vector(result)
+
+
 class _TimedElasticSearchRetrieval(AsyncElasticSearchRetrieval):
     """Record oracle-compatible phases without owning another ES client."""
 
@@ -126,7 +138,7 @@ class _TimedElasticSearchRetrieval(AsyncElasticSearchRetrieval):
     ) -> list[DocumentChunk]:
         embedding_started_at = time.perf_counter()
         try:
-            vector = normalize_vector(await embedding.aembed_query(query))
+            vector = await _embed_text_query(embedding, query)
         finally:
             _record_elapsed(self._timings, "embedding_ms", embedding_started_at)
         return await self.search_by_query_vector(vector, options)
@@ -603,7 +615,7 @@ class KnowledgeRetrievalService:
                     )
                 if is_qwen3_vl_embedding(target.embedding.resolved):
                     # Keep unit identity for any subsequent global ranking stage.
-                    query_vector = normalize_vector(await embedding.aembed_query(text_query))
+                    query_vector = await _embed_text_query(embedding, text_query)
                     unit_candidates = await store.search_units_by_vector(
                         query_vector,
                         vector_options,
@@ -677,7 +689,7 @@ class KnowledgeRetrievalService:
                     return await store.search_by_vector(embedding, text_query, vector_options)
                 embedding_started_at = time.perf_counter()
                 try:
-                    query_vector = normalize_vector(await embedding.aembed_query(text_query))
+                    query_vector = await _embed_text_query(embedding, text_query)
                 finally:
                     cls._record_timing(timings, "embedding_ms", embedding_started_at)
                 if multimodal_kb:
@@ -840,7 +852,7 @@ class KnowledgeRetrievalService:
                 embedding = RedBearEmbeddings(
                     target.embedding.resolved, client_pool=runtime.model_runtime.pool
                 )
-                vector = tuple(normalize_vector(await embedding.aembed_query(query)))
+                vector = tuple(await _embed_text_query(embedding, query))
             finally:
                 cls._record_timing(timings, "embedding_ms", started_at)
         multimodal = is_qwen3_vl_embedding(target.embedding.resolved)
@@ -1200,7 +1212,7 @@ class KnowledgeRetrievalService:
     ) -> list[UnitCandidate]:
         """Embed a text query and recall text units from a multimodal index."""
 
-        query_vector = normalize_vector(await embedding.aembed_query(text_query))
+        query_vector = await _embed_text_query(embedding, text_query)
         return await store.search_units_by_vector(query_vector, options)
 
     @staticmethod

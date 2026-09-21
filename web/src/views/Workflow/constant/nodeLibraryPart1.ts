@@ -318,7 +318,7 @@ export const nodeLibraryPart1: NodeLibrary[] = [
           model_id: {
             type: 'modelSelect',
             required: true,
-            params: { type: 'llm,chat' }, // llm/chat
+            params: { type: 'llm' }, // llm
           },
           text: {
             type: 'variableList',

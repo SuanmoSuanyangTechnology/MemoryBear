@@ -11,7 +11,7 @@ import clsx from 'clsx';
 
 import RbModal from '@/components/RbModal';
 import type { FeaturesConfigForm } from '../../types'
-import type { Capability } from '@/views/ModelManagement/types'
+import type { Modality } from '@/views/ModelManagement/types'
 import type { Application } from '@/views/ApplicationManagement/types';
 
 type FileUpload = Omit<FeaturesConfigForm['file_upload'], 'settings'>
@@ -23,7 +23,7 @@ interface FileUploadSettingModalRef {
 
 interface FileUploadSettingModalProps {
   onSave: (values: FileUpload) => void;
-  capability?: Capability[];
+  input_modalities?: Modality[];
   source?: Application['type']
 }
 export const documentType = {
@@ -110,7 +110,7 @@ export const defaultValues: FileUpload = {
 
 const FileUploadSettingModal = forwardRef<FileUploadSettingModalRef, FileUploadSettingModalProps>(({
   onSave,
-  capability,
+  input_modalities,
   source,
 }, ref) => {
   const { t } = useTranslation();
@@ -162,12 +162,12 @@ const FileUploadSettingModal = forwardRef<FileUploadSettingModalRef, FileUploadS
       ]
     }
     let options = [documentType]
-    if (!capability) return options
-    if (capability.includes('vision')) options = [...options, imageType]
-    if (capability.includes('audio')) options = [...options, audioType]
-    if (capability.includes('video')) options = [...options, videoType]
+    if (!input_modalities) return options
+    if (input_modalities.includes('image')) options = [...options, imageType]
+    if (input_modalities.includes('audio')) options = [...options, audioType]
+    if (input_modalities.includes('video')) options = [...options, videoType]
     return options
-  }, [capability])
+  }, [input_modalities, source])
 
   return (
     <RbModal
@@ -203,7 +203,7 @@ const FileUploadSettingModal = forwardRef<FileUploadSettingModalRef, FileUploadS
               return (
                 <div
                   key={option.type}
-                  className={clsx('rb:border rb:border-[#DFE4ED] rb:rounded-lg rb:p-3', {
+                  className={clsx('rb:border rb:border-gray-400 rb:rounded-lg rb:p-3', {
                     'rb:bg-[#f5f7fc]': isEnabled
                   })}
                 >
@@ -213,7 +213,7 @@ const FileUploadSettingModal = forwardRef<FileUploadSettingModalRef, FileUploadS
                       <Flex align="center" justify="space-between">
                         <Flex vertical>
                           <div className="rb:font-medium">{t(`application.${option.type}`)}</div>
-                          <div className="rb:text-[12px] rb:text-[#5B6167]">{option.formats.map(item => item.toUpperCase()).join(', ')}</div>
+                          <div className="rb:text-[12px] rb:text-gray-600">{option.formats.map(item => item.toUpperCase()).join(', ')}</div>
                         </Flex>
                         <Form.Item name={enabledKey} valuePropName="checked" noStyle>
                           <Switch />
@@ -222,7 +222,7 @@ const FileUploadSettingModal = forwardRef<FileUploadSettingModalRef, FileUploadS
                     </Col>
                   </Row>
                   {isEnabled && (
-                    <Flex align="center" gap={16} className="rb:mt-3! rb:pt-3! rb:border-t rb:border-[#DFE4ED]">
+                    <Flex align="center" gap={16} className="rb:mt-3! rb:pt-3! rb:border-t rb:border-gray-400">
                       <div>
                         <div>{t('application.singleMaxSize')}</div>
                         <Form.Item name={sizeKey} noStyle>
