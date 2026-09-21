@@ -154,10 +154,6 @@ async def lifespan(app: FastAPI):
 
     from app.repositories.neo4j.neo4j_connector import Neo4jConnector
     await Neo4jConnector.shutdown()
-    from app.core.rag.retrieval.async_elasticsearch import AsyncElasticsearchClientProvider
-    from app.core.rag.retrieval.graph_bridge import GraphRetrievalBridge
-    await AsyncElasticsearchClientProvider.aclose()
-    GraphRetrievalBridge.shutdown()
     logger.info("应用程序正在关闭")
 
 
@@ -213,8 +209,6 @@ def read_root():
 async def readiness():
     """Return process readiness, including remote Knowledge when enabled."""
 
-    if not settings.ENABLE_MEM_KNOWLEDGE:
-        return {"status": "ready", "knowledge_mode": "legacy"}
     from app.integrations.knowledge.runtime import is_remote_knowledge_ready
 
     if await is_remote_knowledge_ready():

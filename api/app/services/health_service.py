@@ -35,12 +35,11 @@ async def _check_neo4j() -> bool:
 
 
 async def _check_elasticsearch() -> bool:
-    from app.core.rag.retrieval.async_elasticsearch import (
-        AsyncElasticsearchClientProvider,
-    )
+    from elasticsearch import AsyncElasticsearch
+    from app.core.memory.storage.provider.elasticsearch.config import build_elasticsearch_client_config
 
-    client = await AsyncElasticsearchClientProvider.get_shared_client()
-    return bool(await client.ping())
+    async with AsyncElasticsearch(**build_elasticsearch_client_config()) as client:
+        return bool(await client.ping())
 
 
 def _broker_is_available() -> bool:

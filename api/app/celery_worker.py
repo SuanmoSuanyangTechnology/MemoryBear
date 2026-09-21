@@ -80,23 +80,7 @@ def _reinit_db_pool(**kwargs):
     logger.info("DB connection pool disposed for forked worker process")
 
     # 重建模块级 ThreadPoolExecutor（fork 后线程池不可用）
-    try:
-        from app.core.rag.deepdoc.parser import figure_parser
-        from concurrent.futures import ThreadPoolExecutor
-        figure_parser.shared_executor = ThreadPoolExecutor(max_workers=10)
-        logger.info("figure_parser.shared_executor recreated")
-    except Exception as e:
-        logger.warning(f"Failed to recreate figure_parser.shared_executor: {e}")
 
-    try:
-        from app.core.rag.utils import libre_office
-        from concurrent.futures import ThreadPoolExecutor
-        import os
-        max_workers = os.cpu_count() * 2 if os.cpu_count() else 4
-        libre_office.executor = ThreadPoolExecutor(max_workers=max_workers)
-        logger.info("libre_office.executor recreated")
-    except Exception as e:
-        logger.warning(f"Failed to recreate libre_office.executor: {e}")
 
     # 重置进程级共享 Neo4j driver（fork 后子进程继承了失效的 socket 和 event loop）
     # 子进程首次执行 Neo4j 查询时，_create_or_get_driver() 会检测到 _shared_driver is None

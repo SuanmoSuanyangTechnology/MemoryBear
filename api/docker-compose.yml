@@ -19,7 +19,6 @@ services:
     depends_on:
       - worker-memory
       - worker-memory-fast
-      - worker-document
       - worker-periodic
 
   # Memory worker - Memory read/write tasks (threads pool for asyncio)
@@ -50,21 +49,7 @@ services:
     networks:
       - celery
 
-  # Document worker - Document parsing tasks (prefork for CPU-bound)
-  worker-document:
-    image: redbear-mem-open:latest
-    container_name: worker-document
-    env_file:
-      - .env
-    volumes:
-      - ./files:/files
-      - /etc/localtime:/etc/localtime:ro
-    command: celery -A app.celery_worker.celery_app worker -E --loglevel=info --pool=prefork --concurrency=4 --queues=document_tasks --max-tasks-per-child=100 -n document_worker@%h
-    restart: unless-stopped
-    networks:
-      - celery
-
-  # Periodic worker - Scheduled/beat tasks + API-triggered tasks (prefork, low concurrency)
+  # Periodic worker - Scheduled tasks
   worker-periodic:
     image: redbear-mem-open:latest
     container_name: worker-periodic
