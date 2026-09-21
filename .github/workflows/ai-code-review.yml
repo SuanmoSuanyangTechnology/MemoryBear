@@ -16,6 +16,7 @@ permissions:
 jobs:
   review:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     # 仅评审本仓库分支发起的 PR：fork PR 无法读取 secrets，跳过以免失败
     if: github.event.pull_request.head.repo.full_name == github.repository
     steps:
