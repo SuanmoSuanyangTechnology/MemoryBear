@@ -179,6 +179,7 @@ def _create_provider_model(
         ModelProvider.XINFERENCE,
         ModelProvider.GPUSTACK,
         ModelProvider.SPEEDBEAR,
+        ModelProvider.MINIMAX,
         ModelProvider.VOLCANO,
         ModelProvider.DASHSCOPE,
     }:

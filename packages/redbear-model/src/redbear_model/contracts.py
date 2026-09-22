@@ -296,6 +296,7 @@ class ModelProfile(ContractModel):
 class ModelProvider(StrEnum):
     OPENAI = "openai"
     SPEEDBEAR = "speedbear"
+    MINIMAX = "minimax"
     DASHSCOPE = "dashscope"
     OLLAMA = "ollama"
     XINFERENCE = "xinference"
