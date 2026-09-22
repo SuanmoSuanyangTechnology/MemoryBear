@@ -40,7 +40,10 @@ _CHANNEL_CACHE = ChannelSnapshotCache(ttl_ms=60_000)
 
 
 def _created_ms(value) -> int:
-    return int(value.timestamp() * 1000) if value is not None else 0
+    """裸 datetime 按 UTC 解释（DB 存裸 UTC）；快照契约非可选，缺省 0。"""
+
+    ms = to_timestamp_ms(value)
+    return ms if ms is not None else 0
 
 
 def _config_snapshot(config: ModelConfig) -> ModelConfigSnapshot:
