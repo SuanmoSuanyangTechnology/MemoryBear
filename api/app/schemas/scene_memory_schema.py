@@ -79,7 +79,8 @@ class GenerateSceneSummaryTask(BaseModel):
 class SceneSplitDemoRequest(BaseModel):
     """BERT 场景切分演示请求；未传的配置项由接口回落到 config_id 对应配置。
 
-    当前场景轮次不由前端传入，由接口按「历史窗口数 + 1」推导，仅用于演示短路分支。
+    当前场景轮次不由前端传入，由接口按「实际历史消息条数」推导（不含当前 Query，
+    与 scene_history_window_size 无关），仅用于演示短路分支。
     """
 
     config_id: UUID | int
