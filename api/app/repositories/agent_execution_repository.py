@@ -7,7 +7,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from app.core.utils.datetime_utils import utcnow_naive
+from app.core.workflow.node_cache import sanitize_json_value
 from app.models.agent_execution_model import AgentExecution
+
+
+def _sanitize_jsonb_fields(updates: dict) -> dict:
+    """剥离写入 JSONB 列的 NUL（U+0000）。
+
+    Agent 的 knowledge_retrieval_tool 会把 ES 中 PDF/Office 解析出的 chunk 原文放进
+    steps[].output/input，其中可能混入 NUL。PostgreSQL jsonb/text 无法表示 U+0000，
+    写入即抛 asyncpg UntranslatableCharacterError，表现为会话末尾冒出 model_error。
+    """
+    for key in ("steps", "token_usage", "agent_log"):
+        if updates.get(key) is not None:
+            updates[key] = sanitize_json_value(updates[key])
+    return updates
 
 
 class AgentExecutionRepository:
@@ -58,6 +72,8 @@ class AgentExecutionRepository:
         if agent_log is not None:
             updates["agent_log"] = agent_log
 
+        updates = _sanitize_jsonb_fields(updates)
+
         stmt = (
             select(AgentExecution)
             .where(AgentExecution.id == execution_id)
@@ -97,6 +113,8 @@ class AgentExecutionRepository:
             updates["message_id"] = message_id
         if agent_log is not None:
             updates["agent_log"] = agent_log
+
+        updates = _sanitize_jsonb_fields(updates)
 
         result = await self.db.execute(
             select(AgentExecution).where(AgentExecution.id == execution_id)
