@@ -1337,7 +1337,7 @@ async def analytics_hot_memory_tags(
     - 空间取 ``current_user.current_workspace_id``（管理端=当前会话空间，对外=API Key
       绑定空间）。
     - 数据源：``end_users.memory_tags``（活跃终端用户的用户名片 Tag 数组）。
-    - 合并方式：文本**精确匹配**——复用名片 Tag 规范化规则（去空白折叠、空值/超长
+    - 合并方式：文本**精确匹配**——复用名片 Tag 规范化规则（空白折叠、空值/超长
       剔除、大小写折叠后精确一致才合并），不做语义/Embedding/LLM 归并。
     - 计数口径：``frequency`` = 采用该 tag 的终端用户数（每人对同一 tag 只计一次）。
     - 排序：``frequency`` 降序、同频按代表文本升序，取 Top-N。
@@ -1348,42 +1348,16 @@ async def analytics_hot_memory_tags(
     if limit <= 0:
         limit = 10
 
-    from app.core.memory.analytics.user_card_tags import normalize_stored_user_card_tags
+    from app.core.memory.analytics.user_card_tags import USER_CARD_TAG_MAX_LENGTH
     from app.repositories.end_user_repository import EndUserRepository
 
     repo = EndUserRepository(db)
-    tags_per_user = await repo.get_memory_tags_by_workspace_async(
-        uuid.UUID(str(workspace_id))
+    hot_tags = await repo.get_hot_memory_tags_by_workspace_async(
+        uuid.UUID(str(workspace_id)),
+        limit=limit,
+        max_tag_length=USER_CARD_TAG_MAX_LENGTH,
     )
-    if not tags_per_user:
-        return []
-
-    # casefold key -> {"name": 代表文本（首次出现的规范化形式）, "count": 采用用户数}
-    aggregated: Dict[str, Dict[str, Any]] = {}
-    for stored_tags in tags_per_user:
-        # 每个用户先按名片规则规范化（去空白折叠/超长剔除/大小写折叠去重/限量）
-        normalized_tags = normalize_stored_user_card_tags(stored_tags)
-        # 同一用户对同一 tag 只计一次（normalize 已按 casefold 去重，这里再兜底）
-        seen_keys: set[str] = set()
-        for tag in normalized_tags:
-            key = tag.casefold()
-            if key in seen_keys:
-                continue
-            seen_keys.add(key)
-            entry = aggregated.get(key)
-            if entry is None:
-                aggregated[key] = {"name": tag, "count": 1}
-            else:
-                entry["count"] += 1
-
-    if not aggregated:
-        return []
-
-    ranked = sorted(
-        aggregated.values(),
-        key=lambda item: (-item["count"], item["name"]),
-    )
-    return [{"name": item["name"], "frequency": item["count"]} for item in ranked[:limit]]
+    return [{"name": name, "frequency": frequency} for name, frequency in hot_tags]
 
 
 async def analytics_recent_activity_stats(workspace_id: Optional[str] = None) -> Dict[str, Any]:
