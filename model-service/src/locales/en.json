@@ -1,0 +1,32 @@
+{
+  "errors": {
+    "common": {
+      "internal_error": "Internal server error",
+      "network_error": "Network connection error",
+      "timeout": "Request timeout",
+      "service_unavailable": "Service temporarily unavailable",
+      "bad_request": "Bad request parameters",
+      "unauthorized": "Unauthorized access",
+      "forbidden": "Access forbidden",
+      "not_found": "Resource not found",
+      "method_not_allowed": "Method not allowed",
+      "conflict": "Resource conflict",
+      "too_many_requests": "Too many requests, please try again later",
+      "validation_failed": "Validation failed",
+      "database_error": "Database operation failed",
+      "file_operation_error": "File operation failed"
+    },
+    "api": {
+      "quota_exceeded": "{resource} quota exceeded"
+    },
+    "validation": {
+      "missing_field": "Missing required field: {field}",
+      "invalid_field": "Invalid field: {field}",
+      "field_too_long": "Field too long: {field}",
+      "field_too_short": "Field too short: {field}"
+    },
+    "quota_resources": {
+      "model": "Model"
+    }
+  }
+}

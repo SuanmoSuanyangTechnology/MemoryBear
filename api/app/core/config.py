@@ -169,6 +169,27 @@ class Settings:
         os.getenv("MEM_KNOWLEDGE_HEALTH_TIMEOUT_SECONDS", "3")
     )
 
+    # Independent model service routing（/api/models* 前缀代理；无开关：服务不可用即 fail-fast）
+    MODEL_SERVICE_BASE_URL: str = os.getenv("MODEL_SERVICE_BASE_URL", "http://127.0.0.1:8080")
+    MODEL_SERVICE_CONNECT_TIMEOUT_SECONDS: float = float(
+        os.getenv("MODEL_SERVICE_CONNECT_TIMEOUT_SECONDS", "5")
+    )
+    MODEL_SERVICE_POOL_TIMEOUT_SECONDS: float = float(
+        os.getenv("MODEL_SERVICE_POOL_TIMEOUT_SECONDS", "5")
+    )
+    MODEL_SERVICE_READ_TIMEOUT_SECONDS: float = float(
+        os.getenv("MODEL_SERVICE_READ_TIMEOUT_SECONDS", "120")
+    )
+    MODEL_SERVICE_WRITE_TIMEOUT_SECONDS: float = float(
+        os.getenv("MODEL_SERVICE_WRITE_TIMEOUT_SECONDS", "60")
+    )
+    MODEL_SERVICE_MAX_CONNECTIONS: int = int(
+        os.getenv("MODEL_SERVICE_MAX_CONNECTIONS", "100")
+    )
+    MODEL_SERVICE_MAX_KEEPALIVE_CONNECTIONS: int = int(
+        os.getenv("MODEL_SERVICE_MAX_KEEPALIVE_CONNECTIONS", "20")
+    )
+
     # Xinference configuration
     XINFERENCE_URL: str = os.getenv("XINFERENCE_URL", "http://127.0.0.1")
 
@@ -543,9 +564,6 @@ class Settings:
 
     # official environment system version
     SYSTEM_VERSION: str = os.getenv("SYSTEM_VERSION", "v0.2.1")
-
-    # model square loading
-    LOAD_MODEL: bool = os.getenv("LOAD_MODEL", "false").lower() == "true"
 
     # workflow config
     WORKFLOW_IMPORT_CACHE_TIMEOUT: int = int(os.getenv("WORKFLOW_IMPORT_CACHE_TIMEOUT", 1800))

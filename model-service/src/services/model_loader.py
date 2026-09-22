@@ -1,58 +1,72 @@
-"""模型配置加载器 - 用于将预定义模型批量导入到数据库"""
+"""模型配置加载器 — 将预定义模型（YAML 种子）批量同步到数据库。
 
+机械移植自宿主 `app/core/models/scripts/loader.py`（M7 D-M7-5：服务=唯一写者），
+差异仅两处：
+1. YAML 目录随迁至 ``src/infrastructure/loader_yaml/``；
+2. ``print`` 改 ``logging``（服务侧统一日志口径，宿主无 logger 基建）。
+
+同步语义：已存在（同 name+provider）→ 字段覆盖并回写绑定该 base 的 ModelConfig
+（能力以 config 为源）；不存在 → 新建。逐条独立 commit，单条失败不中断整批。
+"""
+
+from __future__ import annotations
+
+import logging
 from pathlib import Path
-from typing import Callable
 
 import yaml
 from sqlalchemy.orm import Session
 
-from app.models.models_model import ModelBase, ModelProvider, ModelConfig
+from ..models.models_model import ModelBase, ModelConfig, ModelProvider
+
+logger = logging.getLogger(__name__)
+
+_YAML_DIR = Path(__file__).parent.parent / "infrastructure" / "loader_yaml"
 
 
 def _load_yaml_config(provider: ModelProvider) -> list[dict]:
     """从YAML文件加载指定供应商的模型配置"""
-    config_dir = Path(__file__).parent
-    config_file = config_dir / f"{provider.value}_models.yaml"
-    
+    config_file = _YAML_DIR / f"{provider.value}_models.yaml"
+
     if not config_file.exists():
         return []
-    
-    with open(config_file, 'r', encoding='utf-8') as f:
+
+    with open(config_file, encoding="utf-8") as f:
         data = yaml.safe_load(f)
-        return data.get('models', [])
+        return data.get("models", [])
 
 
-def load_models(db: Session, providers: list[str] = None, silent: bool = False) -> dict:
+def load_models(db: Session, providers: list[str] | None = None, silent: bool = False) -> dict:
     """
     加载模型配置到数据库
-    
+
     Args:
         db: 数据库会话
         providers: 要加载的供应商列表，None表示加载所有
         silent: 是否静默模式（不输出详细日志）
-        
+
     Returns:
         dict: 加载结果统计 {"success": int, "skipped": int, "failed": int}
     """
     result = {"success": 0, "skipped": 0, "failed": 0}
-    
+
     # 确定要加载的供应商
     if providers:
         target_providers = [ModelProvider(p) if isinstance(p, str) else p for p in providers]
     else:
         target_providers = [p for p in ModelProvider if p != ModelProvider.COMPOSITE]
-    
+
     for provider in target_providers:
         # 从YAML文件加载模型配置
         models = _load_yaml_config(provider)
-        
+
         if not models:
             if not silent:
-                print(f"警告: 供应商 '{provider.value}' 暂无预定义模型")
+                logger.warning("警告: 供应商 '%s' 暂无预定义模型", provider.value)
             continue
-            
+
         if not silent:
-            print(f"\n正在加载 {provider.value} 的 {len(models)} 个模型...")
+            logger.info("正在加载 %s 的 %s 个模型...", provider.value, len(models))
 
         for model_data in models:
             config_sync_fields = {
@@ -63,33 +77,34 @@ def load_models(db: Session, providers: list[str] = None, silent: bool = False) 
                 "name": None,
                 "provider": None,
                 "type": None,
-                "description": None
+                "description": None,
             }
             try:
                 # 检查模型是否已存在
                 existing = db.query(ModelBase).filter(
                     ModelBase.name == model_data["name"],
-                    ModelBase.provider == model_data["provider"]
+                    ModelBase.provider == model_data["provider"],
                 ).first()
-                
+
                 if existing:
                     # 更新现有模型配置
                     for key, value in model_data.items():
                         setattr(existing, key, value)
-                    
-                    # 更新绑定了该 model_id 的 ModelConfig（能力以 config 为源，渠道运行期取 config 快照）
-                    sync_fields = [k for k in config_sync_fields.keys() if k in model_data]
+
+                    # 更新绑定该 model_id 的 ModelConfig
+                    # （能力以 config 为源，渠道运行期取 config 快照）
+                    sync_fields = [k for k in config_sync_fields if k in model_data]
                     if sync_fields:
                         # 批量更新 ModelConfig
                         update_kwargs = {k: model_data[k] for k in sync_fields}
                         db.query(ModelConfig).filter(ModelConfig.model_id == existing.id).update(
                             update_kwargs,
-                            synchronize_session=False
+                            synchronize_session=False,
                         )
 
                     db.commit()
                     if not silent:
-                        print(f"更新成功: {model_data['name']}")
+                        logger.info("更新成功: %s", model_data["name"])
                     result["success"] += 1
                 else:
                     # 创建新模型
@@ -97,26 +112,26 @@ def load_models(db: Session, providers: list[str] = None, silent: bool = False) 
                     db.add(model)
                     db.commit()
                     if not silent:
-                        print(f"添加成功: {model_data['name']}")
+                        logger.info("添加成功: %s", model_data["name"])
                     result["success"] += 1
-                
+
             except Exception as e:
                 db.rollback()
                 if not silent:
-                    print(f"添加失败: {model_data['name']} - {str(e)}")
+                    logger.warning("添加失败: %s - %s", model_data["name"], str(e))
                 result["failed"] += 1
-    
+
     return result
 
 
 def load_models_by_provider(db: Session, provider: str) -> dict:
     """
     加载指定供应商的模型配置
-    
+
     Args:
         db: 数据库会话
         provider: 供应商名称（字符串或ModelProvider枚举）
-        
+
     Returns:
         dict: 加载结果统计
     """
@@ -124,7 +139,7 @@ def load_models_by_provider(db: Session, provider: str) -> dict:
     return load_models(db, providers=[provider_enum])
 
 
-def get_available_providers() -> list[Callable[[], str]]:
+def get_available_providers() -> list[str]:
     """获取所有可用的供应商列表（从ModelProvider枚举获取，排除COMPOSITE）"""
     return [p.value for p in ModelProvider if p != ModelProvider.COMPOSITE]
 

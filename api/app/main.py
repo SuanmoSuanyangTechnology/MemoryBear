@@ -33,8 +33,6 @@ from app.integrations.knowledge.validation import (
     safe_retrieval_validation_response,
 )
 from app.core.models.failover import channel_error_to_business
-from app.core.models.scripts.loader import load_models
-from app.db import get_db_context
 
 # Initialize logging system
 LoggingConfig.setup_logging()
@@ -66,17 +64,7 @@ async def lifespan(app: FastAPI):
     else:
         logger.info("自动数据库升级已禁用 (DB_AUTO_UPGRADE=false)")
 
-    # 加载预定义模型
-    if settings.LOAD_MODEL:
-        logger.info("开始加载预定义模型...")
-        try:
-            with get_db_context() as db:
-                result = load_models(db, silent=True)
-                logger.info(f"预定义模型加载完成: 成功{result['success']}个, 跳过{result['skipped']}个, 失败{result['failed']}个")
-        except Exception as e:
-            logger.warning(f"加载预定义模型时出错: {str(e)}")
-    else:
-        logger.info("预定义模型加载已禁用 (LOAD_MODEL=false)")
+    # 预定义模型（模型广场种子）加载已迁至 model-service（LOAD_MODEL 由服务侧消费）
     await create_all_indexes()
     logger.info("All neo4j indexes and constraints created successfully!")
 
@@ -107,6 +95,9 @@ async def lifespan(app: FastAPI):
 
     from app.integrations.knowledge.runtime import initialize_knowledge_integration
     await initialize_knowledge_integration()
+
+    from app.integrations.model.runtime import initialize_model_integration
+    await initialize_model_integration()
 
     # Start background intervention timeout scanner
     from app.services.intervention_timeout_scheduler import start as start_timeout_scanner
@@ -140,6 +131,8 @@ async def lifespan(app: FastAPI):
     await close_http_client()
     from app.integrations.knowledge.runtime import close_knowledge_integration
     await close_knowledge_integration()
+    from app.integrations.model.runtime import close_model_integration
+    await close_model_integration()
     from app.services.batch_persist_queue import BatchPersistQueue
     await BatchPersistQueue.flush()
     await BatchPersistQueue.stop()
