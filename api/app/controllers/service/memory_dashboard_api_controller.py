@@ -7,14 +7,15 @@ Note: `/end_users` intentionally reuses the manager-side route function
 (`memory_dashboard_controller.get_workspace_end_users`) instead of the shared
 service layer, and is excluded from the "/api and /v1 as two independent entry
 points over the same service functions" refactoring. The newer endpoints
-(`/total_memory_count`, `/end_user_memory_counts`, `/memory_increment_daily`)
-call the service layer directly.
+(`/total_memory_count`, `/end_user_memory_counts`, `/memory_increment_daily`,
+`/dashboard_data`) call the service layer directly.
 """
 
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Query, Request, status
+from fastapi.responses import JSONResponse
 
 from app.controllers import memory_dashboard_controller
 from app.core.api_key_auth import get_current_api_key_auth, require_api_key_self_db
@@ -26,7 +27,7 @@ from app.db import get_async_db_context, get_db_context
 from app.schemas.api_key_schema import ApiKeyAuth
 from app.schemas.memory_dashboard_schema import EndUserMemoryCountsRequest
 from app.schemas.response_schema import ApiResponse
-from app.services import memory_dashboard_service
+from app.services import memory_dashboard_service, workspace_service
 
 router = APIRouter(prefix="/dashboard", tags=["V1 - Dashboard API"])
 api_logger = get_business_logger()
@@ -222,3 +223,151 @@ async def get_memory_increment_daily(
         )
 
     return success(data=result, msg="查询成功")
+
+
+@router.get("/dashboard_data", response_model=ApiResponse)
+@require_api_key_self_db(scopes=["memory"])
+async def get_dashboard_data(
+    request: Request,
+    api_key_auth: ApiKeyAuth = None,
+):
+    """
+    Aggregated dashboard data for the workspace bound to the API Key.
+
+    The workspace is determined by the API Key and is NOT accepted as input, to
+    prevent cross-workspace access. The response shape matches the manager-side
+    `GET /dashboard/dashboard_data`: `storage_type` plus exactly one of
+    `neo4j_data` / `rag_data` (the other stays null), each holding total_memory /
+    total_app / total_knowledge / total_api_call and their day-over-day changes.
+
+    Returns:
+        ApiResponse: {"storage_type", "neo4j_data": {...} | null, "rag_data": {...} | null}
+    """
+    # 1. 异步提取用户快照（snapshot.current_workspace_id = API Key 绑定空间）
+    async with get_async_db_context() as auth_db:
+        current_user = await get_current_user_snapshot_from_api_key_async(auth_db, api_key_auth)
+
+    workspace_id = api_key_auth.workspace_id
+    if workspace_id is None:
+        return fail(BizCode.INVALID_PARAMETER, "API Key 未绑定工作空间", "workspace_id is None")
+
+    api_logger.info(f"[V1] 查询dashboard整合数据: workspace={workspace_id}")
+
+    async with get_async_db_context() as db:
+        # 空间来自 API Key，无需再做成员权限校验（与 V1 其它接口一致）
+        storage_type = await workspace_service.get_workspace_storage_type_without_auth_async(
+            db=db,
+            workspace_id=workspace_id,
+        )
+        if storage_type is None:
+            storage_type = "neo4j"
+
+        # 只回填与 storage_type 匹配的那一份数据，另一份保持 null
+        result = {
+            "storage_type": storage_type,
+            "neo4j_data": None,
+            "rag_data": None,
+        }
+
+        try:
+            if storage_type == "neo4j":
+                neo4j_data: dict[str, int | None] = {
+                    "total_memory": None,
+                    "total_app": None,
+                    "total_knowledge": None,
+                    "total_api_call": None,
+                }
+
+                # 1) 记忆总量：neo4j 独有口径，走仅总量版本（不拉取宿主明细）
+                try:
+                    neo4j_data["total_memory"] = (
+                        await memory_dashboard_service.get_workspace_total_memory_count_only_async(
+                            db=db,
+                            workspace_id=workspace_id,
+                            current_user=current_user,
+                            end_user_id=None,
+                        )
+                    )
+                    api_logger.info(f"[V1] 成功获取记忆总量: {neo4j_data['total_memory']}")
+                except Exception as e:
+                    api_logger.warning(f"[V1] 获取记忆总量失败: {str(e)}")
+
+                # 2) 共享统计（total_app、total_knowledge、total_api_call）
+                common_stats = await memory_dashboard_service.get_dashboard_common_stats_async(
+                    db, workspace_id
+                )
+                neo4j_data.update(common_stats)
+
+                # 3) 昨日对比
+                try:
+                    changes = await memory_dashboard_service.get_dashboard_yesterday_changes_async(
+                        db=db,
+                        workspace_id=workspace_id,
+                        storage_type=storage_type,
+                        today_data=neo4j_data,
+                    )
+                    neo4j_data.update(changes)
+                except Exception as e:
+                    api_logger.warning(f"[V1] 计算neo4j昨日对比失败: {str(e)}")
+                    neo4j_data.update({
+                        "total_memory_change": None,
+                        "total_app_change": None,
+                        "total_knowledge_change": None,
+                        "total_api_call_change": None,
+                    })
+
+                result["neo4j_data"] = neo4j_data
+
+            elif storage_type == "rag":
+                rag_data: dict[str, int | None] = {
+                    "total_memory": None,
+                    "total_app": None,
+                    "total_knowledge": None,
+                    "total_api_call": None,
+                }
+
+                # 1) 记忆总量：rag 独有口径，document 表的 chunk_num 之和
+                try:
+                    rag_data["total_memory"] = (
+                        await memory_dashboard_service.get_rag_user_kb_total_chunk_async(
+                            db, current_user
+                        )
+                    )
+                    api_logger.info(f"[V1] 成功获取RAG记忆总量: {rag_data['total_memory']}")
+                except Exception as e:
+                    api_logger.warning(f"[V1] 获取RAG记忆总量失败: {str(e)}")
+
+                # 2) 共享统计（total_app、total_knowledge、total_api_call）
+                common_stats = await memory_dashboard_service.get_dashboard_common_stats_async(
+                    db, workspace_id
+                )
+                rag_data.update(common_stats)
+
+                # 3) 昨日对比
+                try:
+                    changes = await memory_dashboard_service.get_dashboard_yesterday_changes_async(
+                        db=db,
+                        workspace_id=workspace_id,
+                        storage_type=storage_type,
+                        today_data=rag_data,
+                    )
+                    rag_data.update(changes)
+                except Exception as e:
+                    api_logger.warning(f"[V1] 计算RAG昨日对比失败: {str(e)}")
+                    rag_data.update({
+                        "total_memory_change": None,
+                        "total_app_change": None,
+                        "total_knowledge_change": None,
+                        "total_api_call_change": None,
+                    })
+
+                result["rag_data"] = rag_data
+
+        except Exception as e:
+            api_logger.error(f"[V1] 获取dashboard整合数据失败: {str(e)}")
+            return JSONResponse(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                content=fail(BizCode.INTERNAL_ERROR, "获取dashboard整合数据失败"),
+            )
+
+    return success(data=result, msg="Dashboard数据获取成功")
