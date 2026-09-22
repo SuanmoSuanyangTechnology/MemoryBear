@@ -11,9 +11,38 @@ import uuid
 from sqlalchemy import Column, String, DateTime, Float, ForeignKey, Text
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
+from sqlalchemy.types import TypeDecorator
 
 from app.db import Base
 from app.core.utils.datetime_utils import utcnow_naive
+
+
+def _strip_nul(value):
+    """递归剥离 PostgreSQL text/jsonb 无法表示的 NUL（U+0000）。"""
+    if isinstance(value, str):
+        return value.replace("\x00", "") if "\x00" in value else value
+    if isinstance(value, dict):
+        return {k: _strip_nul(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_strip_nul(v) for v in value]
+    return value
+
+
+class SafeJSONB(TypeDecorator):
+    """写入前剥离 NUL 的 JSONB。
+
+    knowledge_retrieval_tool 等会把 PDF/Office 解析出的 chunk 原文放进 steps，
+    其中可能混入 U+0000。PostgreSQL jsonb 禁止该字符，写入即抛 asyncpg
+    UntranslatableCharacterError，表现为会话末尾冒出 model_error。
+    在列类型层兜底，可覆盖 repository / draft_run / batch_persist 等所有写入路径。
+    """
+
+    impl = JSONB
+    cache_ok = True
+
+    def process_bind_param(self, value, dialect):
+        return _strip_nul(value)
+
 
 
 class AgentExecution(Base):
@@ -80,7 +109,7 @@ class AgentExecution(Base):
     #     "error": null
     #   }
     # ]
-    steps = Column(JSONB, nullable=False, default=list)
+    steps = Column(SafeJSONB, nullable=False, default=list)
 
     # Agent 执行轨迹（AgentTraceRecorder.to_dict 快照）
     # {
@@ -95,7 +124,7 @@ class AgentExecution(Base):
     # 前端 Runtime.tsx 可直接渲染成工作流智能体节点同款（ROUND / llm / tool_calls）。
     # 本轮仅多 Agent 集群的子 Agent 执行写入；单 Agent 应用为 NULL。
     agent_log = Column(
-        JSONB,
+        SafeJSONB,
         nullable=True,
         comment="Agent 执行轨迹（AgentTraceRecorder.to_dict 快照：{meta, iterations:[{llm, tool_calls}]}）"
     )
@@ -137,12 +166,12 @@ class AgentExecution(Base):
     elapsed_time = Column(Float, nullable=True, comment="总耗时（秒）")
 
     # Token 使用
-    token_usage = Column(JSONB, nullable=True)
+    token_usage = Column(SafeJSONB, nullable=True)
 
     created_at = Column(DateTime, nullable=False, default=utcnow_naive)
 
     # 扩展元数据（模型名称、provider 等运行时信息）
-    meta_data = Column(JSONB, nullable=True, default=dict, comment="扩展元数据")
+    meta_data = Column(SafeJSONB, nullable=True, default=dict, comment="扩展元数据")
 
     # 关系
     app = relationship("App")
