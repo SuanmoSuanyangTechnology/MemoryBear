@@ -550,6 +550,58 @@ async def update_config_scene(
     )
 
 
+@router.get("/read_config_scene_community")
+@require_api_key_self_db(scopes=["memory"])
+async def read_config_scene_community(
+    request: Request,
+    config_id: str = Query(..., description="config_id"),
+    api_key_auth: ApiKeyAuth = None,
+):
+    """Read SceneCommunity settings for the API Key workspace."""
+    logger.info(
+        "V1 read SceneCommunity config - config_id: %s, workspace: %s",
+        config_id,
+        api_key_auth.workspace_id,
+    )
+    async with get_async_db_context() as auth_db:
+        current_user = await get_current_user_snapshot_from_api_key_async(
+            auth_db, api_key_auth
+        )
+    return jsonable_encoder(
+        await memory_config_controller.read_config_scene_community(
+            config_id=config_id,
+            current_user=current_user,
+        )
+    )
+
+
+@router.put("/update_config_scene_community")
+@require_api_key_self_db(scopes=["memory"])
+async def update_config_scene_community(
+    request: Request,
+    api_key_auth: ApiKeyAuth = None,
+    message: str = Body(None, description="Request body"),
+):
+    """Fully update SceneCommunity settings for the API Key workspace."""
+    body = await request.json()
+    # Keep the V1 contract aligned with update_config_scene: the declared
+    # message field is a compatibility placeholder while the raw JSON body is
+    # validated by the shared controller.
+    logger.info(
+        "V1 update SceneCommunity config - config_id: %s, workspace: %s",
+        body.get("config_id"),
+        api_key_auth.workspace_id,
+    )
+    async with get_async_db_context() as auth_db:
+        current_user = await get_current_user_snapshot_from_api_key_async(
+            auth_db, api_key_auth
+        )
+    return await memory_config_controller.update_config_scene_community(
+        payload=body,
+        current_user=current_user,
+    )
+
+
 @router.get("/read_config_preference")
 @require_api_key_self_db(scopes=["memory"])
 async def read_config_preference(

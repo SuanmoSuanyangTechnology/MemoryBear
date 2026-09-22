@@ -15,6 +15,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query, status
 from fastapi.responses import JSONResponse
+from pydantic import ValidationError as PydanticValidationError
 
 from app.controllers.emotion_config_controller import EmotionConfigUpdate
 from app.core.error_codes import BizCode
@@ -38,10 +39,20 @@ from app.schemas.memory_api_schema import PredictionConfigUpdateRequest
 from app.schemas.memory_preference_config_schema import PreferenceConfigUpdate
 from app.schemas.response_schema import ApiResponse
 from app.schemas.scene_memory_schema import SceneConfig, SceneConfigUpdate, SceneSplitDemoRequest
+from app.schemas.scene_community_schema import (
+    CommunityPreviewRequest,
+    SceneCommunityConfigUpdate,
+)
+from app.schemas.scene_memory_schema import SceneConfig, SceneConfigUpdate
 from app.services.emotion_config_service import EmotionConfigService
 from app.services.memory_forget_service import MemoryForgetService
 from app.services.memory_storage_service import DataConfigService
 from app.services.prediction_config_service import PredictionConfigService
+from app.services.scene_community_config_service import SceneCommunityConfigService
+from app.services.scene_community_preview_service import (
+    SceneCommunityPreviewService,
+    UnsupportedPreviewCaseError,
+)
 from app.utils.config_utils import resolve_config_id, resolve_config_id_async
 
 api_logger = get_api_logger()
@@ -51,6 +62,11 @@ forget_service = MemoryForgetService()
 
 router = APIRouter(
     prefix="/memory_config",
+    tags=["Memory Config"],
+)
+
+community_preview_router = APIRouter(
+    prefix="/memory/configs/community",
     tags=["Memory Config"],
 )
 
@@ -786,3 +802,107 @@ async def scene_split_demo(
         )
 
     return success(data=result.model_dump(), msg="查询成功")
+@router.get("/read_config_scene_community", response_model=ApiResponse)
+async def read_config_scene_community(
+    config_id: UUID | int,
+    current_user: CurrentUserSnapshot = Depends(get_current_user_async),
+):
+    """读取 SceneCommunity 配置，不触发任何社区处理。"""
+    async with get_async_db_context() as db:
+        resolved_id = await resolve_config_id_async(config_id, db)
+        config = await SceneCommunityConfigService(db).get(
+            resolved_id, current_user.current_workspace_id
+        )
+        if config is None:
+            return fail(
+                BizCode.MEMORY_CONFIG_NOT_FOUND,
+                "配置不存在或无权访问",
+            )
+        return success(data=config.model_dump(mode="json"), msg="查询成功")
+
+
+@router.post("/update_config_scene_community", response_model=ApiResponse)
+async def update_config_scene_community(
+    payload: dict | None = Body(None),
+    current_user: CurrentUserSnapshot = Depends(get_current_user_async),
+):
+    """全量更新 SceneCommunity 配置，仅持久化配置字段。"""
+    try:
+        validated = SceneCommunityConfigUpdate.model_validate(payload or {})
+    except PydanticValidationError as exc:
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content=fail(
+                BizCode.INVALID_PARAMETER,
+                "SceneCommunity 配置参数不正确",
+                str(exc),
+            ),
+        )
+
+    async with get_async_db_context() as db:
+        config = await SceneCommunityConfigService(db).update(
+            validated, current_user.current_workspace_id
+        )
+        if config is None:
+            return fail(
+                BizCode.MEMORY_CONFIG_NOT_FOUND,
+                "配置不存在或无权访问",
+            )
+        return success(data=config.model_dump(mode="json"), msg="更新成功")
+
+
+@community_preview_router.get("/preview-cases", response_model=ApiResponse)
+async def read_scene_community_preview_cases(
+    _current_user: CurrentUserSnapshot = Depends(get_current_user_async),
+    language_type: Optional[str] = Header(None, alias="X-Language-Type"),
+):
+    """返回稳定的 SceneCommunity 配置预览场景列表。"""
+    locale = get_language_from_header(language_type)
+    return success(
+        data=SceneCommunityPreviewService.list_cases(locale=locale),
+        msg="Query successful" if locale == "en" else "查询成功",
+    )
+
+
+@community_preview_router.post("/preview", response_model=ApiResponse)
+async def preview_scene_community_config(
+    payload: CommunityPreviewRequest,
+    current_user: CurrentUserSnapshot = Depends(get_current_user_async),
+    language_type: Optional[str] = Header(None, alias="X-Language-Type"),
+):
+    """使用固定模拟数据预览配置效果，不读取或写入真实社区。"""
+    locale = get_language_from_header(language_type)
+    async with get_async_db_context() as db:
+        config = await SceneCommunityConfigService(db).get(
+            payload.config_id, current_user.current_workspace_id
+        )
+        if config is None:
+            return fail(
+                BizCode.MEMORY_CONFIG_NOT_FOUND,
+                (
+                    "Configuration not found or access denied"
+                    if locale == "en"
+                    else "配置不存在或无权访问"
+                ),
+            )
+
+    try:
+        result = SceneCommunityPreviewService.build(
+            payload.preview_case,
+            config.candidate_community_limit,
+            locale=locale,
+        )
+    except UnsupportedPreviewCaseError:
+        return fail(
+            BizCode.INVALID_PARAMETER,
+            (
+                "Invalid preview_case parameter"
+                if locale == "en"
+                else "preview_case 参数不正确"
+            ),
+            "unsupported preview_case",
+        )
+    return success(
+        data=result,
+        msg="Query successful" if locale == "en" else "查询成功",
+    )
