@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.utils.datetime_utils import to_iso_z, utcnow_naive
+from app.core.workflow.node_cache import sanitize_json_text
 from app.core.agent.agent_middleware import AgentMiddleware
 from app.core.agent.langchain_agent import LangChainAgent
 from app.core.config import settings
@@ -417,6 +418,11 @@ async def _retrieve_chunks_via_standard(
             continue
         if chunk_id:
             seen_chunk_ids.add(chunk_id)
+        # 与工作流知识库检索节点同口径：检索到内容后立即剥离 chunk 原文里的 NUL
+        # （PDF/Office 解析常混入 U+0000），避免后续组装 context / steps 写 jsonb 失败。
+        content = getattr(chunk, "page_content", None)
+        if isinstance(content, str):
+            chunk.page_content = sanitize_json_text(content)
         unique_results.append(chunk)
     return unique_results
 
