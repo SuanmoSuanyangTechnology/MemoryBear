@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom'
 import {
     DynamicWeightEngine, AssociationEngine,
     ConsolidationEvolutionEngine, PredictionEngineSettings, PredictionEngine,
+    PreferenceEngine
 } from '@redbear/memory-brick'
 
 import { request } from '@/utils/request'
@@ -26,6 +27,9 @@ const MemoryEngine: FC = () => {
   }
   if (type === 'prediction-progress') {
       return <PrivateWrap>{() => <PredictionEngine handleSSE={handleSSE} />}</PrivateWrap>
+  }
+  if (type === 'preference-engine') {
+      return <PrivateWrap>{() => <PreferenceEngine request={request} />}</PrivateWrap>
   }
   return null
 }

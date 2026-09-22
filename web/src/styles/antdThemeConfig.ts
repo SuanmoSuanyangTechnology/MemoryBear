@@ -106,6 +106,7 @@ export const lightTheme: ThemeConfig = {
 
       // cellPaddingInline: 24,
       selectionColumnWidth: 48,
+      headerBorderRadius: 12,
     },
     Breadcrumb: {
       itemColor: '#5B6167',

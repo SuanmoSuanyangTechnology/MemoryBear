@@ -132,6 +132,7 @@ export const home = {
       consolidationEvolutionEngine: '长期固化演进引擎',
       predictionEngine: '记忆预测推演引擎',
       predictionProgress: '预测推演流程',
+      preferenceEngine: '偏好引擎',
     },
     dashboard: {
       total_models: '可用模型总数',
