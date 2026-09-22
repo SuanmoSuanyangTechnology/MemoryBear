@@ -760,9 +760,11 @@ async def scene_split_demo(
         )
     # 过滤空串/纯空白历史：既避免空段污染 BERT 输入，也让轮次推导与实际参与判定的历史一致。
     history_messages = [message for message in payload.history_messages if message and message.strip()]
-    # 演示页不提供轮次输入，按「实际历史消息条数 + 1」推导当前场景轮次：
-    # 填 N 条历史即为第 N+1 轮，min_turns 调到大于该值、或 max_turns 调到不大于该值，即可演示两条短路分支。
-    current_scene_turns = len(history_messages) + 1
+    # 演示页不提供轮次输入，按「上一条 SHIFT 之后的实际历史消息条数」推导当前场景轮次：
+    # 生产口径只数「上一条 SHIFT 消息之后、当前 user 消息之前」的历史，不含当前这条 Query；
+    # 演示页拿不到 SHIFT 标记，故直接用传入的历史消息条数模拟。填 N 条即为第 N 轮，
+    # min_turns 调到大于该值、或 max_turns 调到不大于该值，即可演示两条短路分支。
+    current_scene_turns = len(history_messages)
 
     try:
         result = await SceneSplitDemoService.run(
