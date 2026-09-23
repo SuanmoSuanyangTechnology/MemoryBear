@@ -30,7 +30,7 @@ BOUNDS = {
 
 
 def load_outbox_tasks():
-    source = ast.parse((API / "app/tasks.py").read_text())
+    source = ast.parse((API / "app/tasks.py").read_text(encoding="utf-8"))
     names = {"scan_outbox_projection", "cleanup_outbox"}
     definitions = [
         node
@@ -63,7 +63,7 @@ def load_outbox_tasks():
 
 @pytest.mark.parametrize("name", BOUNDS)
 def test_config_defaults_and_boundaries(monkeypatch, name):
-    module = ast.parse((API / "app/core/config.py").read_text())
+    module = ast.parse((API / "app/core/config.py").read_text(encoding="utf-8"))
     settings = next(node for node in module.body if isinstance(node, ast.ClassDef) and node.name == "Settings")
     node = next(node for node in settings.body if isinstance(node, ast.AnnAssign) and node.target.id == name)
     expression = compile(ast.Expression(node.value), "config_outbox", "eval")
@@ -87,12 +87,14 @@ def test_only_two_registered_tasks_and_beat_entries():
     for task in (tasks.scan_outbox_projection, tasks.cleanup_outbox):
         assert task.max_retries == 0
         assert task.queue == "memory_projection"
-    source = ast.parse((API / "app/celery_app.py").read_text())
+    source = ast.parse((API / "app/celery_app.py").read_text(encoding="utf-8"))
     beat = next(node.value for node in source.body if isinstance(node, ast.Assign)
                 and any(isinstance(target, ast.Name) and target.id == "beat_schedule_config" for target in node.targets))
     names = [key.value for key in beat.keys if "outbox" in key.value]
     assert names == ["scan-outbox-projection", "cleanup-outbox"]
-    assert 'include=["app.core.memory.storage.outbox.tasks"]' not in (API / "app/celery_app.py").read_text()
+    assert 'include=["app.core.memory.storage.outbox.tasks"]' not in (
+        API / "app/celery_app.py"
+    ).read_text(encoding="utf-8")
 
 
 def test_task_wrapper_does_not_retry_or_leak_errors(monkeypatch):
