@@ -125,7 +125,8 @@ async def get_workspace_statistics_async(
     totals = {memory_type: 0 for memory_type in MEMORY_TYPE_ORDER}
     total_users = 0
     after_id: uuid.UUID | None = None
-
+    
+    storage_service = get_storage_service()
     while True:
         end_user_ids = await _get_active_end_user_ids_page(
             workspace_id,
@@ -134,7 +135,6 @@ async def get_workspace_statistics_async(
         if not end_user_ids:
             break
 
-        storage_service = get_storage_service()
         postgresql_statistics, graph_statistics = await asyncio.gather(
             _get_postgresql_statistics(end_user_ids),
             storage_service.get_workspace_memory_graph_statistics(
