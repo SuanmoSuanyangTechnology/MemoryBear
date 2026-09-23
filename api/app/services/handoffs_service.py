@@ -1,6 +1,7 @@
 """Handoffs 服务 - 基于 LangGraph 的多 Agent 协作"""
 import json
 import uuid
+from collections import OrderedDict
 from typing import List, Dict, Any, Optional, AsyncGenerator, Annotated
 from typing_extensions import TypedDict
 
@@ -914,8 +915,10 @@ class HandoffsService:
 
 # ==================== 服务工厂 ====================
 
-# 缓存服务实例（按 app_id）
-_service_cache: Dict[str, HandoffsService] = {}
+# 缓存服务实例（按 app_id）。app_id 基数可达数十万，必须有界：超出上限时淘汰
+# 最久未使用的实例，避免缓存随应用数量无限增长。
+_service_cache_max_size = 500
+_service_cache: "OrderedDict[str, HandoffsService]" = OrderedDict()
 
 
 def get_handoffs_service_for_app(
@@ -939,6 +942,7 @@ def get_handoffs_service_for_app(
     
     # 检查缓存
     if cache_key in _service_cache:
+        _service_cache.move_to_end(cache_key)
         return _service_cache[cache_key]
     
     # 获取多 Agent 配置
@@ -957,9 +961,11 @@ def get_handoffs_service_for_app(
     # 创建服务
     service = HandoffsService(agent_configs, streaming)
     
-    # 缓存
+    # 缓存（超出上限时淘汰最久未使用的实例）
     _service_cache[cache_key] = service
-    
+    while len(_service_cache) > _service_cache_max_size:
+        _service_cache.popitem(last=False)
+
     return service
 
 
