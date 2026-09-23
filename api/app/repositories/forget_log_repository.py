@@ -1,6 +1,7 @@
 import uuid
 
-from sqlalchemy import and_, func, or_, select, update
+from sqlalchemy import and_, any_, bindparam, func, or_, select, update
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
@@ -279,6 +280,26 @@ class ForgetLogRepository:
         result = await db.scalar(
             select(func.count()).select_from(ForgetAuditModel).where(
                 ForgetAuditModel.end_user_id == end_user_id
+            )
+        )
+        return int(result or 0)
+
+    @staticmethod
+    async def get_total_by_user_ids(
+        db: AsyncSession,
+        end_user_ids: list[uuid.UUID],
+    ) -> int:
+        """统计一批终端用户的遗忘日志总数。"""
+        if not end_user_ids:
+            return 0
+        end_user_ids_param = bindparam(
+            "workspace_statistics_end_user_ids",
+            value=end_user_ids,
+            type_=ARRAY(ForgetAuditModel.end_user_id.type),
+        )
+        result = await db.scalar(
+            select(func.count()).select_from(ForgetAuditModel).where(
+                ForgetAuditModel.end_user_id == any_(end_user_ids_param)
             )
         )
         return int(result or 0)

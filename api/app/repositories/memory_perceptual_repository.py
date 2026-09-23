@@ -2,7 +2,8 @@ import uuid
 from datetime import datetime
 from typing import List, Tuple, Optional
 
-from sqlalchemy import and_, desc, select
+from sqlalchemy import and_, any_, bindparam, desc, func, select
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Session
 
 from app.core.utils.datetime_utils import utcnow_naive
@@ -90,6 +91,25 @@ class MemoryPerceptualRepository:
         except Exception as e:
             db_logger.error(f"Failed to query perceptual memory count async: end_user_id={end_user_id} - {str(e)}")
             raise
+
+    async def get_count_by_user_ids_async(
+        self,
+        end_user_ids: List[uuid.UUID],
+    ) -> int:
+        """统计一批终端用户的感知记忆总数。"""
+        if not end_user_ids:
+            return 0
+        end_user_ids_param = bindparam(
+            "workspace_statistics_end_user_ids",
+            value=end_user_ids,
+            type_=ARRAY(MemoryPerceptualModel.end_user_id.type),
+        )
+        result = await self.db.execute(
+            select(func.count()).select_from(MemoryPerceptualModel).where(
+                MemoryPerceptualModel.end_user_id == any_(end_user_ids_param)
+            )
+        )
+        return int(result.scalar_one() or 0)
 
     def get_count_by_type(
             self,

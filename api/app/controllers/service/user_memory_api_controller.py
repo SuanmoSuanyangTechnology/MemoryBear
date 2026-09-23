@@ -28,9 +28,13 @@ from app.core.api_key_utils import get_current_user_snapshot_from_api_key_async,
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
+from app.core.response_utils import fail, success
 from app.db import get_async_db_context
 from app.schemas.api_key_schema import ApiKeyAuth
 from app.schemas.memory_storage_schema import GenerateCacheRequest
+from app.services.workspace_memory_statistics_service import (
+    get_workspace_statistics_async,
+)
 
 # 包装内部服务 controller
 from app.controllers import memory_analytics_controller
@@ -118,6 +122,26 @@ async def get_node_statistics(
         end_user_id=end_user_id,
         current_user=current_user,
     )
+
+
+@router.get("/analytics/workspace_statistics")
+@require_api_key_self_db(scopes=["memory"])
+async def get_workspace_statistics(
+    request: Request,
+    api_key_auth: ApiKeyAuth = None,
+):
+    """Get memory statistics for the API Key workspace."""
+    try:
+        result = await get_workspace_statistics_async(api_key_auth.workspace_id)
+        return success(data=result, msg="查询成功")
+    except Exception as e:
+        logger.error(
+            "工作空间记忆统计查询失败: workspace_id=%s, error=%s",
+            api_key_auth.workspace_id,
+            str(e),
+            exc_info=True,
+        )
+        return fail(BizCode.INTERNAL_ERROR, "工作空间记忆统计查询失败", str(e))
 
 
 # ==================== 用户摘要 & 洞察 ====================

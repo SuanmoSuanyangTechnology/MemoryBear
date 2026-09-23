@@ -17,7 +17,8 @@ from datetime import datetime
 from typing import List, Optional
 
 import sqlalchemy as sa
-from sqlalchemy import func, select, update
+from sqlalchemy import any_, bindparam, func, select, update
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Session, aliased
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -335,6 +336,33 @@ class MemoryMessageRepository:
             .group_by(MemoryMessage.source)
         )
         return len(rows.all())
+
+    async def get_working_memory_source_count_by_user_ids_async(
+        self,
+        end_user_ids: list[uuid.UUID],
+    ) -> int:
+        """统计一批用户 API/MCP 来源的 distinct 用户-source 对数量。"""
+        if not end_user_ids:
+            return 0
+        end_user_ids_param = bindparam(
+            "workspace_statistics_end_user_ids",
+            value=[str(end_user_id) for end_user_id in end_user_ids],
+            type_=ARRAY(MemoryMessage.end_user_id.type),
+        )
+        grouped_sources = (
+            select(MemoryMessage.end_user_id, MemoryMessage.source)
+            .where(
+                MemoryMessage.end_user_id == any_(end_user_ids_param),
+                MemoryMessage.conversation_id.is_(None),
+                MemoryMessage.source.in_(self._API_MCP_SOURCES),
+            )
+            .group_by(MemoryMessage.end_user_id, MemoryMessage.source)
+            .subquery()
+        )
+        result = await self.db.execute(
+            select(func.count()).select_from(grouped_sources)
+        )
+        return int(result.scalar_one() or 0)
 
     def has_api_mcp_messages(self, end_user_id: str) -> bool:
         """判断该用户是否有任何 API/MCP 来源的记忆消息（用于 work_count +1 判断）。"""
