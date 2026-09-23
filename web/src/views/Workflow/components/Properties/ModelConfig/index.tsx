@@ -32,7 +32,7 @@ const ModelConfig: FC<ModelConfigProps> = ({
   const { t } = useTranslation()
   const form = Form.useFormInstance()
   const values = Form.useWatch<ModelConfigForm>([], form)
-  const model_id = Form.useWatch([name], form)
+  const model_id = Form.useWatch(parentName ? [parentName, name] : [name], form)
   const [options, setOptions] = useState<Model[]>([])
   const modelConfigModalRef = useRef<ModelConfigModalRef>(null)
 
@@ -43,11 +43,11 @@ const ModelConfig: FC<ModelConfigProps> = ({
   useEffect(() => {
     if (model_id && options) {
       const model = options.find(item => item.id === model_id)
-      form.setFieldValue('capability', model?.capability || [])
+      form.setFieldValue(parentName ? [parentName, 'features'] : 'features', model?.features || [])
     } else {
-      form.setFieldValue('capability', [])
+      form.setFieldValue(parentName ? [parentName, 'features'] : 'features', [])
     }
-  }, [model_id, options])
+  }, [model_id, options, parentName])
 
   const handleSetConfig = () => {
     modelConfigModalRef.current?.handleOpen(parentName ? values?.[parentName] : values as ModelConfigForm)
@@ -70,10 +70,10 @@ const ModelConfig: FC<ModelConfigProps> = ({
           <Form.Item name={parentName ? [parentName, name] : name} className="rb:flex-1! rb:mb-0!">
             <ModelSelect
               placeholder={t('common.pleaseSelect')}
-              params={{ type: 'llm,chat' }}
+              params={{ type: 'llm' }}
               className="rb:w-full!"
               size="small"
-              onChange={() => form.setFieldValue('json_output', false)}
+              onChange={() => form.setFieldValue(parentName ? [parentName, 'json_output'] : 'json_output', false)}
               updateOptions={updateOptions}
             />
           </Form.Item>

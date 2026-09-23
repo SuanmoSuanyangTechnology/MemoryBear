@@ -116,7 +116,7 @@ const ConfigField: FC<ConfigFieldProps> = ({ configKey: key }) => {
     return (<Form.Item key={key} name={key} hidden />)
   }
   if (key === 'inference_mode') {
-    const modelCapability: string[] = modelOptions.find((item) => item.id === values?.model_id)?.capability || []
+    const modelCapability: string[] = modelOptions.find((item) => item.id === values?.model_id)?.features || []
     const options = modelCapability.includes('function_call') && config.options
       ? [...config.options]
       : config.options

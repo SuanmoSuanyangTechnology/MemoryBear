@@ -51,6 +51,14 @@ const configFields = [
 
 const minThinkingBudgetTokens = 128;
 const defaultThinkingBudgetTokens = 1000;
+
+const omitOutputSettings = (modelParameters?: ModelConfig | null): ModelConfig => {
+  const filteredParameters = { ...(modelParameters ?? {}) };
+  delete filteredParameters.deep_thinking;
+  delete filteredParameters.json_output;
+  return filteredParameters;
+};
+
 const ModelConfigModal = forwardRef<ModelConfigModalRef, ModelConfigModalProps>(({
   refresh,
   data,
@@ -76,7 +84,9 @@ const ModelConfigModal = forwardRef<ModelConfigModalRef, ModelConfigModalProps>(
       form.setFieldsValue({
         ...(data?.model_parameters || {}),
         default_model_config_id: data.default_model_config_id,
-        capability: model?.capability || []
+        input_modalities: model?.input_modalities ?? data.input_modalities ?? data.model_parameters?.input_modalities ?? ['text'],
+        output_modalities: model?.output_modalities ?? data.output_modalities ?? data.model_parameters?.output_modalities ?? ['text'],
+        features: model?.features ?? data.model_parameters?.features ?? []
       })
     } else if (source === 'chat' || source === 'multi_agent') {
       if (model) {
@@ -108,13 +118,15 @@ const ModelConfigModal = forwardRef<ModelConfigModalRef, ModelConfigModalProps>(
   /** Handle model selection change */
   const handleChange: SelectProps['onChange'] = (_value, option) => {
     const newValues: ModelConfig = {
-      capability: (option as Model).capability,
-      deep_thinking: (option as Model).capability?.includes('thinking_only'),
+      input_modalities: (option as Model | undefined)?.input_modalities ?? ['text'],
+      output_modalities: (option as Model | undefined)?.output_modalities ?? ['text'],
+      features: (option as Model | undefined)?.features ?? [],
+      deep_thinking: (option as Model | undefined)?.features?.includes('thinking_only'),
       thinking_budget_tokens: defaultThinkingBudgetTokens,
       json_output: false,
     }
     if (source === 'chat') {
-      newValues.label = (option as Model).name
+      newValues.label = (option as Model | undefined)?.name
     }
     form.setFieldsValue(newValues)
   }
@@ -126,21 +138,19 @@ const ModelConfigModal = forwardRef<ModelConfigModalRef, ModelConfigModalProps>(
   }));
 
   useEffect(() => {
-    const { deep_thinking: _, json_output: __, ...rest } = data?.model_parameters || {}
-    form.setFieldsValue({ ...rest })
-  }, [data?.default_model_config_id])
+    form.setFieldsValue(omitOutputSettings(data?.model_parameters))
+  }, [data?.model_parameters])
 
   useEffect(() => {
     if (values?.deep_thinking && !values?.thinking_budget_tokens) {
       form.setFieldValue('thinking_budget_tokens', defaultThinkingBudgetTokens)
     }
-  }, [values?.deep_thinking])
+  }, [values?.deep_thinking, values?.thinking_budget_tokens, defaultThinkingBudgetTokens])
 
   const handleReset = () => {
     if (!id) return
     resetAppModelConfig(id).then((res) => {
-      const { deep_thinking: _, json_output: __, ...rest } = (res || {}) as Config['model_parameters']
-      form.setFieldsValue(rest)
+      form.setFieldsValue(omitOutputSettings((res || {}) as Config['model_parameters']))
     })
   }
 
@@ -167,25 +177,27 @@ const ModelConfigModal = forwardRef<ModelConfigModalRef, ModelConfigModalProps>(
         >
           {source !== 'multi_agent' &&
             <ModelSelect
-              params={{type: 'llm,chat'}}
+              params={{type: 'llm'}}
               placeholder={t('common.pleaseSelect')}
               onChange={handleChange}
             />
           }
         </FormItem>
         {['model', 'chat'].includes(source) && <>
-          <FormItem name="capability" hidden />
+          <FormItem name="features" hidden />
+          <FormItem name="input_modalities" hidden />
+          <FormItem name="output_modalities" hidden />
         </>}
-        <FormItem name="json_output" valuePropName="checked" hidden={!(values?.capability?.includes('json_output'))}>
+        <FormItem name="json_output" valuePropName="checked" hidden={!(values?.features?.includes('json_output'))}>
           <Checkbox>{t('application.json_output')}</Checkbox>
         </FormItem>
-        <FormItem name="deep_thinking" valuePropName="checked" hidden={!['model', 'chat'].includes(source) || !(values?.deep_thinking || values?.capability?.includes('thinking') || values?.capability?.includes('thinking_only'))}>
-          <Checkbox disabled={values?.capability?.includes('thinking_only')}>{t('application.deep_thinking')}</Checkbox>
+        <FormItem name="deep_thinking" valuePropName="checked" hidden={!['model', 'chat'].includes(source) || !(values?.deep_thinking || values?.features?.includes('thinking') || values?.features?.includes('thinking_only'))}>
+          <Checkbox disabled={values?.features?.includes('thinking_only')}>{t('application.deep_thinking')}</Checkbox>
         </FormItem>
         <FormItem
           name="thinking_budget_tokens"
           label={t('application.thinking_budget_tokens')}
-          hidden={!['model', 'chat'].includes(source) || !(values?.deep_thinking || values?.capability?.includes('thinking') || values?.capability?.includes('thinking_only'))}
+          hidden={!['model', 'chat'].includes(source) || !(values?.deep_thinking || values?.features?.includes('thinking') || values?.features?.includes('thinking_only'))}
           extra={<>{t('application.range')}: [{minThinkingBudgetTokens}, {t(`application.max_tokens`)}: {values?.max_tokens}]</>}
           dependencies={['max_tokens']}
           rules={[

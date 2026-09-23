@@ -191,7 +191,7 @@ const ApiKeyModal = forwardRef<ApiKeyModalRef, CreateModalProps>(({
           {createdApiKey?.other_id &&
             <div className="rb:mb-4">
               <div className="rb:text-sm rb:text-gray-500 rb:mb-2">{t('apiKey.memoryDefaultId')}</div>
-              <Flex align="center" justify="space-between" className="rb:bg-[#F6F6F6] rb:text-[#5B6167] rb:rounded-lg rb:px-3! rb:py-2!">
+              <Flex align="center" justify="space-between" className="rb:bg-[#F6F6F6] rb:text-gray-600 rb:rounded-lg rb:px-3! rb:py-2!">
                 <span className="rb:text-sm">{createdApiKey?.other_id}</span>
   
                 <Button className="rb:px-2! rb:h-7! rb:group" onClick={() => handleCopy(createdApiKey?.other_id || '')}>
@@ -206,7 +206,7 @@ const ApiKeyModal = forwardRef<ApiKeyModalRef, CreateModalProps>(({
 
           <div className="rb:mb-4">
             <div className="rb:text-sm rb:text-gray-500 rb:mb-2">{t('apiKey.apiKey')}</div>
-            <Flex align="center" justify="space-between" className="rb:bg-[#F6F6F6] rb:text-[#5B6167] rb:rounded-lg rb:px-3! rb:py-2!">
+            <Flex align="center" justify="space-between" className="rb:bg-[#F6F6F6] rb:text-gray-600 rb:rounded-lg rb:px-3! rb:py-2!">
               <span className="rb:text-sm">{createdApiKey?.api_key}</span>
 
               <Button className="rb:px-2! rb:h-7! rb:group" onClick={() => handleCopy(createdApiKey?.api_key || '')}>
@@ -224,7 +224,7 @@ const ApiKeyModal = forwardRef<ApiKeyModalRef, CreateModalProps>(({
                 <span className="rb:text-sm rb:text-gray-500">{t('apiKey.endUserId')}</span>
                 <span className="rb:text-xs rb:text-orange-500">{t('apiKey.pleaseSave')}</span>
               </Flex>
-              <Flex align="center" justify="space-between" className="rb:bg-[#F6F6F6] rb:text-[#5B6167] rb:rounded-lg rb:px-3! rb:py-2!">
+              <Flex align="center" justify="space-between" className="rb:bg-[#F6F6F6] rb:text-gray-600 rb:rounded-lg rb:px-3! rb:py-2!">
                 <span className="rb:text-sm">{createdApiKey?.end_user_id}</span>
 
                 <Button className="rb:px-2! rb:h-7! rb:group" onClick={() => handleCopy(createdApiKey?.end_user_id || '')}>
@@ -258,7 +258,7 @@ const ApiKeyModal = forwardRef<ApiKeyModalRef, CreateModalProps>(({
             daily_request_limit: 100000
           }}
         >
-          <div className="rb:text-[#5B6167] rb:font-medium rb:leading-5 rb:mb-4">{t('apiKey.baseInfo')}</div>
+          <div className="rb:text-gray-600 rb:font-medium rb:leading-5 rb:mb-4">{t('apiKey.baseInfo')}</div>
           <FormItem
             name="name"
             label={t('apiKey.name')}
@@ -279,7 +279,7 @@ const ApiKeyModal = forwardRef<ApiKeyModalRef, CreateModalProps>(({
             <Input.TextArea placeholder={t('common.pleaseEnter')} rows={3} />
           </FormItem>
 
-          <div className="rb:text-[#5B6167] rb:font-medium rb:leading-5 rb:mb-4">{t('apiKey.permissionInfo')}</div>
+          <div className="rb:text-gray-600 rb:font-medium rb:leading-5 rb:mb-4">{t('apiKey.permissionInfo')}</div>
 
           <FormItem
             name="memory"
@@ -297,7 +297,6 @@ const ApiKeyModal = forwardRef<ApiKeyModalRef, CreateModalProps>(({
             {memory &&
               <Flex align="center" justify="space-between" className="rb:mb-1!">
                 <div>
-                  <span className="rb:text-[#ff5d34]">*</span>
                   {t('apiKey.memoryDefaultId')}
                 </div>
                 <Button
@@ -311,9 +310,6 @@ const ApiKeyModal = forwardRef<ApiKeyModalRef, CreateModalProps>(({
             <FormItem
               name="end_user"
               dependencies={['memory']}
-              rules={[
-                { required: memory, message: t('common.pleaseEnter') },
-              ]}
               hidden={!memory}
             >
               <DebounceSelect
@@ -323,7 +319,7 @@ const ApiKeyModal = forwardRef<ApiKeyModalRef, CreateModalProps>(({
                 format={(items) => (items as Data[]).map(item => ({
                   ...item,
                   'end_user.id': item.end_user?.id,
-                  label: <Flex align="center" gap={12}>{item.end_user?.id} <span className="rb:text-[#5B6167] rb:text-[12px]">{t('apiKey.existingUser')}</span></Flex>,
+                  label: <Flex align="center" gap={12}>{item.end_user?.id} <span className="rb:text-gray-600 rb:text-[12px]">{t('apiKey.existingUser')}</span></Flex>,
                   value: item.end_user?.id,
                 }))}
                 placeholder={t('memoryConversation.searchPlaceholder')}
@@ -343,7 +339,7 @@ const ApiKeyModal = forwardRef<ApiKeyModalRef, CreateModalProps>(({
             <Switch />
           </FormItem>
 
-          <div className="rb:text-[#5B6167] rb:font-medium rb:leading-5 rb:mb-4">{t('apiKey.advancedSettings')}</div>
+          <div className="rb:text-gray-600 rb:font-medium rb:leading-5 rb:mb-4">{t('apiKey.advancedSettings')}</div>
 
           <FormItem
             name="expires_at"

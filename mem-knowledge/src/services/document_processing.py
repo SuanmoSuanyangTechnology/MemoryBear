@@ -284,10 +284,10 @@ def _build_vision_model(
     snapshot: ParseDocumentSnapshot,
     file_key: str,
 ):
-    factory = TaskModelFactory(runtime)
     if _AUDIO_PATTERN.search(snapshot.file_name):
         if snapshot.audio2text_id is None:
-            raise RuntimeError("audio2text_id model config is unavailable")
+            return None
+        factory = TaskModelFactory(runtime)
         transcriber = factory.create_audio_transcriber(
             snapshot.audio2text_id,
             snapshot.tenant_id,
@@ -298,7 +298,8 @@ def _build_vision_model(
         )
     if _VIDEO_PATTERN.search(snapshot.file_name):
         if snapshot.video2text_id is None:
-            raise RuntimeError("video2text_id model config is unavailable")
+            return None
+        factory = TaskModelFactory(runtime)
         video_runtime = factory.create_video_understanding(
             snapshot.video2text_id,
             snapshot.tenant_id,
@@ -318,7 +319,7 @@ def _build_vision_model(
     if not needs_image_model:
         return None
     if snapshot.image2text_id is None:
-        raise RuntimeError("image2text model config is unavailable")
+        return None
     config = TaskModelFactory(runtime).resolve_image(
         snapshot.image2text_id,
         snapshot.tenant_id,

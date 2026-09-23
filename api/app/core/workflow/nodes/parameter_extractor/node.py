@@ -15,7 +15,7 @@ from app.core.workflow.nodes.parameter_extractor.config import ParameterExtracto
 from app.core.workflow.variable.base_variable import VariableType, DEFAULT_VALUE
 from app.db import get_async_db_context, get_db_read
 from app.models import ModelType
-from app.models.models_model import ModelCapability
+from app.models.models_model import ModelFeature
 from app.schemas.model_schema import ModelInfo
 from app.services.model_service import ModelConfigService
 
@@ -28,7 +28,7 @@ class ParameterExtractorNode(BaseNode):
         self.typed_config: ParameterExtractorNodeConfig | None = None
         self.response_metadata = {}
         self._last_messages: list = []
-        self._model_capability: list[str] = []
+        self._model_features: list[str] = []
 
     def _extract_token_usage(self, business_result: Any) -> dict[str, int] | None:
         if self.response_metadata:
@@ -125,11 +125,11 @@ class ParameterExtractorNode(BaseNode):
                 raise BusinessException("Configured model does not exist", BizCode.NOT_FOUND)
 
             api_config = self.get_runtime_api_config(db, config, variable_pool)
-            capability = api_config.capability
+            features = api_config.features
             model_type = config.type
             model_config = RedBearModelConfig.from_api_key(api_config)
 
-        self._model_capability = capability or []
+        self._model_features = features or []
 
         llm = RedBearLLM(model_config, type=ModelType(model_type))
         return llm
@@ -157,8 +157,9 @@ class ParameterExtractorNode(BaseNode):
                 api_key=api_config.api_key,
                 api_base=api_config.api_base,
                 provider=api_config.provider,
-                is_omni=api_config.is_omni,
-                capability=api_config.capability,
+                input_modalities=[str(item) for item in (api_config.input_modalities or [])],
+                output_modalities=[str(item) for item in (api_config.output_modalities or [])],
+                features=[str(item) for item in (api_config.features or [])],
                 tenant_id=api_config.tenant_id,
                 model_config_id=api_config.model_config_id,
                 channel_id=api_config.channel_id,
@@ -166,7 +167,7 @@ class ParameterExtractorNode(BaseNode):
             )
 
     def _build_llm_from_model_info(self, model_info: ModelInfo) -> RedBearLLM:
-        self._model_capability = model_info.capability or []
+        self._model_features = model_info.features or []
         return RedBearLLM(
             RedBearModelConfig.from_api_key(model_info),
             type=model_info.model_type
@@ -236,7 +237,7 @@ class ParameterExtractorNode(BaseNode):
     def _resolve_inference_mode(self) -> InferenceMode:
         mode = self.typed_config.inference_mode
         if mode == InferenceMode.FUNCTION_CALLING:
-            if ModelCapability.FUNCTION_CALL not in self._model_capability:
+            if ModelFeature.FUNCTION_CALL not in self._model_features:
                 logger.warning(
                     f"node: {self.node_id} model does not support function_call, "
                     f"falling back to prompt mode"

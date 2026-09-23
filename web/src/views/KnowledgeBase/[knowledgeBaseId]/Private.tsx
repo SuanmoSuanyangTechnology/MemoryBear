@@ -1,5 +1,5 @@
 
-import { useEffect, useState, useRef, useCallback, type FC } from 'react';
+import { useEffect, useState, useRef, type FC } from 'react';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Switch, Button, Dropdown, Space, Radio, Tooltip, App, Flex, Divider, Spin } from 'antd';
@@ -80,37 +80,13 @@ const Private: FC = () => {
   const syncStartTimeRef = useRef<number | null>(null);
   const { updateBreadcrumbs } = useBreadcrumbManager({
     breadcrumbType: 'detail',
-    // Don't provide onKnowledgeBaseMenuClick, let it use default navigation behavior (return to list page)
-    onKnowledgeBaseFolderClick: useCallback((folderId: string, folderPath: Array<{ id: string; name: string }>) => {
-      // Navigate to corresponding folder when clicking folder breadcrumb
-      setParentId(folderId);
-      setFolderPath(folderPath);
-      setSelectedKeys([folderId]);
-      setFolder({
-        kb_id: knowledgeBaseId ?? '',
-        parent_id: folderId
-      });
-      
-      // Ensure query object changes to trigger table refresh
-      setQuery({
-        orderby: 'created_at',
-        desc: true,
-        parent_id: folderId,
-        _timestamp: Date.now()
-      });
-      
-      // Ensure API URL is set correctly
-      setTableApi(`/documents/${knowledgeBaseId}/documents`);
-      
-      // Manually trigger table refresh to ensure data update
-      setTimeout(() => {
-        tableRef.current?.loadData();
-      }, 100);
-    }, [knowledgeBaseId])
   });
   const [folderPath, setFolderPath] = useState<BreadcrumbItem[]>([]);
   const [selectedKeys, setSelectedKeys] = useState<React.Key[]>([]);
-  const [knowledgeBaseFolderPath, setKnowledgeBaseFolderPath] = useState<BreadcrumbItem[]>([]);
+  const [knowledgeBaseFolderPath, setKnowledgeBaseFolderPath] = useState<BreadcrumbItem[]>(() => {
+    const state = location.state as { knowledgeBaseFolderPath?: BreadcrumbItem[] } | null;
+    return state?.knowledgeBaseFolderPath ?? [];
+  });
   const fetchKnowledgeBaseDetail = async (id: string) => {
     setLoading(true);
     try {
@@ -188,8 +164,6 @@ const Private: FC = () => {
     
     if (state?.refresh) {
       tableRef.current?.loadData();
-      // Clear state to avoid repeated refresh
-      navigate(location.pathname, { replace: true, state: {} });
     }
     
     // If navigated from knowledge base list page, set knowledge base folder path
@@ -229,9 +203,6 @@ const Private: FC = () => {
       setTimeout(() => {
         tableRef.current?.loadData();
       }, 200);
-      
-      // Clear state to avoid repeated processing
-      navigate(location.pathname, { replace: true, state: {} });
     }
     
     // If returning from document details page, restore document folder path
@@ -262,6 +233,11 @@ const Private: FC = () => {
       setTimeout(() => {
         setAutoExpandPath([]);
       }, 2000);
+    }
+
+    // Consume navigation state only after all breadcrumb and folder paths are restored.
+    if (state && Object.keys(state).length > 0) {
+      navigate(location.pathname, { replace: true, state: {} });
     }
   }, [location.state, knowledgeBaseId, navigate, location.pathname]);
 
@@ -338,7 +314,12 @@ const Private: FC = () => {
       icon: <div className="rb:size-4 rb:bg-cover rb:bg-[url('@/assets/images/knowledgeBase/text.png')]" />,
       label: (<span>{t('knowledgeBase.createA')} {t('knowledgeBase.dataset')}</span>),
       onClick: () => {
-        datasetModalRef?.current?.handleOpen(knowledgeBase?.id,folder?.parent_id ?? knowledgeBase?.id ?? '');
+        datasetModalRef?.current?.handleOpen(
+          knowledgeBase?.id,
+          folder?.parent_id ?? knowledgeBase?.id ?? '',
+          folderPath,
+          knowledgeBaseFolderPath,
+        );
       },
     },
     // {
@@ -503,6 +484,8 @@ const Private: FC = () => {
         source: 'local',
         knowledgeBaseId,
         parentId: parentId ?? knowledgeBaseId,
+        documentFolderPath: folderPath,
+        knowledgeBaseFolderPath,
         startStep: 'parameterSettings',
         fileId: targetFileId,
       },

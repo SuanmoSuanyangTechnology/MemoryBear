@@ -121,6 +121,13 @@ class ModelConfigInactiveError(RedBearModelError):
         super().__init__(f"Model config is inactive: {model_config_id}")
 
 
+class ModelConfigDeprecatedError(RedBearModelError):
+    """模型下线（is_deprecated）：解析期拒止，与 ChatTongyi 退役同类的"已下线"语义。"""
+
+    def __init__(self, model_config_id: UUID):
+        super().__init__(f"Model config is deprecated: {model_config_id}")
+
+
 class ModelAccessDeniedError(RedBearModelError):
     def __init__(self, model_config_id: UUID, tenant_id: UUID):
         super().__init__(

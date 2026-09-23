@@ -38,6 +38,7 @@ _REPO_CANDIDATES = [
     Path(__file__).resolve().parents[1] / ".env",   # core/api
 ]
 
+# 独立脚本不引 app 包：字面量与 app.models.models_model.LLM_FAMILY_TYPES 同口径
 _COMPATIBLE_TYPES = {"llm", "chat"}
 
 
@@ -74,7 +75,7 @@ def _member_rows(db, key_rows: list) -> dict:
     """
     from sqlalchemy import select, tuple_
 
-    from app.models.models_model import ModelConfig
+    from app.models.models_model import ModelConfig, ModelProvider
 
     keys = sorted({(k.provider, k.model_name) for k in key_rows})
     if not keys:
@@ -82,7 +83,7 @@ def _member_rows(db, key_rows: list) -> dict:
     rows = db.execute(
         select(ModelConfig)
         .where(
-            ModelConfig.is_composite.is_(False),
+            ModelConfig.provider != ModelProvider.COMPOSITE,
             tuple_(ModelConfig.provider, ModelConfig.name).in_(keys),
         )
         .order_by(
@@ -107,11 +108,14 @@ def _analyze(db) -> tuple[list[CompositePlan], dict]:
     from app.models.models_model import (
         ModelApiKey,
         ModelConfig,
+        ModelProvider,
         model_config_api_key_association,
     )
 
     composites = list(
-        db.execute(select(ModelConfig).where(ModelConfig.is_composite.is_(True))).scalars()
+        db.execute(
+            select(ModelConfig).where(ModelConfig.provider == ModelProvider.COMPOSITE)
+        ).scalars()
     )
     keys = {k.id: k for k in db.execute(select(ModelApiKey)).scalars()}
     assoc = db.execute(

@@ -620,26 +620,22 @@ register_provider_error_adapter("dashscope", _DASHSCOPE_ADAPTER)
 def classify_llm_error(
         error: Exception,
         provider: str | None = None,
-        is_omni: bool = False,
 ) -> ClassifiedLLMError:
     """Normalize one provider exception using structured adapters and strict fallbacks."""
     info, chain = extract_provider_error_info(error, provider)
     provider_adapter = _PROVIDER_ADAPTERS.get(info.provider or "")
-    is_native_dashscope = info.provider == "dashscope" and not is_omni
 
-    if is_native_dashscope:
+    if any(isinstance(item, OpenAIError) for item in chain):
+        if classified := _OPENAI_ADAPTER.classify(info, chain):
+            return classified
+
+    # DashScope 全量走 OpenAI 兼容协议，非 OpenAI 异常再兜底解析原生错误格式
+    if info.provider == "dashscope":
         info = _enrich_dashscope_error_info(info, chain)
-        if provider_adapter is not None:
-            if classified := provider_adapter.classify(info, chain):
-                return classified
-    else:
-        if any(isinstance(item, OpenAIError) for item in chain):
-            if classified := _OPENAI_ADAPTER.classify(info, chain):
-                return classified
 
-        if info.provider != "dashscope" and provider_adapter is not None:
-            if classified := provider_adapter.classify(info, chain):
-                return classified
+    if provider_adapter is not None:
+        if classified := provider_adapter.classify(info, chain):
+            return classified
 
     if classified := _GENERIC_HTTP_ADAPTER.classify(info, chain):
         return classified

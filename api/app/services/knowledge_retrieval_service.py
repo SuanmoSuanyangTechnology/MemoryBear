@@ -128,12 +128,10 @@ class KnowledgeRetrievalService:
         *,
         extra_params: dict[str, Any] | None = None,
     ) -> RedBearLLM:
-        model_type = ModelType.LLM
-        if snapshot.model_type in {ModelType.LLM.value, ModelType.CHAT.value}:
-            model_type = ModelType(snapshot.model_type)
+        # 2d-1 迁移后 chat 行已归一为 llm，运行时按 LLM 适配器族构造
         return RedBearLLM(
             cls._model_config(snapshot, extra_params=extra_params),
-            type=model_type,
+            type=ModelType.LLM,
         )
 
     @classmethod
@@ -743,17 +741,12 @@ class KnowledgeRetrievalService:
         try:
             client = await AsyncElasticsearchClientProvider.get_shared_client()
             graph_store = GraphElasticsearchStore(client)
-            llm_type = (
-                ModelType.CHAT
-                if graph_target.llm.model_type == ModelType.CHAT.value
-                else ModelType.LLM
-            )
             llm = RedBearLLM(
                 cls._model_config(
                     graph_target.llm,
                     extra_params={"temperature": 0},
                 ),
-                type=llm_type,
+                type=ModelType.LLM,
             )
             embedding = RedBearEmbeddings(
                 cls._model_config(graph_target.embedding)

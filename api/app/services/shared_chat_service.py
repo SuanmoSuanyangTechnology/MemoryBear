@@ -361,7 +361,9 @@ class SharedChatService:
             api_key=api_key_obj.api_key,
             provider=api_key_obj.provider,
             api_base=api_key_obj.api_base,
-            is_omni=api_key_obj.is_omni,
+            input_modalities=list(getattr(api_key_obj, "input_modalities", None) or []),
+            output_modalities=list(getattr(api_key_obj, "output_modalities", None) or []),
+            features=list(getattr(api_key_obj, "features", None) or []),
             temperature=model_parameters.get("temperature", 0.7),
             max_tokens=model_parameters.get("max_tokens", 2000),
             system_prompt=system_prompt,
@@ -369,7 +371,6 @@ class SharedChatService:
             deep_thinking=model_parameters.get("deep_thinking", False),
             thinking_budget_tokens=model_parameters.get("thinking_budget_tokens"),
             json_output=model_parameters.get("json_output", False),
-            capability=api_key_obj.capability,
             tenant_id=api_key_obj.tenant_id,
             model_config_id=api_key_obj.model_config_id,
             channel_id=api_key_obj.channel_id,
@@ -582,7 +583,9 @@ class SharedChatService:
                 api_key=api_key_obj.api_key,
                 provider=api_key_obj.provider,
                 api_base=api_key_obj.api_base,
-                is_omni=api_key_obj.is_omni,
+                input_modalities=list(getattr(api_key_obj, "input_modalities", None) or []),
+                output_modalities=list(getattr(api_key_obj, "output_modalities", None) or []),
+                features=list(getattr(api_key_obj, "features", None) or []),
                 temperature=model_parameters.get("temperature", 0.7),
                 max_tokens=model_parameters.get("max_tokens", 2000),
                 system_prompt=system_prompt,
@@ -591,7 +594,6 @@ class SharedChatService:
                 deep_thinking=model_parameters.get("deep_thinking", False),
                 thinking_budget_tokens=model_parameters.get("thinking_budget_tokens"),
                 json_output=model_parameters.get("json_output", False),
-                capability=api_key_obj.capability or [],
                 tenant_id=api_key_obj.tenant_id,
                 model_config_id=api_key_obj.model_config_id,
                 channel_id=api_key_obj.channel_id,
@@ -911,8 +913,13 @@ class SharedChatService:
                 # 直接转发事件
                 yield event
 
-                # 尝试提取内容（用于保存）
-                if "data:" in event:
+                # 落库正文只认集群级的 `message` 事件（按事件名判定）。
+                # 子 Agent 的正文走 `sub_agent_message`：若一并累加，公开分享会话的
+                # assistant 正文会比界面显示多出一份重复内容（刷新后主气泡变长）。
+                _event_name = ""
+                if event.startswith("event:"):
+                    _event_name = event[6:].split("\n", 1)[0].strip()
+                if _event_name == "message" and "data:" in event:
                     try:
                         data_line = event.split("data: ", 1)[1].strip()
                         data = json.loads(data_line)

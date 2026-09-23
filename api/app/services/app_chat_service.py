@@ -24,7 +24,7 @@ from app.integrations.knowledge.contracts import KnowledgeRetrievalSource
 from app.models import (
     App,
     MultiAgentConfig, AgentConfig, ModelType, WorkflowConfig,
-    ModelCapability, AgentExecution, Message, Conversation)
+    Modality, ModelFeature, AgentExecution, Message, Conversation)
 from app.repositories.agent_execution_repository import AgentExecutionRepository
 from app.repositories.tool_repository import ToolRepository
 from app.schemas import DraftRunRequest
@@ -35,7 +35,7 @@ from app.services.annotation_service import AnnotationService
 from app.services.conversation_service import ConversationService
 from app.services.context_engine_manager import ContextEngineManager
 from app.core.config import settings
-from app.services.draft_run_service import AgentRunService
+from app.services.draft_run_service import AgentRunService, build_uploaded_images_manifest
 from app.services.model_service import ModelApiKeyService
 from app.services.multi_agent_orchestrator import MultiAgentOrchestrator
 from app.services.multimodal_service import (
@@ -644,8 +644,9 @@ class AppChatService:
             provider=api_key_obj.provider,
             api_key=api_key_obj.api_key,
             api_base=api_key_obj.api_base,
-            capability=api_key_obj.capability,
-            is_omni=api_key_obj.is_omni,
+            input_modalities=[str(item) for item in (api_key_obj.input_modalities or [])],
+            output_modalities=[str(item) for item in (api_key_obj.output_modalities or [])],
+            features=[str(item) for item in (api_key_obj.features or [])],
             model_type=ModelType.LLM,
             tenant_id=api_key_obj.tenant_id,
             model_config_id=api_key_obj.model_config_id,
@@ -663,7 +664,6 @@ class AppChatService:
                 system_prompt=system_prompt,
                 current_input=message,
                 current_provider=api_key_obj.provider,
-                current_is_omni=api_key_obj.is_omni,
                 legacy_max_history=settings.AGENT_MAX_HISTORY,
                 model_config_id=config.default_model_config_id,
             )
@@ -675,7 +675,6 @@ class AppChatService:
                     conversation_id=conversation_id,
                     max_history=settings.AGENT_MAX_HISTORY,
                     current_provider=api_key_obj.provider,
-                    current_is_omni=api_key_obj.is_omni
                 )
 
         # 如果是新会话且有开场白，作为第一条 assistant 消息写入数据库
@@ -694,11 +693,12 @@ class AppChatService:
                     conversation_id=conversation_id,
                     max_history=settings.AGENT_MAX_HISTORY,
                     current_provider=api_key_obj.provider,
-                    current_is_omni=api_key_obj.is_omni
                 )
 
         # 处理多模态文件
         processed_files = None
+        # 仅用于发给 LLM 的用户消息（追加本轮图片清单），不污染入库原文 message
+        llm_message = message
         if files:
             multimodal_service = MultimodalService(self.db, model_info)
             fu_config = features_config.get("file_upload", {})
@@ -712,7 +712,15 @@ class AppChatService:
                 file_upload_config=fu_config if isinstance(fu_config, dict) else None,
             )
             logger.info(f"处理了 {len(processed_files)} 个文件")
-            if doc_img_recognition and ModelCapability.VISION in (api_key_obj.capability or []) and any(
+            for tool in tools:
+                set_uploaded_files = getattr(tool, "set_uploaded_files", None)
+                if callable(set_uploaded_files):
+                    set_uploaded_files(files)
+            # 在发给 LLM 的用户消息中列出本轮图片及编号，供模型按需显式触发图片检索
+            image_manifest, _ = build_uploaded_images_manifest(files)
+            if image_manifest:
+                llm_message = f"{message}\n\n{image_manifest}"
+            if doc_img_recognition and Modality.IMAGE in (api_key_obj.input_modalities or []) and any(
                 f.type == FileType.DOCUMENT for f in files
             ):
                 system_prompt += (
@@ -729,20 +737,24 @@ class AppChatService:
         )
 
         # 弱模型：用 ReAct prompt 驱动多轮工具调用，将轨迹注入 system_prompt
-        capability = api_key_obj.capability or []
+        features = [str(item) for item in (api_key_obj.features or [])]
         orchestrator_node_executions = []
         _api_key_config = {
             "model_name": api_key_obj.model_name,
             "api_key": api_key_obj.api_key,
             "provider": api_key_obj.provider,
             "api_base": api_key_obj.api_base,
+            "input_modalities": [str(item) for item in (api_key_obj.input_modalities or [])],
+            "output_modalities": [str(item) for item in (api_key_obj.output_modalities or [])],
+            "features": features,
+            # 旧字段仅存于沙箱 payload 口径（e2b-infra 同批下线前冻结）
             "is_omni": api_key_obj.is_omni,
-            "capability": capability,
+            "capability": [str(item) for item in (api_key_obj.capability or [])],
             "tenant_id": api_key_obj.tenant_id,
             "model_config_id": api_key_obj.model_config_id,
             "channel_id": api_key_obj.channel_id,
         }
-        use_agent_mode = ModelCapability.FUNCTION_CALL in capability
+        use_agent_mode = ModelFeature.FUNCTION_CALL in features
         if not use_agent_mode and tools:
             system_prompt, orchestrator_node_executions = await ToolOrchestrator.create_and_run(
                 tools=tools,
@@ -828,7 +840,9 @@ class AppChatService:
                 api_key=api_key_obj.api_key,
                 provider=api_key_obj.provider,
                 api_base=api_key_obj.api_base,
-                is_omni=api_key_obj.is_omni,
+                input_modalities=[str(item) for item in (api_key_obj.input_modalities or [])],
+                output_modalities=[str(item) for item in (api_key_obj.output_modalities or [])],
+                features=features,
                 temperature=model_parameters.get("temperature", 0.7),
                 max_tokens=model_parameters.get("max_tokens", 2000),
                 system_prompt=system_prompt,
@@ -836,7 +850,6 @@ class AppChatService:
                 deep_thinking=model_parameters.get("deep_thinking", False),
                 thinking_budget_tokens=model_parameters.get("thinking_budget_tokens"),
                 json_output=model_parameters.get("json_output", False),
-                capability=capability,
                 tenant_id=api_key_obj.tenant_id,
                 model_config_id=api_key_obj.model_config_id,
                 channel_id=api_key_obj.channel_id,
@@ -879,7 +892,7 @@ class AppChatService:
             try:
                 # 调用 Agent（支持多模态）
                 result = await agent.chat(
-                    message=message,
+                    message=llm_message,
                     history=history,
                     context=None,
                     files=processed_files
@@ -971,7 +984,6 @@ class AppChatService:
             human_meta["history_files"] = {
                 "content": sanitize_processed_files_for_history(processed_files),
                 "provider": api_key_obj.provider,
-                "is_omni": api_key_obj.is_omni
             }
 
         if audio_url:
@@ -1004,7 +1016,6 @@ class AppChatService:
                     features=features_config,
                     conversation_id=conversation_id,
                     current_provider=api_key_obj.provider,
-                    current_is_omni=api_key_obj.is_omni,
                     legacy_max_history=settings.AGENT_MAX_HISTORY,
                     model_config_id=config.default_model_config_id,
                 )
@@ -1225,8 +1236,9 @@ class AppChatService:
                 provider=api_key_obj.provider,
                 api_key=api_key_obj.api_key,
                 api_base=api_key_obj.api_base,
-                capability=api_key_obj.capability,
-                is_omni=api_key_obj.is_omni,
+                input_modalities=[str(item) for item in (api_key_obj.input_modalities or [])],
+                output_modalities=[str(item) for item in (api_key_obj.output_modalities or [])],
+                features=[str(item) for item in (api_key_obj.features or [])],
                 model_type=ModelType.LLM,
                 tenant_id=api_key_obj.tenant_id,
                 model_config_id=api_key_obj.model_config_id,
@@ -1244,7 +1256,6 @@ class AppChatService:
                     system_prompt=system_prompt,
                     current_input=message,
                     current_provider=api_key_obj.provider,
-                    current_is_omni=api_key_obj.is_omni,
                     legacy_max_history=settings.AGENT_MAX_HISTORY,
                     model_config_id=config.default_model_config_id,
                 )
@@ -1256,7 +1267,6 @@ class AppChatService:
                         conversation_id=conversation_id,
                         max_history=settings.AGENT_MAX_HISTORY,
                         current_provider=api_key_obj.provider,
-                        current_is_omni=api_key_obj.is_omni
                     )
 
             # 新会话开场白先拼到内存 history，避免首包前写库+回查。
@@ -1276,6 +1286,8 @@ class AppChatService:
 
             # 处理多模态文件
             processed_files = None
+            # 仅用于发给 LLM 的用户消息（追加本轮图片清单），不污染入库原文 message
+            llm_message = message
             if files:
                 multimodal_service = MultimodalService(self.db, model_info)
                 fu_config = features_config.get("file_upload", {})
@@ -1289,7 +1301,15 @@ class AppChatService:
                     file_upload_config=fu_config if isinstance(fu_config, dict) else None,
                 )
                 logger.info(f"处理了 {len(processed_files)} 个文件")
-                if doc_img_recognition and ModelCapability.VISION in (api_key_obj.capability or []) and any(
+                for tool in tools:
+                    set_uploaded_files = getattr(tool, "set_uploaded_files", None)
+                    if callable(set_uploaded_files):
+                        set_uploaded_files(files)
+                # 在发给 LLM 的用户消息中列出本轮图片及编号，供模型按需显式触发图片检索
+                image_manifest, _ = build_uploaded_images_manifest(files)
+                if image_manifest:
+                    llm_message = f"{message}\n\n{image_manifest}"
+                if doc_img_recognition and Modality.IMAGE in (api_key_obj.input_modalities or []) and any(
                     f.type == FileType.DOCUMENT for f in files
                 ):
                     system_prompt += (
@@ -1306,20 +1326,24 @@ class AppChatService:
             )
 
             # 弱模型：用 ReAct prompt 驱动多轮工具调用，将轨迹注入 system_prompt
-            capability = api_key_obj.capability or []
+            features = [str(item) for item in (api_key_obj.features or [])]
             orchestrator_node_executions = []
             _api_key_config = {
                 "model_name": api_key_obj.model_name,
                 "api_key": api_key_obj.api_key,
                 "provider": api_key_obj.provider,
                 "api_base": api_key_obj.api_base,
+                "input_modalities": [str(item) for item in (api_key_obj.input_modalities or [])],
+                "output_modalities": [str(item) for item in (api_key_obj.output_modalities or [])],
+                "features": features,
+                # 旧字段仅存于沙箱 payload 口径（e2b-infra 同批下线前冻结）
                 "is_omni": api_key_obj.is_omni,
-                "capability": capability,
+                "capability": [str(item) for item in (api_key_obj.capability or [])],
                 "tenant_id": api_key_obj.tenant_id,
                 "model_config_id": api_key_obj.model_config_id,
                 "channel_id": api_key_obj.channel_id,
             }
-            use_agent_mode = ModelCapability.FUNCTION_CALL in capability
+            use_agent_mode = ModelFeature.FUNCTION_CALL in features
             if not use_agent_mode and tools:
                 stage_context = memory_stage_capture() if execution_mode == "in_process" else nullcontext()
                 with stage_context:
@@ -1389,7 +1413,9 @@ class AppChatService:
                     api_key=api_key_obj.api_key,
                     provider=api_key_obj.provider,
                     api_base=api_key_obj.api_base,
-                    is_omni=api_key_obj.is_omni,
+                    input_modalities=[str(item) for item in (api_key_obj.input_modalities or [])],
+                    output_modalities=[str(item) for item in (api_key_obj.output_modalities or [])],
+                    features=features,
                     temperature=model_parameters.get("temperature", 0.7),
                     max_tokens=model_parameters.get("max_tokens", 2000),
                     system_prompt=system_prompt,
@@ -1398,7 +1424,6 @@ class AppChatService:
                     deep_thinking=model_parameters.get("deep_thinking", False),
                     thinking_budget_tokens=model_parameters.get("thinking_budget_tokens"),
                     json_output=model_parameters.get("json_output", False),
-                    capability=capability,
                     tenant_id=api_key_obj.tenant_id,
                     model_config_id=api_key_obj.model_config_id,
                     channel_id=api_key_obj.channel_id,
@@ -1418,7 +1443,7 @@ class AppChatService:
                         )
 
                 _chunk_stream = agent.chat_stream(
-                    message=message,
+                    message=llm_message,
                     history=history,
                     context=None,
                     files=processed_files,
@@ -1428,7 +1453,6 @@ class AppChatService:
             _api_key_id = api_key_obj.id
             _api_key_model_name = api_key_obj.model_name
             _api_key_provider = api_key_obj.provider
-            _api_key_is_omni = api_key_obj.is_omni
             # 预读 _release_id，避免 LLM 推理结束后重新获取 DB 连接
             from app.models.app_model import App
             _app_obj = await self._db_get(App, config.app_id)
@@ -1592,7 +1616,6 @@ class AppChatService:
                 human_meta["history_files"] = {
                     "content": sanitize_processed_files_for_history(processed_files),
                     "provider": _api_key_provider,
-                    "is_omni": _api_key_is_omni
                 }
 
             all_node_executions = [
@@ -1673,7 +1696,6 @@ class AppChatService:
                             "conversation_id": str(conversation_id),
                             "features_config": features_config,
                             "api_key_provider": _api_key_provider,
-                            "api_key_is_omni": _api_key_is_omni,
                             "model_config_id": str(config.default_model_config_id) if config.default_model_config_id else None,
                         },
                     ))
@@ -1916,6 +1938,8 @@ class AppChatService:
             orchestrator = await MultiAgentOrchestrator.create(self.db, config)
 
             # 3. 流式执行任务
+            # message_id 下传：主执行记录据此带上本轮 assistant message_id，
+            # 日志详情无需再依赖"时序就近"兜底即可把子 Agent 节点挂到该消息下。
             async for event in orchestrator.execute_stream(
                     message=message,
                     conversation_id=conversation_id,
@@ -1925,7 +1949,8 @@ class AppChatService:
                     web_search=web_search,  # 网络搜索参数
                     memory=memory,  # 记忆功能参数
                     storage_type=storage_type,
-                    user_rag_memory_id=user_rag_memory_id
+                    user_rag_memory_id=user_rag_memory_id,
+                    message_id=message_id
             ):
                 # 拦截 sub_usage 事件，累加 token
                 if "event: sub_usage" in event:
@@ -1938,8 +1963,14 @@ class AppChatService:
                             pass
                 else:
                     yield event
-                    # 尝试提取内容（用于保存）
-                    if "data:" in event:
+                    # 累加主气泡正文：只认集群级的 `message` 事件。
+                    # 子 Agent 的正文走 `sub_agent_message`（已在各自区块展示），
+                    # 若一并累加，落库的 assistant 正文会比界面显示多出一份重复内容，
+                    # 刷新后主气泡会变长。
+                    _event_name = ""
+                    if event.startswith("event:"):
+                        _event_name = event[6:].split("\n", 1)[0].strip()
+                    if _event_name == "message" and "data:" in event:
                         try:
                             data_line = event.split("data: ", 1)[1].strip()
                             data = json.loads(data_line)
@@ -1973,6 +2004,20 @@ class AppChatService:
                 },
             ))
             save_messages_enqueued = True
+
+            # 主执行记录的 message_id 回填：记录在流式开始时就已创建（子 Agent 记录
+            # 需要它作为 parent 外键），当时本轮 assistant message 还没落库，写 message_id
+            # 会 FK 违例。这里登记在 save_messages 之后，由 persist 队列在消息提交后回填，
+            # 使日志详情能精确按 message 挂载节点（而不是靠时序就近兜底）。
+            _master_execution_id = getattr(orchestrator, "current_execution_id", None)
+            if _master_execution_id is not None:
+                await BatchPersistQueue.enqueue(PersistTask(
+                    task_type="link_agent_execution_message",
+                    args={
+                        "execution_id": str(_master_execution_id),
+                        "message_id": str(message_id),
+                    },
+                ))
 
             logger.info(
                 "多 Agent 流式聊天完成",

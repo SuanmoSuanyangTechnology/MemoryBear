@@ -35,8 +35,9 @@ from app.schemas.memory_storage_schema import (
     ForgettingConfigUpdateRequest,
 )
 from app.schemas.memory_api_schema import PredictionConfigUpdateRequest
+from app.schemas.memory_preference_config_schema import PreferenceConfigUpdate
 from app.schemas.response_schema import ApiResponse
-from app.schemas.scene_memory_schema import SceneConfig, SceneConfigUpdate
+from app.schemas.scene_memory_schema import SceneConfig, SceneConfigUpdate, SceneSplitDemoRequest
 from app.services.emotion_config_service import EmotionConfigService
 from app.services.memory_forget_service import MemoryForgetService
 from app.services.memory_storage_service import DataConfigService
@@ -655,3 +656,133 @@ async def update_config_scene(
         data = SceneConfig.model_validate(row).model_dump(mode="json")
     await invalidate_cache(prefix=f"memory_config:{payload.config_id}")
     return success(data=data, msg="更新成功")
+
+
+@router.get("/read_config_preference", response_model=ApiResponse)
+async def read_config_preference(
+    config_id: UUID,
+    current_user: CurrentUserSnapshot = Depends(get_current_user_async),
+):
+    """Read the workspace-owned Coding Agent preference configuration."""
+    from app.services.memory_config_service import MemoryConfigService
+
+    workspace_id = current_user.current_workspace_id
+    if workspace_id is None:
+        return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间")
+    async with get_async_db_context() as db:
+        try:
+            data = await MemoryConfigService(db).read_preference_config_async(
+                config_id=config_id,
+                workspace_id=workspace_id,
+            )
+            return success(data=data.model_dump(mode="json"), msg="查询成功")
+        except LookupError:
+            return fail(BizCode.MEMORY_CONFIG_NOT_FOUND, "配置不存在或无权访问")
+
+
+@router.post("/update_config_preference", response_model=ApiResponse)
+async def update_config_preference(
+    payload: PreferenceConfigUpdate,
+    current_user: CurrentUserSnapshot = Depends(get_current_user_async),
+):
+    """Update custom preference keywords and/or the engine switch."""
+    from app.services.memory_config_service import MemoryConfigService
+
+    workspace_id = current_user.current_workspace_id
+    if workspace_id is None:
+        return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间")
+    async with get_async_db_context() as db:
+        try:
+            data = await MemoryConfigService(db).update_preference_config_async(
+                payload=payload,
+                workspace_id=workspace_id,
+                operator=str(current_user.id),
+            )
+            return success(data=data.model_dump(mode="json"), msg="更新成功")
+        except ValueError as exc:
+            await db.rollback()
+            return fail(BizCode.INVALID_PARAMETER, "偏好配置参数错误", str(exc))
+        except LookupError:
+            await db.rollback()
+            return fail(BizCode.MEMORY_CONFIG_NOT_FOUND, "配置不存在或无权访问")
+
+
+@router.post("/scene/split-demo", response_model=ApiResponse)
+async def scene_split_demo(
+    payload: SceneSplitDemoRequest,
+    current_user: CurrentUserSnapshot = Depends(get_current_user_async),
+    language_type: Optional[str] = Header(None, alias="X-Language-Type"),
+) -> dict:
+    """演示一次 BERT 场景切分判定，不落库、不影响生产切分行为。"""
+    from app.core.memory.scene.scene_continuity_bert_client import SceneContinuityError
+    from app.core.memory.scene.scene_split_demo_service import SceneSplitDemoService
+    from app.i18n.service import t
+    from app.models.memory_config_model import MemoryConfig as MemoryConfigModel
+
+    locale = get_language_from_header(language_type)
+    workspace_id = current_user.current_workspace_id
+    if workspace_id is None:
+        return fail(
+            BizCode.INVALID_PARAMETER,
+            t("memory_config.scene_demo.no_workspace", locale=locale),
+            "current_workspace_id is None",
+        )
+
+    async with get_async_db_context() as db:
+        try:
+            config_id = await resolve_config_id_async(payload.config_id, db)
+        except ValueError as e:
+            return fail(
+                BizCode.MEMORY_CONFIG_NOT_FOUND,
+                t("memory_config.scene_demo.config_not_found", locale=locale),
+                str(e),
+            )
+        row = await db.get(MemoryConfigModel, config_id)
+        if row is None or str(row.workspace_id) != str(workspace_id):
+            return fail(
+                BizCode.MEMORY_CONFIG_NOT_FOUND,
+                t("memory_config.scene_demo.config_not_found", locale=locale),
+            )
+        config = SceneConfig.model_validate(row)
+
+    threshold = payload.scene_threshold if payload.scene_threshold is not None else config.scene_threshold
+    window_size = (
+        payload.scene_history_window_size
+        if payload.scene_history_window_size is not None
+        else config.scene_history_window_size
+    )
+    min_turns = payload.scene_min_turns if payload.scene_min_turns is not None else config.scene_min_turns
+    max_turns = payload.scene_max_turns if payload.scene_max_turns is not None else config.scene_max_turns
+    if min_turns >= max_turns:
+        return fail(
+            BizCode.INVALID_PARAMETER,
+            t("memory_config.scene_demo.invalid_turn_range", locale=locale),
+        )
+    # 过滤空串/纯空白历史：既避免空段污染 BERT 输入，也让轮次推导与实际参与判定的历史一致。
+    history_messages = [message for message in payload.history_messages if message and message.strip()]
+    # 演示页不提供轮次输入，按「上一条 SHIFT 之后的实际历史消息条数」推导当前场景轮次：
+    # 生产口径只数「上一条 SHIFT 消息之后、当前 user 消息之前」的历史，不含当前这条 Query；
+    # 演示页拿不到 SHIFT 标记，故直接用传入的历史消息条数模拟。填 N 条即为第 N 轮，
+    # min_turns 调到大于该值、或 max_turns 调到不大于该值，即可演示两条短路分支。
+    current_scene_turns = len(history_messages)
+
+    try:
+        result = await SceneSplitDemoService.run(
+            history_messages=history_messages,
+            current_query=payload.current_query,
+            current_scene_turns=current_scene_turns,
+            threshold=threshold,
+            window_size=window_size,
+            min_turns=min_turns,
+            max_turns=max_turns,
+            locale=locale,
+        )
+    except SceneContinuityError as e:
+        api_logger.warning(f"Scene split demo model call failed: {e}")
+        return fail(
+            BizCode.INTERNAL_ERROR,
+            t("memory_config.scene_demo.model_unavailable", locale=locale),
+            str(e),
+        )
+
+    return success(data=result.model_dump(), msg="查询成功")

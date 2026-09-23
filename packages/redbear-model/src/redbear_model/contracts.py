@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import math
+from collections.abc import Sequence
 from enum import StrEnum
 from typing import Literal
 from uuid import UUID
@@ -20,23 +21,35 @@ from pydantic import (
 logger = logging.getLogger(__name__)
 
 
+class ContractModel(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+
 class ModelType(StrEnum):
+    """接口族：调用协议/适配器形态，只含已接入事实（契约 v2：原 llm + chat 合并）。"""
+
     LLM = "llm"
-    CHAT = "chat"
     EMBEDDING = "embedding"
     RERANK = "rerank"
     IMAGE = "image"
     VIDEO = "video"
-    ASR = "ASR"
+    ASR = "asr"
 
     @classmethod
-    def _missing_(cls, value):
-        if isinstance(value, str) and value.lower() == "asr":
-            return cls.ASR
+    def _missing_(cls, value: object) -> ModelType | None:
+        """存量字符串读侧归一：`"chat"` → LLM（DB/YAML/事件兼容层）；`"asr"` → ASR（大小写容忍）。"""
+        if isinstance(value, str):
+            if value.lower() == "chat":
+                return cls.LLM
+            if value.lower() == "asr":
+                return cls.ASR
         return None
 
 
 class ModelCapability(StrEnum):
+    """deprecated（2a 起别名窗口，2e 删除）：能力混装集合，拆为 `input_modalities` /
+    `output_modalities` / `ModelFeature` 三侧；本类仅在旧列读取窗口内保留。"""
+
     VISION = "vision"
     AUDIO = "audio"
     VIDEO = "video"
@@ -44,6 +57,240 @@ class ModelCapability(StrEnum):
     THINKING_ONLY = "thinking_only"
     JSON_OUTPUT = "json_output"
     FUNCTION_CALL = "function_call"
+
+
+class Modality(StrEnum):
+    TEXT = "text"
+    IMAGE = "image"
+    AUDIO = "audio"
+    VIDEO = "video"
+
+
+class ModelFeature(StrEnum):
+    """功能开关（原 ModelCapability 功能侧；模态侧移出到 input/output_modalities）。"""
+
+    THINKING = "thinking"             # 可开关：请求侧 deep_thinking=false 生效
+    THINKING_ONLY = "thinking_only"   # 恒开不可关：禁止下发关闭参数；thinking_budget 不可配
+    JSON_OUTPUT = "json_output"
+    FUNCTION_CALL = "function_call"
+
+
+class CompositeMember(BaseModel):
+    """组合模型成员声明（config JSON members[] 的序列化形状，spec §10.3）。"""
+    provider: str
+    model_name: str
+
+
+# deprecated（2a–2d 兼容窗口，2e 随 ModelCapability 删）：feature ↔ 旧 capability 双向换算表
+_FEATURE_CAPABILITIES = {
+    ModelFeature.THINKING: ModelCapability.THINKING,
+    ModelFeature.THINKING_ONLY: ModelCapability.THINKING_ONLY,
+    ModelFeature.JSON_OUTPUT: ModelCapability.JSON_OUTPUT,
+    ModelFeature.FUNCTION_CALL: ModelCapability.FUNCTION_CALL,
+}
+_MODALITY_CAPABILITIES = (
+    (Modality.IMAGE, ModelCapability.VISION),
+    (Modality.AUDIO, ModelCapability.AUDIO),
+    (Modality.VIDEO, ModelCapability.VIDEO),
+)
+
+
+def legacy_capability_columns(
+    *,
+    type: ModelType | str,
+    provider: ModelProvider | str,
+    capabilities: Sequence[ModelCapability | str] = (),
+    is_omni: bool = False,
+) -> tuple[tuple[Modality, ...], tuple[Modality, ...], tuple[ModelFeature, ...]]:
+    """旧列（`type`/`capability`/`is_omni`）→ 三新列（spec §13.4 换算口径，2d backfill 同源）。
+
+    未知 capability 值跳过；`is_omni` 仅 provider=dashscope 参与 output 例外（含 audio）。
+    deprecated（2a–2d 兼容窗口，2e 随 ModelCapability 删）。
+    """
+    model_type = ModelType(type)
+    parsed = []
+    for value in capabilities:
+        try:
+            parsed.append(ModelCapability(value))
+        except ValueError:
+            continue
+    values = set(parsed)
+    input_modalities = [Modality.TEXT]
+    for modality, capability in _MODALITY_CAPABILITIES:
+        if capability in values:
+            input_modalities.append(modality)
+    if model_type in (ModelType.IMAGE, ModelType.VIDEO):
+        output_modalities = [Modality(model_type.value)]
+    else:
+        output_modalities = [Modality.TEXT]
+    if is_omni and provider == ModelProvider.DASHSCOPE:
+        output_modalities = [Modality.TEXT, Modality.AUDIO]
+    return (
+        tuple(input_modalities),
+        tuple(output_modalities),
+        tuple(
+            feature
+            for feature, capability in _FEATURE_CAPABILITIES.items()
+            if capability in values
+        ),
+    )
+
+
+def _parse_modalities(
+    values: Sequence[Modality | str],
+    model_id: UUID,
+    label: str,
+) -> list[Modality]:
+    parsed = []
+    for value in values:
+        try:
+            parsed.append(Modality(value))
+        except ValueError:
+            logger.warning("unknown %s %r dropped for model %s", label, value, model_id)
+    return parsed
+
+
+def _parse_features(
+    values: Sequence[ModelFeature | str],
+    model_id: UUID,
+) -> list[ModelFeature]:
+    parsed = []
+    for value in values:
+        try:
+            parsed.append(ModelFeature(value))
+        except ValueError:
+            logger.warning("unknown feature %r dropped for model %s", value, model_id)
+    return parsed
+
+
+class ModelProfile(ContractModel):
+    """模型能力描述（ModelConfig / ModelBase 快照侧，frozen；契约 v2 单一能力载体）。"""
+
+    model_id: UUID
+    tenant_id: UUID | None                     # model_bases 无租户（广场全局目录），base 侧为 None
+    type: ModelType
+    input_modalities: tuple[Modality, ...]     # 显式非空（text 非必需；存量迁移兜底以 text 起步）
+    output_modalities: tuple[Modality, ...]    # 显式非空；生成族 (image,)/(video,) 不含 text
+    features: tuple[ModelFeature, ...] = ()
+    members: tuple[CompositeMember, ...] = ()  # 仅 provider="composite" 时非空
+
+    @model_validator(mode="after")
+    def validate_modalities(self) -> ModelProfile:
+        if not self.input_modalities:
+            raise ValueError("input_modalities must not be empty")
+        if not self.output_modalities:
+            raise ValueError("output_modalities must not be empty")
+        return self
+
+    @classmethod
+    def from_legacy_fields(
+        cls,
+        *,
+        model_id: UUID,
+        tenant_id: UUID | None,
+        type: ModelType | str,
+        provider: ModelProvider | str,
+        capabilities: Sequence[ModelCapability | str] = (),
+        is_omni: bool = False,
+        members: Sequence[CompositeMember] = (),
+    ) -> ModelProfile:
+        """旧列（`type` / `capability` / `is_omni`）→ profile（spec §13.4 换算口径，2d backfill 同源）。
+
+        未知 capability 值跳过；`is_omni` 仅 provider=dashscope 参与 output 例外（含 audio）。
+        deprecated（2a–2d 兼容窗口，2e 随 ModelCapability 删）。
+        """
+        input_modalities, output_modalities, features = legacy_capability_columns(
+            type=type,
+            provider=provider,
+            capabilities=capabilities,
+            is_omni=is_omni,
+        )
+        return cls(
+            model_id=model_id,
+            tenant_id=tenant_id,
+            type=ModelType(type),
+            input_modalities=input_modalities,
+            output_modalities=output_modalities,
+            features=features,
+            members=tuple(members),
+        )
+
+    @classmethod
+    def from_stored_fields(
+        cls,
+        *,
+        model_id: UUID,
+        tenant_id: UUID | None,
+        type: ModelType | str,
+        provider: ModelProvider | str,
+        input_modalities: Sequence[Modality | str] = (),
+        output_modalities: Sequence[Modality | str] = (),
+        features: Sequence[ModelFeature | str] = (),
+        capabilities: Sequence[ModelCapability | str] = (),
+        is_omni: bool = False,
+        members: Sequence[CompositeMember] = (),
+    ) -> ModelProfile:
+        """存储行列 → profile 两态（spec §13.4）：
+
+        `input_modalities` 非空 = 新口径行 → 只读三新列（output 为空按 type 定基补齐，
+        未知枚举值跳过并 warning）；为空 → 回退旧列换算（回滚窗口旧镜像写入行，旧列为其唯一事实源）。
+        """
+        model_type = ModelType(type)
+        if not input_modalities:
+            input_modalities, output_modalities, features = legacy_capability_columns(
+                type=model_type,
+                provider=provider,
+                capabilities=capabilities,
+                is_omni=is_omni,
+            )
+            return cls(
+                model_id=model_id,
+                tenant_id=tenant_id,
+                type=model_type,
+                input_modalities=input_modalities,
+                output_modalities=output_modalities,
+                features=features,
+                members=tuple(members),
+            )
+
+        parsed_input = _parse_modalities(input_modalities, model_id, "input modality")
+        if not parsed_input:
+            logger.warning("input modalities all unknown for model %s; defaulting to text", model_id)
+            parsed_input = [Modality.TEXT]
+        parsed_output = _parse_modalities(output_modalities, model_id, "output modality")
+        if not parsed_output:
+            if model_type in (ModelType.IMAGE, ModelType.VIDEO):
+                parsed_output = [Modality(model_type.value)]
+            else:
+                parsed_output = [Modality.TEXT]
+        return cls(
+            model_id=model_id,
+            tenant_id=tenant_id,
+            type=model_type,
+            input_modalities=tuple(parsed_input),
+            output_modalities=tuple(parsed_output),
+            features=tuple(_parse_features(features, model_id)),
+            members=tuple(members),
+        )
+
+    def legacy_capability_view(
+        self,
+        provider: ModelProvider | str,
+    ) -> tuple[tuple[ModelCapability, ...], bool]:
+        """profile → 旧列视图 `(capability, is_omni)`：宿主遗留壳与包内 v1 key 兼容路径用（deprecated，2e 删）。"""
+        capabilities = [
+            capability
+            for modality, capability in _MODALITY_CAPABILITIES
+            if modality in self.input_modalities
+        ]
+        capabilities.extend(
+            _FEATURE_CAPABILITIES[feature] for feature in self.features
+        )
+        is_omni = (
+            provider == ModelProvider.DASHSCOPE
+            and Modality.AUDIO in self.output_modalities
+        )
+        return tuple(capabilities), is_omni
 
 
 class ModelProvider(StrEnum):
@@ -61,10 +308,6 @@ class ModelProvider(StrEnum):
 class LoadBalanceStrategy(StrEnum):
     ROUND_ROBIN = "round_robin"
     NONE = "none"
-
-
-class ContractModel(BaseModel):
-    model_config = ConfigDict(frozen=True, extra="forbid")
 
 
 QWEN3_VL_EMBEDDING_DIMENSION = 2048
@@ -168,13 +411,12 @@ class ModelConfigSnapshot(ContractModel):
     model_config_id: UUID
     tenant_id: UUID
     provider: ModelProvider
-    model_type: ModelType
     name: str = Field(min_length=1)  # 解析锚点名：非组合 config 的 name 即真实调用名（组合模型调用名在 members 声明）
     is_active: bool
     is_public: bool
+    is_deprecated: bool = False  # 模型下线（model_bases.is_deprecated 派生）：解析期拒止，见 D15⑥
     load_balance_strategy: LoadBalanceStrategy = LoadBalanceStrategy.NONE
-    capabilities: tuple[ModelCapability, ...] = ()
-    is_omni: bool = False
+    profile: ModelProfile
     config: dict[str, JsonValue] = Field(default_factory=dict)
 
 
@@ -207,78 +449,15 @@ class ResolvedModelConfig(ContractModel):
     channel_id: UUID | None = None  # v2：命中渠道 id（usage 事件 / 编排追踪）
     tenant_id: UUID
     provider: ModelProvider
-    model_type: ModelType
     model_name: str = Field(min_length=1)
     api_key: SecretStr
     base_url: str | None = None
-    capabilities: tuple[ModelCapability, ...] = ()
-    is_omni: bool = False
+    profile: ModelProfile
     deep_thinking: bool = False
     thinking_budget_tokens: int | None = Field(default=None, ge=1)
     json_output: bool = False
     provider_params: dict[str, JsonValue] = Field(default_factory=dict)
     runtime: ModelRuntimeOptions = Field(default_factory=ModelRuntimeOptions)
-
-    @model_validator(mode="after")
-    def normalize_capability_flags(self) -> ResolvedModelConfig:
-        deep_thinking, thinking_budget_tokens, json_output = normalize_runtime_flags(
-            self.capabilities,
-            self.deep_thinking,
-            self.thinking_budget_tokens,
-            self.json_output,
-            self.model_name,
-        )
-        object.__setattr__(self, "deep_thinking", deep_thinking)
-        object.__setattr__(self, "thinking_budget_tokens", thinking_budget_tokens)
-        object.__setattr__(self, "json_output", json_output)
-        return self
-
-
-def normalize_runtime_flags(
-    capabilities: tuple[ModelCapability, ...],
-    deep_thinking: bool,
-    thinking_budget_tokens: int | None,
-    json_output: bool,
-    model_name: str,
-) -> tuple[bool, int | None, bool]:
-    """Preserve the legacy RedBearModelConfig capability normalization."""
-    has_thinking = ModelCapability.THINKING in capabilities
-    has_thinking_only = ModelCapability.THINKING_ONLY in capabilities
-    supports_json_output = ModelCapability.JSON_OUTPUT in capabilities
-
-    if deep_thinking and not has_thinking and not has_thinking_only:
-        logger.warning(
-            "Model %s does not support thinking; disabling deep_thinking",
-            model_name,
-        )
-        deep_thinking = False
-        thinking_budget_tokens = None
-
-    if not deep_thinking and thinking_budget_tokens is not None:
-        logger.warning(
-            "Thinking is disabled for model %s; clearing thinking_budget_tokens",
-            model_name,
-        )
-        thinking_budget_tokens = None
-
-    if has_thinking_only:
-        deep_thinking = True
-        thinking_budget_tokens = None
-        if json_output:
-            logger.warning(
-                "thinking_only model %s does not support JSON output",
-                model_name,
-            )
-            json_output = False
-
-    if json_output and not supports_json_output:
-        logger.warning(
-            "Model %s capability does not include json_output; disabling it",
-            model_name,
-        )
-        json_output = False
-
-    return deep_thinking, thinking_budget_tokens, json_output
 
 
 class ChannelSource:
@@ -315,9 +494,3 @@ class ChannelSnapshot(ContractModel):
 
     def covers(self, model_name: str) -> bool:
         return self.is_provider_level or model_name in self.model_names
-
-
-class CompositeMember(BaseModel):
-    """组合模型成员声明（config JSON members[] 的序列化形状，spec §10.3）。"""
-    provider: str
-    model_name: str

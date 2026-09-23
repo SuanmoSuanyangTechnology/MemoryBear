@@ -13,7 +13,7 @@ from langchain_ollama import OllamaLLM
 from langchain_openai import ChatOpenAI, OpenAI
 from pydantic import BaseModel, Field, PrivateAttr, field_validator, model_validator
 
-from redbear_model import FailoverPlan
+from redbear_model import FailoverPlan, legacy_capability_columns
 
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
@@ -21,7 +21,7 @@ from app.core.model_provider_config import (
     get_default_provider_api_base,
     is_local_deployment_provider,
 )
-from app.models.models_model import ModelProvider, ModelType, ModelCapability
+from app.models.models_model import ModelFeature, ModelProvider, ModelType
 from app.core.models.compatible_chat import CompatibleChatOpenAI
 
 T = TypeVar("T")
@@ -88,8 +88,10 @@ class RedBearModelConfig(BaseModel):
     provider: str
     api_key: str
     base_url: Optional[str] = None
-    capability: List[str] = Field(default_factory=list)  # 模型能力列表，驱动所有能力开关
-    is_omni: bool = False  # 是否为 Omni 模型
+    # 契约 v2 三列：能力载体（features 驱动 thinking/json_output 等开关；模态列随行供多模态判定）
+    input_modalities: List[str] = Field(default_factory=list)
+    output_modalities: List[str] = Field(default_factory=list)
+    features: List[str] = Field(default_factory=list)
     deep_thinking: bool = False  # 是否启用深度思考模式
     thinking_budget_tokens: Optional[int] = None  # 深度思考 token 预算
     json_output: bool = False  # 是否强制 JSON 输出
@@ -164,17 +166,17 @@ class RedBearModelConfig(BaseModel):
         return self
 
     @model_validator(mode="after")
-    def _resolve_capabilities(self) -> "RedBearModelConfig":
+    def _resolve_features(self) -> "RedBearModelConfig":
         from app.core.logging_config import get_business_logger
         logger = get_business_logger()
 
-        has_thinking = ModelCapability.THINKING in self.capability
-        has_thinking_only = ModelCapability.THINKING_ONLY in self.capability
-        supports_json_output = ModelCapability.JSON_OUTPUT in self.capability
+        has_thinking = ModelFeature.THINKING in self.features
+        has_thinking_only = ModelFeature.THINKING_ONLY in self.features
+        supports_json_output = ModelFeature.JSON_OUTPUT in self.features
 
         if self.deep_thinking and not has_thinking and not has_thinking_only:
             logger.warning(
-                f"模型 {self.model_name} 不支持深度思考（capability 中无 'thinking'/'thinking_only'），已自动关闭 deep_thinking"
+                f"模型 {self.model_name} 不支持深度思考（features 中无 'thinking'/'thinking_only'），已自动关闭 deep_thinking"
             )
             self.deep_thinking = False
             self.thinking_budget_tokens = None
@@ -200,7 +202,7 @@ class RedBearModelConfig(BaseModel):
 
         if self.json_output and not supports_json_output:
             logger.warning(
-                f"模型 {self.model_name} 不支持 JSON 输出（capability 中无 'json_output'），已自动关闭 json_output"
+                f"模型 {self.model_name} 不支持 JSON 输出（features 中无 'json_output'），已自动关闭 json_output"
             )
             self.json_output = False
         return self
@@ -214,16 +216,30 @@ class RedBearModelConfig(BaseModel):
         extra_params 等），同名覆盖。tenant/model_config/channel 缺失即 None
         （用量事件侧跳过/NULL，语义与中央构建器一致）；failover_plan 同随行
         （旧壳/拷贝丢失 → None，退化为单候选）。
+
+        能力取契约 v2 三列；旧壳（无三列的 dict 快照 / Celery 存量消息）按旧列
+        `capability`/`is_omni` 换算兜底（deprecated，M10 删）。
         """
+        raw_input = _shell_field(api_key_obj, "input_modalities")
+        if raw_input is None:
+            legacy_input, legacy_output, legacy_features = legacy_capability_columns(
+                type=ModelType.LLM.value,
+                provider=str(_shell_field(api_key_obj, "provider") or ""),
+                capabilities=tuple(_shell_field(api_key_obj, "capability") or ()),
+                is_omni=bool(_shell_field(api_key_obj, "is_omni")),
+            )
+            raw_input, raw_output, raw_features = legacy_input, legacy_output, legacy_features
+        else:
+            raw_output = _shell_field(api_key_obj, "output_modalities") or ()
+            raw_features = _shell_field(api_key_obj, "features") or ()
         data: Dict[str, Any] = {
             "model_name": _shell_field(api_key_obj, "model_name"),
             "provider": _shell_field(api_key_obj, "provider"),
             "api_key": _shell_field(api_key_obj, "api_key"),
             "base_url": _shell_field(api_key_obj, "api_base", "base_url") or None,
-            "capability": [
-                str(item) for item in (_shell_field(api_key_obj, "capability") or [])
-            ],
-            "is_omni": bool(_shell_field(api_key_obj, "is_omni")),
+            "input_modalities": [str(item) for item in raw_input],
+            "output_modalities": [str(item) for item in raw_output],
+            "features": [str(item) for item in raw_features],
             "tenant_id": _shell_field(api_key_obj, "tenant_id"),
             "model_config_id": _shell_field(api_key_obj, "model_config_id"),
             "channel_id": _shell_field(api_key_obj, "channel_id"),
@@ -305,7 +321,10 @@ class RedBearModelFactory:
         # 打印供应商信息用于调试
         from app.core.logging_config import get_business_logger
         logger = get_business_logger()
-        logger.debug(f"获取模型参数 - Provider: {provider}, Model: {config.model_name}, is_omni: {config.is_omni}, deep_thinking: {config.deep_thinking}")
+        logger.debug(
+            f"获取模型参数 - Provider: {provider}, Model: {config.model_name}, "
+            f"features: {config.features}, deep_thinking: {config.deep_thinking}"
+        )
 
         filtered_extra_params, provider_specific = cls._extract_provider_specific_params(config.extra_params)
         default_headers = config.extra_params.get("default_headers")
@@ -345,7 +364,7 @@ class RedBearModelFactory:
             # thinking 参数处理：
             # - thinking_only（B类）：不能传 enable_thinking，不做任何处理
             # - thinking（A类）：混合思考，流式和非流式均可开关，非流式也支持 thinking_budget
-            if ModelCapability.THINKING in config.capability:
+            if ModelFeature.THINKING in config.features:
                 extra_body = params.setdefault("extra_body", {})
                 if config.deep_thinking:
                     extra_body["enable_thinking"] = True
@@ -366,7 +385,7 @@ class RedBearModelFactory:
             # JSON 输出模式
             # thinking（A类）模型启用深度思考时，response_format 与思考模式 API 冲突，跳过由调用方 prompt 注入兜底
             if _should_send_response_format(config):
-                if not (ModelCapability.THINKING in config.capability and config.deep_thinking):
+                if not (ModelFeature.THINKING in config.features and config.deep_thinking):
                     model_kwargs = params.setdefault("model_kwargs", {})
                     model_kwargs["response_format"] = _json_response_format(config)
             return params
@@ -426,7 +445,7 @@ class RedBearModelFactory:
             # thinking 参数处理：
             # - thinking_only（B类）：不能传 enable_thinking，不做任何处理
             # - thinking（A类）：混合思考，流式和非流式均可开关
-            if ModelCapability.THINKING in config.capability:
+            if ModelFeature.THINKING in config.features:
                 if provider == ModelProvider.VOLCANO:
                     extra_body = params.setdefault("extra_body", {})
                     if config.deep_thinking:
@@ -457,7 +476,7 @@ class RedBearModelFactory:
                 model_kwargs = params.setdefault("model_kwargs", {})
                 # thinking（A类）模型启用深度思考时,response_format 与思考模式 API 冲突，跳过由调用方 prompt 注入兜底
                 if not (
-                    ModelCapability.THINKING in config.capability and config.deep_thinking
+                    ModelFeature.THINKING in config.features and config.deep_thinking
                 ):
                     model_kwargs["response_format"] = _json_response_format(config)
             return params
@@ -529,7 +548,7 @@ class RedBearModelFactory:
             # JSON 输出模式
             # thinking（A类）模型启用深度思考时，response_format 与思考模式 API 冲突，跳过由调用方 prompt 注入兜底
             if _should_send_response_format(config):
-                if not (ModelCapability.THINKING in config.capability and config.deep_thinking):
+                if not (ModelFeature.THINKING in config.features and config.deep_thinking):
                     model_kwargs = params.setdefault("model_kwargs", {})
                     model_kwargs["response_format"] = _json_response_format(config)
             return params

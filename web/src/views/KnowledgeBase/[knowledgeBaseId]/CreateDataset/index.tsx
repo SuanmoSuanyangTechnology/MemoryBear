@@ -49,10 +49,15 @@ const CreateDataset = () => {
   const location = useLocation();
   const { modal, message: messageApi } = App.useApp();
   const { knowledgeBaseId: routeKnowledgeBaseId } = useParams<{ knowledgeBaseId: string }>();
-  const locationState = (location.state ?? {}) as CreateDatasetLocationState;
+  const locationStateRef = useRef<CreateDatasetLocationState>(
+    (location.state ?? {}) as CreateDatasetLocationState,
+  );
+  const locationState = locationStateRef.current;
   const source = (locationState.source ?? 'local') as SourceType;
   const knowledgeBaseId = locationState.knowledgeBaseId || routeKnowledgeBaseId;
   const parentId = locationState.parentId;
+  const documentFolderPath = locationState.documentFolderPath;
+  const knowledgeBaseFolderPath = locationState.knowledgeBaseFolderPath;
   const initialIds = locationState.fileIds || locationState.fileId;
   const [current, setCurrent] = useState(stepIndexMap[locationState.startStep ?? 'selectFile']);
   const [fileIds, setFileIds] = useState<string[]>(initialIds ? (Array.isArray(initialIds) ? initialIds : [initialIds]) : []);
@@ -69,9 +74,12 @@ const CreateDataset = () => {
         refresh: true,
         timestamp: Date.now(),
         navigateToDocumentFolder: parentId !== knowledgeBaseId ? parentId : undefined,
+        documentFolderPath,
+        fromKnowledgeBaseList: true,
+        knowledgeBaseFolderPath,
       },
     });
-  }, [knowledgeBaseId, navigate, parentId]);
+  }, [documentFolderPath, knowledgeBaseFolderPath, knowledgeBaseId, navigate, parentId]);
 
   const { loading: pollingLoading, poll, start: startPolling } = useDocumentPolling({
     knowledgeBaseId,
@@ -157,7 +165,6 @@ const CreateDataset = () => {
 
   const saveParserSettings = async () => {
     const values = await form.validateFields();
-    console.log('values', values)
     if (
       values.processingMethod === 'directBlock' &&
       (!Number.isInteger(values.chunkOverlap) || values.chunkOverlap <= 0 || values.chunkOverlap >= values.blockSize)
@@ -226,7 +233,6 @@ const CreateDataset = () => {
   const onFileListChange = (fileList: UploadFile[]) => {
     setFileList(fileList);
   };
-  console.log('fileList', fileList);
 
   return (
     <Form form={form} initialValues={defaultValues} layout="vertical" component={false}>

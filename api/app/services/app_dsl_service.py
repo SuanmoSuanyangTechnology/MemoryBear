@@ -1,6 +1,7 @@
 """应用 DSL 导入导出服务"""
 import uuid
 import datetime
+from collections.abc import Collection
 from typing import Optional
 
 import yaml
@@ -16,7 +17,7 @@ from app.models.appshare_model import AppShare
 from app.models.app_release_model import AppRelease
 from app.models.knowledge_model import Knowledge
 from app.models.knowledgeshare_model import KnowledgeShare
-from app.models.models_model import ModelConfig, ModelType
+from app.models.models_model import LLM_FAMILY_TYPES, ModelConfig, ModelType
 from app.models.tool_model import ToolConfig as ToolConfigModel
 from app.models.skill_model import Skill
 from app.models.workflow_model import WorkflowConfig
@@ -526,7 +527,7 @@ class AppDslService:
         ref: Optional[dict],
         tenant_id: uuid.UUID,
         warnings: list,
-        allowed_types: set[str] | None = None,
+        allowed_types: Collection[str] | None = None,
     ) -> Optional[str]:
         if not ref:
             return None
@@ -560,11 +561,16 @@ class AppDslService:
             if ref.get("provider"):
                 q = q.filter(ModelConfig.provider == ref["provider"])
             ref_type = ref.get("type")
-            compatible_llm_types = {ModelType.LLM.value, ModelType.CHAT.value}
-            if ref_type and not (
-                allowed_types == compatible_llm_types and ref_type in compatible_llm_types
-            ):
+            if isinstance(ref_type, str) and ref_type.lower() in LLM_FAMILY_TYPES:
+                # 旧 YAML 的 `type: chat` 与 llm 同族互认（存量 ref 归一口径）
+                q = q.filter(ModelConfig.type.in_(LLM_FAMILY_TYPES))
+            elif ref_type:
                 q = q.filter(ModelConfig.type == ref_type)
+
+            q = q.order_by(
+                ModelConfig.is_active.desc(),
+                ModelConfig.created_at.desc().nullslast(),
+            )
 
             # 同名配置存在时优先使用目标租户自有模型，再回退到公共模型。
             m = q.filter(ModelConfig.tenant_id == tenant_id).first()
@@ -683,7 +689,7 @@ class AppDslService:
         model_id,
         model_ref,
         tenant_id: uuid.UUID,
-        allowed_types: set[str],
+        allowed_types: Collection[str],
     ) -> Optional[str]:
         """解析 DSL 中的模型引用，兼容新 ref 格式和旧版裸 ID。"""
         ref = model_ref if isinstance(model_ref, dict) else None
@@ -804,7 +810,7 @@ class AppDslService:
                         model_id,
                         model_ref,
                         tenant_id,
-                        {ModelType.LLM.value, ModelType.CHAT.value},
+                        LLM_FAMILY_TYPES,
                     )
                     model["model_id"] = resolved_model_id
                     if not resolved_model_id:

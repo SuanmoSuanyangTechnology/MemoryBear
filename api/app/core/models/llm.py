@@ -377,7 +377,7 @@ class RedBearLLM(BaseLLM):
         
         Args:
             config: Model configuration
-            type: Model type (LLM or CHAT)
+            type: Model type
         """
         super().__init__()
         self._config = config

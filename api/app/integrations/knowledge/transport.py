@@ -16,7 +16,9 @@ from .errors import KnowledgeTimeoutError, KnowledgeUnavailableError
 
 logger = logging.getLogger(__name__)
 
-_REQUEST_HEADER_ALLOWLIST = frozenset({"accept", "accept-language", "content-type", "range"})
+_REQUEST_HEADER_ALLOWLIST = frozenset(
+    {"accept", "accept-language", "content-type", "range", "x-language-type"}
+)
 _RESPONSE_HEADER_ALLOWLIST = frozenset(
     {
         "accept-ranges",
@@ -25,6 +27,8 @@ _RESPONSE_HEADER_ALLOWLIST = frozenset(
         "content-length",
         "content-range",
         "content-type",
+        "content-language",
+        "vary",
         "etag",
         "last-modified",
         "x-total-files",

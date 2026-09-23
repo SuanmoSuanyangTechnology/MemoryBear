@@ -447,7 +447,7 @@ export const applicationPart1 = {
 }`,
       uploadCover: '导入并覆盖',
       refresh: '刷新当前页',
-      json_output: '支持JSON格式化输出',
+      json_output: 'JSON格式化输出',
       thinking_budget_tokens: '深度思考预算Token数',
       thinking_budget_tokens_max_error: "不能超过 最大令牌数 ({{max}})",
       thinking_budget_tokens_min_error: "不能小于 {{min}}",

@@ -120,11 +120,10 @@ async def _get_ontology_service_async(
                 detail="指定的LLM模型没有可用的API密钥"
             )
         
-        is_composite = getattr(model_config, 'is_composite', False)
         logger.info(
             f"Using specified model - user: {current_user.id}, "
             f"model_id: {llm_id}, model_name: {api_key_config.model_name}, "
-            f"is_composite: {is_composite}, api_key_id: {api_key_config.id}"
+            f"provider: {model_config.provider}, api_key_id: {api_key_config.id}"
         )
         
         from app.core.memory.pipelines.base_pipeline import ModelClientMixin

@@ -5,6 +5,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
+from app.core.memory.models.graph_models import PreferenceNode
 from app.core.memory.storage.enums import MemoryNodeType
 from app.core.memory.storage.outbox.exceptions import OutboxEnqueueError
 from app.core.memory.storage.outbox.producer import enqueue_events
@@ -16,11 +17,36 @@ logger = logging.getLogger(__name__)
 
 END_USER_MERGE_SOURCE_SNAPSHOT = """
 MATCH (n {end_user_id: $source_id})
+WHERE NOT n:Preference
 RETURN elementId(n) AS element_id,
        toString(n.id) AS node_id,
        [label IN $supported_labels WHERE label IN labels(n)] AS memory_labels,
        properties(n) AS properties
 ORDER BY element_id
+"""
+
+END_USER_MERGE_PREFERENCE_SNAPSHOT = """
+MATCH (n:Preference {end_user_id: $end_user_id})
+RETURN elementId(n) AS element_id,
+       properties(n) AS properties
+ORDER BY n.domain, n.subject, n.situation_key, element_id
+"""
+
+END_USER_MERGE_REASSIGN_PREFERENCE = """
+MATCH (n:Preference)
+WHERE elementId(n) = $element_id
+  AND n.end_user_id = $source_id
+SET n.end_user_id = $target_id,
+    n.updated_at = datetime()
+RETURN elementId(n) AS element_id
+"""
+
+END_USER_MERGE_DELETE_SOURCE_PREFERENCE = """
+MATCH (n:Preference)
+WHERE elementId(n) = $element_id
+  AND n.end_user_id = $source_id
+DETACH DELETE n
+RETURN $element_id AS element_id
 """
 
 END_USER_MERGE_TARGET_USER_SNAPSHOT = """
@@ -119,6 +145,8 @@ class EndUserMergeStats:
     sources_merged: int = 0
     reassigned_nodes: int = 0
     reassigned_edges: int = 0
+    preference_buckets_moved: int = 0
+    preference_buckets_discarded: int = 0
     outbox_events: int = 0
 
 
@@ -135,6 +163,25 @@ class _SourceMergeResult:
     affected_nodes: tuple[EndUserMergeNodeIdentity, ...]
     reassigned_nodes: int
     reassigned_edges: int
+    preference_buckets_moved: int
+    preference_buckets_discarded: int
+
+
+@dataclass(frozen=True, slots=True)
+class _PreferenceBucketSnapshot:
+    element_id: str
+    node: PreferenceNode
+
+    @property
+    def business_key(self) -> tuple[str, str, str]:
+        return self.node.domain, self.node.subject, self.node.situation_key
+
+
+@dataclass(frozen=True, slots=True)
+class _PreferenceMergeResult:
+    moved: int = 0
+    discarded: int = 0
+    affected_nodes: tuple[EndUserMergeNodeIdentity, ...] = ()
 
 
 class EndUserMergePrimaryError(RuntimeError):
@@ -238,6 +285,31 @@ def _merge_user_properties(
     return merged
 
 
+def _parse_preference_snapshot(
+    rows: list[dict[str, Any]],
+    *,
+    owner: str,
+    end_user_id: str,
+) -> list[_PreferenceBucketSnapshot]:
+    buckets: list[_PreferenceBucketSnapshot] = []
+    element_ids: set[str] = set()
+    business_keys: set[tuple[str, str, str]] = set()
+    for row in rows:
+        element_id = str(row.get("element_id") or "")
+        if not element_id or element_id in element_ids:
+            raise ValueError(f"{owner} contains an invalid Preference element ID")
+        node = PreferenceNode.model_validate(dict(row.get("properties") or {}))
+        if node.end_user_id != end_user_id:
+            raise ValueError(f"{owner} contains a Preference owned by another user")
+        business_key = (node.domain, node.subject, node.situation_key)
+        if business_key in business_keys:
+            raise ValueError(f"{owner} contains duplicate Preference business keys")
+        element_ids.add(element_id)
+        business_keys.add(business_key)
+        buckets.append(_PreferenceBucketSnapshot(element_id=element_id, node=node))
+    return buckets
+
+
 def _parse_snapshot(
     rows: list[dict[str, Any]],
     *,
@@ -308,6 +380,93 @@ def _single_count(rows: list[dict[str, Any]], key: str) -> int:
     return int(rows[0].get(key, 0) or 0) if rows else 0
 
 
+async def _merge_preference_buckets(
+    tx,
+    *,
+    source_id: str,
+    target_id: str,
+) -> _PreferenceMergeResult:
+    source_buckets = _parse_preference_snapshot(
+        await _query(
+            tx,
+            END_USER_MERGE_PREFERENCE_SNAPSHOT,
+            end_user_id=source_id,
+        ),
+        owner="source end user",
+        end_user_id=source_id,
+    )
+    if not source_buckets:
+        return _PreferenceMergeResult()
+
+    target_buckets = _parse_preference_snapshot(
+        await _query(
+            tx,
+            END_USER_MERGE_PREFERENCE_SNAPSHOT,
+            end_user_id=target_id,
+        ),
+        owner="target end user",
+        end_user_id=target_id,
+    )
+    target_by_key = {bucket.business_key: bucket for bucket in target_buckets}
+
+    moved = 0
+    discarded = 0
+    affected_nodes: list[EndUserMergeNodeIdentity] = []
+    for source_bucket in source_buckets:
+        target_bucket = target_by_key.get(source_bucket.business_key)
+        if target_bucket is None:
+            rows = await _query(
+                tx,
+                END_USER_MERGE_REASSIGN_PREFERENCE,
+                element_id=source_bucket.element_id,
+                source_id=source_id,
+                target_id=target_id,
+            )
+            if len(rows) != 1 or rows[0].get("element_id") != source_bucket.element_id:
+                raise RuntimeError(
+                    "source Preference reassignment did not affect exactly one node"
+                )
+            moved += 1
+            affected_nodes.append(
+                EndUserMergeNodeIdentity(
+                    element_id=source_bucket.element_id,
+                    node_id=source_bucket.node.id,
+                    label=MemoryNodeType.PREFERENCE,
+                    operation=OutboxOperation.UPSERT,
+                )
+            )
+            continue
+
+        delete_rows = await _query(
+            tx,
+            END_USER_MERGE_DELETE_SOURCE_PREFERENCE,
+            element_id=source_bucket.element_id,
+            source_id=source_id,
+        )
+        if (
+            len(delete_rows) != 1
+            or delete_rows[0].get("element_id") != source_bucket.element_id
+        ):
+            raise RuntimeError(
+                "source Preference deletion did not affect exactly one node"
+            )
+        discarded += 1
+        affected_nodes.append(
+            EndUserMergeNodeIdentity(
+                element_id=source_bucket.element_id,
+                node_id=source_bucket.node.id,
+                label=MemoryNodeType.PREFERENCE,
+                operation=OutboxOperation.DELETE,
+            )
+        )
+
+    return _PreferenceMergeResult(
+        moved=moved,
+        discarded=discarded,
+        affected_nodes=tuple(affected_nodes),
+    )
+
+
 async def _merge_one_source_transaction(
     tx,
     *,
@@ -315,6 +474,11 @@ async def _merge_one_source_transaction(
     target_id: str,
     supported_labels: list[str],
 ) -> _SourceMergeResult:
+    preference_result = await _merge_preference_buckets(
+        tx,
+        source_id=source_id,
+        target_id=target_id,
+    )
     source_nodes = _parse_snapshot(
         await _query(
             tx,
@@ -442,7 +606,7 @@ async def _merge_one_source_transaction(
         relationship_rows, "updated_edges"
     )
 
-    affected = list(moved)
+    affected = [*moved, *preference_result.affected_nodes]
     if target_updated is not None:
         affected.append(target_updated)
     if source_deleted is not None:
@@ -455,6 +619,8 @@ async def _merge_one_source_transaction(
         affected_nodes=tuple(affected),
         reassigned_nodes=len(moved),
         reassigned_edges=reassigned_edges,
+        preference_buckets_moved=preference_result.moved,
+        preference_buckets_discarded=preference_result.discarded,
     )
 
 
@@ -483,6 +649,8 @@ async def merge_end_user_memory_nodes(
     completed_sources: list[str] = []
     reassigned_nodes = 0
     reassigned_edges = 0
+    preference_buckets_moved = 0
+    preference_buckets_discarded = 0
     outbox_events = 0
     supported_labels = [label.value for label in MemoryNodeType]
     try:
@@ -522,12 +690,16 @@ async def merge_end_user_memory_nodes(
             completed_sources.append(source_id)
             reassigned_nodes += result.reassigned_nodes
             reassigned_edges += result.reassigned_edges
+            preference_buckets_moved += result.preference_buckets_moved
+            preference_buckets_discarded += result.preference_buckets_discarded
             outbox_events += len(events)
 
         return EndUserMergeStats(
             sources_merged=len(completed_sources),
             reassigned_nodes=reassigned_nodes,
             reassigned_edges=reassigned_edges,
+            preference_buckets_moved=preference_buckets_moved,
+            preference_buckets_discarded=preference_buckets_discarded,
             outbox_events=outbox_events,
         )
     finally:

@@ -34,10 +34,9 @@ class BaseModel(Base):
 class ModelType(StrEnum):
     """模型类型枚举"""
     LLM = "llm"
-    CHAT = "chat"
     EMBEDDING = "embedding"
     RERANK = "rerank"
-    ASR = "ASR"
+    ASR = "asr"
     # TTS = "tts"
     # SPEECH2TEXT = "speech2text"
     IMAGE = "image"
@@ -46,8 +45,12 @@ class ModelType(StrEnum):
 
     @classmethod
     def _missing_(cls, value):
-        if isinstance(value, str) and value.lower() == "asr":
-            return cls.ASR
+        """存量字符串读侧归一：`"chat"` → LLM（DB/YAML 旧行兼容）；`"asr"` → ASR（大小写容忍）。"""
+        if isinstance(value, str):
+            if value.lower() == "chat":
+                return cls.LLM
+            if value.lower() == "asr":
+                return cls.ASR
         return None
 
     @classmethod
@@ -57,24 +60,34 @@ class ModelType(StrEnum):
         return schema
 
 
-def model_type_storage_values(model_types) -> list[str]:
-    """Return canonical DB values plus legacy aliases needed during rollout."""
-    values: list[str] = []
-    for model_type in model_types:
-        canonical = ModelType(model_type).value
-        for value in (
-            (canonical, "asr") if canonical == ModelType.ASR.value else (canonical,)
-        ):
-            if value not in values:
-                values.append(value)
-    return values
+# 存量类型读侧兼容（2e：CHAT 成员已删；旧 YAML/旧镜像仍可能传/落 "chat"）：
+# 集合/SQL 比较一律用本常量，勿再引 ModelType.CHAT
+LEGACY_CHAT_TYPE = "chat"
+# LLM 族（含存量 chat）：集合判断 / SQL IN 共用；元组顺序即 SQL 字面量顺序
+LLM_FAMILY_TYPES = (ModelType.LLM.value, LEGACY_CHAT_TYPE)
 
 
 class ModelCapability(StrEnum):
-    """模型能力枚举"""
+    """deprecated（契约 v2 起拆为三列，读侧旧列兼容窗口内保留，M10 随列删）"""
     VISION = "vision"
     AUDIO = "audio"
     VIDEO = "video"
+    THINKING = "thinking"
+    THINKING_ONLY = "thinking_only"
+    JSON_OUTPUT = "json_output"
+    FUNCTION_CALL = "function_call"
+
+
+class Modality(StrEnum):
+    """模态（契约 v2 三列 input/output_modalities 值域，与 redbear-model 包同口径）"""
+    TEXT = "text"
+    IMAGE = "image"
+    AUDIO = "audio"
+    VIDEO = "video"
+
+
+class ModelFeature(StrEnum):
+    """能力特征（契约 v2 三列 features 值域，与 redbear-model 包同口径）"""
     THINKING = "thinking"
     THINKING_ONLY = "thinking_only"
     JSON_OUTPUT = "json_output"
@@ -128,13 +141,19 @@ class ModelConfig(BaseModel):
     name = Column(String, nullable=False, comment="模型显示名称")
     provider = Column(String, nullable=False, comment="供应商", server_default=ModelProvider.COMPOSITE)
     type = Column(String, nullable=False, index=True, comment="模型类型")
-    is_composite = Column(Boolean, default=False, server_default="true", nullable=False, comment="是否为组合模型")
+    is_composite = Column(Boolean, default=False, server_default="false", nullable=False, comment="是否为组合模型")
     description = Column(String, comment="模型描述")
     
     # 模型配置参数
     capability = Column(ARRAY(String), default=list, nullable=False, server_default=text("'{}'::varchar[]"),
                         comment="模型能力列表（如['vision', 'audio', 'video', 'thinking']）")
     is_omni = Column(Boolean, default=False, nullable=False, server_default="false", comment="是否为Omni模型（使用特殊API调用）")
+    input_modalities = Column(ARRAY(String), default=list, nullable=False, server_default=text("'{}'::varchar[]"),
+                              comment="输入模态（如['text','image','audio','video']）")
+    output_modalities = Column(ARRAY(String), default=list, nullable=False, server_default=text("'{}'::varchar[]"),
+                               comment="输出模态（如['text','image','audio']）")
+    features = Column(ARRAY(String), default=list, nullable=False, server_default=text("'{}'::varchar[]"),
+                      comment="能力特征（如['thinking','json_output','function_call']）")
     config = Column(JSON, comment="模型配置参数")
     # - temperature : 控制生成文本的随机性。值越高，输出越随机、越有创造性；值越低，输出越确定、越保守。
     # - top_p : 一种替代 temperature 的采样方法，控制模型从概率最高的词中选择的范围。
@@ -197,6 +216,12 @@ class ModelApiKey(BaseModel):
     model_config_id = None
     channel_id = None
 
+    # 能力载体（契约 v2 三列）：旧表无此列，运行时壳由 ModelApiKeyService 按 profile 填充，
+    # 非映射属性、不落库；消费方与 RedBearModelConfig 同口径读取
+    input_modalities = None
+    output_modalities = None
+    features = None
+
     # 请求内换渠道计划（spec §11.2）：非映射类属、不落库/不序列化，
     # 由 ModelApiKeyService 在返回运行时壳时挂载，消费方透传给 RedBearModelConfig
     failover_plan = None
@@ -231,6 +256,12 @@ class ModelBase(Base):
     capability = Column(ARRAY(String), default=list, nullable=False, server_default=text("'{}'::varchar[]"),
                         comment="模型能力列表（如['vision', 'audio', 'video']）")
     is_omni = Column(Boolean, default=False, nullable=False, server_default="false", comment="是否为Omni模型（使用特殊API调用）")
+    input_modalities = Column(ARRAY(String), default=list, nullable=False, server_default=text("'{}'::varchar[]"),
+                              comment="输入模态（如['text','image','audio','video']）")
+    output_modalities = Column(ARRAY(String), default=list, nullable=False, server_default=text("'{}'::varchar[]"),
+                               comment="输出模态（如['text','image','audio']）")
+    features = Column(ARRAY(String), default=list, nullable=False, server_default=text("'{}'::varchar[]"),
+                      comment="能力特征（如['thinking','json_output','function_call']）")
 
     # 关联关系
     configs = relationship("ModelConfig", back_populates="model_base", cascade="all, delete-orphan")

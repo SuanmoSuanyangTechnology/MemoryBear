@@ -370,11 +370,11 @@ class QuotaUsageRepository:
         return int((await self.db.scalar(stmt)) or 0)
 
     def count_models(self, tenant_id: UUID) -> int:
-        from app.models.models_model import ModelConfig
+        from app.models.models_model import ModelConfig, ModelProvider
         return self.db.query(ModelConfig).filter(
             ModelConfig.tenant_id == tenant_id,
             ModelConfig.is_active == True,
-            ModelConfig.is_composite == True
+            ModelConfig.provider == ModelProvider.COMPOSITE
         ).count()
 
     def count_ontology_projects(self, tenant_id: UUID, workspace_id: Optional[UUID] = None) -> int:

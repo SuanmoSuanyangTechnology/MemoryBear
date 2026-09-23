@@ -4940,6 +4940,97 @@
         }
       }
     },
+    "/v1/memory_config/read_config_preference": {
+      "get": {
+        "tags": [
+          "V1 - Memory Config API"
+        ],
+        "summary": "Read Config Preference",
+        "description": "Read a workspace-owned Coding Agent preference config.",
+        "operationId": "read_config_preference_v1_memory_config_read_config_preference_get",
+        "parameters": [
+          {
+            "name": "config_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "config_id",
+              "title": "Config Id"
+            },
+            "description": "config_id"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiKeyAuth"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/memory_config/update_config_preference": {
+      "put": {
+        "tags": [
+          "V1 - Memory Config API"
+        ],
+        "summary": "Update Config Preference",
+        "description": "Update a workspace-owned Coding Agent preference config.",
+        "operationId": "update_config_preference_v1_memory_config_update_config_preference_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_update_config_preference_v1_memory_config_update_config_preference_put"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/memory/analytics/graph_data": {
       "get": {
         "tags": [
@@ -8807,6 +8898,20 @@
         },
         "type": "object",
         "title": "Body_update_config_emotion_v1_memory_config_update_config_emotion_put"
+      },
+      "Body_update_config_preference_v1_memory_config_update_config_preference_put": {
+        "properties": {
+          "api_key_auth": {
+            "$ref": "#/components/schemas/ApiKeyAuth"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "description": "Request body"
+          }
+        },
+        "type": "object",
+        "title": "Body_update_config_preference_v1_memory_config_update_config_preference_put"
       },
       "Body_update_config_reflection_v1_memory_config_update_config_reflection_put": {
         "properties": {
@@ -14260,9 +14365,9 @@
         "type": "string",
         "enum": [
           "llm",
-          "chat",
           "embedding",
           "rerank",
+          "asr",
           "image",
           "video"
         ],

@@ -13,7 +13,7 @@ from starlette.exceptions import HTTPException
 
 from ..error_mapping import map_storage_error
 from ..errors import KnowledgeError
-from ..i18n import normalize_locale, resolve_locale, translate
+from ..i18n import normalize_locale, translate
 from ..request_logging import log_request_failure, safe_failure_detail
 from ..trace import TRACE_ID_HEADER, get_trace_id
 from .schemas.common import fail
@@ -45,11 +45,7 @@ def request_locale(request: Request) -> str:
     selected = getattr(request.state, "knowledge_locale", None)
     if normalize_locale(selected):
         return selected
-    selected = resolve_locale(
-        request.query_params.get("lang"),
-        request.headers.get("Accept-Language"),
-        getattr(request.state, "language", None),
-    )
+    selected = normalize_locale(request.headers.get("X-Language-Type")) or "zh"
     request.state.knowledge_locale = selected
     return selected
 
@@ -70,8 +66,8 @@ def _response(
     response.headers[TRACE_ID_HEADER] = getattr(request.state, "trace_id", get_trace_id())
     response.headers["Content-Language"] = request_locale(request)
     vary = response.headers.get("Vary", "")
-    if "*" not in vary and "accept-language" not in {v.strip().lower() for v in vary.split(",")}:
-        response.headers["Vary"] = f"{vary}, Accept-Language" if vary else "Accept-Language"
+    if "*" not in vary and "x-language-type" not in {v.strip().lower() for v in vary.split(",")}:
+        response.headers["Vary"] = f"{vary}, X-Language-Type" if vary else "X-Language-Type"
     return response
 
 

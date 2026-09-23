@@ -1,16 +1,17 @@
 import { useRef, useState, useLayoutEffect, useCallback, type ReactNode } from 'react'
-import { Popover, Flex, type PopoverProps } from 'antd'
+import { Popover, Flex, type FlexProps, type PopoverProps } from 'antd'
 import Tag, { type TagProps } from '@/components/Tag'
 
 interface OverflowTagsProps {
   items?: ReactNode[];
   gap?: number;
+  justify?: FlexProps['justify'];
   numTagColor?: TagProps['color'];
   numTag?: (num?: number) => ReactNode;
   popoverProps?: PopoverProps | false;
 }
 
-const OverflowTags = ({ items = [], gap = 8, numTagColor = 'default', numTag, popoverProps }: OverflowTagsProps) => {
+const OverflowTags = ({ items = [], gap = 8, justify, numTagColor = 'default', numTag, popoverProps }: OverflowTagsProps) => {
   const containerRef = useRef<HTMLDivElement>(null)
   const measureRef = useRef<HTMLDivElement>(null)
   const [visibleCount, setVisibleCount] = useState(items.length)
@@ -85,11 +86,11 @@ const OverflowTags = ({ items = [], gap = 8, numTagColor = 'default', numTag, po
             {items.map((item, i) => <span key={i}>{item}</span>)}
           </Flex>
         }
-        placement="topLeft"
+        placement={justify === 'flex-end' ? 'topRight' : "topLeft"}
         {...(popoverProps || {})}
         open={popoverProps === false ? false : undefined}
       >
-        <Flex gap={gap} align="center" wrap={false}>
+        <Flex gap={gap} align="center" justify={justify} wrap={false}>
           {items.slice(0, visibleCount).map((item, i) => (
             <span key={i} className="rb:shrink-0 rb:whitespace-nowrap">{item}</span>
           ))}

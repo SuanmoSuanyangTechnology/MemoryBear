@@ -132,6 +132,7 @@ export const home = {
       consolidationEvolutionEngine: 'Long-term Consolidation Evolution Engine',
       predictionEngine: 'Memory Prediction Workbench',
       predictionProgress: 'Prediction Process',
+      preferenceEngine: 'Preference Engine',
     },
     dashboard: {
       total_models: 'Available Models',

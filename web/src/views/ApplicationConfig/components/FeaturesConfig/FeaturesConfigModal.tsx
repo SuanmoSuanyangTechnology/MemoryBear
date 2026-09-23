@@ -19,7 +19,7 @@ import RbModal from '@/components/RbModal'
 import SwitchFormItem from '@/components/FormItem/SwitchFormItem'
 import FileUploadSettingModal from './FileUploadSettingModal'
 import type { Application } from '@/views/ApplicationManagement/types';
-import type { Capability } from '@/views/ModelManagement/types'
+import type { Modality } from '@/views/ModelManagement/types'
 import OpenStatementSettingModal, { type OpenStatementSettingModalRef } from './OpenStatementSettingModal'
 import ContentModerationSettingModal, { type ContentModerationSettingModalRef } from './ContentModerationSettingModal'
 import type { ContentModerationConfig } from '../../types'
@@ -31,7 +31,7 @@ import PrivateWrap from '@/components/PrivateWrap'
 interface FeaturesConfigModalProps {
   refresh: (value: FeaturesConfigForm) => void;
   source?: Application['type'];
-  capability?: Capability[];
+  input_modalities?: Modality[];
   chatVariables: Variable[];
 }
 /**
@@ -40,7 +40,7 @@ interface FeaturesConfigModalProps {
 const FeaturesConfigModal = forwardRef<FeaturesConfigModalRef, FeaturesConfigModalProps>(({
   refresh,
   source,
-  capability,
+  input_modalities,
   chatVariables
 }, ref) => {
   const { t } = useTranslation();
@@ -80,16 +80,16 @@ const FeaturesConfigModal = forwardRef<FeaturesConfigModalRef, FeaturesConfigMod
   }
 
   const formatFileTypeOptions = (fu: FeaturesConfigForm['file_upload']) => {
-    let options = fu.document_enabled ? [{ type: 'document', enabled: fu.document_enabled, maxSize: fu.document_max_size_mb }] : []
-    if (!capability && source !== 'workflow') return options
+    const options = fu.document_enabled ? [{ type: 'document', enabled: fu.document_enabled, maxSize: fu.document_max_size_mb }] : []
+    if (!input_modalities && source !== 'workflow') return options
     
-    if ((capability?.includes('vision') || source === 'workflow') && fu.image_enabled) {
+    if ((input_modalities?.includes('image') || source === 'workflow') && fu.image_enabled) {
       options.push({ type: 'image', enabled: fu.image_enabled, maxSize: fu.image_max_size_mb })
     }
-    if ((capability?.includes('audio') || source === 'workflow') && fu.audio_enabled) {
+    if ((input_modalities?.includes('audio') || source === 'workflow') && fu.audio_enabled) {
       options.push({ type: 'audio', enabled: fu.audio_enabled, maxSize: fu.audio_max_size_mb })
     }
-    if ((capability?.includes('video') || source === 'workflow') && fu.video_enabled) {
+    if ((input_modalities?.includes('video') || source === 'workflow') && fu.video_enabled) {
       options.push({ type: 'video', enabled: fu.video_enabled, maxSize: fu.video_max_size_mb })
     }
     return options.filter(item => item.enabled)
@@ -138,7 +138,7 @@ const FeaturesConfigModal = forwardRef<FeaturesConfigModalRef, FeaturesConfigMod
           layout="vertical"
         >
           <Flex vertical gap={12}>
-            <div className="rb:relative rb:border rb:border-[#DFE4ED] rb:p-3 rb:rounded-lg rb:bg-[#f5f7fc]">
+            <div className="rb:relative rb:border rb:border-gray-400 rb:p-3 rb:rounded-lg rb:bg-[#f5f7fc]">
               <SwitchFormItem
                 title={t('application.opening_statement')}
                 name={['opening_statement', "enabled"]}
@@ -156,14 +156,14 @@ const FeaturesConfigModal = forwardRef<FeaturesConfigModalRef, FeaturesConfigMod
               <Form.Item name="opening_statement" hidden />
             </div>
             {source !== 'workflow' && <>
-              <div className="rb:relative rb:border rb:border-[#DFE4ED] rb:p-3 rb:rounded-lg rb:bg-[#f5f7fc]">
+              <div className="rb:relative rb:border rb:border-gray-400 rb:p-3 rb:rounded-lg rb:bg-[#f5f7fc]">
                 <SwitchFormItem
                   title={t(`memoryConversation.web_search`)}
                   name={['web_search', "enabled"]}
                 />
               </div>
 
-              <div className="rb:relative rb:border rb:border-[#DFE4ED] rb:p-3 rb:rounded-lg rb:bg-[#f5f7fc]">
+              <div className="rb:relative rb:border rb:border-gray-400 rb:p-3 rb:rounded-lg rb:bg-[#f5f7fc]">
                 <SwitchFormItem
                   title={t('application.text_to_speech')}
                   name={['text_to_speech', "enabled"]}
@@ -171,14 +171,14 @@ const FeaturesConfigModal = forwardRef<FeaturesConfigModalRef, FeaturesConfigMod
                 />
               </div>
 
-              <div className="rb:relative rb:border rb:border-[#DFE4ED] rb:p-3 rb:rounded-lg rb:bg-[#f5f7fc]">
+              <div className="rb:relative rb:border rb:border-gray-400 rb:p-3 rb:rounded-lg rb:bg-[#f5f7fc]">
                 <SwitchFormItem
                   title={t('application.suggested_questions_after_answer')}
                   name={['suggested_questions_after_answer', "enabled"]}
                 />
               </div>
 
-              <div className="rb:relative rb:border rb:border-[#DFE4ED] rb:p-3 rb:rounded-lg rb:bg-[#f5f7fc]">
+              <div className="rb:relative rb:border rb:border-gray-400 rb:p-3 rb:rounded-lg rb:bg-[#f5f7fc]">
                 <SwitchFormItem
                   title={t('application.emotion_reply')}
                   desc={t('application.emotion_reply_desc')}
@@ -186,7 +186,7 @@ const FeaturesConfigModal = forwardRef<FeaturesConfigModalRef, FeaturesConfigMod
                 />
               </div>
             </>}
-            <div className="rb:relative rb:border rb:border-[#DFE4ED] rb:p-3 rb:rounded-lg rb:bg-[#f5f7fc]">
+            <div className="rb:relative rb:border rb:border-gray-400 rb:p-3 rb:rounded-lg rb:bg-[#f5f7fc]">
               <SwitchFormItem
                 title={t(`application.citation`)}
                 name={['citation', "enabled"]}
@@ -200,14 +200,14 @@ const FeaturesConfigModal = forwardRef<FeaturesConfigModalRef, FeaturesConfigMod
               />
             </div>
             {source === 'workflow' && <>
-              <div className="rb:relative rb:border rb:border-[#DFE4ED] rb:p-3 rb:rounded-lg rb:bg-[#f5f7fc]">
+              <div className="rb:relative rb:border rb:border-gray-400 rb:p-3 rb:rounded-lg rb:bg-[#f5f7fc]">
                 <Flex
                   align="center"
                   justify="space-between"
                 >
                   {/* Label and description section */}
                   <LabelWrapper title={t('application.sensitive_word_avoidance')}>
-                    <div className="rb:text-[12px] rb:text-[#5B6167] rb:font-regular rb:leading-4 rb:mt-1">
+                    <div className="rb:text-[12px] rb:text-gray-600 rb:font-regular rb:leading-4 rb:mt-1">
                       {values?.sensitive_word_avoidance?.enabled ? undefined : t('application.sensitive_word_avoidance_desc')}
                     </div>
                   </LabelWrapper>
@@ -218,13 +218,13 @@ const FeaturesConfigModal = forwardRef<FeaturesConfigModalRef, FeaturesConfigMod
 
               {values?.sensitive_word_avoidance?.enabled && <>
                   <Flex gap={12} className="rb:py-2!">
-                    <div className="rb:flex-1 rb:border rb:border-[#DFE4ED] rb:rounded-lg rb:bg-white rb:text-[12px]">
-                      <div className="rb:grid rb:grid-cols-2 rb:gap-2 rb:text-[12px] rb:text-[#5B6167] rb:border-b rb:border-b-[#DFE4ED]">
+                    <div className="rb:flex-1 rb:border rb:border-gray-400 rb:rounded-lg rb:bg-white rb:text-[12px]">
+                      <div className="rb:grid rb:grid-cols-2 rb:gap-2 rb:text-[12px] rb:text-gray-600 rb:border-b rb:border-b-gray-400">
                         <div className="rb:px-3 rb:py-1">{t(`application.category`)}</div>
                         <div className="rb:px-3 rb:py-1">{t('application.singleMaxSize')}</div>
                       </div>
                       <div className={clsx('rb:grid rb:grid-cols-2 rb:gap-2')}>
-                        <div className="rb:px-3 rb:py-1">{t(`application.${values?.sensitive_word_avoidance?.type}` || '')}</div>
+                        <div className="rb:px-3 rb:py-1">{values?.sensitive_word_avoidance?.type ? t(`application.${values?.sensitive_word_avoidance?.type}`) : ''}</div>
                         <div className="rb:px-3 rb:py-1">
                           {[
                             values?.sensitive_word_avoidance?.config?.inputs_config?.enabled ? t('application.review_input_content') : null,
@@ -239,7 +239,7 @@ const FeaturesConfigModal = forwardRef<FeaturesConfigModalRef, FeaturesConfigMod
               </div>
             </>}
 
-            <div className="rb:relative rb:border rb:border-[#DFE4ED] rb:p-3 rb:rounded-lg rb:bg-[#f5f7fc]">
+            <div className="rb:relative rb:border rb:border-gray-400 rb:p-3 rb:rounded-lg rb:bg-[#f5f7fc]">
               <SwitchFormItem
                 title={t('application.file_upload')}
                 name={['file_upload', "enabled"]}
@@ -251,14 +251,14 @@ const FeaturesConfigModal = forwardRef<FeaturesConfigModalRef, FeaturesConfigMod
                 const filterTypes = formatFileTypeOptions(fu)
                 return filterTypes.length > 0 ? <>
                   <Flex gap={12} className="rb:py-2!">
-                    <div className="rb:flex-1 rb:border rb:border-[#DFE4ED] rb:rounded-lg rb:bg-white rb:text-[12px]">
-                      <div className="rb:grid rb:grid-cols-2 rb:gap-2 rb:text-[12px] rb:text-[#5B6167] rb:border-b rb:border-b-[#DFE4ED]">
+                    <div className="rb:flex-1 rb:border rb:border-gray-400 rb:rounded-lg rb:bg-white rb:text-[12px]">
+                      <div className="rb:grid rb:grid-cols-2 rb:gap-2 rb:text-[12px] rb:text-gray-600 rb:border-b rb:border-b-gray-400">
                         <div className="rb:px-3 rb:py-1">{t(`application.supportedTypes`)}</div>
                         <div className="rb:px-3 rb:py-1">{t('application.singleMaxSize')}</div>
                       </div>
                       {filterTypes.map((item, index) => (
                         <div key={item.type} className={clsx('rb:grid rb:grid-cols-2 rb:gap-2', {
-                          'rb:border-b rb:border-b-[#DFE4ED]': index !== filterTypes.length - 1
+                          'rb:border-b rb:border-b-gray-400': index !== filterTypes.length - 1
                         })}>
                           <div className="rb:px-3 rb:py-1">{t(`application.${item.type}`)}</div>
                           <div className="rb:px-3 rb:py-1">{item.maxSize} MB</div>
@@ -266,7 +266,7 @@ const FeaturesConfigModal = forwardRef<FeaturesConfigModalRef, FeaturesConfigMod
                       ))}
                     </div>
                     <div>
-                      <div className="rb:text-[12px] rb:text-[#5B6167] rb:py-1">{t('application.maxCount')}</div>
+                      <div className="rb:text-[12px] rb:text-gray-600 rb:py-1">{t('application.maxCount')}</div>
                       {values?.file_upload.max_file_count} {t('application.unix')}
                     </div>
                   </Flex>
@@ -284,7 +284,7 @@ const FeaturesConfigModal = forwardRef<FeaturesConfigModalRef, FeaturesConfigMod
       <FileUploadSettingModal
         ref={fileUploadSettingModalRef}
         onSave={handleSaveSettings}
-        capability={capability}
+        input_modalities={input_modalities}
         source={source}
       />
       <OpenStatementSettingModal

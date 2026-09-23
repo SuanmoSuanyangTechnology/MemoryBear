@@ -1067,7 +1067,6 @@ class ConversationService:
             conversation_id: uuid.UUID,
             max_history: Optional[int] = None,
             current_provider: Optional[str] = None,
-            current_is_omni: Optional[bool] = None
     ) -> List[dict]:
         """
         Retrieve historical conversation messages formatted as dictionaries.
@@ -1076,7 +1075,6 @@ class ConversationService:
             conversation_id (uuid.UUID): Conversation UUID.
             max_history (Optional[int]): Maximum number of messages to retrieve.
             current_provider (Optional[str]): Current provider for file handling.
-            current_is_omni (Optional[bool]): Current omni flag for file handling.
 
         Returns:
             List[dict]: List of message dictionaries with keys 'role' and 'content'.
@@ -1090,12 +1088,11 @@ class ConversationService:
         for msg in messages:
             history_files = msg.meta_data.get("history_files", {}) if msg.meta_data else {}
 
-            has_files = bool(history_files and current_provider and current_is_omni is not None)
+            has_files = bool(history_files and current_provider)
             if has_files:
                 stored_provider = history_files.get("provider")
-                stored_is_omni = history_files.get("is_omni")
 
-                if stored_provider != current_provider or stored_is_omni != current_is_omni:
+                if stored_provider != current_provider:
                     continue
 
                 content = [{"type": "text", "text": msg.content}]
@@ -1583,7 +1580,6 @@ class ConversationService:
             raise BusinessException("Model configuration missing API keys.", BizCode.INVALID_PARAMETER)
 
         provider = api_config.provider
-        is_omni = api_config.is_omni
         model_type = config.type
 
         llm = RedBearLLM(
@@ -1595,7 +1591,6 @@ class ConversationService:
             conversation_id=conversation_id,
             max_history=20,
             current_provider=provider,
-            current_is_omni=is_omni
         )
         if len(conversation_messages) == 0:
             return ConversationOut(

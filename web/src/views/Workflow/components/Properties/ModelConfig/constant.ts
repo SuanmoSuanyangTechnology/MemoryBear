@@ -16,19 +16,19 @@ export const fieldConfigs: Record<string, any> = {
   },
   json_output: {
     type: 'switch',
-    dependence: 'capability',
+    dependence: 'features',
     defaultValue: false,
     hideTip: true
   },
   structured_output: {
     type: 'switch',
-    dependence: 'capability',
+    dependence: 'features',
     defaultValue: false,
     hideTip: true
   },
   json_output_fields: {
     type: 'editor',
-    dependence: 'capability',
+    dependence: 'features',
   },
   top_p: {
     enable: {

@@ -223,7 +223,7 @@ const AiPromptModal = forwardRef<AiPromptModalRef, AiPromptModalProps>(({
               rules={[{ required: true, message: t('common.pleaseSelect') }]}
             >
               <ModelSelect
-                params={{ type: 'llm,chat' }}
+                params={{ type: 'llm' }}
                 className="rb:w-full!"
               />
             </Form.Item>

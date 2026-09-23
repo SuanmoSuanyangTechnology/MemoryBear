@@ -38,13 +38,14 @@ from app.models.annotation_model import AppAnnotation, AppAnnotationHitLog, AppA
 from app.models.appshare_model import AppShare
 from app.models.file_metadata_model import FileMetadata
 from app.models.knowledgeshare_model import KnowledgeShare
-from app.models.models_model import ModelCapability, ModelType
+from app.models.models_model import Modality, ModelFeature, ModelType
 from app.repositories.tool_repository import ToolRepository
 from app.schemas.app_schema import FileInput, Citation, FileType, TransferMethod
 from app.schemas.model_schema import ModelInfo
 from app.schemas.prompt_schema import PromptMessageRole, render_prompt_message
 from app.services.context_engine_manager import ContextEngineManager
 from app.services.annotation_service import AnnotationService
+from app.services.file_content_service import FileReference, resolve_image_retrieval_query
 from app.services.langchain_tool_server import Search
 from app.services.memory_config_service import MemoryConfigService
 from app.services.model_parameter_merger import ModelParameterMerger
@@ -68,6 +69,29 @@ from app.core.memory.emotion.emotion_resolver import (
 )
 
 logger = get_business_logger()
+
+
+def _as_uuid(value: Any) -> Optional[uuid.UUID]:
+    """把可能带脏值的 UUID 入参归一为 UUID 或 None。
+
+    背景：发布快照（app_releases.config）由 `multi_agent_config_to_dict` 序列化，
+    历史版本会把 NULL 的 master_agent_id 写成字面量字符串 "None"；回读后再写进
+    UUID 列会触发 asyncpg `DataError: invalid UUID 'None'`，在观测路径上表现为
+    "集群主执行记录创建失败（已降级）"，主记录整体消失（2026-09-14）。
+
+    这里只在唯一写入口做一次归一，既修根因数据，也保证任何来源的脏值都不会
+    再把整条观测链路打掉。非法串同样降级为 None —— 观测数据缺失远好过对话失败。
+    """
+    if value is None or isinstance(value, uuid.UUID):
+        return value
+    text = str(value).strip()
+    if not text or text.lower() in {"none", "null", "nil", "undefined"}:
+        return None
+    try:
+        return uuid.UUID(text)
+    except (ValueError, AttributeError, TypeError):
+        logger.warning(f"agent_executions 写入时丢弃非法 UUID 入参: {value!r}")
+        return None
 
 
 def _snapshot_annotations(annotations: List[AppAnnotation]) -> List[SimpleNamespace]:
@@ -100,7 +124,55 @@ def _snapshot_message(message: Message) -> SimpleNamespace:
 
 class KnowledgeRetrievalInput(BaseModel):
     """知识库检索工具输入参数"""
-    query: str = Field(description="需要检索的问题或关键词")
+    query: str = Field(
+        default="",
+        description=(
+            "文本形式的检索问题或关键词。仅当用户提出了独立的文字问题/关键词时填写；"
+            "当用户要求“按这张图/用图片检索相似内容”且没有额外文字问题时，本字段留空，"
+            "只通过 image_refs 传图片，切勿把图片中能看到的文字 OCR 出来填到这里。"
+        ),
+    )
+    image_refs: list[int] = Field(
+        default_factory=list,
+        description=(
+            "需要按图片内容检索时，填写用户消息中列出的本轮上传图片编号（从 1 开始）。"
+            "仅在用户明确要求按图片检索知识库时填写；纯文本问题留空。"
+        ),
+    )
+
+
+def _extract_image_references(
+    files: list[FileInput] | list[dict[str, Any]] | None,
+) -> list[FileReference]:
+    """按上传顺序提取本轮图片文件的引用。
+
+    本地文件（transfer_method=local_file）只有 file_id、url 为空，远程图片只有 url；
+    两者都必须收进白名单，否则私有化部署下「以图搜图」会静默空转。
+    """
+    references: list[FileReference] = []
+    for file in files or []:
+        reference = FileReference.from_payload(file)
+        if reference is not None and reference.is_image and (reference.file_id or reference.url):
+            references.append(reference)
+    return references
+
+
+def build_uploaded_images_manifest(
+    files: list[FileInput] | list[dict[str, Any]] | None,
+) -> tuple[str, list[FileReference]]:
+    """构造注入用户消息的本轮图片清单，并返回与编号一致的有序图片引用白名单。
+
+    返回 (manifest_text, image_references)；无图片时返回 ("", [])。
+    清单里只给模型编号与名字：图片地址（尤其内网地址）对模型没有意义，也不该写进上下文。
+    """
+    image_references = _extract_image_references(files)
+    if not image_references:
+        return "", []
+    lines = ["本轮用户上传了以下图片，可在需要按图片内容检索知识库时，"
+             "通过知识库检索工具的 image_refs 参数传入对应编号："]
+    for index, reference in enumerate(image_references, start=1):
+        lines.append(f"[图片{index}] {reference.name or reference.url or '本地图片'}")
+    return "\n".join(lines), image_references
 
 
 class WebSearchInput(BaseModel):
@@ -160,16 +232,18 @@ async def _retrieve_chunks_via_standard(
         app_id: uuid.UUID | str | None,
         workspace_id: uuid.UUID | str | None,
         source: KnowledgeRetrievalSource,
+        image_references: list[FileReference] | None = None,
+        image_stats: dict[str, Any] | None = None,
 ) -> list:
-    """标准化知识库检索：走 KnowledgeRetriever + KnowledgeRetrievalRequest。
+    """Retrieve text and, when explicitly supported, attached image queries.
 
-    读取 agent 的 ``knowledge_retrieval`` 配置（top_k / similarity_threshold /
-    retrieve_type / reranker_id）。由于
-    KnowledgeRetrievalRequest 只携带一组检索参数，这里沿用工作流知识库节点的约定，
-    用第一个 KB 的参数作为全局默认；缺失值回落到 schema 默认值。
+    图片引用由公共文件内容服务统一取字节：本地文件（只有 file_id）直读存储，
+    远程图片走 URL 下载，私有化部署下同样可用。
+
+    当传入 ``image_stats`` 时，函数会原地回填图片检索的执行计数
+    （requested/encoded/succeeded/failed），供调用方向模型反馈失败原因。
     """
     knowledge_bases = (kb_config or {}).get("knowledge_bases", []) or []
-    # 单一过滤源:有 kb_id 的 KB 才会进入请求,request_kbs 与 kb_ids 强一致
     valid_kbs = [kb for kb in knowledge_bases if kb.get("kb_id")]
     kb_ids = [kb["kb_id"] for kb in valid_kbs]
     if not kb_ids:
@@ -202,14 +276,11 @@ async def _retrieve_chunks_via_standard(
         except (ValueError, AttributeError):
             rerank_id = None
 
-    # 分词检索不使用 vector_similarity_weight，其他检索类型从配置读取
-    if retrieve_type == RetrieveType.PARTICIPLE:
-        vector_similarity_weight = None
-    else:
-        vector_similarity_weight = _as_float(first_kb.get("vector_similarity_weight"), 0.5)
-
-    # 混合检索下，按第一个 KB 的开关设置请求级图谱检索兜底
-    # （每个 KB 显式配置的 enable_graph_retrieval 仍会在检索层按 KB 覆盖生效）
+    vector_similarity_weight = (
+        None
+        if retrieve_type == RetrieveType.PARTICIPLE
+        else _as_float(first_kb.get("vector_similarity_weight"), 0.5)
+    )
     enable_graph_retrieval = (
         1
         if (
@@ -218,18 +289,14 @@ async def _retrieve_chunks_via_standard(
         )
         else 0
     )
-
-    # 透传与 kb_ids 同源的 KB 配置,避免重复过滤导致漂移
-    # 配置了全局重排模型时，reranker_top_k 决定最终重排保留数量；
-    # 未配置重排时继续沿用第一个知识库的 top_k 作为请求级默认值。
     request_top_k = (
         _as_int(kb_config.get("reranker_top_k"), 10)
         if rerank_id is not None
         else _as_int(first_kb.get("top_k"), 3)
     )
 
-    request = KnowledgeRetrievalRequest(
-        query=query,
+    # query 与图片请求共用的参数；query 单独按模态构造
+    request_kwargs: dict[str, Any] = dict(
         source=source,
         kb_ids=[uuid.UUID(kid) for kid in kb_ids],
         knowledge_bases=valid_kbs,
@@ -242,16 +309,107 @@ async def _retrieve_chunks_via_standard(
         rerank_weights=kb_config.get("rerank_weights"),
         enable_graph_retrieval=enable_graph_retrieval,
     )
-
     context = await build_app_knowledge_context(
         app_id,
         source=source,
         trace_id=uuid.uuid4().hex,
         expected_workspace_id=workspace_id,
     )
-    result = await get_knowledge_retriever().retrieve(request, context)
+    retriever = get_knowledge_retriever()
+    # query 留空且带图片时为“纯以图搜图”：跳过文本检索，避免图片中可见文字主导召回
+    results: list = []
+    if (query or "").strip():
+        text_request = KnowledgeRetrievalRequest(query=query, **request_kwargs)
+        results = list((await retriever.retrieve(text_request, context)).chunks)
 
-    return result.chunks
+    image_diagnostics: dict[str, Any] = {"requested": 0, "encoded": 0, "succeeded": 0, "failed": 0}
+    if image_references:
+        from app.integrations.knowledge.retrieval_policy import image_retrieval_supported
+        from app.services.image_retrieval_guard import check_image_retrieval
+
+        available_references = [ref for ref in image_references if ref.locator]
+        # 按 locator 去重，保持首次出现顺序
+        unique_references = list({ref.locator: ref for ref in available_references}.values())
+        image_diagnostics["requested"] = len(unique_references)
+        logger.info(
+            "知识库图片检索开始 kb_ids=%s retrieve_type=%s image_count=%s",
+            kb_ids, retrieve_type.value, len(unique_references),
+        )
+        # 先按知识库侧的图片检索边界做本地前置校验，命中时给出与下游一致的具体原因。
+        # agent 场景不中断主流程：图片检索降级，原因随 diagnostics 反馈给模型。
+        rejection_reason = await check_image_retrieval(
+            kb_ids=kb_ids,
+            knowledge_bases=valid_kbs,
+            retrieve_type=retrieve_type,
+            rerank_id=rerank_id,
+            rerank_mode=kb_config.get("rerank_mode"),
+            enable_graph_retrieval=enable_graph_retrieval,
+            metadata_filter_mode=kb_config.get("metadata_filter_mode"),
+        )
+        if rejection_reason is None and not await image_retrieval_supported(
+            retriever,
+            kb_ids=[str(kb_id) for kb_id in kb_ids],
+            retrieve_type=retrieve_type,
+            context=context,
+            rerank_id=str(rerank_id) if rerank_id else None,
+        ):
+            # fail-closed：策略不支持/不可用时明确记录，避免图片检索被静默丢弃
+            rejection_reason = "当前知识库/检索模式不支持图片检索"
+        if rejection_reason is not None:
+            image_diagnostics["failed"] = len(unique_references)
+            image_diagnostics["reason"] = rejection_reason
+            logger.warning(
+                "知识库图片检索未执行 kb_ids=%s retrieve_type=%s reason=%s",
+                kb_ids, retrieve_type.value, rejection_reason,
+            )
+        else:
+            for reference in unique_references:
+                # 本地文件直读存储字节编码，远程图片走 URL 下载，都不依赖模型侧可达性
+                image_query = await resolve_image_retrieval_query(
+                    reference,
+                    workspace_id=context.principal.workspace_id if context.principal else None,
+                    tenant_id=context.principal.tenant_id if context.principal else None,
+                )
+                if image_query is None:
+                    image_diagnostics["failed"] += 1
+                    logger.warning(
+                        "知识库图片检索跳过：图片读取/编码失败 locator=%s", reference.locator,
+                    )
+                    continue
+                image_diagnostics["encoded"] += 1
+                image_request = KnowledgeRetrievalRequest(query=image_query, **request_kwargs)
+                try:
+                    image_chunks = (await retriever.retrieve(image_request, context)).chunks
+                    image_diagnostics["succeeded"] += 1
+                    logger.info(
+                        "知识库图片检索命中 locator=%s chunks=%s",
+                        reference.locator, len(image_chunks),
+                    )
+                    results.extend(image_chunks)
+                except Exception as image_exc:
+                    image_diagnostics["failed"] += 1
+                    # 单张图片检索失败不应丢弃已成功的文本检索结果
+                    logger.warning(
+                        "知识库图片检索失败: %s",
+                        image_exc,
+                        extra={"error": str(image_exc), "error_type": type(image_exc).__name__},
+                    )
+        logger.info("知识库图片检索结束 %s", image_diagnostics)
+        if image_stats is not None:
+            image_stats.update(image_diagnostics)
+
+    seen_chunk_ids: set[str] = set()
+    unique_results = []
+    for chunk in results:
+        metadata = getattr(chunk, "metadata", {}) or {}
+        chunk_id = str(metadata.get("chunk_id") or metadata.get("id") or "")
+        if chunk_id and chunk_id in seen_chunk_ids:
+            continue
+        if chunk_id:
+            seen_chunk_ids.add(chunk_id)
+        unique_results.append(chunk)
+    return unique_results
+
 
 
 def create_knowledge_retrieval_tool(
@@ -264,6 +422,7 @@ def create_knowledge_retrieval_tool(
         source: KnowledgeRetrievalSource,
         citations_collector: Optional[List[Citation]] = None,
         kb_names: Optional[List[Dict]] = None,
+        uploaded_files: Optional[List[FileInput]] = None,
 ):
     """从知识库中检索相关信息。当用户的问题需要参考知识库、文档或历史记录时，使用此工具进行检索。
 
@@ -281,27 +440,92 @@ def create_knowledge_retrieval_tool(
         检索到的相关知识内容
     """
     logger.info(f"创建知识库检索工具，用户：{user_id}")
+    # 本轮上传图片的有序白名单（1-based 编号 -> 图片引用），仅允许模型引用这些图片。
+    # 本地文件只有 file_id、url 为空，统一由公共文件内容服务取字节，不依赖 URL 可达。
+    image_references: list[FileReference] = []
+
+    def set_uploaded_files(files: list[FileInput] | list[dict[str, Any]] | None) -> None:
+        """Record current-turn image references that the model may reference by index."""
+        image_references[:] = _extract_image_references(files)
+
+    set_uploaded_files(uploaded_files)
 
     @tool(args_schema=KnowledgeRetrievalInput)
-    async def knowledge_retrieval_tool(query: str) -> str:
-        """从知识库中检索相关信息。当用户的问题需要参考知识库、文档或历史记录时，使用此工具进行检索。
+    async def knowledge_retrieval_tool(query: str = "", image_refs: list[int] | None = None) -> str:
+        """从知识库中检索相关信息。当用户的问题需要参考知识库、文档或历史记录时使用。
 
-        Args:
-            query: 需要检索的问题或关键词
+        参数说明：
+        - query: 文本形式的检索问题或关键词，可留空。仅当用户提出了独立的文字问题或
+          关键词时才填写；绝不要把图片 URL、链接、base64 放进 query。
+          当用户只要求“按这张图/用图片去知识库检索相似内容”而没有额外文字问题时，
+          query 必须留空，只传 image_refs；尤其不要把图片中能看到的标题/文字
+          OCR 或转写出来填进 query，否则会变成文本检索而非以图搜图。
+        - image_refs: 当且仅当用户要求“按图片/用这张图去知识库检索相似内容”时填写。
+          取值为用户消息中“[图片N]”清单里的编号 N（整数，从 1 开始），可传多个。
+          纯文本问题、或用户未要求按图检索时，留空或传空列表，切勿臆造编号。
+          例如用户消息含“[图片1] xxx.png”，且要求按图检索，则传 image_refs=[1]，
+          此时 query 留空。清单里的“[图片N]”后面可能是文件名或“本地图片”，
+          都不影响编号取值，不要据此推断图片能不能用。
+
+        query 与 image_refs 至少要有一个非空。
 
         Returns:
             检索到的相关知识内容
         """
 
         try:
-
+            # 仅检索模型显式选择、且属于本轮上传白名单的图片，杜绝任意引用
+            selected_image_references: list[FileReference] = []
+            if image_refs:
+                if not image_references:
+                    # 模型给了编号，但本轮没有可用图片白名单（时序/非图片上传问题）
+                    logger.warning(
+                        "知识库工具收到 image_refs=%s 但本轮图片白名单为空，忽略图片检索",
+                        image_refs,
+                    )
+                for ref in image_refs:
+                    if isinstance(ref, bool) or not isinstance(ref, int):
+                        logger.warning("知识库工具 image_refs 含非整数编号，已忽略: %r", ref)
+                        continue
+                    if 1 <= ref <= len(image_references):
+                        selected_image_references.append(image_references[ref - 1])
+                    else:
+                        logger.warning(
+                            "知识库工具 image_refs 编号越界: ref=%s 本轮图片数=%s",
+                            ref, len(image_references),
+                        )
+            query = (query or "").strip()
+            logger.info(
+                "知识库工具检索 query=%r image_refs=%s 选中图片数=%s",
+                query[:120], image_refs, len(selected_image_references),
+            )
+            if not query and not selected_image_references:
+                # 两个检索入口都为空：无法检索，明确告知模型补全参数
+                return "检索失败：query 与 image_refs 不能同时为空。请提供文字问题，或在用户要求按图检索时传入有效图片编号。"
+            image_stats: dict[str, Any] = {}
             retrieve_chunks_result = await _retrieve_chunks_via_standard(
                 query,
                 kb_config,
                 app_id=app_id,
                 workspace_id=workspace_id,
                 source=source,
+                image_references=selected_image_references,
+                image_stats=image_stats,
             )
+            # 模型显式请求了图片检索，但所有图片都没检索成功：给出明确反馈，
+            # 避免模型在没有图片证据时假装已按图检索
+            image_failure_notice = ""
+            if image_stats.get("requested", 0) > 0 and image_stats.get("succeeded", 0) == 0:
+                # 前置校验/策略拒绝会带上具体原因，转述给模型，避免只提示"稍后重试"
+                failure_detail = str(image_stats.get("reason") or "").strip() or (
+                    "图片暂不可下载/编码，或知识库当前不支持图片模态"
+                )
+                image_failure_notice = (
+                    f"\n\n注意：本次按图片检索未成功执行（{failure_detail}），"
+                    "以上仅为文本检索结果（如有）。请不要声称已根据图片内容检索，"
+                    "请提示用户按上述原因调整配置，或改用文字描述。"
+                )
+                logger.warning("知识库图片检索全部失败 image_stats=%s", image_stats)
             if retrieve_chunks_result:
                 retrieval_knowledge = [i.page_content for i in retrieve_chunks_result]
                 context = '\n\n'.join(retrieval_knowledge)
@@ -361,18 +585,22 @@ def create_knowledge_retrieval_tool(
                     ) for chunk in retrieve_chunks_result if chunk.page_content
                 ]
 
-                return f"检索到以下相关信息：\n\n{context}"
+                return f"检索到以下相关信息：\n\n{context}{image_failure_notice}"
             else:
                 knowledge_retrieval_tool._last_sources = []
                 knowledge_retrieval_tool._context_evidence = []
-                logger.warning("知识库检索未找到结果")
+                logger.warning("知识库检索未找到结果 image_stats=%s", image_stats)
+                if image_failure_notice:
+                    return "未找到相关信息。" + image_failure_notice.strip()
                 return "未找到相关信息"
         except Exception as e:
             knowledge_retrieval_tool._context_evidence = []
             logger.error("知识库检索失败", extra={"error": str(e), "error_type": type(e).__name__})
             return f"检索失败: {str(e)}"
 
-    # 挂载工具元数据，供 Agent 执行记录使用
+    # Keep the current turn's files mutable after the tool is constructed.
+    object.__setattr__(knowledge_retrieval_tool, "set_uploaded_files", set_uploaded_files)
+    # 挂载工具元数据，供 Agent 执行记录使用及沙箱序列化使用。
     knowledge_retrieval_tool._tool_meta = {
         "tool_type": "knowledge_retrieval",
         "sources": [{"id": item["id"], "name": item["name"], "knowledge_name": item["name"]} for item in (kb_names or [])],
@@ -561,21 +789,47 @@ class AgentRunService:
             started_at: datetime.datetime,
             model_name: str,
             provider: Optional[str],
+            agent_role: str = "master",
+            parent_execution_id: Optional[uuid.UUID] = None,
+            orchestration_mode: Optional[str] = None,
+            release_id: Optional[uuid.UUID] = None,
+            agent_name: Optional[str] = None,
+            agent_id: Optional[str] = None,
+            message_id: Optional[uuid.UUID] = None,
+            task: Optional[str] = None,
     ) -> uuid.UUID:
+        """创建 Agent 执行记录（running）。
+
+        多 Agent 集群场景下：
+        - 主 Agent 的 execution 由编排器创建（agent_role="master"）；
+        - 子 Agent 由 AgentRunService 自身创建（agent_role="sub" + parent_execution_id）。
+
+        注意：集群子 Agent 的 agent_config 是 AgentConfigProxy，其 id 是 release.id
+        （见 _load_agent_async），而 agent_config_id 的外键指向 agent_configs.id，
+        直接写会外键失败 —— 因此子 Agent 通过 release_id 落库，agent_config_id=None。
+        """
         async with get_async_db_context() as db:
             execution = AgentExecution(
                 app_id=app_id,
                 conversation_id=conversation_id,
-                message_id=None,
-                agent_config_id=agent_config_id,
-                release_id=None,
+                message_id=_as_uuid(message_id),
+                agent_config_id=_as_uuid(agent_config_id),
+                release_id=_as_uuid(release_id),
                 triggered_by=None,
                 steps=[],
                 status="running",
                 started_at=started_at,
+                agent_role=agent_role,
+                parent_execution_id=_as_uuid(parent_execution_id),
+                orchestration_mode=orchestration_mode,
                 meta_data={
                     "model": model_name,
                     "provider": provider,
+                    "agent_name": agent_name,
+                    "agent_id": agent_id,
+                    # 子 Agent 收到的任务（log 详情页的"输入"）；与 agent_dispatch 事件的
+                    # task 同源、同截断长度，保证运行中面板与详情页展示一致。
+                    "task": task,
                 },
             )
             db.add(execution)
@@ -593,6 +847,7 @@ class AgentRunService:
             token_usage: Optional[dict] = None,
             error_message: Optional[str] = None,
             message_id: Optional[uuid.UUID] = None,
+            agent_log: Optional[dict] = None,
     ) -> None:
         async with get_async_db_context() as db:
             result = await db.execute(
@@ -613,6 +868,8 @@ class AgentRunService:
                 record.error_message = error_message
             if message_id is not None:
                 record.message_id = message_id
+            if agent_log is not None:
+                record.agent_log = agent_log
 
             await db.commit()
 
@@ -1187,6 +1444,9 @@ class AgentRunService:
             skip_save: bool = False,
             stateless: bool = False,
             execution_mode: Literal["in_process", "sandbox"] = "in_process",
+            parent_execution_id: Optional[uuid.UUID] = None,
+            orchestration_mode: Optional[str] = None,
+            execution_owner: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """执行试运行（使用 LangChain Agent）
 
@@ -1208,6 +1468,9 @@ class AgentRunService:
             skip_save: 是否跳过保存消息（用于重新生成场景）
             stateless: 是否以无会话、无消息持久化方式执行子 Agent
             execution_mode: 执行模式 (in_process / sandbox)
+            parent_execution_id: 集群编排中父（主）Agent 的执行 ID；sub_agent=True 时由编排器透传
+            orchestration_mode: 编排模式 supervisor / collaboration（仅集群场景）
+            execution_owner: {"release_id": UUID, "agent_name": str}，规避 AgentConfigProxy.id 外键坑
 
         Returns:
             Dict: 包含 AI 回复和元数据的字典
@@ -1225,6 +1488,9 @@ class AgentRunService:
         knowledge_retrieval_config: dict | None = agent_config.knowledge_retrieval
         memory_config: dict | None = agent_config.memory
         features_config: dict = agent_config.features or {}
+        # 集群子 Agent 的执行轨迹（AgentTraceRecorder 快照），由 agent.chat() 返回的 agent_log 取得
+        _trace: Optional[dict] = None
+        agent_execution_id: Optional[uuid.UUID] = None
 
         # 从 features 中读取功能开关（优先级高于参数默认值）
         web_search_feature = features_config.get("web_search", {})
@@ -1388,8 +1654,9 @@ class AgentRunService:
                 provider=api_key_config["provider"],
                 api_key=api_key_config["api_key"],
                 api_base=api_key_config["api_base"],
-                capability=api_key_config["capability"],
-                is_omni=api_key_config["is_omni"],
+                input_modalities=list(api_key_config.get("input_modalities") or []),
+                output_modalities=list(api_key_config.get("output_modalities") or []),
+                features=list(api_key_config.get("features") or []),
                 model_type=model_config.type,
                 tenant_id=api_key_config.get("tenant_id"),
                 model_config_id=api_key_config.get("model_config_id"),
@@ -1407,7 +1674,6 @@ class AgentRunService:
                     system_prompt=system_prompt,
                     current_input=message,
                     current_provider=api_key_config.get("provider"),
-                    current_is_omni=api_key_config.get("is_omni", False),
                     legacy_max_history=settings.AGENT_MAX_HISTORY,
                     model_config_id=model_config.id,
                 )
@@ -1419,13 +1685,14 @@ class AgentRunService:
                         conversation_id=conversation_id,
                         max_history=settings.AGENT_MAX_HISTORY,
                         current_provider=api_key_config.get("provider"),
-                        current_is_omni=api_key_config.get("is_omni", False)
                     )
             # 否则使用外部传入的历史（用于重新生成场景）
 
             # 6. 处理多模态文件
             processed_files = None
             has_doc_with_images = False
+            # 仅用于发给 LLM 的用户消息（追加本轮图片清单），不污染入库原文 message
+            llm_message = message
             if files:
                 provider = api_key_config.get("provider", "openai")
                 multimodal_service = MultimodalService(self.db, model_info)
@@ -1439,10 +1706,19 @@ class AgentRunService:
                     file_upload_config=fu_config if isinstance(fu_config, dict) else None,
                 )
                 logger.info(f"处理了 {len(processed_files)} 个文件，provider={provider}")
-                capability = api_key_config.get("capability", [])
+                # 将本轮上传文件（含图片 URL）回注给知识库工具，作为可被模型引用的白名单
+                for tool in tools:
+                    set_uploaded_files = getattr(tool, "set_uploaded_files", None)
+                    if callable(set_uploaded_files):
+                        set_uploaded_files(files)
+                # 在发给 LLM 的用户消息中列出本轮图片及编号，供模型按需显式触发图片检索
+                image_manifest, _ = build_uploaded_images_manifest(files)
+                if image_manifest:
+                    llm_message = f"{message}\n\n{image_manifest}"
+                input_modalities = api_key_config.get("input_modalities") or []
                 has_doc_with_images = (
                     doc_img_recognition
-                    and ModelCapability.VISION in capability
+                    and Modality.IMAGE in input_modalities
                     and any(f.type == FileType.DOCUMENT for f in files)
                 )
             if has_doc_with_images:
@@ -1453,7 +1729,7 @@ class AgentRunService:
                 )
 
             # 7. 根据模型能力选择执行路径
-            capability = api_key_config.get("capability", [])
+            features = api_key_config.get("features") or []
             async def load_annotation_context():
                 return await self._load_annotation_context_evidence(agent_config.app_id, message)
             system_prompt = append_external_context_rule(system_prompt)
@@ -1461,14 +1737,14 @@ class AgentRunService:
             system_prompt = await apply_emotion_detection(
                 system_prompt, emotion_detection, user_message_id, write_cache=False
             )
-            use_agent_mode = ModelCapability.FUNCTION_CALL in capability
+            use_agent_mode = ModelFeature.FUNCTION_CALL in features
             orchestrator_node_executions = []
             if not use_agent_mode and tools:
                 # 弱模型：用 ReAct prompt 驱动多轮工具调用，将轨迹注入 system_prompt
                 system_prompt, orchestrator_node_executions = await ToolOrchestrator.create_and_run(
                     tools=tools,
                     system_prompt=system_prompt,
-                    message=message,
+                    message=llm_message,
                     history=history,
                     api_key_config=api_key_config,
                     model_config=model_config,
@@ -1483,7 +1759,9 @@ class AgentRunService:
                 api_key=api_key_config["api_key"],
                 provider=api_key_config.get("provider", "openai"),
                 api_base=api_key_config.get("api_base"),
-                is_omni=api_key_config.get("is_omni", False),
+                input_modalities=list(api_key_config.get("input_modalities") or []),
+                output_modalities=list(api_key_config.get("output_modalities") or []),
+                features=features,
                 temperature=effective_params.get("temperature", 0.7),
                 max_tokens=effective_params.get("max_tokens", 2000),
                 system_prompt=system_prompt,
@@ -1491,7 +1769,6 @@ class AgentRunService:
                 deep_thinking=effective_params.get("deep_thinking", False),
                 thinking_budget_tokens=effective_params.get("thinking_budget_tokens"),
                 json_output=effective_params.get("json_output", False),
-                capability=capability,
                 tenant_id=api_key_config.get("tenant_id"),
                 model_config_id=api_key_config.get("model_config_id"),
                 channel_id=api_key_config.get("channel_id"),
@@ -1521,24 +1798,38 @@ class AgentRunService:
             )
 
             # 创建 Agent 执行记录（running 状态）
+            # skip_save=True 仅表示"不落会话消息"（重新生成场景由调用方自己保存），
+            # 不表示"不落执行轨迹" —— 集群子 Agent 也必须留痕，否则日志无处可查。
             agent_execution_id = None
-            if not sub_agent and not skip_save:
+            if not skip_save:
                 agent_execution_id = await self._create_agent_execution_async(
                     app_id=agent_config.app_id,
                     conversation_id=uuid.UUID(conversation_id) if isinstance(conversation_id, str) else conversation_id,
-                    agent_config_id=agent_config.id,
-                    started_at=datetime.datetime.fromtimestamp(start_time),
+                    # 子 Agent 的 agent_config 是 AgentConfigProxy，其 id 是 release.id，
+                    # 不能写进 agent_config_id（FK→agent_configs.id），改走 release_id
+                    agent_config_id=None if sub_agent else agent_config.id,
+                    started_at=utcnow_naive(),
                     model_name=api_key_config["model_name"],
                     provider=api_key_config.get("provider"),
+                    agent_role="sub" if sub_agent else "master",
+                    parent_execution_id=parent_execution_id,
+                    orchestration_mode=orchestration_mode,
+                    release_id=(execution_owner or {}).get("release_id"),
+                    agent_name=(execution_owner or {}).get("agent_name"),
+                    agent_id=(execution_owner or {}).get("agent_id"),
+                    task=message[:500] if sub_agent else None,
                 )
 
             # 8. 调用 Agent（支持多模态）
             result = await agent.chat(
-                message=message,
+                message=llm_message,
                 history=history,
                 context=context,
                 files=processed_files
             )
+            # agent.chat() 的返回值里已带 agent_log（trace.finalize 快照）
+            if isinstance(result, dict) and result.get("agent_log"):
+                _trace = result.get("agent_log")
 
             elapsed_time = time.time() - start_time
 
@@ -1583,14 +1874,12 @@ class AgentRunService:
                     audio_url=audio_url,
                     citations=filtered_citations,
                     provider=api_key_config.get("provider"),
-                    is_omni=api_key_config.get("is_omni", False)
                 )
                 if used_context_engine and not skip_save:
                     _ctx_kwargs = dict(
                         features=features_config,
                         conversation_id=uuid.UUID(conversation_id),
                         current_provider=api_key_config.get("provider"),
-                        current_is_omni=api_key_config.get("is_omni", False),
                         legacy_max_history=settings.AGENT_MAX_HISTORY,
                         model_config_id=model_config.id,
                     )
@@ -1601,13 +1890,15 @@ class AgentRunService:
 
             # 11. 更新 Agent 执行记录为 completed
             node_executions = result.get("node_executions", [])
-            if not sub_agent and not skip_save:
+            if agent_execution_id is not None:
                 await self._update_agent_execution_completed_async(
                     execution_id=agent_execution_id,
                     steps=orchestrator_node_executions + node_executions,
                     status="completed",
                     elapsed_time=elapsed_time,
                     token_usage=result.get("usage"),
+                    # 仅集群子 Agent 落 trace（单 Agent 应用的执行轨迹仍走 steps，不改变既有存储量）
+                    agent_log=_trace if sub_agent else None,
                 )
 
             response = {
@@ -1643,7 +1934,7 @@ class AgentRunService:
         except Exception as e:
             logger.error("LangChain Agent 调用失败", extra={"error": str(e), "error_type": type(e).__name__})
             # 更新 Agent 执行记录为 failed
-            if not sub_agent and not skip_save:
+            if agent_execution_id is not None:
                 try:
                     elapsed_time = time.time() - start_time
                     await self._update_agent_execution_completed_async(
@@ -1652,6 +1943,7 @@ class AgentRunService:
                         status="failed",
                         elapsed_time=elapsed_time,
                         error_message=str(e)[:2000],
+                        agent_log=_trace if sub_agent else None,
                     )
                 except Exception:
                     pass
@@ -1680,6 +1972,9 @@ class AgentRunService:
             stateless: bool = False,
             user_message_id: Optional[uuid.UUID] = None,
             execution_mode: Literal["in_process", "sandbox"] = "in_process",
+            parent_execution_id: Optional[uuid.UUID] = None,
+            orchestration_mode: Optional[str] = None,
+            execution_owner: Optional[Dict[str, Any]] = None,
 
     ) -> AsyncGenerator[str, None]:
         """执行试运行（流式返回，使用 LangChain Agent）
@@ -1694,6 +1989,9 @@ class AgentRunService:
             variables: 自定义变量参数值
             history: 外部传入的历史消息（可选，用于重新生成场景）
             skip_save: 是否跳过保存消息
+            parent_execution_id: 集群编排中父（主）Agent 的执行 ID；sub_agent=True 时由编排器透传
+            orchestration_mode: 编排模式 supervisor / collaboration（仅集群场景）
+            execution_owner: {"release_id": UUID, "agent_name": str}，规避 AgentConfigProxy.id 外键坑
 
         Yields:
             str: SSE 格式的事件数据
@@ -1724,6 +2022,13 @@ class AgentRunService:
         # 支持外部传入 user_message_id（多模型对比时预生成并随 model_start 回传前端）
         user_message_id = user_message_id or uuid.uuid4()
         assistant_message_id = uuid.uuid4()
+        # 集群子 Agent 的执行轨迹（AgentTraceRecorder 快照）：agent_log_final 优先，agent_log 兜底
+        _trace: Optional[dict] = None
+        _agent_execution_id: Optional[uuid.UUID] = None
+        # 异常兜底：except 分支要写 failed 记录，这些局部变量必须已定义
+        orchestrator_node_executions: list = []
+        node_executions: list = []
+        total_tokens = 0
 
         try:
             # 1. 获取 API Key 配置
@@ -1875,8 +2180,9 @@ class AgentRunService:
                 provider=api_key_config["provider"],
                 api_key=api_key_config["api_key"],
                 api_base=api_key_config["api_base"],
-                capability=api_key_config["capability"],
-                is_omni=api_key_config["is_omni"],
+                input_modalities=list(api_key_config.get("input_modalities") or []),
+                output_modalities=list(api_key_config.get("output_modalities") or []),
+                features=list(api_key_config.get("features") or []),
                 model_type=model_config.type,
                 tenant_id=api_key_config.get("tenant_id"),
                 model_config_id=api_key_config.get("model_config_id"),
@@ -1894,7 +2200,6 @@ class AgentRunService:
                     system_prompt=system_prompt,
                     current_input=message,
                     current_provider=api_key_config.get("provider"),
-                    current_is_omni=api_key_config.get("is_omni", False),
                     legacy_max_history=settings.AGENT_MAX_HISTORY,
                     model_config_id=model_config.id,
                 )
@@ -1906,12 +2211,13 @@ class AgentRunService:
                         conversation_id=conversation_id,
                         max_history=settings.AGENT_MAX_HISTORY,
                         current_provider=api_key_config.get("provider"),
-                        current_is_omni=api_key_config.get("is_omni", False)
                     )
 
             # 6. 处理多模态文件
             processed_files = None
             has_doc_with_images = False
+            # 仅用于发给 LLM 的用户消息（追加本轮图片清单），不污染入库原文 message
+            llm_message = message
             if files:
                 provider = api_key_config.get("provider", "openai")
                 multimodal_service = MultimodalService(self.db, model_info)
@@ -1925,10 +2231,19 @@ class AgentRunService:
                     file_upload_config=fu_config if isinstance(fu_config, dict) else None,
                 )
                 logger.info(f"处理了 {len(processed_files)} 个文件，provider={provider}")
-                capability = api_key_config.get("capability", [])
+                input_modalities = api_key_config.get("input_modalities") or []
+                # 将本轮上传文件（含图片 URL）回注给知识库工具，作为可被模型引用的白名单
+                for tool in tools:
+                    set_uploaded_files = getattr(tool, "set_uploaded_files", None)
+                    if callable(set_uploaded_files):
+                        set_uploaded_files(files)
+                # 在发给 LLM 的用户消息中列出本轮图片及编号，供模型按需显式触发图片检索
+                image_manifest, _ = build_uploaded_images_manifest(files)
+                if image_manifest:
+                    llm_message = f"{message}\n\n{image_manifest}"
                 has_doc_with_images = (
                     doc_img_recognition
-                    and ModelCapability.VISION in capability
+                    and Modality.IMAGE in input_modalities
                     and any(f.type == FileType.DOCUMENT for f in files)
                 )
             if has_doc_with_images:
@@ -1939,7 +2254,7 @@ class AgentRunService:
                 )
 
             # 7. 根据模型能力选择执行路径
-            capability = api_key_config.get("capability", [])
+            features = api_key_config.get("features") or []
             async def load_annotation_context():
                 return await self._load_annotation_context_evidence(agent_config.app_id, message)
             system_prompt = append_external_context_rule(system_prompt)
@@ -1947,14 +2262,14 @@ class AgentRunService:
             system_prompt = await apply_emotion_detection(
                 system_prompt, emotion_detection, user_message_id, write_cache=False
             )
-            use_agent_mode = ModelCapability.FUNCTION_CALL in capability
+            use_agent_mode = ModelFeature.FUNCTION_CALL in features
             orchestrator_node_executions = []
             if not use_agent_mode and tools:
                 # 弱模型：用 ReAct prompt 驱动多轮工具调用，将轨迹注入 system_prompt
                 system_prompt, orchestrator_node_executions = await ToolOrchestrator.create_and_run(
                     tools=tools,
                     system_prompt=system_prompt,
-                    message=message,
+                    message=llm_message,
                     history=history,
                     api_key_config=api_key_config,
                     model_config=model_config,
@@ -1997,7 +2312,9 @@ class AgentRunService:
                     api_key=api_key_config["api_key"],
                     provider=api_key_config.get("provider", "openai"),
                     api_base=api_key_config.get("api_base"),
-                    is_omni=api_key_config.get("is_omni", False),
+                    input_modalities=list(api_key_config.get("input_modalities") or []),
+                    output_modalities=list(api_key_config.get("output_modalities") or []),
+                    features=features,
                     temperature=effective_params.get("temperature", 0.7),
                     max_tokens=effective_params.get("max_tokens", 2000),
                     system_prompt=system_prompt,
@@ -2006,7 +2323,6 @@ class AgentRunService:
                     deep_thinking=effective_params.get("deep_thinking", False),
                     thinking_budget_tokens=effective_params.get("thinking_budget_tokens"),
                     json_output=effective_params.get("json_output", False),
-                    capability=capability,
                     tenant_id=api_key_config.get("tenant_id"),
                     model_config_id=api_key_config.get("model_config_id"),
                     channel_id=api_key_config.get("channel_id"),
@@ -2054,16 +2370,37 @@ class AgentRunService:
                 })
 
             # 创建 Agent 执行记录（running 状态）
-            _agent_execution_id = None
-            if not sub_agent and not skip_save:
+            # skip_save=True 仅表示"不落会话消息"（重新生成场景由调用方保存），不表示"不落执行轨迹"。
+            if not skip_save:
                 _agent_execution_id = await self._create_agent_execution_async(
                     app_id=agent_config.app_id,
                     conversation_id=uuid.UUID(conversation_id) if isinstance(conversation_id, str) else conversation_id,
-                    agent_config_id=agent_config.id,
-                    started_at=datetime.datetime.fromtimestamp(start_time),
+                    # 子 Agent 的 agent_config 是 AgentConfigProxy，其 id 是 release.id，
+                    # 不能写进 agent_config_id（FK→agent_configs.id），改走 release_id
+                    agent_config_id=None if sub_agent else agent_config.id,
+                    started_at=utcnow_naive(),
                     model_name=api_key_config["model_name"],
                     provider=api_key_config.get("provider"),
+                    agent_role="sub" if sub_agent else "master",
+                    parent_execution_id=parent_execution_id,
+                    orchestration_mode=orchestration_mode,
+                    release_id=(execution_owner or {}).get("release_id"),
+                    agent_name=(execution_owner or {}).get("agent_name"),
+                    agent_id=(execution_owner or {}).get("agent_id"),
+                    task=message[:500] if sub_agent else None,
                 )
+
+            # 子 Agent 派发事件：此刻 execution_id 才存在，前端据此先建区块再收数据。
+            # 事件类型是新增的（不改任何既有事件名），老前端忽略未知事件即可。
+            if sub_agent and _agent_execution_id is not None:
+                yield self._format_sse_event("agent_dispatch", {
+                    "execution_id": str(_agent_execution_id),
+                    "agent_id": (execution_owner or {}).get("agent_id"),
+                    "agent_name": (execution_owner or {}).get("agent_name"),
+                    "parent_execution_id": str(parent_execution_id) if parent_execution_id else None,
+                    "orchestration_mode": orchestration_mode,
+                    "task": message[:500],
+                })
 
             # close() 前把后续还会用到的 ORM 属性读成普通值，防止 close 后触发 DetachedInstanceError
             _app_id = agent_config.app_id
@@ -2093,7 +2430,7 @@ class AgentRunService:
                 _chunk_stream = _sandbox_stream
             else:
                 _chunk_stream = agent.chat_stream(
-                    message=message,
+                    message=llm_message,
                     history=history,
                     context=context,
                     files=processed_files
@@ -2114,7 +2451,15 @@ class AgentRunService:
                 elif isinstance(chunk, dict) and chunk.get("type") == "tool_error":
                     yield self._format_sse_event("tool_error", {"step_id": chunk.get("step_id"), "name": chunk["name"], "error": chunk.get("error")})
                 elif isinstance(chunk, dict) and chunk.get("type") == "agent_log":
+                    # 增量快照：终态未到时先兜底（中途异常也能留下可查的轨迹）
+                    if _trace is None and isinstance(chunk.get("data"), dict):
+                        _trace = chunk.get("data")
                     yield self._format_sse_event("agent_log", chunk)
+                elif isinstance(chunk, dict) and chunk.get("type") == "agent_log_final":
+                    # 终态快照优先；SSE 行为与此前"通用分支透传"完全一致
+                    if isinstance(chunk.get("data"), dict):
+                        _trace = chunk.get("data")
+                    yield self._format_sse_event("agent_log_final", chunk)
                 elif isinstance(chunk, dict):
                     event_type = str(chunk.get("type") or "unknown")
                     yield self._format_sse_event(event_type, chunk)
@@ -2149,7 +2494,11 @@ class AgentRunService:
             await self._record_api_key_usage_async(api_key_config.get("api_key_id"))
 
             if sub_agent:
-                yield self._format_sse_event("sub_usage", {"total_tokens": total_tokens})
+                # 带上 execution_id：编排层/前端据此把"先建的区块"与真实子执行记录对上
+                yield self._format_sse_event("sub_usage", {
+                    "total_tokens": total_tokens,
+                    "execution_id": str(_agent_execution_id) if _agent_execution_id else None,
+                })
 
             # 过滤 citations（只调用一次）
             filtered_citations = self._filter_citations(features_config, citations_collector)
@@ -2179,14 +2528,12 @@ class AgentRunService:
                     audio_url=stream_audio_url,
                     citations=filtered_citations,
                     provider=api_key_config.get("provider"),
-                    is_omni=api_key_config.get("is_omni", False)
                 )
                 if used_context_engine and not skip_save:
                     _ctx_kwargs = dict(
                         features=features_config,
                         conversation_id=uuid.UUID(conversation_id),
                         current_provider=api_key_config.get("provider"),
-                        current_is_omni=api_key_config.get("is_omni", False),
                         legacy_max_history=settings.AGENT_MAX_HISTORY,
                         model_config_id=_model_config_id,
                     )
@@ -2196,14 +2543,30 @@ class AgentRunService:
                     asyncio.create_task(_run_after_turn())
 
             # 11.5 更新 Agent 执行记录为 completed
-            if not sub_agent and not skip_save:
+            if _agent_execution_id is not None:
                 await self._update_agent_execution_completed_async(
                     execution_id=_agent_execution_id,
                     steps=orchestrator_node_executions + node_executions,
                     status="completed",
                     elapsed_time=elapsed_time,
                     token_usage={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": total_tokens},
+                    # 仅集群子 Agent 落 trace（单 Agent 应用的执行轨迹仍走 steps，不改变既有存储量）
+                    agent_log=_trace if sub_agent else None,
                 )
+
+            # 子 Agent 收尾事件：前端据此把对应区块标记完成（携带耗时/token/最终产出）。
+            # `output` 必须带上：运行中面板的"输出"没有别的数据源（子运行的正文走
+            # sub_agent_message，前端不消费），缺了就只剩一个空 `{}`。
+            if sub_agent:
+                yield self._format_sse_event("agent_complete", {
+                    "execution_id": str(_agent_execution_id) if _agent_execution_id else None,
+                    "agent_id": (execution_owner or {}).get("agent_id"),
+                    "agent_name": (execution_owner or {}).get("agent_name"),
+                    "status": "completed",
+                    "output": full_content,
+                    "elapsed_time": elapsed_time,
+                    "token_usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": total_tokens},
+                })
 
             # 12. 发送结束事件（包含 suggested_questions、audio_url 和 audio_status）
             end_data: Dict[str, Any] = {
@@ -2214,6 +2577,9 @@ class AgentRunService:
                 "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": total_tokens},
                 "citations": filtered_citations,
             }
+            if sub_agent:
+                # 子 Agent 完成事件：携带 execution_id / token，前端据此收尾对应区块
+                end_data["execution_id"] = str(_agent_execution_id) if _agent_execution_id else None
             if not sub_agent:
                 end_data["suggested_questions"] = suggested_questions
                 end_data["audio_url"] = stream_audio_url
@@ -2290,18 +2656,31 @@ class AgentRunService:
                 except Exception:
                     pass
             # 更新 Agent 执行记录为 failed
-            if not sub_agent and not skip_save:
+            if _agent_execution_id is not None:
                 try:
                     elapsed_time = time.time() - start_time
                     await self._update_agent_execution_completed_async(
                         execution_id=_agent_execution_id,
-                        steps=node_executions if 'node_executions' in dir() else [],
+                        steps=orchestrator_node_executions + node_executions,
                         status="failed",
                         elapsed_time=elapsed_time,
                         error_message=json.dumps(compact_error, ensure_ascii=False)[:2000],
+                        agent_log=_trace if sub_agent else None,
                     )
                 except Exception:
                     pass
+            # 子 Agent 失败也发收尾事件，避免前端区块永久停在 running
+            # （output 带已产出的部分内容，便于判断"死在哪儿"）
+            if sub_agent:
+                yield self._format_sse_event("agent_complete", {
+                    "execution_id": str(_agent_execution_id) if _agent_execution_id else None,
+                    "agent_id": (execution_owner or {}).get("agent_id"),
+                    "agent_name": (execution_owner or {}).get("agent_name"),
+                    "status": "failed",
+                    "output": full_content,
+                    "elapsed_time": time.time() - start_time,
+                    "token_usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": total_tokens},
+                })
             # 发送错误事件
             yield self._format_sse_event("error", {
                 "error": compact_error,
@@ -2606,6 +2985,10 @@ class AgentRunService:
                 "api_key": api_key.api_key,
                 "api_base": api_key.api_base,
                 "api_key_id": api_key.id,
+                "input_modalities": list(getattr(api_key, "input_modalities", None) or []),
+                "output_modalities": list(getattr(api_key, "output_modalities", None) or []),
+                "features": list(getattr(api_key, "features", None) or []),
+                # 旧字段仅存于沙箱 payload 口径（e2b-infra 同批下线前冻结）
                 "is_omni": api_key.is_omni,
                 "capability": api_key.capability,
                 "tenant_id": api_key.tenant_id,
@@ -2754,7 +3137,6 @@ class AgentRunService:
             conversation_id: str,
             max_history: int = 10,
             current_provider: Optional[str] = None,
-            current_is_omni: Optional[bool] = None
     ) -> List[Dict[str, str]]:
         """加载会话历史消息，并根据当前模型配置处理多模态文件
 
@@ -2762,7 +3144,6 @@ class AgentRunService:
             conversation_id: 会话ID
             max_history: 最大历史消息数量
             current_provider: 当前模型的provider
-            current_is_omni: 当前模型的is_omni
 
         Returns:
             List[Dict]: 历史消息列表
@@ -2793,12 +3174,11 @@ class AgentRunService:
             for msg in messages:
                 history_files = msg["meta_data"].get("history_files", {})
 
-                has_files = bool(history_files and current_provider and current_is_omni is not None)
+                has_files = bool(history_files and current_provider)
                 if has_files:
                     stored_provider = history_files.get("provider")
-                    stored_is_omni = history_files.get("is_omni")
 
-                    if stored_provider != current_provider or stored_is_omni != current_is_omni:
+                    if stored_provider != current_provider:
                         continue
 
                     content = [{"type": "text", "text": msg["content"]}]
@@ -2898,7 +3278,6 @@ class AgentRunService:
             audio_url: Optional[str] = None,
             citations: Optional[List[Any]] = None,
             provider: Optional[str] = None,
-            is_omni: Optional[bool] = None,
             message_id: Optional[uuid.UUID] = None,
             user_message_id: Optional[uuid.UUID] = None
     ) -> Optional[str]:
@@ -2916,7 +3295,6 @@ class AgentRunService:
             audio_url: 音频URL
             citations: 引用来源列表
             provider: 模型供应商
-            is_omni: 是否为全模态模型
 
         Returns:
             Optional[str]: 助手消息ID
@@ -2954,12 +3332,11 @@ class AgentRunService:
                             size = size or meta[1]
                     human_meta["files"].append(serialize_file_reference(f, name=name, size=size))
 
-            # 保存 history_files，包含 provider 和 is_omni 信息
+            # 保存 history_files，包含 provider 信息
             if processed_files:
                 human_meta["history_files"] = {
                     "content": sanitize_processed_files_for_history(processed_files),
                     "provider": provider,
-                    "is_omni": is_omni
                 }
 
             parent_message_id = await self._get_last_current_assistant_id_async(conv_uuid)
@@ -3101,7 +3478,7 @@ class AgentRunService:
                     api_key_config,
                     extra_params={"temperature": 0.5, "max_tokens": 200},
                 ),
-                type=ModelType.CHAT
+                type=ModelType.LLM
             )
             prompt = (
                 f"根据以下AI回复，生成3个用户可能继续追问的简短问题，每行一个，不加序号：\n\n{assistant_message}"

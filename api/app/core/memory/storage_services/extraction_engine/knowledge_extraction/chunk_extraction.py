@@ -15,11 +15,10 @@ logger = get_memory_logger(__name__)
 class ChunkerStrategy(Enum):
     """Supported chunking strategies."""
     RECURSIVE = "RecursiveChunker"
-    SEMANTIC = "SemanticChunker"
-    LATE = "LateChunker"
-    NEURAL = "NeuralChunker"
+    TOKEN = "TokenChunker"
     LLM = "LLMChunker"
-    
+    SENTENCE = "SentenceChunker"
+
     @classmethod
     def get_valid_strategies(cls) -> List[str]:
         """Get list of valid strategy names."""
@@ -38,7 +37,7 @@ class DialogueChunker:
 
         Args:
             chunker_strategy: The chunking strategy to use (default: RecursiveChunker)
-                             Options: SemanticChunker, RecursiveChunker, LateChunker, NeuralChunker, LLMChunker
+                             Options: RecursiveChunker, TokenChunker, LLMChunker, SentenceChunker
             llm_client: LLM client instance (required for LLMChunker strategy)
             
         Raises:

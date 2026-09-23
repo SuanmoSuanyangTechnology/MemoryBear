@@ -235,13 +235,17 @@ class WorkspaceModelsConfig(BaseModel):
 
 
 class WorkspaceModelOptionItem(BaseModel):
+    """候选/默认模型条目（能力载体为契约 v2 三列，与 `_serialize_model_option` 输出对齐）。"""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
     name: str
     provider: str
     type: str
-    capability: list[str] = Field(default_factory=list)
+    input_modalities: list[str] = Field(default_factory=list)
+    output_modalities: list[str] = Field(default_factory=list)
+    features: list[str] = Field(default_factory=list)
     logo: str | None = None
     is_public: bool = False
     is_deprecated: bool = False

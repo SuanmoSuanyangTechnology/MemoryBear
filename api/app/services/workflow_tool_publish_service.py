@@ -10,6 +10,8 @@ from app.models.app_release_model import AppRelease
 from app.models.tool_model import ToolConfig, WorkflowToolConfig, ToolStatus, ToolType
 from app.models.workflow_model import WorkflowConfig
 from app.schemas.tool_schema import WorkflowToolPublishPreviewSchema
+from app.services.model_impact_service import config_ref_ids
+from app.services.model_service import ModelConfigService
 
 logger = logging.getLogger(__name__)
 
@@ -175,6 +177,10 @@ class WorkflowToolPublishService:
     ) -> ToolConfig | None:
         app = self._validate_workflow_app(workflow_app_id, workspace_id)
         release = self._get_release(app, release_id)
+        # 生效门禁：工具按绑定的 release_id 重建工作流，可绑定历史版本 → 绑定前校验快照模型可用（2026-09-20）
+        ModelConfigService.assert_refs_publishable(
+            self.db, config_ref_ids(release.config, release.default_model_config_id)
+        )
         workflow_config = self._get_workflow_config(workflow_app_id)
         release_config = release.config or {}
         self._validate_no_human_intervention(release_config)

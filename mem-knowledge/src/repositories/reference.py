@@ -7,12 +7,7 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..models.references import (
-    ModelBase,
-    ModelConfig,
-    User,
-    Workspace,
-)
+from ..models.references import ModelBase, ModelConfig, User, Workspace
 
 
 class ReferenceRepository:
@@ -80,3 +75,4 @@ class ReferenceRepository:
             select(ModelBase).where(ModelBase.id.in_(model_base_ids))
         )
         return list(result.scalars().all())
+

@@ -964,11 +964,11 @@ class BaseNode(ABC):
             return content
 
         elif isinstance(content, FileObject):
-            # 缓存键必须包含 capability：不同能力的模型对同一文件产出不同格式
-            # （支持 audio 的模型产出音频段，不支持的应过滤掉）。若漏掉 capability，
+            # 缓存键必须包含输入模态：不同模态能力的模型对同一文件产出不同格式
+            # （支持 audio 的模型产出音频段，不支持的应过滤掉）。若漏掉 input_modalities，
             # 先被支持 audio 的模型处理过的内容会被不支持 audio 的模型直接复用，
             # 导致语音信息未过滤就传入不支持的模型。
-            cache_key = f"{provider}_{api_config.is_omni}_{'-'.join(sorted(api_config.capability or []))}"
+            cache_key = f"{provider}_{'-'.join(sorted(api_config.input_modalities or []))}"
             if content.content_cache.get(cache_key):
                 return content.content_cache[cache_key]
             async with get_async_db_context() as db:

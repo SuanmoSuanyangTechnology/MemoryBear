@@ -87,9 +87,10 @@ def attempt_config(base: RedBearModelConfig, resolved: ResolvedModelConfig) -> R
             "provider": str(resolved.provider),
             "api_key": resolved.api_key.get_secret_value(),
             "base_url": resolved.base_url
-            or get_default_provider_api_base(resolved.provider, resolved.model_type),
-            "capability": [str(item) for item in resolved.capabilities],
-            "is_omni": resolved.is_omni,
+            or get_default_provider_api_base(resolved.provider, resolved.profile.type),
+            "input_modalities": [str(item) for item in resolved.profile.input_modalities],
+            "output_modalities": [str(item) for item in resolved.profile.output_modalities],
+            "features": [str(item) for item in resolved.profile.features],
             "deep_thinking": resolved.deep_thinking,
             "thinking_budget_tokens": resolved.thinking_budget_tokens,
             "json_output": resolved.json_output,

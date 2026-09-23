@@ -256,13 +256,12 @@ class ContextEngineManager:
         return system_prompt, history
 
     @staticmethod
-    def _serialize_history_message(msg, current_provider: Optional[str], current_is_omni: Optional[bool]) -> dict[str, Any]:
+    def _serialize_history_message(msg, current_provider: Optional[str]) -> dict[str, Any]:
         history_files = msg.meta_data.get("history_files", {}) if msg.meta_data else {}
-        has_files = bool(history_files and current_provider and current_is_omni is not None)
+        has_files = bool(history_files and current_provider)
         if has_files:
             stored_provider = history_files.get("provider")
-            stored_is_omni = history_files.get("is_omni")
-            if stored_provider == current_provider and stored_is_omni == current_is_omni:
+            if stored_provider == current_provider:
                 content: Any = [{"type": "text", "text": msg.content}]
                 content.extend(history_files.get("content", []))
             else:
@@ -362,7 +361,6 @@ class ContextEngineManager:
             system_prompt: str,
             current_input: str,
             current_provider: Optional[str],
-            current_is_omni: Optional[bool],
             legacy_max_history: int = 10,
             scope_key: str = "conversation",
             model_config_id: str | uuid.UUID | None = None,
@@ -388,11 +386,11 @@ class ContextEngineManager:
             )
             recent_records = self._trim_messages_after_boundary(messages, state)
             recent_messages = [
-                self._serialize_history_message(msg, current_provider, current_is_omni)
+                self._serialize_history_message(msg, current_provider)
                 for msg in cross_session_records
             ]
             recent_messages.extend([
-                self._serialize_history_message(msg, current_provider, current_is_omni)
+                self._serialize_history_message(msg, current_provider)
                 for msg in recent_records
             ])
             options = self._build_options(
@@ -433,7 +431,6 @@ class ContextEngineManager:
             features: Any,
             conversation_id: uuid.UUID,
             current_provider: Optional[str],
-            current_is_omni: Optional[bool],
             legacy_max_history: int = 10,
             scope_key: str = "conversation",
             model_config_id: str | uuid.UUID | None = None,
@@ -469,7 +466,7 @@ class ContextEngineManager:
                 return False
 
             recent_messages = [
-                self._serialize_history_message(msg, current_provider, current_is_omni)
+                self._serialize_history_message(msg, current_provider)
                 for msg in recent_records
             ]
             # close() 前预读 boundary_message 属性，防止 close 后 DetachedInstanceError
@@ -553,7 +550,7 @@ class ContextEngineManager:
                 state.get("summarized_until_seq") if state else None,
             )
             provider_recent_messages = [
-                self._serialize_history_message(msg, None, None)
+                self._serialize_history_message(msg, None)
                 for msg in cross_session_records
             ]
             provider_recent_messages.extend(self._strip_workflow_seq(recent_messages))

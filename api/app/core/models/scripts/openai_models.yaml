@@ -6,13 +6,16 @@ models:
   description: chatgpt-4o-latest大语言模型，支持多工具调用、智能体思考、流式工具调用、视觉能力，128000上下文窗口，对话模式
   is_deprecated: false
   is_official: true
-  capability:
-  - vision
+  input_modalities:
+  - text
+  - image
   - audio
   - video
+  output_modalities:
+  - text
+  features:
   - json_output
   - function_call
-  is_omni: true
   tags:
   - 大语言模型
   - multi-tool-call
@@ -28,10 +31,13 @@ models:
   description: gpt-3.5-turbo-0125大语言模型，支持多工具调用、智能体思考、流式工具调用，16385上下文窗口，对话模式
   is_deprecated: false
   is_official: true
-  capability:
+  input_modalities:
+  - text
+  output_modalities:
+  - text
+  features:
   - json_output
   - function_call
-  is_omni: false
   tags:
   - 大语言模型
   - multi-tool-call
@@ -44,10 +50,13 @@ models:
   description: gpt-3.5-turbo-1106大语言模型，支持多工具调用、智能体思考、流式工具调用，16385上下文窗口，对话模式
   is_deprecated: false
   is_official: true
-  capability:
+  input_modalities:
+  - text
+  output_modalities:
+  - text
+  features:
   - json_output
   - function_call
-  is_omni: false
   tags:
   - 大语言模型
   - multi-tool-call
@@ -60,10 +69,13 @@ models:
   description: gpt-3.5-turbo-16k大语言模型，支持多工具调用、智能体思考、流式工具调用，16385上下文窗口，对话模式
   is_deprecated: false
   is_official: true
-  capability:
+  input_modalities:
+  - text
+  output_modalities:
+  - text
+  features:
   - json_output
   - function_call
-  is_omni: false
   tags:
   - 大语言模型
   - multi-tool-call
@@ -76,8 +88,11 @@ models:
   description: gpt-3.5-turbo-instruct大语言模型，4096上下文窗口，文本补全模式
   is_deprecated: false
   is_official: true
-  capability: []
-  is_omni: false
+  input_modalities:
+  - text
+  output_modalities:
+  - text
+  features: []
   tags:
   - 大语言模型
   logo: openai
@@ -87,10 +102,13 @@ models:
   description: gpt-3.5-turbo大语言模型，支持多工具调用、智能体思考、流式工具调用，16385上下文窗口，对话模式
   is_deprecated: false
   is_official: true
-  capability:
+  input_modalities:
+  - text
+  output_modalities:
+  - text
+  features:
   - json_output
   - function_call
-  is_omni: false
   tags:
   - 大语言模型
   - multi-tool-call
@@ -103,10 +121,13 @@ models:
   description: gpt-4-0125-preview大语言模型，支持多工具调用、智能体思考、流式工具调用，128000上下文窗口，对话模式
   is_deprecated: false
   is_official: true
-  capability:
+  input_modalities:
+  - text
+  output_modalities:
+  - text
+  features:
   - json_output
   - function_call
-  is_omni: false
   tags:
   - 大语言模型
   - multi-tool-call
@@ -119,10 +140,13 @@ models:
   description: gpt-4-1106-preview大语言模型，支持多工具调用、智能体思考、流式工具调用，128000上下文窗口，对话模式
   is_deprecated: false
   is_official: true
-  capability:
+  input_modalities:
+  - text
+  output_modalities:
+  - text
+  features:
   - json_output
   - function_call
-  is_omni: false
   tags:
   - 大语言模型
   - multi-tool-call
@@ -135,11 +159,14 @@ models:
   description: gpt-4-turbo-2024-04-09大语言模型，支持多工具调用、智能体思考、流式工具调用、视觉能力，128000上下文窗口，对话模式
   is_deprecated: false
   is_official: true
-  capability:
-  - vision
+  input_modalities:
+  - text
+  - image
+  output_modalities:
+  - text
+  features:
   - json_output
   - function_call
-  is_omni: false
   tags:
   - 大语言模型
   - multi-tool-call
@@ -153,10 +180,13 @@ models:
   description: gpt-4-turbo-preview大语言模型，支持多工具调用、智能体思考、流式工具调用，128000上下文窗口，对话模式
   is_deprecated: false
   is_official: true
-  capability:
+  input_modalities:
+  - text
+  output_modalities:
+  - text
+  features:
   - json_output
   - function_call
-  is_omni: false
   tags:
   - 大语言模型
   - multi-tool-call
@@ -169,11 +199,14 @@ models:
   description: gpt-4-turbo大语言模型，支持多工具调用、智能体思考、流式工具调用、视觉能力，128000上下文窗口，对话模式
   is_deprecated: false
   is_official: true
-  capability:
-  - vision
+  input_modalities:
+  - text
+  - image
+  output_modalities:
+  - text
+  features:
   - json_output
   - function_call
-  is_omni: false
   tags:
   - 大语言模型
   - multi-tool-call
@@ -187,8 +220,11 @@ models:
   description: o1-preview大语言模型，支持智能体思考，128000上下文窗口，对话模式，已废弃
   is_deprecated: true
   is_official: true
-  capability: []
-  is_omni: false
+  input_modalities:
+  - text
+  output_modalities:
+  - text
+  features: []
   tags:
   - 大语言模型
   - agent-thought
@@ -199,12 +235,15 @@ models:
   description: o1大语言模型，支持多工具调用、智能体思考、流式工具调用、视觉能力、结构化输出，200000上下文窗口，对话模式
   is_deprecated: false
   is_official: true
-  capability:
-  - vision
+  input_modalities:
+  - text
+  - image
+  output_modalities:
+  - text
+  features:
   - thinking_only
   - json_output
   - function_call
-  is_omni: false
   tags:
   - 大语言模型
   - multi-tool-call
@@ -219,12 +258,15 @@ models:
   description: o3-2025-04-16大语言模型，支持智能体思考、工具调用、视觉能力、流式工具调用、结构化输出，200000上下文窗口，对话模式
   is_deprecated: false
   is_official: true
-  capability:
-  - vision
+  input_modalities:
+  - text
+  - image
+  output_modalities:
+  - text
+  features:
   - thinking_only
   - json_output
   - function_call
-  is_omni: false
   tags:
   - 大语言模型
   - agent-thought
@@ -239,11 +281,14 @@ models:
   description: o3-mini-2025-01-31大语言模型，支持智能体思考、工具调用、流式工具调用、结构化输出，200000上下文窗口，对话模式
   is_deprecated: false
   is_official: true
-  capability:
+  input_modalities:
+  - text
+  output_modalities:
+  - text
+  features:
   - thinking_only
   - json_output
   - function_call
-  is_omni: false
   tags:
   - 大语言模型
   - agent-thought
@@ -257,11 +302,14 @@ models:
   description: o3-mini大语言模型，支持智能体思考、工具调用、流式工具调用、结构化输出，200000上下文窗口，对话模式
   is_deprecated: false
   is_official: true
-  capability:
+  input_modalities:
+  - text
+  output_modalities:
+  - text
+  features:
   - thinking_only
   - json_output
   - function_call
-  is_omni: false
   tags:
   - 大语言模型
   - agent-thought
@@ -275,12 +323,15 @@ models:
   description: o3-pro-2025-06-10大语言模型，支持智能体思考、工具调用、视觉能力、结构化输出，200000上下文窗口，对话模式
   is_deprecated: false
   is_official: true
-  capability:
-  - vision
+  input_modalities:
+  - text
+  - image
+  output_modalities:
+  - text
+  features:
   - thinking_only
   - json_output
   - function_call
-  is_omni: false
   tags:
   - 大语言模型
   - agent-thought
@@ -294,12 +345,15 @@ models:
   description: o3-pro大语言模型，支持智能体思考、工具调用、视觉能力、结构化输出，200000上下文窗口，对话模式
   is_deprecated: false
   is_official: true
-  capability:
-  - vision
+  input_modalities:
+  - text
+  - image
+  output_modalities:
+  - text
+  features:
   - thinking_only
   - json_output
   - function_call
-  is_omni: false
   tags:
   - 大语言模型
   - agent-thought
@@ -313,12 +367,15 @@ models:
   description: o3大语言模型，支持智能体思考、视觉能力、工具调用、流式工具调用、结构化输出，200000上下文窗口，对话模式
   is_deprecated: false
   is_official: true
-  capability:
-  - vision
+  input_modalities:
+  - text
+  - image
+  output_modalities:
+  - text
+  features:
   - thinking_only
   - json_output
   - function_call
-  is_omni: false
   tags:
   - 大语言模型
   - agent-thought
@@ -333,12 +390,15 @@ models:
   description: o4-mini-2025-04-16大语言模型，支持智能体思考、工具调用、视觉能力、流式工具调用、结构化输出，200000上下文窗口，对话模式
   is_deprecated: false
   is_official: true
-  capability:
-  - vision
+  input_modalities:
+  - text
+  - image
+  output_modalities:
+  - text
+  features:
   - thinking_only
   - json_output
   - function_call
-  is_omni: false
   tags:
   - 大语言模型
   - agent-thought
@@ -353,12 +413,15 @@ models:
   description: o4-mini大语言模型，支持智能体思考、工具调用、视觉能力、流式工具调用、结构化输出，200000上下文窗口，对话模式
   is_deprecated: false
   is_official: true
-  capability:
-  - vision
+  input_modalities:
+  - text
+  - image
+  output_modalities:
+  - text
+  features:
   - thinking_only
   - json_output
   - function_call
-  is_omni: false
   tags:
   - 大语言模型
   - agent-thought
@@ -373,8 +436,11 @@ models:
   description: text-embedding-3-large文本向量模型，8191上下文窗口，最大分块数32
   is_deprecated: false
   is_official: true
-  capability: []
-  is_omni: false
+  input_modalities:
+  - text
+  output_modalities:
+  - text
+  features: []
   tags:
   - 文本向量模型
   logo: openai
@@ -384,8 +450,11 @@ models:
   description: text-embedding-3-small文本向量模型，8191上下文窗口，最大分块数32
   is_deprecated: false
   is_official: true
-  capability: []
-  is_omni: false
+  input_modalities:
+  - text
+  output_modalities:
+  - text
+  features: []
   tags:
   - 文本向量模型
   logo: openai
@@ -395,8 +464,11 @@ models:
   description: text-embedding-ada-002文本向量模型，8097上下文窗口，最大分块数32
   is_deprecated: false
   is_official: true
-  capability: []
-  is_omni: false
+  input_modalities:
+  - text
+  output_modalities:
+  - text
+  features: []
   tags:
   - 文本向量模型
   logo: openai

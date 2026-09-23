@@ -57,8 +57,9 @@ def load_models(db: Session, providers: list[str] = None, silent: bool = False) 
         for model_data in models:
             config_sync_fields = {
                 "logo": None,
-                "capability": None,
-                "is_omni": None,
+                "input_modalities": None,
+                "output_modalities": None,
+                "features": None,
                 "name": None,
                 "provider": None,
                 "type": None,

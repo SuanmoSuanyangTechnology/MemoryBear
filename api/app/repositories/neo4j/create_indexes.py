@@ -45,6 +45,7 @@ RANGE_DEFS: List[Tuple[str, str]] = [
     ("user_extracted_entity", "ExtractedEntity"),
     ("user_memorysummary", "MemorySummary"),
     ("user_scenesummary", "SceneSummary"),
+    ("user_preference", "Preference"),
 ]
 
 COMPOSITE_DEFS: List[Tuple[str, str, str]] = [
@@ -55,6 +56,7 @@ COMPOSITE_DEFS: List[Tuple[str, str, str]] = [
     ("user_perceptual_id", "Perceptual", "id"),
     ("user_community_id", "Community", "community_id"),
     ("user_source_id", "UserSource", "id"),
+    ("user_preference_status", "Preference", "status"),
 ]
 
 DELETE_AT_DEFS: List[Tuple[str, str, str]] = [
@@ -77,6 +79,15 @@ CONSTRAINT_DEFS: List[Tuple[str, str, str]] = [
     ("perceptual_id_unique", "Perceptual", "id"),
     ("community_id_unique", "Community", "community_id"),
     ("user_source_id_unique", "UserSource", "id"),
+    ("preference_id_unique", "Preference", "id"),
+]
+
+COMPOSITE_CONSTRAINT_DEFS: List[Tuple[str, str, Tuple[str, ...]]] = [
+    (
+        "preference_business_key_unique",
+        "Preference",
+        ("end_user_id", "domain", "subject", "situation_key"),
+    ),
 ]
 
 
@@ -423,6 +434,19 @@ async def create_unique_constraints():
                     f"FOR (n:{label}) REQUIRE n.{prop} IS UNIQUE"
                 ),
             })
+        for name, label, props in COMPOSITE_CONSTRAINT_DEFS:
+            property_key = ",".join(props)
+            properties_cypher = ", ".join(f"n.{prop}" for prop in props)
+            desired.append({
+                "name": name,
+                "label": label,
+                "property": property_key,
+                "drop_query": f"DROP CONSTRAINT {name}",
+                "create_query": (
+                    f"CREATE CONSTRAINT {name} "
+                    f"FOR (n:{label}) REQUIRE ({properties_cypher}) IS UNIQUE"
+                ),
+            })
 
         await _smart_upsert(
             connector,
@@ -433,8 +457,11 @@ async def create_unique_constraints():
                 WHERE type = 'UNIQUENESS'
                 RETURN name,
                        labelsOrTypes[0] AS label,
-                       properties[0] AS property,
-                       labelsOrTypes[0] + '|' + properties[0] AS def_key
+                       reduce(s='', p IN properties | s + CASE WHEN s='' THEN '' ELSE ',' END + p)
+                         AS property,
+                       labelsOrTypes[0] + '|' +
+                         reduce(s='', p IN properties | s + CASE WHEN s='' THEN '' ELSE ',' END + p)
+                         AS def_key
             """,
             category="constraint",
         )

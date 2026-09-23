@@ -6,18 +6,20 @@ import type { Variable } from '../components/VariableList/types'
 import type { ToolOption } from '../components/ToolList/types'
 import type { ChatItem } from '@/components/Chat/types'
 import type { SkillConfigForm } from '../components/Skill/types'
-import type { Capability } from '@/views/ModelManagement/types'
+import type { Modality, ModelFeature } from '@/views/ModelManagement/types'
 import type { FeaturesConfigForm } from './features'
 
 /**
  * Model configuration parameters
  */
 export interface ModelConfig {
+  features?: ModelFeature[];
   /** Model label */
   label?: string;
   /** Default model configuration ID */
   default_model_config_id?: string;
-  capability?: Capability[];
+  input_modalities?: Modality[];
+  output_modalities?: Modality[];
   /** Temperature for response randomness (0-2) */
   temperature?: number;
   /** Maximum tokens in response */
@@ -59,7 +61,8 @@ export interface Config extends MultiAgentConfig {
   system_prompt: string;
   /** Default model configuration ID */
   default_model_config_id?: string;
-  capability?: Capability[];
+  input_modalities?: Modality[];
+  output_modalities?: Modality[];
   /** Model parameters */
   model_parameters: ModelConfig;
   /** Knowledge retrieval configuration */

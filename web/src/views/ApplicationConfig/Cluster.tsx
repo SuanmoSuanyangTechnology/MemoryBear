@@ -279,7 +279,7 @@ const Cluster = forwardRef<ClusterRef, { onFeaturesLoad?: (features: FeaturesCon
                     <Flex align="center" gap={12}>
                       <Form.Item name="default_model_config_id" noStyle>
                         <ModelSelect
-                          params={{ type: 'llm,chat' }}
+                          params={{ type: 'llm' }}
                           className="rb:w-full!"
                         />
                       </Form.Item>

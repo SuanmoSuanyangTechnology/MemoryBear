@@ -47,9 +47,15 @@ class ExecutionConfig(BaseModel):
 
     # 新增：结果整合模式配置
     result_merge_mode: str = Field(
-        default="smart",
+        default="master",
         pattern="^(smart|master)$",
-        description="结果整合模式：smart（规则去重，快速）| master（Master Agent 智能整合，连贯）"
+        description="结果整合模式：master（Master Agent 流式智能整合，默认；连贯去重）| smart（规则拼接，不调用模型，快速）"
+    )
+    merge_max_tokens: int = Field(
+        default=8192,
+        ge=256,
+        le=32000,
+        description="Master Agent 整合输出的最大 token 数（仅 result_merge_mode=master 生效）"
     )
 
     # 新增：子 Agent 执行模式配置

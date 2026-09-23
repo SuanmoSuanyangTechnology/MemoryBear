@@ -18,9 +18,6 @@ class ModelRuntimeSnapshot:
     provider: str
     api_key: str = field(repr=False)
     api_base: str | None = None
-    capability: tuple[str, ...] = ()
-    is_omni: bool = False
-    model_type: str | None = None
     resolved: Any = field(default=None, repr=False, compare=False)
 
 

@@ -17,6 +17,7 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, JSON, JSONB, UUID
+from sqlalchemy.orm import relationship
 
 from ...utils.datetime_utils import utcnow_naive
 from .base import ReferenceBase
@@ -24,17 +25,20 @@ from .base import ReferenceBase
 
 class ModelType(StrEnum):
     LLM = "llm"
-    CHAT = "chat"
     EMBEDDING = "embedding"
     RERANK = "rerank"
     IMAGE = "image"
     VIDEO = "video"
-    ASR = "ASR"
+    ASR = "asr"
 
     @classmethod
     def _missing_(cls, value):
-        if isinstance(value, str) and value.lower() == "asr":
-            return cls.ASR
+        """存量字符串读侧归一：`"chat"` → LLM（DB 旧行兼容）；`"asr"` → ASR（大小写容忍）。"""
+        if isinstance(value, str):
+            if value.lower() == "chat":
+                return cls.LLM
+            if value.lower() == "asr":
+                return cls.ASR
         return None
 
 
@@ -125,6 +129,27 @@ class ModelConfig(ReferenceBase):
         server_default="false",
         comment="omni model",
     )
+    input_modalities = Column(
+        ARRAY(String),
+        default=list,
+        nullable=False,
+        server_default=text("'{}'::varchar[]"),
+        comment="输入模态（如['text','image','audio','video']）",
+    )
+    output_modalities = Column(
+        ARRAY(String),
+        default=list,
+        nullable=False,
+        server_default=text("'{}'::varchar[]"),
+        comment="输出模态（如['text','image','audio']）",
+    )
+    features = Column(
+        ARRAY(String),
+        default=list,
+        nullable=False,
+        server_default=text("'{}'::varchar[]"),
+        comment="能力特征（如['thinking','json_output','function_call']）",
+    )
     config = Column(JSON, comment="model configuration")
     is_public = Column(Boolean, default=False, nullable=False, comment="public model")
     load_balance_strategy = Column(
@@ -134,6 +159,9 @@ class ModelConfig(ReferenceBase):
         default=LoadBalanceStrategy.NONE,
         server_default=LoadBalanceStrategy.NONE,
     )
+
+    # 只读投影：快照构建派生 is_deprecated（无写语义，故无 core ORM 的 back_populates/cascade）
+    model_base = relationship("ModelBase")
 
 
 class ModelApiKey(ReferenceBase):

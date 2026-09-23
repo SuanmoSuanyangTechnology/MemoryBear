@@ -102,8 +102,13 @@ class KnowledgeModelConfig(BaseModel):
 
 class KnowledgeRetrievalNodeConfig(BaseNodeConfig):
     query: str = Field(
-        ...,
-        description="Search query string"
+        default="",
+        description="文本检索 query（字符串或字符串变量模板），与 image_query 二选一"
+    )
+
+    image_query: str | None = Field(
+        default=None,
+        description="图片检索变量引用，仅支持纯变量引用 file / array[file]（数组取第一张图），与 query 二选一"
     )
 
     knowledge_bases: list[KnowledgeBaseConfig] = Field(
@@ -140,11 +145,23 @@ class KnowledgeRetrievalNodeConfig(BaseNodeConfig):
         description="auto 模式专用模型与参数（仅当 metadata_filter_mode=auto 时使用，model_id 必填）"
     )
 
+    @model_validator(mode="after")
+    def _validate_query_exclusive(self) -> "KnowledgeRetrievalNodeConfig":
+        """文本 query 与图片 image_query 二选一，不能同时填写，也不能都为空。"""
+        has_text = bool((self.query or "").strip())
+        has_image = bool((self.image_query or "").strip())
+        if has_text and has_image:
+            raise ValueError("query 与 image_query 只能二选一，不能同时填写")
+        if not has_text and not has_image:
+            raise ValueError("query 与 image_query 必须填写其中一个")
+        return self
+
     class Config:
         json_schema_extra = {
             "examples": [
                 {
                     "query": "{{sys.message}}",
+                    "image_query": None,
                     "knowledge_bases": [{
                         "kb_id": "xxxxxxxx-xxxx-xxxx-xxxxxxxxxxxxxxxxx",
                         "similarity_threshold": 0.2,

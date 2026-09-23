@@ -397,7 +397,7 @@ class MasterAgentRouter:
             model_config = RedBearModelConfig.from_api_key(api_key_config, extra_params=extra_params)
 
             # 创建 LLM 实例
-            llm = RedBearLLM(model_config, type=ModelType.CHAT)
+            llm = RedBearLLM(model_config, type=ModelType.LLM)
 
             # 调用模型
             response = await llm.ainvoke(prompt)

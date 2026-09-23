@@ -2,26 +2,63 @@ import uuid
 from collections.abc import Sequence
 from typing import List, Optional, Dict, Any, Tuple
 
-from sqlalchemy import and_, or_, desc, select, tuple_
+from sqlalchemy import and_, case, or_, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session, joinedload
 
 from app.core.utils.datetime_utils import utcnow_naive
 from app.core.logging_config import get_db_logger
 from app.models.models_model import (
-    ModelApiKey,
-    ModelBase,
+    LLM_FAMILY_TYPES,
     ModelConfig,
+    ModelApiKey,
     ModelType,
-    model_type_storage_values,
+    ModelBase,
+    ModelProvider,
 )
 from app.schemas.model_schema import (
-    ModelConfigUpdate,
     ModelConfigQuery, ModelConfigQueryNew
 )
 
 # 获取数据库专用日志器
 db_logger = get_db_logger()
+
+
+def _model_type_rank(column):
+    """类型展示序（/models、/models/new、model_plaza 同序）：llm/chat 同序（chat 为存量
+    归一口径）→ embedding → rerank → image → video → 表外预留 6。"""
+    return case(
+        (column.in_(LLM_FAMILY_TYPES), 1),
+        (column == ModelType.EMBEDDING.value, 2),
+        (column == ModelType.RERANK.value, 3),
+        (column == ModelType.IMAGE.value, 4),
+        (column == ModelType.VIDEO.value, 5),
+        else_=6,
+    )
+
+
+def _model_config_display_order():
+    """模型配置列表展示序（/models、/models/new 一致）：
+    未弃用优先 → 启用优先（未启用但可用紧随其后的位置）→ 类型序 → created_at 新者优先。
+
+    弃用态在 model_bases（组合行 model_id 空 → 子查询 NULL → 非弃用）。
+    """
+    deprecated_rank = case(
+        (
+            select(ModelBase.is_deprecated)
+            .where(ModelBase.id == ModelConfig.model_id)
+            .scalar_subquery()
+            .is_(True),
+            1,
+        ),
+        else_=0,
+    )
+    return (
+        deprecated_rank.asc(),
+        ModelConfig.is_active.desc(),
+        _model_type_rank(ModelConfig.type).asc(),
+        ModelConfig.created_at.desc().nullslast(),
+    )
 
 
 class ModelConfigRepository:
@@ -166,7 +203,7 @@ class ModelConfigRepository:
                 .options(joinedload(ModelConfig.model_base))
                 .where(
                     ModelConfig.provider == provider,
-                    ModelConfig.is_composite.is_(False),
+                    ModelConfig.provider != ModelProvider.COMPOSITE,
                     or_(
                         ModelConfig.tenant_id == tenant_id,
                         ModelConfig.is_public,
@@ -178,31 +215,6 @@ class ModelConfigRepository:
             return rows
         except Exception as e:
             db_logger.error(f"查询密钥校验锚点候选失败: provider={provider} - {str(e)}")
-            raise
-
-    @staticmethod
-    def list_active_tenant_provider_models(
-        db: Session, *, provider: str, tenant_id: uuid.UUID
-    ) -> List[ModelConfig]:
-        """删 provider 凭据联动的受影响集：本租户 + 同供应商 + 启用中 + 非组合。
-
-        与其余列表查询不同：**不含** is_public 分支（公开模型归属平台租户，其启用态是
-        跨租户共享目录，不随单个租户的渠道删除联动）。探测口径见
-        model_channel_service._auto_disable_unresolvable。
-        """
-        db_logger.debug(f"查询渠道删除受影响模型: provider={provider}, tenant_id={tenant_id}")
-        try:
-            stmt = select(ModelConfig).where(
-                ModelConfig.tenant_id == tenant_id,
-                ModelConfig.provider == provider,
-                ModelConfig.is_active.is_(True),
-                ModelConfig.is_composite.is_(False),
-            )
-            rows = list(db.execute(stmt).scalars().all())
-            db_logger.debug(f"渠道删除受影响模型查询成功: 数量={len(rows)}")
-            return rows
-        except Exception as e:
-            db_logger.error(f"查询渠道删除受影响模型失败: provider={provider} - {str(e)}")
             raise
 
     @staticmethod
@@ -223,22 +235,9 @@ class ModelConfigRepository:
                     )
                 )
 
-            # 支持多个 type 值（使用 IN 查询）
-            # 兼容 chat 和 llm 类型：如果查询包含其中一个，则同时匹配两者
+            # 支持多个 type 值（使用 IN 查询；13.2 归一后精确匹配，不再 chat↔llm 扩张）
             if query.type:
-                type_values = list(query.type)
-                # 如果包含 chat 或 llm，则同时包含两者
-                if ModelType.CHAT in type_values or ModelType.LLM in type_values:
-                    if ModelType.CHAT not in type_values:
-                        type_values.append(ModelType.CHAT)
-                    if ModelType.LLM not in type_values:
-                        type_values.append(ModelType.LLM)
-                filters.append(
-                    ModelConfig.type.in_(model_type_storage_values(type_values))
-                )
-
-            if query.capability:
-                filters.append(ModelConfig.capability.contains(query.capability))
+                filters.append(ModelConfig.type.in_(list(query.type)))
 
             if query.is_active is not None:
                 filters.append(ModelConfig.is_active == query.is_active)
@@ -265,11 +264,17 @@ class ModelConfigRepository:
             if filters:
                 base_query = base_query.filter(and_(*filters))
 
+            # is_available 过滤需探测派生（SQL 不可达）：全量取行，过滤+分页由服务层内存完成
+            if query.is_available is not None:
+                models = base_query.order_by(*_model_config_display_order()).all()
+                db_logger.debug(f"模型配置列表全量查询（is_available 过滤）: 行数={len(models)}")
+                return models, len(models)
+
             # 获取总数
             total = base_query.count()
 
             # 分页查询
-            models = base_query.order_by(desc(ModelConfig.created_at)).offset(
+            models = base_query.order_by(*_model_config_display_order()).offset(
                 (query.page - 1) * query.pagesize
             ).limit(query.pagesize).all()
 
@@ -299,19 +304,9 @@ class ModelConfigRepository:
                     )
                 )
             
-            # 支持多个 type 值（使用 IN 查询）
-            # 兼容 chat 和 llm 类型：如果查询包含其中一个，则同时匹配两者
+            # 支持多个 type 值（使用 IN 查询；13.2 归一后精确匹配，不再 chat↔llm 扩张）
             if query.type:
-                type_values = list(query.type)
-                # 如果包含 chat 或 llm，则同时包含两者
-                # if ModelType.CHAT in type_values or ModelType.LLM in type_values:
-                #     if ModelType.CHAT not in type_values:
-                #         type_values.append(ModelType.CHAT)
-                #     if ModelType.LLM not in type_values:
-                #         type_values.append(ModelType.LLM)
-                filters.append(
-                    ModelConfig.type.in_(model_type_storage_values(type_values))
-                )
+                filters.append(ModelConfig.type.in_(list(query.type)))
             
             if query.is_active is not None:
                 filters.append(ModelConfig.is_active == query.is_active)
@@ -320,7 +315,10 @@ class ModelConfigRepository:
                 filters.append(ModelConfig.is_public == query.is_public)
 
             if query.is_composite is not None:
-                filters.append(ModelConfig.is_composite == query.is_composite)
+                composite_predicate = ModelConfig.provider == ModelProvider.COMPOSITE
+                filters.append(
+                    composite_predicate if query.is_composite else ~composite_predicate
+                )
             
             if query.provider:
                 filters.append(ModelConfig.provider == query.provider)
@@ -340,14 +338,18 @@ class ModelConfigRepository:
             # 获取总数
             total = base_query.count()
 
-            query_results = base_query.order_by(desc(ModelConfig.created_at)).all()
+            # 展示序兼 canonical 选取（§13.1 同名口径：展示行 = 运行期命中行）：
+            # 未弃用 → 启用 → 类型序 → 新者，排序首行即 canonical
+            query_results = base_query.order_by(*_model_config_display_order()).all()
 
             provider_groups: Dict[str, List[ModelConfig]] = {}
+            seen_keys: set = set()
             for model_config in query_results:
-                provider = model_config.provider
-                if provider not in provider_groups:
-                    provider_groups[provider] = []
-                provider_groups[provider].append(model_config)
+                key = (model_config.provider, model_config.name)
+                if key in seen_keys:
+                    continue
+                seen_keys.add(key)
+                provider_groups.setdefault(model_config.provider, []).append(model_config)
             
             db_logger.debug(
                 f"模型配置列表查询成功: 总数={total}, "
@@ -362,13 +364,14 @@ class ModelConfigRepository:
 
     @staticmethod
     def get_by_type(db: Session, model_types: List[ModelType], tenant_id: uuid.UUID | None = None, is_active: bool = True) -> List[ModelConfig]:
-        """根据类型获取模型配置，支持多类型查询"""
-        db_logger.debug(f"根据类型查询模型配置: types={[t.value for t in model_types]}, tenant_id={tenant_id}, is_active={is_active}")
+        """根据类型获取模型配置，支持多类型查询（枚举成员或裸字符串值）"""
+        type_values = [str(getattr(t, "value", t)) for t in model_types]
+        db_logger.debug(f"根据类型查询模型配置: types={type_values}, tenant_id={tenant_id}, is_active={is_active}")
 
         try:
             query = db.query(ModelConfig).options(
                 joinedload(ModelConfig.model_base),
-            ).filter(ModelConfig.type.in_(model_type_storage_values(model_types)))
+            ).filter(ModelConfig.type.in_(type_values))
 
             if tenant_id:
                 query = query.filter(
@@ -381,7 +384,7 @@ class ModelConfigRepository:
             if is_active:
                 query = query.filter(ModelConfig.is_active)
 
-            query = query.filter(ModelConfig.is_composite == False)
+            query = query.filter(ModelConfig.provider != ModelProvider.COMPOSITE)
 
             models = query.order_by(ModelConfig.created_at.desc()).all()
             db_logger.debug(f"根据类型查询模型配置成功: 数量={len(models)}")
@@ -411,7 +414,7 @@ class ModelConfigRepository:
                 select(ModelConfig)
                 .where(
                     ModelConfig.tenant_id == tenant_id,
-                    ModelConfig.is_composite.is_(False),
+                    ModelConfig.provider != ModelProvider.COMPOSITE,
                     tuple_(ModelConfig.provider, ModelConfig.name).in_(list(provider_names)),
                 )
                 .order_by(
@@ -446,24 +449,23 @@ class ModelConfigRepository:
             raise
 
     @staticmethod
-    def update(db: Session, model_id: uuid.UUID, model_data: ModelConfigUpdate, tenant_id: uuid.UUID | None = None) -> Optional[ModelConfig]:
-        """更新模型配置"""
+    def update(db: Session, model_id: uuid.UUID, update_data: dict, tenant_id: uuid.UUID | None = None) -> Optional[ModelConfig]:
+        """更新模型配置（update_data 由服务层构造：含三新列换算，见 model_service._config_update_payload）"""
         db_logger.debug(f"更新模型配置: model_id={model_id}, tenant_id={tenant_id}")
-        
+
         try:
             query = db.query(ModelConfig).filter(ModelConfig.id == model_id)
-            
+
             # 添加租户过滤（只能更新本租户的模型）
             if tenant_id:
                 query = query.filter(ModelConfig.tenant_id == tenant_id)
-            
+
             db_model = query.first()
             if not db_model:
                 db_logger.warning(f"模型配置不存在或无权限: model_id={model_id}")
                 return None
-            
+
             # 更新字段
-            update_data = model_data.model_dump(exclude_unset=True)
             for field, value in update_data.items():
                 setattr(db_model, field, value)
             
@@ -525,7 +527,7 @@ class ModelConfigRepository:
                         ModelConfig.is_public
                     ),
                     ModelConfig.provider == provider,
-                    ~ModelConfig.is_composite
+                    ModelConfig.provider != ModelProvider.COMPOSITE
                 )
             ).all()
 
@@ -577,9 +579,7 @@ class ModelBaseRepository:
         
         filters = []
         if query.type:
-            filters.append(
-                ModelBase.type.in_(model_type_storage_values([query.type]))
-            )
+            filters.append(ModelBase.type == query.type)
         if query.provider:
             filters.append(ModelBase.provider == query.provider)
         if query.is_official is not None:
@@ -595,8 +595,14 @@ class ModelBaseRepository:
         q = db.query(ModelBase)
         if filters:
             q = q.filter(and_(*filters))
-        
-        return q.order_by(ModelBase.add_count.desc(), ModelBase.created_at.desc()).all()
+
+        # 广场排序（G4/D13.9）：未下线优先 → 接口族分组 → 组内热度 → 新旧兜底
+        return q.order_by(
+            ModelBase.is_deprecated.asc(),
+            _model_type_rank(ModelBase.type).asc(),
+            ModelBase.add_count.desc(),
+            ModelBase.created_at.desc().nullslast(),
+        ).all()
 
     @staticmethod
     def create(db: Session, data: dict) -> 'ModelBase':
@@ -612,6 +618,15 @@ class ModelBaseRepository:
         ).first()
 
     @staticmethod
+    def get_by_name_provider_type(db: Session, name: str, provider: str, model_type: str) -> Optional['ModelBase']:
+        """广场收录判定（(name, provider, type) 三元组，供自定义模型入口守卫用）。"""
+        return db.query(ModelBase).filter(
+            ModelBase.name == name,
+            ModelBase.provider == provider,
+            ModelBase.type == model_type
+        ).first()
+
+    @staticmethod
     def update(db: Session, model_base_id: uuid.UUID, data: dict) -> Optional['ModelBase']:
         model_base = db.query(ModelBase).filter(ModelBase.id == model_base_id).first()
         if not model_base:
@@ -623,7 +638,7 @@ class ModelBaseRepository:
         if any(k in data for k in ['name', 'description', 'logo']):
             db.query(ModelConfig).filter(
                 ModelConfig.model_id == model_base_id,
-                ModelConfig.is_composite == False
+                ModelConfig.provider != ModelProvider.COMPOSITE
             ).update({
                 k: v for k, v in data.items() 
                 if k in ['name', 'description', 'logo']

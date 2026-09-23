@@ -395,8 +395,8 @@ def create_knowledge(
                         & ModelConfig.is_public.is_(True)
                     ),
                 ),
-                ModelConfig.type.in_([ModelType.CHAT.value, ModelType.LLM.value]),
-                ModelConfig.capability.contains(["vision"]),
+                ModelConfig.type == ModelType.LLM.value,
+                ModelConfig.input_modalities.contains(["image"]),
                 ModelConfig.is_active == True,
             ).order_by(ModelConfig.created_at.desc()).first()
             if not model:
@@ -485,8 +485,8 @@ async def create_knowledge_async(
                             & ModelConfig.is_public.is_(True)
                         ),
                     ),
-                    ModelConfig.type.in_([ModelType.CHAT.value, ModelType.LLM.value]),
-                    ModelConfig.capability.contains(["vision"]),
+                    ModelConfig.type == ModelType.LLM.value,
+                    ModelConfig.input_modalities.contains(["image"]),
                     ModelConfig.is_active == True,
                 )
                 .order_by(ModelConfig.created_at.desc())

@@ -37,6 +37,8 @@ const CreateDatasetModal = forwardRef<CreateDatasetModalRef,CreateDatasetModalRe
   // const { knowledgeBaseId } = useParams<{ knowledgeBaseId: string }>();
   const [knowledgeBaseId, setKnowledgeBaseId] = useState<string | undefined>(undefined);
   const [parentId, setParentId] = useState<string | undefined>(undefined);
+  const [documentFolderPath, setDocumentFolderPath] = useState<Array<{ id: string; name: string }>>([]);
+  const [knowledgeBaseFolderPath, setKnowledgeBaseFolderPath] = useState<Array<{ id: string; name: string }>>([]);
   const [visible, setVisible] = useState(false);
   const [loading, setLoading] = useState(false)
   const [value, setValue] = useState(0);
@@ -66,9 +68,16 @@ const CreateDatasetModal = forwardRef<CreateDatasetModalRef,CreateDatasetModalRe
     setVisible(false);
   };
 
-  const handleOpen = (kb_id?: string,parent_id?: string) => {
+  const handleOpen = (
+    kb_id?: string,
+    parent_id?: string,
+    folderPath: Array<{ id: string; name: string }> = [],
+    kbFolderPath: Array<{ id: string; name: string }> = [],
+  ) => {
     setKnowledgeBaseId(kb_id);
     setParentId(parent_id);
+    setDocumentFolderPath(folderPath);
+    setKnowledgeBaseFolderPath(kbFolderPath);
     setVisible(true);
   };
 
@@ -97,6 +106,8 @@ const CreateDatasetModal = forwardRef<CreateDatasetModalRef,CreateDatasetModalRe
           source: source,
           knowledgeBaseId: knowledgeBaseId,
           parentId: parentId,
+          documentFolderPath,
+          knowledgeBaseFolderPath,
         }
       });
     }

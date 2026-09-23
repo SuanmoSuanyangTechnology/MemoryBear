@@ -116,3 +116,29 @@ def route_embedding_field(
         document[target] = vector
         document[embedding_field] = None
     return document
+
+
+def route_embedding_field(
+        document: dict[str, Any],
+        label: Any,
+) -> dict[str, Any]:
+    """Route an embedding vector to the dimension-matched dense_vector field.
+
+    The default dimension keeps the original ``*_embedding`` field name; any
+    other dimension is moved to a ``{field}_{dimension}`` field and the original
+    field is cleared so Elasticsearch does not parse it against the default
+    dims. Non-vector labels and documents without a vector are returned as-is.
+
+    :raises ValueError: when the vector dimension is not supported.
+    """
+    embedding_field = EMBEDDING_FIELDS.get(label)
+    if embedding_field is None:
+        return document
+    vector = document.get(embedding_field)
+    if not vector or not isinstance(vector, (list, tuple)):
+        return document
+    target = get_embedding_field_name(label, len(vector))
+    if target != embedding_field:
+        document[target] = vector
+        document[embedding_field] = None
+    return document

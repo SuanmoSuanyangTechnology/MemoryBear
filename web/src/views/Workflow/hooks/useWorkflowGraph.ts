@@ -1728,7 +1728,7 @@ export const useWorkflowGraph = ({
                 const memoryMessage = { role: 'USER', content: data.config[key].defaultValue.messages }
                 itemConfig = {
                   ...itemConfig,
-                  messages: data.type === 'llm' && rest.enable ? [...messages, memoryMessage] : itemConfig.messages,
+                  messages: data.type === 'llm' && rest.enable ? [...itemConfig.messages, memoryMessage] : itemConfig.messages,
                   memory: { ...rest },
                 }
               } else if (data.config[key] && 'defaultValue' in data.config[key] && key === 'group_variables') {

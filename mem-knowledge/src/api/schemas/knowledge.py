@@ -52,8 +52,9 @@ class ModelConfigSummary(BaseModel):
     is_active: bool = True
     is_public: bool = False
     load_balance_strategy: str | None = LoadBalanceStrategy.NONE.value
-    capability: list[str] = Field(default_factory=list)
-    is_omni: bool = False
+    input_modalities: list[str] | None = None
+    output_modalities: list[str] | None = None
+    features: list[str] | None = None
     model_id: uuid.UUID | None = None
     created_at: datetime.datetime
     updated_at: datetime.datetime
@@ -89,7 +90,30 @@ class KnowledgeBase(BaseModel):
 
 
 class KnowledgeCreate(KnowledgeBase):
-    pass
+    image2text_id: uuid.UUID | None = Field(
+        None,
+        description=(
+            "Image understanding model config ID. A non-null value is used directly; "
+            "omitted or null inherits a compatible workspace vision model and remains "
+            "null when none is available."
+        ),
+    )
+    audio2text_id: uuid.UUID | None = Field(
+        None,
+        description=(
+            "Audio transcription model config ID. A non-null value is used directly; "
+            "omitted or null inherits a compatible workspace audio model and remains "
+            "null when none is available."
+        ),
+    )
+    video2text_id: uuid.UUID | None = Field(
+        None,
+        description=(
+            "Video understanding model config ID. A non-null value is used directly; "
+            "omitted or null inherits a compatible workspace video model and remains "
+            "null when none is available."
+        ),
+    )
 
 
 class KnowledgeUpdate(BaseModel):

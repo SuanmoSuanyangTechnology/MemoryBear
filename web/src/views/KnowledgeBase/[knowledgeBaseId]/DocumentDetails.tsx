@@ -383,6 +383,7 @@ const DocumentDetails: FC = () => {
         source: 'local',
         knowledgeBaseId,
         parentId,
+        documentFolderPath: breadcrumbPath?.documentFolderPath,
         startStep: 'parameterSettings',
         fileId: targetFileId,
       },

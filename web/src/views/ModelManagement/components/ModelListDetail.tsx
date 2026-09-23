@@ -13,13 +13,13 @@ import type { ProviderModelItem, ModelListItem, ModelListDetailRef, MultiKeyConf
 import RbDrawer from '@/components/RbDrawer';
 import RbCard from '@/components/RbCard/Card'
 import Tag from '@/components/Tag';
-import OverflowTags from '@/components/OverflowTags';
 import PageEmpty from '@/components/Empty/PageEmpty';
 import MultiKeyConfigModal from './MultiKeyConfigModal'
 import { getModelNewList, updateModelStatus, modelTypeUrl } from '@/api/models'
 import { getLogoUrl } from '../utils'
 import CustomSelect from '@/components/CustomSelect'
 import { formatModelType } from '../utils'
+import OverflowTags from '@/components/OverflowTags';
 
 /**
  * Component props
@@ -138,13 +138,7 @@ const ModelListDetail = forwardRef<ModelListDetailRef, ModelListDetailProps>(({ 
             <RbCard
               key={item.id}
               title={item.name}
-              subTitle={
-                <OverflowTags
-                  items={[
-                    <Tag>{formatModelType(item.type)}</Tag>,
-                    ...(item.capability ?? []).map(vo => <Tag>{t(`modelNew.${vo}`)}</Tag>)
-                  ].filter(Boolean)}
-                />}
+              subTitle={<Tag>{formatModelType(item.type)}</Tag>}
               avatarUrl={getLogoUrl(item.logo)}
               avatar={
                 <Flex align="center" justify="center" className="rb:size-12 rb:rounded-lg rb:bg-blue-500 rb:text-[28px] rb:text-white">
@@ -152,7 +146,7 @@ const ModelListDetail = forwardRef<ModelListDetailRef, ModelListDetailProps>(({ 
                 </Flex>
               }
               extra={item.provider !== 'speedbear' && <Switch checked={item.is_active} disabled={loading} onChange={() => handleChange(item)} />}
-              bodyClassName={clsx("rb:relative rb:h-[calc(100%-64px)]!", {
+              bodyClassName={clsx("rb:relative rb:h-[calc(100%-64px)]! rb:pt-3!", {
                 "rb:pb-0!": item.provider === 'speedbear',
                 "rb:pb-[64px]!": item.provider !== 'speedbear',
               })}
@@ -161,6 +155,33 @@ const ModelListDetail = forwardRef<ModelListDetailRef, ModelListDetailProps>(({ 
               <Tooltip title={item.description}>
                 <div className="rb:text-gray-600 rb:text-[12px] rb:leading-4.5 rb:font-regular rb:wrap-break-word rb:line-clamp-2">{item.description}</div>
               </Tooltip>
+              <dl className="rb:mt-3 rb:mb-0 rb:flex rb:flex-col rb:gap-2">
+                {(['input_modalities', 'output_modalities', 'features'] as const).map(field => {
+                  const values = [...new Set(item[field] ?? [])];
+                  return (
+                    <Flex
+                      key={field}
+                      justify="space-between"
+                      gap={12}
+                      className="rb:text-[14px] rb:leading-5"
+                    >
+                      <div className="rb:whitespace-nowrap rb:text-gray-600 rb:w-30 rb:shrink-0">
+                        {t(field === 'features' ? 'modelNew.features' : `modelNew.${field}`)}
+                      </div>
+
+                      <div className="rb:flex-1 rb:text-right">
+                        {values.length > 0
+                          ? <OverflowTags
+                            justify="flex-end"
+                            items={values.map(value => <Tag key={value}>{t(`modelNew.${value}`)}</Tag>)}
+                          />
+                          : '-'
+                        }
+                      </div>
+                    </Flex>
+                  );
+                })}
+              </dl>
               {item.provider !== 'speedbear' &&
                 <div className="rb:absolute rb:bottom-4 rb:left-6 rb:right-6">
                   <Row gutter={12}>

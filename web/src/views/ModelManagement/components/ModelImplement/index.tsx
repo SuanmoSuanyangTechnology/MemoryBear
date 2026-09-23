@@ -4,15 +4,17 @@
  * Allows adding and removing model-API key associations
  */
 
-import { type FC, useRef } from "react";
+import { type FC, useRef, useState, useEffect } from "react";
 import { useTranslation } from 'react-i18next';
 import { Flex, Button, Space, App } from 'antd'
 
 import type { SubModelModalRef } from './types'
-import type { ModelListItem } from '../../types'
+import type { ModelListItem, ProviderModelItem, Model } from '../../types'
 import SubModelModal from './SubModelModal'
 import Empty from '@/components/Empty'
 import Tag from '@/components/Tag'
+import { getModelNewList } from '@/api/models'
+import ModelStatusTag from '@/components/ModelSelect/ModelStatusTag';
 
 /**
  * Component props
@@ -33,6 +35,22 @@ const ModelImplement: FC<ModelImplementProps> = ({ type, value, onChange }) => {
   const { t } = useTranslation();
   const { modal, message } = App.useApp();
   const subModelModalRef = useRef<SubModelModalRef>(null)
+  const [modelList, setModelList] = useState<ProviderModelItem[]>([])
+
+  /** Fetch model list grouped by provider */
+  const getList = () => {
+    getModelNewList({
+      is_composite: false,
+      type
+    })
+      .then(res => {
+        setModelList((res || []) as ProviderModelItem[])
+      })
+  }
+
+  useEffect(() => {
+    getList()
+  }, [value, type])
 
   /** Open add implementation modal */
   const handleAdd = () => {
@@ -82,30 +100,34 @@ const ModelImplement: FC<ModelImplementProps> = ({ type, value, onChange }) => {
 
         <Space>
           <Button type="primary" onClick={handleAdd} className="rb:px-2! rb:h-6!">+ {t('modelNew.addImplement')}</Button>
-          <Button size="small" className="rb:px-2! rb:h-6!">{t('modelNew.noAuth')}</Button>
+          {/* <Button size="small" className="rb:px-2! rb:h-6!">{t('modelNew.noAuth')}</Button> */}
         </Space>
       </Flex>
 
 
       <Flex vertical gap={12} className="rb:mt-2!">
         {!value || value.length === 0
-        ? <Empty size={88} />
+          ? <Empty size={88} />
           : value.map((item: any, index) => {
-          return (
-            <Flex key={index} align="center" justify="space-between" className="rb:bg-gray-100 rb:rounded-lg rb:p-3!">
-              <Flex gap={8} align="center">
-                <div className="rb:font-medium">
-                  {item.model_name}
-                </div>
-                <Tag>{String(item.provider).charAt(0).toUpperCase() + String(item.provider).slice(1)}</Tag>
+            const providerModels = modelList.find(vo => vo.provider === item.provider)?.models || [];
+            const filterModel = providerModels.find(vo => vo.name == item.model_name)
+            return (
+              <Flex key={index} align="center" justify="space-between" className="rb:bg-gray-100 rb:rounded-lg rb:p-3!">
+                <Flex gap={8} align="center">
+                  <div className="rb:font-medium">
+                    {item.model_name}
+                  </div>
+                  <Tag>{String(item.provider).charAt(0).toUpperCase() + String(item.provider).slice(1)}</Tag>
+                  {filterModel && <ModelStatusTag model={filterModel as unknown as Model} />}
+                </Flex>
+                <div
+                  className="rb:w-6 rb:h-6 rb:cursor-pointer rb:bg-[url('@/assets/images/deleteBorder.svg')] rb:hover:bg-[url('@/assets/images/deleteBg.svg')]"
+                  onClick={() => handleDelete(item)}
+                ></div>
               </Flex>
-              <div
-                className="rb:w-6 rb:h-6 rb:cursor-pointer rb:bg-[url('@/assets/images/deleteBorder.svg')] rb:hover:bg-[url('@/assets/images/deleteBg.svg')]"
-                onClick={() => handleDelete(item)}
-              ></div>
-            </Flex>
-          )
-        })}
+            )
+          })
+        }
       </Flex>
       <SubModelModal
         ref={subModelModalRef}

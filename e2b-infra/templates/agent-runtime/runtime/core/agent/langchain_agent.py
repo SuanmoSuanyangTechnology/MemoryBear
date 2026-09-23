@@ -346,7 +346,7 @@ class LangChainAgent:
             extra_params=extra_params
         )
 
-        self.llm = RedBearLLM(model_config, type=ModelType.CHAT)
+        self.llm = RedBearLLM(model_config, type=ModelType.LLM)
         # 从经过校验的 config 读取实际生效的能力开关
         self.deep_thinking = model_config.deep_thinking
         self.json_output = model_config.json_output

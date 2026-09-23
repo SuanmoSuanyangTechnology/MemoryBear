@@ -210,7 +210,7 @@ class RedBearLLM(BaseLLM):
         object.__setattr__(self, "_telemetry", telemetry or NoOpModelTelemetry())
         object.__setattr__(self, "_client_pool", pool)
         object.__setattr__(self, "_owns_pool", client_pool is None)
-        object.__setattr__(self, "_model_type", model_type or config.model_type)
+        object.__setattr__(self, "_model_type", model_type or config.profile.type)
         object.__setattr__(
             self,
             "_model",

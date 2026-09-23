@@ -318,6 +318,7 @@ class WritePipeline:
 
         mode = "试运行" if is_pilot_run else "滑动窗口"
         extraction_result = None
+        preference_task: asyncio.Task | None = None
 
         try:
             async with bear.pipeline(
@@ -331,6 +332,31 @@ class WritePipeline:
                 # 初始化客户端和连接
                 self._init_clients()
                 self._init_neo4j_connector()
+
+                # Preference 使用剪枝和文件摘要注入前的独立快照，
+                # 并与 Normal Write 六阶段并行执行。
+                if (
+                    not is_pilot_run
+                    and getattr(self.memory_config, "preference_engine_enabled", False)
+                    and target_message.get("role") == "user"
+                    and target_message.get("memory_message_id")
+                ):
+                    preference_target, preference_history = self._build_preference_snapshot(
+                        target_message=target_message,
+                        context_before=context_before,
+                        message_seq=message_seq,
+                    )
+                    from app.core.config import settings
+
+                    preference_task = asyncio.create_task(
+                        asyncio.wait_for(
+                            self._write_preference(
+                                target_message=preference_target,
+                                history_messages=preference_history,
+                            ),
+                            timeout=settings.PREFERENCE_WRITE_TIMEOUT_SECONDS,
+                        )
+                    )
 
                 # 初始化快照记录器
                 from app.core.memory.utils.debug.write_snapshot_recorder import (
@@ -606,6 +632,13 @@ class WritePipeline:
                     )
                     if stored:
                         result._degraded_error = self._embedding_degraded_error
+                    if preference_task is not None:
+                        preference_outcome = await asyncio.gather(
+                            preference_task,
+                            return_exceptions=True,
+                        )
+                        self._record_preference_result(preference_outcome[0])
+                        preference_task = None
                     return result
 
                 finally:
@@ -620,7 +653,85 @@ class WritePipeline:
             raise
 
         finally:
+            if preference_task is not None:
+                if not preference_task.done():
+                    preference_task.cancel()
+                await asyncio.gather(
+                    preference_task,
+                    return_exceptions=True,
+                )
             await self._cleanup()
+
+    def _build_preference_snapshot(
+        self,
+        *,
+        target_message: dict,
+        context_before: List[dict],
+        message_seq: int,
+    ) -> tuple[dict, list[dict]]:
+        """Project Normal Write's existing history into isolated preference snapshots."""
+        target = {
+            "memory_message_id": target_message.get("memory_message_id"),
+            "role": target_message.get("role"),
+            "content": str(target_message.get("content", "") or ""),
+            "message_seq": target_message.get("message_seq", message_seq),
+        }
+        history = [
+            {
+                "role": item.get("role"),
+                "content": str(item.get("content", "") or ""),
+                "message_seq": item.get("message_seq"),
+            }
+            for item in context_before
+            if isinstance(item, dict) and item.get("role") in {"user", "assistant"}
+        ]
+        return target, history
+
+    async def _write_preference(
+        self,
+        *,
+        target_message: dict,
+        history_messages: list[dict],
+    ):
+        from app.core.memory.storage_services.preference_engine.processor import (
+            PreferenceProcessor,
+        )
+
+        processor = PreferenceProcessor(
+            memory_config=self.memory_config,
+            end_user_id=self.end_user_id,
+            llm_client=self._llm_client,
+            connector=self._neo4j_connector,
+        )
+        return await processor.run(
+            target_message=target_message,
+            history_messages=history_messages,
+        )
+
+    def _record_preference_result(self, outcome: Any) -> None:
+        if isinstance(outcome, BaseException):
+            reason = (
+                "timeout"
+                if isinstance(outcome, asyncio.TimeoutError)
+                else type(outcome).__name__
+            )
+            logger.warning(
+                "[Preference] degraded end_user_id=%s reason=%s error=%s",
+                self.end_user_id,
+                reason,
+                outcome,
+                exc_info=(type(outcome), outcome, outcome.__traceback__),
+            )
+            return
+        logger.info(
+            "[Preference] status=%s identified=%s created=%s updated=%s noop_items=%s reason=%s",
+            getattr(outcome, "status", "degraded"),
+            getattr(outcome, "identified_count", 0),
+            getattr(outcome, "created_count", 0),
+            getattr(outcome, "updated_count", 0),
+            getattr(outcome, "noop_item_count", 0),
+            getattr(outcome, "reason", "invalid_result"),
+        )
 
     # ──────────────────────────────────────────────
     # Step 1: 预处理

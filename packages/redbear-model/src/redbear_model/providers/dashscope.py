@@ -7,7 +7,7 @@ from importlib import import_module
 from typing import Any
 
 from redbear_model.contracts import (
-    ModelCapability,
+    Modality,
     ModelProvider,
     ModelType,
     ResolvedModelConfig,
@@ -18,18 +18,18 @@ from redbear_model.errors import ProviderDependencyMissingError
 def is_qwen3_vl_embedding(config: ResolvedModelConfig) -> bool:
     return (
         config.provider is ModelProvider.DASHSCOPE
-        and config.model_type is ModelType.EMBEDDING
+        and config.profile.type is ModelType.EMBEDDING
         and config.model_name == "qwen3-vl-embedding"
-        and ModelCapability.VISION in config.capabilities
+        and Modality.IMAGE in config.profile.input_modalities
     )
 
 
 def is_qwen3_vl_reranker(config: ResolvedModelConfig) -> bool:
     return (
         config.provider is ModelProvider.DASHSCOPE
-        and config.model_type is ModelType.RERANK
+        and config.profile.type is ModelType.RERANK
         and config.model_name == "qwen3-vl-rerank"
-        and ModelCapability.VISION in config.capabilities
+        and Modality.IMAGE in config.profile.input_modalities
     )
 
 

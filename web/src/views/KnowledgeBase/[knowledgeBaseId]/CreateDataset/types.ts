@@ -18,6 +18,8 @@ export interface CreateDatasetLocationState {
   source?: SourceType;
   knowledgeBaseId?: string;
   parentId?: string;
+  documentFolderPath?: Array<{ id: string; name: string }>;
+  knowledgeBaseFolderPath?: Array<{ id: string; name: string }>;
   startStep?: StepKey;
   fileId?: string | string[];
   fileIds?: string | string[];

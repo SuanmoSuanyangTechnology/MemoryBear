@@ -12,6 +12,7 @@ import uuid
 from typing import Any, AsyncGenerator, Optional
 
 from app.core.config import settings
+from app.services.model_profile_view import columns_from_legacy, profile_columns
 
 logger = logging.getLogger(__name__)
 
@@ -191,6 +192,16 @@ async def build_sandbox_payload(
     """
     serialized_tools = serialize_tools_for_sandbox(tools=tools)
 
+    # 契约 v2 三列（2d-4 双写：模板侧迁移前旧键为准，新键供迁移后直读，旧镜像忽略未知键）
+    if model_config is not None:
+        orm_columns = profile_columns(model_config)
+    else:
+        orm_columns = columns_from_legacy(
+            provider=api_key_config.get("provider", "openai"),
+            capabilities=api_key_config.get("capability") or [],
+            is_omni=bool(api_key_config.get("is_omni", False)),
+        )
+
     sandbox_agent_config = {
         "system_prompt": system_prompt,
         "tools": serialized_tools,
@@ -219,6 +230,9 @@ async def build_sandbox_payload(
         "enable_search": effective_params.get("enable_search", False),
         "is_omni": api_key_config.get("is_omni", False),
         "capability": api_key_config.get("capability") or [],
+        "input_modalities": orm_columns["input_modalities"],
+        "output_modalities": orm_columns["output_modalities"],
+        "features": orm_columns["features"],
         "extra_headers": getattr(model_config, "extra_headers", None) if model_config is not None else None,
         "concurrency": getattr(model_config, "concurrency", 5) if model_config is not None else 5,
     }

@@ -24,6 +24,7 @@ import SwitchFormItem from '@/components/FormItem/SwitchFormItem'
 import FeaturesConfig from './components/FeaturesConfig'
 import Editor from './components/Editor'
 import { useAgent } from './hooks/useAgent'
+import ModelStatusTag from '@/components/ModelSelect/ModelStatusTag';
 
 /**
  * Agent configuration component
@@ -55,7 +56,6 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
     updateVariables,
     refresh,
   } = useAgent(ref, onFeaturesLoad)
-
   return (
     <>
       <Row className="rb:h-full!" gutter={12}>
@@ -69,11 +69,12 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
                     : defaultModel?.name
                     ? <div className="rb:size-4 rb:bg-[url('@/assets/images/application/model.svg')]"></div> : null}
                   {defaultModel?.name || t('application.chooseModel')}
+                  {defaultModel && <ModelStatusTag model={defaultModel} />}
                 </Button>
                 <Space size={12}>
                   <FeaturesConfig
                     value={values?.features as FeaturesConfigForm}
-                    capability={values?.capability || []}
+                    input_modalities={values?.input_modalities || []}
                     refresh={handleSaveFeaturesConfig}
                     chatVariables={chatVariables}
                   />
@@ -85,7 +86,8 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
 
               <Flex gap={12} vertical className="rb:h-[calc(100%-68px)]! rb:overflow-y-auto!">
                 <Form.Item name="default_model_config_id" hidden noStyle></Form.Item>
-                <Form.Item name="capability" hidden noStyle></Form.Item>
+                <Form.Item name="input_modalities" hidden noStyle></Form.Item>
+                <Form.Item name="output_modalities" hidden noStyle></Form.Item>
                 <Form.Item name="model_parameters" hidden noStyle></Form.Item>
                 <Form.Item name="features" hidden noStyle></Form.Item>
                 <Card
@@ -103,7 +105,7 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
                 >
                   <div className="rb:leading-4.5 rb:text-[12px] rb:mb-2">
                     <span className="rb:font-medium">{t('application.configuration')}</span>
-                    <span className="rb:font-regular rb:text-[#5B6167]"> ({t('application.configurationDesc')})</span>
+                    <span className="rb:font-regular rb:text-gray-600"> ({t('application.configurationDesc')})</span>
                   </div>
 
                   <Form.Item name="system_prompt" className="rb:mb-0!">
@@ -123,7 +125,7 @@ const Agent = forwardRef<AgentRef, { onFeaturesLoad?: (features: FeaturesConfigF
 
                   {/* Memory Configuration */}
                 <Card title={t('application.memoryConfiguration')}>
-                  <Flex gap={16} vertical className="rb:bg-[#FAFAFA] rb:rounded-xl rb:p-3!">
+                  <Flex gap={16} vertical className="rb:bg-gray-50 rb:rounded-xl rb:p-3!">
                     <SwitchFormItem
                       title={t('application.dialogueHistoricalMemory')}
                       name={['memory', 'enabled']}

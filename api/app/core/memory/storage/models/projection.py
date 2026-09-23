@@ -181,6 +181,13 @@ DEFAULT_PROJECTION = {
             "keywords", "topic", "domain", "created_at", "file_type", "score"
         )
     ),
+    MemoryNodeType.PREFERENCE: NodeProjection(
+        fields=(
+            "id", "end_user_id", "domain", "subject", "situation_key", "mode",
+            "preference_text", "preference_text_all", "status", "created_at",
+            "updated_at", "score",
+        )
+    ),
     MemoryNodeType.COMMUNITY: NodeProjection(
         fields=(
             ProjectionField(field="community_id", alias="id"), "name",

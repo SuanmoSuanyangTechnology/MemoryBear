@@ -1,3 +1,4 @@
+import ModelSelect from '@/components/ModelSelect'
 /*
  * @Author: ZhaoYing 
  * @Date: 2026-02-03 16:49:20 
@@ -11,7 +12,7 @@
  */
 
 import { forwardRef, useImperativeHandle, useState } from 'react';
-import { Form, Space, Select } from 'antd';
+import { Form } from 'antd';
 import { useTranslation } from 'react-i18next';
 
 import type { SubModelModalForm, SubModelModalRef, SubModelModalProps } from './types';
@@ -19,8 +20,6 @@ import RbModal from '@/components/RbModal'
 import CustomSelect from '@/components/CustomSelect'
 import { modelProviderUrl, getModelNewList } from '@/api/models'
 import type { ProviderModelItem, ModelListItem } from '../../types'
-import Tag from '@/components/Tag';
-import { formatModelType } from '../../utils'
 
 /**
  * Sub-model modal component
@@ -67,7 +66,6 @@ const SubModelModal = forwardRef<SubModelModalRef, SubModelModalProps>(({
       getModelNewList({
         provider: provider,
         is_composite: false,
-        is_active: true,
         type
       })
         .then(res => {
@@ -123,18 +121,12 @@ const SubModelModal = forwardRef<SubModelModalRef, SubModelModalProps>(({
           label={t('modelNew.modelList')}
           rules={[{ required: true, message: t('common.selectPlaceholder', { title: t('modelNew.modelList') }) }]}
         >
-          <Select
+          <ModelSelect
             placeholder={t('common.pleaseSelect')}
-            options={modelList.map(vo => ({
-              label: (
-                <Space>
-                  {vo.name}
-                  <Tag>{formatModelType(vo.type)}</Tag>
-                  {vo.capability?.filter(item => item !== 'video').map(vo => <Tag key={vo}>{t(`modelNew.${vo}`)}</Tag>)}
-                </Space>
-              ),
-              value: vo.name
-            }))}
+            initialData={modelList}
+            isAutoFetch={false}
+            valueKey="name"
+            disableDeprecated={false}
             mode="multiple"
           />
         </Form.Item>

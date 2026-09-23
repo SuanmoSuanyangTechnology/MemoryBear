@@ -56,7 +56,7 @@ const BasicField: FC<BasicFieldProps> = ({ configKey: key, config }) => {
   }
 
   const handleChangeModel = (_value: string, option: any) => {
-    if (!option?.capability?.includes('function_call') && data.type === 'parameter-extractor') {
+    if (!option?.features?.includes('function_call') && data.type === 'parameter-extractor') {
       form.setFieldValue('inference_mode', 'prompt')
     }
   }

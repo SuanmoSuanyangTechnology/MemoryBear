@@ -50,6 +50,14 @@ class ApiKeyCreate(BaseModel):
                 raise ValueError(f"无效范围: {scope}")
         return v
 
+    @field_validator('user_id', mode='before')
+    @classmethod
+    def normalize_user_id(cls, v):
+        """user_id 可选；纯空白归一化为 None，避免创建 other_id 为空白的无效终端用户"""
+        if isinstance(v, str) and not v.strip():
+            return None
+        return v
+
     @model_validator(mode='after')
     def validate_type_constraints(self):
         if self.type == ApiKeyType.SERVICE:
@@ -61,10 +69,6 @@ class ApiKeyCreate(BaseModel):
             if not self.resource_id:
                 raise ValueError(f"{self.type.value} 类型 API Key 必须指定 resource_id（指向应用）")
 
-        # memory scope requires user_id to be non-empty
-        if "memory" in self.scopes:
-            if not self.user_id or not self.user_id.strip():
-                raise ValueError("memory 权限范围必须提供 user_id")
         return self
 
 

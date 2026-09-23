@@ -6,7 +6,6 @@ import type {
   UploadFileFormData,
   FolderFormData,
   UploadFileResponse,
-  PageRequest,
   KnowledgeBase,
   KnowledgeBaseFormData,
   ListQuery,
@@ -47,11 +46,6 @@ export const getFileUrl = (fileId: string) => {
 export const getKnowledgeBaseDocumentParseTypeList = async () => {
   const response = await request.get(`/knowledges/parsertype`);
   return response as any[];
-};
-// 获取模型列表
-export const getModelList = async (pageInfo: PageRequest, types?: string[]) => {
-  const response = await request.get(`/models`, { ...pageInfo, type: types?.join(','), is_active: true });
-    return response as any;
 };
 
 // 知识库列表

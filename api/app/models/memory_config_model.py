@@ -1,7 +1,7 @@
 import datetime
 
-from sqlalchemy import Boolean, Column, DateTime, Float, Integer, String
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import Boolean, Column, DateTime, Float, Integer, String, text
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 
 from app.db import Base
 from app.core.utils.datetime_utils import utcnow_naive
@@ -123,6 +123,15 @@ class MemoryConfig(Base):
     prediction_embedding_min_similarity = Column(
         Float, nullable=False, default=0.7, server_default="0.7",
         comment="Embedding召回最低余弦相似度",
+    )
+    # Coding Agent 偏好引擎配置。系统默认关键词由代码维护，此处只保存自定义词。
+    preference_engine_enabled = Column(
+        Boolean, nullable=False, default=False, server_default=text("false"),
+        comment="是否启用 Coding Agent 偏好处理器",
+    )
+    preference_custom_keywords = Column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb"),
+        comment="用户自定义偏好门禁关键词",
     )
     
     # 时间戳

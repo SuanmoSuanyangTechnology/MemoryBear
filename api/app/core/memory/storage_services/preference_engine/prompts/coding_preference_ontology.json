@@ -1,0 +1,140 @@
+{
+  "ontology_id": "preference",
+  "domains": {
+    "coding": {
+      "description": "Coding Agent 编码任务中的长期用户偏好",
+      "subjects": [
+        {
+          "key": "language",
+          "description": "所有产出文本的语言偏好",
+          "includes": "回复语言、代码注释语言、提交信息语言、文档语言",
+          "boundary": "具体产出对象由 preference_text 和 situation_key 表达"
+        },
+        {
+          "key": "response_length",
+          "description": "回复篇幅和简洁程度",
+          "includes": "简短、详细、不写结尾总结",
+          "boundary": "不表达解释深度和技术细节"
+        },
+        {
+          "key": "explanation_style",
+          "description": "解释内容的组织与展开方式",
+          "includes": "原理深度、技术细节、示例密度、先结论后原因",
+          "boundary": "不表达 Markdown、表格等输出格式"
+        },
+        {
+          "key": "result_presentation",
+          "description": "最终结果的呈现方式",
+          "includes": "Markdown、JSON、表格、diff、代码块、验证结果报告",
+          "boundary": "不表达是否必须执行验证"
+        },
+        {
+          "key": "code_style",
+          "description": "代码本身的稳定风格",
+          "includes": "命名、格式、类型标注、注释、文档字符串",
+          "boundary": "不表达架构取向或修改范围"
+        },
+        {
+          "key": "design_approach",
+          "description": "实现和设计取向",
+          "includes": "架构模式、抽象程度、实现策略、依赖取舍原则",
+          "boundary": "具体工具身份归 tool_choice"
+        },
+        {
+          "key": "change_scope",
+          "description": "修改边界",
+          "includes": "最小修改、是否顺带重构、兼容范围",
+          "boundary": "不表达先确认、先计划等行动顺序"
+        },
+        {
+          "key": "action_mode",
+          "description": "Agent 的行动和流程方式",
+          "includes": "先方案、先确认、只读或直接修改、提交规则、查证要求、验证要求、禁止性行为约束（不做/避免某动作的硬性要求）",
+          "boundary": "验证结果如何展示归 result_presentation"
+        },
+        {
+          "key": "tool_choice",
+          "description": "具体技术与工具选择",
+          "includes": "编程语言、框架、库、包管理器、测试框架、格式化工具、构建工具",
+          "boundary": "不新增依赖等原则归 design_approach"
+        }
+      ],
+      "situation_keys": [
+        {
+          "key": "global",
+          "description": "跨 Coding Agent 任务通用的默认偏好",
+          "boundary": "只有真正跨场景适用时才能使用"
+        },
+        {
+          "key": "code_generation",
+          "description": "新增或生成代码，包括编写新的测试代码",
+          "boundary": "与修改旧代码的 refactoring 区分；测试框架的选择与配置（如 pytest、unittest）、编写测试用例均归本场景"
+        },
+        {
+          "key": "code_explanation",
+          "description": "读码、答疑、概念解释和依据说明",
+          "boundary": "文档产物归 documentation"
+        },
+        {
+          "key": "design_planning",
+          "description": "方案设计和实现规划过程",
+          "boundary": "正式设计文档产物归 documentation"
+        },
+        {
+          "key": "refactoring",
+          "description": "修改和重构已有代码",
+          "boundary": "单纯故障修复归 debugging"
+        },
+        {
+          "key": "debugging",
+          "description": "故障诊断、定位和修复",
+          "boundary": "常规代码审查归 code_review"
+        },
+        {
+          "key": "validation",
+          "description": "运行测试、Lint、类型检查、构建及呈现验证结果",
+          "boundary": "仅指执行/运行测试与验证动作（跑测试、lint、CI、查验证结果）；编写测试代码、测试框架选择归 code_generation"
+        },
+        {
+          "key": "code_review",
+          "description": "代码审查和审查意见",
+          "boundary": "故障定位不归此场景"
+        },
+        {
+          "key": "commit_message",
+          "description": "提交信息和提交操作",
+          "boundary": "一般结果交付不单设场景键"
+        },
+        {
+          "key": "documentation",
+          "description": "README、接口文档、代码文档和正式设计文档",
+          "boundary": "对话式方案讨论归 design_planning"
+        },
+        {
+          "key": "environment_setup",
+          "description": "环境、运行时、工具链、依赖安装和升级配置",
+          "boundary": "吸收原 dependency_management"
+        },
+        {
+          "key": "command_execution",
+          "description": "终端命令和自动化操作",
+          "boundary": "只有命令执行方式相关偏好进入该场景"
+        }
+      ]
+    }
+  },
+  "allowed_modes": [
+    "positive",
+    "negative",
+    "relative"
+  ],
+  "deterministic_fields": {
+    "domain": "coding",
+    "source_message": "由调用代码逐字复制 current_user_message.content"
+  },
+  "removed_fields": [
+    "subdomain",
+    "preference_value",
+    "comparison_target"
+  ]
+}

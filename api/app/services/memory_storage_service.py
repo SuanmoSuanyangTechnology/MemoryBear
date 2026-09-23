@@ -364,10 +364,10 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
         return list(history)
 
     @staticmethod
-    def _normalize_capabilities(capabilities) -> set[str]:
+    def _normalize_modalities(modalities) -> set[str]:
         return {
-            str(getattr(capability, "value", capability)).lower()
-            for capability in capabilities or []
+            str(getattr(modality, "value", modality)).lower()
+            for modality in modalities or []
         }
 
     @staticmethod
@@ -495,20 +495,20 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
             multimodal_service,
             workspace_id: uuid.UUID,
             tenant_id: uuid.UUID,
-            capabilities,
+            input_modalities,
             language: str,
     ) -> list[dict[str, Any]]:
         """按请求顺序处理附件，对模型不支持的类型生成可见文本提示。"""
-        normalized_capabilities = cls._normalize_capabilities(capabilities)
-        required_capabilities = {
-            FileType.IMAGE: "vision",
+        normalized_modalities = cls._normalize_modalities(input_modalities)
+        required_modalities = {
+            FileType.IMAGE: "image",
             FileType.AUDIO: "audio",
             FileType.VIDEO: "video",
         }
         processed_parts: list[dict[str, Any]] = []
         for position, file in enumerate(files or [], start=1):
-            required = required_capabilities.get(file.type)
-            if required and required not in normalized_capabilities:
+            required = required_modalities.get(file.type)
+            if required and required not in normalized_modalities:
                 processed_parts.append(cls._file_marker_part(file, position, language))
                 processed_parts.append(cls._unsupported_file_part(file.type, language))
                 continue
@@ -682,9 +682,10 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
                     provider=api_key_obj.provider,
                     api_key=api_key_obj.api_key,
                     api_base=api_key_obj.api_base or "",
-                    is_omni=api_key_obj.is_omni,
+                    input_modalities=[str(item) for item in (api_key_obj.input_modalities or [])],
+                    output_modalities=[str(item) for item in (api_key_obj.output_modalities or [])],
+                    features=[str(item) for item in (api_key_obj.features or [])],
                     model_type=ModelType.LLM,
-                    capability=api_key_obj.capability or [],
                     tenant_id=api_key_obj.tenant_id,
                     model_config_id=api_key_obj.model_config_id,
                     channel_id=api_key_obj.channel_id,
@@ -703,7 +704,7 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
                         "streaming": streaming,
                     },
                 ),
-                type=ModelType.CHAT,
+                type=ModelType.LLM,
             )
 
         try:
@@ -729,8 +730,8 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
                     return
 
                 media_runtimes: dict[FileType, tuple[ModelInfo, uuid.UUID] | None] = {}
-                required_capabilities = {
-                    FileType.IMAGE: "vision",
+                required_modalities = {
+                    FileType.IMAGE: "image",
                     FileType.AUDIO: "audio",
                     FileType.VIDEO: "video",
                 }
@@ -739,12 +740,12 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
                         continue
                     model_config_id = self._trial_run_media_model_id(memory_config, file_type)
                     runtime = await get_runtime(model_config_id)
-                    required = required_capabilities[file_type]
-                    if runtime is not None and required not in self._normalize_capabilities(runtime[0].capability):
+                    required = required_modalities[file_type]
+                    if runtime is not None and required not in self._normalize_modalities(runtime[0].input_modalities):
                         runtime = None
                     if runtime is None and model_config_id != memory_config.llm_model_id:
                         fallback = final_runtime
-                        if required in self._normalize_capabilities(fallback[0].capability):
+                        if required in self._normalize_modalities(fallback[0].input_modalities):
                             runtime = fallback
                     media_runtimes[file_type] = runtime
 
@@ -782,7 +783,7 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
                     multimodal_service,
                     config_workspace_id,
                     config_tenant_id,
-                    model_info.capability,
+                    model_info.input_modalities,
                     language,
                 )
 
@@ -815,7 +816,6 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
                         "classified": classify_llm_error(
                             e,
                             provider=model_info.provider,
-                            is_omni=model_info.is_omni,
                         ),
                     }
                 response_text = "".join(
@@ -959,7 +959,6 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
                 classified = classify_llm_error(
                     e,
                     provider=final_model_info.provider,
-                    is_omni=final_model_info.is_omni,
                 )
                 yield format_sse_message(
                     "error",

@@ -17,7 +17,7 @@ interface EnableItem {
 }
 export interface ModelConfigForm {
   model_id?: string;
-  capability?: string[];
+  features?: string[];
   temperature?: number;
   max_tokens?: number;
   json_output?: boolean;

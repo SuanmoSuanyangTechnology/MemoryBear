@@ -26,6 +26,7 @@ FULLTEXT_FIELDS: dict[MemoryNodeLabel, tuple[str, ...]] = {
     MemoryNodeType.SCENE_SUMMARY: ("content",),
     MemoryNodeType.COMMUNITY: ("name", "summary"),
     MemoryNodeType.PERCEPTUAL: ("summary", "topic", "domain", "keywords"),
+    MemoryNodeType.PREFERENCE: ("preference_text_all",),
     MemoryNodeType.ASSISTANT_PRUNED: ("text",),
     MemoryNodeType.DIALOGUE: ("content",),
 }
@@ -305,6 +306,24 @@ INDEX_DEFINITIONS: dict[MemoryNodeLabel, IndexDefinition] = {
             "file_type": {"type": "keyword"},
             "topology_score": {"type": "float"},
         }
+    ),
+    MemoryNodeType.PREFERENCE: _index_definition(
+        "preference",
+        MemoryNodeType.PREFERENCE,
+        schema_version=1,
+        generation=1,
+        prop={
+            "id": {"type": "keyword"},
+            "end_user_id": {"type": "keyword"},
+            "domain": {"type": "keyword"},
+            "subject": {"type": "keyword"},
+            "situation_key": {"type": "keyword"},
+            "mode": {"type": "keyword"},
+            "preference_text": {"type": "keyword"},
+            "status": {"type": "keyword"},
+            "created_at": {"type": "date"},
+            "updated_at": {"type": "date"},
+        },
     ),
     MemoryNodeType.SCENE_SUMMARY: _index_definition(
         "scene_summary",

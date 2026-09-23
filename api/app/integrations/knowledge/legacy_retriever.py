@@ -13,6 +13,17 @@ from .contracts import KnowledgeCallContext, KnowledgeContextError
 
 
 class LegacyKnowledgeRetriever:
+    async def retrieval_policy(
+        self,
+        *,
+        kb_ids: list[str],
+        context: KnowledgeCallContext,
+        rerank_id: str | None = None,
+    ) -> dict[str, frozenset[str]]:
+        """The legacy in-process retriever is intentionally text-only."""
+        del kb_ids, context, rerank_id
+        return {}
+
     async def retrieve(
         self,
         request: KnowledgeRetrievalRequest,

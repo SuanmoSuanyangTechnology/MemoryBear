@@ -9,7 +9,6 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, APIRouter
 from fastapi import HTTPException, Request
-from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -344,7 +343,15 @@ async def request_validation_error_handler(
             request.method,
         )
         return safe_retrieval_validation_response()
-    return await request_validation_exception_handler(request, exc)
+    # 请求体/参数校验失败统一走响应体（状态码保持 422）
+    detail = "; ".join(
+        str(error.get("msg") or "").removeprefix("Value error, ")
+        for error in exc.errors()
+    ) or "请求参数校验失败"
+    return JSONResponse(
+        status_code=422,
+        content=fail(code=BizCode.VALIDATION_FAILED.value, msg=detail, error=detail),
+    )
 
 
 @app.exception_handler(PydanticValidationError)

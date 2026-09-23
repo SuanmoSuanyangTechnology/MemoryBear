@@ -2,6 +2,7 @@
 # Author: Eternity
 # @Email: 1533512157@qq.com
 # @Time : 2026/2/10 13:33
+from app.core.utils.text_sanitize import sanitize_value
 from app.core.workflow.engine.runtime_schema import ExecutionContext
 from app.core.workflow.engine.variable_pool import VariablePool
 
@@ -90,7 +91,9 @@ class WorkflowResultBuilder:
             "error": result.get("error"),
             "error_node": result.get("error_node"),
         }
-        return payload
+        # 统一剥除 NUL(\x00) 字符：节点（code/http/document_extractor 等）可能
+        # 把二进制内容当文本解码而带入 NUL，PostgreSQL 文本/JSON 列拒绝该字符。
+        return sanitize_value(payload)
 
     @staticmethod
     def aggregate_citations(node_outputs: dict) -> list:
