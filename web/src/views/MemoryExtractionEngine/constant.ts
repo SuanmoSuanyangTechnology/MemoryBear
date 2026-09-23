@@ -115,12 +115,8 @@ export const configList: ConfigVo[] = [
             options: [
               { label: 'recursiveChunker', value: 'RecursiveChunker' }, // Recursive chunking
               { label: 'tokenChunker', value: 'TokenChunker' }, // Token chunking
-              { label: 'semanticChunker', value: 'SemanticChunker' }, // Semantic chunking
-              { label: 'neuralChunker', value: 'NeuralChunker' }, // Neural network chunking
-              { label: 'hybridChunker', value: 'HybridChunker' }, // Hybrid chunking
               { label: 'llmChunker', value: 'LLMChunker' }, // LLM chunking
               { label: 'sentenceChunker', value: 'SentenceChunker' }, // Sentence chunking
-              { label: 'lateChunker', value: 'LateChunker' }, // Late chunking
             ],
             meaning: 'chunkerStrategyDesc',
           },

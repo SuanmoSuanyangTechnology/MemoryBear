@@ -25,7 +25,7 @@ from app.core.models import RedBearLLM
 from app.core.models.base import RedBearModelConfig
 from app.models import App, ModelType
 from app.repositories.tool_repository import ToolRepository
-from app.services.model_service import ModelApiKeyService
+from app.services.model_service import ModelApiKeyService, ModelConfigService
 
 logger = get_business_logger()
 
@@ -411,8 +411,7 @@ class CollaborativeOrchestrator:
             Agent 配置
         """
         from app.models import AppRelease
-        from app.services.model_service import ModelApiKeyService
-        
+
         # 从数据库加载 Agent Release
         try:
             agent_uuid = uuid.UUID(agent_id)
@@ -442,9 +441,10 @@ class CollaborativeOrchestrator:
                 tenant_id=self.tenant_id,
             )
             if not api_key_config:
-                raise BusinessException(
-                    f"Agent 模型没有可用的 API Key: {agent_id}",
-                    BizCode.API_KEY_NOT_FOUND
+                ModelConfigService.raise_model_unavailable(
+                    self.db,
+                    model_config_id,
+                    tenant_id=self.tenant_id,
                 )
             
             return {

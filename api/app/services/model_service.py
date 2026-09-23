@@ -3,7 +3,7 @@ from datetime import datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
-from typing import TYPE_CHECKING, Iterable, List, Optional, Dict, Any, Sequence, Tuple
+from typing import TYPE_CHECKING, Iterable, List, NoReturn, Optional, Dict, Any, Sequence, Tuple
 import uuid
 import math
 import time
@@ -582,6 +582,52 @@ class ModelConfigService:
         return model
 
     @staticmethod
+    def raise_model_unavailable(
+        db: Session,
+        model_config_id: uuid.UUID,
+        tenant_id: uuid.UUID | None = None,
+    ) -> NoReturn:
+        """凭据取不到时补全错误语义：模型不存在/已弃用/未启用/缺少 API Key（同步 db）。"""
+        ModelConfigService._raise_no_credential_error(
+            ModelConfigService.get_model_by_id(db, model_config_id, tenant_id=tenant_id)
+        )
+
+    @staticmethod
+    async def raise_model_unavailable_async(
+        db: AsyncSession,
+        model_config_id: uuid.UUID,
+        tenant_id: uuid.UUID | None = None,
+    ) -> NoReturn:
+        """异步版（语义同 sync 版）。"""
+        ModelConfigService._raise_no_credential_error(
+            await ModelConfigService.get_model_by_id_async(
+                db, model_config_id, tenant_id=tenant_id
+            )
+        )
+
+    @staticmethod
+    async def raise_model_unavailable_bridge_async(
+        db: Session | AsyncSession,
+        model_config_id: uuid.UUID,
+        tenant_id: uuid.UUID | None = None,
+    ) -> NoReturn:
+        """bridge 版：async 上下文里 db 可能是 Session（试运行宿主）或 AsyncSession。"""
+        if isinstance(db, AsyncSession):
+            await ModelConfigService.raise_model_unavailable_async(
+                db, model_config_id, tenant_id=tenant_id
+            )
+        ModelConfigService.raise_model_unavailable(db, model_config_id, tenant_id=tenant_id)
+
+    @staticmethod
+    def _raise_no_credential_error(model: ModelConfig) -> NoReturn:
+        if not model.is_active:
+            raise BusinessException(
+                "当前模型未启用，请在模型配置中确认 API Key 和 URL 已配置后启用模型",
+                BizCode.MODEL_CONFIG_INVALID,
+            )
+        raise BusinessException("模型配置缺少 API Key", BizCode.INVALID_PARAMETER)
+
+    @staticmethod
     async def get_runtime_model_info_async(
         db: AsyncSession,
         model_id: uuid.UUID,
@@ -617,17 +663,9 @@ class ModelConfigService:
         )
         if not api_key:
             # 冷路径补全错误语义（模型不存在/已弃用/未启用/缺少凭据）
-            model = await ModelConfigService.get_model_by_id_async(
-                db,
-                model_id,
-                tenant_id=tenant_id,
+            await ModelConfigService.raise_model_unavailable_async(
+                db, model_id, tenant_id=tenant_id
             )
-            if not model.is_active:
-                raise BusinessException(
-                    "当前模型未启用，请在模型配置中确认 API Key 和 URL 已配置后启用模型",
-                    BizCode.MODEL_CONFIG_INVALID,
-                )
-            raise BusinessException("模型配置缺少 API Key", BizCode.INVALID_PARAMETER)
 
         if cached_model_type is None:
             model = await ModelConfigService.get_model_by_id_async(

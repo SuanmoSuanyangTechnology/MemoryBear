@@ -36,7 +36,7 @@ from app.services.conversation_service import ConversationService
 from app.services.context_engine_manager import ContextEngineManager
 from app.core.config import settings
 from app.services.draft_run_service import AgentRunService, build_uploaded_images_manifest
-from app.services.model_service import ModelApiKeyService
+from app.services.model_service import ModelApiKeyService, ModelConfigService
 from app.services.multi_agent_orchestrator import MultiAgentOrchestrator
 from app.services.multimodal_service import (
     MultimodalService,
@@ -571,6 +571,10 @@ class AppChatService:
             model_config_id,
             tenant_id=tenant_id,
         )
+        if not api_key_obj:
+            await ModelConfigService.raise_model_unavailable_bridge_async(
+                self.db, model_config_id, tenant_id=tenant_id
+            )
         # 处理系统提示词（支持变量替换）
         system_prompt = config.system_prompt
         if variables:
@@ -1163,6 +1167,10 @@ class AppChatService:
                 model_config_id,
                 tenant_id=tenant_id,
             )
+            if not api_key_obj:
+                await ModelConfigService.raise_model_unavailable_bridge_async(
+                    self.db, model_config_id, tenant_id=tenant_id
+                )
             # 处理系统提示词（支持变量替换）
             system_prompt = config.system_prompt
             if variables:
@@ -1759,7 +1767,13 @@ class AppChatService:
 
             debug_id = self.agent_service._build_debug_id()
             public_error = classify_multimodal_exception(e, debug_id=debug_id)
-            display_error = public_error["message"] if public_error else str(e)
+            if public_error is not None:
+                display_error = public_error["message"]
+            elif isinstance(e, BusinessException):
+                # 业务异常给的是面向用户的文案，str(e) 会带上内部错误码前缀
+                display_error = e.message
+            else:
+                display_error = str(e)
 
             if public_error is not None:
                 logger.error(

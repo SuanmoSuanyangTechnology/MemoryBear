@@ -11,5 +11,20 @@
   },
   "workspace": {
     "no_active_config": "当前工作空间无启用的记忆配置"
+  },
+  "scene_demo": {
+    "no_workspace": "请先切换到一个工作空间",
+    "config_not_found": "配置不存在或无权访问",
+    "invalid_turn_range": "scene_min_turns（最小保护轮次）必须小于 scene_max_turns（最大场景轮次）",
+    "model_unavailable": "场景切分模型暂不可用，请稍后重试",
+    "reason_continue": "{score} > {threshold}，当前 Query 与历史场景的语义连续性较高，判定为保持当前 Scene。",
+    "reason_shifted": "{score} ≤ {threshold}，当前 Query 与历史场景的语义连续性较低，判定为开启新 Scene。",
+    "reason_first_scene": "当前 Query 为首个 Scene 的起点（当前轮次 {turns}），强制开启新 Scene，未调用模型。",
+    "reason_min_turns": "当前 Scene 轮次（{turns}）低于最小保护轮次，强制保持当前 Scene，未调用模型。",
+    "reason_max_turns": "当前 Scene 轮次（{turns}）已达到最大场景轮次，强制开启新 Scene，未调用模型。",
+    "summary_continue_text": "当前 Query 延续已有场景，Scene 保持开放；待后续发生 SHIFT 或会话关闭时再生成摘要。",
+    "summary_continue_hint": "CONTINUE 不关闭 Scene，因此本轮不调用摘要模型。",
+    "summary_shifted_text": "用户围绕近期国际局势、外交政策及大国博弈对全球供应链的影响展开讨论。",
+    "summary_shifted_hint": "摘要对象为切分前的历史 Scene，不包含当前触发 SHIFT 的 Query。"
   }
 }

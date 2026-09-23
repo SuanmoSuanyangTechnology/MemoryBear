@@ -89,12 +89,8 @@ export const space = {
 
       recursiveChunker: 'Recursive Chunker',
       tokenChunker: 'Token Chunker',
-      semanticChunker: 'Semantic Chunker',
-      neuralChunker: 'Neural Chunker',
-      hybridChunker: 'Hybrid Chunker',
       llmChunker: 'LLM Chunker',
       sentenceChunker: 'Sentence Chunker',
-      lateChunker: 'Late Chunker',
       debug: 'Debug',
       clearChat: 'Clear',
       model: 'Model',
