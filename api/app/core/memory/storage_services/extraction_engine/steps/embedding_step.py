@@ -34,7 +34,7 @@ class EmbeddingStep:
         self,
         embedder_client: Any,
         is_pilot_run: bool = False,
-        batch_size: int = 100,
+        batch_size: int = 20,
     ) -> None:
         self.embedder_client = embedder_client
         self.is_pilot_run = is_pilot_run
