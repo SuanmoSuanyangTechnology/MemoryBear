@@ -982,6 +982,6 @@ def reset_handoffs_service_cache(app_id: uuid.UUID = None):
         for key in keys_to_remove:
             del _service_cache[key]
     else:
-        _service_cache = {}
-    
+        _service_cache = OrderedDict()
+
     logger.info(f"Handoffs 服务缓存已重置: app_id={app_id}")
