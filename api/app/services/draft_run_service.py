@@ -49,7 +49,7 @@ from app.services.file_content_service import FileReference, resolve_image_retri
 from app.services.langchain_tool_server import Search
 from app.services.memory_config_service import MemoryConfigService
 from app.services.model_parameter_merger import ModelParameterMerger
-from app.services.model_service import ModelApiKeyService
+from app.services.model_service import ModelApiKeyService, ModelConfigService
 from app.services.multimodal_service import (
     MultimodalService,
     deserialize_file_reference,
@@ -2967,7 +2967,7 @@ class AgentRunService:
             Dict: 包含 model_name, api_key, api_base 的字典
 
         Raises:
-            BusinessException: 当没有可用的 API Key 时
+            BusinessException: 当没有可用的 API Key 时（模型不存在/已弃用/未启用/缺少凭据）
         """
         async with get_async_db_context() as db:
             api_key = await ModelApiKeyService.get_available_api_key_async(
@@ -2977,7 +2977,9 @@ class AgentRunService:
             )
 
             if not api_key:
-                raise BusinessException("没有可用的 API Key", BizCode.AGENT_CONFIG_MISSING)
+                await ModelConfigService.raise_model_unavailable_async(
+                    db, model_config_id, tenant_id=tenant_id
+                )
 
             return {
                 "model_name": api_key.model_name,
