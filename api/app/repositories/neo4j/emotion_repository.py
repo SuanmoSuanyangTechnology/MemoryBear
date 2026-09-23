@@ -82,7 +82,11 @@ class EmotionRepository:
                 - avg_intensity: 平均强度
         """
         # 构建查询条件
-        where_clauses = ["s.end_user_id = $end_user_id", "s.emotion_type IS NOT NULL"]
+        where_clauses = [
+            "s.end_user_id = $end_user_id",
+            "s.delete_at IS NULL",
+            "s.emotion_type IS NOT NULL",
+        ]
         params = {"end_user_id": end_user_id, "limit": limit}
         
         if emotion_type:

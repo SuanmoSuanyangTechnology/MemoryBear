@@ -11,6 +11,7 @@ from app.repositories.forget_log_repository import ForgetLogRepository
 from app.repositories.memory_message_repository import MemoryMessageRepository
 from app.repositories.memory_perceptual_repository import MemoryPerceptualRepository
 from app.repositories.memory_short_repository import ShortTermMemoryRepository
+from app.services.memory_base_service import MIN_MEMORY_SUMMARY_COUNT
 
 WORKSPACE_STATISTICS_BATCH_SIZE = 1000
 MEMORY_TYPE_ORDER = (
@@ -126,7 +127,7 @@ async def get_workspace_statistics_async(
     total_users = 0
     after_id: uuid.UUID | None = None
     
-    storage_service = get_storage_service()
+    workspace_statistics_storage = get_storage_service().workspace_statistics
     while True:
         end_user_ids = await _get_active_end_user_ids_page(
             workspace_id,
@@ -137,8 +138,9 @@ async def get_workspace_statistics_async(
 
         postgresql_statistics, graph_statistics = await asyncio.gather(
             _get_postgresql_statistics(end_user_ids),
-            storage_service.get_workspace_memory_graph_statistics(
+            workspace_statistics_storage.get_statistics(
                 [str(end_user_id) for end_user_id in end_user_ids],
+                MIN_MEMORY_SUMMARY_COUNT,
             ),
         )
 

@@ -7,12 +7,11 @@ from collections.abc import Mapping, Sequence
 from numbers import Integral
 from typing import Any
 
-from app.core.memory.storage.enums import MemoryNodeType
+from app.core.memory.storage.enums import BackendType, MemoryNodeType
+from app.core.memory.storage.provider.factory import BackendFactory
 from app.core.memory.storage.provider.elasticsearch.client import ElasticClient
 from app.core.memory.storage.provider.elasticsearch.index import get_index_name
 from app.core.memory.storage.provider.neo4j.client import Neo4jClient
-
-_workspace_statistics_neo4j_semaphore = asyncio.Semaphore(4)
 
 _IMPLICIT_MEMORY_QUERY = """
 UNWIND $end_user_ids AS end_user_id
@@ -230,16 +229,15 @@ async def get_elasticsearch_workspace_statistics(
 async def get_neo4j_implicit_memory_count(
     client: Neo4jClient,
     end_user_ids: Sequence[str],
-    minimum_summary_count: int = 5,
+    minimum_summary_count: int,
 ) -> int:
     if not end_user_ids:
         return 0
-    async with _workspace_statistics_neo4j_semaphore:
-        rows = await client.execute_query(
-            _IMPLICIT_MEMORY_QUERY,
-            end_user_ids=list(end_user_ids),
-            minimum_summary_count=minimum_summary_count,
-        )
+    rows = await client.execute_query(
+        _IMPLICIT_MEMORY_QUERY,
+        end_user_ids=list(end_user_ids),
+        minimum_summary_count=minimum_summary_count,
+    )
     return int(rows[0].get("implicit_count") or 0) if rows else 0
 
 
@@ -253,14 +251,88 @@ async def get_neo4j_fallback_statistics(
             "explicit_entity_count": 0,
             "emotional_count": 0,
         }
-    async with _workspace_statistics_neo4j_semaphore:
-        rows = await client.execute_query(
-            _FALLBACK_STATISTICS_QUERY,
-            end_user_ids=list(end_user_ids),
-        )
+    rows = await client.execute_query(
+        _FALLBACK_STATISTICS_QUERY,
+        end_user_ids=list(end_user_ids),
+    )
     row = rows[0] if rows else {}
     return {
         "episodic_count": int(row.get("episodic_count") or 0),
         "explicit_entity_count": int(row.get("explicit_entity_count") or 0),
         "emotional_count": int(row.get("emotional_count") or 0),
     }
+
+
+class WorkspaceStatisticsStorage:
+    """Workspace memory statistics over shared Elasticsearch and Neo4j clients."""
+
+    def __init__(self, backend_factory: BackendFactory) -> None:
+        self._backend_factory = backend_factory
+
+    async def get_statistics(
+        self,
+        end_user_ids: Sequence[str],
+        minimum_summary_count: int,
+    ) -> dict[str, int]:
+        """Aggregate episodic, explicit, emotional and implicit memories."""
+        if not end_user_ids:
+            return {
+                "episodic_count": 0,
+                "explicit_count": 0,
+                "emotional_count": 0,
+                "implicit_count": 0,
+            }
+
+        elastic_client = self._backend_factory.get_client(
+            BackendType.ELASTIC
+        )
+        if not isinstance(elastic_client, ElasticClient):
+            raise TypeError("ELASTIC backend must be an ElasticClient")
+        neo4j_client = self._backend_factory.get_client(BackendType.NEO4J)
+        if not isinstance(neo4j_client, Neo4jClient):
+            raise TypeError("NEO4J backend must be a Neo4jClient")
+
+        elastic_task = get_elasticsearch_workspace_statistics(
+            elastic_client,
+            end_user_ids,
+        )
+        implicit_task = get_neo4j_implicit_memory_count(
+            neo4j_client,
+            end_user_ids,
+            minimum_summary_count,
+        )
+        (elastic_statistics, present_ids), implicit_count = (
+            await asyncio.gather(elastic_task, implicit_task)
+        )
+
+        episodic_count = sum(
+            item["episodic_count"] for item in elastic_statistics.values()
+        )
+        explicit_entity_count = sum(
+            item["explicit_entity_count"]
+            for item in elastic_statistics.values()
+        )
+        emotional_count = sum(
+            item["emotional_count"] for item in elastic_statistics.values()
+        )
+
+        missing_ids = [
+            end_user_id
+            for end_user_id in end_user_ids
+            if end_user_id not in present_ids
+        ]
+        if missing_ids:
+            fallback = await get_neo4j_fallback_statistics(
+                neo4j_client,
+                missing_ids,
+            )
+            episodic_count += fallback["episodic_count"]
+            explicit_entity_count += fallback["explicit_entity_count"]
+            emotional_count += fallback["emotional_count"]
+
+        return {
+            "episodic_count": episodic_count,
+            "explicit_count": episodic_count + explicit_entity_count,
+            "emotional_count": emotional_count,
+            "implicit_count": implicit_count,
+        }

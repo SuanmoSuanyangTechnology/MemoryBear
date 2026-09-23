@@ -141,7 +141,7 @@ async def get_workspace_statistics(
             str(e),
             exc_info=True,
         )
-        return fail(BizCode.INTERNAL_ERROR, "工作空间记忆统计查询失败", str(e))
+        return fail(BizCode.INTERNAL_ERROR, "工作空间记忆统计查询失败")
 
 
 # ==================== 用户摘要 & 洞察 ====================
