@@ -11,7 +11,6 @@ export interface MemoryFormData {
   config_id?: string;
   config_name: string;
   config_desc?: string;
-  scene_id?: string;
 }
 
 /**
@@ -40,8 +39,6 @@ export interface Memory {
   updated_at: string;
   config_desc: string;
   workspace_id: string;
-  scene_id: string;
-  scene_name: string;
   is_system_default: boolean;
   [key: string]: string | number | boolean;
 }
