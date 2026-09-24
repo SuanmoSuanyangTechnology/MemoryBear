@@ -8312,7 +8312,7 @@ class WorkflowService:
                                 yield queued_intervention_events.pop(0)
                             break
                     else:
-                        logger.error(f"unexpect workflow run status, status: {status}")
+                        logger.error(f"unexpected workflow run status, status: {status}")
                     # 把积累的 cycle_item 写入 workflow_executions.output_data["node_outputs"]
                     if _cycle_items and execution.output_data:
                         import copy
@@ -9843,7 +9843,7 @@ class WorkflowService:
         for f in files:
             if f.transfer_method.value not in allowed_methods:
                 raise BusinessException(
-                    f"Unsupport file transfer method：{f.transfer_method.value},"
+                    f"Unsupported file transfer method：{f.transfer_method.value},"
                     f"allowed method:{', '.join(allowed_methods)}",
                     BizCode.BAD_REQUEST
                 )

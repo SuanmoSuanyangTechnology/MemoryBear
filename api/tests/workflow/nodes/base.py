@@ -42,7 +42,7 @@ def simple_state():
         "error": None,
         "error_node": None,
         "cycle_nodes": [],  # loop, iteration node id
-        "looping": 0,  # loop runing flag, only use in loop node,not use in main loop
+        "looping": 0,  # loop running flag, only use in loop node,not use in main loop
         "activate": {}
     }
 
