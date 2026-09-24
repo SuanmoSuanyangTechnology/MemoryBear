@@ -18,6 +18,7 @@ from langgraph.graph.state import CompiledStateGraph, StateGraph
 from langgraph.types import Send
 
 from app.core.workflow.engine.state_manager import WorkflowState
+from app.core.workflow.nodes.enums import NodeType
 
 # Bounded checkpointer cache: bounds both entry count (LRU) and entry age (TTL).
 # Each entry holds a full WorkflowState snapshot (messages, accumulated node_outputs,
@@ -75,7 +76,7 @@ def workflow_requires_checkpointer(workflow_config: dict[str, Any]) -> bool:
 from app.core.workflow.engine.stream_output_coordinator import OutputContent, StreamOutputConfig
 from app.core.workflow.engine.variable_pool import VariablePool
 from app.core.workflow.nodes import NodeFactory
-from app.core.workflow.nodes.enums import NodeType, BRANCH_NODES, HttpErrorHandle
+from app.core.workflow.nodes.enums import BRANCH_NODES, HttpErrorHandle
 from app.core.workflow.nodes.llm import LLMNodeConfig
 from app.core.workflow.nodes.code import CodeNodeConfig
 from app.core.workflow.nodes.agent import AgentNodeConfig
