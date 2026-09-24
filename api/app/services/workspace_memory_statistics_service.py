@@ -126,7 +126,7 @@ async def get_workspace_statistics_async(
     totals = {memory_type: 0 for memory_type in MEMORY_TYPE_ORDER}
     total_users = 0
     after_id: uuid.UUID | None = None
-    
+
     workspace_statistics_storage = get_storage_service().workspace_statistics
     while True:
         end_user_ids = await _get_active_end_user_ids_page(
