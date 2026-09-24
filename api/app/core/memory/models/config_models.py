@@ -32,7 +32,7 @@ class ChunkerConfig(BaseModel):
     """Configuration for dialogue chunking strategy.
 
     Attributes:
-        chunker_strategy: Name of the chunking strategy (e.g., 'RecursiveChunker', 'SemanticChunker')
+        chunker_strategy: Name of the chunking strategy (e.g., 'RecursiveChunker', 'LLMChunker')
         embedding_model: Name of the embedding model to use for semantic chunking
         chunk_size: Maximum size of each chunk in characters (default: 2048)
         threshold: Similarity threshold for semantic chunking (0-1, default: 0.8)

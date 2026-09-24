@@ -259,7 +259,7 @@ const Prompt: FC = () => {
                 noStyle
               >
                 <ModelSelect
-                  params={{ type: 'llm,chat' }}
+                  params={{ type: 'llm' }}
                   className={`rb:w-75! ${styles.select}`}
                   variant="filled"
                   placeholder={t('common.selectPlaceholder', { title: t('prompt.model') })}

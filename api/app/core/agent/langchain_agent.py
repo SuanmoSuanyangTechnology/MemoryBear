@@ -224,7 +224,9 @@ class LangChainAgent:
             api_key: str,
             provider: str = "openai",
             api_base: Optional[str] = None,
-            is_omni: bool = False,
+            input_modalities: Optional[List[str]] = None,
+            output_modalities: Optional[List[str]] = None,
+            features: Optional[List[str]] = None,
             temperature: float = 0.7,
             max_tokens: int = 2000,
             system_prompt: Optional[str] = None,
@@ -244,7 +246,6 @@ class LangChainAgent:
             deep_thinking: bool = False,  # 是否启用深度思考模式
             thinking_budget_tokens: Optional[int] = None,  # 深度思考 token 预算
             json_output: bool = False,  # 是否强制 JSON 输出
-            capability: Optional[List[str]] = None,  # 模型能力列表，用于校验是否支持深度思考
             tenant_id: Optional[str] = None,  # 用量归属：租户
             model_config_id: Optional[str] = None,  # 用量归属：模型配置
             channel_id: Optional[str] = None,  # 用量归属：渠道
@@ -275,7 +276,6 @@ class LangChainAgent:
         self.provider = provider
         self.tools = tools or []
         self.streaming = streaming
-        self.is_omni = is_omni
         self.strategy = strategy
         self.tool_call_limit = tool_call_limit
         self._initial_context_evidence = list(context_evidence or [])
@@ -325,7 +325,7 @@ class LangChainAgent:
             f"auto_calculated={max_iterations is None}"
         )
 
-        # 创建 RedBearLLM，capability 校验由 RedBearModelConfig 统一处理
+        # 创建 RedBearLLM，features 校验由 RedBearModelConfig 统一处理
         extra_params: Dict[str, Any] = {
             "temperature": temperature,
             "max_tokens": max_tokens,
@@ -354,8 +354,9 @@ class LangChainAgent:
             provider=provider,
             api_key=api_key,
             base_url=api_base,
-            is_omni=is_omni,
-            capability=capability,
+            input_modalities=list(input_modalities or []),
+            output_modalities=list(output_modalities or []),
+            features=list(features or []),
             tenant_id=tenant_id,
             model_config_id=model_config_id,
             channel_id=channel_id,
@@ -366,7 +367,7 @@ class LangChainAgent:
         )
         model_config.bind_failover_plan(failover_plan)
 
-        self.llm = RedBearLLM(model_config, type=ModelType.CHAT)
+        self.llm = RedBearLLM(model_config, type=ModelType.LLM)
         self._wrap_tools_with_external_context()
         # 从经过校验的 config 读取实际生效的能力开关
         self.deep_thinking = model_config.deep_thinking
@@ -654,15 +655,6 @@ class LangChainAgent:
         Returns:
             List[Dict]: 消息内容列表
         """
-        # 根据 provider 使用不同的文本格式
-        # if (self.provider.lower() in [ModelProvider.BEDROCK, ModelProvider.OPENAI, ModelProvider.XINFERENCE,
-        #                               ModelProvider.GPUSTACK] or (
-        #         self.provider.lower() == ModelProvider.DASHSCOPE and self.is_omni)):
-        #     # Anthropic/Bedrock/Xinference/Gpustack/Openai: {"type": "text", "text": "..."}
-        #     content_parts = [{"type": "text", "text": text}]
-        # else:
-        #     # 通义千问等: {"text": "..."}
-        #     content_parts = [{"type": "text", "text": text}]
         content_parts = [{"type": "text", "text": text}]
 
         # 添加文件内容

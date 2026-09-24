@@ -50,6 +50,23 @@ class SharedChatService:
             rows = self.db.query(Knowledge.id, Knowledge.name).filter(
                 Knowledge.id.in_(kb_ids)
             ).all()
+
+            # 文件夹型知识库检索时会展开成子知识库，命中 chunk 的 knowledge_id 是
+            # 子知识库 ID；递归展开所选文件夹，补全后代名称，避免子库显示为 UUID。
+            pending = [r.id for r in rows]
+            seen = set(pending)
+            child_rows = []
+            while pending:
+                level = self.db.query(Knowledge.id, Knowledge.name).filter(
+                    Knowledge.parent_id.in_(pending)
+                ).all()
+                pending = []
+                for r in level:
+                    if r.id not in seen:
+                        seen.add(r.id)
+                        pending.append(r.id)
+                        child_rows.append(r)
+            rows = rows + child_rows
             kb_names = [{"id": str(r.id), "name": r.name} for r in rows]
 
             target_kb_ids = [uuid.UUID(kid) for kid in kb_ids]
@@ -361,7 +378,9 @@ class SharedChatService:
             api_key=api_key_obj.api_key,
             provider=api_key_obj.provider,
             api_base=api_key_obj.api_base,
-            is_omni=api_key_obj.is_omni,
+            input_modalities=list(getattr(api_key_obj, "input_modalities", None) or []),
+            output_modalities=list(getattr(api_key_obj, "output_modalities", None) or []),
+            features=list(getattr(api_key_obj, "features", None) or []),
             temperature=model_parameters.get("temperature", 0.7),
             max_tokens=model_parameters.get("max_tokens", 2000),
             system_prompt=system_prompt,
@@ -369,7 +388,6 @@ class SharedChatService:
             deep_thinking=model_parameters.get("deep_thinking", False),
             thinking_budget_tokens=model_parameters.get("thinking_budget_tokens"),
             json_output=model_parameters.get("json_output", False),
-            capability=api_key_obj.capability,
             tenant_id=api_key_obj.tenant_id,
             model_config_id=api_key_obj.model_config_id,
             channel_id=api_key_obj.channel_id,
@@ -582,7 +600,9 @@ class SharedChatService:
                 api_key=api_key_obj.api_key,
                 provider=api_key_obj.provider,
                 api_base=api_key_obj.api_base,
-                is_omni=api_key_obj.is_omni,
+                input_modalities=list(getattr(api_key_obj, "input_modalities", None) or []),
+                output_modalities=list(getattr(api_key_obj, "output_modalities", None) or []),
+                features=list(getattr(api_key_obj, "features", None) or []),
                 temperature=model_parameters.get("temperature", 0.7),
                 max_tokens=model_parameters.get("max_tokens", 2000),
                 system_prompt=system_prompt,
@@ -591,7 +611,6 @@ class SharedChatService:
                 deep_thinking=model_parameters.get("deep_thinking", False),
                 thinking_budget_tokens=model_parameters.get("thinking_budget_tokens"),
                 json_output=model_parameters.get("json_output", False),
-                capability=api_key_obj.capability or [],
                 tenant_id=api_key_obj.tenant_id,
                 model_config_id=api_key_obj.model_config_id,
                 channel_id=api_key_obj.channel_id,

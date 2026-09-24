@@ -1,6 +1,8 @@
 """Handoffs 服务 - 基于 LangGraph 的多 Agent 协作"""
 import json
 import uuid
+import threading
+from collections import OrderedDict
 from typing import List, Dict, Any, Optional, AsyncGenerator, Annotated
 from typing_extensions import TypedDict
 
@@ -124,7 +126,7 @@ def create_tools_for_agent(agent_name: str, configs: Dict) -> List:
 def create_agent_node(agent_name: str, system_prompt: str, tools: List,
                       model_config: RedBearModelConfig):
     """创建 Agent 节点（非流式）"""
-    llm = RedBearLLM(model_config, type=ModelType.CHAT)
+    llm = RedBearLLM(model_config, type=ModelType.LLM)
     
     # 绑定工具
     if tools:
@@ -248,7 +250,7 @@ def create_agent_node(agent_name: str, system_prompt: str, tools: List,
 def create_streaming_agent_node(agent_name: str, system_prompt: str, tools: List,
                                  model_config: RedBearModelConfig):
     """创建支持流式输出的 Agent 节点"""
-    llm = RedBearLLM(model_config, type=ModelType.CHAT)
+    llm = RedBearLLM(model_config, type=ModelType.LLM)
     
     # 绑定工具
     if tools:
@@ -914,8 +916,11 @@ class HandoffsService:
 
 # ==================== 服务工厂 ====================
 
-# 缓存服务实例（按 app_id）
-_service_cache: Dict[str, HandoffsService] = {}
+# 缓存服务实例（按 app_id）。app_id 基数可达数十万，必须有界：超出上限时淘汰
+# 最久未使用的实例，避免缓存随应用数量无限增长。
+_service_cache_max_size = 500
+_service_cache: "OrderedDict[str, HandoffsService]" = OrderedDict()
+_service_cache_lock = threading.Lock()
 
 
 def get_handoffs_service_for_app(
@@ -934,32 +939,42 @@ def get_handoffs_service_for_app(
         HandoffsService 实例
     """
     from app.services.multi_agent_service import MultiAgentService
-    
+
     cache_key = f"{app_id}_{streaming}"
-    
-    # 检查缓存
-    if cache_key in _service_cache:
-        return _service_cache[cache_key]
-    
-    # 获取多 Agent 配置
+
+    # 命中路径在锁内完成，避免与插入/淘汰并发交错
+    with _service_cache_lock:
+        cached = _service_cache.get(cache_key)
+        if cached is not None:
+            _service_cache.move_to_end(cache_key)
+            return cached
+
+    # 获取多 Agent 配置（耗时 DB 操作放在锁外）
     multi_agent_service = MultiAgentService(db)
     multi_agent_config = multi_agent_service.get_multi_agent_configs(app_id)
-    
+
     if not multi_agent_config:
         raise ValueError(f"应用 {app_id} 没有多 Agent 配置")
-    
+
     # 转换配置（每个 Agent 包含自己的 model_config）
     agent_configs = convert_multi_agent_config_to_handoffs(multi_agent_config, db)
-    
+
     if not agent_configs:
         raise ValueError(f"应用 {app_id} 没有配置子 Agent")
-    
+
     # 创建服务
     service = HandoffsService(agent_configs, streaming)
-    
-    # 缓存
-    _service_cache[cache_key] = service
-    
+
+    # 缓存（超出上限时淘汰最久未使用的实例）。double-check：等待 DB 期间可能
+    # 已有其他线程写入同 key，此时复用已有实例，不重复插入。
+    with _service_cache_lock:
+        existing = _service_cache.get(cache_key)
+        if existing is not None:
+            return existing
+        _service_cache[cache_key] = service
+        while len(_service_cache) > _service_cache_max_size:
+            _service_cache.popitem(last=False)
+
     return service
 
 
@@ -970,12 +985,13 @@ def reset_handoffs_service_cache(app_id: uuid.UUID = None):
         app_id: 应用 ID，如果为 None 则清除所有缓存
     """
     global _service_cache
-    
-    if app_id:
-        keys_to_remove = [k for k in _service_cache if k.startswith(str(app_id))]
-        for key in keys_to_remove:
-            del _service_cache[key]
-    else:
-        _service_cache = {}
-    
+
+    with _service_cache_lock:
+        if app_id:
+            keys_to_remove = [k for k in _service_cache if k.startswith(str(app_id))]
+            for key in keys_to_remove:
+                del _service_cache[key]
+        else:
+            _service_cache = OrderedDict()
+
     logger.info(f"Handoffs 服务缓存已重置: app_id={app_id}")

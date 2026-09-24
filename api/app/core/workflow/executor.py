@@ -9,7 +9,12 @@ from typing import Any
 from langgraph.graph.state import CompiledStateGraph
 
 from app.core.workflow.engine.event_stream_handler import EventStreamHandler
-from app.core.workflow.engine.graph_builder import GraphBuilder
+from app.core.workflow.engine.graph_builder import (
+    GraphBuilder,
+    get_or_create_checkpointer,
+    remove_checkpointer,
+    workflow_requires_checkpointer,
+)
 from app.core.workflow.engine.result_builder import WorkflowResultBuilder
 from app.core.workflow.engine.runtime_schema import ExecutionContext
 from app.core.workflow.engine.state_manager import WorkflowStateManager
@@ -17,6 +22,7 @@ from app.core.workflow.engine.stream_output_coordinator import StreamOutputCoord
 from app.core.workflow.engine.variable_pool import VariablePool, VariablePoolInitializer
 from app.core.workflow.nodes.base_node import NodeExecutionError
 from app.core.utils.datetime_utils import to_timestamp_ms, utcnow_naive
+from app.core.utils.text_sanitize import sanitize_text, sanitize_value
 
 logger = logging.getLogger(__name__)
 
@@ -91,14 +97,15 @@ class WorkflowExecutor:
             stream=stream,
         )
 
-        if checkpointer is None:
+        if checkpointer is None and workflow_requires_checkpointer(self.workflow_config):
+            # Only workflows with human-intervention nodes need a persistent
+            # checkpointer; others use a local saver reclaimed with the graph.
             thread_id = str(
                 self.execution_context.checkpoint_config
                 .get("configurable", {})
                 .get("thread_id", "")
             )
             if thread_id:
-                from app.core.workflow.engine.graph_builder import get_or_create_checkpointer
                 checkpointer = get_or_create_checkpointer(thread_id)
 
         self.graph = builder.build(checkpointer=checkpointer)
@@ -158,6 +165,20 @@ class WorkflowExecutor:
         )
 
     async def execute_stream(
+            self,
+            input_data: dict[str, Any]
+    ):
+        """流式执行工作流，并在事件出口统一净化非法字符。
+
+        所有外发事件（流式 chunk / node_end / workflow_end 等）都经过
+        ``sanitize_value`` 剥除 NUL(\\x00)：节点可能把二进制内容当文本解码
+        （code/http/document_extractor 等），而 PostgreSQL 文本/JSON 列拒绝
+        NUL 字符。在此边界统一处理可覆盖全部节点来源。
+        """
+        async for event in self._execute_stream_impl(input_data):
+            yield sanitize_value(event)
+
+    async def _execute_stream_impl(
             self,
             input_data: dict[str, Any]
     ):
@@ -221,7 +242,7 @@ class WorkflowExecutor:
 
         def append_message_content(current: str, message_data: dict) -> str:
             nonlocal unscoped_content
-            content = message_data.get("content", "") or ""
+            content = sanitize_text(message_data.get("content", "") or "")
             output_node_id = message_data.get("node_id")
             if output_node_id:
                 ensure_output_order(output_node_id)
@@ -250,7 +271,7 @@ class WorkflowExecutor:
             return [
                 {
                     "node_id": node_id,
-                    "content": output_contents[node_id],
+                    "content": sanitize_text(output_contents[node_id]),
                     "status": "completed",
                 }
                 for node_id in output_order
@@ -285,6 +306,11 @@ class WorkflowExecutor:
             if not restored_global:
                 full_content = rebuild_multi_content()
             return rollback_events
+
+        # Whether the checkpointer must outlive this generator for a later resume.
+        # Only set on the waiting_human path; success, exception and client
+        # disconnect all release the checkpointer.
+        keep_checkpoint_for_resume = False
 
         try:
             # Build the workflow graph in streaming mode
@@ -439,7 +465,9 @@ class WorkflowExecutor:
                                     )
                                     if checkpoint is not None:
                                         output_node_id = checkpoint.get("output_node_id")
-                                        canonical_content = reconcile_data.get("content", "") or ""
+                                        canonical_content = sanitize_text(
+                                            reconcile_data.get("content", "") or ""
+                                        )
                                         if output_node_id:
                                             output_contents[output_node_id] = (
                                                 (checkpoint.get("content", "") or "")
@@ -530,18 +558,15 @@ class WorkflowExecutor:
                         "interventions": interventions,
                     }
                 }
+                # Execution is suspended for human input; the checkpointer must
+                # survive so a later resume can continue from this checkpoint.
+                keep_checkpoint_for_resume = True
                 return
 
             # Clean up registry in the non-interrupt path (no interventions were registered,
             # or they were already cleaned up above)
             from app.core.workflow.nodes.human_intervention.node import InterventionRegistry
             InterventionRegistry.cleanup(self.execution_context.execution_id)
-
-            # Clean up checkpointer from cache to prevent memory leak
-            thread_id = str(self.execution_context.checkpoint_config.get("configurable", {}).get("thread_id", ""))
-            if thread_id:
-                from app.core.workflow.engine.graph_builder import remove_checkpointer
-                remove_checkpointer(thread_id)
 
             # Flush any remaining chunks
             async for msg_event in self.stream_coordinator.flush_remaining_chunk(self.variable_pool):
@@ -682,6 +707,17 @@ class WorkflowExecutor:
             # Generator cancellation/closure may bypass custom rollback events.
             # Never retain provisional content in internal aggregation state.
             restore_pending_checkpoints()
+            # Release the checkpointer unless this execution is suspended waiting
+            # for human input. finally runs on success, exception AND client
+            # disconnect (GeneratorExit/CancelledError), covering every leak path.
+            if not keep_checkpoint_for_resume:
+                thread_id = str(
+                    self.execution_context.checkpoint_config
+                    .get("configurable", {})
+                    .get("thread_id", "")
+                )
+                if thread_id:
+                    remove_checkpointer(thread_id)
 
 
 async def execute_workflow(

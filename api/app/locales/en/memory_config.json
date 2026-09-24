@@ -11,5 +11,20 @@
   },
   "workspace": {
     "no_active_config": "No active memory configuration in the current workspace"
+  },
+  "scene_demo": {
+    "no_workspace": "Please switch to a workspace first",
+    "config_not_found": "Configuration does not exist or is not accessible",
+    "invalid_turn_range": "scene_min_turns (min protected turns) must be less than scene_max_turns (max scene turns)",
+    "model_unavailable": "The scene segmentation model is temporarily unavailable, please try again later",
+    "reason_continue": "{score} > {threshold}, the current query is highly continuous with the historical scene; keeping the current Scene.",
+    "reason_shifted": "{score} ≤ {threshold}, the current query has low semantic continuity with the historical scene; starting a new Scene.",
+    "reason_first_scene": "The current Query is the start of the first Scene (turn {turns}), so a new Scene starts and the model is not called.",
+    "reason_min_turns": "The current Scene turn count ({turns}) is below the min protected turns, so the current Scene is kept and the model is not called.",
+    "reason_max_turns": "The current Scene turn count ({turns}) has reached the max scene turns, so a new Scene starts and the model is not called.",
+    "summary_continue_text": "The current Query continues the existing Scene, which stays open; a summary is generated after a later SHIFT or session close.",
+    "summary_continue_hint": "CONTINUE does not close the Scene, so no summary model is called this turn.",
+    "summary_shifted_text": "The user discussed recent global situations, foreign policy and the impact of major-power competition on global supply chains.",
+    "summary_shifted_hint": "The summary targets the Scene before the split and excludes the Query that triggered SHIFT."
   }
 }

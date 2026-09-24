@@ -90,7 +90,8 @@ class EndUserService:
            映射，**同一次提交**。此后老 end_user_id 即经映射路由到 target，迁移
            期间的新写入直接落到 target，不会产生孤儿数据
         3. PG EndUserInfo：aliases / meta_data 合并到 target
-        4. Neo4j：所有节点的 end_user_id 改为 target；User 实体节点合并全部属性
+        4. Neo4j：普通节点的 end_user_id 改为 target；User 实体节点合并全部属性；
+           Preference 同业务桶保留 target 并删除 source，异桶迁移到 target
         5. Neo4j：关系属性 end_user_id 改为 target（保留原始关系类型）
         6. PG 引用表：conversations / memory_messages / memory_short_term /
            memory_long_term / memory_forget_log / memory_perceptual /
@@ -249,7 +250,8 @@ class EndUserService:
         logger.info(
             f"[merge_end_users] Neo4j 合并完成: "
             f"sources={stats.sources_merged}, "
-            f"nodes={stats.reassigned_nodes}, "
+            f"nodes={stats.reassigned_nodes + stats.preference_buckets_moved}, "
+            f"discarded={stats.preference_buckets_discarded}, "
             f"edges={stats.reassigned_edges}, "
             f"outbox={stats.outbox_events}"
         )

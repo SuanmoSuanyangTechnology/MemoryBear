@@ -10,7 +10,7 @@ from app.schemas.app_schema import ModelParameters
 from app.services.conversation_state_manager import ConversationStateManager
 from app.models import ModelConfig, AgentConfig
 from app.core.logging_config import get_business_logger
-from app.services.model_service import ModelApiKeyService
+from app.services.model_service import ModelApiKeyService, ModelConfigService
 
 logger = get_business_logger()
 
@@ -359,7 +359,11 @@ class MasterAgentRouter:
             )
 
             if not api_key_config:
-                raise Exception("Master Agent 模型没有可用的 API Key")
+                await ModelConfigService.raise_model_unavailable_bridge_async(
+                    self.db,
+                    self.master_model_config.id,
+                    tenant_id=self.tenant_id,
+                )
 
             logger.info(
                 "调用 Master Agent LLM",
@@ -397,7 +401,7 @@ class MasterAgentRouter:
             model_config = RedBearModelConfig.from_api_key(api_key_config, extra_params=extra_params)
 
             # 创建 LLM 实例
-            llm = RedBearLLM(model_config, type=ModelType.CHAT)
+            llm = RedBearLLM(model_config, type=ModelType.LLM)
 
             # 调用模型
             response = await llm.ainvoke(prompt)

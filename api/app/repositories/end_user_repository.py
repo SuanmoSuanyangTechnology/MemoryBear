@@ -319,25 +319,99 @@ class EndUserRepository:
         self, workspace_id: uuid.UUID
     ) -> List[list]:
         """获取指定 workspace 下活跃终端用户的 memory_tags 数组列表。
+    @redis_cache(prefix="hot_tags", id_arg="workspace_id", skip_args=["self"])
+    async def get_hot_memory_tags_by_workspace_async(
+        self,
+        workspace_id: uuid.UUID,
+        limit: int,
+        max_tag_length: int,
+    ) -> List[tuple]:
+        """聚合指定 workspace 下活跃终端用户名片 Tag 的 Top-N 热门标签。
 
-        仅返回 memory_tags 非空的活跃用户，用于热门标签实时聚合。
+        聚合整体下沉到 PostgreSQL：JSONB 数组在库内展开、按展示规则规范化（空白
+        折叠 / 去空 / 长度上限）后按大小写折叠键合并。返回行数由 ``limit`` 决定，
+        不再随空间内用户数增长，也不再需要把全量用户的 memory_tags 搬进应用层。
+
+        规范化规则的真源在 ``core.memory.analytics.user_card_tags``：写侧
+        ``validate_user_card_tags`` 已保证落库数据满足同一套约束，这里是为历史脏
+        数据在库内再兜一层。与原 Python 实现存在三处已知差异：
+
+        1. 代表文本取同一折叠键下码点序最小值，原实现取扫描序首个——原仓储查询
+           没有 ORDER BY，扫描序本身不确定，故这里反而更稳定；
+        2. 大小写合并用 ``lower()``，Python 侧是 ``casefold()``，仅 ß / İ 等极少数
+           码位的结果不同；
+        3. 不再复校每用户 ≤5 条上限（写侧已限制），仅超出上限的历史行会多计。
+
+        Args:
+            workspace_id: 目标工作空间
+            limit: 返回的标签数量上限
+            max_tag_length: Tag 字符长度上限。由调用方传入，因为本仓储不能反向
+                导入 ``core.memory.analytics.user_card_tags``（该模块已导入本仓储，
+                反向导入会成环）
 
         Returns:
-            List[list]: 每项为一个用户的 memory_tags（JSONB 数组）
+            List[tuple[str, int]]: [(代表文本, 采用该 Tag 的用户数)]，已按
+            frequency 降序、代表文本升序排列
         """
-        try:
-            result = await self.db.execute(
-                select(EndUser.memory_tags).where(
-                    EndUser.workspace_id == workspace_id,
-                    EndUser.is_active.is_(True),
-                    EndUser.memory_tags.isnot(None),
+        # 展开每个活跃用户的 memory_tags；非数组的脏值退化为空数组，避免展开报错
+        expanded_tag = (
+            func.jsonb_array_elements_text(
+                sa.case(
+                    (
+                        func.jsonb_typeof(EndUser.memory_tags) == "array",
+                        EndUser.memory_tags,
+                    ),
+                    else_=func.jsonb_build_array(),
                 )
             )
-            return [row[0] for row in result.all() if row[0]]
+            .table_valued(sa.column("value", sa.Text))
+            .lateral()
+        )
+        tag = func.btrim(
+            func.regexp_replace(expanded_tag.c.value, "[[:space:]]+", " ", "g")
+        )
+
+        # 同一用户同名（折叠大小写后）只计一次，与 normalize_stored_user_card_tags
+        # 的 seen 去重对齐
+        per_user_tags = (
+            select(
+                EndUser.id.label("end_user_id"),
+                tag.label("tag"),
+                func.lower(tag).label("tag_key"),
+            )
+            .select_from(EndUser)
+            .join(expanded_tag, sa.true())
+            .where(
+                EndUser.workspace_id == workspace_id,
+                EndUser.is_active.is_(True),
+                tag != "",
+                func.char_length(tag) <= max_tag_length,
+            )
+            .distinct()
+            .cte("per_user_tags")
+        )
+
+        # 代表文本与并列排序都锁到 COLLATE "C"（等价码点序），使结果不随库的
+        # collation 漂移，也对齐原 Python 的字符串比较
+        hot_tag_name = func.min(sa.collate(per_user_tags.c.tag, "C"))
+        user_count = func.count(sa.distinct(per_user_tags.c.end_user_id))
+        statement = (
+            select(
+                hot_tag_name.label("name"),
+                user_count.label("frequency"),
+            )
+            .group_by(per_user_tags.c.tag_key)
+            .order_by(user_count.desc(), hot_tag_name.asc())
+            .limit(limit)
+        )
+
+        try:
+            result = await self.db.execute(statement)
+            return [(name, int(frequency)) for name, frequency in result.all()]
         except Exception as e:
             await self.db.rollback()
             db_logger.error(
-                f"查询工作空间 {workspace_id} 下 memory_tags 时出错: {str(e)}"
+                f"聚合工作空间 {workspace_id} 下热门记忆标签时出错: {str(e)}"
             )
             raise
 
@@ -576,6 +650,39 @@ class EndUserRepository:
             await self.db.rollback()
             db_logger.error(
                 f"查询工作空间 {workspace_id} 下终端用户记忆量时出错: {str(e)}"
+            )
+            raise
+
+    async def get_memory_count_total_by_workspace_async(
+        self,
+        workspace_id: uuid.UUID,
+    ) -> tuple:
+        """聚合指定 workspace 下所有活跃终端用户的记忆总量与宿主数（读 end_users.memory_count）。
+
+        与 get_memory_counts_by_workspace_async 同源，但不返回明细行：SUM/COUNT 全部
+        在数据库端算完，只回传一行。调用方只要总量时应当用本方法，避免为求和而拉取
+        全部宿主明细再在应用层丢弃。
+
+        Returns:
+            tuple: (total_memory_count, host_count)
+                   聚合查询无 GROUP BY 恒返回一行，无活跃宿主时为 (0, 0)
+        """
+        try:
+            result = await self.db.execute(
+                select(
+                    func.coalesce(func.sum(EndUser.memory_count), 0),
+                    func.count(EndUser.id),
+                )
+                .where(
+                    EndUser.workspace_id == workspace_id,
+                    EndUser.is_active.is_(True),
+                )
+            )
+            return result.one()
+        except Exception as e:
+            await self.db.rollback()
+            db_logger.error(
+                f"聚合工作空间 {workspace_id} 下终端用户记忆总量时出错: {str(e)}"
             )
             raise
 
@@ -2627,6 +2734,24 @@ class EndUserRepository:
         except Exception as e:
             await self.db.rollback()
             db_logger.error(f"查询所有活跃终端用户时出错(异步): {str(e)}")
+            raise
+
+    async def get_ids_by_app_workspace_async(self, workspace_id: uuid.UUID) -> List[str]:
+        """通过 App 关联查询指定 workspace 下的所有活跃 end_user ID（异步版本）"""
+        from app.models.app_model import App
+        try:
+            result = await self.db.execute(
+                select(EndUser.id)
+                .join(App, EndUser.app_id == App.id)
+                .where(
+                    App.workspace_id == workspace_id,
+                    EndUser.is_active.is_(True),
+                )
+            )
+            return [str(eid) for (eid,) in result.all()]
+        except Exception as e:
+            await self.db.rollback()
+            db_logger.error(f"查询 workspace {workspace_id} 下的终端用户ID时出错: {str(e)}")
             raise
 
     def get_ids_by_app_workspace(self, workspace_id: uuid.UUID) -> List[str]:

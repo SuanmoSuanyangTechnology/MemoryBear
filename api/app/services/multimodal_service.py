@@ -4,7 +4,7 @@
 处理图片、文档等多模态文件，转换为 LLM 可用的格式
 
 支持的 Provider:
-- DashScope (通义千问): 支持 URL 格式
+- DashScope (通义千问): OpenAI 兼容模式内容格式（image_url / video_url / input_audio）
 - Bedrock/Anthropic: 仅支持 base64 格式
 - OpenAI: 支持 URL 和 base64 格式
 """
@@ -36,11 +36,13 @@ from app.core.config import settings
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
+from app.core.utils.text_sanitize import sanitize_text
 from app.models.file_metadata_model import FileMetadata
-from app.models.models_model import ModelCapability
+from app.models.models_model import Modality
 from app.schemas.app_schema import FileInput, FileType, FileUploadConfig, TransferMethod
 from app.schemas.model_schema import ModelInfo
 from app.services.audio_transcription_service import AudioTranscriptionService
+from app.services.file_content_service import extract_permanent_file_id
 from app.services.file_storage_service import FileStorageService
 
 logger = get_business_logger()
@@ -151,37 +153,14 @@ def serialize_file_reference(
     }
 
 
-_PERMANENT_PATH_MARKER = "/storage/permanent/"
-
-
 def _built_permanent_file_id(url: Any, *, any_host: bool = False) -> str | None:
     """识别本服务自铸的永久下载 URL，并取出其中的文件 ID。
 
-    any_host=False（URL 来自请求，不可信）：只认当前 FILE_LOCAL_SERVER_URL
-    前缀，避免任意公网 URL 被误判成本服务自有文件而触发服务端回拉（SSRF）。
-    any_host=True（URL 来自已持久化的消息元数据，可信）：额外接受路径形态，
-    这样域名/端口变更后旧消息里的永久 URL 仍能还原成文件 ID 由本服务自取字节。
+    判定实现已抽到公共文件内容服务（file_content_service.extract_permanent_file_id），
+    与知识库图片检索等消费点共用同一套口径，避免私有化部署下"URL 是否属于本服务"
+    的判断在各处慢慢分叉。
     """
-    if not isinstance(url, str):
-        return None
-    normalized_url = url.split("?", 1)[0]
-    configured_prefix = f"{settings.FILE_LOCAL_SERVER_URL.rstrip('/')}{_PERMANENT_PATH_MARKER}"
-    if normalized_url.startswith(configured_prefix):
-        candidate = normalized_url[len(configured_prefix):]
-    elif any_host:
-        path = urlparse(normalized_url).path
-        marker_index = path.rfind(_PERMANENT_PATH_MARKER)
-        if marker_index < 0:
-            return None
-        candidate = path[marker_index + len(_PERMANENT_PATH_MARKER):]
-    else:
-        return None
-
-    candidate = candidate.strip("/")
-    try:
-        return str(uuid.UUID(candidate))
-    except (TypeError, ValueError):
-        return None
+    return extract_permanent_file_id(url, trust_any_host=any_host)
 
 
 def _model_cannot_reach_url(url: Any) -> bool:
@@ -361,68 +340,6 @@ class MultimodalFormatStrategy(ABC):
         pass
 
 
-class DashScopeFormatStrategy(MultimodalFormatStrategy):
-    """通义千问策略"""
-
-    async def format_image(self, url: str | None, content: bytes | None = None) -> tuple[bool, Dict[str, Any]]:
-        """通义千问图片格式：本地内容使用 Data URL，远程内容保留 URL。"""
-        image_source = _build_data_url(content, self.file.file_type, "image/jpeg") if content is not None else url
-        if not image_source:
-            return False, {"type": "text", "text": "[图片文件缺少可用内容]"}
-        return True, {
-            "type": "image",
-            "image": image_source,
-        }
-
-    async def format_document(self, file_name: str, text: str) -> tuple[bool, Dict[str, Any]]:
-        """通义千问文档格式"""
-        return True, {
-            "type": "text",
-            "text": f"<document name=\"{file_name}\">\n文档内容：\n{text}\n</document>",
-        }
-
-    async def format_audio(
-            self,
-            file_type: str,
-            url: str | None,
-            content: bytes | None = None,
-            transcription: Optional[str] = None,
-    ) -> tuple[bool, Dict[str, Any]]:
-        """
-        通义千问音频格式。
-
-        公网模型不能访问私有 OSS 时，本地音频以 Data URL 主动随请求传出；
-        DashScope HTTP API 支持该格式。
-        """
-        if transcription:
-            return True, {
-                "type": "text",
-                "text": f"[音频转录]\n{transcription}",
-            }
-
-        audio_source = _build_audio_data_url(content) if content is not None else url
-        if not audio_source:
-            return False, {"type": "text", "text": "[音频文件缺少可用内容]"}
-        return True, {
-            "type": "audio",
-            "audio": audio_source,
-        }
-
-    async def format_video(self, url: str | None, content: bytes | None = None) -> tuple[bool, Dict[str, Any]]:
-        """通义千问视频格式；本地视频需后续接入 provider Files API。"""
-        if content is not None:
-            return False, {
-                "type": "text",
-                "text": "[视频文件无法通过当前模型接口安全传输，请配置 provider Files API 后重试]",
-            }
-        if not url:
-            return False, {"type": "text", "text": "[视频文件缺少可用 URL]"}
-        return True, {
-            "type": "video",
-            "video": url,
-        }
-
-
 class BedrockFormatStrategy(MultimodalFormatStrategy):
     """Bedrock/Anthropic 策略"""
 
@@ -587,10 +504,6 @@ class OpenAIFormatStrategy(MultimodalFormatStrategy):
 
 # Provider 到策略的映射
 PROVIDER_STRATEGIES = {
-    # dashscope 全量模型已统一 OpenAI 兼容协议（ChatTongyi 原生协议退役，见
-    # core/models/base.py:get_provider_llm_class）。原生的
-    # {"type": "image", "image": url} 会被兼容端点以 400 invalid_value 拒绝，
-    # 必须产出 OpenAI 格式（type=text/image_url/video_url）。
     "dashscope": OpenAIFormatStrategy,
     "bedrock": BedrockFormatStrategy,
     "anthropic": BedrockFormatStrategy,
@@ -609,7 +522,6 @@ class MultimodalService:
         db (Session): Database session.
         model_api_key (str): API key for the model provider.
         provider (str): Name of the model provider.
-        is_omni (bool): Indicates whether the model supports full multimodal capability.
         capability (list): Capability configuration of the model.
         audio_api_key (str | None): API key used for audio transcription.
         enable_audio_transcription (bool): Whether audio transcription is enabled.
@@ -636,8 +548,7 @@ class MultimodalService:
         if self.api_config is not None:
             self.model_api_key = api_config.api_key
             self.provider = api_config.provider.lower()
-            self.is_omni = api_config.is_omni
-            self.capability = api_config.capability
+            self.input_modalities = list(getattr(api_config, "input_modalities", None) or [])
         self.audio_api_key = audio_api_key
         self.enable_audio_transcription = enable_audio_transcription
 
@@ -823,12 +734,12 @@ class MultimodalService:
                 if file.type == FileType.VIDEO:
                     if file.upload_file_id:
                         await self._get_local_file_metadata(file.upload_file_id, workspace_id)
-                    if "video" in self.capability and include_processing_errors:
+                    if Modality.VIDEO in self.input_modalities and include_processing_errors:
                         result.append({
                             "type": "text",
                             "text": "[视频文件无法通过当前模型接口安全传输，请配置 provider Files API 后重试]",
                         })
-                    elif "video" not in self.capability:
+                    elif Modality.VIDEO not in self.input_modalities:
                         logger.warning(f"不支持的文件类型: {file.type}")
                     continue
 
@@ -875,7 +786,7 @@ class MultimodalService:
 
             strategy = strategy_class(file)
             try:
-                if file.type == FileType.IMAGE and ModelCapability.VISION in self.capability:
+                if file.type == FileType.IMAGE and Modality.IMAGE in self.input_modalities:
                     is_support, content = await self._process_image(file, strategy)
                     if is_support or include_processing_errors:
                         result.append(content)
@@ -886,7 +797,7 @@ class MultimodalService:
                         continue
                     result.append(content)
                     # 仅当开关开启且模型支持视觉时，才提取文档内嵌图片
-                    if document_image_recognition and ModelCapability.VISION in self.capability:
+                    if document_image_recognition and Modality.IMAGE in self.input_modalities:
                         img_infos = await self.extract_document_images(file)
                         img_result = []
                         for img_info in img_infos:
@@ -923,11 +834,11 @@ class MultimodalService:
                             except Exception as img_err:
                                 logger.warning(f"文档图片处理失败: {img_err}")
                         result.extend(img_result)
-                elif file.type == FileType.AUDIO and "audio" in self.capability:
+                elif file.type == FileType.AUDIO and Modality.AUDIO in self.input_modalities:
                     is_support, content = await self._process_audio(file, strategy)
                     if is_support or include_processing_errors:
                         result.append(content)
-                elif file.type == FileType.VIDEO and "video" in self.capability:
+                elif file.type == FileType.VIDEO and Modality.VIDEO in self.input_modalities:
                     is_support, content = await self._process_video(file, strategy)
                     if is_support or include_processing_errors:
                         result.append(content)
@@ -1272,8 +1183,22 @@ class MultimodalService:
                         parts.append('\t'.join('' if v is None else str(v) for v in row))
                 return '\n'.join(parts)
             except Exception as e:
-                logger.error(f"提取 xlsx 文本失败: {e}")
-                return f"[xlsx 提取失败: {str(e)}]"
+                # openpyxl 对不规范 styles.xml（如空 <fill/>）零容忍，会抛
+                # TypeError: expected <class 'openpyxl.styles.fills.Fill'>；
+                # calamine（Rust 实现，不解析 styles.xml）可正常读取此类文件
+                logger.warning(f"openpyxl 提取 xlsx 文本失败: {e}，尝试 calamine 降级读取")
+                try:
+                    from python_calamine import CalamineWorkbook
+                    cwb = CalamineWorkbook.from_filelike(io.BytesIO(file_content))
+                    parts = []
+                    for sheet_name in cwb.sheet_names:
+                        parts.append(f"[Sheet: {sheet_name}]")
+                        for row in cwb.get_sheet_by_name(sheet_name).to_python():
+                            parts.append('\t'.join('' if v is None else str(v) for v in row))
+                    return '\n'.join(parts)
+                except Exception as e_fallback:
+                    logger.error(f"提取 xlsx 文本失败: openpyxl({e}), calamine({e_fallback})")
+                    return f"[xlsx 提取失败: {str(e_fallback)}]"
 
         # xls（OLE2/BIFF 格式）
         try:
@@ -1359,19 +1284,22 @@ class MultimodalService:
         encoding = encoding.lower()
 
         # 2. 兼容常见中文编码
-        compatible_encodings = ["utf-8", "gbk", "gb18030", "gb2312", "ascii", "latin-1"]
+        # 注意：不能用 latin-1 兜底——它逐字节 1:1 映射且永不失败，会把
+        # ZIP/PDF 等二进制“成功”解码成含 NUL(\\x00) 的字符串，写入
+        # PostgreSQL 时触发 CharacterNotInRepertoireError。
+        compatible_encodings = ["utf-8", "gbk", "gb18030", "gb2312", "ascii"]
 
         # 3. 按优先级尝试解码
         for enc in [encoding] + compatible_encodings:
             if not enc:
                 continue
             try:
-                return file_content.decode(enc.strip())
+                return sanitize_text(file_content.decode(enc.strip()))
             except (UnicodeDecodeError, LookupError):
                 continue
 
-        # 终极兜底
-        return file_content.decode("utf-8", errors="replace")
+        # 终极兜底：非法字节替换为 U+FFFD，同时剥除 NUL
+        return sanitize_text(file_content.decode("utf-8", errors="replace"))
 
 
 def get_multimodal_service(db: Session) -> MultimodalService:

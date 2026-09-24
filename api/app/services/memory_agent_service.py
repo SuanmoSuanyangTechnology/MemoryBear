@@ -353,7 +353,7 @@ class MemoryAgentService:
 
             llm = RedBearLLM(
                 RedBearModelConfig.from_api_key(model_config),
-                type=ModelType.CHAT
+                type=ModelType.LLM
             )
 
             template_root = os.path.join(PROJECT_ROOT_, 'memory', 'agent', 'utils', 'prompt')

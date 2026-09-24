@@ -3266,7 +3266,7 @@ class MultiAgentOrchestrator:
             )
 
             # 创建 LLM 实例
-            llm = RedBearLLM(model_config, type=ModelType.CHAT)
+            llm = RedBearLLM(model_config, type=ModelType.LLM)
 
             # 调用模型进行整合
             response = await llm.ainvoke(merge_prompt)
@@ -3450,7 +3450,7 @@ class MultiAgentOrchestrator:
             )
 
             # 创建 LLM 实例
-            llm = RedBearLLM(model_config, type=ModelType.CHAT)
+            llm = RedBearLLM(model_config, type=ModelType.LLM)
 
             logger.info("开始流式调用 Master Agent LLM")
 

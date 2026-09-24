@@ -60,6 +60,7 @@ import logging
 import threading
 import random
 import uuid
+from collections import OrderedDict
 from enum import Enum
 from functools import wraps
 from typing import Any, Callable, Iterable
@@ -76,8 +77,12 @@ DEFAULT_TTL = 300
 _in_flight: dict[str, asyncio.Task] = {}
 _in_flight_lock = asyncio.Lock()
 
-_sync_locks: dict[str, threading.Lock] = {}
+# Bounded per-key locks: cache_key cardinality (users x languages) can be huge, so an
+# unbounded dict leaks a Lock per distinct key forever. Old, uncontended locks are
+# evicted once the bound is reached.
+_sync_locks: "OrderedDict[str, threading.Lock]" = OrderedDict()
 _sync_locks_guard = threading.Lock()
+_SYNC_LOCKS_MAX_SIZE = 2000
 
 
 def _orjson_default(o: Any) -> Any:
@@ -331,6 +336,20 @@ def redis_cache(
                     if key_lock is None:
                         key_lock = threading.Lock()
                         _sync_locks[cache_key] = key_lock
+                        # Evict oldest uncontended locks to keep the dict bounded.
+                        # Scan at most len() entries; if every lock is held, abort
+                        # rather than spinning (the next call retries eviction).
+                        scanned = 0
+                        while len(_sync_locks) > _SYNC_LOCKS_MAX_SIZE and scanned < len(_sync_locks):
+                            old_key, old_lock = next(iter(_sync_locks.items()))
+                            scanned += 1
+                            if old_lock.locked():
+                                # Skip an in-use lock and try the next entry.
+                                _sync_locks.move_to_end(old_key)
+                                continue
+                            _sync_locks.pop(old_key)
+                    else:
+                        _sync_locks.move_to_end(cache_key)
 
                 with key_lock:
                     result = _try_read_cache()

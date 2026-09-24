@@ -364,10 +364,10 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
         return list(history)
 
     @staticmethod
-    def _normalize_capabilities(capabilities) -> set[str]:
+    def _normalize_modalities(modalities) -> set[str]:
         return {
-            str(getattr(capability, "value", capability)).lower()
-            for capability in capabilities or []
+            str(getattr(modality, "value", modality)).lower()
+            for modality in modalities or []
         }
 
     @staticmethod
@@ -495,20 +495,20 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
             multimodal_service,
             workspace_id: uuid.UUID,
             tenant_id: uuid.UUID,
-            capabilities,
+            input_modalities,
             language: str,
     ) -> list[dict[str, Any]]:
         """按请求顺序处理附件，对模型不支持的类型生成可见文本提示。"""
-        normalized_capabilities = cls._normalize_capabilities(capabilities)
-        required_capabilities = {
-            FileType.IMAGE: "vision",
+        normalized_modalities = cls._normalize_modalities(input_modalities)
+        required_modalities = {
+            FileType.IMAGE: "image",
             FileType.AUDIO: "audio",
             FileType.VIDEO: "video",
         }
         processed_parts: list[dict[str, Any]] = []
         for position, file in enumerate(files or [], start=1):
-            required = required_capabilities.get(file.type)
-            if required and required not in normalized_capabilities:
+            required = required_modalities.get(file.type)
+            if required and required not in normalized_modalities:
                 processed_parts.append(cls._file_marker_part(file, position, language))
                 processed_parts.append(cls._unsupported_file_part(file.type, language))
                 continue
@@ -682,9 +682,10 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
                     provider=api_key_obj.provider,
                     api_key=api_key_obj.api_key,
                     api_base=api_key_obj.api_base or "",
-                    is_omni=api_key_obj.is_omni,
+                    input_modalities=[str(item) for item in (api_key_obj.input_modalities or [])],
+                    output_modalities=[str(item) for item in (api_key_obj.output_modalities or [])],
+                    features=[str(item) for item in (api_key_obj.features or [])],
                     model_type=ModelType.LLM,
-                    capability=api_key_obj.capability or [],
                     tenant_id=api_key_obj.tenant_id,
                     model_config_id=api_key_obj.model_config_id,
                     channel_id=api_key_obj.channel_id,
@@ -703,7 +704,7 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
                         "streaming": streaming,
                     },
                 ),
-                type=ModelType.CHAT,
+                type=ModelType.LLM,
             )
 
         try:
@@ -729,8 +730,8 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
                     return
 
                 media_runtimes: dict[FileType, tuple[ModelInfo, uuid.UUID] | None] = {}
-                required_capabilities = {
-                    FileType.IMAGE: "vision",
+                required_modalities = {
+                    FileType.IMAGE: "image",
                     FileType.AUDIO: "audio",
                     FileType.VIDEO: "video",
                 }
@@ -739,12 +740,12 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
                         continue
                     model_config_id = self._trial_run_media_model_id(memory_config, file_type)
                     runtime = await get_runtime(model_config_id)
-                    required = required_capabilities[file_type]
-                    if runtime is not None and required not in self._normalize_capabilities(runtime[0].capability):
+                    required = required_modalities[file_type]
+                    if runtime is not None and required not in self._normalize_modalities(runtime[0].input_modalities):
                         runtime = None
                     if runtime is None and model_config_id != memory_config.llm_model_id:
                         fallback = final_runtime
-                        if required in self._normalize_capabilities(fallback[0].capability):
+                        if required in self._normalize_modalities(fallback[0].input_modalities):
                             runtime = fallback
                     media_runtimes[file_type] = runtime
 
@@ -782,7 +783,7 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
                     multimodal_service,
                     config_workspace_id,
                     config_tenant_id,
-                    model_info.capability,
+                    model_info.input_modalities,
                     language,
                 )
 
@@ -815,7 +816,6 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
                         "classified": classify_llm_error(
                             e,
                             provider=model_info.provider,
-                            is_omni=model_info.is_omni,
                         ),
                     }
                 response_text = "".join(
@@ -959,7 +959,6 @@ class DataConfigService:  # 数据配置服务类（PostgreSQL）
                 classified = classify_llm_error(
                     e,
                     provider=final_model_info.provider,
-                    is_omni=final_model_info.is_omni,
                 )
                 yield format_sse_message(
                     "error",
@@ -1337,7 +1336,7 @@ async def analytics_hot_memory_tags(
     - 空间取 ``current_user.current_workspace_id``（管理端=当前会话空间，对外=API Key
       绑定空间）。
     - 数据源：``end_users.memory_tags``（活跃终端用户的用户名片 Tag 数组）。
-    - 合并方式：文本**精确匹配**——复用名片 Tag 规范化规则（去空白折叠、空值/超长
+    - 合并方式：文本**精确匹配**——复用名片 Tag 规范化规则（空白折叠、空值/超长
       剔除、大小写折叠后精确一致才合并），不做语义/Embedding/LLM 归并。
     - 计数口径：``frequency`` = 采用该 tag 的终端用户数（每人对同一 tag 只计一次）。
     - 排序：``frequency`` 降序、同频按代表文本升序，取 Top-N。
@@ -1348,42 +1347,16 @@ async def analytics_hot_memory_tags(
     if limit <= 0:
         limit = 10
 
-    from app.core.memory.analytics.user_card_tags import normalize_stored_user_card_tags
+    from app.core.memory.analytics.user_card_tags import USER_CARD_TAG_MAX_LENGTH
     from app.repositories.end_user_repository import EndUserRepository
 
     repo = EndUserRepository(db)
-    tags_per_user = await repo.get_memory_tags_by_workspace_async(
-        uuid.UUID(str(workspace_id))
+    hot_tags = await repo.get_hot_memory_tags_by_workspace_async(
+        uuid.UUID(str(workspace_id)),
+        limit=limit,
+        max_tag_length=USER_CARD_TAG_MAX_LENGTH,
     )
-    if not tags_per_user:
-        return []
-
-    # casefold key -> {"name": 代表文本（首次出现的规范化形式）, "count": 采用用户数}
-    aggregated: Dict[str, Dict[str, Any]] = {}
-    for stored_tags in tags_per_user:
-        # 每个用户先按名片规则规范化（去空白折叠/超长剔除/大小写折叠去重/限量）
-        normalized_tags = normalize_stored_user_card_tags(stored_tags)
-        # 同一用户对同一 tag 只计一次（normalize 已按 casefold 去重，这里再兜底）
-        seen_keys: set[str] = set()
-        for tag in normalized_tags:
-            key = tag.casefold()
-            if key in seen_keys:
-                continue
-            seen_keys.add(key)
-            entry = aggregated.get(key)
-            if entry is None:
-                aggregated[key] = {"name": tag, "count": 1}
-            else:
-                entry["count"] += 1
-
-    if not aggregated:
-        return []
-
-    ranked = sorted(
-        aggregated.values(),
-        key=lambda item: (-item["count"], item["name"]),
-    )
-    return [{"name": item["name"], "frequency": item["count"]} for item in ranked[:limit]]
+    return [{"name": name, "frequency": frequency} for name, frequency in hot_tags]
 
 
 async def analytics_recent_activity_stats(workspace_id: Optional[str] = None) -> Dict[str, Any]:

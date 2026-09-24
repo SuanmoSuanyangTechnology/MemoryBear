@@ -85,20 +85,20 @@ def get_chunker_config(chunker_strategy: str) -> dict:
             "chunk_size": 512,
             "min_characters_per_chunk": 50
         },
+        "TokenChunker": {
+            "chunker_strategy": "TokenChunker",
+            "embedding_model": "BAAI/bge-m3",
+            "chunk_size": 512,
+        },
+        "SentenceChunker": {
+            "chunker_strategy": "SentenceChunker",
+            "embedding_model": "BAAI/bge-m3",
+            "chunk_size": 512,
+        },
         "LLMChunker": {
             "chunker_strategy": "LLMChunker",
             "embedding_model": "BAAI/bge-m3",
             "chunk_size": 1000,
-            "threshold": 0.8,
-            "min_sentences": 2,
-            "language": "zh",
-            "skip_window": 1,
-            "min_characters_per_chunk": 100,
-        },
-        "HybridChunker": {
-            "chunker_strategy": "HybridChunker",
-            "embedding_model": "BAAI/bge-m3",
-            "chunk_size": 512,
             "threshold": 0.8,
             "min_sentences": 2,
             "language": "zh",

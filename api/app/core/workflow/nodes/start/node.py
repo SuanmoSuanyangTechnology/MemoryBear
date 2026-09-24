@@ -115,6 +115,12 @@ class StartNode(BaseNode):
                 value = var_def.default if var_def.default is not None else DEFAULT_VALUE(VariableType.BOOLEAN)
                 provided = True
 
+            # An explicit `null` is valid input but every non-FILE variable type
+            # rejects None. Fall back to the default value (same as a missing field)
+            # instead of letting the downstream typed variable raise TypeError.
+            if provided and value is None and var_type != VariableType.FILE:
+                value = var_def.default if var_def.default is not None else DEFAULT_VALUE(var_type)
+
             # 检查变量是否存在
             if provided:
                 # select: 值必须在 options 列表中

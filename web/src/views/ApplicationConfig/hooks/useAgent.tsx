@@ -24,6 +24,7 @@ import { getListLogoUrl } from '@/views/ModelManagement/utils';
 import Tag from '@/components/Tag'
 import { buildAgentSaveParams, extractPromptVariables, buildVariablesFromNames, findInvalidVariables } from './agentHelpers'
 import { useOpeningStatementSync } from './useOpeningStatementSync'
+import { normalizeSavedAgent } from './modelContract'
 
 /**
  * Encapsulates all state, effects and handlers of the Agent configuration
@@ -87,7 +88,7 @@ export function useAgent(
    */
   const getData = () => {
     getApplicationConfig(id as string).then(res => {
-      const response = res as Config
+      const response = normalizeSavedAgent(res as Config)
       const { skills, variables } = response
       const allSkills = Array.isArray(skills?.skill_ids) ? skills?.skill_ids.map(vo => ({ id: vo })) : []
       const allTools = Array.isArray(response.tools) ? response.tools : []
@@ -123,7 +124,7 @@ export function useAgent(
    */
   const refresh = (vo: ModelConfig, type: Source) => {
     if (type === 'model') {
-      const { default_model_config_id, capability, ...rest } = vo
+      const { default_model_config_id, input_modalities, output_modalities, ...rest } = vo
       if (default_model_config_id !== values.default_model_config_id) {
         const fileUpload = { ...values.features?.file_upload }
         Object.keys(fileUpload).forEach(key => {
@@ -136,7 +137,8 @@ export function useAgent(
       }
       form.setFieldsValue({
         default_model_config_id,
-        capability,
+        input_modalities,
+        output_modalities,
         model_parameters: {...rest}
       })
       if (default_model_config_id === values?.default_model_config_id) {
@@ -214,7 +216,7 @@ export function useAgent(
    * Fetch available models list
    */
   const getModels = () => {
-    getModelList({ type: 'llm,chat', pagesize: 100, page: 1, is_active: true })
+    getModelList({ type: 'llm', pagesize: 100, page: 1 })
       .then(res => {
         const response = res as { items: Model[] }
         setModelList(response.items)
@@ -230,13 +232,19 @@ export function useAgent(
     if (values?.default_model_config_id && modelList.length > 0) {
       const filterValue = modelList.find(item => item.id === values.default_model_config_id)
       setDefaultModel(filterValue as Model | null)
-      setChatList([{
-        label: filterValue?.name || '',
-        model_config_id: filterValue?.id,
-        model_parameters: {...(values?.model_parameters || {})} as unknown as ModelConfig,
-        list: []
-      }])
-      form.setFieldsValue({ capability: filterValue?.capability })
+
+      if (filterValue?.is_available) {
+        setChatList([{
+          label: filterValue?.name || '',
+          model_config_id: filterValue?.id,
+          model_parameters: {...(values?.model_parameters || {})} as unknown as ModelConfig,
+          list: []
+        }])
+      }
+      if (filterValue) {
+        form.setFieldsValue({ input_modalities: filterValue.input_modalities, output_modalities: filterValue.output_modalities })
+        form.setFieldValue(['model_parameters', 'features'], filterValue.features || [])
+      }
     }
   }, [modelList, values?.default_model_config_id])
 

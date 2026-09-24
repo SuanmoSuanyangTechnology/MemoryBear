@@ -567,7 +567,6 @@ async def _handle_after_turn(
             features=kwargs.get("features_config", {}),
             conversation_id=kwargs.get("conversation_id"),
             current_provider=kwargs.get("api_key_provider"),
-            current_is_omni=kwargs.get("api_key_is_omni", False),
             model_config_id=kwargs.get("model_config_id"),
         )
     except Exception:

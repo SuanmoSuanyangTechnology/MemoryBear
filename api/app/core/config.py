@@ -183,6 +183,9 @@ class Settings:
     LLM_MAX_RETRIES: int = int(os.getenv("LLM_MAX_RETRIES", "2"))
     LLM_NETWORK_RETRY_ATTEMPTS: int = int(os.getenv("LLM_NETWORK_RETRY_ATTEMPTS", "3"))
     EMBEDDING_BATCH_SIZE: int = int(os.getenv("EMBEDDING_BATCH_SIZE", "10"))
+    PREFERENCE_WRITE_TIMEOUT_SECONDS: float = float(
+        os.getenv("PREFERENCE_WRITE_TIMEOUT_SECONDS", "300")
+    )
 
     # Fast Write BERT 
     FAST_WRITE_EMOTION_URL: str = os.getenv("FAST_WRITE_EMOTION_URL", "")
@@ -199,6 +202,16 @@ class Settings:
     SCENE_CONTINUITY_TIMEOUT_SECONDS: float = max(
         0.1, float(os.getenv("SCENE_CONTINUITY_TIMEOUT_SECONDS", "2.0"))
     )
+    # Statement 三分类小模型（statement 拆分阶段 2，/v1/rerank 打分，复用 FAST_WRITE_EMOTION_URL；Key/Model 留空则全量走备用 LLM 兜底）
+    STATEMENT_CLASSIFIER_TIMEOUT_SECONDS: float = max(
+        0.1, float(os.getenv("STATEMENT_CLASSIFIER_TIMEOUT_SECONDS", "10.0"))
+    )
+    STATEMENT_TYPE_CLASSIFIER_API_KEY: str = os.getenv("STATEMENT_TYPE_CLASSIFIER_API_KEY", "")
+    STATEMENT_TYPE_CLASSIFIER_MODEL: str = os.getenv("STATEMENT_TYPE_CLASSIFIER_MODEL", "")
+    TEMPORAL_TYPE_CLASSIFIER_API_KEY: str = os.getenv("TEMPORAL_TYPE_CLASSIFIER_API_KEY", "")
+    TEMPORAL_TYPE_CLASSIFIER_MODEL: str = os.getenv("TEMPORAL_TYPE_CLASSIFIER_MODEL", "")
+    UNSOLVED_REFERENCE_CLASSIFIER_API_KEY: str = os.getenv("UNSOLVED_REFERENCE_CLASSIFIER_API_KEY", "")
+    UNSOLVED_REFERENCE_CLASSIFIER_MODEL: str = os.getenv("UNSOLVED_REFERENCE_CLASSIFIER_MODEL", "")
     MEMORY_MESSAGE_MAX_CONTENT_CHARS: int = max(
         1, int(os.getenv("MEMORY_MESSAGE_MAX_CONTENT_CHARS", "12000"))
     )

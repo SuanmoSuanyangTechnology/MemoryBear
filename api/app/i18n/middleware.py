@@ -66,8 +66,8 @@ class LanguageMiddleware(BaseHTTPMiddleware):
         # Process the request
         response = await call_next(request)
         
-        # Add Content-Language header to response
-        response.headers["Content-Language"] = language
+        # Preserve the language selected by an upstream service.
+        response.headers.setdefault("Content-Language", language)
         
         return response
 

@@ -37,7 +37,7 @@ const configList = [
   {
     key: 'reflection_model_id',
     type: 'modelSelect',
-    params: { type: 'chat,llm' }, // chat,llm
+    params: { type: 'llm' }, // chat,llm
   },
   // Iteration period
   {
