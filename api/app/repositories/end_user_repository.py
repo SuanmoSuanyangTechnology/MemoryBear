@@ -315,10 +315,6 @@ class EndUserRepository:
             )
             raise
 
-    async def get_memory_tags_by_workspace_async(
-        self, workspace_id: uuid.UUID
-    ) -> List[list]:
-        """获取指定 workspace 下活跃终端用户的 memory_tags 数组列表。
     @redis_cache(prefix="hot_tags", id_arg="workspace_id", skip_args=["self"])
     async def get_hot_memory_tags_by_workspace_async(
         self,
