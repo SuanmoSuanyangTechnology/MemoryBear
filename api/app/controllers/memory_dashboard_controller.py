@@ -3,6 +3,7 @@ from typing import List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from app.core.logging_config import get_api_logger
@@ -11,7 +12,7 @@ from app.core.error_codes import BizCode
 from app.core.quota_manager import get_end_user_memory_limit
 from app.core.response_utils import fail, success
 from app.core.utils.datetime_utils import to_timestamp_ms, utcnow_naive
-from app.db import get_db, get_async_db_context
+from app.db import get_db, get_async_db, get_async_db_context
 from app.dependencies import get_current_user, get_current_user_async, CurrentUserSnapshot
 from app.models.user_model import User
 from app.schemas.memory_dashboard_schema import EndUserMemoryCountsRequest
@@ -584,8 +585,8 @@ async def dashboard_data(
     end_user_id: Optional[str] = Query(None, description="可选的用户ID"),
     start_date: Optional[int] = Query(None, description="开始时间戳（毫秒）"),
     end_date: Optional[int] = Query(None, description="结束时间戳（毫秒）"),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db),
+    current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ):
     """
     整合dashboard数据接口
@@ -617,7 +618,6 @@ async def dashboard_data(
     """
     workspace_id = current_user.current_workspace_id
     api_logger.info(f"用户 {current_user.username} 请求获取工作空间 {workspace_id} 的dashboard整合数据")
-    
     # 如果没有提供时间范围，默认使用最近30天
     if start_date is None or end_date is None:
         from datetime import timedelta
@@ -628,14 +628,13 @@ async def dashboard_data(
         api_logger.info(f"使用默认时间范围: {start_dt} 到 {end_dt}")
     
     # 获取 storage_type，如果为 None 则使用默认值
-    storage_type = workspace_service.get_workspace_storage_type(
+    storage_type = await workspace_service.get_workspace_storage_type_async(
         db=db,
         workspace_id=workspace_id,
         user=current_user
     )
     if storage_type is None:
         storage_type = 'neo4j'
-    
     
     # 根据 storage_type 决定返回哪个数据对象
     # 如果是 'rag'，neo4j_data 为 null；否则 rag_data 为 null
@@ -648,7 +647,7 @@ async def dashboard_data(
     try:
         # 如果 storage_type 为 'neo4j' 或空，获取 neo4j_data
         if storage_type == 'neo4j':
-            neo4j_data = {
+            neo4j_data: dict[str, int | None] = {
                 "total_memory": None,
                 "total_app": None,
                 "total_knowledge": None,
@@ -656,27 +655,25 @@ async def dashboard_data(
             }
             
             # 1. 获取记忆总量（total_memory）—— neo4j 独有逻辑：查询 neo4j 存储节点
+            #    本接口只消费总量数值，走仅总量版本，宿主明细行不查、不传
             try:
-                async with get_async_db_context() as async_db:
-                    total_memory_data = await memory_dashboard_service.get_workspace_total_memory_count(
-                        db=async_db,
-                        workspace_id=workspace_id,
-                        current_user=current_user,
-                        end_user_id=end_user_id
-                    )
-                neo4j_data["total_memory"] = total_memory_data.get("total_memory_count", 0)
+                neo4j_data["total_memory"] = await memory_dashboard_service.get_workspace_total_memory_count_only_async(
+                    db=db,
+                    workspace_id=workspace_id,
+                    current_user=current_user,
+                    end_user_id=end_user_id
+                )
                 api_logger.info(f"成功获取记忆总量: {neo4j_data['total_memory']}")
             except Exception as e:
                 api_logger.warning(f"获取记忆总量失败: {str(e)}")
-            
             # 2. 获取共享统计数据（total_app、total_knowledge、total_api_call）
-            common_stats = memory_dashboard_service.get_dashboard_common_stats(db, workspace_id)
+            common_stats = await memory_dashboard_service.get_dashboard_common_stats_async(db, workspace_id)
             neo4j_data.update(common_stats)
             api_logger.info(f"成功获取共享统计: app={common_stats['total_app']}, knowledge={common_stats['total_knowledge']}, api_call={common_stats['total_api_call']}")
             
             # 计算昨日对比
             try:
-                changes = memory_dashboard_service.get_dashboard_yesterday_changes(
+                changes = await memory_dashboard_service.get_dashboard_yesterday_changes_async(
                     db=db,
                     workspace_id=workspace_id,
                     storage_type=storage_type,
@@ -691,7 +688,6 @@ async def dashboard_data(
                     "total_knowledge_change": None,
                     "total_api_call_change": None,
                 })
-
             result["neo4j_data"] = neo4j_data
             api_logger.info("成功获取neo4j_data")
         
@@ -706,20 +702,20 @@ async def dashboard_data(
             
             # 1. 获取记忆总量（total_memory）—— rag 独有逻辑：查询 document 表的 chunk_num
             try:
-                total_chunk = memory_dashboard_service.get_rag_user_kb_total_chunk(db, current_user)
+                total_chunk = await memory_dashboard_service.get_rag_user_kb_total_chunk_async(db, current_user)
                 rag_data["total_memory"] = total_chunk
                 api_logger.info(f"成功获取RAG记忆总量: {total_chunk}")
             except Exception as e:
                 api_logger.warning(f"获取RAG记忆总量失败: {str(e)}")
             
             # 2. 获取共享统计数据（total_app、total_knowledge、total_api_call）
-            common_stats = memory_dashboard_service.get_dashboard_common_stats(db, workspace_id)
+            common_stats = await memory_dashboard_service.get_dashboard_common_stats_async(db, workspace_id)
             rag_data.update(common_stats)
             api_logger.info(f"成功获取共享统计: app={common_stats['total_app']}, knowledge={common_stats['total_knowledge']}, api_call={common_stats['total_api_call']}")
             
             # 计算昨日对比
             try:
-                changes = memory_dashboard_service.get_dashboard_yesterday_changes(
+                changes = await memory_dashboard_service.get_dashboard_yesterday_changes_async(
                     db=db,
                     workspace_id=workspace_id,
                     storage_type=storage_type,
