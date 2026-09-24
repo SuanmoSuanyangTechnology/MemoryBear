@@ -288,6 +288,33 @@ class EndUserRepository:
             db_logger.error(f"查询工作空间 {workspace_id} 下终端用户时出错: {str(e)}")
             raise
 
+    async def get_active_end_user_ids_page_async(
+        self,
+        workspace_id: uuid.UUID,
+        after_id: uuid.UUID | None = None,
+        limit: int = 200,
+    ) -> List[uuid.UUID]:
+        """按 ID 游标分页查询 workspace 下的活跃终端用户 ID。"""
+        try:
+            stmt = select(EndUser.id).where(
+                EndUser.workspace_id == workspace_id,
+                EndUser.is_active.is_(True),
+            )
+            if after_id is not None:
+                stmt = stmt.where(EndUser.id > after_id)
+            result = await self.db.execute(
+                stmt.order_by(EndUser.id.asc()).limit(limit)
+            )
+            return list(result.scalars().all())
+        except Exception as e:
+            await self.db.rollback()
+            db_logger.error(
+                "分页查询工作空间 %s 下活跃终端用户 ID 时出错: %s",
+                workspace_id,
+                str(e),
+            )
+            raise
+
     @redis_cache(prefix="hot_tags", id_arg="workspace_id", skip_args=["self"])
     async def get_hot_memory_tags_by_workspace_async(
         self,

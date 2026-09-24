@@ -2,7 +2,8 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import select, desc, func
+from sqlalchemy import any_, bindparam, desc, func, select
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
@@ -12,6 +13,7 @@ from app.models import Conversation, Message
 from app.models.conversation_model import ConversationDetail
 
 logger = get_db_logger()
+_EXCLUDED_APP_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 
 
 class ConversationRepository:
@@ -124,7 +126,7 @@ class ConversationRepository:
         stmt = select(Conversation).where(
             Conversation.user_id == str(user_id),
             Conversation.is_active.is_(is_activate),
-            Conversation.app_id != "00000000-0000-0000-0000-000000000001"
+            Conversation.app_id != _EXCLUDED_APP_ID
         )
 
         if workspace_id:
@@ -158,7 +160,27 @@ class ConversationRepository:
         stmt = select(sa_func.count()).select_from(Conversation).where(
             Conversation.user_id == str(user_id),
             Conversation.is_active.is_(True),
-            Conversation.app_id != "00000000-0000-0000-0000-000000000001",
+            Conversation.app_id != _EXCLUDED_APP_ID,
+        )
+        result = await self.db.execute(stmt)
+        return int(result.scalar_one() or 0)
+
+    async def get_active_conversation_count_by_user_ids_async(
+        self,
+        user_ids: list[uuid.UUID],
+    ) -> int:
+        """统计一批终端用户的活跃会话总数。"""
+        if not user_ids:
+            return 0
+        user_ids_param = bindparam(
+            "workspace_statistics_user_ids",
+            value=[str(user_id) for user_id in user_ids],
+            type_=ARRAY(Conversation.user_id.type),
+        )
+        stmt = select(func.count()).select_from(Conversation).where(
+            Conversation.user_id == any_(user_ids_param),
+            Conversation.is_active.is_(True),
+            Conversation.app_id != _EXCLUDED_APP_ID,
         )
         result = await self.db.execute(stmt)
         return int(result.scalar_one() or 0)
@@ -174,6 +196,32 @@ class ConversationRepository:
             .where(
                 Conversation.user_id == user_id,
                 MemoryMessage.message_seq > sa_func.coalesce(Conversation.write_cursor, 0),
+            )
+        )
+        result = await self.db.execute(stmt)
+        return int(result.scalar_one() or 0)
+
+    async def get_pending_write_conversation_count_by_user_ids_async(
+        self,
+        user_ids: list[uuid.UUID],
+    ) -> int:
+        """统计一批终端用户中存在待写入消息的会话总数。"""
+        if not user_ids:
+            return 0
+        from app.models.memory_message_model import MemoryMessage
+
+        user_ids_param = bindparam(
+            "workspace_statistics_user_ids",
+            value=[str(user_id) for user_id in user_ids],
+            type_=ARRAY(Conversation.user_id.type),
+        )
+        stmt = (
+            select(func.count(func.distinct(Conversation.id)))
+            .select_from(Conversation)
+            .join(MemoryMessage, MemoryMessage.conversation_id == Conversation.id)
+            .where(
+                Conversation.user_id == any_(user_ids_param),
+                MemoryMessage.message_seq > func.coalesce(Conversation.write_cursor, 0),
             )
         )
         result = await self.db.execute(stmt)

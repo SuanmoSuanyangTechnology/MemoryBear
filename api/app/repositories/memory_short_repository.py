@@ -5,7 +5,8 @@ import datetime
 import uuid
 from typing import List, Optional, Dict
 
-from sqlalchemy import select
+from sqlalchemy import any_, bindparam, func, select
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
@@ -94,6 +95,25 @@ class ShortTermMemoryRepository:
         except Exception as e:
             db_logger.error(f"异步查询短期记忆数量出错: end_user_id={end_user_id}, error={str(e)}")
             raise
+
+    async def count_by_user_ids_async(
+        self,
+        end_user_ids: List[uuid.UUID],
+    ) -> int:
+        """统计一批终端用户的短期记忆总数。"""
+        if not end_user_ids:
+            return 0
+        end_user_ids_param = bindparam(
+            "workspace_statistics_end_user_ids",
+            value=[str(end_user_id) for end_user_id in end_user_ids],
+            type_=ARRAY(ShortTermMemory.end_user_id.type),
+        )
+        result = await self.db.execute(
+            select(func.count()).select_from(ShortTermMemory).where(
+                ShortTermMemory.end_user_id == any_(end_user_ids_param)
+            )
+        )
+        return int(result.scalar_one() or 0)
 
 
     def get_latest_by_user_id(self, end_user_id: str, limit: int = 5) -> List[ShortTermMemory]:
@@ -572,4 +592,3 @@ class LongTermMemoryRepository:
             self.db.rollback()
             db_logger.error(f"创建或更新长期记忆记录时出错: {str(e)}")
             raise
-
