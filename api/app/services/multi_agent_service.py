@@ -15,7 +15,7 @@ from app.schemas.multi_agent_schema import (
     MultiAgentConfigUpdate,
     MultiAgentRunRequest
 )
-from app.services.model_service import ModelApiKeyService
+from app.services.model_service import ModelApiKeyService, ModelConfigService
 from app.services.multi_agent_orchestrator import MultiAgentOrchestrator
 from app.core.exceptions import ResourceNotFoundException, BusinessException
 from app.core.error_codes import BizCode
@@ -308,7 +308,11 @@ class MultiAgentService:
                 tenant_id=tenant_id,
             )
             if not model_api_key:
-                raise ResourceNotFoundException("模型配置", str(data.default_model_config_id))
+                ModelConfigService.raise_model_unavailable(
+                    self.db,
+                    data.default_model_config_id,
+                    tenant_id=tenant_id,
+                )
 
         # 3. 验证子 Agent 存在并获取发布版本 ID
         for sub_agent in data.sub_agents:

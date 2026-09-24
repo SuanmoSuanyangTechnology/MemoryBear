@@ -251,7 +251,12 @@ export interface ShareModalRefProps {
 
 // 创建数据集
 export interface CreateDatasetModalRef {
-  handleOpen: (kb_id?: string,parent_id?: string) => void;
+  handleOpen: (
+    kb_id?: string,
+    parent_id?: string,
+    documentFolderPath?: Array<{ id: string; name: string }>,
+    knowledgeBaseFolderPath?: Array<{ id: string; name: string }>,
+  ) => void;
 }
 
 export interface CreateDatasetModalRefProps {

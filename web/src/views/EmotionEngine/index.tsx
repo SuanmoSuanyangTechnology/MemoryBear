@@ -38,7 +38,7 @@ const configList = [
   {
     key: 'emotion_model_id',
     type: 'modelSelect',
-    params: { type: 'chat,llm' }, // chat,llm
+    params: { type: 'llm' }, // chat,llm
   },
   {
     key: 'emotion_min_intensity',

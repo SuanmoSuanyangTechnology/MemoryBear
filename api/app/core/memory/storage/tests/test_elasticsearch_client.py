@@ -531,6 +531,7 @@ def test_elasticsearch_index_definitions_are_explicit_and_unique() -> None:
         MemoryNodeType.EXTRACTED_ENTITY: (3, 1),
         MemoryNodeType.MEMORY_SUMMARY: (3, 1),
         MemoryNodeType.PERCEPTUAL: (3, 1),
+        MemoryNodeType.PREFERENCE: (1, 1),
         MemoryNodeType.SCENE_SUMMARY: (2, 1),
         MemoryNodeType.STATEMENT: (3, 1),
         MemoryNodeType.USER_SOURCE: (3, 1),
@@ -908,8 +909,8 @@ async def test_elastic_client_get_node_uses_filter_projection_and_sort() -> None
             "size": SEARCH_BATCH_SIZE,
             "source_includes": ["id", "status"],
             "sort": [{"score": "desc"}, {"_shard_doc": "asc"}],
-            "allow_partial_search_results": False,
             "pit": {"id": "pit-1", "keep_alive": PIT_KEEP_ALIVE},
+            "allow_partial_search_results": False,
         }
     ]
     assert fake.close_point_in_time_calls == [{"id": "pit-1"}]

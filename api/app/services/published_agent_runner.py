@@ -22,6 +22,7 @@ from app.models import App, AppRelease, ModelConfig
 from app.models.app_model import AppStatus, AppType
 from app.schemas.app_schema import FileInput
 from app.services.draft_run_service import AgentRunService
+from app.services.model_service import ModelConfigService
 from app.utils.app_config_utils import agent_config_4_app_release
 
 ReleasePolicy = Literal["current", "pinned"]
@@ -107,8 +108,11 @@ class PublishedAgentRunner:
         if not release.default_model_config_id:
             raise BusinessException("Agent 发布版本缺少模型配置", BizCode.AGENT_CONFIG_MISSING)
 
-        model_config = await db.get(ModelConfig, release.default_model_config_id)
-        if not model_config or not model_config.is_active:
+        # 走运行时读数入口：模型不存在 / 已弃用在此拒止（db.get 不预加载 model_base）。
+        model_config = await ModelConfigService.get_model_by_id_async(
+            db, release.default_model_config_id
+        )
+        if not model_config.is_active:
             raise BusinessException("Agent 发布版本引用的模型不存在或已停用", BizCode.NOT_FOUND)
 
         return PublishedAgentRuntime(app=app, release=release, model_config=model_config)

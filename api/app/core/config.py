@@ -183,6 +183,9 @@ class Settings:
     LLM_MAX_RETRIES: int = int(os.getenv("LLM_MAX_RETRIES", "2"))
     LLM_NETWORK_RETRY_ATTEMPTS: int = int(os.getenv("LLM_NETWORK_RETRY_ATTEMPTS", "3"))
     EMBEDDING_BATCH_SIZE: int = int(os.getenv("EMBEDDING_BATCH_SIZE", "10"))
+    PREFERENCE_WRITE_TIMEOUT_SECONDS: float = float(
+        os.getenv("PREFERENCE_WRITE_TIMEOUT_SECONDS", "300")
+    )
 
     # Fast Write BERT 
     FAST_WRITE_EMOTION_URL: str = os.getenv("FAST_WRITE_EMOTION_URL", "")

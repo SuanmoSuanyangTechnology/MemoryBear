@@ -17,7 +17,6 @@ from sqlalchemy import (
 )
 
 from app.db import Base
-from app.core.memory.storage.enums import MemoryNodeType
 from app.core.utils.datetime_utils import utcnow_naive
 
 
@@ -49,10 +48,6 @@ class OutboxEvent(Base):
     __table_args__ = (
         PrimaryKeyConstraint("id", name="pk_memory_storage_outbox_events"),
         UniqueConstraint("sequence", name="uq_memory_outbox_sequence"),
-        CheckConstraint(
-            "label IN (" + ", ".join(repr(label.value) for label in MemoryNodeType) + ")",
-            name="ck_memory_outbox_label",
-        ),
         CheckConstraint(
             "operation IN ('upsert', 'delete', 'draft_delete')",
             name="ck_memory_outbox_operation",

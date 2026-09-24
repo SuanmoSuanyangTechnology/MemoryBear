@@ -3,7 +3,7 @@ from datetime import datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
-from typing import TYPE_CHECKING, List, Optional, Dict, Any, Sequence, Tuple
+from typing import TYPE_CHECKING, Iterable, List, NoReturn, Optional, Dict, Any, Sequence, Tuple
 import uuid
 import math
 import time
@@ -13,12 +13,13 @@ from urllib.parse import urlparse
 from pydantic import SecretStr
 
 from app.models.models_model import (
-    LoadBalanceStrategy,
-    ModelApiKey,
-    ModelCapability,
+    LLM_FAMILY_TYPES,
     ModelConfig,
-    ModelProvider,
+    ModelApiKey,
     ModelType,
+    LoadBalanceStrategy,
+    ModelBase,
+    ModelProvider,
 )
 from app.repositories.model_repository import ModelConfigRepository, ModelApiKeyRepository, ModelBaseRepository
 from app.schemas import model_schema
@@ -44,6 +45,7 @@ from app.utils.redis_cache import (invalidate_workspace_model_options, get_json_
 from redbear_model import (
     CredentialDecryptError,
     FailoverPlan,
+    ModelConfigDeprecatedError,
     ModelConfigInactiveError,
     RedBearModelError,
     ResolvedModelConfig,
@@ -60,6 +62,14 @@ from app.services.channel_registry import (
 )
 from app.services.channel_service import ChannelService
 from app.services.model_impact_service import collect_model_impact
+from app.services.model_profile_view import (
+    legacy_view,
+    normalize_type,
+    profile_columns,
+    wire_model_base,
+    wire_model_config,
+    write_columns,
+)
 
 if TYPE_CHECKING:
     from redbear_model import ImageEmbeddingContent
@@ -149,11 +159,11 @@ def _shared_validation_config(
     api_key: str,
     api_base: str | None,
     model_type: str,
-    capability: list | None,
+    input_modalities: list | None = None,
+    output_modalities: list | None = None,
+    features: list | None = None,
 ) -> "ResolvedModelConfig":
-    from redbear_model import (
-        ModelCapability as SharedModelCapability,
-    )
+    from redbear_model import ModelProfile as SharedModelProfile
     from redbear_model import (
         ModelProvider as SharedModelProvider,
     )
@@ -161,21 +171,24 @@ def _shared_validation_config(
         ModelRuntimeOptions,
         ResolvedModelConfig,
     )
-    from redbear_model import (
-        ModelType as SharedModelType,
-    )
 
+    shared_provider = SharedModelProvider(_enum_value(provider))
     return ResolvedModelConfig(
         model_config_id=_MODEL_VALIDATION_CONFIG_ID,
         key_id=_MODEL_VALIDATION_KEY_ID,
         tenant_id=_MODEL_VALIDATION_TENANT_ID,
-        provider=SharedModelProvider(_enum_value(provider)),
-        model_type=SharedModelType(_enum_value(model_type)),
+        provider=shared_provider,
         model_name=model_name,
         api_key=SecretStr(api_key),
         base_url=api_base,
-        capabilities=tuple(
-            SharedModelCapability(_enum_value(item)) for item in (capability or [])
+        profile=SharedModelProfile.from_stored_fields(
+            model_id=_MODEL_VALIDATION_CONFIG_ID,
+            tenant_id=_MODEL_VALIDATION_TENANT_ID,
+            type=_enum_value(model_type),
+            provider=shared_provider,
+            input_modalities=tuple(_enum_value(item) for item in (input_modalities or [])),
+            output_modalities=tuple(_enum_value(item) for item in (output_modalities or [])),
+            features=tuple(_enum_value(item) for item in (features or [])),
         ),
         runtime=ModelRuntimeOptions(timeout_s=10.0, max_retries=0),
     )
@@ -183,20 +196,6 @@ def _shared_validation_config(
 
 def is_asr_model(model_type: str) -> bool:
     return _enum_value(model_type) == _enum_value(ModelType.ASR)
-
-
-def _canonical_model_type_and_capabilities(
-    model_type: ModelType | str,
-    capabilities: list[str] | None,
-) -> tuple[str, list[str]]:
-    canonical_type = ModelType(model_type).value
-    normalized_capabilities = list(dict.fromkeys(capabilities or []))
-    if (
-        canonical_type == ModelType.ASR.value
-        and ModelCapability.AUDIO.value not in normalized_capabilities
-    ):
-        normalized_capabilities.append(ModelCapability.AUDIO.value)
-    return canonical_type, normalized_capabilities
 
 
 def _require_asr_model_configuration(provider: str, model_type: str) -> None:
@@ -224,6 +223,31 @@ def _require_asr_api_base(api_base: str | None) -> None:
 def _reject_asr_composite(model_type: ModelType | str | None) -> None:
     if model_type is not None and is_asr_model(model_type):
         raise BusinessException("ASR 模型暂不支持组合配置", BizCode.INVALID_PARAMETER)
+
+
+def _assert_plaza_entry_absent(
+    db: Session,
+    *,
+    name: str | None,
+    provider: str | None,
+    model_type: str | None,
+    source_base_id: uuid.UUID | None = None,
+) -> None:
+    """入口守卫：(name, provider, type) 命中广场未下线基础模型 → 引导走模型广场添加。
+
+    已下线（is_deprecated）放行——平台不再提供，允许自带渠道自建；
+    `source_base_id` 命中的 base 是本行来源（广场添加而来），不拦。
+    """
+    base = ModelBaseRepository.get_by_name_provider_type(
+        db, (name or "").strip(), provider, normalize_type(model_type)
+    )
+    if base is None or base.is_deprecated or base.id == source_base_id:
+        return
+    raise BusinessException(
+        f"模型 '{base.name}' 已收录在模型广场，请从模型广场添加",
+        BizCode.MODEL_AVAILABLE_IN_PLAZA,
+        context={"model_base_id": str(base.id)},
+    )
 
 
 def _validation_image() -> "ImageEmbeddingContent":
@@ -405,7 +429,7 @@ def _invalidate_model_base_caches(configs: Sequence[ModelConfig]) -> None:
 def _probe_availability(
     db: Session, rows: Sequence[ModelConfig], tenant_id: uuid.UUID | None
 ) -> dict[uuid.UUID, bool]:
-    """批量渠道可用性探测（列表页固定 ≤2 次查询）；tenant_id 缺失（公共目录）时不探测。"""
+    """批量渠道可用性探测（列表页固定 ≤3 次查询）；tenant_id 缺失（公共目录）时不探测。"""
     if tenant_id is None or not rows:
         return {}
     return {
@@ -414,13 +438,59 @@ def _probe_availability(
     }
 
 
+def _derived_available(model: ModelConfig, availability: dict[uuid.UUID, bool]) -> bool | None:
+    """派生可用性（D15③）：弃用/已禁用恒 False；否则渠道候选探测结果；未探测为 None。"""
+    if model.model_base is not None and model.model_base.is_deprecated:
+        return False
+    if not model.is_active:
+        return False
+    return availability.get(model.id)
+
+
 def _with_availability(
     model: ModelConfig, availability: dict[uuid.UUID, bool]
 ) -> model_schema.ModelConfig:
-    item = model_schema.ModelConfig.model_validate(model)
-    if model.id in availability:
+    item = wire_model_config(model)
+    if item.is_deprecated or not model.is_active:
+        # D15：弃用派生封禁（不依赖探测，任意租户口径恒不可用）；已禁用同口径
+        item.is_available = False
+    elif model.id in availability:
         item.is_available = availability[model.id]
     return item
+
+
+_ABILITY_FIELDS = {
+    "type",
+    "provider",
+    "input_modalities",
+    "output_modalities",
+    "features",
+}
+
+
+def _config_update_payload(model_data: ModelConfigUpdate, existing_model: ModelConfig) -> Dict[str, Any]:
+    """更新请求 → ORM 更新 dict（type 归一 + 三新列换算，旧列停写）。
+
+    未提交的能力维度以 `existing_model` 派生视图补齐（单字段更新不清空其余维度）；
+    请求未触达能力字段时三列不重写（存量行保持原样，避免无谓写入）。
+    """
+    fields_set = model_data.model_fields_set
+    payload = model_data.model_dump(
+        exclude_unset=True,
+        exclude={"input_modalities", "output_modalities", "features"},
+    )
+    if "type" in fields_set:
+        payload["type"] = normalize_type(model_data.type)
+    if fields_set & _ABILITY_FIELDS:
+        payload.update(
+            write_columns(
+                input_modalities=model_data.input_modalities if "input_modalities" in fields_set else None,
+                output_modalities=model_data.output_modalities if "output_modalities" in fields_set else None,
+                features=model_data.features if "features" in fields_set else None,
+                fallback_row=existing_model,
+            )
+        )
+    return payload
 
 
 class ModelConfigService:
@@ -431,13 +501,51 @@ class ModelConfigService:
         db: Session, model_config: ModelConfig, tenant_id: uuid.UUID | None = None
     ) -> bool | None:
         """单模型渠道可用性（详情展示）；tenant_id 缺失时返回 None（未探测）。"""
+        if model_config.model_base is not None and model_config.model_base.is_deprecated:
+            return False
+        if not model_config.is_active:
+            return False
         if tenant_id is None:
             return None
         return bool(candidate_channels_sync(db, model_config, tenant_id=tenant_id))
 
     @staticmethod
+    def assert_refs_publishable(db: Session, config_ids: Iterable[uuid.UUID]) -> None:
+        """发布门禁：引用的模型配置须处于启用且基础模型未下线状态。
+
+        单条批量查询（无 N+1）；一次聚合抛出，已下线优先于已禁用（D15⑦ 弃用判定前置）。
+        引用行不存在（已硬删/非法 id）不拦截，交由运行期报错。
+        """
+        ids = list(dict.fromkeys(config_ids))
+        if not ids:
+            return
+        rows = (
+            db.query(
+                ModelConfig.id,
+                ModelConfig.name,
+                ModelConfig.is_active,
+                ModelBase.is_deprecated,
+            )
+            .outerjoin(ModelBase, ModelBase.id == ModelConfig.model_id)
+            .filter(ModelConfig.id.in_(ids))
+            .all()
+        )
+        deprecated = [row.name for row in rows if row.is_deprecated]
+        disabled = [row.name for row in rows if not row.is_active]
+        if deprecated:
+            raise BusinessException(
+                f"以下模型已下线，请更换后再发布：{'、'.join(deprecated)}",
+                BizCode.MODEL_DEPRECATED,
+            )
+        if disabled:
+            raise BusinessException(
+                f"以下模型已禁用，请更换后再发布：{'、'.join(disabled)}",
+                BizCode.INVALID_PARAMETER,
+            )
+
+    @staticmethod
     def get_model_by_id(db: Session, model_id: uuid.UUID, tenant_id: uuid.UUID | None = None) -> ModelConfig:
-        """根据ID获取模型配置"""
+        """运行时读数：弃用即拒（D15 读侧派生封禁）。"""
         model = ModelConfigRepository.get_by_id(db, model_id, tenant_id=tenant_id)
         if not model:
             raise BusinessException("模型配置不存在", BizCode.MODEL_NOT_FOUND)
@@ -449,20 +557,11 @@ class ModelConfigService:
         return model
 
     @staticmethod
-    async def get_model_by_id_async(
-            db: AsyncSession,
-            model_id: uuid.UUID,
-            tenant_id: uuid.UUID | None = None,
-    ) -> ModelConfig:
-        """Async version of get_model_by_id with the same availability checks."""
-        model = await ModelConfigRepository.get_by_id_async(db, model_id, tenant_id=tenant_id)
+    def get_model_detail(db: Session, model_id: uuid.UUID, tenant_id: uuid.UUID | None = None) -> ModelConfig:
+        """管理详情读数：弃用不拦截（D15②，响应带 is_deprecated 标记，前端置灰）。"""
+        model = ModelConfigRepository.get_by_id(db, model_id, tenant_id=tenant_id)
         if not model:
             raise BusinessException("模型配置不存在", BizCode.MODEL_NOT_FOUND)
-        if model.model_base and model.model_base.is_deprecated:
-            raise BusinessException(
-                f"模型 '{model.name}' 已弃用，请在模型配置中更换为其他模型",
-                BizCode.MODEL_DEPRECATED,
-            )
         return model
 
     @staticmethod
@@ -481,6 +580,52 @@ class ModelConfigService:
                 BizCode.MODEL_DEPRECATED,
             )
         return model
+
+    @staticmethod
+    def raise_model_unavailable(
+        db: Session,
+        model_config_id: uuid.UUID,
+        tenant_id: uuid.UUID | None = None,
+    ) -> NoReturn:
+        """凭据取不到时补全错误语义：模型不存在/已弃用/未启用/缺少 API Key（同步 db）。"""
+        ModelConfigService._raise_no_credential_error(
+            ModelConfigService.get_model_by_id(db, model_config_id, tenant_id=tenant_id)
+        )
+
+    @staticmethod
+    async def raise_model_unavailable_async(
+        db: AsyncSession,
+        model_config_id: uuid.UUID,
+        tenant_id: uuid.UUID | None = None,
+    ) -> NoReturn:
+        """异步版（语义同 sync 版）。"""
+        ModelConfigService._raise_no_credential_error(
+            await ModelConfigService.get_model_by_id_async(
+                db, model_config_id, tenant_id=tenant_id
+            )
+        )
+
+    @staticmethod
+    async def raise_model_unavailable_bridge_async(
+        db: Session | AsyncSession,
+        model_config_id: uuid.UUID,
+        tenant_id: uuid.UUID | None = None,
+    ) -> NoReturn:
+        """bridge 版：async 上下文里 db 可能是 Session（试运行宿主）或 AsyncSession。"""
+        if isinstance(db, AsyncSession):
+            await ModelConfigService.raise_model_unavailable_async(
+                db, model_config_id, tenant_id=tenant_id
+            )
+        ModelConfigService.raise_model_unavailable(db, model_config_id, tenant_id=tenant_id)
+
+    @staticmethod
+    def _raise_no_credential_error(model: ModelConfig) -> NoReturn:
+        if not model.is_active:
+            raise BusinessException(
+                "当前模型未启用，请在模型配置中确认 API Key 和 URL 已配置后启用模型",
+                BizCode.MODEL_CONFIG_INVALID,
+            )
+        raise BusinessException("模型配置缺少 API Key", BizCode.INVALID_PARAMETER)
 
     @staticmethod
     async def get_runtime_model_info_async(
@@ -518,17 +663,9 @@ class ModelConfigService:
         )
         if not api_key:
             # 冷路径补全错误语义（模型不存在/已弃用/未启用/缺少凭据）
-            model = await ModelConfigService.get_model_by_id_async(
-                db,
-                model_id,
-                tenant_id=tenant_id,
+            await ModelConfigService.raise_model_unavailable_async(
+                db, model_id, tenant_id=tenant_id
             )
-            if not model.is_active:
-                raise BusinessException(
-                    "当前模型未启用，请在模型配置中确认 API Key 和 URL 已配置后启用模型",
-                    BizCode.MODEL_CONFIG_INVALID,
-                )
-            raise BusinessException("模型配置缺少 API Key", BizCode.INVALID_PARAMETER)
 
         if cached_model_type is None:
             model = await ModelConfigService.get_model_by_id_async(
@@ -545,8 +682,9 @@ class ModelConfigService:
             api_key=api_key.api_key,
             api_base=api_key.api_base,
             provider=api_key.provider,
-            is_omni=api_key.is_omni,
-            capability=api_key.capability,
+            input_modalities=list(api_key.input_modalities or []),
+            output_modalities=list(api_key.output_modalities or []),
+            features=list(api_key.features or []),
             tenant_id=api_key.tenant_id,
             model_config_id=api_key.model_config_id,
             channel_id=api_key.channel_id,
@@ -555,11 +693,25 @@ class ModelConfigService:
 
     @staticmethod
     def get_model_list(db: Session, query: ModelConfigQuery, tenant_id: uuid.UUID | None = None) -> PageData:
-        """获取模型配置列表（含渠道可用性：候选链非空 = True）"""
+        """获取模型配置列表（含渠道可用性：候选链非空 = True）。
+
+        `is_available` 置位时：全量取行 → 批量探测 → 派生过滤 → 内存分页
+        （选择器隐藏已禁用/无渠道/已弃用模型，G1；租户模型量有界）。
+        """
         models, total = ModelConfigRepository.get_list(db, query, tenant_id=tenant_id)
-        pages = math.ceil(total / query.pagesize) if total > 0 else 0
 
         availability = _probe_availability(db, models, tenant_id)
+        if query.is_available is not None:
+            matched = [
+                model
+                for model in models
+                if _derived_available(model, availability) is query.is_available
+            ]
+            total = len(matched)
+            start = (query.page - 1) * query.pagesize
+            models = matched[start : start + query.pagesize]
+
+        pages = math.ceil(total / query.pagesize) if total > 0 else 0
         return PageData(
             page=PageMeta(
                 page=query.page,
@@ -584,6 +736,14 @@ class ModelConfigService:
 
         items = []
         for provider, models in provider_groups.items():
+            # `is_available` 置位时按派生可用性过滤（与 /models 同规则）；过滤空的分组整体移除
+            if query.is_available is not None:
+                models = [
+                    model for model in models
+                    if _derived_available(model, availability) is query.is_available
+                ]
+                if not models:
+                    continue
             # 验证每个模型并封装分组信息
             validated_models = [_with_availability(model, availability) for model in models]
             tags = list({model.type for model in validated_models})
@@ -622,8 +782,9 @@ class ModelConfigService:
         api_base: Optional[str] = None,
         model_type: str = "llm",
         test_message: str = "Hello",
-        is_omni: bool = False,
-        capability: Optional[list] = None,
+        input_modalities: Optional[list] = None,
+        output_modalities: Optional[list] = None,
+        features: Optional[list] = None,
     ) -> Dict[str, Any]:
         """验证模型配置是否有效
 
@@ -635,8 +796,9 @@ class ModelConfigService:
             api_base: API基础URL
             model_type: 模型类型 (llm/chat/embedding/rerank)
             test_message: 测试消息
-            is_omni: 是否为Omni模型
-            capability: 模型能力列表
+            input_modalities: 输入模态列表（契约 v2）
+            output_modalities: 输出模态列表（契约 v2）
+            features: 功能开关列表（契约 v2）
 
         Returns:
             Dict: 验证结果
@@ -684,18 +846,20 @@ class ModelConfigService:
                         "error": "API 未安装可选的 redbear-model 包，暂无法验证 Qwen3-VL 模型",
                         "error_type": "ModelRuntimeUnavailable",
                     }
-                validation_capability = list(capability or [])
-                if "vision" not in {
-                    _enum_value(item) for item in validation_capability
-                }:
-                    validation_capability.append("vision")
+                validation_input = [_enum_value(item) for item in (input_modalities or [])]
+                if "text" not in validation_input:
+                    validation_input.insert(0, "text")
+                if "image" not in validation_input:
+                    validation_input.append("image")
                 shared_config = _shared_validation_config(
                     model_name=model_name,
                     provider=provider_lower,
                     api_key=api_key,
                     api_base=api_base,
                     model_type=model_type_lower,
-                    capability=validation_capability,
+                    input_modalities=validation_input,
+                    output_modalities=output_modalities,
+                    features=features,
                 )
                 if is_qwen3_vl_embedding(shared_config):
                     return await _validate_qwen3_vl_embedding(
@@ -716,16 +880,17 @@ class ModelConfigService:
                 provider=provider,
                 api_key=api_key,
                 base_url=api_base,
-                is_omni=is_omni,
-                capability=capability,
+                input_modalities=[_enum_value(item) for item in (input_modalities or [])],
+                output_modalities=[_enum_value(item) for item in (output_modalities or [])],
+                features=[_enum_value(item) for item in (features or [])],
                 timeout=10.0,
                 max_retries=0,
             )
 
-            # 根据模型类型选择不同的验证方式
-            if model_type_lower in ["llm", "chat"]:
-                # LLM/Chat 模型验证 - 统一使用字符串输入
-                llm = RedBearLLM(model_config, type=ModelType.LLM if model_type_lower == "llm" else ModelType.CHAT)
+            # 根据模型类型选择不同的验证方式（含存量 "chat" 归一口径）
+            if model_type_lower in LLM_FAMILY_TYPES:
+                # LLM 族模型验证 - 统一使用字符串输入
+                llm = RedBearLLM(model_config, type=ModelType.LLM)
                 response = await llm.ainvoke(test_message)
                 elapsed_time = time.time() - start_time
 
@@ -984,6 +1149,16 @@ class ModelConfigService:
         _require_asr_api_base(credential.api_base)
         _require_supported_api_base(model_data.provider, credential.api_base, model_data.type)
         snapshot = model_data.model_dump(exclude={"credential"})
+        # 三新列按 ASR 实际模态定基（audio → text；旧列 capability/is_omni 停写）
+        snapshot.update(
+            write_columns(
+                row_type=model_data.type,
+                provider=model_data.provider,
+                input_modalities=model_data.input_modalities,
+                output_modalities=model_data.output_modalities,
+                features=model_data.features,
+            )
+        )
         await asyncio.to_thread(ModelConfigService._check_asr_model_name, snapshot, tenant_id)
         return await asyncio.to_thread(
             ModelConfigService._save_asr_model, snapshot, credential.model_dump(),
@@ -1002,17 +1177,11 @@ class ModelConfigService:
         ASR 模型登记时只校验配置结构，凭据在实际调用时验证；其他模型
         仍在网络活体验证通过后写入。
         """
+        # 广场已收录（同 name/provider/type 且未下线）→ 引导走广场添加，不再落重复自定义行
+        _assert_plaza_entry_absent(
+            db, name=model_data.name, provider=model_data.provider, model_type=model_data.type
+        )
         if is_asr_model(model_data.type):
-            canonical_type, capabilities = _canonical_model_type_and_capabilities(
-                model_data.type,
-                model_data.capability,
-            )
-            model_data = model_data.model_copy(
-                update={
-                    "type": ModelType(canonical_type),
-                    "capability": capabilities,
-                }
-            )
             return await ModelConfigService._create_asr_model(model_data, tenant_id, created_by)
         # 检查名称是否已存在（同租户内；先于任何网络调用）
         if ModelConfigRepository.get_by_name(db, model_data.name, provider=model_data.provider, tenant_id=tenant_id):
@@ -1033,17 +1202,35 @@ class ModelConfigService:
             api_base=credential.api_base,
             model_type=model_data.type,
             test_message="Hello",
-            is_omni=model_data.is_omni,
-            capability=model_data.capability,
+            input_modalities=model_data.input_modalities,
+            output_modalities=model_data.output_modalities,
+            features=model_data.features,
         )
         if not validation_result["valid"]:
             raise BusinessException(
                 f"模型配置验证失败: {validation_result['error']}", BizCode.INVALID_PARAMETER
             )
 
-        model_config_data = model_data.model_dump(exclude={"credential"})
-        # 添加租户ID
+        model_config_data = model_data.model_dump(
+            exclude={
+                "credential",
+                "input_modalities",
+                "output_modalities",
+                "features",
+            }
+        )
+        # 添加租户ID；type 归一（chat→llm）+ 三新列换算（旧列停写）
         model_config_data["tenant_id"] = tenant_id
+        model_config_data["type"] = normalize_type(model_data.type)
+        model_config_data.update(
+            write_columns(
+                row_type=model_data.type,
+                provider=provider,
+                input_modalities=model_data.input_modalities,
+                output_modalities=model_data.output_modalities,
+                features=model_data.features,
+            )
+        )
 
         try:
             model = ModelConfigRepository.create(db, model_config_data)
@@ -1079,7 +1266,26 @@ class ModelConfigService:
                                                  tenant_id=tenant_id):
                 raise BusinessException("模型名称已存在", BizCode.DUPLICATE_NAME)
 
-        model = ModelConfigRepository.update(db, model_id, model_data, tenant_id=tenant_id)
+        # 标识三元组（name/provider/type）变化时才校验广场收录，避免误伤存量行与
+        # 广场来源行的普通编辑（改描述、切启用态等）
+        fields_set = model_data.model_fields_set
+        new_triple = (
+            model_data.name if "name" in fields_set else existing_model.name,
+            model_data.provider if "provider" in fields_set else existing_model.provider,
+            normalize_type(model_data.type) if "type" in fields_set else existing_model.type,
+        )
+        if new_triple != (existing_model.name, existing_model.provider, existing_model.type):
+            _assert_plaza_entry_absent(
+                db,
+                name=new_triple[0],
+                provider=new_triple[1],
+                model_type=new_triple[2],
+                source_base_id=existing_model.model_id,
+            )
+
+        model = ModelConfigRepository.update(
+            db, model_id, _config_update_payload(model_data, existing_model), tenant_id=tenant_id
+        )
 
         db.commit()
         db.refresh(model)
@@ -1120,7 +1326,7 @@ class ModelConfigService:
 
         rows = ModelConfigRepository.get_members_by_provider_names(db, tenant_id, members)
         request_type = str(model_type)
-        compatible_types = {ModelType.LLM.value, ModelType.CHAT.value}
+        compatible_types = LLM_FAMILY_TYPES
         for provider, model_name in members:
             if provider == ModelProvider.COMPOSITE.value:
                 raise BusinessException(
@@ -1162,18 +1368,20 @@ class ModelConfigService:
         members = ModelConfigService._resolve_composite_members(model_data)
         ModelConfigService._validate_composite_members(db, tenant_id, members, model_data.type)
 
-        # 创建组合模型（空成员不得悬于启用态）
+        # 创建组合模型（空成员不得悬于启用态）；别名容器不虚报能力（三列固定最小集）
         model_config_data = {
             "tenant_id": tenant_id,
             "name": model_data.name,
-            "type": model_data.type,
+            "type": normalize_type(model_data.type),
             "logo": model_data.logo,
             "description": model_data.description,
             "provider": ModelProvider.COMPOSITE,
             "config": ModelConfigService._composite_config(model_data.config, members),
             "is_active": model_data.is_active and bool(members),
             "is_public": model_data.is_public,
-            "is_composite": True
+            "input_modalities": ["text"],
+            "output_modalities": ["text"],
+            "features": [],
         }
         if "load_balance_strategy" in model_data.model_fields_set:
             model_config_data["load_balance_strategy"] = model_data.load_balance_strategy
@@ -1193,8 +1401,6 @@ class ModelConfigService:
         if not existing_model:
             raise BusinessException("模型配置不存在", BizCode.MODEL_NOT_FOUND)
 
-        if not existing_model.is_composite:
-            raise BusinessException("该模型不是组合模型", BizCode.INVALID_PARAMETER)
         _reject_asr_composite(existing_model.type)
         old_cache_state = _model_option_cache_state(existing_model)
 
@@ -1203,6 +1409,9 @@ class ModelConfigService:
                                                  tenant_id=tenant_id):
                 raise BusinessException("模型名称已存在", BizCode.DUPLICATE_NAME)
 
+        if existing_model.provider != ModelProvider.COMPOSITE:
+            raise BusinessException("该模型不是组合模型", BizCode.INVALID_PARAMETER)
+
         members = ModelConfigService._resolve_composite_members(model_data)
         # 组合类型不可变更（controller 已拒 type），校验锚定既有 type
         ModelConfigService._validate_composite_members(db, tenant_id, members, existing_model.type)
@@ -1210,6 +1419,10 @@ class ModelConfigService:
         # 更新基本信息（空成员不得悬于启用态）
         existing_model.name = model_data.name
         # existing_model.type = model_data.type
+        # 别名容器三列固定最小集（与创建同口径；不回读 members 能力）
+        existing_model.input_modalities = ["text"]
+        existing_model.output_modalities = ["text"]
+        existing_model.features = []
         existing_model.logo = model_data.logo
         existing_model.description = model_data.description
         existing_model.config = ModelConfigService._composite_config(model_data.config, members)
@@ -1271,6 +1484,15 @@ class ModelApiKeyService:
         return api_key
 
     @staticmethod
+    def _stamp_profile_columns(api_key: ModelApiKey, model_config: ModelConfig) -> ModelApiKey:
+        """旧表 key 行无三列：运行时壳按 config 行派生视图补齐（消费方统一读三列，非映射属性）。"""
+        columns = profile_columns(model_config)
+        api_key.input_modalities = list(columns["input_modalities"])
+        api_key.output_modalities = list(columns["output_modalities"])
+        api_key.features = list(columns["features"])
+        return api_key
+
+    @staticmethod
     def _runtime_api_key_from_resolved(
         resolved: ResolvedModelConfig,
         *,
@@ -1278,8 +1500,9 @@ class ModelApiKeyService:
     ) -> ModelApiKey:
         """ResolvedModelConfig → 瞬时 ModelApiKey 兼容壳（不落库；id=channel_id）。
 
-        调用方只消费 .model_name/.api_key/.api_base/.provider/.is_omni/.capability
-        与 .id（usage 计数），形状与旧路径一致。
+        能力载体为 profile 三列（.input_modalities/.output_modalities/.features）；
+        旧列 .capability/.is_omni 为派生视图（仅 e2b 沙箱 payload 等冻结消费面读取，
+        内部消费方一律读三列，M10 随旧列删）。
 
         渠道 api_base 为空（provider 级渠道）时物化 provider 公共基地址（dashscope
         原生 SDK 组合在运行期再剥离为 /api/v1），与 RedBearModelConfig 的补默认
@@ -1288,15 +1511,19 @@ class ModelApiKeyService:
         failover_plan：请求内换渠道计划（spec §11.2），非映射类属瞬时挂载，
         不落库/不序列化；门面消费后自取（无 plan 时保持既有单候选行为）。
         """
+        capabilities, is_omni = resolved.profile.legacy_capability_view(resolved.provider)
         key = ModelApiKey(
             id=resolved.channel_id,
             model_name=resolved.model_name,
             provider=str(resolved.provider),
             api_key=resolved.api_key.get_secret_value(),
             api_base=resolved.base_url
-            or get_default_provider_api_base(resolved.provider, resolved.model_type),
-            capability=[str(item) for item in resolved.capabilities],
-            is_omni=resolved.is_omni,
+            or get_default_provider_api_base(resolved.provider, resolved.profile.type),
+            capability=[str(item) for item in capabilities],
+            is_omni=is_omni,
+            input_modalities=[str(item) for item in resolved.profile.input_modalities],
+            output_modalities=[str(item) for item in resolved.profile.output_modalities],
+            features=[str(item) for item in resolved.profile.features],
         )
         key.failover_plan = failover_plan
         return ModelApiKeyService._stamp_usage_attribution(
@@ -1350,13 +1577,18 @@ class ModelApiKeyService:
                 BizCode.AGENT_CONFIG_MISSING,
             )
 
+        capabilities, is_omni = legacy_view(model_config)
+        columns = profile_columns(model_config)
         return ModelApiKey(
             model_name=model_config.name,
             provider=ModelProvider.SPEEDBEAR,
             api_key=binding.gateway_api_key,
             api_base=f"{settings.SPEEDBEAR_BASE_URL.rstrip('/')}/api/v1",
-            capability=model_config.capability,
-            is_omni=model_config.is_omni,
+            capability=capabilities,
+            is_omni=is_omni,
+            input_modalities=columns["input_modalities"],
+            output_modalities=columns["output_modalities"],
+            features=columns["features"],
         )
 
     @staticmethod
@@ -1388,13 +1620,18 @@ class ModelApiKeyService:
                 BizCode.AGENT_CONFIG_MISSING,
             )
 
+        capabilities, is_omni = legacy_view(model_config)
+        columns = profile_columns(model_config)
         return ModelApiKey(
             model_name=model_config.name,
             provider=ModelProvider.SPEEDBEAR,
             api_key=binding.gateway_api_key,
             api_base=f"{settings.SPEEDBEAR_BASE_URL.rstrip('/')}/api/v1",
-            capability=model_config.capability,
-            is_omni=model_config.is_omni,
+            capability=capabilities,
+            is_omni=is_omni,
+            input_modalities=columns["input_modalities"],
+            output_modalities=columns["output_modalities"],
+            features=columns["features"],
         )
 
     @staticmethod
@@ -1418,13 +1655,13 @@ class ModelApiKeyService:
         mode = resolution_mode()
         if mode != "off":
             try:
-                if model_config.is_composite:
+                if model_config.provider == ModelProvider.COMPOSITE:
                     outcome = resolve_composite_plan_sync(db, model_config, tenant_id=tenant_id)
                 else:
                     outcome = resolve_config_plan_sync(
                         db, model_config.id, tenant_id=tenant_id, config_row=model_config
                     )
-            except ModelConfigInactiveError:
+            except (ModelConfigInactiveError, ModelConfigDeprecatedError):
                 return None
             except SpeedbearChannelMissingError as exc:
                 raise BusinessException(
@@ -1468,6 +1705,7 @@ class ModelApiKeyService:
         legacy_key = ModelApiKeyService._select_legacy_key(model_config)
         if legacy_key is None:
             return None
+        ModelApiKeyService._stamp_profile_columns(legacy_key, model_config)
         return ModelApiKeyService._stamp_usage_attribution(
             legacy_key, tenant_id, model_config.id
         )
@@ -1489,13 +1727,13 @@ class ModelApiKeyService:
         mode = resolution_mode()
         if mode != "off":
             try:
-                if model_config.is_composite:
+                if model_config.provider == ModelProvider.COMPOSITE:
                     outcome = await resolve_composite_plan_async(db, model_config, tenant_id=tenant_id)
                 else:
                     outcome = await resolve_config_plan_async(
                         db, model_config.id, tenant_id=tenant_id, config_row=model_config
                     )
-            except ModelConfigInactiveError:
+            except (ModelConfigInactiveError, ModelConfigDeprecatedError):
                 return None
             except SpeedbearChannelMissingError as exc:
                 raise BusinessException(
@@ -1539,6 +1777,7 @@ class ModelApiKeyService:
         legacy_key = ModelApiKeyService._select_legacy_key(model_config)
         if legacy_key is None:
             return None
+        ModelApiKeyService._stamp_profile_columns(legacy_key, model_config)
         return ModelApiKeyService._stamp_usage_attribution(
             legacy_key, tenant_id, model_config.id
         )
@@ -1616,7 +1855,7 @@ class ModelBaseService:
 
         provider_groups = {}
         for m in models:
-            model_dict = model_schema.ModelBase.model_validate(m).model_dump()
+            model_dict = wire_model_base(m).model_dump()
             if tenant_id:
                 model_dict['is_added'] = m.id in added_ids
 
@@ -1642,33 +1881,46 @@ class ModelBaseService:
         existing = ModelBaseRepository.get_by_name_and_provider(db, data.name, data.provider)
         if existing:
             raise BusinessException("模型已存在", BizCode.DUPLICATE_NAME)
-        payload = data.model_dump()
-        payload["type"], payload["capability"] = _canonical_model_type_and_capabilities(
-            data.type,
-            data.capability,
+        create_data = data.model_dump(
+            exclude={"input_modalities", "output_modalities", "features"}
         )
-        model_base = ModelBaseRepository.create(db, payload)
+        create_data["type"] = normalize_type(data.type)
+        create_data.update(
+            write_columns(
+                row_type=data.type,
+                provider=data.provider,
+                input_modalities=data.input_modalities,
+                output_modalities=data.output_modalities,
+                features=data.features,
+            )
+        )
+        model_base = ModelBaseRepository.create(db, create_data)
         db.commit()
         db.refresh(model_base)
         return model_base
 
     @staticmethod
     def update_model_base(db: Session, model_base_id: uuid.UUID, data: model_schema.ModelBaseUpdate):
-        existing = ModelBaseRepository.get_by_id(db, model_base_id)
-        if not existing:
-            raise BusinessException("基础模型不存在", BizCode.MODEL_NOT_FOUND)
-        payload = data.model_dump(exclude_unset=True)
-        effective_type = payload.get("type", existing.type)
-        effective_capabilities = payload.get("capability", existing.capability)
-        canonical_type, capabilities = _canonical_model_type_and_capabilities(
-            effective_type,
-            effective_capabilities,
-        )
-        if "type" in payload or canonical_type == ModelType.ASR.value:
-            payload["type"] = canonical_type
-        if "capability" in payload or canonical_type == ModelType.ASR.value:
-            payload["capability"] = capabilities
+        raw = data.model_dump(exclude_unset=True)
+        fields_set = set(raw.keys())
+        payload = {key: value for key, value in raw.items() if key not in _ABILITY_FIELDS}
+        if "type" in fields_set:
+            payload["type"] = normalize_type(raw["type"])
+        if fields_set & _ABILITY_FIELDS:
+            existing = ModelBaseRepository.get_by_id(db, model_base_id)
+            if not existing:
+                raise BusinessException("基础模型不存在", BizCode.MODEL_NOT_FOUND)
+            payload.update(
+                write_columns(
+                    input_modalities=raw.get("input_modalities") if "input_modalities" in fields_set else None,
+                    output_modalities=raw.get("output_modalities") if "output_modalities" in fields_set else None,
+                    features=raw.get("features") if "features" in fields_set else None,
+                    fallback_row=existing,
+                )
+            )
         model_base = ModelBaseRepository.update(db, model_base_id, payload)
+        if not model_base:
+            raise BusinessException("基础模型不存在", BizCode.MODEL_NOT_FOUND)
         db.commit()
         db.refresh(model_base)
         if "is_deprecated" in payload:
@@ -1685,7 +1937,11 @@ class ModelBaseService:
         if not model_base:
             raise BusinessException("基础模型不存在", BizCode.MODEL_NOT_FOUND)
         configs = _model_base_configs(db, model_base_id)
-        impact = collect_model_impact(db, [config.id for config in configs])
+        impact = collect_model_impact(
+            db,
+            [config.id for config in configs],
+            base_pairs={(model_base.provider, model_base.name)},
+        )
         ModelBaseRepository.update(db, model_base_id, {"is_deprecated": True})
         db.commit()
         _invalidate_model_base_caches(configs)
@@ -1693,30 +1949,38 @@ class ModelBaseService:
 
     @staticmethod
     def add_model_from_plaza(db: Session, model_base_id: uuid.UUID, tenant_id: uuid.UUID) -> ModelConfig:
+        """广场添加基础模型；已下线（is_deprecated）拦截（G5，与前端置灰同口径）。"""
         model_base = ModelBaseRepository.get_by_id(db, model_base_id)
         if not model_base:
             raise BusinessException("基础模型不存在", BizCode.MODEL_NOT_FOUND)
 
+        if model_base.is_deprecated:
+            raise BusinessException(
+                f"模型 '{model_base.name}' 已下线，请选择其他模型",
+                BizCode.MODEL_DEPRECATED,
+            )
+
         if ModelBaseRepository.check_added_by_tenant(db, model_base_id, tenant_id):
             raise BusinessException("模型已添加", BizCode.DUPLICATE_NAME)
 
-        canonical_type, capabilities = _canonical_model_type_and_capabilities(
-            model_base.type,
-            model_base.capability,
-        )
         model_config_data = {
             "model_id": model_base_id,
             "tenant_id": tenant_id,
             "name": model_base.name,
             "provider": model_base.provider,
-            "type": canonical_type,
+            "type": normalize_type(model_base.type),
             "logo": model_base.logo,
             "description": model_base.description,
-            "capability": capabilities,
-            "is_omni": model_base.is_omni,
             "is_active": False,
-            "is_composite": False
         }
+        # 三新列从 base 复制（base 新列空则旧列派生；旧列停写）
+        model_config_data.update(
+            write_columns(
+                row_type=model_base.type,
+                provider=model_base.provider,
+                fallback_row=model_base,
+            )
+        )
         model_config = ModelConfigRepository.create(db, model_config_data)
         ModelBaseRepository.increment_add_count(db, model_base_id)
         db.commit()

@@ -77,7 +77,7 @@ def _safe_id(value):
 def _isolated_config(config: ResolvedModelConfig) -> ResolvedModelConfig:
     if (
         config.provider is not ModelProvider.DASHSCOPE
-        or config.model_type not in {ModelType.LLM, ModelType.CHAT}
+        or config.model_type is not ModelType.LLM
     ):
         raise UnsupportedMultimodalModelError("video understanding")
     if (

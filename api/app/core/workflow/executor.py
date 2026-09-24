@@ -22,6 +22,7 @@ from app.core.workflow.engine.stream_output_coordinator import StreamOutputCoord
 from app.core.workflow.engine.variable_pool import VariablePool, VariablePoolInitializer
 from app.core.workflow.nodes.base_node import NodeExecutionError
 from app.core.utils.datetime_utils import to_timestamp_ms, utcnow_naive
+from app.core.utils.text_sanitize import sanitize_text, sanitize_value
 
 logger = logging.getLogger(__name__)
 
@@ -167,6 +168,20 @@ class WorkflowExecutor:
             self,
             input_data: dict[str, Any]
     ):
+        """流式执行工作流，并在事件出口统一净化非法字符。
+
+        所有外发事件（流式 chunk / node_end / workflow_end 等）都经过
+        ``sanitize_value`` 剥除 NUL(\\x00)：节点可能把二进制内容当文本解码
+        （code/http/document_extractor 等），而 PostgreSQL 文本/JSON 列拒绝
+        NUL 字符。在此边界统一处理可覆盖全部节点来源。
+        """
+        async for event in self._execute_stream_impl(input_data):
+            yield sanitize_value(event)
+
+    async def _execute_stream_impl(
+            self,
+            input_data: dict[str, Any]
+    ):
         """
         Execute the workflow in streaming mode.
 
@@ -227,7 +242,7 @@ class WorkflowExecutor:
 
         def append_message_content(current: str, message_data: dict) -> str:
             nonlocal unscoped_content
-            content = message_data.get("content", "") or ""
+            content = sanitize_text(message_data.get("content", "") or "")
             output_node_id = message_data.get("node_id")
             if output_node_id:
                 ensure_output_order(output_node_id)
@@ -256,7 +271,7 @@ class WorkflowExecutor:
             return [
                 {
                     "node_id": node_id,
-                    "content": output_contents[node_id],
+                    "content": sanitize_text(output_contents[node_id]),
                     "status": "completed",
                 }
                 for node_id in output_order
@@ -450,7 +465,9 @@ class WorkflowExecutor:
                                     )
                                     if checkpoint is not None:
                                         output_node_id = checkpoint.get("output_node_id")
-                                        canonical_content = reconcile_data.get("content", "") or ""
+                                        canonical_content = sanitize_text(
+                                            reconcile_data.get("content", "") or ""
+                                        )
                                         if output_node_id:
                                             output_contents[output_node_id] = (
                                                 (checkpoint.get("content", "") or "")

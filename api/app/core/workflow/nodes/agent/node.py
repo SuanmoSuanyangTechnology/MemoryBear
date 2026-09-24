@@ -31,7 +31,7 @@ from app.core.workflow.nodes.llm.config import strip_unsupported_llm_params, val
 from app.core.workflow.variable.base_variable import FileObject, VariableType
 from app.db import get_async_db_context, get_db_read
 from app.integrations.knowledge.contracts import KnowledgeRetrievalSource
-from app.models import ModelCapability, ModelType
+from app.models import ModelFeature, ModelType
 from app.models.workspace_model import Workspace
 from app.schemas.app_schema import FileInput, TransferMethod
 from app.schemas.model_schema import ModelInfo
@@ -224,8 +224,9 @@ class AgentNode(BaseNode):
                 api_key=api_config.api_key,
                 api_base=api_config.api_base,
                 provider=api_config.provider,
-                is_omni=api_config.is_omni,
-                capability=api_config.capability,
+                input_modalities=list(api_config.input_modalities or []),
+                output_modalities=list(api_config.output_modalities or []),
+                features=list(api_config.features or []),
                 tenant_id=api_config.tenant_id,
                 model_config_id=api_config.model_config_id,
                 channel_id=api_config.channel_id,
@@ -387,9 +388,8 @@ class AgentNode(BaseNode):
 
         param_warnings = validate_llm_param_constraints(
             config=params,
-            capability=model_info.capability or [],
+            features=model_info.features or [],
             provider=model_info.provider or "",
-            is_omni=model_info.is_omni,
         )
         if param_warnings:
             for warning in param_warnings:
@@ -450,8 +450,7 @@ class AgentNode(BaseNode):
         if params.response_format.enable and params.response_format.value == "text":
             json_output = False
 
-        capability_set = set(model_info.capability or [])
-        if json_output and ModelCapability.JSON_OUTPUT not in capability_set:
+        if json_output and ModelFeature.JSON_OUTPUT not in set(model_info.features or []):
             json_output = False
 
         if params.extra_headers.enable and params.extra_headers.value:
@@ -462,7 +461,7 @@ class AgentNode(BaseNode):
                 logger.warning(f"Node {self.node_id}: extra_headers JSON parse failed: {e}")
 
         extra_params, strip_warnings = strip_unsupported_llm_params(
-            extra_params, model_info.provider or "", model_info.is_omni
+            extra_params, model_info.provider or ""
         )
         if strip_warnings:
             for warning in strip_warnings:
@@ -478,7 +477,6 @@ class AgentNode(BaseNode):
             api_key=model_info.api_key,
             provider=model_info.provider or "openai",
             api_base=model_info.api_base,
-            is_omni=model_info.is_omni,
             temperature=params.temperature if params.temperature is not None else 0.7,
             max_tokens=params.max_tokens if params.max_tokens is not None else 2000,
             system_prompt=system_prompt or "你是一个专业的AI助手",
@@ -498,7 +496,9 @@ class AgentNode(BaseNode):
             enable_search=bool(extra_params.get("enable_search")),
             stop=extra_params.get("stop"),
             extra_headers=extra_params.get("default_headers"),
-            capability=model_info.capability,
+            input_modalities=model_info.input_modalities,
+            output_modalities=model_info.output_modalities,
+            features=model_info.features,
             tenant_id=model_info.tenant_id,
             model_config_id=model_info.model_config_id,
             channel_id=model_info.channel_id,

@@ -3,6 +3,7 @@ import secrets
 import uuid
 from typing import List, Optional
 
+from redbear_model import Modality, ModelProfile
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session, joinedload
@@ -14,7 +15,7 @@ from app.core.exceptions import BusinessException, PermissionDeniedException
 from app.core.logging_config import get_business_logger
 from app.core.utils.datetime_utils import utcnow_naive
 from app.models.memory_config_model import MemoryConfig as MemoryConfigModel
-from app.models.models_model import ModelCapability, ModelConfig, ModelProvider, ModelType
+from app.models.models_model import LLM_FAMILY_TYPES, ModelBase, ModelConfig, ModelProvider, ModelType
 from app.models.user_model import User
 from app.models.workspace_model import (
     InviteStatus,
@@ -38,7 +39,9 @@ from app.schemas.workspace_schema import (
 )
 from app.i18n import t
 from app.invalidation_notify import notify_user_async, notify_user_sync
+from app.services.channel_registry import candidate_channels_batch_sync
 from app.services.memory_config_service import MemoryConfigService
+from app.services.model_profile_view import profile_of
 from app.services.session_service import SessionService
 from app.utils.redis_cache import (
     CACHE_MISS,
@@ -54,17 +57,24 @@ from app.utils.redis_cache import (
 business_logger = get_business_logger()
 
 DEFAULT_PRESET_KEY = "default"
-_WORKSPACE_MODEL_SLOTS = ("llm", "embedding", "rerank", "vision", "audio", "video")
+# 模态槽位 = llm 族的输入能力分面；_SLOT_ALIASES = KB 侧槽位名 → 规范槽位
+_MODALITY_SLOTS = ("vision", "audio", "video")
+_SLOT_ALIASES = {"image2text": "vision"}
+_WORKSPACE_MODEL_SLOTS = ("llm", "embedding", "rerank", *_MODALITY_SLOTS)
 _REQUIRED_WORKSPACE_MODEL_SLOTS = ("llm", "embedding", "rerank")
 
 
-def _serialize_model_option(model: ModelConfig) -> dict:
+def _serialize_model_option(model: ModelConfig, profile: ModelProfile | None = None) -> dict:
+    profile = profile or profile_of(model)
     return {
         "id": str(model.id),
         "name": model.name,
         "provider": getattr(model.provider, "value", model.provider),
         "type": getattr(model.type, "value", model.type),
-        "capability": [getattr(item, "value", item) for item in (model.capability or [])],
+        # 能力载体为契约 v2 三列（2e-1 起旧 capability 键已从载荷下线）
+        "input_modalities": [str(item) for item in profile.input_modalities],
+        "output_modalities": [str(item) for item in profile.output_modalities],
+        "features": [str(item) for item in profile.features],
         "logo": model.logo,
         "is_public": bool(model.is_public),
         # 弃用标记存放在基础模型（model_bases）上，与 ModelConfig schema 的派生方式保持一致
@@ -75,8 +85,25 @@ def _serialize_model_option(model: ModelConfig) -> dict:
     }
 
 
-def _get_accessible_workspace_models(db: Session, tenant_id: uuid.UUID) -> list[ModelConfig]:
-    return (
+def _not_deprecated_filter():
+    """候选列表口径：基础模型已弃用的行不入选；无基础模型（model_id 为空）的条目保留。"""
+    return ~ModelConfig.model_base.has(ModelBase.is_deprecated.is_(True))
+
+
+def _drop_models_without_channel(
+    db: Session, rows: list[ModelConfig], tenant_id: uuid.UUID
+) -> list[ModelConfig]:
+    """候选列表口径：渠道候选链为空（含组合成员全不可用）的行不入选。"""
+    if not rows:
+        return rows
+    chains = candidate_channels_batch_sync(db, rows, tenant_id)
+    return [row for row in rows if chains.get(row.id)]
+
+
+def _get_accessible_workspace_models(
+    db: Session, tenant_id: uuid.UUID, *, exclude_deprecated: bool = False
+) -> list[ModelConfig]:
+    query = (
         db.query(ModelConfig)
         .options(joinedload(ModelConfig.model_base))
         .filter(ModelConfig.is_active.is_(True))
@@ -89,38 +116,47 @@ def _get_accessible_workspace_models(db: Session, tenant_id: uuid.UUID) -> list[
                 ),
             )
         )
-        .all()
     )
+    if exclude_deprecated:
+        query = query.filter(_not_deprecated_filter())
+    return query.all()
 
 
-def _get_public_speedbear_models(db: Session) -> list[ModelConfig]:
-    return (
+def _get_public_speedbear_models(
+    db: Session, *, exclude_deprecated: bool = False
+) -> list[ModelConfig]:
+    query = (
         db.query(ModelConfig)
         .options(joinedload(ModelConfig.model_base))
         .filter(ModelConfig.is_active.is_(True))
         .filter(ModelConfig.provider == ModelProvider.SPEEDBEAR)
         .filter(ModelConfig.is_public.is_(True))
-        .all()
     )
+    if exclude_deprecated:
+        query = query.filter(_not_deprecated_filter())
+    return query.all()
 
 
-def _slot_matches_model(slot: str, model: ModelConfig) -> bool:
-    model_type = str(model.type)
-    capability = set(model.capability or [])
-
+def _slot_matches(slot: str, model_type: str, profile: ModelProfile) -> bool:
+    """纯判定：槽位 × 模型 type × 输入模态（分组/校验同口径，不做行级读取）。"""
     if slot == "llm":
-        return model_type in {ModelType.LLM.value, ModelType.CHAT.value}
+        return model_type in LLM_FAMILY_TYPES
     if slot == "embedding":
         return model_type == ModelType.EMBEDDING.value
     if slot == "rerank":
         return model_type == ModelType.RERANK.value
+    # 模态槽位是 llm 族的输入能力分面（条目 type 仍为 llm），生成族/asr 不得入选
     if slot == "vision":
-        return ModelCapability.VISION.value in capability
+        return model_type in LLM_FAMILY_TYPES and Modality.IMAGE in profile.input_modalities
     if slot == "audio":
-        return ModelCapability.AUDIO.value in capability
+        return model_type in LLM_FAMILY_TYPES and Modality.AUDIO in profile.input_modalities
     if slot == "video":
-        return ModelCapability.VIDEO.value in capability
+        return model_type in LLM_FAMILY_TYPES and Modality.VIDEO in profile.input_modalities
     return False
+
+
+def _slot_matches_model(slot: str, model: ModelConfig) -> bool:
+    return _slot_matches(slot, str(model.type), profile_of(model))
 
 
 def _group_workspace_model_options(models: list[ModelConfig]) -> dict[str, list[dict]]:
@@ -132,9 +168,11 @@ def _group_workspace_model_options(models: list[ModelConfig]) -> dict[str, list[
         if model_id in seen_ids:
             continue
         seen_ids.add(model_id)
-        data = _serialize_model_option(model)
+        profile = profile_of(model)
+        model_type = str(model.type)
+        data = _serialize_model_option(model, profile)
         for slot in _WORKSPACE_MODEL_SLOTS:
-            if _slot_matches_model(slot, model):
+            if _slot_matches(slot, model_type, profile):
                 grouped[slot].append(data)
 
     return grouped
@@ -307,10 +345,11 @@ def _diagnose_unavailable_model(
     if not (is_tenant_model or is_public_speedbear):
         # 跨租户模型只返回请求中的模型 ID，不泄露名称、供应商或状态。
         return _model_issue(slot, reason="not_accessible", locale=locale, model_id=model_id)
-    if not model.is_active:
-        return _model_issue(slot, reason="inactive", **common)
+    # 弃用判定前置（D15⑦）：弃用是更具体的下线原因，优先于启用状态展示
     if getattr(model, "model_base", None) is not None and getattr(model.model_base, "is_deprecated", False):
         return _model_issue(slot, reason="deprecated", **common)
+    if not model.is_active:
+        return _model_issue(slot, reason="inactive", **common)
     return _model_issue(slot, reason="not_accessible", **common)
 
 
@@ -515,7 +554,7 @@ def _invalidate_default_config_memory_caches(db: Session) -> None:
             )
 
 
-_VALIDATE_AS_LLM_SLOTS = {"vision", "video", "audio", "image2text"}
+_VALIDATE_AS_LLM_SLOTS = {*_MODALITY_SLOTS, *_SLOT_ALIASES}
 
 
 async def _validate_workspace_slot_runtime(
@@ -578,14 +617,8 @@ async def _validate_workspace_slot_runtime(
     if not model_config.is_active:
         return _model_issue(slot, reason="inactive", **issue_context)
 
-    if slot == "image2text":
-        matches_slot = (
-            str(model_config.type) in {ModelType.LLM.value, ModelType.CHAT.value}
-            and ModelCapability.VISION.value in set(model_config.capability or [])
-        )
-    else:
-        matches_slot = _slot_matches_model(slot, model_config)
-    if not matches_slot:
+    # KB 侧槽位名（image2text 等）经别名归一到规范槽位后同口径判定
+    if not _slot_matches_model(_SLOT_ALIASES.get(slot, slot), model_config):
         return _model_issue(slot, reason="capability_mismatch", **issue_context)
 
     try:
@@ -620,8 +653,9 @@ async def _validate_workspace_slot_runtime(
             api_key=api_key_config.api_key,
             api_base=api_key_config.api_base,
             model_type=validate_type,
-            is_omni=api_key_config.is_omni,
-            capability=api_key_config.capability,
+            input_modalities=list(api_key_config.input_modalities or []),
+            output_modalities=list(api_key_config.output_modalities or []),
+            features=list(api_key_config.features or []),
         )
     except Exception as exc:
         return _model_issue(
@@ -773,13 +807,19 @@ def get_workspace_model_options(db: Session, tenant_id: uuid.UUID) -> dict:
     if cached is not CACHE_MISS and isinstance(cached, dict):
         return cached
 
-    result = _group_workspace_model_options(_get_accessible_workspace_models(db, tenant_id))
+    # 候选列表不返回已弃用与无渠道模型：存量绑定由前端经模型详情接口回显并提示
+    rows = _get_accessible_workspace_models(db, tenant_id, exclude_deprecated=True)
+    result = _group_workspace_model_options(
+        _drop_models_without_channel(db, rows, tenant_id)
+    )
     set_json(cache_key, result, 300)
     return result
 
 
 def get_system_workspace_model_options(db: Session) -> dict:
-    return _group_workspace_model_options(_get_public_speedbear_models(db))
+    return _group_workspace_model_options(
+        _get_public_speedbear_models(db, exclude_deprecated=True)
+    )
 
 
 def switch_workspace(

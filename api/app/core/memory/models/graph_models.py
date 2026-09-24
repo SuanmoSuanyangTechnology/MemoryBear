@@ -18,16 +18,17 @@ Classes:
     ChunkNode: Node representing a conversation chunk
     ExtractedEntityNode: Node representing an extracted entity
     MemorySummaryNode: Node representing a memory summary
+    PreferenceNode: Node representing a Coding Agent preference bucket
 """
 
 import re
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import Any, List, Literal, Optional
 from uuid import uuid4
 
 from app.core.memory.utils.alias_utils import validate_aliases
 from app.core.memory.utils.data.ontology import TemporalInfo
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 def parse_historical_datetime(v):
@@ -742,3 +743,27 @@ class UserSourceEntityEdge(Edge):
     Retrieval path: Entity → UserSource → original_text
     """
     pass
+
+
+class PreferenceNode(BaseModel):
+    """A persisted Coding Agent preference bucket."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    end_user_id: str
+    domain: str
+    subject: str
+    situation_key: str
+    mode: list[str]
+    preference_text: list[str]
+    preference_text_all: str | None = None
+    status: Literal["active", "inactive"] = "active"
+    created_at: Any | None = None
+    updated_at: Any | None = None
+
+    @model_validator(mode="after")
+    def validate_aligned_items(self):
+        if len(self.mode) != len(self.preference_text):
+            raise ValueError("Preference node mode/text arrays have different lengths")
+        return self

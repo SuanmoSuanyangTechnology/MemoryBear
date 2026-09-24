@@ -1,0 +1,53 @@
+name: AI Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+# 同一 PR 连续 push 时取消上一次未完成的评审，避免重复消耗 token
+concurrency:
+  group: ai-code-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    # 评审卡住时兜底，避免长期占用 runner
+    timeout-minutes: 30
+    # 仅评审本仓库分支发起的 PR：fork PR 与 Dependabot PR 都拿不到 secrets，跳过以免失败
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository
+      && github.actor != 'dependabot[bot]'
+    steps:
+      - name: OpenCodeReview
+        # 固定到 v1.12.7 对应的 commit SHA：tag 是可变引用，而该 action 会取得
+        # LLM 密钥与 PR 写权限，固定 SHA 可避免上游改动被自动引入
+        uses: alibaba/open-code-review@85cecfe5f935da2b2aae8f91ce4fee8ed343a681 # v1.12.7
+        with:
+          # 复用现有的百炼密钥（OpenAI 兼容端点），无需新增 secret
+          llm_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+          llm_auth_token: ${{ secrets.DASHSCOPE_API_KEY }}
+          llm_model: qwen3.7-plus
+          llm_use_anthropic: "false"
+          language: Chinese
+          # CLI 版本与上面固定的 action SHA 保持一致：action 内部默认装 @latest，
+          # 那会让实际执行评审的二进制不受固定 SHA 约束
+          ocr_version: "1.12.7"
+          # 改动意图上下文：官方文档称 background 是效果最显著的单一参数，
+          # 本仓库 PR 标题遵循 Conventional Commits，正好适用
+          background: ${{ github.event.pull_request.title }}
+          # 提升评审深度
+          effort: high
+          # low 级发现路由到汇总评论，不占用行内评论刷屏（不会丢弃发现）
+          route_severity_below: low
+          # 降低并发，避免触发百炼速率限制（默认 8）
+          review_concurrency: "5"
+          # 单次评审 token 总量上限：超预算时已有发现照常发布，退出码仍为 0
+          max_tokens_budget: "5000000"
+          # 增量模式：只追加新发现，不重复评论已存在的问题
+          incremental: "true"
+          sticky_summary: "true"

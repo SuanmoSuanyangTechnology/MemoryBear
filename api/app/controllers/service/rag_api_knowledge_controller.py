@@ -129,14 +129,16 @@ async def create_knowledge(
         None,
         description=(
             "Audio transcription model config ID "
-            "(omitted inherits the workspace audio model; null disables it)"
+            "(omitted or null inherits a compatible workspace audio model; "
+            "remains null when none is available)"
         ),
     ),
     video2text_id: uuid.UUID | None = Body(
         None,
         description=(
             "Video understanding model config ID "
-            "(omitted inherits the workspace video model; null disables it)"
+            "(omitted or null inherits a compatible workspace video model; "
+            "remains null when none is available)"
         ),
     ),
 ):

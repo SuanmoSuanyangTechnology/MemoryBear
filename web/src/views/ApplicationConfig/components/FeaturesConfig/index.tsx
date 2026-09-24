@@ -11,7 +11,7 @@ import { Button, Popover } from 'antd';
 import FeaturesConfigModal from './FeaturesConfigModal'
 import type { FeaturesConfigModalRef, FeaturesConfigForm } from '../../types'
 import type { Application } from '@/views/ApplicationManagement/types';
-import type { Capability } from '@/views/ModelManagement/types'
+import type { Modality } from '@/views/ModelManagement/types'
 import type { Variable } from '../VariableList/types'
 
 /** Props for the FeaturesConfig component */
@@ -21,7 +21,7 @@ interface FeaturesConfigProps {
   /** Callback to propagate updated config back to the parent */
   refresh: (value: FeaturesConfigForm) => void;
   source?: Application['type'];
-  capability?: Capability[];
+  input_modalities?: Modality[];
   chatVariables: Variable[];
 }
 
@@ -29,7 +29,7 @@ const FeaturesConfig: FC<FeaturesConfigProps> = ({
   value,
   refresh,
   source,
-  capability,
+  input_modalities,
   chatVariables
 }) => {
   const { t } = useTranslation();
@@ -61,7 +61,7 @@ const FeaturesConfig: FC<FeaturesConfigProps> = ({
         ref={funConfigModalRef}
         refresh={refresh}
         source={source}
-        capability={capability}
+        input_modalities={input_modalities}
         chatVariables={chatVariables}
       />
     </>

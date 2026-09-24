@@ -31,7 +31,6 @@ const Group = forwardRef <BaseRef,{ query: any; handleEdit: (data: ModelListItem
     getModelNewList({
       ...query,
       is_composite: true,
-      is_active: true,
     })
       .then(res => {
         const response = res as ProviderModelItem[]
@@ -75,7 +74,7 @@ const Group = forwardRef <BaseRef,{ query: any; handleEdit: (data: ModelListItem
                     <div className="rb:wrap-break-word rb:line-clamp-1">{item.name}</div>
                   </Tooltip>
                   <Space>
-                    <Tag color={item.is_active ? 'success' : 'error'}>{item.is_active ? t(`common.statusEnabled`) : t(`common.statusDisabled`)}</Tag>
+                    <Tag color={item.is_available ? 'success' : 'error'}>{item.is_available ? t(`common.statusEnabled`) : t(`common.statusDisabled`)}</Tag>
                   </Space>
                 </Flex>}
                 isNeedTooltip={false}

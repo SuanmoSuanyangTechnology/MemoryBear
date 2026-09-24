@@ -125,7 +125,7 @@ def create_tools_for_agent(agent_name: str, configs: Dict) -> List:
 def create_agent_node(agent_name: str, system_prompt: str, tools: List,
                       model_config: RedBearModelConfig):
     """创建 Agent 节点（非流式）"""
-    llm = RedBearLLM(model_config, type=ModelType.CHAT)
+    llm = RedBearLLM(model_config, type=ModelType.LLM)
     
     # 绑定工具
     if tools:
@@ -249,7 +249,7 @@ def create_agent_node(agent_name: str, system_prompt: str, tools: List,
 def create_streaming_agent_node(agent_name: str, system_prompt: str, tools: List,
                                  model_config: RedBearModelConfig):
     """创建支持流式输出的 Agent 节点"""
-    llm = RedBearLLM(model_config, type=ModelType.CHAT)
+    llm = RedBearLLM(model_config, type=ModelType.LLM)
     
     # 绑定工具
     if tools:

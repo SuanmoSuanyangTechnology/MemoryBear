@@ -8,6 +8,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
 
+from redbear_model import ModelProfile
 from sqlalchemy import or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
@@ -98,18 +99,27 @@ def _workspace_media_model_is_compatible(
     tenant_id: uuid.UUID,
 ) -> bool:
     provider = _enum_value(model.provider)
-    model_type = _enum_value(model.type)
-    capabilities = {_enum_value(item) for item in (model.capability or [])}
     accessible = model.tenant_id == tenant_id or (
         provider == ModelProvider.SPEEDBEAR.value and bool(model.is_public)
     )
     if not bool(model.is_active) or not accessible:
         return False
+    # 三新列为权威源（契约 v2 单一口径；旧列仅回滚窗口读侧兜底，与 _model_summary 同源）
+    profile = ModelProfile.from_stored_fields(
+        model_id=model.id,
+        tenant_id=model.tenant_id,
+        type=model.type,
+        provider=model.provider,
+        input_modalities=model.input_modalities or (),
+        output_modalities=model.output_modalities or (),
+        features=model.features or (),
+        capabilities=model.capability or (),
+        is_omni=bool(model.is_omni),
+    )
+    model_type = _enum_value(profile.type)
+    input_modalities = {str(modality.value) for modality in profile.input_modalities}
     if field_name == "image2text_id":
-        return (
-            model_type in {ModelType.LLM.value, ModelType.CHAT.value}
-            and "vision" in capabilities
-        )
+        return model_type == _enum_value(ModelType.LLM) and "image" in input_modalities
     if field_name == "audio2text_id":
         return (
             provider == ModelProvider.DASHSCOPE.value
@@ -118,8 +128,8 @@ def _workspace_media_model_is_compatible(
     if field_name == "video2text_id":
         return (
             provider == ModelProvider.DASHSCOPE.value
-            and model_type in {ModelType.LLM.value, ModelType.CHAT.value}
-            and "video" in capabilities
+            and model_type == _enum_value(ModelType.LLM)
+            and "video" in input_modalities
         )
     return False
 
@@ -132,7 +142,7 @@ async def _inherit_workspace_media_models(
 ) -> None:
     pending: dict[str, uuid.UUID] = {}
     for field_name, workspace_field in _WORKSPACE_MEDIA_MODEL_FIELDS.items():
-        if field_name in create_data.model_fields_set:
+        if getattr(create_data, field_name) is not None:
             continue
         raw_model_id = getattr(workspace, workspace_field, None)
         if raw_model_id is None:
@@ -218,6 +228,18 @@ def _model_summary(
     model: ModelConfig,
     model_base: ModelBase | None,
 ) -> ModelConfigSummary:
+    # 三新列为权威源（契约 v2 单一口径；旧列仅作回滚窗口读侧兜底，M10 随列删）
+    profile = ModelProfile.from_stored_fields(
+        model_id=model.id,
+        tenant_id=model.tenant_id,
+        type=model.type,
+        provider=model.provider,
+        input_modalities=model.input_modalities or (),
+        output_modalities=model.output_modalities or (),
+        features=model.features or (),
+        capabilities=model.capability or (),
+        is_omni=bool(model.is_omni),
+    )
     return ModelConfigSummary(
         id=model.id,
         name=model.name,
@@ -229,8 +251,9 @@ def _model_summary(
         is_active=model.is_active,
         is_public=model.is_public,
         load_balance_strategy=model.load_balance_strategy,
-        capability=model.capability or [],
-        is_omni=model.is_omni,
+        input_modalities=[str(modality.value) for modality in profile.input_modalities],
+        output_modalities=[str(modality.value) for modality in profile.output_modalities],
+        features=[str(feature.value) for feature in profile.features],
         model_id=model.model_id,
         created_at=model.created_at,
         updated_at=model.updated_at,

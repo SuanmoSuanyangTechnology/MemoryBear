@@ -19,9 +19,10 @@ from app.integrations.knowledge.context_factory import build_app_knowledge_conte
 from app.integrations.knowledge.contracts import KnowledgeRetrievalSource
 from app.integrations.knowledge.runtime import get_knowledge_retriever
 from app.schemas.chunk_schema import RetrieveType
-from app.models.models_model import ModelCapability, ModelType
+from app.models.models_model import LLM_FAMILY_TYPES, ModelFeature, ModelType
 from app.schemas.knowledge_metadata_schema import FilterCondition, FilterGroup, MetadataFilterMode
 from app.schemas.knowledge_retrieval_schema import KnowledgeRetrievalRequest
+from app.services.file_content_service import FileReference, resolve_image_retrieval_query
 from app.services.knowledge_metadata_service import KnowledgeMetadataService
 from app.services.knowledge_retrieval_preparation import KnowledgeRetrievalPreparation
 from app.services.metadata_auto_filter_service import MetadataAutoFilterService
@@ -95,11 +96,12 @@ class KnowledgeRetrievalNode(BaseNode):
                 }
         return {"citations": citations, "process": process}
 
-    def _resolve_image_query(self, variable_pool: VariablePool) -> str | None:
-        """解析 image_query 变量引用为首张图片的 URL。
+    def _resolve_image_reference(self, variable_pool: VariablePool) -> FileReference | None:
+        """解析 image_query 变量引用为首张可用图片引用。
 
         仅支持纯变量引用（``{{...}}``），类型为 file 或 array[file]；数组取第一张
-        图片。变量不存在、非纯引用、无图片或 URL 为空时返回 None。
+        图片。「可用」= 带 file_id（本地文件，由本服务自取字节）或带 url（远程图片）。
+        变量不存在、非纯引用、无图片时返回 None。
         """
         image_template = (self._get_typed_config().image_query or "").strip()
         if not image_template:
@@ -125,20 +127,13 @@ class KnowledgeRetrievalNode(BaseNode):
             candidates[0] if candidates else None,
         )
         for candidate in candidates:
-            if isinstance(candidate, dict):
-                file_type = candidate.get("type") or candidate.get("origin_file_type")
-                image_url = candidate.get("url")
-            else:
-                file_type = getattr(candidate, "type", None) or getattr(candidate, "origin_file_type", None)
-                image_url = getattr(candidate, "url", None)
-            if (
-                str(getattr(file_type, "value", file_type) or "").startswith("image")
-                and isinstance(image_url, str)
-                and image_url
-            ):
-                return image_url
+            reference = FileReference.from_payload(candidate)
+            # 本地文件（transfer_method=local_file）只有 file_id、url 为空，
+            # 不能像旧实现那样只认 url，否则内网上传的图片永远解析不到。
+            if reference is not None and reference.is_image and (reference.file_id or reference.url):
+                return reference
         logger.warning(
-            "knowledge node image_query 变量中未找到带 URL 的图片项: %r value=%r",
+            "knowledge node image_query 变量中未找到可用图片项（需带 file_id 或 url）: %r value=%r",
             image_template, value,
         )
         return None
@@ -146,10 +141,11 @@ class KnowledgeRetrievalNode(BaseNode):
     def _extract_input(self, state: WorkflowState, variable_pool: VariablePool) -> dict[str, Any]:
         cfg = self._get_typed_config()
         rendered_filters = self._render_filter_variables(cfg.metadata_filters, variable_pool)
-        image_url = self._resolve_image_query(variable_pool)
+        image_reference = self._resolve_image_reference(variable_pool)
         return {
-            # 二选一：image_query 命中图片时记录图片模态，否则记录文本 query 渲染值
-            "query": {"modality": "image", "content": image_url} if image_url
+            # 二选一：image_query 命中图片时记录图片模态（只放短标识，避免 base64
+            # 进审计日志与缓存键），否则记录文本 query 渲染值
+            "query": {"modality": "image", "content": image_reference.locator} if image_reference
             else self._render_template(cfg.query, variable_pool),
             "image_query": cfg.image_query,
             "knowledge_bases": [kb_config.model_dump(mode="json") for kb_config in cfg.knowledge_bases],
@@ -262,16 +258,14 @@ class KnowledgeRetrievalNode(BaseNode):
                 provider=api_key.provider or model_config.provider,
                 api_key=api_key.api_key,
                 api_base=api_key.api_base,
-                capability=tuple(api_key.capability or model_config.capability or ()),
-                is_omni=(
-                    api_key.is_omni
-                    if api_key.is_omni is not None
-                    else bool(model_config.is_omni)
-                ),
+                input_modalities=tuple(api_key.input_modalities or ()),
+                output_modalities=tuple(api_key.output_modalities or ()),
+                features=tuple(api_key.features or ()),
                 model_type=model_config.type,
                 tenant_id=api_key.tenant_id,
                 model_config_id=api_key.model_config_id,
                 channel_id=api_key.channel_id,
+                failover_plan=getattr(api_key, "failover_plan", None),
             )
 
         return (
@@ -316,10 +310,10 @@ class KnowledgeRetrievalNode(BaseNode):
                 params.response_format.enable
                 and params.response_format.value == "json_object"
             ))
-            and ModelCapability.JSON_OUTPUT in set(model.capability)
+            and ModelFeature.JSON_OUTPUT in set(model.features)
             and not (
                 params.thinking.enable
-                and ModelCapability.THINKING in set(model.capability)
+                and ModelFeature.THINKING in set(model.features)
             )
         ):
             options["response_format"] = {"type": "json_object"}
@@ -343,7 +337,6 @@ class KnowledgeRetrievalNode(BaseNode):
         options, strip_warnings = strip_unsupported_llm_params(
             options,
             model.provider,
-            model.is_omni,
         )
         for warning in strip_warnings:
             logger.warning(
@@ -360,7 +353,7 @@ class KnowledgeRetrievalNode(BaseNode):
 
         common_metadata_defs, model, generation_options = prepared
         model_type = ModelType.LLM
-        if model.model_type in {ModelType.LLM.value, ModelType.CHAT.value}:
+        if str(model.model_type) in LLM_FAMILY_TYPES:
             model_type = ModelType(model.model_type)
         llm = RedBearLLM(
             RedBearModelConfig.from_api_key(model, extra_params=generation_options),
@@ -405,17 +398,18 @@ class KnowledgeRetrievalNode(BaseNode):
             }
 
         # 1. query 与 image_query 二选一：image_query 解析到图片时走图片检索
-        image_url = self._resolve_image_query(variable_pool)
-        query = "" if image_url else self._render_template(self.typed_config.query, variable_pool)
+        image_reference = self._resolve_image_reference(variable_pool)
+        query = "" if image_reference else self._render_template(self.typed_config.query, variable_pool)
 
         # image_query 已配置但运行期未解析到图片（变量不存在/为空/非图片），且文本 query 也为空：
         # 明确报错，避免用空 query 构造请求触发难懂的 pydantic 校验错误
-        if not image_url and not (query or "").strip():
+        if not image_reference and not (query or "").strip():
             image_template = (self.typed_config.image_query or "").strip()
             if image_template:
                 raise BusinessException(
                     f"image_query 未解析到可用图片：{image_template}。"
-                    "请确认上游已传入文件/图片变量（如 sys.files），且数组中包含图片。",
+                    "请确认上游已传入文件/图片变量（如 sys.files），且数组中包含图片"
+                    "（本地文件需带 file_id，远程图片需带可访问的 url）。",
                     BizCode.INVALID_PARAMETER,
                 )
 
@@ -453,30 +447,48 @@ class KnowledgeRetrievalNode(BaseNode):
         # 5. 确定最终 query 与元数据过滤。请求模型要求 query 非空（strip 后），
         #    因此图片模式必须先把图片编码成 data URI（非空）再构造请求，不能用空白占位。
         metadata_filters: list = []
-        if image_url:
-            from app.integrations.knowledge.retrieval_policy import (
-                build_image_retrieval_query,
-                image_retrieval_supported,
+        if image_reference is not None:
+            from app.integrations.knowledge.retrieval_policy import image_retrieval_supported
+            from app.services.image_retrieval_guard import ensure_image_retrieval_supported
+
+            # 先按知识库侧的图片检索边界做本地前置校验：命中时给出与下游一致的
+            # 具体原因（检索模式 / 图谱召回 / 自动元数据筛选 / 向量与重排模型），
+            # 避免用户只看到一句笼统的"不支持图片检索"。
+            await ensure_image_retrieval_supported(
+                kb_ids=kb_ids,
+                knowledge_bases=self.typed_config.knowledge_bases,
+                retrieve_type=first_kb.retrieve_type,
+                rerank_id=self.typed_config.reranker_id,
+                rerank_mode=self.typed_config.rerank_mode,
+                enable_graph_retrieval=enable_graph_retrieval,
+                metadata_filter_mode=self.typed_config.metadata_filter_mode,
             )
 
+            # 兜底：再向知识库侧确认该检索模式/接口支持图片（模型记录变更、多 KB
+            # 组合等本地判不出的情形在这里拦截）。
             if not await image_retrieval_supported(
                 retriever,
                 kb_ids=[str(kb_id) for kb_id in kb_ids],
                 retrieve_type=first_kb.retrieve_type,
                 context=context,
                 rerank_id=str(self.typed_config.reranker_id) if self.typed_config.reranker_id else None,
-                rerank_mode=self.typed_config.rerank_mode,
-                enable_graph_retrieval=enable_graph_retrieval,
             ):
                 raise BusinessException(
                     "当前知识库/检索模式不支持图片检索，请改用文本 query 或更换支持多模态检索的知识库",
                     BizCode.INVALID_PARAMETER,
                 )
-            # 图片检索没有文本 query，跳过基于 LLM 的自动/元数据过滤
-            final_query = await build_image_retrieval_query(image_url)
+            # 图片检索没有文本 query，跳过基于 LLM 的自动/元数据过滤。
+            # 本地文件（私有化环境的内网上传）由本服务直读存储字节后编码，不依赖 URL 可达；
+            # 远程图片仍走知识库集成层的下载 + 编码。
+            final_query = await resolve_image_retrieval_query(
+                image_reference,
+                workspace_id=context.principal.workspace_id if context.principal else None,
+                tenant_id=context.principal.tenant_id if context.principal else None,
+            )
             if final_query is None:
                 raise BusinessException(
-                    "图片检索失败：无法下载或编码 image_query 指向的图片",
+                    "图片检索失败：无法读取或编码 image_query 指向的图片"
+                    "（本地文件请确认上传已完成，远程图片请确认可正常下载）",
                     BizCode.INVALID_PARAMETER,
                 )
         else:
