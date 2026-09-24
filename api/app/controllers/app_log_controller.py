@@ -21,8 +21,10 @@ from app.schemas.response_schema import PageData, PageMeta
 from app.core.exceptions import BusinessException
 from app.core.error_codes import BizCode
 from app.models.app_model import AppType
+from app.models.file_metadata_model import FileMetadata
 from app.services.app_service import AppService
 from app.services.app_log_service import AppLogService
+from app.services.file_content_service import build_permanent_file_url
 
 router = APIRouter(prefix="/apps", tags=["App Logs"])
 logger = get_business_logger()
@@ -179,25 +181,59 @@ def get_app_log_detail(
     else:
         # Agent：ORM Message 对象逐个转换，提取 files
         msg_list = []
+
+        # 收集本地文件 ID，批量查询后解析为可访问 URL（本地文件持久化时只存 upload_file_id）
+        local_file_ids = set()
         for m in messages:
-            files = []
             if isinstance(m.meta_data, dict) and "files" in m.meta_data:
                 for f in m.meta_data["files"]:
-                    if isinstance(f, dict) and f.get("url"):
+                    if isinstance(f, dict) and not f.get("url") and f.get("upload_file_id"):
+                        try:
+                            local_file_ids.add(uuid.UUID(str(f["upload_file_id"])))
+                        except (ValueError, TypeError):
+                            continue
+        local_file_url_map = {}
+        if local_file_ids:
+            completed_files = db.query(FileMetadata).filter(
+                FileMetadata.id.in_(local_file_ids),
+                FileMetadata.workspace_id == workspace_id,
+                FileMetadata.status == "completed",
+            ).all()
+            local_file_url_map = {
+                str(f.id): build_permanent_file_url(f.id) for f in completed_files
+            }
+
+        for m in messages:
+            files = []
+            resolved_meta_files = []
+            if isinstance(m.meta_data, dict) and "files" in m.meta_data:
+                for f in m.meta_data["files"]:
+                    if not isinstance(f, dict):
+                        continue
+                    file_url = f.get("url") or local_file_url_map.get(str(f.get("upload_file_id")))
+                    if file_url:
                         files.append(LogFileInfo(
                             type=f.get("type", ""),
-                            url=f["url"],
+                            url=file_url,
                             name=f.get("name"),
                             size=f.get("size"),
                             file_type=f.get("file_type"),
                         ))
+                        # 同步注入响应的 meta_data.files：前端 ChatContent 直接读取该字段渲染
+                        resolved_meta_files.append({**f, "url": file_url})
+
+            # 复制一份 meta_data，避免改动 ORM 对象上的原始数据
+            response_meta = dict(m.meta_data) if isinstance(m.meta_data, dict) else {}
+            if resolved_meta_files:
+                response_meta["files"] = resolved_meta_files
+
             msg_list.append(AppLogMessage(
                 id=m.id,
                 conversation_id=m.conversation_id,
                 role=m.role,
                 content=m.content,
                 status=m.status,
-                meta_data=m.meta_data,
+                meta_data=response_meta,
                 files=files,
                 created_at=m.created_at,
             ))
