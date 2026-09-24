@@ -31,7 +31,7 @@ class FileType(StrEnum):
         elif value.startswith("video"):
             return cls.VIDEO
         else:
-            raise RuntimeError("Unsupport file type")
+            raise RuntimeError("Unsupported file type")
 
 
 class TransferMethod(str, Enum):

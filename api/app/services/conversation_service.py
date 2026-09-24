@@ -1622,7 +1622,7 @@ class ConversationService:
             elif isinstance(model_resp.content, dict):
                 result = model_resp.content
             else:
-                raise BusinessException("Unexpect model output", code=BizCode.LLM_ERROR)
+                raise BusinessException("Unexpected model output", code=BizCode.LLM_ERROR)
         except Exception as e:
             logger.exception(f"Failed to parse LLM response for conversation_id={conversation_id}")
             raise BusinessException("Failed to parse LLM response", code=BizCode.LLM_ERROR) from e
