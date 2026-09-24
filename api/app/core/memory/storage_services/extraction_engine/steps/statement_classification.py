@@ -169,12 +169,22 @@ class StatementClassifier:
                 raise ClassificationError(f"unmapped reference label: {text!r}")
             return label
 
+        # 显式建 task：任一分类失败时取消其余仍在飞的请求，避免调用方已进入
+        # LLM 兜底后，迟到的分类请求还在后台跑完（gather 默认不取消兄弟任务）。
+        tasks = [
+            asyncio.create_task(_type()),
+            asyncio.create_task(_temporal()),
+            asyncio.create_task(_ref()),
+        ]
         try:
-            stmt_type, temporal_type, has_ref = await asyncio.gather(
-                _type(), _temporal(), _ref()
-            )
+            stmt_type, temporal_type, has_ref = await asyncio.gather(*tasks)
         except ClassificationError:
             raise
+        finally:
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
 
         return StatementClassification(
             statement_type=stmt_type,
