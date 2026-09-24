@@ -530,6 +530,30 @@ PREVIEW_CASE_DATA_BY_LOCALE = {
     "en": PREVIEW_CASE_DATA_EN,
 }
 
+PREVIEW_CANDIDATE_TEXT_BY_LOCALE = {
+    "zh": {
+        "with_candidates": (
+            "候选分数仅为模拟排序。数量调整会改变比较范围；"
+            "同一次事项的判断仍以对象、轮次与目标为准。"
+        ),
+        "not_eligible": "调整候选数量不会绕过价值判断。",
+        "count_template": "实际展示 {actual} / 上限 {limit} 个",
+        "not_queried": "未执行候选查询",
+    },
+    "en": {
+        "with_candidates": (
+            "Candidate scores are for simulated ranking only. Adjusting the "
+            "candidate count changes the comparison scope; whether a memory belongs "
+            "to the same matter is still determined by the object, round, and goal."
+        ),
+        "not_eligible": (
+            "Adjusting the candidate count does not bypass the value assessment."
+        ),
+        "count_template": "Showing {actual} / limit {limit}",
+        "not_queried": "Candidate query was not executed",
+    },
+}
+
 PREVIEW_GRAPH_TEXT_BY_LOCALE = {
     "zh": {
         "caption_template": "居住与日常事务 · {count} 个社区 · 圈内为局部模拟记忆；箭头表示“包含记忆”。",

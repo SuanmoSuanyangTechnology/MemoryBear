@@ -8,6 +8,7 @@ from app.schemas.scene_community_schema import (
 )
 from app.services.scene_community_preview_cases import (
     CANDIDATE_COMMUNITIES_BY_LOCALE,
+    PREVIEW_CANDIDATE_TEXT_BY_LOCALE,
     PREVIEW_CASE_DATA_BY_LOCALE,
     PREVIEW_CASES_BY_LOCALE,
     PREVIEW_GRAPH_TEXT_BY_LOCALE,
@@ -47,6 +48,7 @@ class SceneCommunityPreviewService:
         fixture = PREVIEW_CASE_DATA_BY_LOCALE[locale].get(preview_case)
         if fixture is None:
             raise UnsupportedPreviewCaseError(preview_case)
+        candidate_text = PREVIEW_CANDIDATE_TEXT_BY_LOCALE[locale]
         graph_text = PREVIEW_GRAPH_TEXT_BY_LOCALE[locale]
 
         if preview_case == "NOT_ELIGIBLE":
@@ -58,6 +60,8 @@ class SceneCommunityPreviewService:
                 "classification_result": fixture["classification_result"],
                 "candidate_communities": {
                     "total": 0,
+                    "note": candidate_text["not_eligible"],
+                    "count_text": candidate_text["not_queried"],
                     "empty_text": graph_text["empty_text"],
                     "items": [],
                 },
@@ -117,6 +121,11 @@ class SceneCommunityPreviewService:
             "classification_result": fixture["classification_result"],
             "candidate_communities": {
                 "total": len(candidate_items),
+                "note": candidate_text["with_candidates"],
+                "count_text": candidate_text["count_template"].format(
+                    actual=len(candidate_items),
+                    limit=candidate_community_limit,
+                ),
                 "items": candidate_items,
             },
             "community_change": fixture["community_change"],

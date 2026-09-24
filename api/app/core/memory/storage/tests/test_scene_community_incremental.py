@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -44,7 +45,7 @@ def scene(scene_id: str, created_at: datetime) -> dict:
     }
 
 
-async def test_batch_reuses_temporary_community_and_calls_p3_once():
+async def test_batch_reuses_temporary_community_and_calls_p3_once(caplog):
     now = datetime(2026, 9, 22, tzinfo=timezone.utc)
     writer = SimpleNamespace(
         load_inactive_batch=AsyncMock(return_value=[scene("s1", now), scene("s2", now + timedelta(minutes=2))]),
@@ -98,7 +99,7 @@ async def test_batch_reuses_temporary_community_and_calls_p3_once():
         memory_config=SimpleNamespace(
             batch_trigger_count=2,
             candidate_community_limit=3,
-            compare_all_same_category_communities=False,
+            compare_all_same_category_communities=True,
         ),
         llm=llm,
         embedder=SimpleNamespace(
@@ -107,7 +108,11 @@ async def test_batch_reuses_temporary_community_and_calls_p3_once():
     )
     service._judge_community = judge_with_runtime_id.__get__(service)
 
-    result = await service.run("user-1")
+    with caplog.at_level(
+        logging.INFO,
+        logger="app.core.memory.scene.scene_community_service",
+    ):
+        result = await service.run("user-1")
 
     assert result["status"] == "success"
     assert result["processed"] == 2
@@ -120,6 +125,8 @@ async def test_batch_reuses_temporary_community_and_calls_p3_once():
     assert {
         item["scene_community_id"] for item in commit["assignments"]
     } == {commit["communities"][0]["id"]}
+    assert "compare_all=True fetched_community_count=0" in caplog.text
+    assert "fetched_members=0 added_members=2 members=2" in caplog.text
 
 
 async def test_incomplete_batch_does_not_call_models_or_write():

@@ -229,6 +229,8 @@ class CommunityPreviewCandidate(BaseModel):
 
 class CommunityPreviewCandidates(BaseModel):
     total: int
+    note: str
+    count_text: str
     items: list[CommunityPreviewCandidate]
     empty_text: str | None = None
 

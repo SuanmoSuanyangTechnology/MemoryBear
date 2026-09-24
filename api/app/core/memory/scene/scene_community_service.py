@@ -159,6 +159,12 @@ class SceneCommunityIncrementalService:
             candidate_limit=limit,
             compare_all=compare_all,
         )
+        logger.info(
+            "[SceneCommunity][2/3] P2 candidates fetched compare_all=%s "
+            "fetched_community_count=%s",
+            compare_all,
+            len(rows),
+        )
         ranked: dict[str, tuple[SceneCommunityNode, float]] = {}
         for row in rows:
             similarity = float(row.pop("_similarity", -1.0))
@@ -424,10 +430,13 @@ class SceneCommunityIncrementalService:
                 community = community.model_copy(update=updates)
                 logger.info(
                     "[SceneCommunity][3/3] P3 completed user=%s community=%s mode=%s "
-                    "members=%s reason=%s elapsed_ms=%s",
+                    "fetched_members=%s added_members=%s members=%s reason=%s "
+                    "elapsed_ms=%s",
                     end_user_id,
                     community_id,
                     operation_mode,
+                    len(prior_members),
+                    len(added_by_community[community_id]),
                     len(members),
                     p3.short_reason,
                     int((time.monotonic() - p3_started_at) * 1000),
@@ -435,9 +444,12 @@ class SceneCommunityIncrementalService:
             else:
                 logger.info(
                     "[SceneCommunity][3/3] P3 skipped user=%s community=%s "
-                    "members=%s reason=SINGLE_MEMBER",
+                    "fetched_members=%s added_members=%s members=%s "
+                    "reason=SINGLE_MEMBER",
                     end_user_id,
                     community_id,
+                    len(prior_members),
+                    len(added_by_community[community_id]),
                     len(members),
                 )
 
