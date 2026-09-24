@@ -37,7 +37,7 @@ interface SpaceModalProps {
 /** Storage types */
 const types: StorageType[] = [
   'neo4j',
-  'rag',
+  // 'rag',
 ]
 /** Type icons mapping */
 const typeIcons: Record<StorageType, string> = {
@@ -120,7 +120,7 @@ const SpaceModal = forwardRef<SpaceModalRef, SpaceModalProps>(({
         } else {
           const { icon, is_default_config, ...rest } = values
           const isDefaultConfig = is_default_config === '1' && isPrivateAvailable && Object.keys(defaultModels).length > 0
-          let formData: SpaceModalData = {
+          const formData: SpaceModalData = {
             ...rest,
             is_default_config: isDefaultConfig,
           }
