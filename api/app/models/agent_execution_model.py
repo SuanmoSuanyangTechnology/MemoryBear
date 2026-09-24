@@ -16,6 +16,7 @@ from app.db import Base
 from app.core.utils.datetime_utils import utcnow_naive
 
 
+
 class AgentExecution(Base):
     """Agent 执行记录表
 

@@ -449,13 +449,19 @@ class KnowledgeRetrievalNode(BaseNode):
         metadata_filters: list = []
         if image_reference is not None:
             from app.integrations.knowledge.retrieval_policy import image_retrieval_supported
-            from app.services.image_retrieval_guard import ensure_image_retrieval_supported
+            from app.services.image_retrieval_guard import (
+                ensure_image_retrieval_supported,
+                expand_knowledge_to_leaf_ids,
+            )
+
+            # 文件夹型知识库先展开到叶子库：图片能力取决于叶子库自身绑定的模型。
+            leaf_kb_ids = await expand_knowledge_to_leaf_ids(kb_ids, db=None)
 
             # 先按知识库侧的图片检索边界做本地前置校验：命中时给出与下游一致的
             # 具体原因（检索模式 / 图谱召回 / 自动元数据筛选 / 向量与重排模型），
             # 避免用户只看到一句笼统的"不支持图片检索"。
             await ensure_image_retrieval_supported(
-                kb_ids=kb_ids,
+                kb_ids=leaf_kb_ids,
                 knowledge_bases=self.typed_config.knowledge_bases,
                 retrieve_type=first_kb.retrieve_type,
                 rerank_id=self.typed_config.reranker_id,
@@ -468,7 +474,7 @@ class KnowledgeRetrievalNode(BaseNode):
             # 组合等本地判不出的情形在这里拦截）。
             if not await image_retrieval_supported(
                 retriever,
-                kb_ids=[str(kb_id) for kb_id in kb_ids],
+                kb_ids=[str(kb_id) for kb_id in leaf_kb_ids],
                 retrieve_type=first_kb.retrieve_type,
                 context=context,
                 rerank_id=str(self.typed_config.reranker_id) if self.typed_config.reranker_id else None,

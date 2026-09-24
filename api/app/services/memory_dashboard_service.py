@@ -3,6 +3,7 @@ from typing import List, Optional, Dict, Any
 
 from fastapi import HTTPException
 from sqlalchemy import desc, nullslast
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from app.core.logging_config import get_business_logger
@@ -23,24 +24,24 @@ business_logger = get_business_logger()
 
 
 def get_current_workspace_type(
-    db: Session, 
+    db: Session,
     workspace_id: uuid.UUID,
     current_user: User
 ) -> Optional[str]:
     """获取当前工作空间类型"""
     business_logger.info(f"获取工作空间类型: workspace_id={workspace_id}, 操作者: {current_user.username}")
-    
+
     try:
         from app.repositories.workspace_repository import get_workspace_by_id
-        
+
         workspace = get_workspace_by_id(db, workspace_id)
         if not workspace:
             business_logger.warning(f"工作空间不存在: workspace_id={workspace_id}")
             return None
-            
+
         business_logger.info(f"成功获取工作空间类型: {workspace.storage_type}")
         return workspace.storage_type
-        
+
     except Exception as e:
         business_logger.error(f"获取工作空间类型失败: workspace_id={workspace_id} - {str(e)}")
         raise
@@ -166,19 +167,19 @@ def get_workspace_end_users_paginated_rag(
         raise
 
 async def get_workspace_api_increment_async(
-    workspace_id: uuid.UUID, 
+    workspace_id: uuid.UUID,
     current_user,
 ) -> int:
     """获取工作空间的API调用增量（异步版本）"""
     business_logger.info(f"获取工作空间API调用增量: workspace_id={workspace_id}, 操作者: {current_user.username}")
-    
-    try:        
+
+    try:
         # 查询API调用增量
         api_increment = 856
-        
+
         business_logger.info(f"成功获取 {api_increment} API调用增量")
         return api_increment
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -219,16 +220,16 @@ async def get_workspace_memory_increment_async(
 
 
 async def get_workspace_memory_list_async(
-    db, 
-    workspace_id: uuid.UUID, 
+    db,
+    workspace_id: uuid.UUID,
     current_user,
     limit: int = 7
 ) -> dict:
     """获取工作空间的记忆列表（异步版本）"""
     business_logger.info(f"获取工作空间记忆列表(异步): workspace_id={workspace_id}, 操作者: {current_user.username}")
-    
+
     result = {}
-    
+
     try:
         # 1. 获取记忆总量
         try:
@@ -238,7 +239,7 @@ async def get_workspace_memory_list_async(
         except Exception as e:
             business_logger.warning(f"获取记忆总量失败: {str(e)}")
             result["total_memory"] = 0.0
-        
+
         # 2. 获取记忆增量
         try:
             memory_increment = await get_workspace_memory_increment_async(db, workspace_id, limit, current_user)
@@ -247,7 +248,7 @@ async def get_workspace_memory_list_async(
         except Exception as e:
             business_logger.warning(f"获取记忆增量失败: {str(e)}")
             result["memory_increment"] = []
-        
+
         # 3. 获取宿主列表
         try:
             hosts = await get_workspace_end_users_async(db, workspace_id, current_user)
@@ -256,10 +257,10 @@ async def get_workspace_memory_list_async(
         except Exception as e:
             business_logger.warning(f"获取宿主列表失败: {str(e)}")
             result["hosts"] = []
-        
+
         business_logger.info("成功获取工作空间记忆列表")
         return result
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -268,26 +269,77 @@ async def get_workspace_memory_list_async(
 
 
 async def get_workspace_total_end_users_async(
-    db, 
-    workspace_id: uuid.UUID, 
+    db,
+    workspace_id: uuid.UUID,
     current_user
 ) -> dict:
     """获取用户列表的总用户数（异步版本）"""
     business_logger.info(f"获取用户列表的总用户数(异步): workspace_id={workspace_id}, 操作者: {current_user.username}")
-    
+
     try:
         end_users = await get_workspace_end_users_async(db, workspace_id, current_user)
-        
+
         business_logger.info(f"成功获取 {len(end_users)} 个宿主记录")
         return {
             "total_num": len(end_users),
             "online_num": len(end_users)
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
         business_logger.error(f"获取用户列表失败(异步): workspace_id={workspace_id} - {str(e)}")
+        raise
+
+
+@redis_cache(prefix="memory_count_total", id_arg="workspace_id", skip_args=["current_user"])
+async def get_workspace_total_memory_count_only_async(
+    db,
+    workspace_id: uuid.UUID,
+    current_user,
+    end_user_id: str = None
+) -> int:
+    """获取工作空间的记忆总量（只回传总量数值，不含宿主明细）。
+
+    面向只需要一个总数的场景（如 /dashboard_data 的 total_memory）。全工作空间分支
+    下推为单条 SUM/COUNT 聚合，不拉取任何宿主明细行，省掉"查出全部宿主 -> 逐行构造
+    details -> 求和 -> 丢弃 details"的整条链路；宿主数上万时差别显著。
+
+    与 get_workspace_total_memory_count_async 的数值口径完全一致，两者区别仅在于
+    是否返回 details，故共用同一份 end_users.memory_count 数据源。缓存 prefix 独立，
+    避免与返回 dict 的版本互相覆盖。
+
+    Returns:
+        int: 记忆总量；未找到指定宿主或无活跃宿主时为 0
+    """
+    business_logger.info(
+        f"获取工作空间记忆总量(仅总量): workspace_id={workspace_id}, 操作者: {current_user.username}"
+    )
+
+    try:
+        from app.repositories.end_user_repository import EndUserRepository
+
+        repo = EndUserRepository(db)
+
+        # 指定宿主：沿用单条查询，保住 get_end_user_by_id_async 的合并路由语义
+        if end_user_id:
+            end_user = await repo.get_end_user_by_id_async(uuid.UUID(end_user_id))
+            if not end_user:
+                business_logger.warning(f"未找到宿主 {end_user_id}，返回0")
+                return 0
+            total_count = int(end_user.memory_count or 0)
+        else:
+            # 全工作空间：聚合在 PG 内完成，只回传一行
+            raw_total, _ = await repo.get_memory_count_total_by_workspace_async(workspace_id)
+            total_count = int(raw_total or 0)
+
+        business_logger.info(f"成功获取工作空间记忆总量(仅总量): {total_count}")
+        return total_count
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        business_logger.error(f"获取工作空间记忆总量(仅总量)失败: workspace_id={workspace_id} - {str(e)}")
         raise
 
 
@@ -311,9 +363,10 @@ async def get_workspace_total_memory_count(
     )
 
 
+@redis_cache(prefix="memory_count", id_arg="workspace_id", skip_args=["current_user"])
 async def get_workspace_total_memory_count_async(
-    db, 
-    workspace_id: uuid.UUID, 
+    db,
+    workspace_id: uuid.UUID,
     current_user,
     end_user_id: str = None
 ) -> dict:
@@ -467,7 +520,7 @@ async def get_memory_increment_daily_async(
 
 # ======== RAG 相关服务 ========
 def get_rag_total_doc(
-    db: Session, 
+    db: Session,
     current_user: User
 ) -> int:
     """
@@ -475,7 +528,7 @@ def get_rag_total_doc(
     """
     workspace_id = current_user.current_workspace_id
     business_logger.info(f"获取RAG总文档数: workspace_id={workspace_id}, 操作者: {current_user.username}")
-    
+
     try:
         total_doc = knowledge_repository.get_total_doc_num_by_workspace(db, workspace_id)
         business_logger.info(f"成功获取RAG总文档数: {total_doc}")
@@ -494,7 +547,7 @@ def get_rag_total_chunk(
     """
     workspace_id = current_user.current_workspace_id
     business_logger.info(f"获取RAG总chunk数: workspace_id={workspace_id}, 操作者: {current_user.username}")
-    
+
     try:
         total_chunk = knowledge_repository.get_total_chunk_num_by_workspace(db, workspace_id)
         business_logger.info(f"成功获取RAG总chunk数: {total_chunk}")
@@ -513,7 +566,7 @@ def get_rag_total_kb(
     """
     workspace_id = current_user.current_workspace_id
     business_logger.info(f"获取RAG总知识库数(排除用户知识库): workspace_id={workspace_id}, 操作者: {current_user.username}")
-    
+
     try:
         total_kb = knowledge_repository.get_non_user_kb_count_by_workspace(db, workspace_id)
         business_logger.info(f"成功获取RAG总知识库数: {total_kb}")
@@ -553,8 +606,47 @@ def get_rag_user_kb_total_chunk(
         business_logger.info(f"成功获取用户知识库总chunk数: {total_chunk}")
         return total_chunk
     except Exception as e:
+        db.rollback()
         business_logger.error(f"获取用户知识库总chunk数失败: workspace_id={workspace_id} - {str(e)}")
         raise
+
+
+async def get_rag_user_kb_total_chunk_async(
+    db: AsyncSession,
+    current_user
+) -> int:
+    """get_rag_user_kb_total_chunk 的异步版本，统计口径一致。
+
+    与 /end_users 接口同源：查询 file_name 匹配 end_user_id.txt 的文档 chunk_num 之和。
+    """
+    workspace_id = current_user.current_workspace_id
+    business_logger.info(f"获取用户知识库总chunk数(documents表,异步): workspace_id={workspace_id}, 操作者: {current_user.username}")
+
+    try:
+        from app.models.document_model import Document
+        from app.repositories.end_user_repository import EndUserRepository
+        from sqlalchemy import func, select
+
+        # 通过 App 关联取该 workspace 下所有活跃 end_user_id
+        end_user_ids = await EndUserRepository(db).get_ids_by_app_workspace_async(workspace_id)
+        if not end_user_ids:
+            return 0
+
+        file_names = [f"{uid}.txt" for uid in end_user_ids]
+        result = (await db.execute(
+            select(func.sum(Document.chunk_num)).where(
+                Document.file_name.in_(file_names)
+            )
+        )).scalar()
+
+        total_chunk = int(result or 0)
+        business_logger.info(f"成功获取用户知识库总chunk数(异步): {total_chunk}")
+        return total_chunk
+    except Exception as e:
+        await db.rollback()
+        business_logger.error(f"获取用户知识库总chunk数失败(异步): workspace_id={workspace_id} - {str(e)}")
+        raise
+
 
 def get_dashboard_yesterday_changes(
     db: Session,
@@ -723,6 +815,184 @@ def get_dashboard_yesterday_changes(
     return changes
 
 
+@redis_cache(prefix="dashboard_change", id_arg="workspace_id")
+async def get_dashboard_yesterday_changes_async(
+    db,
+    workspace_id: uuid.UUID,
+    storage_type: str,
+    today_data: dict
+) -> dict:
+    """get_dashboard_yesterday_changes 的异步版本，统计口径与同步版完全一致。
+
+    只把 db.query(...) 换成 await db.execute(select(...))，查询条数、过滤条件、
+    日期边界逐一对应，不做任何合并，以保证数值行为零漂移。
+
+    Args:
+        db: AsyncSession
+        workspace_id: 工作空间ID
+        storage_type: 存储类型 'neo4j' | 'rag'
+        today_data: 当前数据，含 total_memory / total_app / total_knowledge / total_api_call
+
+    Returns:
+        dict: total_memory_change / total_app_change / total_knowledge_change / total_api_call_change
+    """
+    from sqlalchemy import func, select
+    from app.models.api_key_model import ApiKey, ApiKeyLog
+    from app.models.knowledge_model import Knowledge
+    from app.models.app_model import App
+    from app.models.appshare_model import AppShare
+
+    business_logger.info(f"计算昨日对比百分比(异步): workspace_id={workspace_id}, storage_type={storage_type}")
+
+    now_local = utcnow_naive()
+    today_start = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+
+    changes = {
+        "total_memory_change": None,
+        "total_app_change": None,
+        "total_knowledge_change": None,
+        "total_api_call_change": None,
+    }
+
+    def _calc_percentage(today_val, yesterday_val):
+        """计算百分比，昨日为0时返回None"""
+        if yesterday_val is None or yesterday_val == 0:
+            return None
+        return round((today_val - yesterday_val) / yesterday_val, 4)
+
+    # --- total_api_call_change: (截止今日累计总数 - 截止昨日累计总数) / 截止昨日累计总数 ---
+    try:
+        api_key_ids = [
+            row[0] for row in (await db.execute(
+                select(ApiKey.id).where(ApiKey.workspace_id == workspace_id)
+            )).all()
+        ]
+        if api_key_ids:
+            # 截止今日的累计调用总数
+            total_api_until_now = (await db.execute(
+                select(func.count(ApiKeyLog.id)).where(
+                    ApiKeyLog.api_key_id.in_(api_key_ids),
+                    ApiKeyLog.created_at < now_local,
+                )
+            )).scalar() or 0
+            # 截止昨日的累计调用总数（today_start 即昨日结束）
+            total_api_until_yesterday = (await db.execute(
+                select(func.count(ApiKeyLog.id)).where(
+                    ApiKeyLog.api_key_id.in_(api_key_ids),
+                    ApiKeyLog.created_at < today_start,
+                )
+            )).scalar() or 0
+            changes["total_api_call_change"] = _calc_percentage(total_api_until_now, total_api_until_yesterday)
+        else:
+            changes["total_api_call_change"] = None
+    except Exception as e:
+        business_logger.warning(f"计算API调用昨日对比失败: {str(e)}")
+
+    # --- total_knowledge_change: 只看活跃(status=1)且为顶层知识库(parent_id=workspace_id) ---
+    try:
+        # 截止今日的活跃知识库总量
+        today_knowledge = (await db.execute(
+            select(func.count(Knowledge.id)).where(
+                Knowledge.workspace_id == workspace_id,
+                Knowledge.status == 1,
+                Knowledge.parent_id == Knowledge.workspace_id,
+            )
+        )).scalar() or 0
+        # 截止昨日的活跃知识库总量
+        yesterday_knowledge = (await db.execute(
+            select(func.count(Knowledge.id)).where(
+                Knowledge.workspace_id == workspace_id,
+                Knowledge.status == 1,
+                Knowledge.parent_id == Knowledge.workspace_id,
+                Knowledge.created_at < today_start,
+            )
+        )).scalar() or 0
+
+        changes["total_knowledge_change"] = _calc_percentage(today_knowledge, yesterday_knowledge)
+    except Exception as e:
+        business_logger.warning(f"计算知识库昨日对比失败: {str(e)}")
+
+    # --- total_app_change: 只看活跃(is_active=True) ---
+    try:
+        # === 自有app ===
+        today_own_apps = (await db.execute(
+            select(func.count(App.id)).where(
+                App.workspace_id == workspace_id,
+                App.is_active.is_(True),
+            )
+        )).scalar() or 0
+        yesterday_own_apps = (await db.execute(
+            select(func.count(App.id)).where(
+                App.workspace_id == workspace_id,
+                App.is_active.is_(True),
+                App.created_at < today_start,
+            )
+        )).scalar() or 0
+
+        # === 被分享app ===
+        today_shared_apps = (await db.execute(
+            select(func.count(AppShare.id)).where(
+                AppShare.target_workspace_id == workspace_id,
+                AppShare.is_active.is_(True),
+            )
+        )).scalar() or 0
+        yesterday_shared_apps = (await db.execute(
+            select(func.count(AppShare.id)).where(
+                AppShare.target_workspace_id == workspace_id,
+                AppShare.is_active.is_(True),
+                AppShare.created_at < today_start,
+            )
+        )).scalar() or 0
+
+        today_total_app = today_own_apps + today_shared_apps
+        yesterday_total_app = yesterday_own_apps + yesterday_shared_apps
+
+        changes["total_app_change"] = _calc_percentage(today_total_app, yesterday_total_app)
+    except Exception as e:
+        business_logger.warning(f"计算应用数量昨日对比失败: {str(e)}")
+
+    # --- total_memory_change: (今日总量 - 昨日总量) / 昨日总量 ---
+    try:
+        today_memory = today_data.get("total_memory")
+        if today_memory is None:
+            changes["total_memory_change"] = None
+        elif storage_type == "neo4j":
+            last_record = (await db.execute(
+                select(MemoryIncrement).where(
+                    MemoryIncrement.workspace_id == workspace_id,
+                    MemoryIncrement.created_at < today_start,
+                ).order_by(desc(MemoryIncrement.created_at)).limit(1)
+            )).scalars().first()
+            if last_record is None or last_record.total_num == 0:
+                changes["total_memory_change"] = None
+            else:
+                changes["total_memory_change"] = _calc_percentage(today_memory, last_record.total_num)
+        elif storage_type == "rag":
+            from app.models.document_model import Document
+            from app.repositories.end_user_repository import EndUserRepository
+
+            end_user_ids = await EndUserRepository(db).get_ids_by_app_workspace_async(workspace_id)
+            if not end_user_ids:
+                changes["total_memory_change"] = None
+            else:
+                file_names = [f"{uid}.txt" for uid in end_user_ids]
+                yesterday_chunk = int((await db.execute(
+                    select(func.sum(Document.chunk_num)).where(
+                        Document.file_name.in_(file_names),
+                        Document.created_at < today_start,
+                    )
+                )).scalar() or 0)
+                if yesterday_chunk == 0:
+                    changes["total_memory_change"] = None
+                else:
+                    changes["total_memory_change"] = _calc_percentage(today_memory, yesterday_chunk)
+    except Exception as e:
+        business_logger.warning(f"计算记忆总量昨日对比失败: {str(e)}")
+
+    business_logger.info(f"昨日对比百分比计算完成(异步): {changes}")
+    return changes
+
+
 def get_current_user_total_chunk(
     end_user_id: str,
     db: Session,
@@ -732,22 +1002,22 @@ def get_current_user_total_chunk(
     计算documents表中file_name=='end_user_id'+'.txt'的所有记录chunk_num的总和
     """
     business_logger.info(f"获取用户总chunk数: end_user_id={end_user_id}, 操作者: {current_user.username}")
-    
+
     try:
         from app.models.document_model import Document
         from sqlalchemy import func
-        
+
         # 构造文件名
         file_name = f"{end_user_id}.txt"
-        
+
         # 查询并求和
         total_chunk = db.query(func.sum(Document.chunk_num)).filter(
             Document.file_name == file_name
         ).scalar() or 0
-        
+
         business_logger.info(f"成功获取用户总chunk数: {total_chunk} (file_name={file_name})")
         return int(total_chunk)
-        
+
     except Exception as e:
         business_logger.error(f"获取用户总chunk数失败: end_user_id={end_user_id} - {str(e)}")
         raise
@@ -771,17 +1041,17 @@ def get_users_total_chunk_batch(
         格式: {"user_id_1": 100, "user_id_2": 50, ...}
     """
     business_logger.info(f"批量获取 {len(end_user_ids)} 个用户的总chunk数, 操作者: {current_user.username}")
-    
+
     try:
         from app.models.document_model import Document
         from sqlalchemy import func, case
-        
+
         if not end_user_ids:
             return {}
-        
+
         # 构造所有文件名
         file_names = [f"{user_id}.txt" for user_id in end_user_ids]
-        
+
         # 一次查询获取所有用户的chunk总数
         # 使用 GROUP BY file_name 来分组统计
         results = db.query(
@@ -792,22 +1062,22 @@ def get_users_total_chunk_batch(
         ).group_by(
             Document.file_name
         ).all()
-        
+
         # 构建结果字典
         chunk_map = {}
         for file_name, total_chunk in results:
             # 从文件名中提取 end_user_id (去掉 .txt 后缀)
             user_id = file_name.replace('.txt', '')
             chunk_map[user_id] = int(total_chunk or 0)
-        
+
         # 对于没有记录的用户，设置为0
         for user_id in end_user_ids:
             if user_id not in chunk_map:
                 chunk_map[user_id] = 0
-        
+
         business_logger.info(f"成功批量获取 {len(chunk_map)} 个用户的总chunk数")
         return chunk_map
-        
+
     except Exception as e:
         business_logger.error(f"批量获取用户总chunk数失败: {str(e)}")
         raise
@@ -827,19 +1097,19 @@ def get_rag_content(
     最后返回分页数据
     """
     business_logger.info(f"获取RAG内容: end_user_id={end_user_id}, page={page}, pagesize={pagesize}, 操作者: {current_user.username}")
-    
+
     try:
         from app.models.document_model import Document
         from app.core.rag.vdb.elasticsearch.elasticsearch_vector import ElasticSearchVectorFactory
-        
+
         # 1. 构造文件名
         file_name = f"{end_user_id}.txt"
-        
+
         # 2. 查询documents表获取id和kb_id
         documents = db.query(Document).filter(
             Document.file_name == file_name
         ).all()
-        
+
         if not documents:
             business_logger.warning(f"未找到文件: {file_name}")
             return {
@@ -850,26 +1120,26 @@ def get_rag_content(
                 },
                 "items": []
             }
-        
+
         business_logger.info(f"找到 {len(documents)} 个文档记录")
-        
+
         # 3. 按全局偏移量计算当前页数据
         # 全局偏移范围：[offset_start, offset_end)
         offset_start = (page - 1) * pagesize
         offset_end = offset_start + pagesize
-        
+
         global_total = 0    # 所有文档的 chunk 总数
         page_contents = []  # 当前页的内容
-        
+
         for document in documents:
             try:
                 kb = knowledge_repository.get_knowledge_by_id(db, document.kb_id)
                 if not (kb and kb.status == 1):
                     business_logger.warning(f"知识库不存在: kb_id={document.kb_id}")
                     continue
-                
+
                 vector_service = ElasticSearchVectorFactory().init_vector(knowledge=kb)
-                
+
                 # 先用 pagesize=1 获取该文档的 chunk 总数
                 doc_total, _ = vector_service.search_by_segment(
                     document_id=str(document.id),
@@ -878,24 +1148,24 @@ def get_rag_content(
                     page=1,
                     asc=True
                 )
-                
+
                 doc_offset_start = global_total            # 该文档在全局中的起始偏移
                 doc_offset_end = global_total + doc_total  # 该文档在全局中的结束偏移
                 global_total += doc_total
-                
+
                 # 当前页与该文档无交集，跳过
                 if doc_offset_end <= offset_start or doc_offset_start >= offset_end:
                     continue
-                
+
                 # 计算需要从该文档取的局部范围
                 local_start = max(offset_start - doc_offset_start, 0)
                 local_end = min(offset_end - doc_offset_start, doc_total)
                 need_count = local_end - local_start
-                
+
                 # 换算成 ES 分页参数（ES page 从1开始）
                 es_page = (local_start // pagesize) + 1
                 es_offset_in_page = local_start % pagesize
-                
+
                 fetched = []
                 while len(fetched) < es_offset_in_page + need_count:
                     _, items = vector_service.search_by_segment(
@@ -909,14 +1179,14 @@ def get_rag_content(
                         break
                     fetched.extend(items)
                     es_page += 1
-                
+
                 slice_items = fetched[es_offset_in_page: es_offset_in_page + need_count]
                 page_contents.extend([item.page_content for item in slice_items])
-                
+
             except Exception as e:
                 business_logger.error(f"获取文档 {document.id} 的chunks失败: {str(e)}")
                 continue
-        
+
         # 4. 将所有 page_content 拼接后按角色分割为对话列表
         merged_text = "\n".join(page_contents)
         conversations = []
@@ -943,10 +1213,10 @@ def get_rag_content(
             },
             "items": conversations
         }
-        
+
         business_logger.info(f"成功获取RAG内容: page={page}, 返回={len(conversations)} 条对话")
         return result
-        
+
     except Exception as e:
         business_logger.error(f"获取RAG内容失败: end_user_id={end_user_id} - {str(e)}")
         raise
@@ -1133,6 +1403,78 @@ def get_dashboard_common_stats(db: Session, workspace_id) -> dict:
             total_api_calls = db.query(_api_func.count(_ApiKeyLog.id)).filter(
                 _ApiKeyLog.api_key_id.in_(_api_key_ids)
             ).scalar() or 0
+        else:
+            total_api_calls = 0
+        result["total_api_call"] = total_api_calls
+    except Exception as e:
+        business_logger.warning(f"获取API调用统计失败: {e}")
+
+    return result
+
+
+@redis_cache(prefix="common_status", skip_args=["db"], id_arg="workspace_id")
+async def get_dashboard_common_stats_async(db, workspace_id) -> dict:
+    """get_dashboard_common_stats 的异步版本，统计口径一致：
+    total_app、total_knowledge、total_api_call。
+
+    其中 total_app 原实现走 AppService.list_apps(include_shared=True, pagesize=1) 只为
+    取一个 total；此处按该方法的计数语义等价改写为单条 count 查询——
+    count(App WHERE is_active AND (workspace_id = ws OR id IN 活跃分享的 source_app_id))，
+    避免为拿一个数字而走整条分页链路。
+
+    Returns:
+        dict: {"total_app": int, "total_knowledge": int, "total_api_call": int}
+    """
+    from sqlalchemy import func, or_, select
+    from app.models.knowledge_model import Knowledge
+    from app.models.app_model import App
+    from app.models.appshare_model import AppShare
+    from app.models.api_key_model import ApiKey, ApiKeyLog
+
+    result = {"total_app": 0, "total_knowledge": 0, "total_api_call": 0}
+
+    # total_app: 统计当前空间下的所有app数量（自有 + 被分享给本工作空间的app）
+    try:
+        shared_app_ids_stmt = (
+            select(AppShare.source_app_id)
+            .where(AppShare.target_workspace_id == workspace_id, AppShare.is_active.is_(True))
+        )
+        app_stmt = select(App.id).where(
+            App.is_active.is_(True),
+            or_(App.workspace_id == workspace_id, App.id.in_(shared_app_ids_stmt)),
+        )
+        result["total_app"] = int(
+            (await db.execute(select(func.count()).select_from(app_stmt.subquery()))).scalar() or 0
+        )
+    except Exception as e:
+        business_logger.warning(f"获取应用数量失败: {e}")
+
+    # total_knowledge: 统计顶层知识库（parent_id = workspace_id）
+    try:
+        total_knowledge = (await db.execute(
+            select(func.count(Knowledge.id)).where(
+                Knowledge.workspace_id == workspace_id,
+                Knowledge.status == 1,
+                Knowledge.parent_id == Knowledge.workspace_id,
+            )
+        )).scalar() or 0
+        result["total_knowledge"] = total_knowledge
+    except Exception as e:
+        business_logger.warning(f"获取知识库数量失败: {e}")
+
+    # total_api_call: 截止当前的历史累计调用总数
+    try:
+        api_key_ids = [
+            row[0] for row in (await db.execute(
+                select(ApiKey.id).where(ApiKey.workspace_id == workspace_id)
+            )).all()
+        ]
+        if api_key_ids:
+            total_api_calls = (await db.execute(
+                select(func.count(ApiKeyLog.id)).where(
+                    ApiKeyLog.api_key_id.in_(api_key_ids)
+                )
+            )).scalar() or 0
         else:
             total_api_calls = 0
         result["total_api_call"] = total_api_calls
