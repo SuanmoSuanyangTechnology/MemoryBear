@@ -6,6 +6,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from app.schemas.scene_community_schema import SceneValueSummaryOutput
+
 SceneBoundary = Literal["CONTINUE", "SHIFTED", "BERT_FAILED_CONTINUE"]
 SceneCloseReason = Literal["SHIFTED", "IDLE_TIMEOUT"]
 SceneDemoPrediction = Literal["CONTINUE", "SHIFTED"]
@@ -63,8 +65,9 @@ class SceneMessage(BaseModel):
     created_at: datetime
 
 
-class SceneSummaryContent(BaseModel):
-    content: str = Field(..., min_length=1)
+# Backward-compatible import name for callers that still reference the old
+# SceneSummary-only contract.  P1V is now the single generation contract.
+SceneSummaryContent = SceneValueSummaryOutput
 
 
 class GenerateSceneSummaryTask(BaseModel):

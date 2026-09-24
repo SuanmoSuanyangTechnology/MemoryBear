@@ -9,6 +9,147 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 BatchTriggerCount = Annotated[int, Field(ge=1, le=50)]
 CandidateCommunityLimit = Annotated[int, Field(ge=1, le=8)]
 
+Confidence = Literal["HIGH", "MEDIUM", "LOW"]
+
+_P1V_ELIGIBLE_REASONS = {
+    "STABLE_RECALLABLE_MATTER",
+    "ONGOING_RELATIONSHIP_ISSUE",
+    "CONCRETE_EVENT_OR_DECISION",
+    "REUSABLE_EXPERIENCE_OR_PLAN",
+}
+_P1V_NOT_ELIGIBLE_REASONS = {
+    "PHATIC_ONLY",
+    "EMOTIONAL_EXPRESSION_ONLY",
+    "EPHEMERAL_SOCIAL_EXCHANGE",
+    "LOW_INFORMATION_NO_MATTER",
+    "MISSING_REFERENT",
+    "SUMMARY_TOO_VAGUE",
+    "UPSTREAM_CONTEXT_LOSS_SUSPECTED",
+    "SCENE_FRAGMENT_INCOMPLETE",
+}
+_P2_ASSIGN_REASONS = {
+    "SAME_BOUNDED_INSTANCE",
+    "SAME_INSTANCE_DETAIL",
+    "RETURN_TO_EXISTING_INSTANCE",
+}
+_P2_CREATE_REASONS = {
+    "NO_MATCHING_INSTANCE",
+    "DIFFERENT_BOUNDED_INSTANCE",
+    "MAIN_MATTER_CHANGED",
+    "OUTSIDE_SCOPE",
+    "WOULD_REDEFINE_CORE",
+    "ONLY_SAME_BROAD_DOMAIN",
+    "ONLY_SHARED_ENTITY",
+    "CONFLICTS_WITH_EXCLUSION_RULE",
+    "NO_UNIQUE_MATCH",
+    "INSUFFICIENT_MATCH_EVIDENCE",
+}
+
+
+class _StrictModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class SceneValueSummaryOutput(_StrictModel):
+    """Validated P1V result for SceneSummary generation and eligibility."""
+
+    decision: Literal["ELIGIBLE", "NOT_ELIGIBLE"]
+    topic_scope: str | None = Field(..., min_length=1, max_length=500)
+    summary: str = Field(min_length=1, max_length=1200)
+    reason_code: Literal[
+        "STABLE_RECALLABLE_MATTER",
+        "ONGOING_RELATIONSHIP_ISSUE",
+        "CONCRETE_EVENT_OR_DECISION",
+        "REUSABLE_EXPERIENCE_OR_PLAN",
+        "PHATIC_ONLY",
+        "EMOTIONAL_EXPRESSION_ONLY",
+        "EPHEMERAL_SOCIAL_EXCHANGE",
+        "LOW_INFORMATION_NO_MATTER",
+        "MISSING_REFERENT",
+        "SUMMARY_TOO_VAGUE",
+        "UPSTREAM_CONTEXT_LOSS_SUSPECTED",
+        "SCENE_FRAGMENT_INCOMPLETE",
+    ]
+    short_reason: str = Field(min_length=1, max_length=240)
+    confidence: Confidence
+
+    @model_validator(mode="after")
+    def validate_decision_fields(self):
+        if self.decision == "ELIGIBLE":
+            if not self.topic_scope or self.reason_code not in _P1V_ELIGIBLE_REASONS:
+                raise ValueError("ELIGIBLE requires topic_scope and an eligible reason")
+        elif self.topic_scope is not None or self.reason_code not in _P1V_NOT_ELIGIBLE_REASONS:
+            raise ValueError("NOT_ELIGIBLE requires null topic_scope and a matching reason")
+        return self
+
+
+class SceneOntologyRouteOutput(_StrictModel):
+    """Validated O1 result. Category membership is checked by the caller."""
+
+    category_l1: str = Field(min_length=1)
+    reason_code: Literal[
+        "CLEAR_MAIN_CATEGORY",
+        "MAIN_WITH_SECONDARY_CATEGORY",
+        "ROUTED_TO_OTHER",
+    ]
+    short_reason: str = Field(min_length=1, max_length=240)
+    confidence: Confidence
+
+    @model_validator(mode="after")
+    def validate_other_reason(self):
+        routed_to_other = self.reason_code == "ROUTED_TO_OTHER"
+        if (self.category_l1 == "other") != routed_to_other:
+            raise ValueError("other must be paired with ROUTED_TO_OTHER")
+        return self
+
+
+class CommunityJudgeOutput(_StrictModel):
+    """Validated P2 assignment decision."""
+
+    decision: Literal["ASSIGN_EXISTING", "CREATE_NEW"]
+    target_community_id: str | None = Field(...)
+    reason_code: Literal[
+        "SAME_BOUNDED_INSTANCE",
+        "SAME_INSTANCE_DETAIL",
+        "RETURN_TO_EXISTING_INSTANCE",
+        "NO_MATCHING_INSTANCE",
+        "DIFFERENT_BOUNDED_INSTANCE",
+        "MAIN_MATTER_CHANGED",
+        "OUTSIDE_SCOPE",
+        "WOULD_REDEFINE_CORE",
+        "ONLY_SAME_BROAD_DOMAIN",
+        "ONLY_SHARED_ENTITY",
+        "CONFLICTS_WITH_EXCLUSION_RULE",
+        "NO_UNIQUE_MATCH",
+        "INSUFFICIENT_MATCH_EVIDENCE",
+    ]
+    short_reason: str = Field(min_length=1, max_length=240)
+    confidence: Confidence
+
+    @model_validator(mode="after")
+    def validate_decision_fields(self):
+        if self.decision == "ASSIGN_EXISTING":
+            if not self.target_community_id or self.reason_code not in _P2_ASSIGN_REASONS:
+                raise ValueError("ASSIGN_EXISTING requires a target and matching reason")
+        elif self.target_community_id is not None or self.reason_code not in _P2_CREATE_REASONS:
+            raise ValueError("CREATE_NEW requires a null target and matching reason")
+        return self
+
+
+class CommunityBoundarySummaryOutput(_StrictModel):
+    """Validated P3 result; operation-mode invariants are checked by the service."""
+
+    topic_name: str | None = Field(..., min_length=1, max_length=80)
+    topic_scope: str | None = Field(..., min_length=1, max_length=500)
+    boundary_instance_anchor: str | None = Field(..., min_length=1, max_length=240)
+    boundary_lifecycle_anchor: str | None = Field(..., min_length=1, max_length=240)
+    boundary_primary_matter: str | None = Field(..., min_length=1, max_length=240)
+    boundary_include_rule: str | None = Field(..., min_length=1, max_length=500)
+    boundary_exclude_rule: str | None = Field(..., min_length=1, max_length=500)
+    summary: str = Field(min_length=1, max_length=1200)
+    short_reason: str = Field(min_length=1, max_length=240)
+    confidence: Confidence
+
 
 class SceneCommunityConfig(BaseModel):
     """Persisted SceneCommunity settings returned by both API entry points."""
