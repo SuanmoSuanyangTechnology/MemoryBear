@@ -13,7 +13,7 @@ from app.models.user_model import User
 from app.repositories.model_repository import ModelConfigRepository
 from app.schemas import model_schema
 from app.core.response_utils import success, fail
-from app.schemas.response_schema import ApiResponse, PageData
+from app.schemas.response_schema import ApiResponse
 from app.services.model_service import ModelConfigService, ModelBaseService
 from app.services.model_channel_service import ChannelApiKeyService
 from app.services.model_profile_view import wire_model_base, wire_model_config
@@ -72,7 +72,7 @@ def get_model_list(
         current_user: User = Depends(get_current_user)
 ):
     """
-    获取模型配置列表（全量返回，不分页）
+    获取模型配置列表（全量返回裸数组，不分页）
 
     支持多个 type 参数：
     - 单个：?type=LLM
@@ -108,10 +108,9 @@ def get_model_list(
         )
 
         api_logger.debug(f"开始获取模型配置列表: {query.model_dump()}")
-        result_orm = ModelConfigService.get_model_list(db=db, query=query, tenant_id=current_user.tenant_id)
-        result = PageData.model_validate(result_orm)
-        api_logger.info(f"模型配置列表获取成功: 总数={result.page.total}, 当前页={len(result.items)}")
-        return success(data=result, msg="模型配置列表获取成功")
+        models = ModelConfigService.get_model_list(db=db, query=query, tenant_id=current_user.tenant_id)
+        api_logger.info(f"模型配置列表获取成功: 数量={len(models)}")
+        return success(data=models, msg="模型配置列表获取成功")
     except Exception as e:
         api_logger.error(f"获取模型配置列表失败: {str(e)}")
         raise

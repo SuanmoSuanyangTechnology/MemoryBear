@@ -34,7 +34,6 @@ from app.core.model_provider_config import (
     validate_api_base_against_default,
 )
 from app.core.logging_config import get_business_logger
-from app.schemas.response_schema import PageData, PageMeta
 from app.core.exceptions import BusinessException
 from app.core.error_codes import BizCode
 from app.core.utils.datetime_utils import utcnow_naive
@@ -755,11 +754,10 @@ class ModelConfigService:
         )
 
     @staticmethod
-    def get_model_list(db: Session, query: ModelConfigQuery, tenant_id: uuid.UUID | None = None) -> PageData:
+    def get_model_list(db: Session, query: ModelConfigQuery, tenant_id: uuid.UUID | None = None) -> List[model_schema.ModelConfig]:
         """获取模型配置列表（含渠道可用性：候选链非空 = True）。
 
-        不分页，全量返回（2026-09-28 决策）：响应仍保留 PageData 信封，单页全量
-        （page=1、pagesize=total、hasnext=false）以兼容既有调用方。
+        不分页，全量返回裸数组（2026-09-28 决策，与 `/models/new` 口径一致）。
         `is_available` 置位时：全量取行 → 批量探测 → 派生过滤
         （选择器隐藏已禁用/无渠道/已弃用模型，G1；租户模型量有界）。
         """
@@ -773,19 +771,10 @@ class ModelConfigService:
                 if _derived_available(model, availability) is query.is_available
             ]
 
-        total = len(models)
-        return PageData(
-            page=PageMeta(
-                page=1,
-                pagesize=total,
-                total=total,
-                hasnext=False
-            ),
-            items=[
-                _with_availability(model, availability)
-                for model in models
-            ]
-        )
+        return [
+            _with_availability(model, availability)
+            for model in models
+        ]
 
     @staticmethod
     def get_model_list_new(db: Session, query: ModelConfigQueryNew, tenant_id: uuid.UUID | None = None) -> List[dict]:
