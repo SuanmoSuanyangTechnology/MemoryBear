@@ -89,7 +89,6 @@ export const space = {
 
       recursiveChunker: '递归分块器',
       tokenChunker: '令牌分块器',
-      llmChunker: 'LLM分块器',
       sentenceChunker: '句子分块器',
       debug: '调试',
       clearChat: '清空',
