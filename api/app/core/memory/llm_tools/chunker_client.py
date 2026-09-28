@@ -1,5 +1,3 @@
-import asyncio
-import json
 import logging
 import os
 from typing import Any, List
@@ -21,64 +19,6 @@ from app.core.memory.models.message_models import DialogData, Chunk
 
 # Initialize logger
 logger = logging.getLogger(__name__)
-
-
-class LLMChunker:
-    """LLM-based intelligent chunking strategy"""
-
-    def __init__(self, llm_client, chunk_size: int = 1000):
-        self.llm_client = llm_client
-        self.chunk_size = chunk_size
-
-    async def __call__(self, text: str) -> List[Any]:
-        prompt = f"""
-            Split the following text into semantically coherent paragraphs. Each paragraph should focus on one topic, approximately {self.chunk_size} characters long.
-            Return results in JSON format with a chunks array, each chunk having a text field.
-
-            Text content:
-            {text[:5000]}
-            """
-
-        messages = [
-            {"role": "system",
-             "content": "You are a professional text analysis assistant, skilled at splitting long texts into semantically coherent paragraphs."},
-            {"role": "user", "content": prompt}
-        ]
-
-        try:
-            # 使用 ainvoke 方法
-            response = await self.llm_client.ainvoke(messages)
-
-            # 检查响应格式并提取内容
-            if hasattr(response, 'choices') and len(response.choices) > 0:
-                content = response.choices[0].message.content
-            elif hasattr(response, 'content'):
-                content = response.content
-            else:
-                content = str(response)
-
-            # 解析LLM响应
-            if "```json" in content:
-                json_str = content.split("```json")[1].split("```")[0].strip()
-            elif "```" in content:
-                json_str = content.split("```")[1].split("```")[0].strip()
-            else:
-                json_str = content
-
-            result = json.loads(json_str)
-
-            class SimpleChunk:
-                def __init__(self, text, index):
-                    self.text = text
-                    self.start_index = index * 100  # 近似位置
-                    self.end_index = (index + 1) * 100
-
-            return [SimpleChunk(chunk["text"], i) for i, chunk in enumerate(result.get("chunks", []))]
-
-        except Exception as e:
-            print(f"LLM分块失败: {e}")
-            # 失败时返回空列表，外层会处理回退方案
-            return []
 
 
 class ChunkerClient:
@@ -114,10 +54,6 @@ class ChunkerClient:
                 min_characters_per_chunk=self.min_characters_per_chunk or 50,
                 chunk_size=self.chunk_size,
             )
-        elif chunker_config.chunker_strategy == "LLMChunker":
-            if not llm_client:
-                raise ValueError("LLMChunker requires an LLM client")
-            self.chunker = LLMChunker(llm_client, self.chunk_size)
         elif chunker_config.chunker_strategy == "SentenceChunker":
             self.chunker = SentenceChunker(
                 chunk_size=self.chunk_size,
@@ -169,7 +105,7 @@ class ChunkerClient:
             if len(msg_content) > self.chunk_size:
                 # 对单个消息的内容进行分块
                 try:
-                    sub_chunks = self.chunker(msg_content)
+                    sub_chunks = list(self.chunker(msg_content))
                 except Exception as e:
                     raise ValueError(
                         f"Failed to chunk long message {msg_idx} in dialogue {dialogue.ref_id}: {e}"
@@ -179,7 +115,11 @@ class ChunkerClient:
                     sub_chunk_text = sub_chunk.text if hasattr(sub_chunk, 'text') else str(sub_chunk)
                     sub_chunk_text = sub_chunk_text.strip()
 
-                    if len(sub_chunk_text) < (self.min_characters_per_chunk or 50):
+                    # 仅跳过空白块。不按 min_characters_per_chunk 过滤：该阈值已在
+                    # __init__ 中传给 chonkie，其 _split_text() 每层切分后就会把过短
+                    # 碎片并入相邻块；应用层再判一次既是重复，也会丢掉 chunk_size
+                    # 边界切出的正常尾块（内容与其它块无异，只是长度是余数）。
+                    if not sub_chunk_text:
                         continue
 
                     chunk = Chunk(
@@ -212,10 +152,11 @@ class ChunkerClient:
                 dialogue.chunks.append(chunk)
 
         # Validate we generated at least one chunk
+        # 不再按长度过滤后，走到这里只可能是所有消息都是空白内容
         if not dialogue.chunks:
             raise ValueError(
                 f"No valid chunks generated for dialogue {dialogue.ref_id}. "
-                f"All messages were either empty or too short. "
+                f"All messages were empty or whitespace-only. "
                 f"Messages count: {len(dialogue.context.msgs)}"
             )
 
