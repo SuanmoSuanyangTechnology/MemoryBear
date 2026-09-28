@@ -4,7 +4,7 @@ import datetime
 import uuid
 
 from app.core.utils.datetime_utils import to_timestamp_ms
-from app.models.models_model import ModelProvider, ModelType, LoadBalanceStrategy
+from app.models.models_model import ModelFeature, ModelProvider, ModelType, LoadBalanceStrategy, Modality
 
 
 class RejectLegacyModelFields:
@@ -28,6 +28,46 @@ class RejectLegacyModelFields:
             if isinstance(raw_type, str) and raw_type.lower() == "chat":
                 raise ValueError("type='chat' 已下线，请改用 type='llm'")
         return data
+
+
+def _unknown_enum_values(enum_cls, values: Optional[List[str]]) -> List[str]:
+    unknown: List[str] = []
+    for value in values or ():
+        try:
+            enum_cls(value)
+        except ValueError:
+            unknown.append(value)
+    return unknown
+
+
+class RejectUnknownModelColumns:
+    """三列值域守卫（M1，设计 §2.1）：写入口只接受契约枚举成员，未知值 422。
+
+    `List[str]` 会原样接收任意字符串，未知值落库后要到 profile 层才被静默丢弃/回退；
+    前端禁用只能作辅助，服务端信任边界须拒止。响应类不挂本守卫（读侧容忍存量未知值）。
+    """
+
+    @field_validator("input_modalities", "output_modalities")
+    @classmethod
+    def _reject_unknown_modalities(cls, values: Optional[List[str]]) -> Optional[List[str]]:
+        unknown = _unknown_enum_values(Modality, values)
+        if unknown:
+            raise ValueError(
+                f"未知模态 {', '.join(map(str, unknown))}，"
+                f"可选值：{', '.join(item.value for item in Modality)}"
+            )
+        return values
+
+    @field_validator("features")
+    @classmethod
+    def _reject_unknown_features(cls, values: Optional[List[str]]) -> Optional[List[str]]:
+        unknown = _unknown_enum_values(ModelFeature, values)
+        if unknown:
+            raise ValueError(
+                f"未知能力特征 {', '.join(map(str, unknown))}，"
+                f"可选值：{', '.join(item.value for item in ModelFeature)}"
+            )
+        return values
 
 
 # ModelConfig Schemas
@@ -56,7 +96,7 @@ class ApiKeyRegister(BaseModel):
     priority: int = Field(0, description="优先级（大者优先）")
 
 
-class ModelConfigCreate(ModelConfigBase, RejectLegacyModelFields):
+class ModelConfigCreate(ModelConfigBase, RejectLegacyModelFields, RejectUnknownModelColumns):
     """创建自定义模型Schema（内嵌 credential：创建即登记点名渠道，单接口原子完成）
 
     自定义模型不经模型广场添加，provider 级渠道不保证可用，因此凭据必填并
@@ -84,7 +124,7 @@ class CompositeModelCreate(BaseModel, RejectLegacyModelFields):
     load_balance_strategy: Optional[str] = Field(default=LoadBalanceStrategy.NONE.value, description="负载均衡策略")
 
 
-class ModelConfigUpdate(BaseModel, RejectLegacyModelFields):
+class ModelConfigUpdate(BaseModel, RejectLegacyModelFields, RejectUnknownModelColumns):
     """更新模型配置Schema"""
     name: Optional[str] = Field(None, description="模型显示名称", max_length=255)
     type: Optional[ModelType] = Field(None, description="模型类型")
@@ -265,7 +305,7 @@ ModelConfig.model_rebuild()
 
 
 # ModelBase Schemas
-class ModelBaseCreate(BaseModel, RejectLegacyModelFields):
+class ModelBaseCreate(BaseModel, RejectLegacyModelFields, RejectUnknownModelColumns):
     """创建基础模型Schema"""
     name: str = Field(..., description="模型唯一标识", max_length=255)
     type: ModelType = Field(..., description="模型类型")
@@ -279,7 +319,7 @@ class ModelBaseCreate(BaseModel, RejectLegacyModelFields):
     features: Optional[List[str]] = Field(None, description="能力特征（缺省为空）")
 
 
-class ModelBaseUpdate(BaseModel, RejectLegacyModelFields):
+class ModelBaseUpdate(BaseModel, RejectLegacyModelFields, RejectUnknownModelColumns):
     """更新基础模型Schema"""
     name: Optional[str] = Field(None, description="模型唯一标识", max_length=255)
     type: Optional[ModelType] = Field(None, description="模型类型")
