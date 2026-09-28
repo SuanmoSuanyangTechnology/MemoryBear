@@ -51,10 +51,9 @@ const ModelSelect = <T extends ModelOption = Model,>({ params, inputModality, pl
     setOptionsLoaded(false);
     getModelList({
       ...(params ?? {}),
-      pagesize: 100,
       is_available: true,
     }).then((res) => {
-      setOptions((res as { items: T[] }).items ?? []);
+      setOptions((res as T[]) ?? []);
     }).finally(() => {
       setOptionsLoaded(true);
     });
