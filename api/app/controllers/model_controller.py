@@ -68,24 +68,22 @@ def get_model_list(
         is_public: Optional[bool] = Query(None, description="公开状态筛选"),
         is_available: Optional[bool] = Query(None, description="可用性筛选（已启用且未弃用且渠道候选非空）"),
         search: Optional[str] = Query(None, description="搜索关键词"),
-        page: int = Query(1, ge=1, description="页码"),
-        pagesize: int = Query(10, ge=1, le=100, description="每页数量"),
         db: Session = Depends(get_db),
         current_user: User = Depends(get_current_user)
 ):
     """
-    获取模型配置列表
+    获取模型配置列表（全量返回，不分页）
 
     支持多个 type 参数：
     - 单个：?type=LLM
     - 多个（逗号分隔）：?type=LLM,EMBEDDING
     - 多个（重复参数）：?type=LLM&type=EMBEDDING
 
-    is_available=true 时仅返回"已启用且未弃用且渠道候选非空"的模型（服务端全量探测后内存分页），
+    is_available=true 时仅返回"已启用且未弃用且渠道候选非空"的模型（服务端全量探测后过滤），
     供选择器隐藏已禁用/已弃用/无渠道模型；is_deprecated 详情见响应字段。
     """
     api_logger.info(
-        f"获取模型配置列表请求: type={type}, provider={provider}, is_available={is_available}, page={page}, pagesize={pagesize}, tenant_id={current_user.tenant_id}")
+        f"获取模型配置列表请求: type={type}, provider={provider}, is_available={is_available}, tenant_id={current_user.tenant_id}")
 
     try:
         # 解析 type 参数（支持逗号分隔）
@@ -107,8 +105,6 @@ def get_model_list(
             is_public=is_public,
             is_available=is_available,
             search=search,
-            page=page,
-            pagesize=pagesize
         )
 
         api_logger.debug(f"开始获取模型配置列表: {query.model_dump()}")

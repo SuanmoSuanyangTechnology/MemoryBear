@@ -6,7 +6,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 from typing import TYPE_CHECKING, Iterable, List, NoReturn, Optional, Dict, Any, Sequence, Tuple
 import uuid
-import math
 import time
 import asyncio
 from urllib.parse import urlparse
@@ -759,29 +758,28 @@ class ModelConfigService:
     def get_model_list(db: Session, query: ModelConfigQuery, tenant_id: uuid.UUID | None = None) -> PageData:
         """获取模型配置列表（含渠道可用性：候选链非空 = True）。
 
-        `is_available` 置位时：全量取行 → 批量探测 → 派生过滤 → 内存分页
+        不分页，全量返回（2026-09-28 决策）：响应仍保留 PageData 信封，单页全量
+        （page=1、pagesize=total、hasnext=false）以兼容既有调用方。
+        `is_available` 置位时：全量取行 → 批量探测 → 派生过滤
         （选择器隐藏已禁用/无渠道/已弃用模型，G1；租户模型量有界）。
         """
-        models, total = ModelConfigRepository.get_list(db, query, tenant_id=tenant_id)
+        models, _ = ModelConfigRepository.get_list(db, query, tenant_id=tenant_id)
 
         availability = _probe_availability(db, models, tenant_id)
         if query.is_available is not None:
-            matched = [
+            models = [
                 model
                 for model in models
                 if _derived_available(model, availability) is query.is_available
             ]
-            total = len(matched)
-            start = (query.page - 1) * query.pagesize
-            models = matched[start : start + query.pagesize]
 
-        pages = math.ceil(total / query.pagesize) if total > 0 else 0
+        total = len(models)
         return PageData(
             page=PageMeta(
-                page=query.page,
-                pagesize=query.pagesize,
+                page=1,
+                pagesize=total,
                 total=total,
-                hasnext=query.page < pages
+                hasnext=False
             ),
             items=[
                 _with_availability(model, availability)

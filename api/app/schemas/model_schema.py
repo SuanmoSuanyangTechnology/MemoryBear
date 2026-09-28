@@ -256,11 +256,9 @@ class ModelConfigQuery(BaseModel):
     is_active: Optional[bool] = Field(None, description="激活状态筛选")
     is_public: Optional[bool] = Field(None, description="公开状态筛选")
     is_available: Optional[bool] = Field(
-        None, description="可用性筛选（已启用且未弃用且渠道候选非空；置位时服务端全量探测后内存分页）"
+        None, description="可用性筛选（已启用且未弃用且渠道候选非空；服务端全量探测后过滤）"
     )
     search: Optional[str] = Field(None, description="搜索关键词", max_length=255)
-    page: int = Field(1, description="页码", ge=1)
-    pagesize: int = Field(10, description="每页数量", ge=1, le=100)
 
 
 # 查询和响应Schemas
