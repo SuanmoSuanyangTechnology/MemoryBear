@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping, Sequence
 from uuid import UUID
 
@@ -34,6 +35,8 @@ from .errors import (
 )
 from .ports import AsyncModelRegistryRepository, ModelRegistryRepository
 from .runtime.flags import normalize_runtime_flags
+
+logger = logging.getLogger(__name__)
 
 
 def _validate_config_access(
@@ -389,11 +392,13 @@ def resolve_and_chain_from_pool(
     runtime_options: ModelRuntimeOptions | None = None,
     loads: Mapping[UUID, int] | None = None,
 ) -> tuple[ResolvedModelConfig, list[ChannelSnapshot]]:
-    """v2 解析门面（整链版）：返回 (首个候选 resolved, 有序整链)——failover 宿主一次拿齐。
+    """v2 解析门面（整链版）：返回 (首个可解密候选 resolved, 自该位起的有序切片)——failover 宿主一次拿齐。
 
-    错误与 resolve_from_channel_pool 同形（speedbear 公共空链 → SpeedbearChannelMissingError，
-    其余空链 → NoAvailableChannelError）；首候选解密失败照旧抛 CredentialDecryptError
-    （请求内换渠道由编排层顺延，不在此跳过）。
+    候选逐个尝试解密、跳过坏密文（与组合 resolve_composite_head 对齐；运行期编排层本就
+    顺延坏密文候选，构建期不再提前中止），切片头部恒为实际首发渠道。全候选失败抛首个
+    CredentialDecryptError（宿主按模式映射：only → 4014；prefer → 记 fallback 走旧表）。
+    其余错误与 resolve_from_channel_pool 同形（speedbear 公共空链 → SpeedbearChannelMissingError，
+    其余空链 → NoAvailableChannelError）。
     """
     anchor = model_name or config.name
     ordered = ordered_channel_candidates(
@@ -407,17 +412,28 @@ def resolve_and_chain_from_pool(
             str(config.provider),
             anchor,
         )
-    return (
-        build_resolved_from_channel(
-            config,
-            ordered[0],
-            tenant_id=tenant_id,
-            model_name=anchor,
-            cipher=cipher,
-            runtime_options=runtime_options,
-        ),
-        ordered,
-    )
+    failures: list[CredentialDecryptError] = []
+    for index, channel in enumerate(ordered):
+        try:
+            resolved = build_resolved_from_channel(
+                config,
+                channel,
+                tenant_id=tenant_id,
+                model_name=anchor,
+                cipher=cipher,
+                runtime_options=runtime_options,
+            )
+        except CredentialDecryptError as exc:
+            logger.warning(
+                "config %s channel %s credential decrypt failed, trying next: %s",
+                config.model_config_id,
+                channel.id,
+                exc,
+            )
+            failures.append(exc)
+            continue
+        return resolved, ordered[index:]
+    raise failures[0]
 
 
 def resolve_from_channel_pool(
@@ -434,7 +450,7 @@ def resolve_from_channel_pool(
 
     锚点名 = 显式 model_name（组合编排传成员声明名）or config.name（普通模型真实调用名）。
     组合 config 无单渠道解析（成员编排在 composite 模块），直接命中此处视为调用方错误。
-    委托 resolve_and_chain_from_pool 取首元素（错误类型/入参不变）。
+    委托 resolve_and_chain_from_pool 取首元素（坏密文顺延，错误类型/入参不变）。
     """
     resolved, _chain = resolve_and_chain_from_pool(
         config,
