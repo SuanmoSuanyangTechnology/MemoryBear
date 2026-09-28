@@ -1,0 +1,48 @@
+name: Python Lint
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - "api/**/*.py"
+      - ".github/workflows/python-lint.yml"
+      - ".github/scripts/ruff_changed.py"
+
+concurrency:
+  group: python-lint-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  ruff:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # 需要完整历史来算 merge-base
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install ruff
+        run: pip install ruff==0.14.14
+
+      - name: Ruff on changed lines
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          # 仓库存在历史遗留告警，全量门禁会让每个 PR 都红。
+          # 这里只报告 PR 实际改动行上的问题。
+          # 规则集刻意很窄，都是确定性的真缺陷：
+          #   F811 重复定义（函数/类被同名覆盖，前者成为死代码）
+          #   F821 未定义名（运行时 NameError）
+          #   F402 导入被循环变量遮蔽
+          python3 .github/scripts/ruff_changed.py "$BASE_SHA" \
+            --select F811,F821,F402 \
+            --path-prefix api/
