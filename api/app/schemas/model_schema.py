@@ -1,10 +1,14 @@
-from pydantic import BaseModel, Field, field_serializer, model_validator, ConfigDict, field_validator
-from typing import Optional, List, Dict, Any
+from pydantic import BaseModel, Field, field_serializer, model_validator, ConfigDict, field_validator, StringConstraints
+from typing import Optional, List, Dict, Any, Annotated
 import datetime
 import uuid
 
 from app.core.utils.datetime_utils import to_timestamp_ms
 from app.models.models_model import ModelFeature, ModelProvider, ModelType, LoadBalanceStrategy, Modality
+
+# 名称 canonicalization（M3）：写入口统一 trim；空名/纯空白 422。
+# 仅用于请求类；响应类沿用 `str`，存量名（含首尾空白）读侧不受影响。
+ModelName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)]
 
 
 class RejectLegacyModelFields:
@@ -102,6 +106,7 @@ class ModelConfigCreate(ModelConfigBase, RejectLegacyModelFields, RejectUnknownM
     自定义模型不经模型广场添加，provider 级渠道不保证可用，因此凭据必填并
     在创建时做活体验证；验证失败拒绝创建（零落库）。
     """
+    name: ModelName = Field(..., description="模型显示名称（写入前 trim）")
     credential: ApiKeyRegister = Field(..., description="模型凭据（必填，创建时活体验证）")
 
 
@@ -113,7 +118,7 @@ class CompositeMemberSpec(BaseModel):
 
 class CompositeModelCreate(BaseModel, RejectLegacyModelFields):
     """创建组合模型Schema"""
-    name: str = Field(..., description="组合模型名称（别名，真实调用名在成员声明）", max_length=255)
+    name: ModelName = Field(..., description="组合模型名称（别名，真实调用名在成员声明）")
     type: Optional[ModelType] = Field(None, description="模型类型")
     logo: Optional[str] = Field(None, description="模型logo图片URL", max_length=255)
     description: Optional[str] = Field(None, description="模型描述")
@@ -126,7 +131,7 @@ class CompositeModelCreate(BaseModel, RejectLegacyModelFields):
 
 class ModelConfigUpdate(BaseModel, RejectLegacyModelFields, RejectUnknownModelColumns):
     """更新模型配置Schema"""
-    name: Optional[str] = Field(None, description="模型显示名称", max_length=255)
+    name: Optional[ModelName] = Field(None, description="模型显示名称")
     type: Optional[ModelType] = Field(None, description="模型类型")
     provider: Optional[str] = Field(None, description="供应商")
     logo: Optional[str] = Field(None, description="模型logo图片URL", max_length=255)
@@ -307,7 +312,7 @@ ModelConfig.model_rebuild()
 # ModelBase Schemas
 class ModelBaseCreate(BaseModel, RejectLegacyModelFields, RejectUnknownModelColumns):
     """创建基础模型Schema"""
-    name: str = Field(..., description="模型唯一标识", max_length=255)
+    name: ModelName = Field(..., description="模型唯一标识")
     type: ModelType = Field(..., description="模型类型")
     provider: ModelProvider = Field(..., description="提供商")
     logo: Optional[str] = Field(None, description="模型logo图片URL", max_length=255)
@@ -321,7 +326,7 @@ class ModelBaseCreate(BaseModel, RejectLegacyModelFields, RejectUnknownModelColu
 
 class ModelBaseUpdate(BaseModel, RejectLegacyModelFields, RejectUnknownModelColumns):
     """更新基础模型Schema"""
-    name: Optional[str] = Field(None, description="模型唯一标识", max_length=255)
+    name: Optional[ModelName] = Field(None, description="模型唯一标识")
     type: Optional[ModelType] = Field(None, description="模型类型")
     provider: Optional[ModelProvider] = Field(None, description="提供商")
     logo: Optional[str] = Field(None, description="模型logo图片URL", max_length=255)
