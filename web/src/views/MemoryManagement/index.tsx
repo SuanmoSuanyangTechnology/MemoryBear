@@ -160,7 +160,7 @@ const MemoryManagement: React.FC = () => {
 
       <Flex align="center" justify={hasUserConfig ? "end" : 'start'} className="rb:mb-4!">
         {!hasUserConfig &&
-          <span className="rb:text-[16px] rb:font-medium rb:leading-5.5 rb:text-[#212332]">
+          <span className="rb:text-[16px] rb:font-medium rb:leading-5.5 rb:text-gray-800">
             {t('memory.myConfigurations')}
           </span>
         }
@@ -197,22 +197,18 @@ const MemoryManagement: React.FC = () => {
                     bodyClassName="rb:p-3! rb:pt-0!"
                   >
                     {item.is_system_default &&
-                      <div className="rb:absolute rb:right-0 rb:top-0 rb:bg-[#FF5D34] rb:rounded-[0px_12px_0px_12px] rb:text-[12px] rb:text-white rb:font-medium rb:leading-4 rb:py-0.75 rb:px-2">
+                      <div className="rb:absolute rb:right-0 rb:top-0 rb:bg-red-500 rb:rounded-[0px_12px_0px_12px] rb:text-[12px] rb:text-white rb:font-medium rb:leading-4 rb:py-0.75 rb:px-2">
                         {t('common.default')}
                       </div>
                     }
                     <Flex vertical gap={12}>
-                      <div className="rb:bg-[rgba(21,94,239,0.06)] rb:rounded-lg rb:text-[#155EEF] rb:font-medium rb:leading-5 rb:py-1.5 rb:px-2">
-                        {t('memory.scene_id')}: {item.scene_name || '-'}
-                      </div>
-
                       <div className="rb:grid rb:grid-cols-2 rb:gap-x-3 rb:gap-y-2">
                         {['memoryExtractionEngine', 'forgottenEngine', 'emotionEngine', 'reflectionEngine'].map((key) => (
                           <Flex
                             key={key}
                             align="center"
                             justify="space-between"
-                            className="rb:cursor-pointer rb:bg-[#F6F6F6] rb:h-8 rb:rounded-lg rb:font-medium rb:leading-5 rb:pl-2! rb:pr-1! rb:hover:shadow-[0px_2px_8px_0px_rgba(23,23,25,0.16)]"
+                            className="rb:cursor-pointer rb:bg-gray-100 rb:h-8 rb:rounded-lg rb:font-medium rb:leading-5 rb:pl-2! rb:pr-1! rb:hover:shadow-[0px_2px_8px_0px_rgba(23,23,25,0.16)]"
                             onClick={() => handleClick(item.config_id, key, item.config_name)}
                           >
                             {t(`memory.${key}`)}
@@ -227,7 +223,7 @@ const MemoryManagement: React.FC = () => {
                       <Flex
                         align="center"
                         justify={item.updated_at ? "space-between" : "flex-end"}
-                        className="rb:text-[12px] rb:leading-4.5 rb:font-regular rb:text-[#5B6167] rb:pl-1!"
+                        className="rb:text-[12px] rb:leading-4.5 rb:font-regular rb:text-gray-600 rb:pl-1!"
                       >
                         {formatDateTime(item.updated_at, 'YYYY-MM-DD HH:mm:ss')}
                         <Space size={8}>

@@ -5,8 +5,10 @@
 import json
 import logging
 import re
+import threading
+import time
 import uuid
-from collections import defaultdict
+from collections import OrderedDict, defaultdict
 from functools import lru_cache
 from typing import Any, Iterable, Callable
 
@@ -16,22 +18,65 @@ from langgraph.graph.state import CompiledStateGraph, StateGraph
 from langgraph.types import Send
 
 from app.core.workflow.engine.state_manager import WorkflowState
+from app.core.workflow.nodes.enums import NodeType
 
-_checkpointer_cache: dict[str, InMemorySaver] = {}
+# Bounded checkpointer cache: bounds both entry count (LRU) and entry age (TTL).
+# Each entry holds a full WorkflowState snapshot (messages, accumulated node_outputs,
+# plus per-super-step copies), ~1.1MB. An unbounded dict here grows until OOM whenever
+# cleanup is skipped on exception / client-disconnect paths.
+_CHECKPOINTER_MAX_SIZE = 1000
+_CHECKPOINTER_TTL_SECONDS = 24 * 60 * 60
+
+# thread_id -> (InMemorySaver, last_accessed_monotonic)
+_checkpointer_cache: "OrderedDict[str, tuple[InMemorySaver, float]]" = OrderedDict()
+_checkpointer_cache_lock = threading.Lock()
+
+
+def _evict_expired_checkpointers(now: float) -> None:
+    while _checkpointer_cache:
+        _, (_, last_accessed) = next(iter(_checkpointer_cache.items()))
+        if now - last_accessed < _CHECKPOINTER_TTL_SECONDS:
+            break
+        _checkpointer_cache.popitem(last=False)
 
 
 def get_or_create_checkpointer(thread_id: str) -> InMemorySaver:
-    if thread_id not in _checkpointer_cache:
-        _checkpointer_cache[thread_id] = InMemorySaver()
-    return _checkpointer_cache[thread_id]
+    now = time.monotonic()
+    with _checkpointer_cache_lock:
+        entry = _checkpointer_cache.get(thread_id)
+        if entry is not None:
+            saver, _ = entry
+            _checkpointer_cache.move_to_end(thread_id)
+            _checkpointer_cache[thread_id] = (saver, now)
+            return saver
+        _evict_expired_checkpointers(now)
+        saver = InMemorySaver()
+        _checkpointer_cache[thread_id] = (saver, now)
+        while len(_checkpointer_cache) > _CHECKPOINTER_MAX_SIZE:
+            _checkpointer_cache.popitem(last=False)
+        return saver
 
 
 def remove_checkpointer(thread_id: str):
-    _checkpointer_cache.pop(thread_id, None)
+    with _checkpointer_cache_lock:
+        _checkpointer_cache.pop(thread_id, None)
+
+
+def workflow_requires_checkpointer(workflow_config: dict[str, Any]) -> bool:
+    """Only workflows containing a human-intervention node need a persistent checkpointer.
+
+    Human intervention suspends execution and resumes later via the same thread_id, so
+    its checkpoint must survive across requests. Every other workflow can use a local
+    InMemorySaver that is reclaimed with the compiled graph.
+    """
+    return any(
+        node.get("type") == NodeType.HUMAN_INTERVENTION
+        for node in workflow_config.get("nodes", [])
+    )
 from app.core.workflow.engine.stream_output_coordinator import OutputContent, StreamOutputConfig
 from app.core.workflow.engine.variable_pool import VariablePool
 from app.core.workflow.nodes import NodeFactory
-from app.core.workflow.nodes.enums import NodeType, BRANCH_NODES, HttpErrorHandle
+from app.core.workflow.nodes.enums import BRANCH_NODES, HttpErrorHandle
 from app.core.workflow.nodes.llm import LLMNodeConfig
 from app.core.workflow.nodes.code import CodeNodeConfig
 from app.core.workflow.nodes.agent import AgentNodeConfig

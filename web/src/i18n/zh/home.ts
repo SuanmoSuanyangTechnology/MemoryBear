@@ -116,6 +116,8 @@ export const home = {
       orderHistory: '订单记录',
       spaceConfig: '空间配置',
       ontology: '本体工程',
+      ontologySceneTypes: '本体场景类型',
+      ontologyConfigureScene: '配置场景',
       prompt: '提示词工程',
       skills: '技能库',
       workbench: '工作台',

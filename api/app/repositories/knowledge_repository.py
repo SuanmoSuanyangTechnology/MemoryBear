@@ -42,6 +42,8 @@ def knowledge_schema_load_options():
         *model_config_options(Knowledge.reranker),
         *model_config_options(Knowledge.llm),
         *model_config_options(Knowledge.image2text),
+        *model_config_options(Knowledge.audio2text),
+        *model_config_options(Knowledge.video2text),
     )
 
 

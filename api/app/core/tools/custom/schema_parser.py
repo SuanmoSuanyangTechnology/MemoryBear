@@ -101,6 +101,9 @@ class OpenAPISchemaParser:
             解析后的字典，失败返回None
         """
         try:
+            # 已经是字典（如从数据库 JSON 列读出）则直接使用
+            if isinstance(content, dict):
+                return content
             # 根据内容类型解析
             if 'application/json' in content_type:
                 return json.loads(content)
