@@ -115,7 +115,6 @@ export const configList: ConfigVo[] = [
             options: [
               { label: 'recursiveChunker', value: 'RecursiveChunker' }, // Recursive chunking
               { label: 'tokenChunker', value: 'TokenChunker' }, // Token chunking
-              { label: 'llmChunker', value: 'LLMChunker' }, // LLM chunking
               { label: 'sentenceChunker', value: 'SentenceChunker' }, // Sentence chunking
             ],
             meaning: 'chunkerStrategyDesc',
