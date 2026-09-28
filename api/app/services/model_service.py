@@ -1,11 +1,11 @@
 import base64
 from datetime import datetime
 
+import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 from typing import TYPE_CHECKING, Iterable, List, NoReturn, Optional, Dict, Any, Sequence, Tuple
 import uuid
-import math
 import time
 import asyncio
 from urllib.parse import urlparse
@@ -34,7 +34,6 @@ from app.core.model_provider_config import (
     validate_api_base_against_default,
 )
 from app.core.logging_config import get_business_logger
-from app.schemas.response_schema import PageData, PageMeta
 from app.core.exceptions import BusinessException
 from app.core.error_codes import BizCode
 from app.core.utils.datetime_utils import utcnow_naive
@@ -223,6 +222,69 @@ def _require_asr_api_base(api_base: str | None) -> None:
 def _reject_asr_composite(model_type: ModelType | str | None) -> None:
     if model_type is not None and is_asr_model(model_type):
         raise BusinessException("ASR 模型暂不支持组合配置", BizCode.INVALID_PARAMETER)
+
+
+def normalize_model_name(name: str | None) -> str:
+    """名称 canonicalization（M3）：trim；空名拒绝（400）。"""
+    canonical = (name or "").strip()
+    if not canonical:
+        raise BusinessException("模型名称不能为空", BizCode.INVALID_PARAMETER)
+    return canonical
+
+
+def _assert_model_name_available(
+    db: Session,
+    *,
+    name: str | None,
+    provider: str | None,
+    tenant_id: uuid.UUID | None,
+) -> str:
+    """重名检查单一入口（M3）：canonical 化后按"本租户可见（含 `is_public`）"查重，返回 canonical 名。
+
+    写路径（普通/ASR/组合）共用；调用方以返回值为准落库，避免 `" qwen-max "` 与
+    `"qwen-max"` 各自成行。写点应改用 `_lock_and_assert_model_name_available`（并发互斥，
+    M3④）；此函数保留给无锁场景（如 fail-fast 预检）。广场添加路径走认领语义
+    （`add_model_from_plaza`，M3③），不经此入口。
+    """
+    canonical = normalize_model_name(name)
+    if ModelConfigRepository.get_by_name(db, canonical, provider=provider, tenant_id=tenant_id):
+        raise BusinessException("模型名称已存在", BizCode.DUPLICATE_NAME)
+    return canonical
+
+
+def _lock_model_name(
+    db: Session,
+    *,
+    name: str,
+    provider: str | None,
+    tenant_id: uuid.UUID | None,
+) -> None:
+    """并发同名写互斥（M3④）：按 `tenant|provider|name` 取事务级 advisory lock。
+
+    锁随 commit/rollback 自动释放；调用点须在预检与落库之间（网络验证之后），
+    锁窗口不含网络调用。残余：跨租户 `is_public` 同名竞态不在锁键覆盖内。
+    """
+    db.execute(
+        sa.text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+        {"key": f"model_config_name:{tenant_id}|{provider}|{name}"},
+    )
+
+
+def _lock_and_assert_model_name_available(
+    db: Session,
+    *,
+    name: str | None,
+    provider: str | None,
+    tenant_id: uuid.UUID | None,
+) -> str:
+    """写路径权威重名检查（M3④）：canonical 化 → 取名称锁 → 查重，返回 canonical 名。
+
+    替代写点直接调用 `_assert_model_name_available`：并发方在预检后落库的行，
+    于此处的锁内复检中被拒（5001），不再产生重复行。
+    """
+    canonical = normalize_model_name(name)
+    _lock_model_name(db, name=canonical, provider=provider, tenant_id=tenant_id)
+    return _assert_model_name_available(db, name=canonical, provider=provider, tenant_id=tenant_id)
 
 
 def _assert_plaza_entry_absent(
@@ -692,38 +754,27 @@ class ModelConfigService:
         )
 
     @staticmethod
-    def get_model_list(db: Session, query: ModelConfigQuery, tenant_id: uuid.UUID | None = None) -> PageData:
+    def get_model_list(db: Session, query: ModelConfigQuery, tenant_id: uuid.UUID | None = None) -> List[model_schema.ModelConfig]:
         """获取模型配置列表（含渠道可用性：候选链非空 = True）。
 
-        `is_available` 置位时：全量取行 → 批量探测 → 派生过滤 → 内存分页
+        不分页，全量返回裸数组（2026-09-28 决策，与 `/models/new` 口径一致）。
+        `is_available` 置位时：全量取行 → 批量探测 → 派生过滤
         （选择器隐藏已禁用/无渠道/已弃用模型，G1；租户模型量有界）。
         """
-        models, total = ModelConfigRepository.get_list(db, query, tenant_id=tenant_id)
+        models, _ = ModelConfigRepository.get_list(db, query, tenant_id=tenant_id)
 
         availability = _probe_availability(db, models, tenant_id)
         if query.is_available is not None:
-            matched = [
+            models = [
                 model
                 for model in models
                 if _derived_available(model, availability) is query.is_available
             ]
-            total = len(matched)
-            start = (query.page - 1) * query.pagesize
-            models = matched[start : start + query.pagesize]
 
-        pages = math.ceil(total / query.pagesize) if total > 0 else 0
-        return PageData(
-            page=PageMeta(
-                page=query.page,
-                pagesize=query.pagesize,
-                total=total,
-                hasnext=query.page < pages
-            ),
-            items=[
-                _with_availability(model, availability)
-                for model in models
-            ]
-        )
+        return [
+            _with_availability(model, availability)
+            for model in models
+        ]
 
     @staticmethod
     def get_model_list_new(db: Session, query: ModelConfigQueryNew, tenant_id: uuid.UUID | None = None) -> List[dict]:
@@ -756,15 +807,6 @@ class ModelConfigService:
             items.append(group_item)
 
         return items
-
-    @staticmethod
-    def get_model_by_name(db: Session, name: str, provider: str | None = None,
-                          tenant_id: uuid.UUID | None = None) -> ModelConfig:
-        """根据名称获取模型配置"""
-        model = ModelConfigRepository.get_by_name(db, name, provider=provider, tenant_id=tenant_id)
-        if not model:
-            raise BusinessException("模型配置不存在", BizCode.MODEL_NOT_FOUND)
-        return model
 
     @staticmethod
     def search_models_by_name(db: Session, name: str, tenant_id: uuid.UUID | None = None, limit: int = 10) -> List[
@@ -1104,10 +1146,10 @@ class ModelConfigService:
         from app.db import get_db_context
 
         with get_db_context() as db:
-            if ModelConfigRepository.get_by_name(
-                db, model_data["name"], provider=model_data["provider"], tenant_id=tenant_id,
-            ):
-                raise BusinessException("模型名称已存在", BizCode.DUPLICATE_NAME)
+            # fail-fast 预检（独立会话）；权威检查与落库同事务在 _save_asr_model（M3②）
+            _assert_model_name_available(
+                db, name=model_data["name"], provider=model_data["provider"], tenant_id=tenant_id,
+            )
 
     @staticmethod
     def _save_asr_model(model_data: dict, credential: dict, tenant_id: uuid.UUID,
@@ -1116,10 +1158,10 @@ class ModelConfigService:
 
         with get_db_context() as db:
             try:
-                if ModelConfigRepository.get_by_name(
-                    db, model_data["name"], provider=model_data["provider"], tenant_id=tenant_id,
-                ):
-                    raise BusinessException("模型名称已存在", BizCode.DUPLICATE_NAME)
+                # 权威检查与落库同事务，并持名称锁（M3④）
+                model_data["name"] = _lock_and_assert_model_name_available(
+                    db, name=model_data["name"], provider=model_data["provider"], tenant_id=tenant_id,
+                )
                 model = ModelConfigRepository.create(db, {**model_data, "tenant_id": tenant_id})
                 ChannelService(db).register_for_model(
                     provider=model_data["provider"], tenant_id=tenant_id,
@@ -1183,9 +1225,10 @@ class ModelConfigService:
         )
         if is_asr_model(model_data.type):
             return await ModelConfigService._create_asr_model(model_data, tenant_id, created_by)
-        # 检查名称是否已存在（同租户内；先于任何网络调用）
-        if ModelConfigRepository.get_by_name(db, model_data.name, provider=model_data.provider, tenant_id=tenant_id):
-            raise BusinessException("模型名称已存在", BizCode.DUPLICATE_NAME)
+        # 检查名称是否已存在（同租户内；先于任何网络调用），落库用 canonical 名
+        model_data.name = _assert_model_name_available(
+            db, name=model_data.name, provider=model_data.provider, tenant_id=tenant_id
+        )
 
         provider = model_data.provider
         credential = model_data.credential
@@ -1210,6 +1253,11 @@ class ModelConfigService:
             raise BusinessException(
                 f"模型配置验证失败: {validation_result['error']}", BizCode.INVALID_PARAMETER
             )
+
+        # M3④ 并发加固：验证通过后、落库前取名称锁并权威复检（锁窗口不含网络调用）
+        model_data.name = _lock_and_assert_model_name_available(
+            db, name=model_data.name, provider=provider, tenant_id=tenant_id
+        )
 
         model_config_data = model_data.model_dump(
             exclude={
@@ -1261,10 +1309,14 @@ class ModelConfigService:
             raise BusinessException("模型配置不存在", BizCode.MODEL_NOT_FOUND)
         old_cache_state = _model_option_cache_state(existing_model)
 
-        if model_data.name and model_data.name != existing_model.name:
-            if ModelConfigRepository.get_by_name(db, model_data.name, provider=existing_model.provider,
-                                                 tenant_id=tenant_id):
-                raise BusinessException("模型名称已存在", BizCode.DUPLICATE_NAME)
+        if "name" in model_data.model_fields_set:
+            canonical_name = normalize_model_name(model_data.name)
+            if canonical_name != existing_model.name:
+                # M3④：改名与并发同名写互斥（锁内复检）
+                _lock_and_assert_model_name_available(
+                    db, name=canonical_name, provider=existing_model.provider, tenant_id=tenant_id
+                )
+            model_data.name = canonical_name
 
         # 标识三元组（name/provider/type）变化时才校验广场收录，避免误伤存量行与
         # 广场来源行的普通编辑（改描述、切启用态等）
@@ -1361,9 +1413,9 @@ class ModelConfigService:
                                      tenant_id: uuid.UUID) -> ModelConfig:
         """创建组合模型"""
         _reject_asr_composite(model_data.type)
-        if ModelConfigRepository.get_by_name(db, model_data.name, provider=ModelProvider.COMPOSITE,
-                                             tenant_id=tenant_id):
-            raise BusinessException("模型名称已存在", BizCode.DUPLICATE_NAME)
+        model_data.name = _lock_and_assert_model_name_available(
+            db, name=model_data.name, provider=ModelProvider.COMPOSITE, tenant_id=tenant_id
+        )
 
         members = ModelConfigService._resolve_composite_members(model_data)
         ModelConfigService._validate_composite_members(db, tenant_id, members, model_data.type)
@@ -1404,10 +1456,12 @@ class ModelConfigService:
         _reject_asr_composite(existing_model.type)
         old_cache_state = _model_option_cache_state(existing_model)
 
-        if model_data.name and model_data.name != existing_model.name:
-            if ModelConfigRepository.get_by_name(db, model_data.name, provider=existing_model.provider,
-                                                 tenant_id=tenant_id):
-                raise BusinessException("模型名称已存在", BizCode.DUPLICATE_NAME)
+        model_data.name = normalize_model_name(model_data.name)
+        if model_data.name != existing_model.name:
+            # M3④：改名与并发同名写互斥（锁内复检）
+            _lock_and_assert_model_name_available(
+                db, name=model_data.name, provider=existing_model.provider, tenant_id=tenant_id
+            )
 
         if existing_model.provider != ModelProvider.COMPOSITE:
             raise BusinessException("该模型不是组合模型", BizCode.INVALID_PARAMETER)
@@ -1962,6 +2016,28 @@ class ModelBaseService:
 
         if ModelBaseRepository.check_added_by_tenant(db, model_base_id, tenant_id):
             raise BusinessException("模型已添加", BizCode.DUPLICATE_NAME)
+
+        # M3④：取名称锁后做认领判定与落库（并发同名写互斥）
+        _lock_model_name(
+            db, name=model_base.name, provider=model_base.provider, tenant_id=tenant_id
+        )
+
+        # 同名认领（M3③）：本租户已有同 (name, provider, type) 的行时不新增重复行，
+        # 绑定 model_id 复用（保留其属性与启用态）；类型不符或仅跨租户可见则按重名拒绝。
+        claimed = ModelConfigRepository.get_by_name(
+            db, model_base.name, provider=model_base.provider, tenant_id=tenant_id
+        )
+        if claimed is not None:
+            if (
+                claimed.tenant_id == tenant_id
+                and normalize_type(claimed.type) == normalize_type(model_base.type)
+            ):
+                claimed.model_id = model_base_id
+                ModelBaseRepository.increment_add_count(db, model_base_id)
+                db.commit()
+                db.refresh(claimed)
+                return claimed
+            raise BusinessException("模型名称已存在", BizCode.DUPLICATE_NAME)
 
         model_config_data = {
             "model_id": model_base_id,

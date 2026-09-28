@@ -145,7 +145,7 @@ const ModelListDetail = forwardRef<ModelListDetailRef, ModelListDetailProps>(({ 
                   {item.name[0]}
                 </Flex>
               }
-              extra={item.provider !== 'speedbear' && <Switch checked={item.is_active} disabled={loading} onChange={() => handleChange(item)} />}
+              extra={item.provider !== 'speedbear' && <Switch checked={item.is_active} disabled={loading || item.is_deprecated} onChange={() => handleChange(item)} />}
               bodyClassName={clsx("rb:relative rb:h-[calc(100%-64px)]! rb:pt-3!", {
                 "rb:pb-0!": item.provider === 'speedbear',
                 "rb:pb-[64px]!": item.provider !== 'speedbear',

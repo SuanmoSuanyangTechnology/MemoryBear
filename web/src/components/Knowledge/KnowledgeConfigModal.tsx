@@ -11,7 +11,6 @@ import type { KnowledgeConfigModalRef, KnowledgeBase, KnowledgeConfigForm, Retri
 import RbModal from '@/components/RbModal'
 import RbSlider from '@/components/RbSlider'
 import { formatDateTime } from '@/utils/format';
-import ModelSelect from '@/components/ModelSelect'
 import RadioGroupButton from '@/components/RadioGroupButton'
 import WeightBalanceSlider from './WeightBalanceSlider'
 
@@ -69,7 +68,6 @@ const KnowledgeConfigModal = forwardRef<KnowledgeConfigModalRef, KnowledgeConfig
       form.setFieldsValue({ rerank_weights: null, enable_graph_retrieval: 0 });
     } else if (value === 'weighted_score') {
       form.setFieldsValue({
-        reranker_id: null,
         rerank_weights: {
           semantic_weight: 0.7,
           participle_weight: 0.3,
@@ -100,9 +98,9 @@ const KnowledgeConfigModal = forwardRef<KnowledgeConfigModalRef, KnowledgeConfig
           <Flex align="center" justify="space-between" className="rb:mb-6! rb-border rb:rounded-lg rb:p-[17px_16px]! rb:cursor-pointer rb:bg-[#F0F3F8] rb:text-[#212332]">
             <div className="rb:text-[16px] rb:leading-5.5">
               {data.name}
-              <div className="rb:text-[12px] rb:leading-4 rb:text-[#5B6167] rb:mt-2">{t('application.contains', { include_count: data.doc_num })}</div>
+              <div className="rb:text-[12px] rb:leading-4 rb:text-gray-600 rb:mt-2">{t('application.contains', { include_count: data.doc_num })}</div>
             </div>
-            <div className="rb:text-[12px] rb:leading-4 rb:text-[#5B6167]">{formatDateTime(data.updated_at, 'YYYY-MM-DD HH:mm:ss')}</div>
+            <div className="rb:text-[12px] rb:leading-4 rb:text-gray-600">{formatDateTime(data.updated_at, 'YYYY-MM-DD HH:mm:ss')}</div>
           </Flex>
         )}
         <FormItem name="kb_id" hidden />
@@ -154,18 +152,6 @@ const KnowledgeConfigModal = forwardRef<KnowledgeConfigModalRef, KnowledgeConfig
               <Switch checkedChildren={t('knowledgeBase.yes')} unCheckedChildren={t('knowledgeBase.no')} />
             </Form.Item>
           }
-          <FormItem
-            name="reranker_id"
-            label={t('application.rearrangementModel')}
-            rules={[{ required: values?.rerank_mode === 'reranking_model', message: t('common.pleaseSelect') }]}
-            extra={t('application.rearrangementModelDesc')}
-            hidden={values?.rerank_mode !== 'reranking_model'}
-          >
-            <ModelSelect
-              params={{ type: 'rerank' }}
-              className="rb:w-full!"
-            />
-          </FormItem>
 
           {values?.rerank_mode === 'weighted_score' && <>
             <Form.Item

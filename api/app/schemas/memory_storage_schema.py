@@ -161,16 +161,31 @@ class ConfigKey(BaseModel):  # 配置参数键模型
 
 
 # Allowed chunking strategies (extendable later)
+# 注意：SemanticChunker / NeuralChunker / HybridChunker / LateChunker 已随
+# chunker_client.py 一起移除，不再是合法取值。
 ChunkerStrategy = Literal[  # 分块策略枚举
     "RecursiveChunker",
     "TokenChunker",
-    "SemanticChunker",
-    "NeuralChunker",
-    "HybridChunker",
-    "LLMChunker",
-    "SentenceChunker",
-    "LateChunker"
+    "SentenceChunker"
 ]
+
+# chunker_strategy 常见别名 → 合法枚举值，供各请求模型的 before 校验器复用
+CHUNKER_STRATEGY_ALIASES = {
+    "auto": "RecursiveChunker",
+    "by_sentence": "SentenceChunker",
+    "fixed_tokens": "TokenChunker",
+    "递归分块": "RecursiveChunker",
+    "token 分块": "TokenChunker",
+    "token分块": "TokenChunker",
+    "句子分块": "SentenceChunker",
+}
+
+
+def normalize_chunker_strategy(v: str) -> str:
+    """将分块策略别名映射为合法枚举值，非别名原样返回。"""
+    if isinstance(v, str):
+        return CHUNKER_STRATEGY_ALIASES.get(v.strip().lower(), v)
+    return v
 
 
 # 这是 Request body示例
@@ -190,37 +205,14 @@ class ConfigParams(ConfigKey):  # 创建配置参数模型  旧
     # Chunker strategy selection (must be one of the declared literals)
     chunker_strategy: ChunkerStrategy = Field(
         "RecursiveChunker",
-        description=(
-            "分块策略：RecursiveChunker/TokenChunker/SemanticChunker/NeuralChunker/"
-            "HybridChunker/LLMChunker/SentenceChunker/LateChunker"
-        ),
+        description="分块策略：RecursiveChunker/TokenChunker/SentenceChunker",
     )
 
     @field_validator("chunker_strategy", mode="before")
     @classmethod
     def map_chunker_aliases(cls, v: str):
         # 允许常见别名并映射到合法枚举
-        if isinstance(v, str):
-            m = v.strip().lower()
-            alias_map = {
-                "auto": "RecursiveChunker",
-                "by_sentence": "SentenceChunker",
-                "by_paragraph": "SemanticChunker",
-                "fixed_tokens": "TokenChunker",
-                "递归分块": "RecursiveChunker",
-                "token 分块": "TokenChunker",
-                "token分块": "TokenChunker",
-                "语义分块": "SemanticChunker",
-                "神经网络分块": "NeuralChunker",
-                "混合分块": "HybridChunker",
-                "llm 分块": "LLMChunker",
-                "llm分块": "LLMChunker",
-                "句子分块": "SentenceChunker",
-                "延迟分块": "LateChunker",
-            }
-            if m in alias_map:
-                return alias_map[m]
-        return v
+        return normalize_chunker_strategy(v)
 
     @field_validator("config_id", "user_id", "apply_id")
     @classmethod
@@ -307,27 +299,7 @@ class ConfigUpdateExtracted(BaseModel):  # 更新记忆萃取引擎配置参数�
     @field_validator("chunker_strategy", mode="before")
     @classmethod
     def map_chunker_aliases_update(cls, v: str):
-        if isinstance(v, str):
-            m = v.strip().lower()
-            alias_map = {
-                "auto": "RecursiveChunker",
-                "by_sentence": "SentenceChunker",
-                "by_paragraph": "SemanticChunker",
-                "fixed_tokens": "TokenChunker",
-                "递归分块": "RecursiveChunker",
-                "token 分块": "TokenChunker",
-                "token分块": "TokenChunker",
-                "语义分块": "SemanticChunker",
-                "神经网络分块": "NeuralChunker",
-                "混合分块": "HybridChunker",
-                "llm 分块": "LLMChunker",
-                "llm分块": "LLMChunker",
-                "句子分块": "SentenceChunker",
-                "延迟分块": "LateChunker",
-            }
-            if m in alias_map:
-                return alias_map[m]
-        return v
+        return normalize_chunker_strategy(v)
 
 
 class ConfigUpdateForget(BaseModel):  # 更新遗忘引擎配置参数时使用的模型
@@ -604,3 +576,4 @@ class DeleteAllNodesRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
     end_user_id: str = Field(..., description="端用户 ID")
+
