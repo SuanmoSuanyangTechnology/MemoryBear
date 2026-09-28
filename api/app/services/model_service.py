@@ -822,15 +822,6 @@ class ModelConfigService:
         return items
 
     @staticmethod
-    def get_model_by_name(db: Session, name: str, provider: str | None = None,
-                          tenant_id: uuid.UUID | None = None) -> ModelConfig:
-        """根据名称获取模型配置"""
-        model = ModelConfigRepository.get_by_name(db, name, provider=provider, tenant_id=tenant_id)
-        if not model:
-            raise BusinessException("模型配置不存在", BizCode.MODEL_NOT_FOUND)
-        return model
-
-    @staticmethod
     def search_models_by_name(db: Session, name: str, tenant_id: uuid.UUID | None = None, limit: int = 10) -> List[
         ModelConfig]:
         """按名称模糊匹配获取模型配置列表"""
