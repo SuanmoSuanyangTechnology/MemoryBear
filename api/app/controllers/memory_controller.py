@@ -20,7 +20,7 @@ from app.db import get_async_db_context
 from app.dependencies import cur_workspace_access_guard, cur_workspace_access_guard_self_db, get_current_user_async, CurrentUserSnapshot
 from app.repositories import knowledge_repository
 from app.repositories.end_user_repository import EndUserRepository
-from app.schemas.memory_agent_schema import StorageType, UserInput, Write_UserInput
+from app.schemas.memory_agent_schema import UserInput, Write_UserInput
 from app.schemas.memory_config_schema import ModelInactiveError, ModelNotFoundError
 from app.schemas.response_schema import ApiResponse
 from app.services import workspace_service
@@ -127,18 +127,7 @@ async def write_server_async(
         api_logger.info(f"Async write: storage_type={storage_type}, user_rag_memory_id={user_rag_memory_id}")
 
     try:
-        # ── RAG 路径：保持不变，直接拼接文本写向量库 ──
-        if storage_type and storage_type.lower() == StorageType.RAG.value:
-            messages_list = memory_agent_service.get_messages_list(user_input)
-            await MemoryService.write_messages_to_rag(
-                messages=messages_list,
-                end_user_id=effective_end_user_id,
-                user_rag_memory_id=user_rag_memory_id,
-            )
-            api_logger.info(f"RAG write completed for end_user={effective_end_user_id}")
-            return success(data=dict(identity_data) if identity_data else {}, msg="RAG 写入完成")
-
-        # ── Neo4j 路径：通过 dispatcher 写入 ──
+        # RAG / Neo4j 统一交给 dispatcher 分流，避免 Controller 与 Dispatcher 重复写入。
         workspace_id_str = str(current_user.current_workspace_id) if current_user.current_workspace_id else ""
         messages_list = memory_agent_service.get_messages_list(user_input)
 
@@ -151,6 +140,10 @@ async def write_server_async(
             storage_type=storage_type,
             user_rag_memory_id=user_rag_memory_id,
         )
+
+        if storage_type and storage_type.lower() == "rag":
+            api_logger.info(f"RAG write completed for end_user={effective_end_user_id}")
+            return success(data=dict(identity_data) if identity_data else {}, msg="RAG 写入完成")
 
         api_logger.info(
             f"Write tasks queued: {len(task_ids)} tasks, end_user={effective_end_user_id}"
