@@ -14,7 +14,7 @@ MODEL_SOURCE_PLATFORM_ADMIN = "platform_admin"
 class ModelCallContext:
     """Identity and trace metadata for one model service call."""
 
-    actor_id: UUID
+    actor_id: UUID | None
     actor_name: str | None
     tenant_id: UUID
     workspace_id: UUID | None

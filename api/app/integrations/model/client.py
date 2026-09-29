@@ -17,6 +17,15 @@ from .transport import ModelServiceHttpTransport, ModelServiceSyncTransport
 logger = logging.getLogger(__name__)
 
 
+def http_limits(settings: Any) -> httpx.Limits:
+    """连接上限：管理面两个池与 invoke 池共用同一口径（避免漂移）。"""
+
+    return httpx.Limits(
+        max_connections=settings.MODEL_SERVICE_MAX_CONNECTIONS,
+        max_keepalive_connections=settings.MODEL_SERVICE_MAX_KEEPALIVE_CONNECTIONS,
+    )
+
+
 def _http_params(settings: Any) -> tuple[httpx.Timeout, httpx.Limits]:
     """异步/同步两个池共用同一组超时与连接上限（口径唯一，避免漂移）。"""
 
@@ -26,11 +35,7 @@ def _http_params(settings: Any) -> tuple[httpx.Timeout, httpx.Limits]:
         read=settings.MODEL_SERVICE_READ_TIMEOUT_SECONDS,
         write=settings.MODEL_SERVICE_WRITE_TIMEOUT_SECONDS,
     )
-    limits = httpx.Limits(
-        max_connections=settings.MODEL_SERVICE_MAX_CONNECTIONS,
-        max_keepalive_connections=settings.MODEL_SERVICE_MAX_KEEPALIVE_CONNECTIONS,
-    )
-    return timeout, limits
+    return timeout, http_limits(settings)
 
 
 class ModelServiceClient:

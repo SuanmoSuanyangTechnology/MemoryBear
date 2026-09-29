@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.memory.models.service_models import MemoryContext
 from app.core.models import RedBearModelConfig, RedBearLLM, RedBearEmbeddings, RedBearRerank
+from app.integrations.model.invoke_backend import RemoteInvokeRef
 from app.services.model_service import ModelApiKeyService
 
 
@@ -24,18 +25,24 @@ class ModelClientMixin(ABC):
         )
 
     @staticmethod
+    def _invoke_ref(db: Session, model_id: uuid.UUID, tenant_id: uuid.UUID) -> RemoteInvokeRef:
+        """非解密引用：凭据解密与选路在模型服务（§2.2）。"""
+        ref = ModelApiKeyService.resolve_invoke_ref(db, model_id, tenant_id=tenant_id)
+        if ref is None:
+            raise ValueError(f"模型配置不可用: {model_id}")
+        return ref
+
+    @staticmethod
     def get_embedding_client(
         db: Session,
         model_id: uuid.UUID,
         tenant_id: uuid.UUID,
     ) -> RedBearEmbeddings:
-        api_config = ModelApiKeyService.get_available_api_key(db, model_id, tenant_id=tenant_id)
-        return RedBearEmbeddings(RedBearModelConfig.from_api_key(api_config))
+        return RedBearEmbeddings.for_invoke(ModelClientMixin._invoke_ref(db, model_id, tenant_id))
 
     @staticmethod
     def get_rerank_client(db: Session, model_id: uuid.UUID, tenant_id: uuid.UUID) -> RedBearRerank:
-        api_config = ModelApiKeyService.get_available_api_key(db, model_id, tenant_id=tenant_id)
-        return RedBearRerank(RedBearModelConfig.from_api_key(api_config))
+        return RedBearRerank.for_invoke(ModelClientMixin._invoke_ref(db, model_id, tenant_id))
 
     # ── Async variants ──────────────────────────────────────────
 
@@ -47,16 +54,29 @@ class ModelClientMixin(ABC):
         return client_cls(config)
 
     @staticmethod
+    async def _invoke_ref_async(
+        db: AsyncSession, model_id: uuid.UUID, tenant_id: uuid.UUID
+    ) -> RemoteInvokeRef:
+        ref = await ModelApiKeyService.resolve_invoke_ref_async(db, model_id, tenant_id=tenant_id)
+        if ref is None:
+            raise ValueError(f"模型配置不可用: {model_id}")
+        return ref
+
+    @staticmethod
     async def get_llm_client_async(db: AsyncSession, model_id: uuid.UUID, tenant_id: uuid.UUID) -> RedBearLLM:
         return await ModelClientMixin._build_client_async(db, model_id, tenant_id, RedBearLLM)
 
     @staticmethod
     async def get_embedding_client_async(db: AsyncSession, model_id: uuid.UUID, tenant_id: uuid.UUID) -> RedBearEmbeddings:
-        return await ModelClientMixin._build_client_async(db, model_id, tenant_id, RedBearEmbeddings)
+        return RedBearEmbeddings.for_invoke(
+            await ModelClientMixin._invoke_ref_async(db, model_id, tenant_id)
+        )
 
     @staticmethod
     async def get_rerank_client_async(db: AsyncSession, model_id: uuid.UUID, tenant_id: uuid.UUID) -> RedBearRerank:
-        return await ModelClientMixin._build_client_async(db, model_id, tenant_id, RedBearRerank)
+        return RedBearRerank.for_invoke(
+            await ModelClientMixin._invoke_ref_async(db, model_id, tenant_id)
+        )
 
 
 class BasePipeline(ABC):

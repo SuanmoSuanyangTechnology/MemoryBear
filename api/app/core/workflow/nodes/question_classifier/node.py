@@ -3,7 +3,7 @@ from typing import Any
 
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
-from app.core.models import RedBearLLM, RedBearModelConfig
+from app.core.models import RedBearChatModel, RedBearLLM, RedBearModelConfig
 from app.core.workflow.engine.state_manager import WorkflowState
 from app.core.workflow.engine.variable_pool import VariablePool
 from app.core.workflow.nodes.base_node import BaseNode
@@ -79,18 +79,16 @@ class QuestionClassifierNode(BaseNode):
         tenant_id = await self.resolve_tenant_id_async(variable_pool)
 
         async with get_async_db_context() as db:
-            return await ModelConfigService.get_runtime_model_info_async(
+            # 非解密视图：本节点不需要凭据（调用走模型服务，G2）
+            return await ModelConfigService.get_runtime_model_view_async(
                 db,
                 self.typed_config.model_id,
                 tenant_id=tenant_id,
             )
 
     @staticmethod
-    def _build_llm_from_model_info(model_info: ModelInfo) -> RedBearLLM:
-        return RedBearLLM(
-            RedBearModelConfig.from_api_key(model_info),
-            type=model_info.model_type,
-        )
+    def _build_llm_from_model_info(model_info: ModelInfo) -> RedBearChatModel:
+        return RedBearChatModel.for_invoke(model_info)
 
     def _build_category_case_map(self) -> dict[str, str]:
         """

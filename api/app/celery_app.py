@@ -128,8 +128,11 @@ celery_app.conf.update(
         'app.tasks.do_layer2_dedup_full_scan': {'queue': 'reflection_tasks'},
         'app.tasks.scan_reflection_retry': {'queue': 'periodic_tasks'},
         'app.tasks.regenerate_memory_cache': {'queue': 'periodic_tasks'},
-        # 用量事件消费（M4，spec §13.2）：轻量周期任务，与 beat 扫描器同队
+        # 用量事件消费（M4，spec §13.2）：beat 排期已停（消费端迁入 model-service），
+        # 保留路由仅供手工触发兜底，G5 随任务壳删除
         'app.tasks.consume_model_usage': {'queue': 'periodic_tasks'},
+        # 网关告警评估（B9）：独立消费组读 model:usage，喂宿主企业告警插件
+        'app.tasks.consume_model_gateway_alerts': {'queue': 'periodic_tasks'},
 
         # GDS 拓扑分数：scan 在 periodic 扫描，计算在 memory_heavy 执行
         'app.tasks.scan_gds_topology_score': {'queue': 'periodic_tasks'},
@@ -418,15 +421,8 @@ class NoCatchupSchedule(schedule):
         return min(is_due, 1), next_time
 
 
-# 用量事件消费（M4，spec §13.2）：常驻轻量消费，NoCatchup 防止 Beat 重启后追赶补跑历史窗口
-celery_app.conf.beat_schedule["consume-model-usage"] = {
-    "task": "app.tasks.consume_model_usage",
-    "schedule": NoCatchupSchedule(
-        run_every=timedelta(seconds=settings.MODEL_USAGE_CONSUME_INTERVAL_SECONDS)
-    ),
-    "options": {"queue": "periodic_tasks", "expires": 55},
-}
-
+# 用量事件消费（M4，spec §13.2）：消费端已迁入 model-service 进程内常驻任务（服务无 celery，
+# 多副本天然同组分摊），此处不再排期；任务壳与路由保留仅供手工兜底，G5 随壳删除。
 
 if _HAS_NOTIFICATION_TASKS:
     celery_app.conf.beat_schedule.update({
@@ -472,5 +468,14 @@ if _HAS_NOTIFICATION_TASKS:
                 run_every=timedelta(seconds=_NOTIFICATION_SCAN_INTERVAL_SECONDS)
             ),
             "options": {"queue": "notification_state_tasks", "expires": 120},
+        },
+        # 网关告警评估（B9）：独立消费组读 model:usage（服务侧调用终态），
+        # 交给宿主企业告警插件；社区版无 premium 时不排期（不进本块）。
+        "consume-model-gateway-alerts": {
+            "task": "app.tasks.consume_model_gateway_alerts",
+            "schedule": NoCatchupSchedule(
+                run_every=timedelta(seconds=settings.MODEL_USAGE_ALERT_INTERVAL_SECONDS)
+            ),
+            "options": {"queue": "periodic_tasks", "expires": 55},
         },
     })

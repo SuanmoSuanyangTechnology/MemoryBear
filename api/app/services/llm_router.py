@@ -368,7 +368,7 @@ class LLMRouter:
         return prompt
     
     async def _call_llm(self, prompt: str) -> str:
-        """调用 LLM API（使用系统的 RedBearLLM）
+        """调用 LLM API（远端模式：经模型服务 invoke 接缝，宿主不持有凭据）
         
         Args:
             prompt: 提示词
@@ -380,59 +380,36 @@ class LLMRouter:
             raise Exception("路由模型配置未设置")
         
         try:
-            # 使用系统的 RedBearLLM 来调用模型
-            from app.core.models import RedBearLLM
-            from app.core.models.base import RedBearModelConfig
-            from app.models import ModelApiKey, ModelType
-            from app.services.model_service import ModelApiKeyService, ModelConfigService
-            
-            # 获取 API Key 配置（通过关联关系）
-            # api_key_config = self.db.query(ModelApiKey).join(
-            #     ModelConfig, ModelApiKey.model_configs
-            # ).filter(ModelConfig.id == self.routing_model_config.id,
-            #     ModelApiKey.is_active == True
-            # ).first()
-            # api_keys = ModelApiKeyRepository.get_by_model_config(self.db, self.routing_model_config.id)
-            # api_key_config = api_keys[0] if api_keys else None
-            api_key_config = ModelApiKeyService.get_available_api_key(
+            # 远端模式（G3）：宿主不再解凭据，身份/能力取非解密视图（选路与调用事实在模型服务）
+            from app.core.models import RedBearChatModel
+            from app.services.model_service import ModelConfigService
+
+            model_view = ModelConfigService.get_runtime_model_view(
                 self.db,
                 self.routing_model_config.id,
                 tenant_id=self.tenant_id,
             )
-            
-            if not api_key_config:
-                ModelConfigService.raise_model_unavailable(
-                    self.db,
-                    self.routing_model_config.id,
-                    tenant_id=self.tenant_id,
-                )
-            
+
             # 打印供应商信息
             logger.info(
                 "LLM 路由使用模型",
                 extra={
-                    "provider": api_key_config.provider,
-                    "model_name": api_key_config.model_name,
-                    "api_base": api_key_config.api_base,
+                    "provider": model_view.provider,
+                    "model_name": model_view.model_name,
                     "model_config_id": str(self.routing_model_config.id)
                 }
             )
-            
-            # 创建 RedBearModelConfig
-            model_config = RedBearModelConfig.from_api_key(
-                api_key_config,
-                extra_params={"temperature": 0.3, "max_tokens": 500},
-            )
-            
-            logger.debug(f"创建 LLM 实例 - Provider: {api_key_config.provider}, Model: {api_key_config.model_name}")
-            
+
             # 创建 LLM 实例
-            llm = RedBearLLM(model_config, type=ModelType.LLM)
-            
+            llm = RedBearChatModel.for_invoke(
+                model_view,
+                params={"temperature": 0.3, "max_tokens": 500},
+            )
+
             # 调用模型
             response = await llm.ainvoke(prompt)
 
-            ModelApiKeyService.record_api_key_usage(self.db, api_key_config.id)
+            # G3 起不再记渠道密钥用量：调用无凭据（渠道计数由模型服务按 usage 事件落账）
             
             # 提取响应内容
             if hasattr(response, 'content'):

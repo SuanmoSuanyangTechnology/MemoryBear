@@ -107,6 +107,7 @@ from app.core.utils.datetime_utils import (
     utcnow_naive,
 )
 from app.db import get_db_context, get_db_read
+from app.integrations.model.invoke_backend import ref_from_snapshot
 from app.models import App, AppRelease, Document, File, Knowledge, User, Workspace
 from app.models.end_user_model import EndUser
 from app.models.file_model import FILE_ROLE_SOURCE
@@ -278,7 +279,7 @@ def _load_graph_task_state(
 def _build_evidence_index_pipeline(runtime, client, lock_guard):
     # 2d-1 迁移后 chat 行已归一为 llm，运行时按 LLM 适配器族构造
     llm = RedBearLLM(build_model_config(runtime.llm), type=ModelType.LLM)
-    embedding = RedBearEmbeddings(build_model_config(runtime.embedding))
+    embedding = RedBearEmbeddings.for_invoke(ref_from_snapshot(runtime.embedding))
     extractor = LLMEntityRelationExtractor(
         llm,
         runtime.entity_types,
@@ -7057,4 +7058,33 @@ def consume_model_usage_task() -> Dict[str, Any]:
         return consume_model_usage()
     except Exception as exc:
         logger.warning(f"consume_model_usage 本轮失败（下轮重试）: {exc}", exc_info=True)
+        return {"status": "RETRY_LATER", "error": str(exc)}
+
+
+@celery_app.task(
+    name="app.tasks.consume_model_gateway_alerts",
+    bind=False,
+    ignore_result=False,
+    max_retries=0,
+    acks_late=False,
+    time_limit=60,
+    soft_time_limit=50,
+)
+def consume_model_gateway_alerts_task() -> dict[str, Any]:
+    """定时任务：消费 model:usage 事件做网关健康告警评估（B9）。
+
+    服务侧（model-service）的调用终态只进 stream，本任务用独立消费组
+    `model-usage-alerts` 读该 stream 喂给宿主企业告警插件；beat 周期由
+    settings.MODEL_USAGE_ALERT_INTERVAL_SECONDS（默认 30s）驱动。
+    社区版无 premium 插件时插件层直接跳过（不建组不读流）；Redis 层异常不抛，
+    下轮重试（事件已 ACK 的不重放，属尽力而为 + 新鲜度优先口径）。
+    """
+    from app.core.alert_metric_bridge import consume_model_gateway_alerts
+
+    try:
+        return consume_model_gateway_alerts()
+    except Exception as exc:
+        logger.warning(
+            f"consume_model_gateway_alerts 本轮失败（下轮重试）: {exc}", exc_info=True
+        )
         return {"status": "RETRY_LATER", "error": str(exc)}

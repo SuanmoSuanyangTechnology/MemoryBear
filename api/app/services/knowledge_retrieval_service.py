@@ -46,6 +46,7 @@ from app.core.rag.retrieval.models import (
     RetrievalTarget,
     RetrievalTimings,
 )
+from app.integrations.model.invoke_backend import ref_from_snapshot
 from app.models.models_model import ModelType
 from app.schemas.chunk_schema import RetrieveType
 from app.schemas.knowledge_metadata_schema import MetadataFilterMode
@@ -156,9 +157,7 @@ class KnowledgeRetrievalService:
                 )
                 for index, chunk in enumerate(chunks)
             ]
-            reranker = RedBearRerank(
-                cls._model_config(snapshot, extra_params={"top_n": top_k})
-            )
+            reranker = RedBearRerank.for_invoke(ref_from_snapshot(snapshot))
             reranked_documents = list(
                 await reranker.acompress_documents(documents, query)
             )
@@ -588,7 +587,7 @@ class KnowledgeRetrievalService:
             top_k=target.params.top_k if target_type == RetrieveType.SEMANTIC else target.params.top_n,
             score_threshold=target.params.vector_similarity_weight,
         )
-        embedding = RedBearEmbeddings(cls._model_config(target.embedding))
+        embedding = RedBearEmbeddings.for_invoke(ref_from_snapshot(target.embedding))
         if target_type == RetrieveType.SEMANTIC:
             chunks = await store.search_by_vector(embedding, request.query, vector_options)
             cls._log_target_done(target, len(chunks), 0, len(chunks), len(chunks), started_at, timings=timings)
@@ -748,8 +747,8 @@ class KnowledgeRetrievalService:
                 ),
                 type=ModelType.LLM,
             )
-            embedding = RedBearEmbeddings(
-                cls._model_config(graph_target.embedding)
+            embedding = RedBearEmbeddings.for_invoke(
+                ref_from_snapshot(graph_target.embedding)
             )
             pipeline = KnowledgeGraphRetrievalPipeline(
                 graph_store,

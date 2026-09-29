@@ -71,10 +71,10 @@ def test_embedding(
         api_logger.error(f"模型ID {model_id} 不存在")
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="模型ID不存在")
 
-    apiConfig: ModelApiKey = ModelApiKeyService.get_available_api_key(db, config.id, tenant_id=config.tenant_id)
-    if not apiConfig:
-        raise BusinessException("模型配置缺少 API Key", BizCode.INVALID_PARAMETER)
-    model = RedBearEmbeddings(RedBearModelConfig.from_api_key(apiConfig))
+    ref = ModelApiKeyService.resolve_invoke_ref(db, config.id, tenant_id=config.tenant_id)
+    if not ref:
+        raise BusinessException("模型配置不可用", BizCode.INVALID_PARAMETER)
+    model = RedBearEmbeddings.for_invoke(ref)
 
     data = [
         "最近哪家咖啡店评价最好？",
@@ -102,10 +102,10 @@ def test_rerank(
         api_logger.error(f"模型ID {model_id} 不存在")
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="模型ID不存在")
 
-    apiConfig: ModelApiKey = ModelApiKeyService.get_available_api_key(db, config.id, tenant_id=config.tenant_id)
-    if not apiConfig:
-        raise BusinessException("模型配置缺少 API Key", BizCode.INVALID_PARAMETER)
-    model = RedBearRerank(RedBearModelConfig.from_api_key(apiConfig))
+    ref = ModelApiKeyService.resolve_invoke_ref(db, config.id, tenant_id=config.tenant_id)
+    if not ref:
+        raise BusinessException("模型配置不可用", BizCode.INVALID_PARAMETER)
+    model = RedBearRerank.for_invoke(ref)
     query = "最近哪家咖啡店评价最好？"
     data = [
         "最近哪家咖啡店评价最好？",

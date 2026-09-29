@@ -269,7 +269,6 @@ class AppChatService:
             return self._check_annotation_match(app_id, message, source)
 
         try:
-            from app.core.models.base import RedBearModelConfig
             from app.models.annotation_model import AppAnnotation, AppAnnotationHitLog, AppAnnotationSetting
 
             async with get_async_db_context() as db:
@@ -291,18 +290,18 @@ class AppChatService:
                     return None
 
                 tenant_id = await self._resolve_app_tenant_id_async(app_id)
-                api_key_obj = await ModelApiKeyService.get_available_api_key_async(
+                embedding_ref = await ModelApiKeyService.resolve_invoke_ref_async(
                     db,
                     setting.model_config_id,
                     tenant_id=tenant_id,
                 )
-                if not api_key_obj:
+                if not embedding_ref:
                     return None
                 threshold = setting.similarity_threshold
 
-            config = RedBearModelConfig.from_api_key(api_key_obj, timeout=60, max_retries=3)
-
-            query_embedding = await asyncio.to_thread(AnnotationService.generate_embedding, message, config)
+            query_embedding = await asyncio.to_thread(
+                AnnotationService.generate_embedding, message, embedding_ref
+            )
             best_match = None
             best_similarity = 0.0
             for annotation in annotations:
@@ -368,30 +367,20 @@ class AppChatService:
             if not annotations:
                 return None
 
-            from app.models.models_model import ModelConfig
-            model_cfg = self.db.query(ModelConfig).filter(
-                ModelConfig.id == setting.model_config_id
-            ).first()
-            if not model_cfg:
-                return None
-
             tenant_id = self._resolve_app_tenant_id(app_id)
-            api_key_obj = ModelApiKeyService.get_available_api_key(
+            embedding_ref = ModelApiKeyService.resolve_invoke_ref(
                 self.db,
                 setting.model_config_id,
                 tenant_id=tenant_id,
             )
-            if not api_key_obj:
+            if not embedding_ref:
                 return None
-
-            from app.core.models.base import RedBearModelConfig
-            model_config = RedBearModelConfig.from_api_key(api_key_obj, timeout=60, max_retries=3)
 
             result = service.find_best_match(
                 query=message,
                 annotations=annotations,
                 threshold=setting.similarity_threshold,
-                model_config=model_config,
+                embedding_ref=embedding_ref,
                 app_id=app_id,
                 source=source,
             )
@@ -403,9 +392,8 @@ class AppChatService:
     async def _load_annotation_context_evidence(self, app_id: uuid.UUID, message: str) -> List[ContextEvidence]:
         """延迟查询候选标注；只由成功产生证据的知识库/记忆工具触发。"""
         try:
-            from app.core.models.base import RedBearModelConfig
             from app.models.annotation_model import AppAnnotation, AppAnnotationSetting
-            api_key_config: dict[str, Any] | None = None
+            embedding_ref = None
             if self._uses_async_session():
                 async with get_async_db_context() as db:
                     setting = (await db.execute(select(AppAnnotationSetting).where(
@@ -415,42 +403,21 @@ class AppChatService:
                     annotations = _snapshot_annotations(list((await db.execute(select(AppAnnotation).where(
                         AppAnnotation.app_id == app_id, AppAnnotation.is_active == 1))).scalars().all()))
                     tenant_id = await self._resolve_app_tenant_id_async(app_id)
-                    api_key_obj = await ModelApiKeyService.get_available_api_key_async(
+                    embedding_ref = await ModelApiKeyService.resolve_invoke_ref_async(
                         db, setting.model_config_id, tenant_id=tenant_id)
-                    if api_key_obj:
-                        api_key_config = {
-                            "model_name": api_key_obj.model_name,
-                            "provider": api_key_obj.provider,
-                            "api_key": api_key_obj.api_key,
-                            "api_base": api_key_obj.api_base,
-                            "tenant_id": api_key_obj.tenant_id,
-                            "model_config_id": api_key_obj.model_config_id,
-                            "channel_id": api_key_obj.channel_id,
-                        }
             else:
                 service = AnnotationService(self.db)
                 setting = service.get_setting(app_id)
                 if not setting or not setting.enabled or not setting.model_config_id:
                     return []
                 annotations = service.repo.get_all_active_by_app(app_id)
-                api_key_obj = ModelApiKeyService.get_available_api_key(
+                embedding_ref = ModelApiKeyService.resolve_invoke_ref(
                     self.db, setting.model_config_id, tenant_id=self._resolve_app_tenant_id(app_id))
-                if api_key_obj:
-                    api_key_config = {
-                        "model_name": api_key_obj.model_name,
-                        "provider": api_key_obj.provider,
-                        "api_key": api_key_obj.api_key,
-                        "api_base": api_key_obj.api_base,
-                        "tenant_id": api_key_obj.tenant_id,
-                        "model_config_id": api_key_obj.model_config_id,
-                        "channel_id": api_key_obj.channel_id,
-                    }
-            if not annotations or not api_key_config:
+            if not annotations or not embedding_ref:
                 return []
-            model_config = RedBearModelConfig.from_api_key(api_key_config, timeout=60, max_retries=3)
             candidates = await asyncio.to_thread(
                 AnnotationService.find_context_candidates,
-                message, annotations, model_config, 0.6, 3,
+                message, annotations, embedding_ref, 0.6, 3,
             )
             logger.info(
                 "[上下文组装] 标注候选 | "
@@ -566,7 +533,7 @@ class AppChatService:
         # 获取模型配置ID
         model_config_id = config.default_model_config_id
         tenant_id = await self._resolve_tenant_id_async(workspace_id)
-        api_key_obj = await ModelApiKeyService.get_available_api_key_bridge_async(
+        api_key_obj = await ModelApiKeyService.resolve_runtime_api_key_bridge_or_raise_async(
             self.db,
             model_config_id,
             tenant_id=tenant_id,
@@ -575,6 +542,12 @@ class AppChatService:
             await ModelConfigService.raise_model_unavailable_bridge_async(
                 self.db, model_config_id, tenant_id=tenant_id
             )
+        # 远端模式（G3）：非解密视图供 invoke 接缝使用；凭据仍供沙箱/多模态/用量等既有消费者
+        model_view = await ModelConfigService.get_runtime_model_view_bridge_async(
+            self.db,
+            model_config_id,
+            tenant_id=tenant_id,
+        )
         # 处理系统提示词（支持变量替换）
         system_prompt = config.system_prompt
         if variables:
@@ -838,15 +811,11 @@ class AppChatService:
                 )
                 raise
         else:
-            # 创建 LangChain Agent
+            # 创建 LangChain Agent（远端模式：身份/能力事实取非解密视图，凭据不上送）
             agent = LangChainAgent(
                 model_name=api_key_obj.model_name,
-                api_key=api_key_obj.api_key,
+                model_view=model_view,
                 provider=api_key_obj.provider,
-                api_base=api_key_obj.api_base,
-                input_modalities=[str(item) for item in (api_key_obj.input_modalities or [])],
-                output_modalities=[str(item) for item in (api_key_obj.output_modalities or [])],
-                features=features,
                 temperature=model_parameters.get("temperature", 0.7),
                 max_tokens=model_parameters.get("max_tokens", 2000),
                 system_prompt=system_prompt,
@@ -854,10 +823,6 @@ class AppChatService:
                 deep_thinking=model_parameters.get("deep_thinking", False),
                 thinking_budget_tokens=model_parameters.get("thinking_budget_tokens"),
                 json_output=model_parameters.get("json_output", False),
-                tenant_id=api_key_obj.tenant_id,
-                model_config_id=api_key_obj.model_config_id,
-                channel_id=api_key_obj.channel_id,
-                failover_plan=api_key_obj.failover_plan,
                 context_query=message,
                 context_base_text=system_prompt + "\n" + str(history) + "\n" + message,
                 context_evidence_loader=load_annotation_context,
@@ -1162,7 +1127,7 @@ class AppChatService:
             # 获取模型配置ID
             model_config_id = config.default_model_config_id
             tenant_id = await self._resolve_tenant_id_async(workspace_id)
-            api_key_obj = await ModelApiKeyService.get_available_api_key_bridge_async(
+            api_key_obj = await ModelApiKeyService.resolve_runtime_api_key_bridge_or_raise_async(
                 self.db,
                 model_config_id,
                 tenant_id=tenant_id,
@@ -1171,6 +1136,12 @@ class AppChatService:
                 await ModelConfigService.raise_model_unavailable_bridge_async(
                     self.db, model_config_id, tenant_id=tenant_id
                 )
+            # 远端模式（G3）：非解密视图供 invoke 接缝使用；凭据仍供沙箱/多模态/用量等既有消费者
+            model_view = await ModelConfigService.get_runtime_model_view_bridge_async(
+                self.db,
+                model_config_id,
+                tenant_id=tenant_id,
+            )
             # 处理系统提示词（支持变量替换）
             system_prompt = config.system_prompt
             if variables:
@@ -1415,15 +1386,11 @@ class AppChatService:
                     adapter=_sandbox_adapter,
                 )
             else:
-                # 创建 LangChain Agent
+                # 创建 LangChain Agent（远端模式：身份/能力事实取非解密视图，凭据不上送）
                 agent = LangChainAgent(
                     model_name=api_key_obj.model_name,
-                    api_key=api_key_obj.api_key,
+                    model_view=model_view,
                     provider=api_key_obj.provider,
-                    api_base=api_key_obj.api_base,
-                    input_modalities=[str(item) for item in (api_key_obj.input_modalities or [])],
-                    output_modalities=[str(item) for item in (api_key_obj.output_modalities or [])],
-                    features=features,
                     temperature=model_parameters.get("temperature", 0.7),
                     max_tokens=model_parameters.get("max_tokens", 2000),
                     system_prompt=system_prompt,
@@ -1432,10 +1399,6 @@ class AppChatService:
                     deep_thinking=model_parameters.get("deep_thinking", False),
                     thinking_budget_tokens=model_parameters.get("thinking_budget_tokens"),
                     json_output=model_parameters.get("json_output", False),
-                    tenant_id=api_key_obj.tenant_id,
-                    model_config_id=api_key_obj.model_config_id,
-                    channel_id=api_key_obj.channel_id,
-                    failover_plan=api_key_obj.failover_plan,
                     context_query=message,
                     context_base_text=system_prompt + "\n" + str(history) + "\n" + message,
                     context_evidence_loader=load_annotation_context,

@@ -1046,29 +1046,19 @@ class AgentRunService:
                     return None
 
                 tenant_id = await self._resolve_app_tenant_id_async(app_id)
-                api_key_obj = await ModelApiKeyService.get_available_api_key_async(
+                embedding_ref = await ModelApiKeyService.resolve_invoke_ref_async(
                     db,
                     setting.model_config_id,
                     tenant_id=tenant_id,
                 )
-                if not api_key_obj:
+                if not embedding_ref:
                     return None
 
                 threshold = setting.similarity_threshold
-                api_key_data = {
-                    "model_name": api_key_obj.model_name,
-                    "provider": api_key_obj.provider,
-                    "api_key": api_key_obj.api_key,
-                    "api_base": api_key_obj.api_base,
-                    "tenant_id": api_key_obj.tenant_id,
-                    "model_config_id": api_key_obj.model_config_id,
-                    "channel_id": api_key_obj.channel_id,
-                }
 
-            from app.core.models.base import RedBearModelConfig
-            config = RedBearModelConfig.from_api_key(api_key_data, timeout=60, max_retries=3)
-
-            query_embedding = await asyncio.to_thread(AnnotationService.generate_embedding, message, config)
+            query_embedding = await asyncio.to_thread(
+                AnnotationService.generate_embedding, message, embedding_ref
+            )
             best_match = None
             best_similarity = 0.0
             for annotation in annotations:
@@ -1126,26 +1116,15 @@ class AgentRunService:
                 ))).scalars().all()))
                 if not annotations:
                     return []
-                api_key_obj = await ModelApiKeyService.get_available_api_key_async(
+                embedding_ref = await ModelApiKeyService.resolve_invoke_ref_async(
                     db, setting.model_config_id,
                     tenant_id=await self._resolve_app_tenant_id_async(app_id),
                 )
-                if not api_key_obj:
+                if not embedding_ref:
                     return []
-                api_key_data = {
-                    "model_name": api_key_obj.model_name,
-                    "provider": api_key_obj.provider,
-                    "api_key": api_key_obj.api_key,
-                    "api_base": api_key_obj.api_base,
-                    "tenant_id": api_key_obj.tenant_id,
-                    "model_config_id": api_key_obj.model_config_id,
-                    "channel_id": api_key_obj.channel_id,
-                }
-            from app.core.models.base import RedBearModelConfig
-            model_config = RedBearModelConfig.from_api_key(api_key_data, timeout=60, max_retries=3)
             candidates = await asyncio.to_thread(
                 AnnotationService.find_context_candidates,
-                message, annotations, model_config, 0.6, 3,
+                message, annotations, embedding_ref, 0.6, 3,
             )
             logger.info(
                 "[上下文组装] 标注候选 | "
@@ -1543,6 +1522,10 @@ class AgentRunService:
         try:
             # 1. 获取 API Key 配置
             api_key_config = await self._get_api_key(model_config.id, tenant_id=tenant_id)
+            # 远端模式（G3）：非解密视图供 invoke 接缝使用；凭据仍供沙箱/多模态/用量等既有消费者
+            model_view = await ModelConfigService.get_runtime_model_view_bridge_async(
+                self.db, model_config.id, tenant_id=tenant_id
+            )
             logger.debug(
                 "API Key 配置获取成功",
                 extra={
@@ -1793,12 +1776,8 @@ class AgentRunService:
 
             agent = LangChainAgent(
                 model_name=api_key_config["model_name"],
-                api_key=api_key_config["api_key"],
+                model_view=model_view,
                 provider=api_key_config.get("provider", "openai"),
-                api_base=api_key_config.get("api_base"),
-                input_modalities=list(api_key_config.get("input_modalities") or []),
-                output_modalities=list(api_key_config.get("output_modalities") or []),
-                features=features,
                 temperature=effective_params.get("temperature", 0.7),
                 max_tokens=effective_params.get("max_tokens", 2000),
                 system_prompt=system_prompt,
@@ -1806,10 +1785,6 @@ class AgentRunService:
                 deep_thinking=effective_params.get("deep_thinking", False),
                 thinking_budget_tokens=effective_params.get("thinking_budget_tokens"),
                 json_output=effective_params.get("json_output", False),
-                tenant_id=api_key_config.get("tenant_id"),
-                model_config_id=api_key_config.get("model_config_id"),
-                channel_id=api_key_config.get("channel_id"),
-                failover_plan=api_key_config.get("failover_plan"),
                 context_query=message,
                 context_base_text=system_prompt + "\n" + str(history) + "\n" + message,
                 context_evidence_loader=load_annotation_context,
@@ -1984,6 +1959,15 @@ class AgentRunService:
                     )
                 except Exception:
                     pass
+            # 模型配置类异常保留自身错误码（模型不存在/已弃用/未启用/缺 Key），不降级为 INTERNAL_ERROR
+            if isinstance(e, BusinessException) and e.code in (
+                BizCode.MODEL_NOT_FOUND,
+                BizCode.MODEL_DEPRECATED,
+                BizCode.MODEL_CONFIG_INVALID,
+                BizCode.API_KEY_MISSING,
+                BizCode.AGENT_CONFIG_MISSING,
+            ):
+                raise
             raise BusinessException(f"Agent 调用失败: {str(e)}", BizCode.INTERNAL_ERROR, cause=e)
 
     @bind_usage("app", "agent_config.app_id")
@@ -2070,6 +2054,10 @@ class AgentRunService:
         try:
             # 1. 获取 API Key 配置
             api_key_config = await self._get_api_key(model_config.id, tenant_id=tenant_id)
+            # 远端模式（G3）：非解密视图供 invoke 接缝使用；凭据仍供沙箱/多模态/用量等既有消费者
+            model_view = await ModelConfigService.get_runtime_model_view_bridge_async(
+                self.db, model_config.id, tenant_id=tenant_id
+            )
             if sub_agent:
                 variables = self.prepare_variables(variables, agent_config.variables)
             else:
@@ -2346,12 +2334,8 @@ class AgentRunService:
             else:
                 agent = LangChainAgent(
                     model_name=api_key_config["model_name"],
-                    api_key=api_key_config["api_key"],
+                    model_view=model_view,
                     provider=api_key_config.get("provider", "openai"),
-                    api_base=api_key_config.get("api_base"),
-                    input_modalities=list(api_key_config.get("input_modalities") or []),
-                    output_modalities=list(api_key_config.get("output_modalities") or []),
-                    features=features,
                     temperature=effective_params.get("temperature", 0.7),
                     max_tokens=effective_params.get("max_tokens", 2000),
                     system_prompt=system_prompt,
@@ -2360,10 +2344,6 @@ class AgentRunService:
                     deep_thinking=effective_params.get("deep_thinking", False),
                     thinking_budget_tokens=effective_params.get("thinking_budget_tokens"),
                     json_output=effective_params.get("json_output", False),
-                    tenant_id=api_key_config.get("tenant_id"),
-                    model_config_id=api_key_config.get("model_config_id"),
-                    channel_id=api_key_config.get("channel_id"),
-                    failover_plan=api_key_config.get("failover_plan"),
                     context_query=message,
                     context_base_text=system_prompt + "\n" + str(history) + "\n" + message,
                     context_evidence_loader=load_annotation_context,
@@ -3007,7 +2987,7 @@ class AgentRunService:
             BusinessException: 当没有可用的 API Key 时（模型不存在/已弃用/未启用/缺少凭据）
         """
         async with get_async_db_context() as db:
-            api_key = await ModelApiKeyService.get_available_api_key_async(
+            api_key = await ModelApiKeyService.resolve_runtime_api_key_bridge_or_raise_async(
                 db,
                 model_config_id,
                 tenant_id=tenant_id,

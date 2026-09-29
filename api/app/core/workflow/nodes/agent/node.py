@@ -234,10 +234,11 @@ class AgentNode(BaseNode):
             )
 
     async def _load_model_info_async(self, model_id: uuid.UUID, variable_pool: VariablePool) -> ModelInfo:
+        # 非解密视图（G3）：凭据解密与选路在模型服务，宿主只带配置引用与逐请求参数
         tenant_id = await self.resolve_tenant_id_async(variable_pool)
 
         async with get_async_db_context() as db:
-            return await ModelConfigService.get_runtime_model_info_async(
+            return await ModelConfigService.get_runtime_model_view_async(
                 db,
                 model_id,
                 tenant_id=tenant_id,
@@ -472,11 +473,11 @@ class AgentNode(BaseNode):
             self._param_warnings.extend(strip_warnings)
 
         strategy = self.typed_config.strategy
+        # 远端模式（G3）：身份/能力事实来自非解密视图，凭据派生参数不再上送
         agent = LangChainAgent(
             model_name=model_info.model_name,
-            api_key=model_info.api_key,
+            model_view=model_info,
             provider=model_info.provider or "openai",
-            api_base=model_info.api_base,
             temperature=params.temperature if params.temperature is not None else 0.7,
             max_tokens=params.max_tokens if params.max_tokens is not None else 2000,
             system_prompt=system_prompt or "你是一个专业的AI助手",
@@ -496,13 +497,6 @@ class AgentNode(BaseNode):
             enable_search=bool(extra_params.get("enable_search")),
             stop=extra_params.get("stop"),
             extra_headers=extra_params.get("default_headers"),
-            input_modalities=model_info.input_modalities,
-            output_modalities=model_info.output_modalities,
-            features=model_info.features,
-            tenant_id=model_info.tenant_id,
-            model_config_id=model_info.model_config_id,
-            channel_id=model_info.channel_id,
-            failover_plan=model_info.failover_plan,
         )
 
         return agent, message, history, strategy

@@ -22,6 +22,7 @@ from app.core.validators.memory_config_validators import (
     validate_and_resolve_model_id,
 )
 from app.i18n.service import t
+from app.integrations.model.invoke_backend import RemoteInvokeRef
 from app.models import Workspace, WorkspaceDefaultModelPreset
 from app.models.app_model import AppType
 from app.models.memory_config_model import MemoryConfig as MemoryConfigModel
@@ -1096,6 +1097,35 @@ class MemoryConfigService:
             "tenant_id": api_config.tenant_id,
             "channel_id": api_config.channel_id,
         }
+
+    def resolve_model_ref(self, model_id: str, tenant_id: UUID | None = None) -> RemoteInvokeRef:
+        """非解密的运行面模型引用（凭据解密与选路在模型服务，交付设计 §2.2）。
+
+        只认「配置存在且已激活」；弃用/停用/无可用渠道由模型服务在调用时拒绝。
+
+        Args:
+            model_id: Model ID to look up
+            tenant_id: 当前租户 ID
+
+        Returns:
+            RemoteInvokeRef: 调用方声明「哪个配置、代表哪个租户」
+        """
+        from fastapi import status
+        from fastapi.exceptions import HTTPException
+
+        from app.services.model_service import ModelApiKeyService
+
+        try:
+            config_id = uuid.UUID(str(model_id))
+        except (TypeError, ValueError) as exc:
+            logger.warning(f"Model ID {model_id} is not a valid UUID")
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="模型ID不存在") from exc
+
+        ref = ModelApiKeyService.resolve_invoke_ref(self.db, config_id, tenant_id=tenant_id)
+        if ref is None:
+            logger.warning(f"Model ID {model_id} not found or inactive")
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="模型配置不可用")
+        return ref
 
     @staticmethod
     def get_pipeline_config(memory_config: MemoryConfig):

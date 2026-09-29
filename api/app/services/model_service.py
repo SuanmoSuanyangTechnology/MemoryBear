@@ -37,6 +37,7 @@ from app.core.logging_config import get_business_logger
 from app.core.exceptions import BusinessException
 from app.core.error_codes import BizCode
 from app.core.utils.datetime_utils import utcnow_naive
+from app.integrations.model.invoke_backend import RemoteInvokeRef
 from app.utils.redis_cache import (invalidate_workspace_model_options, get_json_async, set_json_async,
                                    CACHE_MISS, invalidate_runtime_model_info,
                                    invalidate_runtime_model_info_batch)
@@ -65,6 +66,7 @@ from app.services.model_profile_view import (
     legacy_view,
     normalize_type,
     profile_columns,
+    profile_of,
     wire_model_base,
     wire_model_config,
     write_columns,
@@ -754,6 +756,65 @@ class ModelConfigService:
         )
 
     @staticmethod
+    def _runtime_model_view(model: ModelConfig) -> ModelInfo:
+        """非解密视图的公共映射：能力/模态由 profile 派生，凭据与渠道恒空。"""
+
+        profile = profile_of(model)
+        return ModelInfo(
+            model_name=model.name,
+            model_type=ModelType(normalize_type(model.type)),
+            api_key=None,
+            provider=model.provider,
+            input_modalities=[str(item.value) for item in profile.input_modalities],
+            output_modalities=[str(item.value) for item in profile.output_modalities],
+            features=[str(item.value) for item in profile.features],
+            tenant_id=str(model.tenant_id) if model.tenant_id is not None else None,
+            model_config_id=str(model.id),
+            channel_id=None,
+        )
+
+    @staticmethod
+    async def get_runtime_model_view_async(
+        db: AsyncSession,
+        model_id: uuid.UUID,
+        tenant_id: uuid.UUID | None = None,
+    ) -> ModelInfo:
+        """运行期**非解密**模型视图（G2/G3 invoke 接缝）：`api_key` 恒 None、不带换线计划。
+
+        与 :meth:`get_runtime_model_info_async` 的差别只在凭据：能力/模态由 profile 派生，
+        可见性（不存在 / 已弃用 / 跨租户）沿用同一入口的报错语义；凭据可用性与选路交给
+        模型服务在调用时判定（渠道禁用等在那里才有完整事实，见 `channel_registry`）。
+        """
+
+        model = await ModelConfigService.get_model_by_id_async(db, model_id, tenant_id=tenant_id)
+        return ModelConfigService._runtime_model_view(model)
+
+    @staticmethod
+    def get_runtime_model_view(
+        db: Session,
+        model_id: uuid.UUID,
+        tenant_id: uuid.UUID | None = None,
+    ) -> ModelInfo:
+        """sync 孪生（同步链路，如 shared_chat / llm_router 的 Session）：语义同 async 版。"""
+
+        model = ModelConfigService.get_model_by_id(db, model_id, tenant_id=tenant_id)
+        return ModelConfigService._runtime_model_view(model)
+
+    @staticmethod
+    async def get_runtime_model_view_bridge_async(
+        db: Session | AsyncSession,
+        model_id: uuid.UUID,
+        tenant_id: uuid.UUID | None = None,
+    ) -> ModelInfo:
+        """bridge 版：async 上下文里 db 可能是 Session（试运行宿主）或 AsyncSession。"""
+
+        if isinstance(db, AsyncSession):
+            return await ModelConfigService.get_runtime_model_view_async(
+                db, model_id, tenant_id=tenant_id
+            )
+        return ModelConfigService.get_runtime_model_view(db, model_id, tenant_id=tenant_id)
+
+    @staticmethod
     def get_model_list(db: Session, query: ModelConfigQuery, tenant_id: uuid.UUID | None = None) -> List[model_schema.ModelConfig]:
         """获取模型配置列表（含渠道可用性：候选链非空 = True）。
 
@@ -913,9 +974,8 @@ class ModelConfigService:
                     return await _validate_qwen3_vl_rerank(shared_config, start_time)
                 raise ValueError("Qwen3-VL model capability mismatch")
 
-            from app.core.models import RedBearLLM, RedBearRerank
+            from app.core.models import RedBearLLM
             from app.core.models.base import RedBearModelConfig
-            from app.core.models.embedding import RedBearEmbeddings
 
             model_config = RedBearModelConfig(
                 model_name=model_name,
@@ -955,13 +1015,24 @@ class ModelConfigService:
                 }
 
             elif model_type_lower == "embedding":
-                # Embedding 模型验证
-                # 统一使用 RedBearEmbeddings（自动支持火山引擎多模态）
-                embedding = RedBearEmbeddings(model_config)
+                # Embedding 模型验证（包内 runtime，与服务侧 /validate 同口径）
+                from redbear_model.runtime import RedBearEmbeddings as SharedRedBearEmbeddings
+
+                shared_config = _shared_validation_config(
+                    model_name=model_name,
+                    provider=provider_lower,
+                    api_key=api_key,
+                    api_base=api_base,
+                    model_type=model_type_lower,
+                    input_modalities=input_modalities,
+                    output_modalities=output_modalities,
+                    features=features,
+                )
+                embedding = SharedRedBearEmbeddings(shared_config)
                 test_texts = [test_message, "测试文本"]
 
                 # 火山引擎使用 embed_batch，其他使用 embed_documents
-                if provider.lower() == "volcano":
+                if provider_lower == "volcano":
                     vectors = await asyncio.to_thread(embedding.embed_batch, test_texts)
                 else:
                     vectors = await asyncio.to_thread(embedding.embed_documents, test_texts)
@@ -982,8 +1053,20 @@ class ModelConfigService:
                 }
 
             elif model_type_lower == "rerank":
-                # Rerank 模型验证（在线程中运行同步方法）
-                rerank = RedBearRerank(model_config)
+                # Rerank 模型验证（在线程中运行同步方法；包内 runtime 同服务侧口径）
+                from redbear_model.runtime import RedBearRerank as SharedRedBearRerank
+
+                shared_config = _shared_validation_config(
+                    model_name=model_name,
+                    provider=provider_lower,
+                    api_key=api_key,
+                    api_base=api_base,
+                    model_type=model_type_lower,
+                    input_modalities=input_modalities,
+                    output_modalities=output_modalities,
+                    features=features,
+                )
+                rerank = SharedRedBearRerank(shared_config)
                 query = test_message
                 documents = ["这是第一个文档", "这是第二个文档", "这是第三个文档"]
                 results = await asyncio.to_thread(rerank.rerank, query=query, documents=documents, top_n=3)
@@ -1689,6 +1772,42 @@ class ModelApiKeyService:
         )
 
     @staticmethod
+    def resolve_invoke_ref(
+        db: Session,
+        model_config_id: uuid.UUID,
+        tenant_id: uuid.UUID | str | None = None,
+    ) -> Optional[RemoteInvokeRef]:
+        """运行面引用（非解密）：只认「配置存在且已激活」，凭据与选路在模型服务（§2.2）。
+
+        返回 None 与 ``get_available_api_key`` 的「不可用」口径对齐（配置缺失/停用），调用方
+        保持既有分支；凭据缺失、渠道不可用等改由服务侧在调用期响亮失败。
+        """
+        model_config = ModelConfigRepository.get_by_id(db, model_config_id, tenant_id=tenant_id)
+        if not model_config or not model_config.is_active:
+            return None
+        return RemoteInvokeRef(
+            config_id=model_config.id,
+            tenant_id=uuid.UUID(str(tenant_id or model_config.tenant_id)),
+        )
+
+    @staticmethod
+    async def resolve_invoke_ref_async(
+        db: AsyncSession,
+        model_config_id: uuid.UUID,
+        tenant_id: uuid.UUID | str | None = None,
+    ) -> Optional[RemoteInvokeRef]:
+        """Async version of resolve_invoke_ref（语义同 sync 版）。"""
+        model_config = await ModelConfigRepository.get_by_id_async(
+            db, model_config_id, tenant_id=tenant_id
+        )
+        if not model_config or not model_config.is_active:
+            return None
+        return RemoteInvokeRef(
+            config_id=model_config.id,
+            tenant_id=uuid.UUID(str(tenant_id or model_config.tenant_id)),
+        )
+
+    @staticmethod
     def get_available_api_key(
         db: Session,
         model_config_id: uuid.UUID,
@@ -1853,6 +1972,47 @@ class ModelApiKeyService:
             model_config_id,
             tenant_id=tenant_id,
         )
+
+    @staticmethod
+    async def resolve_runtime_api_key_bridge_or_raise_async(
+        db: Session | AsyncSession,
+        model_config_id: uuid.UUID,
+        tenant_id: uuid.UUID | None = None,
+    ) -> ModelApiKey:
+        """取运行时 API Key；解析为空时冷路径补全错误语义（sync/async 会话自适应）。
+
+        `get_available_api_key(_async)` 对模型不存在/已弃用/未启用/缺少凭据统一返回 None，
+        调用方只能报笼统文案。此处重读配置行把前三类还原为精确错误码
+        （MODEL_NOT_FOUND / MODEL_DEPRECATED / MODEL_CONFIG_INVALID），其余保持原语义。
+        """
+        async_session = isinstance(db, AsyncSession)
+        api_key = (
+            await ModelApiKeyService.get_available_api_key_async(
+                db, model_config_id, tenant_id=tenant_id
+            )
+            if async_session
+            else ModelApiKeyService.get_available_api_key(
+                db, model_config_id, tenant_id=tenant_id
+            )
+        )
+        if api_key is not None:
+            return api_key
+
+        model = (
+            await ModelConfigService.get_model_by_id_async(
+                db, model_config_id, tenant_id=tenant_id
+            )
+            if async_session
+            else ModelConfigService.get_model_by_id(
+                db, model_config_id, tenant_id=tenant_id
+            )
+        )
+        if not model.is_active:
+            raise BusinessException(
+                "当前模型未启用，请在模型配置中确认 API Key 和 URL 已配置后启用模型",
+                BizCode.MODEL_CONFIG_INVALID,
+            )
+        raise BusinessException("没有可用的 API Key", BizCode.AGENT_CONFIG_MISSING)
 
     @staticmethod
     def record_api_key_usage(db: Session, api_key_id: uuid.UUID | None) -> bool:

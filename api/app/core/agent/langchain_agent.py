@@ -14,7 +14,7 @@ import inspect
 import json
 import time
 import uuid as _uuid
-from typing import Any, AsyncGenerator, Dict, List, Optional, Sequence
+from typing import TYPE_CHECKING, Any, AsyncGenerator, Dict, List, Optional, Sequence
 
 from langchain.agents import create_agent
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage
@@ -23,9 +23,12 @@ from langgraph.errors import GraphRecursionError
 
 from app.core.logging_config import get_business_logger
 from app.core.memory.retrieval_trace.stage_events import is_memory_stage_capture_enabled
-from app.core.models import RedBearLLM, RedBearModelConfig
+from app.core.models import RedBearChatModel, RedBearLLM, RedBearModelConfig
 from app.core.utils.datetime_utils import to_iso_z, utcnow
 from app.models.models_model import ModelType
+
+if TYPE_CHECKING:
+    from app.schemas.model_schema import ModelInfo
 
 logger = get_business_logger()
 
@@ -221,7 +224,7 @@ class LangChainAgent:
     def __init__(
             self,
             model_name: str,
-            api_key: str,
+            api_key: Optional[str] = None,
             provider: str = "openai",
             api_base: Optional[str] = None,
             input_modalities: Optional[List[str]] = None,
@@ -255,12 +258,13 @@ class LangChainAgent:
             context_query: str = "",
             context_base_text: str = "",
             context_evidence_loader: Optional[Any] = None,
+            model_view: Optional["ModelInfo"] = None,  # 远端模式：非解密运行期模型视图
     ):
         """初始化 LangChain Agent
 
         Args:
             model_name: 模型名称
-            api_key: API Key
+            api_key: API Key（远端模式下不用，凭据与选路在模型服务）
             provider: 提供商（openai, xinference, gpustack, ollama, dashscope）
             api_base: API 基础 URL
             temperature: 温度参数
@@ -325,7 +329,7 @@ class LangChainAgent:
             f"auto_calculated={max_iterations is None}"
         )
 
-        # 创建 RedBearLLM，features 校验由 RedBearModelConfig 统一处理
+        # 逐请求参数按两模式组装：远端过线（服务侧仲裁），本地经 RedBearModelConfig 校验
         extra_params: Dict[str, Any] = {
             "temperature": temperature,
             "max_tokens": max_tokens,
@@ -349,29 +353,51 @@ class LangChainAgent:
         if extra_headers:
             extra_params["default_headers"] = extra_headers
 
-        model_config = RedBearModelConfig(
-            model_name=model_name,
-            provider=provider,
-            api_key=api_key,
-            base_url=api_base,
-            input_modalities=list(input_modalities or []),
-            output_modalities=list(output_modalities or []),
-            features=list(features or []),
-            tenant_id=tenant_id,
-            model_config_id=model_config_id,
-            channel_id=channel_id,
-            deep_thinking=deep_thinking,
-            thinking_budget_tokens=thinking_budget_tokens,
-            json_output=json_output,
-            extra_params=extra_params
-        )
-        model_config.bind_failover_plan(failover_plan)
+        if model_view is not None:
+            # 远端模式（G3）：宿主只带配置引用与逐请求参数，凭据解密、选路、换渠道与能力
+            # 仲裁全在模型服务；故不建 RedBearModelConfig（本地分支保留至 G5 清理）。
+            remote_params: Dict[str, Any] = {
+                key: value for key, value in extra_params.items() if key != "streaming"
+            }
+            remote_params["deep_thinking"] = deep_thinking
+            if thinking_budget_tokens is not None:
+                remote_params["thinking_budget_tokens"] = thinking_budget_tokens
+            remote_params["json_output"] = json_output
+            self.llm = RedBearChatModel.for_invoke(
+                model_view, params=remote_params, streaming=streaming
+            )
+            # 思考态判定留在宿主（推理内容剥离用），能力仲裁由服务侧按 profile 事实执行
+            self.deep_thinking = deep_thinking
+            self.json_output = json_output
+        else:
+            if not api_key:
+                raise ValueError(
+                    "LangChainAgent 需要 model_view（远端模式）或 api_key（本地直连模式）"
+                )
+            model_config = RedBearModelConfig(
+                model_name=model_name,
+                provider=provider,
+                api_key=api_key,
+                base_url=api_base,
+                input_modalities=list(input_modalities or []),
+                output_modalities=list(output_modalities or []),
+                features=list(features or []),
+                tenant_id=tenant_id,
+                model_config_id=model_config_id,
+                channel_id=channel_id,
+                deep_thinking=deep_thinking,
+                thinking_budget_tokens=thinking_budget_tokens,
+                json_output=json_output,
+                extra_params=extra_params
+            )
+            model_config.bind_failover_plan(failover_plan)
 
-        self.llm = RedBearLLM(model_config, type=ModelType.LLM)
+            self.llm = RedBearLLM(model_config, type=ModelType.LLM)
+            # 从经过校验的 config 读取实际生效的能力开关
+            self.deep_thinking = model_config.deep_thinking
+            self.json_output = model_config.json_output
+
         self._wrap_tools_with_external_context()
-        # 从经过校验的 config 读取实际生效的能力开关
-        self.deep_thinking = model_config.deep_thinking
-        self.json_output = model_config.json_output
 
         # 获取底层模型用于真正的流式调用
         self._underlying_llm = self.llm._model if hasattr(self.llm, '_model') else self.llm

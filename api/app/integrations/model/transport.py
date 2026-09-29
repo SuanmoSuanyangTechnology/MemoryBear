@@ -45,7 +45,9 @@ def _request_headers(
         for key, value in incoming.items()
         if key.lower() in _REQUEST_HEADER_ALLOWLIST
     }
-    headers["X-Model-Actor-ID"] = str(context.actor_id)
+    # actor 可选（设计 §2.2）：Celery 等无用户身份的调用方省略该头，服务侧按缺省主体处理
+    if context.actor_id is not None:
+        headers["X-Model-Actor-ID"] = str(context.actor_id)
     if context.actor_name:
         # 头值须为 ASCII（RFC 9110），用户名可为中文：UTF-8 百分号编码承载，服务侧 unquote 还原
         headers["X-Model-Actor-Name"] = quote(context.actor_name, safe="")
@@ -53,7 +55,8 @@ def _request_headers(
     if context.workspace_id is not None:
         headers["X-Model-Workspace-ID"] = str(context.workspace_id)
     headers["X-Model-Source"] = context.source
-    headers["X-Trace-Id"] = context.trace_id
+    if context.trace_id:
+        headers["X-Trace-Id"] = context.trace_id
     return headers
 
 
@@ -118,6 +121,12 @@ class ModelServiceHttpTransport:
     @property
     def base_url(self) -> httpx.URL:
         return self._client.base_url
+
+    @property
+    def client(self) -> httpx.AsyncClient:
+        """借出连接池：invoke 通道在**独立池**上复用同组 socket 参数（每请求自带超时）。"""
+
+        return self._client
 
     def internal_url(self, path: str, query: bytes = b"") -> httpx.URL:
         # 空查询串归一为「不带 ?」：httpx 的 copy_with(query=None) 为保持原值语义
@@ -187,6 +196,12 @@ class ModelServiceSyncTransport:
     @property
     def base_url(self) -> httpx.URL:
         return self._client.base_url
+
+    @property
+    def client(self) -> httpx.Client:
+        """借出连接池：同步 invoke 通道在**独立池**上复用同组 socket 参数（每请求自带超时）。"""
+
+        return self._client
 
     def internal_url(self, path: str, query: bytes = b"") -> httpx.URL:
         return self._client.base_url.copy_with(path=path, query=query or None)

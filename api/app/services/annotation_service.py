@@ -6,8 +6,8 @@ from sqlalchemy.orm import Session
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
 from app.core.logging_config import get_business_logger
-from app.core.models.base import RedBearModelConfig
 from app.core.models.embedding import RedBearEmbeddings
+from app.integrations.model.invoke_backend import RemoteInvokeRef
 from app.models.annotation_model import AppAnnotation, AppAnnotationSetting
 from app.repositories.annotation_repository import AnnotationRepository
 from app.schemas import annotation_schema
@@ -82,10 +82,10 @@ class AnnotationService:
     # ==================== Embedding & Similarity ====================
 
     @staticmethod
-    def generate_embedding(text: str, model_config: RedBearModelConfig) -> List[float]:
-        """生成文本的Embedding向量"""
+    def generate_embedding(text: str, embedding_ref: RemoteInvokeRef) -> List[float]:
+        """生成文本的Embedding向量（远端模式：凭据解密与选路在模型服务）"""
         try:
-            embedder = RedBearEmbeddings(model_config)
+            embedder = RedBearEmbeddings.for_invoke(embedding_ref)
             return embedder.embed_query(text)
         except Exception as e:
             logger.error(f"生成Embedding失败: {e}")
@@ -106,7 +106,7 @@ class AnnotationService:
         return max(-1.0, min(1.0, similarity))
 
     def find_best_match(self, query: str, annotations: List[AppAnnotation],
-                       threshold: float = 0.85, model_config: Optional[RedBearModelConfig] = None,
+                       threshold: float = 0.85, embedding_ref: Optional[RemoteInvokeRef] = None,
                        app_id: Optional[uuid.UUID] = None,
                        source: str = "") -> Optional[dict]:
         """
@@ -116,7 +116,7 @@ class AnnotationService:
             query: 用户查询
             annotations: 标注列表
             threshold: 相似度阈值
-            model_config: Embedding模型配置
+            embedding_ref: Embedding模型非解密引用
             app_id: 应用ID
             source: 来源（用于记录命中来源）
 
@@ -126,12 +126,12 @@ class AnnotationService:
         if not annotations:
             return None
 
-        if not model_config:
+        if not embedding_ref:
             return None
 
         try:
             # 生成查询的Embedding
-            query_embedding = self.generate_embedding(query, model_config)
+            query_embedding = self.generate_embedding(query, embedding_ref)
 
             best_match = None
             best_similarity = 0.0
@@ -172,13 +172,13 @@ class AnnotationService:
 
     @staticmethod
     def find_context_candidates(query: str, annotations: List[AppAnnotation],
-                                model_config: Optional[RedBearModelConfig] = None,
+                                embedding_ref: Optional[RemoteInvokeRef] = None,
                                 threshold: float = 0.6, top_k: int = 3) -> List[dict]:
         """查找可作为外部上下文的标注，不记录直接命中。"""
-        if not annotations or not model_config or top_k <= 0:
+        if not annotations or not embedding_ref or top_k <= 0:
             return []
         try:
-            query_embedding = AnnotationService.generate_embedding(query, model_config)
+            query_embedding = AnnotationService.generate_embedding(query, embedding_ref)
             candidates = []
             for annotation in annotations:
                 if not annotation.embedding:

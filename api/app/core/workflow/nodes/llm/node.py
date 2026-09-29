@@ -16,7 +16,7 @@ from langchain_core.messages import AIMessage
 
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
-from app.core.models import RedBearLLM, RedBearModelConfig
+from app.core.models import RedBearChatModel, RedBearLLM, RedBearModelConfig
 from app.core.workflow.engine.state_manager import WorkflowState
 from app.core.workflow.engine.variable_pool import VariablePool
 from app.core.workflow.nodes.base_node import BaseNode
@@ -500,11 +500,25 @@ class LLMNode(BaseNode):
                 idx = pos + len(seq)
         return text, False
 
-    async def _load_model_info_async(self, model_id: uuid.UUID, variable_pool: VariablePool) -> ModelInfo:
+    async def _load_model_info_async(
+        self,
+        model_id: uuid.UUID,
+        variable_pool: VariablePool,
+        *,
+        with_credentials: bool = False,
+    ) -> ModelInfo:
+        """运行期模型视图：非流式（G2）取非解密视图，流式仍走本地直连故需凭据。"""
+
         tenant_id = await self.resolve_tenant_id_async(variable_pool)
 
         async with get_async_db_context() as db:
-            return await ModelConfigService.get_runtime_model_info_async(
+            if with_credentials:
+                return await ModelConfigService.get_runtime_model_info_async(
+                    db,
+                    model_id,
+                    tenant_id=tenant_id,
+                )
+            return await ModelConfigService.get_runtime_model_view_async(
                 db,
                 model_id,
                 tenant_id=tenant_id,
@@ -540,12 +554,14 @@ class LLMNode(BaseNode):
             state: WorkflowState,
             variable_pool: VariablePool,
             stream: bool = False
-    ) -> RedBearLLM:
+    ) -> RedBearLLM | RedBearChatModel:
         """准备 LLM 实例（公共逻辑）
-        
+
+        非流式走模型服务 invoke（宿主不持有凭据）；流式仍为本地直连，随 G3 切换。
+
         Args:
             variable_pool: 变量池
-        
+
         Returns:
             (llm, messages_or_prompt): LLM 实例和消息列表或 prompt 字符串
         """
@@ -560,7 +576,9 @@ class LLMNode(BaseNode):
             raise ValueError(f"节点 {self.node_id} 缺少 model_id 配置")
 
         model_info_started_at = asyncio.get_running_loop().time()
-        model_info = await self._load_model_info_async(model_id, variable_pool)
+        model_info = await self._load_model_info_async(
+            model_id, variable_pool, with_credentials=stream
+        )
         model_info_ms = (asyncio.get_running_loop().time() - model_info_started_at) * 1000
         self.model_info = model_info
 
@@ -686,16 +704,30 @@ class LLMNode(BaseNode):
                     f"节点 {self.node_id}: 模型提供商 {model_info.provider} 不支持 "
                     f"OpenAI 多模态内容格式，已自动关闭 vision")
 
-        llm = RedBearLLM(
-            RedBearModelConfig.from_api_key(
+        if stream:
+            # 流式仍走本地直连（凭据来自解密视图），随 G3 切服务侧
+            llm: RedBearLLM | RedBearChatModel = RedBearLLM(
+                RedBearModelConfig.from_api_key(
+                    model_info,
+                    deep_thinking=deep_thinking,
+                    thinking_budget_tokens=thinking_budget_tokens,
+                    json_output=json_output,
+                    extra_params=extra_params,
+                ),
+                type=model_info.model_type
+            )
+        else:
+            # 非流式切运行面 invoke：宿主不再解密凭据，选路/换渠道/归因在模型服务（G2）。
+            # 思考/JSON 开关经逐请求参数过线（服务侧按能力事实重新仲裁），故这里不再重复过滤。
+            llm = RedBearChatModel.for_invoke(
                 model_info,
-                deep_thinking=deep_thinking,
-                thinking_budget_tokens=thinking_budget_tokens,
-                json_output=json_output,
-                extra_params=extra_params,
-            ),
-            type=model_info.model_type
-        )
+                params={
+                    **extra_params,
+                    "deep_thinking": deep_thinking,
+                    "thinking_budget_tokens": thinking_budget_tokens,
+                    "json_output": json_output,
+                },
+            )
 
         logger.debug(
             f"创建 LLM 实例: provider={model_info.provider}, model={model_info.model_name}, streaming={stream}")

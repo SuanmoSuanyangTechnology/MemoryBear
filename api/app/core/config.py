@@ -189,6 +189,19 @@ class Settings:
     MODEL_SERVICE_MAX_KEEPALIVE_CONNECTIONS: int = int(
         os.getenv("MODEL_SERVICE_MAX_KEEPALIVE_CONNECTIONS", "20")
     )
+    # invoke 通道独立超时（服务连接池独立，口径不可与管理面整响应语义混用）：
+    # IDLE 映射 httpx read，语义为**帧间隔**（管理面 READ=120 按整响应计，长文生成必破）；
+    # 总时长不设上限——长文流式由业务侧取消决定，硬上限会截断正常生成。
+    # IDLE=180：LLM 非流式（G2）整段无帧、首块即终块，服务侧 120s 首块档 + 网络抖动需留余量。
+    MODEL_SERVICE_INVOKE_CONNECT_TIMEOUT_SECONDS: float = float(
+        os.getenv("MODEL_SERVICE_INVOKE_CONNECT_TIMEOUT_SECONDS", "5")
+    )
+    MODEL_SERVICE_INVOKE_IDLE_TIMEOUT_SECONDS: float = float(
+        os.getenv("MODEL_SERVICE_INVOKE_IDLE_TIMEOUT_SECONDS", "180")
+    )
+    MODEL_SERVICE_INVOKE_WRITE_TIMEOUT_SECONDS: float = float(
+        os.getenv("MODEL_SERVICE_INVOKE_WRITE_TIMEOUT_SECONDS", "60")
+    )
 
     # Xinference configuration
     XINFERENCE_URL: str = os.getenv("XINFERENCE_URL", "http://127.0.0.1")
@@ -634,6 +647,11 @@ class Settings:
     )
     # 消费积压告警阈值（xlen / xpending 超此值记 warning）
     MODEL_USAGE_BACKLOG_WARN: int = int(os.getenv("MODEL_USAGE_BACKLOG_WARN", "50000"))
+    # 网关告警评估 beat 周期（秒，B9）：宿主消费组读 model:usage 喂企业告警插件；
+    # 社区版无 premium 插件时不排期
+    MODEL_USAGE_ALERT_INTERVAL_SECONDS: int = int(
+        os.getenv("MODEL_USAGE_ALERT_INTERVAL_SECONDS", "30")
+    )
 
     def get_memory_output_path(self, filename: str = "") -> str:
         """

@@ -12,7 +12,6 @@ from sqlalchemy.orm import Session
 from langchain_core.documents import Document
 
 from app.db import get_db_read
-from app.core.models.base import RedBearModelConfig
 from app.core.models import RedBearLLM, RedBearRerank
 from app.models.models_model import ModelApiKey
 from app.models import knowledge_model
@@ -325,11 +324,11 @@ def rerank(
     if top_k <= 0:
         raise ValueError("top_k must be a positive integer")
     try:
-        # initialize reranker
-        apiConfig = ModelApiKeyService.get_available_api_key(db, reranker_id, tenant_id=tenant_id)
-        if not apiConfig:
-            raise ValueError("模型配置缺少 API Key")
-        reranker = RedBearRerank(RedBearModelConfig.from_api_key(apiConfig))
+        # initialize reranker（凭据解密与选路在模型服务，宿主只带配置 id 与租户）
+        ref = ModelApiKeyService.resolve_invoke_ref(db, reranker_id, tenant_id=tenant_id)
+        if not ref:
+            raise ValueError("模型配置不可用")
+        reranker = RedBearRerank.for_invoke(ref)
         # Convert to LangChain Document object
         documents = [
             Document(

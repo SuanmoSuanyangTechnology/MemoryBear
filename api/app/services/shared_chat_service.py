@@ -21,7 +21,7 @@ from app.integrations.knowledge.contracts import KnowledgeRetrievalSource
 from app.repositories.tool_repository import ToolRepository
 from app.services.conversation_service import ConversationService
 from app.services.draft_run_service import create_web_search_tool
-from app.services.model_service import ModelApiKeyService
+from app.services.model_service import ModelConfigService
 from app.services.multi_agent_service import MultiAgentService
 from app.services.release_share_service import ReleaseShareService
 
@@ -296,13 +296,12 @@ class SharedChatService:
         # api_keys = ModelApiKeyRepository.get_by_model_config(self.db, model_config_id)
         # api_key_obj = api_keys[0] if api_keys else None
         tenant_id = self._resolve_tenant_id(release.app.workspace_id if release.app else None)
-        api_key_obj = ModelApiKeyService.get_available_api_key(
+        # 远端模式（G3）：宿主不再解凭据，身份/能力取非解密视图；可用性与选路由模型服务判定
+        model_view = ModelConfigService.get_runtime_model_view(
             self.db,
             model_config_id,
             tenant_id=tenant_id,
         )
-        if not api_key_obj:
-            raise BusinessException("没有可用的 API Key", BizCode.AGENT_CONFIG_MISSING)
 
         # 获取或创建会话
         conversation = self.create_or_get_conversation(
@@ -372,15 +371,11 @@ class SharedChatService:
         # 获取模型参数
         model_parameters = config.get("model_parameters", {})
 
-        # 创建 LangChain Agent
+        # 创建 LangChain Agent（远端模式：身份/能力事实取非解密视图，凭据不上送）
         agent = LangChainAgent(
-            model_name=api_key_obj.model_name,
-            api_key=api_key_obj.api_key,
-            provider=api_key_obj.provider,
-            api_base=api_key_obj.api_base,
-            input_modalities=list(getattr(api_key_obj, "input_modalities", None) or []),
-            output_modalities=list(getattr(api_key_obj, "output_modalities", None) or []),
-            features=list(getattr(api_key_obj, "features", None) or []),
+            model_name=model_view.model_name,
+            model_view=model_view,
+            provider=model_view.provider,
             temperature=model_parameters.get("temperature", 0.7),
             max_tokens=model_parameters.get("max_tokens", 2000),
             system_prompt=system_prompt,
@@ -388,10 +383,6 @@ class SharedChatService:
             deep_thinking=model_parameters.get("deep_thinking", False),
             thinking_budget_tokens=model_parameters.get("thinking_budget_tokens"),
             json_output=model_parameters.get("json_output", False),
-            tenant_id=api_key_obj.tenant_id,
-            model_config_id=api_key_obj.model_config_id,
-            channel_id=api_key_obj.channel_id,
-            failover_plan=api_key_obj.failover_plan,
         )
 
         # 加载历史消息
@@ -442,7 +433,7 @@ class SharedChatService:
 
         elapsed_time = time.time() - start_time
 
-        ModelApiKeyService.record_api_key_usage(self.db, api_key_obj.id)
+        # G3 起不再记渠道密钥用量：调用无凭据（渠道计数由模型服务按 usage 事件落账）
 
         return {
             "conversation_id": conversation.id,
@@ -518,13 +509,12 @@ class SharedChatService:
             # api_keys = ModelApiKeyRepository.get_by_model_config(self.db, model_config_id)
             # api_key_obj = api_keys[0] if api_keys else None
             tenant_id = self._resolve_tenant_id(release.app.workspace_id if release.app else None)
-            api_key_obj = ModelApiKeyService.get_available_api_key(
+            # 远端模式（G3）：宿主不再解凭据，身份/能力取非解密视图；可用性与选路由模型服务判定
+            model_view = ModelConfigService.get_runtime_model_view(
                 self.db,
                 model_config_id,
                 tenant_id=tenant_id,
             )
-            if not api_key_obj:
-                raise BusinessException("没有可用的 API Key", BizCode.AGENT_CONFIG_MISSING)
 
             # 获取或创建会话
             conversation = self.create_or_get_conversation(
@@ -594,15 +584,11 @@ class SharedChatService:
             # 获取模型参数
             model_parameters = config.get("model_parameters", {})
 
-            # 创建 LangChain Agent
+            # 创建 LangChain Agent（远端模式：身份/能力事实取非解密视图，凭据不上送）
             agent = LangChainAgent(
-                model_name=api_key_obj.model_name,
-                api_key=api_key_obj.api_key,
-                provider=api_key_obj.provider,
-                api_base=api_key_obj.api_base,
-                input_modalities=list(getattr(api_key_obj, "input_modalities", None) or []),
-                output_modalities=list(getattr(api_key_obj, "output_modalities", None) or []),
-                features=list(getattr(api_key_obj, "features", None) or []),
+                model_name=model_view.model_name,
+                model_view=model_view,
+                provider=model_view.provider,
                 temperature=model_parameters.get("temperature", 0.7),
                 max_tokens=model_parameters.get("max_tokens", 2000),
                 system_prompt=system_prompt,
@@ -611,10 +597,6 @@ class SharedChatService:
                 deep_thinking=model_parameters.get("deep_thinking", False),
                 thinking_budget_tokens=model_parameters.get("thinking_budget_tokens"),
                 json_output=model_parameters.get("json_output", False),
-                tenant_id=api_key_obj.tenant_id,
-                model_config_id=api_key_obj.model_config_id,
-                channel_id=api_key_obj.channel_id,
-                failover_plan=api_key_obj.failover_plan,
             )
 
             # 加载历史消息
@@ -666,12 +648,12 @@ class SharedChatService:
                 role="assistant",
                 content=full_content,
                 meta_data={
-                    "model": api_key_obj.model_name,
+                    "model": model_view.model_name,
                     "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": total_tokens}
                 },
             )
 
-            ModelApiKeyService.record_api_key_usage(self.db, api_key_obj.id)
+            # G3 起不再记渠道密钥用量：调用无凭据（渠道计数由模型服务按 usage 事件落账）
 
             # 发送结束事件
             end_data = {"elapsed_time": elapsed_time, "message_length": len(full_content)}

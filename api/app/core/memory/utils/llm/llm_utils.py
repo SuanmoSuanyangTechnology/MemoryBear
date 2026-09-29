@@ -1,5 +1,7 @@
 from typing import TYPE_CHECKING
 
+from sqlalchemy.orm import Session
+
 from app.core.memory.llm_tools.openai_client import OpenAIClient
 from app.core.models.base import RedBearModelConfig
 from pydantic import BaseModel
@@ -56,7 +58,7 @@ class MemoryClientFactory:
             raise ValueError("Embedding ID is required")
 
         try:
-            embedder_config = self._config_service.get_embedder_config(
+            ref = self._config_service.resolve_model_ref(
                 embedding_id,
                 tenant_id=tenant_id or self._tenant_id,
             )
@@ -64,12 +66,11 @@ class MemoryClientFactory:
             raise ValueError(f"Invalid embedding ID '{embedding_id}': {str(e)}") from e
 
         try:
-            return OpenAIEmbedderClient(
-                RedBearModelConfig.from_api_key(embedder_config)
-            )
+            return OpenAIEmbedderClient(remote=ref)
         except Exception as e:
-            model_name = embedder_config.get('model_name', 'unknown')
-            raise ValueError(f"Failed to initialize embedder client for model '{model_name}': {str(e)}") from e
+            raise ValueError(
+                f"Failed to initialize embedder client for model '{embedding_id}': {str(e)}"
+            ) from e
 
     def get_reranker_client(self, rerank_id: str, tenant_id=None) -> OpenAIClient:
         """Get reranker client by model ID."""
