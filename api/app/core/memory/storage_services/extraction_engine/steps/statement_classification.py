@@ -203,9 +203,6 @@ class StatementClassifier:
         from app.core.memory.utils.prompt.prompt_utils import (
             render_statement_classification_fallback_prompt,
         )
-        from app.core.memory.storage_services.extraction_engine.steps.base import (
-            call_structured,
-        )
 
         prompt = await render_statement_classification_fallback_prompt(
             statement_text=statement_text, language=language
@@ -220,7 +217,7 @@ class StatementClassifier:
             },
             {"role": "user", "content": prompt},
         ]
-        parsed = await call_structured(llm_client, messages, _FallbackClassificationResponse)
+        parsed = await llm_client.call_structured(messages, _FallbackClassificationResponse)
 
         stmt_type = (parsed.statement_type or "").strip().upper()
         temporal_type = (parsed.temporal_type or "").strip().upper()
