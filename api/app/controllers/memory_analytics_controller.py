@@ -32,6 +32,9 @@ from app.services.user_memory_service import (
     analytics_graph_data,
     analytics_memory_types_async,
 )
+from app.services.workspace_memory_statistics_service import (
+    get_workspace_statistics_async,
+)
 
 api_logger = get_api_logger()
 
@@ -225,6 +228,31 @@ async def get_node_statistics_api(
     except Exception as e:
         api_logger.error(f"记忆类型查询失败: end_user_id={end_user_id}, error={str(e)}")
         return fail(BizCode.INTERNAL_ERROR, "记忆类型查询失败", str(e))
+
+
+@router.get("/workspace_statistics", response_model=ApiResponse)
+async def get_workspace_statistics_api(
+        current_user: CurrentUserSnapshot = Depends(get_current_user_async),
+) -> dict:
+    """获取当前工作空间的记忆类型统计。"""
+    workspace_id = current_user.current_workspace_id
+    if workspace_id is None:
+        api_logger.warning(
+            f"用户 {current_user.username} 尝试查询工作空间记忆统计但未选择工作空间"
+        )
+        return fail(BizCode.INVALID_PARAMETER, "请先切换到一个工作空间")
+
+    try:
+        result = await get_workspace_statistics_async(workspace_id)
+        return success(data=result, msg="查询成功")
+    except Exception as e:
+        api_logger.error(
+            "工作空间记忆统计查询失败: workspace_id=%s, error=%s",
+            workspace_id,
+            str(e),
+            exc_info=True,
+        )
+        return fail(BizCode.INTERNAL_ERROR, "工作空间记忆统计查询失败")
 
 
 @router.get("/graph_data", response_model=ApiResponse)

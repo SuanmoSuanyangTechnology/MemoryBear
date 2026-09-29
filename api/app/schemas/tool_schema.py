@@ -1,6 +1,7 @@
 """工具相关的数据模式定义"""
+import json
 from typing import Dict, Any, List, Optional
-from pydantic import BaseModel, Field, field_serializer
+from pydantic import BaseModel, Field, field_serializer, field_validator
 from datetime import datetime
 from enum import Enum
 
@@ -145,6 +146,17 @@ class CustomToolConfigSchema(BaseModel):
     timeout: int = 30
     schema_content: Optional[Dict[str, Any]] = None
     schema_url: Optional[str] = None
+
+    @field_validator("schema_content", mode="before")
+    @classmethod
+    def _parse_schema_content(cls, v):
+        # 兼容历史数据：前端文本域可能把整段 JSON 以字符串存入
+        if isinstance(v, str):
+            v = v.strip()
+            if not v:
+                return None
+            return json.loads(v)
+        return v
 
     class Config:
         from_attributes = True

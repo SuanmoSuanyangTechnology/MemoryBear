@@ -5,9 +5,9 @@
 === Tasks ===
 
 {% if language == "zh" %}
-你的任务是从目标文本中提取候选记忆陈述句，并按文末 schema 标注每条陈述句。
+你的任务是从目标文本中提取候选记忆陈述句。每条只输出 statement_text、is_permanent、has_emotional_state、valid_at、invalid_at 五个字段，严格遵守文末 schema。
 {% else %}
-Your task is to extract candidate memory statements from the target text and annotate each statement under the schema at the end.
+Extract candidate memory statements from the target text. Each statement must contain only statement_text, is_permanent, has_emotional_state, valid_at, and invalid_at under the schema at the end.
 {% endif %}
 
 === Inputs ===
@@ -15,7 +15,8 @@ Your task is to extract candidate memory statements from the target text and ann
 
 - chunk_id: chunk 唯一 ID
 - end_user_id: 终端用户 ID
-- dialog_at: 会话时间，通常是 ISO 8601 时间点；输出时必须原样复制输入中的 dialog_at
+- dialog_at: 会话时间，用于解析相对时间的 ISO 8601 时间点；仅作为输入，不在本阶段输出
+- role: 当前目标消息的原始角色，user 或 assistant（大小写不敏感）；用于理解说话来源，不是陈述主语。每次只处理一个可确定来源角色的抽取单元；多角色文本由调用方预先按消息边界拆分并保留来源映射
 - target_content: 当前要处理的对话片段文本，也是唯一允许被抽取的目标文本
 - supporting_context: 完整对话上下文，仅用于辅助理解 target_content，不能单独贡献新的可抽取事实
 - supporting_context.before_msgs: 发生在 target_content **之前**的上下文消息列表（按时间升序），可包含 User 和 Assistant
@@ -25,7 +26,8 @@ Your task is to extract candidate memory statements from the target text and ann
   {% else %}
 - chunk_id: unique chunk identifier
 - end_user_id: end-user identifier
-- dialog_at: session time, usually an ISO 8601 timestamp; output must copy the input `dialog_at` verbatim
+- dialog_at: ISO 8601 session timestamp used to resolve relative time; input only, never output in this stage
+- role: original role of the target message, user or assistant (case-insensitive); identifies its speaking source, not its grammatical subject. The caller must split mixed-role text at message boundaries into extraction units with one known source role and retain the source mapping
 - target_content: the current dialogue fragment to process, and the only text span that may be extracted from
 - supporting_context: full dialogue context used only to help interpret target_content and must not independently contribute new extractable facts
 - supporting_context.before_msgs: ordered list of messages that occurred **before** target_content (chronological), may include User and Assistant
@@ -41,10 +43,10 @@ Your task is to extract candidate memory statements from the target text and ann
 
 1. **选择路径**：去掉 speaker 前缀后，若 `target_content` 已包含事实值、谓词、动作、关系、态度或计划，即使主语或事件依赖上文省略，也走普通路径；只有仅含短值或明确肯定/否定短答时才尝试下方短回答路径。短回答路径的否决条件不得作用于普通路径。路径消歧硬规则：如果 target 由裸号码、标识符、日期、金额等一个或多个短值组成，且除短值外不含有任何谓词、动作、关系、态度或计划，那么无论这些短值能否被称为“事实值”，都必须走短回答路径并按下方规则补全；不得先按“包含事实值”归入普通路径，再用普通过滤规则以“无谓词/无独立命题”为由清空输出。
 2. **生成候选**：普通路径中，先锁定每个分句在原文中的语法主语和话语行为，再遍历全部并列、转折、因果和条件分句，为每个独立谓词生成候选，最后处理拆分或合并。第三方主语的已发生动作不能改成用户发起的委托；“提醒我/记得提醒我”不能改成用户已经执行被提醒的动作。属性、联系方式或标识分句只有在 target 含具体字面值时才生成候选，纯“这/这个/它”不生成候选。不能因某个态度、情绪或主句更显著而漏掉同句中的事实、状态、消息来源或背景谓词。每个候选的事实值、核心谓词、动作、关系、态度、属性、任务、计划和源时间表达都必须在 `target_content` 中有直接文字依据。短回答路径只允许按下方规则从最近的前序 Assistant 问题取得唯一槽位或已绑定命题。
-3. **过滤候选**：按后文 Extraction Rules 过滤问题、问候、对话填充、纯操作指令、无值字段及其他不成立的候选。先区分两类缺口：人物/事件引用未解时保留最小必要引用并标记 unresolved；属性、联系方式或标识的语法值只有“这/这个/它”且没有具体字面值时，该候选在生成 statement 前直接删除，不能用 unresolved 保留。表达用户计划、委托、分工或安排的祈使式说法不是纯操作指令。`<input-file-summary>` 按其专门规则处理。
+3. **过滤候选**：按后文 Extraction Rules 过滤问题、问候、对话填充、纯操作指令、无值字段及其他不成立的候选。先区分两类缺口：人物/事件引用无法唯一消解时保留最小必要引用；属性、联系方式或标识的语法值只有“这/这个/它”且没有具体字面值时，该候选在生成 statement 前直接删除。表达用户计划、委托、分工或安排的祈使式说法不是纯操作指令。`<input-file-summary>` 按其专门规则处理。
 4. **受限使用上下文**：候选确定后，context 只能消解 target 已有的代词、省略、人物/角色/事件槽位，解析 target 已有的时间表达，或按永久记忆规则修改现有候选的 `is_permanent`。除合法短回答外，context 不能增加候选数量，也不能增加 target 中没有的事实值、谓词、动作、属性、任务、计划或源时间表达。执行指代消解时，应把它视为对 target 占位表达的局部替换；不得把用于推理的整句 context 拼接、复述或合并进 statement。
 5. **处理冲突与下文**：User 原始消息与 Assistant 总结冲突时，以 User 原始消息为准。`after_msgs` 只能消解 target 已有的指代或槽位，不能提供新事实、日期或事件锚点，也不能反向修正短回答。成员身份只有在下文明示“谁对应哪个槽位”时才能绑定职责；仅列出成员姓名不能按顺序分配角色。
-6. **生成最终对象**：完成条件保留、指代消解和时间改写后，再逐条判断类型、时间字段、引用字段、情感字段和 `is_permanent`。可解析的相对时间必须在 `statement_text` 中替换为解析结果，并与 `valid_at` / `invalid_at` 一致；最后按输出 schema 生成 JSON。
+6. **生成最终对象**：完成条件保留、指代消解和时间改写后，再逐条生成时间字段、情感字段和 `is_permanent`。可解析的相对时间必须在 `statement_text` 中替换为解析结果，并与 `valid_at` / `invalid_at` 一致；最后按输出 schema 生成 JSON。
 
 前序 Assistant 简短回答补全（普通来源规则的唯一例外）：
 
@@ -86,7 +88,7 @@ B. 肯定确认回答：
 
 - target 是明确肯定短答，例如“是”“是的”“对”“没错”“正确”。Assistant 的最近问题必须是封闭式确认问题，并且其中每个原子命题都已明确绑定主体、谓词或槽位、以及具体值；不能含未绑定槽位、二选一或其他备选值。
 - 问题只有一个合格原子命题时，输出一条肯定命题。问题含多个合格原子命题且每个槽位和值都已逐一明确绑定时，分别输出全部被确认的命题。
-- 具体命题和值可以来自该 Assistant 问题，因为 target 的肯定回答构成用户对它们的明确确认；最终 `speaker` 仍为 `"user"`。直接输出确认后的事实，不要输出“用户说是的”或“用户确认了上述信息”等元陈述。
+- 具体命题和值可以来自该 Assistant 问题，因为 target 的肯定回答构成用户对它们的明确确认；说话来源仍是用户，由调用方保留来源映射。直接输出确认后的事实，不要输出“用户说是的”或“用户确认了上述信息”等元陈述。
 - 确认后的 statement 只能保留最近 Assistant 问题中已经绑定的命题和 target 提供的肯定立场；除了解析问题内部的指代，不得从更早或更晚的 context 增加“之前登记的”“已保存的”等问题中没有的修饰语或关系。
 - 如果命题来自第三人称剪枝摘要，先按“剪枝摘要规范化硬约束”删除“登记、保存、记录、核对、确认”等流程包装；即使这些词紧邻字段，也不能把它们改写为字段限定语。
 
@@ -97,7 +99,7 @@ C. 否定确认回答：
 - 否定 statement 只能保留最近 Assistant 问题中的单一绑定命题和 target 提供的否定立场；除了解析问题内部的指代，不得从其他 before_msgs 或 after_msgs 增加限定语、状态或新事实。
 - 如果命题来自第三人称剪枝摘要，先按“剪枝摘要规范化硬约束”恢复最小字段命题，不能把“登记、保存、核对”等流程动作保留为字段限定语。
 
-所有分支都必须遵守：问题必须来自 `before_msgs` 中的 Assistant 原始问题，或来自该问题语义完整的剪枝摘要；普通 Assistant 陈述、与提问无关的总结、猜测、建议或改写不构成本例外。问题摘要只能提供其明确保留的槽位或已绑定命题，不能作为普通事实来源。最终 statement 的类型、时态、时间字段、指代字段和 `is_permanent` 按其他规则判断，Assistant 的措辞本身不能触发永久记忆。简短回答的发生时间不等于重建事实的生效时间；若重建的是不含明确起始时间的静态属性、身份、关系或联系方式，`valid_at` 和 `invalid_at` 都填 `"NULL"`，不能把 `dialog_at` 当作起始时间。
+所有分支都必须遵守：问题必须来自 `before_msgs` 中的 Assistant 原始问题，或来自该问题语义完整的剪枝摘要；普通 Assistant 陈述、与提问无关的总结、猜测、建议或改写不构成本例外。问题摘要只能提供其明确保留的槽位或已绑定命题，不能作为普通事实来源。最终 statement 的时间字段和 `is_permanent` 按其他规则判断，Assistant 的措辞本身不能触发永久记忆。简短回答的发生时间不等于重建事实的生效时间；若重建的是不含明确起始时间的属性、身份、关系或联系方式，`valid_at` 和 `invalid_at` 都填 `"NULL"`，不能把 `dialog_at` 当作起始时间。
 
 {% else %}
 
@@ -105,10 +107,10 @@ Follow this sequence exactly. It is the single authoritative flow for source con
 
 1. **Choose a path**: after stripping the speaker prefix, use the ordinary path when `target_content` contains a factual value, predicate, action, relationship, attitude, or plan, even if its subject or event is omitted and depends on prior context. Try the short-answer path only when the target contains short values or an explicit affirmative/negative answer alone. Short-answer vetoes never apply to an ordinary target. Path-disambiguation hard rule: if the target consists only of one or more bare short values such as a number, identifier, date, or amount, with no predicate, action, relationship, attitude, or plan of its own, then regardless of whether such values could be called a "factual value", it MUST take the short-answer path and be completed under the rules below; never classify it into the ordinary path first and then empty the output via ordinary filtering on the grounds of "no predicate / no standalone proposition".
 2. **Generate candidates**: on the ordinary path, first lock each clause's grammatical subject and speech act as expressed in the source, then traverse every coordinated, contrastive, causal, and conditional clause and generate a candidate for each independent predicate before deciding whether to split or merge them. A completed action with a third-party subject must not become a delegation initiated by the user; “remind me/remember to remind me” must not become an assertion that the user already performs the reminded action. Generate an attribute, contact-detail, or identifier candidate only when the target contains a concrete literal value; bare `this/that/it` creates no candidate. A salient attitude, emotion, or main clause must not suppress a factual, state, source-attribution, or background predicate in the same target. Every factual value, core predicate, action, relationship, attitude, attribute, task, plan, and source temporal expression must have direct support in `target_content`. On the short-answer path, only the unique slot or explicitly bound proposition from the most recent preceding Assistant question may be inherited under the rules below.
-3. **Filter candidates**: apply the Extraction Rules below to remove questions, greetings, conversational filler, pure operational instructions, valueless fields, and other invalid candidates. Distinguish two gaps before output: an unresolved person/event reference keeps the minimal reference and is marked unresolved; an attribute, contact detail, or identifier whose grammatical value is only `this/that/it` with no concrete literal value is deleted before statement generation and cannot be rescued as unresolved. Imperative wording that expresses the user's plan, delegation, assignment, or arrangement is not a pure operational instruction. Handle `<input-file-summary>` under its dedicated rule.
+3. **Filter candidates**: apply the Extraction Rules below to remove questions, greetings, conversational filler, pure operational instructions, valueless fields, and other invalid candidates. Distinguish two gaps before output: a person/event reference that cannot be uniquely resolved keeps the minimal necessary reference; an attribute, contact detail, or identifier whose grammatical value is only `this/that/it` with no concrete literal value is deleted before statement generation. Imperative wording that expresses the user's plan, delegation, assignment, or arrangement is not a pure operational instruction. Handle `<input-file-summary>` under its dedicated rule.
 4. **Use context under strict limits**: after candidates are fixed, context may only resolve references, ellipsis, person/role/event slots already present in the target; resolve temporal expressions already present in the target; or change `is_permanent` under its dedicated rule. Except for a valid short answer, context cannot increase candidate count or add any factual value, predicate, action, attribute, task, plan, or source temporal expression absent from the target. Treat reference resolution as a local substitution for a placeholder in the target; never concatenate, restate, or merge the contextual sentence used as reasoning evidence into the statement.
 5. **Resolve conflicts and later context**: prefer original User messages over conflicting Assistant summaries. `after_msgs` may only resolve a reference or slot already present in the target; it cannot supply a new fact, date, or event anchor, and cannot repair a short answer. Bind members to responsibilities only when later context explicitly states who maps to which slot; a list of member names alone never authorizes assignment by order.
-6. **Build final objects**: after preserving conditions and completing reference and temporal rewriting, determine types, time fields, reference fields, emotion fields, and `is_permanent` for each statement. Replace every resolvable relative time inside `statement_text` with its resolved expression and keep it consistent with `valid_at` / `invalid_at`; then generate JSON under the output schema.
+6. **Build final objects**: after preserving conditions and completing reference and temporal rewriting, determine time fields, emotion fields, and `is_permanent` for each statement. Replace every resolvable relative time inside `statement_text` with its resolved expression and keep it consistent with `valid_at` / `invalid_at`; then generate JSON under the output schema.
 
 Short-answer completion from a preceding Assistant question (the only exception to the ordinary source rule):
 
@@ -150,7 +152,7 @@ B. Affirmative confirmation answer:
 
 - The target is an explicit affirmation such as “yes”, “correct”, or “that's right”. The most recent Assistant question must be a closed confirmation question in which every atomic proposition already has an explicit subject, predicate or slot, and concrete value; it must contain no unbound slot, either-or choice, or alternative value.
 - If the question has one eligible atomic proposition, output that affirmed proposition. If it has multiple eligible atomic propositions and every slot-value pair is explicitly bound, output every confirmed proposition separately.
-- The concrete propositions and values may come from that Assistant question because the target supplies the user's explicit affirmation. Final `speaker` remains `"user"`. Output the affirmed facts themselves, never a meta-statement such as “the user said yes” or “the user confirmed the information”.
+- The concrete propositions and values may come from that Assistant question because the target supplies the user's explicit affirmation. The speaking source remains the user; the caller retains that source mapping. Output the affirmed facts themselves, never a meta-statement such as “the user said yes” or “the user confirmed the information”.
 - An affirmed statement may retain only the proposition already bound in the most recent Assistant question plus the target's affirmative polarity. Except for resolving a reference inside that question, do not add modifiers or relationships such as “previously registered” or “saved” from earlier or later context when they are absent from the question.
 - When the proposition comes from a third-person pruned summary, first apply the hard pruned-summary normalization rule and remove workflow wrappers such as registered, saved, recorded, checked, or confirmed. Even when adjacent to the field, these words must not become field qualifiers.
 
@@ -161,7 +163,7 @@ C. Negative confirmation answer:
 - A negative statement may retain only the single bound proposition in the most recent Assistant question plus the target's negative polarity. Except for resolving a reference inside that question, do not add qualifiers, states, or new facts from other before_msgs or after_msgs.
 - When the proposition comes from a third-person pruned summary, first recover the minimal field proposition under the hard normalization rule. Never retain workflow actions such as registered, saved, or checked as field qualifiers.
 
-All branches must obey these limits: the question must come from an original Assistant question in `before_msgs` or its semantically complete pruned summary. Ordinary Assistant statements, summaries unrelated to a question, guesses, suggestions, or rephrasings do not qualify. A question summary may supply only the slots or bound propositions it explicitly preserves and is never an ordinary factual source. Determine statement type, temporality, time fields, reference fields, and `is_permanent` under the other rules, and Assistant wording alone never triggers permanent memory. The time of the short answer is not the start time of the reconstructed fact. For a static attribute, identity, relationship, or contact detail with no explicit start time in the question or target, set both `valid_at` and `invalid_at` to `"NULL"`; never use `dialog_at` as its start time.
+All branches must obey these limits: the question must come from an original Assistant question in `before_msgs` or its semantically complete pruned summary. Ordinary Assistant statements, summaries unrelated to a question, guesses, suggestions, or rephrasings do not qualify. A question summary may supply only the slots or bound propositions it explicitly preserves and is never an ordinary factual source. Determine time fields and `is_permanent` under the other rules, and Assistant wording alone never triggers permanent memory. The time of the short answer is not the start time of the reconstructed fact. For an attribute, identity, relationship, or contact detail with no explicit start time in the question or target, set both `valid_at` and `invalid_at` to `"NULL"`; never use `dialog_at` as its start time.
 
 {% endif %}
 
@@ -172,12 +174,12 @@ All branches must obey these limits: the question must come from an original Ass
 - 以“一个完整意思”为单位提取陈述句，通常对应一个完整句子或一个自然语义片段。
 - 默认保留一个完整语义单元。不同谓词表达彼此独立的事实、事件、状态或态度时应分别输出；但原因或背景与其直接引出的状态、同一关系及其持续时间或程度、以及拆开后会丢失语义依赖的分句应保留在同一 statement 中。“听同事说/报告显示/群里通知”等消息来源属于命题作用域，必须保留原消息来源，不能改写成无来源事实或泛化为“用户得知/用户听说”。若“如果/要是/除非”“想/希望/打算/计划”“请/让/交给/委托”等条件、意愿或委托作用于多个谓词，要么保留为一条，要么在每条拆分结果中重复其作用域；拆分“用户想请/让/委托X做Y”时仍须写成“用户想请/让/委托X做Y”，不能降成“X做Y”或“用户已邀请X”。
 - 合法 `OPEN_VALUE + OPEN_SLOTS` 不适用上一条默认规则：每个唯一绑定的槽位值对都是一条独立事实，必须分别输出。
-- 输出所有通过来源和语义成立性检查的独立 statement。唯一性只约束槽位补全和具体实体回填；普通路径中引用无法唯一消解时，按共指规则保留 unresolved statement，而不是丢弃整个候选。
+- 输出所有通过来源和语义成立性检查的独立 statement。唯一性只约束槽位补全和具体实体回填；普通路径中引用无法唯一消解时，按共指规则保留最小必要描述或原始引用，而不是丢弃整个候选。
 
 用户主语归一化：
 
 - 如果陈述句的主语是用户本人，无论上下文中给出的用户名称、昵称、别名或真实姓名是什么，都必须使用与输出语言一致的用户锚点，不要使用用户的具体名字或别名。
-- 如果 `target_content` 的语法主语是明确第三方，保留第三方作为 statement 主语；不得把“小周帮我订票”改成“用户让小周订票”，也不得添加“用户提到/用户说”这类顶层转述包装。`speaker` 字段已经表达当前消息来源。
+- 如果 `target_content` 的语法主语是明确第三方，保留第三方作为 statement 主语；不得把“小周帮我订票”改成“用户让小周订票”，也不得添加“用户提到/用户说”这类顶层转述包装。当前消息来源由调用方保留，不通过改写陈述主语表达。
 - 中文输出使用“用户”作为主语。
 - 英文输出使用 `the user` 作为主语。
 - 这是硬规则；如果用户主语没有按输出语言统一成对应锚点，则该 statement 视为不合格。
@@ -185,12 +187,9 @@ All branches must obey these limits: the question must come from an original Ass
 共指消解：
 
 - prompt 示例中的人物名、事件名、地点名和日期只用于说明规则，不是当前输入的候选事实或候选实体。除非某个实体名确实出现在当前 `input.target_content` 或当前 `input.supporting_context` 中，否则禁止把示例里的实体名写入 `statement_text`。
-- 先完成最终的 `statement_text` 改写，再判断 `has_unsolved_reference`。
-- `has_unsolved_reference` 必须基于最终输出的 `statement_text` 判断，而不是基于原始 `target_content` 里是否出现过代词来判断。
-- 如果最终 `statement_text` 已经把引用改写成具体实体名，例如“助理恭喜用户”“小李点了一杯美式咖啡”，则 `has_unsolved_reference` 必须是 `false`。
-- 如果最终 `statement_text` 已经把“他/她/他们/他俩/两位同事/另一位”等指代表达改写成当前输入中真实出现过的具体实体名，`has_unsolved_reference` 必须是 `false`；不能因为原句含有代词或集合表达而继续标为 `true`。
-- 人物或事件引用能解析到具体实体名时，输出该实体名并设 `has_unsolved_reference=false`；不能唯一解析时，保留最小必要描述或原始引用并设为 `true`。只要 target 已明确给出核心谓词或关系，这类 unresolved 仍须输出，不能变成空数组。
-- 属性、联系方式或标识值不走上述保留路径：如果删除“这/这个/它”后没有任何具体字面值，整个字段候选必须丢弃，不能输出“字段是这个”，也不能用 `has_unsolved_reference=true` 保留。
+- 人物或事件引用能解析到当前输入中真实出现过的具体实体名时，必须在最终 `statement_text` 中改写为该实体名，例如“助理恭喜用户”“小李点了一杯美式咖啡”。
+- 如果“他/她/他们/他俩/两位同事/另一位”等不能唯一解析，保留最小必要描述或原始引用。只要 target 已明确给出核心谓词或关系，这类 statement 仍须输出，不能变成空数组。
+- 属性、联系方式或标识值不走上述保留路径：如果删除“这/这个/它”后没有任何具体字面值，整个字段候选必须丢弃，不能输出“字段是这个”。
 - 但对任何命名表达（如“X 叫 Z / X 的名字是 Z / 大家叫 X 为 Z”），只允许为了解析 `X` 做必要改写；`Z` 是新出现的名字、称呼或别名，必须保留原文表面形式，不得被共指消解、翻译、转写或归一化成 `X`。
 - 只有当 `target_content` 明确表达命名关系时，才允许输出“用户叫 X / 用户的名字是 X / the user is named X”这类命名 statement。明确命名证据包括：“我叫 X”“我的名字是 X”“大家叫我 X”“你可以叫我 X”“I am X”“my name is X”“call me X”“people call me X”等。
 - 呼语、问候对象、感谢对象、邮件/消息开头称呼、@mention、句首称呼对象，都不是命名证据，不能被改写成用户的名字或别名。
@@ -199,9 +198,9 @@ All branches must obey these limits: the question must come from an original Ass
 人物、集合与排除式指代消解：
 
 - 对集合指代如“他俩”“她俩”“他们两个”“两位朋友”“那几个人”，如果 `supporting_context` 中可以唯一确定集合成员，应展开为具体姓名列表。
-- 对“另一个人”“另一个朋友”“剩下那位”等排除式指代，执行集合差：先从 before_msgs 建立当前任务的有限人物集合 `C`，再找出已被明确分配当前任务另一职责的成员集合 `A`，计算 `R = C - A`。仅当 `R` 恰好剩一个具体人物时，必须用该人物替换 target 的排除式指代并设 `has_unsolved_reference=false`；否则保留最小指代并设为 `true`。结构演算：若 `C={人物甲, 人物乙}`、`A={人物甲}`，target 为“另一个人负责事项Z”，则 `R={人物乙}`，最终只能输出“人物乙负责事项Z”；输出“另一个人负责事项Z”或把建立 C、A 的前文一起输出都属于错误。
+- 对“另一个人”“另一个朋友”“剩下那位”等排除式指代，执行集合差：先从 before_msgs 建立当前任务的有限人物集合 `C`，再找出已被明确分配当前任务另一职责的成员集合 `A`，计算 `R = C - A`。仅当 `R` 恰好剩一个具体人物时，必须用该人物替换 target 的排除式指代；否则保留最小指代。结构演算：若 `C={人物甲, 人物乙}`、`A={人物甲}`，target 为“另一个人负责事项Z”，则 `R={人物乙}`，最终只能输出“人物乙负责事项Z”；输出“另一个人负责事项Z”或把建立 C、A 的前文一起输出都属于错误。
 - 排除式消解中，`C` 和 `A` 只作为推理证据。最终 statement 只保留 target 的主体占位和新谓词，将占位替换为 `R`；不得输出用来建立 `C` 或 `A` 的旧邀请、成员列表、身份、职责或事件。
-- 对 `target_content` 中已有的角色槽位或任务槽位，如“一个负责技术演示，另一个负责现场组织”，只有 `supporting_context.after_msgs` 明确且唯一地说明了每个成员与每个槽位的对应关系时，才允许回填具体姓名并将 `has_unsolved_reference` 设为 `false`。下文仅列出集合成员姓名、仅说明其中一人的其他属性，或姓名出现顺序与槽位数量一致，都不构成职责绑定。此时先把对全组成立的邀请/参与谓词单独输出并可展开成员姓名；再把逐个职责分别保留为“一人负责技术演示”“另一人负责现场组织”并标记 unresolved。禁止把成员姓名和未绑定职责合并进同一 statement 后按姓名顺序猜测分工。
+- 对 `target_content` 中已有的角色槽位或任务槽位，如“一个负责技术演示，另一个负责现场组织”，只有 `supporting_context.after_msgs` 明确且唯一地说明了每个成员与每个槽位的对应关系时，才允许回填具体姓名。下文仅列出集合成员姓名、仅说明其中一人的其他属性，或姓名出现顺序与槽位数量一致，都不构成职责绑定。此时先把对全组成立的邀请/参与谓词单独输出并可展开成员姓名；再把逐个职责分别保留为“一人负责技术演示”“另一人负责现场组织”。禁止把成员姓名和未绑定职责合并进同一 statement 后按姓名顺序猜测分工。
 - 槽位回填只允许把 `target_content` 中**已有**的槽位文字（如“技术演示”“现场组织”）替换为具体姓名，**不允许**把 after_msgs 里出现的更细任务名（如“演示环境”“会场和签到”）作为新槽位写入 statement，即使语义看起来近似或更精确。任何 after_msgs 中新出现的任务名、子任务、动作或时间表达都不能进入 statement_text。分工 target 的输出只保留 target 自己提出的职责谓词；前文的邀请、活动、参与意图或其他安排只用于确定人物集合，不得被复制或合并进分工 statement。
 - “也”“一起”“到时候她也来”等添加性表达只表明目标人物加入某个上下文活动，不自动表明用户本人或其他未在 target 中点明的人也参加。只有 target 本身明确出现“我/我们/用户和她”等共同参与证据时，才能把用户写成共同参与者。
 - 如果 User 原始消息与 Assistant 总结冲突，优先相信 User 原始消息；例如 Assistant 错误地把“另一个人是厨师”总结成“用户是厨师”时，不能据此把厨师身份归给用户。
@@ -218,7 +217,7 @@ All branches must obey these limits: the question must come from an original Ass
 - 只有当当前 `supporting_context` 足以将引用稳定映射到具体实体名时，才算 fully resolved。
 - `张三`、`老张`（且上下文中明确就是张三）、`李教授`、`王老师` 属于清晰指代。
 - 具体姓名、稳定称呼或职务是第三方实体时，直接保留该实体；不得为统一用户锚点而擅自加成“用户的张三/用户的小周/用户的李教授”等所有关系。
-- `用户的朋友`、`用户的同事`、`某位老师`、`一位面试官` 这类最小必要描述允许输出，但仍然算 unresolved。
+- `用户的朋友`、`用户的同事`、`某位老师`、`一位面试官` 这类无法映射到具体实体名的最小必要描述允许输出。
 - `朋友`、`前天那个人`、`那个`、`这个`、`那些`、`那两个`、`对方`、`他/她`（且无唯一可解对象）属于模糊指代。
 
 过滤：
@@ -226,7 +225,7 @@ All branches must obey these limits: the question must come from an original Ass
 - 最终 `statement_text` 必须是陈述句，但 `target_content` 的表面句式不必是完整陈述句。含有事实值、谓词、动作、关系、态度或计划的省略句，以及语法上确为请求或祈使的“请/让/帮我”表达，都应在补全必要主语后改写为陈述句；第三方作主语的已发生事件，如“X帮我做了Y”，不是用户发出的委托，必须保留为“X为用户做了Y”。在“提醒我/记得提醒我在某时做X”中，用户是被提醒者，陈述核心是“用户希望届时被提醒做X”；绝不能改写成“用户提醒自己做X”，也不能改写成用户已经或确定会做X。提醒请求及其模态必须保留。
 - 满足“前序 Assistant 简短回答补全”全部条件的 target 虽然表面上不是完整陈述句，但重建后构成陈述句，不得仅因 target 缺少显式谓词而过滤；不满足全部条件时仍按普通过滤规则处理。
 - 不要把 `target_content` 中的问题、问候语或对话填充词作为普通 statement 提取。纯粹要求 Assistant 立即执行操作且不表达可记忆事实、计划或安排的命令也应过滤。该规则不取消前序 Assistant 字段请求在合法简短回答分支中提供槽位/命题的资格。
-- 每条属性、联系方式或标识候选都必须有明确值。若一个分句只声明字段、属性或关系但没有给出对应值，不为该分句生成 statement，也不得从相邻分句借用名称、数字或其他值，除非 target 明确建立了该绑定。没有可唯一解析对象的“这/这个/它”等指示词不算字段值，`has_unsolved_reference=true` 也不能把无值字段变成可输出 statement；但人物或事件引用未解且核心谓词已明确时，仍按上一节输出 unresolved statement。
+- 每条属性、联系方式或标识候选都必须有明确值。若一个分句只声明字段、属性或关系但没有给出对应值，不为该分句生成 statement，也不得从相邻分句借用名称、数字或其他值，除非 target 明确建立了该绑定。没有可唯一解析对象的“这/这个/它”等指示词不算字段值，也不能把无值字段变成可输出 statement；但人物或事件引用未解且核心谓词已明确时，仍按上一节保留最小必要描述或原始引用并输出。
 - 完全过滤纯呼语或问候称呼，不输出 statement。例如：`Hey, Jack`、`Hi Caroline`、`Dear 李教授`、`Jack，早上好`。
 - 如果名字只是在句首或句尾作为称呼对象出现，也不要把它改写成命名 statement。例如：`Jack, can you help me?`、`Thanks, Caroline`、`@Jack 看一下这个` 都不能输出“用户叫 Jack/Caroline”。
 
@@ -234,25 +233,22 @@ All branches must obey these limits: the question must come from an original Ass
 
 - 如果 `target_content` 中包含 `<input-file-summary>...</input-file-summary>` 标签，标签内的内容是用户上传文件（图片、视频、文档等）的系统预处理摘要。
 - 对于这类内容，必须以"用户"为主语改写成陈述句，表达用户上传/分享了什么内容。
-- 例如：`<input-file-summary>这张图片展示了一朵盛开的粉色莲花</input-file-summary>` 应提取为 `"用户分享了一张盛开的粉色莲花的图片，背景是蓝色的墙壁。"`
+- 例如：`<input-file-summary>这张图片展示了一朵盛开的粉色莲花</input-file-summary>` 应提取为 `"用户分享了一张盛开的粉色莲花的图片。"`
 - 不要原样保留 `<input-file-summary>` 标签在 statement_text 中。
 - 不要把文件摘要当作独立的客观描述输出（如"一张图片展示了..."），必须关联到用户行为。
 
-speaker：
+阶段边界：
 
-- `speaker` 表示该 statement 在 `target_content` 中的直接说话来源。
-- 如果 statement 来自用户消息，填 `"user"`。
-- 如果 statement 来自助理消息，填 `"assistant"`。
-- 不要省略 `speaker`；每条 statement 都必须输出该字段。
-
-statement_type：
-
-- `FACT`：用户陈述的事实、状态、关系、经历、行为、事件或计划等现实描述。
-- `OPINION`：主观评价、态度、判断、感受、看法，例如“我觉得”“我担心”。
-- `OTHER`：不应归入 `FACT` 或 `OPINION` 的其他陈述；“我希望……”默认标为 `OTHER`。
-- 不要因为句子带有主观色彩就自动判为 `OPINION`；只有在其核心是个人判断、态度、感受或评价时才标为 `OPINION`。
+- 本阶段负责提取、过滤、条件和来源保留、指代消解、时间解析、情感和永久保留意图判断。
+- 三个分类字段由后续分类阶段判断；statement_id、speaker、dialog_at 由代码补齐。本阶段不输出这六个字段。
+- 不得因为引用判断交给后续阶段而省略指代消解；仍无法消解的人物或事件引用按原规则保留，不编造实体。
 
 时间规则：
+
+- 普遍事实、定义、常识、数学事实或无具体时间边界的泛化陈述：valid_at 和 invalid_at 均为 "NULL"。
+- 相对稳定且仍持续的身份、属性、长期偏好、关系、职业或居住状态：有明确起始时间才填 valid_at，否则为 "NULL"；invalid_at 为 "NULL"。不能把会话时间当作这些状态的起始时间。
+- 明确已结束或有结束边界的阶段性状态按事件/阶段处理，不能因涉及职业、关系或居住就忽略其结束时间。
+- 时间字段按陈述语义确定；不因出现时间词就自动填满两个边界，也不因事实长期有效就设置 is_permanent=true。
 
 - 仅使用目标文本中明确陈述、可由 `dialog_at` 直接解析，或可由 `target_content` 中的事件日期 / `supporting_context.before_msgs` 中已确认事件锚点解析的时间信息；不要使用外部知识补时间。
 - 解析时间表达前，先判断它的时间锚点类型，不要把所有相对时间都默认锚定到 `dialog_at`。
@@ -299,7 +295,7 @@ statement_type：
 - `valid_at` 表示陈述开始成立或生效的时间。
 - `invalid_at` 表示陈述结束或不再成立的时间；如果仍在持续，填 `"NULL"`。
 - 对“最近”“近来”“这段时间”这类开放过去区间，如果只能确定截至某个参考时间之前的一段时间，但无法确定开始边界，不要把参考时间误填为 `valid_at`；可以在 `statement_text` 中保留锚定后的开放区间，并将 `valid_at` 填 `"NULL"`。
-- `dialog_at` 表示当前会话时间，每条 statement 都必须原样复制输入中的 `dialog_at`。
+- `dialog_at` 仅用作输入时间锚点；本阶段不输出该字段，由代码在最终合并时原样复制。
 - `dialog_at` 是必需输入。若 `dialog_at` 缺失或不可解析，不要发明当前时间锚点；只能保留最小可信时间表达，并将无法可靠确定的 `valid_at` / `invalid_at` 填为 `"NULL"`。
 - `valid_at` 和 `invalid_at` 输出必须使用 ISO 8601 UTC 日期时间并以 `Z` 结尾，或在无可用时间时填 `"NULL"`。
 - 对于只有日期没有时分秒的时间，默认使用整天边界，便于后续检索。
@@ -324,33 +320,51 @@ statement_type：
 
 永久记忆判断：
 
-- `is_permanent` 表示用户是否明确要求当前 statement 被永久、永远或长期保留，或明确要求系统不要遗忘该信息；它不表示 statement 描述的事实永远有效。
+- `is_permanent` 表示当前 statement 在写入时是否应被保护，不按普通记忆衰减或淘汰；它不表示 statement 描述的事实永远有效。事件过期后的降级属于后续生命周期机制，不在本任务中处理。
 - 必须先完成 statement 提取、条件保留、指代消融和时间改写，得到最终 `statement_text`，再单独判断该 statement 的 `is_permanent`。
-- 只有用户明确表达“永久记住/永久保留”“永远记住/永远不要忘记”“长期保留”或“不要遗忘这条信息”等永久保留意图时，才输出 `true`；其他所有情况一律输出 `false`。
-- 普通“记住/保存”、一般重要性、内容自身价值、长期事实、偏好、健康信息、亲属日期或人生目标都不能自行触发 `true`。
-- 普通行动提醒，如“别忘了开会”“记得买蛋糕”，不是要求系统永久保存信息，必须输出 `false`。
-- 永久保留指令必须在 `target_content` 中，或出现在 supporting_context 的 `role="user"` 消息中并且能唯一指向当前 statement。Assistant 消息不能提供这种意图。
 - 每条 statement 独立判断。证据不足、含义不清、作用范围不明确或规则冲突时，一律输出 `false`。
-- 不判断或推测任何存储容量、永久记忆配额或分配结果；`is_permanent` 只表示用户明确表达的永久保留意图，容量由后端确定性处理。
-- 如果一句输入产生多条 statement，而永久保留指令无法唯一指向其中一条，不要把 `true` 扩散到全部 statement。只有用户明确要求“这些内容全部永久保留”等且无歧义地覆盖全部候选时，才可全部标为 `true`。
-- 对 context 中的永久保留指令必须执行以下绑定算法：
+
+强永久记忆指令：
+
+- 只有明确要求系统保存当前信息的表达才是强指令，例如“记住这件事”“帮我记住……”“帮我保存下来”“加入永久记忆”“帮我收藏/保存这条信息”。
+- 强指令必须在 `target_content` 中，或出现在 supporting_context 的 `role="user"` 消息中并且能唯一指向当前 statement。Assistant 消息不能提供这种意图。
+- 强指令可以使短期信息成为 `true`。例如用户明确说“记住，我明天下午三点开会”，先把时间改写为具体日期和时间，再将该会议 statement 标为 `true`。
+- 如果一句输入产生多条 statement，而“这个”“这件事”等无法唯一指向其中一条，不要把 `true` 扩散到全部 statement。只有“这些都记住”等表达明确且无歧义地覆盖全部候选时，才可全部标为 `true`。
+- 硬边界：当 `target_content` 产生两条及以上 statement 时，后文只有“这个帮我记住”“这件事很重要”等单数泛指、且没有复述任何主题、对象、谓词或日期，必须完全忽略该 context 指令，再仅按每条 statement 自身内容判断。不要把这种单数泛指解释成“整条上一消息中的全部事实”。
+- 对 context 中的强指令必须执行以下绑定算法；这是业务规则，优先于自然对话中“这个可能指上一整条消息”的通常解释：
   1. 先计算 `target_content` 已产生的候选数量 N。
-  2. 若 N=1，明确的单数永久保留指令可绑定唯一候选。
-  3. 若 N>1 且明确要求“这些/以上内容/两件事/全部永久保留”，可绑定全部候选。
-  4. 若 N>1 且永久保留指令复述了能唯一匹配某一候选的主题、对象、谓词或日期，只绑定该候选。
-  5. 若 N>1 且指令没有唯一复述，也没有明确的全部量词，则不绑定任何候选，所有候选均输出 `false`。
+  2. 若 N=1，单数“这个/这件事”可绑定唯一候选。
+  3. 若 N>1 且明确说“这些/以上内容/两件事/全部都记住”，可绑定全部候选。
+  4. 若 N>1 且 context 复述了能唯一匹配某一候选的主题、对象、谓词或日期，只绑定该候选。
+  5. 若 N>1 且只有“这个/这件事”而没有唯一复述，也没有明确的全部量词，则不绑定任何候选；移除这条 context 指令的影响，逐条回到“内容自身是否高价值”的规则判断。
 
-temporal_type：
+不能单独触发的弱提示：
 
-- `STATIC`：相对稳定、持续性的状态、身份、属性、长期偏好、长期关系、长期职业或长期居住状态；若带起始时间，可填 `valid_at`，`invalid_at` 必须为 `"NULL"`。
-- `DYNAMIC`：有明确时间范围、阶段性持续、可结束或已结束的事件、活动、计划、任务或临时状态。
-- `ATEMPORAL`：普遍事实、定义、常识、百科知识、数学事实或无具体时间边界的泛化陈述；`valid_at` 和 `invalid_at` 都必须为 `"NULL"`。
-- 不要因为句子里出现时间词就机械地标为 `DYNAMIC`。
+- “重要”“别忘了”“一定要”“记得”等强调、提醒或行动措辞不能单独触发 `true`。
+- “我收藏了这篇文章”等对既往收藏行为的描述不是要求系统保存当前信息，不能单独触发 `true`。
+- 因此，“我明天一定要去医院”“别忘了，我明天下午三点开会”“明天记得去买蛋糕”“女儿的生日很重要”本身都应为 `false`。
+
+无强指令时，仅以下高价值内容可保守地标为 `true`：
+
+- 用户直系亲属的重要且可长期复用的关键日期，例如用户女儿的明确生日日期。
+- 严重、长期并会影响后续决策的健康事实，例如用户对青霉素严重过敏。
+- 稳定且会持续约束后续服务或决策的强约束，例如用户是素食者且不吃肉。
+- 对用户有重大长期影响的人生目标或里程碑，例如用户计划在明确年份结婚。
+
+以下内容在没有强指令时应为 `false`：
+
+- 普通第三方信息，例如用户同事的生日。
+- 临时小病、普通短期状态，例如用户最近有点感冒。
+- 普通喜好，例如用户喜欢喝奶茶。
+- 普通短期任务、会议、购买、提醒或日程。
+- 当前公司、职位等可变经历。
+- 已由用户元数据负责的普通姓名陈述，例如“我叫张三”；但“记住，我叫张三”因有强指令仍为 `true`，后续可由存储层与元数据归并或去重。
+- 不增加密码、验证码、令牌等敏感内容的特殊排除规则；仍按上述同一套判断顺序处理。
 
 改写边界：
 
 - 允许为解决代词、省略和时间歧义做最小必要改写。
-- `今年/去年/目前/依然/已经N年` 等显式时间或持续性限定属于原命题内容；即使 statement 被判断为 `STATIC`，也必须保留或做等价时间改写，不能因类型标注而删除。
+- `今年/去年/目前/依然/已经N年` 等显式时间或持续性限定属于原命题内容，必须保留或做等价时间改写。
 - 不要引入原文未明确表达的新事实、额外推断或风格化概括。
 - 不要伪造无法从正确参考锚点可靠落地的时间精度；正确参考锚点可能是 `dialog_at`、`target_content` 中的事件日期，或 `supporting_context.before_msgs` 中已确认事件锚点。
   {% else %}
@@ -358,12 +372,12 @@ temporal_type：
 - Extract statements at the level of one complete thought, usually one full sentence or one natural semantic unit.
 - Preserve one complete semantic unit by default. Split distinct predicates that express independent facts, events, states, or attitudes. Keep clauses together when one supplies the cause or background for the resulting state, when they express one relationship plus its duration or degree, or when splitting would lose a semantic dependency. A source attribution such as “a coworker said,” “the report shows,” or “the group announced” belongs to the proposition's scope; preserve the stated source instead of rewriting it as an unsourced fact or generic “the user learned/heard.” When a condition (`if`, `unless`), intention (`want`, `hope`, `plan`), or delegation (`ask`, `assign`, `entrust`) scopes over multiple predicates, either keep them together or repeat that scope in every split statement. A split of “the user wants to ask/assign X to do Y” must still say that the user wants to ask/assign X to do Y; never reduce it to “X does Y” or “the user invited X.”
 - The previous default does not apply to a valid `OPEN_VALUE + OPEN_SLOTS` answer: every uniquely bound slot-value pair is an independent fact and must be output separately.
-- Output every independent statement that passes source and semantic-validity checks. Uniqueness constrains slot completion and concrete-entity backfilling only; on the ordinary path, preserve an unresolved statement under the coreference rules instead of dropping the candidate.
+- Output every independent statement that passes source and semantic-validity checks. Uniqueness constrains slot completion and concrete-entity backfilling only; on the ordinary path, preserve the minimal necessary description or original reference under the coreference rules instead of dropping a candidate whose reference cannot be uniquely resolved.
 
 User-subject normalization:
 
 - If the subject of a statement is the user, always use “the user” as the subject in the extracted statement, regardless of whether the context provides the user’s real name, nickname, alias, or other identifier.
-- If the grammatical subject in `target_content` is a concrete third party, keep that third party as the statement subject. Do not rewrite “Xiao Zhou booked a ticket for me” as “the user asked Xiao Zhou to book a ticket,” and do not add a top-level wrapper such as “the user mentioned/said”; `speaker` already records the message source.
+- If the grammatical subject in `target_content` is a concrete third party, keep that third party as the statement subject. Do not rewrite “Xiao Zhou booked a ticket for me” as “the user asked Xiao Zhou to book a ticket,” and do not add a top-level wrapper such as “the user mentioned/said”; the caller retains the message source separately from the statement subject.
 - This is a hard rule. If a user-subject statement does not use “the user,” treat it as invalid.
 - Keep “the user” as the main retrieval anchor in English rewrites, including object position when possible.
 - For English reflexive self-expressions, preserve retrieval consistency without creating unnatural strings. Use these preferred rewrites:
@@ -377,12 +391,9 @@ User-subject normalization:
 Coreference resolution:
 
 - Names, events, places, and dates in prompt examples only illustrate rules. They are not candidate facts or candidate entities for the current input. Unless an entity name actually appears in the current `input.target_content` or current `input.supporting_context`, do not put that example entity into `statement_text`.
-- First produce the final rewritten `statement_text`, then decide `has_unsolved_reference`.
-- `has_unsolved_reference` must be judged from the final `statement_text`, not from whether the original `target_content` once contained a pronoun.
-- If the final `statement_text` already resolves the reference to a concrete named entity, such as “The assistant congratulates the user” or “Xiao Li ordered an Americano,” then `has_unsolved_reference` must be `false`.
-- If the final `statement_text` has rewritten expressions such as “he,” “she,” “they,” “the two of them,” “the two colleagues,” or “the other one” into concrete entity names that actually occur in the current input, `has_unsolved_reference` must be `false`; do not keep it `true` merely because the source text contained pronouns or group references.
-- If a person or event reference resolves to a concrete named entity, output that entity and set `has_unsolved_reference=false`; otherwise preserve the minimal grounded description or original reference and set it to `true`. When the target supplies the core predicate or relationship, such an unresolved candidate must still be output rather than becoming an empty array.
-- Attribute, contact-detail, and identifier values do not use that preservation path. If removing `this/that/it` leaves no concrete literal value, drop the entire field candidate; never output “the field is this” or retain it via `has_unsolved_reference=true`.
+- If a person or event reference resolves to a concrete named entity that actually occurs in the current input, rewrite the final `statement_text` with that entity, such as “The assistant congratulates the user” or “Xiao Li ordered an Americano.”
+- If expressions such as “he,” “she,” “they,” “the two of them,” “the two colleagues,” or “the other one” cannot be uniquely resolved, preserve the minimal grounded description or original reference. When the target supplies the core predicate or relationship, the candidate must still be output rather than becoming an empty array.
+- Attribute, contact-detail, and identifier values do not use that preservation path. If removing `this/that/it` leaves no concrete literal value, drop the entire field candidate; never output “the field is this.”
 - However, for any naming expression such as "X is called Z", "X's name is Z", or "people call X Z", only `X` may be minimally rewritten for reference resolution; `Z` is a newly introduced name, form of address, or alias and must keep its original surface form. Do not coreference-resolve, translate, transcribe, or normalize `Z` into `X`.
 - Output naming statements such as “the user is named X” only when `target_content` explicitly expresses a naming relation. Explicit naming evidence includes “I am X,” “my name is X,” “call me X,” “people call me X,” “我的名字是 X,” or “大家叫我 X.”
 - Vocatives, greeting addressees, thanked addressees, email/message salutations, @mentions, and names used as sentence-initial address terms are not naming evidence and must not be rewritten as the user's name or alias.
@@ -391,9 +402,9 @@ Coreference resolution:
 People, group, and exclusion-based reference resolution:
 
 - For group references such as “the two of them,” “both of them,” “the two friends,” or “those people,” if `supporting_context` can uniquely identify the members, expand them into the concrete name list.
-- For “the other person,” “the other friend,” or “the remaining one,” perform set subtraction. Build the finite person set `C` for the current task from before_msgs, identify the members `A` already explicitly assigned another responsibility in that task, and compute `R = C - A`. If and only if `R` contains exactly one concrete person, replace the target's exclusion reference with that person and set `has_unsolved_reference=false`; otherwise preserve the minimal reference and set it to `true`. Structural calculation: if `C={Person A, Person B}`, `A={Person A}`, and the target is “the other person handles task Z,” then `R={Person B}` and the only valid output is “Person B handles task Z.” Keeping “the other person” or copying the contextual sentences used to build C and A is incorrect.
+- For “the other person,” “the other friend,” or “the remaining one,” perform set subtraction. Build the finite person set `C` for the current task from before_msgs, identify the members `A` already explicitly assigned another responsibility in that task, and compute `R = C - A`. If and only if `R` contains exactly one concrete person, replace the target's exclusion reference with that person; otherwise preserve the minimal reference. Structural calculation: if `C={Person A, Person B}`, `A={Person A}`, and the target is “the other person handles task Z,” then `R={Person B}` and the only valid output is “Person B handles task Z.” Keeping “the other person” or copying the contextual sentences used to build C and A is incorrect.
 - In exclusion-based resolution, `C` and `A` are reasoning evidence only. The final statement retains only the target's subject placeholder and new predicate, replacing the placeholder with `R`; never output the old invitation, member list, identity, responsibility, or event used to construct `C` or `A`.
-- For role or task slots already present in `target_content`, such as “one handles the technical demo, and the other handles onsite organization,” backfill concrete names and set `has_unsolved_reference` to `false` only when `supporting_context.after_msgs` explicitly and uniquely states each member-to-slot correspondence. A later list of member names alone, an unrelated attribute for only one member, or matching name and slot counts/order does not establish responsibility. In that case, first output any invitation/participation predicate that applies to the whole group separately and may expand the member names; then preserve each role as `one handles...` / `the other handles...` and mark it unresolved. Never combine member names with unbound role slots in one statement and then guess assignments by name order.
+- For role or task slots already present in `target_content`, such as “one handles the technical demo, and the other handles onsite organization,” backfill concrete names only when `supporting_context.after_msgs` explicitly and uniquely states each member-to-slot correspondence. A later list of member names alone, an unrelated attribute for only one member, or matching name and slot counts/order does not establish responsibility. In that case, first output any invitation/participation predicate that applies to the whole group separately and may expand the member names; then preserve each role as `one handles...` / `the other handles...`. Never combine member names with unbound role slots in one statement and then guess assignments by name order.
 - Slot backfilling may only replace the slot wording **already present** in `target_content` (such as “the technical demo” or “onsite organization”) with concrete names. It must NOT introduce a more specific task name from after_msgs (such as “the demo environment” or “the venue and check-in”) as a new slot in the statement, even when the wording sounds semantically close or more precise. Any task name, sub-task, action, or temporal expression that appears only in after_msgs must not enter statement_text. For a division-of-work target, output only the responsibility predicates stated by the target. An earlier invitation, event, participation intention, or arrangement may identify the person set but must not be copied or merged into the responsibility statement.
 - Additive wording such as “also,” “together,” or “she will come too” only adds the target person to a contextual activity. It does not by itself establish that the user or any other person absent from the target also participates. Include the user as a co-participant only when the target itself explicitly says “I/we/the user and her” or provides equivalent joint-participation evidence.
 - If original User messages conflict with Assistant summaries, prefer the User messages. For example, if the Assistant incorrectly summarizes “the other person is a chef” as “the user is a chef,” do not assign the chef identity to the user.
@@ -405,20 +416,20 @@ Event and plan reference resolution:
 - This rule applies only when the event-relative time expression (“one week in advance,” “that day,” “then,” etc.) and the new core action (“prepare,” “be responsible for,” “attend,” “submit,” etc.) themselves appear in `target_content`. If they appear only in `supporting_context.before_msgs` or `supporting_context.after_msgs` but not in `target_content`, they must not be turned into a standalone statement and must not be added into any other statement.
 - `after_msgs` may only map a reference or slot already present in the target; ignore every new action, assignment, task, subtask, and temporal expression found there. Resolve `N days/weeks in advance` only from the relative expression in the target and an event date already confirmed in `before_msgs`; never use a new after_msgs date retroactively.
 
-Clear vs unresolved reference:
+Reference clarity:
 
 - A reference is fully resolved only if the current `supporting_context` can map it to a concrete named entity.
 - `Zhang San`, `Old Zhang` when clearly resolved to Zhang San, `Professor Li`, and `Teacher Wang` are clear references.
 - When a concrete name, stable form of address, or title denotes a third party, preserve that entity directly; user-subject normalization must not invent ownership forms such as “the user's Zhang San/Xiao Zhou/Professor Li.”
-- `the user's friend`, `the user's coworker`, `a teacher`, and `an interviewer` are allowed outputs but still count as unresolved.
-- `friend`, `that person from the other day`, `that one`, `this one`, `those`, `the two of them`, `the other party`, and `he/she` without a unique referent are unresolved.
+- `the user's friend`, `the user's coworker`, `a teacher`, and `an interviewer` are allowed minimal descriptions when they cannot be mapped to concrete named entities.
+- Without a unique referent, preserve only the minimum necessary wording from expressions such as `friend`, `that person from the other day`, `that one`, `this one`, `those`, `the two of them`, `the other party`, and `he/she`.
 
 Filtering:
 
 - Final `statement_text` must be declarative, but the surface form of `target_content` need not already be a complete declarative sentence. An elliptical clause that contains a factual value, predicate, action, relationship, attitude, or plan, and wording such as “please,” “have,” or “help me” only when it is grammatically a request or imperative, must be rewritten as a declarative statement after supplying only the necessary subject. A completed event with a third-party subject, such as “X helped me do Y,” is not a user delegation and must remain “X did Y for the user.” In “remind me/remember to remind me to do X at time T,” the user is the reminder recipient, and the core proposition is that the user wants to be reminded to do X at T. Never rewrite it as the user reminding themself or as the user having done or certainly doing X; preserve the request and reminder modality.
 - A target satisfying every condition of "Short-answer completion from a preceding Assistant question" becomes declarative after reconstruction. Do not filter it merely because the raw target lacks an explicit predicate; when any condition fails, apply the ordinary filtering rules.
 - Do not ordinarily extract questions, greetings, or conversational filler from `target_content`. Also filter a pure command that only asks the Assistant to perform an immediate operation and expresses no memorable fact, plan, or arrangement. This rule does not disqualify a preceding Assistant field request from supplying slots/propositions in a valid short-answer branch.
-- Every attribute, contact-detail, or identifier candidate must have an explicit value. If a clause names a field, attribute, or relationship without supplying its value, emit no statement for that clause and never borrow a name, number, or other value from an adjacent clause unless the target explicitly binds them. A demonstrative such as "this", "that", or "it" with no uniquely resolvable referent does not count as a field value, and `has_unsolved_reference=true` cannot rescue a valueless field. A person or event reference may still remain unresolved when its core predicate is explicit, as specified above.
+- Every attribute, contact-detail, or identifier candidate must have an explicit value. If a clause names a field, attribute, or relationship without supplying its value, emit no statement for that clause and never borrow a name, number, or other value from an adjacent clause unless the target explicitly binds them. A demonstrative such as "this", "that", or "it" with no uniquely resolvable referent does not count as a field value and cannot rescue a valueless field. A person or event reference that cannot be uniquely resolved may still retain its minimal necessary description when its core predicate is explicit, as specified above.
 - Completely filter pure vocatives and greeting addressees; output no statement for them. Examples: `Hey, Jack`, `Hi Caroline`, `Dear Professor Li`, `Good morning, Jack`.
 - If a name appears only as an address term at the beginning or end of a question, command, thanks, mention, or message salutation, do not rewrite it into a naming statement. Examples: `Jack, can you help me?`, `Thanks, Caroline`, and `@Jack please check this` must not produce “the user is named Jack/Caroline.”
 
@@ -426,25 +437,22 @@ Perceptual memory file summary handling:
 
 - If `target_content` contains `<input-file-summary>...</input-file-summary>` tags, the content inside is a system-preprocessed summary of a file uploaded by the user (image, video, document, etc.).
 - For such content, you must rewrite it as a declarative statement with "the user" as the subject, expressing what the user uploaded or shared.
-- Example: `<input-file-summary>This image shows a blooming pink lotus</input-file-summary>` should be extracted as `"The user shared an image of a blooming pink lotus with a blue wall in the background."`
+- Example: `<input-file-summary>This image shows a blooming pink lotus</input-file-summary>` should be extracted as `"The user shared an image of a blooming pink lotus."`
 - Do not keep `<input-file-summary>` tags in statement_text.
 - Do not output file summaries as standalone objective descriptions (e.g., "An image shows..."). They must be linked to the user's action.
 
-speaker:
+Stage boundary:
 
-- `speaker` is the direct speaking source of the statement in `target_content`.
-- If the statement comes from a user message, output `"user"`.
-- If the statement comes from an assistant message, output `"assistant"`.
-- Never omit `speaker`; every statement must include this field.
-
-statement_type:
-
-- `FACT`: user-stated facts, states, relationships, experiences, behaviors, events, or plans.
-- `OPINION`: subjective judgments, attitudes, feelings, evaluations, or viewpoints, such as “I think...” or “I worry...”.
-- `OTHER`: statements that should not be categorized as `FACT` or `OPINION`; statements like “I hope...” default to `OTHER`.
-- Do not classify a statement as `OPINION` merely because it sounds subjective; use `OPINION` only when its core content is a personal judgment, attitude, feeling, or evaluation.
+- This stage performs extraction, filtering, condition/source preservation, reference resolution, temporal parsing, emotion detection, and permanent-retention intent detection.
+- A later stage produces the three classification fields; code adds statement_id, speaker, and dialog_at. Do not output any of these six fields here.
+- Delegating reference classification does not remove reference resolution from this stage. Preserve an unresolved person/event reference under the rules above; never invent an entity.
 
 Temporal rules:
+
+- For general facts, definitions, common knowledge, mathematical facts, or generalizations without meaningful temporal boundaries, both valid_at and invalid_at are "NULL".
+- For relatively stable, ongoing identities, attributes, long-term preferences, relationships, occupations, or residence states, set valid_at only if a start time is supported; otherwise use "NULL". invalid_at is "NULL". Do not use the session timestamp as their start time.
+- A state explicitly ended or bounded in time is an event/phase; do not discard its ending merely because it concerns occupation, relationships, or residence.
+- Derive boundaries from the proposition, not the mere presence of a time word. A lasting fact does not imply is_permanent=true.
 
 - Use only temporal information explicitly stated in the target text, directly resolvable from `dialog_at`, or resolvable from an event date in `target_content` / an already-confirmed event anchor in `supporting_context.before_msgs`; do not add dates from external knowledge.
 - Before resolving a temporal expression, first determine its temporal anchor type. Do not default every relative expression to `dialog_at`.
@@ -491,7 +499,7 @@ Temporal rules:
 - `valid_at` means when the statement became valid or started to hold.
 - `invalid_at` means when the statement ended or stopped being valid; use `"NULL"` if it is still ongoing.
 - For open past intervals such as “recently,” “lately,” or “these days,” if only the reference endpoint is known and the start boundary is unknown, do not incorrectly use the reference time as `valid_at`; keep the anchored open interval in `statement_text` and use `"NULL"` for `valid_at`.
-- `dialog_at` is the session timestamp, and every statement must copy the input `dialog_at` verbatim.
+- `dialog_at` is an input time anchor only; do not output it here. Code copies it verbatim during final assembly.
 - `dialog_at` is required. If `dialog_at` is missing or cannot be parsed, do not invent a current-time anchor; keep only the smallest trustworthy temporal expression and set unreliable `valid_at` / `invalid_at` values to `"NULL"`.
 - `valid_at` and `invalid_at` outputs must use ISO 8601 UTC datetimes ending with `Z`, or `"NULL"` when no time is available.
 - When only a date can be resolved, default to full-day boundaries for retrieval use.
@@ -516,33 +524,51 @@ Emotional-state detection:
 
 Permanent-memory detection:
 
-- `is_permanent` indicates whether the user explicitly asks for the current statement to be retained permanently, forever, or long-term, or explicitly asks the system never to forget it. It does not mean the proposition remains currently valid forever.
+- `is_permanent` indicates whether the statement should be protected from ordinary memory decay or eviction when it is written. It does not mean the proposition remains currently valid forever. Demotion after an event expires belongs to a later memory-lifecycle process and is outside this task.
 - First finish extraction, condition preservation, reference resolution, and temporal rewriting to obtain the final `statement_text`. Then judge `is_permanent` independently.
-- Output `true` only when the user explicitly says to retain the information permanently, forever, long-term, or never forget it. Output `false` in every other case.
-- Ordinary wording such as “remember” or “save”, general importance, inherent content value, durable facts, preferences, health information, family dates, or life goals cannot trigger `true` by themselves.
-- Ordinary action reminders such as “don't forget the meeting” or “remember to buy a cake” are not requests for permanent retention and must be `false`.
-- The permanent-retention instruction must occur in `target_content`, or in a supporting_context message with `role="user"` that unambiguously points to the current statement. Assistant messages cannot supply this intent.
 - Judge every statement separately. If evidence, meaning, or instruction scope is missing, unclear, ambiguous, or conflicting, output `false`.
-- Never infer or evaluate storage capacity, permanent-memory quota, or allocation results. `is_permanent` represents only the user's explicit permanent-retention intent; capacity is handled deterministically by the backend.
-- If one input produces multiple statements and the permanent-retention instruction cannot uniquely identify one, do not propagate `true` to every statement. Apply it to all candidates only when the user explicitly and unambiguously asks for all of them to be retained permanently.
-- Apply this binding algorithm to every permanent-retention instruction in context:
+
+Strong permanent-memory instructions:
+
+- Only language that directly asks the system to save the current information is a strong instruction, such as “remember this”, “please remember that ...”, “save this for me”, “add this to permanent memory”, or “bookmark/save this information for me”.
+- The strong instruction must occur in `target_content`, or in a supporting_context message with `role="user"` that unambiguously points to the current statement. Assistant messages cannot supply this intent.
+- A strong instruction may make short-lived information `true`. For example, for “Remember, I have a meeting tomorrow at 3 p.m.”, first rewrite the time to a concrete date and time, then mark that meeting statement `true`.
+- If one input produces multiple statements and wording such as “this” cannot uniquely identify one of them, do not propagate `true` to every statement. Apply it to all candidates only when wording such as “remember all of these” explicitly and unambiguously covers all of them.
+- Hard boundary: when `target_content` produces two or more statements, a later generic singular reference such as “remember this” or “this is important” that repeats no topic, object, predicate, or date must be ignored completely. Then judge each statement from its own content only. Do not interpret that singular reference as all facts in the preceding message.
+- Apply this binding algorithm to every strong instruction in context. This business rule overrides the ordinary conversational interpretation that “this” may refer to an entire preceding message:
   1. First count the candidates N already produced from `target_content`.
-  2. If N=1, an explicit singular permanent-retention instruction may bind the sole candidate.
-  3. If N>1 and the instruction explicitly says all/these/both items must be retained permanently, it may bind all candidates.
-  4. If N>1 and the instruction repeats a topic, object, predicate, or date that uniquely matches one candidate, bind only that candidate.
-  5. If N>1 and the instruction contains neither uniquely repeated content nor an explicit all-quantifier, bind no candidate and output `false` for every candidate.
+  2. If N=1, singular “this” may bind the one candidate.
+  3. If N>1 and the instruction explicitly says “these”, “the above”, “both items”, or “remember all of them”, it may bind all candidates.
+  4. If N>1 and context repeats a topic, object, predicate, or date that uniquely matches one candidate, bind only that candidate.
+  5. If N>1 and context contains only singular “this” with no unique repeated content and no explicit all-quantifier, bind no candidate. Remove the context instruction's effect and return to the content-only importance rule for each statement.
 
-temporal_type:
+Weak signals that cannot trigger permanence by themselves:
 
-- `STATIC`: relatively stable, ongoing states, identities, attributes, long-term preferences, long-term relationships, occupations, or residence states.
-- `DYNAMIC`: events, activities, plans, tasks, or temporary states with a bounded or potentially bounded time span.
-- `ATEMPORAL`: general facts, definitions, common knowledge, encyclopedic knowledge, mathematical facts, or generalized statements without meaningful temporal boundaries; both `valid_at` and `invalid_at` must be `"NULL"`.
-- Do not classify a statement as `DYNAMIC` merely because it contains a time word.
+- Emphasis or reminder wording such as “important”, “don't forget”, “must”, and “remember to” cannot independently trigger `true`.
+- A description of a past save action such as “I bookmarked this article” is not a request for the system to save the current information and cannot independently trigger `true`.
+- Therefore, ordinary actions phrased as “I must ...”, a short-term meeting introduced by “don't forget”, “remember to buy a cake tomorrow”, and “my daughter's birthday is important” are `false` by themselves.
+
+Without a strong instruction, only the following high-value content may conservatively be marked `true`:
+
+- An important, reusable key date for the user's immediate family, such as the explicit birthday date of the user's daughter.
+- A serious, durable health fact that affects later decisions, such as a severe penicillin allergy.
+- A stable constraint that continuously affects later service or decisions, such as the user being vegetarian and not eating meat.
+- A major long-term personal goal or life milestone, such as the user planning to marry in a specified year.
+
+Without a strong instruction, mark the following `false`:
+
+- Ordinary third-party information, such as a coworker's birthday.
+- A temporary minor illness or ordinary short-lived state, such as a recent cold.
+- A casual preference, such as liking milk tea.
+- An ordinary short-term task, meeting, purchase, reminder, or schedule.
+- A mutable experience such as a current employer or job title.
+- An ordinary name statement owned by user metadata, such as “My name is Zhang San”. However, “Remember, my name is Zhang San” is still `true` because the strong instruction overrides this exclusion; downstream storage may merge or deduplicate it with metadata.
+- Do not add a special exclusion for sensitive content such as passwords, verification codes, or tokens; apply the same decision order above.
 
 Rewrite boundary:
 
 - Minimal rewriting is allowed only to resolve reference, ellipsis, and temporal ambiguity.
-- Explicit temporal or continuity qualifiers such as this year, last year, currently, still, or for N years belong to the proposition. Preserve them or rewrite them equivalently even when `temporal_type` is `STATIC`; never delete them merely because of the type label.
+- Explicit temporal or continuity qualifiers such as this year, last year, currently, still, or for N years belong to the proposition. Preserve them or rewrite them equivalently.
 - For resolvable relative time expressions, rewrite them into grounded time expressions directly inside `statement_text`, using the output language.
 - Do not keep both the vague source phrase and the grounded phrase together; output only the rewritten concrete form.
 - Do not fake precision for time expressions that cannot be grounded reliably from the correct reference anchor. The correct anchor may be `dialog_at`, an event date in `target_content`, or an already-confirmed event anchor in `supporting_context.before_msgs`.
@@ -557,18 +583,19 @@ Rewrite boundary:
 边界示例 B：`我的名字是 Jack。` 是明确命名陈述，可以输出“用户的名字是 Jack。”。
 边界示例 C：`dialog_at=2026-06-08`，上下文为“用户打算2026年7月15日举办活动E，邀请人物A和人物B。人物A擅长任务甲，另一个人擅长任务乙。”，target_content 为“我让他俩提前一周准备吧，她负责事项甲，他负责事项乙。”正确输出应解析为“人物A和人物B从2026年7月8日开始准备”“人物A负责事项甲”“人物B负责事项乙”。不能输出“2026年6月1日准备”，也不能把后文人物身份归给用户。实际输出时必须替换为当前 input/context 中真实出现过的实体名，禁止输出示例占位名或示例实体名。
 边界示例 D（与示例 C 方向相反，演示 after_msgs 边界）：`dialog_at=2026-06-09`，target_content 为“我下个月10号要在公司做一场活动E，想请两位同事一起帮忙，一个负责任务甲，一个负责任务乙。”，after_msgs 中后续依次出现“他们是人物A和人物B。人物A是后端工程师”“另一个人是行政负责人，控场能力很强”“我让他俩提前一周开始准备吧，他负责任务甲细节X，她负责任务乙细节Y”。正确做法是只从 target_content 抽取：`用户计划于2026年7月10日在公司举办活动E。`、`用户邀请人物A和人物B协助活动E。`，以及在 after_msgs 唯一指认人物后回填 target 已有的两个槽位：`人物A负责活动E的任务甲。`、`人物B负责活动E的任务乙。`。不允许输出 `用户计划让人物A和人物B从2026年7月3日开始为活动E做准备。`、`人物A负责活动E的任务甲细节X。`、`人物B负责活动E的任务乙细节Y。` 这些核心谓词只在 after_msgs 中出现，必须丢弃。
-边界示例 E（上下文只影响永久字段）：target_content 为“她的生日是9月12日”，上下文唯一确认“她”是用户女儿，且后续 `role="user"` 消息明确说“这件事请永久保留，不要遗忘”。可以把 `statement_text` 改写为“用户女儿的生日是9月12日”，并设置 `is_permanent=true`；后续永久保留指令本身不能成为新 statement。
-边界示例 F（非永久提示不触发）：`明天记得去买蛋糕`、`别忘了，我明天下午三点开会`、`记住，我明天下午三点开会`、`我明天一定要去医院`都应在完成时间改写后设置 `is_permanent=false`。
-边界示例 G（明确永久意图触发）：`请永久记住，我明天下午三点开会，永远不要忘记`应先根据 `dialog_at` 将时间改写为具体日期和时间，再设置 `is_permanent=true`。
-边界示例 H（多候选歧义）：target_content 同时表达普通事项甲和普通事项乙，后文只说“请永久记住这个”且没有复述甲或乙的任何内容，则甲、乙两条 statement 的 `is_permanent` 都必须为 `false`；不能把单数“这个”扩散为“全部永久保留”。
+边界示例 E（上下文只影响永久字段）：target_content 为“她的生日是9月12日”，上下文唯一确认“她”是用户女儿，且后续 `role="user"` 消息明确说“这件事帮我记住”。可以把 `statement_text` 改写为“用户女儿的生日是9月12日”，并设置 `is_permanent=true`；后续记忆指令本身不能成为新 statement。
+边界示例 F（弱提示不触发）：`明天记得去买蛋糕`、`别忘了，我明天下午三点开会`、`我明天一定要去医院`都应在完成时间改写后设置 `is_permanent=false`。
+边界示例 G（强指令触发）：`记住，我明天下午三点开会`应先根据 `dialog_at` 将时间改写为具体日期和时间，再设置 `is_permanent=true`。
+边界示例 H（多候选歧义）：target_content 同时表达普通事项甲和普通事项乙，后文只说“这个帮我记住”且没有复述甲或乙的任何内容，则甲、乙两条 statement 的 `is_permanent` 都必须为 `false`；不能把单数“这个”扩散为“全部记住”。
 
-边界示例 I（多槽位只答其一）：`dialog_at=2026-07-15T02:03:32+00:00`，before_msgs 中最近的 Assistant 消息为“请提供称呼、企业名称和手机号，以便商务精准对接。”，target_content 为 `user: 17320000558`，after_msgs 为流程总结类消息。判定：target 属于 `OPEN_VALUE`，Assistant 请求属于 `OPEN_SLOTS`；“17320000558”凭标准手机号格式唯一绑定“手机号”槽位，“称呼”“企业名称”两个槽位保持未绑定。正确输出有且仅有一条：“用户的手机号是17320000558。”（`statement_type=FACT`、`temporal_type=STATIC`、`valid_at="NULL"`、`invalid_at="NULL"`）。错误输出包括：因两个槽位未答而返回 `{"statements": []}`；为空槽位编造 statement；把请求句或总结句中的“登记/对接”等流程动作写入 statement。
+边界示例 I（多槽位只答其一）：`dialog_at=2026-07-15T02:03:32+00:00`，before_msgs 中最近的 Assistant 消息为“请提供称呼、企业名称和手机号，以便商务精准对接。”，target_content 为 `user: 17320000558`，after_msgs 为流程总结类消息。判定：target 属于 `OPEN_VALUE`，Assistant 请求属于 `OPEN_SLOTS`；“17320000558”凭标准手机号格式唯一绑定“手机号”槽位，“称呼”“企业名称”两个槽位保持未绑定。正确输出有且仅有一条：“用户的手机号是17320000558。”（`valid_at="NULL"`、`invalid_at="NULL"`）。错误输出包括：因两个槽位未答而返回 `{"statements": []}`；为空槽位编造 statement；把请求句或总结句中的“登记/对接”等流程动作写入 statement。
 
 示例 1:
 示例输入: {
   "chunk_id": "chunk_a1b2c3d4",
   "end_user_id": "eu_12345678",
   "dialog_at": "2023-09-04T18:00:00Z",
+  "role": "user",
   "target_content": "老李这学期要求还是一如既往地严，不过他讲课确实清晰透彻，而且每节课的结构都特别清楚。就是气场实在太吓人了，我每次被他点名都有点发怵。",
   "supporting_context": {
     "before_msgs": [
@@ -588,41 +615,23 @@ Rewrite boundary:
 示例输出: {
   "statements": [
     {
-      "statement_id": "stmt_e5f6g7h8",
       "statement_text": "李教授这学期要求很严。",
-      "statement_type": "OPINION",
-      "temporal_type": "DYNAMIC",
-      "speaker": "user",
       "has_emotional_state": false,
-      "has_unsolved_reference": false,
       "is_permanent": false,
-      "dialog_at": "2023-09-04T18:00:00Z",
       "valid_at": "2023-09-04T18:00:00Z",
       "invalid_at": "NULL"
     },
     {
-      "statement_id": "stmt_i9j0k1l2",
       "statement_text": "李教授讲课清晰透彻。",
-      "statement_type": "OPINION",
-      "temporal_type": "ATEMPORAL",
-      "speaker": "user",
       "has_emotional_state": false,
-      "has_unsolved_reference": false,
       "is_permanent": false,
-      "dialog_at": "2023-09-04T18:00:00Z",
       "valid_at": "NULL",
       "invalid_at": "NULL"
     },
     {
-      "statement_id": "stmt_m1n2o3p4",
       "statement_text": "用户每次被李教授点名都有点发怵。",
-      "statement_type": "OPINION",
-      "temporal_type": "DYNAMIC",
-      "speaker": "user",
       "has_emotional_state": true,
-      "has_unsolved_reference": false,
       "is_permanent": false,
-      "dialog_at": "2023-09-04T18:00:00Z",
       "valid_at": "2023-09-04T18:00:00Z",
       "invalid_at": "NULL"
     }
@@ -634,6 +643,7 @@ Rewrite boundary:
   "chunk_id": "chunk_b2c3d4e5",
   "end_user_id": "eu_12345678",
   "dialog_at": "2026-04-01T00:00:00Z",
+  "role": "user",
   "target_content": "我最近在学它，每天晚上都会练一个小时。这周还打算先把基础语法和函数部分过一遍。",
   "supporting_context": {
     "before_msgs": [
@@ -653,43 +663,25 @@ Rewrite boundary:
 示例输出: {
   "statements": [
     {
-      "statement_id": "stmt_m3n4o5p6",
       "statement_text": "用户截至2026年4月1日之前的最近一段时间在学Python。",
-      "statement_type": "FACT",
-      "temporal_type": "DYNAMIC",
-      "speaker": "user",
       "has_emotional_state": false,
-      "has_unsolved_reference": false,
       "is_permanent": false,
-      "dialog_at": "2026-04-01T00:00:00Z",
       "valid_at": "NULL",
       "invalid_at": "NULL"
     },
     {
-      "statement_id": "stmt_q7r8s9t0",
       "statement_text": "用户截至2026年4月1日之前的最近一段时间每晚都会练一个小时Python。",
-      "statement_type": "FACT",
-      "temporal_type": "DYNAMIC",
-      "speaker": "user",
       "has_emotional_state": false,
-      "has_unsolved_reference": false,
       "is_permanent": false,
-      "dialog_at": "2026-04-01T00:00:00Z",
       "valid_at": "NULL",
       "invalid_at": "NULL"
     },
     {
-      "statement_id": "stmt_u1v2w3x4",
       "statement_text": "用户计划在2026年3月30日至2026年4月5日先复习Python的基础语法和函数部分。",
-      "statement_type": "FACT",
-      "temporal_type": "DYNAMIC",
-      "speaker": "user",
       "has_emotional_state": false,
-      "has_unsolved_reference": false,
       "is_permanent": false,
-      "dialog_at": "2026-04-01T00:00:00Z",
-      "valid_at": "2026-04-01T00:00:00Z",
-      "invalid_at": "NULL"
+      "valid_at": "2026-03-30T00:00:00Z",
+      "invalid_at": "2026-04-05T23:59:59Z"
     }
   ]
 }
@@ -699,6 +691,7 @@ Rewrite boundary:
   "chunk_id": "chunk_c3d4e5f6",
   "end_user_id": "eu_12345678",
   "dialog_at": "2026-04-01T00:00:00Z",
+  "role": "user",
   "target_content": "那两个项目我一直觉得有点难，而且我昨晚看了半天还是没太搞明白。要是这周末再弄不出来，我可能就得去问助教了。",
   "supporting_context": {
     "before_msgs": [
@@ -723,41 +716,23 @@ Rewrite boundary:
 示例输出: {
   "statements": [
     {
-      "statement_id": "stmt_y5z6a7b8",
       "statement_text": "用户觉得2025年冬天老师布置的那两个项目有点难。",
-      "statement_type": "OPINION",
-      "temporal_type": "DYNAMIC",
-      "speaker": "user",
       "has_emotional_state": false,
-      "has_unsolved_reference": true,
       "is_permanent": false,
-      "dialog_at": "2026-04-01T00:00:00Z",
       "valid_at": "NULL",
       "invalid_at": "NULL"
     },
     {
-      "statement_id": "stmt_c9d0e1f2",
       "statement_text": "用户2026年3月31日晚上看了半天那两个项目还是没太搞明白。",
-      "statement_type": "FACT",
-      "temporal_type": "DYNAMIC",
-      "speaker": "user",
       "has_emotional_state": false,
-      "has_unsolved_reference": true,
       "is_permanent": false,
-      "dialog_at": "2026-04-01T00:00:00Z",
       "valid_at": "2026-03-31T00:00:00Z",
       "invalid_at": "2026-03-31T23:59:59Z"
     },
     {
-      "statement_id": "stmt_g3h4i5j6",
       "statement_text": "如果到2026年4月4日至2026年4月5日还弄不出来，用户可能会去问助教。",
-      "statement_type": "OTHER",
-      "temporal_type": "DYNAMIC",
-      "speaker": "user",
       "has_emotional_state": false,
-      "has_unsolved_reference": true,
       "is_permanent": false,
-      "dialog_at": "2026-04-01T00:00:00Z",
       "valid_at": "2026-04-01T00:00:00Z",
       "invalid_at": "NULL"
     }
@@ -768,18 +743,19 @@ Boundary Example A: `Hey, Jack` is a pure vocative or greeting addressee, not a 
 Boundary Example B: `My name is Jack.` is explicit naming evidence, so it may output “The user's name is Jack.”
 Boundary Example C: if `dialog_at=2026-06-08`, the context says “the user plans to hold event E on July 15, 2026, and invites Person A and Person B. Person A is good at task X, and the other person is good at task Y,” and target_content says “I'll ask the two of them to prepare one week in advance; she handles item X, and he handles item Y,” the correct resolution is “Person A and Person B start preparing on July 8, 2026,” “Person A handles item X,” and “Person B handles item Y.” Do not output “prepare on June 1, 2026,” and do not assign a later person identity to the user. In actual output, replace placeholders with entity names that really appear in the current input/context; never output example placeholders or example entities.
 Boundary Example D (mirror of Example C, demonstrating the after_msgs boundary): if `dialog_at=2026-06-09`, target_content says “Next month on the 10th I'll hold event E at the company and want to invite two colleagues to help — one handles task X and the other handles task Y,” and after_msgs later says, in order, “They are Person A and Person B. Person A is a backend engineer,” “The other one is the head of administration with strong floor-control skills,” and “I'll ask the two of them to start preparing one week in advance; he handles task X detail X1, and she handles task Y detail Y1.” The correct behavior is to extract from target_content only: `The user plans to hold event E at the company on July 10, 2026.` and `The user invites Person A and Person B to help with event E.`, plus, after after_msgs uniquely identifies the two members, backfill the two slots already present in target_content into: `Person A is responsible for task X for event E.` and `Person B is responsible for task Y for event E.` Do NOT output `The user plans to ask Person A and Person B to start preparing for event E from July 3, 2026.`, `Person A is responsible for task X detail X1 of event E.`, or `Person B is responsible for task Y detail Y1 of event E.` These core predicates (“start preparing one week in advance,” “task X detail X1,” “task Y detail Y1”) appear only in after_msgs and must be dropped.
-Boundary Example E (context affects only the permanence field): target_content says “Her birthday is September 12,” context uniquely resolves “her” to the user's daughter, and a later message with `role="user"` explicitly says “Retain this permanently and never forget it.” You may rewrite `statement_text` as “The user's daughter's birthday is September 12” and set `is_permanent=true`; the later permanent-retention instruction must not become a new statement.
-Boundary Example F (non-permanent signals do not trigger): “Remember to buy a cake tomorrow,” “Don't forget, I have a meeting tomorrow at 3 p.m.,” “Remember, I have a meeting tomorrow at 3 p.m.,” and “I must go to the hospital tomorrow” must all receive `is_permanent=false` after temporal rewriting.
-Boundary Example G (explicit permanent intent triggers): for “Retain this permanently: I have a meeting tomorrow at 3 p.m. Never forget it,” first rewrite the time to a concrete date and time using `dialog_at`, then set `is_permanent=true`.
-Boundary Example H (ambiguous scope over multiple candidates): target_content contains ordinary item A and ordinary item B, and a later message says only “retain this permanently” without repeating any content from A or B. Both statements must keep `is_permanent=false`; do not expand singular “this” into “retain everything permanently”.
+Boundary Example E (context affects only the permanence field): target_content says “Her birthday is September 12,” context uniquely resolves “her” to the user's daughter, and a later message with `role="user"` explicitly says “Please remember this for me.” You may rewrite `statement_text` as “The user's daughter's birthday is September 12” and set `is_permanent=true`; the later memory instruction must not become a new statement.
+Boundary Example F (weak signals do not trigger): “Remember to buy a cake tomorrow,” “Don't forget, I have a meeting tomorrow at 3 p.m.,” and “I must go to the hospital tomorrow” must all receive `is_permanent=false` after temporal rewriting.
+Boundary Example G (strong instruction triggers): for “Remember, I have a meeting tomorrow at 3 p.m.,” first rewrite the time to a concrete date and time using `dialog_at`, then set `is_permanent=true`.
+Boundary Example H (ambiguous scope over multiple candidates): target_content contains ordinary item A and ordinary item B, and a later message says only “remember this” without repeating any content from A or B. Both statements must keep `is_permanent=false`; do not expand singular “this” into “remember everything”.
 
-Boundary Example I (one answered slot out of several): `dialog_at=2026-07-15T02:03:32+00:00`, the nearest Assistant message in before_msgs reads “请提供称呼、企业名称和手机号，以便商务精准对接。” (Please provide name, company name, and phone number for business contact.), and target_content is `user: 17320000558`. Classify as `OPEN_VALUE + OPEN_SLOTS`; `17320000558` uniquely binds the phone-number slot via its standard phone format, while the name and company slots stay unbound. Correct output is exactly one statement: “用户的手机号是17320000558。” (`statement_type=FACT`, `temporal_type=STATIC`, `valid_at="NULL"`, `invalid_at="NULL"`). Wrong outputs include returning `{"statements": []}` because two slots went unanswered, fabricating statements for unfilled slots, or writing workflow actions such as “registered/contacted” from the request or summary into the statement.
+Boundary Example I (one answered slot out of several): `dialog_at=2026-07-15T02:03:32+00:00`, the nearest Assistant message in before_msgs reads “请提供称呼、企业名称和手机号，以便商务精准对接。” (Please provide name, company name, and phone number for business contact.), and target_content is `user: 17320000558`. Classify as `OPEN_VALUE + OPEN_SLOTS`; `17320000558` uniquely binds the phone-number slot via its standard phone format, while the name and company slots stay unbound. Correct output is exactly one statement: “用户的手机号是17320000558。” (`valid_at="NULL"`, `invalid_at="NULL"`). Wrong outputs include returning `{"statements": []}` because two slots went unanswered, fabricating statements for unfilled slots, or writing workflow actions such as “registered/contacted” from the request or summary into the statement.
 
 Example 1:
 Example Input: {
   "chunk_id": "chunk_a1b2c3d4",
   "end_user_id": "eu_12345678",
   "dialog_at": "2023-09-04T18:00:00Z",
+  "role": "user",
   "target_content": "Old Li is just as strict as ever this semester, but he really explains things clearly and the structure of every class is extremely clear. His presence is honestly kind of intimidating, and I get nervous every time he calls on me.",
   "supporting_context": {
     "before_msgs": [
@@ -799,41 +775,23 @@ Example Input: {
 Example Output: {
   "statements": [
     {
-      "statement_id": "stmt_e5f6g7h8",
       "statement_text": "Professor Li is very strict this semester.",
-      "statement_type": "OPINION",
-      "temporal_type": "DYNAMIC",
-      "speaker": "user",
       "has_emotional_state": false,
-      "has_unsolved_reference": false,
       "is_permanent": false,
-      "dialog_at": "2023-09-04T18:00:00Z",
       "valid_at": "2023-09-04T18:00:00Z",
       "invalid_at": "NULL"
     },
     {
-      "statement_id": "stmt_i9j0k1l2",
       "statement_text": "Professor Li explains things clearly.",
-      "statement_type": "OPINION",
-      "temporal_type": "ATEMPORAL",
-      "speaker": "user",
       "has_emotional_state": false,
-      "has_unsolved_reference": false,
       "is_permanent": false,
-      "dialog_at": "2023-09-04T18:00:00Z",
       "valid_at": "NULL",
       "invalid_at": "NULL"
     },
     {
-      "statement_id": "stmt_m1n2o3p4",
       "statement_text": "The user gets nervous every time Professor Li calls on the user.",
-      "statement_type": "OPINION",
-      "temporal_type": "DYNAMIC",
-      "speaker": "user",
       "has_emotional_state": true,
-      "has_unsolved_reference": false,
       "is_permanent": false,
-      "dialog_at": "2023-09-04T18:00:00Z",
       "valid_at": "2023-09-04T18:00:00Z",
       "invalid_at": "NULL"
     }
@@ -845,6 +803,7 @@ Example Input: {
   "chunk_id": "chunk_b2c3d4e5",
   "end_user_id": "eu_12345678",
   "dialog_at": "2026-04-01T00:00:00Z",
+  "role": "user",
   "target_content": "I've been learning it recently, and I practice for an hour every night. This week I also plan to review basic syntax and functions first.",
   "supporting_context": {
     "before_msgs": [
@@ -864,43 +823,25 @@ Example Input: {
 Example Output: {
   "statements": [
     {
-      "statement_id": "stmt_m3n4o5p6",
       "statement_text": "The user has been learning Python recently before April 1, 2026.",
-      "statement_type": "FACT",
-      "temporal_type": "DYNAMIC",
-      "speaker": "user",
       "has_emotional_state": false,
-      "has_unsolved_reference": false,
       "is_permanent": false,
-      "dialog_at": "2026-04-01T00:00:00Z",
       "valid_at": "NULL",
       "invalid_at": "NULL"
     },
     {
-      "statement_id": "stmt_q7r8s9t0",
       "statement_text": "The user has been practicing Python for an hour every night recently before April 1, 2026.",
-      "statement_type": "FACT",
-      "temporal_type": "DYNAMIC",
-      "speaker": "user",
       "has_emotional_state": false,
-      "has_unsolved_reference": false,
       "is_permanent": false,
-      "dialog_at": "2026-04-01T00:00:00Z",
       "valid_at": "NULL",
       "invalid_at": "NULL"
     },
     {
-      "statement_id": "stmt_u1v2w3x4",
       "statement_text": "The user plans to review Python basic syntax and functions first during 2026-03-30 to 2026-04-05.",
-      "statement_type": "FACT",
-      "temporal_type": "DYNAMIC",
-      "speaker": "user",
       "has_emotional_state": false,
-      "has_unsolved_reference": false,
       "is_permanent": false,
-      "dialog_at": "2026-04-01T00:00:00Z",
-      "valid_at": "2026-04-01T00:00:00Z",
-      "invalid_at": "NULL"
+      "valid_at": "2026-03-30T00:00:00Z",
+      "invalid_at": "2026-04-05T23:59:59Z"
     }
   ]
 }
@@ -910,6 +851,7 @@ Example Input: {
   "chunk_id": "chunk_c3d4e5f6",
   "end_user_id": "eu_12345678",
   "dialog_at": "2026-04-01T00:00:00Z",
+  "role": "user",
   "target_content": "Those two projects seem difficult to me, and even after looking at them for a long time last night I still didn't really understand them. If I still can't finish them by this weekend, I may have to ask the TA.",
   "supporting_context": {
     "before_msgs": [
@@ -934,41 +876,23 @@ Example Input: {
 Example Output: {
   "statements": [
     {
-      "statement_id": "stmt_y5z6a7b8",
       "statement_text": "The user thinks the two projects assigned in winter 2025 are difficult.",
-      "statement_type": "OPINION",
-      "temporal_type": "DYNAMIC",
-      "speaker": "user",
       "has_emotional_state": false,
-      "has_unsolved_reference": true,
       "is_permanent": false,
-      "dialog_at": "2026-04-01T00:00:00Z",
       "valid_at": "NULL",
       "invalid_at": "NULL"
     },
     {
-      "statement_id": "stmt_c9d0e1f2",
       "statement_text": "The user spent a long time on the evening of 2026-03-31 looking at those two projects but still did not really understand them.",
-      "statement_type": "FACT",
-      "temporal_type": "DYNAMIC",
-      "speaker": "user",
       "has_emotional_state": false,
-      "has_unsolved_reference": true,
       "is_permanent": false,
-      "dialog_at": "2026-04-01T00:00:00Z",
       "valid_at": "2026-03-31T00:00:00Z",
       "invalid_at": "2026-03-31T23:59:59Z"
     },
     {
-      "statement_id": "stmt_g3h4i5j6",
       "statement_text": "If the user still cannot finish them by 2026-04-04 to 2026-04-05, the user may ask the TA.",
-      "statement_type": "OTHER",
-      "temporal_type": "DYNAMIC",
-      "speaker": "user",
       "has_emotional_state": false,
-      "has_unsolved_reference": true,
       "is_permanent": false,
-      "dialog_at": "2026-04-01T00:00:00Z",
       "valid_at": "2026-04-01T00:00:00Z",
       "invalid_at": "NULL"
     }
@@ -990,20 +914,18 @@ Example Output: {
 
 **ISO 8601 HARD CONSTRAINT:**
 
-- `dialog_at` must be ISO 8601.
+- Input `dialog_at` is an ISO 8601 time anchor; do not include it in output statements.
 - `valid_at` and `invalid_at` must be ISO 8601 UTC datetimes ending with `Z`, or `"NULL"` when no time is available.
 - Do not output non-ISO values such as `2026/04/01`, `2026-04-01 00:00:00`, `yesterday evening`, or `下周三`.
 - When only a date is known, still output an ISO 8601 UTC datetime boundary ending with `Z`.
 
 **SCHEMA HARD CONSTRAINT:**
 
-- Every statement object must include exactly these fields: `statement_id`, `statement_text`, `statement_type`, `temporal_type`, `speaker`, `has_emotional_state`, `has_unsolved_reference`, `is_permanent`, `dialog_at`, `valid_at`, `invalid_at`.
-- Do not omit `speaker`, `dialog_at`, `valid_at`, or `invalid_at`.
+- Every statement object must include exactly these five fields: `statement_text`, `is_permanent`, `has_emotional_state`, `valid_at`, `invalid_at`.
+- Do not omit any of the five required fields; `statement_text` must be a non-empty string.
 - Do not output extra fields.
-- `statement_type` must be one of `"FACT"`, `"OPINION"`, `"OTHER"`.
-- `temporal_type` must be one of `"STATIC"`, `"DYNAMIC"`, `"ATEMPORAL"`.
-- `speaker` must be one of `"user"`, `"assistant"`.
-- `has_emotional_state`, `has_unsolved_reference`, and `is_permanent` must be JSON booleans, not strings.
+- Do not output `statement_id`, `speaker`, `dialog_at`, `statement_type`, `temporal_type`, or `has_unsolved_reference`.
+- `has_emotional_state` and `is_permanent` must be JSON booleans, not strings.
 - Missing time must be the string `"NULL"`, not JSON null.
 
 **LANGUAGE REQUIREMENT:**

@@ -81,10 +81,6 @@ const ActiveConfigBanner: FC<ActiveConfigBannerProps> = ({ config }) => {
           <div className="rb:text-[14px] rb:leading-5 rb:text-[#212332]">{config.config_name || '-'}</div>
         </div>
         <div>
-          <div className="rb:text-[12px] rb:leading-4 rb:text-[#9A9A9A] rb:mb-1">{t('memory.scene')}</div>
-          <div className="rb:text-[14px] rb:leading-5 rb:text-[#212332]">{config.scene_name || '-'}</div>
-        </div>
-        <div>
           <div className="rb:text-[12px] rb:leading-4 rb:text-[#9A9A9A] rb:mb-1">{t('memory.updateTime')}</div>
           <div className="rb:text-[14px] rb:leading-5 rb:text-[#212332]">
             {config.updated_at ? formatDateTime(config.updated_at, 'YYYY-MM-DD HH:mm:ss') : '-'}

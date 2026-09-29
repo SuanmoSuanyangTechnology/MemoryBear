@@ -204,7 +204,6 @@ export const model = {
       configurationName: 'Configuration Name',
       emotionEngine: 'Emotion Engine',
       reflectionEngine: 'Self-Reflection Engine',
-      scene_id: 'Ontology Scenario',
       myConfigurations: 'My Configurations',
       scene: 'Scenario',
       updateTime: 'Updated At',

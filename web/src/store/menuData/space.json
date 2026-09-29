@@ -320,21 +320,6 @@
         ]
       },
       {
-        "id": 23,
-        "parent": 2,
-        "icon": "rb:bg-[url('@/assets/images/menuNew/ontology.svg')]",
-        "active_icon": "rb:bg-[url('@/assets/images/menuNew/ontology_active.svg')]",
-        "code": "ontology",
-        "label": "本体工程",
-        "i18nKey": "menu.ontology",
-        "path": "/ontology",
-        "enable": true,
-        "display": true,
-        "level": 2,
-        "sort": 0,
-        "subs": null
-      },
-      {
         "id": 24,
         "parent": 2,
         "icon": "rb:bg-[url('@/assets/images/menuNew/memoryConversation.svg')]",

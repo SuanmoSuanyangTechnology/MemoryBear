@@ -16,13 +16,12 @@ from app.models.prompt_optimizer_model import (
     PromptOptimizerSession,
     RoleType
 )
-from app.repositories.model_repository import ModelConfigRepository, ModelApiKeyRepository
 from app.repositories.prompt_optimizer_repository import (
     PromptOptimizerSessionRepository,
     PromptReleaseRepository
 )
 from app.schemas.prompt_optimizer_schema import OptimizePromptResult
-from app.services.model_service import ModelApiKeyService
+from app.services.model_service import ModelApiKeyService, ModelConfigService as ModelSvc
 from app.services.prompt import prompt_manager
 
 logger = get_business_logger()
@@ -57,13 +56,7 @@ class PromptOptimizerService:
             BusinessException: If the model configuration does not exist.
         """
 
-        model = ModelConfigRepository.get_by_id(
-            self.db, model_id, tenant_id=tenant_id
-        )
-        if not model:
-            raise BusinessException("模型配置不存在", BizCode.MODEL_NOT_FOUND)
-
-        return model
+        return ModelSvc.get_model_by_id(self.db, model_id, tenant_id=tenant_id)
 
     def create_session(
             self,
@@ -184,6 +177,10 @@ class PromptOptimizerService:
             model_config.id,
             tenant_id=tenant_id,
         )
+        if not api_config:
+            ModelSvc.raise_model_unavailable(
+                self.db, model_config.id, tenant_id=tenant_id
+            )
         llm = RedBearLLM(
             RedBearModelConfig.from_api_key(api_config),
             type=ModelType(model_config.type),

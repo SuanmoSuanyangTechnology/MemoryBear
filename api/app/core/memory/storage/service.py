@@ -3,7 +3,10 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Self
 
-from app.core.memory.storage.enums import MemoryNodeLabel, MemoryRelationshipType
+from app.core.memory.storage.enums import (
+    MemoryNodeLabel,
+    MemoryRelationshipType,
+)
 from app.core.memory.storage.models import (
     GraphWriteResult,
     MemoryGraphWriteCommand,
@@ -26,9 +29,14 @@ memory_storage_service: "MemoryStorageService | None" = None
 
 class MemoryStorageService:
     def __init__(self, backend_factory: BackendFactory) -> None:
+        from app.core.memory.storage.custom.workspace_statistics import (
+            WorkspaceStatisticsStorage,
+        )
+
         self._backend_factory = backend_factory
         self._read_router = ReadRouter(backend_factory)
         self._write_router = WriteRouter(backend_factory)
+        self.workspace_statistics = WorkspaceStatisticsStorage(backend_factory)
 
     @classmethod
     async def create(cls) -> Self:

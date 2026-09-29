@@ -31,6 +31,12 @@ class EndUser(Base):
             postgresql_where=text("is_active = TRUE"),
         ),
         Index(
+            "idx_end_users_ws_active_id",
+            "workspace_id",
+            "id",
+            postgresql_where=text("is_active = TRUE"),
+        ),
+        Index(
             "ix_end_users_workspace_write_time",
             "workspace_id",
             "write_time",

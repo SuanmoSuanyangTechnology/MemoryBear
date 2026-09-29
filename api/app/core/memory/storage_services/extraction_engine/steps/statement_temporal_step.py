@@ -5,6 +5,7 @@ Temporal extraction logic (valid_at / invalid_at) is merged into this step,
 eliminating the need for a separate ``TemporalExtractor`` call.
 """
 
+import asyncio
 import logging
 import uuid
 from typing import Any, List
@@ -16,6 +17,7 @@ from app.core.memory.utils.prompt.prompt_utils import render_statement_extractio
 
 from .base import ExtractionStep, StepContext
 from .schema import StatementStepInput, StatementStepOutput
+from .statement_classification import ClassificationError, StatementClassification, StatementClassifier
 
 logger = logging.getLogger(__name__)
 
@@ -24,16 +26,18 @@ logger = logging.getLogger(__name__)
 
 
 class _ExtractedStatement(BaseModel):
-    """Raw statement returned by the LLM (before enrichment)."""
+    """Raw statement returned by the LLM (stage-1 five fields only).
+
+    statement_type / temporal_type / has_unsolved_reference 已被拆到阶段 2
+    （小模型分类器 + 备用 LLM 兜底），statement_id / speaker / dialog_at
+    由代码补齐，均不由本阶段 LLM 输出。
+    """
 
     statement: str = Field(
         ...,
         validation_alias=AliasChoices("statement", "statement_text"),
         description="The extracted statement text",
     )
-    statement_type: str = Field(..., description="FACT / OPINION / OTHER")
-    temporal_type: str = Field(..., description="STATIC / DYNAMIC / ATEMPORAL")
-    # relevance: str = Field("RELEVANT", description="RELEVANT / IRRELEVANT")
     has_emotional_state: bool = Field(
         False,
         description="Whether the statement reflects user's emotional state",
@@ -42,10 +46,8 @@ class _ExtractedStatement(BaseModel):
         False,
         description="Whether the user explicitly requires this statement to be retained permanently",
     )
-    dialog_at: str = Field("", description="ISO 8601 session timestamp, copied verbatim from input")
     valid_at: str = Field("NULL", description="ISO 8601 or NULL")
     invalid_at: str = Field("NULL", description="ISO 8601 or NULL")
-    has_unsolved_reference: bool = Field(False, description="Whether the statement has unresolved references")
 
 
 class _StatementExtractionResponse(BaseModel):
@@ -169,22 +171,54 @@ class StatementTemporalExtractionStep(ExtractionStep[StatementStepInput, List[St
         if not hasattr(raw_response, "statements") or raw_response.statements is None:
             return []
 
+        classifier = StatementClassifier()
+        try:
+            # 阶段 2：逐条三分类（小模型并发；任一失败该条整体回退备用 LLM；双失败上抛触发步骤重试）
+            async def _classify(stmt) -> StatementClassification:
+                return await classifier.classify(
+                    stmt.statement,
+                    llm_client=self.llm_client,
+                    language=self.language,
+                )
+
+            classifications: List[StatementClassification] = list(
+                await asyncio.gather(*[_classify(s) for s in raw_response.statements])
+            )
+        except ClassificationError as exc:
+            logger.error(
+                "[StmtExtract] classification failed (small models + fallback LLM): %s", exc
+            )
+            raise
+        finally:
+            await classifier.close()
+
         results: List[StatementStepOutput] = []
-        for stmt in raw_response.statements:
+        for stmt, cls in zip(raw_response.statements, classifications):
+            valid_at = stmt.valid_at or "NULL"
+            invalid_at = stmt.invalid_at or "NULL"
+            # 3.1 时间-类型冲突：以阶段 2 temporal_type 为准，代码清空时间字段
+            if cls.temporal_type == "ATEMPORAL":
+                valid_at, invalid_at = "NULL", "NULL"
+            elif cls.temporal_type == "STATIC":
+                invalid_at = "NULL"
+            # DYNAMIC：时间字段按阶段 1 原值，不做强制清空
+
+            statement_id = uuid.uuid4().hex
+
             results.append(
                 StatementStepOutput(
-                    statement_id=uuid.uuid4().hex,
+                    statement_id=statement_id,
                     statement_text=stmt.statement,
-                    statement_type=stmt.statement_type.strip().upper(),
-                    temporal_type=stmt.temporal_type.strip().upper(),
+                    statement_type=cls.statement_type,
+                    temporal_type=cls.temporal_type,
                     # relevance=stmt.relevance.strip().upper(),
                     speaker="user",  # default; orchestrator overrides from chunk metadata
                     has_emotional_state=getattr(stmt, "has_emotional_state", False),
                     is_permanent=getattr(stmt, "is_permanent", False),
                     dialog_at=input_data.dialog_at or "",  # carry through from input
-                    valid_at=stmt.valid_at or "NULL",
-                    invalid_at=stmt.invalid_at or "NULL",
-                    has_unsolved_reference=getattr(stmt, "has_unsolved_reference", False),
+                    valid_at=valid_at,
+                    invalid_at=invalid_at,
+                    has_unsolved_reference=cls.has_unsolved_reference,
                 )
             )
         return results
