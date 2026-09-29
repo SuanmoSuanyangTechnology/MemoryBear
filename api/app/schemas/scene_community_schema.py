@@ -241,19 +241,34 @@ class CommunityPreviewChange(BaseModel):
     after: str
 
 
-class CommunityPreviewGraphCommunity(BaseModel):
+class CommunityPreviewGraphMemory(BaseModel):
+    node_id: str
+    node_type: Literal["MEMORY"]
     name: str
-    child_names: list[str]
+    description: str
+    is_new_content: bool
+
+
+class CommunityPreviewGraphCommunity(BaseModel):
+    node_id: str
+    node_type: Literal["COMMUNITY"]
+    name: str
+    description: str
+    children: list[CommunityPreviewGraphMemory]
 
 
 class CommunityPreviewGraphNewContent(BaseModel):
+    node_id: str
     node_name: str
     description: str
+    joined_community_node_id: str | None
     joined_community_name: str | None
+    created_community_node_id: str | None
     created_community_name: str | None
 
 
 class CommunityPreviewGraph(BaseModel):
+    default_selected_node_id: str | None
     communities: list[CommunityPreviewGraphCommunity]
     caption: str
     new_content: CommunityPreviewGraphNewContent
@@ -275,6 +290,33 @@ class CommunityPreviewResult(BaseModel):
         candidates = self.candidate_communities
         new_content = self.graph.new_content
         selected_count = sum(item.selected for item in candidates.items)
+        graph_community_by_id = {
+            community.node_id: community for community in self.graph.communities
+        }
+        graph_memory_nodes = [
+            child
+            for community in self.graph.communities
+            for child in community.children
+        ]
+        graph_memory_by_id = {child.node_id: child for child in graph_memory_nodes}
+        highlighted_memory_ids = [
+            child.node_id
+            for community in self.graph.communities
+            for child in community.children
+            if child.is_new_content
+        ]
+
+        graph_community_ids = set(graph_community_by_id)
+        graph_memory_ids = set(graph_memory_by_id)
+        all_node_ids = graph_community_ids | graph_memory_ids
+        node_count = len(self.graph.communities) + len(graph_memory_nodes)
+        if len(all_node_ids) != node_count:
+            raise ValueError("Preview graph node IDs must be unique")
+        if (
+            self.graph.default_selected_node_id is not None
+            and self.graph.default_selected_node_id not in all_node_ids
+        ):
+            raise ValueError("Default selected node must exist in the preview graph")
 
         if result == "NOT_ELIGIBLE":
             if candidates.total != 0 or candidates.items or self.graph.communities:
@@ -285,14 +327,54 @@ class CommunityPreviewResult(BaseModel):
                 raise ValueError("NOT_ELIGIBLE pipeline states are inconsistent")
             if new_content.joined_community_name or new_content.created_community_name:
                 raise ValueError("NOT_ELIGIBLE preview cannot have a community target")
+            if (
+                new_content.joined_community_node_id
+                or new_content.created_community_node_id
+                or self.graph.default_selected_node_id
+            ):
+                raise ValueError("NOT_ELIGIBLE preview cannot select a graph node")
         elif result == "ASSIGN_EXISTING":
             if selected_count != 1:
                 raise ValueError("ASSIGN_EXISTING preview must select exactly one candidate")
             if not new_content.joined_community_name or new_content.created_community_name:
                 raise ValueError("ASSIGN_EXISTING preview target is inconsistent")
+            if (
+                new_content.joined_community_node_id not in graph_community_ids
+                or new_content.created_community_node_id is not None
+            ):
+                raise ValueError("ASSIGN_EXISTING preview target node is inconsistent")
+            if (
+                graph_community_by_id[new_content.joined_community_node_id].name
+                != new_content.joined_community_name
+            ):
+                raise ValueError("ASSIGN_EXISTING preview target name is inconsistent")
         elif result == "CREATE_NEW":
             if selected_count != 0:
                 raise ValueError("CREATE_NEW preview cannot select an existing candidate")
             if new_content.joined_community_name or not new_content.created_community_name:
                 raise ValueError("CREATE_NEW preview target is inconsistent")
+            if (
+                new_content.joined_community_node_id is not None
+                or new_content.created_community_node_id not in graph_community_ids
+            ):
+                raise ValueError("CREATE_NEW preview target node is inconsistent")
+            if (
+                graph_community_by_id[new_content.created_community_node_id].name
+                != new_content.created_community_name
+            ):
+                raise ValueError("CREATE_NEW preview target name is inconsistent")
+
+        if result != "NOT_ELIGIBLE":
+            if new_content.node_id not in graph_memory_ids:
+                raise ValueError("New content node must exist in the preview graph")
+            graph_new_content = graph_memory_by_id[new_content.node_id]
+            if (
+                graph_new_content.name != new_content.node_name
+                or graph_new_content.description != new_content.description
+            ):
+                raise ValueError("New content node detail is inconsistent")
+            if self.graph.default_selected_node_id != new_content.node_id:
+                raise ValueError("New content node must be selected by default")
+            if highlighted_memory_ids != [new_content.node_id]:
+                raise ValueError("Exactly the new content node must be highlighted")
         return self

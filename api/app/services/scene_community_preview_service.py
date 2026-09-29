@@ -23,13 +23,12 @@ class SceneCommunityPreviewService:
     """Build preview responses without models, queues, or persistence writes."""
 
     @staticmethod
-    def list_cases(locale: str = "zh") -> dict:
+    def list_cases(locale: str = "zh") -> list[dict]:
         cases = PREVIEW_CASES_BY_LOCALE["en" if locale == "en" else "zh"]
-        items = [
+        return [
             CommunityPreviewCaseItem.model_validate(item).model_dump(mode="json")
             for item in cases
         ]
-        return {"items": items}
 
     @staticmethod
     def _serialize(result: dict) -> dict:
@@ -67,6 +66,7 @@ class SceneCommunityPreviewService:
                 },
                 "community_change": fixture["community_change"],
                 "graph": {
+                    "default_selected_node_id": None,
                     "communities": [],
                     "caption": graph_text["empty_caption"],
                     "new_content": fixture["new_content"],
@@ -91,25 +91,46 @@ class SceneCommunityPreviewService:
         ]
         graph_communities = [
             {
+                "node_id": candidate["node_id"],
+                "node_type": "COMMUNITY",
                 "name": candidate["title"],
-                "child_names": candidate["child_names"],
+                "description": candidate["description"],
+                "children": [
+                    {
+                        **child,
+                        "node_type": "MEMORY",
+                        "is_new_content": False,
+                    }
+                    for child in candidate["children"]
+                ],
             }
             for candidate in visible_candidates
         ]
+        new_content_node = {
+            "node_id": fixture["new_content"]["node_id"],
+            "node_type": "MEMORY",
+            "name": fixture["new_content"]["node_name"],
+            "description": fixture["new_content"]["description"],
+            "is_new_content": True,
+        }
 
         if preview_case == "EXISTING_COMMUNITY_UPDATE":
-            graph_communities[0]["child_names"].append(
-                fixture["new_content"]["node_name"]
-            )
+            graph_communities[0]["children"].append(new_content_node)
         elif preview_case == "SECOND_MEMBER_BOUNDARY":
-            graph_communities[0]["child_names"] = graph_text[
-                "second_member_child_names"
+            graph_communities[0]["children"] = [
+                graph_communities[0]["children"][0],
+                new_content_node,
             ]
         elif preview_case == "NEW_SINGLE_MEMBER_COMMUNITY":
             graph_communities.append(
                 {
+                    "node_id": fixture["new_content"][
+                        "created_community_node_id"
+                    ],
+                    "node_type": "COMMUNITY",
                     "name": fixture["new_content"]["created_community_name"],
-                    "child_names": [fixture["new_content"]["node_name"]],
+                    "description": fixture["created_community_description"],
+                    "children": [new_content_node],
                 }
             )
 
@@ -130,6 +151,7 @@ class SceneCommunityPreviewService:
             },
             "community_change": fixture["community_change"],
             "graph": {
+                "default_selected_node_id": fixture["new_content"]["node_id"],
                 "communities": graph_communities,
                 "caption": graph_text["caption_template"].format(
                     count=len(graph_communities)
