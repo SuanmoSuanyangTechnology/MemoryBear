@@ -8,6 +8,7 @@ import {
 } from '@/api/notification';
 import {
   configureNotificationRealtime,
+  performNotificationSync,
   setupNotificationRealtime,
   teardownNotificationRealtime,
   updateNotificationRealtimeState,
@@ -158,7 +159,8 @@ export const useNotification = create<NotificationState>((set, get) => {
     markAllAsRead: async () => {
       try {
         await notificationReadAll();
-          get().fetchMessages();
+        await performNotificationSync(null, true);
+        await get().fetchMessages();
       } catch {
         // Realtime synchronization will eventually restore server state.
       }
