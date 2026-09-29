@@ -85,7 +85,7 @@ export const useNotification = create<NotificationState>((set, get) => {
           pagesize: pageSize,
         });
         const { messages, hasMore, ...rest } = extractPaginatedMessages(response, pageSize);
-        console.log('rest', rest)
+
         set((state) => ({
           messages,
           pagination: {
@@ -158,6 +158,7 @@ export const useNotification = create<NotificationState>((set, get) => {
     markAllAsRead: async () => {
       try {
         await notificationReadAll();
+          get().fetchMessages();
       } catch {
         // Realtime synchronization will eventually restore server state.
       }
