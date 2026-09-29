@@ -149,8 +149,10 @@ class MemoryService:
         workspace_id: str = "",
         end_user_id: str = "",
         language: str = "zh",
+        storage_type: str = "neo4j",
+        user_rag_memory_id: str = "",
     ) -> bool:
-        """批量 Agent 消息摄入：一次事务写入 + 一次滑动窗口派发。
+        """批量 Agent 消息摄入；RAG 直写知识库，Neo4j 进入任务流水线。
 
         同一回合的 user + assistant 应通过此入口一次派发，避免两次
         fire-and-forget 造成的 seq 分配竞态（顺序颠倒）。
@@ -167,6 +169,8 @@ class MemoryService:
             workspace_id=workspace_id,
             end_user_id=end_user_id,
             language=language,
+            storage_type=storage_type,
+            user_rag_memory_id=user_rag_memory_id,
         )
 
     @staticmethod
@@ -178,8 +182,10 @@ class MemoryService:
         config_id: str,
         workspace_id: str,
         language: str = "zh",
+        storage_type: str = "neo4j",
+        user_rag_memory_id: str = "",
     ) -> None:
-        """Workflow 消息摄入：批量写入 memory_messages 表 + 触发滑动窗口派发。"""
+        """Workflow 消息摄入；RAG 直写知识库，Neo4j 进入任务流水线。"""
         from app.core.memory.pipelines.dispatcher import ingest_workflow_messages
         await ingest_workflow_messages(
             messages=messages,
@@ -188,6 +194,8 @@ class MemoryService:
             config_id=config_id,
             workspace_id=workspace_id,
             language=language,
+            storage_type=storage_type,
+            user_rag_memory_id=user_rag_memory_id,
         )
 
     @staticmethod
@@ -198,6 +206,8 @@ class MemoryService:
         config_id: str,
         workspace_id: str,
         language: str = "zh",
+        storage_type: str = "neo4j",
+        user_rag_memory_id: str = "",
     ) -> List[str]:
         """API Service 异步写入入口。"""
         from app.core.memory.pipelines.dispatcher import dispatch_api_service_async
@@ -207,6 +217,8 @@ class MemoryService:
             config_id=config_id,
             workspace_id=workspace_id,
             language=language,
+            storage_type=storage_type,
+            user_rag_memory_id=user_rag_memory_id,
         )
 
     @staticmethod
@@ -217,6 +229,7 @@ class MemoryService:
         config_id: uuid.UUID,
         workspace_id: str,
         storage_type: str = "neo4j",
+        user_rag_memory_id: str = "",
         dialog_at: str = "",
     ) -> str:
         """MCP 单条消息写入入口。
@@ -229,29 +242,21 @@ class MemoryService:
             config_id: 记忆配置 ID
             workspace_id: 工作空间 ID
             storage_type: 存储类型 ("neo4j" | "rag")
+            user_rag_memory_id: RAG 记忆知识库 ID
             dialog_at: 对话发生时间（ISO 8601）
 
         Returns:
             派发的任务 msg_id（RAG 路径返回空字符串）
         """
-        from app.core.memory.pipelines.dispatcher import (
-            dispatch_mcp_write,
-            write_messages_to_rag,
-        )
-
-        if storage_type and storage_type.lower() == "rag":
-            await write_messages_to_rag(
-                messages=[{"role": "user", "content": message, "dialog_at": dialog_at}],
-                end_user_id=end_user_id,
-                user_rag_memory_id="",
-            )
-            return ""
+        from app.core.memory.pipelines.dispatcher import dispatch_mcp_write
 
         return await dispatch_mcp_write(
             message=message,
             end_user_id=end_user_id,
             config_id=config_id,
             workspace_id=workspace_id,
+            storage_type=storage_type,
+            user_rag_memory_id=user_rag_memory_id,
             dialog_at=dialog_at,
         )
 

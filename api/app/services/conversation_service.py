@@ -483,6 +483,8 @@ class ConversationService:
         conversation_id: uuid.UUID,
         user_message: dict[str, Any],
         assistant_message: dict[str, Any],
+        storage_type: str = "neo4j",
+        user_rag_memory_id: str = "",
     ) -> None:
         """查会话 + 解析记忆配置 + 组装成对消息 + fire-and-forget 批量派发。
 
@@ -496,6 +498,8 @@ class ConversationService:
                 - content: str
                 - meta_data: dict | None
                 - should_memorize: bool（默认 True）
+            storage_type: 记忆空间存储类型；RAG 会直写知识库，不派发图写入任务。
+            user_rag_memory_id: RAG 记忆知识库 ID。
         """
         conversation = await self.conversation_repo.get_conversation_by_conversation_id_async(conversation_id)
         if not conversation:
@@ -530,6 +534,8 @@ class ConversationService:
                     config_id=str(config_id),
                     workspace_id=str(conversation.workspace_id),
                     end_user_id=str(conversation.user_id) if conversation.user_id else "",
+                    storage_type=storage_type or "neo4j",
+                    user_rag_memory_id=user_rag_memory_id,
                 )
             )
         except Exception as exc:
