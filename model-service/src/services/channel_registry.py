@@ -3,7 +3,11 @@
 - 包内 SQL registry 基座 + 本库 ORM 注入：RegistrySQLSource 投影（ModelConfig/
   ModelChannel 行 → 包契约快照；时间列 DateTime → unix ms 在边界换算）
 - 进程级共享 ChannelSnapshotCache（TTL 60s）：per-request registry 复用同一实例，
-  写路径（ChannelService）经 invalidate_channel_cache 主动失效，不依赖 TTL 兜底
+  写路径（ChannelService）经 notify_channel_change 主动失效（本地 + 跨副本广播），
+  不依赖 TTL 兜底
+- 多副本失效广播（M8 §2.7）：写副本 publish `model:channel-invalidations`，各副本常驻
+  订阅（run_channel_invalidation_listener）→ 本地失效；无广播时他副本只能等 TTL 兜底。
+  广播是 best-effort（Redis 不可用只告警），订阅断连退避重连，二者都不阻塞写读主流程
 - sync/async 双读：管理面/worker/同步链路用 resolve_config_sync；异步链路用
   resolve_config_async（GC#11：async 上下文禁止 sync session）
 - 宿主 tenant_id 在入口归一为 UUID（_normalize_tenant_id）：同一租户身份在宿主存在
@@ -29,7 +33,12 @@
 """
 from __future__ import annotations
 
+import asyncio
+import contextlib
+import json
 import logging
+import os
+import socket
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -60,6 +69,7 @@ from sqlalchemy import select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session, joinedload
 
+from ..infrastructure.redis import get_async_client, get_sync_client
 from ..infrastructure.redis_cache import invalidate_workspace_model_options
 from ..models.models_model import ModelBase, ModelChannel, ModelConfig
 from ..utils.datetime_utils import to_timestamp_ms
@@ -68,6 +78,12 @@ from .usage_load import channel_loads_async, channel_loads_sync
 
 _CHANNEL_CACHE_TTL_MS = 60_000
 _shared_cache = ChannelSnapshotCache(ttl_ms=_CHANNEL_CACHE_TTL_MS)
+
+# 多副本失效广播：写副本 publish、各副本订阅后本地失效（M8 §2.7）
+CHANNEL_INVALIDATION_CHANNEL = "model:channel-invalidations"
+_INSTANCE_ID = f"{socket.gethostname()}:{os.getpid()}"
+_RECONNECT_BASE_DELAY_S = 1.0
+_RECONNECT_MAX_DELAY_S = 30.0
 
 logger = logging.getLogger(__name__)
 
@@ -312,10 +328,126 @@ def invalidate_channel_cache(
     tenant_id: uuid.UUID | None = None,
     provider: str | None = None,
 ) -> None:
-    """写路径主动失效渠道快照缓存（同租户全量键一并失效，见包内缓存语义）。"""
+    """本地失效渠道快照缓存（同租户全量键一并失效，见包内缓存语义）。
+
+    订阅端与回滚补偿路径用本函数；写路径用 ``notify_channel_change``（本地 + 广播）。
+    """
     _shared_cache.invalidate(tenant_id, provider)
     # workspace 模型候选按渠道可用性过滤，渠道态变更须同步失效（tenant_id 为空时 no-op）
     invalidate_workspace_model_options((tenant_id,))
+
+
+def notify_channel_change(
+    tenant_id: uuid.UUID | None = None,
+    provider: str | None = None,
+) -> None:
+    """写路径入口：本地失效 + 跨副本失效广播。
+
+    先本地后广播：广播是 best-effort，Redis 不可用时本副本已生效，他副本退回 TTL 兜底。
+    """
+    invalidate_channel_cache(tenant_id, provider)
+    broadcast_channel_invalidation(tenant_id, provider)
+
+
+def broadcast_channel_invalidation(
+    tenant_id: uuid.UUID | None = None,
+    provider: str | None = None,
+) -> None:
+    """向其他副本广播渠道失效；广播失败只告警，不影响写路径与本地失效。"""
+    payload = json.dumps(
+        {
+            "origin": _INSTANCE_ID,
+            "tenant_id": str(tenant_id) if tenant_id is not None else None,
+            "provider": provider,
+        },
+        separators=(",", ":"),
+    )
+    try:
+        get_sync_client().publish(CHANNEL_INVALIDATION_CHANNEL, payload)
+    except Exception:
+        logger.warning(
+            "渠道失效广播失败（本地已失效，他副本退回 TTL 兜底）: tenant=%s provider=%s",
+            tenant_id,
+            provider,
+            exc_info=True,
+        )
+
+
+def apply_channel_invalidation(payload: str | bytes) -> bool:
+    """订阅侧：广播载荷 → 本地失效；返回是否实际失效。
+
+    畸形/未知/自环载荷告警后忽略（前向兼容，单条坏消息不炸订阅循环）。tenant_id 必须
+    存在且合法：广播由写路径发出，恒有租户；缺租户的载荷若当全量失效处理，会把一次
+    脏消息放大成整进程缓存清空。
+    """
+    if isinstance(payload, bytes):
+        payload = payload.decode("utf-8", errors="replace")
+    try:
+        parsed = json.loads(payload)
+    except (TypeError, ValueError):
+        logger.warning("渠道失效广播载荷非 JSON，已忽略: %r", payload)
+        return False
+    if not isinstance(parsed, dict):
+        logger.warning("渠道失效广播载荷非对象，已忽略: %r", payload)
+        return False
+    if parsed.get("origin") == _INSTANCE_ID:
+        return False  # 自身广播：写路径已本地失效（防自环）
+    try:
+        tenant_id = uuid.UUID(str(parsed["tenant_id"]))
+    except (KeyError, TypeError, ValueError, AttributeError):
+        logger.warning("渠道失效广播 tenant_id 缺失或非法，已忽略: %r", payload)
+        return False
+    provider = parsed.get("provider")
+    if provider is not None and not isinstance(provider, str):
+        logger.warning("渠道失效广播 provider 非法，已忽略: %r", payload)
+        return False
+    invalidate_channel_cache(tenant_id, provider)
+    logger.info(
+        "已应用他副本渠道失效: tenant=%s provider=%s origin=%s",
+        tenant_id,
+        provider,
+        parsed.get("origin"),
+    )
+    return True
+
+
+async def run_channel_invalidation_listener() -> None:
+    """常驻订阅他副本的渠道失效广播；断订阅退避重连，不阻塞主流程。
+
+    本地失效经 ``asyncio.to_thread``：``invalidate_channel_cache`` 内含同步 Redis 删除，
+    事件循环内直调会阻塞（GC#11）。取消（进程收尾）即退出，重连退避不吞取消。
+    """
+    delay = _RECONNECT_BASE_DELAY_S
+    while True:
+        pubsub = None
+        try:
+            client = await get_async_client()
+            pubsub = client.pubsub(ignore_subscribe_messages=True)
+            await pubsub.subscribe(CHANNEL_INVALIDATION_CHANNEL)
+            delay = _RECONNECT_BASE_DELAY_S
+            logger.info(
+                "渠道失效订阅就绪: channel=%s instance=%s",
+                CHANNEL_INVALIDATION_CHANNEL,
+                _INSTANCE_ID,
+            )
+            async for message in pubsub.listen():
+                data = message.get("data") if isinstance(message, dict) else None
+                if data is None:
+                    continue
+                try:
+                    await asyncio.to_thread(apply_channel_invalidation, data)
+                except Exception:
+                    logger.warning("应用渠道失效广播失败: %r", data, exc_info=True)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning("渠道失效订阅中断，%.1fs 后重连: %s", delay, exc)
+            await asyncio.sleep(delay)
+            delay = min(delay * 2, _RECONNECT_MAX_DELAY_S)
+        finally:
+            if pubsub is not None:
+                with contextlib.suppress(Exception):
+                    await pubsub.aclose()
 
 
 def parse_members(config: dict | None) -> list[tuple[str, str]]:
@@ -790,13 +922,17 @@ def affected_config_ids(
 
 
 __all__ = [
+    "CHANNEL_INVALIDATION_CHANNEL",
     "SOURCE",
     "ResolvedWithPlan",
     "affected_config_ids",
+    "apply_channel_invalidation",
+    "broadcast_channel_invalidation",
     "candidate_channels_async",
     "candidate_channels_batch_sync",
     "candidate_channels_sync",
     "invalidate_channel_cache",
+    "notify_channel_change",
     "parse_members",
     "resolve_composite_async",
     "resolve_composite_plan_async",
@@ -806,5 +942,6 @@ __all__ = [
     "resolve_config_plan_async",
     "resolve_config_plan_sync",
     "resolve_config_sync",
+    "run_channel_invalidation_listener",
     "to_profile",
 ]

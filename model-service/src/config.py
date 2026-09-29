@@ -152,6 +152,49 @@ class ModelServiceSettings(BaseSettings):
         gt=0,
         validation_alias="MODEL_SERVICE_HEALTH_PROBE_TIMEOUT_SECONDS",
     )
+    # 运行面 invoke 上游首块档（设计 §2.9 服务侧第一档，**按候选**生效）：
+    # 单次候选调用超过即判瞬时错误 → 同候选重试 → 仍失败换渠道（换渠道只在此档有意义）。
+    invoke_first_result_timeout_s: float = Field(
+        default=15.0,
+        gt=0,
+        validation_alias="MODEL_INVOKE_FIRST_RESULT_TIMEOUT_S",
+    )
+    # 运行面 invoke 首帧上限（**整次请求**，含选路/解密/换渠道）：
+    # 不变量①「必须小于宿主 invoke 预算」——宿主 SSE 与 stream=false 都以 idle 计时
+    # （包内 InvokeTimeouts.idle_s 默认 60s），服务先答才不会白跑；
+    # 不变量②「须 ≥ 3 × 首块档」——同候选重试与换渠道要有容身之处，否则首块档形同虚设。
+    # **llm 族例外**（下方 invoke_llm_*）：生成整段回复天然慢，沿用此式会把首块档
+    # 压到无意义的秒级；故 llm 族单独给档，代价是慢响应超时后无重试/换渠道余量——
+    # 快速失败（连接失败/5xx/401）仍按候选完整换渠道，只有「首块档超时」这一条路径
+    # 拿不到同候选重试。改档前先读宿主 MODEL_SERVICE_INVOKE_IDLE_TIMEOUT_SECONDS。
+    # 超时 → 504（SERVICE_UNAVAILABLE）：上游未在预算内产出，宿主可整轮重试。
+    invoke_total_timeout_s: float = Field(
+        default=45.0,
+        gt=0,
+        validation_alias="MODEL_INVOKE_TOTAL_TIMEOUT_S",
+    )
+    # llm 族（G2 非流式 / G3 流式）同义档：首块档 = 单次生成上界（非流式下首块即结果；
+    # 流式下 = 连接 + 首个 chunk，由 open_astream 在候选循环内 eager 拉出，故换渠道仍有效）。
+    # 默认 120s 覆盖长文生成；总档 150s 只留选路/解密/一次换渠道的余量。
+    invoke_llm_first_result_timeout_s: float = Field(
+        default=120.0,
+        gt=0,
+        validation_alias="MODEL_INVOKE_LLM_FIRST_RESULT_TIMEOUT_S",
+    )
+    invoke_llm_total_timeout_s: float = Field(
+        default=150.0,
+        gt=0,
+        validation_alias="MODEL_INVOKE_LLM_TOTAL_TIMEOUT_S",
+    )
+    # llm 流式块间空闲档（**服务侧执行**，设计 §2.5 的显式偏离）：供应商流中途长时间无增量
+    # → 服务先答 error 帧，宿主拿到结构化失败而非裸 idle 断连。不变量③「服务 idle(60) <
+    # 宿主 idle(180，MODEL_SERVICE_INVOKE_IDLE_TIMEOUT_SECONDS)」；总档 150s **不包排流**
+    # （只包解析 + 首块），故长回复不受总档截断，只受本档逐块约束。
+    invoke_llm_idle_timeout_s: float = Field(
+        default=60.0,
+        gt=0,
+        validation_alias="MODEL_INVOKE_LLM_IDLE_TIMEOUT_S",
+    )
     # 渠道 least-used 选路：计量表滚动窗口（D14）与全局开关
     model_usage_load_window_minutes: int = Field(
         default=15,
@@ -161,6 +204,12 @@ class ModelServiceSettings(BaseSettings):
     model_usage_least_used_enabled: bool = Field(
         default=True,
         validation_alias="MODEL_USAGE_LEAST_USED_ENABLED",
+    )
+    # 用量消费积压告警阈值：stream 长度 / 消费组 pending 超此值打 WARNING
+    model_usage_backlog_warn: int = Field(
+        default=50_000,
+        ge=1,
+        validation_alias="MODEL_USAGE_BACKLOG_WARN",
     )
     # 内部面鉴权：direct（社区默认，信任 X-Model-* 内部头 + NetworkPolicy）；
     # gateway（企业，auth-sdk 内部 token 验签，M10 收紧批次落地）

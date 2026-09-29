@@ -106,7 +106,7 @@ class ChannelService:
         provider: str,
         model_names: list[str] | None,
     ) -> None:
-        """双层失效：进程内渠道快照缓存 + 受影响 config 的 Redis 运行时缓存。
+        """三层失效：本副本渠道快照缓存 + 他副本广播 + 受影响 config 的 Redis 运行时缓存。
 
         model_names=None → provider 级渠道（影响该 provider 全部 config）；
         非 None → 仅 name ∈ model_names 的 config。突变 flush 后即失效。
@@ -115,10 +115,10 @@ class ChannelService:
         """
         from .channel_registry import (  # 延迟导入：registry 反向依赖本模块 cipher
             affected_config_ids,
-            invalidate_channel_cache,
+            notify_channel_change,
         )
 
-        invalidate_channel_cache(tenant_id, provider)
+        notify_channel_change(tenant_id, provider)
         config_ids = affected_config_ids(
             self.db, tenant_id=tenant_id, provider=provider, model_names=model_names
         )

@@ -16,7 +16,12 @@ from fastapi import HTTPException, Request
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
-from .api.dependencies import Principal, principal_from_headers
+from .api.dependencies import (
+    InvokePrincipal,
+    Principal,
+    invoke_principal_from_headers,
+    principal_from_headers,
+)
 from .api.schemas.common import fail
 from .errors import BizCode
 from .i18n import resolve_locale, translate
@@ -31,6 +36,20 @@ _PUBLIC_PATHS = frozenset(
         "/internal/v1/health/ready",
     }
 )
+
+# 运行面（invoke）放行无用户身份的调用方（Celery worker / 后台任务）；管理面 actor 一律必填。
+# validate 为只读探测（不落库、无用量归属），宿主 SSO 等外部签名调用方没有用户身份，同组放行；
+# 该路径后续若引入写路径，须移出本集合重新收紧。
+_ACTOR_OPTIONAL_PATHS = frozenset({"/internal/v1/invoke", "/internal/v1/models/validate"})
+
+
+def _parse_principal(request: Request) -> Principal | InvokePrincipal:
+    """运行面按路径放行无 actor 主体；其余路径 actor 必填（fail-closed）。"""
+
+    path = request.url.path.rstrip("/") or "/"
+    if path in _ACTOR_OPTIONAL_PATHS:
+        return invoke_principal_from_headers(request)
+    return principal_from_headers(request)
 
 
 @dataclass
@@ -104,7 +123,7 @@ class ModelAuthMiddleware(BaseHTTPMiddleware):
         if self._gateway is not None:
             return await self._gateway_dispatch(request, call_next)
         try:
-            principal = principal_from_headers(request)
+            principal = _parse_principal(request)
         except HTTPException as exc:
             return _auth_error(request, 401, "invalid principal headers", exception=exc)
         request.state.principal = principal

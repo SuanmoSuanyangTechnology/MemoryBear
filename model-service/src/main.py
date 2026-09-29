@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -75,11 +77,25 @@ def create_app(settings: ModelServiceSettings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
+        from .services.channel_registry import run_channel_invalidation_listener
+        from .services.usage_consumer import run_usage_consumer
+
         logger.info("Model service started: %s", service_settings.safe_summary())
         _sync_seed_models(application.state.runtime, service_settings)
+        # 多副本渠道缓存失效广播：Redis 不可用时自行退避重连，不阻断启动与请求
+        invalidation_listener = asyncio.create_task(run_channel_invalidation_listener())
+        # 用量事件消费（承接 G5 前的宿主 beat）：同上自行退避重连
+        usage_consumer = asyncio.create_task(
+            run_usage_consumer(application.state.runtime.database.async_session)
+        )
         try:
             yield
         finally:
+            # 先停常驻任务再关连接池：任务取消期间仍可能持有会话/连接
+            for task in (invalidation_listener, usage_consumer):
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
             await application.state.runtime.aclose()
             logger.info("Model service stopped")
 

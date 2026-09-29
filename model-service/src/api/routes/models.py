@@ -26,9 +26,15 @@ from ...services.model_impact_service import collect_model_impact
 from ...services.model_profile_view import wire_model_base, wire_model_config
 from ...services.model_quota import check_model_activation_quota, check_model_quota
 from ...services.model_service import ModelBaseService, ModelConfigService
-from ..dependencies import Principal, get_principal, get_sync_db
+from ..dependencies import (
+    InvokePrincipal,
+    Principal,
+    get_invoke_principal,
+    get_principal,
+    get_sync_db,
+)
 from ..schemas.common import fail, success
-from ..schemas.response_schema import ApiResponse, PageData
+from ..schemas.response_schema import ApiResponse
 
 logger = logging.getLogger(__name__)
 
@@ -76,24 +82,22 @@ def get_model_list(
         is_public: Optional[bool] = Query(None, description="公开状态筛选"),
         is_available: Optional[bool] = Query(None, description="可用性筛选（已启用且未弃用且渠道候选非空）"),
         search: Optional[str] = Query(None, description="搜索关键词"),
-        page: int = Query(1, ge=1, description="页码"),
-        pagesize: int = Query(10, ge=1, le=100, description="每页数量"),
         db: Session = Depends(get_sync_db),
         principal: Principal = Depends(get_principal)
 ):
     """
-    获取模型配置列表
+    获取模型配置列表（全量返回裸数组，不分页）
 
     支持多个 type 参数：
     - 单个：?type=LLM
     - 多个（逗号分隔）：?type=LLM,EMBEDDING
     - 多个（重复参数）：?type=LLM&type=EMBEDDING
 
-    is_available=true 时仅返回"已启用且未弃用且渠道候选非空"的模型（服务端全量探测后内存分页），
+    is_available=true 时仅返回"已启用且未弃用且渠道候选非空"的模型（服务端全量探测后过滤），
     供选择器隐藏已禁用/已弃用/无渠道模型；is_deprecated 详情见响应字段。
     """
     logger.info(
-        f"获取模型配置列表请求: type={type}, provider={provider}, is_available={is_available}, page={page}, pagesize={pagesize}, tenant_id={principal.tenant_id}")
+        f"获取模型配置列表请求: type={type}, provider={provider}, is_available={is_available}, tenant_id={principal.tenant_id}")
 
     try:
         # 解析 type 参数（支持逗号分隔）
@@ -114,16 +118,13 @@ def get_model_list(
             is_active=is_active,
             is_public=is_public,
             is_available=is_available,
-            search=search,
-            page=page,
-            pagesize=pagesize
+            search=search
         )
 
         logger.debug(f"开始获取模型配置列表: {query.model_dump()}")
-        result_orm = ModelConfigService.get_model_list(db=db, query=query, tenant_id=principal.tenant_id)
-        result = PageData.model_validate(result_orm)
-        logger.info(f"模型配置列表获取成功: 总数={result.page.total}, 当前页={len(result.items)}")
-        return success(data=result, msg="模型配置列表获取成功")
+        models = ModelConfigService.get_model_list(db=db, query=query, tenant_id=principal.tenant_id)
+        logger.info(f"模型配置列表获取成功: 数量={len(models)}")
+        return success(data=models, msg="模型配置列表获取成功")
     except Exception as e:
         logger.error(f"获取模型配置列表失败: {str(e)}")
         raise
@@ -704,7 +705,7 @@ def unbind_model_api_key(
 async def validate_model_config(
     validate_data: model_schema.ModelValidateRequest,
     db: Session = Depends(get_sync_db),
-    principal: Principal = Depends(get_principal)
+    principal: InvokePrincipal = Depends(get_invoke_principal)
 ):
     """
     验证模型配置是否有效
@@ -713,8 +714,15 @@ async def validate_model_config(
     - llm: 大语言模型
     - embedding: 向量模型
     - rerank: 重排序模型
+
+    二选一形态：候选明文凭据（model_name/provider/api_key），或既有配置
+    config_id（凭据与能力列由服务内解析，明文不出宿主边界）。只读探测、不落库，
+    actor 可缺省（宿主 SSO 等无用户身份的调用方）；tenant 头仍必填。
     """
-    logger.info(f"验证模型配置请求: {validate_data.model_name} ({validate_data.model_type}), 用户: {principal.actor_name}")
+    logger.info(
+        f"验证模型配置请求: {validate_data.model_name or validate_data.model_config_id} "
+        f"({validate_data.model_type}), 用户: {principal.actor_name or '-'}"
+    )
 
     result = await ModelConfigService.validate_model_config(
         db=db,
@@ -724,6 +732,11 @@ async def validate_model_config(
         api_base=validate_data.api_base,
         model_type=validate_data.model_type,
         test_message=validate_data.test_message,
+        input_modalities=validate_data.input_modalities,
+        output_modalities=validate_data.output_modalities,
+        features=validate_data.features,
+        model_config_id=validate_data.model_config_id,
+        tenant_id=principal.tenant_id,
     )
 
     return success(data=model_schema.ModelValidateResponse(**result), msg="验证完成")

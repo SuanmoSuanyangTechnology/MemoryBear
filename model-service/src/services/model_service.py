@@ -19,7 +19,6 @@ from __future__ import annotations
 import asyncio
 import base64
 import logging
-import math
 import time
 import uuid
 from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Optional, Sequence, Tuple
@@ -65,7 +64,6 @@ from ..repositories.model_repository import (
     ModelBaseRepository,
     ModelConfigRepository,
 )
-from ..api.schemas.response_schema import PageData, PageMeta
 from ..schemas import model_schema
 from ..schemas.model_schema import (
     ModelConfigCreate,
@@ -184,6 +182,52 @@ def _shared_validation_config(
         ),
         runtime=ModelRuntimeOptions(timeout_s=10.0, max_retries=0),
     )
+
+
+def _load_stored_config_row(
+    db: Session,
+    model_config_id: uuid.UUID,
+    tenant_id: uuid.UUID | None,
+) -> Optional[ModelConfig]:
+    """既有配置行读取（租户过滤 = 本租户或公开，与 invoke 门面同口径）。"""
+    if tenant_id is None:
+        raise BusinessException("缺少租户上下文", BizCode.INVALID_PARAMETER)
+    row = ModelConfigRepository.get_by_id(db, model_config_id, tenant_id=tenant_id)
+    if row is None:
+        raise BusinessException(
+            f"模型配置不存在或无权访问: {model_config_id}", BizCode.MODEL_NOT_FOUND
+        )
+    return row
+
+
+def _resolve_stored_probe_inputs(
+    db: Session,
+    model_config_id: uuid.UUID,
+    tenant_id: uuid.UUID,
+) -> Dict[str, Any]:
+    """既有配置 → 探活入参（凭据与能力列一律取服务内存储值，明文不出宿主边界）。
+
+    失败按 HTTP 错误码分档（无可用凭据 4012 / 解密失败 4014 / SpeedBear 缺绑 4013
+    原样抛出），供宿主校验类路径按码映射为 `no_api_key` / `verify_failed`。
+
+    async-over-sync 先例同 `_validate_provider_key`：解析期间 sync 连接跨网络调用持有，
+    随阶段二服务化 sync→async 统一整改（设计 §2.3）。
+    """
+    # 渠道解析（解密/选路）在服务内完成；4013/4014 由 helper 内部抛出透传
+    key = ModelApiKeyService.get_available_api_key(db, model_config_id, tenant_id)
+    if key is None:
+        raise BusinessException(
+            "模型配置当前无可用渠道凭据", BizCode.NO_AVAILABLE_CHANNEL
+        )
+    return {
+        "model_name": key.model_name,
+        "provider": key.provider,
+        "api_key": key.api_key,
+        "api_base": key.api_base,
+        "input_modalities": list(key.input_modalities or []),
+        "output_modalities": list(key.output_modalities or []),
+        "features": list(key.features or []),
+    }
 
 
 def is_asr_model(model_type: str) -> bool:
@@ -646,38 +690,27 @@ class ModelConfigService:
         )
 
     @staticmethod
-    def get_model_list(db: Session, query: ModelConfigQuery, tenant_id: uuid.UUID | None = None) -> PageData:
+    def get_model_list(db: Session, query: ModelConfigQuery, tenant_id: uuid.UUID | None = None) -> List[model_schema.ModelConfig]:
         """获取模型配置列表（含渠道可用性：候选链非空 = True）。
 
-        `is_available` 置位时：全量取行 → 批量探测 → 派生过滤 → 内存分页
+        不分页，全量返回裸数组（2026-09-28 决策，与 `/models/new` 口径一致）。
+        `is_available` 置位时：全量取行 → 批量探测 → 派生过滤
         （选择器隐藏已禁用/无渠道/已弃用模型，G1；租户模型量有界）。
         """
-        models, total = ModelConfigRepository.get_list(db, query, tenant_id=tenant_id)
+        models = ModelConfigRepository.get_list(db, query, tenant_id=tenant_id)
 
         availability = _probe_availability(db, models, tenant_id)
         if query.is_available is not None:
-            matched = [
+            models = [
                 model
                 for model in models
                 if _derived_available(model, availability) is query.is_available
             ]
-            total = len(matched)
-            start = (query.page - 1) * query.pagesize
-            models = matched[start : start + query.pagesize]
 
-        pages = math.ceil(total / query.pagesize) if total > 0 else 0
-        return PageData(
-            page=PageMeta(
-                page=query.page,
-                pagesize=query.pagesize,
-                total=total,
-                hasnext=query.page < pages
-            ),
-            items=[
-                _with_availability(model, availability)
-                for model in models
-            ]
-        )
+        return [
+            _with_availability(model, availability)
+            for model in models
+        ]
 
     @staticmethod
     def get_model_list_new(db: Session, query: ModelConfigQueryNew, tenant_id: uuid.UUID | None = None) -> List[dict]:
@@ -730,33 +763,44 @@ class ModelConfigService:
     async def validate_model_config(
         db: Session,
         *,
-        model_name: str,
-        provider: str,
-        api_key: str,
+        model_name: Optional[str] = None,
+        provider: Optional[str] = None,
+        api_key: Optional[str] = None,
         api_base: Optional[str] = None,
-        model_type: str = "llm",
+        model_type: Optional[str] = None,
         test_message: str = "Hello",
         input_modalities: Optional[list] = None,
         output_modalities: Optional[list] = None,
         features: Optional[list] = None,
+        model_config_id: Optional[uuid.UUID] = None,
+        tenant_id: Optional[uuid.UUID] = None,
     ) -> Dict[str, Any]:
-        """验证模型配置是否有效
+        """验证模型配置是否有效（二选一形态）
 
         Args:
-            db: 数据库会话（签名兼容保留，验证不落库）
-            model_name: 模型名称
-            provider: 提供商
-            api_key: API密钥
+            db: 数据库会话（候选模式不落库；config_id 模式下解析既有配置用）
+            model_name: 模型名称（候选模式必填）
+            provider: 提供商（候选模式必填）
+            api_key: API密钥（候选模式必填）
             api_base: API基础URL
-            model_type: 模型类型 (llm/embedding/rerank/image/video/asr)
+            model_type: 模型类型 (llm/embedding/rerank/image/video/asr)；
+                config_id 模式缺省取配置类型，候选模式缺省 "llm"
             test_message: 测试消息
             input_modalities: 输入模态列表（契约 v2）
             output_modalities: 输出模态列表（契约 v2）
             features: 功能开关列表（契约 v2）
+            model_config_id: 既有配置 ID（凭据与能力列由服务内解析）
+            tenant_id: 租户 ID（config_id 模式必填，禁止隐式跨租户解析）
 
         Returns:
             Dict: 验证结果
         """
+        if model_config_id is not None:
+            row = _load_stored_config_row(db, model_config_id, tenant_id)
+            if model_type is None:
+                model_type = _enum_value(row.type)
+        if model_type is None:
+            model_type = "llm"
         if is_asr_model(model_type):
             return {
                 "valid": False,
@@ -767,7 +811,15 @@ class ModelConfigService:
                 "error": "ASR 模型将在实际调用时校验模型和凭据",
                 "error_type": "MediaValidationUnsupported",
             }
-        _ = db
+        if model_config_id is not None:
+            stored = _resolve_stored_probe_inputs(db, model_config_id, tenant_id)
+            model_name = stored["model_name"]
+            provider = stored["provider"]
+            api_key = stored["api_key"]
+            api_base = stored["api_base"]
+            input_modalities = stored["input_modalities"]
+            output_modalities = stored["output_modalities"]
+            features = stored["features"]
         import traceback
 
         model_type_lower = _enum_value(model_type)

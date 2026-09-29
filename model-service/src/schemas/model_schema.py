@@ -219,11 +219,9 @@ class ModelConfigQuery(BaseModel):
     is_active: Optional[bool] = Field(None, description="激活状态筛选")
     is_public: Optional[bool] = Field(None, description="公开状态筛选")
     is_available: Optional[bool] = Field(
-        None, description="可用性筛选（已启用且未弃用且渠道候选非空；置位时服务端全量探测后内存分页）"
+        None, description="可用性筛选（已启用且未弃用且渠道候选非空；服务端全量探测后过滤）"
     )
     search: Optional[str] = Field(None, description="搜索关键词", max_length=255)
-    page: int = Field(1, description="页码", ge=1)
-    pagesize: int = Field(10, description="每页数量", ge=1, le=100)
 
 
 # 查询和响应Schemas
@@ -247,15 +245,49 @@ class ModelMarketplace(BaseModel):
     active_count: int
 
 
+_VALIDATE_CREDENTIAL_FIELDS = ("model_name", "provider", "api_key")
+_VALIDATE_CONFLICT_FIELDS = (
+    *_VALIDATE_CREDENTIAL_FIELDS,
+    "api_base",
+    "input_modalities",
+    "output_modalities",
+    "features",
+)
+
+
 # 验证模型配置Schema
 class ModelValidateRequest(BaseModel):
-    """验证模型配置请求"""
-    model_name: str = Field(..., description="模型实际名称")
-    provider: ModelProvider = Field(..., description="API Key提供商")
-    api_key: str = Field(..., description="API密钥")
+    """验证模型配置请求（二选一：候选明文凭据 / 既有配置 config_id）"""
+    model_config_id: Optional[uuid.UUID] = Field(
+        None, description="既有模型配置 ID（凭据由服务内解析，与候选凭据字段互斥）"
+    )
+    model_name: Optional[str] = Field(None, description="模型实际名称")
+    provider: Optional[ModelProvider] = Field(None, description="API Key提供商")
+    api_key: Optional[str] = Field(None, description="API密钥")
     api_base: Optional[str] = Field(None, description="API基础URL")
-    model_type: Optional[ModelType] = Field(ModelType.LLM, description="模型类型")
+    model_type: Optional[ModelType] = Field(None, description="模型类型（config_id 模式缺省取配置类型）")
     test_message: Optional[str] = Field("Hello", description="测试消息")
+    input_modalities: Optional[List[str]] = Field(None, description="输入模态（候选模式用；config_id 模式取配置值）")
+    output_modalities: Optional[List[str]] = Field(None, description="输出模态（候选模式用；config_id 模式取配置值）")
+    features: Optional[List[str]] = Field(None, description="能力特征（候选模式用；config_id 模式取配置值）")
+
+    @model_validator(mode="after")
+    def _require_single_mode(self) -> "ModelValidateRequest":
+        if self.model_config_id is not None:
+            conflicts = [name for name in _VALIDATE_CONFLICT_FIELDS if getattr(self, name)]
+            if conflicts:
+                raise ValueError(
+                    f"model_config_id 与 {', '.join(conflicts)} 互斥："
+                    "既有配置的凭据与能力列一律取服务内存储值"
+                )
+            return self
+        missing = [name for name in _VALIDATE_CREDENTIAL_FIELDS if not getattr(self, name)]
+        if missing:
+            raise ValueError(
+                f"需提供 model_config_id（既有配置），"
+                f"或提供候选凭据 model_name/provider/api_key（缺少: {', '.join(missing)}）"
+            )
+        return self
 
 
 class ModelValidateResponse(BaseModel):
@@ -265,6 +297,7 @@ class ModelValidateResponse(BaseModel):
     response: Optional[str] = Field(None, description="模型响应内容")
     elapsed_time: Optional[float] = Field(None, description="响应时间（秒）")
     error: Optional[str] = Field(None, description="错误信息")
+    error_type: Optional[str] = Field(None, description="错误类型（异常类名）")
     usage: Optional[Dict[str, Any]] = Field(None, description="Token使用情况")
 
 
