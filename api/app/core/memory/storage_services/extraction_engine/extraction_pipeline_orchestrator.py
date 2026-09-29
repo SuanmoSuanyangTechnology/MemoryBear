@@ -933,6 +933,7 @@ class NewExtractionOrchestrator:
             "OPINION": StatementType.OPINION,
             "PREDICTION": StatementType.PREDICTION,
             "SUGGESTION": StatementType.SUGGESTION,
+            "OTHER": StatementType.OTHER,
         }
         _TEMPORAL_MAP = {
             "STATIC": TemporalInfo.STATIC,
