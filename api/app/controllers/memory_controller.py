@@ -148,6 +148,8 @@ async def write_server_async(
             config_id=config_id,
             workspace_id=workspace_id_str,
             language=language,
+            storage_type=storage_type,
+            user_rag_memory_id=user_rag_memory_id,
         )
 
         api_logger.info(

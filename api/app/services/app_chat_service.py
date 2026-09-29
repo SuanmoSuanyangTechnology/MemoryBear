@@ -529,6 +529,8 @@ class AppChatService:
                 conversation_id,
                 user_message={"id": user_message_id, "content": message, "meta_data": {"files": []}},
                 assistant_message={"id": message_id, "content": annotation_match["answer"], "meta_data": {"usage": {}}},
+                storage_type=storage_type or "neo4j",
+                user_rag_memory_id=user_rag_memory_id or "",
             )
             elapsed_time = time.time() - start_time
             return {
@@ -1014,6 +1016,8 @@ class AppChatService:
                 conversation_id,
                 user_message={"id": user_message_id, "content": message, "meta_data": human_meta, "should_memorize": memory},
                 assistant_message={"id": message_id, "content": result["content"], "meta_data": assistant_meta, "should_memorize": memory},
+                storage_type=storage_type or "neo4j",
+                user_rag_memory_id=user_rag_memory_id or "",
             )
             if used_context_engine:
                 _ctx_kwargs = dict(
@@ -1135,6 +1139,8 @@ class AppChatService:
                     conversation_id,
                     user_message={"id": user_message_id, "content": message, "meta_data": {"files": []}},
                     assistant_message={"id": message_id, "content": annotation_match["answer"], "meta_data": {"usage": {}}},
+                    storage_type=storage_type or "neo4j",
+                    user_rag_memory_id=user_rag_memory_id or "",
                 )
                 yield f"event: start\ndata: {json.dumps({'conversation_id': str(conversation_id), 'message_id': str(message_id), 'user_message_id': str(user_message_id)}, ensure_ascii=False)}\n\n"
                 yield f"event: message\ndata: {json.dumps({'content': annotation_match['answer'], 'conversation_id': str(conversation_id)}, ensure_ascii=False)}\n\n"
@@ -1675,7 +1681,9 @@ class AppChatService:
                 await self.conversation_service.dispatch_memory_pair(
                     conversation_id,
                     user_message={"id": user_message_id, "content": message, "meta_data": human_meta, "should_memorize": memory},
-                    assistant_message={"id": message_id, "content": full_content, "meta_data": assistant_meta, "should_memorize": True},
+                    assistant_message={"id": message_id, "content": full_content, "meta_data": assistant_meta, "should_memorize": memory},
+                    storage_type=storage_type or "neo4j",
+                    user_rag_memory_id=user_rag_memory_id or "",
                 )
 
                 # Enqueue agent execution after messages so the FK is satisfied

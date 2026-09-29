@@ -1,16 +1,183 @@
 """Fast write pipeline storage integration: Dialogue via save_memory_graph + outbox."""
 
 from datetime import datetime
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
 
+from app.core.memory.enums import StorageType
 from app.core.memory.models.graph_models import DialogueNode
+from app.core.memory.pipelines import dispatcher
 from app.core.memory.storage.enums import BackendType, MemoryNodeType
 from app.core.memory.storage.models import GraphWriteResult
 from app.core.memory.storage.outbox.exceptions import OutboxEnqueueError
 from app.core.memory.storage.provider.factory import BackendFactory
 from app.core.memory.storage.service import MemoryStorageService
+
+
+async def test_rag_storage_does_not_have_fast_write_permission() -> None:
+    assert not await dispatcher.check_fast_write_permission(
+        role="user",
+        should_memorize=True,
+        storage_type="rag",
+    )
+
+
+async def test_neo4j_storage_keeps_fast_write_permission() -> None:
+    assert await dispatcher.check_fast_write_permission(
+        role="user",
+        should_memorize=True,
+        storage_type="neo4j",
+    )
+
+
+async def test_rag_enum_does_not_have_fast_write_permission() -> None:
+    assert not await dispatcher.check_fast_write_permission(
+        role="user",
+        should_memorize=True,
+        storage_type=StorageType.RAG,
+    )
+
+
+async def test_rag_storage_does_not_push_fast_write_task(monkeypatch) -> None:
+    push_fast_write_task = AsyncMock()
+    monkeypatch.setattr(dispatcher, "push_fast_write_task", push_fast_write_task)
+
+    await dispatcher.safe_push_fast_write(
+        role="user",
+        should_memorize=True,
+        storage_type="RAG",
+        end_user_id="end-user-1",
+        target_message={"role": "user", "content": "hello"},
+        config_id="config-1",
+        workspace_id="workspace-1",
+    )
+
+    push_fast_write_task.assert_not_awaited()
+
+
+async def test_rag_agent_write_bypasses_normal_and_fast_dispatch(monkeypatch) -> None:
+    rag_write = AsyncMock()
+    normal_dispatch = AsyncMock()
+    fast_dispatch = AsyncMock()
+    monkeypatch.setattr(dispatcher, "check_memory_enabled", AsyncMock(return_value=True))
+    monkeypatch.setattr(dispatcher, "write_messages_to_rag", rag_write)
+    monkeypatch.setattr(dispatcher, "check_sliding_window_and_dispatch", normal_dispatch)
+    monkeypatch.setattr(dispatcher, "safe_push_fast_write", fast_dispatch)
+    messages = [
+        SimpleNamespace(role="user", content="remember me", should_memorize=True),
+        SimpleNamespace(role="assistant", content="okay", should_memorize=True),
+    ]
+
+    result = await dispatcher.ingest_agent_messages(
+        conversation_id="conversation-1",
+        messages=messages,
+        app_id="app-1",
+        end_user_id="end-user-1",
+        storage_type="rag",
+        user_rag_memory_id="knowledge-1",
+    )
+
+    assert result is True
+    rag_write.assert_awaited_once_with(
+        messages=messages,
+        end_user_id="end-user-1",
+        user_rag_memory_id="knowledge-1",
+    )
+    normal_dispatch.assert_not_awaited()
+    fast_dispatch.assert_not_awaited()
+
+
+async def test_rag_workflow_write_bypasses_normal_and_fast_dispatch(monkeypatch) -> None:
+    rag_write = AsyncMock()
+    normal_dispatch = AsyncMock()
+    fast_dispatch = AsyncMock()
+    monkeypatch.setattr(dispatcher, "write_messages_to_rag", rag_write)
+    monkeypatch.setattr(dispatcher, "check_sliding_window_and_dispatch", normal_dispatch)
+    monkeypatch.setattr(dispatcher, "safe_push_fast_write", fast_dispatch)
+    messages = [
+        {"role": "user", "content": "remember me", "should_memorize": True},
+        {"role": "assistant", "content": "okay", "should_memorize": True},
+    ]
+
+    await dispatcher.ingest_workflow_messages(
+        messages=messages,
+        conversation_id="conversation-1",
+        end_user_id="end-user-1",
+        config_id="config-1",
+        workspace_id="workspace-1",
+        storage_type="rag",
+        user_rag_memory_id="knowledge-1",
+    )
+
+    rag_write.assert_awaited_once_with(
+        messages=messages,
+        end_user_id="end-user-1",
+        user_rag_memory_id="knowledge-1",
+    )
+    normal_dispatch.assert_not_awaited()
+    fast_dispatch.assert_not_awaited()
+
+
+async def test_rag_api_write_bypasses_normal_and_fast_dispatch(monkeypatch) -> None:
+    rag_write = AsyncMock()
+    normal_dispatch = AsyncMock()
+    fast_dispatch = AsyncMock()
+    monkeypatch.setattr(dispatcher, "write_messages_to_rag", rag_write)
+    monkeypatch.setattr(dispatcher, "push_write_task", normal_dispatch)
+    monkeypatch.setattr(dispatcher, "safe_push_fast_write", fast_dispatch)
+    messages = [{"role": "user", "content": "remember me"}]
+
+    task_ids = await dispatcher.dispatch_api_service_async(
+        messages=messages,
+        end_user_id="end-user-1",
+        config_id="config-1",
+        workspace_id="workspace-1",
+        storage_type="rag",
+        user_rag_memory_id="knowledge-1",
+    )
+
+    assert task_ids == []
+    rag_write.assert_awaited_once_with(
+        messages=messages,
+        end_user_id="end-user-1",
+        user_rag_memory_id="knowledge-1",
+    )
+    normal_dispatch.assert_not_awaited()
+    fast_dispatch.assert_not_awaited()
+
+
+async def test_rag_mcp_write_bypasses_normal_and_fast_dispatch(monkeypatch) -> None:
+    rag_write = AsyncMock()
+    normal_dispatch = AsyncMock()
+    fast_dispatch = AsyncMock()
+    monkeypatch.setattr(dispatcher, "write_messages_to_rag", rag_write)
+    monkeypatch.setattr(dispatcher, "push_write_task", normal_dispatch)
+    monkeypatch.setattr(dispatcher, "safe_push_fast_write", fast_dispatch)
+
+    task_id = await dispatcher.dispatch_mcp_write(
+        message="remember me",
+        end_user_id="end-user-1",
+        config_id="config-1",
+        workspace_id="workspace-1",
+        storage_type="rag",
+        user_rag_memory_id="knowledge-1",
+        dialog_at="2026-09-23T00:00:00+00:00",
+    )
+
+    assert task_id == ""
+    rag_write.assert_awaited_once_with(
+        messages=[{
+            "role": "user",
+            "content": "remember me",
+            "dialog_at": "2026-09-23T00:00:00+00:00",
+        }],
+        end_user_id="end-user-1",
+        user_rag_memory_id="knowledge-1",
+    )
+    normal_dispatch.assert_not_awaited()
+    fast_dispatch.assert_not_awaited()
 
 
 def _dialogue_node() -> DialogueNode:

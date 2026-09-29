@@ -2625,10 +2625,6 @@ def write_message_task(
         skip_cursor_advance: bool = False,
         dispatch_at: str = "",  # 任务执行时间
         source: str = "",  # 写入来源（agent/service_api/mcp/workflow）
-        # MCP 入口兼容字段（不经过 memory_messages 表，直接写入）
-        messages: Optional[List[dict]] = None,
-        storage_type: str = "neo4j",
-        user_rag_memory_id: str = "",
 ) -> Dict[str, Any]:
     """统一写入任务 — 纯净入口，接收完整参数直接写入。
 
@@ -2644,21 +2640,11 @@ def write_message_task(
         language: 语言
         skip_cursor_advance: 是否跳过 cursor 推进（MCP 等直接写入路径）
         dispatch_at: 任务派发时刻的 UTC ISO 8601 时间戳，由 push_write_task 自动注入
-        messages: MCP 入口兼容字段，单条消息列表 [{"role", "content", "dialog_at"}]
-        storage_type: MCP 入口兼容字段，存储类型（neo4j / rag）
-        user_rag_memory_id: MCP 入口兼容字段，RAG 记忆 ID
 
     Returns:
         Dict containing status, result, elapsed_time, task_id
     """
     loop = set_asyncio_event_loop()
-    # MCP 入口兼容：收到 messages 但无 target_message 时，转换为新格式
-    if target_message is None and messages:
-        msg = messages[0] if messages else {"role": "user", "content": ""}
-        target_message = msg
-        context_before = []
-        context_after = []
-        skip_cursor_advance = True
 
     # 解析 end_user_id：若排队期间用户已被合并，自动路由到目标用户
     resolved_end_user_id = end_user_id
@@ -2679,27 +2665,7 @@ def write_message_task(
             f"falling back to original ID"
         )
 
-    # RAG 存储类型走独立路径
-    if storage_type and storage_type.lower() == "rag":
-        try:
-            async def _rag_write():
-                from app.core.memory.memory_service import MemoryService
-                await MemoryService.write_messages_to_rag(
-                    messages=messages,
-                    end_user_id=resolved_end_user_id,
-                    user_rag_memory_id=user_rag_memory_id,
-                )
-
-            loop.run_until_complete(_rag_write())
-            return {"status": "SUCCESS", "result": "rag_write_complete", "task_id": self.request.id}
-        except Exception as e:
-            logger.error(f"[CELERY WRITE] RAG write failed: {e}", exc_info=True)
-            return {"status": "FAILURE", "error": str(e), "task_id": self.request.id}
-        finally:
-            if loop:
-                _shutdown_loop_gracefully(loop)
-
-    # 新格式：直接调用 MemoryService.write()
+    # 调用 Neo4j MemoryService.write()；RAG 已在 dispatcher 层完成分流。
     logger.info(
         f"[CELERY WRITE] Starting - end_user_id={resolved_end_user_id}, "
         f"config_id={config_id}, conv={conversation_id or '-'}, "
