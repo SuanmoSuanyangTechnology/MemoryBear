@@ -23,7 +23,7 @@ Classes:
 
 import re
 from datetime import datetime, timezone
-from typing import Any, List, Literal, Optional
+from typing import List, Literal, Optional
 from uuid import uuid4
 
 from app.core.memory.utils.alias_utils import validate_aliases
@@ -759,8 +759,8 @@ class PreferenceNode(BaseModel):
     preference_text: list[str]
     preference_text_all: str | None = None
     status: Literal["active", "inactive"] = "active"
-    created_at: Any | None = None
-    updated_at: Any | None = None
+    created_at: datetime
+    updated_at: datetime
 
     @model_validator(mode="after")
     def validate_aligned_items(self):
