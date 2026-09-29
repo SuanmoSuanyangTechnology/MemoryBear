@@ -31,7 +31,7 @@ class ModelClientPool:
         if self._clients is None:
             timeout = httpx.Timeout(
                 timeout=self._options.timeout_s,
-                connect=60.0,
+                connect=min(self._options.timeout_s, 60.0),
                 read=self._options.timeout_s,
                 write=60.0,
                 pool=10.0,

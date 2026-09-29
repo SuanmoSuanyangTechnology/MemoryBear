@@ -7,13 +7,15 @@
 
 宿主门面走 pair 入口：`FailoverPlan`（入口快照 + 密文候选链）→ `run_failover_plan`；
 单 config + 渠道链形状保留为兼容口（`run_with_channel_fallback`，membranes 组合编排
-成员传 `model_name` 锚点）。流式"产出前失败才整体重试"由宿主在 invoke 回调内
-eager 拉首块实现（首块产出后不再进入本编排）。
+成员传 `model_name` 锚点）。流式走 `run_failover_plan_stream{,_async}`：invoke 返回
+惰性迭代器，本模块在候选循环内 eager 拉首块——首块前失败照常换渠道/同渠道重试，
+首块产出即锁定（其后失败由消费方透传为终态）。
 """
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Sequence
+import itertools
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator, Sequence
 from dataclasses import dataclass
 from typing import Generic, TypeVar
 from uuid import UUID
@@ -340,6 +342,89 @@ async def run_failover_plan_async(
         tenant_id=plan.tenant_id,
         cipher=cipher,
         invoke=invoke,
+        is_candidate_available=is_candidate_available,
+        max_attempts_per_channel=max_attempts_per_channel,
+    )
+
+
+def open_stream(call: Callable[[], Iterator[R]]) -> Iterator[R]:
+    """打开候选流并 eager 拉首块：产出前失败留在编排内（可换渠道），空流 → 空迭代器。
+
+    首块产出后不再由编排接管：其后失败对消费方是终态错误，不换候选（避免重复输出）。
+    """
+    iterator = iter(call())
+    try:
+        first = next(iterator)
+    except StopIteration:
+        return iter(())
+    return itertools.chain((first,), iterator)
+
+
+async def open_astream(call: Callable[[], AsyncIterator[R]]) -> AsyncIterator[R]:
+    """open_stream 的 async 态：**必须 await**（await 时完成首块拉取），返回值才是异步迭代器。
+
+    刻意不写成异步生成器（`async def ... yield`）——那会把首块拉取推迟到消费方首次
+    `__anext__`，落在候选循环之外，换渠道与同渠道重试全部失效。
+    """
+    iterator = call().__aiter__()
+    try:
+        first = await iterator.__anext__()
+    except StopAsyncIteration:
+        return _empty_astream()
+    return _chained_astream(first, iterator)
+
+
+async def _chained_astream(first: R, rest: AsyncIterator[R]) -> AsyncIterator[R]:
+    yield first
+    async for chunk in rest:
+        yield chunk
+
+
+async def _empty_astream() -> AsyncIterator[R]:
+    return
+    yield  # pragma: no cover - 使函数成为空异步生成器
+
+
+def run_failover_plan_stream(
+    plan: FailoverPlan,
+    *,
+    cipher: CredentialCipher,
+    invoke: Callable[[ResolvedModelConfig], Iterator[R]],
+    is_candidate_available: Callable[[FailoverCandidate], bool] | None = None,
+    max_attempts_per_channel: int = 3,
+) -> FallbackOutcome[Iterator[R]]:
+    """run_failover_plan 的流式形态：invoke 返回惰性迭代器，本入口在候选循环内 eager 拉首块。
+
+    首块前失败（含 call() 自身抛错）走与非流式完全相同的归类：瞬时网络 → 同候选重试、
+    可换渠道/解密失败 → 顺延下一候选、terminal/不可分类 → 原样透传。首块产出后本编排
+    交棒。attempts/switched/resolved/failures 归因与非流式逐字段一致。
+    """
+    return run_failover_plan(
+        plan,
+        cipher=cipher,
+        invoke=lambda resolved: open_stream(lambda: invoke(resolved)),
+        is_candidate_available=is_candidate_available,
+        max_attempts_per_channel=max_attempts_per_channel,
+    )
+
+
+async def run_failover_plan_stream_async(
+    plan: FailoverPlan,
+    *,
+    cipher: CredentialCipher,
+    invoke: Callable[[ResolvedModelConfig], AsyncIterator[R]],
+    is_candidate_available: Callable[[FailoverCandidate], bool] | None = None,
+    max_attempts_per_channel: int = 3,
+) -> FallbackOutcome[AsyncIterator[R]]:
+    """run_failover_plan_stream 的 async 态（候选循环的 await 内完成首块拉取）。
+
+    invoke 为普通可调用、返回惰性异步迭代器（两形态一致）。勿写成 `async def`：协程
+    没有 `__aiter__`，会在拉首块处直接 AttributeError——需要惰性求值而非先建后传。
+    """
+    return await run_failover_plan_async(
+        plan,
+        cipher=cipher,
+        invoke=lambda resolved: open_astream(lambda: invoke(resolved)),
         is_candidate_available=is_candidate_available,
         max_attempts_per_channel=max_attempts_per_channel,
     )
