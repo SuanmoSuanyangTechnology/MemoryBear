@@ -376,6 +376,7 @@ class KnowledgeServiceClient:
             if payload is not None
             else None
         )
+        started_at = time.perf_counter()
         upstream = await self._transport.send(
             method=method.upper(),
             url=url,
@@ -383,7 +384,7 @@ class KnowledgeServiceClient:
             profile=CallProfile.JSON,
             content=content,
         )
-        started_at = time.perf_counter()
+        headers_at = time.perf_counter()
         try:
             raw = await upstream.aread()
         except httpx.TimeoutException as exc:
@@ -414,13 +415,14 @@ class KnowledgeServiceClient:
         envelope["time"] = int(time.time() * 1000)
         logger.info(
             "knowledge_detached_call_completed method=%s path=%s status=%s code=%s "
-            "source=%s bytes=%s elapsed_ms=%.2f trace_id=%s",
+            "source=%s bytes=%s header_ms=%.2f elapsed_ms=%.2f trace_id=%s",
             method.upper(),
             path,
             upstream.status_code,
             code,
             context.source.value,
             len(raw),
+            (headers_at - started_at) * 1000,
             (time.perf_counter() - started_at) * 1000,
             trace_id,
         )
