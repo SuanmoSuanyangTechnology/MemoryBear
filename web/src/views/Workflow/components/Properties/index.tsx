@@ -133,7 +133,7 @@ const Properties: FC<PropertiesProps> = ({
     if (values && selectedNode) {
       const nodeData = selectedNode.getData()
       const { id, knowledge_retrieval, group, group_variables, ...rest } = values
-      const { knowledge_bases = [], name: _name, description: _description, ...restKnowledgeConfig } = (knowledge_retrieval as any) || {}
+      const { knowledge_bases = [], name: _name, description: _description, query: _query, image_query: _imageQuery, ...restKnowledgeConfig } = (knowledge_retrieval as any) || {}
 
       let allRest = {
         ...rest,
@@ -144,7 +144,7 @@ const Properties: FC<PropertiesProps> = ({
           id: vo.id,
           ...vo.config
         }))
-      } else if (nodeData.type === 'knowledge-retrieval') {
+      } else if (nodeData?.type === 'knowledge-retrieval') {
         allRest.knowledge_bases = []
       }
 
@@ -155,9 +155,14 @@ const Properties: FC<PropertiesProps> = ({
           if (!nodeData.config[key]) {
             nodeData.config[key] = {};
           }
+          let nextValue = values[key]
+          if (nodeData.type === 'knowledge-retrieval' && key === 'knowledge_retrieval' && nextValue && typeof nextValue === 'object') {
+            const { query: _query, image_query: _imageQuery, ...restKnowledge } = nextValue
+            nextValue = restKnowledge
+          }
           nodeData.config[key] = {
             ...nodeData.config[key],
-            defaultValue: values[key]
+            defaultValue: nextValue
           };
         }
       })
