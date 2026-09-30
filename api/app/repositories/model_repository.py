@@ -264,22 +264,11 @@ class ModelConfigRepository:
             if filters:
                 base_query = base_query.filter(and_(*filters))
 
-            # is_available 过滤需探测派生（SQL 不可达）：全量取行，过滤+分页由服务层内存完成
-            if query.is_available is not None:
-                models = base_query.order_by(*_model_config_display_order()).all()
-                db_logger.debug(f"模型配置列表全量查询（is_available 过滤）: 行数={len(models)}")
-                return models, len(models)
+            # 不分页，全量取行（is_available 过滤需探测派生，由服务层内存完成）
+            models = base_query.order_by(*_model_config_display_order()).all()
 
-            # 获取总数
-            total = base_query.count()
-
-            # 分页查询
-            models = base_query.order_by(*_model_config_display_order()).offset(
-                (query.page - 1) * query.pagesize
-            ).limit(query.pagesize).all()
-
-            db_logger.debug(f"模型配置列表查询成功: 总数={total}, 当前页={len(models)}, type筛选={query.type}")
-            return models, total
+            db_logger.debug(f"模型配置列表查询成功: 行数={len(models)}, type筛选={query.type}")
+            return models, len(models)
 
         except Exception as e:
             db_logger.error(f"查询模型配置列表失败: {str(e)}")

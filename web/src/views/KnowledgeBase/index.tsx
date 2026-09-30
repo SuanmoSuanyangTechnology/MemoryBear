@@ -214,12 +214,12 @@ const KnowledgeBaseManagement: FC = () => {
     }))
   }
   const fetchModelList = () => { 
-    getModelList({ page: 1, pagesize: 100 })
+    getModelList()
       .then(res => {
-        const response = res as { items: Model[] }
-        if (response?.items && Array.isArray(response.items)) {
+        const response = res as Model[] || []
+        if (Array.isArray(response)) {
           const cache: Record<string, Model> = {};
-          response.items.forEach((model: any) => {
+          response.forEach((model: any) => {
             if (model.id && model.name) {
               cache[model.id] = model;
             }

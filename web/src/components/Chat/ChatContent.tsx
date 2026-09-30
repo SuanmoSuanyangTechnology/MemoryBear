@@ -69,7 +69,11 @@ const ChatContent: FC<ChatContentProps> = ({
     setManualToggledReasoning(prev => new Set(prev).add(index))
     setExpandedReasoning(prev => {
       const next = new Set(prev)
-      next.has(index) ? next.delete(index) : next.add(index)
+      if (next.has(index)) {
+        next.delete(index)
+      } else {
+        next.add(index)
+      }
       return next
     })
   }
@@ -79,7 +83,11 @@ const ChatContent: FC<ChatContentProps> = ({
     setManualToggledInterventions(prev => new Set(prev).add(key))
     setExpandedInterventions(prev => {
       const next = new Set(prev)
-      next.has(key) ? next.delete(key) : next.add(key)
+      if (next.has(key)) {
+        next.delete(key)
+      } else {
+        next.add(key)
+      }
       return next
     })
   }
@@ -164,6 +172,19 @@ const ChatContent: FC<ChatContentProps> = ({
   }, [data])
 
   const handleDownload = (file: any) => {
+    if (file.thumbUrl || file.originFileObj) {
+      const url = getFileUrl(file)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = file.name
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      if (!file.thumbUrl && !file.url && file.originFileObj) {
+        setTimeout(() => URL.revokeObjectURL(url), 1000)
+      }
+      return
+    }
     window.open(getFileUrl(file), '_blank')
   }
   const onFormSubmit = (values: Record<string, any>) => {

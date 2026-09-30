@@ -51,7 +51,7 @@ class StatementStepOutput(BaseModel):
 
     statement_id: str
     statement_text: str
-    statement_type: str   # FACT / OPINION / PREDICTION / SUGGESTION
+    statement_type: str   # FACT / OPINION / OTHER
     temporal_type: str    # STATIC / DYNAMIC / ATEMPORAL
     # relevance: str        # RELEVANT / IRRELEVANT
     speaker: str          # "user" / "assistant"

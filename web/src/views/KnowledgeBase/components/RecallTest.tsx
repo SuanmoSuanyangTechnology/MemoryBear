@@ -16,7 +16,6 @@ import type {
   RetrievalPolicy,
 } from '@/views/KnowledgeBase/types';
 import { getRetrievalModeType, reChunks, retrievalPolicyApi } from '@/api/knowledgeBase';
-import ModelSelect from '@/components/ModelSelect';
 import WeightBalanceSlider from '@/components/Knowledge/WeightBalanceSlider';
 import RecallImageUpload from './RecallImageUpload';
 import RecallTestResult from './RecallTestResult';
@@ -161,7 +160,6 @@ const RecallTest = () => {
         vector_similarity_weight,
         top_k,
         enable_graph_retrieval,
-        reranker_id,
         rerank_weights,
       }) => {
         const hasQuery = typeof query === 'string' && query.trim().length > 0;
@@ -192,7 +190,7 @@ const RecallTest = () => {
             ? {
                 rerank_mode,
                 ...(rerank_mode === 'reranking_model'
-                  ? { reranker_id }
+                  ? {}
                   : { rerank_weights  }
                 ),
               }
@@ -210,7 +208,6 @@ const RecallTest = () => {
       form.setFieldsValue({ rerank_weights: undefined, enable_graph_retrieval: 0 });
     } else if (value === 'weighted_score') {
       form.setFieldsValue({
-        reranker_id: undefined,
         rerank_weights: { semantic_weight: 0.7, participle_weight: 0.3 },
         enable_graph_retrieval: 0,
       });
@@ -295,16 +292,6 @@ const RecallTest = () => {
                       placeholder={t('common.pleaseSelect')}
                       onChange={(value) => handleChangeRerankMode(value)}
                     />
-                  </Form.Item>
-                </div>
-                <div className={formValues.rerank_mode !== 'reranking_model' ? 'rb:hidden' : ''}>
-                  <Form.Item
-                    name="reranker_id"
-                    label={t('application.rearrangementModel')}
-                    className="rb:col-span-full rb:mb-0!"
-                    hidden={formValues.rerank_mode !== 'reranking_model'}
-                  >
-                    <ModelSelect params={{ type: 'rerank', pagesize: 100 }} />
                   </Form.Item>
                 </div>
 
