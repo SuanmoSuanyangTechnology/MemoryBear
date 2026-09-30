@@ -111,5 +111,23 @@ def get_knowledge_route_proxy() -> KnowledgeRouteProxy | None:
     return _runtime.route_proxy
 
 
+def get_knowledge_service_client() -> "KnowledgeServiceClient":
+    """Detached client for in-process callers without an inbound Request.
+
+    Raises KnowledgeConfigurationError when the remote knowledge integration
+    is disabled, so callers fail fast instead of silently falling back to the
+    legacy in-process controllers.
+    """
+
+    from .client import KnowledgeServiceClient
+
+    proxy = _runtime.route_proxy
+    if not isinstance(proxy, KnowledgeServiceClient):
+        raise KnowledgeConfigurationError(
+            "Remote knowledge service integration is not enabled"
+        )
+    return proxy
+
+
 async def is_remote_knowledge_ready() -> bool:
     return await _runtime.ready()
