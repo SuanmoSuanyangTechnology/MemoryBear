@@ -12,8 +12,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
+from ..errors import KnowledgeError
 from ..models.owned import (
     FILE_ROLE_DERIVED_IMAGE,
     FILE_ROLE_SOURCE,
@@ -31,6 +32,7 @@ from ..runtime import ProcessRuntime
 from ..tasks.dispatch import TaskDispatcher
 from ..tasks.observability import BusinessOutcome, TaskRun
 from ..utils.datetime_utils import utcnow_naive
+from . import document as document_service
 from .knowledge_file_storage import KnowledgeFileStorage, generate_kb_file_key
 
 logger = logging.getLogger(__name__)
@@ -420,24 +422,43 @@ def _snapshot_stale_files(
         return tuple(stale)
 
 
-def _delete_stale_records(
+async def _prepare_stale_document_deletion(
     runtime: ProcessRuntime,
-    stale_files: tuple[_StaleFileSnapshot, ...],
+    kb_id: uuid.UUID,
+    parser_config: dict[str, Any],
+    stale: _StaleFileSnapshot,
+) -> document_service.DocumentDeletionSnapshot:
+    async with runtime.database.async_session() as db:
+        return await document_service.begin_document_deletion(
+            db,
+            stale.document_id,
+            kb_id,
+            parser_config,
+            source_file_id=stale.file.id,
+        )
+
+
+async def _persist_stale_deletion(
+    runtime: ProcessRuntime,
+    snapshot: document_service.DocumentDeletionSnapshot | None,
+    stale: _StaleFileSnapshot,
 ) -> None:
-    with runtime.database.sync_session() as session:
-        for stale in stale_files:
-            if stale.document_id is not None:
-                document = session.get(Document, stale.document_id)
-                if document is not None:
-                    session.delete(document)
-            for derived in stale.derived_files:
-                record = session.get(File, derived.id)
-                if record is not None:
-                    session.delete(record)
-            record = session.get(File, stale.file.id)
-            if record is not None:
-                session.delete(record)
-        session.commit()
+    async with runtime.database.async_session() as db:
+        if snapshot is not None:
+            await document_service.delete_document_records(db, snapshot)
+        else:
+            try:
+                await db.execute(
+                    delete(File).where(
+                        File.id == stale.file.id,
+                        File.kb_id == stale.file.kb_id,
+                        File.file_role == FILE_ROLE_SOURCE,
+                    )
+                )
+                await db.commit()
+            except Exception:
+                await db.rollback()
+                raise
 
 
 def _delete_stale_files(
@@ -448,25 +469,39 @@ def _delete_stale_files(
     stale_files = _snapshot_stale_files(runtime, kb_id, current_urls)
     if not stale_files:
         return 0
+    knowledge = _load_knowledge(runtime, kb_id)
+    if knowledge is None:
+        raise KnowledgeError.from_code("KB_KNOWLEDGE_NOT_FOUND")
     storage = KnowledgeFileStorage(runtime.storage)
     vector_store = TaskVectorStore(runtime.elasticsearch.sync_client(), kb_id, None)
+    deleted_count = 0
     for stale in stale_files:
+        snapshot = None
+        keys = (stale.file.file_key,) if stale.file.file_key else ()
         if stale.document_id is not None:
-            vector_store.delete_by_metadata_field(
-                "document_id",
-                str(stale.document_id),
+            snapshot = runtime.run_async(
+                lambda item=stale: _prepare_stale_document_deletion(
+                    runtime,
+                    kb_id,
+                    knowledge.parser_config,
+                    item,
+                )
             )
-        for record in (*stale.derived_files, stale.file):
-            if record.file_key:
-                try:
-                    runtime.run_async(lambda key=record.file_key: storage.delete(key))
-                except Exception as exc:
-                    logger.warning(
-                        "Failed to delete synchronized storage object: "
-                        "file=%s error_type=%s",
-                        record.id,
-                        type(exc).__name__,
-                    )
+            snapshot = runtime.run_async(
+                lambda planned=snapshot: document_service.wait_for_document_assets(runtime, planned)
+            )
+            keys = snapshot.storage_keys
+            vector_store.delete_by_metadata_field("document_id", str(stale.document_id))
+        for key in dict.fromkeys(keys):
+            try:
+                runtime.run_async(lambda key=key: storage.delete(key))
+            except Exception as exc:
+                logger.warning(
+                    "Failed to delete synchronized storage object: file=%s error_type=%s",
+                    stale.file.id,
+                    type(exc).__name__,
+                )
+                raise KnowledgeError.from_code("KB_STORAGE_UNAVAILABLE") from exc
         parent_id = stale.file.parent_id or stale.file.kb_id
         legacy_path = _legacy_file_path(
             runtime,
@@ -477,8 +512,11 @@ def _delete_stale_files(
         )
         if legacy_path.exists():
             legacy_path.unlink()
-    _delete_stale_records(runtime, stale_files)
-    return len(stale_files)
+        runtime.run_async(
+            lambda planned=snapshot, item=stale: _persist_stale_deletion(runtime, planned, item)
+        )
+        deleted_count += 1
+    return deleted_count
 
 
 def _sync_web(

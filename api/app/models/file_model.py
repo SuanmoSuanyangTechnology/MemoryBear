@@ -37,3 +37,6 @@ class File(Base):
         comment="documents.id for a derived image asset",
     )
     created_at = Column(DateTime, default=utcnow_naive)
+    asset_write_state = Column(
+        String(32), nullable=True, comment="Derived asset IO state; NULL means legacy ready"
+    )

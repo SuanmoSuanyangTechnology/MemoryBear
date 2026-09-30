@@ -143,6 +143,8 @@ def _load_snapshot(
         document = session.get(Document, document_id)
         if document is None:
             raise ValueError(f"Document {document_id} not found")
+        if document.deletion_started_at is not None:
+            raise _ParseAborted
         knowledge = session.get(Knowledge, document.kb_id)
         if knowledge is None:
             raise ValueError(f"Knowledge {document.kb_id} not found")
@@ -194,10 +196,10 @@ def _update_document(
     updater,
 ) -> bool:
     with runtime.database.sync_session() as session:
-        document = session.get(Document, document_id)
-        if document is None:
+        document = session.get(Document, document_id, with_for_update=True)
+        if document is None or document.deletion_started_at is not None:
             logger.warning(
-                "Document missing while updating parse state: document=%s",
+                "Document unavailable for parse state update: document=%s",
                 document_id,
             )
             return False
@@ -221,7 +223,8 @@ def _clear_parse_state(runtime: ProcessRuntime, document_id: object) -> None:
 
 def _document_exists(runtime: ProcessRuntime, document_id: uuid.UUID) -> bool:
     with runtime.database.sync_session() as session:
-        return session.get(Document, document_id) is not None
+        document = session.get(Document, document_id)
+        return document is not None and document.deletion_started_at is None
 
 
 def _should_abort(runtime: ProcessRuntime, document_id: uuid.UUID) -> bool:
@@ -244,7 +247,7 @@ def _should_abort(runtime: ProcessRuntime, document_id: uuid.UUID) -> bool:
             document_id,
             type(exc).__name__,
         )
-    return False
+    return not _document_exists(runtime, document_id)
 
 
 def _download_file(runtime: ProcessRuntime, file_key: str) -> bytes:

@@ -43,6 +43,9 @@ class Document(Base):
     process_duration = Column(Float, default=0)
     run = Column(Integer, default=0, comment="start to run processing or cancel.(1: run it; 2: cancel)")
     status = Column(Integer, default=1, comment="is it validate(0: wasted, 1: validate)")
+    deletion_started_at = Column(
+        DateTime, nullable=True, comment="Naive UTC deletion intent; NULL allows parsing"
+    )
     created_at = Column(DateTime, default=utcnow_naive)
     updated_at = Column(DateTime, default=utcnow_naive)
 

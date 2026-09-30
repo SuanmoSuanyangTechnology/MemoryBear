@@ -214,6 +214,12 @@ class KnowledgeSettings(BaseSettings):
         "qa_import_worker",
     ] = Field(default="api", validation_alias="KB_PROCESS_ROLE")
     kb_log_level: str = Field(default="INFO", validation_alias="KB_LOG_LEVEL")
+    kb_document_asset_delete_wait_timeout_ms: int = Field(
+        default=5000,
+        gt=0,
+        validation_alias="KB_DOCUMENT_ASSET_DELETE_WAIT_TIMEOUT_MS",
+        description="Maximum wait for in-flight derived asset IO during deletion, in milliseconds",
+    )
     kb_db_pool_size: int = Field(
         default=20,
         ge=1,

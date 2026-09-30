@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -22,6 +24,7 @@ from ..models.owned import (
     File,
     KnowledgeMetadataBinding,
 )
+from ..models.owned.file import ASSET_WRITE_BUSY_STATES
 from ..rag.knowledge_graph import (
     GraphPipeline,
     GraphPipelineConfigError,
@@ -47,6 +50,7 @@ PARSE_CANCEL_KEY = "doc:{doc_id}:parse_cancel"
 PARSE_TASK_TTL = 7200
 PARSE_CANCEL_TTL = 60
 PARSE_TASK_NAME = "app.core.rag.tasks.parse_document"
+_ASSET_DELETE_POLL_INTERVAL_SECONDS = 0.1
 
 _COMPARE_AND_DELETE = """
 if redis.call('get', KEYS[1]) == ARGV[1] then
@@ -221,6 +225,20 @@ async def apply_document_update(
     document = await get_document(db, plan.document_id, principal, plan.knowledge_id)
     if document is None:
         raise KnowledgeError.from_code("KB_DOCUMENT_NOT_FOUND")
+    locked = await db.execute(
+        select(Document)
+        .where(
+            Document.id == plan.document_id,
+            Document.kb_id == plan.knowledge_id,
+        )
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    document = locked.scalar_one_or_none()
+    if document is None:
+        raise KnowledgeError.from_code("KB_DOCUMENT_NOT_FOUND")
+    if document.deletion_started_at is not None:
+        raise KnowledgeError.from_code("KB_CONFLICT")
     knowledge = await knowledge_service.get_knowledge(db, plan.knowledge_id, principal)
     if knowledge is None:
         raise KnowledgeError.from_code("KB_KNOWLEDGE_NOT_FOUND")
@@ -343,22 +361,34 @@ async def _persist_parse_dispatch_state(
     state: str,
 ) -> None:
     async with runtime.database.async_session() as db:
-        document = await db.get(Document, document_id)
-        if document is None:
-            raise ValueError(f"Document {document_id} not found while updating dispatch state")
-        timestamp = to_iso_z(utcnow())
-        if state == "queued":
-            document.progress = 0.0
-            document.progress_msg = f"{timestamp} Queued.\n"
-            document.process_duration = 0.0
-            document.run = 0
-        elif state == "failed":
-            document.progress = -1.0
-            document.progress_msg = f"{timestamp} Task dispatch failed.\n"
-            document.run = 0
-        else:
-            raise ValueError(f"Unsupported parse dispatch state: {state}")
-        await db.commit()
+        try:
+            result = await db.execute(
+                select(Document)
+                .where(Document.id == document_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+            document = result.scalar_one_or_none()
+            if document is None:
+                raise ValueError(f"Document {document_id} not found while updating dispatch state")
+            if document.deletion_started_at is not None:
+                raise KnowledgeError.from_code("KB_CONFLICT")
+            timestamp = to_iso_z(utcnow())
+            if state == "queued":
+                document.progress = 0.0
+                document.progress_msg = f"{timestamp} Queued.\n"
+                document.process_duration = 0.0
+                document.run = 0
+            elif state == "failed":
+                document.progress = -1.0
+                document.progress_msg = f"{timestamp} Task dispatch failed.\n"
+                document.run = 0
+            else:
+                raise ValueError(f"Unsupported parse dispatch state: {state}")
+            await db.commit()
+        except Exception:
+            await db.rollback()
+            raise
 
 
 async def claim_and_dispatch_parse(
@@ -423,6 +453,53 @@ async def prepare_document_deletion(
     if knowledge is None:
         raise KnowledgeError.from_code("KB_KNOWLEDGE_NOT_FOUND")
 
+    return await begin_document_deletion(
+        db,
+        document_id,
+        document.kb_id,
+        dict(knowledge.parser_config or {}),
+    )
+
+
+async def begin_document_deletion(
+    db: AsyncSession,
+    document_id: uuid.UUID,
+    knowledge_id: uuid.UUID,
+    parser_config: dict[str, Any],
+    *,
+    source_file_id: uuid.UUID | None = None,
+) -> DocumentDeletionSnapshot:
+    """Start deletion after caller authorization or a scoped sync-worker snapshot."""
+    locked = await db.execute(
+        select(Document)
+        .where(
+            Document.id == document_id,
+            Document.kb_id == knowledge_id,
+        )
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    document = locked.scalar_one_or_none()
+    if document is None:
+        raise KnowledgeError.from_code("KB_DOCUMENT_NOT_FOUND")
+    if source_file_id is not None and document.file_id != source_file_id:
+        raise KnowledgeError.from_code("KB_CONFLICT")
+    try:
+        if document.deletion_started_at is None:
+            document.deletion_started_at = utcnow_naive()
+        snapshot = await _document_deletion_snapshot(db, document, parser_config)
+        await db.commit()
+        return snapshot
+    except Exception:
+        await db.rollback()
+        raise
+
+
+async def _document_deletion_snapshot(
+    db: AsyncSession,
+    document: Document,
+    parser_config: dict[str, Any],
+) -> DocumentDeletionSnapshot:
     file_result = await db.execute(
         select(File).where(File.id == document.file_id, File.kb_id == document.kb_id)
     )
@@ -439,6 +516,7 @@ async def prepare_document_deletion(
     derived_result = await db.execute(
         select(File).where(
             File.source_document_id == document.id,
+            File.kb_id == document.kb_id,
             File.file_role == FILE_ROLE_DERIVED_IMAGE,
         )
     )
@@ -446,10 +524,55 @@ async def prepare_document_deletion(
     return DocumentDeletionSnapshot(
         document_id=document.id,
         knowledge_id=document.kb_id,
-        parser_config=dict(knowledge.parser_config or {}),
+        parser_config=dict(parser_config),
         storage_keys=tuple(file.file_key for file in files if file.file_key),
         file_ids=tuple(file.id for file in files),
     )
+
+
+async def wait_for_document_assets(
+    runtime: ProcessRuntime,
+    snapshot: DocumentDeletionSnapshot,
+) -> DocumentDeletionSnapshot:
+    """Drain registered IO and refresh scalar cleanup evidence with short sessions."""
+    deadline = time.monotonic() + runtime.settings.kb_document_asset_delete_wait_timeout_ms / 1000
+    while True:
+        async with runtime.database.async_session() as db:
+            result = await db.execute(
+                select(File.id, File.file_key, File.asset_write_state).where(
+                    File.source_document_id == snapshot.document_id,
+                    File.kb_id == snapshot.knowledge_id,
+                    File.file_role == FILE_ROLE_DERIVED_IMAGE,
+                )
+            )
+            assets = result.all()
+        if not any(state in ASSET_WRITE_BUSY_STATES for _, _, state in assets):
+            return DocumentDeletionSnapshot(
+                document_id=snapshot.document_id,
+                knowledge_id=snapshot.knowledge_id,
+                parser_config=snapshot.parser_config,
+                storage_keys=tuple(
+                    dict.fromkeys(
+                        [
+                            *snapshot.storage_keys,
+                            *(key for _, key, _ in assets if key),
+                        ]
+                    )
+                ),
+                file_ids=tuple(
+                    dict.fromkeys(
+                        [
+                            *snapshot.file_ids,
+                            *(file_id for file_id, _, _ in assets),
+                        ]
+                    )
+                ),
+            )
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            logger.warning("Document asset deletion timed out: document=%s", snapshot.document_id)
+            raise KnowledgeError.from_code("KB_STORAGE_UNAVAILABLE")
+        await asyncio.sleep(min(_ASSET_DELETE_POLL_INTERVAL_SECONDS, remaining))
 
 
 async def delete_document_records(
@@ -457,8 +580,34 @@ async def delete_document_records(
     snapshot: DocumentDeletionSnapshot,
 ) -> None:
     try:
+        result = await db.execute(
+            select(Document)
+            .where(
+                Document.id == snapshot.document_id,
+                Document.kb_id == snapshot.knowledge_id,
+            )
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        document = result.scalar_one_or_none()
+        if document is not None and document.deletion_started_at is None:
+            raise KnowledgeError.from_code("KB_CONFLICT")
+        busy = await db.execute(
+            select(File.id).where(
+                File.source_document_id == snapshot.document_id,
+                File.kb_id == snapshot.knowledge_id,
+                File.file_role == FILE_ROLE_DERIVED_IMAGE,
+                File.asset_write_state.in_(ASSET_WRITE_BUSY_STATES),
+            )
+        )
+        if busy.first() is not None:
+            raise KnowledgeError.from_code("KB_STORAGE_UNAVAILABLE")
         if snapshot.file_ids:
-            await db.execute(delete(File).where(File.id.in_(snapshot.file_ids)))
+            await db.execute(
+                delete(File).where(
+                    File.id.in_(snapshot.file_ids), File.kb_id == snapshot.knowledge_id
+                )
+            )
         await db.execute(
             delete(KnowledgeMetadataBinding).where(
                 KnowledgeMetadataBinding.document_id == snapshot.document_id
@@ -478,7 +627,8 @@ async def delete_document_resources(
     dispatcher: TaskDispatcher,
     storage: KnowledgeFileStorage,
     delete_search: Callable[[], Awaitable[Any]],
-    delete_records: Callable[[], Awaitable[None]],
+    delete_records: Callable[[DocumentDeletionSnapshot], Awaitable[None]],
+    refresh_assets: Callable[[], Awaitable[DocumentDeletionSnapshot]],
 ) -> None:
     task_key = PARSE_TASK_KEY.format(doc_id=snapshot.document_id)
     task_id = await redis.get(task_key)
@@ -499,16 +649,21 @@ async def delete_document_resources(
         dispatch_legacy=False,
         document_deleted=True,
     )
+    snapshot = await refresh_assets()
     await delete_search()
+    failed = False
     for storage_key in snapshot.storage_keys:
         try:
             await storage.delete(storage_key)
         except Exception:
+            failed = True
             logger.warning(
                 "Failed to delete document storage object: key=%s",
                 storage_key,
             )
-    await delete_records()
+    if failed:
+        raise KnowledgeError.from_code("KB_STORAGE_UNAVAILABLE")
+    await delete_records(snapshot)
 
 
 __all__ = [
@@ -521,6 +676,7 @@ __all__ = [
     "ParseDispatchResult",
     "ParseDocumentSnapshot",
     "apply_document_update",
+    "begin_document_deletion",
     "change_document_status",
     "claim_and_dispatch_parse",
     "create_document",
@@ -533,4 +689,5 @@ __all__ = [
     "list_documents",
     "prepare_document_deletion",
     "prepare_document_update",
+    "wait_for_document_assets",
 ]

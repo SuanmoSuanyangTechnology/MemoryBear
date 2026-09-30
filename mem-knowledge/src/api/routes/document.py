@@ -187,9 +187,9 @@ async def delete_document(
             snapshot.document_id,
         )
 
-    async def delete_records() -> None:
+    async def delete_records(final_snapshot: document_service.DocumentDeletionSnapshot) -> None:
         async with runtime.database.async_session() as db:
-            await document_service.delete_document_records(db, snapshot)
+            await document_service.delete_document_records(db, final_snapshot)
 
     await document_service.delete_document_resources(
         snapshot,
@@ -198,6 +198,7 @@ async def delete_document(
         storage=KnowledgeFileStorage(runtime.storage),
         delete_search=delete_search,
         delete_records=delete_records,
+        refresh_assets=lambda: document_service.wait_for_document_assets(runtime, snapshot),
     )
     return _success(
         request,

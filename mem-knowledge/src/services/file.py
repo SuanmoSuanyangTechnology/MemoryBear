@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..api.dependencies import Principal
@@ -27,6 +27,11 @@ from ..models.owned import (
     Document,
     File,
     Knowledge,
+)
+from ..models.owned.file import (
+    ASSET_WRITE_BUSY_STATES,
+    ASSET_WRITE_CLEANING,
+    ASSET_WRITE_CLEANUP_REQUIRED,
 )
 from ..rag.knowledge_graph import GraphPipelineConfigError
 from ..rag.parser_config import normalize_document_parser_config
@@ -91,6 +96,7 @@ class FileDeletionPlan:
     storage_keys: tuple[str, ...]
     derived_file_ids: tuple[uuid.UUID, ...]
     derived_storage_keys: tuple[str, ...]
+    reserved_asset_ids: tuple[uuid.UUID, ...] = ()
 
 
 def _not_found(code: str = "KB_FILE_NOT_FOUND") -> KnowledgeError:
@@ -342,46 +348,106 @@ async def prepare_file_deletion(
         )
         files.extend(result.scalars().all())
 
-    source_ids = tuple(
-        file.id for file in files if file.file_role == FILE_ROLE_SOURCE
+    source_ids = tuple(file.id for file in files if file.file_role == FILE_ROLE_SOURCE)
+    direct_document_ids = tuple(
+        file.source_document_id
+        for file in files
+        if file.file_role == FILE_ROLE_DERIVED_IMAGE and file.source_document_id is not None
     )
-    document_ids: tuple[uuid.UUID, ...] = ()
-    if source_ids:
-        result = await db.execute(select(Document.id).where(Document.file_id.in_(source_ids)))
-        document_ids = tuple(result.scalars().all())
-    derived_files: list[File] = []
-    if document_ids:
+    try:
+        # Follow the asset writer's lock order: document rows, then image rows.
         result = await db.execute(
-            select(File).where(
-                File.source_document_id.in_(document_ids),
-                File.file_role == FILE_ROLE_DERIVED_IMAGE,
+            select(Document)
+            .where(
+                Document.kb_id == target.kb_id,
+                or_(Document.file_id.in_(source_ids), Document.id.in_(direct_document_ids)),
             )
+            .order_by(Document.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
         )
-        derived_files = list(result.scalars().all())
-    return FileDeletionPlan(
-        file_ids=tuple(file.id for file in files),
-        storage_keys=tuple(file.file_key for file in files if file.file_key),
-        derived_file_ids=tuple(file.id for file in derived_files),
-        derived_storage_keys=tuple(
-            file.file_key for file in derived_files if file.file_key
-        ),
-    )
+        documents = list(result.scalars().all())
+        if any(document.deletion_started_at is not None for document in documents):
+            raise KnowledgeError.from_code("KB_CONFLICT")
+        document_ids = tuple(
+            document.id for document in documents if document.file_id in source_ids
+        )
+        result = await db.execute(
+            select(File)
+            .where(
+                File.id.in_(tuple(file.id for file in files)),
+                File.kb_id == target.kb_id,
+            )
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        files = list(result.scalars().all())
+        derived_files: list[File] = []
+        if document_ids:
+            result = await db.execute(
+                select(File)
+                .where(
+                    File.source_document_id.in_(document_ids),
+                    File.kb_id == target.kb_id,
+                    File.file_role == FILE_ROLE_DERIVED_IMAGE,
+                )
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+            selected_ids = {file.id for file in files}
+            derived_files = [file for file in result.scalars().all() if file.id not in selected_ids]
+        assets = [file for file in files if file.file_role == FILE_ROLE_DERIVED_IMAGE]
+        assets.extend(derived_files)
+        if any(file.asset_write_state in ASSET_WRITE_BUSY_STATES for file in assets):
+            raise KnowledgeError.from_code("KB_CONFLICT")
+        for file in assets:
+            file.asset_write_state = ASSET_WRITE_CLEANING
+        plan = FileDeletionPlan(
+            file_ids=tuple(file.id for file in files),
+            storage_keys=tuple(file.file_key for file in files if file.file_key),
+            derived_file_ids=tuple(file.id for file in derived_files),
+            derived_storage_keys=tuple(file.file_key for file in derived_files if file.file_key),
+            reserved_asset_ids=tuple(file.id for file in assets),
+        )
+        await db.commit()
+        return plan
+    except Exception:
+        await db.rollback()
+        raise
 
 
 async def delete_file_storage(
     storage: KnowledgeFileStorage,
     plan: FileDeletionPlan,
 ) -> None:
-    for file_key in plan.storage_keys:
+    failed = False
+    for file_key in dict.fromkeys((*plan.storage_keys, *plan.derived_storage_keys)):
         try:
             await storage.delete(file_key)
         except Exception:
+            failed = True
             logger.warning("Failed to delete file from storage: %s", file_key)
-    for file_key in plan.derived_storage_keys:
-        try:
-            await storage.delete(file_key)
-        except Exception:
-            logger.warning("Failed to delete derived image: %s", file_key)
+    if failed:
+        raise KnowledgeError.from_code("KB_STORAGE_UNAVAILABLE")
+
+
+async def release_file_deletion(db: AsyncSession, plan: FileDeletionPlan) -> None:
+    """Release occupancy after known-completed IO or a database persistence failure."""
+    try:
+        result = await db.execute(
+            select(File)
+            .where(
+                File.id.in_(plan.reserved_asset_ids),
+                File.asset_write_state == ASSET_WRITE_CLEANING,
+            )
+            .with_for_update()
+        )
+        for file in result.scalars().all():
+            file.asset_write_state = ASSET_WRITE_CLEANUP_REQUIRED
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
 
 
 async def persist_file_deletion(
