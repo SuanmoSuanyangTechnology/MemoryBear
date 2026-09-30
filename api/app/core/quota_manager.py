@@ -481,6 +481,24 @@ async def _check_quota_async(
     )
 
 
+async def check_knowledge_capacity_quota_async(
+        db: AsyncSession,
+        tenant_id: UUID,
+        workspace_id: Optional[UUID] = None,
+) -> None:
+    """Async 版知识库容量配额检查，供 SSO 等非 HTTP 装饰器场景复用。
+
+    语义与 @check_knowledge_capacity_quota 装饰器一致（同一个 _check_quota）。
+    """
+    await _check_quota_async(
+        db,
+        tenant_id,
+        "knowledge_capacity_quota",
+        "knowledge_capacity",
+        workspace_id=workspace_id,
+    )
+
+
 async def check_end_user_quota_async(
         db: AsyncSession,
         tenant_id: UUID,

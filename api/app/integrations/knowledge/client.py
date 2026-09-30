@@ -6,8 +6,9 @@ import asyncio
 import json
 import logging
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from typing import Any
+from urllib.parse import urlencode
 
 import httpx
 from fastapi import Request
@@ -335,6 +336,97 @@ class KnowledgeServiceClient:
             raise
         finally:
             await upstream.aclose()
+
+    async def call_internal(
+        self,
+        *,
+        method: str,
+        path: str,
+        context: KnowledgeCallContext,
+        payload: Any | None = None,
+        query: Mapping[str, str | None] | None = None,
+    ) -> dict[str, Any]:
+        """Detached JSON call for in-process callers without an inbound Request.
+
+        Follows the transport.request_headers / transport.send / envelope
+        conventions used by retrieval_policy() and retrieve(), so detached
+        callers share the same identity headers, pool, timeouts and logs as
+        forwarded manager-API traffic.
+        """
+
+        if not path.startswith("/internal/v1/"):
+            raise ValueError("Knowledge internal call path must start with /internal/v1/")
+        send_query = b""
+        if query:
+            normalized = [
+                (key, value)
+                for key, value in query.items()
+                if value is not None and value != ""
+            ]
+            if normalized:
+                send_query = urlencode(normalized).encode("utf-8")
+        url = self._transport.internal_url(path, send_query)
+        headers = self._transport.request_headers(
+            {"Content-Type": "application/json"},
+            context,
+            CallProfile.JSON,
+        )
+        content = (
+            json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode()
+            if payload is not None
+            else None
+        )
+        started_at = time.perf_counter()
+        upstream = await self._transport.send(
+            method=method.upper(),
+            url=url,
+            headers=headers,
+            profile=CallProfile.JSON,
+            content=content,
+        )
+        headers_at = time.perf_counter()
+        try:
+            raw = await upstream.aread()
+        except httpx.TimeoutException as exc:
+            raise KnowledgeTimeoutError(
+                "Knowledge service request timed out"
+            ) from exc
+        except httpx.RequestError as exc:
+            raise KnowledgeUnavailableError(
+                "Knowledge service is unavailable"
+            ) from exc
+        finally:
+            await upstream.aclose()
+        trace_id = upstream.headers.get("X-Trace-Id", context.trace_id)
+        try:
+            envelope = json.loads(raw)
+        except (TypeError, ValueError) as exc:
+            raise KnowledgeProtocolError(
+                "Knowledge service returned invalid JSON"
+            ) from exc
+        if not isinstance(envelope, dict):
+            raise KnowledgeProtocolError("Knowledge service envelope must be an object")
+        code = envelope.get("code")
+        if not isinstance(code, int):
+            raise KnowledgeProtocolError("Knowledge service envelope code must be an integer")
+        message = str(envelope.get("error") or envelope.get("msg") or "Knowledge error")
+        if not 200 <= upstream.status_code < 300 or code != 0:
+            raise KnowledgeServiceError(upstream.status_code, code, message, trace_id)
+        envelope["time"] = int(time.time() * 1000)
+        logger.info(
+            "knowledge_detached_call_completed method=%s path=%s status=%s code=%s "
+            "source=%s bytes=%s header_ms=%.2f elapsed_ms=%.2f trace_id=%s",
+            method.upper(),
+            path,
+            upstream.status_code,
+            code,
+            context.source.value,
+            len(raw),
+            (headers_at - started_at) * 1000,
+            (time.perf_counter() - started_at) * 1000,
+            trace_id,
+        )
+        return envelope
 
     async def ready(self) -> bool:
         return await self._transport.ready()
