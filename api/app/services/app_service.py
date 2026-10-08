@@ -37,6 +37,7 @@ from app.models import (
     Workspace,
 )
 from app.models.app_model import AppStatus, AppType
+from app.plugins import get_plugin
 from app.repositories.app_repository import get_apps_by_id, AppRepository
 from app.repositories.workflow_repository import WorkflowConfigRepository
 from app.schemas import app_schema
@@ -576,16 +577,46 @@ class AppService:
         max_ver = self.db.execute(stmt).scalar()
         return 1 if max_ver is None else int(max_ver) + 1
 
+    # 企业版本体模块注册的同步门面（社区版不存在）
+    ONTOLOGY_BINDING_PLUGIN = "memory.ontology_binding"
+
+    def _load_ontology_map(
+            self,
+            app_ids: List[uuid.UUID]
+    ) -> Optional[Dict[uuid.UUID, dict]]:
+        """批量取应用当前生效本体（ontology 子对象）。
+
+        Returns:
+            - 社区版（无本体模块）：None，调用方把 ontology 置为 null
+            - 企业版：{app_id: ontology dict}，未绑定的应用为系统默认本体兜底块
+            聚合失败时记错误日志并降级为 None，不影响列表主流程。
+        """
+        binder = get_plugin(self.ONTOLOGY_BINDING_PLUGIN)
+        if binder is None:
+            return None
+        if not app_ids:
+            return {}
+        try:
+            # 包一层 SAVEPOINT：聚合 SQL 失败时只回滚到保存点，外层事务保持可用，
+            # 否则 PG 事务进入 aborted 状态，后续 _convert_to_schema 的查询会连带报错。
+            with self.db.begin_nested():
+                return binder.load_app_ontology_batch(self.db, app_ids)
+        except Exception as e:
+            logger.error("应用本体聚合失败", extra={"error": str(e)}, exc_info=True)
+            return None
+
     def _convert_to_schema(
             self,
             app: App,
-            current_workspace_id: uuid.UUID
+            current_workspace_id: uuid.UUID,
+            ontology: Optional[dict] = None
     ) -> app_schema.App:
         """将 App 模型转换为 Schema，并设置 is_shared 字段
 
         Args:
             app: App 模型实例
             current_workspace_id: 当前工作空间ID
+            ontology: 应用当前生效本体（由 _load_ontology_map 批量取得），社区版为 None
 
         Returns:
             app_schema.App: 应用 Schema
@@ -650,6 +681,7 @@ class AppService:
             "shared_by": shared_by,
             "shared_by_name": shared_by_name,
             "shared_at": shared_at,
+            "ontology": ontology,
             "created_at": app.created_at,
             "updated_at": app.updated_at
         }
@@ -755,7 +787,8 @@ class AppService:
             *,
             user_id: uuid.UUID,
             workspace_id: uuid.UUID,
-            data: app_schema.AppCreate
+            data: app_schema.AppCreate,
+            tenant_id: Optional[uuid.UUID] = None
     ) -> App:
         """创建应用
 
@@ -763,6 +796,7 @@ class AppService:
             user_id: 创建者用户ID
             workspace_id: 工作空间ID
             data: 应用创建数据
+            tenant_id: 当前用户租户ID（绑定本体时做跨租户校验）
 
         Returns:
             App: 创建的应用对象
@@ -813,16 +847,45 @@ class AppService:
                 wf_data = WorkflowConfigCreate(**data.workflow_config) if isinstance(data.workflow_config, dict) else data.workflow_config
                 self._create_workflow_config(app.id, wf_data, now)
 
+            # 可选绑定本体：与应用、配置同一事务提交，任一步失败整体回滚
+            if data.ontology_id:
+                self._bind_ontology_in_session(app.id, tenant_id, data.ontology_id)
+
             self.db.commit()
             self.db.refresh(app)
 
             logger.info("应用创建成功", extra={"app_id": str(app.id), "app_name": app.name})
             return app
 
+        except BusinessException:
+            # 业务校验错误（如本体不存在 4000 / 跨租户 3001）保留原业务码，不包装成 10001
+            self.db.rollback()
+            raise
         except Exception as e:
             self.db.rollback()
             logger.error("应用创建失败", extra={"app_name": data.name, "error": str(e)})
             raise BusinessException(f"应用创建失败: {str(e)}", BizCode.INTERNAL_ERROR, cause=e)
+
+    def _bind_ontology_in_session(
+            self,
+            app_id: uuid.UUID,
+            tenant_id: Optional[uuid.UUID],
+            ontology_id: uuid.UUID
+    ) -> None:
+        """在当前事务内写入应用-本体绑定（不 commit）。
+
+        社区版无本体模块时忽略入参并记 warning。
+        """
+        binder = get_plugin(self.ONTOLOGY_BINDING_PLUGIN)
+        if binder is None:
+            logger.warning(
+                "未加载本体模块，忽略 ontology_id",
+                extra={"app_id": str(app_id), "ontology_id": str(ontology_id)}
+            )
+            return
+        if tenant_id is None:
+            raise BusinessException("缺少租户信息，无法绑定本体", BizCode.INVALID_PARAMETER)
+        binder.bind_in_session(self.db, app_id, tenant_id, ontology_id)
 
     def update_app(
             self,
@@ -1258,6 +1321,8 @@ class AppService:
             shared_only: bool = False,
             page: int = 1,
             pagesize: int = 10,
+            ontology_status: str = "all",
+            field_search: Optional[str] = None,
     ) -> Tuple[List[App], int]:
         """列出工作空间中的应用（分页）
 
@@ -1275,6 +1340,8 @@ class AppService:
             include_shared: 是否包含分享的应用
             page: 页码（从1开始）
             pagesize: 每页数量
+            ontology_status: 本体状态筛选 all | bound（已关联本体）| default（仅默认本体）
+            field_search: 标签模式搜索，模糊匹配绑定本体的场景自定义字段展示名
 
         Returns:
             Tuple[List[App], int]: (应用列表, 总数)
@@ -1315,6 +1382,17 @@ class AppService:
                     )
                 )
             )
+        # 本体筛选：条件由企业版本体模块提供（涉及 premium 表），社区版忽略
+        field_search = field_search.strip() if field_search else None
+        if (ontology_status and ontology_status != "all") or field_search:
+            binder = get_plugin(self.ONTOLOGY_BINDING_PLUGIN)
+            if binder is None:
+                logger.warning(
+                    "未加载本体模块，忽略本体筛选参数",
+                    extra={"ontology_status": ontology_status, "field_search": field_search}
+                )
+            else:
+                filters.extend(binder.build_list_filters(ontology_status, field_search))
         # shared_only implies include_shared; enforce to avoid confusing API usage
         if shared_only:
             include_shared = True
@@ -2762,10 +2840,11 @@ class AppService:
 # ==================== 向后兼容的函数接口 ====================
 # 保留函数接口以兼容现有代码，但内部使用服务类
 
-def create_app(db: Session, *, user_id: uuid.UUID, workspace_id: uuid.UUID, data: app_schema.AppCreate) -> App:
+def create_app(db: Session, *, user_id: uuid.UUID, workspace_id: uuid.UUID, data: app_schema.AppCreate,
+               tenant_id: Optional[uuid.UUID] = None) -> App:
     """创建应用（向后兼容接口）"""
     service = AppService(db)
-    return service.create_app(user_id=user_id, workspace_id=workspace_id, data=data)
+    return service.create_app(user_id=user_id, workspace_id=workspace_id, data=data, tenant_id=tenant_id)
 
 
 def update_app(db: Session, *, app_id: uuid.UUID, data: app_schema.AppUpdate,
@@ -2859,6 +2938,8 @@ def list_apps(
         shared_only: bool = False,
         page: int = 1,
         pagesize: int = 10,
+        ontology_status: str = "all",
+        field_search: Optional[str] = None,
 ) -> Tuple[List[App], int]:
     """列出应用（向后兼容接口）"""
     service = AppService(db)
@@ -2873,6 +2954,8 @@ def list_apps(
         shared_only=shared_only,
         page=page,
         pagesize=pagesize,
+        ontology_status=ontology_status,
+        field_search=field_search,
     )
 
 
