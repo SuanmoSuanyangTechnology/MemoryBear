@@ -118,13 +118,7 @@ _DEFINITIONS = {
     "KB_KNOWLEDGE_DOWNLOAD_EMPTY": ErrorDefinition(400, False, 404, "business"),
     "KB_KNOWLEDGE_NAME_EXISTS": ErrorDefinition(400, False, 400, "http", {"knowledge_name": str}),
     "KB_KNOWLEDGE_NOT_FOUND": ErrorDefinition(400, False, 404, "business"),
-    "KB_KNOWLEDGE_MODEL_NOT_FOUND": ErrorDefinition(
-        400, False, 400, "http", {"model_field": str}
-    ),
-    "KB_KNOWLEDGE_MODEL_INACTIVE": ErrorDefinition(
-        400, False, 400, "http", {"model_field": str}
-    ),
-    "KB_KNOWLEDGE_MODEL_DEPRECATED": ErrorDefinition(
+    "KB_KNOWLEDGE_MODEL_UNAVAILABLE": ErrorDefinition(
         400, False, 400, "http", {"model_field": str}
     ),
     "KB_KNOWLEDGE_MODEL_CAPABILITY_MISMATCH": ErrorDefinition(

@@ -1,16 +1,22 @@
-"""Validate caller-supplied knowledge model IDs using stored configuration only."""
+"""Validate caller-supplied knowledge model IDs through the shared model resolver."""
 
 from __future__ import annotations
 
 import uuid
 from collections.abc import Mapping
 
-from redbear_model import ModelProfile
+from cryptography.exceptions import InvalidTag
+from redbear_model import (
+    ModelProvider,
+    ModelType,
+    RedBearModelError,
+    ResolvedModelConfig,
+    resolve_model_async,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..errors import KnowledgeError
-from ..models.references import ModelConfig, ModelProvider, ModelType
-from ..repositories.reference import ReferenceRepository
+from ..repositories.model_registry import AsyncSQLModelRegistry
 
 _MODEL_FIELD_TYPES = {
     "embedding_id": ModelType.EMBEDDING,
@@ -27,28 +33,14 @@ _MEDIA_INPUT_MODALITIES = {
 _DASHSCOPE_MEDIA_FIELDS = frozenset({"audio2text_id", "video2text_id"})
 
 
-def _matches_knowledge_model_field(field_name: str, model: ModelConfig) -> bool:
+def _matches_knowledge_model_field(field_name: str, model: ResolvedModelConfig) -> bool:
     """Match the same media capabilities and providers used by knowledge processing."""
-    try:
-        profile = ModelProfile.from_stored_fields(
-            model_id=model.id,
-            tenant_id=model.tenant_id,
-            type=model.type,
-            provider=model.provider,
-            input_modalities=model.input_modalities or (),
-            output_modalities=model.output_modalities or (),
-            features=model.features or (),
-            capabilities=model.capability or (),
-            is_omni=bool(model.is_omni),
-        )
-    except (TypeError, ValueError):
-        return False
-    if profile.type.value != _MODEL_FIELD_TYPES[field_name].value:
+    if model.profile.type != _MODEL_FIELD_TYPES[field_name]:
         return False
     if field_name in _DASHSCOPE_MEDIA_FIELDS and model.provider != ModelProvider.DASHSCOPE:
         return False
     modality = _MEDIA_INPUT_MODALITIES.get(field_name)
-    return modality is None or modality in profile.input_modalities
+    return modality is None or modality in model.profile.input_modalities
 
 
 async def validate_requested_knowledge_models(
@@ -65,35 +57,21 @@ async def validate_requested_knowledge_models(
     if not requested:
         return
 
-    models = await ReferenceRepository.get_model_configs(
-        db, list(dict.fromkeys(requested.values()))
-    )
-    models_by_id = {model.id: model for model in models}
+    registry = AsyncSQLModelRegistry(db)
+    resolved_models: dict[uuid.UUID, ResolvedModelConfig] = {}
     for field_name, model_id in requested.items():
-        model = models_by_id.get(model_id)
-        # Do not disclose the state or capabilities of another tenant's private model.
-        if model is None or not (
-            model.tenant_id == tenant_id
-            or (model.provider == ModelProvider.SPEEDBEAR and bool(model.is_public))
-        ):
-            raise KnowledgeError.from_code(
-                "KB_KNOWLEDGE_MODEL_NOT_FOUND", params={"model_field": field_name}
-            )
-        if not model.is_active:
-            raise KnowledgeError.from_code(
-                "KB_KNOWLEDGE_MODEL_INACTIVE", params={"model_field": field_name}
-            )
-
-    # Batch-read base models explicitly instead of lazy-loading relationships in async code.
-    base_ids = list(dict.fromkeys(model.model_id for model in models if model.model_id))
-    bases = await ReferenceRepository.get_model_bases(db, base_ids)
-    deprecated_ids = {base.id for base in bases if base.is_deprecated}
-    for field_name, model_id in requested.items():
-        model = models_by_id[model_id]
-        if model.model_id in deprecated_ids:
-            raise KnowledgeError.from_code(
-                "KB_KNOWLEDGE_MODEL_DEPRECATED", params={"model_field": field_name}
-            )
+        if model_id not in resolved_models:
+            try:
+                resolved_models[model_id] = await resolve_model_async(
+                    registry, model_config_id=model_id, tenant_id=tenant_id
+                )
+            except (RedBearModelError, ValueError, InvalidTag) as exc:
+                # The resolver checks state before visibility; use one public error to
+                # avoid disclosing private model state or credential details.
+                raise KnowledgeError.from_code(
+                    "KB_KNOWLEDGE_MODEL_UNAVAILABLE", params={"model_field": field_name}
+                ) from exc
+        model = resolved_models[model_id]
         if not _matches_knowledge_model_field(field_name, model):
             raise KnowledgeError.from_code(
                 "KB_KNOWLEDGE_MODEL_CAPABILITY_MISMATCH", params={"model_field": field_name}
