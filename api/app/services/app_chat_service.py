@@ -23,13 +23,12 @@ from app.db import get_db, get_async_db_context
 from app.integrations.knowledge.contracts import KnowledgeRetrievalSource
 from app.models import (
     App,
-    MultiAgentConfig, AgentConfig, ModelType, WorkflowConfig,
+    MultiAgentConfig, AgentConfig, WorkflowConfig,
     Modality, ModelFeature, AgentExecution, Message, Conversation)
 from app.repositories.agent_execution_repository import AgentExecutionRepository
 from app.repositories.tool_repository import ToolRepository
 from app.schemas import DraftRunRequest
 from app.schemas.app_schema import FileInput, FileType, TransferMethod
-from app.schemas.model_schema import ModelInfo
 from app.schemas.prompt_schema import render_prompt_message, PromptMessageRole
 from app.services.annotation_service import AnnotationService
 from app.services.conversation_service import ConversationService
@@ -542,7 +541,7 @@ class AppChatService:
             await ModelConfigService.raise_model_unavailable_bridge_async(
                 self.db, model_config_id, tenant_id=tenant_id
             )
-        # 远端模式（G3）：非解密视图供 invoke 接缝使用；凭据仍供沙箱/多模态/用量等既有消费者
+        # 远端模式（G3）：非解密视图供 invoke 接缝与多模态格式化使用；凭据仍供沙箱/用量等既有消费者
         model_view = await ModelConfigService.get_runtime_model_view_bridge_async(
             self.db,
             model_config_id,
@@ -616,21 +615,6 @@ class AppChatService:
 
         system_prompt = append_external_context_rule(system_prompt)
 
-        model_info = ModelInfo(
-            model_name=api_key_obj.model_name,
-            provider=api_key_obj.provider,
-            api_key=api_key_obj.api_key,
-            api_base=api_key_obj.api_base,
-            input_modalities=[str(item) for item in (api_key_obj.input_modalities or [])],
-            output_modalities=[str(item) for item in (api_key_obj.output_modalities or [])],
-            features=[str(item) for item in (api_key_obj.features or [])],
-            model_type=ModelType.LLM,
-            tenant_id=api_key_obj.tenant_id,
-            model_config_id=api_key_obj.model_config_id,
-            channel_id=api_key_obj.channel_id,
-            failover_plan=api_key_obj.failover_plan,
-        )
-
         # 加载历史消息（包含开场白）
         used_context_engine = False
         if history is None:
@@ -677,7 +661,7 @@ class AppChatService:
         # 仅用于发给 LLM 的用户消息（追加本轮图片清单），不污染入库原文 message
         llm_message = message
         if files:
-            multimodal_service = MultimodalService(self.db, model_info)
+            multimodal_service = MultimodalService(self.db, model_view)
             fu_config = features_config.get("file_upload", {})
             if hasattr(fu_config, "model_dump"):
                 fu_config = fu_config.model_dump()
@@ -1209,21 +1193,6 @@ class AppChatService:
 
             system_prompt = append_external_context_rule(system_prompt)
 
-            model_info = ModelInfo(
-                model_name=api_key_obj.model_name,
-                provider=api_key_obj.provider,
-                api_key=api_key_obj.api_key,
-                api_base=api_key_obj.api_base,
-                input_modalities=[str(item) for item in (api_key_obj.input_modalities or [])],
-                output_modalities=[str(item) for item in (api_key_obj.output_modalities or [])],
-                features=[str(item) for item in (api_key_obj.features or [])],
-                model_type=ModelType.LLM,
-                tenant_id=api_key_obj.tenant_id,
-                model_config_id=api_key_obj.model_config_id,
-                channel_id=api_key_obj.channel_id,
-                failover_plan=api_key_obj.failover_plan,
-            )
-
             # 加载历史消息（包含开场白）
             used_context_engine = False
             if history is None:
@@ -1267,7 +1236,7 @@ class AppChatService:
             # 仅用于发给 LLM 的用户消息（追加本轮图片清单），不污染入库原文 message
             llm_message = message
             if files:
-                multimodal_service = MultimodalService(self.db, model_info)
+                multimodal_service = MultimodalService(self.db, model_view)
                 fu_config = features_config.get("file_upload", {})
                 if hasattr(fu_config, "model_dump"):
                     fu_config = fu_config.model_dump()

@@ -108,22 +108,22 @@ async def _get_ontology_service_async(
             )
         
         from app.services.model_service import ModelApiKeyService
-        api_key_config = await ModelApiKeyService.get_available_api_key_async(
+        ref = await ModelApiKeyService.resolve_invoke_ref_async(
             db,
             model_config.id,
             tenant_id=current_user.tenant_id,
         )
-        if not api_key_config:
-            logger.error(f"Model {llm_id} has no active API key")
+        if not ref:
+            logger.error(f"Model {llm_id} unavailable")
             raise HTTPException(
                 status_code=400,
                 detail="指定的LLM模型没有可用的API密钥"
             )
-        
+
         logger.info(
             f"Using specified model - user: {current_user.id}, "
-            f"model_id: {llm_id}, model_name: {api_key_config.model_name}, "
-            f"provider: {model_config.provider}, api_key_id: {api_key_config.id}"
+            f"model_id: {llm_id}, model_name: {model_config.name}, "
+            f"provider: {model_config.provider}"
         )
         
         from app.core.memory.pipelines.base_pipeline import ModelClientMixin
@@ -133,7 +133,7 @@ async def _get_ontology_service_async(
         
         logger.debug(
             f"OntologyService created successfully - "
-            f"user: {current_user.id}, model: {api_key_config.model_name}"
+            f"user: {current_user.id}, model: {model_config.name}"
         )
         
         return service

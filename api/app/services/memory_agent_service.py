@@ -36,6 +36,7 @@ from app.repositories.end_user_repository import get_tenant_id_by_end_user_id
 from app.repositories.neo4j.neo4j_connector import Neo4jConnector
 from app.schemas.memory_agent_schema import Write_UserInput
 from app.services.memory_config_service import MemoryConfigService
+from app.services.model_service import ModelConfigService
 
 logger = get_logger(__name__)
 config_logger = get_config_logger()
@@ -333,7 +334,9 @@ class MemoryAgentService:
                     config_id=config_id
                 )
                 tenant_id = get_tenant_id_by_end_user_id(db, end_user_id)
-                model_config = config_service.get_model_config(str(memory_config.llm_model_id), tenant_id)
+                model_view = ModelConfigService.get_runtime_model_view(
+                    db, memory_config.llm_model_id, tenant_id=tenant_id
+                )
             except Exception as e:
                 if "No memory configuration found" in str(e):
                     raise  # Re-raise our specific error
@@ -346,15 +349,11 @@ class MemoryAgentService:
         logger.info(f"Generating summary from retrieve info for query: {query[:50]}...")
 
         try:
-            from app.core.models import RedBearLLM, RedBearModelConfig
+            from app.core.models import RedBearChatModel
             from app.core.memory.agent.utils.llm_tools import PROJECT_ROOT_
             from app.core.memory.agent.utils.template_tools import TemplateService
-            from app.models.models_model import ModelType
 
-            llm = RedBearLLM(
-                RedBearModelConfig.from_api_key(model_config),
-                type=ModelType.LLM
-            )
+            llm = RedBearChatModel.for_invoke(model_view)
 
             template_root = os.path.join(PROJECT_ROOT_, 'memory', 'agent', 'utils', 'prompt')
             template_service = TemplateService(template_root)

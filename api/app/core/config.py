@@ -202,6 +202,12 @@ class Settings:
     MODEL_SERVICE_INVOKE_WRITE_TIMEOUT_SECONDS: float = float(
         os.getenv("MODEL_SERVICE_INVOKE_WRITE_TIMEOUT_SECONDS", "60")
     )
+    # 媒体族（asr/image/video）invoke 档：媒体调用是「整段媒体操作」——上游任务式完成前
+    # 宿主无帧可收（asr 服务侧轮询 1s/600s、image/video 任务轮询），IDLE 须大于服务侧
+    # 媒体总档（≈660s = 600s 轮询上限 + 余量），否则宿主先断开而服务侧仍在轮询。
+    MODEL_SERVICE_INVOKE_MEDIA_IDLE_TIMEOUT_SECONDS: float = float(
+        os.getenv("MODEL_SERVICE_INVOKE_MEDIA_IDLE_TIMEOUT_SECONDS", "720")
+    )
 
     # Xinference configuration
     XINFERENCE_URL: str = os.getenv("XINFERENCE_URL", "http://127.0.0.1")

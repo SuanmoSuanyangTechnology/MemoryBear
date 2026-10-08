@@ -17,8 +17,10 @@
 
 超时三档（§2.9）：**上游首块档**在门面按候选生效（超时 → 瞬时错误 → 重试 → 换渠道）；
 **首帧档**兜底整次请求（含选路/解密/换渠道），必须小于宿主 idle 预算——宿主先断则服务
-白跑。非流式族的首帧即结果帧（llm 族单开宽档，见 config.py 的 llm 例外）；llm 流式的该档
-只包住「解析 + 首 chunk」（排流在档外，长回复不被截断），块间由**空闲档**逐块计时。
+白跑。非流式族的首帧即结果帧（llm 族单开宽档、媒体族 asr/image/video 第二宽档，见
+config.py 的 llm/媒体例外）；llm 流式的该档只包住「解析 + 首 chunk」（排流在档外，长回复
+不被截断），块间由**空闲档**逐块计时。媒体任务式轮询（asr/video）节奏经 ``media_poll_*``
+传入门面，轮询上限小于媒体首块档。
 
 断连（ASGI 取消生成器）在 ``finally`` 里 ``task.cancel()`` + ``await`` 收尾，避免泄漏
 供应商连接与进程并发配额。
@@ -40,7 +42,13 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...errors import BizCode
-from ...schemas.invoke_schema import InvokeRequestBody, LLMInvokeRequest
+from ...schemas.invoke_schema import (
+    ASRInvokeRequest,
+    ImageInvokeRequest,
+    InvokeRequestBody,
+    LLMInvokeRequest,
+    VideoInvokeRequest,
+)
 from ...services.invoke_service import (
     InvokeAttribution,
     InvokeFailure,
@@ -294,10 +302,14 @@ async def invoke_model(
     except InvokeFailure as failure:
         return _failure_response(failure)
 
-    # llm 族单开档：生成整段回复天然慢（config.py 的 llm 例外），结构化族沿用短档
+    # 档位分族：llm 宽档（生成天然慢，config.py 的 llm 例外）；媒体族第二宽档（整段媒体
+    # 操作含任务式轮询，config.py 的媒体档）；结构化族（embedding/rerank）沿用短档
     if isinstance(body, LLMInvokeRequest):
         first_result_timeout_s = settings.invoke_llm_first_result_timeout_s
         total_timeout_s = settings.invoke_llm_total_timeout_s
+    elif isinstance(body, (ASRInvokeRequest, ImageInvokeRequest, VideoInvokeRequest)):
+        first_result_timeout_s = settings.invoke_media_first_result_timeout_s
+        total_timeout_s = settings.invoke_media_total_timeout_s
     else:
         first_result_timeout_s = settings.invoke_first_result_timeout_s
         total_timeout_s = settings.invoke_total_timeout_s
@@ -332,6 +344,8 @@ async def invoke_model(
         attribution=attribution,
         first_result_timeout_s=first_result_timeout_s,
         client_pool=runtime.model_runtime.pool,
+        media_poll_interval_s=settings.invoke_media_poll_interval_s,
+        media_poll_timeout_s=settings.invoke_media_poll_timeout_s,
     )
     if body.stream:
         task = asyncio.ensure_future(_guarded(call, timeout_s=total_timeout_s))

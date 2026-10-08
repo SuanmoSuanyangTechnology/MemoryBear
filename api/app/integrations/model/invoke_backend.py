@@ -1,4 +1,4 @@
-"""运行面调用后端（C2 接缝）：宿主壳 → 服务侧 invoke 的 embedding / rerank 两族。
+"""运行面调用后端（C2 接缝）：宿主壳 → 服务侧 invoke 的 embedding / rerank / asr 族。
 
 宿主侧只剩「用哪个配置、代表哪个租户」：``RemoteInvokeRef`` 只带配置 id 与租户，凭据解密、
 渠道选路、failover 全在服务侧（设计 §2.2 调用方不持有凭据）。本层把宿主契约翻成服务侧严格
@@ -8,13 +8,17 @@
   命中项的下标映回原列表——调用方无需自行对齐；
 - ``top_n`` 为 ``None`` 或 ``<=0``（langchain 的「全部」语义）一律**省略**该字段（服务侧
   ``top_n`` 必须 ``>=1``）；
-- 结果条数/下标与上送不符即协议违规（响亮失败，不静默错位）。
+- 结果条数/下标与上送不符即协议违规（响亮失败，不静默错位）；
+- **媒体双通道**（G4a §2.3）：远端 URL 直传（``url_media_ref``）或 ≤1MB 内联（``inline_media_ref``）
+  ——超限又无 URL 可给即响亮拒止（先落对象存储是调用方的责任）。
 
-G1 的 embedding / rerank 均非流式：``stream=False`` 走 JSON 信封，结果体在 ``data`` 里。
+各族的传输形态（``stream=False`` 走 JSON 信封，结果体在 ``data`` 里）：
+embedding / rerank / asr 均非流式；asr 的任务轮询归服务侧（宿主零协议面）。
 """
 
 from __future__ import annotations
 
+import base64
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -27,7 +31,12 @@ from app.core.trace import get_trace_id
 
 from .contracts import MODEL_SOURCE_INTERNAL_API, ModelCallContext
 from .errors import ModelServiceProtocolError
-from .runtime import get_model_invoke_client, get_model_invoke_sync_client
+from .runtime import (
+    get_model_invoke_client,
+    get_model_invoke_sync_client,
+    get_model_media_invoke_client,
+    get_model_media_invoke_sync_client,
+)
 
 if TYPE_CHECKING:
     from app.core.rag.retrieval.models import ModelRuntimeSnapshot
@@ -223,13 +232,89 @@ def call_rerank_sync(
     return _ranked(data, positions)
 
 
+# ---------------- 媒体族（G4a：asr；image/video 生成族无宿主存活调用方） ----------------
+
+#: 内联媒体上限：与运行面契约 ``invoke_schema.MAX_INLINE_MEDIA_BYTES`` 同值（服务侧超限 422）
+MAX_INLINE_MEDIA_BYTES = 1024 * 1024
+
+
+def url_media_ref(url: str, *, mime: str | None = None) -> dict[str, Any]:
+    """已可公网获取的媒体 → URL 引用（服务侧直传上游）。"""
+
+    ref: dict[str, Any] = {"kind": "url", "url": url}
+    if mime:
+        ref["mime"] = mime
+    return ref
+
+
+def inline_media_ref(data: bytes, *, mime: str) -> dict[str, Any]:
+    """本地字节 → 内联引用（契约上限 1MB）。
+
+    超限即响亮拒止：调用方须先落对象存储换 URL（``url_media_ref``）；静默截断或丢弃
+    会改变调用语义。
+    """
+
+    if len(data) > MAX_INLINE_MEDIA_BYTES:
+        raise ModelServiceProtocolError(
+            f"inline media exceeds {MAX_INLINE_MEDIA_BYTES} bytes ({len(data)}); "
+            "store it and pass an http(s) URL instead"
+        )
+    return {
+        "kind": "inline",
+        "data_b64": base64.b64encode(data).decode("ascii"),
+        "mime": mime,
+    }
+
+
+def _asr_request(ref: RemoteInvokeRef, *, file_url: str) -> InvokeRequest:
+    return InvokeRequest(
+        config_id=ref.config_id,
+        type=ModelType.ASR,
+        params={"audio": url_media_ref(file_url)},
+        stream=False,
+    )
+
+
+def _transcript_text(data: Any) -> str:
+    """结果体 ``{"text": ..., "tracks": [...], "usage": {...}}``；缺 ``text`` 即协议违规。"""
+
+    text = data.get("text") if isinstance(data, dict) else None
+    if not isinstance(text, str):
+        raise ModelServiceProtocolError("asr result is missing 'text'")
+    return text
+
+
+async def acall_asr(ref: RemoteInvokeRef, *, file_url: str) -> str:
+    """异步音频转写：服务侧轮询至任务完成，返回转录文本（分轨细节留在服务侧结果体）。
+
+    只收公网 URL（dashscope 文件转写不吃内联）；本地文件先落存储换 URL。
+    """
+
+    client = get_model_media_invoke_client()
+    data = await client.call(_asr_request(ref, file_url=file_url), context_from_ref(ref))
+    return _transcript_text(data)
+
+
+def call_asr_sync(ref: RemoteInvokeRef, *, file_url: str) -> str:
+    """同步孪生（sync celery 链：``tasks.py`` 媒体转写）。"""
+
+    client = get_model_media_invoke_sync_client()
+    data = client.call(_asr_request(ref, file_url=file_url), context_from_ref(ref))
+    return _transcript_text(data)
+
+
 __all__ = [
+    "MAX_INLINE_MEDIA_BYTES",
     "RemoteInvokeRef",
+    "acall_asr",
     "acall_embedding",
     "acall_rerank",
+    "call_asr_sync",
     "call_embedding_sync",
     "call_rerank_sync",
     "context_from_ref",
+    "inline_media_ref",
     "ref_from_model_info",
     "ref_from_snapshot",
+    "url_media_ref",
 ]

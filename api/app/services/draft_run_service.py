@@ -42,7 +42,6 @@ from app.models.knowledgeshare_model import KnowledgeShare
 from app.models.models_model import Modality, ModelFeature, ModelType
 from app.repositories.tool_repository import ToolRepository
 from app.schemas.app_schema import FileInput, Citation, FileType, TransferMethod
-from app.schemas.model_schema import ModelInfo
 from app.schemas.prompt_schema import PromptMessageRole, render_prompt_message
 from app.services.context_engine_manager import ContextEngineManager
 from app.services.annotation_service import AnnotationService
@@ -1522,7 +1521,7 @@ class AgentRunService:
         try:
             # 1. 获取 API Key 配置
             api_key_config = await self._get_api_key(model_config.id, tenant_id=tenant_id)
-            # 远端模式（G3）：非解密视图供 invoke 接缝使用；凭据仍供沙箱/多模态/用量等既有消费者
+            # 远端模式（G3）：非解密视图供 invoke 接缝与多模态格式化使用；凭据仍供沙箱/用量等既有消费者
             model_view = await ModelConfigService.get_runtime_model_view_bridge_async(
                 self.db, model_config.id, tenant_id=tenant_id
             )
@@ -1671,21 +1670,6 @@ class AgentRunService:
                         }
                     }
 
-            model_info = ModelInfo(
-                model_name=api_key_config["model_name"],
-                provider=api_key_config["provider"],
-                api_key=api_key_config["api_key"],
-                api_base=api_key_config["api_base"],
-                input_modalities=list(api_key_config.get("input_modalities") or []),
-                output_modalities=list(api_key_config.get("output_modalities") or []),
-                features=list(api_key_config.get("features") or []),
-                model_type=model_config.type,
-                tenant_id=api_key_config.get("tenant_id"),
-                model_config_id=api_key_config.get("model_config_id"),
-                channel_id=api_key_config.get("channel_id"),
-                failover_plan=api_key_config.get("failover_plan"),
-            )
-
             # 6. 加载历史消息（包含开场白）
             used_context_engine = False
             if history is None:
@@ -1717,7 +1701,7 @@ class AgentRunService:
             llm_message = message
             if files:
                 provider = api_key_config.get("provider", "openai")
-                multimodal_service = MultimodalService(self.db, model_info)
+                multimodal_service = MultimodalService(self.db, model_view)
                 fu_config = features_config.get("file_upload", {})
                 if hasattr(fu_config, "model_dump"):
                     fu_config = fu_config.model_dump()
@@ -2056,7 +2040,7 @@ class AgentRunService:
         try:
             # 1. 获取 API Key 配置
             api_key_config = await self._get_api_key(model_config.id, tenant_id=tenant_id)
-            # 远端模式（G3）：非解密视图供 invoke 接缝使用；凭据仍供沙箱/多模态/用量等既有消费者
+            # 远端模式（G3）：非解密视图供 invoke 接缝与多模态格式化使用；凭据仍供沙箱/用量等既有消费者
             model_view = await ModelConfigService.get_runtime_model_view_bridge_async(
                 self.db, model_config.id, tenant_id=tenant_id
             )
@@ -2204,21 +2188,6 @@ class AgentRunService:
                     yield self._format_sse_event("end", end_data)
                     return
 
-            model_info = ModelInfo(
-                model_name=api_key_config["model_name"],
-                provider=api_key_config["provider"],
-                api_key=api_key_config["api_key"],
-                api_base=api_key_config["api_base"],
-                input_modalities=list(api_key_config.get("input_modalities") or []),
-                output_modalities=list(api_key_config.get("output_modalities") or []),
-                features=list(api_key_config.get("features") or []),
-                model_type=model_config.type,
-                tenant_id=api_key_config.get("tenant_id"),
-                model_config_id=api_key_config.get("model_config_id"),
-                channel_id=api_key_config.get("channel_id"),
-                failover_plan=api_key_config.get("failover_plan"),
-            )
-
             # 6. 加载历史消息
             used_context_engine = False
             if history is None:
@@ -2249,7 +2218,7 @@ class AgentRunService:
             llm_message = message
             if files:
                 provider = api_key_config.get("provider", "openai")
-                multimodal_service = MultimodalService(self.db, model_info)
+                multimodal_service = MultimodalService(self.db, model_view)
                 fu_config = features_config.get("file_upload", {})
                 if hasattr(fu_config, "model_dump"):
                     fu_config = fu_config.model_dump()

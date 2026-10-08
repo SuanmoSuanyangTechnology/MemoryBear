@@ -35,7 +35,7 @@ from app.core.memory.retrieval_trace.stage_projection import (
     project_result_items,
 )
 from app.core.memory.storage.enums import MemoryNodeType
-from app.core.models import RedBearLLM
+from app.core.models import RedBearChatModel
 from app.core.utils.datetime_utils import utcnow_naive
 from app.db import get_async_db_context
 from app.repositories.memory_short_repository import ShortTermMemoryRepository
@@ -43,11 +43,13 @@ from app.schemas.memory_retrieval_display_schema import (
     RETRIEVE_SEARCH_MODES,
     RetrieveDisplayTask,
 )
+from app.schemas.model_schema import ModelInfo
 from app.services.memory_retrieval_display_queue import MemoryRetrievalDisplayQueue
 from app.services.memory_retrieval_display_service import (
     build_retrieve_snapshot,
     clean_query_for_display,
 )
+from app.services.model_service import ModelConfigService
 
 logger = logging.getLogger(__name__)
 
@@ -435,6 +437,24 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
         else:
             return None
 
+    async def _get_perceptual_model_view(self, perceptual_type: int) -> ModelInfo | None:
+        """感知槽位对应的非解密模型视图（仅 provider / 模态门控，凭据在模型服务侧）。"""
+        cfg = self.ctx.memory_config
+        if perceptual_type == 1:  # VISION
+            model_id = cfg.vision_model_id
+        elif perceptual_type == 2:  # AUDIO
+            model_id = cfg.audio_model_id
+        elif perceptual_type == 3:  # TEXT
+            model_id = cfg.llm_model_id
+        else:
+            return None
+        if not model_id:
+            return None
+        async with get_async_db_context() as db:
+            return await ModelConfigService.get_runtime_model_view_async(
+                db, model_id, tenant_id=cfg.tenant_id
+            )
+
     async def _get_rerank_client(self):
         """懒加载 rerank client，仅在 rerank_model_id 已配置时可用。
 
@@ -529,21 +549,26 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
         perceptual_memory_count = len(perceptual_memories)
         if perceptual_memories:
             parse_tasks = []
-            # 同一感知类型复用模型客户端；初始化失败时记为 None，统一降级使用原 summary。
-            type_llm_cache: dict[int, RedBearLLM | None] = {}
+            # 同一感知类型复用（壳, 非解密视图）；初始化失败时记为 None，统一降级使用原 summary。
+            type_client_cache: dict[int, tuple[RedBearChatModel, ModelInfo] | None] = {}
 
-            async def _get_llm_for_type(pt: int):
-                if pt not in type_llm_cache:
+            async def _get_clients_for_type(pt: int):
+                if pt not in type_client_cache:
                     try:
-                        type_llm_cache[pt] = await self._get_perceptual_llm_client(pt)
+                        llm = await self._get_perceptual_llm_client(pt)
+                        view = (
+                            await self._get_perceptual_model_view(pt)
+                            if llm is not None else None
+                        )
+                        type_client_cache[pt] = (llm, view) if view is not None else None
                     except Exception:
                         logger.warning(
                             "[DeepRead] Unable to initialize perceptual model for type %s; using stored summary",
                             pt,
                             exc_info=True,
                         )
-                        type_llm_cache[pt] = None
-                return type_llm_cache[pt]
+                        type_client_cache[pt] = None
+                return type_client_cache[pt]
 
             for i, question in enumerate(questions):
                 if i >= len(hybrid_results) or isinstance(hybrid_results[i], Exception):
@@ -587,12 +612,13 @@ class ReadPipeLine(ModelClientMixin, BasePipeline):
                     by_type[pt].append(mem)
 
                 for pt, mems in by_type.items():
-                    llm = await _get_llm_for_type(pt)
-                    if llm is None:
+                    clients = await _get_clients_for_type(pt)
+                    if clients is None:
                         continue
+                    llm, model_view = clients
                     parse_tasks.append(
                         search_service.resolve_perceptual_content(
-                            question, mems, llm
+                            question, mems, llm, model_view
                         )
                     )
 

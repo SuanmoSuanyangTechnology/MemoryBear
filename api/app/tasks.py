@@ -1,7 +1,6 @@
 import asyncio
 import json
 import os
-import re
 import shutil
 import socket
 import tempfile
@@ -29,7 +28,7 @@ from app.celery_app import celery_app
 from app.core.config import settings
 from app.core.logging_config import get_logger
 from app.core.memory.exceptions import MemoryExtractionBusinessError
-from app.core.models import RedBearEmbeddings, RedBearLLM
+from app.core.models import RedBearChatModel, RedBearEmbeddings
 from app.core.memory.storage.outbox.consumer import (
     cleanup_outbox_events,
     consume_outbox_batch,
@@ -45,7 +44,6 @@ from app.core.memory.storage_services.reflection_engine.errors import (
     ReflectionFailureReason,
     ReflectionRetriesExhausted,
 )
-from app.core.models import RedBearEmbeddings, RedBearLLM
 from app.core.rag.chunk.hierarchy import GroupedChildChunks, validate_parent_child_result
 from app.core.rag.chunk.metadata import merge_parser_metadata
 from app.core.rag.chunk.parser.image_storage import cleanup_mineru_v3_images
@@ -71,10 +69,7 @@ from app.core.rag.knowledge_graph.rebuild_task_guard import (
     release_rebuild_execution,
     release_rebuild_job,
 )
-from app.core.rag.knowledge_graph.runtime import (
-    build_model_config,
-    snapshot_graph_runtime,
-)
+from app.core.rag.knowledge_graph.runtime import snapshot_graph_runtime
 from app.core.rag.parser_config import set_graph_pipeline_for_migration
 from app.core.rag.retrieval.async_elasticsearch import (
     build_async_elasticsearch_client_config,
@@ -84,9 +79,12 @@ from app.core.rag.integrations.feishu.models import FileInfo
 from app.core.rag.integrations.yuque.client import YuqueAPIClient
 from app.core.rag.integrations.yuque.models import YuqueDocInfo
 from app.core.rag.llm.chat_model import Base
-from app.core.rag.llm.cv_model import QWenCV
 from app.core.rag.llm.embedding_model import OpenAIEmbed
-from app.core.rag.llm.sequence2txt_model import QWenSeq2txt
+from app.core.rag.llm.invoke_vision import (
+    build_chunk_vision_model,
+    vision_media_kind,
+    vision_slot_id,
+)
 from app.core.rag.models.chunk import DocumentChunk
 from app.core.rag.prompts.generator import qa_proposal
 from app.core.rag.utils.chunk_write_order import (
@@ -111,12 +109,11 @@ from app.integrations.model.invoke_backend import ref_from_snapshot
 from app.models import App, AppRelease, Document, File, Knowledge, User, Workspace
 from app.models.end_user_model import EndUser
 from app.models.file_model import FILE_ROLE_SOURCE
-from app.models.models_model import ModelType
 from app.repositories.end_user_repository import get_active_end_users_by_workspace, get_end_users_by_workspace, get_all_active_workspaces
 from app.schemas import document_schema, file_schema
 from app.services.memory_config_service import MemoryConfigService
 from app.services.memory_forget_service import MemoryForgetService
-from app.services.model_service import ModelApiKeyService
+from app.services.model_service import ModelApiKeyService, ModelConfigService
 from app.utils.redis_lock import UNLOCK_SCRIPT, RedisFairLock
 
 
@@ -143,15 +140,7 @@ def setup_logger(logger, *args, **kwargs):
 
 logger = get_logger(__name__)
 
-# ── 预编译文件类型正则 & 常量 ──────────────────────────────────
-AUDIO_PATTERN = re.compile(
-    r"\.(da|wave|wav|mp3|aac|flac|ogg|aiff|au|midi|wma|realaudio|vqf|oggvorbis|ape?)$",
-    re.IGNORECASE,
-)
-VIDEO_PATTERN = re.compile(
-    r"\.(mp4|mov|avi|flv|mpeg|mpg|webm|wmv|3gp|3gpp|mkv?)$",
-    re.IGNORECASE,
-)
+# ── 解析常量 ──────────────────────────────────────────────────
 DEFAULT_PARSE_LANGUAGE = "Chinese"
 DEFAULT_PARSE_TO_PAGE = 100_000
 EMBEDDING_BATCH_SIZE = settings.EMBEDDING_BATCH_SIZE
@@ -277,8 +266,7 @@ def _load_graph_task_state(
 
 
 def _build_evidence_index_pipeline(runtime, client, lock_guard):
-    # 2d-1 迁移后 chat 行已归一为 llm，运行时按 LLM 适配器族构造
-    llm = RedBearLLM(build_model_config(runtime.llm), type=ModelType.LLM)
+    llm = RedBearChatModel.for_invoke_ref(ref_from_snapshot(runtime.llm))
     embedding = RedBearEmbeddings.for_invoke(ref_from_snapshot(runtime.embedding))
     extractor = LLMEntityRelationExtractor(
         llm,
@@ -868,6 +856,29 @@ def _download_storage_file(file_key: str) -> bytes:
             loop.close()
 
 
+def _storage_file_url(file_key: str) -> str | None:
+    """取文件的外部可达 URL（媒体族 asr / 视频理解只收公网 URL）。
+
+    本地存储返回相对路径（非 http(s)），调用侧按「无 URL」处理——见
+    ``invoke_vision.externally_reachable_media_url``。
+    """
+    from app.services.file_storage_service import FileStorageService
+
+    storage_service = FileStorageService()
+
+    async def _get_url():
+        return await storage_service.get_file_url(file_key)
+
+    try:
+        return asyncio.run(_get_url())
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(_get_url())
+        finally:
+            loop.close()
+
+
 def _upload_kb_file_content_sync(kb_id: uuid.UUID, file_id: uuid.UUID, file_ext: str, content: bytes) -> str:
     from app.services.file_storage_service import FileStorageService, generate_kb_file_key
 
@@ -1101,42 +1112,6 @@ def process_item(item: dict):
     return result
 
 
-def _build_image_vision_model(db, image2text_id, tenant_id):
-    """Build the knowledge-base image-to-text model for document parsing."""
-    image2text_key = _resolve_model_api_key(db, image2text_id, tenant_id, "image2text")
-    return QWenCV(
-        key=image2text_key.api_key,
-        model_name=image2text_key.model_name,
-        lang=DEFAULT_PARSE_LANGUAGE,
-        base_url=image2text_key.api_base,
-    )
-
-
-def _build_media_model(file_path: str):
-    """Build the existing audio or video model when the file type requires one."""
-    if AUDIO_PATTERN.search(file_path):
-        omni_key = os.getenv("QWEN3_OMNI_API_KEY", "")
-        omni_model = os.getenv("QWEN3_OMNI_MODEL_NAME", "qwen3-omni-flash")
-        omni_base = os.getenv("QWEN3_OMNI_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
-        return QWenSeq2txt(
-            key=omni_key,
-            model_name=omni_model,
-            lang=DEFAULT_PARSE_LANGUAGE,
-            base_url=omni_base,
-        )
-    if VIDEO_PATTERN.search(file_path):
-        omni_key = os.getenv("QWEN3_OMNI_API_KEY", "")
-        omni_model = os.getenv("QWEN3_OMNI_MODEL_NAME", "qwen3-omni-flash")
-        omni_base = os.getenv("QWEN3_OMNI_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
-        return QWenCV(
-            key=omni_key,
-            model_name=omni_model,
-            lang=DEFAULT_PARSE_LANGUAGE,
-            base_url=omni_base,
-        )
-    return None
-
-
 @celery_app.task(name="app.core.rag.tasks.parse_document")
 def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
     """
@@ -1220,8 +1195,16 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
             if auto_questions_topn:
                 llm_config = _build_llm_config(db, db_knowledge.llm_id, tenant_id)
             knowledge_id = str(db_knowledge.id)
-            image_vision_model = _build_image_vision_model(db, db_knowledge.image2text_id, tenant_id)
-            vision_model = _build_media_model(file_name) or image_vision_model
+            # 视觉/转写模型按文件类别选配置槽（G4a：宿主只持非解密视图，凭据与选路在模型服务）
+            vision_kind = vision_media_kind(file_name)
+            vision_config_id = vision_slot_id(db_knowledge, vision_kind)
+            if not vision_config_id:
+                raise RuntimeError(
+                    f"{vision_kind} model config is unavailable for knowledge {db_knowledge.id}"
+                )
+            vision_view = ModelConfigService.get_runtime_model_view(
+                db, vision_config_id, tenant_id=tenant_id
+            )
             vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)
 
             progress_lines.append(f"{_progress_ts()} Start to parse.")
@@ -1241,6 +1224,17 @@ def parse_document(file_key: str, document_id: uuid.UUID, file_name: str = ""):
         if not file_binary:
             raise IOError(f"Downloaded empty file from storage: {file_key}")
         logger.info(f"[ParseDoc] Downloaded {len(file_binary)} bytes from storage key: {file_key}")
+
+        # 音频 / 视频理解需要外部可达 URL（asr 族只收公网 URL；视频超 1MB 无 URL 拒止）
+        media_url = (
+            _storage_file_url(file_key) if vision_kind in ("audio", "video") else None
+        )
+        vision_model = build_chunk_vision_model(
+            vision_view,
+            kind=vision_kind,
+            lang=DEFAULT_PARSE_LANGUAGE,
+            media_url=media_url,
+        )
 
         estimated_pages = _get_estimated_pages(file_name, file_binary)
         logger.info(f"[ParseDoc] document={document_id} estimated_pages={estimated_pages}")

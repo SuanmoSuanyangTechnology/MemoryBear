@@ -156,7 +156,7 @@ async def _resolve_file_url(
         from app.db import get_db_read
 
         with get_db_read() as db:
-            return await MultimodalService(db, api_config=None).get_file_url(file)
+            return await MultimodalService(db).get_file_url(file)
     except Exception as e:
         logger.warning(f"[PILOT_RUN] 文件 URL 解析失败: file_id={file.upload_file_id}, err={e}")
         return None
@@ -210,7 +210,7 @@ async def _generate_perceptual_snapshots(
 
     if needs_db:
         with get_db_read() as db:
-            await _collect_urls(MultimodalService(db, api_config=None))
+            await _collect_urls(MultimodalService(db))
     else:
         await _collect_urls(None)
 

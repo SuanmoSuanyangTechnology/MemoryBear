@@ -39,6 +39,31 @@ def _resolve_tenant_id(db: Session, workspace_id: str | uuid.UUID | None) -> uui
         return None
     return ToolRepository.get_tenant_id_by_workspace_id(db, str(workspace_id))
 
+
+def _ensure_legacy_kg_models(db: Session, db_knowledge, chat_model, embedding_model):
+    """KB-graph LEGACY（G5 清理对象）：KGSearch 按旧式 .chat()/.encode_queries() 接口
+    消费模型对象，壳不提供该接口，故此处保留明文构造；仅图检索分支触发时才构造，
+    普通检索路径（participle/semantic/hybrid）不再解密任何凭据。"""
+    tenant_id = _resolve_tenant_id(db, db_knowledge.workspace_id)
+    if not chat_model and db_knowledge.llm_id:
+        llm_key = ModelApiKeyService.get_available_api_key(db, db_knowledge.llm_id, tenant_id=tenant_id)
+        if llm_key:
+            chat_model = Base(
+                key=llm_key.api_key,
+                model_name=llm_key.model_name,
+                base_url=llm_key.api_base,
+            )
+    if not embedding_model and db_knowledge.embedding_id:
+        emb_key = ModelApiKeyService.get_available_api_key(db, db_knowledge.embedding_id, tenant_id=tenant_id)
+        if emb_key:
+            embedding_model = OpenAIEmbed(
+                key=emb_key.api_key,
+                model_name=emb_key.model_name,
+                base_url=emb_key.api_base,
+            )
+    return chat_model, embedding_model
+
+
 def knowledge_retrieval(
         query: str,
         config: Dict[str, Any],
@@ -110,6 +135,7 @@ def knowledge_retrieval(
                             embedding_model=embedding_model,
                             kb_ids=kb_ids,
                             workspace_ids=workspace_ids,
+                            use_graph=use_graph,
                         )
 
                         all_results.extend(rs)
@@ -160,6 +186,8 @@ def _retrieve_for_knowledge(
     embedding_model: OpenAIEmbed | None,
     kb_ids: list[str],
     workspace_ids: list[str],
+    *,
+    use_graph: bool = False,
 ) -> tuple[list[DocumentChunk], Base | None, OpenAIEmbed | None]:
     """
     对单个知识库进行检索。
@@ -195,6 +223,7 @@ def _retrieve_for_knowledge(
                 embedding_model=embedding_model,
                 kb_ids=kb_ids,
                 workspace_ids=workspace_ids,
+                use_graph=use_graph,
             )
             results.extend(child_results)
         return results, chat_model, embedding_model
@@ -205,21 +234,9 @@ def _retrieve_for_knowledge(
     if str(db_knowledge.workspace_id) not in workspace_ids:
         workspace_ids.append(str(db_knowledge.workspace_id))
 
-    tenant_id = _resolve_tenant_id(db, db_knowledge.workspace_id)
-
-    if not chat_model:
-        llm_key = ModelApiKeyService.get_available_api_key(db, db_knowledge.llm_id, tenant_id=tenant_id)
-        chat_model = Base(
-            key=llm_key.api_key,
-            model_name=llm_key.model_name,
-            base_url=llm_key.api_base,
-        )
-    if not embedding_model:
-        emb_key = ModelApiKeyService.get_available_api_key(db, db_knowledge.embedding_id, tenant_id=tenant_id)
-        embedding_model = OpenAIEmbed(
-            key=emb_key.api_key,
-            model_name=emb_key.model_name,
-            base_url=emb_key.api_base,
+    if use_graph or kb_config["retrieve_type"] == "graph":
+        chat_model, embedding_model = _ensure_legacy_kg_models(
+            db, db_knowledge, chat_model, embedding_model
         )
 
     vector_service = ElasticSearchVectorFactory().init_vector(knowledge=db_knowledge)

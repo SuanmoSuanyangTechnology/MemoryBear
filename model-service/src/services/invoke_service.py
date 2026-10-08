@@ -44,11 +44,16 @@ from typing import Any
 
 from langchain_core.messages import AIMessageChunk, BaseMessage
 from redbear_model import (
+    AudioTaskStatus,
+    AudioTranscriptionRequest,
+    AudioTranscriptionResult,
     ChannelSwitchExhaustedError,
     CredentialDecryptError,
+    InvalidProviderResponseError,
     ModelConfigDeprecatedError,
     ModelConfigInactiveError,
     ModelProvider,
+    ModelTaskFailedError,
     ModelType,
     NoAvailableChannelError,
     ResolvedModelConfig,
@@ -60,9 +65,12 @@ from redbear_model import (
     run_candidate_fallback_async,
 )
 from redbear_model.runtime import (
+    RedBearAudioTranscriber,
     RedBearEmbeddings,
+    RedBearImageGenerator,
     RedBearLLM,
     RedBearRerank,
+    RedBearVideoGenerator,
     messages_from_wire,
     normalize_runtime_flags,
 )
@@ -72,13 +80,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..errors import BizCode, http_status_for
 from ..repositories.model_repository import ModelConfigRepository
 from ..schemas.invoke_schema import (
+    ASRInvokeRequest,
     EmbeddingInvokeRequest,
     EmbeddingParams,
+    ImageInvokeRequest,
+    ImageParams,
     InvokeRequestBody,
     LLMInvokeRequest,
     LLMParams,
+    MediaRef,
+    MediaUrlRef,
     RerankInvokeRequest,
     RerankParams,
+    VideoInvokeRequest,
+    VideoParams,
 )
 from ..sensitive import SensitiveDataFilter
 from .channel_registry import (
@@ -189,6 +204,153 @@ async def _invoke_rerank(resolved: ResolvedModelConfig, params: RerankParams) ->
             for item in results
         ]
     }
+
+
+# ---------------- 媒体族（G4a：asr / image / video） ----------------
+
+#: 媒体任务式轮询缺省（settings 缺省来自 config.py；此处服务直调/测试场景）
+_MEDIA_POLL_INTERVAL_S = 1.0
+_MEDIA_POLL_TIMEOUT_S = 600.0
+
+
+def _media_source(ref: MediaRef) -> str:
+    """MediaRef → 上游可吃形态（§2.3 双通道）：url 直传；inline 转 data URI。
+
+    inline 的落地能力按上游定：Ark 图文/视频生成接受 ``data:{mime};base64,...``；
+    DashScope 文件转写只接受公网 http(s) URL——asr 分支在 ``_family_invoker``
+    入参期响亮拒止，不在此处静默降级。
+    """
+    if isinstance(ref, MediaUrlRef):
+        return ref.url
+    return f"data:{ref.mime};base64,{ref.data_b64}"
+
+
+def _transcript_dump(result: AudioTranscriptionResult) -> dict[str, Any]:
+    """``AudioTranscriptionResult`` → 可序列化结果体（宿主按 ``text`` 回填）。"""
+    return {
+        "text": result.text,
+        "tracks": [
+            {
+                "channel_id": track.channel_id,
+                "text": track.text,
+                "sentences": [
+                    {
+                        "text": sentence.text,
+                        "sentence_id": sentence.sentence_id,
+                        "language": sentence.language,
+                        "start_ms": sentence.start_ms,
+                        "end_ms": sentence.end_ms,
+                        "words": [
+                            {
+                                "text": word.text,
+                                "punctuation": word.punctuation,
+                                "start_ms": word.start_ms,
+                                "end_ms": word.end_ms,
+                            }
+                            for word in sentence.words
+                        ],
+                    }
+                    for sentence in track.sentences
+                ],
+            }
+            for track in result.tracks
+        ],
+        "usage": result.usage.model_dump(),
+    }
+
+
+async def _invoke_asr(
+    resolved: ResolvedModelConfig,
+    *,
+    file_url: str,
+    client_pool: ModelClientPool | None = None,
+    poll_interval_s: float,
+    poll_timeout_s: float,
+) -> dict[str, Any]:
+    """asr 族：包内 RedBearAudioTranscriber 三段式（submit → 轮询 → fetch_result）。
+
+    轮询归服务侧（宿主/km 零协议面）：invoke 阻塞至任务完成或 ``poll_timeout_s`` 超时；
+    FAILED/UNKNOWN 状态退出轮询，由 ``afetch_result``（包内 ``_ready``）响亮抛错。
+    """
+    runtime = RedBearAudioTranscriber(resolved, client_pool=client_pool)
+    try:
+        task = await runtime.asubmit(AudioTranscriptionRequest(file_url=file_url))
+        deadline = time.monotonic() + poll_timeout_s
+        while task.status in {AudioTaskStatus.PENDING, AudioTaskStatus.RUNNING}:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError(f"ASR task polling timed out after {poll_timeout_s:g}s")
+            await asyncio.sleep(min(poll_interval_s, remaining))
+            task = await runtime.aget_task(task.ref)
+        result = await runtime.afetch_result(task.ref)
+    finally:
+        await runtime.aclose()
+    return _transcript_dump(result)
+
+
+async def _invoke_image(resolved: ResolvedModelConfig, params: ImageParams) -> dict[str, Any]:
+    """image 族（生成）：Ark ``images.generate`` 单次调用；参考图经双通道解析。
+
+    ``negative_prompt`` / ``n>1`` 在上游无对应参数（Ark SDK 签名固定），入参期拒止。
+    """
+    runtime = RedBearImageGenerator(resolved)
+    try:
+        response = await runtime.agenerate(
+            params.prompt,
+            image=(
+                None
+                if params.reference_image is None
+                else _media_source(params.reference_image)
+            ),
+            size=params.size or "2K",
+        )
+    finally:
+        await runtime.aclose()
+    return response
+
+
+async def _invoke_video(
+    resolved: ResolvedModelConfig,
+    params: VideoParams,
+    *,
+    poll_interval_s: float,
+    poll_timeout_s: float,
+) -> dict[str, Any]:
+    """video 族（生成）：Ark 任务式（create → 轮询 → succeeded 快照为结果体）。
+
+    参考图走 content 的 ``reference_image`` 角色（url / data URI）；FAILED/CANCELLED
+    抛 ``ModelTaskFailedError``（与 asr 路径同错误词汇），未知状态响亮报错。
+    """
+    runtime = RedBearVideoGenerator(resolved)
+    try:
+        created = await runtime.agenerate(
+            params.prompt,
+            reference_images=(
+                None
+                if params.reference_image is None
+                else [_media_source(params.reference_image)]
+            ),
+            resolution=params.resolution,
+        )
+        task_id = created.get("id") if isinstance(created, dict) else None
+        if not isinstance(task_id, str) or not task_id:
+            raise InvalidProviderResponseError("video.create", "missing task id")
+        deadline = time.monotonic() + poll_timeout_s
+        while True:
+            snapshot = await runtime.aget_task_status(task_id)
+            status = snapshot.get("status") if isinstance(snapshot, dict) else None
+            if status == "succeeded":
+                return snapshot
+            if status in {"failed", "cancelled"}:
+                raise ModelTaskFailedError("video.get_task")
+            if status not in {"queued", "running"}:
+                raise InvalidProviderResponseError("video.get_task", "unknown task status")
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError(f"video task polling timed out after {poll_timeout_s:g}s")
+            await asyncio.sleep(min(poll_interval_s, remaining))
+    finally:
+        await runtime.aclose()
 
 
 #: 逐请求参数并进 ``provider_params`` 的键（与宿主 LLM 节点 extra_params 同口径）：
@@ -444,11 +606,13 @@ def _family_invoker(
     request: InvokeRequestBody,
     *,
     client_pool: ModelClientPool | None = None,
+    media_poll_interval_s: float = _MEDIA_POLL_INTERVAL_S,
+    media_poll_timeout_s: float = _MEDIA_POLL_TIMEOUT_S,
 ) -> Callable[[ResolvedModelConfig], Awaitable[Any]]:
-    """按族取调用闭包；族未开放 / 入参不可支持一律终态拒止（不做静默忽略）。
+    """按族取调用闭包；入参不可支持一律终态拒止（不做静默忽略）。
 
-    灰度现开：llm（G2 非流式 / G3 流式 + 工具）、embedding / rerank（G1）；
-    多模态族待 G4 逐族接入本表。llm 流式的返回物是异步迭代器（``invoke`` 里再排流）。
+    全族开放（G4a 起）：llm（G2 非流式 / G3 流式 + 工具）、embedding / rerank（G1）、
+    asr / image / video（G4a）。llm 流式的返回物是异步迭代器（``invoke`` 里再排流）。
     """
     if isinstance(request, LLMInvokeRequest):
         try:
@@ -477,11 +641,53 @@ def _family_invoker(
             raise _unsupported_param("rerank instruct")
         params = request.params
         return lambda resolved: _invoke_rerank(resolved, params)
+    if isinstance(request, ASRInvokeRequest):
+        audio = request.params.audio
+        if not isinstance(audio, MediaUrlRef):
+            # DashScope 文件转写只接受公网 URL，无法消费 inline bytes（无对象存储设施）
+            raise InvokeFailure(
+                code=BizCode.INVALID_PARAMETER,
+                message=(
+                    "asr 族 inline 音频暂不支持：DashScope 文件转写仅接受公网 "
+                    "http(s) URL（kind=url），请先上传对象存储"
+                ),
+            )
+        if request.params.format is not None:
+            raise _unsupported_param("asr format")
+        if request.params.sample_rate is not None:
+            raise _unsupported_param("asr sample_rate")
+        file_url = audio.url
+        return lambda resolved: _invoke_asr(
+            resolved,
+            file_url=file_url,
+            client_pool=client_pool,
+            poll_interval_s=media_poll_interval_s,
+            poll_timeout_s=media_poll_timeout_s,
+        )
+    if isinstance(request, ImageInvokeRequest):
+        params = request.params
+        if params.negative_prompt is not None:
+            raise _unsupported_param("image negative_prompt")
+        if params.n not in (None, 1):
+            raise _unsupported_param("image n>1")
+        return lambda resolved: _invoke_image(resolved, params)
+    if isinstance(request, VideoInvokeRequest):
+        params = request.params
+        if params.negative_prompt is not None:
+            raise _unsupported_param("video negative_prompt")
+        if params.n not in (None, 1):
+            raise _unsupported_param("video n>1")
+        return lambda resolved: _invoke_video(
+            resolved,
+            params,
+            poll_interval_s=media_poll_interval_s,
+            poll_timeout_s=media_poll_timeout_s,
+        )
     raise InvokeFailure(
         code=BizCode.INVALID_PARAMETER,
         message=(
-            f"invoke 暂未开放 type={request.type} 族"
-            "（当前灰度：llm / embedding / rerank）"
+            f"invoke 不支持 type={request.type} 的族"
+            "（当前支持：llm / embedding / rerank / asr / image / video）"
         ),
     )
 
@@ -638,6 +844,8 @@ async def invoke(
     idle_timeout_s: float | None = None,
     chunk_sink: asyncio.Queue[dict[str, Any]] | None = None,
     client_pool: ModelClientPool | None = None,
+    media_poll_interval_s: float = _MEDIA_POLL_INTERVAL_S,
+    media_poll_timeout_s: float = _MEDIA_POLL_TIMEOUT_S,
 ) -> InvokeOutcome:
     """单次 invoke：解析 → 选路/解密/调用 → 归因（终态旁路发射 usage）。失败抛 ``InvokeFailure``。
 
@@ -659,13 +867,22 @@ async def invoke(
     ``chunk_sink`` 非空 = llm 流式：增量经 ``_drain_stream`` 归一后推入有界队列（``await put``
     背压，宿主实时收帧），成功返回体是 ``{"usage_metadata": counts}``；``idle_timeout_s``
     是块间空闲档（每块重新起算）。
+
+    ``media_poll_interval_s`` / ``media_poll_timeout_s`` = 媒体任务式轮询节奏（asr/video
+    专用，其余族忽略）：候选调用内 submit 后按间隔轮询至完成，超 ``media_poll_timeout_s``
+    抛 ``TimeoutError``（须小于媒体首块档，先于门面 wait_for 给出结构化超时）。
     """
     if not attribution.source_service.strip():
         raise InvokeFailure(
             code=BizCode.INVALID_PARAMETER,
             message="缺少来源标识 X-Model-Source（usage 归因必填）",
         )
-    run_family = _family_invoker(request, client_pool=client_pool)
+    run_family = _family_invoker(
+        request,
+        client_pool=client_pool,
+        media_poll_interval_s=media_poll_interval_s,
+        media_poll_timeout_s=media_poll_timeout_s,
+    )
 
     row = await ModelConfigRepository.get_by_id_async(
         db, request.config_id, tenant_id=tenant_id

@@ -944,11 +944,11 @@ class BaseNode(ABC):
 
     @staticmethod
     async def process_message(
-            api_config: ModelInfo,
+            model_view: ModelInfo,
             content: str | dict | FileObject,
             enable_file=False
     ) -> list | str | None:
-        provider = api_config.provider
+        provider = model_view.provider
         if isinstance(content, dict):
             content = FileObject(
                 type=content.get("type"),
@@ -968,11 +968,11 @@ class BaseNode(ABC):
             # （支持 audio 的模型产出音频段，不支持的应过滤掉）。若漏掉 input_modalities，
             # 先被支持 audio 的模型处理过的内容会被不支持 audio 的模型直接复用，
             # 导致语音信息未过滤就传入不支持的模型。
-            cache_key = f"{provider}_{'-'.join(sorted(api_config.input_modalities or []))}"
+            cache_key = f"{provider}_{'-'.join(sorted(model_view.input_modalities or []))}"
             if content.content_cache.get(cache_key):
                 return content.content_cache[cache_key]
             async with get_async_db_context() as db:
-                multimodal_service = MultimodalService(db, api_config=api_config)
+                multimodal_service = MultimodalService(db, model_view=model_view)
                 try:
                     upload_file_id = uuid.UUID(content.file_id) if content.file_id else None
                 except ValueError:

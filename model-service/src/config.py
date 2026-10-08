@@ -195,6 +195,32 @@ class ModelServiceSettings(BaseSettings):
         gt=0,
         validation_alias="MODEL_INVOKE_LLM_IDLE_TIMEOUT_S",
     )
+    # 媒体族（G4a：asr/image/video）超时档：候选调用即整段媒体操作（asr/video 任务式轮询、
+    # image 单次生成），首块档 = 总档同设（默认 660s），与 llm 族例外同构——快速失败
+    # （连接失败/5xx/401）仍按候选完整换渠道，仅「首块档超时」无同候选重试余量。
+    # 须 < 宿主媒体 idle 档（MODEL_SERVICE_INVOKE_MEDIA_IDLE_TIMEOUT_SECONDS，见宿主 runtime）。
+    invoke_media_first_result_timeout_s: float = Field(
+        default=660.0,
+        gt=0,
+        validation_alias="MODEL_INVOKE_MEDIA_FIRST_RESULT_TIMEOUT_S",
+    )
+    invoke_media_total_timeout_s: float = Field(
+        default=660.0,
+        gt=0,
+        validation_alias="MODEL_INVOKE_MEDIA_TOTAL_TIMEOUT_S",
+    )
+    # 媒体任务式轮询（asr 转写 / video 生成共用）：间隔与上限；上限须 < 首块档，先于门面
+    # wait_for 给出结构化超时。asr 提交后轮询归服务侧（宿主/km 零协议面）。
+    invoke_media_poll_interval_s: float = Field(
+        default=1.0,
+        gt=0,
+        validation_alias="MODEL_INVOKE_MEDIA_POLL_INTERVAL_S",
+    )
+    invoke_media_poll_timeout_s: float = Field(
+        default=600.0,
+        gt=0,
+        validation_alias="MODEL_INVOKE_MEDIA_POLL_TIMEOUT_S",
+    )
     # 渠道 least-used 选路：计量表滚动窗口（D14）与全局开关
     model_usage_load_window_minutes: int = Field(
         default=15,

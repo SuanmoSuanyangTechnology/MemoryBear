@@ -18,6 +18,11 @@ from app.core.rag.chunk.hierarchy import GroupedChildChunks, validate_parent_chi
 from app.core.rag.chunk.metadata import merge_parser_metadata
 from app.core.rag.knowledge_graph.dispatch import dispatch_document_graph_sync
 from app.core.rag.llm.cv_model import QWenCV
+from app.core.rag.llm.invoke_vision import (
+    build_chunk_vision_model,
+    vision_media_kind,
+    vision_slot_id,
+)
 from app.core.rag.models.chunk import DocumentChunk
 from app.core.rag.retrieval.models import RetrievalPrincipal
 from app.core.rag.vdb.elasticsearch.elasticsearch_vector import ElasticSearchVectorFactory
@@ -34,7 +39,7 @@ from app.schemas.response_schema import ApiResponse
 from app.services import knowledge_service, document_service
 from app.services.file_storage_service import FileStorageService, get_file_storage_service, generate_kb_file_key
 from app.services.knowledge_retrieval_service import KnowledgeRetrievalAccessDenied
-from app.services.model_service import ModelApiKeyService
+from app.services.model_service import ModelApiKeyService, ModelConfigService
 from app.core.rag.utils.preview_utils import _build_preview_hierarchy
 from app.core.utils.datetime_utils import to_timestamp_ms
 from app.integrations.knowledge.call_profile import CallProfile
@@ -199,8 +204,32 @@ async def get_preview_chunks(
     # 7. Document parsing & segmentation
     def progress_callback(prog=None, msg=None):
         print(f"prog: {prog} msg: {msg}\n")
-    # Prepare to configure vision_model information
-    vision_model = _build_image2text_vision_model(db, db_knowledge.image2text_id, current_user.tenant_id)
+    # 视觉/转写模型按文件类别选配置槽（G4a：宿主只持非解密视图，凭据与选路在模型服务）
+    vision_kind = vision_media_kind(db_file.file_name)
+    vision_config_id = vision_slot_id(db_knowledge, vision_kind)
+    if not vision_config_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"{vision_kind} model config is unavailable",
+        )
+    vision_view = await ModelConfigService.get_runtime_model_view_async(
+        db, vision_config_id, tenant_id=current_user.tenant_id
+    )
+    # 音频 / 视频理解需要外部可达 URL（本地存储返回相对路径，按无 URL 交适配器判定）
+    media_url: Optional[str] = None
+    if vision_kind in ("audio", "video"):
+        try:
+            media_url = await storage_service.get_file_url(db_file.file_key)
+        except Exception as exc:
+            api_logger.warning(
+                f"Failed to resolve media url for preview: document={document_id} error={exc}"
+            )
+    vision_model = build_chunk_vision_model(
+        vision_view,
+        kind=vision_kind,
+        lang="Chinese",
+        media_url=media_url,
+    )
     from app.core.rag.chunk import chunk_pipeline as chunk
     from app.core.rag.chunk.context import ChunkOutputMode
     parent_child_mode = db_document.is_parent_child_mode

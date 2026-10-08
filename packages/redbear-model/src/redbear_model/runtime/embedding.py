@@ -36,7 +36,7 @@ from redbear_model.providers.openai import (
     build_openai_embedding_params,
     load_openai_embedding_class,
 )
-from redbear_model.providers.volcengine import load_ark_class
+from redbear_model.providers.volcengine import build_ark_client
 from redbear_model.telemetry import (
     ModelTelemetry,
     NoOpModelTelemetry,
@@ -82,10 +82,7 @@ class RedBearEmbeddings(Embeddings):
             self._client = None
         elif self._is_volcano:
             self._model = None
-            self._client = load_ark_class()(
-                api_key=config.api_key.get_secret_value(),
-                base_url=config.base_url,
-            )
+            self._client = build_ark_client(config)
         else:
             self._model = self._create_model(config)
             self._client = None
