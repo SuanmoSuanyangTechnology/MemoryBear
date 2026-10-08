@@ -149,6 +149,15 @@ def to_profile(row: ModelConfig) -> ModelProfile:
     )
 
 
+#: 运行期不外发的 config JSON 簿记键：``model_configs.config`` 的运行期语义 = provider
+#: 透传参数（openai 兼容族并进构造器 kwargs，dashscope 分桶 extra_body），企业侧
+#: SpeedBear 导入（enterprise_ext.model.build_model_row）在同一 JSON 里追加上游登记
+#: 簿记——簿记键透传会在 provider 构造/SDK create() 处以 unexpected keyword 崩掉
+#: （2026-10-08 回归：系统公共 speedbear 模型 invoke 全挂）。在 ORM→快照单一构造点
+#: 剥除，LLM/embedding/rerank/媒体全族覆盖；写入侧保留（查重等管理逻辑仍读原行）。
+_CONFIG_BOOKKEEPING_KEYS = frozenset({"upstream_model_id", "provider_type"})
+
+
 def _config_snapshot(row: ModelConfig) -> ModelConfigSnapshot:
     return ModelConfigSnapshot(
         model_config_id=row.id,
@@ -162,7 +171,11 @@ def _config_snapshot(row: ModelConfig) -> ModelConfigSnapshot:
             row.load_balance_strategy or LoadBalanceStrategy.NONE
         ),
         profile=to_profile(row),
-        config=dict(row.config or {}),
+        config={
+            key: value
+            for key, value in dict(row.config or {}).items()
+            if key not in _CONFIG_BOOKKEEPING_KEYS
+        },
     )
 
 

@@ -756,10 +756,19 @@ class ModelConfigService:
         )
 
     @staticmethod
-    def _runtime_model_view(model: ModelConfig) -> ModelInfo:
-        """非解密视图的公共映射：能力/模态由 profile 派生，凭据与渠道恒空。"""
+    def _runtime_model_view(
+        model: ModelConfig, tenant_id: uuid.UUID | None = None
+    ) -> ModelInfo:
+        """非解密视图的公共映射：能力/模态由 profile 派生，凭据与渠道恒空。
+
+        归属租户取**调用租户**（tenant_id 非空时）：公共配置（speedbear 等）挂在系统
+        租户下，服务侧按请求租户加载候选渠道（平台渠道在各调用租户名下）且用量归因落
+        调用租户；无租户上下文（tenant_id=None）退化为配置行租户，与
+        :meth:`get_runtime_model_info_async` 的兜底语义一致。
+        """
 
         profile = profile_of(model)
+        effective_tenant = tenant_id or model.tenant_id
         return ModelInfo(
             model_name=model.name,
             model_type=ModelType(normalize_type(model.type)),
@@ -768,7 +777,7 @@ class ModelConfigService:
             input_modalities=[str(item.value) for item in profile.input_modalities],
             output_modalities=[str(item.value) for item in profile.output_modalities],
             features=[str(item.value) for item in profile.features],
-            tenant_id=str(model.tenant_id) if model.tenant_id is not None else None,
+            tenant_id=str(effective_tenant) if effective_tenant is not None else None,
             model_config_id=str(model.id),
             channel_id=None,
         )
@@ -784,10 +793,12 @@ class ModelConfigService:
         与 :meth:`get_runtime_model_info_async` 的差别只在凭据：能力/模态由 profile 派生，
         可见性（不存在 / 已弃用 / 跨租户）沿用同一入口的报错语义；凭据可用性与选路交给
         模型服务在调用时判定（渠道禁用等在那里才有完整事实，见 `channel_registry`）。
+        归属租户取调用租户（公共配置挂系统租户，选路与归因须落调用方，见
+        :meth:`_runtime_model_view`）。
         """
 
         model = await ModelConfigService.get_model_by_id_async(db, model_id, tenant_id=tenant_id)
-        return ModelConfigService._runtime_model_view(model)
+        return ModelConfigService._runtime_model_view(model, tenant_id)
 
     @staticmethod
     def get_runtime_model_view(
@@ -798,7 +809,7 @@ class ModelConfigService:
         """sync 孪生（同步链路，如 shared_chat / llm_router 的 Session）：语义同 async 版。"""
 
         model = ModelConfigService.get_model_by_id(db, model_id, tenant_id=tenant_id)
-        return ModelConfigService._runtime_model_view(model)
+        return ModelConfigService._runtime_model_view(model, tenant_id)
 
     @staticmethod
     async def get_runtime_model_view_bridge_async(

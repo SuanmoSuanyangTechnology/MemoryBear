@@ -91,6 +91,7 @@ from redbear_model.runtime.client_pool import ModelClientPool
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..errors import BizCode, http_status_for
+from ..infrastructure.model_provider_config import get_default_provider_api_base
 from ..repositories.model_repository import ModelConfigRepository
 from ..schemas.invoke_schema import (
     ASRInvokeRequest,
@@ -551,6 +552,22 @@ def _with_llm_params(
             "json_output": json_output,
         }
     )
+
+
+def _materialize_default_base(resolved: ResolvedModelConfig) -> ResolvedModelConfig:
+    """渠道 api_base 空（provider 级渠道恒 NULL）→ 按能力物化 provider 公共基地址。
+
+    与旧壳 ``ModelApiKeyService._runtime_api_key_from_resolved`` 同语义（本地 provider
+    无默认地址，保持空并由下游明确报错）。invoke 直喂包 runtime、不经旧壳：不物化时
+    speedbear 会落到 OpenAI SDK 默认端点（api.openai.com）而 401（2026-10-08 回归：
+    公共 speedbear 模型经平台渠道 invoke 全挂）。
+    """
+    if resolved.base_url:
+        return resolved
+    default = get_default_provider_api_base(resolved.provider, resolved.profile.type)
+    if not default:
+        return resolved
+    return resolved.model_copy(update={"base_url": default})
 
 
 def _as_int(value: Any) -> int:
@@ -1041,6 +1058,7 @@ async def invoke(
 
     async def _call(resolved: ResolvedModelConfig) -> Any:
         nonlocal attempts, last_resolved
+        resolved = _materialize_default_base(resolved)
         attempts += 1
         last_resolved = resolved
         if first_result_timeout_s is None:
