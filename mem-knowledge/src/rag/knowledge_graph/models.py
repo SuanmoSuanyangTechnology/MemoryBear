@@ -6,7 +6,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from pydantic import BaseModel, Field
-from redbear_model import ResolvedModelConfig
+
+from ..retrieval.models import ModelRuntimeSnapshot
 
 
 class SourceChunk(BaseModel):
@@ -154,8 +155,8 @@ class GraphIndexRuntime:
     chunk_index_name: str
     entity_types: tuple[str, ...]
     scene_name: str
-    llm: ResolvedModelConfig
-    embedding: ResolvedModelConfig
+    llm: ModelRuntimeSnapshot
+    embedding: ModelRuntimeSnapshot
 
 
 @dataclass(frozen=True)

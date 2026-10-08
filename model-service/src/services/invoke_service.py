@@ -23,6 +23,12 @@ llm 族（G2 非流式 / G3 流式 + 工具）：逐请求参数并进 ``provide
 provider 构造器对未知字段静默忽略，绑错通道即工具静默失效）；token 归因取自返回消息的
 ``usage_metadata``（流式取最后一个带 usage 的块；缺则记 0，不臆造）。
 
+embedding / rerank 双模式（G4b）：文本模式（``input`` / ``query``+``documents``）旧口径
+零改动；结构化模式（``contents`` / ``query_content``+``views``）按 resolved 能力选路——
+qwen3-vl 走包内 ``EmbeddingRequest``（单向量融合）/ ``RerankCandidateView``（多模态
+rerank），volcano embedding 走多模态宽入；能力不匹配即 INVALID_PARAMETER 拒止
+（不静默降级文本路径）。
+
 流式（G3）：``chunk_sink`` 非空 = 增量下发，runtime 的块经 ``_drain_stream`` 归一后推入
 有界队列（``await put`` 背压）；首块由候选循环内 eager 拉取（``open_astream``），故首块前
 失败照常同候选重试 / 换渠道，首块产出后交棒（§2.5：不再换渠道）。首帧前总档由
@@ -49,6 +55,9 @@ from redbear_model import (
     AudioTranscriptionResult,
     ChannelSwitchExhaustedError,
     CredentialDecryptError,
+    EmbeddingPurpose,
+    EmbeddingRequest,
+    ImageEmbeddingContent,
     InvalidProviderResponseError,
     ModelConfigDeprecatedError,
     ModelConfigInactiveError,
@@ -56,10 +65,14 @@ from redbear_model import (
     ModelTaskFailedError,
     ModelType,
     NoAvailableChannelError,
+    RerankCandidateView,
     ResolvedModelConfig,
     SpeedbearChannelMissingError,
+    TextEmbeddingContent,
     UsageEvent,
     UsageStatus,
+    is_qwen3_vl_embedding,
+    is_qwen3_vl_reranker,
     open_astream,
     publish_usage_safely,
     run_candidate_fallback_async,
@@ -83,6 +96,7 @@ from ..schemas.invoke_schema import (
     ASRInvokeRequest,
     EmbeddingInvokeRequest,
     EmbeddingParams,
+    ImageContentBlock,
     ImageInvokeRequest,
     ImageParams,
     InvokeRequestBody,
@@ -92,6 +106,7 @@ from ..schemas.invoke_schema import (
     MediaUrlRef,
     RerankInvokeRequest,
     RerankParams,
+    TextContentBlock,
     VideoInvokeRequest,
     VideoParams,
 )
@@ -186,8 +201,81 @@ async def _invoke_embedding(
     }
 
 
+async def _invoke_embedding_structured(
+    resolved: ResolvedModelConfig,
+    params: EmbeddingParams,
+    *,
+    client_pool: ModelClientPool | None = None,
+) -> dict[str, Any]:
+    """结构化 embedding（G4b：contents + purpose）：按模型能力选路，响应恒为单向量。
+
+    - qwen3-vl（``is_qwen3_vl_embedding``）：包内 ``EmbeddingRequest`` 单向量融合
+      （2048 维），usage（含 image_tokens）原样透传。
+    - volcano：``embed_multimodal`` 多模态宽入（OpenAI 内容块形状），批内容整体融合。
+    - 其余模型：INVALID_PARAMETER 响亮拒止（不静默降级文本路径）。
+    """
+    if params.purpose is None or params.contents is None:
+        # schema 互斥校验已保证；非 HTTP 构造路径（内部/测试）违反即契约违规
+        raise InvokeFailure(
+            code=BizCode.INVALID_PARAMETER,
+            message="结构化 embedding 需要 purpose 与 contents",
+        )
+    if not is_qwen3_vl_embedding(resolved) and resolved.provider is not ModelProvider.VOLCANO:
+        raise InvokeFailure(
+            code=BizCode.INVALID_PARAMETER,
+            message=(
+                f"模型 {resolved.model_name} 不支持结构化 embedding 入参"
+                "（需 qwen3-vl embedding 或 volcano 多模态）"
+            ),
+        )
+    runtime = RedBearEmbeddings(resolved, client_pool=client_pool)
+    try:
+        if is_qwen3_vl_embedding(resolved):
+            result = await runtime.aembed_contents(
+                EmbeddingRequest(
+                    purpose=EmbeddingPurpose(params.purpose),
+                    contents=tuple(
+                        _package_content_block(block) for block in params.contents
+                    ),
+                )
+            )
+            return {
+                "vector": list(result.vector),
+                "dimension": result.dimension,
+                "usage": dict(result.usage),
+            }
+        vectors = await runtime.aembed_multimodal(
+            [_volcano_content_block(block) for block in params.contents]
+        )
+        # volcano 多模态把整批内容融合为单向量（response.data.embedding 单条）
+        vector = list(vectors[0]) if vectors else []
+        return {"vector": vector, "dimension": len(vector), "usage": {}}
+    finally:
+        await runtime.aclose()
+
+
+def _package_content_block(
+    block: TextContentBlock | ImageContentBlock,
+) -> TextEmbeddingContent | ImageEmbeddingContent:
+    """wire 内容块 → 包 contract（字段镜像，仅类型转换）。"""
+    if isinstance(block, TextContentBlock):
+        return TextEmbeddingContent(text=block.text)
+    return ImageEmbeddingContent(
+        media_type=block.media_type,
+        data_uri=block.data_uri,
+        decoded_bytes=block.decoded_bytes,
+    )
+
+
+def _volcano_content_block(block: TextContentBlock | ImageContentBlock) -> dict[str, Any]:
+    """wire 内容块 → volcano 多模态宽入（OpenAI 内容块形状）。"""
+    if isinstance(block, TextContentBlock):
+        return {"type": "text", "text": block.text}
+    return {"type": "image_url", "image_url": {"url": block.data_uri}}
+
+
 async def _invoke_rerank(resolved: ResolvedModelConfig, params: RerankParams) -> dict[str, Any]:
-    """rerank 族：包内 RedBearRerank（provider 适配与 qwen3-vl 分支在包内）。"""
+    """rerank 族文本模式：包内 RedBearRerank（provider 适配与 qwen3-vl 分支在包内）。"""
     runtime = RedBearRerank(resolved)
     try:
         results = await asyncio.to_thread(
@@ -202,6 +290,56 @@ async def _invoke_rerank(resolved: ResolvedModelConfig, params: RerankParams) ->
         "results": [
             {"index": item["index"], "relevance_score": item["relevance_score"]}
             for item in results
+        ]
+    }
+
+
+async def _invoke_rerank_multimodal(
+    resolved: ResolvedModelConfig,
+    params: RerankParams,
+) -> dict[str, Any]:
+    """rerank 族多模态模式（G4b：query_content + views）：qwen3-vl rerank 原生多模态。
+
+    响应形状与文本路径一致（``{"results": [{"index", "relevance_score"}]}``）；
+    适配器返回数组位置下标，此处映射回 ``views[].chunk_index``（调用方候选序号，
+    结果按此回指）。``top_n`` 缺省 = 视图数（schema 已限 ≤ len(views)，包内适配器同口径）。
+    """
+    if params.query_content is None or params.views is None:
+        # schema 互斥校验已保证；非 HTTP 构造路径（内部/测试）违反即契约违规
+        raise InvokeFailure(
+            code=BizCode.INVALID_PARAMETER,
+            message="多模态 rerank 需要 query_content 与 views",
+        )
+    if not is_qwen3_vl_reranker(resolved):
+        raise InvokeFailure(
+            code=BizCode.INVALID_PARAMETER,
+            message=f"模型 {resolved.model_name} 不支持多模态 rerank（views 入参）",
+        )
+    views = tuple(
+        RerankCandidateView(
+            chunk_index=view.chunk_index,
+            kind=view.kind,
+            content=view.content,
+            image_index=view.image_index,
+        )
+        for view in params.views
+    )
+    runtime = RedBearRerank(resolved)
+    try:
+        scores = await runtime.arerank_multimodal(
+            _package_content_block(params.query_content),
+            views,
+            top_n=params.top_n if params.top_n is not None else len(views),
+        )
+    finally:
+        await runtime.aclose()
+    return {
+        "results": [
+            {
+                "index": views[score.input_index].chunk_index,
+                "relevance_score": score.relevance_score,
+            }
+            for score in scores
         ]
     }
 
@@ -635,11 +773,17 @@ def _family_invoker(
         if request.params.dimensions is not None:
             raise _unsupported_param("embedding dimensions")
         params = request.params
+        if params.contents is not None:
+            return lambda resolved: _invoke_embedding_structured(
+                resolved, params, client_pool=client_pool
+            )
         return lambda resolved: _invoke_embedding(resolved, params, client_pool=client_pool)
     if isinstance(request, RerankInvokeRequest):
         if request.params.instruct is not None:
             raise _unsupported_param("rerank instruct")
         params = request.params
+        if params.views is not None:
+            return lambda resolved: _invoke_rerank_multimodal(resolved, params)
         return lambda resolved: _invoke_rerank(resolved, params)
     if isinstance(request, ASRInvokeRequest):
         audio = request.params.audio

@@ -1,39 +1,32 @@
-"""Minimal knowledge-owned adapter for image-capable RedBear models."""
+"""视觉壳（QWenCV，G4b）：图 → 文走 llm 族多模态消息（data URI），凭据不出 km。
+
+旧 ``rag.models.vision.QWenCV`` 的壳化版本：只换底座（``RedBearLLM`` → 同步
+``RedBearChatModel`` 壳），消息形态、prompt 文案与返回口径保持不变。纯 sync 站点
+（celery ``parse_document`` 的图 → 文）使用。
+"""
 
 from __future__ import annotations
 
 import base64
-from typing import Any
 
-from redbear_model import ResolvedModelConfig
-from redbear_model.runtime import RedBearLLM
-
-
-def _message_text(response: Any) -> str:
-    content = getattr(response, "content", response)
-    if isinstance(content, str):
-        return content.strip()
-    if isinstance(content, list):
-        return "\n".join(
-            str(item.get("text", "")).strip()
-            for item in content
-            if isinstance(item, dict) and item.get("text")
-        ).strip()
-    return str(content or "").strip()
+from .chat import RedBearChatModel, message_text, message_token_count
+from .invoke_backend import RemoteInvokeRef
+from .runtime import ModelInvokeRuntime
 
 
 class QWenCV:
-    """Expose the legacy describe methods over a resolved model snapshot."""
+    """图 → 文：持同步 chat 壳（llm 族多模态消息，服务侧选路）。"""
 
-    def __init__(
-        self,
-        config: ResolvedModelConfig,
-        *,
-        client_pool,
-        lang: str = "Chinese",
-    ) -> None:
-        self.lang = lang
-        self._model = RedBearLLM(config, client_pool=client_pool)
+    @classmethod
+    def for_invoke_sync_ref(
+        cls, ref: RemoteInvokeRef, *, pool: ModelInvokeRuntime, lang: str = "Chinese"
+    ) -> QWenCV:
+        """远端同步模式：与旧 ``QWenCV(config, client_pool=...)`` 同用法。"""
+
+        instance = cls.__new__(cls)
+        instance.lang = lang
+        instance._model = RedBearChatModel.for_invoke_sync_ref(ref, pool=pool)
+        return instance
 
     def describe(self, image: bytes) -> tuple[str, int]:
         prompt = (
@@ -66,10 +59,10 @@ class QWenCV:
                 }
             ]
         )
-        text = _message_text(response)
+        text = message_text(response)
         if not text:
             raise RuntimeError("Image model returned empty content")
-        return text, 0
+        return text, message_token_count(response, text)
 
 
 __all__ = ["QWenCV"]

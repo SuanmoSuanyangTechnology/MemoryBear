@@ -4,19 +4,17 @@ import uuid
 from enum import StrEnum
 
 from sqlalchemy import (
-    BigInteger,
     Boolean,
     Column,
     DateTime,
     ForeignKey,
     Integer,
     String,
-    Table,
     Text,
     UniqueConstraint,
     text,
 )
-from sqlalchemy.dialects.postgresql import ARRAY, JSON, JSONB, UUID
+from sqlalchemy.dialects.postgresql import ARRAY, JSON, UUID
 from sqlalchemy.orm import relationship
 
 from ...utils.datetime_utils import utcnow_naive
@@ -57,25 +55,6 @@ class ModelProvider(StrEnum):
 class LoadBalanceStrategy(StrEnum):
     ROUND_ROBIN = "round_robin"
     NONE = "none"
-
-
-model_config_api_key_association = Table(
-    "model_config_api_key_association",
-    ReferenceBase.metadata,
-    Column(
-        "model_config_id",
-        UUID(as_uuid=True),
-        ForeignKey("model_configs.id"),
-        primary_key=True,
-    ),
-    Column(
-        "api_key_id",
-        UUID(as_uuid=True),
-        ForeignKey("model_api_keys.id"),
-        primary_key=True,
-    ),
-    Column("created_at", DateTime, default=utcnow_naive),
-)
 
 
 class ModelConfig(ReferenceBase):
@@ -162,75 +141,6 @@ class ModelConfig(ReferenceBase):
 
     # 只读投影：快照构建派生 is_deprecated（无写语义，故无 core ORM 的 back_populates/cascade）
     model_base = relationship("ModelBase")
-
-
-class ModelApiKey(ReferenceBase):
-    __tablename__ = "model_api_keys"
-
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
-    created_at = Column(DateTime, default=utcnow_naive, comment="created at")
-    updated_at = Column(
-        DateTime,
-        default=utcnow_naive,
-        onupdate=utcnow_naive,
-        comment="updated at",
-    )
-    is_active = Column(Boolean, default=True, nullable=False, comment="active")
-    model_name = Column(String, nullable=False, comment="runtime model name")
-    description = Column(String, comment="description")
-    provider = Column(String, nullable=False, comment="provider")
-    api_key = Column(String, nullable=False, comment="API credential")
-    api_base = Column(String, comment="API base URL")
-    capability = Column(
-        ARRAY(String),
-        default=list,
-        nullable=False,
-        server_default=text("'{}'::varchar[]"),
-        comment="model capabilities",
-    )
-    is_omni = Column(
-        Boolean,
-        default=False,
-        nullable=False,
-        server_default="false",
-        comment="omni model",
-    )
-    config = Column(JSON, comment="API key configuration")
-    usage_count = Column(String, default="0", comment="usage count")
-    last_used_at = Column(DateTime, comment="last used at")
-    priority = Column(String, default="1", comment="priority")
-
-
-class ModelChannel(ReferenceBase):
-    """Read-only projection of a model channel row (M5 起平台/租户凭据落表处).
-
-    列集与 core `ModelChannel` 对齐：渠道池投影需要覆盖匹配与排序字段
-    （model_names/priority/created_at），另带凭据指纹/掩码供 ChannelSnapshot 构造。
-    """
-
-    __tablename__ = "model_channels"
-
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
-    tenant_id = Column(UUID(as_uuid=True), nullable=False, index=True)
-    provider = Column(String(50), nullable=False)
-    model_names = Column(
-        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
-    )
-    api_base = Column(String(512), nullable=True)
-    credential_encrypted = Column(Text, nullable=False)
-    credential_sha256 = Column(String(64), nullable=False, server_default="")
-    credential_masked = Column(String(255), nullable=False, server_default="")
-    priority = Column(Integer, nullable=False, default=0, server_default="0")
-    cooldown_until_ms = Column(BigInteger, nullable=True)
-    source = Column(String(20), nullable=False, default="manual")
-    extra = Column(
-        JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb")
-    )
-    is_active = Column(Boolean, default=True, nullable=False)
-    created_at = Column(DateTime, default=utcnow_naive, comment="created at")
-    updated_at = Column(
-        DateTime, default=utcnow_naive, onupdate=utcnow_naive, comment="updated at"
-    )
 
 
 class ModelBase(ReferenceBase):

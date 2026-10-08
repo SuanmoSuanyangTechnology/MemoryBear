@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from ..bootstrap import get_settings
 from ..runtime import get_worker_runtime
+from ..usage_context import bind_usage
 from .celery_app import celery_app
 from .observability import (
     DocumentProgressSink,
@@ -42,6 +43,7 @@ def process_knowledge_sync(*args, **kwargs):
 
 
 @celery_app.task(name="app.core.rag.tasks.parse_document")
+@bind_usage("document", "document_id")
 def parse_document(file_key: str, document_id, file_name: str = ""):
     settings = get_settings()
     runtime = get_worker_runtime()
@@ -74,6 +76,7 @@ def parse_document(file_key: str, document_id, file_name: str = ""):
 
 
 @celery_app.task(name="app.core.rag.tasks.sync_knowledge_for_kb")
+@bind_usage("kb", "kb_id")
 def sync_knowledge_for_kb(kb_id):
     settings = get_settings()
     runtime = get_worker_runtime()

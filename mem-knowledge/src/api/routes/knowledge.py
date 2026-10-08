@@ -10,12 +10,6 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, Body, Depends, Query, Request
 from fastapi.responses import StreamingResponse
-from redbear_model import (
-    ModelConfigNotFoundError,
-    ModelCredentialNotFoundError,
-    PublicCredentialUnavailableError,
-    resolve_model_async,
-)
 from sqlalchemy import select
 from starlette.background import BackgroundTask
 
@@ -144,25 +138,19 @@ async def get_knowledge_graph_entity_types(
     runtime: Annotated[ProcessRuntime, Depends(get_runtime)],
 ) -> SuccessEnvelope[str]:
     async with runtime.database.async_session() as db:
-        try:
-            resolved = await resolve_model_async(
-                AsyncSQLModelRegistry(db),
-                model_config_id=llm_id,
-                tenant_id=principal.tenant_id,
-            )
-        except ModelConfigNotFoundError as exc:
-            raise KnowledgeError.from_code(
-                "KB_MODEL_CONFIG_NOT_FOUND",
-            ) from exc
-        except (
-            ModelCredentialNotFoundError,
-            PublicCredentialUnavailableError,
-        ) as exc:
-            raise KnowledgeError.from_code(
-                "KB_MODEL_CREDENTIAL_UNAVAILABLE",
-            ) from exc
+        config = await AsyncSQLModelRegistry(db).get_model_config(
+            llm_id,
+            principal.tenant_id,
+        )
+    if config is None:
+        raise KnowledgeError.from_code("KB_MODEL_CONFIG_NOT_FOUND")
     try:
-        result = await graph_service.graph_entity_types(runtime, resolved, scenario)
+        result = await graph_service.graph_entity_types(
+            runtime,
+            config,
+            principal.tenant_id,
+            scenario,
+        )
     except KnowledgeError:
         raise
     except Exception as exc:

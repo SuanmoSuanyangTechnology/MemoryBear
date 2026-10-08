@@ -6,6 +6,9 @@
   （凭据与选路全在服务侧，调用方不得指定来源）。
 - `messages`（langchain 序列化）与 `tools`（OpenAI function 形状）是**透传载荷**：
   其内部字段属 langchain 契约，不设白名单，只做最小形状校验。
+- 结构化内容块（`contents` / `query_content` / `views`，G4b 多模态面扩展）严格镜像
+  包 contract（``EmbeddingRequest`` / ``RerankCandidateView``）：块内字段同样 `forbid`，
+  图像 data URI 须合法 base64 且 ≤10MB（对齐 km 索引期图像约束）。
 """
 
 from __future__ import annotations
@@ -15,12 +18,21 @@ from typing import Annotated, Any, Literal
 from urllib.parse import urlparse
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 # 媒体内联上限（设计 §2.3 选项 (c)）：超过即 422，不做截断
 MAX_INLINE_MEDIA_BYTES = 1024 * 1024
 # base64 编码膨胀：4 字符/3 字节（含 padding），先按编码长度拒绝，避免为超限载荷做无谓解码
 _MAX_INLINE_B64_CHARS = ((MAX_INLINE_MEDIA_BYTES + 2) // 3) * 4
+
+# 结构化内容块的图片上限：与 mem-knowledge 索引期图像约束
+# （multimodal_image.MAX_IMAGE_BYTES = 10MB，超限压缩/丢弃）对齐，不在此收紧
+MAX_EMBEDDING_IMAGE_BYTES = 10 * 1024 * 1024
+_MAX_EMBEDDING_IMAGE_B64_CHARS = ((MAX_EMBEDDING_IMAGE_BYTES + 2) // 3) * 4
+EmbeddingImageMediaType = Literal["image/jpeg", "image/png", "image/webp", "image/bmp"]
+#: 结构化 embedding 约束镜像包 contract（EmbeddingRequest：≤20 块、图 ≤10）
+MAX_EMBEDDING_CONTENTS = 20
+MAX_EMBEDDING_IMAGES = 10
 
 
 class MediaUrlRef(BaseModel):
@@ -68,6 +80,99 @@ class MediaInlineRef(BaseModel):
 MediaRef = Annotated[MediaUrlRef | MediaInlineRef, Field(discriminator="kind")]
 
 
+class TextContentBlock(BaseModel):
+    """结构化文本块（镜像包 contract ``TextEmbeddingContent``）。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["text"] = "text"
+    text: str = Field(min_length=1)
+
+    @field_validator("text")
+    @classmethod
+    def _normalize_text(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("text content must not be blank")
+        return stripped
+
+
+class ImageContentBlock(BaseModel):
+    """结构化图片块（镜像包 contract ``ImageEmbeddingContent``）：data URI + 解码字节数。
+
+    ``decoded_bytes`` 必须与载荷一致（不替调用方纠正）；图片上限与 mem-knowledge 索引期
+    图像约束（multimodal_image.MAX_IMAGE_BYTES = 10MB，超限压缩/丢弃）对齐，不在此收紧。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["image"] = "image"
+    media_type: EmbeddingImageMediaType
+    data_uri: str = Field(min_length=1, repr=False)
+    decoded_bytes: int = Field(ge=1, repr=False)
+
+    @model_validator(mode="after")
+    def _validate_payload(self) -> ImageContentBlock:
+        header = f"data:{self.media_type};base64,"
+        if not self.data_uri.startswith(header):
+            raise ValueError("image data_uri 必须是与该 media_type 匹配的 base64 data URI")
+        decoded = _check_image_data_uri_payload(self.data_uri[len(header) :])
+        if decoded != self.decoded_bytes:
+            raise ValueError("decoded_bytes 与 data_uri 载荷长度不一致")
+        return self
+
+
+ContentBlock = Annotated[TextContentBlock | ImageContentBlock, Field(discriminator="type")]
+
+
+def _check_image_data_uri_payload(payload: str) -> int:
+    """b64 载荷长度与解码尺寸双重上限（先按编码长度拒止，避免为超限载荷做无谓解码）。
+
+    返回解码字节数供调用方核对声明值。
+    """
+    if not payload:
+        raise ValueError("image content 载荷不得为空")
+    if len(payload) > _MAX_EMBEDDING_IMAGE_B64_CHARS:
+        raise ValueError(f"image content exceeds {MAX_EMBEDDING_IMAGE_BYTES} bytes")
+    try:
+        binary = base64.b64decode(payload, validate=True)
+    except ValueError as exc:
+        raise ValueError(f"image content is not valid base64: {exc}") from exc
+    if len(binary) > MAX_EMBEDDING_IMAGE_BYTES:
+        raise ValueError(f"image content exceeds {MAX_EMBEDDING_IMAGE_BYTES} bytes")
+    return len(binary)
+
+
+class RerankViewBlock(BaseModel):
+    """多模态 rerank 候选视图（镜像包 contract ``RerankCandidateView``）。
+
+    ``chunk_index`` 是调用方候选序号（结果 ``index`` 按此回指）；image 视图的 ``content``
+    是 base64 data URI（≤10MB），``image_index`` 缺省 0（text 视图不得携带）。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    chunk_index: int = Field(ge=0)
+    kind: Literal["text", "image"]
+    content: str = Field(min_length=1, repr=False)
+    image_index: int | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def _validate_view(self) -> RerankViewBlock:
+        if self.kind == "image":
+            if self.image_index is None:
+                object.__setattr__(self, "image_index", 0)
+            if not self.content.startswith("data:"):
+                raise ValueError("image rerank view content 必须是 base64 data URI")
+            header, separator, payload = self.content.partition(",")
+            if not separator or not header.endswith(";base64"):
+                raise ValueError("image rerank view content 必须是 base64 data URI")
+            _check_image_data_uri_payload(payload)
+        elif self.image_index is not None:
+            raise ValueError("text rerank views cannot have an image index")
+        return self
+
+
 class LLMParams(BaseModel):
     """LLM 族入参。采样/开关为供应商无关意图；值域与宿主 LLM 节点配置同口径。
 
@@ -105,40 +210,106 @@ class LLMParams(BaseModel):
 
 
 class EmbeddingParams(BaseModel):
+    """embedding 族入参（互斥双模式）。
+
+    - 文本模式（``input``）：纯文本批，旧口径零改动。
+    - 结构化模式（``contents`` + ``purpose``）：文本/图片内容块；服务侧按模型能力选路
+      （qwen3-vl 走包内 EmbeddingRequest 单向量融合、volcano 多模态宽入）；维度固定
+      2048（包 contract），``dimensions`` 一律拒止（服务侧入参期）。
+    """
+
     model_config = ConfigDict(extra="forbid")
 
-    input: list[str] = Field(min_length=1)
+    input: list[str] | None = Field(default=None, min_length=1)
     dimensions: int | None = Field(default=None, ge=1)
+    contents: list[ContentBlock] | None = Field(
+        default=None, min_length=1, max_length=MAX_EMBEDDING_CONTENTS
+    )
+    purpose: Literal["index", "retrieval"] | None = None
 
     @field_validator("input")
     @classmethod
-    def _no_blank_inputs(cls, value: list[str]) -> list[str]:
+    def _no_blank_inputs(cls, value: list[str] | None) -> list[str] | None:
+        if value is None:
+            return value
         if any(not item.strip() for item in value):
             raise ValueError("input must not contain blank entries")
         return value
 
+    @model_validator(mode="after")
+    def _exactly_one_mode(self) -> EmbeddingParams:
+        if (self.input is None) == (self.contents is None):
+            raise ValueError(
+                "embedding params 需要 input（文本批）与 contents（结构化）恰有其一"
+            )
+        if self.contents is None:
+            if self.purpose is not None:
+                raise ValueError("purpose 仅用于结构化 contents 入参")
+            return self
+        if self.purpose is None:
+            raise ValueError("结构化 contents 入参必须声明 purpose")
+        image_count = sum(isinstance(block, ImageContentBlock) for block in self.contents)
+        if image_count > MAX_EMBEDDING_IMAGES:
+            raise ValueError(f"结构化 embedding 至多 {MAX_EMBEDDING_IMAGES} 张图片")
+        return self
+
 
 class RerankParams(BaseModel):
+    """rerank 族入参（互斥双模式）。
+
+    - 文本模式（``query`` + ``documents``）：旧口径零改动。
+    - 多模态模式（``query_content`` + ``views``）：query 为文本/图片块，候选视图带
+      ``chunk_index`` 归属；``top_n`` 缺省 = 视图数（包内约束 1..len(views)）。
+    """
+
     model_config = ConfigDict(extra="forbid")
 
-    query: str = Field(min_length=1)
-    documents: list[str] = Field(min_length=1)
+    query: str | None = Field(default=None, min_length=1)
+    documents: list[str] | None = Field(default=None, min_length=1)
     top_n: int | None = Field(default=None, ge=1)
     instruct: str | None = None
+    query_content: ContentBlock | None = None
+    views: list[RerankViewBlock] | None = Field(default=None, min_length=1)
 
     @field_validator("query")
     @classmethod
-    def _non_blank_query(cls, value: str) -> str:
+    def _non_blank_query(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
         if not value.strip():
             raise ValueError("query must not be blank")
         return value
 
     @field_validator("documents")
     @classmethod
-    def _no_blank_documents(cls, value: list[str]) -> list[str]:
+    def _no_blank_documents(cls, value: list[str] | None) -> list[str] | None:
+        if value is None:
+            return value
         if any(not item.strip() for item in value):
             raise ValueError("documents must not contain blank entries")
         return value
+
+    @model_validator(mode="after")
+    def _exactly_one_mode(self) -> RerankParams:
+        textual = self.query is not None and self.documents is not None
+        multimodal = self.query_content is not None and self.views is not None
+        if textual == multimodal:
+            raise ValueError(
+                "rerank params 需要（query + documents）与（query_content + views）恰有其一"
+            )
+        if textual:
+            if self.query_content is not None or self.views is not None:
+                raise ValueError("文本模式不接受 query_content / views")
+            return self
+        if self.instruct is not None:
+            raise ValueError("instruct 仅用于文本 documents 模式")
+        if self.top_n is not None and self.top_n > len(self.views):
+            raise ValueError("top_n 不得超过 views 数量")
+        chunk_indexes = [view.chunk_index for view in self.views]
+        if len(set(chunk_indexes)) != len(chunk_indexes):
+            # 结果 index 按 chunk_index 回指：重复键即回指歧义，入参期拒止
+            raise ValueError("views 的 chunk_index 必须唯一")
+        return self
 
 
 class ASRParams(BaseModel):
@@ -220,11 +391,17 @@ InvokeRequestBody = Annotated[
 
 
 __all__ = [
+    "MAX_EMBEDDING_CONTENTS",
+    "MAX_EMBEDDING_IMAGES",
+    "MAX_EMBEDDING_IMAGE_BYTES",
     "MAX_INLINE_MEDIA_BYTES",
     "ASRInvokeRequest",
     "ASRParams",
+    "ContentBlock",
+    "EmbeddingImageMediaType",
     "EmbeddingInvokeRequest",
     "EmbeddingParams",
+    "ImageContentBlock",
     "ImageInvokeRequest",
     "ImageParams",
     "InvokeRequestBody",
@@ -235,6 +412,8 @@ __all__ = [
     "MediaUrlRef",
     "RerankInvokeRequest",
     "RerankParams",
+    "RerankViewBlock",
+    "TextContentBlock",
     "VideoInvokeRequest",
     "VideoParams",
 ]

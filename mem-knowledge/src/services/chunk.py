@@ -13,9 +13,7 @@ from redbear_model import (
     QWEN3_VL_EMBEDDING_DIMENSION,
     EmbeddingPurpose,
     EmbeddingRequest,
-    ResolvedModelConfig,
-    is_qwen3_vl_embedding,
-    resolve_model_async,
+    ModelConfigSnapshot,
 )
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,6 +21,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..api.dependencies import Principal
 from ..api.schemas.chunk import ChunkCreate, ChunkType
 from ..errors import KnowledgeError
+from ..integrations.model.chat import RedBearChatModel
+from ..integrations.model.embedding import RedBearEmbeddings
+from ..integrations.model.invoke_backend import ref_from_view
+from ..integrations.model.views import is_qwen3_vl_embedding_view
 from ..models.owned import Document
 from ..rag.chunk.metadata import merge_parser_metadata
 from ..rag.chunk.preview import preview_binary
@@ -388,42 +390,51 @@ async def resolve_embedding_config(
     db: AsyncSession,
     snapshot: ChunkDocumentSnapshot,
     principal: Principal,
-) -> ResolvedModelConfig:
+) -> ModelConfigSnapshot:
     if snapshot.embedding_id is None:
         raise KnowledgeError.from_code(
             "KB_EMBEDDING_MODEL_UNAVAILABLE",
         )
     try:
-        return await resolve_model_async(
-            AsyncSQLModelRegistry(db),
-            model_config_id=snapshot.embedding_id,
-            tenant_id=principal.tenant_id,
+        config = await AsyncSQLModelRegistry(db).get_model_config(
+            snapshot.embedding_id,
+            principal.tenant_id,
         )
     except Exception as exc:
         raise KnowledgeError.from_code(
             "KB_EMBEDDING_MODEL_UNAVAILABLE",
         ) from exc
+    # 存量口径：不存在/不可见/下线/停用一律折叠为同一错误码
+    if config is None or config.is_deprecated or not config.is_active:
+        raise KnowledgeError.from_code(
+            "KB_EMBEDDING_MODEL_UNAVAILABLE",
+        )
+    return config
 
 
 async def resolve_vision_config(
     db: AsyncSession,
     snapshot: ChunkDocumentSnapshot,
     principal: Principal,
-) -> ResolvedModelConfig:
+) -> ModelConfigSnapshot:
     if snapshot.image2text_id is None:
         raise KnowledgeError.from_code(
             "KB_VISION_MODEL_UNAVAILABLE",
         )
     try:
-        return await resolve_model_async(
-            AsyncSQLModelRegistry(db),
-            model_config_id=snapshot.image2text_id,
-            tenant_id=principal.tenant_id,
+        config = await AsyncSQLModelRegistry(db).get_model_config(
+            snapshot.image2text_id,
+            principal.tenant_id,
         )
     except Exception as exc:
         raise KnowledgeError.from_code(
             "KB_VISION_MODEL_UNAVAILABLE",
         ) from exc
+    if config is None or config.is_deprecated or not config.is_active:
+        raise KnowledgeError.from_code(
+            "KB_VISION_MODEL_UNAVAILABLE",
+        )
+    return config
 
 
 def _message_text(response: Any) -> str:
@@ -443,7 +454,9 @@ async def preview_with_vision(
     runtime: ProcessRuntime,
     snapshot: ChunkDocumentSnapshot,
     binary: bytes,
-    vision_config: ResolvedModelConfig,
+    vision_config: ModelConfigSnapshot,
+    *,
+    tenant_id: uuid.UUID,
 ) -> list[DocumentChunk]:
     suffix = snapshot.file_name.rsplit(".", 1)[-1].lower() if "." in snapshot.file_name else ""
     image_exts = {"png", "jpeg", "jpg", "webp", "gif"}
@@ -463,7 +476,6 @@ async def preview_with_vision(
         )
 
     from langchain_core.messages import HumanMessage
-    from redbear_model.runtime import RedBearLLM
 
     encoded = base64.b64encode(binary).decode("ascii")
     media_type = mimetypes.guess_type(snapshot.file_name)[0] or "application/octet-stream"
@@ -485,7 +497,10 @@ async def preview_with_vision(
             "video_url": {"url": f"data:{media_type};base64,{encoded}"},
         }
         instruction = "Describe and transcribe the video accurately for knowledge retrieval."
-    model = RedBearLLM(vision_config, client_pool=runtime.model_runtime.pool)
+    model = RedBearChatModel.for_invoke_ref(
+        ref_from_view(vision_config, tenant_id),
+        pool=runtime.model_runtime,
+    )
     response = await model.ainvoke(
         [HumanMessage(content=[{"type": "text", "text": instruction}, media_block])]
     )
@@ -507,8 +522,9 @@ def build_chunk_store(
     runtime: ProcessRuntime,
     client: Any,
     snapshot: ChunkDocumentSnapshot,
-    resolved_embedding: ResolvedModelConfig | None = None,
+    embedding_config: ModelConfigSnapshot | None = None,
     *,
+    tenant_id: uuid.UUID,
     for_mutation: bool = True,
 ) -> AsyncChunkStore:
     embed = None
@@ -517,16 +533,15 @@ def build_chunk_store(
     image_resolver = None
     embedding_dimension = None
     multimodal = (
-        resolved_embedding is not None and is_qwen3_vl_embedding(resolved_embedding)
+        embedding_config is not None and is_qwen3_vl_embedding_view(embedding_config)
     )
     # Read-only paths (e.g. chunk listing) only need the multimodal marker to
     # collapse unit docs; skip building the embedding model client entirely.
-    if resolved_embedding is not None and for_mutation:
-        from redbear_model.runtime import RedBearEmbeddings
-
-        model = RedBearEmbeddings(
-            resolved_embedding,
-            client_pool=runtime.model_runtime.pool,
+    if embedding_config is not None and for_mutation:
+        model = RedBearEmbeddings.for_invoke_ref(
+            ref_from_view(embedding_config, tenant_id),
+            pool=runtime.model_runtime,
+            multimodal=multimodal,
         )
         if multimodal:
             embedding_dimension = QWEN3_VL_EMBEDDING_DIMENSION

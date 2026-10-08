@@ -9,6 +9,10 @@ from typing import Any
 
 from sqlalchemy import select
 
+from ..integrations.model.chat import RedBearChatModel
+from ..integrations.model.embedding import RedBearEmbeddings
+from ..integrations.model.invoke_backend import ref_from_view
+from ..integrations.model.views import is_qwen3_vl_embedding_view
 from ..models.owned import Document, Knowledge
 from ..rag.knowledge_graph.config import (
     GraphDocumentDeletionPending,
@@ -96,14 +100,16 @@ async def _build_pipeline(
     lock_guard: Any,
     stage_callback: GraphStageCallback | None = None,
 ):
-    from redbear_model.runtime import RedBearEmbeddings, RedBearLLM
-
     client = await runtime.elasticsearch.client()
     redis = await runtime.redis.client()
-    llm = RedBearLLM(graph_runtime.llm, client_pool=runtime.model_runtime.pool)
-    embedding = RedBearEmbeddings(
-        graph_runtime.embedding,
-        client_pool=runtime.model_runtime.pool,
+    llm = RedBearChatModel.for_invoke_ref(
+        ref_from_view(graph_runtime.llm, graph_runtime.llm.tenant_id),
+        pool=runtime.model_runtime,
+    )
+    embedding = RedBearEmbeddings.for_invoke_ref(
+        ref_from_view(graph_runtime.embedding, graph_runtime.embedding.tenant_id),
+        pool=runtime.model_runtime,
+        multimodal=is_qwen3_vl_embedding_view(graph_runtime.embedding),
     )
     extractor = LLMEntityRelationExtractor(
         llm,
