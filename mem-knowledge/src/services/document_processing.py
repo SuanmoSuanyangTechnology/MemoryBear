@@ -45,8 +45,17 @@ from ..rag.vdb.vector_store import TaskVectorStore
 from ..runtime import ProcessRuntime
 from ..tasks.dispatch import TaskDispatcher
 from ..tasks.observability import BusinessOutcome, TaskRun
-from ..tasks.state import PARSE_CANCEL_KEY, PARSE_TASK_KEY
+from ..tasks.state import PARSE_TASK_KEY
 from ..utils.datetime_utils import to_iso_z, to_timestamp_ms, utcnow, utcnow_naive
+from .document_mutation_guard import (
+    DocumentMutationLeaseLost,
+    sync_document_mutation_guard,
+)
+from .document_task_lifecycle import (
+    DocumentTaskAborted,
+    cleanup_late_write_if_deleted,
+    ensure_document_active,
+)
 from .knowledge_file_storage import KnowledgeFileStorage
 from .multimodal_image import StorageImageResolver
 
@@ -220,32 +229,13 @@ def _clear_parse_state(runtime: ProcessRuntime, document_id: object) -> None:
         )
 
 
-def _document_exists(runtime: ProcessRuntime, document_id: uuid.UUID) -> bool:
-    with runtime.database.sync_session() as session:
-        return session.get(Document, document_id) is not None
-
-
 def _should_abort(runtime: ProcessRuntime, document_id: uuid.UUID) -> bool:
     try:
-        redis = runtime.redis.sync_client()
-    except Exception as exc:  # noqa: BLE001 - DB presence is the legacy fallback.
-        logger.warning(
-            "Parse cancellation client unavailable: document=%s error_type=%s",
-            document_id,
-            type(exc).__name__,
-        )
-        return not _document_exists(runtime, document_id)
-    try:
-        if redis.get(PARSE_CANCEL_KEY.format(doc_id=document_id)) is not None:
-            logger.info("Document parsing cancelled: document=%s", document_id)
-            return True
-    except Exception as exc:  # noqa: BLE001 - RedisDB.get was best effort.
-        logger.warning(
-            "Parse cancellation state unavailable: document=%s error_type=%s",
-            document_id,
-            type(exc).__name__,
-        )
-    return not _document_exists(runtime, document_id)
+        ensure_document_active(runtime, document_id)
+        return False
+    except DocumentTaskAborted:
+        logger.info("Document parsing cancelled: document=%s", document_id)
+        return True
 
 
 def _download_file(runtime: ProcessRuntime, file_key: str) -> bytes:
@@ -685,13 +675,29 @@ def _write_chunks_with_retry(
     runtime: ProcessRuntime,
     vector_store: TaskVectorStore,
     batches: list[list[DocumentChunk]],
+    document_id: uuid.UUID,
 ) -> None:
     batch_errors: dict[int, Exception] = {}
     total_batches = len(batches)
 
     def write(batch_index: int, chunks: list[DocumentChunk]) -> None:
+        def prepare_and_write() -> None:
+            if _should_abort(runtime, document_id):
+                raise _ParseAborted
+            prepared = vector_store.prepare_chunks(chunks)
+            with sync_document_mutation_guard(
+                runtime.redis.sync_client(), document_id
+            ) as guard:
+                if _should_abort(runtime, document_id):
+                    raise _ParseAborted
+                guard.ensure_owned()
+                vector_store.write_prepared_batches([prepared])
+                guard.ensure_owned()
+
         try:
-            vector_store.add_chunks(chunks)
+            prepare_and_write()
+        except (_ParseAborted, DocumentMutationLeaseLost):
+            raise
         except Exception as exc:  # noqa: BLE001 - exactly one retry is required.
             logger.warning(
                 "Document vector batch failed; retrying: batch=%s error_type=%s",
@@ -699,7 +705,9 @@ def _write_chunks_with_retry(
                 type(exc).__name__,
             )
             try:
-                vector_store.add_chunks(chunks)
+                prepare_and_write()
+            except (_ParseAborted, DocumentMutationLeaseLost):
+                raise
             except Exception as retry_exc:  # noqa: BLE001 - aggregate batch failures.
                 logger.error(
                     "Document vector batch retry failed: batch=%s error_type=%s",
@@ -902,10 +910,17 @@ def process_document(
         else:
             vector_store = preflight.vector_store
             with run.stage("delete_old_vectors"):
-                vector_store.delete_by_metadata_field(
-                    "document_id",
-                    str(normalized_document_id),
-                )
+                with sync_document_mutation_guard(
+                    runtime.redis.sync_client(), normalized_document_id
+                ) as guard:
+                    if _should_abort(runtime, normalized_document_id):
+                        raise _ParseAborted
+                    guard.ensure_owned()
+                    vector_store.delete_by_metadata_field(
+                        "document_id",
+                        str(normalized_document_id),
+                    )
+                    guard.ensure_owned()
             with run.stage("prepare_chunks"):
                 if snapshot.parent_child_mode:
                     all_chunks = _parent_child_chunks(
@@ -948,7 +963,11 @@ def process_document(
             ]
             total_batches = len(batches)
             with run.stage("embedding"):
-                _write_chunks_with_retry(runtime, vector_store, batches)
+                _write_chunks_with_retry(
+                    runtime, vector_store, batches, normalized_document_id
+                )
+            if _should_abort(runtime, normalized_document_id):
+                raise _ParseAborted
             progress_lines.append(
                 f"{_progress_ts()} All {total_batches} batches embedded "
                 f"(workers={runtime.settings.embedding_max_workers})."
@@ -976,6 +995,8 @@ def process_document(
 
         with run.stage("persist_document"):
             _update_document(runtime, normalized_document_id, mark_done)
+        if _should_abort(runtime, normalized_document_id):
+            raise _ParseAborted
         with run.stage("dispatch_graph"):
             _dispatch_graph(runtime, snapshot, progress_lines)
         logger.info(
@@ -997,6 +1018,20 @@ def process_document(
             detail="document_deleted_or_cancelled",
         )
         return f"parse document '{document_label}' aborted (deleted or cancelled)."
+    except DocumentMutationLeaseLost as exc:
+        if normalized_document_id is not None:
+            try:
+                cleanup_late_write_if_deleted(
+                    runtime, snapshot.knowledge_id, normalized_document_id
+                )
+            except Exception as cleanup_exc:
+                logger.warning(
+                    "Late document vector cleanup failed: document=%s error_type=%s",
+                    normalized_document_id,
+                    type(cleanup_exc).__name__,
+                )
+        run.finish(BusinessOutcome.FAILURE, error_code="KB_DOC_PROCESSING_FAILED", exc=exc)
+        return f"parse document '{document_label}' failed."
     except Exception as exc:  # noqa: BLE001 - task returns a legacy failure string.
         logger.error(
             "Document parsing failed: document=%s error_type=%s",
