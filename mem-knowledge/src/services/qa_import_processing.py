@@ -26,7 +26,7 @@ from ..utils.datetime_utils import to_iso_z, to_timestamp_ms, utcnow, utcnow_nai
 from .document_mutation_guard import DocumentMutationLeaseLost, sync_document_mutation_guard
 from .document_task_lifecycle import (
     DocumentTaskAborted,
-    cleanup_late_write_if_deleted,
+    cleanup_after_lost_lease,
     ensure_document_active,
 )
 from .knowledge_file_storage import KnowledgeFileStorage
@@ -282,6 +282,7 @@ def process_qa_import(
     start_time = time.time()
     progress_lines = [f"{_progress_ts()} QA import task has been received."]
     normalized_document_id: uuid.UUID | None = None
+    chunks: list[DocumentChunk] = []
     error_code = "KB_QA_PROCESSING_FAILED"
     try:
         try:
@@ -452,11 +453,12 @@ def process_qa_import(
             detail="document_deleted_or_cancelled",
         )
         return {"error": "document deleted or cancelled", "imported": 0}
-    except DocumentMutationLeaseLost as exc:
-        if normalized_document_id is not None:
+    except Exception as exc:
+        if isinstance(exc, DocumentMutationLeaseLost) and normalized_document_id is not None:
             try:
-                cleanup_late_write_if_deleted(
-                    runtime, normalized_kb_id, normalized_document_id
+                cleanup_after_lost_lease(
+                    runtime, normalized_kb_id, normalized_document_id,
+                    [str(chunk.metadata["doc_id"]) for chunk in chunks],
                 )
             except Exception as cleanup_exc:
                 logger.warning(
@@ -464,9 +466,6 @@ def process_qa_import(
                     normalized_document_id,
                     type(cleanup_exc).__name__,
                 )
-        run.finish(BusinessOutcome.FAILURE, error_code="KB_QA_VECTOR_WRITE_FAILED", exc=exc)
-        return {"error": "QA vector processing failed", "imported": 0}
-    except Exception as exc:
         safe_error = (
             exc
             if isinstance(exc, _SafeQAImportError)

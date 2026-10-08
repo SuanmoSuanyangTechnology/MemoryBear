@@ -10,6 +10,8 @@ from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager, contextmanager
 from typing import Any
 
+from redis.exceptions import RedisError
+
 logger = logging.getLogger(__name__)
 
 DOCUMENT_MUTATION_LOCK_TTL_SECONDS = 120
@@ -31,7 +33,14 @@ class SyncDocumentMutationGuard:
         self._lost = lost
 
     def ensure_owned(self) -> None:
-        if self._lost.is_set() or not self._lock.owned():
+        if self._lost.is_set():
+            raise DocumentMutationLeaseLost("Document ES mutation lease was lost")
+        try:
+            owned = self._lock.owned()
+        except RedisError as exc:
+            self._lost.set()
+            raise DocumentMutationLeaseLost("Document ES mutation ownership is unknown") from exc
+        if not owned:
             raise DocumentMutationLeaseLost("Document ES mutation lease was lost")
 
 
@@ -41,7 +50,14 @@ class AsyncDocumentMutationGuard:
         self._lost = lost
 
     async def ensure_owned(self) -> None:
-        if self._lost.is_set() or not await self._lock.owned():
+        if self._lost.is_set():
+            raise DocumentMutationLeaseLost("Document ES mutation lease was lost")
+        try:
+            owned = await self._lock.owned()
+        except RedisError as exc:
+            self._lost.set()
+            raise DocumentMutationLeaseLost("Document ES mutation ownership is unknown") from exc
+        if not owned:
             raise DocumentMutationLeaseLost("Document ES mutation lease was lost")
 
 
@@ -85,8 +101,12 @@ def sync_document_mutation_guard(
     finally:
         stop.set()
         thread.join(timeout=5)
-        if lock.owned():
+        try:
+            if not lock.owned():
+                raise DocumentMutationLeaseLost("Document ES mutation lease was lost at release")
             lock.release()
+        except RedisError as exc:
+            raise DocumentMutationLeaseLost("Document ES mutation lease release failed") from exc
 
 
 @asynccontextmanager
@@ -115,9 +135,7 @@ async def async_document_mutation_guard(
             except TimeoutError:
                 pass
             try:
-                if not await lock.extend(
-                    DOCUMENT_MUTATION_LOCK_TTL_SECONDS, replace_ttl=True
-                ):
+                if not await lock.extend(DOCUMENT_MUTATION_LOCK_TTL_SECONDS, replace_ttl=True):
                     lost.set()
                     return
             except Exception:
@@ -135,8 +153,12 @@ async def async_document_mutation_guard(
     finally:
         stop.set()
         await task
-        if await lock.owned():
+        try:
+            if not await lock.owned():
+                raise DocumentMutationLeaseLost("Document ES mutation lease was lost at release")
             await lock.release()
+        except RedisError as exc:
+            raise DocumentMutationLeaseLost("Document ES mutation lease release failed") from exc
 
 
 __all__ = [

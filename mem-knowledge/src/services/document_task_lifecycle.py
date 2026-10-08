@@ -4,12 +4,20 @@ from __future__ import annotations
 
 import logging
 import uuid
+from collections.abc import AsyncIterator, Sequence
+from contextlib import asynccontextmanager
 
+from ..errors import KnowledgeError
 from ..models.owned import Document
-from ..rag.vdb.vector_store import TaskVectorStore, collection_name_for_knowledge
+from ..rag.vdb.field import Field
+from ..rag.vdb.vector_store import collection_name_for_knowledge
 from ..runtime import ProcessRuntime
 from ..tasks.state import PARSE_CANCEL_KEY
-from .document_mutation_guard import sync_document_mutation_guard
+from .document_mutation_guard import (
+    DocumentMutationLeaseLost,
+    async_document_mutation_guard,
+    sync_document_mutation_guard,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -39,19 +47,43 @@ def ensure_document_active(runtime: ProcessRuntime, document_id: uuid.UUID) -> N
         raise DocumentTaskAborted(f"Document processing cancelled: {document_id}")
 
 
-def cleanup_late_write_if_deleted(
+@asynccontextmanager
+async def guard_chunk_mutation(
     runtime: ProcessRuntime,
     knowledge_id: uuid.UUID,
     document_id: uuid.UUID,
-) -> None:
-    """Best-effort compensation after an in-flight ES request loses its lease."""
+) -> AsyncIterator[None]:
+    """Revalidate an authorized chunk request after its embedding has finished."""
 
-    with sync_document_mutation_guard(
-        runtime.redis.sync_client(), document_id
-    ) as guard:
+    redis = await runtime.redis.client()
+    try:
+        async with async_document_mutation_guard(redis, document_id) as guard:
+            async with runtime.database.async_session() as session:
+                document = await session.get(Document, document_id)
+                if document is None or document.kb_id != knowledge_id:
+                    raise KnowledgeError.from_code("KB_DOCUMENT_NOT_FOUND")
+            if await redis.get(PARSE_CANCEL_KEY.format(doc_id=document_id)) is not None:
+                raise KnowledgeError.from_code("KB_CONFLICT")
+            await guard.ensure_owned()
+            yield
+            await guard.ensure_owned()
+    except (TimeoutError, DocumentMutationLeaseLost) as exc:
+        raise KnowledgeError.from_code("KB_SEARCH_UNAVAILABLE") from exc
+
+
+def cleanup_after_lost_lease(
+    runtime: ProcessRuntime,
+    knowledge_id: uuid.UUID,
+    document_id: uuid.UUID,
+    chunk_ids: Sequence[str] = (),
+) -> None:
+    """Clean a deleted document or only this failed attempt's newly created chunks."""
+
+    with sync_document_mutation_guard(runtime.redis.sync_client(), document_id) as guard:
         with runtime.database.sync_session() as session:
-            if session.get(Document, document_id) is not None:
-                return
+            document_exists = session.get(Document, document_id) is not None
+        if document_exists and not chunk_ids:
+            return
         guard.ensure_owned()
         client = runtime.elasticsearch.sync_client()
         index = collection_name_for_knowledge(knowledge_id)
@@ -60,18 +92,42 @@ def cleanup_late_write_if_deleted(
         refresh_result = client.indices.refresh(index=index)
         if refresh_result.get("_shards", {}).get("failed", 0):
             raise RuntimeError("Elasticsearch refresh failed during late-write cleanup")
-        store = TaskVectorStore(client, knowledge_id, None)
-        store.delete_by_metadata_field("document_id", str(document_id), refresh=True)
+        query = {"term": {Field.DOCUMENT_ID.value: str(document_id)}}
+        if document_exists:
+            query = {
+                "bool": {
+                    "filter": [
+                        query,
+                        {"terms": {Field.DOC_ID.value: list(chunk_ids)}},
+                    ]
+                }
+            }
+        guard.ensure_owned()
+        result = client.delete_by_query(
+            index=index,
+            query=query,
+            refresh=True,
+            conflicts="abort",
+            wait_for_completion=True,
+        )
+        if (
+            result.get("timed_out")
+            or result.get("failures")
+            or result.get("_shards", {}).get("failed", 0)
+        ):
+            raise RuntimeError("Elasticsearch late-write cleanup failed")
         guard.ensure_owned()
         logger.warning(
-            "Removed late document vectors after lease loss: knowledge=%s document=%s",
+            "Removed late document vectors after lease loss: knowledge=%s document=%s deleted=%s",
             knowledge_id,
             document_id,
+            result.get("deleted", 0),
         )
 
 
 __all__ = [
     "DocumentTaskAborted",
-    "cleanup_late_write_if_deleted",
+    "cleanup_after_lost_lease",
     "ensure_document_active",
+    "guard_chunk_mutation",
 ]

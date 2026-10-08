@@ -7,6 +7,7 @@ import logging
 import mimetypes
 import uuid
 from dataclasses import dataclass, field
+from functools import partial
 from typing import Any
 
 from redbear_model import (
@@ -35,6 +36,7 @@ from ..utils.datetime_utils import to_timestamp_ms
 from . import document as document_service
 from . import file as file_service
 from . import knowledge as knowledge_service
+from .document_task_lifecycle import guard_chunk_mutation
 from .multimodal_image import resolve_storage_images_async
 
 logger = logging.getLogger(__name__)
@@ -560,6 +562,10 @@ def build_chunk_store(
         # Match worker indexes: multimodal vectors use script_score recall.
         vector_indexed=not multimodal,
         multimodal=multimodal,
+        mutation_context=(
+            partial(guard_chunk_mutation, runtime, snapshot.knowledge_id, snapshot.document_id)
+            if for_mutation else None
+        ),
     )
 
 

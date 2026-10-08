@@ -53,7 +53,7 @@ from .document_mutation_guard import (
 )
 from .document_task_lifecycle import (
     DocumentTaskAborted,
-    cleanup_late_write_if_deleted,
+    cleanup_after_lost_lease,
     ensure_document_active,
 )
 from .knowledge_file_storage import KnowledgeFileStorage
@@ -729,8 +729,19 @@ def _write_chunks_with_retry(
 
     with ThreadPoolExecutor(max_workers=runtime.settings.embedding_max_workers) as executor:
         futures = [executor.submit(write, index, chunks) for index, chunks in enumerate(batches)]
+        interrupted = []
         for future in futures:
-            future.result()
+            try:
+                future.result()
+            except (_ParseAborted, DocumentMutationLeaseLost) as exc:
+                interrupted.append(exc)
+    # Wait for every batch before cleanup, including when cancellation and
+    # lease loss occur concurrently. Do not let an abort hide a possible late write.
+    for exc in interrupted:
+        if isinstance(exc, DocumentMutationLeaseLost):
+            raise exc
+    if interrupted:
+        raise interrupted[0]
     if batch_errors:
         details = "; ".join(
             f"batch {index}: {type(error).__name__}: {error}"
@@ -804,6 +815,7 @@ def process_document(
     started_at = time.time()
     document_label = file_name or str(document_id)
     normalized_document_id: uuid.UUID | None = None
+    all_chunks: list[DocumentChunk] = []
     try:
         normalized_document_id = uuid.UUID(str(document_id))
         with run.stage("load_snapshot"):
@@ -1018,11 +1030,12 @@ def process_document(
             detail="document_deleted_or_cancelled",
         )
         return f"parse document '{document_label}' aborted (deleted or cancelled)."
-    except DocumentMutationLeaseLost as exc:
-        if normalized_document_id is not None:
+    except Exception as exc:  # noqa: BLE001 - task returns a legacy failure string.
+        if isinstance(exc, DocumentMutationLeaseLost) and normalized_document_id is not None:
             try:
-                cleanup_late_write_if_deleted(
-                    runtime, snapshot.knowledge_id, normalized_document_id
+                cleanup_after_lost_lease(
+                    runtime, snapshot.knowledge_id, normalized_document_id,
+                    [str(chunk.metadata["doc_id"]) for chunk in all_chunks],
                 )
             except Exception as cleanup_exc:
                 logger.warning(
@@ -1030,9 +1043,6 @@ def process_document(
                     normalized_document_id,
                     type(cleanup_exc).__name__,
                 )
-        run.finish(BusinessOutcome.FAILURE, error_code="KB_DOC_PROCESSING_FAILED", exc=exc)
-        return f"parse document '{document_label}' failed."
-    except Exception as exc:  # noqa: BLE001 - task returns a legacy failure string.
         logger.error(
             "Document parsing failed: document=%s error_type=%s",
             normalized_document_id or document_id,
