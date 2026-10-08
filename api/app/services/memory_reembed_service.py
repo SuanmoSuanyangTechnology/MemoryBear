@@ -270,20 +270,33 @@ def dispatch_end_user_job(
     return result.id
 
 
+#: 已结束展示的状态：任务成功即该次重算完成，此后没有进度可报。
 _CURRENT_JOB_EXCLUDED_STATUSES = (ReembedJobStatus.succeeded.value,)
 
 
 def _current_job_filters(workspace_id: uuid.UUID) -> tuple:
-    """两个「当前任务」查询共用的过滤条件。
+    """两个「当前任务」查询共用的过滤条件：只按工作空间圈定候选行。
+
+    ``status`` **不写进这里**。SQL 的 ``WHERE`` 先于 ``ORDER BY`` 生效，把状态当成
+    过滤条件就等于"最新那条若已成功就从候选集里剔除、回退到上一条"——更早的
+    ``failed`` 会被顶上来充当当前任务，而它早已被后一次（成功的）全量重算覆盖，
+    再展示只会让人以为还有活要干。要的是"最新那条已成功 = 没有当前任务"，所以
+    状态判定落在取到的那一行上，见 :func:`_current_job_row_is_hidden`。
 
     async 与 sync 各有一份实现（见 :func:`get_current_reembed_job_async` /
     :func:`get_current_reembed_job`），条件从这里取，两份因此不可能对同一批行给出
     不同的说法——「进度已经结束」的判据必须只有一个来源。
     """
-    return (
-        MemoryReembedJob.workspace_id == workspace_id,
-        MemoryReembedJob.status.notin_(_CURRENT_JOB_EXCLUDED_STATUSES),
-    )
+    return (MemoryReembedJob.workspace_id == workspace_id,)
+
+
+def _current_job_row_is_hidden(job: MemoryReembedJob) -> bool:
+    """最新那条任务行是否已结束展示（判据见 :func:`_current_job_filters`）。
+
+    sync/async 两份实现共用它："取哪一行"（:func:`_current_job_filters`）与"那一行
+    算不算数"因此各只有一个来源，两个端点不会一个清空、另一个还返回旧任务。
+    """
+    return job.status in _CURRENT_JOB_EXCLUDED_STATUSES
 
 
 async def get_reembed_job_async(
@@ -302,13 +315,16 @@ async def get_current_reembed_job_async(
         db: AsyncSession,
         workspace_id: uuid.UUID,
 ) -> MemoryReembedJob | None:
-    """该工作空间当前的存量向量重算任务；已成功则返回 ``None``。
+    """该工作空间当前的存量向量重算任务；**最新那一次**已成功则返回 ``None``。
 
-    返回的是「最近一次仍在展示的任务」，不一定是最新那一条：更新的那次若已成功，
-    会被跳过而回退到更早的可见任务（见 :func:`_current_job_filters`）。``None``
-    由调用方翻译成既有的"无任务"空响应（``data: {}``）。
+    取 ``created_at`` 最新的一行，再判它是否已结束展示（见
+    :func:`_current_job_row_is_hidden`）。两步合起来是"最新那次成功 = 没有当前
+    任务"，不会回退去展示一次更早的 ``failed``：后一次切换对该工作空间全量重算，
+    前一次的失败残留已经被覆盖掉了。
+
+    ``None`` 由调用方翻译成既有的"无任务"空响应（``data: {}``）。
     """
-    return (
+    job = (
         await db.execute(
             select(MemoryReembedJob)
             .where(*_current_job_filters(workspace_id))
@@ -316,6 +332,9 @@ async def get_current_reembed_job_async(
             .limit(1)
         )
     ).scalar_one_or_none()
+    if job is None or _current_job_row_is_hidden(job):
+        return None
+    return job
 
 
 def get_active_reembed_job_id(db: Session, workspace_id: uuid.UUID) -> str | None:
@@ -1290,17 +1309,21 @@ def get_current_reembed_job(
         db: Session,
         workspace_id: uuid.UUID,
 ) -> MemoryReembedJob | None:
-    """该工作空间当前的存量向量重算任务（同步版）；已成功则返回 ``None``。
+    """该工作空间当前的存量向量重算任务（同步版）；最新那一次已成功则返回 ``None``。
 
-    与 :func:`get_current_reembed_job_async` 同源（共用 :func:`_current_job_filters`）：
-    「进度已经结束」的判据只有一个来源，两个端点不会一个清空、另一个还返回旧任务。
+    与 :func:`get_current_reembed_job_async` 同源（共用 :func:`_current_job_filters`
+    与 :func:`_current_job_row_is_hidden`）：「进度已经结束」的判据只有一个来源，
+    两个端点不会一个清空、另一个还返回旧任务。
     """
-    return (
+    job = (
         db.query(MemoryReembedJob)
         .filter(*_current_job_filters(workspace_id))
         .order_by(MemoryReembedJob.created_at.desc())
         .first()
     )
+    if job is None or _current_job_row_is_hidden(job):
+        return None
+    return job
 
 
 def empty_job_end_user_page(
