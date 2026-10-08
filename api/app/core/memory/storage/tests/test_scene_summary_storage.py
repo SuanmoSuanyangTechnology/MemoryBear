@@ -221,43 +221,55 @@ async def test_existing_scene_summary_is_not_regenerated_when_sources_change(
     assert "immutable summary source changed" in caplog.text
 
 
-def test_preference_migration_removes_outbox_label_constraint(monkeypatch) -> None:
+def test_outbox_label_constraint_migration_recreates_full_label_set(monkeypatch) -> None:
     migration = import_module(
         "migrations.versions.24eb21498a55_202609211914"
     )
-    drop_constraint = Mock()
-    monkeypatch.setattr(migration.op, "drop_constraint", drop_constraint)
-
-    migration.upgrade()
-
-    drop_constraint.assert_called_once_with(
-        "ck_memory_outbox_label",
-        "memory_storage_outbox_events",
-        type_="check",
-    )
-
-
-def test_scene_community_migration_allows_scene_labels(monkeypatch) -> None:
-    migration = import_module(
-        "migrations.versions."
-        "c85f4b2d9e31_202609221030_add_scene_community_outbox_label"
-    )
-    drop_constraint = Mock()
+    execute = Mock()
     create_check_constraint = Mock()
-    monkeypatch.setattr(migration.op, "drop_constraint", drop_constraint)
+    monkeypatch.setattr(migration.op, "execute", execute)
+    monkeypatch.setattr(migration.op, "add_column", Mock())
     monkeypatch.setattr(
-        migration.op,
-        "create_check_constraint",
-        create_check_constraint,
+        migration.op, "create_check_constraint", create_check_constraint
     )
 
     migration.upgrade()
 
-    drop_constraint.assert_called_once_with(
-        "ck_memory_outbox_label",
-        "memory_storage_outbox_events",
-        type_="check",
-    )
+    # The constraint must be dropped AND recreated, never left absent.
+    drop_sql = execute.call_args.args[0]
+    assert "DROP CONSTRAINT IF EXISTS ck_memory_outbox_label" in drop_sql
     expression = create_check_constraint.call_args.args[2]
+    assert "'Preference'" in expression
     assert "'SceneCommunity'" in expression
     assert "'SceneSummary'" in expression
+
+
+def test_single_alembic_head_matches_tracked_migration_set() -> None:
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+
+    config = Config("alembic.ini")
+    script = ScriptDirectory.from_config(config)
+    heads = script.get_heads()
+    assert heads == ["40ceae7eb6f3"], f"unexpected heads: {heads}"
+
+
+def test_outbox_constraint_allows_every_node_label() -> None:
+    from app.core.memory.storage.enums import MemoryNodeType
+
+    migration = import_module(
+        "migrations.versions.24eb21498a55_202609211914"
+    )
+    # The constraint recreated by this migration is authoritative: it must
+    # accept every production label, otherwise a valid projection event cannot
+    # be enqueued.
+    expression = migration._LABEL_CHECK
+    for label in MemoryNodeType:
+        assert f"'{label.value}'" in expression, f"{label.value} missing"
+
+    # Downgrade must restore the pre-revision set without dropping the table's
+    # other labels.
+    previous = migration._PREVIOUS_LABEL_CHECK
+    assert "'Preference'" not in previous
+    assert "'SceneCommunity'" not in previous
+    assert "'SceneSummary'" in previous
