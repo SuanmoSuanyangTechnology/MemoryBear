@@ -50,7 +50,7 @@ def store_mineru_v3_image(
         LOGGER.warning("MinerU image storage skipped because required context is missing")
         return None
 
-    if is_parse_cancelled(runtime.redis.sync_client(), document_uuid):
+    if _parse_cancel_requested(runtime, document_uuid):
         LOGGER.info("MinerU image upload skipped for cancelled document=%s", document_uuid)
         return None
 
@@ -113,11 +113,23 @@ def store_mineru_v3_image(
     )
 
 
+def _parse_cancel_requested(runtime, document_id: uuid.UUID) -> bool:
+    try:
+        return is_parse_cancelled(runtime.redis.sync_client(), document_id)
+    except Exception as exc:
+        LOGGER.warning(
+            "MinerU cancel check unavailable: document=%s error_type=%s",
+            document_id,
+            type(exc).__name__,
+        )
+        return False
+
+
 def _image_upload_cancelled(runtime, document_id: uuid.UUID) -> bool:
     with runtime.database.sync_session() as session:
         if session.get(Document, document_id) is None:
             return True
-    return is_parse_cancelled(runtime.redis.sync_client(), document_id)
+    return _parse_cancel_requested(runtime, document_id)
 
 
 def _persist_image_record(runtime, file_id: uuid.UUID, fields: dict[str, Any]) -> None:
