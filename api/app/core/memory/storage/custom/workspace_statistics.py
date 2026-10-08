@@ -292,18 +292,22 @@ class WorkspaceStatisticsStorage:
         if not isinstance(neo4j_client, Neo4jClient):
             raise TypeError("NEO4J backend must be a Neo4jClient")
 
-        elastic_task = get_elasticsearch_workspace_statistics(
-            elastic_client,
-            end_user_ids,
-        )
-        implicit_task = get_neo4j_implicit_memory_count(
-            neo4j_client,
-            end_user_ids,
-            minimum_summary_count,
-        )
-        (elastic_statistics, present_ids), implicit_count = (
-            await asyncio.gather(elastic_task, implicit_task)
-        )
+        async with asyncio.TaskGroup() as task_group:
+            elastic_task = task_group.create_task(
+                get_elasticsearch_workspace_statistics(
+                    elastic_client,
+                    end_user_ids,
+                )
+            )
+            implicit_task = task_group.create_task(
+                get_neo4j_implicit_memory_count(
+                    neo4j_client,
+                    end_user_ids,
+                    minimum_summary_count,
+                )
+            )
+        elastic_statistics, present_ids = elastic_task.result()
+        implicit_count = implicit_task.result()
 
         episodic_count = sum(
             item["episodic_count"] for item in elastic_statistics.values()
