@@ -17,6 +17,10 @@ export interface SpaceConfigData {
   vision?: string;
   audio?: string;
   video?: string;
+  
+  default_config_updated: boolean;
+  default_config_notice: null;
+  reembed_job_id: string | null;
 }
 /**
  * Space config component ref interface

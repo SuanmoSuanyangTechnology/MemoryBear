@@ -9,10 +9,11 @@
  * Configures default models for workspace (LLM, embedding, rerank)
  */
 
-import { type FC, useEffect, useState, useRef } from 'react';
-import { Form, App, Button, Skeleton, Flex, Tabs, type TabsProps } from 'antd';
+import { type FC, useEffect, useState } from 'react';
+import { Form, App, Button, Skeleton, Flex, Tabs, type TabsProps, Descriptions, Row, Col } from 'antd';
 import { useTranslation } from 'react-i18next';
 import { MemoryLifecycle } from '@redbear/memory-brick';
+import clsx from 'clsx';
 
 import type { SpaceConfigData } from './types'
 import {
@@ -26,6 +27,9 @@ import type { Modality, Model } from '@/views/ModelManagement/types'
 import { isPrivateAvailable } from '@/utils/private'
 import ModelSelect from '@/components/ModelSelect'
 import { request } from '@/utils/request'
+import EmbeddingAlert from './components/EmbeddingAlert';
+
+import styles from './index.module.css'
 
 /** Required base model selectors */
 const baseModelFields: { name: string; label: string; required?: boolean }[] = [
@@ -47,7 +51,7 @@ const SpaceConfig: FC = () => {
   const [pageLoading, setPageLoading] = useState(false)
   const [form] = Form.useForm<SpaceConfigData>();
   const [loading, setLoading] = useState(false)
-  const lastConfirmedEmbeddingRef = useRef<SpaceConfigData['embedding']>(undefined)
+  const [reembedJobId, setReembedJobId] = useState<string | null | undefined>(null)
 
   const values = Form.useWatch([], form);
 
@@ -61,7 +65,7 @@ const SpaceConfig: FC = () => {
     })
   }
   const [customModels, setCustomModels] = useState<Record<string, Model[]>>({})
-  const [lastConfig, setLastConfig] = useState<SpaceConfigData>({})
+  const [lastConfig, setLastConfig] = useState<SpaceConfigData>({} as SpaceConfigData)
   const handleGetCustomModels = () => {
     getCustomWorkspaceModels().then(res => {
       setCustomModels((res || {}) as Record<string, Model[]>)
@@ -82,9 +86,10 @@ const SpaceConfig: FC = () => {
   useEffect(() => {
     setPageLoading(true)
     getWorkspaceModels().then((res) => {
-      const { is_default_config } = res as SpaceConfigData
+      const { is_default_config, reembed_job_id } = res as SpaceConfigData
       form.setFieldValue('is_default_config', is_default_config && isPrivateAvailable ? '1' : '0')
       setLastConfig(res as SpaceConfigData)
+      setReembedJobId(reembed_job_id)
     })
     .finally(() => {
       setPageLoading(false)
@@ -94,50 +99,83 @@ const SpaceConfig: FC = () => {
     handleGetCustomModels()
   }, [])
 
-  useEffect(() => {
-    lastConfirmedEmbeddingRef.current = lastConfig.embedding
-  }, [lastConfig.embedding])
-
-  const handleEmbeddingChange = (newValue: SpaceConfigData['embedding']) => {
-    const prevValue = lastConfirmedEmbeddingRef.current
-    if (newValue === prevValue) return
-    modal.confirm({
-      title: t('space.embeddingSwitchConfirmTitle'),
-      content: t('space.embeddingSwitchConfirmContent'),
-      okText: t('common.confirm'),
-      cancelText: t('common.cancel'),
-      onOk: () => {
-        lastConfirmedEmbeddingRef.current = newValue
-      },
-      onCancel: () => {
-        form.setFieldsValue({ embedding: prevValue })
-      },
-    })
+  const getFormData = ({ is_default_config, ...rest }: SpaceConfigData) => {
+    const isDefaultConfig = is_default_config === '1' && isPrivateAvailable && Object.keys(defaultModels).length > 0
+    if (isDefaultConfig) {
+      [...baseModelFields, ...multimodalModelFields].map(field => {
+        (rest as Record<string, any>)[field.name] = undefined
+      })
+    }
+    return { ...rest, is_default_config: isDefaultConfig }
+  }
+  const saveConfig = (values: SpaceConfigData) => {
+    setLoading(true)
+    const rest = getFormData(values)
+    return updateWorkspaceModels(rest)
+      .then((res) => {
+        const { workspace } = res as {workspace: SpaceConfigData};
+        setLastConfig({ ...workspace })
+        setReembedJobId(workspace.reembed_job_id)
+        message.success(t('common.updateSuccess'))
+      })
+      .catch(() => {})
+      .finally(() => {
+        setLoading(false)
+      })
   }
   /** Save model configuration */
   const handleSave = () => {
     form
       .validateFields()
-      .then(({ is_default_config, ...rest }: SpaceConfigData) => {
-        const isDefaultConfig = is_default_config === '1' && isPrivateAvailable && Object.keys(defaultModels).length > 0
-        if (isDefaultConfig) {
-          [...baseModelFields, ...multimodalModelFields].map(field => {
-            (rest as Record<string, any>)[field.name] = undefined
-          })
+      .then((values: SpaceConfigData) => {
+        const embeddingChanged = values.embedding !== lastConfig.embedding
+        if (!embeddingChanged) {
+          return saveConfig(values)
         }
-        setLoading(true)
-        updateWorkspaceModels({ ...rest, is_default_config: isDefaultConfig })
-          .then(() => {
-            setLoading(false)
-            message.success(t('common.updateSuccess'))
-          })
-          .catch(() => {
-            setLoading(false)
-          });
+        const modelName = customModels.embedding?.find(model => model.id === values.embedding)?.name || values.embedding
+        modal.confirm({
+          width: 540,
+          centered: true,
+          icon: null,
+          classNames: {
+            content: 'rb:p-6 rb:rounded-xl rb:overflow-hidden'
+          },
+          title: (
+            <div>
+              <div className="rb:text-[18px] rb:leading-6.5 rb:font-semibold">
+                {t('space.embeddingSwitchConfirmTitle')}
+              </div>
+              <div className="rb:mt-1 rb:text-[13px] rb:leading-5 rb:font-normal rb:text-gray-600">
+                {t('space.embeddingSwitchConfirmContent')}
+              </div>
+            </div>
+          ),
+          content: (
+            <div className="rb:p-4 rb:rounded-xl rb:bg-gray-100 rb:text-gray-600 rb:text-[13px] rb:leading-5.5">
+              <div>{t('space.embeddingSwitchTask', { model: modelName })}</div>
+              <div className="rb:mt-5.5">{t('space.embeddingSwitchDuring')}</div>
+              <ul className="rb:pl-3 rb:list-disc">
+                <li>{t('space.embeddingSwitchSearchImpact')}</li>
+                <li>{t('space.embeddingSwitchLocked')}</li>
+                <li>{t('space.embeddingSwitchRecovery')}</li>
+              </ul>
+              <div className="rb:mt-5.5">{t('space.embeddingSwitchEstimate')}</div>
+              <div className="rb:mt-5.5">{t('space.embeddingSwitchContinue')}</div>
+            </div>
+          ),
+          footer: (_, { OkBtn, CancelBtn }) => (
+            <Flex align="center" justify="flex-end" gap={12}>
+              <CancelBtn />
+              <OkBtn />
+            </Flex>
+          ),
+          okText: t('space.embeddingSwitchConfirmAction'),
+          cancelText: t('common.cancel'),
+          okButtonProps: { style: { height: 36, margin: 0, paddingInline: 20, borderRadius: 8, background: '#191919', borderColor: '#191919', fontWeight: 600 } },
+          cancelButtonProps: { style: { height: 36, margin: 0, paddingInline: 16, borderRadius: 8, borderColor: '#D0D5DD', color: '#344054' } },
+          onOk: () => saveConfig(values),
+        })
       })
-      .catch((err) => {
-        console.log('err', err)
-      });
   }
   const [activeTab, setActiveTab] = useState<'models' | 'memoryConfig'>('models')
   /** Handle tab change */
@@ -146,137 +184,146 @@ const SpaceConfig: FC = () => {
   }
 
   return (
-    <Flex vertical className="rb:bg-white rb:rounded-lg rb:p-6! rb:h-full rb:overflow-auto">
-      <Flex vertical gap={8} className="rb:mb-2!">
-        <div className="rb:font-[MiSans-Bold] rb:font-bold rb:text-gray-800 rb:leading-5">{t('menu.spaceConfig')}</div>
-        <div className="rb:text-gray-600 rb:text-[12px] rb:leading-4">{t('space.configAlert')}</div>
-      </Flex>
-      {isPrivateAvailable &&
-        <Tabs
-          items={['models', 'memoryConfig'].map(key => ({
-            label: t(`space.${key}`),
-            key
-          }))}
-          activeKey={activeTab}
-          onChange={handleChangeTab}
-        />
-      }
-      {activeTab === 'models' &&
-        <>
-          {pageLoading
-            ? <Skeleton active />
-            : (
-              <Form
-                form={form}
-                layout="vertical"
-                initialValues={{ is_default_config: isPrivateAvailable ? '1' : '0' }}
-                className="rb:flex-1! rb:overflow-hidden!"
-              >
-                <Flex vertical gap={4} className="rb:h-full! rb:overflow-hidden!">
-                  <div className="rb:flex-1! rb:overflow-auto">
-                    {isPrivateAvailable && Object.keys(defaultModels).length > 0 &&
-                      <Form.Item name="is_default_config" className="rb:mb-6! rb:max-w-137.5">
-                        <RadioGroupCard
-                          allowClear={false}
-                          options={[
-                            {
-                              value: '1',
-                              label: t('space.defaultConfigPackage'),
-                              labelDesc: t('space.defaultConfigPackageDesc'),
-                              recommend: true,
-                            },
-                            {
-                              value: '0',
-                              label: t('space.customConfig'),
-                              labelDesc: t('space.customConfigDesc'),
-                            },
-                          ]}
-                        />
-                      </Form.Item>
-                    }
+    <div className="rb:bg-white rb:rounded-lg rb:p-6! rb:h-full rb:overflow-auto">
+      <Flex vertical className="rb:max-w-205">
+        <Flex vertical gap={6} className="rb:mb-2!">
+          <div className="rb:font-[MiSans-Bold] rb:font-bold rb:text-[16px] rb:leading-5.5">{t('menu.spaceConfig')}</div>
+          <div className="rb:text-gray-600 rb:text-[12px] rb:leading-4">{t('space.configAlert')}</div>
+        </Flex>
+        {isPrivateAvailable &&
+          <Tabs
+            items={['models', 'memoryConfig'].map(key => ({
+              label: t(`space.${key}`),
+              key
+            }))}
+            activeKey={activeTab}
+            onChange={handleChangeTab}
+            className={clsx("rb:mb-1!", styles.tabs)}
+          />
+        }
+        {activeTab === 'models' &&
+          <>
+            {pageLoading
+              ? <Skeleton active />
+              : (
+                <Form
+                  form={form}
+                  layout="vertical"
+                  initialValues={{ is_default_config: isPrivateAvailable ? '1' : '0' }}
+                  className="rb:flex-1! rb:overflow-hidden!"
+                > 
+                  <Flex vertical gap={4} className="rb:h-full! rb:overflow-hidden!">
+                    <EmbeddingAlert reembedJobId={reembedJobId} onChange={setReembedJobId} />
+                    <div className="rb:flex-1! rb:mt-4 rb:overflow-x-hidden rb:overflow-y-auto">
+                      {isPrivateAvailable && Object.keys(defaultModels).length > 0 &&
+                        <Form.Item name="is_default_config" className="rb:mb-6!">
+                          <RadioGroupCard
+                            allowClear={false}
+                            options={[
+                              {
+                                value: '1',
+                                label: t('space.defaultConfigPackage'),
+                                labelDesc: t('space.defaultConfigPackageDesc'),
+                                recommend: true,
+                              },
+                              {
+                                value: '0',
+                                label: t('space.customConfig'),
+                                labelDesc: t('space.customConfigDesc'),
+                              },
+                            ]}
+                            className="rb:text-left! rb:px-5!"
+                          />
+                        </Form.Item>
+                      }
 
-                    {!isPrivateAvailable || Object.keys(defaultModels).length === 0 || values?.is_default_config === '0' ? (
-                      <>
-                        <Flex align="baseline" gap={8} className="rb:pb-3! rb:mb-6! rb:border-b rb:border-[#EBEBEB] rb:max-w-137.5">
-                          <span className="rb:font-medium rb:text-gray-800">{t('space.baseModel')}</span>
-                          <span className="rb:text-[12px] rb:text-gray-600">{t('space.baseModelDesc')}</span>
-                        </Flex>
-                        {baseModelFields.map(field => (
-                          <Form.Item
-                            key={field.name}
-                            label={t(`space.${field.label}`)}
-                            className="rb:font-medium rb:text-gray-800 rb:mb-6!"
-                            name={field.name}
-                            rules={[{ required: true, message: t('common.pleaseSelect') }]}
-                          >
-                            <ModelSelect
-                              fieldNames={{ label: 'name', value: 'id' }}
-                              placeholder={t('common.pleaseSelect')}
-                              isAutoFetch={false}
-                              initialData={customModels[field.name]}
-                              inputModality={'modality' in field ? String(field.modality) : undefined}
-                              className="rb:w-137.5!"
-                              {...(field.name === 'embedding' ? { onChange: handleEmbeddingChange } : {})}
-                            />
-                          </Form.Item>
-                        ))}
-
-                        <Flex align="baseline" gap={8} className="rb:pb-3! rb:mb-6! rb:border-b rb:border-[#EBEBEB] rb:max-w-137.5">
-                          <span className="rb:font-medium rb:text-gray-800">{t('space.multimodalModel')}</span>
-                          <span className="rb:text-[12px] rb:text-gray-600">{t('space.multimodalModelDesc')}</span>
-                        </Flex>
-                        {multimodalModelFields.map(field => (
-                          <Form.Item
-                            key={field.name}
-                            label={<>{t(`space.${field.label}`)}<span className="rb:text-gray-600 rb:font-regular">{t('space.optional')}</span></>}
-                            className="rb:font-medium rb:text-gray-800 rb:mb-6!"
-                            name={field.name}
-                          >
-                            <ModelSelect
-                              fieldNames={{ label: 'name', value: 'id' }}
-                              placeholder={t('common.pleaseSelect')}
-                              isAutoFetch={false}
-                              initialData={customModels[field.name]}
-                              inputModality={'modality' in field ? String(field.modality) : undefined}
-                              className="rb:w-137.5!"
-                            />
-                          </Form.Item>
-                        ))}
-                      </>
-                    ) : (
-                      <div className="rb:rounded-lg rb:bg-gray-100 rb:px-4 rb:mb-6 rb:max-w-137.5">
-                        {[...baseModelFields, ...multimodalModelFields].map(field => (
-                          <Flex
-                            key={field.name}
-                            align="center"
-                            justify="space-between"
-                            className="rb:py-3.5! rb:border-b rb:border-[#EBEBEB] rb:last:border-b-0"
-                          >
-                            <span className="rb:text-gray-600">{t(`space.${field.label}`)}</span>
-                            <span className="rb:font-medium rb:text-gray-800">{defaultModels[field.name]?.name || '-'}</span>
+                      {!isPrivateAvailable || Object.keys(defaultModels).length === 0 || values?.is_default_config === '0' ? (
+                        <>
+                          <Flex align="baseline" justify="space-between" gap={8} className="rb:pb-3! rb:mb-5! rb-border-b">
+                            <div className="rb:font-semibold rb:leading-4.5 rb:border-l-4 rb:border-l-blue-500 rb:pl-2">{t('space.baseModel')}</div>
+                            <span className="rb:text-[12px] rb:text-gray-600">{t('space.baseModelDesc')}</span>
                           </Flex>
-                        ))}
-                      </div>
-                    )}
-                  </div>
+                          <Row gutter={20}>
+                            {baseModelFields.map(field => (
+                              <Col key={field.name} span={12}>
+                                <Form.Item
+                                  label={t(`space.${field.label}`)}
+                                  className="rb:font-medium rb:mb-5!"
+                                  name={field.name}
+                                  rules={[{ required: true, message: t('common.pleaseSelect') }]}
+                                  extra={!!reembedJobId && field.name === 'embedding'
+                                    ? <span className="rb:text-orange-500">{t('space.reembedding.switchLockedNotice')}</span>
+                                    : undefined
+                                  }
+                                >
+                                  <ModelSelect
+                                    fieldNames={{ label: 'name', value: 'id' }}
+                                    placeholder={t('common.pleaseSelect')}
+                                    isAutoFetch={false}
+                                    initialData={customModels[field.name]}
+                                    disabled={!!reembedJobId && field.name === 'embedding'}
+                                  />
+                                </Form.Item>
+                              </Col>
+                            ))}
+                          </Row>
 
-                  <div className="rb:shrink-0 rb:pt-3!">
-                    <Button type="primary" onClick={handleSave} loading={loading}>
-                      {t('common.save')}
-                    </Button>
-                  </div>
-                </Flex>
-              </Form>
-            )
-          }
-        </>
-      }
-      {isPrivateAvailable && activeTab === 'memoryConfig' && (
-        <MemoryLifecycle
-          request={request}
-        />
-      )}
-    </Flex>
+                          <Flex align="baseline" justify="space-between" gap={8} className="rb:pb-3! rb:mb-5! rb-border-b">
+                            <div className="rb:font-semibold rb:leading-4.5 rb:border-l-4 rb:border-l-blue-500 rb:pl-2">{t('space.multimodalModel')}</div>
+                            <span className="rb:text-[12px] rb:text-gray-600">{t('space.multimodalModelDesc')}</span>
+                          </Flex>
+                          <Row gutter={20}>
+                            {multimodalModelFields.map(field => (
+                              <Col key={field.name} span={12}>
+                                <Form.Item
+                                  label={t(`space.${field.label}`)}
+                                  className="rb:font-medium rb:mb-5!"
+                                  name={field.name}
+                                >
+                                  <ModelSelect
+                                    fieldNames={{ label: 'name', value: 'id' }}
+                                    placeholder={t('common.pleaseSelect')}
+                                    isAutoFetch={false}
+                                    initialData={customModels[field.name]}
+                                  />
+                                </Form.Item>
+                              </Col>
+                            ))}
+                          </Row>
+                        </>
+                      ) : (
+                        <Descriptions
+                          bordered
+                          column={2}
+                          items={[...baseModelFields, ...multimodalModelFields].map(field => ({
+                            key: field.name,
+                            label: t(`space.${field.label}`),
+                            children: defaultModels[field.name]?.name || '-'
+                          }))}
+                          size="small"
+                          className={styles.descriptions}
+                        />
+                      )}
+                    </div>
+
+                    <Flex gap={12} className="rb:shrink-0 rb:pt-10!">
+                      <Button type="primary" onClick={handleSave} loading={loading}>
+                        {t('common.save')}
+                      </Button>
+                    </Flex>
+                  </Flex>
+                </Form>
+              )
+            }
+          </>
+        }
+        {isPrivateAvailable && activeTab === 'memoryConfig' && (
+          <MemoryLifecycle
+            request={request}
+          />
+        )}
+      </Flex>
+    </div>
   );
 };
 
