@@ -10,11 +10,6 @@ from ...utils.datetime_utils import utcnow_naive
 
 FILE_ROLE_SOURCE = "source"
 FILE_ROLE_DERIVED_IMAGE = "derived_image"
-ASSET_WRITE_UPLOADING = "uploading"
-ASSET_WRITE_CLEANING = "cleaning"
-ASSET_WRITE_READY = "ready"
-ASSET_WRITE_CLEANUP_REQUIRED = "cleanup_required"
-ASSET_WRITE_BUSY_STATES = (ASSET_WRITE_UPLOADING, ASSET_WRITE_CLEANING)
 
 
 class File(KnowledgeBase):
@@ -69,6 +64,3 @@ class File(KnowledgeBase):
         comment="documents.id for a derived image asset",
     )
     created_at = Column(DateTime, default=utcnow_naive)
-    asset_write_state = Column(
-        String(32), nullable=True, comment="Derived asset IO state; NULL means legacy ready"
-    )

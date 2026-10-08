@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 import mimetypes
 import os
 import uuid
@@ -355,17 +354,7 @@ async def delete_file(
     storage = KnowledgeFileStorage(runtime.storage)
     async with runtime.database.async_session() as db:
         plan = await file_service.prepare_file_deletion(db, file_id, principal)
-    try:
-        await file_service.delete_file_storage(storage, plan)
-        async with runtime.database.async_session() as db:
-            await file_service.persist_file_deletion(db, plan)
-    except Exception:
-        try:
-            async with runtime.database.async_session() as db:
-                await file_service.release_file_deletion(db, plan)
-        except Exception as exc:
-            logging.getLogger(__name__).warning(
-                "Failed to release file deletion occupancy: error_type=%s", type(exc).__name__
-            )
-        raise
+    await file_service.delete_file_storage(storage, plan)
+    async with runtime.database.async_session() as db:
+        await file_service.persist_file_deletion(db, plan)
     return _success(request, msg="File deleted successfully")

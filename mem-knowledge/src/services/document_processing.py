@@ -143,8 +143,6 @@ def _load_snapshot(
         document = session.get(Document, document_id)
         if document is None:
             raise ValueError(f"Document {document_id} not found")
-        if document.deletion_started_at is not None:
-            raise _ParseAborted
         knowledge = session.get(Knowledge, document.kb_id)
         if knowledge is None:
             raise ValueError(f"Knowledge {document.kb_id} not found")
@@ -196,10 +194,10 @@ def _update_document(
     updater,
 ) -> bool:
     with runtime.database.sync_session() as session:
-        document = session.get(Document, document_id, with_for_update=True)
-        if document is None or document.deletion_started_at is not None:
+        document = session.get(Document, document_id)
+        if document is None:
             logger.warning(
-                "Document unavailable for parse state update: document=%s",
+                "Document missing while updating parse state: document=%s",
                 document_id,
             )
             return False
@@ -212,7 +210,8 @@ def _clear_parse_state(runtime: ProcessRuntime, document_id: object) -> None:
     try:
         redis = runtime.redis.sync_client()
         redis.delete(PARSE_TASK_KEY.format(doc_id=document_id))
-        redis.delete(PARSE_CANCEL_KEY.format(doc_id=document_id))
+        # Let the existing cancellation marker expire naturally so an upload
+        # still running after a worker interruption can observe it.
     except Exception as exc:  # noqa: BLE001 - cleanup must not replace task results.
         logger.warning(
             "Failed to clear parse state: document=%s error_type=%s",
@@ -223,8 +222,7 @@ def _clear_parse_state(runtime: ProcessRuntime, document_id: object) -> None:
 
 def _document_exists(runtime: ProcessRuntime, document_id: uuid.UUID) -> bool:
     with runtime.database.sync_session() as session:
-        document = session.get(Document, document_id)
-        return document is not None and document.deletion_started_at is None
+        return session.get(Document, document_id) is not None
 
 
 def _should_abort(runtime: ProcessRuntime, document_id: uuid.UUID) -> bool:
