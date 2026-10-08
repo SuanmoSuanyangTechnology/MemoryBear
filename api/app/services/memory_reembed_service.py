@@ -270,18 +270,22 @@ def dispatch_end_user_job(
     return result.id
 
 
-#: 已结束展示的状态：任务成功即该次重算完成，此后没有进度可报。
-_CURRENT_JOB_EXCLUDED_STATUSES = (ReembedJobStatus.succeeded.value,)
+#: 「当前任务」的展示窗口：**终态**任务结束超过这么久就不再是"当前"，而是一条
+#: 历史记录（详情仍可按 job_id 查）。在途任务不受窗口限制——它还在干活，藏掉只会
+#: 让轮询的前端以为"没任务了"，而它其实正跑着。
+REEMBED_CURRENT_JOB_VISIBLE_SECONDS = 24 * 60 * 60
 
 
 def _current_job_filters(workspace_id: uuid.UUID) -> tuple:
     """两个「当前任务」查询共用的过滤条件：只按工作空间圈定候选行。
 
-    ``status`` **不写进这里**。SQL 的 ``WHERE`` 先于 ``ORDER BY`` 生效，把状态当成
-    过滤条件就等于"最新那条若已成功就从候选集里剔除、回退到上一条"——更早的
-    ``failed`` 会被顶上来充当当前任务，而它早已被后一次（成功的）全量重算覆盖，
-    再展示只会让人以为还有活要干。要的是"最新那条已成功 = 没有当前任务"，所以
-    状态判定落在取到的那一行上，见 :func:`_current_job_row_is_hidden`。
+    这里只回答"取哪一行"（``created_at`` 最新的那一行），**不回答"那一行算不算
+    数"**——是否过期是对取到的那一行的判定，见 :func:`_current_job_row_is_expired`。
+
+    时间**不写进这里**。SQL 的 ``WHERE`` 先于 ``ORDER BY`` 生效，把它当成过滤条件
+    就等于"最新那条已过期就从候选集里剔除、回退到上一条"——更早的一次失败会被顶
+    上来充当当前任务，而它比最新那条更旧，没理由替它出场。要的是"最新那条过期 =
+    没有当前任务"。
 
     async 与 sync 各有一份实现（见 :func:`get_current_reembed_job_async` /
     :func:`get_current_reembed_job`），条件从这里取，两份因此不可能对同一批行给出
@@ -290,13 +294,31 @@ def _current_job_filters(workspace_id: uuid.UUID) -> tuple:
     return (MemoryReembedJob.workspace_id == workspace_id,)
 
 
-def _current_job_row_is_hidden(job: MemoryReembedJob) -> bool:
-    """最新那条任务行是否已结束展示（判据见 :func:`_current_job_filters`）。
+def _current_job_visible_since():
+    """展示窗口的起点：终态任务结束早于它的，不再算"当前"。"""
+    return utcnow_naive() - timedelta(seconds=REEMBED_CURRENT_JOB_VISIBLE_SECONDS)
 
-    sync/async 两份实现共用它："取哪一行"（:func:`_current_job_filters`）与"那一行
-    算不算数"因此各只有一个来源，两个端点不会一个清空、另一个还返回旧任务。
+
+def _current_job_row_is_expired(job: MemoryReembedJob) -> bool:
+    """最新那条任务行是否已过期，不该再当"当前任务"展示。
+
+    判据只有这一处实现（sync/async 都调它，"算不算数"只有一个来源）：
+
+    - **在途**（``pending``/``running``）永不过期——它还在干活；
+    - **终态**（``succeeded``/``failed``）看结束时间（``finished_at``，缺失时回落
+      ``created_at``）是否早于 :func:`_current_job_visible_since`。
+
+    ``succeeded`` 与 ``failed`` 一视同仁：成功的任务当下正是用户要看的"最近一次
+    重算"（完成通知就在那一刻发的），只有放旧了才退场；陈旧这个判据由窗口负责，
+    不再需要按状态另设一条。
+
+    按**结束时间**而非创建时间判：跑了很久才结束的任务，结束就发生在刚刚，正是
+    用户刚看到结果的那一条，不该因为"是昨天创建的"被藏掉。
     """
-    return job.status in _CURRENT_JOB_EXCLUDED_STATUSES
+    if job.status in _ACTIVE_STATUSES:
+        return False
+    ended_at = job.finished_at or job.created_at
+    return ended_at is not None and ended_at < _current_job_visible_since()
 
 
 async def get_reembed_job_async(
@@ -315,12 +337,14 @@ async def get_current_reembed_job_async(
         db: AsyncSession,
         workspace_id: uuid.UUID,
 ) -> MemoryReembedJob | None:
-    """该工作空间当前的存量向量重算任务；**最新那一次**已成功则返回 ``None``。
+    """该工作空间**近 24h 内最新的一次**存量向量重算任务；已过期则返回 ``None``。
 
-    取 ``created_at`` 最新的一行，再判它是否已结束展示（见
-    :func:`_current_job_row_is_hidden`）。两步合起来是"最新那次成功 = 没有当前
-    任务"，不会回退去展示一次更早的 ``failed``：后一次切换对该工作空间全量重算，
-    前一次的失败残留已经被覆盖掉了。
+    取 ``created_at`` 最新的一行，再判它是否已过期
+    （:func:`_current_job_row_is_expired`）：终态且结束早于
+    ``REEMBED_CURRENT_JOB_VISIBLE_SECONDS`` 的算"没有当前任务"；在途的、以及
+    24h 内结束的（成功的也含在内）照常返回。
+
+    两步合起来是"**最新那条说了算**"，不会回退去展示一次更早的任务。
 
     ``None`` 由调用方翻译成既有的"无任务"空响应（``data: {}``）。
     """
@@ -332,7 +356,7 @@ async def get_current_reembed_job_async(
             .limit(1)
         )
     ).scalar_one_or_none()
-    if job is None or _current_job_row_is_hidden(job):
+    if job is None or _current_job_row_is_expired(job):
         return None
     return job
 
@@ -1309,10 +1333,10 @@ def get_current_reembed_job(
         db: Session,
         workspace_id: uuid.UUID,
 ) -> MemoryReembedJob | None:
-    """该工作空间当前的存量向量重算任务（同步版）；最新那一次已成功则返回 ``None``。
+    """该工作空间近 24h 内最新的一次存量向量重算任务（同步版）；已过期则返回 ``None``。
 
     与 :func:`get_current_reembed_job_async` 同源（共用 :func:`_current_job_filters`
-    与 :func:`_current_job_row_is_hidden`）：「进度已经结束」的判据只有一个来源，
+    与 :func:`_current_job_row_is_expired`）：「进度已经结束」的判据只有一个来源，
     两个端点不会一个清空、另一个还返回旧任务。
     """
     job = (
@@ -1321,7 +1345,7 @@ def get_current_reembed_job(
         .order_by(MemoryReembedJob.created_at.desc())
         .first()
     )
-    if job is None or _current_job_row_is_hidden(job):
+    if job is None or _current_job_row_is_expired(job):
         return None
     return job
 
