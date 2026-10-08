@@ -6,6 +6,7 @@ import logging
 import uuid
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
+from typing import Any
 
 from ..errors import KnowledgeError
 from ..models.owned import Document
@@ -52,6 +53,7 @@ async def guard_chunk_mutation(
     runtime: ProcessRuntime,
     knowledge_id: uuid.UUID,
     document_id: uuid.UUID,
+    search_client: Any,
 ) -> AsyncIterator[None]:
     """Revalidate an authorized chunk request after its embedding has finished."""
 
@@ -67,8 +69,40 @@ async def guard_chunk_mutation(
             await guard.ensure_owned()
             yield
             await guard.ensure_owned()
-    except (TimeoutError, DocumentMutationLeaseLost) as exc:
+    except DocumentMutationLeaseLost as exc:
+        try:
+            await _cleanup_deleted_chunk_write(
+                runtime, redis, search_client, knowledge_id, document_id
+            )
+        except Exception as cleanup_exc:
+            logger.error(
+                "Late chunk vector cleanup failed: knowledge=%s document=%s error_type=%s",
+                knowledge_id,
+                document_id,
+                type(cleanup_exc).__name__,
+            )
         raise KnowledgeError.from_code("KB_SEARCH_UNAVAILABLE") from exc
+    except TimeoutError as exc:
+        raise KnowledgeError.from_code("KB_SEARCH_UNAVAILABLE") from exc
+
+
+async def _cleanup_deleted_chunk_write(
+    runtime: ProcessRuntime,
+    redis: Any,
+    search_client: Any,
+    knowledge_id: uuid.UUID,
+    document_id: uuid.UUID,
+) -> None:
+    # Import lazily: chunk and document services share this lifecycle boundary.
+    from .document import delete_document_search_data
+
+    async with async_document_mutation_guard(redis, document_id) as guard:
+        async with runtime.database.async_session() as session:
+            if await session.get(Document, document_id) is not None:
+                return
+        await guard.ensure_owned()
+        await delete_document_search_data(search_client, knowledge_id, document_id)
+        await guard.ensure_owned()
 
 
 def cleanup_after_lost_lease(

@@ -563,7 +563,9 @@ def build_chunk_store(
         vector_indexed=not multimodal,
         multimodal=multimodal,
         mutation_context=(
-            partial(guard_chunk_mutation, runtime, snapshot.knowledge_id, snapshot.document_id)
+            partial(
+                guard_chunk_mutation, runtime, snapshot.knowledge_id, snapshot.document_id, client
+            )
             if for_mutation else None
         ),
     )
