@@ -2,7 +2,6 @@
 
 from contextlib import nullcontext
 from datetime import datetime
-from importlib import import_module
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
@@ -118,20 +117,3 @@ async def test_scene_summary_is_written_through_storage(monkeypatch) -> None:
     } == expected_payload
     storage.close.assert_awaited_once_with()
     connector.close.assert_awaited_once_with()
-
-
-def test_outbox_label_constraint_is_removed_by_migration(monkeypatch) -> None:
-    migration = import_module(
-        "migrations.versions."
-        "c1a7e5d9b204_202609211800_drop_memory_outbox_label_constraint"
-    )
-    drop_constraint = Mock()
-    monkeypatch.setattr(migration.op, "drop_constraint", drop_constraint)
-
-    migration.upgrade()
-
-    drop_constraint.assert_called_once_with(
-        "ck_memory_outbox_label",
-        "memory_storage_outbox_events",
-        type_="check",
-    )

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from app.core.memory.storage.enums import (
     MemoryNodeLabel,
     MemoryNodeType,
@@ -68,6 +70,21 @@ class WriteRouter:
             label,
             data,
             node_filter,
+        )
+        await self._enqueue_result(label, result, OutboxOperation.UPSERT)
+        return result
+
+    async def update_node_embeddings(
+        self,
+        label: MemoryNodeLabel,
+        field: str,
+        updates: Sequence[tuple[str, Sequence[float]]],
+    ) -> StorageWriteResult:
+        """Rewrite one embedding property, then enqueue those node projections."""
+        result = await self._write_client(label).update_node_embeddings(
+            label,
+            field,
+            updates,
         )
         await self._enqueue_result(label, result, OutboxOperation.UPSERT)
         return result
