@@ -16,9 +16,9 @@ from sqlalchemy.orm import Session
 import operator
 
 from app.core.logging_config import get_business_logger
-from app.core.models import RedBearLLM, RedBearModelConfig
-from app.models.models_model import ModelType
-from app.services.model_service import ModelApiKeyService
+from app.core.models import RedBearChatModel
+from app.schemas.model_schema import ModelInfo
+from app.services.model_service import ModelConfigService
 
 logger = get_business_logger()
 
@@ -124,10 +124,12 @@ def create_tools_for_agent(agent_name: str, configs: Dict) -> List:
 # ==================== Agent 节点创建 ====================
 
 def create_agent_node(agent_name: str, system_prompt: str, tools: List,
-                      model_config: RedBearModelConfig):
+                      model_view: ModelInfo):
     """创建 Agent 节点（非流式）"""
-    llm = RedBearLLM(model_config, type=ModelType.LLM)
-    
+    llm = RedBearChatModel.for_invoke(
+        model_view, params={"temperature": 0.7, "max_tokens": 2000}
+    )
+
     # 绑定工具
     if tools:
         llm = llm.bind_tools(tools)
@@ -248,10 +250,14 @@ def create_agent_node(agent_name: str, system_prompt: str, tools: List,
 
 
 def create_streaming_agent_node(agent_name: str, system_prompt: str, tools: List,
-                                 model_config: RedBearModelConfig):
+                                 model_view: ModelInfo):
     """创建支持流式输出的 Agent 节点"""
-    llm = RedBearLLM(model_config, type=ModelType.LLM)
-    
+    llm = RedBearChatModel.for_invoke(
+        model_view,
+        params={"temperature": 0.7, "max_tokens": 2000},
+        streaming=True,
+    )
+
     # 绑定工具
     if tools:
         llm = llm.bind_tools(tools)
@@ -513,7 +519,7 @@ async def convert_multi_agent_config_to_handoffs(
         db: 数据库会话
     
     Returns:
-        agent_configs 字典，每个 Agent 包含自己的 model_config
+        agent_configs 字典，每个 Agent 包含自己的 model_view
     """
     from app.models import AppRelease, App
     
@@ -532,7 +538,7 @@ async def convert_multi_agent_config_to_handoffs(
         # 从 AppRelease 获取 Agent 的系统提示词和模型配置
         system_prompt = f"你是 {agent_name}。"
         capabilities = sub_agent.get("capabilities", [])
-        model_config = None
+        model_view = None
         release = None
         
         if agent_id:
@@ -558,21 +564,16 @@ async def convert_multi_agent_config_to_handoffs(
                         if release_system_prompt:
                             system_prompt = release_system_prompt
 
-                    # 获取该 Agent 的模型配置
+                    # 获取该 Agent 的模型视图（非解密视图，调用经模型服务 invoke 接缝）
                     if release.default_model_config_id:
                         tenant_id = await _resolve_release_tenant_id(db, release)
-                        model_api_key = await ModelApiKeyService.get_available_api_key_bridge_async(
+                        model_view = await ModelConfigService.get_runtime_model_view_bridge_async(
                             db,
                             release.default_model_config_id,
                             tenant_id=tenant_id,
                         )
-                        if model_api_key:
-                            model_config = RedBearModelConfig.from_api_key(
-                                model_api_key,
-                                extra_params={"temperature": 0.7, "max_tokens": 2000, "streaming": True},
-                            )
-                            logger.debug(f"Agent {agent_name} 使用模型: {model_api_key.model_name}")
-                            await ModelApiKeyService.record_api_key_usage_bridge_async(db, model_api_key.id)
+                        if model_view:
+                            logger.debug(f"Agent {agent_name} 使用模型: {model_view.model_name}")
                         else:
                             logger.warning(f"Agent {agent_name} 模型配置无效: {release.default_model_config_id}")
                     else:
@@ -594,7 +595,7 @@ async def convert_multi_agent_config_to_handoffs(
             "description": f"转移到 {agent_name}。{sub_agent.get('role') or ''}",
             "system_prompt": system_prompt,
             "capabilities": capabilities,
-            "model_config": model_config,  # 每个 Agent 自己的模型配置
+            "model_view": model_view,  # 每个 Agent 自己的模型视图
             "can_transfer_to": []  # 稍后填充
         }
     
@@ -660,16 +661,16 @@ class HandoffsService:
         """初始化 Handoffs 服务
         
         Args:
-            agent_configs: Agent 配置字典，每个 Agent 包含自己的 model_config
+            agent_configs: Agent 配置字典，每个 Agent 包含自己的 model_view
             streaming: 是否启用流式输出
         """
         self.agent_configs = agent_configs
         self.streaming = streaming
         self._graph = None
-        
-        # 验证每个 Agent 都有模型配置
+
+        # 验证每个 Agent 都有模型视图
         for agent_name, config in agent_configs.items():
-            if not config.get("model_config"):
+            if not config.get("model_view"):
                 raise ValueError(f"Agent {agent_name} 没有配置模型")
         
         logger.info(f"HandoffsService 初始化, agents: {list(self.agent_configs.keys())}")
@@ -687,22 +688,22 @@ class HandoffsService:
             config = self.agent_configs[agent_name]
             tools = create_tools_for_agent(agent_name, self.agent_configs)
             
-            # 使用每个 Agent 自己的模型配置
-            agent_model_config = config.get("model_config")
-            
+            # 使用每个 Agent 自己的模型视图
+            agent_model_view = config.get("model_view")
+
             if self.streaming:
                 agent_node = create_streaming_agent_node(
                     agent_name=agent_name,
                     system_prompt=config.get("system_prompt", f"你是 {agent_name}"),
                     tools=tools,
-                    model_config=agent_model_config
+                    model_view=agent_model_view
                 )
             else:
                 agent_node = create_agent_node(
                     agent_name=agent_name,
                     system_prompt=config.get("system_prompt", f"你是 {agent_name}"),
                     tools=tools,
-                    model_config=agent_model_config
+                    model_view=agent_model_view
                 )
             builder.add_node(agent_name, agent_node)
 
@@ -956,7 +957,7 @@ def get_handoffs_service_for_app(
     if not multi_agent_config:
         raise ValueError(f"应用 {app_id} 没有多 Agent 配置")
 
-    # 转换配置（每个 Agent 包含自己的 model_config）
+    # 转换配置（每个 Agent 包含自己的 model_view）
     agent_configs = convert_multi_agent_config_to_handoffs(multi_agent_config, db)
 
     if not agent_configs:

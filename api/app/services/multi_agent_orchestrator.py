@@ -18,7 +18,7 @@ from app.core.error_codes import BizCode
 from app.core.logging_config import get_business_logger
 from app.core.utils.datetime_utils import utcnow_naive
 from app.repositories.tool_repository import ToolRepository
-from app.services.model_service import ModelApiKeyService
+from app.services.model_service import ModelConfigService
 
 logger = get_business_logger()
 
@@ -1909,7 +1909,7 @@ class MultiAgentOrchestrator:
                 "orchestration_mode": self.config.orchestration_mode
             }
 
-            # 2. 转换配置（每个 Agent 包含自己的 model_config）
+            # 2. 转换配置（每个 Agent 包含自己的 model_view）
             agent_configs = await convert_multi_agent_config_to_handoffs(
                 multi_agent_config,
                 self.db
@@ -2125,7 +2125,7 @@ class MultiAgentOrchestrator:
                 "orchestration_mode": self.config.orchestration_mode
             }
 
-            # 2. 转换配置（每个 Agent 包含自己的 model_config）
+            # 2. 转换配置（每个 Agent 包含自己的 model_view）
             agent_configs = await convert_multi_agent_config_to_handoffs(
                 multi_agent_config,
                 self.db
@@ -3217,9 +3217,7 @@ class MultiAgentOrchestrator:
 
         try:
             # 调用 Master Agent 的 LLM 进行整合
-            from app.core.models import RedBearLLM
-            from app.core.models.base import RedBearModelConfig
-            from app.models import ModelType
+            from app.core.models import RedBearChatModel
 
             # 获取 Master Agent 的模型配置
             default_model_config_id = self.config.default_model_config_id
@@ -3227,24 +3225,12 @@ class MultiAgentOrchestrator:
                 logger.warning("没有配置 Master Agent，使用简单整合")
                 return self._smart_merge_results(results, strategy)
 
-            # 获取 API Key 配置
-            # api_key_config = self.db.query(ModelApiKey).join(
-            #     ModelConfig, ModelApiKey.model_configs
-            # ).filter(
-            #     ModelConfig.id == default_model_config_id,
-            #     ModelApiKey.is_active.is_(True)
-            # ).first()
-            # api_keys = ModelApiKeyRepository.get_by_model_config(self.db, default_model_config_id)
-            # api_key_config = api_keys[0] if api_keys else None
-            api_key_config = await ModelApiKeyService.get_available_api_key_bridge_async(
+            # 获取模型视图（非解密视图，调用经模型服务 invoke 接缝）
+            model_view = await ModelConfigService.get_runtime_model_view_bridge_async(
                 self.db,
                 default_model_config_id,
                 tenant_id=self.tenant_id,
             )
-
-            if not api_key_config:
-                logger.warning("Master Agent 没有可用的 API Key，使用简单整合")
-                return self._smart_merge_results(results, strategy)
 
             logger.info(
                 "使用 Master Agent 整合结果",
@@ -3255,23 +3241,18 @@ class MultiAgentOrchestrator:
                 }
             )
 
-            # 创建 RedBearModelConfig
+            # 创建 LLM 实例
             _merge_params = self._resolve_merge_params()
-            model_config = RedBearModelConfig.from_api_key(
-                api_key_config,
-                extra_params={
+            llm = RedBearChatModel.for_invoke(
+                model_view,
+                params={
                     "temperature": _merge_params["temperature"],
                     "max_tokens": _merge_params["max_tokens"],
                 },
             )
 
-            # 创建 LLM 实例
-            llm = RedBearLLM(model_config, type=ModelType.LLM)
-
             # 调用模型进行整合
             response = await llm.ainvoke(merge_prompt)
-
-            await ModelApiKeyService.record_api_key_usage_bridge_async(self.db, api_key_config.id)
 
             # 提取整合消耗的 token
             merge_tokens = 0
@@ -3395,9 +3376,7 @@ class MultiAgentOrchestrator:
 请生成最终的整合答案："""
 
         try:
-            from app.core.models import RedBearLLM
-            from app.core.models.base import RedBearModelConfig
-            from app.models import ModelType
+            from app.core.models import RedBearChatModel
 
             # 获取 Master Agent 的模型配置
             default_model_config_id = self.config.default_model_config_id
@@ -3407,26 +3386,12 @@ class MultiAgentOrchestrator:
                     yield _evt
                 return
 
-            # 获取 API Key 配置
-            # api_key_config = self.db.query(ModelApiKey).join(
-            #     ModelConfig, ModelApiKey.model_configs
-            # ).filter(
-            #     ModelConfig.id == default_model_config_id,
-            #     ModelApiKey.is_active.is_(True)
-            # ).first()
-            # api_keys = ModelApiKeyRepository.get_by_model_config(self.db, default_model_config_id)
-            # api_key_config = api_keys[0] if api_keys else None
-            api_key_config = await ModelApiKeyService.get_available_api_key_bridge_async(
+            # 获取模型视图（非解密视图，调用经模型服务 invoke 接缝）
+            model_view = await ModelConfigService.get_runtime_model_view_bridge_async(
                 self.db,
                 default_model_config_id,
                 tenant_id=self.tenant_id,
             )
-
-            if not api_key_config:
-                logger.warning("Master Agent 没有可用的 API Key，降级为 smart 拼接（分块流式）")
-                async for _evt in self._smart_merge_results_stream(results, strategy):
-                    yield _evt
-                return
 
             logger.info(
                 "开始 Master Agent 流式整合",
@@ -3436,36 +3401,27 @@ class MultiAgentOrchestrator:
                 }
             )
 
-            # 创建 RedBearModelConfig（启用流式）
+            # 创建 LLM 实例（流式）
             # max_tokens 走 execution_config.merge_max_tokens（默认 8192）：
             # 写死 2000 会把长报告的整合结果截断，而整合输出正是用户看到的最终答案。
             _merge_params = self._resolve_merge_params()
-            model_config = RedBearModelConfig.from_api_key(
-                api_key_config,
-                extra_params={
+            llm = RedBearChatModel.for_invoke(
+                model_view,
+                params={
                     "temperature": _merge_params["temperature"],
                     "max_tokens": _merge_params["max_tokens"],
-                    "streaming": True,
                 },
+                streaming=True,
             )
-
-            # 创建 LLM 实例
-            llm = RedBearLLM(model_config, type=ModelType.LLM)
 
             logger.info("开始流式调用 Master Agent LLM")
 
             # 流式调用模型进行整合
             try:
                 chunk_count = 0
-                logger.debug(f"开始流式调用，provider={api_key_config.provider}")
+                logger.debug(f"开始流式调用，model={model_view.model_name}")
 
-                # 获取底层模型
-                underlying_model = llm._model if hasattr(llm, '_model') else llm
-                logger.debug(f"底层模型类型: {type(underlying_model).__name__}")
-
-                # 使用底层模型的 astream 方法直接流式输出
-                # 这样可以绕过可能的包装器累积问题
-                async for chunk in underlying_model.astream(merge_prompt):
+                async for chunk in llm.astream(merge_prompt):
                     chunk_count += 1
 
                     # 提取内容
@@ -3480,8 +3436,6 @@ class MultiAgentOrchestrator:
                         if chunk_count <= 5:
                             logger.debug(f"收到流式 chunk #{chunk_count}: {content[:30]}...")
                         yield self._format_sse_event("message", {"content": content})
-
-                ModelApiKeyService.record_api_key_usage(self.db, api_key_config.id)
 
                 logger.info(f"Master Agent 流式整合完成，共 {chunk_count} 个 chunks")
 

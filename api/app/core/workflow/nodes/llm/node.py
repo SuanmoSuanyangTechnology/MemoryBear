@@ -16,7 +16,7 @@ from langchain_core.messages import AIMessage
 
 from app.core.error_codes import BizCode
 from app.core.exceptions import BusinessException
-from app.core.models import RedBearChatModel, RedBearLLM, RedBearModelConfig
+from app.core.models import RedBearChatModel
 from app.core.workflow.engine.state_manager import WorkflowState
 from app.core.workflow.engine.variable_pool import VariablePool
 from app.core.workflow.nodes.base_node import BaseNode
@@ -31,7 +31,6 @@ from app.core.workflow.nodes.llm.config import (
 )
 from app.core.workflow.variable.base_variable import VariableType
 from app.db import get_async_db_context
-from app.models import ModelType
 from app.schemas.model_schema import ModelInfo
 from app.services.context_engine_manager import ContextEngineManager
 from app.services.model_service import ModelConfigService
@@ -504,20 +503,12 @@ class LLMNode(BaseNode):
         self,
         model_id: uuid.UUID,
         variable_pool: VariablePool,
-        *,
-        with_credentials: bool = False,
     ) -> ModelInfo:
-        """运行期模型视图：非流式（G2）取非解密视图，流式仍走本地直连故需凭据。"""
+        """运行期模型视图：恒为非解密视图（凭据不出模型服务，G3 起流式/非流式一致）。"""
 
         tenant_id = await self.resolve_tenant_id_async(variable_pool)
 
         async with get_async_db_context() as db:
-            if with_credentials:
-                return await ModelConfigService.get_runtime_model_info_async(
-                    db,
-                    model_id,
-                    tenant_id=tenant_id,
-                )
             return await ModelConfigService.get_runtime_model_view_async(
                 db,
                 model_id,
@@ -554,10 +545,10 @@ class LLMNode(BaseNode):
             state: WorkflowState,
             variable_pool: VariablePool,
             stream: bool = False
-    ) -> RedBearLLM | RedBearChatModel:
+    ) -> RedBearChatModel:
         """准备 LLM 实例（公共逻辑）
 
-        非流式走模型服务 invoke（宿主不持有凭据）；流式仍为本地直连，随 G3 切换。
+        流式/非流式均走模型服务 invoke（宿主不持有凭据）。
 
         Args:
             variable_pool: 变量池
@@ -576,9 +567,7 @@ class LLMNode(BaseNode):
             raise ValueError(f"节点 {self.node_id} 缺少 model_id 配置")
 
         model_info_started_at = asyncio.get_running_loop().time()
-        model_info = await self._load_model_info_async(
-            model_id, variable_pool, with_credentials=stream
-        )
+        model_info = await self._load_model_info_async(model_id, variable_pool)
         model_info_ms = (asyncio.get_running_loop().time() - model_info_started_at) * 1000
         self.model_info = model_info
 
@@ -593,8 +582,8 @@ class LLMNode(BaseNode):
             self._param_warnings.extend(param_warnings)
 
         # 4. 创建 LLM 实例（使用已提取的数据）
-        # 注意：对于流式输出，需要在模型初始化时设置 streaming=True
-        extra_params: dict[str, Any] = {"streaming": stream} if stream else {}
+        # 注意：流式经 for_invoke(streaming=...) 表达，不进请求参数
+        extra_params: dict[str, Any] = {}
         
         if self.typed_config.temperature is not None:
             extra_params["temperature"] = self.typed_config.temperature
@@ -705,16 +694,17 @@ class LLMNode(BaseNode):
                     f"OpenAI 多模态内容格式，已自动关闭 vision")
 
         if stream:
-            # 流式仍走本地直连（凭据来自解密视图），随 G3 切服务侧
-            llm: RedBearLLM | RedBearChatModel = RedBearLLM(
-                RedBearModelConfig.from_api_key(
-                    model_info,
-                    deep_thinking=deep_thinking,
-                    thinking_budget_tokens=thinking_budget_tokens,
-                    json_output=json_output,
-                    extra_params=extra_params,
-                ),
-                type=model_info.model_type
+            # 流式切运行面 invoke（G3）：宿主不再解密凭据。streaming=True 使节点
+            # ainvoke 也走 _astream，回调面才出 on_chat_model_stream token 事件。
+            llm = RedBearChatModel.for_invoke(
+                model_info,
+                params={
+                    **extra_params,
+                    "deep_thinking": deep_thinking,
+                    "thinking_budget_tokens": thinking_budget_tokens,
+                    "json_output": json_output,
+                },
+                streaming=True,
             )
         else:
             # 非流式切运行面 invoke：宿主不再解密凭据，选路/换渠道/归因在模型服务（G2）。

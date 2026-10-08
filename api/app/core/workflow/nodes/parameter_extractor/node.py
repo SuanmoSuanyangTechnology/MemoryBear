@@ -137,19 +137,10 @@ class ParameterExtractorNode(BaseNode):
     async def _load_model_info_async(
         self,
         variable_pool: VariablePool,
-        *,
-        with_credentials: bool = False,
     ) -> ModelInfo:
         tenant_id = await self.resolve_tenant_id_async(variable_pool)
 
         async with get_async_db_context() as db:
-            if with_credentials:
-                # function-calling 模式仍走本地直连（tools 未过线，G3），需要凭据
-                return await ModelConfigService.get_runtime_model_info_async(
-                    db,
-                    self.typed_config.model_id,
-                    tenant_id=tenant_id,
-                )
             return await ModelConfigService.get_runtime_model_view_async(
                 db,
                 self.typed_config.model_id,
@@ -257,7 +248,7 @@ class ParameterExtractorNode(BaseNode):
                 return InferenceMode.PROMPT
         return mode
 
-    async def _execute_function_calling(self, llm: RedBearLLM, variable_pool: VariablePool) -> dict:
+    async def _execute_function_calling(self, llm: RedBearChatModel, variable_pool: VariablePool) -> dict:
         tool_schema = self._build_tool_schema()
         llm_with_tools = llm.bind_tools([tool_schema])
 
@@ -288,7 +279,7 @@ class ParameterExtractorNode(BaseNode):
         return result
 
     async def _execute_prompt(
-        self, llm: RedBearLLM | RedBearChatModel, variable_pool: VariablePool
+        self, llm: RedBearChatModel, variable_pool: VariablePool
     ) -> dict:
         system_prompt, user_prompt = self._get_prompt()
 
@@ -329,11 +320,8 @@ class ParameterExtractorNode(BaseNode):
         logger.info(f"node: {self.node_id} inference_mode={actual_mode}")
 
         if actual_mode == InferenceMode.FUNCTION_CALLING:
-            # tools 未过线（G3）：本地直连需凭据，故按需补取解密视图
-            credential_info = await self._load_model_info_async(
-                variable_pool, with_credentials=True
-            )
-            llm = self._build_llm_from_model_info(credential_info)
+            # tools 过线后走运行面 invoke（G3b）：工具经 bind_tools 直落包实现
+            llm = RedBearChatModel.for_invoke(model_info)
             return await self._execute_function_calling(llm, variable_pool)
         return await self._execute_prompt(
             RedBearChatModel.for_invoke(model_info), variable_pool

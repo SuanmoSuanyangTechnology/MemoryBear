@@ -1558,7 +1558,7 @@ class AgentRunService:
 
             # 4. 并行加载工具/技能/知识库/记忆配置（各自独立 DB 会话，无相互依赖）
             tools = []
-            parallel_results = await asyncio.gather(
+            parallel_coros = [
                 self.load_tools_config(tools_config, web_search, tenant_id, user_id, workspace_id),
                 self.load_skill_config(skills_config, message, tenant_id, user_id, workspace_id),
                 self.load_knowledge_retrieval_config(
@@ -1568,15 +1568,17 @@ class AgentRunService:
                     workspace_id=workspace_id,
                     source=KnowledgeRetrievalSource.AGENT if sub_agent else KnowledgeRetrievalSource.DRAFT,
                 ),
-                self.load_memory_config(memory_config, user_id, workspace_id, storage_type, user_rag_memory_id)
-                if memory else None,
-                return_exceptions=True,
-            )
+            ]
+            if memory:
+                parallel_coros.append(
+                    self.load_memory_config(memory_config, user_id, workspace_id, storage_type, user_rag_memory_id)
+                )
+            parallel_results = await asyncio.gather(*parallel_coros, return_exceptions=True)
 
             base_tools = parallel_results[0]
             skill_result = parallel_results[1]
             kb_result = parallel_results[2]
-            memory_result = parallel_results[3]
+            memory_result = parallel_results[3] if memory else None
 
             if not isinstance(base_tools, Exception):
                 tools.extend(base_tools)
@@ -1766,8 +1768,7 @@ class AgentRunService:
                     system_prompt=system_prompt,
                     message=llm_message,
                     history=history,
-                    api_key_config=api_key_config,
-                    model_config=model_config,
+                    model_view=model_view,
                     effective_params=effective_params,
                     processed_files=processed_files,
                     context_evidence_loader=load_annotation_context,
@@ -2050,6 +2051,7 @@ class AgentRunService:
         orchestrator_node_executions: list = []
         node_executions: list = []
         total_tokens = 0
+        full_content = ""
 
         try:
             # 1. 获取 API Key 配置
@@ -2082,7 +2084,7 @@ class AgentRunService:
 
             # 4. 并行加载工具/技能/知识库/记忆配置（各自独立 DB 会话，无相互依赖）
             tools = []
-            parallel_results = await asyncio.gather(
+            parallel_coros = [
                 self.load_tools_config(tools_config, web_search, tenant_id, user_id, workspace_id),
                 self.load_skill_config(skills_config, message, tenant_id, user_id, workspace_id),
                 self.load_knowledge_retrieval_config(
@@ -2092,15 +2094,17 @@ class AgentRunService:
                     workspace_id=workspace_id,
                     source=KnowledgeRetrievalSource.AGENT if sub_agent else KnowledgeRetrievalSource.DRAFT,
                 ),
-                self.load_memory_config(memory_config, user_id, workspace_id, storage_type, user_rag_memory_id)
-                if memory else None,
-                return_exceptions=True,
-            )
+            ]
+            if memory:
+                parallel_coros.append(
+                    self.load_memory_config(memory_config, user_id, workspace_id, storage_type, user_rag_memory_id)
+                )
+            parallel_results = await asyncio.gather(*parallel_coros, return_exceptions=True)
 
             base_tools = parallel_results[0]
             skill_result = parallel_results[1]
             kb_result = parallel_results[2]
-            memory_result = parallel_results[3]
+            memory_result = parallel_results[3] if memory else None
 
             if not isinstance(base_tools, Exception):
                 tools.extend(base_tools)
@@ -2296,8 +2300,7 @@ class AgentRunService:
                     system_prompt=system_prompt,
                     message=llm_message,
                     history=history,
-                    api_key_config=api_key_config,
-                    model_config=model_config,
+                    model_view=model_view,
                     effective_params=effective_params,
                     processed_files=processed_files,
                     context_evidence_loader=load_annotation_context,
