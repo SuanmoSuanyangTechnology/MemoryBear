@@ -125,6 +125,36 @@ class MemoryService:
         )
         return instance
 
+    @staticmethod
+    async def reembed_end_user_vectors(
+        *,
+        embedder: Any,
+        job_id: str,
+        end_user_id: str,
+        should_continue: Callable[[], bool] | None = None,
+    ) -> Any:
+        """通过统一记忆服务入口重算单个 end_user 的存量向量。
+
+        MemoryService 持有存储生命周期；引擎内部的任务失效异常
+        （``JobSupersededError``）直接向上透传，上层统一用该异常判断是否停止写入。
+        """
+        from app.core.memory.storage.service import MemoryStorageService
+        from app.core.memory.storage_services.reembedding_engine.rebuilder import (
+            rebuild_end_user_vectors,
+        )
+
+        storage = await MemoryStorageService.create_graph_write_only()
+        try:
+            return await rebuild_end_user_vectors(
+                storage=storage,
+                embedder=embedder,
+                job_id=job_id,
+                end_user_id=end_user_id,
+                should_continue=should_continue,
+            )
+        finally:
+            await storage.close()
+
     # ──────────────────────────────────────────────
     # 静态方法：摄入/派发（不需要实例化，不加载 config）
     # ──────────────────────────────────────────────
