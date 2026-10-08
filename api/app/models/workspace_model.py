@@ -43,7 +43,7 @@ class Workspace(Base):
     iconType = Column(String, nullable=True)
     description = Column(String, nullable=True)
     tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False)  # belongs to tenant
-    storage_type = Column(String, nullable=True)
+    storage_type = Column(String, nullable=False, server_default="neo4j", default="neo4j")
     llm = Column(String, nullable=True)
     embedding = Column(String, nullable=True)
     rerank = Column(String, nullable=True)
