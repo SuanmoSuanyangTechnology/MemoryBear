@@ -362,9 +362,9 @@ class MemoryReembedEndUserListResponse(BaseModel):
     ``hasnext``。``job_id``/``job_status``/``summary`` 是分页结构之外的同级领域字段，
     与 ``PermanentMemoryList``（``page`` + ``quota`` + ``items``）同一形态。
 
-    ``job_id`` 可空：无当前任务时（从未重算，或当前任务已成功——见
-    ``_CURRENT_JOB_EXCLUDED_STATUSES``）返回的是空分页信封，此时没有真 job_id，
-    调用方靠它是否为 ``None`` 区分"无任务"与"任务里恰好没有行"。
+    ``job_id`` 可空：无当前任务时（从未重算，或最新那一条已过期——终态且结束超过
+    ``REEMBED_CURRENT_JOB_VISIBLE_SECONDS``）返回的是空分页信封，此时没有真
+    job_id，调用方靠它是否为 ``None`` 区分"无任务"与"任务里恰好没有行"。
     """
 
     job_id: uuid.UUID | None = Field(

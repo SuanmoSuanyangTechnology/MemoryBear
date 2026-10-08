@@ -593,15 +593,17 @@ async def get_current_workspace_reembed_job(
         db: AsyncSession = Depends(get_async_db),
         current_user: CurrentUserSnapshot = Depends(get_current_user_async),
 ):
-    """查询当前工作空间**当前**的存量向量重算任务。
+    """查询当前工作空间**近 24h 内最新的一次**存量向量重算任务。
 
     embedding 底层模型变更后前端靠它拿 job_id 并轮询进度。
 
-    叫 current 而不是 latest：任务成功后这个端点会回到"无任务"（语义见
-    ``memory_reembed_service._CURRENT_JOB_EXCLUDED_STATUSES``），返回的并不
-    总是最近那一条，用 latest 会误导调用方去假设"一定有任务可看"。
-    任务成功后要拿那一次的详情，用 ``GET /workspace_reembed/{job_id}``
-    （按 id 查询不过滤状态）——轮询方手里本来就有 job_id。
+    成功的那次照常返回——它正是用户当下要看的"最近一次重算"（完成通知就在那一刻
+    发的）。退场只由时间决定：终态任务结束满 24h 后回到"无任务"（语义见
+    ``memory_reembed_service._current_job_row_is_expired``），因此这个端点仍不是
+    "永远有任务可看"，调用方不能假设一定拿得到 job_id。
+
+    在途任务不受 24h 限制：它还在跑，藏掉只会让轮询方以为没任务了。过期任务要拿
+    详情，用 ``GET /workspace_reembed/{job_id}``（按 id 查询不看新旧）。
     """
     job = await memory_reembed_service.get_current_reembed_job_async(
         db,
@@ -670,9 +672,10 @@ def list_current_workspace_reembed_end_users(
         db: Session = Depends(get_db),
         current_user: User = Depends(get_current_user),
 ):
-    """查询当前工作空间当前重算任务下，各 end_user 的重算状态。
+    """查询当前工作空间近 24h 内最新一次重算任务下，各 end_user 的重算状态。
 
-    与 ``GET /workspace_reembed/current`` 同一判据：任务成功后回到"无任务"。
+    与 ``GET /workspace_reembed/current`` 同一判据：终态任务结束满 24h 后回到
+    "无任务"（成功的那次同样按时间退场，不提前清空）。
 
     但**空态形状不同**：``/current`` 是详情接口，无任务返回 ``data: {}``；
     本接口是分页接口，无任务返回空分页信封（``job_id: null`` + 空的
@@ -705,14 +708,19 @@ def _current_reembed_job_or_none(
 ):
     """把 ``current`` 解析成任务行；没有返回 ``None``（**不报错**）。
 
-    "没有当前任务"（从未重算，或当前任务已成功）不是失败：调用方只是点了个按钮，
-    而那时没有任何行需要重试。返回 404 会让前端把它当错误弹出来，而
+    "没有当前任务"（从未重算，或最新那一条已过期超过 24h）不是失败：调用方只是点了
+    个按钮，而那时没有任何行需要重试。返回 404 会让前端把它当错误弹出来，而
     ``retry_job_users`` 早把"有任务但没有终态失败行"定成 ``retried: 0`` 的非错误
     语义——两种"没重试任何行"不该一个报错一个不报。空结果由
     :func:`memory_reembed_service.empty_job_retry_result` 给出。
 
+    解析到的可能是已成功的任务（成功与否不再影响可见性）：``finalize_job_if_complete``
+    只在没有终态失败行时才写 ``succeeded``，所以这种任务必然没有可重试的行，会落到
+    ``retry_job_users`` 的 ``retried: 0`` 分支，不会重开任务。
+
     与 ``{job_id}`` 版的分工：那是调用方**指名**的任务，不存在就仍然 404
-    （见 ``list_workspace_reembed_end_users`` 等）。
+    （见 ``list_workspace_reembed_end_users`` 等）。已过期的旧任务只走那条路——
+    它们在 ``/current`` 上已经不该可见了。
     """
     return memory_reembed_service.get_current_reembed_job(db, workspace_id)
 
@@ -733,8 +741,13 @@ def retry_failed_current_workspace_reembed_end_users(
 
     与 ``POST /workspace_reembed/{job_id}/end_users/retry_failed`` 同一语义与同一
     响应，只是不需要调用方持有 job_id。「当前」的判据与
-    ``GET /workspace_reembed/current`` 完全同源（``_current_job_filters``），所以
-    "列表看到的那次任务"就是"这里重试的那次任务"。
+    ``GET /workspace_reembed/current`` 完全同源（``_current_job_filters`` +
+    ``_current_job_row_is_expired``），所以"列表看到的那次任务"就是"这里重试的那次
+    任务"。
+
+    当前任务已成功时结果为空的 ``retried: 0``：``succeeded`` 是按"没有终态失败行"
+    写的，本来就没有可重试的行。任务已过期（结束满 24h）时才回到"没有当前任务"，
+    同样是 ``retried: 0``。要针对某一次明确重试，用带 job_id 的那条。
 
     没有当前任务时返回 200 + 空结果（``retried: 0``），不是 404。
     """
