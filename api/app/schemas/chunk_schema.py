@@ -177,20 +177,17 @@ class ChunkUpdate(BaseModel):
         return {}
 
 
-class ChunkRetrieve(BaseModel):
+class _ChunkRetrieveBase(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     query: RetrievalQuery
     kb_ids: list[uuid.UUID] = Field(default_factory=list)
     ex_ids: list[str] | None = Field(None)
-    knowledge_bases: list[KnowledgeBaseConfig] = Field(default_factory=list)
     file_names_filter: list[str] | None = Field(None)
     similarity_threshold: float | None = Field(None)
     vector_similarity_weight: float | None = Field(None)
     top_k: int | None = Field(20, ge=1, le=100)
-    top_n: int | None = Field(20, ge=1, le=100)
     retrieve_type: RetrieveType | None = Field(None)
-    rerank_id: uuid.UUID | None = None
     rerank_mode: RerankMode | None = None
     rerank_weights: RerankWeights | None = None
     enable_graph_retrieval: int = Field(
@@ -216,6 +213,22 @@ class ChunkRetrieve(BaseModel):
     @property
     def normalized_query(self) -> TextRetrievalQuery | ImageRetrievalQuery:
         return normalize_retrieval_query(self.query)
+
+
+class V1ChunkRetrieve(_ChunkRetrieveBase):
+    """Supported request parameters for API Key retrieval."""
+
+    @model_validator(mode="after")
+    def validate_knowledge_ids(self) -> "V1ChunkRetrieve":
+        if not self.kb_ids and not self.ex_ids:
+            raise ValueError("kb_ids and ex_ids cannot both be empty")
+        return self
+
+
+class ChunkRetrieve(_ChunkRetrieveBase):
+    knowledge_bases: list[KnowledgeBaseConfig] = Field(default_factory=list)
+    top_n: int | None = Field(20, ge=1, le=100)
+    rerank_id: uuid.UUID | None = None
 
     @model_validator(mode="after")
     def resolve_top_n(self):

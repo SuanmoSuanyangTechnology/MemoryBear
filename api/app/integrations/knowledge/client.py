@@ -15,13 +15,14 @@ from fastapi import Request
 from starlette.datastructures import UploadFile
 from starlette.responses import StreamingResponse
 
+from app.schemas.chunk_schema import V1ChunkRetrieve
 from app.schemas.knowledge_retrieval_schema import (
     KnowledgeRetrievalRequest,
     KnowledgeRetrievalResult,
 )
 
 from .call_profile import CallProfile
-from .contracts import KnowledgeCallContext
+from .contracts import KnowledgeCallContext, KnowledgeRetrievalSource
 from .errors import (
     KnowledgeProtocolError,
     KnowledgeServiceError,
@@ -31,6 +32,7 @@ from .errors import (
 from .transport import KnowledgeHttpTransport
 
 logger = logging.getLogger(__name__)
+_V1_RETRIEVAL_PATH = "/v1/chunks/retrieval"
 _REQUEST_RERANK_WIRE_FIELDS = ("rerank_id", "rerank_mode", "rerank_weights")
 _KNOWLEDGE_BASE_RERANK_WIRE_FIELDS = ("rerank_mode", "rerank_weights")
 
@@ -138,6 +140,14 @@ class KnowledgeServiceClient:
         else:
             body = await request.body()
             if body:
+                if (
+                    request.method == "POST"
+                    and request.url.path == _V1_RETRIEVAL_PATH
+                    and context.source is KnowledgeRetrievalSource.EXTERNAL_API
+                ):
+                    body = V1ChunkRetrieve.model_validate_json(body).model_dump_json(
+                        exclude_unset=True,
+                    ).encode("utf-8")
                 send_kwargs["content"] = body
         upstream = await self._transport.send(
             method=request.method,
