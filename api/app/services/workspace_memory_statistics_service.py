@@ -504,12 +504,14 @@ def _with_yesterday_changes(response: dict[str, Any]) -> dict[str, Any]:
         }
         for item in response["statistics"]
     ]
+    statistics.sort(key=lambda item: item["count"], reverse=True)
     result = {
         **response,
         "statistics": statistics,
         "total_count_change": _calculate_yesterday_change(
             response["total_count"], yesterday["total_count"]
         ),
+        "update": response["total_count"] - yesterday["total_count"],
     }
     result.pop("yesterday")
     return result
