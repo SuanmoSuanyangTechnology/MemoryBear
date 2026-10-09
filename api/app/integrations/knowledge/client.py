@@ -8,7 +8,7 @@ import logging
 import time
 from collections.abc import AsyncIterator, Mapping
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import unquote, urlencode
 
 import httpx
 from fastapi import Request
@@ -337,6 +337,26 @@ class KnowledgeServiceClient:
         finally:
             await upstream.aclose()
 
+    @staticmethod
+    def _validate_internal_path(path: str) -> None:
+        """Reject paths that could escape the /internal/v1/ prefix.
+
+        A bare ``startswith`` is not enough: httpx collapses dot segments
+        before sending (``/internal/v1/../admin`` is sent as
+        ``/internal/admin``), so a crafted path would reach a different
+        upstream route. Dot segments are rejected both raw and percent-decoded,
+        and query/fragment/backslash characters are refused because the query
+        must go through the ``query`` argument.
+        """
+
+        if not path.startswith("/internal/v1/"):
+            raise ValueError("Knowledge internal call path must start with /internal/v1/")
+        decoded = unquote(path)
+        if any(ch in path or ch in decoded for ch in ("?", "#", "\\")):
+            raise ValueError("Knowledge internal call path contains illegal characters")
+        if any(segment in (".", "..") for segment in decoded.split("/")):
+            raise ValueError("Knowledge internal call path must not contain dot segments")
+
     async def call_internal(
         self,
         *,
@@ -352,10 +372,19 @@ class KnowledgeServiceClient:
         conventions used by retrieval_policy() and retrieve(), so detached
         callers share the same identity headers, pool, timeouts and logs as
         forwarded manager-API traffic.
+
+        Return contract: this is a generic envelope passthrough. Only the
+        envelope structure is validated (JSON object, integer ``code``, HTTP
+        2xx and ``code == 0``; anything else raises). The shape of ``data`` is
+        owned by each upstream endpoint and is deliberately NOT validated here:
+        some endpoints legitimately return no ``data`` (e.g. delete). Callers
+        that need specific fields must read them defensively
+        (``result.get("data")``) or validate against their own schema, as
+        ``retrieve()`` does for retrieval results. The returned dict is the
+        upstream envelope with ``time`` refreshed to the local epoch ms.
         """
 
-        if not path.startswith("/internal/v1/"):
-            raise ValueError("Knowledge internal call path must start with /internal/v1/")
+        self._validate_internal_path(path)
         send_query = b""
         if query:
             normalized = [
@@ -385,6 +414,10 @@ class KnowledgeServiceClient:
             content=content,
         )
         headers_at = time.perf_counter()
+        # Snapshot status/trace id before the body is read and the response is
+        # closed, so nothing below depends on reading a closed Response.
+        status_code = upstream.status_code
+        trace_id = upstream.headers.get("X-Trace-Id", context.trace_id)
         try:
             raw = await upstream.aread()
         except httpx.TimeoutException as exc:
@@ -397,7 +430,6 @@ class KnowledgeServiceClient:
             ) from exc
         finally:
             await upstream.aclose()
-        trace_id = upstream.headers.get("X-Trace-Id", context.trace_id)
         try:
             envelope = json.loads(raw)
         except (TypeError, ValueError) as exc:
@@ -410,15 +442,15 @@ class KnowledgeServiceClient:
         if not isinstance(code, int):
             raise KnowledgeProtocolError("Knowledge service envelope code must be an integer")
         message = str(envelope.get("error") or envelope.get("msg") or "Knowledge error")
-        if not 200 <= upstream.status_code < 300 or code != 0:
-            raise KnowledgeServiceError(upstream.status_code, code, message, trace_id)
+        if not 200 <= status_code < 300 or code != 0:
+            raise KnowledgeServiceError(status_code, code, message, trace_id)
         envelope["time"] = int(time.time() * 1000)
         logger.info(
             "knowledge_detached_call_completed method=%s path=%s status=%s code=%s "
             "source=%s bytes=%s header_ms=%.2f elapsed_ms=%.2f trace_id=%s",
             method.upper(),
             path,
-            upstream.status_code,
+            status_code,
             code,
             context.source.value,
             len(raw),

@@ -122,6 +122,12 @@ def get_knowledge_service_client() -> "KnowledgeServiceClient":
     from .client import KnowledgeServiceClient
 
     proxy = _runtime.route_proxy
+    # Deliberately an isinstance check on the concrete client rather than
+    # ``_runtime.enabled`` or the KnowledgeRouteProxy protocol: call_internal()
+    # exists only on KnowledgeServiceClient, so an "enabled" runtime holding
+    # some other proxy implementation would fail later with AttributeError.
+    # Tests injecting a fake via ``remote_factory`` should use
+    # ``MagicMock(spec=KnowledgeServiceClient)`` (passes isinstance) or a subclass.
     if not isinstance(proxy, KnowledgeServiceClient):
         raise KnowledgeConfigurationError(
             "Remote knowledge service integration is not enabled"
