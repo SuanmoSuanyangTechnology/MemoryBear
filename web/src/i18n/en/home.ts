@@ -169,6 +169,12 @@ export const home = {
       forgettingExecutionRate: 'Forgetting Execution Rate',
 
       memoryClassificationDistribution: 'Memory classification distribution',
+      memoryScaleDistribution: 'Memory Scale · Category Distribution',
+      memoryScaleCoreMetrics: 'Memory Scale · Core Metrics',
+      byMemoryType: 'By Memory Type',
+      topFiveMemoryTypes: 'Top Five Memory Types',
+      activeMemory: 'Active Memory',
+      updatedToday: 'Updated Today',
       knowledgeBaseTypeDistribution: 'Distribution of Knowledge Base Types',
       memoryGrowthTrend: 'Memory Growth Trend',
       corporateMemory: 'Corporate Memory',
