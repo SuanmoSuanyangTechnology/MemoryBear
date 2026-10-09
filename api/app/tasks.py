@@ -6828,6 +6828,8 @@ def generate_scene_summary(
     idle_high_watermark_message_id: str | None = None,
 ):
     from app.core.memory.scene.scene_summary_service import SceneSummaryService
+    from app.core.memory.storage.custom import SceneStorage
+    from app.core.memory.storage.provider.neo4j.client import Neo4jClient
     from app.schemas.scene_memory_schema import GenerateSceneSummaryTask
 
     payload = GenerateSceneSummaryTask(
@@ -6838,20 +6840,152 @@ def generate_scene_summary(
         idle_high_watermark_message_id=idle_high_watermark_message_id,
         close_reason=close_reason,
     )
+    started_at = time.monotonic()
+    stage = "generate_summary"
     loop = set_asyncio_event_loop()
+
+    async def _run():
+        storage_client = await Neo4jClient.create()
+        try:
+            writer = SceneStorage(storage_client)
+            return await SceneSummaryService(writer=writer).generate(payload)
+        finally:
+            await storage_client.close()
+
     try:
-        result = loop.run_until_complete(SceneSummaryService().generate(payload))
+        result = loop.run_until_complete(_run())
+        if result.get("community_dispatch_required"):
+            stage = "dispatch_scene_community"
+            community_task = run_scene_community_incremental.apply_async(
+                kwargs={"end_user_id": end_user_id}
+            )
+            result["scene_community_task_id"] = community_task.id
         logger.info(
-            "[SceneSummary] generation completed: scene_start=%s, "
-            "close_reason=%s, status=%s, reason=%s, summary_id=%s",
+            "[SceneSummary] generation completed: user=%s, scene_start=%s, "
+            "close_reason=%s, status=%s, reason=%s, summary_id=%s, "
+            "inactive=%s, dispatched=%s, elapsed_ms=%s",
+            end_user_id,
             scene_start_message_id,
             close_reason,
             result.get("status"),
             result.get("reason"),
             result.get("summary_id"),
+            result.get("inactive_count"),
+            bool(result.get("scene_community_task_id")),
+            int((time.monotonic() - started_at) * 1000),
         )
         return result
+    except Exception as exc:
+        logger.error(
+            "[SceneSummary] generation failed: user=%s scene_start=%s stage=%s "
+            "error_type=%s retry=%s elapsed_ms=%s",
+            end_user_id,
+            scene_start_message_id,
+            stage,
+            type(exc).__name__,
+            getattr(self.request, "retries", 0),
+            int((time.monotonic() - started_at) * 1000),
+        )
+        raise
     finally:
+        _shutdown_loop_gracefully(loop)
+
+
+@celery_app.task(
+    bind=True,
+    name="app.core.memory.run_scene_community_incremental",
+    acks_late=True,
+    autoretry_for=(Exception,),
+    retry_backoff=True,
+    retry_kwargs={"max_retries": 3},
+    time_limit=1800,
+    soft_time_limit=1700,
+)
+def run_scene_community_incremental(self, end_user_id: str):
+    """Process exactly one complete SceneCommunity batch for an end user."""
+    from app.core.memory.scene.scene_community_service import (
+        SceneCommunityIncrementalService,
+    )
+    from app.core.memory.storage.custom import SceneStorage
+    from app.core.memory.storage.provider.neo4j.client import Neo4jClient
+
+    started_at = time.monotonic()
+    stage = "acquire_lock"
+    loop = set_asyncio_event_loop()
+    write_lock = None
+
+    async def _run():
+        nonlocal stage
+        stage = "load_config"
+        with get_db_context() as db:
+            config_service = MemoryConfigService(db)
+            current_config_id = config_service.get_config_id_by_end_user(end_user_id)
+            memory_config = config_service.load_memory_config(current_config_id)
+
+        stage = "connect_neo4j"
+        storage_client = await Neo4jClient.create()
+        try:
+            stage = "run_incremental"
+            writer = SceneStorage(storage_client)
+            result = await SceneCommunityIncrementalService(
+                writer=writer,
+                memory_config=memory_config,
+            ).run(end_user_id)
+            result["config_id"] = str(current_config_id)
+            result["batch_trigger_count_snapshot"] = int(
+                memory_config.batch_trigger_count
+            )
+            result["candidate_community_limit_snapshot"] = int(
+                memory_config.candidate_community_limit
+            )
+            result["compare_all_same_category_communities_snapshot"] = bool(
+                memory_config.compare_all_same_category_communities
+            )
+            return result
+        finally:
+            await storage_client.close()
+
+    try:
+        end_user_id, write_lock = _acquire_community_clustering_lock(
+            end_user_id,
+            redis_client=get_thread_safe_sync_redis(),
+            expire=1800,
+        )
+        result = loop.run_until_complete(_run())
+        if result.get("dispatch_next"):
+            stage = "dispatch_next"
+            next_task = run_scene_community_incremental.apply_async(
+                kwargs={"end_user_id": end_user_id}
+            )
+            result["next_task_id"] = next_task.id
+        logger.info(
+            "[SceneCommunity] incremental task completed: user=%s status=%s "
+            "processed=%s communities=%s remaining=%s config=%s "
+            "dispatch_next=%s elapsed_ms=%s",
+            end_user_id,
+            result.get("status"),
+            result.get("processed"),
+            result.get("community_count"),
+            result.get("remaining_inactive_count", result.get("inactive_count")),
+            result.get("config_id"),
+            bool(result.get("next_task_id")),
+            int((time.monotonic() - started_at) * 1000),
+        )
+        return result
+    except Exception as exc:
+        logger.error(
+            "[SceneCommunity] incremental task failed: user=%s stage=%s "
+            "error_type=%s retry=%s elapsed_ms=%s",
+            end_user_id,
+            stage,
+            type(exc).__name__,
+            getattr(self.request, "retries", 0),
+            int((time.monotonic() - started_at) * 1000),
+        )
+        raise
+    finally:
+        if write_lock is not None:
+            write_lock.release()
         _shutdown_loop_gracefully(loop)
 
 
