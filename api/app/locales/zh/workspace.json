@@ -64,7 +64,9 @@
       "capability_mismatch": "{slot}与所选模型「{model_name}」不匹配（模型类型: {model_type}），请重新选择",
       "no_api_key": "{slot}「{model_name}」没有可用的 API 密钥，请先在模型管理中配置密钥",
       "api_verify_failed": "{slot}「{model_name}」连通性校验失败：{error}",
-      "verify_failed": "{slot}「{model_name}」校验异常：{error}"
+      "verify_failed": "{slot}「{model_name}」校验异常：{error}",
+      "unsupported_dimension": "{slot}「{model_name}」的向量维度不受支持（{error}），请改用受支持的 embedding 模型",
+      "embedding_switch_in_progress": "{slot}正在切换中，存量记忆向量重算完成前无法再次切换，请稍后再试"
     }
   }
 }

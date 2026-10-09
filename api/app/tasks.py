@@ -2625,10 +2625,6 @@ def write_message_task(
         skip_cursor_advance: bool = False,
         dispatch_at: str = "",  # 任务执行时间
         source: str = "",  # 写入来源（agent/service_api/mcp/workflow）
-        # MCP 入口兼容字段（不经过 memory_messages 表，直接写入）
-        messages: Optional[List[dict]] = None,
-        storage_type: str = "neo4j",
-        user_rag_memory_id: str = "",
 ) -> Dict[str, Any]:
     """统一写入任务 — 纯净入口，接收完整参数直接写入。
 
@@ -2644,21 +2640,11 @@ def write_message_task(
         language: 语言
         skip_cursor_advance: 是否跳过 cursor 推进（MCP 等直接写入路径）
         dispatch_at: 任务派发时刻的 UTC ISO 8601 时间戳，由 push_write_task 自动注入
-        messages: MCP 入口兼容字段，单条消息列表 [{"role", "content", "dialog_at"}]
-        storage_type: MCP 入口兼容字段，存储类型（neo4j / rag）
-        user_rag_memory_id: MCP 入口兼容字段，RAG 记忆 ID
 
     Returns:
         Dict containing status, result, elapsed_time, task_id
     """
     loop = set_asyncio_event_loop()
-    # MCP 入口兼容：收到 messages 但无 target_message 时，转换为新格式
-    if target_message is None and messages:
-        msg = messages[0] if messages else {"role": "user", "content": ""}
-        target_message = msg
-        context_before = []
-        context_after = []
-        skip_cursor_advance = True
 
     # 解析 end_user_id：若排队期间用户已被合并，自动路由到目标用户
     resolved_end_user_id = end_user_id
@@ -2679,27 +2665,7 @@ def write_message_task(
             f"falling back to original ID"
         )
 
-    # RAG 存储类型走独立路径
-    if storage_type and storage_type.lower() == "rag":
-        try:
-            async def _rag_write():
-                from app.core.memory.memory_service import MemoryService
-                await MemoryService.write_messages_to_rag(
-                    messages=messages,
-                    end_user_id=resolved_end_user_id,
-                    user_rag_memory_id=user_rag_memory_id,
-                )
-
-            loop.run_until_complete(_rag_write())
-            return {"status": "SUCCESS", "result": "rag_write_complete", "task_id": self.request.id}
-        except Exception as e:
-            logger.error(f"[CELERY WRITE] RAG write failed: {e}", exc_info=True)
-            return {"status": "FAILURE", "error": str(e), "task_id": self.request.id}
-        finally:
-            if loop:
-                _shutdown_loop_gracefully(loop)
-
-    # 新格式：直接调用 MemoryService.write()
+    # 调用 Neo4j MemoryService.write()；RAG 已在 dispatcher 层完成分流。
     logger.info(
         f"[CELERY WRITE] Starting - end_user_id={resolved_end_user_id}, "
         f"config_id={config_id}, conv={conversation_id or '-'}, "
@@ -3878,6 +3844,30 @@ def do_gds_topology_score(self, end_user_id: str, inflight_token: Optional[str] 
         result["end_user_id"] = end_user_id
         result["elapsed_time"] = time.time() - start_time
         result["task_id"] = self.request.id
+
+        # 价值评估展示事件：GDS 成功且实际写入节点属性后 best effort 落 PG。
+        # 用户写锁已在 _run 的 finally 中释放；展示写入失败只记日志，不改变任务结果。
+        if (
+            result.get("status") == "success"
+            and int(result.get("node_properties_written") or 0) > 0
+        ):
+            try:
+                from app.services.memory_engine_display_service import (
+                    MemoryEngineDisplayService,
+                )
+                loop.run_until_complete(
+                    MemoryEngineDisplayService.save_memory_value_event(
+                        end_user_id=end_user_id,
+                        result=result,
+                        task_id=self.request.id,
+                    )
+                )
+            except Exception as e:
+                logger.warning(
+                    f"[EngineDisplay] 价值评估展示写入异常（不影响主流程）: {e}",
+                    exc_info=True,
+                )
+
         return result
     except Exception as e:
         # GDS 投影 / eigenvector.write / drop 抛错，re-raise 让 Celery 标记 FAILURE（带 traceback）
@@ -6838,6 +6828,8 @@ def generate_scene_summary(
     idle_high_watermark_message_id: str | None = None,
 ):
     from app.core.memory.scene.scene_summary_service import SceneSummaryService
+    from app.core.memory.storage.custom import SceneStorage
+    from app.core.memory.storage.provider.neo4j.client import Neo4jClient
     from app.schemas.scene_memory_schema import GenerateSceneSummaryTask
 
     payload = GenerateSceneSummaryTask(
@@ -6848,20 +6840,152 @@ def generate_scene_summary(
         idle_high_watermark_message_id=idle_high_watermark_message_id,
         close_reason=close_reason,
     )
+    started_at = time.monotonic()
+    stage = "generate_summary"
     loop = set_asyncio_event_loop()
+
+    async def _run():
+        storage_client = await Neo4jClient.create()
+        try:
+            writer = SceneStorage(storage_client)
+            return await SceneSummaryService(writer=writer).generate(payload)
+        finally:
+            await storage_client.close()
+
     try:
-        result = loop.run_until_complete(SceneSummaryService().generate(payload))
+        result = loop.run_until_complete(_run())
+        if result.get("community_dispatch_required"):
+            stage = "dispatch_scene_community"
+            community_task = run_scene_community_incremental.apply_async(
+                kwargs={"end_user_id": end_user_id}
+            )
+            result["scene_community_task_id"] = community_task.id
         logger.info(
-            "[SceneSummary] generation completed: scene_start=%s, "
-            "close_reason=%s, status=%s, reason=%s, summary_id=%s",
+            "[SceneSummary] generation completed: user=%s, scene_start=%s, "
+            "close_reason=%s, status=%s, reason=%s, summary_id=%s, "
+            "inactive=%s, dispatched=%s, elapsed_ms=%s",
+            end_user_id,
             scene_start_message_id,
             close_reason,
             result.get("status"),
             result.get("reason"),
             result.get("summary_id"),
+            result.get("inactive_count"),
+            bool(result.get("scene_community_task_id")),
+            int((time.monotonic() - started_at) * 1000),
         )
         return result
+    except Exception as exc:
+        logger.error(
+            "[SceneSummary] generation failed: user=%s scene_start=%s stage=%s "
+            "error_type=%s retry=%s elapsed_ms=%s",
+            end_user_id,
+            scene_start_message_id,
+            stage,
+            type(exc).__name__,
+            getattr(self.request, "retries", 0),
+            int((time.monotonic() - started_at) * 1000),
+        )
+        raise
     finally:
+        _shutdown_loop_gracefully(loop)
+
+
+@celery_app.task(
+    bind=True,
+    name="app.core.memory.run_scene_community_incremental",
+    acks_late=True,
+    autoretry_for=(Exception,),
+    retry_backoff=True,
+    retry_kwargs={"max_retries": 3},
+    time_limit=1800,
+    soft_time_limit=1700,
+)
+def run_scene_community_incremental(self, end_user_id: str):
+    """Process exactly one complete SceneCommunity batch for an end user."""
+    from app.core.memory.scene.scene_community_service import (
+        SceneCommunityIncrementalService,
+    )
+    from app.core.memory.storage.custom import SceneStorage
+    from app.core.memory.storage.provider.neo4j.client import Neo4jClient
+
+    started_at = time.monotonic()
+    stage = "acquire_lock"
+    loop = set_asyncio_event_loop()
+    write_lock = None
+
+    async def _run():
+        nonlocal stage
+        stage = "load_config"
+        with get_db_context() as db:
+            config_service = MemoryConfigService(db)
+            current_config_id = config_service.get_config_id_by_end_user(end_user_id)
+            memory_config = config_service.load_memory_config(current_config_id)
+
+        stage = "connect_neo4j"
+        storage_client = await Neo4jClient.create()
+        try:
+            stage = "run_incremental"
+            writer = SceneStorage(storage_client)
+            result = await SceneCommunityIncrementalService(
+                writer=writer,
+                memory_config=memory_config,
+            ).run(end_user_id)
+            result["config_id"] = str(current_config_id)
+            result["batch_trigger_count_snapshot"] = int(
+                memory_config.batch_trigger_count
+            )
+            result["candidate_community_limit_snapshot"] = int(
+                memory_config.candidate_community_limit
+            )
+            result["compare_all_same_category_communities_snapshot"] = bool(
+                memory_config.compare_all_same_category_communities
+            )
+            return result
+        finally:
+            await storage_client.close()
+
+    try:
+        end_user_id, write_lock = _acquire_community_clustering_lock(
+            end_user_id,
+            redis_client=get_thread_safe_sync_redis(),
+            expire=1800,
+        )
+        result = loop.run_until_complete(_run())
+        if result.get("dispatch_next"):
+            stage = "dispatch_next"
+            next_task = run_scene_community_incremental.apply_async(
+                kwargs={"end_user_id": end_user_id}
+            )
+            result["next_task_id"] = next_task.id
+        logger.info(
+            "[SceneCommunity] incremental task completed: user=%s status=%s "
+            "processed=%s communities=%s remaining=%s config=%s "
+            "dispatch_next=%s elapsed_ms=%s",
+            end_user_id,
+            result.get("status"),
+            result.get("processed"),
+            result.get("community_count"),
+            result.get("remaining_inactive_count", result.get("inactive_count")),
+            result.get("config_id"),
+            bool(result.get("next_task_id")),
+            int((time.monotonic() - started_at) * 1000),
+        )
+        return result
+    except Exception as exc:
+        logger.error(
+            "[SceneCommunity] incremental task failed: user=%s stage=%s "
+            "error_type=%s retry=%s elapsed_ms=%s",
+            end_user_id,
+            stage,
+            type(exc).__name__,
+            getattr(self.request, "retries", 0),
+            int((time.monotonic() - started_at) * 1000),
+        )
+        raise
+    finally:
+        if write_lock is not None:
+            write_lock.release()
         _shutdown_loop_gracefully(loop)
 
 

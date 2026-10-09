@@ -1,12 +1,13 @@
 import uuid
-from typing import List, Optional
+from typing import List, Optional, Callable
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging_config import get_api_logger
 from app.core.response_utils import success
-from app.db import get_db
+from app.db import get_async_db, get_db
 from app.dependencies import (
     CurrentUserSnapshot,
     cur_workspace_access_guard,
@@ -28,6 +29,9 @@ from app.models.user_model import User
 from app.models.workspace_model import InviteStatus
 from app.schemas.response_schema import ApiResponse
 from app.schemas.workspace_schema import (
+    MemoryReembedEndUserListResponse,
+    MemoryReembedJobResponse,
+    MemoryReembedRetryResponse,
     WorkspaceCreate,
     WorkspaceDefaultModelPresetResponse,
     WorkspaceInviteCreate,
@@ -35,6 +39,7 @@ from app.schemas.workspace_schema import (
     WorkspaceModelOptionsResponse,
     WorkspaceMemberUpdate,
     WorkspaceModelsConfig,
+    WorkspaceModelsResponse,
     WorkspaceModelsValidationResponse,
     WorkspaceModelsUpdate,
     WorkspaceRetentionPolicyResponse,
@@ -43,6 +48,7 @@ from app.schemas.workspace_schema import (
     WorkspaceUpdate,
 )
 from app.services import workspace_service
+from app.services import memory_reembed_service
 from app.core.quota_stub import check_workspace_quota
 
 # 获取API专用日志器
@@ -82,7 +88,7 @@ def get_workspaces(
     current_user: User = Depends(get_current_user),
     current_tenant: Tenants = Depends(get_current_tenant),
     language: str = Depends(get_current_language),
-    t: callable = Depends(get_translator)
+    t: Callable = Depends(get_translator)
 ):
     """获取当前租户下用户参与的所有工作空间
 
@@ -122,7 +128,7 @@ async def create_workspace(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_superuser),
     language: str = Depends(get_current_language),
-    t: callable = Depends(get_translator)
+    t: Callable = Depends(get_translator)
 ):
     """创建新的工作空间"""
     from app.core.language_utils import get_language_from_header
@@ -158,7 +164,7 @@ def update_workspace(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     language: str = Depends(get_current_language),
-    t: callable = Depends(get_translator)
+    t: Callable = Depends(get_translator)
 ):
     """更新工作空间"""
     workspace_id = current_user.current_workspace_id
@@ -185,7 +191,7 @@ def update_workspace(
 def get_workspace_retention_policy(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    t: callable = Depends(get_translator),
+    t: Callable = Depends(get_translator),
 ):
     """获取当前工作空间的临时身份保留策略。"""
     workspace_id = current_user.current_workspace_id
@@ -212,7 +218,7 @@ def update_workspace_retention_policy(
     policy: WorkspaceRetentionPolicyUpdate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    t: callable = Depends(get_translator),
+    t: Callable = Depends(get_translator),
 ):
     """更新当前工作空间的临时身份保留策略。"""
     workspace_id = current_user.current_workspace_id
@@ -239,7 +245,7 @@ def get_cur_workspace_members(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     language: str = Depends(get_current_language),
-    t: callable = Depends(get_translator)
+    t: Callable = Depends(get_translator)
 ):
     """获取工作空间成员列表（关系序列化）"""
     api_logger.info(f"用户 {current_user.username} 请求获取工作空间 {current_user.current_workspace_id} 的成员列表")
@@ -267,7 +273,7 @@ def update_workspace_members(
     updates: List[WorkspaceMemberUpdate],
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    t: callable = Depends(get_translator)
+    t: Callable = Depends(get_translator)
 ):
     workspace_id = current_user.current_workspace_id
     api_logger.info(f"用户 {current_user.username} 请求更新工作空间 {workspace_id} 的成员角色")
@@ -287,7 +293,7 @@ async def delete_workspace_member(
     member_id: uuid.UUID,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    t: callable = Depends(get_translator)
+    t: Callable = Depends(get_translator)
 ):
     workspace_id = current_user.current_workspace_id
     api_logger.info(f"用户 {current_user.username} 请求删除工作空间 {workspace_id} 的成员 {member_id}")
@@ -310,7 +316,7 @@ def create_workspace_invite(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     language: str = Depends(get_current_language),
-    t: callable = Depends(get_translator)
+    t: Callable = Depends(get_translator)
 ):
     """创建工作空间邀请"""
     workspace_id = current_user.current_workspace_id
@@ -341,7 +347,7 @@ def get_workspace_invites(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     language: str = Depends(get_current_language),
-    t: callable = Depends(get_translator)
+    t: Callable = Depends(get_translator)
 ):
     """获取工作空间邀请列表"""
     workspace_id = current_user.current_workspace_id
@@ -369,7 +375,7 @@ def get_workspace_invite_info(
     token: str,
     db: Session = Depends(get_db),
     language: str = Depends(get_current_language),
-    t: callable = Depends(get_translator)
+    t: Callable = Depends(get_translator)
 ):
     """获取工作空间邀请用户信息（无需认证）"""
     result = workspace_service.validate_invite_token(db=db, token=token)
@@ -390,7 +396,7 @@ def revoke_workspace_invite(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     language: str = Depends(get_current_language),
-    t: callable = Depends(get_translator)
+    t: Callable = Depends(get_translator)
 ):
     """撤销工作空间邀请"""
     workspace_id = current_user.current_workspace_id
@@ -431,7 +437,7 @@ def switch_workspace(
     workspace_id: uuid.UUID,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    t: callable = Depends(get_translator)
+    t: Callable = Depends(get_translator)
 ):
     """切换工作空间"""
     api_logger.info(f"用户 {current_user.username} 请求切换工作空间为 {workspace_id}")
@@ -449,7 +455,7 @@ def switch_workspace(
 @cur_workspace_access_guard_async()
 async def get_workspace_storage_type(
         current_user: CurrentUserSnapshot = Depends(get_current_user_async),
-        t: callable = Depends(get_translator)
+        t: Callable = Depends(get_translator)
 ):
     """获取当前工作空间的存储类型（纯异步版本）"""
     from app.db import get_async_db_context
@@ -494,7 +500,7 @@ def workspace_models_configs(
         db: Session = Depends(get_db),
         current_user: User = Depends(get_current_user),
         language: str = Depends(get_current_language),
-        t: callable = Depends(get_translator)
+        t: Callable = Depends(get_translator)
 ):
     """获取当前工作空间的模型配置（llm, embedding, rerank）"""
     workspace_id = current_user.current_workspace_id
@@ -516,9 +522,10 @@ def workspace_models_configs(
 
     api_logger.info(
         f"成功获取工作空间 {workspace_id} 的模型配置: "
-        f"llm={configs.get('llm')}, embedding={configs.get('embedding')}, rerank={configs.get('rerank')}"
+        f"llm={configs.get('llm')}, embedding={configs.get('embedding')}, "
+        f"rerank={configs.get('rerank')}, reembed_job_id={configs.get('reembed_job_id')}"
     )
-    return success(data=WorkspaceModelsConfig.model_validate(configs), msg=t("workspace.models.config_retrieved"))
+    return success(data=WorkspaceModelsResponse.model_validate(configs), msg=t("workspace.models.config_retrieved"))
 
 
 @router.post("/workspace_models/validate", response_model=ApiResponse)
@@ -528,7 +535,7 @@ async def validate_workspace_models_configs(
         db: Session = Depends(get_db),
         current_user: User = Depends(get_current_user),
         language: str = Depends(get_current_language),
-        t: callable = Depends(get_translator)
+        t: Callable = Depends(get_translator)
 ):
     """校验当前工作空间模型配置"""
     from app.core.language_utils import get_language_from_header
@@ -546,13 +553,13 @@ async def validate_workspace_models_configs(
 
 
 @router.put("/workspace_models", response_model=ApiResponse)
-@cur_workspace_access_guard()
+@cur_workspace_access_guard_async()
 async def update_workspace_models_configs(
         models_update: WorkspaceModelsUpdate,
-        db: Session = Depends(get_db),
-        current_user: User = Depends(get_current_user),
+        db: AsyncSession = Depends(get_async_db),
+        current_user: CurrentUserSnapshot = Depends(get_current_user_async),
         language: str = Depends(get_current_language),
-        t: callable = Depends(get_translator)
+        t: Callable = Depends(get_translator)
 ):
     """更新当前工作空间的模型配置，并校验模型可用性"""
     from app.core.language_utils import get_language_from_header
@@ -572,8 +579,286 @@ async def update_workspace_models_configs(
     api_logger.info(
         f"成功更新工作空间 {workspace_id} 的模型配置: "
         f"llm={updated_workspace.get('llm')}, embedding={updated_workspace.get('embedding')}, "
-        f"rerank={updated_workspace.get('rerank')}"
+        f"rerank={updated_workspace.get('rerank')}, "
+        f"reembed_job_id={updated_workspace.get('reembed_job_id')}"
     )
 
-    data = WorkspaceModelsConfig.model_validate(updated_workspace)
+    data = WorkspaceModelsResponse.model_validate(updated_workspace)
     return success(data={"workspace": data.model_dump()}, msg=t("workspace.models.config_updated"))
+
+
+@router.get("/workspace_reembed/current", response_model=ApiResponse)
+@cur_workspace_access_guard_async()
+async def get_current_workspace_reembed_job(
+        db: AsyncSession = Depends(get_async_db),
+        current_user: CurrentUserSnapshot = Depends(get_current_user_async),
+):
+    """查询当前工作空间**近 24h 内最新的一次**存量向量重算任务。
+
+    embedding 底层模型变更后前端靠它拿 job_id 并轮询进度。
+
+    成功的那次照常返回——它正是用户当下要看的"最近一次重算"（完成通知就在那一刻
+    发的）。退场只由时间决定：终态任务结束满 24h 后回到"无任务"（语义见
+    ``memory_reembed_service._current_job_row_is_expired``），因此这个端点仍不是
+    "永远有任务可看"，调用方不能假设一定拿得到 job_id。
+
+    在途任务不受 24h 限制：它还在跑，藏掉只会让轮询方以为没任务了。过期任务要拿
+    详情，用 ``GET /workspace_reembed/{job_id}``（按 id 查询不看新旧）。
+    """
+    job = await memory_reembed_service.get_current_reembed_job_async(
+        db,
+        current_user.current_workspace_id,
+    )
+    if job is None:
+        return success(data=None, msg="no re-embed job")
+    payload = await memory_reembed_service.build_reembed_job_payload(db, job)
+    return success(data=MemoryReembedJobResponse.model_validate(payload))
+
+
+@router.get("/workspace_reembed/{job_id}", response_model=ApiResponse)
+@cur_workspace_access_guard_async()
+async def get_workspace_reembed_job(
+        job_id: uuid.UUID,
+        db: AsyncSession = Depends(get_async_db),
+        current_user: CurrentUserSnapshot = Depends(get_current_user_async),
+):
+    """查询指定的存量向量重算任务（限当前工作空间）。"""
+    job = await memory_reembed_service.get_reembed_job_async(db, job_id)
+    if job is None or job.workspace_id != current_user.current_workspace_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="reembed job not found",
+        )
+    payload = await memory_reembed_service.build_reembed_job_payload(db, job)
+    return success(data=MemoryReembedJobResponse.model_validate(payload))
+
+
+def _require_workspace_admin(
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_user),
+) -> None:
+    """重试类接口的管理员门禁（重试会触发真实重算，与切换模型同权限）。"""
+    workspace_service.require_workspace_admin(
+        db, current_user.current_workspace_id, current_user
+    )
+
+
+def _reembed_end_user_page(
+        job,
+        *,
+        status: str | None,
+        page: int,
+        pagesize: int,
+        db: Session,
+) -> MemoryReembedEndUserListResponse:
+    payload = memory_reembed_service.list_job_end_users(
+        db,
+        job_id=job.id,
+        status=status,
+        page=page,
+        pagesize=pagesize,
+    )
+    return MemoryReembedEndUserListResponse.model_validate(payload)
+
+
+# 注意：本路由必须注册在 ``/workspace_reembed/{job_id}/end_users`` 之前，
+# 否则 "current" 会被当作 job_id 去做 UUID 校验而报 422。
+@router.get("/workspace_reembed/current/end_users", response_model=ApiResponse)
+@cur_workspace_access_guard()
+def list_current_workspace_reembed_end_users(
+        status: str | None = Query(None, description="queued/running/succeeded/failed"),
+        page: int = Query(1, ge=1),
+        pagesize: int = Query(20, ge=1, le=200),
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_user),
+):
+    """查询当前工作空间近 24h 内最新一次重算任务下，各 end_user 的重算状态。
+
+    与 ``GET /workspace_reembed/current`` 同一判据：终态任务结束满 24h 后回到
+    "无任务"（成功的那次同样按时间退场，不提前清空）。
+
+    但**空态形状不同**：``/current`` 是详情接口，无任务返回 ``data: {}``；
+    本接口是分页接口，无任务返回空分页信封（``job_id: null`` + 空的
+    ``page``/``items`` + 四键全 0 的 ``summary``），见
+    :func:`memory_reembed_service.empty_job_end_user_page`。分页接口的调用方
+    不该为"有没有任务"写两套解析。
+    """
+    job = memory_reembed_service.get_current_reembed_job(
+        db, current_user.current_workspace_id
+    )
+    if job is None:
+        return success(
+            data=MemoryReembedEndUserListResponse.model_validate(
+                memory_reembed_service.empty_job_end_user_page(
+                    page=page, pagesize=pagesize
+                )
+            ),
+            msg="no re-embed job",
+        )
+    return success(
+        data=_reembed_end_user_page(
+            job, status=status, page=page, pagesize=pagesize, db=db
+        )
+    )
+
+
+def _current_reembed_job_or_none(
+        db: Session,
+        workspace_id: uuid.UUID,
+):
+    """把 ``current`` 解析成任务行；没有返回 ``None``（**不报错**）。
+
+    "没有当前任务"（从未重算，或最新那一条已过期超过 24h）不是失败：调用方只是点了
+    个按钮，而那时没有任何行需要重试。返回 404 会让前端把它当错误弹出来，而
+    ``retry_job_users`` 早把"有任务但没有终态失败行"定成 ``retried: 0`` 的非错误
+    语义——两种"没重试任何行"不该一个报错一个不报。空结果由
+    :func:`memory_reembed_service.empty_job_retry_result` 给出。
+
+    解析到的可能是已成功的任务（成功与否不再影响可见性）：``finalize_job_if_complete``
+    只在没有终态失败行时才写 ``succeeded``，所以这种任务必然没有可重试的行，会落到
+    ``retry_job_users`` 的 ``retried: 0`` 分支，不会重开任务。
+
+    与 ``{job_id}`` 版的分工：那是调用方**指名**的任务，不存在就仍然 404
+    （见 ``list_workspace_reembed_end_users`` 等）。已过期的旧任务只走那条路——
+    它们在 ``/current`` 上已经不该可见了。
+    """
+    return memory_reembed_service.get_current_reembed_job(db, workspace_id)
+
+
+# 这两个路由同样必须注册在 ``/workspace_reembed/{job_id}/end_users/...`` 之前：
+# 段数相同，late 注册会让 "current" 先被 ``{job_id}`` 吃掉（UUID 校验 → 422）。
+@router.post(
+    "/workspace_reembed/current/end_users/retry_failed",
+    response_model=ApiResponse,
+)
+@cur_workspace_access_guard()
+def retry_failed_current_workspace_reembed_end_users(
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_user),
+        _admin: None = Depends(_require_workspace_admin),
+):
+    """一键重试**当前**任务下所有终态失败的 end_user。
+
+    与 ``POST /workspace_reembed/{job_id}/end_users/retry_failed`` 同一语义与同一
+    响应，只是不需要调用方持有 job_id。「当前」的判据与
+    ``GET /workspace_reembed/current`` 完全同源（``_current_job_filters`` +
+    ``_current_job_row_is_expired``），所以"列表看到的那次任务"就是"这里重试的那次
+    任务"。
+
+    当前任务已成功时结果为空的 ``retried: 0``：``succeeded`` 是按"没有终态失败行"
+    写的，本来就没有可重试的行。任务已过期（结束满 24h）时才回到"没有当前任务"，
+    同样是 ``retried: 0``。要针对某一次明确重试，用带 job_id 的那条。
+
+    没有当前任务时返回 200 + 空结果（``retried: 0``），不是 404。
+    """
+    job = _current_reembed_job_or_none(db, current_user.current_workspace_id)
+    if job is None:
+        return success(
+            data=MemoryReembedRetryResponse.model_validate(
+                memory_reembed_service.empty_job_retry_result()
+            ),
+            msg="no re-embed job",
+        )
+    payload = memory_reembed_service.retry_job_users(db, job_id=job.id)
+    return success(data=MemoryReembedRetryResponse.model_validate(payload))
+
+
+@router.post(
+    "/workspace_reembed/current/end_users/{end_user_id}/retry",
+    response_model=ApiResponse,
+)
+@cur_workspace_access_guard()
+def retry_current_workspace_reembed_end_user(
+        end_user_id: str,
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_user),
+        _admin: None = Depends(_require_workspace_admin),
+):
+    """重试**当前**任务下单个终态失败的 end_user（内部重试预算已耗尽的那种）。
+
+    没有当前任务时同上一并返回 200 + 空结果。
+    """
+    job = _current_reembed_job_or_none(db, current_user.current_workspace_id)
+    if job is None:
+        return success(
+            data=MemoryReembedRetryResponse.model_validate(
+                memory_reembed_service.empty_job_retry_result()
+            ),
+            msg="no re-embed job",
+        )
+    payload = memory_reembed_service.retry_job_users(
+        db, job_id=job.id, end_user_ids=[end_user_id]
+    )
+    return success(data=MemoryReembedRetryResponse.model_validate(payload))
+
+
+@router.get("/workspace_reembed/{job_id}/end_users", response_model=ApiResponse)
+@cur_workspace_access_guard()
+def list_workspace_reembed_end_users(
+        job_id: uuid.UUID,
+        status: str | None = Query(None, description="queued/running/succeeded/failed"),
+        page: int = Query(1, ge=1),
+        pagesize: int = Query(20, ge=1, le=200),
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_user),
+):
+    """查询指定重算任务下，各 end_user 的重算状态（限当前工作空间）。"""
+    from fastapi import status as http_status
+    job = memory_reembed_service.get_reembed_job(db, job_id)
+    if job is None or job.workspace_id != current_user.current_workspace_id:
+        raise HTTPException(
+            status_code=http_status.HTTP_404_NOT_FOUND,
+            detail="reembed job not found",
+        )
+    return success(
+        data=_reembed_end_user_page(
+            job, status=status, page=page, pagesize=pagesize, db=db
+        )
+    )
+
+
+@router.post(
+    "/workspace_reembed/{job_id}/end_users/retry_failed",
+    response_model=ApiResponse,
+)
+@cur_workspace_access_guard()
+def retry_failed_workspace_reembed_end_users(
+        job_id: uuid.UUID,
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_user),
+        _admin: None = Depends(_require_workspace_admin),
+):
+    """一键重试该任务下所有终态失败的 end_user。"""
+    job = memory_reembed_service.get_reembed_job(db, job_id)
+    if job is None or job.workspace_id != current_user.current_workspace_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="reembed job not found",
+        )
+    payload = memory_reembed_service.retry_job_users(db, job_id=job_id)
+    return success(data=MemoryReembedRetryResponse.model_validate(payload))
+
+
+@router.post(
+    "/workspace_reembed/{job_id}/end_users/{end_user_id}/retry",
+    response_model=ApiResponse,
+)
+@cur_workspace_access_guard()
+def retry_workspace_reembed_end_user(
+        job_id: uuid.UUID,
+        end_user_id: str,
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_user),
+        _admin: None = Depends(_require_workspace_admin),
+):
+    """重试单个终态失败的 end_user（内部重试预算已耗尽的那种）。"""
+    job = memory_reembed_service.get_reembed_job(db, job_id)
+    if job is None or job.workspace_id != current_user.current_workspace_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="reembed job not found",
+        )
+    payload = memory_reembed_service.retry_job_users(
+        db, job_id=job_id, end_user_ids=[end_user_id]
+    )
+    return success(data=MemoryReembedRetryResponse.model_validate(payload))

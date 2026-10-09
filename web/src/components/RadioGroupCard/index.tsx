@@ -55,6 +55,7 @@ interface RadioCardProps extends Omit<RadioGroupProps, 'onChange'> {
   /** Whether to display cards in block (vertical) layout */
   block?: boolean;
   disabled?: boolean;
+  className?: string;
 }
 
 /** Radio group card component that displays options as selectable cards */
@@ -67,6 +68,7 @@ const RadioGroupCard: FC<RadioCardProps> = ({
   allowClear = true,
   block = false,
   disabled = false,
+  className = '',
 }) => {
   const { t } = useTranslation();
   /** Listen to value changes and trigger side effects via onValueChange callback */
@@ -97,23 +99,32 @@ const RadioGroupCard: FC<RadioCardProps> = ({
     })}>
       {/* Render each option as a selectable card */}
       {options.map(option => (
-        <div key={String(option.value)} className={clsx("rb:relative rb:border rb:rounded-lg rb:w-full rb:text-center rb:cursor-pointer", {
-          'rb:border rb:border-[#171719]!': option.value === value,
-          'rb:border-[#EBEBEB] rb:bg-white': option.value !== value,
-          'rb:opacity-[0.75] rb:cursor-not-allowed!': option.disabled || disabled,
-          'rb:py-5 rb:px-3 rb:leading-5.5': !block,
-          'rb:flex rb:items-center rb:text-left! rb:gap-4 rb:py-3 rb:px-4 rb:leading-4': block,
-        })} onClick={() => handleChange(option)}>
-          {option.recommend && <div className="rb:absolute rb:right-0 rb:top-0 rb:bg-[#FF5D34] rb:rounded-[0px_7px_0px_8px] rb:text-[12px] rb:text-white rb:font-regular rb:leading-4 rb:py-1 rb:px-2">{t('common.recommend')}</div>}
+        <div key={String(option.value)}
+          className={clsx("rb:relative rb:border rb:rounded-xl rb:w-full rb:text-center rb:cursor-pointer", {
+            'rb:border rb:border-[#171719]!': option.value === value,
+            'rb:border-[#EBEBEB] rb:bg-white': option.value !== value,
+            'rb:opacity-[0.75] rb:cursor-not-allowed!': option.disabled || disabled,
+            'rb:py-5 rb:px-3 rb:leading-5.5': !block,
+            'rb:flex rb:items-center rb:text-left! rb:gap-4 rb:py-3 rb:px-4 rb:leading-4': block,
+          }, className)}
+          onClick={() => handleChange(option)}
+        >
+          {option.recommend &&
+            <div className="rb:absolute rb:right-[-0.5px] rb:top-[-0.5px] rb:bg-blue-500 rb:rounded-[0px_12px_0px_12px] rb:text-[12px] rb:text-white rb:font-regular rb:leading-5 rb:px-2">
+              {t('common.recommend')}
+            </div>
+          }
           {/* Use custom render or default card layout */}
           {itemRender ? itemRender(option) : (
             <>
-              {option.icon && <img src={option.icon} alt={option.icon} className={clsx("rb:size-10", {
-                'rb:m-[0_auto] rb:mb-3': !block,
-              })} />}
+              {option.icon &&
+                <img src={option.icon} alt={option.icon} className={clsx("rb:size-10", {
+                  'rb:m-[0_auto] rb:mb-3': !block,
+                })} />
+              }
               <div>
-                <div className="rb:font-medium rb:text-[#212332]">{option.label}</div>
-                <div className="rb:mt-2 rb:text-[#5B6167] rb:text-[12px] rb:font-regular">{option.labelDesc}</div>
+                <div className="rb:font-semibold rb:text-[16px]">{option.label}</div>
+                <div className="rb:mt-2 rb:text-gray-600 rb:text-[12px] rb:font-regular">{option.labelDesc}</div>
               </div>
             </>
           )}

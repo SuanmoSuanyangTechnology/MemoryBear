@@ -49,3 +49,20 @@ export const validateWorkspaceModels = (data: SpaceConfigData) => {
 export const updateWorkspaceModelsAndValidate = (data: SpaceConfigData) => {
   return request.put(`/workspaces/workspace_models`, data)
 }
+// Get workspace re-embedding progress
+export const getWorkspaceReembedCurrent = () => {
+  return request.get(`/workspaces/workspace_reembed/current`)
+}
+// Get workspace re-embedding progress by end user
+export const getWorkspaceReembedCurrenEndUsersUrl = '/workspaces/workspace_reembed/current/end_users'
+export const getWorkspaceReembedCurrenEndUsers = (data?: { status: 'failed' | 'running' | 'queued' | 'succeeded' }) => {
+  return request.get(getWorkspaceReembedCurrenEndUsersUrl, data)
+}
+// Retry all failed end-user re-embedding tasks
+export const getWorkspaceReembedCurrenEndUsersRetryFailed = () => {
+  return request.post(`/workspaces/workspace_reembed/current/end_users/retry_failed`)
+}
+// Retry re-embedding for a single end user
+export const getWorkspaceReembedCurrenEndUserRetry = (end_user_id: string) => {
+  return request.post(`/workspaces/workspace_reembed/current/end_users/${end_user_id}/retry`)
+}
