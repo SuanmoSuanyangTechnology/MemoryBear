@@ -175,10 +175,11 @@ class WriteSnapshotRecorder:
         """将别名归并+节点删除后的 Neo4j 实体状态写入 8_after_alias_merge.json。
 
         由 Celery post_store_dedup_and_alias_merge 任务在完成归并和删除后调用，
-        直接上传到 OSS 已有的 snapshot 目录前缀下。
+        直接上传到对象存储上已有的快照前缀下。
 
         Args:
-            snapshot_dir: 主流水线创建的 OSS 前缀路径（如 "snapshot/new_20260521_143022"）。
+            snapshot_dir: 主流水线创建的快照前缀路径
+                （如 "extract_snapshot/{end_user_id}/{conversation_id}/seq_000012_20260521_143022"）。
             entity_rows:  从 Neo4j 查询到的实体属性列表，每项包含
                           id / name / entity_type / description / aliases 字段。
         """
